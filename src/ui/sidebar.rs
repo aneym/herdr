@@ -764,7 +764,20 @@ pub(crate) fn collapsed_sidebar_sections(area: Rect) -> (Rect, Option<u16>, Rect
     (ws_area, Some(divider_y), detail_area)
 }
 
-/// Collapsed sidebar: workspace glance on top, compact agent list below.
+fn ordered_collapsed_sidebar_sections(app: &AppState, area: Rect) -> (Rect, Option<u16>, Rect) {
+    let (first, divider_y, second) = collapsed_sidebar_sections(area);
+    match app.sidebar_section_order {
+        [crate::config::SidebarSection::Spaces, crate::config::SidebarSection::Agents] => {
+            (first, divider_y, second)
+        }
+        [crate::config::SidebarSection::Agents, crate::config::SidebarSection::Spaces] => {
+            (second, divider_y, first)
+        }
+        _ => (first, divider_y, second),
+    }
+}
+
+/// Collapsed sidebar: workspace glance and compact agent list.
 pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: Rect) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -785,7 +798,7 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
         buf[(sep_x, y)].set_style(sep_style);
     }
 
-    let (ws_area, divider_y, detail_area) = collapsed_sidebar_sections(area);
+    let (ws_area, divider_y, detail_area) = ordered_collapsed_sidebar_sections(app, area);
     if ws_area == Rect::default() {
         render_sidebar_toggle(app, frame, area, true, p);
         return;
@@ -2369,6 +2382,22 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
 
         assert!(agent_area.y < workspace_area.y);
         assert_eq!(agent_area.height + workspace_area.height, area.height);
+    }
+
+    #[test]
+    fn ordered_collapsed_sidebar_sections_put_agents_first_when_configured() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.sidebar_section_order = [
+            crate::config::SidebarSection::Agents,
+            crate::config::SidebarSection::Spaces,
+        ];
+        let area = Rect::new(0, 0, 5, 20);
+
+        let (workspace_area, divider_y, agent_area) =
+            ordered_collapsed_sidebar_sections(&app, area);
+
+        assert!(agent_area.y < divider_y.expect("divider should be visible"));
+        assert!(workspace_area.y > divider_y.expect("divider should be visible"));
     }
 
     #[test]
