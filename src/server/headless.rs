@@ -4318,6 +4318,8 @@ impl HeadlessServer {
     fn handle_scheduled_tasks_headless(&mut self, now: Instant, geometry_dirty: bool) -> bool {
         let mut changed = false;
 
+        self.app.sync_animation_timer(now);
+
         // No resize polling needed — server has no terminal.
         // Client resize messages drive size changes instead.
 
@@ -4367,6 +4369,16 @@ impl HeadlessServer {
         {
             self.app.copy_feedback_deadline = None;
             self.app.state.copy_feedback = None;
+            changed = true;
+        }
+
+        if self
+            .app
+            .next_animation_tick
+            .is_some_and(|deadline| now >= deadline)
+        {
+            self.app.state.animation_tick = self.app.state.animation_tick.wrapping_add(8);
+            self.app.next_animation_tick = Some(now + app::ANIMATION_INTERVAL);
             changed = true;
         }
 
@@ -4426,6 +4438,7 @@ impl HeadlessServer {
                 .app
                 .start_pending_agent_resumes(self.app.pending_agent_resume_due(now));
         }
+        self.app.sync_animation_timer(now);
         changed
     }
 

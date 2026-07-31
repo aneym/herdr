@@ -203,6 +203,19 @@ pub(super) fn state_dot(state: AgentState, seen: bool, p: &Palette) -> (&'static
     }
 }
 
+pub(super) fn agent_icon(
+    state: AgentState,
+    seen: bool,
+    tick: u32,
+    p: &Palette,
+) -> (&'static str, Style) {
+    if state == AgentState::Working {
+        (super::spinner_frame(tick), Style::default().fg(p.yellow))
+    } else {
+        state_dot(state, seen, p)
+    }
+}
+
 pub(super) fn state_label(state: AgentState, seen: bool) -> &'static str {
     match (state, seen) {
         (AgentState::Blocked, _) => "blocked",
@@ -258,6 +271,16 @@ mod tests {
             assert_eq!(actual_symbol, symbol);
             assert_eq!(style.fg, Some(color));
         }
+    }
+
+    #[test]
+    fn working_agent_icon_uses_v075_spinner_frames() {
+        let palette = Palette::catppuccin();
+        let frames = (0..10)
+            .map(|index| agent_icon(AgentState::Working, true, index * 8, &palette).0)
+            .collect::<Vec<_>>();
+
+        assert_eq!(frames, ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]);
     }
 
     #[test]

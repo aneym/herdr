@@ -6,8 +6,9 @@ use std::time::Duration;
 use crossterm::terminal;
 
 use super::{
-    background_update_check_enabled, pressed_key_identity, App, AUTO_UPDATE_CHECK_INTERVAL,
-    MIN_RENDER_INTERVAL, RESIZE_POLL_INTERVAL, SELECTION_AUTOSCROLL_INTERVAL,
+    background_update_check_enabled, pressed_key_identity, App, ANIMATION_INTERVAL,
+    AUTO_UPDATE_CHECK_INTERVAL, MIN_RENDER_INTERVAL, RESIZE_POLL_INTERVAL,
+    SELECTION_AUTOSCROLL_INTERVAL,
 };
 fn retain_custom_command_after_wait(
     pid: u32,
@@ -226,6 +227,8 @@ impl App {
         let mut changed = false;
         let mut resized = false;
 
+        self.sync_animation_timer(now);
+
         if now >= self.next_resize_poll {
             resized = self.handle_resize_poll();
             changed |= resized;
@@ -287,6 +290,15 @@ impl App {
         }
 
         if self
+            .next_animation_tick
+            .is_some_and(|deadline| now >= deadline)
+        {
+            self.state.animation_tick = self.state.animation_tick.wrapping_add(8);
+            self.next_animation_tick = Some(now + ANIMATION_INTERVAL);
+            changed = true;
+        }
+
+        if self
             .selection_autoscroll_deadline
             .is_some_and(|deadline| now >= deadline)
         {
@@ -327,7 +339,29 @@ impl App {
             self.sync_pending_agent_resume_deadline(now);
             changed |= self.start_pending_agent_resumes(self.pending_agent_resume_due(now));
         }
+        self.sync_animation_timer(now);
         changed
+    }
+
+    pub(crate) fn sync_animation_timer(&mut self, now: Instant) {
+        let has_working_agent = self.state.workspaces.iter().any(|workspace| {
+            workspace.tabs.iter().any(|tab| {
+                tab.panes.values().any(|pane| {
+                    self.state
+                        .terminals
+                        .get(&pane.attached_terminal_id)
+                        .is_some_and(|terminal| {
+                            terminal.state == crate::detect::AgentState::Working
+                        })
+                })
+            })
+        });
+        if has_working_agent {
+            self.next_animation_tick
+                .get_or_insert(now + ANIMATION_INTERVAL);
+        } else {
+            self.next_animation_tick = None;
+        }
     }
 
     /// Clears temporary copied-token highlights, such as after double-click copy.
@@ -535,6 +569,7 @@ impl App {
             self.state.next_pending_agent_notification_deadline(),
             self.state.next_managed_agent_deadline(),
             self.copy_feedback_deadline,
+            self.next_animation_tick,
             include_git_refresh
                 .then(|| self.git_refresh_deadline())
                 .flatten(),

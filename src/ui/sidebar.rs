@@ -10,7 +10,7 @@ use ratatui::{
 
 use self::tokens::{ResolvedToken, ResolvedTokenKind, SpaceTokenContext};
 use super::scrollbar::{render_scrollbar, should_show_scrollbar};
-use super::status::{state_dot, state_label, state_label_color};
+use super::status::{agent_icon, state_dot, state_label, state_label_color};
 use super::text::{display_width, display_width_u16, truncate_end};
 use crate::app::state::{AgentPanelSort, Palette};
 use crate::app::{AppState, Mode};
@@ -872,7 +872,7 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
             }
             let position = detail_idx + 1;
             let position_style = Style::default().fg(p.overlay0);
-            let (icon, icon_style) = state_dot(detail.state, detail.seen, p);
+            let (icon, icon_style) = agent_icon(detail.state, detail.seen, app.animation_tick, p);
             frame.render_widget(
                 Paragraph::new(Line::from(vec![
                     Span::styled(format!("{position:<2}"), position_style),
@@ -1523,7 +1523,7 @@ fn render_agent_detail(
             Style::default().fg(label_color).add_modifier(Modifier::DIM)
         };
         let agent_style = Style::default().fg(p.overlay0).add_modifier(Modifier::DIM);
-        let default_state_icon = state_dot(detail.state, detail.seen, p);
+        let default_state_icon = agent_icon(detail.state, detail.seen, app.animation_tick, p);
         let state_icon = (
             app.sidebar_agents
                 .state_icon(detail.state)
