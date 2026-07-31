@@ -106,6 +106,15 @@ impl AgentPanelSortConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ShowTabStatusConfig {
+    #[default]
+    Off,
+    Attention,
+    All,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum HostCursorModeConfig {
@@ -820,6 +829,8 @@ pub struct UiConfig {
     pub show_agent_labels_on_pane_borders: bool,
     /// Hide the tab row when the workspace has one tab. Default: false.
     pub hide_tab_bar_when_single_tab: bool,
+    /// Show agent state dots in tabs. Default: off.
+    pub show_tab_status: ShowTabStatusConfig,
     /// Desktop tab row placement. Default: top.
     pub tab_bar_position: TabBarPositionConfig,
     /// Agent sidebar ordering. Saved values are "spaces" or "priority". Default: "spaces".
@@ -1024,6 +1035,7 @@ impl Default for UiConfig {
             pane_gaps: true,
             show_agent_labels_on_pane_borders: false,
             hide_tab_bar_when_single_tab: false,
+            show_tab_status: ShowTabStatusConfig::Off,
             tab_bar_position: TabBarPositionConfig::Top,
             agent_panel_sort: AgentPanelSortConfig::Spaces,
             sidebar: SidebarConfig::default(),
@@ -1256,6 +1268,7 @@ agent_panel_scope = "current"
         assert!(default_config.ui.pane_gaps);
         assert!(!default_config.ui.show_agent_labels_on_pane_borders);
         assert!(!default_config.ui.hide_tab_bar_when_single_tab);
+        assert_eq!(default_config.ui.show_tab_status, ShowTabStatusConfig::Off);
         assert_eq!(
             default_config.ui.tab_bar_position,
             TabBarPositionConfig::Top
@@ -1267,6 +1280,7 @@ pane_borders = false
 pane_gaps = true
 show_agent_labels_on_pane_borders = true
 hide_tab_bar_when_single_tab = true
+show_tab_status = "attention"
 tab_bar_position = "bottom"
 "#;
         let config: Config = toml::from_str(toml).unwrap();
@@ -1274,6 +1288,7 @@ tab_bar_position = "bottom"
         assert!(config.ui.pane_gaps);
         assert!(config.ui.show_agent_labels_on_pane_borders);
         assert!(config.ui.hide_tab_bar_when_single_tab);
+        assert_eq!(config.ui.show_tab_status, ShowTabStatusConfig::Attention);
         assert_eq!(config.ui.tab_bar_position, TabBarPositionConfig::Bottom);
     }
 

@@ -1,13 +1,16 @@
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
+    text::Span,
     widgets::Paragraph,
     Frame,
 };
 
+use super::status::state_label_color;
 use super::text::display_width_u16;
 use super::widgets::panel_contrast_fg;
 use crate::app::AppState;
+use crate::detect::AgentState;
 
 const MIN_TAB_WIDTH: u16 = 8;
 const NEW_TAB_WIDTH: u16 = 3;
@@ -26,6 +29,37 @@ fn tab_width(ws: &crate::workspace::Workspace, tab_idx: usize) -> u16 {
     display_width_u16(&tab_chrome_label(ws, tab_idx))
         .saturating_add(4)
         .max(MIN_TAB_WIDTH)
+}
+
+fn tab_agent_state(app: &AppState, tab: &crate::workspace::Tab) -> Option<(AgentState, bool)> {
+    tab.panes
+        .values()
+        .filter_map(|pane| {
+            app.terminals
+                .get(&pane.attached_terminal_id)
+                .map(|terminal| (terminal.state, pane.seen))
+        })
+        .max_by_key(|(state, seen)| match (state, seen) {
+            (AgentState::Blocked, _) => 4,
+            (AgentState::Idle, false) => 3,
+            (AgentState::Working, _) => 2,
+            (AgentState::Idle, true) => 1,
+            (AgentState::Unknown, _) => 0,
+        })
+}
+
+fn should_show_tab_status(
+    mode: crate::config::ShowTabStatusConfig,
+    state: AgentState,
+    seen: bool,
+) -> bool {
+    match mode {
+        crate::config::ShowTabStatusConfig::Off => false,
+        crate::config::ShowTabStatusConfig::Attention => {
+            state == AgentState::Blocked || (state == AgentState::Idle && !seen)
+        }
+        crate::config::ShowTabStatusConfig::All => state != AgentState::Unknown,
+    }
 }
 
 fn tab_chrome_label(ws: &crate::workspace::Workspace, tab_idx: usize) -> String {
@@ -338,8 +372,23 @@ pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
         };
         let width = rect.width as usize;
         let name = tab_chrome_label(ws, idx);
-        let text = format!(" {:width$}", name, width = width.saturating_sub(1));
-        frame.render_widget(Paragraph::new(text).style(style), rect);
+        let status = tab_agent_state(app, tab)
+            .filter(|(state, seen)| should_show_tab_status(app.show_tab_status, *state, *seen));
+        let status_width = usize::from(status.is_some()) * 2;
+        let label = format!(
+            " {:width$}",
+            name,
+            width = width.saturating_sub(1 + status_width)
+        );
+        let mut line = ratatui::text::Line::from(Span::styled(label, style));
+        if let Some((state, seen)) = status {
+            line.push_span(Span::styled(
+                "●",
+                style.fg(state_label_color(state, seen, p)),
+            ));
+            line.push_span(Span::styled(" ", style));
+        }
+        frame.render_widget(Paragraph::new(line), rect);
     }
 
     if let Some(crate::app::state::DragState {
@@ -461,6 +510,63 @@ mod tests {
         assert_eq!(style.bg, Some(app.palette.accent));
         assert!(!style.add_modifier.contains(Modifier::DIM));
         assert!(!style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn tab_status_modes_render_known_states_with_sidebar_colors() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("test")];
+        app.active = Some(0);
+        app.ensure_test_terminals();
+        let terminal_id = app.workspaces[0].tabs[0].panes[&app.workspaces[0].tabs[0].root_pane]
+            .attached_terminal_id
+            .clone();
+        app.terminals.get_mut(&terminal_id).unwrap().state = AgentState::Blocked;
+        app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
+        let view = compute_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false);
+        app.view.tab_hit_areas = view.tab_hit_areas;
+
+        for (mode, should_render) in [
+            (crate::config::ShowTabStatusConfig::Off, false),
+            (crate::config::ShowTabStatusConfig::Attention, true),
+            (crate::config::ShowTabStatusConfig::All, true),
+        ] {
+            app.show_tab_status = mode;
+            let backend = TestBackend::new(30, 1);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal
+                .draw(|frame| render_tab_bar(&app, frame, app.view.tab_bar_rect))
+                .unwrap();
+            let tab_rect = app.view.tab_hit_areas[0];
+            let dot = (tab_rect.x..tab_rect.x + tab_rect.width)
+                .find(|x| terminal.backend().buffer()[(*x, tab_rect.y)].symbol() == "●");
+            assert_eq!(dot.is_some(), should_render);
+            if let Some(x) = dot {
+                assert_eq!(
+                    terminal.backend().buffer()[(x, tab_rect.y)].style().fg,
+                    Some(app.palette.red)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn attention_tab_status_includes_unseen_idle_but_not_working() {
+        assert!(should_show_tab_status(
+            crate::config::ShowTabStatusConfig::Attention,
+            AgentState::Idle,
+            false
+        ));
+        assert!(!should_show_tab_status(
+            crate::config::ShowTabStatusConfig::Attention,
+            AgentState::Working,
+            true
+        ));
+        assert!(!should_show_tab_status(
+            crate::config::ShowTabStatusConfig::All,
+            AgentState::Unknown,
+            true
+        ));
     }
 
     #[test]
