@@ -324,8 +324,9 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # New tabs can still be created with the configured keybinding.
 # hide_tab_bar_when_single_tab = false
 
-# Agent state dots in tabs: "off", "attention", or "all".
+# Agent state dots in tabs: "off", "attention", "active", or "all".
 # "attention" shows blocked and completed agents awaiting attention.
+# "active" also shows working agents, while idle tabs stay quiet like the sidebar.
 # "all" shows any known agent state.
 # show_tab_status = "off"
 

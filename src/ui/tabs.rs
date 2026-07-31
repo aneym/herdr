@@ -63,6 +63,11 @@ fn should_show_tab_status(
         crate::config::ShowTabStatusConfig::Attention => {
             state == AgentState::Blocked || (state == AgentState::Idle && !seen)
         }
+        crate::config::ShowTabStatusConfig::Active => {
+            state == AgentState::Working
+                || state == AgentState::Blocked
+                || (state == AgentState::Idle && !seen)
+        }
         crate::config::ShowTabStatusConfig::All => state != AgentState::Unknown,
     }
 }
@@ -560,6 +565,7 @@ mod tests {
         for (mode, should_render) in [
             (crate::config::ShowTabStatusConfig::Off, false),
             (crate::config::ShowTabStatusConfig::Attention, true),
+            (crate::config::ShowTabStatusConfig::Active, true),
             (crate::config::ShowTabStatusConfig::All, true),
         ] {
             app.show_tab_status = mode;
@@ -637,6 +643,10 @@ mod tests {
             14
         );
         assert_eq!(
+            tab_width(&ws, 0, crate::config::ShowTabStatusConfig::Active),
+            14
+        );
+        assert_eq!(
             tab_width(&ws, 0, crate::config::ShowTabStatusConfig::All),
             14
         );
@@ -659,6 +669,23 @@ mod tests {
             AgentState::Unknown,
             true
         ));
+    }
+
+    #[test]
+    fn active_tab_status_includes_working_and_attention_but_not_idle_or_unknown() {
+        for (state, seen, should_render) in [
+            (AgentState::Working, true, true),
+            (AgentState::Blocked, true, true),
+            (AgentState::Idle, false, true),
+            (AgentState::Idle, true, false),
+            (AgentState::Unknown, true, false),
+        ] {
+            assert_eq!(
+                should_show_tab_status(crate::config::ShowTabStatusConfig::Active, state, seen),
+                should_render,
+                "state={state:?}, seen={seen}"
+            );
+        }
     }
 
     #[test]

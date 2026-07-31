@@ -866,10 +866,11 @@
           "key": "ui.show_tab_status",
           "type": "enum",
           "default": "\"off\"",
-          "description": "Show agent state dots in tabs. attention shows blocked and completed agents awaiting attention; all shows any known state.",
+          "description": "Show agent state dots in tabs. attention shows blocked and completed agents awaiting attention; active also shows working agents while idle tabs stay quiet like the sidebar; all shows any known state.",
           "values": [
             "off",
             "attention",
+            "active",
             "all"
           ]
         },

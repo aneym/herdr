@@ -112,6 +112,7 @@ pub enum ShowTabStatusConfig {
     #[default]
     Off,
     Attention,
+    Active,
     All,
 }
 
@@ -1295,7 +1296,7 @@ pane_borders = false
 pane_gaps = true
 show_agent_labels_on_pane_borders = true
 hide_tab_bar_when_single_tab = true
-show_tab_status = "attention"
+show_tab_status = "active"
 attention_read = "on_unfocus"
 tab_bar_position = "bottom"
 "#;
@@ -1304,7 +1305,7 @@ tab_bar_position = "bottom"
         assert!(config.ui.pane_gaps);
         assert!(config.ui.show_agent_labels_on_pane_borders);
         assert!(config.ui.hide_tab_bar_when_single_tab);
-        assert_eq!(config.ui.show_tab_status, ShowTabStatusConfig::Attention);
+        assert_eq!(config.ui.show_tab_status, ShowTabStatusConfig::Active);
         assert_eq!(config.ui.attention_read, AttentionReadConfig::OnUnfocus);
         assert_eq!(config.ui.tab_bar_position, TabBarPositionConfig::Bottom);
     }
