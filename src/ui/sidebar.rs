@@ -1703,7 +1703,7 @@ mod tests {
         let body = agent_panel_body_rect(agent_area, false);
         let first = row_text(terminal.backend().buffer(), body.y, body.width);
 
-        assert_eq!(first, " one · 1");
+        assert_eq!(first, " one");
     }
 
     #[test]
