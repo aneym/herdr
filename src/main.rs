@@ -320,6 +320,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # "all" shows any known agent state.
 # show_tab_status = "off"
 
+# When focused agent attention is marked read: "on_focus" or "on_unfocus".
+# on_unfocus keeps the attention state until focus leaves the pane.
+# attention_read = "on_focus"
+
 # Desktop tab row placement: "top" or "bottom".
 # tab_bar_position = "top"
 

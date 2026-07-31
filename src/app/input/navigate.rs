@@ -257,6 +257,8 @@ impl App {
                 }
             }
             NavigateAction::WorkspacePicker => {
+                self.state.read_focused_attention();
+                self.state.leave_focused_attention();
                 self.state.mobile_switcher_scroll = 0;
                 self.state.mode = Mode::Navigate;
             }
@@ -1642,6 +1644,8 @@ pub(super) fn execute_navigate_action_in_context(
             }
         }
         NavigateAction::WorkspacePicker => {
+            state.read_focused_attention();
+            state.leave_focused_attention();
             state.mobile_switcher_scroll = 0;
             state.mode = Mode::Navigate;
         }

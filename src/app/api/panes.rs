@@ -164,7 +164,7 @@ impl App {
         };
 
         self.state.focus_pane_in_workspace(ws_idx, pane_id);
-        self.state.mark_active_tab_seen();
+        self.state.read_focused_attention();
         self.state.settle_terminal_mode_after_focus();
 
         let Some(pane) = self.pane_info(ws_idx, pane_id) else {

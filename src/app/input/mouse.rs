@@ -1151,6 +1151,8 @@ impl AppState {
                 return MobileMouseResult::Ignored;
             }
             if rect_contains(self.view.mobile_menu_hit_area, mouse.column, mouse.row) {
+                self.read_focused_attention();
+                self.leave_focused_attention();
                 self.mobile_switcher_scroll = 0;
                 self.mode = Mode::Navigate;
                 return MobileMouseResult::Consumed;

@@ -1414,6 +1414,12 @@ pub(crate) struct PaneFocusTarget {
     pub pane_id: PaneId,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DeferredAttentionRead {
+    pub target: PaneFocusTarget,
+    pub state_change_seq: u64,
+}
+
 /// All application state — pure data, no channels or async runtime.
 /// Testable without PTYs or a tokio runtime.
 pub struct AppState {
@@ -1426,6 +1432,7 @@ pub struct AppState {
     pub workspaces: Vec<Workspace>,
     pub active: Option<usize>,
     pub(crate) previous_pane_focus: Option<PaneFocusTarget>,
+    pub(crate) deferred_attention_read: Option<DeferredAttentionRead>,
     pub selected: usize,
     pub mode: Mode,
     pub should_quit: bool,
@@ -1529,6 +1536,7 @@ pub struct AppState {
     pub show_agent_labels_on_pane_borders: bool,
     pub hide_tab_bar_when_single_tab: bool,
     pub show_tab_status: crate::config::ShowTabStatusConfig,
+    pub attention_read: crate::config::AttentionReadConfig,
     pub tab_bar_position: TabBarPositionConfig,
     pub pane_history_persistence: bool,
     /// Expose the focused pane's cursor anchor to the outer terminal even when
@@ -1804,6 +1812,7 @@ impl AppState {
             workspaces: Vec::new(),
             active: None,
             previous_pane_focus: None,
+            deferred_attention_read: None,
             selected: 0,
             mode: Mode::Navigate,
             should_quit: false,
@@ -1909,6 +1918,7 @@ impl AppState {
             show_agent_labels_on_pane_borders: false,
             hide_tab_bar_when_single_tab: false,
             show_tab_status: crate::config::ShowTabStatusConfig::Off,
+            attention_read: crate::config::AttentionReadConfig::OnFocus,
             tab_bar_position: TabBarPositionConfig::Top,
             pane_history_persistence: false,
             reveal_hidden_cursor_for_cjk_ime: false,
@@ -2019,6 +2029,10 @@ impl AppState {
             assert!(
                 self.previous_pane_focus.is_none(),
                 "empty app state must not keep previous pane focus"
+            );
+            assert!(
+                self.deferred_attention_read.is_none(),
+                "empty app state must not keep deferred attention read"
             );
             assert!(
                 self.plugin_panes.is_empty(),
@@ -2171,6 +2185,13 @@ impl AppState {
         }
         if let Some(focus) = &self.previous_pane_focus {
             assert_workspace_pane(&focus.workspace_id, focus.pane_id, "previous pane focus");
+        }
+        if let Some(pending) = &self.deferred_attention_read {
+            assert_workspace_pane(
+                &pending.target.workspace_id,
+                pending.target.pane_id,
+                "deferred attention read",
+            );
         }
         if let Some(toast) = &self.toast {
             if let Some(target) = &toast.target {

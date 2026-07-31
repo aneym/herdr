@@ -682,6 +682,16 @@
           ]
         },
         {
+          "key": "ui.attention_read",
+          "type": "enum",
+          "default": "\"on_focus\"",
+          "description": "Choose when focused agent attention is marked read. on_unfocus preserves attention until focus leaves the pane.",
+          "values": [
+            "on_focus",
+            "on_unfocus"
+          ]
+        },
+        {
           "key": "ui.tab_bar_position",
           "type": "enum",
           "default": "\"top\"",

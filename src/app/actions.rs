@@ -278,6 +278,71 @@ impl AppState {
         Some((ws_idx, tab_idx))
     }
 
+    fn pane_attention_generation(&self, target: &PaneFocusTarget) -> Option<u64> {
+        let (ws_idx, tab_idx) = self.pane_focus_target_indices(target)?;
+        let pane = self.workspaces[ws_idx].tabs[tab_idx]
+            .panes
+            .get(&target.pane_id)?;
+        if pane.seen {
+            return None;
+        }
+        Some(
+            self.terminals
+                .get(&pane.attached_terminal_id)?
+                .last_agent_state_change_seq
+                .unwrap_or(0),
+        )
+    }
+
+    fn mark_deferred_attention_read(&mut self, target: &PaneFocusTarget, state_change_seq: u64) {
+        let Some((ws_idx, tab_idx)) = self.pane_focus_target_indices(target) else {
+            return;
+        };
+        let Some(pane) = self.workspaces[ws_idx].tabs[tab_idx]
+            .panes
+            .get_mut(&target.pane_id)
+        else {
+            return;
+        };
+        let is_same_attention =
+            self.terminals
+                .get(&pane.attached_terminal_id)
+                .is_some_and(|terminal| {
+                    terminal.last_agent_state_change_seq.unwrap_or(0) == state_change_seq
+                });
+        if is_same_attention && !pane.seen {
+            pane.seen = true;
+        }
+    }
+
+    fn update_attention_read_for_focus_change(
+        &mut self,
+        previous: Option<&PaneFocusTarget>,
+        current: Option<&PaneFocusTarget>,
+    ) {
+        if self.attention_read == crate::config::AttentionReadConfig::OnFocus {
+            self.deferred_attention_read = None;
+            self.mark_active_tab_seen();
+            return;
+        }
+
+        if previous == current {
+            return;
+        }
+        if let Some(pending) = self.deferred_attention_read.take() {
+            self.mark_deferred_attention_read(&pending.target, pending.state_change_seq);
+        }
+        self.deferred_attention_read = current.and_then(|target| {
+            self.pane_attention_generation(target)
+                .map(
+                    |state_change_seq| crate::app::state::DeferredAttentionRead {
+                        target: target.clone(),
+                        state_change_seq,
+                    },
+                )
+        });
+    }
+
     pub(crate) fn record_pane_focus_change(
         &mut self,
         previous: Option<PaneFocusTarget>,
@@ -292,6 +357,7 @@ impl AppState {
             pane_id,
         };
         if previous.as_ref() != Some(&target) {
+            self.update_attention_read_for_focus_change(previous.as_ref(), Some(&target));
             self.previous_pane_focus = previous;
         }
     }
@@ -299,6 +365,7 @@ impl AppState {
     fn record_pane_focus_after_navigation(&mut self, previous: Option<PaneFocusTarget>) {
         let current = self.current_pane_focus_target();
         if previous != current {
+            self.update_attention_read_for_focus_change(previous.as_ref(), current.as_ref());
             self.previous_pane_focus = previous;
         }
     }
@@ -330,19 +397,34 @@ impl AppState {
         if self.copy_mode.is_some() {
             self.clear_copy_mode_selection();
         }
-        self.switch_workspace_tab(ws_idx, tab_idx);
-        if let Some(tab) = self
-            .workspaces
-            .get_mut(ws_idx)
-            .and_then(|ws| ws.tabs.get_mut(tab_idx))
-        {
-            tab.layout.focus_pane(pane_id);
-            self.previous_pane_focus = previous;
-            self.mark_session_dirty();
-            self.sync_copy_mode_with_focus();
-            return true;
+        let is_workspace_changed = self.active != Some(ws_idx);
+        self.active = Some(ws_idx);
+        self.selected = ws_idx;
+        self.ensure_workspace_visible(ws_idx);
+        let workspace_id = self.workspaces[ws_idx].id.clone();
+        if is_workspace_changed {
+            crate::logging::workspace_focused(&workspace_id);
         }
-        false
+        let is_focused = self.workspaces.get_mut(ws_idx).is_some_and(|ws| {
+            ws.select_tab(tab_idx);
+            let tab_id =
+                public_tab_id_for_index(ws, tab_idx).unwrap_or_else(|| workspace_id.clone());
+            crate::logging::tab_focused(&workspace_id, &tab_id);
+            ws.tabs.get_mut(tab_idx).is_some_and(|tab| {
+                tab.layout.focus_pane(pane_id);
+                true
+            })
+        });
+        if !is_focused {
+            return false;
+        }
+        self.update_attention_read_for_focus_change(previous.as_ref(), Some(&target));
+        self.previous_pane_focus = previous;
+        self.mark_session_dirty();
+        self.tab_scroll_follow_active = true;
+        self.refresh_tab_bar_view();
+        self.sync_copy_mode_with_focus();
+        true
     }
 
     #[cfg(test)]
@@ -1119,7 +1201,11 @@ impl AppState {
             self.ensure_workspace_visible(idx);
             if let Some(ws) = self.workspaces.get_mut(idx) {
                 let active_tab = ws.active_tab;
-                ws.switch_tab(active_tab);
+                if self.attention_read == crate::config::AttentionReadConfig::OnFocus {
+                    ws.switch_tab(active_tab);
+                } else {
+                    ws.select_tab(active_tab);
+                }
                 let tab_id =
                     public_tab_id_for_index(ws, active_tab).unwrap_or_else(|| workspace_id.clone());
                 crate::logging::tab_focused(&workspace_id, &tab_id);
@@ -1154,7 +1240,11 @@ impl AppState {
         self.mark_session_dirty();
         self.ensure_workspace_visible(ws_idx);
         if let Some(ws) = self.workspaces.get_mut(ws_idx) {
-            ws.switch_tab(tab_idx);
+            if self.attention_read == crate::config::AttentionReadConfig::OnFocus {
+                ws.switch_tab(tab_idx);
+            } else {
+                ws.select_tab(tab_idx);
+            }
             let tab_id =
                 public_tab_id_for_index(ws, tab_idx).unwrap_or_else(|| workspace_id.clone());
             crate::logging::tab_focused(&workspace_id, &tab_id);
@@ -1252,7 +1342,11 @@ impl AppState {
             let Some(ws) = self.workspaces.get_mut(ws_idx) else {
                 return;
             };
-            ws.switch_tab(idx);
+            if self.attention_read == crate::config::AttentionReadConfig::OnFocus {
+                ws.switch_tab(idx);
+            } else {
+                ws.select_tab(idx);
+            }
             let workspace_id = ws.id.clone();
             let tab_id = public_tab_id_for_index(ws, idx).unwrap_or_else(|| workspace_id.clone());
             crate::logging::tab_focused(&workspace_id, &tab_id);
@@ -1261,6 +1355,34 @@ impl AppState {
             self.refresh_tab_bar_view();
             self.record_pane_focus_after_navigation(previous_focus);
             self.sync_selection_after_focus_navigation();
+        }
+    }
+
+    pub(crate) fn read_focused_attention(&mut self) -> bool {
+        if self.attention_read == crate::config::AttentionReadConfig::OnFocus {
+            self.deferred_attention_read = None;
+            return self.mark_active_tab_seen();
+        }
+        if self.deferred_attention_read.is_none() {
+            self.deferred_attention_read = self.current_pane_focus_target().and_then(|target| {
+                self.pane_attention_generation(&target)
+                    .map(
+                        |state_change_seq| crate::app::state::DeferredAttentionRead {
+                            target,
+                            state_change_seq,
+                        },
+                    )
+            });
+        }
+        false
+    }
+
+    pub(crate) fn leave_focused_attention(&mut self) {
+        if self.attention_read != crate::config::AttentionReadConfig::OnUnfocus {
+            return;
+        }
+        if let Some(pending) = self.deferred_attention_read.take() {
+            self.mark_deferred_attention_read(&pending.target, pending.state_change_seq);
         }
     }
 
@@ -1882,7 +2004,7 @@ impl AppState {
         let Some(target) = self.previous_pane_focus.clone() else {
             return;
         };
-        let Some((ws_idx, tab_idx)) = self.pane_focus_target_indices(&target) else {
+        let Some((ws_idx, _)) = self.pane_focus_target_indices(&target) else {
             self.previous_pane_focus = None;
             return;
         };
@@ -1892,15 +2014,8 @@ impl AppState {
             return;
         }
 
-        self.switch_workspace_tab(ws_idx, tab_idx);
-        if let Some(tab) = self
-            .workspaces
-            .get_mut(ws_idx)
-            .and_then(|ws| ws.tabs.get_mut(tab_idx))
-        {
-            tab.layout.focus_pane(target.pane_id);
+        if self.focus_pane_in_workspace(ws_idx, target.pane_id) {
             self.previous_pane_focus = current;
-            self.mark_session_dirty();
         }
     }
 
@@ -4471,6 +4586,83 @@ mod tests {
             .workspace_card_areas
             .iter()
             .any(|card| card.ws_idx == 7));
+    }
+
+    #[test]
+    fn deferred_attention_is_read_when_focus_leaves_pane() {
+        let mut state = app_with_workspaces(&["test"]);
+        state.attention_read = crate::config::AttentionReadConfig::OnUnfocus;
+        let root = state.workspaces[0].tabs[0].root_pane;
+        let right = state.workspaces[0].test_split(Direction::Horizontal);
+        state.ensure_test_terminals();
+        let terminal_id = state.workspaces[0].tabs[0].panes[&root]
+            .attached_terminal_id
+            .clone();
+        state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .last_agent_state_change_seq = Some(1);
+        state.workspaces[0].tabs[0]
+            .panes
+            .get_mut(&root)
+            .unwrap()
+            .seen = false;
+        state.workspaces[0].tabs[0].layout.focus_pane(root);
+
+        state.read_focused_attention();
+        assert!(!state.workspaces[0].tabs[0].panes[&root].seen);
+        state.focus_pane_in_workspace(0, right);
+
+        assert!(state.workspaces[0].tabs[0].panes[&root].seen);
+    }
+
+    #[test]
+    fn deferred_attention_does_not_clear_newer_generation_on_unfocus() {
+        let mut state = app_with_workspaces(&["test"]);
+        state.attention_read = crate::config::AttentionReadConfig::OnUnfocus;
+        let root = state.workspaces[0].tabs[0].root_pane;
+        let right = state.workspaces[0].test_split(Direction::Horizontal);
+        state.ensure_test_terminals();
+        let terminal_id = state.workspaces[0].tabs[0].panes[&root]
+            .attached_terminal_id
+            .clone();
+        state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .last_agent_state_change_seq = Some(1);
+        state.workspaces[0].tabs[0]
+            .panes
+            .get_mut(&root)
+            .unwrap()
+            .seen = false;
+        state.workspaces[0].tabs[0].layout.focus_pane(root);
+        state.read_focused_attention();
+
+        state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .last_agent_state_change_seq = Some(2);
+        state.focus_pane_in_workspace(0, right);
+
+        assert!(!state.workspaces[0].tabs[0].panes[&root].seen);
+    }
+
+    #[test]
+    fn on_focus_attention_read_preserves_existing_behavior() {
+        let mut state = app_with_workspaces(&["test"]);
+        let root = state.workspaces[0].tabs[0].root_pane;
+        state.workspaces[0].tabs[0]
+            .panes
+            .get_mut(&root)
+            .unwrap()
+            .seen = false;
+
+        state.read_focused_attention();
+
+        assert!(state.workspaces[0].tabs[0].panes[&root].seen);
     }
 
     #[test]

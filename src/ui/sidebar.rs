@@ -324,7 +324,7 @@ pub(crate) fn next_entry_is_indented_workspace(entries: &[WorkspaceListEntry], i
 }
 
 pub(crate) fn normalized_workspace_scroll(app: &AppState, area: Rect, requested: usize) -> usize {
-    let ws_area = workspace_list_rect(app, area);
+    let ws_area = workspace_list_rect(&app, area);
     let body = workspace_list_body_rect(ws_area, false);
     if body.height == 0 {
         return requested;
@@ -561,7 +561,9 @@ fn resolved_agent_rows(app: &AppState, entry: &AgentPanelEntry) -> Vec<Vec<Resol
         .map(String::as_str)
         .unwrap_or_else(|| state_label(entry.state, entry.seen));
     let mut rows = tokens::agent_rows(&app.sidebar_agents, entry, label);
-    rows.resize_with(app.sidebar_agents.min_row_lines as usize, Vec::new);
+    if rows.len() < app.sidebar_agents.min_row_lines as usize {
+        rows.resize_with(app.sidebar_agents.min_row_lines as usize, Vec::new);
+    }
     rows
 }
 
@@ -673,7 +675,7 @@ pub(crate) fn compute_workspace_list_areas(
     app: &AppState,
     area: Rect,
 ) -> (Vec<crate::app::state::WorkspaceCardArea>, Vec<()>) {
-    let ws_area = workspace_list_rect(app, area);
+    let ws_area = workspace_list_rect(&app, area);
     if ws_area == Rect::default() {
         return (Vec::new(), Vec::new());
     }
@@ -1987,7 +1989,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
         app.sidebar_spaces.rows = vec![vec![crate::config::SpaceSidebarToken::Workspace]; 6];
         let area = Rect::new(0, 0, 20, 10);
-        let workspace_area = workspace_list_rect(app, area);
+        let workspace_area = workspace_list_rect(&app, area);
         let body = workspace_list_body_rect(workspace_area, false);
 
         let metrics = workspace_list_scroll_metrics(&app, workspace_area);
@@ -2463,7 +2465,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         app.sidebar_spaces.row_gap = 0;
         let area = Rect::new(0, 0, 30, 20);
         app.view.workspace_card_areas = compute_workspace_card_areas(&app, area);
-        let list_area = workspace_list_rect(app, area);
+        let list_area = workspace_list_rect(&app, area);
 
         let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
         terminal
@@ -2504,7 +2506,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         let area = Rect::new(0, 0, 30, 10);
         app.view.workspace_card_areas = compute_workspace_card_areas(&app, area);
         assert_eq!(app.view.workspace_card_areas.len(), 2);
-        let list_area = workspace_list_rect(app, area);
+        let list_area = workspace_list_rect(&app, area);
 
         let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
         terminal
@@ -2596,7 +2598,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         app.sidebar_spaces.row_gap = 0;
         let area = Rect::new(0, 0, 30, 20);
         app.view.workspace_card_areas = compute_workspace_card_areas(&app, area);
-        let list_area = workspace_list_rect(app, area);
+        let list_area = workspace_list_rect(&app, area);
         let indicator_row = workspace_drop_indicator_row(
             &app,
             &app.view.workspace_card_areas,
