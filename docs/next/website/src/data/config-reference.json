@@ -685,7 +685,7 @@
           "key": "ui.attention_read",
           "type": "enum",
           "default": "\"on_focus\"",
-          "description": "Choose when focused agent attention is marked read. on_unfocus preserves attention until focus leaves the pane.",
+          "description": "Choose when focused agent attention is marked read. on_unfocus preserves attention until an in-app pane, tab, workspace, sidebar, or mobile navigation transition leaves it; outer-terminal focus loss does not end the visit.",
           "values": [
             "on_focus",
             "on_unfocus"

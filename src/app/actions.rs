@@ -391,6 +391,7 @@ impl AppState {
             pane_id,
         };
         if previous.as_ref() == Some(&target) {
+            self.read_focused_attention();
             return false;
         }
 
@@ -419,6 +420,7 @@ impl AppState {
             return false;
         }
         self.update_attention_read_for_focus_change(previous.as_ref(), Some(&target));
+        self.read_focused_attention();
         self.previous_pane_focus = previous;
         self.mark_session_dirty();
         self.tab_scroll_follow_active = true;
@@ -1773,6 +1775,13 @@ impl AppState {
             .is_some_and(|focus| pane_ids.contains(&focus.pane_id))
         {
             self.previous_pane_focus = None;
+        }
+        if self
+            .deferred_attention_read
+            .as_ref()
+            .is_some_and(|pending| pane_ids.contains(&pending.target.pane_id))
+        {
+            self.deferred_attention_read = None;
         }
         for pane_id in pane_ids {
             self.plugin_panes.remove(&pane_id);
@@ -3191,9 +3200,27 @@ impl AppState {
         if change.state != AgentState::Idle {
             pane.seen = true;
         } else if is_completion_transition(change) {
-            pane.seen = suppress_active_tab_notifications;
+            pane.seen = suppress_active_tab_notifications
+                && self.attention_read == crate::config::AttentionReadConfig::OnFocus;
         }
         let seen = pane.seen;
+
+        if is_completion_transition(change)
+            && self
+                .current_pane_focus_target()
+                .is_some_and(|target| target.pane_id == pane_id)
+            && self.attention_read == crate::config::AttentionReadConfig::OnUnfocus
+        {
+            self.deferred_attention_read = self.current_pane_focus_target().and_then(|target| {
+                self.pane_attention_generation(&target)
+                    .map(
+                        |state_change_seq| crate::app::state::DeferredAttentionRead {
+                            target,
+                            state_change_seq,
+                        },
+                    )
+            });
+        }
 
         if let Some(delivery) = self.record_or_deliver_agent_notification(ws_idx, pane_id, change) {
             self.apply_agent_notification_delivery(&delivery);
@@ -5042,10 +5069,11 @@ mod tests {
     }
 
     #[test]
-    fn active_tab_completion_marks_pane_seen() {
+    fn active_tab_completion_stays_unseen_until_unfocus() {
         let mut state = app_with_workspaces(&["active"]);
         state.active = Some(0);
         state.outer_terminal_focus = Some(true);
+        state.attention_read = crate::config::AttentionReadConfig::OnUnfocus;
         let pane_id = *state.workspaces[0].panes.keys().next().unwrap();
         let terminal_id = state.workspaces[0]
             .panes
@@ -5069,7 +5097,39 @@ mod tests {
         let terminal = state.terminals.get(&terminal_id).unwrap();
         assert_eq!(terminal.state, AgentState::Idle);
         let pane = state.workspaces[0].panes.get(&pane_id).unwrap();
-        assert!(pane.seen);
+        assert!(!pane.seen);
+        assert_eq!(
+            state
+                .deferred_attention_read
+                .as_ref()
+                .map(|pending| pending.target.pane_id),
+            Some(pane_id)
+        );
+    }
+
+    #[test]
+    fn active_tab_completion_marks_pane_seen_on_focus() {
+        let mut state = app_with_workspaces(&["active"]);
+        state.active = Some(0);
+        state.outer_terminal_focus = Some(true);
+        let pane_id = *state.workspaces[0].panes.keys().next().unwrap();
+        let terminal_id = state.workspaces[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        state.terminals.get_mut(&terminal_id).unwrap().state = AgentState::Working;
+        state.workspaces[0].panes.get_mut(&pane_id).unwrap().seen = false;
+
+        state.handle_app_event(AppEvent::StateChanged {
+            pane_id,
+            agent: Some(Agent::Pi),
+            state: AgentState::Idle,
+            visible_blocker: false,
+            visible_working: false,
+            process_exited: false,
+            observed_at: std::time::Instant::now(),
+        });
+
+        assert!(state.workspaces[0].panes[&pane_id].seen);
     }
 
     #[test]
@@ -6033,6 +6093,25 @@ mod tests {
     }
 
     #[test]
+    fn close_pane_clears_deferred_attention_for_closed_pane() {
+        let mut state = app_with_workspaces(&["test"]);
+        let pane_id = state.workspaces[0].test_split(Direction::Horizontal);
+        state.ensure_test_terminals();
+        state.deferred_attention_read = Some(crate::app::state::DeferredAttentionRead {
+            target: crate::app::state::PaneFocusTarget {
+                workspace_id: state.workspaces[0].id.clone(),
+                pane_id,
+            },
+            state_change_seq: 1,
+        });
+
+        state.close_pane();
+
+        assert!(state.deferred_attention_read.is_none());
+        state.assert_invariants_for_test();
+    }
+
+    #[test]
     fn close_tab_removes_unattached_terminal_states() {
         let mut state = app_with_workspaces(&["test"]);
         let tab_idx = state.workspaces[0].test_add_tab(Some("logs"));
@@ -6049,8 +6128,16 @@ mod tests {
         );
         insert_test_pane_graphics_state(&mut state, pane_id);
 
+        state.deferred_attention_read = Some(crate::app::state::DeferredAttentionRead {
+            target: crate::app::state::PaneFocusTarget {
+                workspace_id: state.workspaces[0].id.clone(),
+                pane_id,
+            },
+            state_change_seq: 1,
+        });
         state.close_tab();
 
+        assert!(state.deferred_attention_read.is_none());
         assert!(!state.terminals.contains_key(&terminal_id));
         assert!(!state.plugin_panes.contains_key(&pane_id));
         assert!(!state.pane_graphics_layers.contains_key(&pane_id));
@@ -6072,8 +6159,16 @@ mod tests {
         );
         insert_test_pane_graphics_state(&mut state, pane_id);
 
+        state.deferred_attention_read = Some(crate::app::state::DeferredAttentionRead {
+            target: crate::app::state::PaneFocusTarget {
+                workspace_id: state.workspaces[0].id.clone(),
+                pane_id,
+            },
+            state_change_seq: 1,
+        });
         state.close_selected_workspace();
 
+        assert!(state.deferred_attention_read.is_none());
         assert!(!state.terminals.contains_key(&terminal_id));
         assert!(!state.plugin_panes.contains_key(&pane_id));
         assert!(!state.pane_graphics_layers.contains_key(&pane_id));

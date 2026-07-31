@@ -1127,7 +1127,7 @@ impl HeadlessServer {
         apply_keybindings(&mut self.app, &keybindings);
         self.sync_visible_server_config_diagnostic(uses_local_keybindings);
         if outer_terminal_focus == Some(true) {
-            self.app.state.mark_active_tab_seen();
+            self.app.state.read_focused_attention();
         }
         self.app.set_host_terminal_appearance_state(
             host_terminal_appearance,
@@ -7777,6 +7777,47 @@ next_tab = ""
             RenderEncoding::SemanticFrame,
             None,
         )
+    }
+
+    #[test]
+    fn attaching_focused_client_starts_deferred_attention_visit() {
+        let mut server = test_headless_server();
+        server.app.state.workspaces = vec![crate::workspace::Workspace::test_new("test")];
+        server.app.state.ensure_test_terminals();
+        server.app.state.active = Some(0);
+        server.app.state.selected = 0;
+        server.app.state.attention_read = crate::config::AttentionReadConfig::OnUnfocus;
+        let pane_id = server.app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = server.app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        server.app.state.workspaces[0].tabs[0]
+            .panes
+            .get_mut(&pane_id)
+            .unwrap()
+            .seen = false;
+        server
+            .app
+            .state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .last_agent_state_change_seq = Some(1);
+        server.clients.insert(1, test_app_client(Some(true), 1));
+        server.foreground_client_id = Some(1);
+
+        server.sync_foreground_client_state();
+
+        assert!(!server.app.state.workspaces[0].tabs[0].panes[&pane_id].seen);
+        assert_eq!(
+            server
+                .app
+                .state
+                .deferred_attention_read
+                .as_ref()
+                .map(|pending| pending.target.pane_id),
+            Some(pane_id)
+        );
     }
 
     #[test]

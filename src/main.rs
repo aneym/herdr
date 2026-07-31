@@ -321,7 +321,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # show_tab_status = "off"
 
 # When focused agent attention is marked read: "on_focus" or "on_unfocus".
-# on_unfocus keeps the attention state until focus leaves the pane.
+# on_unfocus keeps attention until an in-app pane, tab, workspace, sidebar, or mobile
+# navigation transition leaves it. Outer-terminal focus loss does not end the visit.
 # attention_read = "on_focus"
 
 # Desktop tab row placement: "top" or "bottom".
