@@ -327,6 +327,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # "workspaces" is accepted as an alias for "spaces".
 # agent_panel_sort = "spaces"
 
+# Expanded sidebar section order. "workspaces" is accepted as an alias for "spaces".
+# [ui.sidebar]
+# section_order = ["spaces", "agents"]
+
 # Expanded agent rows. Built-ins are state_icon, state_text, workspace, tab, pane, agent,
 # terminal_title, and terminal_title_stripped.
 # Custom values reported through pane metadata use a $name token.

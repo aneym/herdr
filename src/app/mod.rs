@@ -626,6 +626,7 @@ impl App {
             sidebar_section_split,
             agent_panel_sort,
             agent_view_override: None,
+            sidebar_section_order: config.ui.sidebar.section_order,
             sidebar_agents: config.ui.sidebar.agents.clone(),
             sidebar_spaces: config.ui.sidebar.spaces.clone(),
             next_agent_state_change_seq: 0,
@@ -1456,6 +1457,7 @@ impl App {
                 self.state.tab_bar_position = config.ui.tab_bar_position;
                 self.state.agent_panel_sort =
                     agent_panel_sort_from_config(config.ui.agent_panel_sort);
+                self.state.sidebar_section_order = config.ui.sidebar.section_order;
                 self.state.sidebar_agents = config.ui.sidebar.agents.clone();
                 self.state.sidebar_spaces = config.ui.sidebar.spaces.clone();
                 self.state.agent_panel_scroll = 0;

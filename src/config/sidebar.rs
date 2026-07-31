@@ -424,11 +424,51 @@ impl Default for SpacesSidebarConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SidebarSection {
+    #[serde(alias = "workspaces")]
+    Spaces,
+    Agents,
+}
+
+fn default_section_order() -> [SidebarSection; 2] {
+    [SidebarSection::Spaces, SidebarSection::Agents]
+}
+
+fn deserialize_section_order<'de, D>(deserializer: D) -> Result<[SidebarSection; 2], D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let order = Vec::<SidebarSection>::deserialize(deserializer)?;
+    match order.as_slice() {
+        [SidebarSection::Spaces, SidebarSection::Agents] => Ok(default_section_order()),
+        [SidebarSection::Agents, SidebarSection::Spaces] => {
+            Ok([SidebarSection::Agents, SidebarSection::Spaces])
+        }
+        _ => Err(serde::de::Error::custom(
+            "sidebar section_order must contain spaces and agents exactly once",
+        )),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct SidebarConfig {
+    #[serde(deserialize_with = "deserialize_section_order")]
+    pub section_order: [SidebarSection; 2],
     pub agents: AgentsSidebarConfig,
     pub spaces: SpacesSidebarConfig,
+}
+
+impl Default for SidebarConfig {
+    fn default() -> Self {
+        Self {
+            section_order: default_section_order(),
+            agents: AgentsSidebarConfig::default(),
+            spaces: SpacesSidebarConfig::default(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -438,6 +478,10 @@ mod tests {
     #[test]
     fn defaults_match_the_compact_agent_and_existing_space_layouts() {
         let config = SidebarConfig::default();
+        assert_eq!(
+            config.section_order,
+            [SidebarSection::Spaces, SidebarSection::Agents]
+        );
         assert_eq!(
             config.agents.rows,
             vec![
@@ -459,6 +503,42 @@ mod tests {
             ]
         );
         assert_eq!(config.spaces.row_gap, 0);
+    }
+
+    #[test]
+    fn section_order_parses_both_permutations_and_workspace_alias() {
+        let agents_first: crate::config::Config = toml::from_str(
+            r#"
+[ui.sidebar]
+section_order = ["agents", "spaces"]
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            agents_first.ui.sidebar.section_order,
+            [SidebarSection::Agents, SidebarSection::Spaces]
+        );
+
+        let alias: crate::config::Config = toml::from_str(
+            r#"
+[ui.sidebar]
+section_order = ["workspaces", "agents"]
+"#,
+        )
+        .unwrap();
+        assert_eq!(alias.ui.sidebar.section_order, default_section_order());
+    }
+
+    #[test]
+    fn section_order_rejects_duplicates_and_incomplete_lists() {
+        for value in [
+            r#"section_order = ["spaces", "spaces"]"#,
+            r#"section_order = ["agents"]"#,
+            r#"section_order = ["spaces", "agents", "spaces"]"#,
+        ] {
+            let toml = format!("[ui.sidebar]\n{value}\n");
+            assert!(toml::from_str::<crate::config::Config>(&toml).is_err());
+        }
     }
 
     #[test]
