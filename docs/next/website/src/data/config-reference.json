@@ -910,6 +910,12 @@
           "description": "Vertical order of expanded sidebar sections. Must contain spaces and agents exactly once; workspaces is accepted as an alias for spaces."
         },
         {
+          "key": "ui.sidebar.agents.state_icons",
+          "type": "table of strings",
+          "default": "{}",
+          "description": "Agent state_icon overrides keyed by idle, working, blocked, or unknown. Unspecified states retain their built-in glyph; an empty string removes the icon token and its adjacent separators without reserving column width."
+        },
+        {
           "key": "ui.sidebar.agents.min_row_lines",
           "type": "integer",
           "default": "0",

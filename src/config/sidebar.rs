@@ -369,6 +369,21 @@ where
     Ok(rows_by_agent)
 }
 
+fn deserialize_state_icons<'de, D>(deserializer: D) -> Result<BTreeMap<String, String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let state_icons = BTreeMap::<String, String>::deserialize(deserializer)?;
+    for state in state_icons.keys() {
+        if !matches!(state.as_str(), "idle" | "working" | "blocked" | "unknown") {
+            return Err(serde::de::Error::custom(format!(
+                "unknown agent state `{state}` in sidebar state_icons"
+            )));
+        }
+    }
+    Ok(state_icons)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct AgentsSidebarConfig {
@@ -376,6 +391,8 @@ pub struct AgentsSidebarConfig {
     pub rows: AgentSidebarRows,
     #[serde(default, deserialize_with = "deserialize_rows_by_agent")]
     pub rows_by_agent: BTreeMap<String, AgentSidebarRows>,
+    #[serde(default, deserialize_with = "deserialize_state_icons")]
+    pub state_icons: BTreeMap<String, String>,
     pub min_row_lines: u16,
     pub row_gap: u16,
 }
@@ -385,6 +402,16 @@ impl AgentsSidebarConfig {
         agent
             .and_then(|agent| self.rows_by_agent.get(crate::detect::agent_label(agent)))
             .unwrap_or(&self.rows)
+    }
+
+    pub(crate) fn state_icon(&self, state: crate::detect::AgentState) -> Option<&str> {
+        let state = match state {
+            crate::detect::AgentState::Idle => "idle",
+            crate::detect::AgentState::Working => "working",
+            crate::detect::AgentState::Blocked => "blocked",
+            crate::detect::AgentState::Unknown => "unknown",
+        };
+        self.state_icons.get(state).map(String::as_str)
     }
 }
 
@@ -400,6 +427,7 @@ impl Default for AgentsSidebarConfig {
                 vec![AgentSidebarToken::Agent],
             ],
             rows_by_agent: BTreeMap::new(),
+            state_icons: BTreeMap::new(),
             min_row_lines: 0,
             row_gap: DEFAULT_SIDEBAR_ROW_GAP,
         }
@@ -496,6 +524,7 @@ mod tests {
             ]
         );
         assert!(config.agents.rows_by_agent.is_empty());
+        assert!(config.agents.state_icons.is_empty());
         assert_eq!(config.agents.min_row_lines, 0);
         assert_eq!(config.agents.row_gap, 0);
         assert_eq!(
@@ -556,6 +585,44 @@ min_row_lines = 3
         )
         .unwrap();
         assert_eq!(config.ui.sidebar.agents.min_row_lines, 3);
+    }
+
+    #[test]
+    fn agent_state_icons_default_to_empty_and_parse_known_states() {
+        assert!(SidebarConfig::default().agents.state_icons.is_empty());
+
+        let config: crate::config::Config = toml::from_str(
+            r#"
+[ui.sidebar.agents]
+state_icons = { idle = "", working = "...", blocked = "!", unknown = "?" }
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            config
+                .ui
+                .sidebar
+                .agents
+                .state_icon(crate::detect::AgentState::Idle),
+            Some("")
+        );
+        assert_eq!(
+            config
+                .ui
+                .sidebar
+                .agents
+                .state_icon(crate::detect::AgentState::Working),
+            Some("...")
+        );
+    }
+
+    #[test]
+    fn agent_state_icons_reject_unknown_states() {
+        let config = r#"
+[ui.sidebar.agents]
+state_icons = { done = "x" }
+"#;
+        assert!(toml::from_str::<crate::config::Config>(config).is_err());
     }
 
     #[test]

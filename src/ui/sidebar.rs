@@ -1062,7 +1062,12 @@ fn resolved_token_spans(
             .sum::<usize>();
         content + separators
     };
-    let mut active = resolved.iter().map(|_| true).collect::<Vec<_>>();
+    let mut active = resolved
+        .iter()
+        .map(|token| {
+            !matches!(token.kind, ResolvedTokenKind::StateIcon) || !state_icon.0.is_empty()
+        })
+        .collect::<Vec<_>>();
     if minimum_width(&active) > max_width {
         for (index, width) in flexible_widths.iter().enumerate() {
             if *width > 0 {
@@ -1518,7 +1523,13 @@ fn render_agent_detail(
             Style::default().fg(label_color).add_modifier(Modifier::DIM)
         };
         let agent_style = Style::default().fg(p.overlay0).add_modifier(Modifier::DIM);
-        let state_icon = state_dot(detail.state, detail.seen, p);
+        let default_state_icon = state_dot(detail.state, detail.seen, p);
+        let state_icon = (
+            app.sidebar_agents
+                .state_icon(detail.state)
+                .unwrap_or(default_state_icon.0),
+            default_state_icon.1,
+        );
 
         for (row_index, resolved) in rows.iter().take(height as usize).enumerate() {
             let mut spans = vec![Span::raw(if row_index == 0 { " " } else { "   " })];
@@ -1664,6 +1675,35 @@ mod tests {
         assert!(agent_style.add_modifier.contains(Modifier::DIM));
         assert!(!agent_style.add_modifier.contains(Modifier::BOLD));
         assert_eq!(agent_style.bg, Some(app.palette.surface_dim));
+    }
+
+    #[test]
+    fn empty_agent_state_icon_removes_the_token_and_separator() {
+        let mut app = crate::app::state::AppState::test_new();
+        let workspace = Workspace::test_new("one");
+        let pane_id = workspace.tabs[0].root_pane;
+        app.workspaces = vec![workspace];
+        app.ensure_test_terminals();
+        let terminal_id = app.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let terminal_state = app.terminals.get_mut(&terminal_id).unwrap();
+        terminal_state.detected_agent = Some(Agent::Pi);
+        terminal_state.state = AgentState::Idle;
+        app.sidebar_agents
+            .state_icons
+            .insert("idle".into(), String::new());
+
+        let area = Rect::new(0, 0, 26, 20);
+        let mut terminal = Terminal::new(TestBackend::new(26, 20)).unwrap();
+        terminal
+            .draw(|frame| render_sidebar(&app, &TerminalRuntimeRegistry::new(), frame, area))
+            .unwrap();
+        let (_, agent_area) = expanded_sidebar_sections(area, app.sidebar_section_split);
+        let body = agent_panel_body_rect(agent_area, false);
+        let first = row_text(terminal.backend().buffer(), body.y, body.width);
+
+        assert_eq!(first, " one · 1");
     }
 
     #[test]
