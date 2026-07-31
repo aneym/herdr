@@ -376,6 +376,7 @@ pub struct AgentsSidebarConfig {
     pub rows: AgentSidebarRows,
     #[serde(default, deserialize_with = "deserialize_rows_by_agent")]
     pub rows_by_agent: BTreeMap<String, AgentSidebarRows>,
+    pub min_row_lines: u16,
     pub row_gap: u16,
 }
 
@@ -399,6 +400,7 @@ impl Default for AgentsSidebarConfig {
                 vec![AgentSidebarToken::Agent],
             ],
             rows_by_agent: BTreeMap::new(),
+            min_row_lines: 0,
             row_gap: DEFAULT_SIDEBAR_ROW_GAP,
         }
     }
@@ -494,6 +496,7 @@ mod tests {
             ]
         );
         assert!(config.agents.rows_by_agent.is_empty());
+        assert_eq!(config.agents.min_row_lines, 0);
         assert_eq!(config.agents.row_gap, 0);
         assert_eq!(
             config.spaces.rows,
@@ -539,6 +542,20 @@ section_order = ["workspaces", "agents"]
             let toml = format!("[ui.sidebar]\n{value}\n");
             assert!(toml::from_str::<crate::config::Config>(&toml).is_err());
         }
+    }
+
+    #[test]
+    fn agent_min_row_lines_defaults_to_zero_and_parses() {
+        assert_eq!(SidebarConfig::default().agents.min_row_lines, 0);
+
+        let config: crate::config::Config = toml::from_str(
+            r#"
+[ui.sidebar.agents]
+min_row_lines = 3
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.ui.sidebar.agents.min_row_lines, 3);
     }
 
     #[test]

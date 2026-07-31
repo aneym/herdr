@@ -560,7 +560,9 @@ fn resolved_agent_rows(app: &AppState, entry: &AgentPanelEntry) -> Vec<Vec<Resol
         .get(agent_panel_status_key(entry.state, entry.seen))
         .map(String::as_str)
         .unwrap_or_else(|| state_label(entry.state, entry.seen));
-    tokens::agent_rows(&app.sidebar_agents, entry, label)
+    let mut rows = tokens::agent_rows(&app.sidebar_agents, entry, label);
+    rows.resize_with(app.sidebar_agents.min_row_lines as usize, Vec::new);
+    rows
 }
 
 pub(crate) fn agent_entry_height_in_body(
@@ -1826,6 +1828,38 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         assert_eq!(metrics.max_offset_from_bottom, 0);
         assert_eq!(row_text(buffer, body.y, body.width), " pi");
         assert_eq!(row_text(buffer, body.y + 1, body.width), " claude");
+    }
+
+    #[test]
+    fn agent_min_row_lines_pads_rendering_and_scroll_geometry() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
+        app.ensure_test_terminals();
+        for (workspace, agent) in app.workspaces.iter().zip([Agent::Pi, Agent::Claude]) {
+            let pane_id = workspace.tabs[0].root_pane;
+            let terminal_id = workspace.tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            app.terminals.get_mut(&terminal_id).unwrap().detected_agent = Some(agent);
+        }
+        app.sidebar_agents.rows = vec![vec![crate::config::AgentSidebarToken::Agent]];
+        app.sidebar_agents.min_row_lines = 2;
+
+        let area = Rect::new(0, 0, 20, 7);
+        let metrics = agent_panel_scroll_metrics(&app, area);
+        let body = agent_panel_body_rect(area, false);
+        let mut terminal = Terminal::new(TestBackend::new(20, 7)).unwrap();
+        terminal
+            .draw(|frame| render_agent_detail(&app, &TerminalRuntimeRegistry::new(), frame, area))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+
+        assert_eq!(metrics.viewport_rows, 2);
+        assert_eq!(metrics.max_offset_from_bottom, 0);
+        assert_eq!(row_text(buffer, body.y, body.width), " pi");
+        assert_eq!(row_text(buffer, body.y + 1, body.width), "");
+        assert_eq!(row_text(buffer, body.y + 2, body.width), " claude");
+        assert_eq!(row_text(buffer, body.y + 3, body.width), "");
     }
 
     #[test]

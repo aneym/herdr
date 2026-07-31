@@ -337,6 +337,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # A token occurrence may be styled with { token = "workspace", fg = "#89b4fa", bold = true, dim = false }.
 # Omitted style fields preserve the contextual default.
 # [ui.sidebar.agents]
+# Minimum rendered lines per agent entry. Blank lines pad entries with fewer populated rows.
+# min_row_lines = 0
 # Blank rows between agent entries. Set to 1 to restore the previous spacing.
 # row_gap = 0
 # rows = [["state_icon", "workspace", "tab"], ["agent"]]

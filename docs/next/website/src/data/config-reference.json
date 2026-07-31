@@ -671,6 +671,17 @@
           "description": "Hide the tab row when the workspace has one tab."
         },
         {
+          "key": "ui.show_tab_status",
+          "type": "enum",
+          "default": "\"off\"",
+          "description": "Show agent state dots in tabs. attention shows blocked and completed agents awaiting attention; all shows any known state.",
+          "values": [
+            "off",
+            "attention",
+            "all"
+          ]
+        },
+        {
           "key": "ui.tab_bar_position",
           "type": "enum",
           "default": "\"top\"",
@@ -689,6 +700,18 @@
             "spaces",
             "priority"
           ]
+        },
+        {
+          "key": "ui.sidebar.section_order",
+          "type": "list of enums",
+          "default": "[\"spaces\", \"agents\"]",
+          "description": "Vertical order of expanded sidebar sections. Must contain spaces and agents exactly once; workspaces is accepted as an alias for spaces."
+        },
+        {
+          "key": "ui.sidebar.agents.min_row_lines",
+          "type": "integer",
+          "default": "0",
+          "description": "Minimum rendered lines per expanded Agent sidebar entry. Entries with fewer populated rows are padded with blank lines."
         },
         {
           "key": "ui.sidebar.agents.row_gap",
