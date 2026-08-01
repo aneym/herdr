@@ -866,7 +866,7 @@
           "key": "ui.show_tab_status",
           "type": "enum",
           "default": "\"off\"",
-          "description": "Show agent state dots in tabs. attention shows blocked and completed agents awaiting attention; active also shows working agents while idle tabs stay quiet like the sidebar; all shows any known state.",
+          "description": "Show sidebar agent state icons in tabs, using the same glyphs, state_icons overrides, and working animation. attention shows blocked and completed agents awaiting attention; active also shows working agents while seen idle tabs stay quiet; all shows every state whose resolved glyph is non-empty.",
           "values": [
             "off",
             "attention",

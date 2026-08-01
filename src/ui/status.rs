@@ -216,6 +216,20 @@ pub(super) fn agent_icon(
     }
 }
 
+pub(super) fn resolved_agent_icon<'a>(
+    config: &'a crate::config::AgentsSidebarConfig,
+    state: AgentState,
+    seen: bool,
+    tick: u32,
+    p: &Palette,
+) -> (&'a str, Style) {
+    let default_icon = agent_icon(state, seen, tick, p);
+    (
+        config.state_icon(state).unwrap_or(default_icon.0),
+        default_icon.1,
+    )
+}
+
 pub(super) fn state_label(state: AgentState, seen: bool) -> &'static str {
     match (state, seen) {
         (AgentState::Blocked, _) => "blocked",

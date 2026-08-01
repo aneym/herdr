@@ -1537,12 +1537,12 @@ fn render_agent_detail(
             Style::default().fg(label_color).add_modifier(Modifier::DIM)
         };
         let agent_style = Style::default().fg(p.overlay0).add_modifier(Modifier::DIM);
-        let default_state_icon = agent_icon(detail.state, detail.seen, app.animation_tick, p);
-        let state_icon = (
-            app.sidebar_agents
-                .state_icon(detail.state)
-                .unwrap_or(default_state_icon.0),
-            default_state_icon.1,
+        let state_icon = super::status::resolved_agent_icon(
+            &app.sidebar_agents,
+            detail.state,
+            detail.seen,
+            app.animation_tick,
+            p,
         );
 
         for (row_index, resolved) in rows.iter().take(height as usize).enumerate() {
