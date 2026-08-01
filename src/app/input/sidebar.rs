@@ -173,8 +173,22 @@ impl AppState {
     }
 
     pub(crate) fn sidebar_new_button_rect(&self) -> Rect {
+        if self.sidebar_new_button == crate::config::SidebarNewButtonConfig::Header {
+            let area = self.workspace_list_rect();
+            if area == Rect::default() || area.width == 0 || area.height == 0 {
+                return Rect::default();
+            }
+            let content_width = area.width.saturating_sub(1);
+            return Rect::new(
+                area.x + content_width.saturating_sub(3),
+                area.y,
+                3.min(content_width),
+                1,
+            );
+        }
+
         let footer = self.sidebar_footer_rect();
-        let width = 5u16.min(footer.width.max(1));
+        let width = 5u16.min(footer.width.saturating_sub(1));
         Rect::new(footer.x, footer.y, width, footer.height)
     }
 
@@ -184,13 +198,18 @@ impl AppState {
         }
 
         let footer = self.sidebar_footer_rect();
+        let content_width = footer.width.saturating_sub(2);
         let width = if self.global_menu_attention_badge_visible() {
-            8
+            7
         } else {
-            6
+            4
         }
-        .min(footer.width.max(1));
-        let x = footer.x + footer.width.saturating_sub(width);
+        .min(content_width);
+        let x = if self.sidebar_menu_position == crate::config::SidebarMenuPositionConfig::Left {
+            footer.x
+        } else {
+            footer.x + content_width.saturating_sub(width)
+        };
         Rect::new(x, footer.y, width, footer.height)
     }
 

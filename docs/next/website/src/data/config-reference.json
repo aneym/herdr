@@ -911,6 +911,26 @@
           "description": "Vertical order of expanded sidebar sections. Must contain spaces and agents exactly once; workspaces is accepted as an alias for spaces."
         },
         {
+          "key": "ui.sidebar.new_button",
+          "type": "enum",
+          "default": "\"footer\"",
+          "description": "New workspace button placement in the expanded sidebar.",
+          "values": [
+            "footer",
+            "header"
+          ]
+        },
+        {
+          "key": "ui.sidebar.menu_position",
+          "type": "enum",
+          "default": "\"right\"",
+          "description": "Footer menu button alignment in the expanded sidebar.",
+          "values": [
+            "left",
+            "right"
+          ]
+        },
+        {
           "key": "ui.sidebar.agents.state_icons",
           "type": "table of strings",
           "default": "{}",

@@ -345,6 +345,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Expanded sidebar section order. "workspaces" is accepted as an alias for "spaces".
 # [ui.sidebar]
 # section_order = ["spaces", "agents"]
+# New workspace button placement: "footer" or "header".
+# new_button = "footer"
+# Footer menu button alignment: "right" or "left".
+# menu_position = "right"
 
 # Expanded agent rows. Built-ins are state_icon, state_text, workspace, tab, pane, agent,
 # terminal_title, and terminal_title_stripped.

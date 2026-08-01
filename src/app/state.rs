@@ -1570,6 +1570,8 @@ pub struct AppState {
     /// Transient session-wide projection override for the built-in Agents view.
     pub agent_view_override: Option<crate::api::schema::AgentViewSetParams>,
     pub sidebar_section_order: [crate::config::SidebarSection; 2],
+    pub sidebar_new_button: crate::config::SidebarNewButtonConfig,
+    pub sidebar_menu_position: crate::config::SidebarMenuPositionConfig,
     pub sidebar_agents: crate::config::AgentsSidebarConfig,
     pub sidebar_spaces: crate::config::SpacesSidebarConfig,
     pub next_agent_state_change_seq: u64,
@@ -1955,6 +1957,8 @@ impl AppState {
                 crate::config::SidebarSection::Spaces,
                 crate::config::SidebarSection::Agents,
             ],
+            sidebar_new_button: crate::config::SidebarNewButtonConfig::Footer,
+            sidebar_menu_position: crate::config::SidebarMenuPositionConfig::Right,
             sidebar_agents: crate::config::AgentsSidebarConfig::default(),
             sidebar_spaces: crate::config::SpacesSidebarConfig::default(),
             next_agent_state_change_seq: 0,

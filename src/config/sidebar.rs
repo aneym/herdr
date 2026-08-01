@@ -466,6 +466,22 @@ fn default_section_order() -> [SidebarSection; 2] {
     [SidebarSection::Spaces, SidebarSection::Agents]
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SidebarNewButtonConfig {
+    #[default]
+    Footer,
+    Header,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SidebarMenuPositionConfig {
+    Left,
+    #[default]
+    Right,
+}
+
 fn deserialize_section_order<'de, D>(deserializer: D) -> Result<[SidebarSection; 2], D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -487,6 +503,8 @@ where
 pub struct SidebarConfig {
     #[serde(deserialize_with = "deserialize_section_order")]
     pub section_order: [SidebarSection; 2],
+    pub new_button: SidebarNewButtonConfig,
+    pub menu_position: SidebarMenuPositionConfig,
     pub agents: AgentsSidebarConfig,
     pub spaces: SpacesSidebarConfig,
 }
@@ -495,6 +513,8 @@ impl Default for SidebarConfig {
     fn default() -> Self {
         Self {
             section_order: default_section_order(),
+            new_button: SidebarNewButtonConfig::Footer,
+            menu_position: SidebarMenuPositionConfig::Right,
             agents: AgentsSidebarConfig::default(),
             spaces: SpacesSidebarConfig::default(),
         }
@@ -512,6 +532,8 @@ mod tests {
             config.section_order,
             [SidebarSection::Spaces, SidebarSection::Agents]
         );
+        assert_eq!(config.new_button, SidebarNewButtonConfig::Footer);
+        assert_eq!(config.menu_position, SidebarMenuPositionConfig::Right);
         assert_eq!(
             config.agents.rows,
             vec![
@@ -559,6 +581,24 @@ section_order = ["workspaces", "agents"]
         )
         .unwrap();
         assert_eq!(alias.ui.sidebar.section_order, default_section_order());
+    }
+
+    #[test]
+    fn sidebar_control_positions_parse() {
+        let config: crate::config::Config = toml::from_str(
+            r#"
+[ui.sidebar]
+new_button = "header"
+menu_position = "left"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.ui.sidebar.new_button, SidebarNewButtonConfig::Header);
+        assert_eq!(
+            config.ui.sidebar.menu_position,
+            SidebarMenuPositionConfig::Left
+        );
     }
 
     #[test]

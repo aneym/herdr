@@ -1243,6 +1243,15 @@ fn render_workspace_list(
             )])),
             Rect::new(area.x, area.y, area.width, 1),
         );
+        if app.mouse_capture
+            && app.sidebar_new_button == crate::config::SidebarNewButtonConfig::Header
+        {
+            frame.render_widget(
+                Paragraph::new(Span::styled(" + ", Style::default().fg(p.overlay0)))
+                    .alignment(Alignment::Right),
+                app.sidebar_new_button_rect(),
+            );
+        }
     }
 
     let metrics = workspace_list_scroll_metrics(app, area);
@@ -1410,11 +1419,13 @@ fn render_workspace_list(
     }
 
     if app.mouse_capture && list_bottom > area.y {
-        let new_rect = app.sidebar_new_button_rect();
-        frame.render_widget(
-            Paragraph::new(Span::styled(" new", Style::default().fg(p.overlay0))),
-            new_rect,
-        );
+        if app.sidebar_new_button == crate::config::SidebarNewButtonConfig::Footer {
+            let new_rect = app.sidebar_new_button_rect();
+            frame.render_widget(
+                Paragraph::new(Span::styled(" new", Style::default().fg(p.overlay0))),
+                new_rect,
+            );
+        }
 
         let menu_rect = app.global_launcher_rect();
         let menu_line = if app.global_menu_attention_badge_visible() {
@@ -1428,10 +1439,13 @@ fn render_workspace_list(
         } else {
             Line::from(vec![Span::styled("menu", Style::default().fg(p.overlay0))])
         };
-        frame.render_widget(
-            Paragraph::new(menu_line).alignment(Alignment::Right),
-            menu_rect,
-        );
+        let alignment =
+            if app.sidebar_menu_position == crate::config::SidebarMenuPositionConfig::Left {
+                Alignment::Left
+            } else {
+                Alignment::Right
+            };
+        frame.render_widget(Paragraph::new(menu_line).alignment(alignment), menu_rect);
     }
 }
 
@@ -1629,6 +1643,79 @@ mod tests {
                     row_text(buffer, row, width)
                 )
             })
+    }
+
+    fn rendered_sidebar(app: &AppState, area: Rect) -> ratatui::buffer::Buffer {
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        terminal
+            .draw(|frame| render_sidebar(app, &TerminalRuntimeRegistry::new(), frame, area))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    #[test]
+    fn header_new_button_moves_rendering_and_hit_region() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one")];
+        app.sidebar_new_button = crate::config::SidebarNewButtonConfig::Header;
+        app.view.sidebar_rect = Rect::new(0, 0, 18, 20);
+        let area = app.view.sidebar_rect;
+        let (spaces, _) = ordered_sidebar_sections(&app, area);
+        let button = app.sidebar_new_button_rect();
+        let buffer = rendered_sidebar(&app, area);
+
+        assert_eq!(
+            button,
+            Rect::new(spaces.x + spaces.width - 4, spaces.y, 3, 1)
+        );
+        assert_eq!(
+            row_text(&buffer, spaces.y, area.width),
+            " spaces       +  │"
+        );
+        assert_eq!(
+            row_text(&buffer, spaces.y + spaces.height - 1, area.width),
+            "           menu  │"
+        );
+    }
+
+    #[test]
+    fn left_menu_is_the_only_footer_control_in_header_mode() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one")];
+        app.sidebar_new_button = crate::config::SidebarNewButtonConfig::Header;
+        app.sidebar_menu_position = crate::config::SidebarMenuPositionConfig::Left;
+        app.view.sidebar_rect = Rect::new(0, 0, 18, 20);
+        let area = app.view.sidebar_rect;
+        let footer = app.sidebar_footer_rect();
+        let menu = app.global_launcher_rect();
+        let buffer = rendered_sidebar(&app, area);
+
+        assert_eq!(menu, Rect::new(footer.x, footer.y, 4, 1));
+        assert_eq!(
+            row_text(&buffer, footer.y, area.width),
+            "menu             │"
+        );
+    }
+
+    #[test]
+    fn footer_menu_is_not_truncated_at_minimum_sidebar_width() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one")];
+        app.sidebar_section_order = [
+            crate::config::SidebarSection::Agents,
+            crate::config::SidebarSection::Spaces,
+        ];
+        app.view.sidebar_rect = Rect::new(0, 0, 18, 20);
+        let area = app.view.sidebar_rect;
+        let footer = app.sidebar_footer_rect();
+        let buffer = rendered_sidebar(&app, area);
+
+        assert_eq!(app.global_launcher_rect().width, 4);
+        assert_eq!(
+            row_text(&buffer, footer.y, area.width),
+            " new       menu «│"
+        );
+        assert!(row_text(&buffer, footer.y, area.width).contains("menu"));
     }
 
     #[test]
