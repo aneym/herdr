@@ -646,6 +646,7 @@ impl App {
             sidebar_section_split,
             agent_panel_sort,
             agent_close_focus: config.ui.agent_close_focus,
+            pending_agent_close_focus: None,
             agent_view_override: None,
             sidebar_section_order: config.ui.sidebar.section_order,
             sidebar_new_button: config.ui.sidebar.new_button,

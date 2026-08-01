@@ -1579,6 +1579,7 @@ pub struct AppState {
     pub sidebar_section_split: f32,
     pub agent_panel_sort: AgentPanelSort,
     pub agent_close_focus: crate::config::AgentCloseFocusConfig,
+    pub pending_agent_close_focus: Option<(usize, crate::layout::PaneId)>,
     /// Transient session-wide projection override for the built-in Agents view.
     pub agent_view_override: Option<crate::api::schema::AgentViewSetParams>,
     pub sidebar_section_order: [crate::config::SidebarSection; 2],
@@ -1965,6 +1966,7 @@ impl AppState {
             sidebar_section_split: 0.5,
             agent_panel_sort: AgentPanelSort::Spaces,
             agent_close_focus: crate::config::AgentCloseFocusConfig::Stock,
+            pending_agent_close_focus: None,
             agent_view_override: None,
             sidebar_section_order: [
                 crate::config::SidebarSection::Spaces,

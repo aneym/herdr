@@ -738,7 +738,9 @@ pub(super) fn open_confirm_close(state: &mut AppState) {
 
 #[cfg(test)]
 pub(super) fn confirm_close_accept(state: &mut AppState) {
+    let target = state.pending_agent_close_focus.take();
     state.close_selected_workspace();
+    state.focus_panel_agent_after_close(target);
     if state.workspaces.is_empty() {
         state.mode = Mode::Navigate;
     } else {
@@ -747,6 +749,7 @@ pub(super) fn confirm_close_accept(state: &mut AppState) {
 }
 
 pub(super) fn confirm_close_cancel(state: &mut AppState) {
+    state.pending_agent_close_focus = None;
     state.mode = Mode::Navigate;
 }
 
@@ -1113,10 +1116,12 @@ impl App {
     }
 
     pub(super) fn confirm_close_accept_via_api(&mut self) {
+        let target = self.state.pending_agent_close_focus.take();
         let ws_idx = self.state.selected;
         if ws_idx < self.state.workspaces.len() {
             self.close_workspace_idx_via_api(ws_idx);
         }
+        self.state.focus_panel_agent_after_close(target);
         self.state.mode = if self.state.active.is_some() {
             Mode::Terminal
         } else {
@@ -1450,6 +1455,18 @@ mod tests {
             checkout_path: format!("/repo/worktree-{ws_idx}").into(),
             is_linked_worktree: ws_idx != 0,
         });
+    }
+
+    fn mark_agent(state: &mut AppState, ws_idx: usize, agent_state: crate::detect::AgentState) {
+        let pane_id = state.workspaces[ws_idx].tabs[0].root_pane;
+        let terminal_id = state.workspaces[ws_idx].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_state(Some(crate::detect::Agent::Claude), agent_state);
     }
 
     #[test]
@@ -2225,6 +2242,66 @@ mod tests {
         assert_eq!(state.selected, 0);
         assert_eq!(state.mode, Mode::ConfirmClose);
         assert_eq!(state.workspaces.len(), 2);
+    }
+
+    #[test]
+    fn confirmed_agent_close_focuses_precaptured_next_entry() {
+        let mut state = state_with_workspaces(&["main", "issue", "other"]);
+        state.ensure_test_terminals();
+        mark_worktree_space_member(&mut state, 0, "repo-key");
+        mark_worktree_space_member(&mut state, 1, "repo-key");
+        mark_agent(&mut state, 0, crate::detect::AgentState::Idle);
+        mark_agent(&mut state, 2, crate::detect::AgentState::Working);
+        let target = state.workspaces[2].tabs[0].root_pane;
+        state.active = Some(0);
+        state.selected = 0;
+        state.mode = Mode::ConfirmClose;
+        state.pending_agent_close_focus = Some((2, target));
+
+        confirm_close_accept(&mut state);
+
+        assert_eq!(state.active, Some(0));
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(target));
+        assert_eq!(state.pending_agent_close_focus, None);
+    }
+
+    #[test]
+    fn cancelled_agent_close_discards_precaptured_target() {
+        let mut state = state_with_workspaces(&["main", "issue", "other"]);
+        state.ensure_test_terminals();
+        mark_worktree_space_member(&mut state, 0, "repo-key");
+        mark_worktree_space_member(&mut state, 1, "repo-key");
+        let target = state.workspaces[2].tabs[0].root_pane;
+        state.active = Some(0);
+        state.selected = 0;
+        state.mode = Mode::ConfirmClose;
+        state.pending_agent_close_focus = Some((2, target));
+
+        confirm_close_cancel(&mut state);
+        state.selected = 2;
+        confirm_close_accept(&mut state);
+
+        assert_eq!(state.pending_agent_close_focus, None);
+        assert_eq!(state.active, Some(0));
+    }
+
+    #[test]
+    fn confirmed_agent_close_uses_stock_focus_when_target_is_gone() {
+        let mut state = state_with_workspaces(&["main", "issue", "other"]);
+        state.ensure_test_terminals();
+        mark_worktree_space_member(&mut state, 0, "repo-key");
+        mark_worktree_space_member(&mut state, 1, "repo-key");
+        let target = state.workspaces[2].tabs[0].root_pane;
+        state.active = Some(0);
+        state.selected = 0;
+        state.mode = Mode::ConfirmClose;
+        state.pending_agent_close_focus = Some((2, target));
+        state.workspaces[2].close_pane(target);
+
+        confirm_close_accept(&mut state);
+
+        assert_eq!(state.pending_agent_close_focus, None);
+        assert_eq!(state.active, Some(0));
     }
 
     #[test]

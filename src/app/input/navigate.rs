@@ -600,7 +600,9 @@ impl App {
         };
         self.runtime_pane_close("tui.pane.close", public_pane_id);
         let requires_confirmation = self.state.mode == Mode::ConfirmClose;
-        if !requires_confirmation {
+        if requires_confirmation {
+            self.state.pending_agent_close_focus = target;
+        } else {
             self.state.focus_panel_agent_after_close(target);
         }
         requires_confirmation

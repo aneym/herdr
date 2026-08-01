@@ -1709,16 +1709,18 @@ impl AppState {
     }
 
     pub(crate) fn focus_panel_agent_after_close(&mut self, target: Option<(usize, PaneId)>) {
-        let Some((ws_idx, pane_id)) = target else {
+        let Some((_ws_idx, pane_id)) = target else {
             return;
         };
         let entries = crate::ui::agent_panel_entries(self);
-        let Some(idx) = entries
+        let Some((idx, target)) = entries
             .iter()
-            .position(|entry| entry.ws_idx == ws_idx && entry.pane_id == pane_id)
+            .enumerate()
+            .find(|(_, entry)| entry.pane_id == pane_id)
         else {
             return;
         };
+        let ws_idx = target.ws_idx;
         if self.focus_pane_in_workspace(ws_idx, pane_id) {
             self.ensure_agent_panel_entry_visible(idx);
         }
