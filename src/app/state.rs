@@ -1489,12 +1489,12 @@ pub(crate) struct DeferredAttentionRead {
 }
 
 #[derive(Debug)]
-pub(super) struct AppModeState {
+struct AppModeState {
     mode: Mode,
 }
 
 impl AppModeState {
-    pub(super) fn new(mode: Mode) -> Self {
+    fn new(mode: Mode) -> Self {
         Self { mode }
     }
 }
@@ -1513,7 +1513,7 @@ pub struct AppState {
     pub(crate) previous_pane_focus: Option<PaneFocusTarget>,
     pub(crate) deferred_attention_read: Option<DeferredAttentionRead>,
     pub selected: usize,
-    pub(super) mode_state: AppModeState,
+    mode_state: AppModeState,
     pub should_quit: bool,
     /// In monolithic --no-session mode, detach exits the app because there is no server to detach from.
     pub detach_exits: bool,
@@ -1895,10 +1895,8 @@ pub fn key_matches(
 // Test helpers
 // ---------------------------------------------------------------------------
 
-#[cfg(test)]
 impl AppState {
-    /// Create an AppState for testing — no channels, no PTYs.
-    pub fn test_new() -> Self {
+    pub(super) fn new(mode: Mode) -> Self {
         Self {
             terminals: std::collections::HashMap::new(),
             direct_attach_resize_locks: std::collections::HashSet::new(),
@@ -1909,7 +1907,7 @@ impl AppState {
             previous_pane_focus: None,
             deferred_attention_read: None,
             selected: 0,
-            mode_state: AppModeState::new(Mode::Navigate),
+            mode_state: AppModeState::new(mode),
             should_quit: false,
             detach_exits: false,
             detach_requested: false,
@@ -2077,6 +2075,14 @@ impl AppState {
             session_dirty: false,
             terminal_runtime_shutdowns: Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+impl AppState {
+    /// Create an AppState for testing — no channels, no PTYs.
+    pub fn test_new() -> Self {
+        Self::new(Mode::Navigate)
     }
 
     /// Populate missing `TerminalState` entries for every pane so tests that

@@ -545,181 +545,178 @@ impl App {
         let theme_runtime = theme_runtime_config(config, true);
         let (theme_palette, theme_name) = resolve_effective_theme(&theme_runtime, None);
 
-        let mut state = AppState {
-            terminals: std::collections::HashMap::new(),
-            direct_attach_resize_locks: std::collections::HashSet::new(),
-            pane_id_aliases: std::collections::HashMap::new(),
-            public_pane_id_aliases: std::collections::HashMap::new(),
-            workspaces,
-            active,
-            previous_pane_focus: None,
-            deferred_attention_read: None,
-            selected,
-            mode_state: state::AppModeState::new(mode),
-            should_quit: false,
-            detach_exits: no_session,
-            detach_requested: false,
-            request_new_workspace: false,
-            request_new_tab: false,
-            request_new_linked_worktree: None,
-            request_open_existing_worktree: None,
-            request_new_workspace_cwd: None,
-            request_remove_linked_worktree: None,
-            request_submit_worktree_create: false,
-            request_submit_worktree_open: false,
-            request_submit_worktree_remove: false,
-            request_reload_config: false,
-            request_client_config_reload: false,
-            request_clipboard_write: None,
-            creating_new_tab: false,
-            requested_new_tab_name: None,
-            pending_workspace_create_cwd: None,
-            rename_pane_target: None,
-            worktree_create: None,
-            worktree_open: None,
-            worktree_remove: None,
-            worktree_directory,
-            collapsed_space_keys,
-            request_complete_onboarding: false,
-            name_input: String::new(),
-            name_input_replace_on_type: false,
-            release_notes: None,
-            product_announcement: startup_product_announcement.map(|announcement| {
-                state::ProductAnnouncementState {
-                    version: announcement.version,
-                    id: announcement.id,
-                    title: announcement.title,
-                    body: announcement.body,
-                    scroll: 0,
-                    preview: announcement.preview,
-                }
-            }),
-            keybind_help: state::KeybindHelpState::default(),
-            navigator: state::NavigatorState::default(),
-            copy_mode: None,
-            workspace_scroll: 0,
-            agent_panel_scroll: 0,
-            tab_scroll: 0,
-            tab_scroll_follow_active: true,
-            mobile_switcher_scroll: 0,
-            view: state::ViewState {
-                layout: state::ViewLayout::Desktop,
-                sidebar_rect: Rect::default(),
-                workspace_card_areas: Vec::new(),
-                tab_bar_rect: Rect::default(),
-                tab_hit_areas: Vec::new(),
-                tab_scroll_left_hit_area: Rect::default(),
-                tab_scroll_right_hit_area: Rect::default(),
-                new_tab_hit_area: Rect::default(),
-                terminal_area: Rect::default(),
-                mobile_header_rect: Rect::default(),
-                mobile_menu_hit_area: Rect::default(),
-                toast_hit_area: Rect::default(),
-                pane_infos: Vec::new(),
-                split_borders: Vec::new(),
-            },
-            drag: None,
-            workspace_press: None,
-            tab_press: None,
-            selection: None,
-            selection_autoscroll: None,
-            context_menu: None,
-            update_available,
-            update_install_command,
-            latest_release_notes_available,
-            update_dismissed: false,
-            config_diagnostic,
-            toast: None,
-            pending_agent_notifications: std::collections::HashMap::new(),
-            copy_feedback: None,
-            outer_terminal_focus: None,
-            prefix_code,
-            prefix_mods,
-            default_sidebar_width: config.ui.sidebar_width,
-            sidebar_width,
-            sidebar_min_width,
-            sidebar_max_width,
-            mobile_width_threshold: config.ui.mobile_width_threshold,
-            sidebar_width_source,
-            sidebar_width_auto: false,
-            sidebar_collapsed: config.ui.sidebar_start_collapsed,
-            sidebar_collapsed_mode: config.ui.sidebar_collapsed_mode,
-            sidebar_section_split,
-            agent_panel_sort,
-            agent_close_focus: config.ui.agent_close_focus,
-            pending_agent_close_focus: None,
-            agent_view_override: None,
-            sidebar_section_order: config.ui.sidebar.section_order,
-            sidebar_new_button: config.ui.sidebar.new_button,
-            sidebar_menu_position: config.ui.sidebar.menu_position,
-            sidebar_agents: config.ui.sidebar.agents.clone(),
-            sidebar_spaces: config.ui.sidebar.spaces.clone(),
-            next_agent_state_change_seq: 0,
-            mouse_capture: config.ui.mouse_capture,
-            copy_on_select: config.ui.copy_on_select,
-            right_click_passthrough_modifiers: config.ui.right_click_passthrough_modifiers(),
-            right_click_passthrough: None,
-            redraw_on_focus_gained: config.ui.redraw_on_focus_gained,
-            mouse_scroll_lines: config.ui.mouse_scroll_lines(),
-            confirm_close: config.ui.confirm_close,
-            prompt_new_tab_name: config.ui.prompt_new_tab_name,
-            prompt_new_workspace_name: config.ui.prompt_new_workspace_name,
-            pane_borders: config.ui.pane_borders,
-            pane_gaps: config.ui.pane_gaps,
-            show_agent_labels_on_pane_borders: config.ui.show_agent_labels_on_pane_borders,
-            hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
-            show_tab_status: config.ui.show_tab_status,
-            attention_read: config.ui.attention_read,
-            tab_bar_position: config.ui.tab_bar_position,
-            pane_history_persistence: config.experimental.pane_history,
-            reveal_hidden_cursor_for_cjk_ime: config.experimental.reveal_hidden_cursor_for_cjk_ime,
-            cjk_ime_agent_filter_configured: !config.experimental.cjk_ime_agents.is_empty(),
-            cjk_ime_agents: parse_cjk_ime_agents(&config.experimental.cjk_ime_agents),
-            cjk_ime_cursor_shape: config.experimental.cjk_ime_cursor_shape.to_decscusr(),
-            switch_ascii_input_source_in_prefix: config
-                .experimental
-                .switch_ascii_input_source_in_prefix,
-            kitty_graphics_enabled: config.experimental.kitty_graphics,
-            default_shell: config.terminal.default_shell.clone(),
-            shell_mode: config.terminal.shell_mode,
-            new_terminal_cwd: config.terminal.new_cwd.clone(),
-            pane_scrollback_limit_bytes: config.advanced.scrollback_limit_bytes,
-            accent: crate::config::parse_color(&config.ui.accent),
-            sound: config.ui.sound.clone(),
-            local_sound_playback: true,
-            toast_config: config.ui.toast.clone(),
-            keybinds: config.keybinds(),
-            animation_tick: 0,
-            palette: theme_palette,
-            theme_name,
-            theme_runtime,
-            host_terminal_appearance: None,
-            host_terminal_appearance_explicit: false,
-            settings: state::SettingsState {
-                section: state::SettingsSection::Theme,
-                list: state::SelectionListState::new(0),
-                original_palette: None,
-                original_theme: None,
-            },
-            integration_recommendations: crate::integration::integration_recommendations(),
-            agent_manifest_summaries,
-            agent_manifest_update_status: crate::detect::manifest_update::load_status(),
-            integration_install_messages: Vec::new(),
-            installed_plugins: load_plugin_registry(no_session),
-            plugin_panes: std::collections::HashMap::new(),
-            pane_graphics_layers: std::collections::HashMap::new(),
-            pane_graphics_streams: std::collections::HashMap::new(),
-            pane_graphics_revision: 0,
-            popup_pane: None,
-            plugin_command_logs: Vec::new(),
-            next_plugin_command_log_id: 1,
-            plugin_commands_in_flight: 0,
-            global_menu: state::MenuListState::new(0),
-            host_terminal_theme: crate::terminal_theme::TerminalTheme::default(),
-            host_cell_size: crate::kitty_graphics::HostCellSize::default(),
-            session_dirty: false,
-            terminal_runtime_shutdowns: Vec::new(),
+        let mut state = AppState::new(mode);
+        state.terminals = std::collections::HashMap::new();
+        state.direct_attach_resize_locks = std::collections::HashSet::new();
+        state.pane_id_aliases = std::collections::HashMap::new();
+        state.public_pane_id_aliases = std::collections::HashMap::new();
+        state.workspaces = workspaces;
+        state.active = active;
+        state.previous_pane_focus = None;
+        state.deferred_attention_read = None;
+        state.selected = selected;
+        state.should_quit = false;
+        state.detach_exits = no_session;
+        state.detach_requested = false;
+        state.request_new_workspace = false;
+        state.request_new_tab = false;
+        state.request_new_linked_worktree = None;
+        state.request_open_existing_worktree = None;
+        state.request_new_workspace_cwd = None;
+        state.request_remove_linked_worktree = None;
+        state.request_submit_worktree_create = false;
+        state.request_submit_worktree_open = false;
+        state.request_submit_worktree_remove = false;
+        state.request_reload_config = false;
+        state.request_client_config_reload = false;
+        state.request_clipboard_write = None;
+        state.creating_new_tab = false;
+        state.requested_new_tab_name = None;
+        state.pending_workspace_create_cwd = None;
+        state.rename_pane_target = None;
+        state.worktree_create = None;
+        state.worktree_open = None;
+        state.worktree_remove = None;
+        state.worktree_directory = worktree_directory;
+        state.collapsed_space_keys = collapsed_space_keys;
+        state.request_complete_onboarding = false;
+        state.name_input = String::new();
+        state.name_input_replace_on_type = false;
+        state.release_notes = None;
+        state.product_announcement =
+            startup_product_announcement.map(|announcement| state::ProductAnnouncementState {
+                version: announcement.version,
+                id: announcement.id,
+                title: announcement.title,
+                body: announcement.body,
+                scroll: 0,
+                preview: announcement.preview,
+            });
+        state.keybind_help = state::KeybindHelpState::default();
+        state.navigator = state::NavigatorState::default();
+        state.copy_mode = None;
+        state.workspace_scroll = 0;
+        state.agent_panel_scroll = 0;
+        state.tab_scroll = 0;
+        state.tab_scroll_follow_active = true;
+        state.mobile_switcher_scroll = 0;
+        state.view = state::ViewState {
+            layout: state::ViewLayout::Desktop,
+            sidebar_rect: Rect::default(),
+            workspace_card_areas: Vec::new(),
+            tab_bar_rect: Rect::default(),
+            tab_hit_areas: Vec::new(),
+            tab_scroll_left_hit_area: Rect::default(),
+            tab_scroll_right_hit_area: Rect::default(),
+            new_tab_hit_area: Rect::default(),
+            terminal_area: Rect::default(),
+            mobile_header_rect: Rect::default(),
+            mobile_menu_hit_area: Rect::default(),
+            toast_hit_area: Rect::default(),
+            pane_infos: Vec::new(),
+            split_borders: Vec::new(),
         };
+        state.drag = None;
+        state.workspace_press = None;
+        state.tab_press = None;
+        state.selection = None;
+        state.selection_autoscroll = None;
+        state.context_menu = None;
+        state.update_available = update_available;
+        state.update_install_command = update_install_command;
+        state.latest_release_notes_available = latest_release_notes_available;
+        state.update_dismissed = false;
+        state.config_diagnostic = config_diagnostic;
+        state.toast = None;
+        state.pending_agent_notifications = std::collections::HashMap::new();
+        state.copy_feedback = None;
+        state.outer_terminal_focus = None;
+        state.prefix_code = prefix_code;
+        state.prefix_mods = prefix_mods;
+        state.default_sidebar_width = config.ui.sidebar_width;
+        state.sidebar_width = sidebar_width;
+        state.sidebar_min_width = sidebar_min_width;
+        state.sidebar_max_width = sidebar_max_width;
+        state.mobile_width_threshold = config.ui.mobile_width_threshold;
+        state.sidebar_width_source = sidebar_width_source;
+        state.sidebar_width_auto = false;
+        state.sidebar_collapsed = config.ui.sidebar_start_collapsed;
+        state.sidebar_collapsed_mode = config.ui.sidebar_collapsed_mode;
+        state.sidebar_section_split = sidebar_section_split;
+        state.agent_panel_sort = agent_panel_sort;
+        state.agent_close_focus = config.ui.agent_close_focus;
+        state.pending_agent_close_focus = None;
+        state.agent_view_override = None;
+        state.sidebar_section_order = config.ui.sidebar.section_order;
+        state.sidebar_new_button = config.ui.sidebar.new_button;
+        state.sidebar_menu_position = config.ui.sidebar.menu_position;
+        state.sidebar_agents = config.ui.sidebar.agents.clone();
+        state.sidebar_spaces = config.ui.sidebar.spaces.clone();
+        state.next_agent_state_change_seq = 0;
+        state.mouse_capture = config.ui.mouse_capture;
+        state.copy_on_select = config.ui.copy_on_select;
+        state.right_click_passthrough_modifiers = config.ui.right_click_passthrough_modifiers();
+        state.right_click_passthrough = None;
+        state.redraw_on_focus_gained = config.ui.redraw_on_focus_gained;
+        state.mouse_scroll_lines = config.ui.mouse_scroll_lines();
+        state.confirm_close = config.ui.confirm_close;
+        state.prompt_new_tab_name = config.ui.prompt_new_tab_name;
+        state.prompt_new_workspace_name = config.ui.prompt_new_workspace_name;
+        state.pane_borders = config.ui.pane_borders;
+        state.pane_gaps = config.ui.pane_gaps;
+        state.show_agent_labels_on_pane_borders = config.ui.show_agent_labels_on_pane_borders;
+        state.hide_tab_bar_when_single_tab = config.ui.hide_tab_bar_when_single_tab;
+        state.show_tab_status = config.ui.show_tab_status;
+        state.attention_read = config.ui.attention_read;
+        state.tab_bar_position = config.ui.tab_bar_position;
+        state.pane_history_persistence = config.experimental.pane_history;
+        state.reveal_hidden_cursor_for_cjk_ime =
+            config.experimental.reveal_hidden_cursor_for_cjk_ime;
+        state.cjk_ime_agent_filter_configured = !config.experimental.cjk_ime_agents.is_empty();
+        state.cjk_ime_agents = parse_cjk_ime_agents(&config.experimental.cjk_ime_agents);
+        state.cjk_ime_cursor_shape = config.experimental.cjk_ime_cursor_shape.to_decscusr();
+        state.switch_ascii_input_source_in_prefix =
+            config.experimental.switch_ascii_input_source_in_prefix;
+        state.kitty_graphics_enabled = config.experimental.kitty_graphics;
+        state.default_shell = config.terminal.default_shell.clone();
+        state.shell_mode = config.terminal.shell_mode;
+        state.new_terminal_cwd = config.terminal.new_cwd.clone();
+        state.pane_scrollback_limit_bytes = config.advanced.scrollback_limit_bytes;
+        state.accent = crate::config::parse_color(&config.ui.accent);
+        state.sound = config.ui.sound.clone();
+        state.local_sound_playback = true;
+        state.toast_config = config.ui.toast.clone();
+        state.keybinds = config.keybinds();
+        state.animation_tick = 0;
+        state.palette = theme_palette;
+        state.theme_name = theme_name;
+        state.theme_runtime = theme_runtime;
+        state.host_terminal_appearance = None;
+        state.host_terminal_appearance_explicit = false;
+        state.settings = state::SettingsState {
+            section: state::SettingsSection::Theme,
+            list: state::SelectionListState::new(0),
+            original_palette: None,
+            original_theme: None,
+        };
+        state.integration_recommendations = crate::integration::integration_recommendations();
+        state.agent_manifest_summaries = agent_manifest_summaries;
+        state.agent_manifest_update_status = crate::detect::manifest_update::load_status();
+        state.integration_install_messages = Vec::new();
+        state.installed_plugins = load_plugin_registry(no_session);
+        state.plugin_panes = std::collections::HashMap::new();
+        state.pane_graphics_layers = std::collections::HashMap::new();
+        state.pane_graphics_streams = std::collections::HashMap::new();
+        state.pane_graphics_revision = 0;
+        state.popup_pane = None;
+        state.plugin_command_logs = Vec::new();
+        state.next_plugin_command_log_id = 1;
+        state.plugin_commands_in_flight = 0;
+        state.global_menu = state::MenuListState::new(0);
+        state.host_terminal_theme = crate::terminal_theme::TerminalTheme::default();
+        state.host_cell_size = crate::kitty_graphics::HostCellSize::default();
+        state.session_dirty = false;
+        state.terminal_runtime_shutdowns = Vec::new();
 
         state.terminals = restored_terminals;
 
