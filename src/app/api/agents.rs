@@ -467,6 +467,34 @@ mod tests {
     }
 
     #[test]
+    fn agent_focus_replacing_confirm_close_discards_pending_close_focus() {
+        let mut app = app_with_agent();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_state(Some(Agent::Pi), AgentState::Idle);
+        app.state.mode = Mode::ConfirmClose;
+        app.state.pending_agent_close_focus = Some((0, pane_id));
+
+        let response = app.handle_agent_focus(
+            "req".into(),
+            AgentTarget {
+                target: app.public_pane_id(0, pane_id).unwrap(),
+            },
+        );
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert!(matches!(success.result, ResponseResult::AgentInfo { .. }));
+        assert_eq!(app.state.mode, Mode::Terminal);
+        assert_eq!(app.state.pending_agent_close_focus, None);
+    }
+
+    #[test]
     fn agent_focus_marks_already_focused_done_agent_seen() {
         let mut app = app_with_agent();
         app.state.outer_terminal_focus = Some(false);

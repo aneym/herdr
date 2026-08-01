@@ -96,14 +96,14 @@ pub(super) fn global_menu_actions(state: &AppState) -> Vec<GlobalMenuAction> {
 
 pub(super) fn open_global_menu(state: &mut AppState) {
     state.global_menu = MenuListState::new(0);
-    state.mode = Mode::GlobalMenu;
+    state.replace_mode(Mode::GlobalMenu);
 }
 
 pub(super) fn open_keybind_help(state: &mut AppState) {
     state.keybind_help.scroll = 0;
     state.keybind_help.query.clear();
     state.keybind_help.search_focused = false;
-    state.mode = Mode::KeybindHelp;
+    state.replace_mode(Mode::KeybindHelp);
 }
 
 fn open_update_release_notes(state: &mut AppState) {
@@ -117,7 +117,7 @@ fn open_update_release_notes(state: &mut AppState) {
         scroll: 0,
         preview: notes.preview,
     });
-    state.mode = Mode::ReleaseNotes;
+    state.replace_mode(Mode::ReleaseNotes);
 }
 
 pub(super) fn request_detach(state: &mut AppState) {
@@ -386,7 +386,7 @@ pub(super) fn open_rename_workspace(
     state.name_input =
         state.workspaces[ws_idx].display_name_from(&state.terminals, terminal_runtimes);
     state.name_input_replace_on_type = false;
-    state.mode = Mode::RenameWorkspace;
+    state.replace_mode(Mode::RenameWorkspace);
 }
 
 pub(crate) fn open_new_workspace_dialog(state: &mut AppState, cwd: std::path::PathBuf) {
@@ -397,7 +397,7 @@ pub(crate) fn open_new_workspace_dialog(state: &mut AppState, cwd: std::path::Pa
     state.rename_pane_target = None;
     state.name_input = suggested_name;
     state.name_input_replace_on_type = true;
-    state.mode = Mode::RenameWorkspace;
+    state.replace_mode(Mode::RenameWorkspace);
 }
 
 pub(super) fn open_rename_active_tab(state: &mut AppState, replace_on_type: bool) {
@@ -409,7 +409,7 @@ pub(super) fn open_rename_active_tab(state: &mut AppState, replace_on_type: bool
         if let Some(name) = ws.active_tab_display_name() {
             state.name_input = name;
             state.name_input_replace_on_type = replace_on_type;
-            state.mode = Mode::RenameTab;
+            state.replace_mode(Mode::RenameTab);
         }
     }
 }
@@ -430,7 +430,7 @@ pub(super) fn open_rename_pane(state: &mut AppState, pane_id: crate::layout::Pan
         .and_then(|t| t.manual_label.clone())
         .unwrap_or_default();
     state.name_input_replace_on_type = terminal.and_then(|t| t.manual_label.as_ref()).is_none();
-    state.mode = Mode::RenamePane;
+    state.replace_mode(Mode::RenamePane);
 }
 
 fn workspace_create_label(input: &str, suggested_name: &str) -> Option<String> {
@@ -453,14 +453,14 @@ pub(super) fn open_new_tab_dialog(state: &mut AppState) {
     state.rename_pane_target = None;
     state.name_input = next_new_tab_default_name(state);
     state.name_input_replace_on_type = true;
-    state.mode = Mode::RenameTab;
+    state.replace_mode(Mode::RenameTab);
 }
 
 pub(super) fn leave_modal(state: &mut AppState) {
     if state.active.is_some() {
-        state.mode = Mode::Terminal;
+        state.replace_mode(Mode::Terminal);
     } else {
-        state.mode = Mode::Navigate;
+        state.replace_mode(Mode::Navigate);
     }
 }
 
@@ -757,8 +757,7 @@ pub(super) fn confirm_close_accept(state: &mut AppState) {
 }
 
 pub(super) fn confirm_close_cancel(state: &mut AppState) {
-    state.pending_agent_close_focus = None;
-    state.mode = Mode::Navigate;
+    state.replace_mode(Mode::Navigate);
 }
 
 #[cfg(test)]
@@ -1576,7 +1575,7 @@ mod tests {
     #[test]
     fn rename_modal_keyboard_and_mouse_share_actions() {
         let mut state = state_with_workspaces(&["test"]);
-        state.mode = Mode::RenameWorkspace;
+        state.replace_mode(Mode::RenameWorkspace);
         state.name_input = "hello".into();
 
         handle_rename_key(
@@ -1600,7 +1599,7 @@ mod tests {
 
         state.view.sidebar_rect = Rect::new(0, 0, 26, 20);
         state.view.terminal_area = Rect::new(26, 0, 80, 20);
-        state.mode = Mode::RenameWorkspace;
+        state.replace_mode(Mode::RenameWorkspace);
         state.name_input = "mouse".into();
         let inner = state.rename_modal_inner().unwrap();
         let (save, _, _) = crate::ui::rename_button_rects(inner);
@@ -1611,7 +1610,7 @@ mod tests {
     #[test]
     fn tab_rename_updates_captured_snapshot() {
         let mut state = state_with_workspaces(&["test"]);
-        state.mode = Mode::RenameTab;
+        state.replace_mode(Mode::RenameTab);
         state.name_input = "logs".into();
 
         handle_rename_key(
@@ -1629,7 +1628,7 @@ mod tests {
     #[test]
     fn rename_cancel_returns_to_terminal_when_workspace_is_active() {
         let mut state = state_with_workspaces(&["test"]);
-        state.mode = Mode::RenameTab;
+        state.replace_mode(Mode::RenameTab);
         state.name_input = "test".into();
 
         handle_rename_key(
@@ -1644,7 +1643,7 @@ mod tests {
     #[test]
     fn rename_modal_replaces_prefilled_text_on_first_type() {
         let mut state = state_with_workspaces(&["test"]);
-        state.mode = Mode::RenameTab;
+        state.replace_mode(Mode::RenameTab);
         state.name_input = "2".into();
         state.name_input_replace_on_type = true;
 
@@ -1665,7 +1664,7 @@ mod tests {
     #[test]
     fn rename_modal_replaces_prefilled_text_on_paste() {
         let mut state = state_with_workspaces(&["test"]);
-        state.mode = Mode::RenameTab;
+        state.replace_mode(Mode::RenameTab);
         state.name_input = "2".into();
         state.name_input_replace_on_type = true;
 
@@ -1682,7 +1681,7 @@ mod tests {
     #[test]
     fn rename_modal_handles_line_editing_shortcuts() {
         let mut state = state_with_workspaces(&["test"]);
-        state.mode = Mode::RenameWorkspace;
+        state.replace_mode(Mode::RenameWorkspace);
         state.name_input = "website zero".into();
 
         handle_rename_key(
@@ -1735,7 +1734,7 @@ mod tests {
     #[test]
     fn rename_modal_does_not_insert_modified_shortcut_chars() {
         let mut state = state_with_workspaces(&["test"]);
-        state.mode = Mode::RenameWorkspace;
+        state.replace_mode(Mode::RenameWorkspace);
         state.name_input = "website".into();
 
         handle_rename_key(
@@ -2130,6 +2129,19 @@ mod tests {
             state.workspaces[0].tab_display_name(1).as_deref(),
             Some("2")
         );
+    }
+
+    #[test]
+    fn opening_different_modal_discards_pending_close_focus() {
+        let mut state = state_with_workspaces(&["a"]);
+        let pane_id = state.workspaces[0].tabs[0].root_pane;
+        state.mode = Mode::ConfirmClose;
+        state.pending_agent_close_focus = Some((0, pane_id));
+
+        open_global_menu(&mut state);
+
+        assert_eq!(state.mode, Mode::GlobalMenu);
+        assert_eq!(state.pending_agent_close_focus, None);
     }
 
     #[test]

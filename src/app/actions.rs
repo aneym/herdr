@@ -451,7 +451,7 @@ impl AppState {
             self.navigator.expanded_workspaces.insert(ws.id.clone());
         }
 
-        self.mode = Mode::Navigator;
+        self.replace_mode(Mode::Navigator);
         self.navigator.selected = self
             .current_navigator_row_index_from(terminal_runtimes)
             .unwrap_or(0);

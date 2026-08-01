@@ -315,7 +315,7 @@ pub(crate) fn open_settings_at(state: &mut AppState, section: SettingsSection) {
         SettingsSection::Experiments => 0,
         SettingsSection::Integrations => 0,
     };
-    state.mode = Mode::Settings;
+    state.replace_mode(Mode::Settings);
 }
 
 impl AppState {

@@ -776,8 +776,15 @@ impl AppState {
         }
     }
 
+    pub(crate) fn replace_mode(&mut self, mode: Mode) {
+        if self.mode == Mode::ConfirmClose && mode != Mode::ConfirmClose {
+            self.pending_agent_close_focus = None;
+        }
+        self.mode = mode;
+    }
+
     pub(crate) fn settle_terminal_mode_after_focus(&mut self) {
-        self.mode = Mode::Terminal;
+        self.replace_mode(Mode::Terminal);
         self.sync_copy_mode_with_focus();
     }
 
