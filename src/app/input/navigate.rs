@@ -420,6 +420,9 @@ impl App {
             NavigateAction::OpenNavigator => {
                 self.state.open_navigator_from(&self.terminal_runtimes)
             }
+            NavigateAction::OpenNavigatorSearch => self
+                .state
+                .open_navigator_search_from(&self.terminal_runtimes),
         }
 
         finish_action_context(&mut self.state, context, previous_mode);
@@ -1383,6 +1386,7 @@ pub(crate) enum NavigateAction {
     OpenNotificationTarget,
     Detach,
     OpenNavigator,
+    OpenNavigatorSearch,
 }
 
 fn copy_mode_survives_prefix_action(action: NavigateAction) -> bool {
@@ -1525,6 +1529,7 @@ fn non_indexed_action_for_key(
         ),
         (&kb.detach, NavigateAction::Detach),
         (&kb.goto, NavigateAction::OpenNavigator),
+        (&kb.search, NavigateAction::OpenNavigatorSearch),
     ] {
         if action_matches(bindings, key, dispatch) {
             return Some(action);
@@ -1783,6 +1788,7 @@ pub(super) fn execute_navigate_action_in_context(
             leave_navigate_mode(state);
         }
         NavigateAction::OpenNavigator => state.open_navigator_from(terminal_runtimes),
+        NavigateAction::OpenNavigatorSearch => state.open_navigator_search_from(terminal_runtimes),
     }
 
     finish_action_context(state, context, previous_mode);
@@ -1982,6 +1988,20 @@ mod tests {
         );
 
         assert_eq!(state.mode, Mode::Navigator);
+    }
+
+    #[test]
+    fn default_search_key_opens_navigator_with_search_focused() {
+        let mut state = state_with_workspaces(&["test"]);
+
+        handle_navigate_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty()),
+        );
+
+        assert_eq!(state.mode, Mode::Navigator);
+        assert!(state.navigator.search_focused);
+        assert!(state.navigator.search_entry);
     }
 
     #[test]

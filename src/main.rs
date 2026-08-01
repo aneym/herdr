@@ -187,6 +187,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # open_notification_target = "prefix+o"
 # workspace_picker = "prefix+w"
 # goto = "prefix+g"
+# search = "prefix+f"
 # new_workspace = "prefix+shift+n"
 # new_worktree = "prefix+shift+g"
 # open_worktree = ""    # optional, unset by default
