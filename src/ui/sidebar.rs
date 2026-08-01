@@ -1554,7 +1554,9 @@ fn render_agent_detail(
                 status_style,
                 name_style,
                 agent_style,
-                agent_style,
+                // terminal titles are the row's primary identity line — style
+                // them like workspace names, not dim metadata
+                name_style,
                 p,
                 body.width
                     .saturating_sub(if row_index == 0 { 1 } else { 3 }) as usize,
