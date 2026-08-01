@@ -182,7 +182,7 @@ pub(crate) fn encode_local_pane_graphics(
     cell_size: HostCellSize,
     cache: &mut HostGraphicsCache,
 ) -> Vec<u8> {
-    let mode_ok = app.mode == Mode::Terminal;
+    let mode_ok = app.mode() == Mode::Terminal;
     let cell_ok = cell_size.is_known();
     tracing::debug!(
         mode_ok,
@@ -239,7 +239,7 @@ pub(crate) fn has_visible_pane_graphics(
     surface: crate::ui::TabSurfaceView<'_>,
     cell_size: HostCellSize,
 ) -> bool {
-    if app.mode != Mode::Terminal || !cell_size.is_known() {
+    if app.mode() != Mode::Terminal || !cell_size.is_known() {
         return false;
     }
 

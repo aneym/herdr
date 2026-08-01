@@ -1488,6 +1488,16 @@ pub(crate) struct DeferredAttentionRead {
     pub state_change_seq: u64,
 }
 
+macro_rules! app_state {
+    ($mode:expr; $($fields:tt)*) => {
+        AppState {
+            mode: $mode,
+            $($fields)*
+        }
+    };
+}
+pub(crate) use app_state;
+
 /// All application state — pure data, no channels or async runtime.
 /// Testable without PTYs or a tokio runtime.
 pub struct AppState {
@@ -1502,7 +1512,7 @@ pub struct AppState {
     pub(crate) previous_pane_focus: Option<PaneFocusTarget>,
     pub(crate) deferred_attention_read: Option<DeferredAttentionRead>,
     pub selected: usize,
-    pub mode: Mode,
+    pub(super) mode: Mode,
     pub should_quit: bool,
     /// In monolithic --no-session mode, detach exits the app because there is no server to detach from.
     pub detach_exits: bool,
@@ -1687,6 +1697,17 @@ pub struct AppState {
 }
 
 impl AppState {
+    pub fn mode(&self) -> Mode {
+        self.mode
+    }
+
+    pub fn replace_mode(&mut self, mode: Mode) {
+        if self.mode == Mode::ConfirmClose && mode != Mode::ConfirmClose {
+            self.pending_agent_close_focus = None;
+        }
+        self.mode = mode;
+    }
+
     pub(crate) fn mark_session_dirty(&mut self) {
         self.session_dirty = true;
     }
@@ -2086,6 +2107,10 @@ impl AppState {
     }
 
     pub fn assert_invariants_for_test(&self) {
+        assert!(
+            self.mode == Mode::ConfirmClose || self.pending_agent_close_focus.is_none(),
+            "pending agent close focus must only exist while close confirmation is active"
+        );
         if self.workspaces.is_empty() {
             assert!(
                 self.active.is_none(),

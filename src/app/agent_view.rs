@@ -96,7 +96,7 @@ fn triage_priority(state: crate::detect::AgentState, seen: bool) -> u8 {
 }
 
 pub(crate) fn presented_workspace_idx(app: &AppState) -> Option<usize> {
-    if app.mode == Mode::Navigate {
+    if app.mode() == Mode::Navigate {
         app.workspaces.get(app.selected).map(|_| app.selected)
     } else {
         app.active
@@ -538,13 +538,13 @@ mod tests {
 
         assert_eq!(crate::ui::agent_panel_entries(&state)[0].ws_idx, 0);
 
-        state.mode = Mode::Navigate;
+        state.replace_mode(Mode::Navigate);
         state.selected = 1;
         let entries = crate::ui::agent_panel_entries(&state);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].ws_idx, 1);
 
-        state.mode = Mode::Settings;
+        state.replace_mode(Mode::Settings);
         let entries = crate::ui::agent_panel_entries(&state);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].ws_idx, 0);

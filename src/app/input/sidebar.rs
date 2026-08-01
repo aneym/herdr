@@ -561,7 +561,7 @@ mod tests {
             rect.y,
         ));
 
-        assert_eq!(app.state.mode, Mode::GlobalMenu);
+        assert_eq!(app.state.mode(), Mode::GlobalMenu);
     }
 
     #[test]
@@ -597,7 +597,7 @@ mod tests {
             menu.y + 2,
         ));
 
-        assert_eq!(app.state.mode, Mode::KeybindHelp);
+        assert_eq!(app.state.mode(), Mode::KeybindHelp);
     }
 
     #[test]
@@ -617,7 +617,7 @@ mod tests {
             menu.y + 1,
         ));
 
-        assert_eq!(app.state.mode, Mode::Settings);
+        assert_eq!(app.state.mode(), Mode::Settings);
     }
 
     #[test]
@@ -638,7 +638,7 @@ mod tests {
         ));
 
         assert!(app.state.request_reload_config);
-        assert_eq!(app.state.mode, Mode::Navigate);
+        assert_eq!(app.state.mode(), Mode::Navigate);
     }
 
     #[test]
@@ -693,7 +693,7 @@ mod tests {
 
         assert!(app.state.detach_requested);
         assert!(!app.state.should_quit);
-        assert_ne!(app.state.mode, Mode::GlobalMenu);
+        assert_ne!(app.state.mode(), Mode::GlobalMenu);
     }
 
     #[test]
@@ -741,7 +741,7 @@ mod tests {
             .detected_agent = Some(Agent::Claude);
         app.state.active = Some(0);
         app.state.selected = 0;
-        app.state.mode = Mode::Terminal;
+        app.state.replace_mode(Mode::Terminal);
 
         app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2, 16));
 
@@ -750,7 +750,7 @@ mod tests {
             app.state.workspaces[0].tabs[1].layout.focused(),
             second_pane
         );
-        assert_eq!(app.state.mode, Mode::Terminal);
+        assert_eq!(app.state.mode(), Mode::Terminal);
         let snapshot = capture_snapshot(&app.state);
         assert_eq!(snapshot.workspaces[0].active_tab, first_tab);
         assert_eq!(
@@ -863,7 +863,7 @@ mod tests {
         app.state.workspaces = vec![Workspace::test_new("test")];
         app.state.active = Some(0);
         app.state.selected = 0;
-        app.state.mode = Mode::Terminal;
+        app.state.replace_mode(Mode::Terminal);
         app.state.agent_panel_scroll = 3;
 
         let (_, detail_area) = crate::ui::expanded_sidebar_sections(
@@ -930,7 +930,7 @@ mod tests {
             .detected_agent = Some(Agent::Claude);
         app.state.active = Some(0);
         app.state.selected = 0;
-        app.state.mode = Mode::Terminal;
+        app.state.replace_mode(Mode::Terminal);
 
         let (_, detail_area) = crate::ui::expanded_sidebar_sections(
             app.state.view.sidebar_rect,
@@ -990,7 +990,7 @@ mod tests {
         }
         app.state.active = Some(0);
         app.state.selected = 0;
-        app.state.mode = Mode::Terminal;
+        app.state.replace_mode(Mode::Terminal);
 
         let detail_area = app.state.agent_panel_rect();
         assert!(crate::ui::should_show_scrollbar(
@@ -1051,7 +1051,7 @@ mod tests {
         }
         app.state.active = Some(0);
         app.state.selected = 0;
-        app.state.mode = Mode::Terminal;
+        app.state.replace_mode(Mode::Terminal);
         app.state.sidebar_agents.rows = vec![vec![crate::config::AgentSidebarToken::Agent]];
         app.state.sidebar_agents.rows_by_agent.insert(
             "claude".into(),
@@ -1075,7 +1075,7 @@ mod tests {
             app.state.workspaces[0].tabs[second_tab].layout.focused(),
             second_pane
         );
-        assert_eq!(app.state.mode, Mode::Terminal);
+        assert_eq!(app.state.mode(), Mode::Terminal);
     }
 
     #[test]
@@ -1105,7 +1105,7 @@ mod tests {
             .detected_agent = Some(Agent::Claude);
         app.state.active = Some(0);
         app.state.selected = 0;
-        app.state.mode = Mode::Terminal;
+        app.state.replace_mode(Mode::Terminal);
         app.state.sidebar_collapsed = true;
         app.state.view.sidebar_rect = Rect::new(0, 0, 4, 20);
         app.state.view.terminal_area = Rect::new(4, 0, 80, 20);
@@ -1123,7 +1123,7 @@ mod tests {
             app.state.workspaces[0].tabs[1].layout.focused(),
             second_pane
         );
-        assert_eq!(app.state.mode, Mode::Terminal);
+        assert_eq!(app.state.mode(), Mode::Terminal);
     }
 
     #[test]
@@ -1138,7 +1138,7 @@ mod tests {
         app.state.ensure_test_terminals();
         app.state.active = Some(0);
         app.state.selected = 0;
-        app.state.mode = Mode::Terminal;
+        app.state.replace_mode(Mode::Terminal);
         app.state.sidebar_collapsed = true;
         app.state.agent_panel_sort = AgentPanelSort::Priority;
         app.state.view.sidebar_rect = Rect::new(0, 0, 4, 20);
@@ -1260,7 +1260,7 @@ mod tests {
                 });
         }
         app.state.active = None;
-        app.state.mode = Mode::Terminal;
+        app.state.replace_mode(Mode::Terminal);
         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
         let parent = app.state.view.workspace_card_areas[0].rect;
 
@@ -1294,7 +1294,7 @@ mod tests {
                 });
         }
         app.state.active = None;
-        app.state.mode = Mode::Terminal;
+        app.state.replace_mode(Mode::Terminal);
         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
         let parent = app.state.view.workspace_card_areas[0];
         let chevron = crate::ui::workspace_group_chevron_rect(&parent);
@@ -1338,7 +1338,7 @@ mod tests {
         }
         app.state.active = Some(0);
         app.state.selected = 0;
-        app.state.mode = Mode::Navigate;
+        app.state.replace_mode(Mode::Navigate);
         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 30));
         let list = app.state.workspace_list_rect();
         assert!(!crate::ui::should_show_scrollbar(

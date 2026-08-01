@@ -436,7 +436,7 @@ impl App {
             self.state.worktree_create = None;
             self.state.name_input.clear();
             self.state.name_input_replace_on_type = false;
-            self.state.mode = crate::app::Mode::Terminal;
+            self.state.replace_mode(crate::app::Mode::Terminal);
         }
         self.state.mark_session_dirty();
         if created_workspace {
@@ -585,11 +585,11 @@ impl App {
             remove.workspace_id == result.workspace_id && remove.path == result.path
         }) {
             self.state.worktree_remove = None;
-            self.state.mode = if self.state.active.is_some() {
+            self.state.replace_mode(if self.state.active.is_some() {
                 crate::app::Mode::Terminal
             } else {
                 crate::app::Mode::Navigate
-            };
+            });
         }
         let response = encode_success(
             api.id,

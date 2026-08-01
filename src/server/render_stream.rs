@@ -416,7 +416,7 @@ fn focused_terminal_owns_host_cursor(
     app_state: &AppState,
     terminal_runtimes: &TerminalRuntimeRegistry,
 ) -> bool {
-    if app_state.mode != Mode::Terminal {
+    if app_state.mode() != Mode::Terminal {
         return false;
     }
 
@@ -444,7 +444,7 @@ fn focused_terminal_suppresses_host_cursor(
     app_state: &AppState,
     terminal_runtimes: &TerminalRuntimeRegistry,
 ) -> bool {
-    if app_state.mode != Mode::Terminal {
+    if app_state.mode() != Mode::Terminal {
         return false;
     }
 

@@ -2602,7 +2602,7 @@ mod tests {
             panic!("expected pane move response");
         };
         assert!(move_result.changed);
-        assert_eq!(app.state.mode, Mode::Copy);
+        assert_eq!(app.state.mode(), Mode::Copy);
         assert_eq!(app.state.copy_mode.expect("copy mode").pane_id, source);
         assert_eq!(app.state.workspaces[0].tabs[0].layout.focused(), source);
     }
@@ -2627,7 +2627,7 @@ mod tests {
         app.state.workspaces.push(Workspace::test_new("other"));
         app.state.active = Some(0);
         app.state.selected = 0;
-        app.state.mode = Mode::Terminal;
+        app.state.replace_mode(Mode::Terminal);
         let source_public = app.public_pane_id(0, source).unwrap();
         let target = app.state.workspaces[1].tabs[0].root_pane;
         let target_tab_id = app.public_tab_id(1, 0).unwrap();
@@ -3291,7 +3291,7 @@ mod tests {
         app.state.workspaces[1].tabs[0].layout.focus_pane(target);
         app.state.active = Some(1);
         app.state.selected = 1;
-        app.state.mode = Mode::Terminal;
+        app.state.replace_mode(Mode::Terminal);
         app.state.copy_mode = Some(crate::app::state::CopyModeState {
             pane_id: source,
             cursor_row: 0,
@@ -3316,7 +3316,7 @@ mod tests {
         };
         assert!(zoom.focus_changed);
         assert_eq!(app.state.active, Some(0));
-        assert_eq!(app.state.mode, Mode::Copy);
+        assert_eq!(app.state.mode(), Mode::Copy);
         assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(source));
         assert_eq!(app.state.workspaces[1].focused_pane_id(), Some(target));
     }
@@ -3665,7 +3665,7 @@ mod tests {
         assert_eq!(app.state.active, Some(1));
         assert_eq!(app.state.workspaces[1].active_tab, target_tab_idx);
         assert_eq!(app.state.workspaces[1].focused_pane_id(), Some(target_pane));
-        assert_eq!(app.state.mode, Mode::Terminal);
+        assert_eq!(app.state.mode(), Mode::Terminal);
     }
 
     #[test]

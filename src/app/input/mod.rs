@@ -88,12 +88,12 @@ impl App {
             return None;
         }
 
-        match self.state.mode {
+        match self.state.mode() {
             Mode::Terminal => return self.handle_terminal_key(key).await,
             Mode::Prefix => self.handle_prefix_key(key),
             Mode::Navigate => self.handle_navigate_key(key),
             Mode::Copy => self.handle_copy_mode_key(key),
-            _ => match self.state.mode {
+            _ => match self.state.mode() {
                 Mode::Onboarding => self.handle_onboarding_key(key_event),
                 Mode::ReleaseNotes => self.handle_release_notes_key(key_event),
                 Mode::ProductAnnouncement => self.handle_product_announcement_key(key_event),
@@ -130,7 +130,7 @@ impl App {
             }
             return;
         }
-        if self.state.mode != Mode::Terminal {
+        if self.state.mode() != Mode::Terminal {
             self.paste_into_active_text_input(&text);
             return;
         }
@@ -146,7 +146,7 @@ impl App {
     }
 
     pub(crate) fn paste_into_active_text_input(&mut self, text: &str) -> bool {
-        match self.state.mode {
+        match self.state.mode() {
             Mode::RenameWorkspace | Mode::RenameTab | Mode::RenamePane => {
                 insert_rename_input_text(&mut self.state, text);
                 true
@@ -476,7 +476,7 @@ impl App {
     }
 
     fn focus_pane_before_mouse_press(&mut self, mouse: MouseEvent) {
-        if !matches!(self.state.mode, Mode::Terminal | Mode::Resize)
+        if !matches!(self.state.mode(), Mode::Terminal | Mode::Resize)
             || !matches!(
                 mouse.kind,
                 MouseEventKind::Down(MouseButton::Left | MouseButton::Middle)
@@ -505,7 +505,7 @@ impl App {
         source_id: super::InputSourceId,
         mouse: MouseEvent,
     ) -> bool {
-        if self.state.mode != Mode::Terminal
+        if self.state.mode() != Mode::Terminal
             || !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
             || !mouse.modifiers.contains(modified_url_click_modifier())
         {
@@ -585,7 +585,7 @@ impl App {
             return None;
         }
 
-        if self.state.mode != Mode::Terminal {
+        if self.state.mode() != Mode::Terminal {
             self.last_pane_click = None;
             return None;
         }
@@ -650,7 +650,7 @@ pub(crate) fn is_modal_paste_shortcut(key: &KeyEvent) -> bool {
 }
 
 pub(crate) fn modal_paste_target_active(state: &AppState) -> bool {
-    match state.mode {
+    match state.mode() {
         Mode::RenameWorkspace | Mode::RenameTab | Mode::RenamePane | Mode::NewLinkedWorktree => {
             true
         }
@@ -726,7 +726,7 @@ impl AppState {
                     .insert(new_pane.terminal.id.clone(), new_pane.terminal);
                 self.record_pane_focus_change(previous_focus, ws_idx, new_id);
                 self.mark_session_dirty();
-                self.mode = Mode::Terminal;
+                self.replace_mode(Mode::Terminal);
             }
         }
     }
@@ -742,7 +742,7 @@ fn state_with_workspaces(names: &[&str]) -> AppState {
     if !state.workspaces.is_empty() {
         state.active = Some(0);
         state.selected = 0;
-        state.mode = Mode::Navigate;
+        state.replace_mode(Mode::Navigate);
     }
     state
 }
@@ -757,7 +757,7 @@ fn app_for_mouse_test() -> App {
         api_rx,
         crate::api::EventHub::default(),
     );
-    app.state.mode = Mode::Terminal;
+    app.state.replace_mode(Mode::Terminal);
     app.state.update_available = None;
     app.state.latest_release_notes_available = false;
     app.state.view.sidebar_rect = ratatui::layout::Rect::new(0, 0, 26, 20);
@@ -854,7 +854,7 @@ mod tests {
         app.state.workspaces = vec![crate::workspace::Workspace::test_new("test")];
         app.state.active = Some(0);
         app.state.selected = 0;
-        app.state.mode = Mode::RenameTab;
+        app.state.replace_mode(Mode::RenameTab);
         app.state.name_input = "2".into();
         app.state.name_input_replace_on_type = true;
 
@@ -867,7 +867,7 @@ mod tests {
     #[tokio::test]
     async fn paste_routes_to_keybind_help_query_only_when_searching() {
         let mut app = test_app();
-        app.state.mode = Mode::KeybindHelp;
+        app.state.replace_mode(Mode::KeybindHelp);
         app.handle_paste("ignored".into()).await;
         assert!(app.state.keybind_help.query.is_empty());
 
@@ -882,7 +882,7 @@ mod tests {
     #[tokio::test]
     async fn paste_routes_to_new_linked_worktree_input() {
         let mut app = test_app();
-        app.state.mode = Mode::NewLinkedWorktree;
+        app.state.replace_mode(Mode::NewLinkedWorktree);
         app.state.name_input = "generated-branch".into();
         app.state.name_input_replace_on_type = true;
         app.state.worktree_create = Some(crate::app::state::WorktreeCreateState {
@@ -935,22 +935,22 @@ mod tests {
     fn modal_paste_target_is_active_only_for_text_inputs() {
         let mut state = AppState::test_new();
 
-        state.mode = Mode::RenameTab;
+        state.replace_mode(Mode::RenameTab);
         assert!(modal_paste_target_active(&state));
 
-        state.mode = Mode::Navigator;
+        state.replace_mode(Mode::Navigator);
         state.navigator.search_focused = false;
         assert!(!modal_paste_target_active(&state));
         state.navigator.search_focused = true;
         assert!(modal_paste_target_active(&state));
 
-        state.mode = Mode::KeybindHelp;
+        state.replace_mode(Mode::KeybindHelp);
         state.keybind_help.search_focused = false;
         assert!(!modal_paste_target_active(&state));
         state.keybind_help.search_focused = true;
         assert!(modal_paste_target_active(&state));
 
-        state.mode = Mode::ConfirmClose;
+        state.replace_mode(Mode::ConfirmClose);
         assert!(!modal_paste_target_active(&state));
     }
 }

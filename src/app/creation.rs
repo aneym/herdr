@@ -82,7 +82,7 @@ impl App {
     }
 
     pub(super) fn workspace_creation_source(&self) -> Option<usize> {
-        if self.state.mode == Mode::Navigate
+        if self.state.mode() == Mode::Navigate
             && self.state.workspaces.get(self.state.selected).is_some()
         {
             return Some(self.state.selected);
@@ -116,11 +116,11 @@ impl App {
                 env: Default::default(),
             },
         );
-        self.state.mode = if self.state.active.is_some() {
+        self.state.replace_mode(if self.state.active.is_some() {
             Mode::Terminal
         } else {
             Mode::Navigate
-        };
+        });
     }
 
     /// Create a workspace with a real PTY (needs event_tx).
@@ -133,7 +133,7 @@ impl App {
         let initial_cwd = self.resolve_new_terminal_cwd(follow_cwd);
         if let Err(e) = self.create_workspace_with_events(initial_cwd, true) {
             error!(err = %e, "failed to create workspace");
-            self.state.mode = Mode::Navigate;
+            self.state.replace_mode(Mode::Navigate);
         }
     }
 
@@ -205,7 +205,7 @@ impl App {
         self.state.remove_alias_shadowed_by_new_pane(root_pane);
         if focus {
             self.state.switch_workspace_tab(ws_idx, idx);
-            self.state.mode = Mode::Terminal;
+            self.state.replace_mode(Mode::Terminal);
         }
         let workspace_id = self.state.workspaces[ws_idx].id.clone();
         let tab_id = self
@@ -266,7 +266,7 @@ impl App {
         crate::logging::workspace_created(&workspace_id, root_pane);
         if focus || self.state.active.is_none() {
             self.state.switch_workspace(idx);
-            self.state.mode = Mode::Terminal;
+            self.state.replace_mode(Mode::Terminal);
         }
         self.schedule_session_save();
         Ok(idx)

@@ -121,7 +121,7 @@ impl App {
             error: None,
             creating: false,
         });
-        self.state.mode = Mode::NewLinkedWorktree;
+        self.state.replace_mode(Mode::NewLinkedWorktree);
     }
 
     pub(crate) fn open_remove_linked_worktree_confirmation(&mut self, ws_idx: usize) {
@@ -148,7 +148,7 @@ impl App {
             removing: false,
             force_confirmation: false,
         });
-        self.state.mode = Mode::ConfirmRemoveWorktree;
+        self.state.replace_mode(Mode::ConfirmRemoveWorktree);
     }
 
     pub(crate) fn open_existing_worktree_dialog(&mut self, ws_idx: usize) {
@@ -230,7 +230,7 @@ impl App {
             search_focused: false,
             error: None,
         });
-        self.state.mode = Mode::OpenExistingWorktree;
+        self.state.replace_mode(Mode::OpenExistingWorktree);
     }
 
     pub(crate) fn handle_worktree_create_key(&mut self, key: KeyEvent) {
@@ -276,11 +276,11 @@ impl App {
         match key.code {
             KeyCode::Esc => {
                 self.state.worktree_open = None;
-                self.state.mode = if self.state.active.is_some() {
+                self.state.replace_mode(if self.state.active.is_some() {
                     Mode::Terminal
                 } else {
                     Mode::Navigate
-                };
+                });
             }
             KeyCode::Up => {
                 if let Some(open) = &mut self.state.worktree_open {
@@ -373,7 +373,7 @@ impl App {
                 entry.is_linked_worktree,
             );
             self.state.switch_workspace(ws_idx);
-            self.state.mode = Mode::Terminal;
+            self.state.replace_mode(Mode::Terminal);
             self.emit_worktree_opened_for_workspace(ws_idx, true);
             return;
         }
@@ -426,7 +426,7 @@ impl App {
                     search_focused: false,
                     error: Some(format!("failed to open worktree: {err}")),
                 });
-                self.state.mode = Mode::OpenExistingWorktree;
+                self.state.replace_mode(Mode::OpenExistingWorktree);
             }
         }
     }
@@ -480,11 +480,11 @@ impl App {
         self.state.worktree_create = None;
         self.state.name_input.clear();
         self.state.name_input_replace_on_type = false;
-        self.state.mode = if self.state.active.is_some() {
+        self.state.replace_mode(if self.state.active.is_some() {
             Mode::Terminal
         } else {
             Mode::Navigate
-        };
+        });
     }
 
     fn sync_worktree_branch_from_input(&mut self) {
@@ -621,11 +621,11 @@ impl App {
                     return;
                 }
                 self.state.worktree_remove = None;
-                self.state.mode = if self.state.active.is_some() {
+                self.state.replace_mode(if self.state.active.is_some() {
                     Mode::Terminal
                 } else {
                     Mode::Navigate
-                };
+                });
             }
             KeyCode::Enter => self.submit_worktree_remove_via_api(),
             _ => {}
@@ -732,7 +732,7 @@ impl App {
         );
         if serde_json::from_str::<crate::api::schema::SuccessResponse>(&response).is_ok() {
             self.state.worktree_open = None;
-            self.state.mode = Mode::Terminal;
+            self.state.replace_mode(Mode::Terminal);
         } else if let Ok(error) =
             serde_json::from_str::<crate::api::schema::ErrorResponse>(&response)
         {
@@ -832,7 +832,7 @@ impl App {
                         true,
                     );
                     self.state.switch_workspace(ws_idx);
-                    self.state.mode = Mode::Terminal;
+                    self.state.replace_mode(Mode::Terminal);
                     if let Some(worktree) = self.worktree_info_for_workspace(ws_idx) {
                         self.emit_worktree_created_event(ws_idx, worktree);
                     }
@@ -859,7 +859,7 @@ impl App {
                             self.state.config_diagnostic = Some(format!(
                                 "created worktree but failed to open workspace: {err}"
                             ));
-                            self.state.mode = Mode::Navigate;
+                            self.state.replace_mode(Mode::Navigate);
                         }
                     }
                 }
@@ -936,11 +936,11 @@ impl App {
                         forced,
                     );
                 }
-                self.state.mode = if self.state.active.is_some() {
+                self.state.replace_mode(if self.state.active.is_some() {
                     Mode::Terminal
                 } else {
                     Mode::Navigate
-                };
+                });
                 self.render_dirty.request_generic();
                 self.render_notify.notify_one();
             }
@@ -1494,7 +1494,7 @@ mod tests {
     fn worktree_create_and_open_dialogs_reject_linked_child_source() {
         let mut app = app_for_worktree_tests();
         app.state.workspaces = vec![crate::workspace::Workspace::test_new("issue")];
-        app.state.mode = Mode::Navigate;
+        app.state.replace_mode(Mode::Navigate);
         app.state.workspaces[0].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
             key: "repo-key".into(),
             label: "herdr".into(),
@@ -1505,7 +1505,7 @@ mod tests {
 
         app.open_new_linked_worktree_dialog(0);
 
-        assert_eq!(app.state.mode, Mode::Navigate);
+        assert_eq!(app.state.mode(), Mode::Navigate);
         assert!(app.state.worktree_create.is_none());
         assert_eq!(
             app.state.config_diagnostic.as_deref(),
@@ -1570,7 +1570,7 @@ mod tests {
         let checkout_key = crate::worktree::canonical_or_original(&checkout_path);
         app.pending_api_worktree_creates.insert(checkout_key, 1);
         app.state.workspaces[0].worktree_space = Some(source_membership.clone());
-        app.state.mode = Mode::NewLinkedWorktree;
+        app.state.replace_mode(Mode::NewLinkedWorktree);
         app.state.name_input = branch.into();
         app.state.worktree_create = Some(WorktreeCreateState {
             source_workspace_id,
@@ -1624,7 +1624,7 @@ mod tests {
             is_linked_worktree: false,
         };
         app.state.workspaces[0].worktree_space = Some(source_membership.clone());
-        app.state.mode = Mode::OpenExistingWorktree;
+        app.state.replace_mode(Mode::OpenExistingWorktree);
         app.state.worktree_open = Some(WorktreeOpenState {
             source_workspace_id,
             source_existing_membership: Some(source_membership),
@@ -2009,7 +2009,7 @@ mod tests {
 
         app.open_new_linked_worktree_dialog(0);
 
-        assert_eq!(app.state.mode, Mode::NewLinkedWorktree);
+        assert_eq!(app.state.mode(), Mode::NewLinkedWorktree);
         assert!(app.state.config_diagnostic.is_none());
         let create = app.state.worktree_create.as_ref().unwrap();
         assert_eq!(create.source_checkout_path, bare);

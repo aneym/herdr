@@ -520,7 +520,7 @@ pub(super) fn apply_rename_action(state: &mut AppState, action: ModalAction) {
             } else {
                 state.name_input.trim().to_string()
             };
-            match state.mode {
+            match state.mode() {
                 Mode::RenameWorkspace
                     if state.pending_workspace_create_cwd.is_none()
                         && !state.workspaces.is_empty()
@@ -724,9 +724,9 @@ pub(crate) fn handle_resize_key(state: &mut AppState, raw_key: TerminalKey) {
         || state.keybinds.resize_mode.matches_direct_key(raw_key)
     {
         if state.active.is_some() {
-            state.mode = Mode::Terminal;
+            state.replace_mode(Mode::Terminal);
         } else {
-            state.mode = Mode::Navigate;
+            state.replace_mode(Mode::Navigate);
         }
         return;
     }
@@ -741,7 +741,7 @@ pub(crate) fn handle_resize_key(state: &mut AppState, raw_key: TerminalKey) {
 }
 
 pub(super) fn open_confirm_close(state: &mut AppState) {
-    state.mode = Mode::ConfirmClose;
+    state.replace_mode(Mode::ConfirmClose);
 }
 
 #[cfg(test)]
@@ -750,9 +750,9 @@ pub(super) fn confirm_close_accept(state: &mut AppState) {
     state.close_selected_workspace();
     state.focus_panel_agent_after_close(target);
     if state.workspaces.is_empty() {
-        state.mode = Mode::Navigate;
+        state.replace_mode(Mode::Navigate);
     } else {
-        state.mode = Mode::Terminal;
+        state.replace_mode(Mode::Terminal);
     }
 }
 
@@ -826,7 +826,7 @@ pub(super) fn apply_context_menu_action(
                 open_confirm_close(state);
             } else {
                 state.close_selected_workspace();
-                state.mode = Mode::Navigate;
+                state.replace_mode(Mode::Navigate);
             }
         }
         (ContextMenuKind::Tab { ws_idx, tab_idx }, Some("New tab")) => {
@@ -846,11 +846,11 @@ pub(super) fn apply_context_menu_action(
             state.active = Some(ws_idx);
             state.switch_tab(tab_idx);
             if !state.close_tab() {
-                state.mode = if state.active.is_some() {
+                state.replace_mode(if state.active.is_some() {
                     Mode::Terminal
                 } else {
                     Mode::Navigate
-                };
+                });
             }
         }
         (ContextMenuKind::Pane { pane_id, .. }, Some("Rename pane")) => {
@@ -871,7 +871,7 @@ pub(super) fn apply_context_menu_action(
                     }
                 }
             }
-            state.mode = Mode::Terminal;
+            state.replace_mode(Mode::Terminal);
         }
         (
             ContextMenuKind::Pane {
@@ -898,7 +898,7 @@ pub(super) fn apply_context_menu_action(
                     }
                 }
             }
-            state.mode = Mode::Terminal;
+            state.replace_mode(Mode::Terminal);
         }
         (
             ContextMenuKind::Pane {
@@ -914,7 +914,7 @@ pub(super) fn apply_context_menu_action(
             state.switch_tab(tab_idx);
             state.focus_pane_in_workspace(ws_idx, pane_id);
             state.split_pane(terminal_runtimes, Direction::Horizontal);
-            state.mode = Mode::Terminal;
+            state.replace_mode(Mode::Terminal);
         }
         (
             ContextMenuKind::Pane {
@@ -930,7 +930,7 @@ pub(super) fn apply_context_menu_action(
             state.switch_tab(tab_idx);
             state.focus_pane_in_workspace(ws_idx, pane_id);
             state.split_pane(terminal_runtimes, Direction::Vertical);
-            state.mode = Mode::Terminal;
+            state.replace_mode(Mode::Terminal);
         }
         (
             ContextMenuKind::Pane {
@@ -946,7 +946,7 @@ pub(super) fn apply_context_menu_action(
             state.switch_tab(tab_idx);
             state.focus_pane_in_workspace(ws_idx, pane_id);
             state.toggle_zoom();
-            state.mode = Mode::Terminal;
+            state.replace_mode(Mode::Terminal);
         }
         (
             ContextMenuKind::Pane {
@@ -962,11 +962,11 @@ pub(super) fn apply_context_menu_action(
             state.switch_tab(tab_idx);
             state.focus_pane_in_workspace(ws_idx, pane_id);
             if !state.close_pane() {
-                state.mode = if state.active.is_some() {
+                state.replace_mode(if state.active.is_some() {
                     Mode::Terminal
                 } else {
                     Mode::Navigate
-                };
+                });
             }
         }
         _ => leave_modal(state),
@@ -1021,7 +1021,7 @@ impl App {
             self.state.name_input.trim().to_string()
         };
 
-        match self.state.mode {
+        match self.state.mode() {
             Mode::RenameWorkspace => {
                 if let Some(cwd) = self.state.pending_workspace_create_cwd.take() {
                     let suggested_name = crate::workspace::derive_label_from_cwd(&cwd);
@@ -1129,11 +1129,11 @@ impl App {
             self.close_workspace_idx_via_api(ws_idx);
         }
         self.state.focus_panel_agent_after_close(target);
-        self.state.mode = if self.state.active.is_some() {
+        self.state.replace_mode(if self.state.active.is_some() {
             Mode::Terminal
         } else {
             Mode::Navigate
-        };
+        });
     }
 
     pub(crate) fn handle_resize_key_via_api(&mut self, raw_key: TerminalKey) {
@@ -1143,11 +1143,11 @@ impl App {
             || self.state.keybinds.resize_mode.matches_prefix_key(raw_key)
             || self.state.keybinds.resize_mode.matches_direct_key(raw_key)
         {
-            self.state.mode = if self.state.active.is_some() {
+            self.state.replace_mode(if self.state.active.is_some() {
                 Mode::Terminal
             } else {
                 Mode::Navigate
-            };
+            });
             return;
         }
 
@@ -1258,7 +1258,7 @@ impl App {
                     open_confirm_close(&mut self.state);
                 } else {
                     self.close_workspace_idx_via_api(ws_idx);
-                    self.state.mode = Mode::Navigate;
+                    self.state.replace_mode(Mode::Navigate);
                 }
             }
             (ContextMenuKind::Tab { ws_idx, tab_idx }, Some("New tab")) => {
@@ -1296,7 +1296,7 @@ impl App {
                         },
                     );
                 }
-                self.state.mode = Mode::Terminal;
+                self.state.replace_mode(Mode::Terminal);
             }
             (
                 ContextMenuKind::Pane {
@@ -1323,7 +1323,7 @@ impl App {
                     );
                     self.focus_pane_internal_via_api(ws_idx, source_pane_id);
                 }
-                self.state.mode = Mode::Terminal;
+                self.state.replace_mode(Mode::Terminal);
             }
             (
                 ContextMenuKind::Pane {
@@ -1333,7 +1333,7 @@ impl App {
             ) => {
                 self.focus_pane_internal_via_api(ws_idx, pane_id);
                 self.split_focused_pane_via_api(crate::api::schema::SplitDirection::Right);
-                self.state.mode = Mode::Terminal;
+                self.state.replace_mode(Mode::Terminal);
             }
             (
                 ContextMenuKind::Pane {
@@ -1343,7 +1343,7 @@ impl App {
             ) => {
                 self.focus_pane_internal_via_api(ws_idx, pane_id);
                 self.split_focused_pane_via_api(crate::api::schema::SplitDirection::Down);
-                self.state.mode = Mode::Terminal;
+                self.state.replace_mode(Mode::Terminal);
             }
             (
                 ContextMenuKind::Pane {
@@ -1353,7 +1353,7 @@ impl App {
             ) => {
                 self.focus_pane_internal_via_api(ws_idx, pane_id);
                 self.zoom_focused_pane_via_api();
-                self.state.mode = Mode::Terminal;
+                self.state.replace_mode(Mode::Terminal);
             }
             (
                 ContextMenuKind::Pane {
@@ -1365,11 +1365,11 @@ impl App {
                     && self.state.workspaces[ws_idx].focused_pane_id() == Some(pane_id);
                 self.focus_pane_internal_via_api(ws_idx, pane_id);
                 if !self.close_focused_pane_via_api_requires_confirmation(was_focused) {
-                    self.state.mode = if self.state.active.is_some() {
+                    self.state.replace_mode(if self.state.active.is_some() {
                         Mode::Terminal
                     } else {
                         Mode::Navigate
-                    };
+                    });
                 }
             }
             _ => leave_modal(&mut self.state),
@@ -1479,7 +1479,7 @@ mod tests {
     #[test]
     fn custom_resize_key_exits_resize_mode() {
         let mut state = state_with_workspaces(&["test"]);
-        state.mode = Mode::Resize;
+        state.replace_mode(Mode::Resize);
         state.keybinds.resize_mode = crate::config::ActionKeybinds::prefix("g");
 
         handle_resize_key(
@@ -1487,13 +1487,13 @@ mod tests {
             TerminalKey::new(KeyCode::Char('g'), KeyModifiers::empty()),
         );
 
-        assert_eq!(state.mode, Mode::Terminal);
+        assert_eq!(state.mode(), Mode::Terminal);
     }
 
     #[test]
     fn direct_resize_key_exits_resize_mode() {
         let mut state = state_with_workspaces(&["test"]);
-        state.mode = Mode::Resize;
+        state.replace_mode(Mode::Resize);
         state.keybinds.resize_mode = crate::config::ActionKeybinds::direct("ctrl+alt+r");
 
         handle_resize_key(
@@ -1504,13 +1504,13 @@ mod tests {
             ),
         );
 
-        assert_eq!(state.mode, Mode::Terminal);
+        assert_eq!(state.mode(), Mode::Terminal);
     }
 
     #[test]
     fn resize_key_exit_matches_enhanced_shifted_punctuation() {
         let mut state = state_with_workspaces(&["test"]);
-        state.mode = Mode::Resize;
+        state.replace_mode(Mode::Resize);
         state.keybinds.resize_mode = crate::config::ActionKeybinds::prefix("?");
 
         handle_resize_key(
@@ -1519,7 +1519,7 @@ mod tests {
                 .with_shifted_codepoint('?' as u32),
         );
 
-        assert_eq!(state.mode, Mode::Terminal);
+        assert_eq!(state.mode(), Mode::Terminal);
     }
 
     #[test]
@@ -1559,7 +1559,7 @@ mod tests {
 
         apply_global_menu_action(&mut state, GlobalMenuAction::WhatsNew);
 
-        assert_eq!(state.mode, Mode::ReleaseNotes);
+        assert_eq!(state.mode(), Mode::ReleaseNotes);
         assert_eq!(
             state
                 .release_notes
@@ -1589,7 +1589,7 @@ mod tests {
             &mut state,
             KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
         );
-        assert_eq!(state.mode, Mode::Terminal);
+        assert_eq!(state.mode(), Mode::Terminal);
         assert_eq!(state.workspaces[0].display_name(), "renamed");
         let snapshot = capture_snapshot(&state);
         assert_eq!(
@@ -1636,7 +1636,7 @@ mod tests {
             KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
         );
 
-        assert_eq!(state.mode, Mode::Terminal);
+        assert_eq!(state.mode(), Mode::Terminal);
         assert!(state.name_input.is_empty());
     }
 
@@ -1828,7 +1828,7 @@ mod tests {
             &mut state,
             TerminalKey::new(KeyCode::Esc, KeyModifiers::empty()),
         );
-        assert_eq!(state.mode, Mode::KeybindHelp);
+        assert_eq!(state.mode(), Mode::KeybindHelp);
         assert!(!state.keybind_help.search_focused);
         assert!(state.keybind_help.query.is_empty());
 
@@ -1836,7 +1836,7 @@ mod tests {
             &mut state,
             TerminalKey::new(KeyCode::Esc, KeyModifiers::empty()),
         );
-        assert_eq!(state.mode, Mode::Terminal);
+        assert_eq!(state.mode(), Mode::Terminal);
     }
 
     #[test]
@@ -1864,7 +1864,7 @@ mod tests {
                 .with_shifted_codepoint('?' as u32),
         );
 
-        assert_eq!(state.mode, Mode::Terminal);
+        assert_eq!(state.mode(), Mode::Terminal);
 
         open_keybind_help(&mut state);
         handle_keybind_help_key(
@@ -1884,7 +1884,7 @@ mod tests {
     fn navigator_search_accepts_pasted_text_when_focused() {
         let mut state = state_with_workspaces(&["alpha", "beta"]);
         let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
-        state.mode = Mode::Navigator;
+        state.replace_mode(Mode::Navigator);
         state.navigator.search_focused = true;
         state.navigator.state_filter = Some(NavigatorStateFilter::Working);
 
@@ -1898,7 +1898,7 @@ mod tests {
     fn navigator_search_ignores_paste_when_search_is_not_focused() {
         let mut state = state_with_workspaces(&["alpha", "beta"]);
         let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
-        state.mode = Mode::Navigator;
+        state.replace_mode(Mode::Navigator);
         state.navigator.search_focused = false;
 
         insert_navigator_search_text(&mut state, &terminal_runtimes, "beta");
@@ -1910,7 +1910,7 @@ mod tests {
     fn navigator_empty_search_escape_returns_to_commands() {
         let mut state = state_with_workspaces(&["alpha", "beta"]);
         let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
-        state.mode = Mode::Navigator;
+        state.replace_mode(Mode::Navigator);
         state.navigator.search_focused = true;
 
         handle_navigator_key(
@@ -1919,7 +1919,7 @@ mod tests {
             KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
         );
 
-        assert_eq!(state.mode, Mode::Navigator);
+        assert_eq!(state.mode(), Mode::Navigator);
         assert!(!state.navigator.search_focused);
         assert!(state.navigator.query.is_empty());
 
@@ -1941,14 +1941,14 @@ mod tests {
             KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
         );
 
-        assert_eq!(state.mode, Mode::Terminal);
+        assert_eq!(state.mode(), Mode::Terminal);
     }
 
     #[test]
     fn navigator_search_escape_clears_then_blurs_then_closes() {
         let mut state = state_with_workspaces(&["alpha", "beta"]);
         let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
-        state.mode = Mode::Navigator;
+        state.replace_mode(Mode::Navigator);
         state.navigator.search_focused = true;
         state.navigator.query = "a".into();
 
@@ -1958,7 +1958,7 @@ mod tests {
             KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
         );
 
-        assert_eq!(state.mode, Mode::Navigator);
+        assert_eq!(state.mode(), Mode::Navigator);
         assert!(state.navigator.search_focused);
         assert!(state.navigator.query.is_empty());
 
@@ -1976,7 +1976,7 @@ mod tests {
             KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
         );
 
-        assert_eq!(state.mode, Mode::Navigator);
+        assert_eq!(state.mode(), Mode::Navigator);
         assert!(state.navigator.search_focused);
         assert!(state.navigator.query.is_empty());
 
@@ -1986,7 +1986,7 @@ mod tests {
             KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
         );
 
-        assert_eq!(state.mode, Mode::Navigator);
+        assert_eq!(state.mode(), Mode::Navigator);
         assert!(!state.navigator.search_focused);
 
         handle_navigator_key(
@@ -1994,7 +1994,7 @@ mod tests {
             &terminal_runtimes,
             KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
         );
-        assert_eq!(state.mode, Mode::Terminal);
+        assert_eq!(state.mode(), Mode::Terminal);
     }
 
     #[test]
@@ -2009,7 +2009,7 @@ mod tests {
             &terminal_runtimes,
             KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
         );
-        assert_eq!(state.mode, Mode::Navigator);
+        assert_eq!(state.mode(), Mode::Navigator);
         assert!(state.navigator.query.is_empty());
         assert!(state.navigator.search_focused);
 
@@ -2018,7 +2018,7 @@ mod tests {
             &terminal_runtimes,
             KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
         );
-        assert_eq!(state.mode, Mode::Terminal);
+        assert_eq!(state.mode(), Mode::Terminal);
     }
 
     #[test]
@@ -2029,7 +2029,7 @@ mod tests {
 
         open_rename_active_tab(&mut state, true);
 
-        assert_eq!(state.mode, Mode::RenameTab);
+        assert_eq!(state.mode(), Mode::RenameTab);
         assert_eq!(state.name_input, "2");
         assert!(state.name_input_replace_on_type);
     }
@@ -2044,7 +2044,7 @@ mod tests {
             KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
         );
 
-        assert_eq!(state.mode, Mode::Terminal);
+        assert_eq!(state.mode(), Mode::Terminal);
         assert!(!state.creating_new_tab);
         assert!(!state.request_new_tab);
         assert!(state.requested_new_tab_name.is_none());
@@ -2063,7 +2063,7 @@ mod tests {
             KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
         );
 
-        assert_eq!(state.mode, Mode::Terminal);
+        assert_eq!(state.mode(), Mode::Terminal);
         assert!(!state.creating_new_tab);
         assert!(state.request_new_tab);
         assert_eq!(state.requested_new_tab_name.as_deref(), Some("logs"));
@@ -2079,7 +2079,7 @@ mod tests {
             KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
         );
 
-        assert_eq!(state.mode, Mode::Terminal);
+        assert_eq!(state.mode(), Mode::Terminal);
         assert!(!state.creating_new_tab);
         assert!(state.request_new_tab);
         assert!(state.requested_new_tab_name.is_none());
@@ -2123,7 +2123,7 @@ mod tests {
             KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
         );
 
-        assert_eq!(state.mode, Mode::Terminal);
+        assert_eq!(state.mode(), Mode::Terminal);
         assert!(state.workspaces[0].tabs[1].custom_name.is_none());
         assert_eq!(
             state.workspaces[0].tab_display_name(1).as_deref(),
@@ -2135,29 +2135,29 @@ mod tests {
     fn opening_different_modal_discards_pending_close_focus() {
         let mut state = state_with_workspaces(&["a"]);
         let pane_id = state.workspaces[0].tabs[0].root_pane;
-        state.mode = Mode::ConfirmClose;
+        state.replace_mode(Mode::ConfirmClose);
         state.pending_agent_close_focus = Some((0, pane_id));
 
         open_global_menu(&mut state);
 
-        assert_eq!(state.mode, Mode::GlobalMenu);
+        assert_eq!(state.mode(), Mode::GlobalMenu);
         assert_eq!(state.pending_agent_close_focus, None);
     }
 
     #[test]
     fn confirm_close_keyboard_actions_are_direct_not_focused() {
         let mut state = state_with_workspaces(&["a", "b"]);
-        state.mode = Mode::ConfirmClose;
+        state.replace_mode(Mode::ConfirmClose);
         state.selected = 1;
 
         handle_confirm_close_key(
             &mut state,
             KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
         );
-        assert_eq!(state.mode, Mode::Navigate);
+        assert_eq!(state.mode(), Mode::Navigate);
         assert_eq!(state.workspaces.len(), 2);
 
-        state.mode = Mode::ConfirmClose;
+        state.replace_mode(Mode::ConfirmClose);
         handle_confirm_close_key(
             &mut state,
             KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
@@ -2168,7 +2168,7 @@ mod tests {
     #[test]
     fn confirm_close_for_linked_worktree_closes_workspace_only() {
         let mut state = state_with_workspaces(&["main", "issue"]);
-        state.mode = Mode::ConfirmClose;
+        state.replace_mode(Mode::ConfirmClose);
         state.selected = 1;
         state.workspaces[1].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
             key: "repo-key".into(),
@@ -2186,7 +2186,7 @@ mod tests {
         assert_eq!(state.request_remove_linked_worktree, None);
         assert_eq!(state.workspaces.len(), 1);
         assert_eq!(state.workspaces[0].display_name(), "main");
-        assert_eq!(state.mode, Mode::Terminal);
+        assert_eq!(state.mode(), Mode::Terminal);
     }
 
     #[test]
@@ -2224,12 +2224,12 @@ mod tests {
         apply_context_menu_action(&mut state, &mut terminal_runtimes, menu, 1);
 
         assert_eq!(state.selected, 0);
-        assert_eq!(state.mode, Mode::ConfirmClose);
+        assert_eq!(state.mode(), Mode::ConfirmClose);
 
         confirm_close_accept(&mut state);
 
         assert!(state.workspaces.is_empty());
-        assert_eq!(state.mode, Mode::Navigate);
+        assert_eq!(state.mode(), Mode::Navigate);
     }
 
     #[test]
@@ -2274,7 +2274,7 @@ mod tests {
         apply_context_menu_action(&mut state, &mut terminal_runtimes, menu, idx);
 
         assert_eq!(state.selected, 0);
-        assert_eq!(state.mode, Mode::ConfirmClose);
+        assert_eq!(state.mode(), Mode::ConfirmClose);
         assert_eq!(state.workspaces.len(), 2);
     }
 
@@ -2289,7 +2289,7 @@ mod tests {
         let target = state.workspaces[2].tabs[0].root_pane;
         state.active = Some(0);
         state.selected = 0;
-        state.mode = Mode::ConfirmClose;
+        state.replace_mode(Mode::ConfirmClose);
         state.pending_agent_close_focus = Some((2, target));
 
         confirm_close_accept(&mut state);
@@ -2308,7 +2308,7 @@ mod tests {
         let target = state.workspaces[2].tabs[0].root_pane;
         state.active = Some(0);
         state.selected = 0;
-        state.mode = Mode::ConfirmClose;
+        state.replace_mode(Mode::ConfirmClose);
         state.pending_agent_close_focus = Some((2, target));
 
         confirm_close_cancel(&mut state);
@@ -2328,7 +2328,7 @@ mod tests {
         let target = state.workspaces[2].tabs[0].root_pane;
         state.active = Some(0);
         state.selected = 0;
-        state.mode = Mode::ConfirmClose;
+        state.replace_mode(Mode::ConfirmClose);
         state.pending_agent_close_focus = Some((2, target));
         state.workspaces[2].close_pane(target);
 
@@ -2345,7 +2345,7 @@ mod tests {
         mark_worktree_space_member(&mut app.state, 1, "repo-key");
         app.state.active = Some(0);
         app.state.selected = 1;
-        app.state.mode = Mode::ContextMenu;
+        app.state.replace_mode(Mode::ContextMenu);
         let menu = ContextMenuState {
             kind: ContextMenuKind::Tab {
                 ws_idx: 0,
@@ -2364,7 +2364,7 @@ mod tests {
         app.apply_context_menu_action_via_api(menu, idx);
 
         assert_eq!(app.state.selected, 0);
-        assert_eq!(app.state.mode, Mode::ConfirmClose);
+        assert_eq!(app.state.mode(), Mode::ConfirmClose);
         assert_eq!(app.state.workspaces.len(), 2);
     }
 
@@ -2375,7 +2375,7 @@ mod tests {
         mark_worktree_space_member(&mut app.state, 1, "repo-key");
         app.state.active = Some(0);
         app.state.selected = 1;
-        app.state.mode = Mode::ContextMenu;
+        app.state.replace_mode(Mode::ContextMenu);
         let pane_id = app.state.workspaces[0].tabs[0].root_pane;
         let mut menu = ContextMenuState {
             kind: ContextMenuKind::Pane {
@@ -2400,7 +2400,7 @@ mod tests {
         app.handle_context_menu_key_via_api(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
         assert_eq!(app.state.selected, 0);
-        assert_eq!(app.state.mode, Mode::ConfirmClose);
+        assert_eq!(app.state.mode(), Mode::ConfirmClose);
         assert_eq!(app.state.workspaces.len(), 2);
         assert!(app.state.context_menu.is_none());
     }

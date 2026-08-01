@@ -308,7 +308,7 @@ mod tests {
         app.state.ensure_test_terminals();
         app.state.active = Some(0);
         app.state.selected = 0;
-        app.state.mode = Mode::Terminal;
+        app.state.replace_mode(Mode::Terminal);
         app
     }
 
@@ -478,7 +478,7 @@ mod tests {
             .get_mut(&terminal_id)
             .unwrap()
             .set_detected_state(Some(Agent::Pi), AgentState::Idle);
-        app.state.mode = Mode::ConfirmClose;
+        app.state.replace_mode(Mode::ConfirmClose);
         app.state.pending_agent_close_focus = Some((0, pane_id));
 
         let response = app.handle_agent_focus(
@@ -490,7 +490,7 @@ mod tests {
 
         let success: SuccessResponse = serde_json::from_str(&response).unwrap();
         assert!(matches!(success.result, ResponseResult::AgentInfo { .. }));
-        assert_eq!(app.state.mode, Mode::Terminal);
+        assert_eq!(app.state.mode(), Mode::Terminal);
         assert_eq!(app.state.pending_agent_close_focus, None);
     }
 

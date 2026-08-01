@@ -187,7 +187,7 @@ impl App {
 
         if params.focus || replace_was_active {
             self.state.switch_workspace_tab(ws_idx, new_tab_idx);
-            self.state.mode = Mode::Terminal;
+            self.state.replace_mode(Mode::Terminal);
         }
         self.schedule_session_save();
         if let Some(tab) = self.tab_info(ws_idx, new_tab_idx) {

@@ -113,7 +113,7 @@ impl App {
                 }
                 if focus {
                     self.state.switch_workspace_tab(ws_idx, tab_idx);
-                    self.state.mode = Mode::Terminal;
+                    self.state.replace_mode(Mode::Terminal);
                 }
                 self.schedule_session_save();
                 self.emit_tab_created_events(ws_idx, tab_idx);
@@ -451,6 +451,39 @@ mod tests {
             "tab bar should reflow to the new label width immediately: \
              before={width_before}, after={width_after}"
         );
+    }
+
+    #[tokio::test]
+    async fn focused_tab_create_replacing_confirm_close_discards_pending_focus() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        app.state.default_shell = exiting_test_command().into();
+        app.state.shell_mode = ShellModeConfig::NonLogin;
+        app.state.workspaces = vec![Workspace::test_new("tabs")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.ensure_test_terminals();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        app.state.replace_mode(Mode::ConfirmClose);
+        app.state.pending_agent_close_focus = Some((0, pane_id));
+
+        let response = app.handle_tab_create(
+            "req".into(),
+            TabCreateParams {
+                workspace_id: None,
+                cwd: None,
+                focus: true,
+                label: None,
+                env: Default::default(),
+            },
+        );
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert!(matches!(success.result, ResponseResult::TabCreated { .. }));
+        assert_eq!(app.state.mode(), Mode::Terminal);
+        assert_eq!(app.state.pending_agent_close_focus, None);
+        shutdown_test_runtimes(&mut app);
     }
 
     #[tokio::test]

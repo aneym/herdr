@@ -475,7 +475,7 @@ impl App {
         tab.zoomed = overlay.previous_zoomed;
 
         if was_overlay_active && self.state.active == Some(overlay.ws_idx) {
-            self.state.mode = Mode::Terminal;
+            self.state.replace_mode(Mode::Terminal);
         }
     }
 
@@ -1367,7 +1367,7 @@ mod tests {
         app.state.workspaces = vec![workspace];
         app.state.ensure_test_terminals();
         app.state.active = Some(0);
-        app.state.mode = Mode::Terminal;
+        app.state.replace_mode(Mode::Terminal);
         app.overlay_panes.insert(
             overlay_pane,
             OverlayPaneState {
@@ -1700,7 +1700,7 @@ mod tests {
         app.state.terminals.get_mut(&terminal_id).unwrap().cwd = stale_cwd;
         app.state.active = None;
         app.state.selected = 0;
-        app.state.mode = Mode::Terminal;
+        app.state.replace_mode(Mode::Terminal);
         app.state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
         app.state.toast_config.delay_seconds = 0;
 
@@ -1792,7 +1792,7 @@ mod tests {
         app.state.terminals.get_mut(&terminal_id).unwrap().cwd = stale_cwd;
         app.state.active = None;
         app.state.selected = 0;
-        app.state.mode = Mode::Terminal;
+        app.state.replace_mode(Mode::Terminal);
         app.state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
         app.state.toast_config.delay_seconds = 1;
 
@@ -2024,7 +2024,7 @@ mod tests {
         app.state.workspaces = vec![workspace];
         app.state.ensure_test_terminals();
         app.state.active = Some(0);
-        app.state.mode = Mode::Terminal;
+        app.state.replace_mode(Mode::Terminal);
         let tab_id = app.public_tab_id(0, 0).unwrap();
         app.overlay_panes.insert(
             overlay_pane,
@@ -2222,7 +2222,7 @@ mod tests {
         app.state.terminals.get_mut(&terminal_id).unwrap().cwd = "/__herdr_projects__".into();
         app.state.active = None;
         app.state.selected = 0;
-        app.state.mode = Mode::Terminal;
+        app.state.replace_mode(Mode::Terminal);
         app.state.toast_config.delivery = crate::config::ToastDelivery::Terminal;
 
         app.handle_internal_event(AppEvent::StateChanged {

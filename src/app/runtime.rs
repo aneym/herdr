@@ -53,7 +53,7 @@ impl App {
         &mut self,
         msg: crate::api::ApiRequestMessage,
     ) -> bool {
-        let previous_mode = self.state.mode;
+        let previous_mode = self.state.mode();
         let mut changed = self.expire_due_metadata(Instant::now());
         changed |= crate::api::request_changes_ui(&msg.request);
         let skip_default_workspace = matches!(
@@ -108,14 +108,14 @@ impl App {
         &mut self,
         event: crate::raw_input::RawInputEvent,
     ) -> bool {
-        let previous_mode = self.state.mode;
+        let previous_mode = self.state.mode();
         let changed = match event {
             crate::raw_input::RawInputEvent::Key(key) => {
                 let pressed_key_id = pressed_key_identity(super::LOCAL_INPUT_SOURCE, &key);
                 match key.kind {
                     crossterm::event::KeyEventKind::Press => {
                         if self.state.popup_pane.is_some()
-                            || self.state.mode == crate::app::Mode::Terminal
+                            || self.state.mode() == crate::app::Mode::Terminal
                         {
                             self.suppressed_repeat_keys.remove(&pressed_key_id);
                         } else {
@@ -145,7 +145,7 @@ impl App {
                             }
                             true
                         } else if (self.state.popup_pane.is_some()
-                            || self.state.mode == crate::app::Mode::Terminal)
+                            || self.state.mode() == crate::app::Mode::Terminal)
                             && !self.suppressed_repeat_keys.contains(&pressed_key_id)
                         {
                             self.handle_key(key).await;
@@ -171,7 +171,7 @@ impl App {
             }
             crate::raw_input::RawInputEvent::Mouse(mouse) => {
                 let changes_view = !matches!(mouse.kind, crossterm::event::MouseEventKind::Moved)
-                    || self.state.mode.mouse_motion_changes_view();
+                    || self.state.mode().mouse_motion_changes_view();
                 if self.state.popup_pane.is_some() || self.state.mouse_capture {
                     self.handle_mouse(mouse);
                 } else {
@@ -814,7 +814,7 @@ mod tests {
     #[tokio::test]
     async fn passive_mouse_motion_does_not_request_monolithic_render() {
         let (mut app, _) = test_app_with_pane();
-        app.state.mode = crate::app::Mode::Terminal;
+        app.state.replace_mode(crate::app::Mode::Terminal);
         let motion = || {
             crate::raw_input::RawInputEvent::Mouse(crossterm::event::MouseEvent {
                 kind: crossterm::event::MouseEventKind::Moved,
@@ -825,7 +825,7 @@ mod tests {
         };
 
         assert!(!app.handle_raw_input_event(motion()).await);
-        app.state.mode = crate::app::Mode::GlobalMenu;
+        app.state.replace_mode(crate::app::Mode::GlobalMenu);
         assert!(app.handle_raw_input_event(motion()).await);
     }
 

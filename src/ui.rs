@@ -345,7 +345,7 @@ fn compute_mobile_view(
         (area, Rect::default())
     };
 
-    if app.mode == Mode::Navigate {
+    if app.mode() == Mode::Navigate {
         let switcher_viewport_h = area.height.saturating_sub(header_h + 1);
         let max_scroll = mobile_switcher_max_scroll_for_height(app, switcher_viewport_h);
         app.mobile_switcher_scroll = app.mobile_switcher_scroll.min(max_scroll);
@@ -434,7 +434,7 @@ pub fn render_with_runtime_registry(
         terminal_area
     };
 
-    match app.mode {
+    match app.mode() {
         Mode::Onboarding => render_onboarding_overlay(app, frame, frame.area()),
         Mode::ReleaseNotes => render_release_notes_overlay(app, frame, frame.area()),
         Mode::ProductAnnouncement => render_product_announcement_overlay(app, frame, frame.area()),
@@ -655,7 +655,7 @@ mod tests {
     #[test]
     fn workspace_creation_dialog_renders_new_workspace_title() {
         let mut app = crate::app::state::AppState::test_new();
-        app.mode = Mode::RenameWorkspace;
+        app.replace_mode(Mode::RenameWorkspace);
         app.pending_workspace_create_cwd = Some("/tmp/project".into());
         app.name_input = "project".into();
 
@@ -692,7 +692,7 @@ mod tests {
         app.workspaces = vec![ws];
         app.active = Some(0);
         app.selected = 0;
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
 
         compute_view(&mut app, Rect::new(0, 0, 80, 20));
         let focused = app
@@ -717,7 +717,7 @@ mod tests {
         app.workspaces = vec![Workspace::test_new("one")];
         app.active = Some(0);
         app.selected = 0;
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
 
         compute_view(&mut app, Rect::new(0, 0, 44, 20));
 
@@ -739,7 +739,7 @@ mod tests {
         app.workspaces = vec![Workspace::test_new("one")];
         app.active = Some(0);
         app.selected = 0;
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
         app.config_diagnostic = Some("config.toml:100:10; herdr config check".into());
 
         let area = Rect::new(0, 0, 44, 20);
@@ -758,7 +758,7 @@ mod tests {
         app.workspaces = vec![Workspace::test_new("one")];
         app.active = Some(0);
         app.selected = 0;
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
         app.toast_config.herdr.position = crate::config::ToastHerdrPosition::TopLeft;
         app.toast = Some(crate::app::state::ToastNotification {
             kind: crate::app::state::ToastKind::Finished,
@@ -782,7 +782,7 @@ mod tests {
         app.workspaces = vec![Workspace::test_new("one")];
         app.active = Some(0);
         app.selected = 0;
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
         app.config_diagnostic = Some("config warning".into());
         app.toast_config.herdr.position = crate::config::ToastHerdrPosition::TopLeft;
         app.toast = Some(crate::app::state::ToastNotification {
@@ -805,7 +805,7 @@ mod tests {
         app.workspaces = vec![Workspace::test_new("one")];
         app.active = Some(0);
         app.selected = 0;
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
 
         compute_view(&mut app, Rect::new(0, 0, 80, 20));
         assert_eq!(app.view.layout, ViewLayout::Desktop);
@@ -823,7 +823,7 @@ mod tests {
         app.workspaces = vec![Workspace::test_new("one")];
         app.active = Some(0);
         app.selected = 0;
-        app.mode = Mode::Prefix;
+        app.replace_mode(Mode::Prefix);
 
         compute_view(&mut app, Rect::new(0, 0, 80, 20));
         assert_eq!(app.view.tab_bar_rect, Rect::new(26, 0, 54, 1));
@@ -853,7 +853,7 @@ mod tests {
         app.workspaces = vec![Workspace::test_new("one")];
         app.active = Some(0);
         app.selected = 0;
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
 
         compute_view(&mut app, Rect::new(0, 0, 80, 20));
         let single_tab_terminal_area = app.view.terminal_area;
@@ -888,7 +888,7 @@ mod tests {
         app.workspaces = vec![Workspace::test_new("one")];
         app.active = Some(0);
         app.selected = 0;
-        app.mode = Mode::Prefix;
+        app.replace_mode(Mode::Prefix);
 
         compute_view(&mut app, Rect::new(0, 0, 80, 20));
         assert_eq!(app.view.tab_bar_rect, Rect::default());
@@ -927,7 +927,7 @@ mod tests {
         app.workspaces = vec![one_tab_workspace, two_tab_workspace];
         app.active = Some(0);
         app.selected = 0;
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
 
         compute_view(&mut app, Rect::new(0, 0, 80, 20));
 
@@ -953,7 +953,7 @@ mod tests {
         app.workspaces = vec![workspace];
         app.active = Some(0);
         app.selected = 0;
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
 
         compute_view(&mut app, Rect::new(0, 0, 44, 20));
 
@@ -971,7 +971,7 @@ mod tests {
         app.workspaces = vec![Workspace::test_new("one")];
         app.active = Some(0);
         app.selected = 0;
-        app.mode = Mode::ProductAnnouncement;
+        app.replace_mode(Mode::ProductAnnouncement);
         app.product_announcement = Some(crate::app::state::ProductAnnouncementState {
             version: "0.6.0".into(),
             id: "keybinding-v2".into(),
@@ -1012,7 +1012,7 @@ mod tests {
         app.workspaces = vec![Workspace::test_new("one")];
         app.active = Some(0);
         app.selected = 0;
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
         app.sidebar_max_width = 30;
         app.sidebar_width = 999;
 
@@ -1027,7 +1027,7 @@ mod tests {
         app.workspaces = vec![Workspace::test_new("one")];
         app.active = Some(0);
         app.selected = 0;
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
         app.sidebar_min_width = 22;
         app.sidebar_width = 5;
 
@@ -1044,7 +1044,7 @@ mod tests {
         app.workspaces = vec![Workspace::test_new("one")];
         app.active = Some(0);
         app.selected = 0;
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
 
         compute_view(&mut app, Rect::new(0, 0, 80, 20));
 
@@ -1065,7 +1065,7 @@ mod tests {
         app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
         app.active = Some(1);
         app.selected = 0;
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
 
         compute_view(&mut app, Rect::new(0, 0, 80, 20));
 
@@ -1097,7 +1097,7 @@ mod tests {
             .clone();
         app.terminals.get_mut(&root_terminal_id).unwrap().cwd = repo.clone();
         app.selected = 0;
-        app.mode = Mode::Navigate;
+        app.replace_mode(Mode::Navigate);
 
         compute_view(&mut app, Rect::new(0, 0, 80, 20));
 
@@ -1127,7 +1127,7 @@ mod tests {
         app.workspaces = vec![ws];
         app.active = Some(0);
         app.selected = 0;
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
 
         compute_view(&mut app, Rect::new(0, 0, 80, 20));
 
@@ -1158,7 +1158,7 @@ mod tests {
         app.workspaces = vec![ws];
         app.active = Some(0);
         app.selected = 0;
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
 
         compute_view(&mut app, Rect::new(0, 0, 80, 20));
 
@@ -1184,7 +1184,7 @@ mod tests {
         app.workspaces = vec![ws];
         app.active = Some(0);
         app.selected = 0;
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
 
         compute_view(&mut app, Rect::new(0, 0, 80, 20));
 
@@ -1214,7 +1214,7 @@ mod tests {
         app.workspaces = vec![ws];
         app.active = Some(0);
         app.selected = 0;
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
         app.tab_scroll_follow_active = false;
         app.tab_scroll = 2;
 
@@ -1259,7 +1259,7 @@ mod tests {
         app.workspaces = vec![ws];
         app.active = Some(0);
         app.selected = 0;
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
         app.tab_scroll_follow_active = false;
         app.tab_scroll = usize::MAX;
 
@@ -1413,7 +1413,7 @@ mod tests {
     #[test]
     fn prefix_mode_renders_prefix_indicator() {
         let mut app = crate::app::state::AppState::test_new();
-        app.mode = Mode::Prefix;
+        app.replace_mode(Mode::Prefix);
         app.view.terminal_area = ratatui::layout::Rect::new(0, 0, 60, 4);
         let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 4))
             .expect("test terminal");

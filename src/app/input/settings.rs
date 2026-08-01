@@ -519,7 +519,7 @@ mod tests {
             KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
         );
 
-        assert_eq!(state.mode, Mode::Terminal);
+        assert_eq!(state.mode(), Mode::Terminal);
         assert_eq!(state.theme_name, original_theme);
         assert_eq!(state.palette.accent, original_palette.accent);
         assert_eq!(state.palette.panel_bg, original_palette.panel_bg);
@@ -539,7 +539,7 @@ mod tests {
 
         assert_eq!(action, Some(SettingsAction::SaveSound(true)));
         assert!(!state.sound.enabled);
-        assert_eq!(state.mode, Mode::Settings);
+        assert_eq!(state.mode(), Mode::Settings);
     }
 
     #[test]
@@ -554,7 +554,7 @@ mod tests {
         );
 
         assert_eq!(action, Some(SettingsAction::SavePaneHistory(true)));
-        assert_eq!(state.mode, Mode::Settings);
+        assert_eq!(state.mode(), Mode::Settings);
     }
 
     #[test]
@@ -578,7 +578,7 @@ mod tests {
             action,
             Some(SettingsAction::SaveSwitchAsciiInputSourceInPrefix(true))
         );
-        assert_eq!(state.mode, Mode::Settings);
+        assert_eq!(state.mode(), Mode::Settings);
     }
 
     #[test]

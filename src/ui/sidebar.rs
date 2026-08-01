@@ -373,7 +373,7 @@ fn workspace_list_entries_inner(app: &AppState, force_expanded: bool) -> Vec<Wor
         .map(|(key, _)| key.clone())
         .collect::<std::collections::HashSet<_>>();
 
-    let visible_group_idx = if matches!(app.mode, Mode::Navigate) {
+    let visible_group_idx = if matches!(app.mode(), Mode::Navigate) {
         Some(app.selected)
     } else {
         app.active
@@ -784,7 +784,7 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
         return;
     }
 
-    let is_navigating = matches!(app.mode, Mode::Navigate);
+    let is_navigating = matches!(app.mode(), Mode::Navigate);
 
     let p = &app.palette;
     let sep_style = if is_navigating {
@@ -990,7 +990,7 @@ pub(super) fn render_sidebar(
     area: Rect,
 ) {
     let p = &app.palette;
-    let is_navigating = matches!(app.mode, Mode::Navigate);
+    let is_navigating = matches!(app.mode(), Mode::Navigate);
     let sep_style = if is_navigating {
         Style::default().fg(p.accent)
     } else {
@@ -1855,7 +1855,7 @@ rows = [[{ token = "workspace", bold = false }, { token = "agent", dim = false }
         let mut app = crate::app::state::AppState::test_new();
         app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
         app.active = Some(0);
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
         let area = Rect::new(0, 0, 26, 20);
         app.view.workspace_card_areas = compute_workspace_card_areas(&app, area);
         let first_row = app.view.workspace_card_areas[0].rect.y;
@@ -1893,7 +1893,7 @@ rows = [[{ token = "$hype", fg = "#abcdef", bold = true, dim = false }, "workspa
         app.sidebar_spaces = config.ui.sidebar.spaces;
         app.workspaces = vec![Workspace::test_new("one")];
         app.active = Some(0);
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
         app.workspaces[0].metadata_tokens.patch(
             std::collections::HashMap::from([("hype".into(), Some("HI".into()))]),
             None,
@@ -2577,7 +2577,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         app.workspaces = vec![ws];
         app.active = Some(0);
         app.selected = 0;
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
         app.view.workspace_card_areas = vec![crate::app::state::WorkspaceCardArea {
             ws_idx: 0,
             rect: Rect::new(0, 1, 15, 2),
@@ -2865,7 +2865,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         }
         app.collapsed_space_keys.insert("repo-key".into());
         app.active = None;
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
 
         let ws_area = Rect::new(0, 0, 30, 6);
         let metrics = workspace_list_scroll_metrics(&app, ws_area);
@@ -2885,7 +2885,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         ];
         app.collapsed_space_keys.insert("repo-key".into());
         app.active = None;
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
         app.workspace_scroll = 1;
 
         let (cards, headers) = compute_workspace_list_areas(&app, Rect::new(0, 0, 30, 12));
@@ -3028,7 +3028,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
             workspace_with_worktree_space("issue", Some("repo-key"), "/repo/herdr-issue"),
         ];
         app.active = Some(1);
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
         app.collapsed_space_keys.insert("repo-key".into());
 
         assert_eq!(
@@ -3046,7 +3046,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         );
 
         app.active = None;
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
         assert_eq!(
             workspace_list_entries(&app),
             vec![WorkspaceListEntry::Workspace {
@@ -3063,7 +3063,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
             workspace_with_worktree_space("main", Some("repo-key"), "/repo/herdr"),
             workspace_with_worktree_space("issue", Some("repo-key"), "/repo/herdr-issue"),
         ];
-        app.mode = Mode::Navigate;
+        app.replace_mode(Mode::Navigate);
         app.selected = 1;
         app.active = Some(1);
         app.collapsed_space_keys.insert("repo-key".into());

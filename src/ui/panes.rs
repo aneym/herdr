@@ -308,7 +308,7 @@ pub(super) fn render_panes(
     };
 
     let multi_pane = ws.layout.pane_count() > 1;
-    let terminal_active = app.mode == Mode::Terminal;
+    let terminal_active = app.mode() == Mode::Terminal;
 
     for info in pane_infos {
         if let Some(rt) = app.runtime_for_pane_in_workspace(terminal_runtimes, ws_idx, info.id) {
@@ -680,7 +680,7 @@ fn line_cell_symbol(line: LineCell) -> &'static str {
 }
 
 fn render_copy_mode_cursor(app: &AppState, frame: &mut Frame, info: &PaneInfo) {
-    if app.mode != Mode::Copy {
+    if app.mode() != Mode::Copy {
         return;
     }
     let Some(copy_mode) = app.copy_mode.as_ref() else {
@@ -1007,7 +1007,7 @@ mod tests {
     #[test]
     fn pane_border_renderer_places_adjacent_cjk_by_display_width() {
         let mut app = AppState::test_new();
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
         app.view.terminal_area = Rect::new(0, 0, 12, 3);
         let ws = Workspace::test_new("test");
         let pane_id = ws.tabs[0].root_pane;
@@ -1138,7 +1138,7 @@ mod tests {
     #[test]
     fn global_pane_border_renderer_composes_junctions_and_focus_style() {
         let mut app = AppState::test_new();
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
         app.view.terminal_area = Rect::new(0, 0, 4, 4);
         app.view.pane_infos = vec![
             PaneInfo {
@@ -1208,7 +1208,7 @@ mod tests {
     #[test]
     fn gapped_pane_focus_does_not_color_neighbor_border() {
         let mut app = AppState::test_new();
-        app.mode = Mode::Terminal;
+        app.replace_mode(Mode::Terminal);
         app.pane_gaps = true;
         app.view.terminal_area = Rect::new(0, 0, 4, 3);
         app.view.pane_infos = vec![

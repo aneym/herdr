@@ -459,7 +459,7 @@ mod tests {
         app.pane_history_persistence = true;
         app.settings.section = SettingsSection::Experiments;
         app.settings.list.selected = 0;
-        app.mode = Mode::Settings;
+        app.replace_mode(Mode::Settings);
 
         let mut terminal =
             Terminal::new(TestBackend::new(80, 24)).expect("test terminal should initialize");
@@ -485,7 +485,7 @@ mod tests {
         app.pane_history_persistence = false;
         app.settings.section = SettingsSection::Experiments;
         app.settings.list.selected = 0;
-        app.mode = Mode::Settings;
+        app.replace_mode(Mode::Settings);
 
         let mut terminal =
             Terminal::new(TestBackend::new(80, 24)).expect("test terminal should initialize");
@@ -510,7 +510,7 @@ mod tests {
         app.switch_ascii_input_source_in_prefix = true;
         app.settings.section = SettingsSection::Experiments;
         app.settings.list.selected = 1;
-        app.mode = Mode::Settings;
+        app.replace_mode(Mode::Settings);
 
         let mut terminal =
             Terminal::new(TestBackend::new(80, 24)).expect("test terminal should initialize");

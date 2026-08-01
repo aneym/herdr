@@ -143,7 +143,7 @@ impl App {
             self.state.switch_workspace_tab(ws_idx, tab_idx);
             self.state
                 .record_pane_focus_change(previous_focus, ws_idx, new_pane.pane_id);
-            self.state.mode = crate::app::Mode::Terminal;
+            self.state.replace_mode(crate::app::Mode::Terminal);
         }
         if placement == PluginPanePlacement::Zoomed {
             if let Some(tab) = self
@@ -209,7 +209,7 @@ impl App {
         let pane_id = ws.tabs[tab_idx].root_pane;
         if params.focus {
             self.state.switch_workspace_tab(ws_idx, tab_idx);
-            self.state.mode = crate::app::Mode::Terminal;
+            self.state.replace_mode(crate::app::Mode::Terminal);
         }
         let new_pane = crate::workspace::NewPane {
             pane_id,

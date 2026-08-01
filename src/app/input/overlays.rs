@@ -20,7 +20,7 @@ fn rect_contains(rect: Rect, col: u16, row: u16) -> bool {
 
 impl App {
     pub(super) fn handle_overlay_mouse(&mut self, mouse: MouseEvent) -> bool {
-        if self.state.mode == Mode::ReleaseNotes {
+        if self.state.mode() == Mode::ReleaseNotes {
             match mouse.kind {
                 MouseEventKind::Down(MouseButton::Left)
                     if self
@@ -71,7 +71,7 @@ impl App {
             return true;
         }
 
-        if self.state.mode == Mode::ProductAnnouncement {
+        if self.state.mode() == Mode::ProductAnnouncement {
             match mouse.kind {
                 MouseEventKind::Down(MouseButton::Left)
                     if self
@@ -123,7 +123,7 @@ impl App {
             return true;
         }
 
-        if self.state.mode == Mode::Navigator {
+        if self.state.mode() == Mode::Navigator {
             match mouse.kind {
                 MouseEventKind::Moved => {
                     if let Some(idx) = self.state.navigator_row_index_at_from(
@@ -190,7 +190,7 @@ impl App {
             return true;
         }
 
-        if self.state.mode == Mode::KeybindHelp {
+        if self.state.mode() == Mode::KeybindHelp {
             match mouse.kind {
                 MouseEventKind::Down(MouseButton::Left)
                     if self
@@ -718,7 +718,7 @@ mod tests {
     #[test]
     fn clicking_keybind_help_close_button_closes_overlay() {
         let mut app = app_for_mouse_test();
-        app.state.mode = Mode::KeybindHelp;
+        app.state.replace_mode(Mode::KeybindHelp);
 
         let rect = app.state.keybind_help_popup_rect();
         let inner = Rect::new(
@@ -735,13 +735,13 @@ mod tests {
             close.y,
         ));
 
-        assert_eq!(app.state.mode, Mode::Navigate);
+        assert_eq!(app.state.mode(), Mode::Navigate);
     }
 
     #[test]
     fn clicking_keybind_help_back_button_leaves_help_open() {
         let mut app = app_for_mouse_test();
-        app.state.mode = Mode::KeybindHelp;
+        app.state.replace_mode(Mode::KeybindHelp);
         app.state.keybind_help.search_focused = true;
         app.state.keybind_help.query = "work".into();
 
@@ -760,7 +760,7 @@ mod tests {
             back.y,
         ));
 
-        assert_eq!(app.state.mode, Mode::KeybindHelp);
+        assert_eq!(app.state.mode(), Mode::KeybindHelp);
         assert!(!app.state.keybind_help.search_focused);
         assert!(app.state.keybind_help.query.is_empty());
     }
@@ -768,7 +768,7 @@ mod tests {
     #[test]
     fn onboarding_hover_does_not_change_selection() {
         let mut app = app_for_mouse_test();
-        app.state.mode = Mode::Onboarding;
+        app.state.replace_mode(Mode::Onboarding);
 
         let inner = app.state.onboarding_modal_inner(64, 16).unwrap();
         let content = crate::ui::modal_stack_areas(inner, 2, 0, 1, 1).content;
@@ -780,7 +780,7 @@ mod tests {
     #[test]
     fn onboarding_click_continue_requests_completion() {
         let mut app = app_for_mouse_test();
-        app.state.mode = Mode::Onboarding;
+        app.state.replace_mode(Mode::Onboarding);
 
         let inner = app.state.onboarding_modal_inner(64, 16).unwrap();
         let actions = crate::ui::modal_stack_areas(inner, 2, 0, 1, 1)
