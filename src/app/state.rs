@@ -1488,15 +1488,16 @@ pub(crate) struct DeferredAttentionRead {
     pub state_change_seq: u64,
 }
 
-macro_rules! app_state {
-    ($mode:expr; $($fields:tt)*) => {
-        AppState {
-            mode: $mode,
-            $($fields)*
-        }
-    };
+#[derive(Debug)]
+pub(super) struct AppModeState {
+    mode: Mode,
 }
-pub(crate) use app_state;
+
+impl AppModeState {
+    pub(super) fn new(mode: Mode) -> Self {
+        Self { mode }
+    }
+}
 
 /// All application state — pure data, no channels or async runtime.
 /// Testable without PTYs or a tokio runtime.
@@ -1512,7 +1513,7 @@ pub struct AppState {
     pub(crate) previous_pane_focus: Option<PaneFocusTarget>,
     pub(crate) deferred_attention_read: Option<DeferredAttentionRead>,
     pub selected: usize,
-    pub(super) mode: Mode,
+    pub(super) mode_state: AppModeState,
     pub should_quit: bool,
     /// In monolithic --no-session mode, detach exits the app because there is no server to detach from.
     pub detach_exits: bool,
@@ -1698,14 +1699,14 @@ pub struct AppState {
 
 impl AppState {
     pub fn mode(&self) -> Mode {
-        self.mode
+        self.mode_state.mode
     }
 
     pub fn replace_mode(&mut self, mode: Mode) {
-        if self.mode == Mode::ConfirmClose && mode != Mode::ConfirmClose {
+        if self.mode_state.mode == Mode::ConfirmClose && mode != Mode::ConfirmClose {
             self.pending_agent_close_focus = None;
         }
-        self.mode = mode;
+        self.mode_state.mode = mode;
     }
 
     pub(crate) fn mark_session_dirty(&mut self) {
@@ -1771,7 +1772,7 @@ impl AppState {
         &self,
         terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
     ) -> bool {
-        self.mode == Mode::Terminal
+        self.mode() == Mode::Terminal
             && self
                 .active
                 .and_then(|idx| self.focused_runtime_in_workspace(terminal_runtimes, idx))
@@ -1908,7 +1909,7 @@ impl AppState {
             previous_pane_focus: None,
             deferred_attention_read: None,
             selected: 0,
-            mode: Mode::Navigate,
+            mode_state: AppModeState::new(Mode::Navigate),
             should_quit: false,
             detach_exits: false,
             detach_requested: false,
@@ -2108,7 +2109,7 @@ impl AppState {
 
     pub fn assert_invariants_for_test(&self) {
         assert!(
-            self.mode == Mode::ConfirmClose || self.pending_agent_close_focus.is_none(),
+            self.mode() == Mode::ConfirmClose || self.pending_agent_close_focus.is_none(),
             "pending agent close focus must only exist while close confirmation is active"
         );
         if self.workspaces.is_empty() {

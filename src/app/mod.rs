@@ -545,7 +545,7 @@ impl App {
         let theme_runtime = theme_runtime_config(config, true);
         let (theme_palette, theme_name) = resolve_effective_theme(&theme_runtime, None);
 
-        let mut state = state::app_state! { mode;
+        let mut state = AppState {
             terminals: std::collections::HashMap::new(),
             direct_attach_resize_locks: std::collections::HashSet::new(),
             pane_id_aliases: std::collections::HashMap::new(),
@@ -555,6 +555,7 @@ impl App {
             previous_pane_focus: None,
             deferred_attention_read: None,
             selected,
+            mode_state: state::AppModeState::new(mode),
             should_quit: false,
             detach_exits: no_session,
             detach_requested: false,
