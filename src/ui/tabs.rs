@@ -6,8 +6,8 @@ use ratatui::{
     Frame,
 };
 
-use super::status::state_label_color;
-use super::text::display_width_u16;
+use super::status::resolved_agent_icon;
+use super::text::{display_width, display_width_u16};
 use super::widgets::panel_contrast_fg;
 use crate::app::AppState;
 use crate::detect::AgentState;
@@ -25,12 +25,13 @@ pub(crate) struct TabBarView {
     pub new_tab_hit_area: Rect,
 }
 
-fn tab_width(
-    ws: &crate::workspace::Workspace,
-    tab_idx: usize,
-    show_tab_status: crate::config::ShowTabStatusConfig,
-) -> u16 {
-    let status_width = u16::from(show_tab_status != crate::config::ShowTabStatusConfig::Off) * 2;
+fn tab_width(app: &AppState, ws: &crate::workspace::Workspace, tab_idx: usize) -> u16 {
+    let status_width = ws
+        .tabs
+        .get(tab_idx)
+        .and_then(|tab| tab_status(app, tab))
+        .map(|(glyph, _)| display_width_u16(glyph).saturating_add(1))
+        .unwrap_or(0);
     display_width_u16(&tab_chrome_label(ws, tab_idx))
         .saturating_add(4 + status_width)
         .max(MIN_TAB_WIDTH)
@@ -68,8 +69,23 @@ fn should_show_tab_status(
                 || state == AgentState::Blocked
                 || (state == AgentState::Idle && !seen)
         }
-        crate::config::ShowTabStatusConfig::All => state != AgentState::Unknown,
+        crate::config::ShowTabStatusConfig::All => true,
     }
+}
+
+fn tab_status<'a>(app: &'a AppState, tab: &crate::workspace::Tab) -> Option<(&'a str, Style)> {
+    let (state, seen) = tab_agent_state(app, tab)?;
+    if !should_show_tab_status(app.show_tab_status, state, seen) {
+        return None;
+    }
+    let icon = resolved_agent_icon(
+        &app.sidebar_agents,
+        state,
+        seen,
+        app.animation_tick,
+        &app.palette,
+    );
+    (!icon.0.is_empty()).then_some(icon)
 }
 
 fn tab_chrome_label(ws: &crate::workspace::Workspace, tab_idx: usize) -> String {
@@ -84,10 +100,10 @@ fn tab_chrome_label(ws: &crate::workspace::Workspace, tab_idx: usize) -> String 
 }
 
 fn layout_tab_hit_areas(
+    app: &AppState,
     ws: &crate::workspace::Workspace,
     area: Rect,
     scroll: usize,
-    show_tab_status: crate::config::ShowTabStatusConfig,
 ) -> Vec<Rect> {
     let mut rects = vec![Rect::default(); ws.tabs.len()];
     if area.width == 0 || area.height == 0 {
@@ -100,7 +116,7 @@ fn layout_tab_hit_areas(
         if x >= right {
             break;
         }
-        let desired = tab_width(ws, idx, show_tab_status);
+        let desired = tab_width(app, ws, idx);
         let remaining = right.saturating_sub(x);
         let width = desired.min(remaining).max(1);
         *rect = Rect::new(x, area.y, width, 1);
@@ -109,17 +125,13 @@ fn layout_tab_hit_areas(
     rects
 }
 
-fn centered_tab_scroll(
-    ws: &crate::workspace::Workspace,
-    area: Rect,
-    show_tab_status: crate::config::ShowTabStatusConfig,
-) -> usize {
+fn centered_tab_scroll(app: &AppState, ws: &crate::workspace::Workspace, area: Rect) -> usize {
     let mut best_scroll = ws.active_tab;
     let mut best_distance = u16::MAX;
     let viewport_center = area.x.saturating_mul(2).saturating_add(area.width);
 
     for scroll in 0..=ws.active_tab {
-        let rects = layout_tab_hit_areas(ws, area, scroll, show_tab_status);
+        let rects = layout_tab_hit_areas(app, ws, area, scroll);
         let Some(active_rect) = rects.get(ws.active_tab).copied() else {
             continue;
         };
@@ -150,14 +162,10 @@ fn trailing_tab_controls_x(tab_hit_areas: &[Rect], fallback_x: u16) -> u16 {
         .unwrap_or(fallback_x)
 }
 
-fn max_tab_scroll(
-    ws: &crate::workspace::Workspace,
-    area: Rect,
-    show_tab_status: crate::config::ShowTabStatusConfig,
-) -> usize {
+fn max_tab_scroll(app: &AppState, ws: &crate::workspace::Workspace, area: Rect) -> usize {
     (0..ws.tabs.len())
         .find(|&scroll| {
-            layout_tab_hit_areas(ws, area, scroll, show_tab_status)
+            layout_tab_hit_areas(app, ws, area, scroll)
                 .last()
                 .is_some_and(|rect| rect.width > 0)
         })
@@ -165,27 +173,27 @@ fn max_tab_scroll(
 }
 
 pub(crate) fn compute_tab_bar_view(
+    app: &AppState,
     ws: &crate::workspace::Workspace,
     area: Rect,
     current_scroll: usize,
     follow_active: bool,
     mouse_chrome: bool,
-    show_tab_status: crate::config::ShowTabStatusConfig,
 ) -> TabBarView {
     if area.width == 0 || area.height == 0 {
         return TabBarView::default();
     }
 
     if !mouse_chrome {
-        let max_scroll = max_tab_scroll(ws, area, show_tab_status);
+        let max_scroll = max_tab_scroll(app, ws, area);
         let scroll = if follow_active {
-            centered_tab_scroll(ws, area, show_tab_status).min(max_scroll)
+            centered_tab_scroll(app, ws, area).min(max_scroll)
         } else {
             current_scroll.min(max_scroll)
         };
         return TabBarView {
             scroll,
-            tab_hit_areas: layout_tab_hit_areas(ws, area, scroll, show_tab_status),
+            tab_hit_areas: layout_tab_hit_areas(app, ws, area, scroll),
             scroll_left_hit_area: Rect::default(),
             scroll_right_hit_area: Rect::default(),
             new_tab_hit_area: Rect::default(),
@@ -199,7 +207,7 @@ pub(crate) fn compute_tab_bar_view(
         area.width.saturating_sub(NEW_TAB_WIDTH),
         area.height,
     );
-    let all_tabs = layout_tab_hit_areas(ws, all_tabs_area, 0, show_tab_status);
+    let all_tabs = layout_tab_hit_areas(app, ws, all_tabs_area, 0);
     let overflow = all_tabs.iter().any(|rect| rect.width == 0);
     if !overflow {
         let new_tab_x = trailing_tab_controls_x(&all_tabs, area.x);
@@ -229,13 +237,13 @@ pub(crate) fn compute_tab_bar_view(
         area.height,
     );
 
-    let max_scroll = max_tab_scroll(ws, tab_area, show_tab_status);
+    let max_scroll = max_tab_scroll(app, ws, tab_area);
     let scroll = if follow_active {
-        centered_tab_scroll(ws, tab_area, show_tab_status).min(max_scroll)
+        centered_tab_scroll(app, ws, tab_area).min(max_scroll)
     } else {
         current_scroll.min(max_scroll)
     };
-    let tab_hit_areas = layout_tab_hit_areas(ws, tab_area, scroll, show_tab_status);
+    let tab_hit_areas = layout_tab_hit_areas(app, ws, tab_area, scroll);
     let trailing_x = trailing_tab_controls_x(&tab_hit_areas, tab_area_x).min(tab_area_right);
     let right_hit_area = Rect::new(
         trailing_x,
@@ -396,20 +404,18 @@ pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
         };
         let width = rect.width as usize;
         let name = tab_chrome_label(ws, idx);
-        let status = tab_agent_state(app, tab)
-            .filter(|(state, seen)| should_show_tab_status(app.show_tab_status, *state, *seen));
-        let status_width = usize::from(status.is_some()) * 2;
+        let status = tab_status(app, tab);
+        let status_width = status
+            .map(|(glyph, _)| display_width(glyph).saturating_add(1))
+            .unwrap_or(0);
         let label = format!(
             " {:width$}",
             name,
             width = width.saturating_sub(1 + status_width)
         );
         let mut line = ratatui::text::Line::from(Span::styled(label, style));
-        if let Some((state, seen)) = status {
-            line.push_span(Span::styled(
-                "●",
-                style.fg(state_label_color(state, seen, p)),
-            ));
+        if let Some((glyph, icon_style)) = status {
+            line.push_span(Span::styled(glyph, style.patch(icon_style)));
             line.push_span(Span::styled(" ", style));
         }
         frame.render_widget(Paragraph::new(line), rect);
@@ -493,12 +499,12 @@ mod tests {
         app.active = Some(0);
         app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
         let view = compute_tab_bar_view(
+            &app,
             &app.workspaces[0],
             app.view.tab_bar_rect,
             0,
             true,
             false,
-            crate::config::ShowTabStatusConfig::Off,
         );
         app.view.tab_hit_areas = view.tab_hit_areas;
 
@@ -527,12 +533,12 @@ mod tests {
         app.active = Some(0);
         app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
         let view = compute_tab_bar_view(
+            &app,
             &app.workspaces[0],
             app.view.tab_bar_rect,
             0,
             true,
             false,
-            crate::config::ShowTabStatusConfig::Off,
         );
         app.view.tab_hit_areas = view.tab_hit_areas;
 
@@ -570,12 +576,12 @@ mod tests {
         ] {
             app.show_tab_status = mode;
             let view = compute_tab_bar_view(
+                &app,
                 &app.workspaces[0],
                 app.view.tab_bar_rect,
                 0,
                 true,
                 false,
-                mode,
             );
             app.view.tab_hit_areas = view.tab_hit_areas;
             let backend = TestBackend::new(30, 1);
@@ -597,6 +603,58 @@ mod tests {
     }
 
     #[test]
+    fn tab_glyph_matches_sidebar_resolver_for_every_state_and_overrides() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("test")];
+        app.ensure_test_terminals();
+        app.show_tab_status = crate::config::ShowTabStatusConfig::All;
+        app.sidebar_agents
+            .state_icons
+            .insert("idle".into(), String::new());
+        app.sidebar_agents
+            .state_icons
+            .insert("blocked".into(), "!!".into());
+        app.animation_tick = 3;
+        let pane_id = app.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+
+        for (state, seen) in [
+            (AgentState::Idle, true),
+            (AgentState::Idle, false),
+            (AgentState::Working, true),
+            (AgentState::Blocked, true),
+            (AgentState::Unknown, true),
+        ] {
+            app.terminals.get_mut(&terminal_id).unwrap().state = state;
+            app.workspaces[0].tabs[0]
+                .panes
+                .get_mut(&pane_id)
+                .unwrap()
+                .seen = seen;
+            let expected = resolved_agent_icon(
+                &app.sidebar_agents,
+                state,
+                seen,
+                app.animation_tick,
+                &app.palette,
+            );
+            let actual = tab_status(&app, &app.workspaces[0].tabs[0]);
+            if expected.0.is_empty() {
+                assert!(actual.is_none(), "state={state:?}, seen={seen}");
+            } else {
+                assert_eq!(actual, Some(expected), "state={state:?}, seen={seen}");
+            }
+            if state == AgentState::Idle && !seen {
+                assert_eq!(expected.0, "●");
+                assert_eq!(expected.1.fg, Some(app.palette.teal));
+                assert!(actual.is_some());
+            }
+        }
+    }
+
+    #[test]
     fn off_tab_status_preserves_pre_feature_rendering() {
         let mut app = AppState::test_new();
         let mut ws = Workspace::test_new("test");
@@ -608,12 +666,12 @@ mod tests {
         app.show_tab_status = crate::config::ShowTabStatusConfig::Off;
         app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
         let view = compute_tab_bar_view(
+            &app,
             &app.workspaces[0],
             app.view.tab_bar_rect,
             0,
             true,
             false,
-            crate::config::ShowTabStatusConfig::Off,
         );
         app.view.tab_hit_areas = view.tab_hit_areas;
 
@@ -630,26 +688,23 @@ mod tests {
     }
 
     #[test]
-    fn opted_in_tab_status_adds_suffix_width() {
+    fn tab_status_width_tracks_resolved_glyph_width() {
+        let mut app = AppState::test_new();
         let mut ws = Workspace::test_new("test");
         ws.tabs[0].set_custom_name("abcdefgh".into());
+        app.workspaces = vec![ws];
+        app.ensure_test_terminals();
+        app.show_tab_status = crate::config::ShowTabStatusConfig::All;
+        app.sidebar_agents
+            .state_icons
+            .insert("unknown".into(), "界".into());
 
-        assert_eq!(
-            tab_width(&ws, 0, crate::config::ShowTabStatusConfig::Off),
-            12
-        );
-        assert_eq!(
-            tab_width(&ws, 0, crate::config::ShowTabStatusConfig::Attention),
-            14
-        );
-        assert_eq!(
-            tab_width(&ws, 0, crate::config::ShowTabStatusConfig::Active),
-            14
-        );
-        assert_eq!(
-            tab_width(&ws, 0, crate::config::ShowTabStatusConfig::All),
-            14
-        );
+        assert_eq!(tab_width(&app, &app.workspaces[0], 0), 15);
+
+        app.sidebar_agents
+            .state_icons
+            .insert("unknown".into(), String::new());
+        assert_eq!(tab_width(&app, &app.workspaces[0], 0), 12);
     }
 
     #[test]
@@ -664,7 +719,7 @@ mod tests {
             AgentState::Working,
             true
         ));
-        assert!(!should_show_tab_status(
+        assert!(should_show_tab_status(
             crate::config::ShowTabStatusConfig::All,
             AgentState::Unknown,
             true
@@ -694,10 +749,8 @@ mod tests {
         ws.tabs[0].set_custom_name("abcdefgh".into());
         ws.tabs[0].zoomed = true;
 
-        assert_eq!(
-            tab_width(&ws, 0, crate::config::ShowTabStatusConfig::Off),
-            14
-        );
+        let app = AppState::test_new();
+        assert_eq!(tab_width(&app, &ws, 0), 14);
     }
 
     #[test]
@@ -705,8 +758,9 @@ mod tests {
         let mut ws = Workspace::test_new("test");
         ws.tabs[0].set_custom_name("提交 herdr 的反馈".into());
 
+        let app = AppState::test_new();
         assert_eq!(
-            tab_width(&ws, 0, crate::config::ShowTabStatusConfig::Off),
+            tab_width(&app, &ws, 0),
             display_width_u16("提交 herdr 的反馈") + 4
         );
     }
@@ -721,12 +775,12 @@ mod tests {
         app.workspaces = vec![ws];
         app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
         let view = compute_tab_bar_view(
+            &app,
             &app.workspaces[0],
             app.view.tab_bar_rect,
             0,
             true,
             false,
-            crate::config::ShowTabStatusConfig::Off,
         );
         app.view.tab_hit_areas = view.tab_hit_areas;
 

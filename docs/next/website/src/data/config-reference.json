@@ -866,7 +866,7 @@
           "key": "ui.show_tab_status",
           "type": "enum",
           "default": "\"off\"",
-          "description": "Show agent state dots in tabs. attention shows blocked and completed agents awaiting attention; active also shows working agents while idle tabs stay quiet like the sidebar; all shows any known state.",
+          "description": "Show sidebar agent state icons in tabs, using the same glyphs, state_icons overrides, and working animation. attention shows blocked and completed agents awaiting attention; active also shows working agents while seen idle tabs stay quiet; all shows every state whose resolved glyph is non-empty.",
           "values": [
             "off",
             "attention",
@@ -934,7 +934,7 @@
           "key": "ui.sidebar.agents.state_icons",
           "type": "table of strings",
           "default": "{}",
-          "description": "Agent state_icon overrides keyed by idle, working, blocked, or unknown. Unspecified states retain their built-in glyph; an empty string removes the icon token and its adjacent separators without reserving column width."
+          "description": "Agent state_icon overrides. Plain idle, working, blocked, and unknown keys apply only to seen agents; append _unseen to override unseen variants. Unspecified variants retain their built-in glyph, so idle = \"\" hides seen-idle while unread completions keep their built-in marker. An empty string removes the icon token and adjacent separators without reserving column width."
         },
         {
           "key": "ui.sidebar.agents.min_row_lines",

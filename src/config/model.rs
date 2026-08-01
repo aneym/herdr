@@ -848,7 +848,7 @@ pub struct UiConfig {
     pub show_agent_labels_on_pane_borders: bool,
     /// Hide the tab row when the workspace has one tab. Default: false.
     pub hide_tab_bar_when_single_tab: bool,
-    /// Show agent state dots in tabs. Default: off.
+    /// Show sidebar agent state icons in tabs. Default: off.
     pub show_tab_status: ShowTabStatusConfig,
     /// When focused agent attention is marked read. Default: on_focus.
     pub attention_read: AttentionReadConfig,

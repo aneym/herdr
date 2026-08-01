@@ -324,10 +324,11 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # New tabs can still be created with the configured keybinding.
 # hide_tab_bar_when_single_tab = false
 
-# Agent state dots in tabs: "off", "attention", "active", or "all".
+# Sidebar agent state icons in tabs: "off", "attention", "active", or "all".
+# Icons use the same glyphs, overrides, and working animation as the agent sidebar.
 # "attention" shows blocked and completed agents awaiting attention.
-# "active" also shows working agents, while idle tabs stay quiet like the sidebar.
-# "all" shows any known agent state.
+# "active" also shows working agents, while seen idle tabs stay quiet.
+# "all" shows every state whose resolved glyph is non-empty.
 # show_tab_status = "off"
 
 # When focused agent attention is marked read: "on_focus" or "on_unfocus".
@@ -356,9 +357,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # A token occurrence may be styled with { token = "workspace", fg = "#89b4fa", bold = true, dim = false }.
 # Omitted style fields preserve the contextual default.
 # [ui.sidebar.agents]
-# Override state_icon glyphs by internal state. Empty strings remove the token and its separators.
-# Unspecified states keep the built-in glyph. Valid keys: idle, working, blocked, unknown.
-# state_icons = { idle = "" }
+# Override seen state_icon glyphs by internal state; use <state>_unseen for unseen variants.
+# Plain keys do not affect unseen agents. Empty strings remove the token and its separators.
+# Unspecified variants keep the built-in glyph. States: idle, working, blocked, unknown.
+# state_icons = { idle = "", idle_unseen = "✓" }
 # Minimum rendered lines per agent entry. Blank lines pad entries with fewer populated rows.
 # min_row_lines = 0
 # Blank rows between agent entries. Set to 1 to restore the previous spacing.
