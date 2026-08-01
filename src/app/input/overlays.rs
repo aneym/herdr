@@ -261,6 +261,19 @@ impl AppState {
 
     pub(crate) fn navigator_popup_rect(&self) -> Rect {
         let area = self.onboarding_full_area();
+        if self.navigator.search_entry {
+            let width = 76.min(area.width.saturating_sub(4));
+            let x = area.x + area.width.saturating_sub(width) / 2;
+            let y = area.y + area.height / 5;
+            let desired_height = if self.navigator_search_is_active() {
+                17
+            } else {
+                3
+            };
+            let height = desired_height.min(area.bottom().saturating_sub(y));
+            return Rect::new(x, y, width, height);
+        }
+
         let margin_x = (area.width / 16).max(2);
         let margin_y = (area.height / 10).max(1);
         let width = area.width.saturating_sub(margin_x.saturating_mul(2));
@@ -271,6 +284,10 @@ impl AppState {
             width.max(4),
             height.max(4),
         )
+    }
+
+    fn navigator_search_is_active(&self) -> bool {
+        !self.navigator.query.is_empty() || self.navigator.state_filter.is_some()
     }
 
     pub(crate) fn navigator_inner_rect(&self) -> Rect {
@@ -286,18 +303,23 @@ impl AppState {
 
     pub(crate) fn navigator_body_rect(&self) -> Rect {
         let inner = self.navigator_inner_rect();
-        if inner.height <= 4 {
+        let reserved_rows = if self.navigator.search_entry { 3 } else { 4 };
+        if inner.height <= reserved_rows {
             return Rect::default();
         }
         Rect::new(
             inner.x,
             inner.y + 2,
             inner.width,
-            inner.height.saturating_sub(4),
+            inner.height.saturating_sub(reserved_rows),
         )
     }
 
     pub(crate) fn navigator_detail_rect(&self) -> Rect {
+        if self.navigator.search_entry {
+            return Rect::default();
+        }
+
         let inner = self.navigator_inner_rect();
         Rect::new(
             inner.x,
@@ -308,6 +330,10 @@ impl AppState {
     }
 
     pub(crate) fn navigator_footer_rect(&self) -> Rect {
+        if self.navigator.search_entry && !self.navigator_search_is_active() {
+            return Rect::default();
+        }
+
         let inner = self.navigator_inner_rect();
         Rect::new(
             inner.x,
@@ -714,6 +740,66 @@ mod tests {
 
     use super::super::{app_for_mouse_test, mouse};
     use super::*;
+
+    fn navigator_app(area: Rect, search_entry: bool) -> App {
+        let mut app = app_for_mouse_test();
+        app.state.view.sidebar_rect = Rect::new(area.x, area.y, 0, area.height);
+        app.state.view.terminal_area = area;
+        app.state.navigator.search_entry = search_entry;
+        app
+    }
+
+    #[test]
+    fn dormant_search_palette_is_a_centered_upper_strip() {
+        let app = navigator_app(Rect::new(10, 5, 120, 50), true);
+
+        let popup = app.state.navigator_popup_rect();
+
+        assert_eq!(popup, Rect::new(32, 15, 76, 3));
+        assert_eq!(app.state.navigator_body_rect(), Rect::default());
+        assert_eq!(app.state.navigator_detail_rect(), Rect::default());
+        assert_eq!(app.state.navigator_footer_rect(), Rect::default());
+    }
+
+    #[test]
+    fn active_search_palette_has_fixed_results_height() {
+        let mut app = navigator_app(Rect::new(10, 5, 120, 50), true);
+        app.state.navigator.query = "pane".into();
+
+        assert_eq!(app.state.navigator_popup_rect(), Rect::new(32, 15, 76, 17));
+        assert_eq!(app.state.navigator_body_rect().height, 12);
+        assert_eq!(app.state.navigator_detail_rect(), Rect::default());
+        assert_eq!(app.state.navigator_footer_rect().height, 1);
+    }
+
+    #[test]
+    fn goto_navigator_popup_keeps_legacy_geometry() {
+        let area = Rect::new(10, 5, 120, 50);
+        let app = navigator_app(area, false);
+        let margin_x = (area.width / 16).max(2);
+        let margin_y = (area.height / 10).max(1);
+        let expected = Rect::new(
+            area.x + margin_x,
+            area.y + margin_y,
+            area.width.saturating_sub(margin_x.saturating_mul(2)).max(4),
+            area.height.saturating_sub(margin_y.saturating_mul(2)).max(4),
+        );
+
+        assert_eq!(app.state.navigator_popup_rect(), expected);
+    }
+
+    #[test]
+    fn search_palette_height_is_clamped_below_upper_position() {
+        let mut app = navigator_app(Rect::new(0, 0, 70, 10), true);
+        app.state.navigator.state_filter = Some(crate::app::state::NavigatorStateFilter::Working);
+
+        let popup = app.state.navigator_popup_rect();
+
+        assert_eq!(popup.width, 66);
+        assert_eq!(popup.x, 2);
+        assert_eq!(popup.y, 2);
+        assert_eq!(popup.height, 8);
+    }
 
     #[test]
     fn clicking_keybind_help_close_button_closes_overlay() {
