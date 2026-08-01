@@ -929,6 +929,8 @@ pub(crate) struct NavigatorRow {
     pub is_tab: bool,
     pub expanded: bool,
     pub search_text: String,
+    pub label_match_positions: Vec<usize>,
+    pub ranked: bool,
     /// Whether this row itself matched the active query/state filter, as
     /// opposed to being included as ancestor context or cascaded subtree of a
     /// matching workspace or tab. Always true when no filter is active.
@@ -944,9 +946,10 @@ pub(crate) enum NavigatorDisplayLine {
 }
 
 pub(crate) fn navigator_display_lines(rows: &[NavigatorRow]) -> Vec<NavigatorDisplayLine> {
+    let ranked = rows.first().is_some_and(|row| row.ranked);
     let mut lines = Vec::with_capacity(rows.len().saturating_mul(2));
     for (idx, row) in rows.iter().enumerate() {
-        if row.is_workspace && !lines.is_empty() {
+        if !ranked && row.is_workspace && !lines.is_empty() {
             lines.push(NavigatorDisplayLine::Spacer);
         }
         lines.push(NavigatorDisplayLine::Row(idx));
@@ -987,6 +990,7 @@ pub(crate) struct NavigatorState {
     pub selected: usize,
     pub scroll: usize,
     pub search_focused: bool,
+    pub search_entry: bool,
     pub state_filter: Option<NavigatorStateFilter>,
     pub expanded_workspaces: std::collections::HashSet<String>,
 }
@@ -2444,6 +2448,8 @@ mod tests {
             is_tab: false,
             expanded: true,
             search_text: String::new(),
+            label_match_positions: Vec::new(),
+            ranked: false,
             matched: true,
         }
     }

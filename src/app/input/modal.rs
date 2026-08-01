@@ -167,7 +167,15 @@ pub(crate) fn handle_navigator_key(
     if state.navigator.search_focused {
         match key.code {
             KeyCode::Esc => {
-                state.navigator.search_focused = false;
+                if !state.navigator.query.is_empty() {
+                    state.navigator.query.clear();
+                    state.navigator.state_filter = None;
+                    state.select_first_navigator_match_from(terminal_runtimes);
+                } else if state.navigator.search_entry {
+                    leave_modal(state);
+                } else {
+                    state.navigator.search_focused = false;
+                }
             }
             KeyCode::Enter => {
                 state.accept_navigator_selection_from(terminal_runtimes);
@@ -188,7 +196,7 @@ pub(crate) fn handle_navigator_key(
             KeyCode::Char('u') if key.modifiers == KeyModifiers::CONTROL => {
                 state.navigator.query.clear();
                 state.navigator.state_filter = None;
-                state.clamp_navigator_selection_from(terminal_runtimes);
+                state.select_first_navigator_match_from(terminal_runtimes);
             }
             KeyCode::Char(c)
                 if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
@@ -1919,7 +1927,7 @@ mod tests {
     }
 
     #[test]
-    fn navigator_search_escape_blurs_then_next_escape_closes() {
+    fn navigator_search_escape_clears_then_blurs_then_closes() {
         let mut state = state_with_workspaces(&["alpha", "beta"]);
         let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
         state.mode = Mode::Navigator;
@@ -1933,27 +1941,8 @@ mod tests {
         );
 
         assert_eq!(state.mode, Mode::Navigator);
-        assert!(!state.navigator.search_focused);
-        assert_eq!(state.navigator.query, "a");
-
-        handle_navigator_key(
-            &mut state,
-            &terminal_runtimes,
-            KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
-        );
-
-        assert_eq!(state.navigator.selected, 1);
-        assert_eq!(state.navigator.query, "a");
-
-        handle_navigator_key(
-            &mut state,
-            &terminal_runtimes,
-            KeyEvent::new(KeyCode::Char('/'), KeyModifiers::empty()),
-        );
-
-        assert_eq!(state.mode, Mode::Navigator);
         assert!(state.navigator.search_focused);
-        assert_eq!(state.navigator.query, "a");
+        assert!(state.navigator.query.is_empty());
 
         handle_navigator_key(
             &mut state,
@@ -1961,7 +1950,17 @@ mod tests {
             KeyEvent::new(KeyCode::Char('l'), KeyModifiers::empty()),
         );
 
-        assert_eq!(state.navigator.query, "al");
+        assert_eq!(state.navigator.query, "l");
+
+        handle_navigator_key(
+            &mut state,
+            &terminal_runtimes,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
+        );
+
+        assert_eq!(state.mode, Mode::Navigator);
+        assert!(state.navigator.search_focused);
+        assert!(state.navigator.query.is_empty());
 
         handle_navigator_key(
             &mut state,
@@ -1977,7 +1976,30 @@ mod tests {
             &terminal_runtimes,
             KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
         );
+        assert_eq!(state.mode, Mode::Terminal);
+    }
 
+    #[test]
+    fn search_entry_escape_clears_then_closes() {
+        let mut state = state_with_workspaces(&["alpha"]);
+        let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+        state.open_navigator_search_from(&terminal_runtimes);
+        state.navigator.query = "alpha".into();
+
+        handle_navigator_key(
+            &mut state,
+            &terminal_runtimes,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
+        );
+        assert_eq!(state.mode, Mode::Navigator);
+        assert!(state.navigator.query.is_empty());
+        assert!(state.navigator.search_focused);
+
+        handle_navigator_key(
+            &mut state,
+            &terminal_runtimes,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
+        );
         assert_eq!(state.mode, Mode::Terminal);
     }
 

@@ -91,7 +91,7 @@ fn render_search(app: &AppState, frame: &mut Frame, area: Rect) {
             app,
         ),
         None if query.is_empty() => spans.push(Span::styled(
-            "search panes",
+            "search workspaces & panes",
             Style::default().fg(p.overlay0),
         )),
         None => spans.push(Span::styled(query.to_string(), Style::default().fg(p.text))),
@@ -210,7 +210,11 @@ fn render_row(
         status_style.bg(p.panel_bg)
     };
 
-    let prefix = tree_prefix(rows, idx);
+    let prefix = if row.ranked {
+        String::new()
+    } else {
+        tree_prefix(rows, idx)
+    };
     let current = if row.is_current { "◆" } else { " " };
     let gutter = format!(" {current} ");
     let gutter_style = if selected {
@@ -237,14 +241,29 @@ fn render_row(
         .saturating_sub(3) as usize;
     let title = truncate_end(&row.label, left_budget);
 
-    let spans = vec![
+    let mut spans = vec![
         Span::styled(gutter, gutter_style),
         Span::styled(prefix, tree_style),
         Span::styled(" ", base_style),
         Span::styled(status_icon, status_style),
         Span::raw(" "),
-        Span::styled(title, text_style),
     ];
+    push_highlighted_label(
+        &mut spans,
+        &title,
+        &row.label_match_positions,
+        text_style,
+        if selected {
+            base_style
+                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::UNDERLINED)
+        } else {
+            Style::default()
+                .fg(p.accent)
+                .bg(p.panel_bg)
+                .add_modifier(Modifier::BOLD)
+        },
+    );
     frame.render_widget(Paragraph::new(Line::from(spans)).style(base_style), rect);
 
     if meta_width > 0 {
@@ -334,6 +353,42 @@ fn render_navigator_scrollbar(app: &AppState, line_count: usize, frame: &mut Fra
         app.palette.overlay0,
         "▕",
     );
+}
+
+fn push_highlighted_label<'a>(
+    spans: &mut Vec<Span<'a>>,
+    title: &'a str,
+    positions: &[usize],
+    normal_style: Style,
+    match_style: Style,
+) {
+    let mut segment = String::new();
+    let mut is_match = None;
+    for (idx, ch) in title.chars().enumerate() {
+        let char_matches = positions.binary_search(&idx).is_ok();
+        if is_match.is_some_and(|current| current != char_matches) {
+            spans.push(Span::styled(
+                std::mem::take(&mut segment),
+                if is_match == Some(true) {
+                    match_style
+                } else {
+                    normal_style
+                },
+            ));
+        }
+        is_match = Some(char_matches);
+        segment.push(ch);
+    }
+    if !segment.is_empty() {
+        spans.push(Span::styled(
+            segment,
+            if is_match == Some(true) {
+                match_style
+            } else {
+                normal_style
+            },
+        ));
+    }
 }
 
 fn metadata_width(width: u16) -> u16 {
@@ -548,7 +603,14 @@ fn render_footer(app: &AppState, frame: &mut Frame, area: Rect) {
             Span::styled("ctrl+u", key),
             Span::styled(" clear  ", dim),
             Span::styled("esc", key),
-            Span::styled(" back", dim),
+            Span::styled(
+                if app.navigator.search_entry && app.navigator.query.is_empty() {
+                    " close"
+                } else {
+                    " back"
+                },
+                dim,
+            ),
         ])
     } else {
         Line::from(vec![
@@ -585,6 +647,8 @@ mod tests {
             is_tab: false,
             expanded: true,
             search_text: String::new(),
+            label_match_positions: Vec::new(),
+            ranked: false,
             matched: true,
         }
     }

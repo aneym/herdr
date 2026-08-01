@@ -15,11 +15,12 @@ use crate::terminal::{EffectiveStateChange, TerminalStateMutation};
 use crate::workspace::WorkspaceGitStatus;
 
 use super::api_helpers::pane_agent_status;
+use super::fuzzy::fuzzy_match_words;
 use super::state::{
     navigator_display_index_of_row, navigator_display_lines, navigator_first_row_at_or_after,
-    text_matches_query, AgentNotificationDelivery, AppState, Mode, NavigatorRow,
-    NavigatorStateFilter, NavigatorTarget, PaneFocusTarget, PendingAgentNotification, ToastKind,
-    ToastNotification, ToastTarget, ViewLayout,
+    AgentNotificationDelivery, AppState, Mode, NavigatorRow, NavigatorStateFilter, NavigatorTarget,
+    PaneFocusTarget, PendingAgentNotification, ToastKind, ToastNotification, ToastTarget,
+    ViewLayout,
 };
 
 fn is_background_completion_transition(prev_state: AgentState, new_state: AgentState) -> bool {
@@ -441,6 +442,7 @@ impl AppState {
     ) {
         self.navigator.query.clear();
         self.navigator.search_focused = false;
+        self.navigator.search_entry = false;
         self.navigator.state_filter = None;
         self.navigator.scroll = 0;
         self.navigator.expanded_workspaces.clear();
@@ -456,6 +458,15 @@ impl AppState {
         self.ensure_navigator_selection_visible_from(terminal_runtimes);
     }
 
+    pub(crate) fn open_navigator_search_from(
+        &mut self,
+        terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
+    ) {
+        self.open_navigator_from(terminal_runtimes);
+        self.navigator.search_focused = true;
+        self.navigator.search_entry = true;
+    }
+
     #[cfg(test)]
     pub(crate) fn navigator_rows(&self) -> Vec<NavigatorRow> {
         let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
@@ -466,8 +477,11 @@ impl AppState {
         &self,
         terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
     ) -> Vec<NavigatorRow> {
-        let query = self.navigator.query.trim().to_lowercase();
-        let query_kind = navigator_query_kind(&query, self.navigator.state_filter);
+        let query = self.navigator.query.trim();
+        let query_kind = navigator_query_kind(query, self.navigator.state_filter);
+        if matches!(query_kind, NavigatorQueryKind::Text) {
+            return self.ranked_navigator_rows(terminal_runtimes, query);
+        }
         let mut rows = Vec::new();
         for (ws_idx, ws) in self.workspaces.iter().enumerate() {
             let workspace_label = ws.display_name_from(&self.terminals, terminal_runtimes);
@@ -479,11 +493,11 @@ impl AppState {
                     let (state, seen) = ws.aggregate_state(&self.terminals);
                     navigator_state_filter_matches(filter, state, seen)
                 }
-                NavigatorQueryKind::Text => navigator_matches(&query, &workspace_search_text),
+                NavigatorQueryKind::Text => unreachable!("text queries use ranked rows"),
             };
 
             let child_rows =
-                self.navigator_child_rows(ws_idx, query_kind, &query, workspace_matches);
+                self.navigator_child_rows(ws_idx, query_kind, query, workspace_matches);
             if !workspace_matches && child_rows.is_empty() {
                 continue;
             }
@@ -504,6 +518,8 @@ impl AppState {
                 is_tab: false,
                 expanded,
                 search_text: workspace_search_text,
+                label_match_positions: Vec::new(),
+                ranked: false,
                 matched: workspace_matches,
             });
             if expanded {
@@ -511,6 +527,71 @@ impl AppState {
             }
         }
         rows
+    }
+
+    fn ranked_navigator_rows(
+        &self,
+        terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
+        query: &str,
+    ) -> Vec<NavigatorRow> {
+        let mut scored = Vec::new();
+        for (ws_idx, ws) in self.workspaces.iter().enumerate() {
+            let workspace_label = ws.display_name_from(&self.terminals, terminal_runtimes);
+            let activity = workspace_activity_summary(ws, &self.terminals);
+            let (status, seen) = ws.aggregate_state(&self.terminals);
+            let pane_count = ws.tabs.iter().map(|tab| tab.panes.len()).sum::<usize>();
+            let mut workspace_row = NavigatorRow {
+                target: NavigatorTarget::Workspace { ws_idx },
+                depth: 0,
+                label: format!("{workspace_label} ({pane_count})"),
+                meta: activity.clone(),
+                status,
+                seen,
+                is_current: self.active == Some(ws_idx),
+                is_workspace: true,
+                is_tab: false,
+                expanded: false,
+                search_text: format!("{workspace_label} {activity}"),
+                label_match_positions: Vec::new(),
+                ranked: true,
+                matched: true,
+            };
+            if let Some(score) = score_navigator_row(query, &mut workspace_row) {
+                scored.push((score, workspace_row));
+            }
+
+            let multi_tab = ws.tabs.len() > 1;
+            for tab_idx in 0..ws.tabs.len() {
+                if multi_tab {
+                    let mut tab_row = self.navigator_tab_row(ws_idx, tab_idx);
+                    tab_row.depth = 0;
+                    tab_row.meta = workspace_label.clone();
+                    tab_row.search_text = format!("{} {}", tab_row.label, tab_row.meta);
+                    tab_row.ranked = true;
+                    if let Some(score) = score_navigator_row(query, &mut tab_row) {
+                        scored.push((score, tab_row));
+                    }
+                }
+                let tab_label = ws
+                    .tab_display_name(tab_idx)
+                    .unwrap_or_else(|| (tab_idx + 1).to_string());
+                for mut pane_row in self.navigator_pane_rows_for_tab(ws_idx, tab_idx, multi_tab) {
+                    pane_row.depth = 0;
+                    pane_row.meta = if multi_tab {
+                        format!("{workspace_label} › {tab_label}")
+                    } else {
+                        workspace_label.clone()
+                    };
+                    pane_row.search_text = format!("{} {}", pane_row.label, pane_row.meta);
+                    pane_row.ranked = true;
+                    if let Some(score) = score_navigator_row(query, &mut pane_row) {
+                        scored.push((score, pane_row));
+                    }
+                }
+            }
+        }
+        scored.sort_by_key(|entry| std::cmp::Reverse(entry.0));
+        scored.into_iter().map(|(_, row)| row).collect()
     }
 
     fn navigator_child_rows(
@@ -595,6 +676,8 @@ impl AppState {
             is_tab: true,
             expanded: true,
             search_text,
+            label_match_positions: Vec::new(),
+            ranked: false,
             matched: true,
         }
     }
@@ -672,6 +755,8 @@ impl AppState {
                 is_tab: false,
                 expanded: false,
                 search_text,
+                label_match_positions: Vec::new(),
+                ranked: false,
                 matched: true,
             });
         }
@@ -796,8 +881,21 @@ impl AppState {
         &mut self,
         terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
     ) {
-        let query = self.navigator.query.trim().to_lowercase();
-        let query_kind = navigator_query_kind(&query, self.navigator.state_filter);
+        let query = self.navigator.query.trim();
+        let query_kind = navigator_query_kind(query, self.navigator.state_filter);
+        if matches!(query_kind, NavigatorQueryKind::Text) {
+            self.navigator.selected = 0;
+            self.navigator.scroll = 0;
+            return;
+        }
+        if matches!(query_kind, NavigatorQueryKind::Empty) {
+            self.navigator.selected = self
+                .current_navigator_row_index_from(terminal_runtimes)
+                .unwrap_or(0);
+            self.navigator.scroll = 0;
+            self.ensure_navigator_selection_visible_from(terminal_runtimes);
+            return;
+        }
         if !matches!(query_kind, NavigatorQueryKind::Empty) {
             let rows = self.navigator_rows_from(terminal_runtimes);
             let idx = if matches!(query_kind, NavigatorQueryKind::State(_)) {
@@ -954,7 +1052,23 @@ fn navigator_state_filter_matches(
 }
 
 fn navigator_matches(query: &str, text: &str) -> bool {
-    text_matches_query(query, text)
+    fuzzy_match_words(query, text).is_some()
+}
+
+fn score_navigator_row(query: &str, row: &mut NavigatorRow) -> Option<i32> {
+    let matched = fuzzy_match_words(query, &row.search_text)?;
+    row.label_match_positions = fuzzy_match_words(query, &row.label)
+        .map(|label_match| label_match.positions)
+        .unwrap_or_else(|| {
+            let label_chars = row.label.chars().count();
+            matched
+                .positions
+                .iter()
+                .copied()
+                .filter(|position| *position < label_chars)
+                .collect()
+        });
+    Some(matched.score)
 }
 
 fn launch_label(argv: Option<&Vec<String>>) -> Option<String> {
@@ -3868,12 +3982,9 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(root);
 
-        // The workspace matched by its live cwd label; its subtree cascades in
-        // as context.
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].label, "herdr (1)");
         assert!(rows[0].matched);
-        assert!(!rows[1].matched);
     }
 
     #[test]
@@ -3967,7 +4078,7 @@ mod tests {
             .set_detected_state(Some(Agent::Claude), AgentState::Idle);
 
         state.open_navigator();
-        state.navigator.query = "idle".into();
+        state.navigator.query = "claude".into();
         let rows = state.navigator_rows();
 
         assert!(rows.iter().any(|row| matches!(
@@ -4032,13 +4143,6 @@ mod tests {
             row.target,
             crate::app::state::NavigatorTarget::Pane { pane_id, .. } if pane_id == shell
         )));
-        assert!(
-            text_rows.iter().any(|row| matches!(
-                row.target,
-                crate::app::state::NavigatorTarget::Pane { pane_id, .. } if pane_id == working
-            )),
-            "literal one-letter search may still match visible state text"
-        );
     }
 
     #[test]
@@ -4056,38 +4160,22 @@ mod tests {
 
         let rows = state.navigator_rows();
 
-        assert!(rows.iter().any(|row| row.is_workspace));
+        assert!(rows.iter().all(|row| row.depth == 0 && row.ranked));
         assert!(rows
             .iter()
             .any(|row| !row.is_workspace && row.label.contains("weekly")));
     }
 
     #[test]
-    fn navigator_workspace_match_cascades_full_subtree() {
+    fn navigator_workspace_match_is_a_flat_result() {
         let mut state = app_with_workspaces(&["one", "two"]);
-        let root = state.workspaces[0].tabs[0].root_pane;
-        let extra = state.workspaces[0].test_split(Direction::Horizontal);
-        state.ensure_test_terminals();
-        for pane in [root, extra] {
-            let terminal_id = state.workspaces[0].terminal_id(pane).cloned().unwrap();
-            state
-                .terminals
-                .get_mut(&terminal_id)
-                .unwrap()
-                .set_manual_label("unrelated".into());
-        }
-
         state.open_navigator();
         state.navigator.query = "one".into();
+
         let rows = state.navigator_rows();
 
-        // Both panes cascade in even though only the workspace label matched,
-        // and only the workspace carries the matched flag.
-        let pane_rows: Vec<_> = rows.iter().filter(|row| !row.is_workspace).collect();
-        assert_eq!(pane_rows.len(), 2);
-        assert!(pane_rows.iter().all(|row| !row.matched));
-        assert!(rows.iter().any(|row| row.is_workspace && row.matched));
-        assert!(!rows.iter().any(|row| row.label.starts_with("two")));
+        assert!(rows.iter().any(|row| row.is_workspace));
+        assert!(rows.iter().all(|row| row.ranked && row.depth == 0));
     }
 
     #[test]
@@ -4113,6 +4201,51 @@ mod tests {
             selected.target,
             crate::app::state::NavigatorTarget::Pane { pane_id, .. } if pane_id == pane
         ));
+    }
+
+    #[test]
+    fn navigator_ranked_results_put_boundary_match_first_and_add_context() {
+        let mut state = app_with_workspaces(&["herdr"]);
+        let first = state.workspaces[0].tabs[0].root_pane;
+        let second = state.workspaces[0].test_split(Direction::Horizontal);
+        state.ensure_test_terminals();
+        let first_terminal = state.workspaces[0].terminal_id(first).cloned().unwrap();
+        state
+            .terminals
+            .get_mut(&first_terminal)
+            .unwrap()
+            .set_manual_label("fix login bug".into());
+        let second_terminal = state.workspaces[0].terminal_id(second).cloned().unwrap();
+        state
+            .terminals
+            .get_mut(&second_terminal)
+            .unwrap()
+            .set_manual_label("login page redesign".into());
+        state.navigator.query = "login".into();
+
+        let rows = state.navigator_rows();
+
+        assert_eq!(rows[0].label, "login page redesign");
+        assert!(rows.iter().all(|row| row.depth == 0 && row.ranked));
+        assert!(rows
+            .iter()
+            .filter(|row| !row.is_workspace)
+            .all(|row| row.meta == "herdr"));
+        assert!(!navigator_display_lines(&rows)
+            .iter()
+            .any(|line| matches!(line, crate::app::state::NavigatorDisplayLine::Spacer)));
+    }
+
+    #[test]
+    fn opening_navigator_search_focuses_search_entry() {
+        let mut state = app_with_workspaces(&["one"]);
+        let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+
+        state.open_navigator_search_from(&terminal_runtimes);
+
+        assert_eq!(state.mode, Mode::Navigator);
+        assert!(state.navigator.search_focused);
+        assert!(state.navigator.search_entry);
     }
 
     #[test]
