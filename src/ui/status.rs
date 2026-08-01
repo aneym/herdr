@@ -225,7 +225,7 @@ pub(super) fn resolved_agent_icon<'a>(
 ) -> (&'a str, Style) {
     let default_icon = agent_icon(state, seen, tick, p);
     (
-        config.state_icon(state).unwrap_or(default_icon.0),
+        config.state_icon(state, seen).unwrap_or(default_icon.0),
         default_icon.1,
     )
 }

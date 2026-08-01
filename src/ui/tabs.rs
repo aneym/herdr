@@ -646,6 +646,11 @@ mod tests {
             } else {
                 assert_eq!(actual, Some(expected), "state={state:?}, seen={seen}");
             }
+            if state == AgentState::Idle && !seen {
+                assert_eq!(expected.0, "●");
+                assert_eq!(expected.1.fg, Some(app.palette.teal));
+                assert!(actual.is_some());
+            }
         }
     }
 

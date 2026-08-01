@@ -1791,6 +1791,22 @@ mod tests {
         let first = row_text(terminal.backend().buffer(), body.y, body.width);
 
         assert_eq!(first, " one");
+
+        app.workspaces[0].tabs[0]
+            .panes
+            .get_mut(&pane_id)
+            .unwrap()
+            .seen = false;
+        let mut terminal = Terminal::new(TestBackend::new(26, 20)).unwrap();
+        terminal
+            .draw(|frame| render_sidebar(&app, &TerminalRuntimeRegistry::new(), frame, area))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let marker_x = find_symbol_x(buffer, body.y, body.width, "●");
+        assert_eq!(
+            buffer[(marker_x, body.y)].style().fg,
+            Some(app.palette.teal)
+        );
     }
 
     #[test]

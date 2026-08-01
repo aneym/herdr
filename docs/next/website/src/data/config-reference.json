@@ -934,7 +934,7 @@
           "key": "ui.sidebar.agents.state_icons",
           "type": "table of strings",
           "default": "{}",
-          "description": "Agent state_icon overrides keyed by idle, working, blocked, or unknown. Unspecified states retain their built-in glyph; an empty string removes the icon token and its adjacent separators without reserving column width."
+          "description": "Agent state_icon overrides. Plain idle, working, blocked, and unknown keys apply only to seen agents; append _unseen to override unseen variants. Unspecified variants retain their built-in glyph, so idle = \"\" hides seen-idle while unread completions keep their built-in marker. An empty string removes the icon token and adjacent separators without reserving column width."
         },
         {
           "key": "ui.sidebar.agents.min_row_lines",

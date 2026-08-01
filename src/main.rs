@@ -357,9 +357,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # A token occurrence may be styled with { token = "workspace", fg = "#89b4fa", bold = true, dim = false }.
 # Omitted style fields preserve the contextual default.
 # [ui.sidebar.agents]
-# Override state_icon glyphs by internal state. Empty strings remove the token and its separators.
-# Unspecified states keep the built-in glyph. Valid keys: idle, working, blocked, unknown.
-# state_icons = { idle = "" }
+# Override seen state_icon glyphs by internal state; use <state>_unseen for unseen variants.
+# Plain keys do not affect unseen agents. Empty strings remove the token and its separators.
+# Unspecified variants keep the built-in glyph. States: idle, working, blocked, unknown.
+# state_icons = { idle = "", idle_unseen = "✓" }
 # Minimum rendered lines per agent entry. Blank lines pad entries with fewer populated rows.
 # min_row_lines = 0
 # Blank rows between agent entries. Set to 1 to restore the previous spacing.

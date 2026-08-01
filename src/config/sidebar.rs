@@ -375,7 +375,17 @@ where
 {
     let state_icons = BTreeMap::<String, String>::deserialize(deserializer)?;
     for state in state_icons.keys() {
-        if !matches!(state.as_str(), "idle" | "working" | "blocked" | "unknown") {
+        if !matches!(
+            state.as_str(),
+            "idle"
+                | "idle_unseen"
+                | "working"
+                | "working_unseen"
+                | "blocked"
+                | "blocked_unseen"
+                | "unknown"
+                | "unknown_unseen"
+        ) {
             return Err(serde::de::Error::custom(format!(
                 "unknown agent state `{state}` in sidebar state_icons"
             )));
@@ -404,12 +414,16 @@ impl AgentsSidebarConfig {
             .unwrap_or(&self.rows)
     }
 
-    pub(crate) fn state_icon(&self, state: crate::detect::AgentState) -> Option<&str> {
-        let state = match state {
-            crate::detect::AgentState::Idle => "idle",
-            crate::detect::AgentState::Working => "working",
-            crate::detect::AgentState::Blocked => "blocked",
-            crate::detect::AgentState::Unknown => "unknown",
+    pub(crate) fn state_icon(&self, state: crate::detect::AgentState, seen: bool) -> Option<&str> {
+        let state = match (state, seen) {
+            (crate::detect::AgentState::Idle, true) => "idle",
+            (crate::detect::AgentState::Idle, false) => "idle_unseen",
+            (crate::detect::AgentState::Working, true) => "working",
+            (crate::detect::AgentState::Working, false) => "working_unseen",
+            (crate::detect::AgentState::Blocked, true) => "blocked",
+            (crate::detect::AgentState::Blocked, false) => "blocked_unseen",
+            (crate::detect::AgentState::Unknown, true) => "unknown",
+            (crate::detect::AgentState::Unknown, false) => "unknown_unseen",
         };
         self.state_icons.get(state).map(String::as_str)
     }
@@ -634,7 +648,7 @@ min_row_lines = 3
         let config: crate::config::Config = toml::from_str(
             r#"
 [ui.sidebar.agents]
-state_icons = { idle = "", working = "...", blocked = "!", unknown = "?" }
+state_icons = { idle = "", idle_unseen = "✓", working = "...", blocked = "!", unknown = "?" }
 "#,
         )
         .unwrap();
@@ -643,7 +657,7 @@ state_icons = { idle = "", working = "...", blocked = "!", unknown = "?" }
                 .ui
                 .sidebar
                 .agents
-                .state_icon(crate::detect::AgentState::Idle),
+                .state_icon(crate::detect::AgentState::Idle, true),
             Some("")
         );
         assert_eq!(
@@ -651,7 +665,15 @@ state_icons = { idle = "", working = "...", blocked = "!", unknown = "?" }
                 .ui
                 .sidebar
                 .agents
-                .state_icon(crate::detect::AgentState::Working),
+                .state_icon(crate::detect::AgentState::Idle, false),
+            Some("✓")
+        );
+        assert_eq!(
+            config
+                .ui
+                .sidebar
+                .agents
+                .state_icon(crate::detect::AgentState::Working, true),
             Some("...")
         );
     }
