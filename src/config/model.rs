@@ -95,6 +95,7 @@ pub enum AgentPanelSortConfig {
     #[serde(alias = "workspaces")]
     Spaces,
     Priority,
+    Triage,
 }
 
 impl AgentPanelSortConfig {
@@ -102,8 +103,17 @@ impl AgentPanelSortConfig {
         match self {
             Self::Spaces => "spaces",
             Self::Priority => "priority",
+            Self::Triage => "triage",
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentCloseFocusConfig {
+    #[default]
+    Stock,
+    PanelNext,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
@@ -844,8 +854,10 @@ pub struct UiConfig {
     pub attention_read: AttentionReadConfig,
     /// Desktop tab row placement. Default: top.
     pub tab_bar_position: TabBarPositionConfig,
-    /// Agent sidebar ordering. Saved values are "spaces" or "priority". Default: "spaces".
+    /// Agent sidebar ordering. Default: "spaces".
     pub agent_panel_sort: AgentPanelSortConfig,
+    /// Focus behavior after closing an agent pane. Default: "stock".
+    pub agent_close_focus: AgentCloseFocusConfig,
     /// Expanded sidebar row composition.
     pub sidebar: SidebarConfig,
     /// Accent color for highlights, borders, and navigation UI.
@@ -1050,6 +1062,7 @@ impl Default for UiConfig {
             attention_read: AttentionReadConfig::OnFocus,
             tab_bar_position: TabBarPositionConfig::Top,
             agent_panel_sort: AgentPanelSortConfig::Spaces,
+            agent_close_focus: AgentCloseFocusConfig::Stock,
             sidebar: SidebarConfig::default(),
             accent: "cyan".into(),
             toast: ToastConfig::default(),
@@ -1260,6 +1273,13 @@ agent_panel_sort = "priority"
 
         let toml = r#"
 [ui]
+agent_panel_sort = "triage"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.ui.agent_panel_sort, AgentPanelSortConfig::Triage);
+
+        let toml = r#"
+[ui]
 agent_panel_sort = "workspaces"
 "#;
         let config: Config = toml::from_str(toml).unwrap();
@@ -1271,6 +1291,24 @@ agent_panel_scope = "current"
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.ui.agent_panel_sort, AgentPanelSortConfig::Spaces);
+    }
+
+    #[test]
+    fn agent_close_focus_config_parses_and_defaults() {
+        assert_eq!(
+            Config::default().ui.agent_close_focus,
+            AgentCloseFocusConfig::Stock
+        );
+
+        let toml = r#"
+[ui]
+agent_close_focus = "panel_next"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(
+            config.ui.agent_close_focus,
+            AgentCloseFocusConfig::PanelNext
+        );
     }
 
     #[test]

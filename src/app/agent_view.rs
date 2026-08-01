@@ -61,19 +61,37 @@ pub(crate) fn apply_agent_view(app: &AppState, entries: &mut Vec<AgentPanelEntry
         }
     }
 
-    if matches!(
-        app.agent_panel_sort,
-        crate::app::state::AgentPanelSort::Priority
-    ) {
-        entries.sort_by_key(|entry| {
-            (
-                std::cmp::Reverse(super::api_helpers::tab_attention_priority(
-                    entry.state,
-                    entry.seen,
-                )),
-                std::cmp::Reverse(entry.last_agent_state_change_seq),
-            )
-        });
+    match app.agent_panel_sort {
+        crate::app::state::AgentPanelSort::Spaces => {}
+        crate::app::state::AgentPanelSort::Priority => {
+            entries.sort_by_key(|entry| {
+                (
+                    std::cmp::Reverse(super::api_helpers::tab_attention_priority(
+                        entry.state,
+                        entry.seen,
+                    )),
+                    std::cmp::Reverse(entry.last_agent_state_change_seq),
+                )
+            });
+        }
+        crate::app::state::AgentPanelSort::Triage => {
+            entries.sort_by_key(|entry| {
+                (
+                    std::cmp::Reverse(triage_priority(entry.state, entry.seen)),
+                    entry.last_agent_state_change_seq,
+                )
+            });
+        }
+    }
+}
+
+fn triage_priority(state: crate::detect::AgentState, seen: bool) -> u8 {
+    match (state, seen) {
+        (crate::detect::AgentState::Blocked, _) => 4,
+        (crate::detect::AgentState::Idle, false) => 3,
+        (crate::detect::AgentState::Idle, true) => 2,
+        (crate::detect::AgentState::Working, _) => 1,
+        (crate::detect::AgentState::Unknown, _) => 0,
     }
 }
 
@@ -449,6 +467,32 @@ mod tests {
         state
     }
 
+    fn entry(
+        pane_id: u32,
+        state: AgentState,
+        seen: bool,
+        last_agent_state_change_seq: Option<u64>,
+    ) -> AgentPanelEntry {
+        AgentPanelEntry {
+            ws_idx: 0,
+            tab_idx: 0,
+            pane_id: crate::layout::PaneId::from_raw(pane_id),
+            primary_label: String::new(),
+            primary_tab_label: None,
+            pane_label: None,
+            terminal_title: None,
+            terminal_title_stripped: None,
+            agent_label: None,
+            agent_kind_label: None,
+            agent: None,
+            state,
+            seen,
+            last_agent_state_change_seq,
+            state_labels: Default::default(),
+            tokens: Default::default(),
+        }
+    }
+
     fn current_workspace_view() -> AgentViewSetParams {
         AgentViewSetParams {
             source: "example.views".to_string(),
@@ -461,6 +505,30 @@ mod tests {
             }),
             sort: Vec::new(),
         }
+    }
+
+    #[test]
+    fn triage_sort_orders_tiers_and_oldest_state_change_first() {
+        let mut state = AppState::test_new();
+        state.agent_panel_sort = crate::app::state::AgentPanelSort::Triage;
+        let mut entries = vec![
+            entry(1, AgentState::Working, true, Some(2)),
+            entry(2, AgentState::Idle, false, Some(8)),
+            entry(3, AgentState::Unknown, true, None),
+            entry(4, AgentState::Idle, true, Some(3)),
+            entry(5, AgentState::Blocked, false, Some(5)),
+            entry(6, AgentState::Idle, false, Some(1)),
+        ];
+
+        apply_agent_view(&state, &mut entries);
+
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.pane_id.raw())
+                .collect::<Vec<_>>(),
+            vec![5, 6, 2, 4, 1, 3]
+        );
     }
 
     #[test]

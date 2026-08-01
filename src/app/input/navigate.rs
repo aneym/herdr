@@ -374,7 +374,7 @@ impl App {
                 leave_navigate_mode(&mut self.state);
             }
             NavigateAction::ClosePane => {
-                if !self.close_focused_pane_via_api_requires_confirmation() {
+                if !self.close_focused_pane_via_api_requires_confirmation(true) {
                     leave_navigate_mode(&mut self.state);
                 }
             }
@@ -585,15 +585,25 @@ impl App {
         );
     }
 
-    pub(crate) fn close_focused_pane_via_api_requires_confirmation(&mut self) -> bool {
+    pub(crate) fn close_focused_pane_via_api_requires_confirmation(
+        &mut self,
+        was_focused: bool,
+    ) -> bool {
         let Some((ws_idx, pane_id)) = self.focused_pane_target() else {
             return false;
         };
-        let Some(pane_id) = self.public_pane_id(ws_idx, pane_id) else {
+        let target = self
+            .state
+            .panel_next_agent_close_target(ws_idx, pane_id, was_focused);
+        let Some(public_pane_id) = self.public_pane_id(ws_idx, pane_id) else {
             return false;
         };
-        self.runtime_pane_close("tui.pane.close", pane_id);
-        self.state.mode == Mode::ConfirmClose
+        self.runtime_pane_close("tui.pane.close", public_pane_id);
+        let requires_confirmation = self.state.mode == Mode::ConfirmClose;
+        if !requires_confirmation {
+            self.state.focus_panel_agent_after_close(target);
+        }
+        requires_confirmation
     }
 
     pub(crate) fn zoom_focused_pane_via_api(&mut self) {

@@ -879,6 +879,26 @@ mod tests {
 
         assert_eq!(app.state.agent_panel_sort, AgentPanelSort::Priority);
         assert_eq!(app.state.agent_panel_scroll, 0);
+
+        let (_, detail_area) = crate::ui::expanded_sidebar_sections(
+            app.state.view.sidebar_rect,
+            app.state.sidebar_section_split,
+        );
+        let toggle = crate::ui::agent_panel_toggle_rect(detail_area, app.state.agent_panel_sort);
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            toggle.x,
+            toggle.y,
+        ));
+        assert_eq!(app.state.agent_panel_sort, AgentPanelSort::Triage);
+
+        let toggle = crate::ui::agent_panel_toggle_rect(detail_area, app.state.agent_panel_sort);
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            toggle.x,
+            toggle.y,
+        ));
+        assert_eq!(app.state.agent_panel_sort, AgentPanelSort::Spaces);
     }
 
     #[test]

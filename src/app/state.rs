@@ -1034,6 +1034,17 @@ pub enum AgentPanelSort {
     #[default]
     Spaces,
     Priority,
+    Triage,
+}
+
+impl AgentPanelSort {
+    pub(crate) fn next(self) -> Self {
+        match self {
+            Self::Spaces => Self::Priority,
+            Self::Priority => Self::Triage,
+            Self::Triage => Self::Spaces,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1567,6 +1578,7 @@ pub struct AppState {
     /// Ratio of sidebar height allocated to the workspaces section.
     pub sidebar_section_split: f32,
     pub agent_panel_sort: AgentPanelSort,
+    pub agent_close_focus: crate::config::AgentCloseFocusConfig,
     /// Transient session-wide projection override for the built-in Agents view.
     pub agent_view_override: Option<crate::api::schema::AgentViewSetParams>,
     pub sidebar_section_order: [crate::config::SidebarSection; 2],
@@ -1952,6 +1964,7 @@ impl AppState {
             sidebar_collapsed_mode: crate::config::SidebarCollapsedModeConfig::Compact,
             sidebar_section_split: 0.5,
             agent_panel_sort: AgentPanelSort::Spaces,
+            agent_close_focus: crate::config::AgentCloseFocusConfig::Stock,
             agent_view_override: None,
             sidebar_section_order: [
                 crate::config::SidebarSection::Spaces,

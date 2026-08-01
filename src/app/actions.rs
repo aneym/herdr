@@ -1687,6 +1687,43 @@ impl AppState {
         );
     }
 
+    pub(crate) fn panel_next_agent_close_target(
+        &self,
+        ws_idx: usize,
+        pane_id: PaneId,
+        was_focused: bool,
+    ) -> Option<(usize, PaneId)> {
+        if !was_focused || self.agent_close_focus != crate::config::AgentCloseFocusConfig::PanelNext
+        {
+            return None;
+        }
+        let entries = crate::ui::agent_panel_entries(self);
+        if entries.len() < 2 {
+            return None;
+        }
+        let closed_idx = entries
+            .iter()
+            .position(|entry| entry.ws_idx == ws_idx && entry.pane_id == pane_id)?;
+        let target = &entries[(closed_idx + 1) % entries.len()];
+        Some((target.ws_idx, target.pane_id))
+    }
+
+    pub(crate) fn focus_panel_agent_after_close(&mut self, target: Option<(usize, PaneId)>) {
+        let Some((ws_idx, pane_id)) = target else {
+            return;
+        };
+        let entries = crate::ui::agent_panel_entries(self);
+        let Some(idx) = entries
+            .iter()
+            .position(|entry| entry.ws_idx == ws_idx && entry.pane_id == pane_id)
+        else {
+            return;
+        };
+        if self.focus_pane_in_workspace(ws_idx, pane_id) {
+            self.ensure_agent_panel_entry_visible(idx);
+        }
+    }
+
     pub(crate) fn terminal_ids_for_workspace(
         &self,
         ws_idx: usize,
@@ -2162,6 +2199,15 @@ impl AppState {
         self.selection = None;
         self.selection_autoscroll = None;
         self.mark_session_dirty();
+        let close_target = active
+            .and_then(|ws_idx| {
+                self.workspaces
+                    .get(ws_idx)
+                    .and_then(|ws| ws.focused_pane_id().map(|pane_id| (ws_idx, pane_id)))
+            })
+            .and_then(|(ws_idx, pane_id)| {
+                self.panel_next_agent_close_target(ws_idx, pane_id, true)
+            });
         let terminal_ids = active
             .and_then(|i| {
                 self.workspaces
@@ -2187,6 +2233,7 @@ impl AppState {
         } else {
             self.remove_unattached_terminal_ids(terminal_ids);
         }
+        self.focus_panel_agent_after_close(close_target);
         false
     }
 
@@ -4424,6 +4471,33 @@ mod tests {
     }
 
     #[test]
+    fn next_agent_cycles_triage_sorted_agent_panel_entries() {
+        let mut first = Workspace::test_new("one");
+        let first_root = first.tabs[0].root_pane;
+        let first_second = first.test_split(Direction::Horizontal);
+        first.tabs[0].layout.focus_pane(first_root);
+        let second = Workspace::test_new("two");
+        let second_root = second.tabs[0].root_pane;
+
+        let mut state = AppState::test_new();
+        state.workspaces = vec![first, second];
+        state.ensure_test_terminals();
+        state.active = Some(0);
+        state.selected = 0;
+        state.mode = Mode::Terminal;
+        state.agent_panel_sort = crate::app::state::AgentPanelSort::Triage;
+        set_agent_state(&mut state, 0, 0, first_root, AgentState::Idle);
+        set_agent_state(&mut state, 0, 0, first_second, AgentState::Working);
+        set_agent_state(&mut state, 1, 0, second_root, AgentState::Blocked);
+
+        state.next_agent();
+
+        assert_eq!(state.active, Some(0));
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(first_second));
+        state.assert_invariants_for_test();
+    }
+
+    #[test]
     fn priority_sort_keeps_recently_changed_idle_agent_above_older_idle_agent() {
         let mut workspace = Workspace::test_new("one");
         let first = workspace.tabs[0].root_pane;
@@ -6016,6 +6090,92 @@ mod tests {
             .rect;
 
         assert!(root_rect.x > right_rect.x);
+    }
+
+    fn set_agent_close_test_state(
+        state: &mut AppState,
+        pane_id: PaneId,
+        agent_state: AgentState,
+        seen: bool,
+        seq: u64,
+    ) {
+        transition_agent_state(state, pane_id, agent_state);
+        let terminal_id = state.workspaces[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .last_agent_state_change_seq = Some(seq);
+        state.workspaces[0].panes.get_mut(&pane_id).unwrap().seen = seen;
+    }
+
+    #[test]
+    fn closing_focused_agent_focuses_next_triage_entry() {
+        let mut state = app_with_workspaces(&["test"]);
+        let blocked = state.workspaces[0].tabs[0].root_pane;
+        let idle = state.workspaces[0].test_split(Direction::Horizontal);
+        let working = state.workspaces[0].test_split(Direction::Vertical);
+        state.ensure_test_terminals();
+        state.agent_panel_sort = crate::app::state::AgentPanelSort::Triage;
+        state.agent_close_focus = crate::config::AgentCloseFocusConfig::PanelNext;
+        set_agent_close_test_state(&mut state, blocked, AgentState::Blocked, true, 1);
+        set_agent_close_test_state(&mut state, idle, AgentState::Idle, false, 2);
+        set_agent_close_test_state(&mut state, working, AgentState::Working, true, 3);
+        state.focus_pane_in_workspace(0, idle);
+
+        state.close_pane();
+
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(working));
+        state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn closing_last_triage_entry_wraps_to_first_remaining() {
+        let mut state = app_with_workspaces(&["test"]);
+        let blocked = state.workspaces[0].tabs[0].root_pane;
+        let unknown = state.workspaces[0].test_split(Direction::Horizontal);
+        state.ensure_test_terminals();
+        state.agent_panel_sort = crate::app::state::AgentPanelSort::Triage;
+        state.agent_close_focus = crate::config::AgentCloseFocusConfig::PanelNext;
+        set_agent_close_test_state(&mut state, blocked, AgentState::Blocked, true, 1);
+        set_agent_close_test_state(&mut state, unknown, AgentState::Unknown, true, 2);
+        state.focus_pane_in_workspace(0, unknown);
+
+        state.close_pane();
+
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(blocked));
+        state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn stock_agent_close_focus_preserves_layout_focus() {
+        let mut state = app_with_workspaces(&["test"]);
+        let root = state.workspaces[0].tabs[0].root_pane;
+        let closed = state.workspaces[0].test_split(Direction::Horizontal);
+        state.ensure_test_terminals();
+        set_agent_close_test_state(&mut state, root, AgentState::Blocked, true, 1);
+        set_agent_close_test_state(&mut state, closed, AgentState::Idle, false, 2);
+        state.focus_pane_in_workspace(0, closed);
+
+        state.close_pane();
+
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(root));
+        state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn panel_next_close_target_ignores_non_agent_and_unfocused_agent() {
+        let mut state = app_with_workspaces(&["test"]);
+        let agent = state.workspaces[0].tabs[0].root_pane;
+        let shell = state.workspaces[0].test_split(Direction::Horizontal);
+        state.ensure_test_terminals();
+        state.agent_close_focus = crate::config::AgentCloseFocusConfig::PanelNext;
+        set_agent_close_test_state(&mut state, agent, AgentState::Idle, false, 1);
+
+        assert_eq!(state.panel_next_agent_close_target(0, shell, true), None);
+        assert_eq!(state.panel_next_agent_close_target(0, agent, false), None);
     }
 
     #[test]

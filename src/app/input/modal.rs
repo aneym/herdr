@@ -1349,8 +1349,10 @@ impl App {
                 },
                 Some("Close pane"),
             ) => {
+                let was_focused = self.state.active == Some(ws_idx)
+                    && self.state.workspaces[ws_idx].focused_pane_id() == Some(pane_id);
                 self.focus_pane_internal_via_api(ws_idx, pane_id);
-                if !self.close_focused_pane_via_api_requires_confirmation() {
+                if !self.close_focused_pane_via_api_requires_confirmation(was_focused) {
                     self.state.mode = if self.state.active.is_some() {
                         Mode::Terminal
                     } else {
