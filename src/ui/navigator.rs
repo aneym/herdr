@@ -212,6 +212,8 @@ fn render_row(
 
     let prefix = if row.ranked {
         String::new()
+    } else if app.navigator.search_entry {
+        "  ".repeat(row.depth as usize)
     } else {
         tree_prefix(rows, idx)
     };

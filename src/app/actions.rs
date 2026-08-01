@@ -465,6 +465,10 @@ impl AppState {
         self.open_navigator_from(terminal_runtimes);
         self.navigator.search_focused = true;
         self.navigator.search_entry = true;
+        self.navigator.selected = self
+            .current_navigator_row_index_from(terminal_runtimes)
+            .unwrap_or(0);
+        self.ensure_navigator_selection_visible_from(terminal_runtimes);
     }
 
     #[cfg(test)]
@@ -481,6 +485,9 @@ impl AppState {
         let query_kind = navigator_query_kind(query, self.navigator.state_filter);
         if matches!(query_kind, NavigatorQueryKind::Text) {
             return self.ranked_navigator_rows(terminal_runtimes, query);
+        }
+        if self.navigator.search_entry {
+            return self.palette_navigator_rows(terminal_runtimes, query_kind);
         }
         let mut rows = Vec::new();
         for (ws_idx, ws) in self.workspaces.iter().enumerate() {
@@ -525,6 +532,69 @@ impl AppState {
             if expanded {
                 rows.extend(child_rows);
             }
+        }
+        rows
+    }
+
+    fn palette_navigator_rows(
+        &self,
+        terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
+        query_kind: NavigatorQueryKind,
+    ) -> Vec<NavigatorRow> {
+        let mut rows = Vec::new();
+        for (ws_idx, ws) in self.workspaces.iter().enumerate() {
+            let workspace_label = ws.display_name_from(&self.terminals, terminal_runtimes);
+            let activity = workspace_activity_summary(ws, &self.terminals);
+            let (status, seen) = ws.aggregate_state(&self.terminals);
+            let workspace_matches = match query_kind {
+                NavigatorQueryKind::Empty => true,
+                NavigatorQueryKind::State(filter) => {
+                    navigator_state_filter_matches(filter, status, seen)
+                }
+                NavigatorQueryKind::Text => unreachable!("text queries use ranked rows"),
+            };
+            let multi_tab = ws.tabs.len() > 1;
+            let mut pane_rows = Vec::new();
+            for tab_idx in 0..ws.tabs.len() {
+                let tab_label = ws
+                    .tab_display_name(tab_idx)
+                    .unwrap_or_else(|| (tab_idx + 1).to_string());
+                for mut pane_row in self.navigator_pane_rows_for_tab(ws_idx, tab_idx, false) {
+                    if let NavigatorQueryKind::State(filter) = query_kind {
+                        if !navigator_state_filter_matches(filter, pane_row.status, pane_row.seen) {
+                            continue;
+                        }
+                    }
+                    pane_row.depth = 1;
+                    if multi_tab {
+                        pane_row.meta = format!("{tab_label} · {}", pane_row.meta);
+                        pane_row.search_text =
+                            format!("{} {}", pane_row.label, pane_row.meta).to_lowercase();
+                    }
+                    pane_rows.push(pane_row);
+                }
+            }
+            if !workspace_matches && pane_rows.is_empty() {
+                continue;
+            }
+            let pane_count = ws.tabs.iter().map(|tab| tab.panes.len()).sum::<usize>();
+            rows.push(NavigatorRow {
+                target: NavigatorTarget::Workspace { ws_idx },
+                depth: 0,
+                label: format!("{workspace_label} ({pane_count})"),
+                meta: activity.clone(),
+                status,
+                seen,
+                is_current: self.active == Some(ws_idx),
+                is_workspace: true,
+                is_tab: false,
+                expanded: true,
+                search_text: format!("{workspace_label} {activity}").to_lowercase(),
+                label_match_positions: Vec::new(),
+                ranked: false,
+                matched: workspace_matches,
+            });
+            rows.extend(pane_rows);
         }
         rows
     }
@@ -703,6 +773,7 @@ impl AppState {
             let pane_number = ws.public_pane_number(pane_id).unwrap_or(0);
             let label = terminal
                 .and_then(|terminal| terminal.effective_title())
+                .or_else(|| terminal.and_then(|terminal| terminal.terminal_title_stripped()))
                 .or_else(|| {
                     terminal
                         .and_then(|terminal| terminal.manual_label.as_deref().map(str::to_string))
@@ -4295,6 +4366,113 @@ mod tests {
         assert_eq!(state.mode(), Mode::Navigator);
         assert!(state.navigator.search_focused);
         assert!(state.navigator.search_entry);
+    }
+
+    #[test]
+    fn navigator_uses_live_terminal_title_for_label_and_fuzzy_search() {
+        let mut state = app_with_workspaces(&["one"]);
+        let pane = state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = state.workspaces[0].terminal_id(pane).cloned().unwrap();
+        state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_terminal_title(Some(
+                "✳ Implement Cmd+K search for chats and workspaces".into(),
+            ));
+
+        state.open_navigator();
+        let pane_row = state
+            .navigator_rows()
+            .into_iter()
+            .find(|row| matches!(row.target, NavigatorTarget::Pane { pane_id, .. } if pane_id == pane))
+            .unwrap();
+        assert_eq!(
+            pane_row.label,
+            "Implement Cmd+K search for chats and workspaces"
+        );
+
+        for query in ["cmd k", "cmdk"] {
+            state.navigator.query = query.into();
+            assert!(state.navigator_rows().iter().any(
+                |row| matches!(row.target, NavigatorTarget::Pane { pane_id, .. } if pane_id == pane)
+            ));
+        }
+    }
+
+    #[test]
+    fn search_entry_empty_view_is_compact_and_selects_current_pane() {
+        let mut state = app_with_workspaces(&["one", "two"]);
+        state.workspaces[0].tabs[0].custom_name = Some("build".into());
+        state.workspaces[0].test_add_tab(Some("tests"));
+        state.ensure_test_terminals();
+        let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+
+        state.open_navigator_search_from(&terminal_runtimes);
+        let rows = state.navigator_rows_from(&terminal_runtimes);
+
+        assert!(!rows
+            .iter()
+            .any(|row| matches!(row.target, NavigatorTarget::Tab { .. })));
+        assert!(rows
+            .iter()
+            .filter(|row| row.is_workspace)
+            .all(|row| row.depth == 0));
+        assert!(rows
+            .iter()
+            .filter(|row| matches!(row.target, NavigatorTarget::Pane { ws_idx: 0, .. }))
+            .all(|row| row.depth == 1
+                && (row.meta.starts_with("build · ") || row.meta.starts_with("tests · "))));
+        assert!(rows[state.navigator.selected].is_current);
+        assert_eq!(
+            navigator_display_lines(&rows)
+                .iter()
+                .filter(|line| matches!(line, crate::app::state::NavigatorDisplayLine::Spacer))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn goto_empty_view_keeps_multi_tab_tree() {
+        let mut state = app_with_workspaces(&["one"]);
+        state.workspaces[0].test_add_tab(Some("tests"));
+        state.ensure_test_terminals();
+
+        state.open_navigator();
+
+        assert!(state
+            .navigator_rows()
+            .iter()
+            .any(|row| matches!(row.target, NavigatorTarget::Tab { .. })));
+    }
+
+    #[test]
+    fn search_entry_state_filter_keeps_compact_layout() {
+        let mut state = app_with_workspaces(&["one"]);
+        state.workspaces[0].test_add_tab(Some("tests"));
+        state.ensure_test_terminals();
+        let working = state.workspaces[0].tabs[1].root_pane;
+        let terminal_id = state.workspaces[0].terminal_id(working).cloned().unwrap();
+        state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_state(Some(Agent::Codex), AgentState::Working);
+        let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+
+        state.open_navigator_search_from(&terminal_runtimes);
+        state.navigator.state_filter = Some(NavigatorStateFilter::Working);
+        let rows = state.navigator_rows();
+
+        assert!(!rows
+            .iter()
+            .any(|row| matches!(row.target, NavigatorTarget::Tab { .. })));
+        assert!(rows.iter().any(
+            |row| matches!(row.target, NavigatorTarget::Pane { pane_id, .. } if pane_id == working)
+                && row.depth == 1
+                && row.meta.starts_with("tests · ")
+        ));
     }
 
     #[test]
