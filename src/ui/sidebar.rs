@@ -2612,10 +2612,14 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
                 let mut app = AppState::test_new();
                 app.sidebar_section_split = ratio;
                 app.sidebar_section_order = order;
-                let (first, second) = expanded_sidebar_sections(area, ratio);
                 let expected = match order {
-                    [crate::config::SidebarSection::Spaces, _] => (first, second),
-                    [crate::config::SidebarSection::Agents, _] => (second, first),
+                    [crate::config::SidebarSection::Spaces, _] => {
+                        expanded_sidebar_sections(area, ratio)
+                    }
+                    [crate::config::SidebarSection::Agents, _] => {
+                        let (first, second) = expanded_sidebar_sections(area, 1.0 - ratio);
+                        (second, first)
+                    }
                 };
 
                 assert_eq!(ordered_sidebar_sections(&app, area), expected);

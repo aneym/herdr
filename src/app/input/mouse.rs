@@ -3858,7 +3858,33 @@ mod tests {
     }
 
     #[test]
-    fn agents_first_collapsed_clicks_match_rendered_sections() {
+    fn content_fit_agents_first_header_new_workspace_button_wins_over_divider() {
+        let mut app = app_for_mouse_test();
+        app.state.workspaces = vec![Workspace::test_new("one")];
+        app.state.sidebar_new_button = crate::config::SidebarNewButtonConfig::Header;
+        app.state.sidebar_spaces.max_visible = 8;
+        app.state.sidebar_section_order = [
+            crate::config::SidebarSection::Agents,
+            crate::config::SidebarSection::Spaces,
+        ];
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 40));
+        let new_workspace = app.state.sidebar_new_button_rect();
+
+        let action = app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                new_workspace.x + 1,
+                new_workspace.y,
+            ),
+        );
+
+        assert!(matches!(action, Some(MouseAction::NewWorkspace)));
+        assert!(app.state.drag.is_none());
+    }
+
+    #[test]
+    fn content_fit_config_keeps_collapsed_clicks_aligned_with_rendered_sections() {
         let mut app = app_for_mouse_test();
         let first = Workspace::test_new("first");
         let second = Workspace::test_new("second");
@@ -3876,6 +3902,7 @@ mod tests {
         app.state.active = Some(0);
         app.state.selected = 0;
         app.state.sidebar_collapsed = true;
+        app.state.sidebar_spaces.max_visible = 8;
         app.state.sidebar_section_order = [
             crate::config::SidebarSection::Agents,
             crate::config::SidebarSection::Spaces,
