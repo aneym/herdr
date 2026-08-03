@@ -564,10 +564,11 @@ impl App {
         state.workspaces = workspaces;
         state.active = active;
         state.active_profile = active_profile;
+        state.selected = selected;
+        state.settle_active_workspace_visibility();
         state.previous_pane_focus = None;
         state.pane_focus_history = state::PaneFocusHistory::default();
         state.deferred_attention_read = None;
-        state.selected = selected;
         state.should_quit = false;
         state.detach_exits = no_session;
         state.detach_requested = false;
@@ -877,6 +878,7 @@ impl App {
         app.state.selected = snapshot
             .selected
             .min(app.state.workspaces.len().saturating_sub(1));
+        app.state.settle_active_workspace_visibility();
         if let Some(width) = snapshot.sidebar_width {
             app.state.sidebar_width = width;
             app.state.sidebar_width_source = state::SidebarWidthSource::Persisted;

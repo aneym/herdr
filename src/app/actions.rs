@@ -1674,17 +1674,12 @@ impl AppState {
         } else {
             crate::ui::workspace_list_entries(self)
         };
-        let order = entries
+        entries
             .into_iter()
             .map(|entry| match entry {
                 crate::ui::WorkspaceListEntry::Workspace { ws_idx, .. } => ws_idx,
             })
-            .collect::<Vec<_>>();
-        if order.is_empty() {
-            (0..self.workspaces.len()).collect()
-        } else {
-            order
-        }
+            .collect()
     }
 
     pub(crate) fn workspace_at_visible_position(&self, position: usize) -> Option<usize> {
@@ -1716,6 +1711,9 @@ impl AppState {
         }
         let current = self.active.unwrap_or(self.selected);
         let order = self.visible_workspace_order();
+        if order.is_empty() {
+            return;
+        }
         let current_pos = order.iter().position(|idx| *idx == current).unwrap_or(0);
         let next = order[(current_pos + 1) % order.len()];
         self.switch_workspace(next);
@@ -1728,6 +1726,9 @@ impl AppState {
         }
         let current = self.active.unwrap_or(self.selected);
         let order = self.visible_workspace_order();
+        if order.is_empty() {
+            return;
+        }
         let current_pos = order.iter().position(|idx| *idx == current).unwrap_or(0);
         let prev = if current_pos == 0 {
             order[order.len() - 1]
@@ -3865,6 +3866,21 @@ mod tests {
     use crate::detect::{Agent, AgentState};
     use crate::workspace::Workspace;
     use ratatui::layout::Direction;
+
+    #[test]
+    fn zero_visible_workspace_navigation_is_a_no_op() {
+        let mut state = AppState::test_new();
+        state.workspaces = vec![Workspace::test_new("default")];
+        state.active_profile = "work".into();
+        state.active = None;
+
+        assert!(state.visible_workspace_order().is_empty());
+        assert_eq!(state.workspace_at_visible_position(0), None);
+        state.next_workspace();
+        state.previous_workspace();
+        assert_eq!(state.active, None);
+        assert_eq!(state.active_profile, "work");
+    }
 
     fn app_with_workspaces(names: &[&str]) -> AppState {
         let mut state = AppState::test_new();

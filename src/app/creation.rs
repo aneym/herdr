@@ -243,6 +243,16 @@ impl App {
         focus: bool,
         extra_env: Vec<(String, String)>,
     ) -> std::io::Result<usize> {
+        self.create_workspace_with_profiles(initial_cwd, focus, extra_env, None)
+    }
+
+    pub(crate) fn create_workspace_with_profiles(
+        &mut self,
+        initial_cwd: PathBuf,
+        focus: bool,
+        extra_env: Vec<(String, String)>,
+        profiles: Option<Vec<String>>,
+    ) -> std::io::Result<usize> {
         let (rows, cols) = self.state.estimate_pane_size();
         let (ws, terminal, runtime) = Workspace::new_with_extra_env(
             initial_cwd,
@@ -260,15 +270,17 @@ impl App {
         self.state.terminals.insert(terminal.id.clone(), terminal);
         self.state.workspaces.push(ws);
         let idx = self.state.workspaces.len() - 1;
-        if self.state.active_profile != crate::workspace::DEFAULT_PROFILE {
-            self.state.workspaces[idx].profiles = vec![self.state.active_profile.clone()];
-        }
+        self.state.workspaces[idx].profiles = profiles.unwrap_or_else(|| {
+            (self.state.active_profile != crate::workspace::DEFAULT_PROFILE)
+                .then(|| vec![self.state.active_profile.clone()])
+                .unwrap_or_default()
+        });
         self.state
             .remove_alias_shadowed_by_new_pane(self.state.workspaces[idx].tabs[0].root_pane);
         let workspace_id = self.state.workspaces[idx].id.clone();
         let root_pane = self.state.workspaces[idx].tabs[0].root_pane.raw();
         crate::logging::workspace_created(&workspace_id, root_pane);
-        if focus || self.state.active.is_none() {
+        if focus || (self.state.active.is_none() && self.state.workspace_is_visible(idx)) {
             self.state.switch_workspace(idx);
             self.state.replace_mode(Mode::Terminal);
         }

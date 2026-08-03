@@ -649,6 +649,7 @@ impl App {
             previous_tab_label: self.state.workspaces[source_ws_idx].tabs[source_tab_idx]
                 .custom_name
                 .clone(),
+            previous_profiles: self.state.workspaces[source_ws_idx].profiles.clone(),
             previous_worktree_space: self.state.workspaces[source_ws_idx].worktree_space.clone(),
             identity_cwd: self.state.workspaces[source_ws_idx].identity_cwd.clone(),
         };
@@ -851,6 +852,7 @@ impl App {
                 } else if self.state.selected > source_ws_idx {
                     self.state.selected -= 1;
                 }
+                self.state.settle_active_workspace_visibility();
             }
         }
 
@@ -926,7 +928,7 @@ impl App {
                     .map(|terminal| terminal.cwd.clone())
                     .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| "/".into()));
                 let moved_pane_id = moved.pane_id;
-                let workspace = crate::workspace::Workspace::from_existing_pane(
+                let mut workspace = crate::workspace::Workspace::from_existing_pane(
                     label,
                     tab_label,
                     identity_cwd,
@@ -935,6 +937,9 @@ impl App {
                     self.render_notify.clone(),
                     self.render_dirty.clone(),
                 );
+                if self.state.active_profile != crate::workspace::DEFAULT_PROFILE {
+                    workspace.profiles = vec![self.state.active_profile.clone()];
+                }
                 self.state.workspaces.push(workspace);
                 let target_ws_idx = self.state.workspaces.len() - 1;
                 created_workspace = true;
@@ -943,7 +948,8 @@ impl App {
             }
         };
 
-        if focus || self.state.active.is_none() {
+        if focus || (self.state.active.is_none() && self.state.workspace_is_visible(target_ws_idx))
+        {
             self.state
                 .switch_workspace_tab(target_ws_idx, target_tab_idx);
             self.state
@@ -1065,6 +1071,7 @@ impl App {
                 self.render_dirty.clone(),
             );
             workspace.id = context.previous_workspace_id;
+            workspace.profiles = context.previous_profiles;
             workspace.worktree_space = context.previous_worktree_space;
             let insert_idx = context.source_ws_idx.min(self.state.workspaces.len());
             if let Some(active) = self.state.active {
@@ -1799,6 +1806,7 @@ struct PaneMoveRecoveryContext {
     previous_workspace_id: String,
     previous_workspace_label: Option<String>,
     previous_tab_label: Option<String>,
+    previous_profiles: Vec<String>,
     previous_worktree_space: Option<crate::workspace::WorktreeSpaceMembership>,
     identity_cwd: std::path::PathBuf,
 }
@@ -3008,6 +3016,69 @@ mod tests {
     }
 
     #[test]
+    fn pane_move_new_workspace_inherits_active_profile_and_settles_visibility() {
+        let mut app = app_with_linked_worktree();
+        app.state.active_profile = "work".into();
+        app.state.workspaces[0].profiles = vec!["work".into()];
+        app.state.active = Some(0);
+        let source = app.state.workspaces[0].tabs[0].root_pane;
+        seed_terminal_states(&mut app);
+        let source_public = app.public_pane_id(0, source).unwrap();
+
+        let response = app.handle_pane_move(
+            "req".into(),
+            PaneMoveParams {
+                pane_id: source_public,
+                destination: PaneMoveDestination::NewWorkspace {
+                    label: Some("moved".into()),
+                    tab_label: None,
+                },
+                focus: false,
+            },
+        );
+
+        let _: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(app.state.workspaces.len(), 1);
+        assert_eq!(app.state.workspaces[0].profiles, vec!["work"]);
+        assert_eq!(app.state.active, Some(0));
+        assert!(app.state.workspace_is_visible(0));
+    }
+
+    #[test]
+    fn pane_move_removing_active_source_settles_to_visible_workspace() {
+        let mut app = app_with_linked_worktree();
+        app.state.active_profile = "work".into();
+        app.state.workspaces[0].profiles = vec!["work".into()];
+        let mut hidden_target = crate::workspace::Workspace::test_new("personal");
+        hidden_target.profiles = vec!["personal".into()];
+        let hidden_tab_id = hidden_target.id.clone();
+        app.state.workspaces.push(hidden_target);
+        seed_terminal_states(&mut app);
+        let source = app.state.workspaces[0].tabs[0].root_pane;
+        let source_public = app.public_pane_id(0, source).unwrap();
+        let target_tab = app.public_tab_id(1, 0).unwrap();
+        assert!(target_tab.starts_with(&hidden_tab_id));
+
+        let response = app.handle_pane_move(
+            "req".into(),
+            PaneMoveParams {
+                pane_id: source_public,
+                destination: PaneMoveDestination::Tab {
+                    tab_id: target_tab,
+                    target_pane_id: None,
+                    split: SplitDirection::Right,
+                    ratio: None,
+                },
+                focus: false,
+            },
+        );
+
+        let _: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(app.state.active, None);
+        assert_eq!(app.state.active_profile, "work");
+    }
+
+    #[test]
     fn api_pane_move_same_tab_returns_same_tab_noop() {
         let mut app = app_with_linked_worktree();
         let source = app.state.workspaces[0].tabs[0].root_pane;
@@ -3122,12 +3193,14 @@ mod tests {
             .terminal_id(source)
             .unwrap()
             .clone();
+        app.state.workspaces[0].profiles = vec!["work".into(), "personal".into()];
         let previous_workspace_id = app.public_workspace_id(0);
         let context = PaneMoveRecoveryContext {
             source_ws_idx: 0,
             previous_workspace_id: previous_workspace_id.clone(),
             previous_workspace_label: app.state.workspaces[0].custom_name.clone(),
             previous_tab_label: app.state.workspaces[0].tabs[0].custom_name.clone(),
+            previous_profiles: app.state.workspaces[0].profiles.clone(),
             previous_worktree_space: app.state.workspaces[0].worktree_space.clone(),
             identity_cwd: app.state.workspaces[0].identity_cwd.clone(),
         };
@@ -3142,6 +3215,7 @@ mod tests {
 
         assert_eq!(app.state.workspaces.len(), 1);
         assert_eq!(app.state.workspaces[0].id, previous_workspace_id);
+        assert_eq!(app.state.workspaces[0].profiles, vec!["work", "personal"]);
         assert_eq!(
             app.state.workspaces[0].tabs[0].terminal_id(source),
             Some(&source_terminal)

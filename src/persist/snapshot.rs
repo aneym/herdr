@@ -768,6 +768,11 @@ mod tests {
         assert_eq!(snap.version, 3);
         assert_eq!(snap.workspaces.len(), 2);
         assert_eq!(snap.active, Some(0));
+        assert_eq!(snap.active_profile, DEFAULT_PROFILE);
+        assert!(snap
+            .workspaces
+            .iter()
+            .all(|workspace| workspace.profiles.is_empty()));
         assert_eq!(snap.selected, 0);
         assert_eq!(snap.sidebar_width, None);
         assert_eq!(snap.sidebar_section_split, None);
@@ -847,7 +852,9 @@ mod tests {
         let ws = &snap.workspaces[0];
 
         assert_eq!(snap.version, 2);
+        assert_eq!(snap.active_profile, DEFAULT_PROFILE);
         assert_eq!(snap.workspaces.len(), 1);
+        assert!(ws.profiles.is_empty());
         assert_eq!(ws.custom_name.as_deref(), Some("legacy"));
         assert_eq!(ws.identity_cwd, PathBuf::from("/tmp/pion"));
         assert_eq!(ws.active_tab, 0);
@@ -856,6 +863,20 @@ mod tests {
         assert_eq!(ws.tabs[0].root_pane, Some(0));
         assert_eq!(ws.tabs[0].panes[&0].cwd, PathBuf::from("/tmp/pion"));
         assert_eq!(ws.tabs[0].panes[&1].cwd, PathBuf::from("/tmp/herdr"));
+    }
+
+    #[test]
+    fn profile_fields_survive_capture_and_json_roundtrip() {
+        let mut state = state_with_workspaces(&["shared"]);
+        state.active_profile = "work".into();
+        state.workspaces[0].profiles = vec!["work".into(), "personal".into()];
+
+        let captured = capture_from_state(&state);
+        let json = serde_json::to_string(&captured).unwrap();
+        let restored = parse_snapshot(&json).unwrap();
+
+        assert_eq!(restored.active_profile, "work");
+        assert_eq!(restored.workspaces[0].profiles, vec!["work", "personal"]);
     }
 
     #[test]

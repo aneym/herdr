@@ -131,14 +131,8 @@ impl App {
             },
             None => None,
         };
-        match self.create_workspace_with_launch_env(cwd, params.focus, extra_env) {
+        match self.create_workspace_with_profiles(cwd, params.focus, extra_env, profiles) {
             Ok(index) => {
-                if let Some(profiles) = profiles {
-                    self.state.workspaces[index].profiles = profiles;
-                    if params.focus {
-                        self.state.reveal_workspace(index);
-                    }
-                }
                 if let Some(label) = params.label {
                     if let Some(workspace) = self.state.workspaces.get_mut(index) {
                         workspace.set_custom_name(label);
@@ -573,6 +567,65 @@ mod tests {
         assert_eq!(active, "work");
         assert_eq!(profiles, vec!["default", "work", "personal"]);
         assert_eq!(app.state.active, Some(0));
+    }
+
+    #[test]
+    fn set_profiles_with_explicit_default_keeps_active_workspace_visible() {
+        let mut app = app_with_linked_worktree();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        let workspace_id = app.state.workspaces[0].id.clone();
+
+        for profiles in [
+            vec!["default".into()],
+            vec!["default".into(), "work".into()],
+        ] {
+            let response = app.handle_workspace_set_profiles(
+                "set".into(),
+                WorkspaceSetProfilesParams {
+                    workspace_id: workspace_id.clone(),
+                    profiles,
+                },
+            );
+            let _: SuccessResponse = serde_json::from_str(&response).unwrap();
+            assert_eq!(app.state.active_profile, "default");
+            assert_eq!(app.state.active, Some(0));
+            assert!(app.state.workspace_is_visible(0));
+        }
+        app.state.switch_profile("work".into());
+        assert_eq!(app.state.active, Some(0));
+    }
+
+    #[tokio::test]
+    async fn create_with_explicit_profiles_applies_membership_before_implicit_focus() {
+        use super::super::test_support::{exiting_test_command, shutdown_test_runtimes};
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            true,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.default_shell = exiting_test_command().into();
+        app.state.active_profile = "work".into();
+        app.state.active = None;
+
+        let response = app.handle_workspace_create(
+            "create".into(),
+            WorkspaceCreateParams {
+                cwd: None,
+                focus: false,
+                label: None,
+                env: Default::default(),
+                profiles: Some(vec!["personal".into()]),
+            },
+        );
+        let _: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(app.state.workspaces[0].profiles, vec!["personal"]);
+        assert_eq!(app.state.active, None);
+        assert_eq!(app.state.active_profile, "work");
+        shutdown_test_runtimes(&mut app);
     }
 
     #[test]

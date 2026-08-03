@@ -1728,11 +1728,9 @@ impl AppState {
 
     pub fn workspace_is_visible(&self, idx: usize) -> bool {
         self.workspaces.get(idx).is_some_and(|workspace| {
-            if self.active_profile == crate::workspace::DEFAULT_PROFILE {
-                workspace.profiles.is_empty()
-            } else {
-                workspace.profiles.contains(&self.active_profile)
-            }
+            (self.active_profile == crate::workspace::DEFAULT_PROFILE
+                && workspace.profiles.is_empty())
+                || workspace.profiles.contains(&self.active_profile)
         })
     }
 
@@ -1785,6 +1783,15 @@ impl AppState {
 
     pub(crate) fn first_visible_workspace(&self) -> Option<usize> {
         (0..self.workspaces.len()).find(|idx| self.workspace_is_visible(*idx))
+    }
+
+    pub(crate) fn settle_active_workspace_visibility(&mut self) {
+        let active = self
+            .active
+            .filter(|idx| self.workspace_is_visible(*idx))
+            .or_else(|| self.first_visible_workspace());
+        self.active = active;
+        self.selected = active.unwrap_or(0);
     }
 
     pub(crate) fn remove_alias_shadowed_by_new_pane(&mut self, pane_id: PaneId) {
@@ -2552,6 +2559,42 @@ mod tests {
         state.switch_profile("empty".into());
         assert_eq!(state.active, None);
         assert_eq!(state.selected, 0);
+    }
+
+    #[test]
+    fn settling_restored_active_workspace_prefers_first_visible_or_none() {
+        let mut state = AppState::test_new();
+        let default = crate::workspace::Workspace::test_new("default");
+        let mut work = crate::workspace::Workspace::test_new("work");
+        work.profiles = vec!["work".into()];
+        state.workspaces = vec![default, work];
+        state.active_profile = "work".into();
+        state.active = Some(0);
+        state.selected = 0;
+
+        state.settle_active_workspace_visibility();
+        assert_eq!(state.active, Some(1));
+        assert_eq!(state.selected, 1);
+        state.active_profile = "empty".into();
+        state.settle_active_workspace_visibility();
+        assert_eq!(state.active, None);
+        assert_eq!(state.selected, 0);
+    }
+
+    #[test]
+    fn explicit_default_membership_is_visible_in_default_and_other_profiles() {
+        let mut state = AppState::test_new();
+        let mut default_only = crate::workspace::Workspace::test_new("default-only");
+        default_only.profiles = vec!["default".into()];
+        let mut shared = crate::workspace::Workspace::test_new("shared");
+        shared.profiles = vec!["default".into(), "work".into()];
+        state.workspaces = vec![default_only, shared];
+
+        assert!(state.workspace_is_visible(0));
+        assert!(state.workspace_is_visible(1));
+        state.active_profile = "work".into();
+        assert!(!state.workspace_is_visible(0));
+        assert!(state.workspace_is_visible(1));
     }
 
     #[test]
