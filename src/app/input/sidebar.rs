@@ -290,7 +290,7 @@ impl AppState {
     }
 
     pub(super) fn on_sidebar_section_divider(&self, col: u16, row: u16) -> bool {
-        if self.sidebar_collapsed {
+        if self.sidebar_collapsed || self.sidebar_spaces.max_visible > 0 {
             return false;
         }
         let rect = crate::ui::sidebar_section_divider_rect(self, self.view.sidebar_rect);
@@ -1977,6 +1977,21 @@ mod tests {
         let (workspace_area, agent_area) =
             crate::ui::ordered_sidebar_sections(&app.state, app.state.view.sidebar_rect);
         assert!(agent_area.height > workspace_area.height);
+    }
+
+    #[test]
+    fn content_fit_spaces_disable_sidebar_section_divider_hit_test() {
+        let mut app = app_for_mouse_test();
+        let divider =
+            crate::ui::sidebar_section_divider_rect(&app.state, app.state.view.sidebar_rect);
+
+        assert!(app
+            .state
+            .on_sidebar_section_divider(divider.x + 1, divider.y));
+        app.state.sidebar_spaces.max_visible = 8;
+        assert!(!app
+            .state
+            .on_sidebar_section_divider(divider.x + 1, divider.y));
     }
 
     #[test]

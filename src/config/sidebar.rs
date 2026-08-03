@@ -8,6 +8,10 @@ const MAX_SIDEBAR_ROWS: usize = 16;
 const MAX_SIDEBAR_TOKENS_PER_ROW: usize = 16;
 const DEFAULT_SIDEBAR_ROW_GAP: u16 = 0;
 
+fn is_zero(value: &usize) -> bool {
+    *value == 0
+}
+
 fn deserialize_sidebar_rows<'de, D, T>(deserializer: D) -> Result<Vec<Vec<T>>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -454,6 +458,8 @@ pub struct SpacesSidebarConfig {
     #[serde(deserialize_with = "deserialize_sidebar_rows")]
     pub rows: SpaceSidebarRows,
     pub row_gap: u16,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub max_visible: usize,
 }
 
 impl Default for SpacesSidebarConfig {
@@ -464,6 +470,7 @@ impl Default for SpacesSidebarConfig {
                 vec![SpaceSidebarToken::Branch, SpaceSidebarToken::GitStatus],
             ],
             row_gap: DEFAULT_SIDEBAR_ROW_GAP,
+            max_visible: 0,
         }
     }
 }
@@ -571,6 +578,20 @@ mod tests {
             ]
         );
         assert_eq!(config.spaces.row_gap, 0);
+        assert_eq!(config.spaces.max_visible, 0);
+    }
+
+    #[test]
+    fn spaces_max_visible_parses() {
+        let config: crate::config::Config = toml::from_str(
+            r#"
+[ui.sidebar.spaces]
+max_visible = 8
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.ui.sidebar.spaces.max_visible, 8);
     }
 
     #[test]

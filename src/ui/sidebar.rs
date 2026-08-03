@@ -69,12 +69,71 @@ pub(crate) fn expanded_sidebar_sections(area: Rect, split_ratio: f32) -> (Rect, 
 }
 
 pub(crate) fn ordered_sidebar_sections(app: &AppState, area: Rect) -> (Rect, Rect) {
+    if app.sidebar_spaces.max_visible > 0 && area.height >= 6 {
+        return content_fit_sidebar_sections(app, area);
+    }
+
     match app.sidebar_section_order {
         [crate::config::SidebarSection::Agents, crate::config::SidebarSection::Spaces] => {
             let (first, second) = expanded_sidebar_sections(area, 1.0 - app.sidebar_section_split);
             (second, first)
         }
         _ => expanded_sidebar_sections(area, app.sidebar_section_split),
+    }
+}
+
+fn content_fit_sidebar_sections(app: &AppState, area: Rect) -> (Rect, Rect) {
+    let content = Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height);
+    if content.width == 0 || content.height == 0 {
+        return (Rect::default(), Rect::default());
+    }
+
+    let entries = workspace_list_entries(app);
+    let visible_count = entries.len().min(app.sidebar_spaces.max_visible);
+    let body_height =
+        entries
+            .iter()
+            .take(visible_count)
+            .enumerate()
+            .fold(0u16, |height, (entry_idx, entry)| {
+                let WorkspaceListEntry::Workspace { ws_idx, indented } = entry;
+                let row_height = app
+                    .workspaces
+                    .get(*ws_idx)
+                    .map(|workspace| workspace_row_height(app, workspace, *indented))
+                    .unwrap_or(0);
+                let gap = if entry_idx + 1 < visible_count {
+                    workspace_entry_gap(app, &entries, entry_idx)
+                } else {
+                    0
+                };
+                height.saturating_add(row_height).saturating_add(gap)
+            });
+    let spaces_height = body_height
+        .saturating_add(WORKSPACE_SECTION_HEADER_ROWS + 1)
+        .clamp(3, content.height.saturating_sub(3));
+    let agents_height = content.height.saturating_sub(spaces_height);
+    match app.sidebar_section_order {
+        [crate::config::SidebarSection::Agents, crate::config::SidebarSection::Spaces] => {
+            let agents = Rect::new(content.x, content.y, content.width, agents_height);
+            let spaces = Rect::new(
+                content.x,
+                content.y + agents_height,
+                content.width,
+                spaces_height,
+            );
+            (spaces, agents)
+        }
+        _ => {
+            let spaces = Rect::new(content.x, content.y, content.width, spaces_height);
+            let agents = Rect::new(
+                content.x,
+                content.y + spaces_height,
+                content.width,
+                agents_height,
+            );
+            (spaces, agents)
+        }
     }
 }
 
@@ -2534,6 +2593,100 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
 
         assert!(agent_area.y < workspace_area.y);
         assert_eq!(agent_area.height + workspace_area.height, area.height);
+    }
+
+    #[test]
+    fn default_sidebar_section_sizing_matches_ratio_split() {
+        let area = Rect::new(2, 3, 20, 20);
+        for ratio in [0.1, 0.33, 0.5, 0.9] {
+            for order in [
+                [
+                    crate::config::SidebarSection::Spaces,
+                    crate::config::SidebarSection::Agents,
+                ],
+                [
+                    crate::config::SidebarSection::Agents,
+                    crate::config::SidebarSection::Spaces,
+                ],
+            ] {
+                let mut app = AppState::test_new();
+                app.sidebar_section_split = ratio;
+                app.sidebar_section_order = order;
+                let (first, second) = expanded_sidebar_sections(area, ratio);
+                let expected = match order {
+                    [crate::config::SidebarSection::Spaces, _] => (first, second),
+                    [crate::config::SidebarSection::Agents, _] => (second, first),
+                };
+
+                assert_eq!(ordered_sidebar_sections(&app, area), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn content_fit_spaces_hug_bottom_and_leave_remainder_for_agents() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
+        app.sidebar_spaces.max_visible = 8;
+        app.sidebar_section_order = [
+            crate::config::SidebarSection::Agents,
+            crate::config::SidebarSection::Spaces,
+        ];
+        let area = Rect::new(0, 0, 20, 20);
+
+        let (spaces, agents) = ordered_sidebar_sections(&app, area);
+
+        assert_eq!(spaces, Rect::new(0, 13, 19, 7));
+        assert_eq!(agents, Rect::new(0, 0, 19, 13));
+    }
+
+    #[test]
+    fn content_fit_spaces_cap_visible_entries_and_scroll() {
+        let mut app = AppState::test_new();
+        app.workspaces = ["one", "two", "three", "four"]
+            .into_iter()
+            .map(Workspace::test_new)
+            .collect();
+        app.sidebar_spaces.max_visible = 2;
+        app.sidebar_section_order = [
+            crate::config::SidebarSection::Agents,
+            crate::config::SidebarSection::Spaces,
+        ];
+        let area = Rect::new(0, 0, 20, 20);
+
+        let (spaces, _) = ordered_sidebar_sections(&app, area);
+        let metrics = workspace_list_scroll_metrics(&app, spaces);
+
+        assert_eq!(spaces.height, 7);
+        assert_eq!(metrics.viewport_rows, 2);
+        assert!(metrics.max_offset_from_bottom > 0);
+        assert!(workspace_list_scrollbar_rect(&app, spaces).is_some());
+    }
+
+    #[test]
+    fn content_fit_spaces_respect_spaces_first_order() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one")];
+        app.sidebar_spaces.max_visible = 8;
+        let area = Rect::new(0, 0, 20, 20);
+
+        let (spaces, agents) = ordered_sidebar_sections(&app, area);
+
+        assert_eq!(spaces, Rect::new(0, 0, 19, 5));
+        assert_eq!(agents, Rect::new(0, 5, 19, 15));
+    }
+
+    #[test]
+    fn content_fit_spaces_fall_back_to_ratio_split_at_tiny_heights() {
+        let mut app = AppState::test_new();
+        app.sidebar_spaces.max_visible = 8;
+        app.sidebar_section_split = 0.9;
+        let area = Rect::new(0, 0, 20, 5);
+
+        assert_eq!(
+            ordered_sidebar_sections(&app, area),
+            expanded_sidebar_sections(area, app.sidebar_section_split)
+        );
     }
 
     #[test]
