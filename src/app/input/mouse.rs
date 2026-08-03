@@ -990,13 +990,11 @@ impl AppState {
                 if over_agent_panel {
                     let agent_entries =
                         crate::ui::agent_panel_list_entries_from(self, terminal_runtimes);
-                    if crate::ui::should_show_scrollbar(
-                        crate::ui::agent_panel_scroll_metrics(
-                            self,
-                            &agent_entries,
-                            agent_area,
-                        ),
-                    ) {
+                    if crate::ui::should_show_scrollbar(crate::ui::agent_panel_scroll_metrics(
+                        self,
+                        &agent_entries,
+                        agent_area,
+                    )) {
                         self.scroll_agent_panel(&agent_entries, -1);
                     }
                 } else if crate::ui::should_show_scrollbar(
@@ -1015,13 +1013,11 @@ impl AppState {
                 if over_agent_panel {
                     let agent_entries =
                         crate::ui::agent_panel_list_entries_from(self, terminal_runtimes);
-                    if crate::ui::should_show_scrollbar(
-                        crate::ui::agent_panel_scroll_metrics(
-                            self,
-                            &agent_entries,
-                            agent_area,
-                        ),
-                    ) {
+                    if crate::ui::should_show_scrollbar(crate::ui::agent_panel_scroll_metrics(
+                        self,
+                        &agent_entries,
+                        agent_area,
+                    )) {
                         self.scroll_agent_panel(&agent_entries, 1);
                     }
                 } else if crate::ui::should_show_scrollbar(
