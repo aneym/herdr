@@ -81,7 +81,8 @@ pub(crate) use self::{
         agent_panel_scrollbar_rect, agent_panel_toggle_rect, all_agent_panel_entries,
         automation_panel_entries, collapsed_sidebar_sections, collapsed_sidebar_toggle_rect,
         compute_workspace_card_areas, expanded_sidebar_toggle_rect, normalized_workspace_scroll,
-        ordered_sidebar_sections, sidebar_section_divider_rect, workspace_drop_slots,
+        ordered_sidebar_sections, refresh_automation_workspace_ids, sidebar_section_divider_rect,
+        workspace_drop_slots,
         workspace_group_chevron_rect, workspace_list_entries, workspace_list_entries_expanded,
         workspace_list_rect, workspace_list_scroll_metrics, workspace_list_scrollbar_rect,
         workspace_parent_group_state, AgentPanelEntry, AgentPanelListEntry, WorkspaceListEntry,
@@ -224,6 +225,8 @@ fn compute_view_internal(
     resize_panes: bool,
     cell_size: crate::kitty_graphics::HostCellSize,
 ) {
+    refresh_automation_workspace_ids(app, terminal_runtimes);
+
     if is_mobile_width(area, app.mobile_width_threshold) {
         compute_mobile_view(app, terminal_runtimes, area, resize_panes, cell_size);
         return;

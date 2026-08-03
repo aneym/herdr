@@ -163,10 +163,36 @@ fn partition_agent_panel_entries(
     let mut entries = collect_agent_panel_entries_with_runtimes(app, terminal_runtimes);
     crate::app::agent_view::apply_agent_view(app, &mut entries);
     entries.into_iter().partition(|entry| {
-        !app.sidebar_automations
-            .workspaces
-            .contains(&entry.primary_label)
+        !app.automation_workspace_ids.as_ref().map_or_else(
+            || {
+                app.sidebar_automations
+                    .workspaces
+                    .contains(&entry.primary_label)
+            },
+            |workspace_ids| {
+                app.workspaces
+                    .get(entry.ws_idx)
+                    .is_some_and(|workspace| workspace_ids.contains(&workspace.id))
+            },
+        )
     })
+}
+
+pub(crate) fn refresh_automation_workspace_ids(
+    app: &mut AppState,
+    terminal_runtimes: &TerminalRuntimeRegistry,
+) {
+    app.automation_workspace_ids = Some(
+        app.workspaces
+            .iter()
+            .filter(|workspace| {
+                app.sidebar_automations
+                    .workspaces
+                    .contains(&workspace.display_name_from(&app.terminals, terminal_runtimes))
+            })
+            .map(|workspace| workspace.id.clone())
+            .collect(),
+    );
 }
 
 fn collect_agent_panel_entries_with_runtimes(
@@ -275,7 +301,7 @@ impl AutomationActivitySummary {
 
     fn color(&self, palette: &Palette) -> ratatui::style::Color {
         if self.blocked > 0 {
-            palette.accent
+            palette.red
         } else {
             palette.overlay0
         }
@@ -1647,6 +1673,9 @@ fn render_agent_detail(
     let body_bottom = body.y + body.height;
     for (index, list_entry) in details.iter().enumerate().skip(scroll) {
         if matches!(list_entry, AgentPanelListEntry::AutomationsHeader) {
+            if row_y.saturating_add(1) > body_bottom {
+                break;
+            }
             let header_style = Style::default()
                 .fg(automation_summary.color(p))
                 .add_modifier(Modifier::BOLD);
@@ -1949,6 +1978,11 @@ mod tests {
             .join("\n");
         assert!(collapsed_text.contains("automations"));
         assert!(collapsed_text.contains("1 blocked"));
+        let header_row = (0..area.height)
+            .find(|row| row_text(&collapsed, *row, area.width).contains("automations"))
+            .unwrap();
+        let header_x = find_symbol_x(&collapsed, header_row, area.width, "a");
+        assert_eq!(collapsed[(header_x, header_row)].style().fg, Some(app.palette.red));
         assert!(!collapsed_text.contains("⚡ routines"));
 
         app.automations_expanded = true;
@@ -1959,6 +1993,35 @@ mod tests {
             .join("\n");
         assert!(expanded_text.contains("automations"));
         assert!(expanded_text.contains("routines"), "{expanded_text}");
+    }
+
+    #[test]
+    fn automation_header_does_not_render_beyond_a_one_row_body() {
+        let mut app = AppState::test_new();
+        let normal = Workspace::test_new("normal");
+        let normal_pane = normal.tabs[0].root_pane;
+        let mut automation = Workspace::test_new("automation-path");
+        automation.custom_name = Some("⚡ routines".into());
+        app.workspaces = vec![normal, automation];
+        app.ensure_test_terminals();
+        for terminal in app.terminals.values_mut() {
+            terminal.detected_agent = Some(Agent::Pi);
+        }
+        app.sidebar_agents.rows = vec![vec![crate::config::AgentSidebarToken::Agent]];
+        app.sidebar_automations.workspaces = vec!["⚡ routines".into()];
+        let normal_id = app.workspaces[0].id.clone();
+        let automation_id = app.workspaces[1].id.clone();
+        app.automation_workspace_ids = Some(std::collections::HashSet::from([automation_id]));
+
+        let area = Rect::new(0, 0, 26, 4);
+        let mut terminal = Terminal::new(TestBackend::new(26, 5)).unwrap();
+        terminal
+            .draw(|frame| render_agent_detail(&app, &TerminalRuntimeRegistry::new(), frame, area))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        assert_eq!(agent_panel_entries(&app)[0].pane_id, normal_pane);
+        assert_eq!(app.workspaces[0].id, normal_id);
+        assert!(!row_text(buffer, 4, 26).contains("automations"));
     }
 
     #[test]
@@ -2727,6 +2790,14 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         runtime_registry.insert(terminal_id, runtime);
         let entries = agent_panel_entries_from(&app, &runtime_registry);
         let primary_label = entries[0].primary_label.clone();
+        app.sidebar_automations.workspaces = vec!["herdr".into()];
+        refresh_automation_workspace_ids(&mut app, &runtime_registry);
+        assert!(agent_panel_entries(&app).is_empty());
+        assert_eq!(automation_panel_entries(&app).len(), 1);
+        assert!(matches!(
+            agent_panel_list_entries(&app).as_slice(),
+            [AgentPanelListEntry::AutomationsHeader]
+        ));
 
         for (_, runtime) in runtime_registry.drain() {
             runtime.shutdown();
