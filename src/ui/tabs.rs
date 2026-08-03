@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use super::status::resolved_agent_icon;
-use super::text::{display_width, display_width_u16};
+use super::text::{display_width, display_width_u16, truncate_end};
 use super::widgets::panel_contrast_fg;
 use crate::app::AppState;
 use crate::detect::AgentState;
@@ -15,6 +15,8 @@ use crate::detect::AgentState;
 const MIN_TAB_WIDTH: u16 = 8;
 const NEW_TAB_WIDTH: u16 = 3;
 const TAB_SCROLL_BUTTON_WIDTH: u16 = 3;
+const SESSION_BADGE_MAX_WIDTH: usize = 16;
+const SESSION_BADGE_GAP: u16 = 1;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TabBarView {
@@ -23,6 +25,31 @@ pub(crate) struct TabBarView {
     pub scroll_left_hit_area: Rect,
     pub scroll_right_hit_area: Rect,
     pub new_tab_hit_area: Rect,
+    pub session_badge_rect: Rect,
+}
+
+fn session_badge_text(app: &AppState) -> String {
+    truncate_end(
+        app.session_name.as_deref().unwrap_or("default"),
+        SESSION_BADGE_MAX_WIDTH,
+    )
+}
+
+fn session_badge_layout(app: &AppState, area: Rect) -> (Rect, Rect) {
+    let badge_width = display_width_u16(&session_badge_text(app));
+    let reserved_width = badge_width.saturating_add(SESSION_BADGE_GAP);
+    if area.width < reserved_width.saturating_add(MIN_TAB_WIDTH) {
+        return (area, Rect::default());
+    }
+
+    let badge_rect = Rect::new(
+        area.x + area.width - badge_width,
+        area.y,
+        badge_width,
+        area.height,
+    );
+    let content_area = Rect::new(area.x, area.y, area.width - reserved_width, area.height);
+    (content_area, badge_rect)
 }
 
 fn tab_width(app: &AppState, ws: &crate::workspace::Workspace, tab_idx: usize) -> u16 {
@@ -184,36 +211,39 @@ pub(crate) fn compute_tab_bar_view(
         return TabBarView::default();
     }
 
+    let (content_area, session_badge_rect) = session_badge_layout(app, area);
+
     if !mouse_chrome {
-        let max_scroll = max_tab_scroll(app, ws, area);
+        let max_scroll = max_tab_scroll(app, ws, content_area);
         let scroll = if follow_active {
-            centered_tab_scroll(app, ws, area).min(max_scroll)
+            centered_tab_scroll(app, ws, content_area).min(max_scroll)
         } else {
             current_scroll.min(max_scroll)
         };
         return TabBarView {
             scroll,
-            tab_hit_areas: layout_tab_hit_areas(app, ws, area, scroll),
+            tab_hit_areas: layout_tab_hit_areas(app, ws, content_area, scroll),
             scroll_left_hit_area: Rect::default(),
             scroll_right_hit_area: Rect::default(),
             new_tab_hit_area: Rect::default(),
+            session_badge_rect,
         };
     }
 
-    let area_right = area.x + area.width;
+    let area_right = content_area.x + content_area.width;
     let all_tabs_area = Rect::new(
-        area.x,
-        area.y,
-        area.width.saturating_sub(NEW_TAB_WIDTH),
-        area.height,
+        content_area.x,
+        content_area.y,
+        content_area.width.saturating_sub(NEW_TAB_WIDTH),
+        content_area.height,
     );
     let all_tabs = layout_tab_hit_areas(app, ws, all_tabs_area, 0);
     let overflow = all_tabs.iter().any(|rect| rect.width == 0);
     if !overflow {
-        let new_tab_x = trailing_tab_controls_x(&all_tabs, area.x);
+        let new_tab_x = trailing_tab_controls_x(&all_tabs, content_area.x);
         let new_tab_hit_area = Rect::new(
             new_tab_x,
-            area.y,
+            content_area.y,
             area_right.saturating_sub(new_tab_x).min(NEW_TAB_WIDTH),
             1,
         );
@@ -223,10 +253,16 @@ pub(crate) fn compute_tab_bar_view(
             scroll_left_hit_area: Rect::default(),
             scroll_right_hit_area: Rect::default(),
             new_tab_hit_area,
+            session_badge_rect,
         };
     }
 
-    let left_hit_area = Rect::new(area.x, area.y, TAB_SCROLL_BUTTON_WIDTH.min(area.width), 1);
+    let left_hit_area = Rect::new(
+        content_area.x,
+        content_area.y,
+        TAB_SCROLL_BUTTON_WIDTH.min(content_area.width),
+        1,
+    );
     let tab_area_x = left_hit_area.x + left_hit_area.width;
     let reserved_trailing_width = NEW_TAB_WIDTH.saturating_add(TAB_SCROLL_BUTTON_WIDTH);
     let tab_area_right = area_right.saturating_sub(reserved_trailing_width);
@@ -267,6 +303,7 @@ pub(crate) fn compute_tab_bar_view(
         scroll_left_hit_area: left_hit_area,
         scroll_right_hit_area: right_hit_area,
         new_tab_hit_area,
+        session_badge_rect,
     }
 }
 
@@ -443,6 +480,15 @@ pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
         frame.render_widget(
             Paragraph::new(" + ").style(Style::default().fg(p.overlay1)),
             app.view.new_tab_hit_area,
+        );
+    }
+
+    if app.view.session_badge_rect.width > 0 {
+        frame.render_widget(
+            Paragraph::new(session_badge_text(app))
+                .style(Style::default().fg(p.overlay0))
+                .alignment(ratatui::layout::Alignment::Right),
+            app.view.session_badge_rect,
         );
     }
 
@@ -792,5 +838,91 @@ mod tests {
 
         let row = buffer_row_text(terminal.backend().buffer(), app.view.tab_bar_rect, 0);
         assert!(row.contains('馈'), "tab row: {row:?}");
+    }
+
+    #[test]
+    fn session_badge_reserves_right_aligned_geometry() {
+        let mut app = AppState::test_new();
+        app.session_name = Some("work".into());
+        let ws = Workspace::test_new("test");
+        let area = Rect::new(4, 2, 30, 1);
+
+        let view = compute_tab_bar_view(&app, &ws, area, 0, true, true);
+
+        assert_eq!(view.session_badge_rect, Rect::new(30, 2, 4, 1));
+        assert!(view
+            .tab_hit_areas
+            .iter()
+            .chain([
+                &view.scroll_left_hit_area,
+                &view.scroll_right_hit_area,
+                &view.new_tab_hit_area,
+            ])
+            .all(|rect| rect.width == 0 || rect.x + rect.width < view.session_badge_rect.x));
+    }
+
+    #[test]
+    fn session_badge_is_hidden_when_tab_bar_is_too_narrow() {
+        let app = AppState::test_new();
+        let ws = Workspace::test_new("test");
+        let area = Rect::new(0, 0, 15, 1);
+
+        let view = compute_tab_bar_view(&app, &ws, area, 0, true, false);
+
+        assert_eq!(view.session_badge_rect, Rect::default());
+        assert_eq!(view.tab_hit_areas[0].width, MIN_TAB_WIDTH);
+    }
+
+    #[test]
+    fn session_badge_truncates_long_names_by_display_width() {
+        let mut app = AppState::test_new();
+        app.session_name = Some("提交-herdr-session-name".into());
+        let ws = Workspace::test_new("test");
+
+        let view = compute_tab_bar_view(&app, &ws, Rect::new(0, 0, 40, 1), 0, true, false);
+        let text = session_badge_text(&app);
+
+        assert_eq!(display_width(&text), SESSION_BADGE_MAX_WIDTH);
+        assert!(text.ends_with('…'));
+        assert_eq!(view.session_badge_rect.width as usize, display_width(&text));
+    }
+
+    #[test]
+    fn session_badge_renders_named_and_default_sessions_with_dim_color() {
+        for (session_name, expected) in [(Some("work"), "work"), (None, "default")] {
+            let mut app = AppState::test_new();
+            app.session_name = session_name.map(str::to_string);
+            app.workspaces = vec![Workspace::test_new("test")];
+            app.active = Some(0);
+            app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
+            let view = compute_tab_bar_view(
+                &app,
+                &app.workspaces[0],
+                app.view.tab_bar_rect,
+                0,
+                true,
+                false,
+            );
+            app.view.tab_hit_areas = view.tab_hit_areas;
+            app.view.session_badge_rect = view.session_badge_rect;
+
+            let backend = TestBackend::new(30, 1);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal
+                .draw(|frame| render_tab_bar(&app, frame, app.view.tab_bar_rect))
+                .unwrap();
+
+            let badge_rect = app.view.session_badge_rect;
+            let badge_text = (badge_rect.x..badge_rect.x + badge_rect.width)
+                .map(|x| terminal.backend().buffer()[(x, badge_rect.y)].symbol())
+                .collect::<String>();
+            assert_eq!(badge_text, expected);
+            assert_eq!(
+                terminal.backend().buffer()[(badge_rect.x, badge_rect.y)]
+                    .style()
+                    .fg,
+                Some(app.palette.overlay0)
+            );
+        }
     }
 }
