@@ -1,9 +1,10 @@
 use std::path::PathBuf;
 
 use crate::api::schema::{
-    EventData, EventEnvelope, EventKind, ResponseResult, WorkspaceCreateParams,
-    WorkspaceMoveBlockParams, WorkspaceMoveParams, WorkspaceRenameParams,
-    WorkspaceReportMetadataParams, WorkspaceTarget,
+    EventData, EventEnvelope, EventKind, ProfileSwitchParams, ResponseResult,
+    WorkspaceCreateParams, WorkspaceListParams, WorkspaceMoveBlockParams, WorkspaceMoveParams,
+    WorkspaceRenameParams, WorkspaceReportMetadataParams, WorkspaceSetProfilesParams,
+    WorkspaceTarget,
 };
 use crate::app::App;
 
@@ -11,11 +12,82 @@ use super::super::api_helpers::{normalize_metadata_source, normalize_metadata_tt
 use super::responses::{encode_error, encode_success};
 
 impl App {
-    pub(super) fn handle_workspace_list(&mut self, id: String) -> String {
+    pub(super) fn handle_workspace_list(
+        &mut self,
+        id: String,
+        params: WorkspaceListParams,
+    ) -> String {
+        let workspaces = self
+            .workspace_list_info()
+            .into_iter()
+            .enumerate()
+            .filter_map(|(idx, workspace)| {
+                (!params.visible_only || self.state.workspace_is_visible(idx)).then_some(workspace)
+            })
+            .collect();
+        encode_success(id, ResponseResult::WorkspaceList { workspaces })
+    }
+
+    pub(super) fn handle_workspace_set_profiles(
+        &mut self,
+        id: String,
+        params: WorkspaceSetProfilesParams,
+    ) -> String {
+        let Some(index) = self.parse_workspace_id(&params.workspace_id) else {
+            return workspace_not_found(id, &params.workspace_id);
+        };
+        let profiles = match crate::workspace::normalize_profiles(params.profiles) {
+            Ok(profiles) => profiles,
+            Err(message) => return encode_error(id, "invalid_profile", message),
+        };
+        let Some(workspace) = self.state.workspaces.get_mut(index) else {
+            return workspace_not_found(id, &params.workspace_id);
+        };
+        workspace.profiles = profiles;
+        if self.state.active == Some(index) && !self.state.workspace_is_visible(index) {
+            self.state.reveal_workspace(index);
+        }
+        self.state.mark_session_dirty();
+        self.schedule_session_save();
         encode_success(
             id,
-            ResponseResult::WorkspaceList {
-                workspaces: self.workspace_list_info(),
+            ResponseResult::WorkspaceInfo {
+                workspace: self.workspace_info(index),
+            },
+        )
+    }
+
+    pub(super) fn handle_profile_switch(
+        &mut self,
+        id: String,
+        params: ProfileSwitchParams,
+    ) -> String {
+        let profile = match crate::workspace::normalize_profile_name(&params.profile) {
+            Ok(profile) => profile,
+            Err(message) => return encode_error(id, "invalid_profile", message),
+        };
+        self.state.switch_profile(profile);
+        self.schedule_session_save();
+        self.handle_profile_list(id)
+    }
+
+    pub(super) fn handle_profile_list(&mut self, id: String) -> String {
+        let mut profiles = vec![crate::workspace::DEFAULT_PROFILE.to_string()];
+        for profile in self
+            .state
+            .workspaces
+            .iter()
+            .flat_map(|workspace| workspace.profiles.iter())
+        {
+            if !profiles.contains(profile) {
+                profiles.push(profile.clone());
+            }
+        }
+        encode_success(
+            id,
+            ResponseResult::ProfileList {
+                active: self.state.active_profile.clone(),
+                profiles,
             },
         )
     }
@@ -52,8 +124,21 @@ impl App {
             Ok(env) => env,
             Err((code, message)) => return encode_error(id, &code, message),
         };
+        let profiles = match params.profiles {
+            Some(profiles) => match crate::workspace::normalize_profiles(profiles) {
+                Ok(profiles) => Some(profiles),
+                Err(message) => return encode_error(id, "invalid_profile", message),
+            },
+            None => None,
+        };
         match self.create_workspace_with_launch_env(cwd, params.focus, extra_env) {
             Ok(index) => {
+                if let Some(profiles) = profiles {
+                    self.state.workspaces[index].profiles = profiles;
+                    if params.focus {
+                        self.state.reveal_workspace(index);
+                    }
+                }
                 if let Some(label) = params.label {
                     if let Some(workspace) = self.state.workspaces.get_mut(index) {
                         workspace.set_custom_name(label);
@@ -414,6 +499,7 @@ mod tests {
                 focus: false,
                 label: None,
                 env: Default::default(),
+                profiles: None,
             },
         );
 
@@ -453,6 +539,58 @@ mod tests {
             is_linked_worktree: true,
         });
         app
+    }
+
+    #[test]
+    fn profile_api_normalizes_membership_lists_profiles_and_switches_visibility() {
+        let mut app = app_with_linked_worktree();
+        app.state.workspaces.push(Workspace::test_new("default"));
+        let workspace_id = app.state.workspaces[0].id.clone();
+
+        let response = app.handle_workspace_set_profiles(
+            "set".into(),
+            WorkspaceSetProfilesParams {
+                workspace_id,
+                profiles: vec![" work ".into(), "work".into(), "personal".into()],
+            },
+        );
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::WorkspaceInfo { workspace } = success.result else {
+            panic!("expected workspace info");
+        };
+        assert_eq!(workspace.profiles, vec!["work", "personal"]);
+
+        let response = app.handle_profile_switch(
+            "switch".into(),
+            ProfileSwitchParams {
+                profile: "work".into(),
+            },
+        );
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::ProfileList { active, profiles } = success.result else {
+            panic!("expected profile list");
+        };
+        assert_eq!(active, "work");
+        assert_eq!(profiles, vec!["default", "work", "personal"]);
+        assert_eq!(app.state.active, Some(0));
+    }
+
+    #[test]
+    fn workspace_list_visible_only_filters_without_changing_raw_numbers() {
+        let mut app = app_with_linked_worktree();
+        app.state.workspaces[0].profiles = vec!["work".into()];
+        app.state.workspaces.push(Workspace::test_new("default"));
+        app.state.active_profile = "work".into();
+
+        let response =
+            app.handle_workspace_list("list".into(), WorkspaceListParams { visible_only: true });
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::WorkspaceList { workspaces } = success.result else {
+            panic!("expected workspace list");
+        };
+        assert_eq!(workspaces.len(), 1);
+        assert_eq!(workspaces[0].number, 1);
+        assert_eq!(workspaces[0].profiles, vec!["work"]);
     }
 
     #[test]

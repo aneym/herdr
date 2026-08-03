@@ -29,10 +29,12 @@ pub(crate) struct TabBarView {
 }
 
 fn session_badge_text(app: &AppState) -> String {
-    truncate_end(
-        app.session_name.as_deref().unwrap_or("default"),
-        SESSION_BADGE_MAX_WIDTH,
-    )
+    let text = app
+        .session_name
+        .as_deref()
+        .filter(|name| *name != "default")
+        .unwrap_or(&app.active_profile);
+    truncate_end(text, SESSION_BADGE_MAX_WIDTH)
 }
 
 fn session_badge_layout(app: &AppState, area: Rect, mouse_chrome: bool) -> (Rect, Rect) {
@@ -942,10 +944,15 @@ mod tests {
     }
 
     #[test]
-    fn session_badge_renders_named_and_default_sessions_with_dim_color() {
-        for (session_name, expected) in [(Some("work"), "work"), (None, "default")] {
+    fn session_badge_renders_named_session_or_default_session_profile_with_dim_color() {
+        for (session_name, active_profile, expected) in [
+            (Some("work"), "personal", "work"),
+            (Some("default"), "personal", "personal"),
+            (None, "default", "default"),
+        ] {
             let mut app = AppState::test_new();
             app.session_name = session_name.map(str::to_string);
+            app.active_profile = active_profile.to_string();
             app.workspaces = vec![Workspace::test_new("test")];
             app.active = Some(0);
             app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);

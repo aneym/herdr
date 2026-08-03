@@ -6,7 +6,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::layout::Node;
 use crate::terminal::TerminalRuntimeRegistry;
-use crate::workspace::Workspace;
+use crate::workspace::{Workspace, DEFAULT_PROFILE};
+
+fn default_profile() -> String {
+    DEFAULT_PROFILE.to_string()
+}
 
 /// Current snapshot format version.
 pub(super) const SNAPSHOT_VERSION: u32 = 3;
@@ -19,6 +23,8 @@ pub struct SessionSnapshot {
     pub version: u32,
     pub workspaces: Vec<WorkspaceSnapshot>,
     pub active: Option<usize>,
+    #[serde(default = "default_profile")]
+    pub active_profile: String,
     pub selected: usize,
     #[serde(default)]
     pub sidebar_width: Option<u16>,
@@ -54,6 +60,8 @@ pub struct WorkspaceSnapshot {
     pub id: Option<String>,
     #[serde(default)]
     pub custom_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub profiles: Vec<String>,
     pub identity_cwd: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree_space: Option<crate::workspace::WorktreeSpaceMembership>,
@@ -158,6 +166,7 @@ impl From<LegacyWorkspaceSnapshot> for WorkspaceSnapshot {
         Self {
             id: None,
             custom_name: snap.custom_name,
+            profiles: Vec::new(),
             identity_cwd,
             worktree_space: None,
             public_pane_numbers: HashMap::new(),
@@ -178,6 +187,8 @@ struct RawSessionSnapshot {
     workspaces: Vec<serde_json::Value>,
     #[serde(default)]
     active: Option<usize>,
+    #[serde(default = "default_profile")]
+    active_profile: String,
     #[serde(default)]
     selected: usize,
     #[serde(default)]
@@ -199,6 +210,7 @@ fn migrate_snapshot(raw: RawSessionSnapshot) -> Result<SessionSnapshot, String> 
             .map(migrate_workspace)
             .collect::<Result<Vec<_>, _>>()?,
         active: raw.active,
+        active_profile: raw.active_profile,
         selected: raw.selected,
         sidebar_width: raw.sidebar_width,
         sidebar_section_split: raw.sidebar_section_split,
@@ -262,6 +274,7 @@ pub fn capture(
     >,
     terminal_runtimes: &TerminalRuntimeRegistry,
     active: Option<usize>,
+    active_profile: String,
     selected: usize,
     sidebar_width: u16,
     sidebar_section_split: f32,
@@ -275,6 +288,7 @@ pub fn capture(
             .map(|workspace| capture_workspace(workspace, terminals, terminal_runtimes))
             .collect(),
         active,
+        active_profile,
         selected,
         sidebar_width: Some(sidebar_width),
         sidebar_section_split: Some(sidebar_section_split),
@@ -294,6 +308,7 @@ fn capture_workspace(
     WorkspaceSnapshot {
         id: Some(ws.id.clone()),
         custom_name: ws.custom_name.clone(),
+        profiles: ws.profiles.clone(),
         identity_cwd: ws
             .resolved_identity_cwd_from(terminals, terminal_runtimes)
             .unwrap_or_else(|| ws.identity_cwd.clone()),
@@ -558,6 +573,7 @@ mod tests {
             &state.terminals,
             terminal_runtimes,
             state.active,
+            state.active_profile.clone(),
             state.selected,
             state.sidebar_width,
             state.sidebar_section_split,
@@ -623,6 +639,7 @@ mod tests {
             version: SNAPSHOT_VERSION,
             workspaces: vec![],
             active: None,
+            active_profile: crate::workspace::DEFAULT_PROFILE.to_string(),
             selected: 0,
             sidebar_width: Some(26),
             sidebar_section_split: Some(0.5),
@@ -689,6 +706,7 @@ mod tests {
             workspaces: vec![WorkspaceSnapshot {
                 id: Some("wproj".to_string()),
                 custom_name: Some("pi-mono".to_string()),
+                profiles: Vec::new(),
                 identity_cwd: PathBuf::from("/home/can/Projects/herdr"),
                 worktree_space: None,
                 public_pane_numbers: HashMap::from([(0, 1), (1, 2)]),
@@ -711,6 +729,7 @@ mod tests {
                 active_tab: 0,
             }],
             active: Some(0),
+            active_profile: crate::workspace::DEFAULT_PROFILE.to_string(),
             selected: 0,
             sidebar_width: Some(26),
             sidebar_section_split: Some(0.5),
@@ -1252,6 +1271,7 @@ mod tests {
             workspaces: vec![WorkspaceSnapshot {
                 id: Some("test-ws".to_string()),
                 custom_name: Some("fallback test".to_string()),
+                profiles: Vec::new(),
                 identity_cwd: PathBuf::from("/tmp"),
                 worktree_space: None,
                 public_pane_numbers: HashMap::new(),
@@ -1274,6 +1294,7 @@ mod tests {
                 active_tab: 0,
             }],
             active: Some(0),
+            active_profile: crate::workspace::DEFAULT_PROFILE.to_string(),
             selected: 0,
             sidebar_width: Some(26),
             sidebar_section_split: Some(0.5),

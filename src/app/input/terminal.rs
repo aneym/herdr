@@ -1436,6 +1436,7 @@ mod tests {
             &app.state.terminals,
             &app.terminal_runtimes,
             app.state.active,
+            app.state.active_profile.clone(),
             app.state.selected,
             app.state.sidebar_width,
             app.state.sidebar_section_split,

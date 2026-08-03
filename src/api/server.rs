@@ -355,6 +355,9 @@ fn api_method_name(method: &Method) -> &'static str {
         Method::SessionSnapshot(_) => "session.snapshot",
         Method::WorkspaceCreate(_) => "workspace.create",
         Method::WorkspaceList(_) => "workspace.list",
+        Method::WorkspaceSetProfiles(_) => "workspace.set_profiles",
+        Method::ProfileSwitch(_) => "profile.switch",
+        Method::ProfileList(_) => "profile.list",
         Method::WorkspaceGet(_) => "workspace.get",
         Method::WorkspaceFocus(_) => "workspace.focus",
         Method::WorkspaceRename(_) => "workspace.rename",
@@ -1021,7 +1024,9 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let request = Request {
             id: "req_2".into(),
-            method: Method::WorkspaceList(crate::api::schema::EmptyParams::default()),
+            method: Method::WorkspaceList(crate::api::schema::WorkspaceListParams {
+                visible_only: false,
+            }),
         };
 
         let request_for_thread = request.clone();

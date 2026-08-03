@@ -167,12 +167,53 @@ pub(crate) fn reserve_workspace_ids(workspaces: &[Workspace]) {
     }
 }
 
+pub const DEFAULT_PROFILE: &str = "default";
+pub const MAX_PROFILE_NAME_LEN: usize = 32;
+pub const MAX_WORKSPACE_PROFILES: usize = 16;
+
+pub fn normalize_profile_name(profile: &str) -> Result<String, String> {
+    let profile = profile.trim();
+    if profile.is_empty() {
+        return Err("profile name must not be empty".to_string());
+    }
+    if profile.len() > MAX_PROFILE_NAME_LEN {
+        return Err(format!(
+            "profile name must be at most {MAX_PROFILE_NAME_LEN} characters"
+        ));
+    }
+    if !profile
+        .chars()
+        .all(|ch| ch.is_ascii() && !ch.is_ascii_control())
+    {
+        return Err("profile name must contain only printable ASCII characters".to_string());
+    }
+    Ok(profile.to_string())
+}
+
+pub fn normalize_profiles(profiles: Vec<String>) -> Result<Vec<String>, String> {
+    let mut normalized = Vec::new();
+    for profile in profiles {
+        let profile = normalize_profile_name(&profile)?;
+        if !normalized.contains(&profile) {
+            normalized.push(profile);
+        }
+    }
+    if normalized.len() > MAX_WORKSPACE_PROFILES {
+        return Err(format!(
+            "a workspace may belong to at most {MAX_WORKSPACE_PROFILES} profiles"
+        ));
+    }
+    Ok(normalized)
+}
+
 /// A named workspace containing tabs.
 pub struct Workspace {
     /// Stable public workspace identity, independent of display order.
     pub id: String,
     /// User-provided override. If set, auto-derived identity stops updating.
     pub custom_name: Option<String>,
+    /// Profile membership. Empty means the workspace belongs to `default` only.
+    pub profiles: Vec<String>,
     /// Fallback workspace identity source for tests, old snapshots, or missing runtimes.
     pub identity_cwd: PathBuf,
     /// CWD from which the cached automatic label and Git metadata were derived.
@@ -247,6 +288,7 @@ impl Workspace {
         Self {
             id,
             custom_name: label,
+            profiles: Vec::new(),
             identity_cwd: identity_cwd.clone(),
             cached_identity_cwd: identity_cwd.clone(),
             cached_auto_label,
@@ -435,6 +477,7 @@ impl Workspace {
             Self {
                 id,
                 custom_name: None,
+                profiles: Vec::new(),
                 identity_cwd: initial_cwd.clone(),
                 cached_identity_cwd: initial_cwd.clone(),
                 cached_auto_label,
@@ -1277,6 +1320,7 @@ impl Workspace {
         Self {
             id: generate_workspace_id(),
             custom_name: Some(name.to_string()),
+            profiles: Vec::new(),
             identity_cwd: identity_cwd.clone(),
             cached_identity_cwd: identity_cwd.clone(),
             cached_auto_label: fallback_label_from_cwd(&identity_cwd),
@@ -1511,6 +1555,24 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn profile_names_are_trimmed_deduplicated_and_bounded() {
+        assert_eq!(
+            normalize_profiles(vec![" work ".into(), "personal".into(), "work".into()]),
+            Ok(vec!["work".into(), "personal".into()])
+        );
+        assert!(normalize_profile_name(" ").is_err());
+        assert!(normalize_profile_name("work\n").is_ok());
+        assert!(normalize_profile_name("wörk").is_err());
+        assert!(normalize_profile_name(&"x".repeat(MAX_PROFILE_NAME_LEN + 1)).is_err());
+        assert!(normalize_profiles(
+            (0..=MAX_WORKSPACE_PROFILES)
+                .map(|idx| format!("p{idx}"))
+                .collect()
+        )
+        .is_err());
+    }
 
     #[test]
     fn generated_workspace_ids_are_short_base32_handles() {

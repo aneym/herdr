@@ -1518,6 +1518,7 @@ pub struct AppState {
     pub(crate) public_pane_id_aliases: std::collections::HashMap<String, PaneId>,
     pub workspaces: Vec<Workspace>,
     pub active: Option<usize>,
+    pub active_profile: String,
     pub session_name: Option<String>,
     pub(crate) previous_pane_focus: Option<PaneFocusTarget>,
     pub(crate) pane_focus_history: PaneFocusHistory,
@@ -1725,6 +1726,67 @@ impl AppState {
         self.session_dirty = true;
     }
 
+    pub fn workspace_is_visible(&self, idx: usize) -> bool {
+        self.workspaces.get(idx).is_some_and(|workspace| {
+            if self.active_profile == crate::workspace::DEFAULT_PROFILE {
+                workspace.profiles.is_empty()
+            } else {
+                workspace.profiles.contains(&self.active_profile)
+            }
+        })
+    }
+
+    pub(crate) fn profile_for_workspace(&self, idx: usize) -> Option<&str> {
+        let workspace = self.workspaces.get(idx)?;
+        if workspace.profiles.is_empty() {
+            Some(crate::workspace::DEFAULT_PROFILE)
+        } else if workspace.profiles.contains(&self.active_profile) {
+            Some(&self.active_profile)
+        } else {
+            workspace.profiles.first().map(String::as_str)
+        }
+    }
+
+    pub(crate) fn reveal_workspace(&mut self, idx: usize) -> bool {
+        let Some(profile) = self.profile_for_workspace(idx).map(str::to_string) else {
+            return false;
+        };
+        if profile == self.active_profile {
+            return false;
+        }
+        self.active_profile = profile;
+        self.workspace_scroll = 0;
+        self.agent_panel_scroll = 0;
+        self.mobile_switcher_scroll = 0;
+        self.navigator.selected = 0;
+        self.mark_session_dirty();
+        true
+    }
+
+    pub(crate) fn switch_profile(&mut self, profile: String) {
+        if self.active_profile == profile {
+            return;
+        }
+        self.active_profile = profile;
+        let next_active = self
+            .active
+            .filter(|idx| self.workspace_is_visible(*idx))
+            .or_else(|| (0..self.workspaces.len()).find(|idx| self.workspace_is_visible(*idx)));
+        self.active = next_active;
+        self.selected = next_active.unwrap_or(0);
+        self.workspace_scroll = 0;
+        self.agent_panel_scroll = 0;
+        self.mobile_switcher_scroll = 0;
+        self.navigator.selected = 0;
+        self.tab_scroll = 0;
+        self.tab_scroll_follow_active = true;
+        self.mark_session_dirty();
+    }
+
+    pub(crate) fn first_visible_workspace(&self) -> Option<usize> {
+        (0..self.workspaces.len()).find(|idx| self.workspace_is_visible(*idx))
+    }
+
     pub(crate) fn remove_alias_shadowed_by_new_pane(&mut self, pane_id: PaneId) {
         self.pane_id_aliases.remove(&pane_id.raw());
     }
@@ -1916,6 +1978,7 @@ impl AppState {
             public_pane_id_aliases: std::collections::HashMap::new(),
             workspaces: Vec::new(),
             active: None,
+            active_profile: crate::workspace::DEFAULT_PROFILE.to_string(),
             session_name: None,
             previous_pane_focus: None,
             pane_focus_history: PaneFocusHistory::default(),
@@ -2220,15 +2283,24 @@ impl AppState {
             self.selected,
             self.workspaces.len()
         );
-        let active = self
-            .active
-            .expect("non-empty app state must have active workspace");
-        assert!(
-            active < self.workspaces.len(),
-            "active workspace {} out of bounds for {} workspaces",
-            active,
-            self.workspaces.len()
-        );
+        if let Some(active) = self.active {
+            assert!(
+                active < self.workspaces.len(),
+                "active workspace {} out of bounds for {} workspaces",
+                active,
+                self.workspaces.len()
+            );
+            assert!(
+                self.workspace_is_visible(active),
+                "active workspace {active} must be visible in profile {}",
+                self.active_profile
+            );
+        } else {
+            assert!(
+                self.first_visible_workspace().is_none(),
+                "non-empty app state may lack an active workspace only when none are visible"
+            );
+        }
 
         let mut workspace_ids = std::collections::HashSet::new();
         let mut workspace_id_to_idx = std::collections::HashMap::new();
@@ -2461,6 +2533,48 @@ impl AppState {
 mod tests {
     use super::*;
     use crossterm::event::KeyEvent;
+
+    #[test]
+    fn workspace_visibility_and_profile_switch_preserve_or_clear_focus() {
+        let mut state = AppState::test_new();
+        let default = crate::workspace::Workspace::test_new("default");
+        let mut work = crate::workspace::Workspace::test_new("work");
+        work.profiles = vec!["work".into()];
+        state.workspaces = vec![default, work];
+        state.active = Some(0);
+        state.selected = 0;
+
+        assert!(state.workspace_is_visible(0));
+        assert!(!state.workspace_is_visible(1));
+        state.switch_profile("work".into());
+        assert_eq!(state.active, Some(1));
+        assert_eq!(state.selected, 1);
+        state.switch_profile("empty".into());
+        assert_eq!(state.active, None);
+        assert_eq!(state.selected, 0);
+    }
+
+    #[test]
+    fn reveal_workspace_uses_existing_membership_and_preserves_shared_profile() {
+        let mut state = AppState::test_new();
+        let mut shared = crate::workspace::Workspace::test_new("shared");
+        shared.profiles = vec!["work".into(), "personal".into()];
+        state.workspaces = vec![shared];
+        state.active_profile = "personal".into();
+        assert!(!state.reveal_workspace(0));
+        assert_eq!(state.active_profile, "personal");
+        state.active_profile = "default".into();
+        assert!(state.reveal_workspace(0));
+        assert_eq!(state.active_profile, "work");
+    }
+
+    #[test]
+    fn adversarial_identity_state_remains_valid_with_profile_membership() {
+        let mut state = AppState::test_with_adversarial_identity_state();
+        state.workspaces[0].profiles = vec!["work".into()];
+        state.active_profile = "work".into();
+        state.assert_invariants_for_test();
+    }
 
     #[test]
     fn agent_terminal_keeps_final_child_cursor_exposed() {

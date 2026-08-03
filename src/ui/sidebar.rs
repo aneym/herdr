@@ -248,6 +248,7 @@ fn collect_agent_panel_entries_with_runtimes(
     app.workspaces
         .iter()
         .enumerate()
+        .filter(|(ws_idx, _)| app.workspace_is_visible(*ws_idx))
         .flat_map(|(ws_idx, ws)| {
             let multi_tab = ws.tabs.len() > 1;
             let workspace_label = ws.display_name_from(&app.terminals, terminal_runtimes);
@@ -441,6 +442,9 @@ fn workspace_attention_priority(state: AgentState, seen: bool) -> u8 {
 fn space_aggregate_state(app: &AppState, key: &str) -> (AgentState, bool) {
     app.workspaces
         .iter()
+        .enumerate()
+        .filter(|(ws_idx, _)| app.workspace_is_visible(*ws_idx))
+        .map(|(_, workspace)| workspace)
         .filter(|ws| ws.worktree_space().is_some_and(|space| space.key == key))
         .map(|ws| ws.aggregate_state(&app.terminals))
         .max_by_key(|(state, seen)| workspace_attention_priority(*state, *seen))
@@ -458,6 +462,9 @@ pub(crate) fn workspace_parent_group_state(
     let member_count = app
         .workspaces
         .iter()
+        .enumerate()
+        .filter(|(member_idx, _)| app.workspace_is_visible(*member_idx))
+        .map(|(_, workspace)| workspace)
         .filter(|ws| {
             ws.worktree_space()
                 .is_some_and(|member| member.key == space.key)
@@ -528,6 +535,9 @@ pub(crate) fn workspace_list_entries_expanded(app: &AppState) -> Vec<WorkspaceLi
 fn workspace_list_entries_inner(app: &AppState, force_expanded: bool) -> Vec<WorkspaceListEntry> {
     let mut members_by_key = std::collections::HashMap::<String, Vec<usize>>::new();
     for (ws_idx, ws) in app.workspaces.iter().enumerate() {
+        if !app.workspace_is_visible(ws_idx) {
+            continue;
+        }
         if let Some(space) = ws.worktree_space() {
             members_by_key
                 .entry(space.key.clone())
@@ -564,6 +574,9 @@ fn workspace_list_entries_inner(app: &AppState, force_expanded: bool) -> Vec<Wor
     let mut emitted_groups = std::collections::HashSet::<String>::new();
     let mut entries = Vec::new();
     for (ws_idx, ws) in app.workspaces.iter().enumerate() {
+        if !app.workspace_is_visible(ws_idx) {
+            continue;
+        }
         let Some(space) = ws
             .worktree_space()
             .filter(|space| grouped_keys.contains(&space.key))
@@ -1022,15 +1035,19 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
         return;
     }
 
-    for (visible_idx, ws) in app.workspaces.iter().enumerate() {
+    for (visible_idx, entry) in workspace_list_entries(app).iter().enumerate() {
+        let WorkspaceListEntry::Workspace { ws_idx, .. } = entry;
+        let Some(ws) = app.workspaces.get(*ws_idx) else {
+            continue;
+        };
         let y = ws_area.y + visible_idx as u16;
         if y >= ws_area.y + ws_area.height {
             break;
         }
         let (agg_state, agg_seen) = ws.aggregate_state(&app.terminals);
         let (icon, icon_style) = state_dot(agg_state, agg_seen, p);
-        let is_selected = visible_idx == app.selected && is_navigating;
-        let is_active = Some(visible_idx) == app.active;
+        let is_selected = *ws_idx == app.selected && is_navigating;
+        let is_active = Some(*ws_idx) == app.active;
         let row_style = if is_selected {
             Style::default().bg(p.surface0)
         } else if is_active {

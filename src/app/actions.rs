@@ -447,6 +447,7 @@ impl AppState {
         if self.copy_mode.is_some() {
             self.clear_copy_mode_selection();
         }
+        self.reveal_workspace(ws_idx);
         let is_workspace_changed = self.active != Some(ws_idx);
         self.active = Some(ws_idx);
         self.selected = ws_idx;
@@ -540,6 +541,9 @@ impl AppState {
         }
         let mut rows = Vec::new();
         for (ws_idx, ws) in self.workspaces.iter().enumerate() {
+            if !self.workspace_is_visible(ws_idx) {
+                continue;
+            }
             let workspace_label = ws.display_name_from(&self.terminals, terminal_runtimes);
             let activity = workspace_activity_summary(ws, &self.terminals);
             let workspace_search_text = format!("{workspace_label} {activity}").to_lowercase();
@@ -592,6 +596,9 @@ impl AppState {
     ) -> Vec<NavigatorRow> {
         let mut rows = Vec::new();
         for (ws_idx, ws) in self.workspaces.iter().enumerate() {
+            if !self.workspace_is_visible(ws_idx) {
+                continue;
+            }
             let workspace_label = ws.display_name_from(&self.terminals, terminal_runtimes);
             let activity = workspace_activity_summary(ws, &self.terminals);
             let (status, seen) = ws.aggregate_state(&self.terminals);
@@ -657,20 +664,27 @@ impl AppState {
         for (ws_idx, ws) in self.workspaces.iter().enumerate() {
             let workspace_label = ws.display_name_from(&self.terminals, terminal_runtimes);
             let activity = workspace_activity_summary(ws, &self.terminals);
+            let profile_context = (!self.workspace_is_visible(ws_idx))
+                .then(|| self.profile_for_workspace(ws_idx).map(str::to_string))
+                .flatten();
+            let activity_with_profile = profile_context
+                .as_deref()
+                .map(|profile| format!("{activity} · {profile}"))
+                .unwrap_or_else(|| activity.clone());
             let (status, seen) = ws.aggregate_state(&self.terminals);
             let pane_count = ws.tabs.iter().map(|tab| tab.panes.len()).sum::<usize>();
             let mut workspace_row = NavigatorRow {
                 target: NavigatorTarget::Workspace { ws_idx },
                 depth: 0,
                 label: format!("{workspace_label} ({pane_count})"),
-                meta: activity.clone(),
+                meta: activity_with_profile.clone(),
                 status,
                 seen,
                 is_current: self.active == Some(ws_idx),
                 is_workspace: true,
                 is_tab: false,
                 expanded: false,
-                search_text: format!("{workspace_label} {activity}"),
+                search_text: format!("{workspace_label} {activity_with_profile}"),
                 label_match_positions: Vec::new(),
                 ranked: true,
                 matched: true,
@@ -684,7 +698,10 @@ impl AppState {
                 if multi_tab {
                     let mut tab_row = self.navigator_tab_row(ws_idx, tab_idx);
                     tab_row.depth = 0;
-                    tab_row.meta = workspace_label.clone();
+                    tab_row.meta = profile_context
+                        .as_deref()
+                        .map(|profile| format!("{workspace_label} · {profile}"))
+                        .unwrap_or_else(|| workspace_label.clone());
                     tab_row.search_text = format!("{} {}", tab_row.label, tab_row.meta);
                     tab_row.ranked = true;
                     if let Some(score) = score_navigator_row(query, &mut tab_row) {
@@ -701,6 +718,9 @@ impl AppState {
                     } else {
                         workspace_label.clone()
                     };
+                    if let Some(profile) = profile_context.as_deref() {
+                        pane_row.meta.push_str(&format!(" · {profile}"));
+                    }
                     pane_row.search_text = format!("{} {}", pane_row.label, pane_row.meta);
                     pane_row.ranked = true;
                     if let Some(score) = score_navigator_row(query, &mut pane_row) {
@@ -1428,6 +1448,7 @@ impl AppState {
 
     pub fn switch_workspace(&mut self, idx: usize) {
         if idx < self.workspaces.len() {
+            self.reveal_workspace(idx);
             let previous_focus = self.current_pane_focus_target();
             self.active = Some(idx);
             self.selected = idx;
@@ -1465,6 +1486,7 @@ impl AppState {
             return false;
         }
 
+        self.reveal_workspace(ws_idx);
         let previous_focus = self.current_pane_focus_target();
         let workspace_changed = self.active != Some(ws_idx);
         self.active = Some(ws_idx);
@@ -2136,10 +2158,12 @@ impl AppState {
                     self.selected = idx;
                 }
             }
-            if self.selected >= self.workspaces.len() {
-                self.selected = self.workspaces.len() - 1;
+            if !self.workspace_is_visible(self.selected) {
+                self.selected = self.first_visible_workspace().unwrap_or(0);
             }
-            self.active = Some(self.selected);
+            self.active = self
+                .workspace_is_visible(self.selected)
+                .then_some(self.selected);
             self.workspace_scroll = self
                 .workspace_scroll
                 .min(self.workspaces.len().saturating_sub(1));
@@ -3806,18 +3830,19 @@ impl AppState {
                         self.active = Some(idx);
                     }
                 }
-                if let Some(active) = self.active {
-                    if active >= self.workspaces.len() {
-                        self.active = Some(self.workspaces.len() - 1);
-                    }
+                if self
+                    .active
+                    .is_none_or(|active| !self.workspace_is_visible(active))
+                {
+                    self.active = self.first_visible_workspace();
                 }
                 if let Some(id) = selected_workspace_id {
                     if let Some(idx) = self.workspaces.iter().position(|ws| ws.id == id) {
                         self.selected = idx;
                     }
                 }
-                if self.selected >= self.workspaces.len() {
-                    self.selected = self.workspaces.len() - 1;
+                if !self.workspace_is_visible(self.selected) {
+                    self.selected = self.active.unwrap_or(0);
                 }
                 self.workspace_scroll = self
                     .workspace_scroll

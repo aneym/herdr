@@ -66,7 +66,13 @@ pub enum Method {
     #[serde(rename = "workspace.create")]
     WorkspaceCreate(WorkspaceCreateParams),
     #[serde(rename = "workspace.list")]
-    WorkspaceList(EmptyParams),
+    WorkspaceList(WorkspaceListParams),
+    #[serde(rename = "workspace.set_profiles")]
+    WorkspaceSetProfiles(WorkspaceSetProfilesParams),
+    #[serde(rename = "profile.switch")]
+    ProfileSwitch(ProfileSwitchParams),
+    #[serde(rename = "profile.list")]
+    ProfileList(EmptyParams),
     #[serde(rename = "workspace.get")]
     WorkspaceGet(WorkspaceTarget),
     #[serde(rename = "workspace.focus")]

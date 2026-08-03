@@ -967,6 +967,7 @@ impl HeadlessServer {
                 focus: true,
                 label,
                 env: Default::default(),
+                profiles: None,
             }),
         )
     }
@@ -1199,6 +1200,7 @@ impl HeadlessServer {
             &self.app.state.terminals,
             &self.app.terminal_runtimes,
             self.app.state.active,
+            self.app.state.active_profile.clone(),
             self.app.state.selected,
             self.app.state.sidebar_width,
             self.app.state.sidebar_section_split,

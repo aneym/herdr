@@ -1,7 +1,7 @@
 use crate::api::schema::{
-    EmptyParams, Method, PaneFocusDirectionParams, PaneMoveParams, PaneRenameParams,
-    PaneResizeParams, PaneSplitParams, PaneSwapParams, PaneTarget, PaneZoomParams, Request,
-    TabCreateParams, TabListParams, TabRenameParams, TabTarget, WorkspaceCreateParams,
+    Method, PaneFocusDirectionParams, PaneMoveParams, PaneRenameParams, PaneResizeParams,
+    PaneSplitParams, PaneSwapParams, PaneTarget, PaneZoomParams, Request, TabCreateParams,
+    TabListParams, TabRenameParams, TabTarget, WorkspaceCreateParams, WorkspaceListParams,
     WorkspaceRenameParams, WorkspaceTarget, WorktreeCreateParams, WorktreeListParams,
     WorktreeOpenParams, WorktreeRemoveParams,
 };
@@ -16,7 +16,9 @@ fn print_method_response(id: &'static str, method: Method) -> std::io::Result<i3
 pub(super) fn workspace_list() -> std::io::Result<i32> {
     print_method_response(
         "cli:workspace:list",
-        Method::WorkspaceList(EmptyParams::default()),
+        Method::WorkspaceList(WorkspaceListParams {
+            visible_only: false,
+        }),
     )
 }
 

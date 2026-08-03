@@ -1092,6 +1092,12 @@
               "minimum": 0,
               "type": "integer"
             },
+            "profiles": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
             "tab_count": {
               "format": "uint",
               "minimum": 0,
@@ -3585,6 +3591,17 @@
             }
           ]
         },
+        "ProfileSwitchParams": {
+          "properties": {
+            "profile": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "profile"
+          ],
+          "type": "object"
+        },
         "ReadFormat": {
           "enum": [
             "text",
@@ -4122,6 +4139,24 @@
                 "string",
                 "null"
               ]
+            },
+            "profiles": {
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "WorkspaceListParams": {
+          "properties": {
+            "visible_only": {
+              "default": false,
+              "type": "boolean"
             }
           },
           "type": "object"
@@ -4221,6 +4256,24 @@
             "workspace_id",
             "source",
             "tokens"
+          ],
+          "type": "object"
+        },
+        "WorkspaceSetProfilesParams": {
+          "properties": {
+            "profiles": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "workspace_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspace_id",
+            "profiles"
           ],
           "type": "object"
         },
@@ -4561,6 +4614,54 @@
           "properties": {
             "method": {
               "const": "workspace.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/WorkspaceListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "workspace.set_profiles",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/WorkspaceSetProfilesParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "profile.switch",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/ProfileSwitchParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "profile.list",
               "type": "string"
             },
             "params": {
@@ -8669,6 +8770,29 @@
             },
             {
               "properties": {
+                "active": {
+                  "type": "string"
+                },
+                "profiles": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "profile_list",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "active",
+                "profiles"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
                 "source": {
                   "$ref": "#/schemas/success_response/$defs/WorktreeSourceInfo"
                 },
@@ -9808,6 +9932,12 @@
               "format": "uint",
               "minimum": 0,
               "type": "integer"
+            },
+            "profiles": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
             },
             "tab_count": {
               "format": "uint",

@@ -409,6 +409,7 @@ impl App {
         let (
             workspaces,
             active,
+            active_profile,
             selected,
             sidebar_width,
             sidebar_width_source,
@@ -419,6 +420,7 @@ impl App {
             (
                 Vec::new(),
                 None,
+                crate::workspace::DEFAULT_PROFILE.to_string(),
                 0,
                 config.ui.sidebar_width,
                 state::SidebarWidthSource::ConfigDefault,
@@ -452,6 +454,7 @@ impl App {
                 (
                     Vec::new(),
                     None,
+                    snap.active_profile.clone(),
                     0,
                     snap.sidebar_width.unwrap_or(config.ui.sidebar_width),
                     if snap.sidebar_width.is_some() {
@@ -470,6 +473,7 @@ impl App {
                 (
                     ws,
                     active,
+                    snap.active_profile.clone(),
                     selected,
                     snap.sidebar_width.unwrap_or(config.ui.sidebar_width),
                     if snap.sidebar_width.is_some() {
@@ -486,6 +490,7 @@ impl App {
             (
                 Vec::new(),
                 None,
+                crate::workspace::DEFAULT_PROFILE.to_string(),
                 0,
                 config.ui.sidebar_width,
                 state::SidebarWidthSource::ConfigDefault,
@@ -558,6 +563,7 @@ impl App {
         state.public_pane_id_aliases = std::collections::HashMap::new();
         state.workspaces = workspaces;
         state.active = active;
+        state.active_profile = active_profile;
         state.previous_pane_focus = None;
         state.pane_focus_history = state::PaneFocusHistory::default();
         state.deferred_attention_read = None;
@@ -867,6 +873,7 @@ impl App {
         app.state.active = snapshot
             .active
             .filter(|&idx| idx < app.state.workspaces.len());
+        app.state.active_profile = snapshot.active_profile.clone();
         app.state.selected = snapshot
             .selected
             .min(app.state.workspaces.len().saturating_sub(1));
@@ -1001,6 +1008,7 @@ impl App {
                         focus: true,
                         label: None,
                         env: Default::default(),
+                        profiles: None,
                     },
                 );
                 needs_render = true;
@@ -1040,6 +1048,7 @@ impl App {
                         focus: true,
                         label: None,
                         env: Default::default(),
+                        profiles: None,
                     },
                 );
                 needs_render = true;
@@ -1917,6 +1926,7 @@ mod tests {
             &std::collections::HashMap::new(),
             &crate::terminal::TerminalRuntimeRegistry::new(),
             None,
+            crate::workspace::DEFAULT_PROFILE.to_string(),
             0,
             26,
             0.5,
@@ -3853,7 +3863,9 @@ mod tests {
         let read_only = crate::api::schema::Request {
             id: "req_1".into(),
             method: crate::api::schema::Method::WorkspaceList(
-                crate::api::schema::EmptyParams::default(),
+                crate::api::schema::WorkspaceListParams {
+                    visible_only: false,
+                },
             ),
         };
         let mutating = crate::api::schema::Request {

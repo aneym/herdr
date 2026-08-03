@@ -203,6 +203,7 @@ mod tests {
             version: SNAPSHOT_VERSION,
             workspaces: vec![],
             active: None,
+            active_profile: crate::workspace::DEFAULT_PROFILE.to_string(),
             selected: 0,
             sidebar_width: Some(26),
             sidebar_section_split: Some(0.5),

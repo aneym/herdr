@@ -1033,6 +1033,7 @@ impl App {
                             focus: true,
                             label,
                             env: Default::default(),
+                            profiles: None,
                         },
                     );
                 } else if !self.state.workspaces.is_empty() && !new_name.is_empty() {

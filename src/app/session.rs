@@ -45,6 +45,7 @@ impl App {
                 &self.state.terminals,
                 &self.terminal_runtimes,
                 self.state.active,
+                self.state.active_profile.clone(),
                 self.state.selected,
                 self.state.sidebar_width,
                 self.state.sidebar_section_split,

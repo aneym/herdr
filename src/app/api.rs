@@ -973,7 +973,12 @@ impl App {
                 );
             }
             Method::SessionSnapshot(_) => return self.handle_session_snapshot(request.id),
-            Method::WorkspaceList(_) => return self.handle_workspace_list(request.id),
+            Method::WorkspaceList(params) => return self.handle_workspace_list(request.id, params),
+            Method::WorkspaceSetProfiles(params) => {
+                return self.handle_workspace_set_profiles(request.id, params)
+            }
+            Method::ProfileSwitch(params) => return self.handle_profile_switch(request.id, params),
+            Method::ProfileList(_) => return self.handle_profile_list(request.id),
             Method::WorkspaceGet(target) => return self.handle_workspace_get(request.id, target),
             Method::WorkspaceCreate(params) => {
                 return self.handle_workspace_create(request.id, params);

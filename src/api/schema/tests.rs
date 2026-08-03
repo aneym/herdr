@@ -54,6 +54,7 @@ fn request_uses_dot_method_names() {
             focus: true,
             label: Some("api".into()),
             env: Default::default(),
+            profiles: None,
         }),
     };
 
@@ -711,6 +712,7 @@ fn worktree_request_and_response_round_trip() {
                 tab_count: 1,
                 active_tab_id: "w_1:1".into(),
                 agent_status: AgentStatus::Unknown,
+                profiles: Vec::new(),
                 tokens: HashMap::new(),
                 worktree: Some(WorkspaceWorktreeInfo {
                     repo_key: "/repo/herdr/.git".into(),
@@ -797,6 +799,7 @@ fn worktree_lifecycle_events_round_trip() {
         tab_count: 1,
         active_tab_id: "w_2:1".into(),
         agent_status: AgentStatus::Unknown,
+        profiles: Vec::new(),
         tokens: HashMap::new(),
         worktree: Some(WorkspaceWorktreeInfo {
             repo_key: "/repo/herdr/.git".into(),

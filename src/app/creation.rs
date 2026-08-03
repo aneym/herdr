@@ -114,6 +114,7 @@ impl App {
                 focus: true,
                 label: None,
                 env: Default::default(),
+                profiles: None,
             },
         );
         self.state.replace_mode(if self.state.active.is_some() {
@@ -259,6 +260,9 @@ impl App {
         self.state.terminals.insert(terminal.id.clone(), terminal);
         self.state.workspaces.push(ws);
         let idx = self.state.workspaces.len() - 1;
+        if self.state.active_profile != crate::workspace::DEFAULT_PROFILE {
+            self.state.workspaces[idx].profiles = vec![self.state.active_profile.clone()];
+        }
         self.state
             .remove_alias_shadowed_by_new_pane(self.state.workspaces[idx].tabs[0].root_pane);
         let workspace_id = self.state.workspaces[idx].id.clone();
@@ -501,6 +505,7 @@ impl App {
                 crate::workspace::public_tab_id_for_number(&ws.id, ws.active_tab + 1)
             }),
             agent_status: pane_agent_status(agg_state, seen),
+            profiles: ws.profiles.clone(),
             tokens: ws.metadata_tokens.values(),
             worktree: ws
                 .worktree_space()
