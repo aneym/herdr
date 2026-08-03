@@ -429,6 +429,17 @@ impl AppState {
                     return None;
                 }
 
+                if in_sidebar && !self.sidebar_collapsed {
+                    let new_button = self.sidebar_new_button_rect();
+                    let on_new_button = mouse.row >= new_button.y
+                        && mouse.row < new_button.y + new_button.height
+                        && mouse.column >= new_button.x
+                        && mouse.column < new_button.x + new_button.width;
+                    if on_new_button {
+                        return Some(MouseAction::NewWorkspace);
+                    }
+                }
+
                 if self.on_sidebar_section_divider(mouse.column, mouse.row) {
                     self.drag = Some(DragState {
                         target: DragTarget::SidebarSectionDivider,
@@ -534,15 +545,6 @@ impl AppState {
                             return Some(MouseAction::FocusPane { ws_idx, pane_id });
                         }
                         return None;
-                    }
-
-                    let new_button = self.sidebar_new_button_rect();
-                    let on_new_button = mouse.row >= new_button.y
-                        && mouse.row < new_button.y + new_button.height
-                        && mouse.column >= new_button.x
-                        && mouse.column < new_button.x + new_button.width;
-                    if on_new_button {
-                        return Some(MouseAction::NewWorkspace);
                     }
 
                     if let Some(target) =
@@ -3828,6 +3830,74 @@ mod tests {
         assert!(app.state.pending_workspace_create_cwd.is_some());
         assert!(app.state.name_input_replace_on_type);
         assert_eq!(app.state.workspaces.len(), 1);
+    }
+
+    #[test]
+    fn agents_first_header_new_workspace_button_emits_action() {
+        let mut app = app_for_mouse_test();
+        app.state.workspaces = vec![Workspace::test_new("one")];
+        app.state.sidebar_new_button = crate::config::SidebarNewButtonConfig::Header;
+        app.state.sidebar_section_order = [
+            crate::config::SidebarSection::Agents,
+            crate::config::SidebarSection::Spaces,
+        ];
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 40));
+        let new_workspace = app.state.sidebar_new_button_rect();
+
+        let action = app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                new_workspace.x + 1,
+                new_workspace.y,
+            ),
+        );
+
+        assert!(matches!(action, Some(MouseAction::NewWorkspace)));
+        assert!(app.state.drag.is_none());
+    }
+
+    #[test]
+    fn agents_first_collapsed_clicks_match_rendered_sections() {
+        let mut app = app_for_mouse_test();
+        let first = Workspace::test_new("first");
+        let second = Workspace::test_new("second");
+        let agent_pane = second.tabs[0].root_pane;
+        app.state.workspaces = vec![first, second];
+        app.state.ensure_test_terminals();
+        let terminal_id = app.state.workspaces[1].tabs[0].panes[&agent_pane]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("agent terminal")
+            .detected_agent = Some(Agent::Claude);
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.sidebar_collapsed = true;
+        app.state.sidebar_section_order = [
+            crate::config::SidebarSection::Agents,
+            crate::config::SidebarSection::Spaces,
+        ];
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 40));
+        let (spaces, _, agents) =
+            crate::ui::ordered_collapsed_sidebar_sections(&app.state, app.state.view.sidebar_rect);
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            agents.x,
+            agents.y,
+        ));
+        assert_eq!(app.state.active, Some(1));
+        assert_eq!(app.state.workspaces[1].focused_pane_id(), Some(agent_pane));
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            spaces.x,
+            spaces.y,
+        ));
+        assert_eq!(app.state.active, Some(0));
     }
 
     #[test]

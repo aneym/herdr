@@ -69,26 +69,29 @@ pub(crate) fn expanded_sidebar_sections(area: Rect, split_ratio: f32) -> (Rect, 
 }
 
 pub(crate) fn ordered_sidebar_sections(app: &AppState, area: Rect) -> (Rect, Rect) {
-    let (first, second) = expanded_sidebar_sections(area, app.sidebar_section_split);
     match app.sidebar_section_order {
-        [crate::config::SidebarSection::Spaces, crate::config::SidebarSection::Agents] => {
-            (first, second)
-        }
         [crate::config::SidebarSection::Agents, crate::config::SidebarSection::Spaces] => {
+            let (first, second) = expanded_sidebar_sections(area, 1.0 - app.sidebar_section_split);
             (second, first)
         }
-        _ => (first, second),
+        _ => expanded_sidebar_sections(area, app.sidebar_section_split),
     }
 }
 
-pub(crate) fn sidebar_section_divider_rect(area: Rect, split_ratio: f32) -> Rect {
+pub(crate) fn sidebar_section_divider_rect(app: &AppState, area: Rect) -> Rect {
     let content = Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height);
     if content.width == 0 || content.height < 6 {
         return Rect::default();
     }
 
-    let (ws_h, _) = sidebar_section_heights(content.height, split_ratio);
-    Rect::new(content.x, content.y + ws_h, content.width, 1)
+    let first_section_ratio = match app.sidebar_section_order {
+        [crate::config::SidebarSection::Agents, crate::config::SidebarSection::Spaces] => {
+            1.0 - app.sidebar_section_split
+        }
+        _ => app.sidebar_section_split,
+    };
+    let (first_h, _) = sidebar_section_heights(content.height, first_section_ratio);
+    Rect::new(content.x, content.y + first_h, content.width, 1)
 }
 
 fn agent_panel_sort_label(sort: AgentPanelSort) -> &'static str {
@@ -765,7 +768,10 @@ pub(crate) fn collapsed_sidebar_sections(area: Rect) -> (Rect, Option<u16>, Rect
     (ws_area, Some(divider_y), detail_area)
 }
 
-fn ordered_collapsed_sidebar_sections(app: &AppState, area: Rect) -> (Rect, Option<u16>, Rect) {
+pub(crate) fn ordered_collapsed_sidebar_sections(
+    app: &AppState,
+    area: Rect,
+) -> (Rect, Option<u16>, Rect) {
     let (first, divider_y, second) = collapsed_sidebar_sections(area);
     match app.sidebar_section_order {
         [crate::config::SidebarSection::Spaces, crate::config::SidebarSection::Agents] => {
@@ -2548,7 +2554,8 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
 
     #[test]
     fn sidebar_section_divider_is_hidden_for_tiny_heights() {
-        let divider = sidebar_section_divider_rect(Rect::new(0, 0, 20, 5), 0.5);
+        let app = crate::app::state::AppState::test_new();
+        let divider = sidebar_section_divider_rect(&app, Rect::new(0, 0, 20, 5));
 
         assert_eq!(divider, Rect::default());
     }
