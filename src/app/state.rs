@@ -1576,6 +1576,8 @@ pub struct AppState {
     pub(crate) workspace_press: Option<WorkspacePressState>,
     pub(crate) tab_press: Option<TabPressState>,
     pub selection: Option<Selection>,
+    pub(crate) pane_app_drag_gesture: Option<(PaneId, bool)>,
+    pub(crate) pane_app_drag_selection: Option<PaneId>,
     pub selection_autoscroll: Option<SelectionAutoscroll>,
     pub context_menu: Option<ContextMenuState>,
     // Notifications
@@ -2051,6 +2053,8 @@ impl AppState {
             workspace_press: None,
             tab_press: None,
             selection: None,
+            pane_app_drag_gesture: None,
+            pane_app_drag_selection: None,
             selection_autoscroll: None,
             context_menu: None,
             update_available: None,

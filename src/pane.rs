@@ -53,6 +53,8 @@ pub use self::{
 const RELEASE_REACQUIRE_SUPPRESSION: std::time::Duration = std::time::Duration::from_secs(1);
 const PANE_TERM: &str = "xterm-256color";
 const PANE_COLORTERM: &str = "truecolor";
+const PANE_TERM_PROGRAM: &str = "ghostty";
+const PANE_TERM_PROGRAM_VERSION: &str = "1.3.1";
 
 fn apply_pane_terminal_env(cmd: &mut CommandBuilder) {
     // Each pane is rendered by herdr's own terminal layer, not the outer terminal
@@ -61,6 +63,10 @@ fn apply_pane_terminal_env(cmd: &mut CommandBuilder) {
     // when the remote side lacks matching terminfo entries.
     cmd.env("TERM", PANE_TERM);
     cmd.env("COLORTERM", PANE_COLORTERM);
+    // The pane VT is libghostty-vt; kitty-protocol apps gate CSI-u support on
+    // terminal identity rather than capability queries.
+    cmd.env("TERM_PROGRAM", PANE_TERM_PROGRAM);
+    cmd.env("TERM_PROGRAM_VERSION", PANE_TERM_PROGRAM_VERSION);
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -3298,18 +3304,26 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn pane_terminal_identity_overrides_outer_terminal_env() {
-        let output = capture_shell_output("printf '%s\\n%s\\n' \"$TERM\" \"$COLORTERM\"", &[]);
-        assert_eq!(output, "xterm-256color\ntruecolor\n");
+        let output = capture_shell_output(
+            "printf '%s\\n%s\\n%s\\n%s\\n' \"$TERM\" \"$COLORTERM\" \"$TERM_PROGRAM\" \"$TERM_PROGRAM_VERSION\"",
+            &[],
+        );
+        assert_eq!(output, "xterm-256color\ntruecolor\nghostty\n1.3.1\n");
     }
 
     #[cfg(unix)]
     #[test]
     fn pane_terminal_identity_allows_explicit_override() {
         let output = capture_shell_output(
-            "printf '%s\\n%s\\n' \"$TERM\" \"$COLORTERM\"",
-            &[("TERM", "vt100"), ("COLORTERM", "24bit")],
+            "printf '%s\\n%s\\n%s\\n%s\\n' \"$TERM\" \"$COLORTERM\" \"$TERM_PROGRAM\" \"$TERM_PROGRAM_VERSION\"",
+            &[
+                ("TERM", "vt100"),
+                ("COLORTERM", "24bit"),
+                ("TERM_PROGRAM", "override"),
+                ("TERM_PROGRAM_VERSION", "2.0"),
+            ],
         );
-        assert_eq!(output, "vt100\n24bit\n");
+        assert_eq!(output, "vt100\n24bit\noverride\n2.0\n");
     }
 
     #[cfg(unix)]

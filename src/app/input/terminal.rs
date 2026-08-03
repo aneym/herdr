@@ -138,6 +138,26 @@ impl App {
         let ws = self.state.workspaces.get(ws_idx)?;
         let pane_id = ws.focused_pane_id()?;
         let terminal_id = ws.terminal_id(pane_id)?.clone();
+        let is_super_c = matches!(key.code, KeyCode::Char('c' | 'C'))
+            && key.modifiers == crossterm::event::KeyModifiers::SUPER;
+        let key = if is_super_c {
+            if self.state.pane_app_drag_selection != Some(pane_id) {
+                // Claude Code's cmd+c selection binding clears its selection before copying.
+                // Swallowing without a tracked drag also avoids typing "c" in legacy panes
+                // and can never turn an unselected copy attempt into an interrupt.
+                return None;
+            }
+            // Plain ctrl+c is consumed as copy when Claude Code still has a selection.
+            self.state.pane_app_drag_selection = None;
+            TerminalKey {
+                code: KeyCode::Char('c'),
+                modifiers: crossterm::event::KeyModifiers::CONTROL,
+                ..key
+            }
+        } else {
+            self.state.pane_app_drag_selection = None;
+            key
+        };
         let rt =
             self.state
                 .runtime_for_pane_in_workspace(&self.terminal_runtimes, ws_idx, pane_id)?;
@@ -468,6 +488,33 @@ mod tests {
         app.state.replace_mode(Mode::Terminal);
         app.state.view.pane_infos = pane_infos;
         (app, info)
+    }
+
+    fn app_with_mouse_reporting_runtime() -> (
+        App,
+        crate::layout::PaneInfo,
+        tokio::sync::mpsc::Receiver<Bytes>,
+    ) {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("test");
+        let pane_id = ws.tabs[0].root_pane;
+        let pane_infos = ws.tabs[0].layout.panes(Rect::new(26, 2, 80, 18));
+        let info = pane_infos[0].clone();
+        let (runtime, input_rx) =
+            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+                info.inner_rect.width,
+                info.inner_rect.height,
+                0,
+                b"\x1b[?1002h\x1b[?1006h",
+                8,
+            );
+        ws.insert_test_runtime(pane_id, runtime);
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.replace_mode(Mode::Terminal);
+        app.state.view.pane_infos = pane_infos;
+        (app, info, input_rx)
     }
 
     fn double_click(app: &mut App, col: u16, row: u16) {
@@ -1136,6 +1183,104 @@ mod tests {
             .expect("highlight clear deadline");
         assert!(app.handle_scheduled_tasks(deadline + std::time::Duration::from_millis(1), false));
         assert!(app.state.selection.is_none());
+    }
+
+    #[tokio::test]
+    async fn pane_app_drag_translates_one_super_c_to_control_c() {
+        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime();
+        let col = info.inner_rect.x + 2;
+        let row = info.inner_rect.y + 3;
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+        app.handle_mouse(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            col + 1,
+            row + 1,
+        ));
+        app.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            col + 1,
+            row + 1,
+        ));
+        for _ in 0..3 {
+            input_rx.try_recv().expect("forwarded mouse event");
+        }
+
+        app.handle_terminal_key_headless(TerminalKey::new(
+            KeyCode::Char('c'),
+            KeyModifiers::SUPER,
+        ));
+        assert_eq!(input_rx.try_recv().expect("translated copy chord").as_ref(), b"\x03");
+        assert!(app.state.pane_app_drag_selection.is_none());
+
+        app.handle_terminal_key_headless(TerminalKey::new(
+            KeyCode::Char('c'),
+            KeyModifiers::SUPER,
+        ));
+        assert!(input_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn super_c_without_pane_app_drag_is_swallowed() {
+        let (mut app, _info, mut input_rx) = app_with_mouse_reporting_runtime();
+
+        app.handle_terminal_key_headless(TerminalKey::new(
+            KeyCode::Char('c'),
+            KeyModifiers::SUPER,
+        ));
+
+        assert!(input_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn pane_app_click_does_not_enable_super_c_bridge() {
+        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime();
+        let col = info.inner_rect.x + 2;
+        let row = info.inner_rect.y + 3;
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), col, row));
+        input_rx.try_recv().expect("forwarded mouse down");
+        input_rx.try_recv().expect("forwarded mouse up");
+        app.handle_terminal_key_headless(TerminalKey::new(
+            KeyCode::Char('c'),
+            KeyModifiers::SUPER,
+        ));
+
+        assert!(input_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn forwarded_key_clears_pane_app_drag_selection() {
+        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime();
+        let col = info.inner_rect.x + 2;
+        let row = info.inner_rect.y + 3;
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+        app.handle_mouse(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            col + 1,
+            row + 1,
+        ));
+        app.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            col + 1,
+            row + 1,
+        ));
+        for _ in 0..3 {
+            input_rx.try_recv().expect("forwarded mouse event");
+        }
+
+        app.handle_terminal_key_headless(TerminalKey::new(
+            KeyCode::Char('x'),
+            KeyModifiers::empty(),
+        ));
+        assert_eq!(input_rx.try_recv().expect("unrelated key").as_ref(), b"x");
+        app.handle_terminal_key_headless(TerminalKey::new(
+            KeyCode::Char('c'),
+            KeyModifiers::SUPER,
+        ));
+        assert!(input_rx.try_recv().is_err());
     }
 
     #[tokio::test]

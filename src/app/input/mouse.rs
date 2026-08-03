@@ -1686,7 +1686,7 @@ impl AppState {
     }
 
     pub(super) fn forward_pane_mouse_button(
-        &self,
+        &mut self,
         terminal_runtimes: &TerminalRuntimeRegistry,
         info: &PaneInfo,
         mouse: MouseEvent,
@@ -1707,11 +1707,32 @@ impl AppState {
         if let Err(err) = rt.try_send_bytes(Bytes::from(bytes)) {
             warn!(pane = info.id.raw(), err = %err, kind = ?mouse.kind, "failed to forward mouse button event");
         }
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                self.pane_app_drag_gesture = Some((info.id, false));
+                self.pane_app_drag_selection = None;
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let Some((pane_id, is_drag)) = self.pane_app_drag_gesture.as_mut() {
+                    if *pane_id == info.id {
+                        *is_drag = true;
+                    }
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                let was_drag = self
+                    .pane_app_drag_gesture
+                    .take()
+                    .is_some_and(|(pane_id, is_drag)| pane_id == info.id && is_drag);
+                self.pane_app_drag_selection = was_drag.then_some(info.id);
+            }
+            _ => {}
+        }
         true
     }
 
     pub(super) fn forward_pane_mouse_motion(
-        &self,
+        &mut self,
         terminal_runtimes: &TerminalRuntimeRegistry,
         info: &PaneInfo,
         mouse: MouseEvent,
@@ -1730,6 +1751,11 @@ impl AppState {
         };
         if let Err(err) = rt.try_send_bytes(Bytes::from(bytes)) {
             warn!(pane = info.id.raw(), err = %err, kind = ?mouse.kind, "failed to forward mouse motion event");
+        }
+        if let Some((pane_id, is_drag)) = self.pane_app_drag_gesture.as_mut() {
+            if *pane_id == info.id {
+                *is_drag = true;
+            }
         }
         true
     }
