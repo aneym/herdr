@@ -991,7 +991,7 @@ impl AppState {
                     let agent_entries =
                         crate::ui::agent_panel_list_entries_from(self, terminal_runtimes);
                     if crate::ui::should_show_scrollbar(
-                        crate::ui::agent_panel_scroll_metrics_for_entries(
+                        crate::ui::agent_panel_scroll_metrics(
                             self,
                             &agent_entries,
                             agent_area,
@@ -1016,7 +1016,7 @@ impl AppState {
                     let agent_entries =
                         crate::ui::agent_panel_list_entries_from(self, terminal_runtimes);
                     if crate::ui::should_show_scrollbar(
-                        crate::ui::agent_panel_scroll_metrics_for_entries(
+                        crate::ui::agent_panel_scroll_metrics(
                             self,
                             &agent_entries,
                             agent_area,

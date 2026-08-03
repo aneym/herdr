@@ -138,14 +138,6 @@ pub(crate) fn agent_panel_entries_from(
     agent_panel_entries_with_runtimes(app, Some(terminal_runtimes))
 }
 
-#[cfg(test)]
-pub(crate) fn agent_panel_partition_from(
-    app: &AppState,
-    terminal_runtimes: &TerminalRuntimeRegistry,
-) -> (Vec<AgentPanelEntry>, Vec<AgentPanelEntry>) {
-    partition_agent_panel_entries(app, Some(terminal_runtimes))
-}
-
 fn agent_panel_entries_with_runtimes(
     app: &AppState,
     terminal_runtimes: Option<&TerminalRuntimeRegistry>,
@@ -801,7 +793,7 @@ pub(crate) fn agent_panel_scroll_for_target(
     scroll.min(max_scroll)
 }
 
-pub(crate) fn agent_panel_scroll_metrics_for_entries(
+pub(crate) fn agent_panel_scroll_metrics(
     app: &AppState,
     entries: &[AgentPanelListEntry],
     area: Rect,
@@ -817,13 +809,12 @@ pub(crate) fn agent_panel_scroll_metrics_for_entries(
     }
 }
 
-pub(crate) fn agent_panel_scroll_metrics(app: &AppState, area: Rect) -> crate::pane::ScrollMetrics {
-    let entries = agent_panel_list_entries(app);
-    agent_panel_scroll_metrics_for_entries(app, &entries, area)
-}
-
-pub(crate) fn agent_panel_scrollbar_rect(app: &AppState, area: Rect) -> Option<Rect> {
-    let metrics = agent_panel_scroll_metrics(app, area);
+pub(crate) fn agent_panel_scrollbar_rect(
+    app: &AppState,
+    entries: &[AgentPanelListEntry],
+    area: Rect,
+) -> Option<Rect> {
+    let metrics = agent_panel_scroll_metrics(app, entries, area);
     let body = agent_panel_body_rect(area, true);
     (should_show_scrollbar(metrics) && body.width > 0 && body.height > 0).then_some(Rect::new(
         area.x + area.width.saturating_sub(1),
@@ -1659,8 +1650,8 @@ fn render_agent_detail(
     let automations = automation_panel_entries_from(app, terminal_runtimes);
     let automation_summary = automation_activity_summary(&automations);
     let details = agent_panel_list_entries_from_partition(app, (agents, automations));
-    let metrics = agent_panel_scroll_metrics(app, area);
-    let scrollbar_rect = agent_panel_scrollbar_rect(app, area);
+    let metrics = agent_panel_scroll_metrics(app, &details, area);
+    let scrollbar_rect = agent_panel_scrollbar_rect(app, &details, area);
     let body = agent_panel_body_rect(area, should_show_scrollbar(metrics));
     if body == Rect::default() {
         return;
@@ -2303,7 +2294,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         assert_eq!(app.sidebar_agents.row_gap, 0);
 
         let area = Rect::new(0, 0, 20, 5);
-        let metrics = agent_panel_scroll_metrics(&app, area);
+        let metrics = agent_panel_scroll_metrics(&app, &agent_panel_list_entries(&app), area);
         let body = agent_panel_body_rect(area, false);
         let mut terminal = Terminal::new(TestBackend::new(20, 5)).unwrap();
         terminal
@@ -2333,7 +2324,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         app.sidebar_agents.min_row_lines = 2;
 
         let area = Rect::new(0, 0, 20, 7);
-        let metrics = agent_panel_scroll_metrics(&app, area);
+        let metrics = agent_panel_scroll_metrics(&app, &agent_panel_list_entries(&app), area);
         let body = agent_panel_body_rect(area, false);
         let mut terminal = Terminal::new(TestBackend::new(20, 7)).unwrap();
         terminal
@@ -2463,7 +2454,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         ];
         let area = Rect::new(0, 0, 20, 6);
 
-        let metrics = agent_panel_scroll_metrics(&app, area);
+        let metrics = agent_panel_scroll_metrics(&app, &agent_panel_list_entries(&app), area);
         assert_eq!(metrics.max_offset_from_bottom, 1);
         assert_eq!(
             agent_panel_scroll_for_target(&app, &agent_panel_list_entries(&app), area, 0, 2),
@@ -2506,7 +2497,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         );
         let panel = Rect::new(0, 0, 20, 5);
 
-        let metrics = agent_panel_scroll_metrics(&app, panel);
+        let metrics = agent_panel_scroll_metrics(&app, &agent_panel_list_entries(&app), panel);
 
         assert_eq!(metrics.viewport_rows, 1);
         assert_eq!(metrics.max_offset_from_bottom, 0);
@@ -2801,13 +2792,28 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         let entries = agent_panel_entries_from(&app, &runtime_registry);
         let primary_label = entries[0].primary_label.clone();
         app.sidebar_automations.workspaces = vec!["herdr".into()];
-        let (agents, automations) = agent_panel_partition_from(&app, &runtime_registry);
-        assert!(agents.is_empty());
-        assert_eq!(automations.len(), 1);
+        app.automations_expanded = true;
+        let details = agent_panel_list_entries_from(&app, &runtime_registry);
         assert!(matches!(
-            agent_panel_list_entries_from_partition(&app, (agents, automations)).as_slice(),
-            [AgentPanelListEntry::AutomationsHeader]
+            details.as_slice(),
+            [
+                AgentPanelListEntry::AutomationsHeader,
+                AgentPanelListEntry::Automation(_)
+            ]
         ));
+        let area = Rect::new(0, 0, 26, 4);
+        let metrics = agent_panel_scroll_metrics(&app, &details, area);
+        assert_eq!(metrics.max_offset_from_bottom, 1);
+        assert_eq!(
+            agent_panel_scrollbar_rect(&app, &details, area),
+            Some(Rect::new(25, 3, 1, 1))
+        );
+        app.agent_panel_scroll = 1;
+        let mut terminal = Terminal::new(TestBackend::new(26, 4)).unwrap();
+        terminal
+            .draw(|frame| render_agent_detail(&app, &runtime_registry, frame, area))
+            .unwrap();
+        assert!(row_text(terminal.backend().buffer(), 3, 25).contains("herdr"));
 
         for (_, runtime) in runtime_registry.drain() {
             runtime.shutdown();

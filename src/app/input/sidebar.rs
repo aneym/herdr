@@ -107,8 +107,8 @@ impl AppState {
         row: u16,
     ) -> Option<ScrollbarClickTarget> {
         let area = self.agent_panel_rect();
-        let metrics = crate::ui::agent_panel_scroll_metrics_for_entries(self, entries, area);
-        let track = crate::ui::agent_panel_scrollbar_rect(self, area)?;
+        let metrics = crate::ui::agent_panel_scroll_metrics(self, entries, area);
+        let track = crate::ui::agent_panel_scrollbar_rect(self, entries, area)?;
         if col < track.x
             || col >= track.x + track.width
             || row < track.y
@@ -132,8 +132,8 @@ impl AppState {
         grab_row_offset: u16,
     ) -> Option<usize> {
         let area = self.agent_panel_rect();
-        let metrics = crate::ui::agent_panel_scroll_metrics_for_entries(self, entries, area);
-        let track = crate::ui::agent_panel_scrollbar_rect(self, area)?;
+        let metrics = crate::ui::agent_panel_scroll_metrics(self, entries, area);
+        let track = crate::ui::agent_panel_scrollbar_rect(self, entries, area)?;
         Some(crate::ui::scrollbar_offset_from_drag_row(
             metrics,
             track,
@@ -148,7 +148,7 @@ impl AppState {
         offset_from_bottom: usize,
     ) {
         let area = self.agent_panel_rect();
-        let metrics = crate::ui::agent_panel_scroll_metrics_for_entries(self, entries, area);
+        let metrics = crate::ui::agent_panel_scroll_metrics(self, entries, area);
         self.agent_panel_scroll = metrics
             .max_offset_from_bottom
             .saturating_sub(offset_from_bottom);
@@ -160,8 +160,8 @@ impl AppState {
         delta: i16,
     ) {
         let area = self.agent_panel_rect();
-        let max_scroll = crate::ui::agent_panel_scroll_metrics_for_entries(self, entries, area)
-            .max_offset_from_bottom;
+        let max_scroll =
+            crate::ui::agent_panel_scroll_metrics(self, entries, area).max_offset_from_bottom;
         if delta.is_negative() {
             self.agent_panel_scroll = self
                 .agent_panel_scroll
@@ -522,7 +522,7 @@ impl AppState {
         }
 
         let detail_area = self.agent_panel_rect();
-        let metrics = crate::ui::agent_panel_scroll_metrics_for_entries(self, entries, detail_area);
+        let metrics = crate::ui::agent_panel_scroll_metrics(self, entries, detail_area);
         let body = crate::ui::agent_panel_body_rect(
             detail_area,
             crate::ui::should_show_scrollbar(metrics),
@@ -559,7 +559,7 @@ impl AppState {
         }
 
         let detail_area = self.agent_panel_rect();
-        let metrics = crate::ui::agent_panel_scroll_metrics_for_entries(self, entries, detail_area);
+        let metrics = crate::ui::agent_panel_scroll_metrics(self, entries, detail_area);
         let body = crate::ui::agent_panel_body_rect(
             detail_area,
             crate::ui::should_show_scrollbar(metrics),
@@ -918,7 +918,11 @@ mod tests {
         );
         app.state.sidebar_agents.row_gap = 1;
         let detail_area = app.state.agent_panel_rect();
-        let metrics = crate::ui::agent_panel_scroll_metrics(&app.state, detail_area);
+        let metrics = crate::ui::agent_panel_scroll_metrics(
+            &app.state,
+            &crate::ui::agent_panel_list_entries(&app.state),
+            detail_area,
+        );
         let body = crate::ui::agent_panel_body_rect(
             detail_area,
             crate::ui::should_show_scrollbar(metrics),
@@ -1136,7 +1140,11 @@ mod tests {
 
         let detail_area = app.state.agent_panel_rect();
         assert!(crate::ui::should_show_scrollbar(
-            crate::ui::agent_panel_scroll_metrics(&app.state, detail_area)
+            crate::ui::agent_panel_scroll_metrics(
+                &app.state,
+                &crate::ui::agent_panel_list_entries(&app.state),
+                detail_area,
+            )
         ));
 
         app.handle_mouse(mouse(
