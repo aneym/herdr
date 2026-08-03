@@ -102,11 +102,12 @@ impl AppState {
 
     pub(super) fn agent_panel_scrollbar_target_at(
         &self,
+        entries: &[crate::ui::AgentPanelListEntry],
         col: u16,
         row: u16,
     ) -> Option<ScrollbarClickTarget> {
         let area = self.agent_panel_rect();
-        let metrics = crate::ui::agent_panel_scroll_metrics(self, area);
+        let metrics = crate::ui::agent_panel_scroll_metrics_for_entries(self, entries, area);
         let track = crate::ui::agent_panel_scrollbar_rect(self, area)?;
         if col < track.x
             || col >= track.x + track.width
@@ -126,11 +127,12 @@ impl AppState {
 
     pub(super) fn agent_panel_offset_for_drag_row(
         &self,
+        entries: &[crate::ui::AgentPanelListEntry],
         row: u16,
         grab_row_offset: u16,
     ) -> Option<usize> {
         let area = self.agent_panel_rect();
-        let metrics = crate::ui::agent_panel_scroll_metrics(self, area);
+        let metrics = crate::ui::agent_panel_scroll_metrics_for_entries(self, entries, area);
         let track = crate::ui::agent_panel_scrollbar_rect(self, area)?;
         Some(crate::ui::scrollbar_offset_from_drag_row(
             metrics,
@@ -140,17 +142,26 @@ impl AppState {
         ))
     }
 
-    pub(super) fn set_agent_panel_offset_from_bottom(&mut self, offset_from_bottom: usize) {
+    pub(super) fn set_agent_panel_offset_from_bottom(
+        &mut self,
+        entries: &[crate::ui::AgentPanelListEntry],
+        offset_from_bottom: usize,
+    ) {
         let area = self.agent_panel_rect();
-        let metrics = crate::ui::agent_panel_scroll_metrics(self, area);
+        let metrics = crate::ui::agent_panel_scroll_metrics_for_entries(self, entries, area);
         self.agent_panel_scroll = metrics
             .max_offset_from_bottom
             .saturating_sub(offset_from_bottom);
     }
 
-    pub(super) fn scroll_agent_panel(&mut self, delta: i16) {
+    pub(super) fn scroll_agent_panel(
+        &mut self,
+        entries: &[crate::ui::AgentPanelListEntry],
+        delta: i16,
+    ) {
         let area = self.agent_panel_rect();
-        let max_scroll = crate::ui::agent_panel_scroll_metrics(self, area).max_offset_from_bottom;
+        let max_scroll = crate::ui::agent_panel_scroll_metrics_for_entries(self, entries, area)
+            .max_offset_from_bottom;
         if delta.is_negative() {
             self.agent_panel_scroll = self
                 .agent_panel_scroll
@@ -496,13 +507,22 @@ impl AppState {
             && row < rect.y + rect.height
     }
 
-    pub(super) fn on_automations_header(&self, col: u16, row: u16) -> bool {
-        if self.sidebar_collapsed || crate::ui::automation_panel_entries(self).is_empty() {
+    pub(super) fn on_automations_header(
+        &self,
+        entries: &[crate::ui::AgentPanelListEntry],
+        col: u16,
+        row: u16,
+    ) -> bool {
+        if self.sidebar_collapsed
+            || !entries
+                .iter()
+                .any(|entry| matches!(entry, crate::ui::AgentPanelListEntry::AutomationsHeader))
+        {
             return false;
         }
 
         let detail_area = self.agent_panel_rect();
-        let metrics = crate::ui::agent_panel_scroll_metrics(self, detail_area);
+        let metrics = crate::ui::agent_panel_scroll_metrics_for_entries(self, entries, detail_area);
         let body = crate::ui::agent_panel_body_rect(
             detail_area,
             crate::ui::should_show_scrollbar(metrics),
@@ -514,7 +534,6 @@ impl AppState {
 
         let mut row_y = body.y;
         let scroll = self.agent_panel_scroll.min(metrics.max_offset_from_bottom);
-        let entries = crate::ui::agent_panel_list_entries(self);
         for (index, entry) in entries.iter().enumerate().skip(scroll) {
             let height = crate::ui::agent_panel_list_entry_height(self, entry, body.height);
             if matches!(entry, crate::ui::AgentPanelListEntry::AutomationsHeader) {
@@ -532,6 +551,7 @@ impl AppState {
 
     pub(super) fn agent_detail_target_at(
         &self,
+        entries: &[crate::ui::AgentPanelListEntry],
         row: u16,
     ) -> Option<(usize, usize, crate::layout::PaneId)> {
         if self.sidebar_collapsed {
@@ -539,7 +559,7 @@ impl AppState {
         }
 
         let detail_area = self.agent_panel_rect();
-        let metrics = crate::ui::agent_panel_scroll_metrics(self, detail_area);
+        let metrics = crate::ui::agent_panel_scroll_metrics_for_entries(self, entries, detail_area);
         let body = crate::ui::agent_panel_body_rect(
             detail_area,
             crate::ui::should_show_scrollbar(metrics),
@@ -550,7 +570,6 @@ impl AppState {
 
         let mut row_y = body.y;
         let body_bottom = body.y + body.height;
-        let entries = crate::ui::agent_panel_list_entries(self);
         let scroll = self.agent_panel_scroll.min(metrics.max_offset_from_bottom);
         for (index, entry) in entries.iter().enumerate().skip(scroll) {
             let height = crate::ui::agent_panel_list_entry_height(self, entry, body.height);
@@ -834,7 +853,11 @@ mod tests {
         );
         let header_row = body.y + normal_height;
 
-        assert!(app.state.on_automations_header(body.x, header_row));
+        assert!(app.state.on_automations_header(
+            &crate::ui::agent_panel_list_entries(&app.state),
+            body.x,
+            header_row,
+        ));
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
             body.x,
@@ -845,7 +868,10 @@ mod tests {
 
         let automation_row = header_row + 1;
         assert_eq!(
-            app.state.agent_detail_target_at(automation_row),
+            app.state.agent_detail_target_at(
+                &crate::ui::agent_panel_list_entries(&app.state),
+                automation_row,
+            ),
             Some((1, 0, automation_pane))
         );
         app.handle_mouse(mouse(
@@ -899,18 +925,31 @@ mod tests {
         );
 
         assert_eq!(
-            app.state.agent_detail_target_at(body.y),
+            app.state
+                .agent_detail_target_at(&crate::ui::agent_panel_list_entries(&app.state), body.y,),
             Some((0, 0, first_pane))
         );
-        assert_eq!(app.state.agent_detail_target_at(body.y + 1), None);
         assert_eq!(
-            app.state.agent_detail_target_at(body.y + 3),
+            app.state.agent_detail_target_at(
+                &crate::ui::agent_panel_list_entries(&app.state),
+                body.y + 1,
+            ),
+            None
+        );
+        assert_eq!(
+            app.state.agent_detail_target_at(
+                &crate::ui::agent_panel_list_entries(&app.state),
+                body.y + 3,
+            ),
             Some((1, 0, second_pane))
         );
 
         app.state.sidebar_agents.row_gap = 0;
         assert_eq!(
-            app.state.agent_detail_target_at(body.y + 1),
+            app.state.agent_detail_target_at(
+                &crate::ui::agent_panel_list_entries(&app.state),
+                body.y + 1,
+            ),
             Some((1, 0, second_pane))
         );
     }
@@ -954,7 +993,8 @@ mod tests {
         let body = crate::ui::agent_panel_body_rect(detail_area, false);
 
         assert_eq!(
-            app.state.agent_detail_target_at(body.y),
+            app.state
+                .agent_detail_target_at(&crate::ui::agent_panel_list_entries(&app.state), body.y,),
             Some((0, 0, first_pane))
         );
     }

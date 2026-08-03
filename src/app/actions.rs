@@ -1863,9 +1863,11 @@ impl AppState {
             return;
         }
 
+        let entries = crate::ui::agent_panel_list_entries(self);
         let (_, detail_area) = crate::ui::ordered_sidebar_sections(self, self.view.sidebar_rect);
         self.agent_panel_scroll = crate::ui::agent_panel_scroll_for_target(
             self,
+            &entries,
             detail_area,
             self.agent_panel_scroll,
             idx,

@@ -138,6 +138,14 @@ pub(crate) fn agent_panel_entries_from(
     agent_panel_entries_with_runtimes(app, Some(terminal_runtimes))
 }
 
+#[cfg(test)]
+pub(crate) fn agent_panel_partition_from(
+    app: &AppState,
+    terminal_runtimes: &TerminalRuntimeRegistry,
+) -> (Vec<AgentPanelEntry>, Vec<AgentPanelEntry>) {
+    partition_agent_panel_entries(app, Some(terminal_runtimes))
+}
+
 fn agent_panel_entries_with_runtimes(
     app: &AppState,
     terminal_runtimes: Option<&TerminalRuntimeRegistry>,
@@ -145,6 +153,7 @@ fn agent_panel_entries_with_runtimes(
     partition_agent_panel_entries(app, terminal_runtimes).0
 }
 
+#[cfg(test)]
 pub(crate) fn automation_panel_entries(app: &AppState) -> Vec<AgentPanelEntry> {
     partition_agent_panel_entries(app, None).1
 }
@@ -163,36 +172,10 @@ fn partition_agent_panel_entries(
     let mut entries = collect_agent_panel_entries_with_runtimes(app, terminal_runtimes);
     crate::app::agent_view::apply_agent_view(app, &mut entries);
     entries.into_iter().partition(|entry| {
-        !app.automation_workspace_ids.as_ref().map_or_else(
-            || {
-                app.sidebar_automations
-                    .workspaces
-                    .contains(&entry.primary_label)
-            },
-            |workspace_ids| {
-                app.workspaces
-                    .get(entry.ws_idx)
-                    .is_some_and(|workspace| workspace_ids.contains(&workspace.id))
-            },
-        )
+        !app.sidebar_automations
+            .workspaces
+            .contains(&entry.primary_label)
     })
-}
-
-pub(crate) fn refresh_automation_workspace_ids(
-    app: &mut AppState,
-    terminal_runtimes: &TerminalRuntimeRegistry,
-) {
-    app.automation_workspace_ids = Some(
-        app.workspaces
-            .iter()
-            .filter(|workspace| {
-                app.sidebar_automations
-                    .workspaces
-                    .contains(&workspace.display_name_from(&app.terminals, terminal_runtimes))
-            })
-            .map(|workspace| workspace.id.clone())
-            .collect(),
-    );
 }
 
 fn collect_agent_panel_entries_with_runtimes(
@@ -253,6 +236,16 @@ pub(crate) enum AgentPanelListEntry {
 
 pub(crate) fn agent_panel_list_entries(app: &AppState) -> Vec<AgentPanelListEntry> {
     agent_panel_list_entries_from_partition(app, partition_agent_panel_entries(app, None))
+}
+
+pub(crate) fn agent_panel_list_entries_from(
+    app: &AppState,
+    terminal_runtimes: &TerminalRuntimeRegistry,
+) -> Vec<AgentPanelListEntry> {
+    agent_panel_list_entries_from_partition(
+        app,
+        partition_agent_panel_entries(app, Some(terminal_runtimes)),
+    )
 }
 
 fn agent_panel_list_entries_from_partition(
@@ -743,7 +736,12 @@ fn agent_panel_list_entry_gap(
     }
 }
 
-fn agent_panel_visible_count_from(app: &AppState, area: Rect, scroll: usize) -> usize {
+fn agent_panel_visible_count_from(
+    app: &AppState,
+    entries: &[AgentPanelListEntry],
+    area: Rect,
+    scroll: usize,
+) -> usize {
     let body = agent_panel_body_rect(area, false);
     if body.width == 0 || body.height == 0 {
         return 0;
@@ -751,7 +749,6 @@ fn agent_panel_visible_count_from(app: &AppState, area: Rect, scroll: usize) -> 
 
     let mut used_rows = 0u16;
     let mut visible = 0usize;
-    let entries = agent_panel_list_entries(app);
     for (index, entry) in entries.iter().enumerate().skip(scroll) {
         let height = agent_panel_list_entry_height(app, entry, body.height);
         if used_rows.saturating_add(height) > body.height {
@@ -766,9 +763,8 @@ fn agent_panel_visible_count_from(app: &AppState, area: Rect, scroll: usize) -> 
     visible
 }
 
-fn agent_panel_bottom_start(app: &AppState, area: Rect) -> usize {
+fn agent_panel_bottom_start(app: &AppState, entries: &[AgentPanelListEntry], area: Rect) -> usize {
     let body = agent_panel_body_rect(area, false);
-    let entries = agent_panel_list_entries(app);
     let mut used_rows = 0u16;
     let mut start = entries.len();
     for (index, entry) in entries.iter().enumerate().rev() {
@@ -785,17 +781,18 @@ fn agent_panel_bottom_start(app: &AppState, area: Rect) -> usize {
 
 pub(crate) fn agent_panel_scroll_for_target(
     app: &AppState,
+    entries: &[AgentPanelListEntry],
     area: Rect,
     current_scroll: usize,
     target: usize,
 ) -> usize {
-    let max_scroll = agent_panel_bottom_start(app, area);
+    let max_scroll = agent_panel_bottom_start(app, entries, area);
     if target < current_scroll {
         return target.min(max_scroll);
     }
     let mut scroll = current_scroll.min(max_scroll);
     while scroll < target {
-        let visible = agent_panel_visible_count_from(app, area, scroll);
+        let visible = agent_panel_visible_count_from(app, entries, area, scroll);
         if visible > 0 && target < scroll.saturating_add(visible) {
             break;
         }
@@ -804,16 +801,25 @@ pub(crate) fn agent_panel_scroll_for_target(
     scroll.min(max_scroll)
 }
 
-pub(crate) fn agent_panel_scroll_metrics(app: &AppState, area: Rect) -> crate::pane::ScrollMetrics {
-    let max_scroll = agent_panel_bottom_start(app, area);
+pub(crate) fn agent_panel_scroll_metrics_for_entries(
+    app: &AppState,
+    entries: &[AgentPanelListEntry],
+    area: Rect,
+) -> crate::pane::ScrollMetrics {
+    let max_scroll = agent_panel_bottom_start(app, entries, area);
     let scroll = app.agent_panel_scroll.min(max_scroll);
-    let viewport_rows = agent_panel_visible_count_from(app, area, scroll);
+    let viewport_rows = agent_panel_visible_count_from(app, entries, area, scroll);
 
     crate::pane::ScrollMetrics {
         offset_from_bottom: max_scroll.saturating_sub(scroll),
         max_offset_from_bottom: max_scroll,
         viewport_rows,
     }
+}
+
+pub(crate) fn agent_panel_scroll_metrics(app: &AppState, area: Rect) -> crate::pane::ScrollMetrics {
+    let entries = agent_panel_list_entries(app);
+    agent_panel_scroll_metrics_for_entries(app, &entries, area)
 }
 
 pub(crate) fn agent_panel_scrollbar_rect(app: &AppState, area: Rect) -> Option<Rect> {
@@ -1982,7 +1988,10 @@ mod tests {
             .find(|row| row_text(&collapsed, *row, area.width).contains("automations"))
             .unwrap();
         let header_x = find_symbol_x(&collapsed, header_row, area.width, "a");
-        assert_eq!(collapsed[(header_x, header_row)].style().fg, Some(app.palette.red));
+        assert_eq!(
+            collapsed[(header_x, header_row)].style().fg,
+            Some(app.palette.red)
+        );
         assert!(!collapsed_text.contains("⚡ routines"));
 
         app.automations_expanded = true;
@@ -2010,8 +2019,6 @@ mod tests {
         app.sidebar_agents.rows = vec![vec![crate::config::AgentSidebarToken::Agent]];
         app.sidebar_automations.workspaces = vec!["⚡ routines".into()];
         let normal_id = app.workspaces[0].id.clone();
-        let automation_id = app.workspaces[1].id.clone();
-        app.automation_workspace_ids = Some(std::collections::HashSet::from([automation_id]));
 
         let area = Rect::new(0, 0, 26, 4);
         let mut terminal = Terminal::new(TestBackend::new(26, 5)).unwrap();
@@ -2458,7 +2465,10 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
 
         let metrics = agent_panel_scroll_metrics(&app, area);
         assert_eq!(metrics.max_offset_from_bottom, 1);
-        assert_eq!(agent_panel_scroll_for_target(&app, area, 0, 2), 1);
+        assert_eq!(
+            agent_panel_scroll_for_target(&app, &agent_panel_list_entries(&app), area, 0, 2),
+            1
+        );
     }
 
     #[test]
@@ -2791,11 +2801,11 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         let entries = agent_panel_entries_from(&app, &runtime_registry);
         let primary_label = entries[0].primary_label.clone();
         app.sidebar_automations.workspaces = vec!["herdr".into()];
-        refresh_automation_workspace_ids(&mut app, &runtime_registry);
-        assert!(agent_panel_entries(&app).is_empty());
-        assert_eq!(automation_panel_entries(&app).len(), 1);
+        let (agents, automations) = agent_panel_partition_from(&app, &runtime_registry);
+        assert!(agents.is_empty());
+        assert_eq!(automations.len(), 1);
         assert!(matches!(
-            agent_panel_list_entries(&app).as_slice(),
+            agent_panel_list_entries_from_partition(&app, (agents, automations)).as_slice(),
             [AgentPanelListEntry::AutomationsHeader]
         ));
 
