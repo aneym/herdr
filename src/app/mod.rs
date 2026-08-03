@@ -546,6 +546,7 @@ impl App {
         let (theme_palette, theme_name) = resolve_effective_theme(&theme_runtime, None);
 
         let mut state = AppState::new(mode);
+        state.session_name = crate::session::active_name();
         state.terminals = std::collections::HashMap::new();
         state.direct_attach_resize_locks = std::collections::HashSet::new();
         state.pane_id_aliases = std::collections::HashMap::new();
@@ -1895,6 +1896,38 @@ mod tests {
             api_rx,
             crate::api::EventHub::default(),
         )
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn handoff_construction_captures_named_session() {
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        std::env::set_var(crate::session::SESSION_ENV_VAR, "work");
+        let snapshot = crate::persist::capture(
+            &[],
+            &std::collections::HashMap::new(),
+            &crate::terminal::TerminalRuntimeRegistry::new(),
+            None,
+            0,
+            26,
+            0.5,
+            std::collections::HashSet::new(),
+        );
+        let mut imports = std::collections::HashMap::new();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let app = App::new_from_handoff(
+            &Config::default(),
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+            &snapshot,
+            &mut imports,
+        )
+        .unwrap();
+
+        std::env::remove_var(crate::session::SESSION_ENV_VAR);
+        assert_eq!(app.state.session_name.as_deref(), Some("work"));
     }
 
     fn unique_temp_path(name: &str) -> std::path::PathBuf {

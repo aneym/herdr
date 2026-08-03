@@ -4712,7 +4712,6 @@ pub fn run_server() -> io::Result<()> {
             api_rx,
             event_hub,
         );
-        app.state.session_name = crate::session::active_name();
         seed_startup_workspace_if_empty(&mut app);
 
         // The server runs headless — disable local notification side effects.

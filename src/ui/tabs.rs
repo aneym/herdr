@@ -35,10 +35,12 @@ fn session_badge_text(app: &AppState) -> String {
     )
 }
 
-fn session_badge_layout(app: &AppState, area: Rect) -> (Rect, Rect) {
+fn session_badge_layout(app: &AppState, area: Rect, mouse_chrome: bool) -> (Rect, Rect) {
     let badge_width = display_width_u16(&session_badge_text(app));
     let reserved_width = badge_width.saturating_add(SESSION_BADGE_GAP);
-    if area.width < reserved_width.saturating_add(MIN_TAB_WIDTH) {
+    let tab_controls_width = if mouse_chrome { NEW_TAB_WIDTH } else { 0 };
+    let minimum_content_width = MIN_TAB_WIDTH.saturating_add(tab_controls_width);
+    if area.width < reserved_width.saturating_add(minimum_content_width) {
         return (area, Rect::default());
     }
 
@@ -211,7 +213,7 @@ pub(crate) fn compute_tab_bar_view(
         return TabBarView::default();
     }
 
-    let (content_area, session_badge_rect) = session_badge_layout(app, area);
+    let (content_area, session_badge_rect) = session_badge_layout(app, area, mouse_chrome);
 
     if !mouse_chrome {
         let max_scroll = max_tab_scroll(app, ws, content_area);
@@ -507,6 +509,11 @@ pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
     if last_visible_idx.is_some_and(|idx| idx + 1 < ws.tabs.len()) {
         let x = if app.mouse_capture && app.view.tab_scroll_right_hit_area.width > 0 {
             app.view.tab_scroll_right_hit_area.x.saturating_sub(1)
+        } else if app.view.session_badge_rect.width > 0 {
+            app.view
+                .session_badge_rect
+                .x
+                .saturating_sub(SESSION_BADGE_GAP + 1)
         } else {
             area.x + area.width.saturating_sub(1)
         };
@@ -874,6 +881,20 @@ mod tests {
     }
 
     #[test]
+    fn session_badge_is_hidden_before_mouse_chrome_squeezes_tab_width() {
+        let app = AppState::test_new();
+        let ws = Workspace::test_new("test");
+        let badge_width = display_width_u16("default") + SESSION_BADGE_GAP;
+        let area = Rect::new(0, 0, badge_width + MIN_TAB_WIDTH + NEW_TAB_WIDTH - 1, 1);
+
+        let view = compute_tab_bar_view(&app, &ws, area, 0, true, true);
+
+        assert_eq!(view.session_badge_rect, Rect::default());
+        assert_eq!(view.tab_hit_areas[0].width, MIN_TAB_WIDTH);
+        assert_eq!(view.new_tab_hit_area.width, NEW_TAB_WIDTH);
+    }
+
+    #[test]
     fn session_badge_truncates_long_names_by_display_width() {
         let mut app = AppState::test_new();
         app.session_name = Some("提交-herdr-session-name".into());
@@ -885,6 +906,39 @@ mod tests {
         assert_eq!(display_width(&text), SESSION_BADGE_MAX_WIDTH);
         assert!(text.ends_with('…'));
         assert_eq!(view.session_badge_rect.width as usize, display_width(&text));
+    }
+
+    #[test]
+    fn non_mouse_overflow_ellipsis_does_not_overwrite_session_badge() {
+        let mut app = AppState::test_new();
+        app.session_name = Some("work".into());
+        let mut ws = Workspace::test_new("test");
+        for name in ["two", "three", "four"] {
+            ws.test_add_tab(Some(name));
+        }
+        app.workspaces = vec![ws];
+        app.active = Some(0);
+        app.view.tab_bar_rect = Rect::new(0, 0, 20, 1);
+        let view = compute_tab_bar_view(
+            &app,
+            &app.workspaces[0],
+            app.view.tab_bar_rect,
+            0,
+            true,
+            false,
+        );
+        app.view.tab_hit_areas = view.tab_hit_areas;
+        app.view.session_badge_rect = view.session_badge_rect;
+
+        let backend = TestBackend::new(20, 1);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render_tab_bar(&app, frame, app.view.tab_bar_rect))
+            .unwrap();
+
+        let row = buffer_row_text(terminal.backend().buffer(), app.view.tab_bar_rect, 0);
+        assert!(row.contains('…'), "tab row: {row:?}");
+        assert!(row.ends_with("work"), "tab row: {row:?}");
     }
 
     #[test]
