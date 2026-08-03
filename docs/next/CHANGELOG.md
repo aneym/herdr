@@ -394,6 +394,7 @@ This is a hotfix for v0.6.3. See the v0.6.3 notes for the full feature release.
 - Added opt-in pane screen history across full server restarts with `[experimental] pane_history = true` and Settings > Experiments > pane screen history. (#217, #248, thanks @icedac)
 - Added a session navigator at `prefix+g` with a searchable workspace/tab/pane tree, agent state filters, mouse switching, and keyboard navigation. (#157)
 - Added configurable navigate-mode movement bindings for workspace and pane navigation keys. (#193)
+- Added configurable `focus_back` and `focus_forward` keybinding actions for browser-style pane focus history navigation. They are unset by default.
 - Added a configurable `last_pane` keybinding action for tmux-style back-and-forth navigation to the last focused pane across workspaces and tabs. It is unset by default. (#287)
 - Added scrollback support to direct agent terminal attaches. Mouse wheel and plain PageUp/PageDown now scroll the attached terminal viewport, while terminal apps that request mouse or alternate-scroll input still receive those events. The client/server protocol is now version 11.
 - Added `ui.redraw_on_focus_gained` to keep the existing full redraw on outer-terminal focus gain by default while allowing users to opt out of the visible refresh. (#282)

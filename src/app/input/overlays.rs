@@ -782,7 +782,9 @@ mod tests {
             area.x + margin_x,
             area.y + margin_y,
             area.width.saturating_sub(margin_x.saturating_mul(2)).max(4),
-            area.height.saturating_sub(margin_y.saturating_mul(2)).max(4),
+            area.height
+                .saturating_sub(margin_y.saturating_mul(2))
+                .max(4),
         );
 
         assert_eq!(app.state.navigator_popup_rect(), expected);

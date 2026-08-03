@@ -401,6 +401,14 @@ impl App {
                 self.last_pane_via_api();
                 leave_navigate_mode(&mut self.state);
             }
+            NavigateAction::FocusBack => {
+                self.focus_history_via_api(false);
+                leave_navigate_mode(&mut self.state);
+            }
+            NavigateAction::FocusForward => {
+                self.focus_history_via_api(true);
+                leave_navigate_mode(&mut self.state);
+            }
             NavigateAction::Help => super::modal::open_keybind_help(&mut self.state),
             NavigateAction::Settings => super::settings::open_settings(&mut self.state),
             NavigateAction::ReloadConfig => {
@@ -664,6 +672,16 @@ impl App {
             self.state.previous_pane_focus = None;
             return;
         }
+        self.focus_pane_internal_via_api(ws_idx, target.pane_id);
+    }
+
+    pub(crate) fn focus_history_via_api(&mut self, is_forward: bool) {
+        let Some(target) = self.state.focus_history_target(is_forward) else {
+            return;
+        };
+        let Some((ws_idx, _)) = self.state.pane_focus_target_indices(&target) else {
+            return;
+        };
         self.focus_pane_internal_via_api(ws_idx, target.pane_id);
     }
 
@@ -1380,6 +1398,8 @@ pub(crate) enum NavigateAction {
     CyclePaneNext,
     CyclePanePrevious,
     LastPane,
+    FocusBack,
+    FocusForward,
     Help,
     Settings,
     ReloadConfig,
@@ -1408,6 +1428,8 @@ fn copy_mode_survives_prefix_action(action: NavigateAction) -> bool {
             | NavigateAction::CyclePaneNext
             | NavigateAction::CyclePanePrevious
             | NavigateAction::LastPane
+            | NavigateAction::FocusBack
+            | NavigateAction::FocusForward
             | NavigateAction::OpenNotificationTarget
     )
 }
@@ -1514,6 +1536,8 @@ fn non_indexed_action_for_key(
         (&kb.swap_pane_up, NavigateAction::SwapPaneUp),
         (&kb.swap_pane_right, NavigateAction::SwapPaneRight),
         (&kb.last_pane, NavigateAction::LastPane),
+        (&kb.focus_back, NavigateAction::FocusBack),
+        (&kb.focus_forward, NavigateAction::FocusForward),
         (&kb.cycle_pane_next, NavigateAction::CyclePaneNext),
         (&kb.cycle_pane_previous, NavigateAction::CyclePanePrevious),
         (&kb.split_vertical, NavigateAction::SplitVertical),
@@ -1769,6 +1793,14 @@ pub(super) fn execute_navigate_action_in_context(
         }
         NavigateAction::LastPane => {
             state.last_pane();
+            leave_navigate_mode(state);
+        }
+        NavigateAction::FocusBack => {
+            state.focus_back();
+            leave_navigate_mode(state);
+        }
+        NavigateAction::FocusForward => {
+            state.focus_forward();
             leave_navigate_mode(state);
         }
         NavigateAction::Help => super::modal::open_keybind_help(state),
@@ -2603,6 +2635,47 @@ navigate_pane_right = "ctrl+l"
         );
 
         assert_eq!(action, Some(NavigateAction::LastPane));
+    }
+
+    #[test]
+    fn focus_history_shortcuts_map_to_navigation_actions() {
+        let config: Config = toml::from_str(
+            r#"
+[keys]
+focus_back = ["prefix+[", "ctrl+alt+["]
+focus_forward = "prefix+]"
+"#,
+        )
+        .unwrap();
+        let mut state = state_with_workspaces(&["test"]);
+        state.keybinds = config.keybinds();
+
+        assert_eq!(
+            action_for_key(
+                &state,
+                TerminalKey::new(KeyCode::Char('['), KeyModifiers::empty()),
+                BindingDispatch::Prefix,
+            ),
+            Some(NavigateAction::FocusBack)
+        );
+        assert_eq!(
+            terminal_direct_navigation_action(
+                &state,
+                TerminalKey::new(
+                    KeyCode::Char('['),
+                    KeyModifiers::CONTROL | KeyModifiers::ALT,
+                ),
+            ),
+            Some(NavigateAction::FocusBack)
+        );
+        assert_eq!(
+            action_for_key(
+                &state,
+                TerminalKey::new(KeyCode::Char(']'), KeyModifiers::empty()),
+                BindingDispatch::Prefix,
+            ),
+            Some(NavigateAction::FocusForward)
+        );
     }
 
     #[test]

@@ -553,6 +553,7 @@ impl App {
         state.workspaces = workspaces;
         state.active = active;
         state.previous_pane_focus = None;
+        state.pane_focus_history = state::PaneFocusHistory::default();
         state.deferred_attention_read = None;
         state.selected = selected;
         state.should_quit = false;

@@ -1482,6 +1482,13 @@ pub(crate) struct PaneFocusTarget {
     pub pane_id: PaneId,
 }
 
+#[derive(Debug, Default)]
+pub(crate) struct PaneFocusHistory {
+    pub back: Vec<PaneFocusTarget>,
+    pub forward: Vec<PaneFocusTarget>,
+    pub pending_navigation: Option<PaneFocusTarget>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DeferredAttentionRead {
     pub target: PaneFocusTarget,
@@ -1511,6 +1518,7 @@ pub struct AppState {
     pub workspaces: Vec<Workspace>,
     pub active: Option<usize>,
     pub(crate) previous_pane_focus: Option<PaneFocusTarget>,
+    pub(crate) pane_focus_history: PaneFocusHistory,
     pub(crate) deferred_attention_read: Option<DeferredAttentionRead>,
     pub selected: usize,
     mode_state: AppModeState,
@@ -1905,6 +1913,7 @@ impl AppState {
             workspaces: Vec::new(),
             active: None,
             previous_pane_focus: None,
+            pane_focus_history: PaneFocusHistory::default(),
             deferred_attention_read: None,
             selected: 0,
             mode_state: AppModeState::new(mode),

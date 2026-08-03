@@ -344,6 +344,50 @@ impl AppState {
         });
     }
 
+    fn record_focus_history_change(
+        &mut self,
+        previous: Option<&PaneFocusTarget>,
+        target: &PaneFocusTarget,
+    ) {
+        if self.pane_focus_history.pending_navigation.take().as_ref() == Some(target) {
+            return;
+        }
+        self.pane_focus_history.forward.clear();
+        let Some(previous) = previous else {
+            return;
+        };
+        if self.pane_focus_history.back.last() != Some(previous) {
+            self.pane_focus_history.back.push(previous.clone());
+            if self.pane_focus_history.back.len() > 64 {
+                self.pane_focus_history.back.remove(0);
+            }
+        }
+    }
+
+    pub(crate) fn focus_history_target(&mut self, is_forward: bool) -> Option<PaneFocusTarget> {
+        let current = self.current_pane_focus_target()?;
+        loop {
+            let target = if is_forward {
+                self.pane_focus_history.forward.pop()
+            } else {
+                self.pane_focus_history.back.pop()
+            }?;
+            if target == current || self.pane_focus_target_indices(&target).is_none() {
+                continue;
+            }
+            let destination = if is_forward {
+                &mut self.pane_focus_history.back
+            } else {
+                &mut self.pane_focus_history.forward
+            };
+            if destination.last() != Some(&current) {
+                destination.push(current);
+            }
+            self.pane_focus_history.pending_navigation = Some(target.clone());
+            return Some(target);
+        }
+    }
+
     pub(crate) fn record_pane_focus_change(
         &mut self,
         previous: Option<PaneFocusTarget>,
@@ -359,6 +403,7 @@ impl AppState {
         };
         if previous.as_ref() != Some(&target) {
             self.update_attention_read_for_focus_change(previous.as_ref(), Some(&target));
+            self.record_focus_history_change(previous.as_ref(), &target);
             self.previous_pane_focus = previous;
         }
     }
@@ -367,6 +412,9 @@ impl AppState {
         let current = self.current_pane_focus_target();
         if previous != current {
             self.update_attention_read_for_focus_change(previous.as_ref(), current.as_ref());
+            if let Some(current) = current.as_ref() {
+                self.record_focus_history_change(previous.as_ref(), current);
+            }
             self.previous_pane_focus = previous;
         }
     }
@@ -422,6 +470,7 @@ impl AppState {
         }
         self.update_attention_read_for_focus_change(previous.as_ref(), Some(&target));
         self.read_focused_attention();
+        self.record_focus_history_change(previous.as_ref(), &target);
         self.previous_pane_focus = previous;
         self.mark_session_dirty();
         self.tab_scroll_follow_active = true;
@@ -2000,6 +2049,20 @@ impl AppState {
         {
             self.previous_pane_focus = None;
         }
+        self.pane_focus_history
+            .back
+            .retain(|focus| !pane_ids.contains(&focus.pane_id));
+        self.pane_focus_history
+            .forward
+            .retain(|focus| !pane_ids.contains(&focus.pane_id));
+        if self
+            .pane_focus_history
+            .pending_navigation
+            .as_ref()
+            .is_some_and(|focus| pane_ids.contains(&focus.pane_id))
+        {
+            self.pane_focus_history.pending_navigation = None;
+        }
         if self
             .deferred_attention_read
             .as_ref()
@@ -2231,6 +2294,27 @@ impl AppState {
             };
             self.focus_pane_in_workspace(ws_idx, target);
         }
+    }
+
+    #[cfg(test)]
+    pub fn focus_back(&mut self) {
+        self.focus_history(false);
+    }
+
+    #[cfg(test)]
+    pub fn focus_forward(&mut self) {
+        self.focus_history(true);
+    }
+
+    #[cfg(test)]
+    fn focus_history(&mut self, is_forward: bool) {
+        let Some(target) = self.focus_history_target(is_forward) else {
+            return;
+        };
+        let Some((ws_idx, _)) = self.pane_focus_target_indices(&target) else {
+            return;
+        };
+        self.focus_pane_in_workspace(ws_idx, target.pane_id);
     }
 
     #[cfg(test)]
@@ -4870,6 +4954,155 @@ mod tests {
         state.switch_workspace(2);
         assert_eq!(state.active, Some(2));
         assert_eq!(state.selected, 2);
+    }
+
+    #[test]
+    fn focus_history_navigates_back_and_forward() {
+        let mut state = app_with_workspaces(&["test"]);
+        let a = state.workspaces[0].tabs[0].root_pane;
+        let b = state.workspaces[0].test_split(Direction::Horizontal);
+        let c = state.workspaces[0].test_split(Direction::Horizontal);
+
+        state.focus_pane_in_workspace(0, a);
+        state.focus_pane_in_workspace(0, b);
+        state.focus_pane_in_workspace(0, c);
+        state.focus_back();
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(b));
+        state.focus_back();
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(a));
+        state.focus_forward();
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(b));
+        state.focus_forward();
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(c));
+    }
+
+    #[test]
+    fn normal_focus_after_back_clears_forward_history() {
+        let mut state = app_with_workspaces(&["test"]);
+        let a = state.workspaces[0].tabs[0].root_pane;
+        let b = state.workspaces[0].test_split(Direction::Horizontal);
+        let c = state.workspaces[0].test_split(Direction::Horizontal);
+        let d = state.workspaces[0].test_split(Direction::Horizontal);
+
+        state.focus_pane_in_workspace(0, a);
+        state.focus_pane_in_workspace(0, b);
+        state.focus_pane_in_workspace(0, c);
+        state.focus_back();
+        state.focus_pane_in_workspace(0, d);
+        state.focus_forward();
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(d));
+        state.focus_back();
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(b));
+    }
+
+    #[test]
+    fn focus_history_crosses_workspaces_and_tabs() {
+        let mut state = app_with_workspaces(&["one", "two"]);
+        let a = state.workspaces[0].tabs[0].root_pane;
+        let second_tab = state.workspaces[1].test_add_tab(Some("logs"));
+        let b = state.workspaces[1].tabs[second_tab].root_pane;
+
+        state.focus_pane_in_workspace(0, a);
+        state.focus_pane_in_workspace(1, b);
+        state.focus_back();
+        assert_eq!(state.active, Some(0));
+        assert_eq!(state.workspaces[0].active_tab, 0);
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(a));
+        state.focus_forward();
+        assert_eq!(state.active, Some(1));
+        assert_eq!(state.workspaces[1].active_tab, second_tab);
+        assert_eq!(state.workspaces[1].focused_pane_id(), Some(b));
+    }
+
+    #[test]
+    fn focus_back_skips_close_fallback_that_matches_current_pane() {
+        let mut state = app_with_workspaces(&["test"]);
+        let a = state.workspaces[0].tabs[0].root_pane;
+        let b = state.workspaces[0].test_split(Direction::Horizontal);
+        let c = state.workspaces[0].test_split(Direction::Horizontal);
+        state.ensure_test_terminals();
+
+        state.focus_pane_in_workspace(0, a);
+        state.focus_pane_in_workspace(0, b);
+        state.focus_pane_in_workspace(0, c);
+        state.close_pane();
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(b));
+
+        state.focus_back();
+
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(a));
+    }
+
+    #[test]
+    fn focus_forward_skips_close_fallback_that_matches_current_pane() {
+        let mut state = app_with_workspaces(&["test"]);
+        let a = state.workspaces[0].tabs[0].root_pane;
+        let b = state.workspaces[0].test_split(Direction::Horizontal);
+        let c = state.workspaces[0].test_split(Direction::Horizontal);
+        state.ensure_test_terminals();
+
+        state.focus_pane_in_workspace(0, a);
+        state.focus_pane_in_workspace(0, b);
+        state.focus_pane_in_workspace(0, c);
+        state.focus_back();
+        state.focus_back();
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(a));
+        state.close_pane();
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(b));
+
+        state.focus_forward();
+
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(c));
+    }
+
+    #[test]
+    fn removed_pane_is_pruned_from_focus_history() {
+        let mut state = app_with_workspaces(&["test"]);
+        let a = state.workspaces[0].tabs[0].root_pane;
+        let b = state.workspaces[0].test_split(Direction::Horizontal);
+        let c = state.workspaces[0].test_split(Direction::Horizontal);
+
+        state.focus_pane_in_workspace(0, a);
+        state.focus_pane_in_workspace(0, b);
+        state.focus_pane_in_workspace(0, c);
+        state.workspaces[0].remove_pane(b);
+        state.remove_plugin_pane_records([b]);
+        state.focus_back();
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(a));
+    }
+
+    #[test]
+    fn empty_focus_history_navigation_is_a_no_op() {
+        let mut state = app_with_workspaces(&["test"]);
+        let root = state.workspaces[0].focused_pane_id();
+
+        state.focus_back();
+        state.focus_forward();
+
+        assert_eq!(state.workspaces[0].focused_pane_id(), root);
+    }
+
+    #[test]
+    fn focus_history_deduplicates_and_caps_back_entries() {
+        let mut state = app_with_workspaces(&["test"]);
+        let root = state.workspaces[0].tabs[0].root_pane;
+        let other = state.workspaces[0].test_split(Direction::Horizontal);
+
+        state.focus_pane_in_workspace(0, root);
+        let history_len = state.pane_focus_history.back.len();
+        state.focus_pane_in_workspace(0, root);
+        assert_eq!(state.pane_focus_history.back.len(), history_len);
+
+        for _ in 0..80 {
+            state.focus_pane_in_workspace(0, other);
+            state.focus_pane_in_workspace(0, root);
+        }
+        assert_eq!(state.pane_focus_history.back.len(), 64);
+        assert!(state
+            .pane_focus_history
+            .back
+            .windows(2)
+            .all(|pair| pair[0] != pair[1]));
     }
 
     #[test]
