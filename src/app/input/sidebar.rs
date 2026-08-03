@@ -496,6 +496,40 @@ impl AppState {
             && row < rect.y + rect.height
     }
 
+    pub(super) fn on_automations_header(&self, col: u16, row: u16) -> bool {
+        if self.sidebar_collapsed || crate::ui::automation_panel_entries(self).is_empty() {
+            return false;
+        }
+
+        let detail_area = self.agent_panel_rect();
+        let metrics = crate::ui::agent_panel_scroll_metrics(self, detail_area);
+        let body = crate::ui::agent_panel_body_rect(
+            detail_area,
+            crate::ui::should_show_scrollbar(metrics),
+        );
+        if col < body.x || col >= body.x + body.width || row < body.y || row >= body.y + body.height
+        {
+            return false;
+        }
+
+        let mut row_y = body.y;
+        let scroll = self.agent_panel_scroll.min(metrics.max_offset_from_bottom);
+        let entries = crate::ui::agent_panel_list_entries(self);
+        for (index, entry) in entries.iter().enumerate().skip(scroll) {
+            let height = crate::ui::agent_panel_list_entry_height(self, entry, body.height);
+            if matches!(entry, crate::ui::AgentPanelListEntry::AutomationsHeader) {
+                return row == row_y;
+            }
+            let gap = if index + 1 < entries.len() {
+                self.sidebar_agents.row_gap
+            } else {
+                0
+            };
+            row_y = row_y.saturating_add(height).saturating_add(gap);
+        }
+        false
+    }
+
     pub(super) fn agent_detail_target_at(
         &self,
         row: u16,
@@ -516,19 +550,34 @@ impl AppState {
 
         let mut row_y = body.y;
         let body_bottom = body.y + body.height;
-        let entries = crate::ui::agent_panel_entries(self);
+        let entries = crate::ui::agent_panel_list_entries(self);
         let scroll = self.agent_panel_scroll.min(metrics.max_offset_from_bottom);
-        for (index, detail) in entries.iter().enumerate().skip(scroll) {
-            let height = crate::ui::agent_entry_height_in_body(self, detail, body.height);
+        for (index, entry) in entries.iter().enumerate().skip(scroll) {
+            let height = crate::ui::agent_panel_list_entry_height(self, entry, body.height);
             if row_y.saturating_add(height) > body_bottom {
                 break;
             }
             if row >= row_y && row < row_y.saturating_add(height) {
-                return Some((detail.ws_idx, detail.tab_idx, detail.pane_id));
+                return match entry {
+                    crate::ui::AgentPanelListEntry::Agent(detail)
+                    | crate::ui::AgentPanelListEntry::Automation(detail) => {
+                        Some((detail.ws_idx, detail.tab_idx, detail.pane_id))
+                    }
+                    crate::ui::AgentPanelListEntry::AutomationsHeader => None,
+                };
             }
+            let gap = match entry {
+                crate::ui::AgentPanelListEntry::Agent(_)
+                | crate::ui::AgentPanelListEntry::Automation(_)
+                    if index + 1 < entries.len() =>
+                {
+                    self.sidebar_agents.row_gap
+                }
+                _ => 0,
+            };
             row_y = row_y
                 .saturating_add(height)
-                .saturating_add(crate::ui::agent_entry_gap(self, index, entries.len()))
+                .saturating_add(gap)
                 .min(body_bottom);
         }
         None
@@ -757,6 +806,59 @@ mod tests {
             snapshot.workspaces[0].tabs[first_tab].focused,
             Some(second_pane.raw())
         );
+    }
+
+    #[test]
+    fn automation_header_toggles_dirty_state_and_expanded_row_focuses() {
+        let mut app = app_for_mouse_test();
+        let normal = Workspace::test_new("normal");
+        let normal_pane = normal.tabs[0].root_pane;
+        let mut automation = Workspace::test_new("automation-path");
+        automation.custom_name = Some("⚡ routines".into());
+        let automation_pane = automation.tabs[0].root_pane;
+        app.state.workspaces = vec![normal, automation];
+        app.state.ensure_test_terminals();
+        for terminal in app.state.terminals.values_mut() {
+            terminal.detected_agent = Some(Agent::Claude);
+        }
+        app.state.sidebar_automations.workspaces = vec!["⚡ routines".into()];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.replace_mode(Mode::Terminal);
+        let detail_area = app.state.agent_panel_rect();
+        let body = crate::ui::agent_panel_body_rect(detail_area, false);
+        let normal_height = crate::ui::agent_panel_list_entry_height(
+            &app.state,
+            &crate::ui::agent_panel_list_entries(&app.state)[0],
+            body.height,
+        );
+        let header_row = body.y + normal_height;
+
+        assert!(app.state.on_automations_header(body.x, header_row));
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            body.x,
+            header_row,
+        ));
+        assert!(app.state.automations_expanded);
+        assert!(app.state.session_dirty);
+
+        let automation_row = header_row + 1;
+        assert_eq!(
+            app.state.agent_detail_target_at(automation_row),
+            Some((1, 0, automation_pane))
+        );
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            body.x,
+            automation_row,
+        ));
+        assert_eq!(app.state.active, Some(1));
+        assert_eq!(
+            app.state.workspaces[1].focused_pane_id(),
+            Some(automation_pane)
+        );
+        assert_ne!(normal_pane, automation_pane);
     }
 
     #[test]

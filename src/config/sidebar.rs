@@ -512,6 +512,12 @@ where
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(default)]
+pub struct AutomationsSidebarConfig {
+    pub workspaces: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct SidebarConfig {
@@ -520,6 +526,7 @@ pub struct SidebarConfig {
     pub new_button: SidebarNewButtonConfig,
     pub menu_position: SidebarMenuPositionConfig,
     pub agents: AgentsSidebarConfig,
+    pub automations: AutomationsSidebarConfig,
     pub spaces: SpacesSidebarConfig,
 }
 
@@ -530,6 +537,7 @@ impl Default for SidebarConfig {
             new_button: SidebarNewButtonConfig::Footer,
             menu_position: SidebarMenuPositionConfig::Right,
             agents: AgentsSidebarConfig::default(),
+            automations: AutomationsSidebarConfig::default(),
             spaces: SpacesSidebarConfig::default(),
         }
     }
@@ -560,6 +568,7 @@ mod tests {
             ]
         );
         assert!(config.agents.rows_by_agent.is_empty());
+        assert!(config.automations.workspaces.is_empty());
         assert!(config.agents.state_icons.is_empty());
         assert_eq!(config.agents.min_row_lines, 0);
         assert_eq!(config.agents.row_gap, 0);
@@ -595,6 +604,23 @@ section_order = ["workspaces", "agents"]
         )
         .unwrap();
         assert_eq!(alias.ui.sidebar.section_order, default_section_order());
+    }
+
+    #[test]
+    fn automation_workspaces_default_empty_and_parse() {
+        assert!(SidebarConfig::default().automations.workspaces.is_empty());
+
+        let config: crate::config::Config = toml::from_str(
+            r#"
+[ui.sidebar.automations]
+workspaces = ["⚡ routines", "scheduled"]
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            config.ui.sidebar.automations.workspaces,
+            ["⚡ routines", "scheduled"]
+        );
     }
 
     #[test]

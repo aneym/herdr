@@ -142,9 +142,31 @@ fn agent_panel_entries_with_runtimes(
     app: &AppState,
     terminal_runtimes: Option<&TerminalRuntimeRegistry>,
 ) -> Vec<AgentPanelEntry> {
+    partition_agent_panel_entries(app, terminal_runtimes).0
+}
+
+pub(crate) fn automation_panel_entries(app: &AppState) -> Vec<AgentPanelEntry> {
+    partition_agent_panel_entries(app, None).1
+}
+
+fn automation_panel_entries_from(
+    app: &AppState,
+    terminal_runtimes: &TerminalRuntimeRegistry,
+) -> Vec<AgentPanelEntry> {
+    partition_agent_panel_entries(app, Some(terminal_runtimes)).1
+}
+
+fn partition_agent_panel_entries(
+    app: &AppState,
+    terminal_runtimes: Option<&TerminalRuntimeRegistry>,
+) -> (Vec<AgentPanelEntry>, Vec<AgentPanelEntry>) {
     let mut entries = collect_agent_panel_entries_with_runtimes(app, terminal_runtimes);
     crate::app::agent_view::apply_agent_view(app, &mut entries);
-    entries
+    entries.into_iter().partition(|entry| {
+        !app.sidebar_automations
+            .workspaces
+            .contains(&entry.primary_label)
+    })
 }
 
 fn collect_agent_panel_entries_with_runtimes(
@@ -195,6 +217,87 @@ fn collect_agent_panel_entries_with_runtimes(
                 })
         })
         .collect()
+}
+
+pub(crate) enum AgentPanelListEntry {
+    Agent(AgentPanelEntry),
+    AutomationsHeader,
+    Automation(AgentPanelEntry),
+}
+
+pub(crate) fn agent_panel_list_entries(app: &AppState) -> Vec<AgentPanelListEntry> {
+    agent_panel_list_entries_from_partition(app, partition_agent_panel_entries(app, None))
+}
+
+fn agent_panel_list_entries_from_partition(
+    app: &AppState,
+    (agents, automations): (Vec<AgentPanelEntry>, Vec<AgentPanelEntry>),
+) -> Vec<AgentPanelListEntry> {
+    if automations.is_empty() {
+        return agents.into_iter().map(AgentPanelListEntry::Agent).collect();
+    }
+
+    let mut entries = agents
+        .into_iter()
+        .map(AgentPanelListEntry::Agent)
+        .collect::<Vec<_>>();
+    entries.push(AgentPanelListEntry::AutomationsHeader);
+    if app.automations_expanded {
+        entries.extend(automations.into_iter().map(AgentPanelListEntry::Automation));
+    }
+    entries
+}
+
+struct AutomationActivitySummary {
+    blocked: usize,
+    working: usize,
+    done: usize,
+    total: usize,
+}
+
+impl AutomationActivitySummary {
+    fn label(&self) -> String {
+        let mut parts = Vec::new();
+        if self.blocked > 0 {
+            parts.push(format!("{} blocked", self.blocked));
+        }
+        if self.working > 0 {
+            parts.push(format!("{} working", self.working));
+        }
+        if self.done > 0 {
+            parts.push(format!("{} done", self.done));
+        }
+        if parts.is_empty() {
+            parts.push(self.total.to_string());
+        }
+        parts.join(" · ")
+    }
+
+    fn color(&self, palette: &Palette) -> ratatui::style::Color {
+        if self.blocked > 0 {
+            palette.accent
+        } else {
+            palette.overlay0
+        }
+    }
+}
+
+fn automation_activity_summary(entries: &[AgentPanelEntry]) -> AutomationActivitySummary {
+    let mut summary = AutomationActivitySummary {
+        blocked: 0,
+        working: 0,
+        done: 0,
+        total: entries.len(),
+    };
+    for entry in entries {
+        match (entry.state, entry.seen) {
+            (AgentState::Blocked, _) => summary.blocked += 1,
+            (AgentState::Working, _) => summary.working += 1,
+            (AgentState::Idle, false) => summary.done += 1,
+            _ => {}
+        }
+    }
+    summary
 }
 
 pub(super) fn agent_panel_status_key(state: AgentState, seen: bool) -> &'static str {
@@ -588,6 +691,32 @@ pub(crate) fn agent_entry_gap(app: &AppState, entry_idx: usize, entry_count: usi
     }
 }
 
+pub(crate) fn agent_panel_list_entry_height(
+    app: &AppState,
+    entry: &AgentPanelListEntry,
+    body_height: u16,
+) -> u16 {
+    match entry {
+        AgentPanelListEntry::Agent(entry) | AgentPanelListEntry::Automation(entry) => {
+            agent_entry_height_in_body(app, entry, body_height)
+        }
+        AgentPanelListEntry::AutomationsHeader => 1.min(body_height),
+    }
+}
+
+fn agent_panel_list_entry_gap(
+    app: &AppState,
+    entries: &[AgentPanelListEntry],
+    index: usize,
+) -> u16 {
+    match entries.get(index) {
+        Some(AgentPanelListEntry::Agent(_)) | Some(AgentPanelListEntry::Automation(_)) => {
+            agent_entry_gap(app, index, entries.len())
+        }
+        Some(AgentPanelListEntry::AutomationsHeader) | None => 0,
+    }
+}
+
 fn agent_panel_visible_count_from(app: &AppState, area: Rect, scroll: usize) -> usize {
     let body = agent_panel_body_rect(area, false);
     if body.width == 0 || body.height == 0 {
@@ -596,16 +725,16 @@ fn agent_panel_visible_count_from(app: &AppState, area: Rect, scroll: usize) -> 
 
     let mut used_rows = 0u16;
     let mut visible = 0usize;
-    let entries = agent_panel_entries(app);
+    let entries = agent_panel_list_entries(app);
     for (index, entry) in entries.iter().enumerate().skip(scroll) {
-        let height = agent_entry_height_in_body(app, entry, body.height);
+        let height = agent_panel_list_entry_height(app, entry, body.height);
         if used_rows.saturating_add(height) > body.height {
             break;
         }
         used_rows = used_rows.saturating_add(height);
         visible += 1;
         used_rows = used_rows
-            .saturating_add(agent_entry_gap(app, index, entries.len()))
+            .saturating_add(agent_panel_list_entry_gap(app, &entries, index))
             .min(body.height);
     }
     visible
@@ -613,12 +742,12 @@ fn agent_panel_visible_count_from(app: &AppState, area: Rect, scroll: usize) -> 
 
 fn agent_panel_bottom_start(app: &AppState, area: Rect) -> usize {
     let body = agent_panel_body_rect(area, false);
-    let entries = agent_panel_entries(app);
+    let entries = agent_panel_list_entries(app);
     let mut used_rows = 0u16;
     let mut start = entries.len();
     for (index, entry) in entries.iter().enumerate().rev() {
-        let gap = agent_entry_gap(app, index, entries.len());
-        let needed = agent_entry_height_in_body(app, entry, body.height).saturating_add(gap);
+        let gap = agent_panel_list_entry_gap(app, &entries, index);
+        let needed = agent_panel_list_entry_height(app, entry, body.height).saturating_add(gap);
         if used_rows.saturating_add(needed) > body.height {
             break;
         }
@@ -1494,7 +1623,10 @@ fn render_agent_detail(
         );
     }
 
-    let details = agent_panel_entries_from(app, terminal_runtimes);
+    let agents = agent_panel_entries_from(app, terminal_runtimes);
+    let automations = automation_panel_entries_from(app, terminal_runtimes);
+    let automation_summary = automation_activity_summary(&automations);
+    let details = agent_panel_list_entries_from_partition(app, (agents, automations));
     let metrics = agent_panel_scroll_metrics(app, area);
     let scrollbar_rect = agent_panel_scrollbar_rect(app, area);
     let body = agent_panel_body_rect(area, should_show_scrollbar(metrics));
@@ -1513,7 +1645,27 @@ fn render_agent_detail(
     let scroll = app.agent_panel_scroll.min(metrics.max_offset_from_bottom);
     let mut row_y = body.y;
     let body_bottom = body.y + body.height;
-    for (index, detail) in details.iter().enumerate().skip(scroll) {
+    for (index, list_entry) in details.iter().enumerate().skip(scroll) {
+        if matches!(list_entry, AgentPanelListEntry::AutomationsHeader) {
+            let header_style = Style::default()
+                .fg(automation_summary.color(p))
+                .add_modifier(Modifier::BOLD);
+            frame.render_widget(
+                Paragraph::new(Span::styled(" automations", header_style)),
+                Rect::new(body.x, row_y, body.width, 1),
+            );
+            frame.render_widget(
+                Paragraph::new(Span::styled(automation_summary.label(), header_style))
+                    .alignment(Alignment::Right),
+                Rect::new(body.x, row_y, body.width, 1),
+            );
+            row_y = row_y.saturating_add(1).min(body_bottom);
+            continue;
+        }
+        let detail = match list_entry {
+            AgentPanelListEntry::Agent(detail) | AgentPanelListEntry::Automation(detail) => detail,
+            AgentPanelListEntry::AutomationsHeader => continue,
+        };
         let label_color = state_label_color(detail.state, detail.seen, p);
         let rows = resolved_agent_rows(app, detail);
         let height = (rows.len().max(1) as u16).min(body.height);
@@ -1568,7 +1720,7 @@ fn render_agent_detail(
         }
         row_y = row_y
             .saturating_add(height)
-            .saturating_add(agent_entry_gap(app, index, details.len()))
+            .saturating_add(agent_panel_list_entry_gap(app, &details, index))
             .min(body_bottom);
     }
 
@@ -1719,6 +1871,110 @@ mod tests {
             " new       menu «│"
         );
         assert!(row_text(&buffer, footer.y, area.width).contains("menu"));
+    }
+
+    #[test]
+    fn automation_entries_are_partitioned_and_expand_after_the_header() {
+        let mut app = AppState::test_new();
+        let normal = Workspace::test_new("normal");
+        let mut automation = Workspace::test_new("automation-path");
+        automation.custom_name = Some("⚡ routines".into());
+        app.workspaces = vec![normal, automation];
+        app.ensure_test_terminals();
+        for terminal in app.terminals.values_mut() {
+            terminal.detected_agent = Some(Agent::Pi);
+        }
+        app.sidebar_automations.workspaces = vec!["⚡ routines".into()];
+
+        let agents = agent_panel_entries(&app);
+        let automations = automation_panel_entries(&app);
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].primary_label, "normal");
+        assert_eq!(automations.len(), 1);
+        assert_eq!(automations[0].primary_label, "⚡ routines");
+        assert!(matches!(
+            agent_panel_list_entries(&app).as_slice(),
+            [
+                AgentPanelListEntry::Agent(_),
+                AgentPanelListEntry::AutomationsHeader
+            ]
+        ));
+
+        app.automations_expanded = true;
+        assert!(matches!(
+            agent_panel_list_entries(&app).as_slice(),
+            [
+                AgentPanelListEntry::Agent(_),
+                AgentPanelListEntry::AutomationsHeader,
+                AgentPanelListEntry::Automation(_)
+            ]
+        ));
+    }
+
+    #[test]
+    fn empty_automation_config_preserves_the_stock_render() {
+        let mut stock = AppState::test_new();
+        stock.workspaces = vec![Workspace::test_new("normal")];
+        stock.ensure_test_terminals();
+        for terminal in stock.terminals.values_mut() {
+            terminal.detected_agent = Some(Agent::Pi);
+        }
+        let area = Rect::new(0, 0, 26, 20);
+        let stock_buffer = rendered_sidebar(&stock, area);
+
+        let mut explicit_empty = stock;
+        explicit_empty.sidebar_automations.workspaces = Vec::new();
+        explicit_empty.automations_expanded = true;
+        assert_eq!(rendered_sidebar(&explicit_empty, area), stock_buffer);
+    }
+
+    #[test]
+    fn collapsed_and_expanded_automation_rows_render_with_summary() {
+        let mut app = AppState::test_new();
+        let mut automation = Workspace::test_new("automation-path");
+        automation.custom_name = Some("⚡ routines".into());
+        app.workspaces = vec![automation];
+        app.ensure_test_terminals();
+        for terminal in app.terminals.values_mut() {
+            terminal.detected_agent = Some(Agent::Pi);
+            terminal.state = AgentState::Blocked;
+        }
+        app.sidebar_automations.workspaces = vec!["⚡ routines".into()];
+        let area = Rect::new(0, 0, 30, 20);
+
+        let collapsed = rendered_sidebar(&app, area);
+        let collapsed_text = (0..area.height)
+            .map(|row| row_text(&collapsed, row, area.width))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(collapsed_text.contains("automations"));
+        assert!(collapsed_text.contains("1 blocked"));
+        assert!(!collapsed_text.contains("⚡ routines"));
+
+        app.automations_expanded = true;
+        let expanded = rendered_sidebar(&app, area);
+        let expanded_text = (0..area.height)
+            .map(|row| row_text(&expanded, row, area.width))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(expanded_text.contains("automations"));
+        assert!(expanded_text.contains("routines"), "{expanded_text}");
+    }
+
+    #[test]
+    fn automation_header_is_hidden_without_matching_rows() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("normal")];
+        app.ensure_test_terminals();
+        app.sidebar_automations.workspaces = vec!["⚡ routines".into()];
+
+        let area = Rect::new(0, 0, 26, 20);
+        let buffer = rendered_sidebar(&app, area);
+        let rendered = (0..area.height)
+            .map(|row| row_text(&buffer, row, area.width))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!rendered.contains("automations"));
     }
 
     #[test]

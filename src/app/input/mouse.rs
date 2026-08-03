@@ -599,6 +599,13 @@ impl AppState {
                         return None;
                     }
 
+                    if self.on_automations_header(mouse.column, mouse.row) {
+                        self.automations_expanded = !self.automations_expanded;
+                        self.agent_panel_scroll = 0;
+                        self.mark_session_dirty();
+                        return None;
+                    }
+
                     if let Some(target) =
                         self.agent_panel_scrollbar_target_at(mouse.column, mouse.row)
                     {

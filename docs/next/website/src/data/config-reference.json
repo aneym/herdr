@@ -967,6 +967,12 @@
           "description": "Complete Agent-row overrides keyed by strict canonical agent id. Agents without an override use ui.sidebar.agents.rows."
         },
         {
+          "key": "ui.sidebar.automations.workspaces",
+          "type": "list of strings",
+          "default": "[]",
+          "description": "Exact workspace display labels whose agent panes appear in the collapsible automations group instead of the main Agents list."
+        },
+        {
           "key": "ui.sidebar.spaces.row_gap",
           "type": "integer",
           "default": "0",
