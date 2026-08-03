@@ -414,6 +414,7 @@ impl App {
             sidebar_width_source,
             sidebar_section_split,
             collapsed_space_keys,
+            automations_expanded,
         ) = if no_session {
             (
                 Vec::new(),
@@ -423,6 +424,7 @@ impl App {
                 state::SidebarWidthSource::ConfigDefault,
                 0.5_f32,
                 std::collections::HashSet::new(),
+                false,
             )
         } else if let Some(snap) = crate::persist::load() {
             let history = config
@@ -459,6 +461,7 @@ impl App {
                     },
                     snap.sidebar_section_split.unwrap_or(0.5),
                     snap.collapsed_space_keys,
+                    snap.automations_expanded,
                 )
             } else {
                 crate::logging::session_restored(ws.len(), "ok");
@@ -476,6 +479,7 @@ impl App {
                     },
                     snap.sidebar_section_split.unwrap_or(0.5),
                     snap.collapsed_space_keys,
+                    snap.automations_expanded,
                 )
             }
         } else {
@@ -487,6 +491,7 @@ impl App {
                 state::SidebarWidthSource::ConfigDefault,
                 0.5_f32,
                 std::collections::HashSet::new(),
+                false,
             )
         };
 
@@ -581,6 +586,7 @@ impl App {
         state.worktree_remove = None;
         state.worktree_directory = worktree_directory;
         state.collapsed_space_keys = collapsed_space_keys;
+        state.automations_expanded = automations_expanded;
         state.request_complete_onboarding = false;
         state.name_input = String::new();
         state.name_input_replace_on_type = false;
@@ -654,6 +660,7 @@ impl App {
         state.sidebar_new_button = config.ui.sidebar.new_button;
         state.sidebar_menu_position = config.ui.sidebar.menu_position;
         state.sidebar_agents = config.ui.sidebar.agents.clone();
+        state.sidebar_automations = config.ui.sidebar.automations.clone();
         state.sidebar_spaces = config.ui.sidebar.spaces.clone();
         state.next_agent_state_change_seq = 0;
         state.mouse_capture = config.ui.mouse_capture;
@@ -871,6 +878,7 @@ impl App {
             app.state.sidebar_section_split = split;
         }
         app.state.collapsed_space_keys = snapshot.collapsed_space_keys.clone();
+        app.state.automations_expanded = snapshot.automations_expanded;
         app.state.replace_mode(if app.state.active.is_some() {
             state::Mode::Terminal
         } else {
@@ -1494,6 +1502,7 @@ impl App {
                 self.state.sidebar_new_button = config.ui.sidebar.new_button;
                 self.state.sidebar_menu_position = config.ui.sidebar.menu_position;
                 self.state.sidebar_agents = config.ui.sidebar.agents.clone();
+                self.state.sidebar_automations = config.ui.sidebar.automations.clone();
                 self.state.sidebar_spaces = config.ui.sidebar.spaces.clone();
                 self.state.agent_panel_scroll = 0;
                 self.state.accent = crate::config::parse_color(&config.ui.accent);
@@ -1912,6 +1921,7 @@ mod tests {
             26,
             0.5,
             std::collections::HashSet::new(),
+            false,
         );
         let mut imports = std::collections::HashMap::new();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -3016,6 +3026,7 @@ mod tests {
             ]]
         );
         assert_eq!(app.state.sidebar_agents.row_gap, 1);
+        assert!(app.state.sidebar_automations.workspaces.is_empty());
         assert_eq!(
             app.state.sidebar_spaces.rows,
             vec![vec![
@@ -3034,6 +3045,31 @@ mod tests {
         let report = app.reload_config();
         assert_eq!(report.status, crate::config::ConfigReloadStatus::Partial);
         assert_eq!(app.state.sidebar_agents, previous_agents);
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn reload_config_updates_automation_workspaces() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("reload-config-sidebar-automations");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+        let mut app = test_app();
+
+        std::fs::write(
+            &path,
+            "[ui.sidebar.automations]\nworkspaces = [\"⚡ routines\"]\n",
+        )
+        .unwrap();
+        let report = app.reload_config();
+
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert_eq!(
+            app.state.sidebar_automations.workspaces,
+            vec!["⚡ routines"]
+        );
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());

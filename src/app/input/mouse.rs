@@ -594,6 +594,9 @@ impl AppState {
                         return None;
                     }
 
+                    let agent_entries =
+                        crate::ui::agent_panel_list_entries_from(self, terminal_runtimes);
+
                     if self.on_agent_panel_sort_toggle(mouse.column, mouse.row) {
                         self.agent_panel_sort = self.agent_panel_sort.next();
                         self.agent_panel_scroll = 0;
@@ -601,9 +604,18 @@ impl AppState {
                         return None;
                     }
 
-                    if let Some(target) =
-                        self.agent_panel_scrollbar_target_at(mouse.column, mouse.row)
-                    {
+                    if self.on_automations_header(&agent_entries, mouse.column, mouse.row) {
+                        self.automations_expanded = !self.automations_expanded;
+                        self.agent_panel_scroll = 0;
+                        self.mark_session_dirty();
+                        return None;
+                    }
+
+                    if let Some(target) = self.agent_panel_scrollbar_target_at(
+                        &agent_entries,
+                        mouse.column,
+                        mouse.row,
+                    ) {
                         match target {
                             ScrollbarClickTarget::Thumb { grab_row_offset } => {
                                 self.drag = Some(DragState {
@@ -611,14 +623,17 @@ impl AppState {
                                 });
                             }
                             ScrollbarClickTarget::Track { offset_from_bottom } => {
-                                self.set_agent_panel_offset_from_bottom(offset_from_bottom);
+                                self.set_agent_panel_offset_from_bottom(
+                                    &agent_entries,
+                                    offset_from_bottom,
+                                );
                             }
                         }
                         return None;
                     }
 
                     if let Some((ws_idx, _tab_idx, pane_id)) =
-                        self.agent_detail_target_at(mouse.row)
+                        self.agent_detail_target_at(&agent_entries, mouse.row)
                     {
                         self.replace_mode(Mode::Terminal);
                         return Some(MouseAction::FocusPane { ws_idx, pane_id });
@@ -734,10 +749,17 @@ impl AppState {
                             }
                         }
                         DragTarget::AgentPanelScrollbar { grab_row_offset } => {
-                            if let Some(offset_from_bottom) =
-                                self.agent_panel_offset_for_drag_row(mouse.row, *grab_row_offset)
-                            {
-                                self.set_agent_panel_offset_from_bottom(offset_from_bottom);
+                            let agent_entries =
+                                crate::ui::agent_panel_list_entries_from(self, terminal_runtimes);
+                            if let Some(offset_from_bottom) = self.agent_panel_offset_for_drag_row(
+                                &agent_entries,
+                                mouse.row,
+                                *grab_row_offset,
+                            ) {
+                                self.set_agent_panel_offset_from_bottom(
+                                    &agent_entries,
+                                    offset_from_bottom,
+                                );
                             }
                         }
                         DragTarget::PaneSplit {
@@ -968,10 +990,14 @@ impl AppState {
                     && mouse.row >= agent_area.y
                     && mouse.row < agent_area.y + agent_area.height;
                 if over_agent_panel {
+                    let agent_entries =
+                        crate::ui::agent_panel_list_entries_from(self, terminal_runtimes);
                     if crate::ui::should_show_scrollbar(crate::ui::agent_panel_scroll_metrics(
-                        self, agent_area,
+                        self,
+                        &agent_entries,
+                        agent_area,
                     )) {
-                        self.scroll_agent_panel(-1);
+                        self.scroll_agent_panel(&agent_entries, -1);
                     }
                 } else if crate::ui::should_show_scrollbar(
                     crate::ui::workspace_list_scroll_metrics(self, self.workspace_list_rect()),
@@ -987,10 +1013,14 @@ impl AppState {
                     && mouse.row >= agent_area.y
                     && mouse.row < agent_area.y + agent_area.height;
                 if over_agent_panel {
+                    let agent_entries =
+                        crate::ui::agent_panel_list_entries_from(self, terminal_runtimes);
                     if crate::ui::should_show_scrollbar(crate::ui::agent_panel_scroll_metrics(
-                        self, agent_area,
+                        self,
+                        &agent_entries,
+                        agent_area,
                     )) {
-                        self.scroll_agent_panel(1);
+                        self.scroll_agent_panel(&agent_entries, 1);
                     }
                 } else if crate::ui::should_show_scrollbar(
                     crate::ui::workspace_list_scroll_metrics(self, self.workspace_list_rect()),

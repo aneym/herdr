@@ -26,6 +26,8 @@ pub struct SessionSnapshot {
     pub sidebar_section_split: Option<f32>,
     #[serde(default)]
     pub collapsed_space_keys: std::collections::HashSet<String>,
+    #[serde(default)]
+    pub automations_expanded: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -184,6 +186,8 @@ struct RawSessionSnapshot {
     sidebar_section_split: Option<f32>,
     #[serde(default)]
     collapsed_space_keys: std::collections::HashSet<String>,
+    #[serde(default)]
+    automations_expanded: bool,
 }
 
 fn migrate_snapshot(raw: RawSessionSnapshot) -> Result<SessionSnapshot, String> {
@@ -199,6 +203,7 @@ fn migrate_snapshot(raw: RawSessionSnapshot) -> Result<SessionSnapshot, String> 
         sidebar_width: raw.sidebar_width,
         sidebar_section_split: raw.sidebar_section_split,
         collapsed_space_keys: raw.collapsed_space_keys,
+        automations_expanded: raw.automations_expanded,
     })
 }
 
@@ -261,6 +266,7 @@ pub fn capture(
     sidebar_width: u16,
     sidebar_section_split: f32,
     collapsed_space_keys: std::collections::HashSet<String>,
+    automations_expanded: bool,
 ) -> SessionSnapshot {
     SessionSnapshot {
         version: SNAPSHOT_VERSION,
@@ -273,6 +279,7 @@ pub fn capture(
         sidebar_width: Some(sidebar_width),
         sidebar_section_split: Some(sidebar_section_split),
         collapsed_space_keys,
+        automations_expanded,
     }
 }
 
@@ -523,6 +530,20 @@ mod tests {
         state
     }
 
+    #[test]
+    fn automations_expanded_roundtrips_and_defaults_false_when_missing() {
+        let mut state = state_with_workspaces(&["one"]);
+        state.automations_expanded = true;
+        let snapshot = capture_from_state(&state);
+        let serialized = serde_json::to_value(&snapshot).unwrap();
+        assert_eq!(serialized["automations_expanded"], true);
+
+        let mut old = serialized;
+        old.as_object_mut().unwrap().remove("automations_expanded");
+        let migrated = migrate_snapshot(serde_json::from_value(old).unwrap()).unwrap();
+        assert!(!migrated.automations_expanded);
+    }
+
     fn capture_from_state(state: &AppState) -> SessionSnapshot {
         let terminal_runtimes = TerminalRuntimeRegistry::new();
         capture_from_state_with_runtimes(state, &terminal_runtimes)
@@ -541,6 +562,7 @@ mod tests {
             state.sidebar_width,
             state.sidebar_section_split,
             state.collapsed_space_keys.clone(),
+            state.automations_expanded,
         )
     }
 
@@ -605,6 +627,7 @@ mod tests {
             sidebar_width: Some(26),
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: std::collections::HashSet::new(),
+            automations_expanded: false,
         };
         let json = serde_json::to_string(&snap).unwrap();
         let restored = parse_snapshot(&json).unwrap();
@@ -692,6 +715,7 @@ mod tests {
             sidebar_width: Some(26),
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: std::collections::HashSet::new(),
+            automations_expanded: false,
             version: SNAPSHOT_VERSION,
         };
 
@@ -1254,6 +1278,7 @@ mod tests {
             sidebar_width: Some(26),
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: std::collections::HashSet::new(),
+            automations_expanded: false,
         };
 
         let json = serde_json::to_string(&snap).unwrap();

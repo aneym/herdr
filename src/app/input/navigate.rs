@@ -252,7 +252,7 @@ impl App {
             NavigateAction::FocusAgent(idx) => {
                 if let Some((ws_idx, pane_id)) = self.agent_entry_target(idx) {
                     self.focus_pane_internal_via_api(ws_idx, pane_id);
-                    self.state.ensure_agent_panel_entry_visible(idx);
+                    self.ensure_agent_panel_entry_visible(idx);
                     leave_navigate_mode(&mut self.state);
                 }
             }
@@ -277,14 +277,14 @@ impl App {
             NavigateAction::PreviousAgent => {
                 if let Some((idx, ws_idx, pane_id)) = self.relative_agent_entry(false) {
                     self.focus_pane_internal_via_api(ws_idx, pane_id);
-                    self.state.ensure_agent_panel_entry_visible(idx);
+                    self.ensure_agent_panel_entry_visible(idx);
                     leave_navigate_mode(&mut self.state);
                 }
             }
             NavigateAction::NextAgent => {
                 if let Some((idx, ws_idx, pane_id)) = self.relative_agent_entry(true) {
                     self.focus_pane_internal_via_api(ws_idx, pane_id);
-                    self.state.ensure_agent_panel_entry_visible(idx);
+                    self.ensure_agent_panel_entry_visible(idx);
                     leave_navigate_mode(&mut self.state);
                 }
             }
@@ -767,14 +767,32 @@ impl App {
         Some((ws.active_tab as isize + delta).rem_euclid(ws.tabs.len() as isize) as usize)
     }
 
+    fn ensure_agent_panel_entry_visible(&mut self, idx: usize) {
+        if self.state.sidebar_collapsed {
+            return;
+        }
+
+        let entries =
+            crate::ui::agent_panel_list_entries_from(&self.state, &self.terminal_runtimes);
+        let (_, detail_area) =
+            crate::ui::ordered_sidebar_sections(&self.state, self.state.view.sidebar_rect);
+        self.state.agent_panel_scroll = crate::ui::agent_panel_scroll_for_target(
+            &self.state,
+            &entries,
+            detail_area,
+            self.state.agent_panel_scroll,
+            idx,
+        );
+    }
+
     fn agent_entry_target(&self, idx: usize) -> Option<(usize, crate::layout::PaneId)> {
-        let entries = crate::ui::agent_panel_entries(&self.state);
+        let entries = crate::ui::agent_panel_entries_from(&self.state, &self.terminal_runtimes);
         let target = entries.get(idx)?;
         Some((target.ws_idx, target.pane_id))
     }
 
     fn relative_agent_entry(&self, forward: bool) -> Option<(usize, usize, crate::layout::PaneId)> {
-        let entries = crate::ui::agent_panel_entries(&self.state);
+        let entries = crate::ui::agent_panel_entries_from(&self.state, &self.terminal_runtimes);
         if entries.is_empty() {
             return None;
         }
@@ -2008,6 +2026,50 @@ mod tests {
         app.execute_tui_navigate_action(NavigateAction::NextAgent, ActionContext::Prefix);
 
         assert_eq!(app.state.active, Some(1));
+    }
+
+    fn mark_all_workspaces_as_agents(app: &mut App) {
+        for ws_idx in 0..app.state.workspaces.len() {
+            let pane_id = app.state.workspaces[ws_idx].tabs[0].root_pane;
+            let terminal_id = app.state.workspaces[ws_idx].tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            app.state
+                .terminals
+                .get_mut(&terminal_id)
+                .unwrap()
+                .detected_agent = Some(crate::detect::Agent::Claude);
+        }
+    }
+
+    #[test]
+    fn next_agent_immediately_excludes_newly_renamed_automation_workspace() {
+        let mut app = app_with_test_workspaces(&["first", "other", "last"]);
+        mark_all_workspaces_as_agents(&mut app);
+        app.state.sidebar_automations.workspaces = vec!["⚡ routines".into()];
+        let workspace_id = app.public_workspace_id(1);
+        app.runtime_workspace_rename(
+            "test.workspace.rename",
+            crate::api::schema::WorkspaceRenameParams {
+                workspace_id,
+                label: "⚡ routines".into(),
+            },
+        );
+
+        app.execute_tui_navigate_action(NavigateAction::NextAgent, ActionContext::Prefix);
+
+        assert_eq!(app.state.active, Some(2));
+    }
+
+    #[test]
+    fn next_agent_immediately_uses_updated_automation_config() {
+        let mut app = app_with_test_workspaces(&["first", "⚡ routines", "last"]);
+        mark_all_workspaces_as_agents(&mut app);
+        app.state.sidebar_automations.workspaces = vec!["⚡ routines".into()];
+
+        app.execute_tui_navigate_action(NavigateAction::NextAgent, ActionContext::Prefix);
+
+        assert_eq!(app.state.active, Some(2));
     }
 
     #[test]

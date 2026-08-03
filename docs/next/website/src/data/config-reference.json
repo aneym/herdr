@@ -985,6 +985,12 @@
           "description": "Maximum visible Space entries when fitting the section to its content. Additional entries remain scrollable, and the Agent section uses the remaining height. Set to 0 to keep the draggable ratio split."
         },
         {
+          "key": "ui.sidebar.automations.workspaces",
+          "type": "list of strings",
+          "default": "[]",
+          "description": "Exact workspace display labels whose agent panes appear in the collapsible automations group instead of the main Agents list."
+        },
+        {
           "key": "ui.sidebar.spaces.row_gap",
           "type": "integer",
           "default": "0",

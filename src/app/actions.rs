@@ -1912,9 +1912,11 @@ impl AppState {
             return;
         }
 
+        let entries = crate::ui::agent_panel_list_entries(self);
         let (_, detail_area) = crate::ui::ordered_sidebar_sections(self, self.view.sidebar_rect);
         self.agent_panel_scroll = crate::ui::agent_panel_scroll_for_target(
             self,
+            &entries,
             detail_area,
             self.agent_panel_scroll,
             idx,
@@ -4801,6 +4803,34 @@ mod tests {
         assert_eq!(state.active, Some(0));
         assert_eq!(state.workspaces[0].focused_pane_id(), Some(first_second));
         state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn agent_navigation_excludes_automation_workspaces_when_expanded_or_collapsed() {
+        let first = Workspace::test_new("one");
+        let first_root = first.tabs[0].root_pane;
+        let mut automation = Workspace::test_new("automation-path");
+        automation.custom_name = Some("⚡ routines".into());
+        let automation_root = automation.tabs[0].root_pane;
+        let second = Workspace::test_new("two");
+        let second_root = second.tabs[0].root_pane;
+
+        let mut state = AppState::test_new();
+        state.workspaces = vec![first, automation, second];
+        state.active = Some(0);
+        state.selected = 0;
+        state.replace_mode(Mode::Terminal);
+        state.sidebar_automations.workspaces = vec!["⚡ routines".into()];
+        mark_agent(&mut state, 0, 0, first_root);
+        mark_agent(&mut state, 1, 0, automation_root);
+        mark_agent(&mut state, 2, 0, second_root);
+
+        state.next_agent();
+        assert_eq!(state.active, Some(2));
+        state.automations_expanded = true;
+        state.next_agent();
+        assert_eq!(state.active, Some(0));
+        assert!(!state.focus_agent_entry(2));
     }
 
     #[test]

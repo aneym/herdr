@@ -26,9 +26,9 @@ pub use self::{
         UpdateChannelConfig, MAX_TOAST_DELAY_SECONDS,
     },
     sidebar::{
-        AgentSidebarToken, AgentsSidebarConfig, SidebarConfig, SidebarMenuPositionConfig,
-        SidebarNewButtonConfig, SidebarSection, SidebarTokenStyle, SpaceSidebarToken,
-        SpacesSidebarConfig,
+        AgentSidebarToken, AgentsSidebarConfig, AutomationsSidebarConfig, SidebarConfig,
+        SidebarMenuPositionConfig, SidebarNewButtonConfig, SidebarSection, SidebarTokenStyle,
+        SpaceSidebarToken, SpacesSidebarConfig,
     },
     sound::SoundConfig,
     theme::{parse_color, CustomThemeColors, ModeThemeColors, ThemeConfig},

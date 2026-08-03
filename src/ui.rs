@@ -76,7 +76,8 @@ pub(crate) use self::{
         SETTINGS_POPUP_WIDTH,
     },
     sidebar::{
-        agent_entry_gap, agent_entry_height_in_body, agent_panel_body_rect, agent_panel_entries,
+        agent_panel_body_rect, agent_panel_entries, agent_panel_entries_from,
+        agent_panel_list_entries, agent_panel_list_entries_from, agent_panel_list_entry_height,
         agent_panel_scroll_for_target, agent_panel_scroll_metrics, agent_panel_scrollbar_rect,
         agent_panel_toggle_rect, all_agent_panel_entries, collapsed_sidebar_toggle_rect,
         compute_workspace_card_areas, expanded_sidebar_toggle_rect, normalized_workspace_scroll,
@@ -84,7 +85,7 @@ pub(crate) use self::{
         workspace_drop_slots, workspace_group_chevron_rect, workspace_list_entries,
         workspace_list_entries_expanded, workspace_list_rect, workspace_list_scroll_metrics,
         workspace_list_scrollbar_rect, workspace_parent_group_state, AgentPanelEntry,
-        WorkspaceListEntry,
+        AgentPanelListEntry, WorkspaceListEntry,
     },
 };
 
@@ -251,7 +252,9 @@ fn compute_view_internal(
     if !app.sidebar_collapsed {
         app.workspace_scroll = normalized_workspace_scroll(app, sidebar_area, app.workspace_scroll);
         let (_, detail_area) = ordered_sidebar_sections(app, sidebar_area);
-        let max_agent_scroll = agent_panel_scroll_metrics(app, detail_area).max_offset_from_bottom;
+        let agent_entries = agent_panel_list_entries_from(app, terminal_runtimes);
+        let max_agent_scroll =
+            agent_panel_scroll_metrics(app, &agent_entries, detail_area).max_offset_from_bottom;
         app.agent_panel_scroll = app.agent_panel_scroll.min(max_agent_scroll);
     } else {
         app.workspace_scroll = app
