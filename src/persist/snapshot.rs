@@ -12,6 +12,22 @@ fn default_profile() -> String {
     DEFAULT_PROFILE.to_string()
 }
 
+fn deserialize_profile<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let profile = String::deserialize(deserializer)?;
+    Ok(crate::workspace::normalize_profile_name_lossy(&profile).unwrap_or_else(default_profile))
+}
+
+fn deserialize_profiles<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let profiles = Vec::<String>::deserialize(deserializer)?;
+    Ok(crate::workspace::normalize_profiles_lossy(profiles))
+}
+
 /// Current snapshot format version.
 pub(super) const SNAPSHOT_VERSION: u32 = 3;
 
@@ -23,7 +39,7 @@ pub struct SessionSnapshot {
     pub version: u32,
     pub workspaces: Vec<WorkspaceSnapshot>,
     pub active: Option<usize>,
-    #[serde(default = "default_profile")]
+    #[serde(default = "default_profile", deserialize_with = "deserialize_profile")]
     pub active_profile: String,
     pub selected: usize,
     #[serde(default)]
@@ -60,7 +76,11 @@ pub struct WorkspaceSnapshot {
     pub id: Option<String>,
     #[serde(default)]
     pub custom_name: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "deserialize_profiles"
+    )]
     pub profiles: Vec<String>,
     pub identity_cwd: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -210,7 +230,8 @@ fn migrate_snapshot(raw: RawSessionSnapshot) -> Result<SessionSnapshot, String> 
             .map(migrate_workspace)
             .collect::<Result<Vec<_>, _>>()?,
         active: raw.active,
-        active_profile: raw.active_profile,
+        active_profile: crate::workspace::normalize_profile_name_lossy(&raw.active_profile)
+            .unwrap_or_else(default_profile),
         selected: raw.selected,
         sidebar_width: raw.sidebar_width,
         sidebar_section_split: raw.sidebar_section_split,
@@ -220,17 +241,17 @@ fn migrate_snapshot(raw: RawSessionSnapshot) -> Result<SessionSnapshot, String> 
 }
 
 fn migrate_workspace(raw: serde_json::Value) -> Result<WorkspaceSnapshot, String> {
-    if raw.get("identity_cwd").is_some() {
-        return serde_json::from_value(raw).map_err(|e| e.to_string());
-    }
-
-    if raw.get("layout").is_some() {
+    let mut snapshot: WorkspaceSnapshot = if raw.get("identity_cwd").is_some() {
+        serde_json::from_value(raw).map_err(|e| e.to_string())?
+    } else if raw.get("layout").is_some() {
         let legacy =
             serde_json::from_value::<LegacyWorkspaceSnapshot>(raw).map_err(|e| e.to_string())?;
-        return Ok(legacy.into());
-    }
-
-    Err("workspace snapshot is neither current nor legacy format".to_string())
+        legacy.into()
+    } else {
+        return Err("workspace snapshot is neither current nor legacy format".to_string());
+    };
+    snapshot.profiles = crate::workspace::normalize_profiles_lossy(snapshot.profiles);
+    Ok(snapshot)
 }
 
 fn legacy_identity_cwd(snap: &LegacyWorkspaceSnapshot) -> PathBuf {
@@ -543,6 +564,83 @@ mod tests {
             state.replace_mode(Mode::Terminal);
         }
         state
+    }
+
+    #[test]
+    fn legacy_default_active_profile_migrates_to_personal() {
+        let snapshot = capture_from_state(&state_with_workspaces(&["one"]));
+        let mut serialized = serde_json::to_value(snapshot).unwrap();
+        serialized["active_profile"] = serde_json::Value::String("default".into());
+
+        let migrated = parse_snapshot(&serialized.to_string()).unwrap();
+
+        assert_eq!(migrated.active_profile, "personal");
+    }
+
+    #[test]
+    fn legacy_default_workspace_profiles_migrate_and_deduplicate() {
+        for (profiles, expected) in [
+            (vec!["default", "work"], vec!["personal", "work"]),
+            (vec!["default", "personal"], vec!["personal"]),
+        ] {
+            let snapshot = capture_from_state(&state_with_workspaces(&["one"]));
+            let mut serialized = serde_json::to_value(snapshot).unwrap();
+            serialized["workspaces"][0]["profiles"] = serde_json::json!(profiles);
+
+            let migrated = parse_snapshot(&serialized.to_string()).unwrap();
+
+            assert_eq!(migrated.workspaces[0].profiles, expected);
+        }
+    }
+
+    #[test]
+    fn missing_active_profile_defaults_to_personal() {
+        let snapshot = capture_from_state(&state_with_workspaces(&["one"]));
+        let mut serialized = serde_json::to_value(snapshot).unwrap();
+        serialized.as_object_mut().unwrap().remove("active_profile");
+
+        let migrated = parse_snapshot(&serialized.to_string()).unwrap();
+
+        assert_eq!(migrated.active_profile, "personal");
+    }
+
+    #[test]
+    fn invalid_active_profile_defaults_to_personal() {
+        let snapshot = capture_from_state(&state_with_workspaces(&["one"]));
+        let mut serialized = serde_json::to_value(snapshot).unwrap();
+        serialized["active_profile"] = serde_json::Value::String(String::new());
+
+        let migrated = parse_snapshot(&serialized.to_string()).unwrap();
+
+        assert_eq!(migrated.active_profile, "personal");
+    }
+
+    #[test]
+    fn invalid_workspace_profiles_are_dropped() {
+        let snapshot = capture_from_state(&state_with_workspaces(&["one"]));
+        let mut serialized = serde_json::to_value(snapshot).unwrap();
+        serialized["workspaces"][0]["profiles"] = serde_json::json!(["", "wörk", "work"]);
+
+        let migrated = parse_snapshot(&serialized.to_string()).unwrap();
+
+        assert_eq!(migrated.workspaces[0].profiles, ["work"]);
+    }
+
+    #[test]
+    fn excessive_workspace_profiles_are_truncated() {
+        let snapshot = capture_from_state(&state_with_workspaces(&["one"]));
+        let mut serialized = serde_json::to_value(snapshot).unwrap();
+        let profiles = (0..=crate::workspace::MAX_WORKSPACE_PROFILES)
+            .map(|idx| format!("p{idx}"))
+            .collect::<Vec<_>>();
+        serialized["workspaces"][0]["profiles"] = serde_json::json!(profiles);
+
+        let migrated = parse_snapshot(&serialized.to_string()).unwrap();
+
+        assert_eq!(
+            migrated.workspaces[0].profiles,
+            profiles[..crate::workspace::MAX_WORKSPACE_PROFILES]
+        );
     }
 
     #[test]

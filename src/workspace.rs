@@ -167,7 +167,7 @@ pub(crate) fn reserve_workspace_ids(workspaces: &[Workspace]) {
     }
 }
 
-pub const DEFAULT_PROFILE: &str = "default";
+pub const DEFAULT_PROFILE: &str = "personal";
 pub const MAX_PROFILE_NAME_LEN: usize = 32;
 pub const MAX_WORKSPACE_PROFILES: usize = 16;
 
@@ -187,7 +187,14 @@ pub fn normalize_profile_name(profile: &str) -> Result<String, String> {
     {
         return Err("profile name must contain only printable ASCII characters".to_string());
     }
+    if profile == "default" {
+        return Ok(DEFAULT_PROFILE.to_string());
+    }
     Ok(profile.to_string())
+}
+
+pub fn normalize_profile_name_lossy(profile: &str) -> Option<String> {
+    normalize_profile_name(profile).ok()
 }
 
 pub fn normalize_profiles(profiles: Vec<String>) -> Result<Vec<String>, String> {
@@ -206,13 +213,29 @@ pub fn normalize_profiles(profiles: Vec<String>) -> Result<Vec<String>, String> 
     Ok(normalized)
 }
 
+pub fn normalize_profiles_lossy(profiles: Vec<String>) -> Vec<String> {
+    let mut normalized = Vec::new();
+    for profile in profiles {
+        let Some(profile) = normalize_profile_name_lossy(&profile) else {
+            continue;
+        };
+        if !normalized.contains(&profile) {
+            normalized.push(profile);
+        }
+        if normalized.len() == MAX_WORKSPACE_PROFILES {
+            break;
+        }
+    }
+    normalized
+}
+
 /// A named workspace containing tabs.
 pub struct Workspace {
     /// Stable public workspace identity, independent of display order.
     pub id: String,
     /// User-provided override. If set, auto-derived identity stops updating.
     pub custom_name: Option<String>,
-    /// Profile membership. Empty means the workspace belongs to `default` only.
+    /// Profile membership. Empty means the workspace belongs to `personal` only.
     pub profiles: Vec<String>,
     /// Fallback workspace identity source for tests, old snapshots, or missing runtimes.
     pub identity_cwd: PathBuf,
@@ -1561,6 +1584,14 @@ mod tests {
         assert_eq!(
             normalize_profiles(vec![" work ".into(), "personal".into(), "work".into()]),
             Ok(vec!["work".into(), "personal".into()])
+        );
+        assert_eq!(
+            normalize_profiles(vec!["default".into()]),
+            Ok(vec!["personal".into()])
+        );
+        assert_eq!(
+            normalize_profiles(vec!["default".into(), "personal".into()]),
+            Ok(vec!["personal".into()])
         );
         assert!(normalize_profile_name(" ").is_err());
         assert!(normalize_profile_name("work\n").is_ok());

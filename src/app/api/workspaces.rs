@@ -565,20 +565,20 @@ mod tests {
             panic!("expected profile list");
         };
         assert_eq!(active, "work");
-        assert_eq!(profiles, vec!["default", "work", "personal"]);
+        assert_eq!(profiles, vec!["personal", "work"]);
         assert_eq!(app.state.active, Some(0));
     }
 
     #[test]
-    fn set_profiles_with_explicit_default_keeps_active_workspace_visible() {
+    fn set_profiles_with_explicit_personal_keeps_active_workspace_visible() {
         let mut app = app_with_linked_worktree();
         app.state.active = Some(0);
         app.state.selected = 0;
         let workspace_id = app.state.workspaces[0].id.clone();
 
         for profiles in [
-            vec!["default".into()],
-            vec!["default".into(), "work".into()],
+            vec!["personal".into()],
+            vec!["personal".into(), "work".into()],
         ] {
             let response = app.handle_workspace_set_profiles(
                 "set".into(),
@@ -588,7 +588,7 @@ mod tests {
                 },
             );
             let _: SuccessResponse = serde_json::from_str(&response).unwrap();
-            assert_eq!(app.state.active_profile, "default");
+            assert_eq!(app.state.active_profile, "personal");
             assert_eq!(app.state.active, Some(0));
             assert!(app.state.workspace_is_visible(0));
         }

@@ -2586,13 +2586,13 @@ mod tests {
     }
 
     #[test]
-    fn explicit_default_membership_is_visible_in_default_and_other_profiles() {
+    fn explicit_personal_membership_is_visible_in_personal_and_other_profiles() {
         let mut state = AppState::test_new();
-        let mut default_only = crate::workspace::Workspace::test_new("default-only");
-        default_only.profiles = vec!["default".into()];
+        let mut personal_only = crate::workspace::Workspace::test_new("personal-only");
+        personal_only.profiles = vec!["personal".into()];
         let mut shared = crate::workspace::Workspace::test_new("shared");
-        shared.profiles = vec!["default".into(), "work".into()];
-        state.workspaces = vec![default_only, shared];
+        shared.profiles = vec!["personal".into(), "work".into()];
+        state.workspaces = vec![personal_only, shared];
 
         assert!(state.workspace_is_visible(0));
         assert!(state.workspace_is_visible(1));
@@ -2610,7 +2610,7 @@ mod tests {
         state.active_profile = "personal".into();
         assert!(!state.reveal_workspace(0));
         assert_eq!(state.active_profile, "personal");
-        state.active_profile = "default".into();
+        state.active_profile = "empty".into();
         assert!(state.reveal_workspace(0));
         assert_eq!(state.active_profile, "work");
     }

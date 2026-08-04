@@ -948,7 +948,7 @@ mod tests {
         for (session_name, active_profile, expected) in [
             (Some("work"), "personal", "work"),
             (Some("default"), "personal", "personal"),
-            (None, "default", "default"),
+            (None, "personal", "personal"),
         ] {
             let mut app = AppState::test_new();
             app.session_name = session_name.map(str::to_string);
