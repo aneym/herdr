@@ -1956,6 +1956,13 @@ impl AppState {
         {
             return None;
         }
+        // A close that leaves tab siblings stays spatial; panel-next only removes whole tabs.
+        if self.workspaces.get(ws_idx).is_some_and(|ws| {
+            ws.find_tab_index_for_pane(pane_id)
+                .is_some_and(|tab_idx| ws.tabs[tab_idx].layout.pane_count() > 1)
+        }) {
+            return None;
+        }
         let entries = crate::ui::agent_panel_entries(self);
         if entries.len() < 2 {
             return None;
@@ -6732,8 +6739,10 @@ mod tests {
     fn closing_focused_agent_focuses_next_triage_entry() {
         let mut state = app_with_workspaces(&["test"]);
         let blocked = state.workspaces[0].tabs[0].root_pane;
-        let idle = state.workspaces[0].test_split(Direction::Horizontal);
-        let working = state.workspaces[0].test_split(Direction::Vertical);
+        let idle_tab = state.workspaces[0].test_add_tab(Some("idle"));
+        let idle = state.workspaces[0].tabs[idle_tab].root_pane;
+        let working_tab = state.workspaces[0].test_add_tab(Some("working"));
+        let working = state.workspaces[0].tabs[working_tab].root_pane;
         state.ensure_test_terminals();
         state.agent_panel_sort = crate::app::state::AgentPanelSort::Triage;
         state.agent_close_focus = crate::config::AgentCloseFocusConfig::PanelNext;
@@ -6752,7 +6761,8 @@ mod tests {
     fn closing_last_triage_entry_wraps_to_first_remaining() {
         let mut state = app_with_workspaces(&["test"]);
         let blocked = state.workspaces[0].tabs[0].root_pane;
-        let unknown = state.workspaces[0].test_split(Direction::Horizontal);
+        let unknown_tab = state.workspaces[0].test_add_tab(Some("unknown"));
+        let unknown = state.workspaces[0].tabs[unknown_tab].root_pane;
         state.ensure_test_terminals();
         state.agent_panel_sort = crate::app::state::AgentPanelSort::Triage;
         state.agent_close_focus = crate::config::AgentCloseFocusConfig::PanelNext;
@@ -6763,6 +6773,53 @@ mod tests {
         state.close_pane();
 
         assert_eq!(state.workspaces[0].focused_pane_id(), Some(blocked));
+        state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn close_with_tab_siblings_stays_in_tab() {
+        let mut state = app_with_workspaces(&["test"]);
+        let sibling = state.workspaces[0].tabs[0].root_pane;
+        let closed = state.workspaces[0].test_split(Direction::Horizontal);
+        let other_tab = state.workspaces[0].test_add_tab(Some("other"));
+        let other = state.workspaces[0].tabs[other_tab].root_pane;
+        state.ensure_test_terminals();
+        state.agent_panel_sort = crate::app::state::AgentPanelSort::Triage;
+        state.agent_close_focus = crate::config::AgentCloseFocusConfig::PanelNext;
+        set_agent_close_test_state(&mut state, sibling, AgentState::Blocked, true, 1);
+        set_agent_close_test_state(&mut state, closed, AgentState::Idle, false, 2);
+        set_agent_close_test_state(&mut state, other, AgentState::Working, true, 3);
+        state.focus_pane_in_workspace(0, closed);
+        let active_workspace = state.active;
+        let active_tab = state.workspaces[0].active_tab;
+
+        state.close_pane();
+
+        assert_eq!(state.active, active_workspace);
+        assert_eq!(state.workspaces[0].active_tab, active_tab);
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(sibling));
+        state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn panel_next_close_target_none_when_tab_has_siblings() {
+        let mut state = app_with_workspaces(&["test"]);
+        let sibling = state.workspaces[0].tabs[0].root_pane;
+        let split = state.workspaces[0].test_split(Direction::Horizontal);
+        let last_pane_tab = state.workspaces[0].test_add_tab(Some("last-pane"));
+        let last_pane = state.workspaces[0].tabs[last_pane_tab].root_pane;
+        state.ensure_test_terminals();
+        state.agent_panel_sort = crate::app::state::AgentPanelSort::Triage;
+        state.agent_close_focus = crate::config::AgentCloseFocusConfig::PanelNext;
+        set_agent_close_test_state(&mut state, sibling, AgentState::Blocked, true, 1);
+        set_agent_close_test_state(&mut state, last_pane, AgentState::Idle, false, 2);
+        set_agent_close_test_state(&mut state, split, AgentState::Working, true, 3);
+
+        assert_eq!(state.panel_next_agent_close_target(0, sibling, true), None);
+        assert_eq!(
+            state.panel_next_agent_close_target(0, last_pane, true),
+            Some((0, split))
+        );
         state.assert_invariants_for_test();
     }
 
