@@ -39,14 +39,21 @@ fn parse_kitty_key_sequence(data: &str) -> Option<TerminalKey> {
 
     let code = kitty_codepoint_to_keycode(codepoint)?;
     let kind = parse_kitty_event_type(event_type)?;
+    let mut modifiers = key_modifiers_from_u8(modifier);
+    // Kitty permits the shifted alternate only while Shift is active. Normalize
+    // contradictory reports here so they cannot dispatch an unshifted command.
+    if matches!(code, KeyCode::Char(_))
+        && shifted_codepoint
+            .is_some_and(|shifted| shifted != codepoint && char::from_u32(shifted).is_some())
+    {
+        modifiers |= KeyModifiers::SHIFT;
+    }
 
-    Some(TerminalKey {
-        code,
-        modifiers: key_modifiers_from_u8(modifier),
-        kind,
-        shifted_codepoint,
-        is_text_commit: false,
-    })
+    let mut key = TerminalKey::new(code, modifiers).with_kind(kind);
+    if let Some(shifted_codepoint) = shifted_codepoint {
+        key = key.with_shifted_codepoint(shifted_codepoint);
+    }
+    Some(key)
 }
 
 #[allow(dead_code)] // Reserved for the upcoming raw stdin parser.
@@ -121,7 +128,7 @@ fn parse_legacy_ctrl_char(ch: char) -> Option<TerminalKey> {
         28 => Some(TerminalKey::new(KeyCode::Char('\\'), KeyModifiers::CONTROL)),
         29 => Some(TerminalKey::new(KeyCode::Char(']'), KeyModifiers::CONTROL)),
         30 => Some(TerminalKey::new(KeyCode::Char('^'), KeyModifiers::CONTROL)),
-        31 => Some(TerminalKey::new(KeyCode::Char('-'), KeyModifiers::CONTROL)),
+        31 => Some(TerminalKey::new(KeyCode::Char('_'), KeyModifiers::CONTROL)),
         _ => None,
     }
 }
@@ -533,7 +540,7 @@ mod tests {
     fn parse_legacy_alt_shift_letter_preserves_shift() {
         let key = parse_terminal_key_sequence("\x1bA").expect("alt-shift letter should parse");
         assert_terminal_key_eq(
-            key,
+            key.clone(),
             KeyCode::Char('A'),
             KeyModifiers::ALT | KeyModifiers::SHIFT,
             crossterm::event::KeyEventKind::Press,
@@ -601,6 +608,30 @@ mod tests {
     }
 
     #[test]
+    fn parse_kitty_sequence_recovers_omitted_shift_modifier() {
+        for (sequence, kind) in [
+            ("\x1b[114:82;1u", crossterm::event::KeyEventKind::Press),
+            ("\x1b[114:82;1:2u", crossterm::event::KeyEventKind::Repeat),
+            ("\x1b[114:82;1:3u", crossterm::event::KeyEventKind::Release),
+        ] {
+            let key = parse_terminal_key_sequence(sequence).unwrap();
+            assert_eq!(key.code, KeyCode::Char('r'));
+            assert_eq!(key.modifiers, KeyModifiers::SHIFT);
+            assert_eq!(key.kind, kind);
+            assert_eq!(key.shifted_codepoint, Some('R' as u32));
+        }
+    }
+
+    #[test]
+    fn parse_kitty_sequence_does_not_infer_shift_without_distinct_shifted_alternate() {
+        for sequence in ["\x1b[114;1u", "\x1b[114:114;1u", "\x1b[114::113;1u"] {
+            let key = parse_terminal_key_sequence(sequence).unwrap();
+            assert_eq!(key.code, KeyCode::Char('r'));
+            assert_eq!(key.modifiers, KeyModifiers::empty());
+        }
+    }
+
+    #[test]
     fn parse_kitty_sequence_preserves_non_us_shift_pairs() {
         for (sequence, base, shifted) in [
             ("\x1b[50:34;2:1u", '2', '"'),
@@ -620,7 +651,7 @@ mod tests {
     fn parse_kitty_sequence_with_associated_emoji_text() {
         let key = parse_terminal_key_sequence("\x1b[128512;1;128512u").unwrap();
         assert_terminal_key_eq(
-            key,
+            key.clone(),
             KeyCode::Char('😀'),
             KeyModifiers::empty(),
             crossterm::event::KeyEventKind::Press,
@@ -794,7 +825,7 @@ mod tests {
             (b'\x1c', '\\'),
             (b'\x1d', ']'),
             (b'\x1e', '^'),
-            (b'\x1f', '-'),
+            (b'\x1f', '_'),
         ] {
             let key = parse_terminal_key_sequence(std::str::from_utf8(&[byte]).unwrap()).unwrap();
             assert_terminal_key_eq(

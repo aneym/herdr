@@ -10,7 +10,7 @@ use super::text::display_width_u16;
 use super::widgets::panel_contrast_fg;
 use crate::{
     app::state::{CopyFeedback, Palette, ToastKind, ToastNotification},
-    config::{ToastClipboardPosition, ToastHerdrPosition},
+    config::{StatusIndicatorStyle, ToastClipboardPosition, ToastHerdrPosition},
     detect::AgentState,
 };
 
@@ -193,26 +193,51 @@ pub(super) fn render_config_diagnostic(frame: &mut Frame, area: Rect, message: &
     }
 }
 
-pub(super) fn state_dot(state: AgentState, seen: bool, p: &Palette) -> (&'static str, Style) {
-    match (state, seen) {
-        (AgentState::Blocked, _) => ("●", Style::default().fg(p.red)),
-        (AgentState::Working, _) => ("●", Style::default().fg(p.yellow)),
-        (AgentState::Idle, false) => ("●", Style::default().fg(p.teal)),
-        (AgentState::Idle, true) => ("○", Style::default().fg(p.green)),
-        (AgentState::Unknown, _) => ("·", Style::default().fg(p.overlay0)),
+pub(super) fn state_icon_symbol(
+    state: AgentState,
+    seen: bool,
+    indicator_style: StatusIndicatorStyle,
+) -> &'static str {
+    match (indicator_style, state, seen) {
+        (StatusIndicatorStyle::Dots, AgentState::Blocked, _) => "●",
+        (StatusIndicatorStyle::Dots, AgentState::Working, _) => "●",
+        (StatusIndicatorStyle::Dots, AgentState::Idle, false) => "●",
+        (StatusIndicatorStyle::Dots, AgentState::Idle, true) => "○",
+        (StatusIndicatorStyle::Dots, AgentState::Unknown, _) => "·",
+        (StatusIndicatorStyle::Symbols, AgentState::Blocked, _) => "×",
+        (StatusIndicatorStyle::Symbols, AgentState::Working, _) => "◐",
+        (StatusIndicatorStyle::Symbols, AgentState::Idle, false) => "✓",
+        (StatusIndicatorStyle::Symbols, AgentState::Idle, true) => "○",
+        (StatusIndicatorStyle::Symbols, AgentState::Unknown, _) => "·",
     }
 }
 
-pub(super) fn agent_icon(
+pub(super) fn state_icon(
     state: AgentState,
     seen: bool,
+    indicator_style: StatusIndicatorStyle,
+    p: &Palette,
+) -> (&'static str, Style) {
+    (
+        state_icon_symbol(state, seen, indicator_style),
+        Style::default().fg(state_label_color(state, seen, p)),
+    )
+}
+
+pub(super) fn animated_state_icon(
+    state: AgentState,
+    seen: bool,
+    indicator_style: StatusIndicatorStyle,
     tick: u32,
     p: &Palette,
 ) -> (&'static str, Style) {
     if state == AgentState::Working {
-        (super::spinner_frame(tick), Style::default().fg(p.yellow))
+        (
+            super::spinner_frame(tick),
+            Style::default().fg(state_label_color(state, seen, p)),
+        )
     } else {
-        state_dot(state, seen, p)
+        state_icon(state, seen, indicator_style, p)
     }
 }
 
@@ -220,10 +245,11 @@ pub(super) fn resolved_agent_icon<'a>(
     config: &'a crate::config::AgentsSidebarConfig,
     state: AgentState,
     seen: bool,
+    indicator_style: StatusIndicatorStyle,
     tick: u32,
     p: &Palette,
 ) -> (&'a str, Style) {
-    let default_icon = agent_icon(state, seen, tick, p);
+    let default_icon = animated_state_icon(state, seen, indicator_style, tick, p);
     (
         config.state_icon(state, seen).unwrap_or(default_icon.0),
         default_icon.1,
@@ -272,18 +298,27 @@ mod tests {
     }
 
     #[test]
-    fn state_dots_use_aligned_static_workspace_marks() {
+    fn state_icons_support_dot_and_distinct_symbol_styles() {
         let palette = Palette::catppuccin();
-        for (state, seen, symbol, color) in [
-            (AgentState::Blocked, true, "●", palette.red),
-            (AgentState::Working, true, "●", palette.yellow),
-            (AgentState::Idle, false, "●", palette.teal),
-            (AgentState::Idle, true, "○", palette.green),
-            (AgentState::Unknown, true, "·", palette.overlay0),
+        for (indicator_style, expected_symbols) in [
+            (StatusIndicatorStyle::Dots, ["●", "●", "●", "○", "·"]),
+            (StatusIndicatorStyle::Symbols, ["×", "◐", "✓", "○", "·"]),
         ] {
-            let (actual_symbol, style) = state_dot(state, seen, &palette);
-            assert_eq!(actual_symbol, symbol);
-            assert_eq!(style.fg, Some(color));
+            for ((state, seen, color), expected_symbol) in [
+                (AgentState::Blocked, true, palette.red),
+                (AgentState::Working, true, palette.yellow),
+                (AgentState::Idle, false, palette.teal),
+                (AgentState::Idle, true, palette.green),
+                (AgentState::Unknown, true, palette.overlay0),
+            ]
+            .into_iter()
+            .zip(expected_symbols)
+            {
+                let (actual_symbol, style) = state_icon(state, seen, indicator_style, &palette);
+                assert_eq!(actual_symbol, expected_symbol);
+                assert_eq!(display_width_u16(actual_symbol), 1);
+                assert_eq!(style.fg, Some(color));
+            }
         }
     }
 
@@ -291,7 +326,16 @@ mod tests {
     fn working_agent_icon_uses_v075_spinner_frames() {
         let palette = Palette::catppuccin();
         let frames = (0..10)
-            .map(|index| agent_icon(AgentState::Working, true, index * 8, &palette).0)
+            .map(|index| {
+                animated_state_icon(
+                    AgentState::Working,
+                    true,
+                    StatusIndicatorStyle::Dots,
+                    index * 8,
+                    &palette,
+                )
+                .0
+            })
             .collect::<Vec<_>>();
 
         assert_eq!(frames, ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]);

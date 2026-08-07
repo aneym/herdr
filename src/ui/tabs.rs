@@ -113,6 +113,7 @@ fn tab_status<'a>(app: &'a AppState, tab: &crate::workspace::Tab) -> Option<(&'a
         &app.sidebar_agents,
         state,
         seen,
+        app.status_indicators,
         app.animation_tick,
         &app.palette,
     );
@@ -692,6 +693,7 @@ mod tests {
                 &app.sidebar_agents,
                 state,
                 seen,
+                app.status_indicators,
                 app.animation_tick,
                 &app.palette,
             );
