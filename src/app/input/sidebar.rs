@@ -554,6 +554,72 @@ impl AppState {
         false
     }
 
+    /// The durable agent identity whose group chevron sits at (col, row), if
+    /// any. Only owner rows with children expose a chevron.
+    pub(super) fn agent_group_toggle_at(
+        &self,
+        entries: &[crate::ui::AgentPanelListEntry],
+        col: u16,
+        row: u16,
+    ) -> Option<String> {
+        if self.sidebar_collapsed {
+            return None;
+        }
+
+        let detail_area = self.agent_panel_rect();
+        let metrics = crate::ui::agent_panel_scroll_metrics(self, entries, detail_area);
+        let body = crate::ui::agent_panel_body_rect(
+            detail_area,
+            crate::ui::should_show_scrollbar(metrics),
+        );
+        if body.height == 0 || row < body.y || row >= body.y + body.height {
+            return None;
+        }
+
+        let mut row_y = body.y;
+        let body_bottom = body.y + body.height;
+        let scroll = self.agent_panel_scroll.min(metrics.max_offset_from_bottom);
+        for (index, entry) in entries.iter().enumerate().skip(scroll) {
+            let height = crate::ui::agent_panel_list_entry_height(self, entry, body.height);
+            if row_y.saturating_add(height) > body_bottom {
+                break;
+            }
+            if row == row_y {
+                let crate::ui::AgentPanelListEntry::Agent(detail) = entry else {
+                    return None;
+                };
+                detail.tree.expanded?;
+                let rect = crate::ui::agent_group_chevron_rect(body, row_y, &detail.tree);
+                if rect.width > 0 && col >= rect.x && col < rect.x + rect.width {
+                    return detail.agent_identity.clone();
+                }
+                return None;
+            }
+            let gap = match entry {
+                crate::ui::AgentPanelListEntry::Agent(_)
+                | crate::ui::AgentPanelListEntry::Automation(_)
+                    if index + 1 < entries.len() =>
+                {
+                    self.sidebar_agents.row_gap
+                }
+                _ => 0,
+            };
+            row_y = row_y
+                .saturating_add(height)
+                .saturating_add(gap)
+                .min(body_bottom);
+        }
+        None
+    }
+
+    /// Toggle a collapsed agent ownership group by owner identity.
+    pub(crate) fn toggle_agent_group_collapsed(&mut self, identity: String) {
+        if !self.collapsed_agent_group_keys.remove(&identity) {
+            self.collapsed_agent_group_keys.insert(identity);
+        }
+        self.mark_session_dirty();
+    }
+
     pub(super) fn agent_detail_target_at(
         &self,
         entries: &[crate::ui::AgentPanelListEntry],
@@ -960,6 +1026,96 @@ mod tests {
                 body.y + 1,
             ),
             Some((1, 0, second_pane))
+        );
+    }
+
+    #[test]
+    fn agent_group_chevron_click_toggles_collapse_and_preserves_row_focus() {
+        let mut app = app_for_mouse_test();
+        let lead = Workspace::test_new("lead-space");
+        let lead_pane = lead.tabs[0].root_pane;
+        let worker = Workspace::test_new("worker-space");
+        let worker_pane = worker.tabs[0].root_pane;
+        app.state.workspaces = vec![lead, worker];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        for (ws_idx, pane_id, name) in [(0usize, lead_pane, "lead"), (1, worker_pane, "wkr")] {
+            let terminal_id = app.state.workspaces[ws_idx].tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+            terminal.set_agent_name(name.into());
+            terminal.set_detected_state(Some(Agent::Pi), AgentState::Idle);
+            terminal.agent_identity = Some(format!("agent_{name}"));
+        }
+        let worker_terminal_id = app.state.workspaces[1].tabs[0].panes[&worker_pane]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&worker_terminal_id)
+            .unwrap()
+            .agent_ownership = Some(crate::agent_ownership::AgentOwnership::new(
+            crate::agent_ownership::AgentOwnerRef {
+                agent_id: "agent_lead".into(),
+                name: Some("lead".into()),
+                agent: Some("pi".into()),
+                session: None,
+            },
+        ));
+
+        let entries = crate::ui::agent_panel_list_entries(&app.state);
+        assert_eq!(entries.len(), 2, "owner and child rows expected");
+        let detail_area = app.state.agent_panel_rect();
+        let metrics = crate::ui::agent_panel_scroll_metrics(&app.state, &entries, detail_area);
+        let body = crate::ui::agent_panel_body_rect(
+            detail_area,
+            crate::ui::should_show_scrollbar(metrics),
+        );
+        let crate::ui::AgentPanelListEntry::Agent(owner_entry) = &entries[0] else {
+            panic!("expected owner agent row");
+        };
+        let chevron = crate::ui::agent_group_chevron_rect(body, body.y, &owner_entry.tree);
+        assert!(chevron.width > 0);
+
+        // A click outside the chevron cell is not a toggle.
+        assert_eq!(
+            app.state
+                .agent_group_toggle_at(&entries, chevron.x.saturating_sub(2), body.y),
+            None
+        );
+        let toggled = app
+            .state
+            .agent_group_toggle_at(&entries, chevron.x, body.y)
+            .expect("chevron click should resolve to the owner identity");
+        assert_eq!(toggled, "agent_lead");
+        app.state.toggle_agent_group_collapsed(toggled);
+        assert!(app.state.collapsed_agent_group_keys.contains("agent_lead"));
+
+        // Collapsed: the child row is gone, the owner row keeps its chevron.
+        let collapsed_entries = crate::ui::agent_panel_list_entries(&app.state);
+        assert_eq!(collapsed_entries.len(), 1);
+        let crate::ui::AgentPanelListEntry::Agent(collapsed_owner) = &collapsed_entries[0] else {
+            panic!("expected collapsed owner row");
+        };
+        assert_eq!(collapsed_owner.tree.expanded, Some(false));
+        assert_eq!(collapsed_owner.tree.hidden_children, 1);
+        let collapsed_chevron =
+            crate::ui::agent_group_chevron_rect(body, body.y, &collapsed_owner.tree);
+        let reopened = app
+            .state
+            .agent_group_toggle_at(&collapsed_entries, collapsed_chevron.x, body.y)
+            .expect("collapsed chevron should still toggle");
+        app.state.toggle_agent_group_collapsed(reopened);
+        assert!(!app.state.collapsed_agent_group_keys.contains("agent_lead"));
+        assert_eq!(crate::ui::agent_panel_list_entries(&app.state).len(), 2);
+
+        // Plain row clicks still focus panes.
+        assert_eq!(
+            app.state
+                .agent_detail_target_at(&crate::ui::agent_panel_list_entries(&app.state), body.y,),
+            Some((0, 0, lead_pane))
         );
     }
 

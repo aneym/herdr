@@ -1,9 +1,9 @@
 use std::time::{Duration, Instant};
 
 use crate::api::schema::{
-    AgentPromptParams, AgentPromptWaitOptions, AgentReadParams, AgentRenameParams,
-    AgentSendKeysParams, AgentStartParams, AgentTarget, AgentWaitParams, EmptyParams, Method,
-    ReadFormat, ReadSource, Request,
+    AgentOwnerSetParams, AgentPromptParams, AgentPromptWaitOptions, AgentReadParams,
+    AgentRenameParams, AgentSendKeysParams, AgentStartParams, AgentTarget, AgentWaitParams,
+    EmptyParams, Method, ReadFormat, ReadSource, Request,
 };
 
 pub(super) fn run_agent_command(args: &[String]) -> std::io::Result<i32> {
@@ -23,6 +23,7 @@ pub(super) fn run_agent_command(args: &[String]) -> std::io::Result<i32> {
         "wait" => agent_wait(&args[1..]),
         "attach" => agent_attach(&args[1..]),
         "start" => agent_start(&args[1..]),
+        "owner" => agent_owner(&args[1..]),
         "explain" => agent_explain(&args[1..]),
         "help" | "--help" | "-h" => {
             print_agent_help();
@@ -271,7 +272,7 @@ fn matched_rule_region_preview<'a>(
 
 fn agent_start(args: &[String]) -> std::io::Result<i32> {
     let Some(name) = args.first() else {
-        eprintln!("usage: herdr agent start <name> --kind KIND --pane ID [--timeout MS] [-- <agent-args...>]");
+        eprintln!("usage: herdr agent start <name> --kind KIND --pane ID [--timeout MS] [--owner TARGET|--no-owner] [-- <agent-args...>]");
         return Ok(2);
     };
     let separator = args
@@ -281,6 +282,8 @@ fn agent_start(args: &[String]) -> std::io::Result<i32> {
     let mut kind = None;
     let mut pane_id = None;
     let mut timeout_ms = None;
+    let mut owner = None;
+    let mut no_owner = false;
     let mut index = 1;
     while index < separator {
         match args[index].as_str() {
@@ -311,11 +314,27 @@ fn agent_start(args: &[String]) -> std::io::Result<i32> {
                 };
                 index += 2;
             }
+            "--owner" => {
+                let Some(value) = args.get(index + 1).filter(|_| index + 1 < separator) else {
+                    eprintln!("missing value for --owner");
+                    return Ok(2);
+                };
+                owner = Some(value.clone());
+                index += 2;
+            }
+            "--no-owner" => {
+                no_owner = true;
+                index += 1;
+            }
             other => {
                 eprintln!("unknown option: {other}");
                 return Ok(2);
             }
         }
+    }
+    if no_owner && owner.is_some() {
+        eprintln!("--owner and --no-owner are mutually exclusive");
+        return Ok(2);
     }
     let Some(kind) = kind else {
         eprintln!("missing required --kind");
@@ -330,6 +349,13 @@ fn agent_start(args: &[String]) -> std::io::Result<i32> {
         return Ok(2);
     };
     let expected_kind = crate::detect::agent_label(expected_kind).to_string();
+    // Caller context: when this CLI runs inside a Herdr-managed pane that
+    // hosts an agent, the server records that agent as the new agent's owner.
+    let caller_pane_id = (!no_owner && owner.is_none())
+        .then(|| std::env::var("HERDR_PANE_ID").ok())
+        .flatten()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| super::normalize_pane_id(&value));
     let mut response = super::send_request(&Request {
         id: "cli:agent:start".into(),
         method: Method::AgentStart(AgentStartParams {
@@ -342,6 +368,8 @@ fn agent_start(args: &[String]) -> std::io::Result<i32> {
                 Vec::new()
             },
             timeout_ms,
+            owner,
+            caller_pane_id,
         }),
     })?;
     if response.get("error").is_some() {
@@ -793,6 +821,50 @@ fn agent_read(args: &[String]) -> std::io::Result<i32> {
     super::print_read_response(&response)
 }
 
+fn agent_owner(args: &[String]) -> std::io::Result<i32> {
+    const USAGE: &str =
+        "usage: herdr agent owner set <target> <owner>\n       herdr agent owner clear <target>";
+    let Some(subcommand) = args.first().map(|arg| arg.as_str()) else {
+        eprintln!("{USAGE}");
+        return Ok(2);
+    };
+    match subcommand {
+        "set" => {
+            let (Some(target), Some(owner), None) = (args.get(1), args.get(2), args.get(3)) else {
+                eprintln!("usage: herdr agent owner set <target> <owner>");
+                return Ok(2);
+            };
+            super::print_response(&super::send_request(&Request {
+                id: "cli:agent:owner:set".into(),
+                method: Method::AgentOwnerSet(AgentOwnerSetParams {
+                    target: target.clone(),
+                    owner: owner.clone(),
+                }),
+            })?)
+        }
+        "clear" => {
+            let (Some(target), None) = (args.get(1), args.get(2)) else {
+                eprintln!("usage: herdr agent owner clear <target>");
+                return Ok(2);
+            };
+            super::print_response(&super::send_request(&Request {
+                id: "cli:agent:owner:clear".into(),
+                method: Method::AgentOwnerClear(AgentTarget {
+                    target: target.clone(),
+                }),
+            })?)
+        }
+        "help" | "--help" | "-h" => {
+            eprintln!("{USAGE}");
+            Ok(0)
+        }
+        _ => {
+            eprintln!("{USAGE}");
+            Ok(2)
+        }
+    }
+}
+
 fn print_agent_help() {
     eprintln!("herdr agent commands:");
     eprintln!("  herdr agent list");
@@ -805,8 +877,10 @@ fn print_agent_help() {
     eprintln!("  herdr agent wait <target> [--until STATUS]... [--timeout MS]");
     eprintln!("  herdr agent attach <target> [--takeover]");
     eprintln!(
-        "  herdr agent start <name> --kind KIND --pane ID [--timeout MS] [-- <agent-args...>]"
+        "  herdr agent start <name> --kind KIND --pane ID [--timeout MS] [--owner TARGET|--no-owner] [-- <agent-args...>]"
     );
+    eprintln!("  herdr agent owner set <target> <owner>");
+    eprintln!("  herdr agent owner clear <target>");
     eprintln!("  herdr agent explain <target> [--json|--format text|json] [--verbose]");
     eprintln!(
         "  herdr agent explain --file PATH --agent LABEL [--json|--format text|json] [--verbose]"

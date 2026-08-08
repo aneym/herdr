@@ -1533,6 +1533,7 @@ pub struct AppState {
     pub worktree_directory: std::path::PathBuf,
     pub collapsed_space_keys: std::collections::HashSet<String>,
     pub automations_expanded: bool,
+    pub collapsed_agent_group_keys: std::collections::HashSet<String>,
     pub request_complete_onboarding: bool,
     pub name_input: String,
     pub name_input_replace_on_type: bool,
@@ -1989,6 +1990,7 @@ impl AppState {
             worktree_directory: std::path::PathBuf::from("/tmp/herdr-worktrees"),
             collapsed_space_keys: std::collections::HashSet::new(),
             automations_expanded: false,
+            collapsed_agent_group_keys: std::collections::HashSet::new(),
             request_complete_onboarding: false,
             name_input: String::new(),
             name_input_replace_on_type: false,
@@ -2138,6 +2140,91 @@ impl AppState {
             session_dirty: false,
             terminal_runtime_shutdowns: Vec::new(),
         }
+    }
+}
+
+/// Durable agent ownership resolution over live state.
+impl AppState {
+    /// Locate the pane hosting the live agent with this durable identity.
+    pub fn agent_pane_by_identity(&self, agent_id: &str) -> Option<(usize, crate::layout::PaneId)> {
+        self.find_agent_pane(|terminal| terminal.agent_identity.as_deref() == Some(agent_id))
+    }
+
+    /// Resolve an owner reference to the pane hosting that live agent.
+    ///
+    /// Resolution order: durable agent identity first, then the recorded
+    /// session identity — the latter reconciles an owner whose original
+    /// terminal is gone but whose agent session was resumed elsewhere.
+    pub fn resolve_agent_owner(
+        &self,
+        owner: &crate::agent_ownership::AgentOwnerRef,
+    ) -> Option<(usize, crate::layout::PaneId)> {
+        if let Some(found) = self.agent_pane_by_identity(&owner.agent_id) {
+            return Some(found);
+        }
+        let session = owner.session.as_ref()?;
+        self.find_agent_pane(|terminal| terminal.current_agent_session().as_ref() == Some(session))
+    }
+
+    /// Whether an ownership record currently fails to resolve to a live owner.
+    pub fn agent_ownership_orphaned(
+        &self,
+        ownership: &crate::agent_ownership::AgentOwnership,
+    ) -> bool {
+        ownership
+            .current
+            .as_ref()
+            .is_some_and(|owner| self.resolve_agent_owner(owner).is_none())
+    }
+
+    fn find_agent_pane(
+        &self,
+        matches: impl Fn(&crate::terminal::TerminalState) -> bool,
+    ) -> Option<(usize, crate::layout::PaneId)> {
+        self.workspaces
+            .iter()
+            .enumerate()
+            .find_map(|(ws_idx, workspace)| {
+                workspace.tabs.iter().find_map(|tab| {
+                    tab.panes.iter().find_map(|(pane_id, pane)| {
+                        self.terminals
+                            .get(&pane.attached_terminal_id)
+                            .filter(|terminal| terminal.is_agent_terminal() && matches(terminal))
+                            .map(|_| (ws_idx, *pane_id))
+                    })
+                })
+            })
+    }
+
+    /// Whether making `owner_identity` the owner of `child_identity` would
+    /// create an ownership cycle (the child is already an ancestor of the
+    /// proposed owner).
+    pub fn agent_ownership_would_cycle(&self, child_identity: &str, owner_identity: &str) -> bool {
+        if child_identity == owner_identity {
+            return true;
+        }
+        let mut visited = std::collections::HashSet::new();
+        let mut cursor = owner_identity.to_string();
+        while visited.insert(cursor.clone()) {
+            let Some((ws_idx, pane_id)) = self.agent_pane_by_identity(&cursor) else {
+                return false;
+            };
+            let Some(next) = self
+                .workspaces
+                .get(ws_idx)
+                .and_then(|workspace| workspace.pane_state(pane_id))
+                .and_then(|pane| self.terminals.get(&pane.attached_terminal_id))
+                .and_then(|terminal| terminal.agent_ownership.as_ref())
+                .and_then(|ownership| ownership.current.as_ref())
+            else {
+                return false;
+            };
+            if next.agent_id == child_identity {
+                return true;
+            }
+            cursor = next.agent_id.clone();
+        }
+        false
     }
 }
 

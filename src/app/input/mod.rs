@@ -861,6 +861,7 @@ fn capture_snapshot(state: &AppState) -> crate::persist::SessionSnapshot {
         state.sidebar_section_split,
         state.collapsed_space_keys.clone(),
         state.automations_expanded,
+        state.collapsed_agent_group_keys.clone(),
     )
 }
 

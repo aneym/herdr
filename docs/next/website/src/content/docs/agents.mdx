@@ -154,3 +154,20 @@ herdr agent attach reviewer --takeover
 ```
 
 Use `herdr terminal attach <terminal_id>` when you want the same direct attach behavior for a non-agent terminal.
+
+## Agent ownership
+
+Agents can durably belong to another agent. When an agent runs `herdr agent start` from inside its own pane, the started agent is automatically recorded as owned by the caller and the sidebar nests it beneath its owner. Ownership is anchored to a durable agent identity, not a pane ID, so it survives renames, pane moves between tabs and workspaces, Herdr restarts, and resumable agent sessions.
+
+Each owned agent keeps two references: an immutable origin owner recorded when ownership first appeared, and a transferable current owner. Change the current owner explicitly:
+
+```bash
+herdr agent owner set worker lead     # adopt or transfer
+herdr agent owner clear worker        # release to a root agent
+```
+
+`agent start` accepts `--owner TARGET` to record a specific owner and `--no-owner` to keep the new agent a root. `agent list` and `agent get` report `agent_id` and an `ownership` object with `origin`, `current`, and `orphaned`.
+
+When a current owner can no longer be resolved — for example the owner exited and its session was not resumed — the owned agent is marked orphaned rather than silently flattened. Orphaned agents carry a `◌` marker in the sidebar and stay actionable: adopt them with `agent owner set` or release them with `agent owner clear`. If the owner's agent session comes back elsewhere, the reference reconciles automatically through the recorded session identity.
+
+In the sidebar, owner rows show a chevron that collapses or expands their subtree. A collapsed group shows how many agents it hides and inherits their highest-attention status color, so blocked or unseen work stays visible. Collapse state persists across restarts.

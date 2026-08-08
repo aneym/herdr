@@ -39,6 +39,28 @@ pub(crate) struct AgentPanelEntry {
     pub last_agent_state_change_seq: Option<u64>,
     pub state_labels: std::collections::HashMap<String, String>,
     pub tokens: std::collections::HashMap<String, String>,
+    /// Durable identity of the hosted agent occupancy, when assigned.
+    pub agent_identity: Option<String>,
+    /// Pane hosting this agent's resolved current owner, when it resolves.
+    pub owner_pane: Option<(usize, crate::layout::PaneId)>,
+    /// The current owner reference no longer resolves to a live agent.
+    pub orphaned: bool,
+    /// Hierarchy placement computed by `arrange_agent_hierarchy`.
+    pub tree: AgentTreeRender,
+}
+
+/// Presentation-only hierarchy data for one agent panel row.
+#[derive(Default, Clone, PartialEq, Eq, Debug)]
+pub(crate) struct AgentTreeRender {
+    pub depth: u8,
+    /// `Some(expanded)` when this agent owns visible children.
+    pub expanded: Option<bool>,
+    /// Number of descendants hidden by a collapsed group.
+    pub hidden_children: usize,
+    /// Highest-attention (state, seen) among hidden descendants.
+    pub hidden_state: Option<(AgentState, bool)>,
+    /// This row is the last child within its parent group.
+    pub last_in_group: bool,
 }
 
 fn sidebar_section_heights(total_h: u16, split_ratio: f32) -> (u16, u16) {
@@ -227,11 +249,170 @@ fn partition_agent_panel_entries(
 ) -> (Vec<AgentPanelEntry>, Vec<AgentPanelEntry>) {
     let mut entries = collect_agent_panel_entries_with_runtimes(app, terminal_runtimes);
     crate::app::agent_view::apply_agent_view(app, &mut entries);
-    entries.into_iter().partition(|entry| {
-        !app.sidebar_automations
-            .workspaces
-            .contains(&entry.primary_label)
-    })
+    let (agents, automations): (Vec<AgentPanelEntry>, Vec<AgentPanelEntry>) =
+        entries.into_iter().partition(|entry| {
+            !app.sidebar_automations
+                .workspaces
+                .contains(&entry.primary_label)
+        });
+    (arrange_agent_hierarchy(app, agents), automations)
+}
+
+fn agent_attention_priority(state: AgentState, seen: bool) -> u8 {
+    workspace_attention_priority(state, seen)
+}
+
+/// Reorder agent entries so each agent's children sit directly beneath it,
+/// depth-first, dropping descendants of collapsed groups and recording the
+/// hidden-descendant summary on the collapsed owner row. Roots keep their
+/// incoming sort order; siblings keep their relative order. Cycle-safe: any
+/// entry unreachable from a root (a defensive case) is appended at the end as
+/// a root.
+fn arrange_agent_hierarchy(app: &AppState, entries: Vec<AgentPanelEntry>) -> Vec<AgentPanelEntry> {
+    if entries.len() < 2 {
+        return entries;
+    }
+
+    let index_by_pane: std::collections::HashMap<(usize, crate::layout::PaneId), usize> = entries
+        .iter()
+        .enumerate()
+        .map(|(idx, entry)| ((entry.ws_idx, entry.pane_id), idx))
+        .collect();
+    let mut children: Vec<Vec<usize>> = vec![Vec::new(); entries.len()];
+    let mut has_parent = vec![false; entries.len()];
+    for (idx, entry) in entries.iter().enumerate() {
+        let Some(owner_idx) = entry
+            .owner_pane
+            .and_then(|owner| index_by_pane.get(&owner).copied())
+            .filter(|owner_idx| *owner_idx != idx)
+        else {
+            continue;
+        };
+        children[owner_idx].push(idx);
+        has_parent[idx] = true;
+    }
+
+    let mut entries: Vec<Option<AgentPanelEntry>> = entries.into_iter().map(Some).collect();
+    let mut arranged = Vec::with_capacity(entries.len());
+    let mut visited = vec![false; entries.len()];
+
+    fn hidden_summary(
+        idx: usize,
+        entries: &[Option<AgentPanelEntry>],
+        children: &[Vec<usize>],
+        visited: &mut [bool],
+        count: &mut usize,
+        state: &mut Option<(AgentState, bool)>,
+    ) {
+        for &child in &children[idx] {
+            if visited[child] {
+                continue;
+            }
+            visited[child] = true;
+            *count += 1;
+            if let Some(entry) = entries[child].as_ref() {
+                let replace = state.is_none_or(|(current_state, current_seen)| {
+                    agent_attention_priority(entry.state, entry.seen)
+                        > agent_attention_priority(current_state, current_seen)
+                });
+                if replace {
+                    *state = Some((entry.state, entry.seen));
+                }
+            }
+            hidden_summary(child, entries, children, visited, count, state);
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)] // local recursion helper mirrors its captured context
+    fn push_subtree(
+        idx: usize,
+        depth: u8,
+        last_in_group: bool,
+        app: &AppState,
+        entries: &mut [Option<AgentPanelEntry>],
+        children: &[Vec<usize>],
+        visited: &mut [bool],
+        arranged: &mut Vec<AgentPanelEntry>,
+    ) {
+        if visited[idx] {
+            return;
+        }
+        visited[idx] = true;
+        let Some(mut entry) = entries[idx].take() else {
+            return;
+        };
+        entry.tree.depth = depth;
+        entry.tree.last_in_group = last_in_group;
+        let child_indexes: Vec<usize> = children[idx]
+            .iter()
+            .copied()
+            .filter(|child| !visited[*child])
+            .collect();
+        if child_indexes.is_empty() {
+            arranged.push(entry);
+            return;
+        }
+        let expanded = entry
+            .agent_identity
+            .as_ref()
+            .is_none_or(|identity| !app.collapsed_agent_group_keys.contains(identity));
+        entry.tree.expanded = Some(expanded);
+        if !expanded {
+            let mut count = 0;
+            let mut state = None;
+            hidden_summary(idx, entries, children, visited, &mut count, &mut state);
+            entry.tree.hidden_children = count;
+            entry.tree.hidden_state = state;
+            arranged.push(entry);
+            return;
+        }
+        arranged.push(entry);
+        let last = child_indexes.len().saturating_sub(1);
+        for (position, child) in child_indexes.into_iter().enumerate() {
+            push_subtree(
+                child,
+                depth.saturating_add(1),
+                position == last,
+                app,
+                entries,
+                children,
+                visited,
+                arranged,
+            );
+        }
+    }
+
+    for (idx, parented) in has_parent.iter().copied().enumerate() {
+        if !parented {
+            push_subtree(
+                idx,
+                0,
+                false,
+                app,
+                &mut entries,
+                &children,
+                &mut visited,
+                &mut arranged,
+            );
+        }
+    }
+    // Ownership cycles cannot be created through the API, but stale persisted
+    // state must never lose rows: append anything unreachable as a root.
+    for idx in 0..entries.len() {
+        if !visited[idx] {
+            push_subtree(
+                idx,
+                0,
+                false,
+                app,
+                &mut entries,
+                &children,
+                &mut visited,
+                &mut arranged,
+            );
+        }
+    }
+    arranged
 }
 
 fn collect_agent_panel_entries_with_runtimes(
@@ -262,6 +443,16 @@ fn collect_agent_panel_entries_with_runtimes(
                             .tabs
                             .get(detail.tab_idx)
                             .is_some_and(|tab| !tab.is_auto_named());
+                    let terminal = ws
+                        .pane_state(detail.pane_id)
+                        .and_then(|pane| app.terminals.get(&pane.attached_terminal_id));
+                    let agent_identity =
+                        terminal.and_then(|terminal| terminal.agent_identity.clone());
+                    let current_owner = terminal
+                        .and_then(|terminal| terminal.agent_ownership.as_ref())
+                        .and_then(|ownership| ownership.current.as_ref());
+                    let owner_pane = current_owner.and_then(|owner| app.resolve_agent_owner(owner));
+                    let orphaned = current_owner.is_some() && owner_pane.is_none();
                     AgentPanelEntry {
                         ws_idx,
                         tab_idx: detail.tab_idx,
@@ -279,6 +470,10 @@ fn collect_agent_panel_entries_with_runtimes(
                         last_agent_state_change_seq: detail.last_agent_state_change_seq,
                         state_labels: detail.state_labels,
                         tokens: detail.tokens,
+                        agent_identity,
+                        owner_pane,
+                        orphaned,
+                        tree: AgentTreeRender::default(),
                     }
                 })
         })
@@ -733,6 +928,28 @@ pub(crate) fn workspace_list_scrollbar_rect(app: &AppState, area: Rect) -> Optio
         1,
         body.height,
     ))
+}
+
+fn agent_group_trailing_width(tree: &AgentTreeRender) -> usize {
+    match tree.expanded {
+        None => 0,
+        Some(true) => 2,
+        Some(false) => {
+            // "+N " summary plus the chevron cell.
+            2 + if tree.hidden_children > 0 {
+                format!("+{} ", tree.hidden_children).len()
+            } else {
+                0
+            }
+        }
+    }
+}
+
+/// Right-aligned chevron (and collapsed-group summary) hit region on an agent
+/// group's first row.
+pub(crate) fn agent_group_chevron_rect(body: Rect, row_y: u16, tree: &AgentTreeRender) -> Rect {
+    let width = (agent_group_trailing_width(tree) as u16).min(body.width);
+    Rect::new(body.x + body.width.saturating_sub(width), row_y, width, 1)
 }
 
 pub(crate) fn agent_panel_body_rect(area: Rect, has_scrollbar: bool) -> Rect {
@@ -1833,8 +2050,49 @@ fn render_agent_detail(
             p,
         );
 
+        let tree = &detail.tree;
+        let depth = tree.depth as usize;
+        let group_trailing_width = agent_group_trailing_width(tree);
         for (row_index, resolved) in rows.iter().take(height as usize).enumerate() {
-            let mut spans = vec![Span::raw(if row_index == 0 { " " } else { "   " })];
+            let mut spans = vec![Span::raw(" ")];
+            let mut prefix_width = 1usize;
+            if depth > 0 {
+                if depth > 1 {
+                    spans.push(Span::raw("   ".repeat(depth - 1)));
+                    prefix_width += 3 * (depth - 1);
+                }
+                if row_index == 0 {
+                    spans.push(Span::styled(
+                        if tree.last_in_group {
+                            "└─ "
+                        } else {
+                            "├─ "
+                        },
+                        Style::default().fg(p.overlay0),
+                    ));
+                } else if tree.last_in_group {
+                    spans.push(Span::raw("   "));
+                } else {
+                    spans.push(Span::styled("│", Style::default().fg(p.overlay0)));
+                    spans.push(Span::raw("  "));
+                }
+                prefix_width += 3;
+            } else if row_index != 0 {
+                spans.push(Span::raw("  "));
+                prefix_width += 2;
+            }
+            if row_index == 0 && detail.orphaned {
+                spans.push(Span::styled(
+                    "◌ ",
+                    Style::default().fg(p.mauve).add_modifier(Modifier::BOLD),
+                ));
+                prefix_width += 2;
+            }
+            let trailing_width = if row_index == 0 {
+                group_trailing_width
+            } else {
+                0
+            };
             spans.extend(resolved_token_spans(
                 resolved,
                 state_icon,
@@ -1846,11 +2104,33 @@ fn render_agent_detail(
                 name_style,
                 p,
                 body.width
-                    .saturating_sub(if row_index == 0 { 1 } else { 3 }) as usize,
+                    .saturating_sub((prefix_width + trailing_width) as u16)
+                    as usize,
             ));
             frame.render_widget(
                 Paragraph::new(Line::from(spans)).style(row_style),
                 Rect::new(body.x, row_y + row_index as u16, body.width, 1),
+            );
+        }
+        if let Some(expanded) = tree.expanded {
+            let mut trailing = Vec::new();
+            if !expanded && tree.hidden_children > 0 {
+                let (hidden_state, hidden_seen) =
+                    tree.hidden_state.unwrap_or((detail.state, detail.seen));
+                trailing.push(Span::styled(
+                    format!("+{} ", tree.hidden_children),
+                    Style::default()
+                        .fg(state_label_color(hidden_state, hidden_seen, p))
+                        .add_modifier(Modifier::BOLD),
+                ));
+            }
+            trailing.push(Span::styled(
+                if expanded { "▾" } else { "▸" },
+                Style::default().fg(p.accent),
+            ));
+            frame.render_widget(
+                Paragraph::new(Line::from(trailing)).alignment(Alignment::Right),
+                agent_group_chevron_rect(body, row_y, tree),
             );
         }
         row_y = row_y
@@ -1941,6 +2221,176 @@ mod tests {
             .draw(|frame| render_sidebar(app, &TerminalRuntimeRegistry::new(), frame, area))
             .unwrap();
         terminal.backend().buffer().clone()
+    }
+
+    fn app_with_owned_agents() -> AppState {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![
+            Workspace::test_new("lead-space"),
+            Workspace::test_new("b-space"),
+            Workspace::test_new("c-space"),
+        ];
+        app.ensure_test_terminals();
+        app.active = Some(0);
+        app.selected = 0;
+        for (ws_idx, name) in [(0usize, "lead"), (1, "wkb"), (2, "wkc")] {
+            let pane_id = app.workspaces[ws_idx].tabs[0].root_pane;
+            let terminal_id = app.workspaces[ws_idx].tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            let terminal = app.terminals.get_mut(&terminal_id).unwrap();
+            terminal.set_agent_name(name.to_string());
+            terminal.set_detected_state(Some(Agent::Pi), AgentState::Idle);
+            terminal.agent_identity = Some(format!("agent_{name}"));
+        }
+        let lead_ref = crate::agent_ownership::AgentOwnerRef {
+            agent_id: "agent_lead".into(),
+            name: Some("lead".into()),
+            agent: Some("pi".into()),
+            session: None,
+        };
+        for ws_idx in [1usize, 2] {
+            let pane_id = app.workspaces[ws_idx].tabs[0].root_pane;
+            let terminal_id = app.workspaces[ws_idx].tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            app.terminals.get_mut(&terminal_id).unwrap().agent_ownership = Some(
+                crate::agent_ownership::AgentOwnership::new(lead_ref.clone()),
+            );
+        }
+        app
+    }
+
+    fn entry_names(entries: &[AgentPanelEntry], app: &AppState) -> Vec<String> {
+        entries
+            .iter()
+            .map(|entry| {
+                let pane_id = entry.pane_id;
+                let terminal_id = app.workspaces[entry.ws_idx].tabs[0].panes[&pane_id]
+                    .attached_terminal_id
+                    .clone();
+                app.terminals[&terminal_id]
+                    .agent_name
+                    .clone()
+                    .unwrap_or_default()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn agent_hierarchy_nests_children_beneath_owner_in_order() {
+        let app = app_with_owned_agents();
+        let entries = agent_panel_entries(&app);
+
+        assert_eq!(entry_names(&entries, &app), ["lead", "wkb", "wkc"]);
+        assert_eq!(entries[0].tree.depth, 0);
+        assert_eq!(entries[0].tree.expanded, Some(true));
+        assert_eq!(entries[1].tree.depth, 1);
+        assert!(!entries[1].tree.last_in_group);
+        assert_eq!(entries[2].tree.depth, 1);
+        assert!(entries[2].tree.last_in_group);
+        assert!(!entries[1].orphaned);
+    }
+
+    #[test]
+    fn collapsed_agent_group_hides_children_and_summarizes_attention() {
+        let mut app = app_with_owned_agents();
+        // One hidden worker is blocked and unseen: the summary must surface it.
+        let blocked_pane = app.workspaces[2].tabs[0].root_pane;
+        let blocked_terminal_id = app.workspaces[2].tabs[0].panes[&blocked_pane]
+            .attached_terminal_id
+            .clone();
+        app.terminals
+            .get_mut(&blocked_terminal_id)
+            .unwrap()
+            .set_detected_state(Some(Agent::Pi), AgentState::Blocked);
+        app.workspaces[2].tabs[0]
+            .panes
+            .get_mut(&blocked_pane)
+            .unwrap()
+            .seen = false;
+        app.collapsed_agent_group_keys.insert("agent_lead".into());
+
+        let entries = agent_panel_entries(&app);
+        assert_eq!(entry_names(&entries, &app), ["lead"]);
+        assert_eq!(entries[0].tree.expanded, Some(false));
+        assert_eq!(entries[0].tree.hidden_children, 2);
+        assert_eq!(
+            entries[0].tree.hidden_state,
+            Some((AgentState::Blocked, false))
+        );
+
+        let area = Rect::new(0, 0, 30, 24);
+        let buffer = rendered_sidebar(&app, area);
+        let (_, detail) = ordered_sidebar_sections(&app, area);
+        let body = agent_panel_body_rect(detail, false);
+        let first_row = row_text(&buffer, body.y, area.width);
+        assert!(
+            first_row.contains("+2") && first_row.contains('▸'),
+            "collapsed owner row should show hidden summary and chevron: {first_row:?}"
+        );
+    }
+
+    #[test]
+    fn expanded_agent_group_renders_tree_guides_and_chevron() {
+        let app = app_with_owned_agents();
+        let area = Rect::new(0, 0, 30, 24);
+        let buffer = rendered_sidebar(&app, area);
+        let (_, detail) = ordered_sidebar_sections(&app, area);
+        let body = agent_panel_body_rect(detail, false);
+        let owner_row = row_text(&buffer, body.y, area.width);
+        assert!(
+            owner_row.contains('▾'),
+            "expanded owner row should show a chevron: {owner_row:?}"
+        );
+        let entries = agent_panel_list_entries(&app);
+        let owner_height = agent_panel_list_entry_height(&app, &entries[0], body.height)
+            + app.sidebar_agents.row_gap;
+        let first_child_row = row_text(&buffer, body.y + owner_height, area.width);
+        let entries_agents = agent_panel_entries(&app);
+        assert_eq!(entries_agents[1].tree.depth, 1);
+        assert!(
+            first_child_row.contains("├─"),
+            "first child row should carry a tree guide: {first_child_row:?}"
+        );
+    }
+
+    #[test]
+    fn orphaned_agent_renders_marker_and_flattens_to_root() {
+        let mut app = app_with_owned_agents();
+        // Point one worker at an owner that no longer exists.
+        let orphan_pane = app.workspaces[1].tabs[0].root_pane;
+        let orphan_terminal_id = app.workspaces[1].tabs[0].panes[&orphan_pane]
+            .attached_terminal_id
+            .clone();
+        app.terminals
+            .get_mut(&orphan_terminal_id)
+            .unwrap()
+            .agent_ownership = Some(crate::agent_ownership::AgentOwnership::new(
+            crate::agent_ownership::AgentOwnerRef {
+                agent_id: "agent_gone".into(),
+                name: Some("ghost".into()),
+                agent: Some("pi".into()),
+                session: None,
+            },
+        ));
+
+        let entries = agent_panel_entries(&app);
+        let names = entry_names(&entries, &app);
+        let orphan_idx = names.iter().position(|name| name == "wkb").unwrap();
+        assert!(entries[orphan_idx].orphaned);
+        assert_eq!(entries[orphan_idx].tree.depth, 0);
+
+        let area = Rect::new(0, 0, 30, 24);
+        let buffer = rendered_sidebar(&app, area);
+        let mut found = false;
+        for y in 0..area.height {
+            if row_text(&buffer, y, area.width).contains('◌') {
+                found = true;
+                break;
+            }
+        }
+        assert!(found, "orphaned agent row should carry the ◌ marker");
     }
 
     #[test]

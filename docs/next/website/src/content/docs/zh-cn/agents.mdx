@@ -154,3 +154,20 @@ herdr agent attach reviewer --takeover
 ```
 
 想对非智能体终端获得相同的直接附加行为时,用 `herdr terminal attach <terminal_id>`。
+
+## 智能体所有权
+
+智能体可以持久地归属于另一个智能体。当一个智能体在自己的窗格内运行 `herdr agent start` 时,被启动的智能体会自动记录为调用者所有,并在侧边栏中嵌套在其所有者下方。所有权锚定在持久的智能体 ID 上而不是窗格 ID,因此在重命名、跨标签页和工作区移动窗格、Herdr 重启以及可恢复的智能体会话之间都能保持。
+
+每个被拥有的智能体保留两个引用:所有权首次出现时记录的不可变 origin,以及可转移的 current。可以显式更改当前所有者:
+
+```bash
+herdr agent owner set worker lead     # 收养或转移
+herdr agent owner clear worker        # 释放为根智能体
+```
+
+`agent start` 接受 `--owner TARGET` 来记录特定所有者,`--no-owner` 让新智能体保持为根。`agent list` 和 `agent get` 会报告 `agent_id` 以及包含 `origin`、`current` 和 `orphaned` 的 `ownership` 对象。
+
+当当前所有者无法再解析时 — 例如所有者已退出且其会话未恢复 — 被拥有的智能体会被标记为 orphaned,而不是被静默扁平化。孤儿智能体在侧边栏带有 `◌` 标记,并保持可操作:用 `agent owner set` 收养它们,或用 `agent owner clear` 释放。若所有者的会话在别处恢复,引用会通过记录的会话标识自动重新解析。
+
+在侧边栏中,所有者行显示一个折叠/展开子树的箭头。折叠的分组会显示隐藏的智能体数量,并继承其中最需要注意的状态颜色,因此 blocked 或未读的工作始终可见。折叠状态在重启后保持。

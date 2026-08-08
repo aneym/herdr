@@ -417,13 +417,44 @@ fn agent_command() -> Command {
                         .help("Wait for interactive readiness (default: 30000; max: 300000)"),
                 )
                 .arg(
+                    option("owner", "TARGET")
+                        .help("Record this agent as owned by an existing agent"),
+                )
+                .arg(
+                    flag("no-owner")
+                        .help("Do not record the calling pane's agent as the owner"),
+                )
+                .arg(
                     Arg::new("agent_args")
                         .value_name("AGENT_ARG")
                         .num_args(0..)
                         .last(true),
                 )
                 .after_help(
-                    "The pane must be at its interactive shell prompt. Success means the expected agent was detected in the same terminal and is ready for input.\n\nnext: herdr agent prompt <TARGET> <TEXT> --wait",
+                    "The pane must be at its interactive shell prompt. Success means the expected agent was detected in the same terminal and is ready for input. When the command runs inside a pane hosting an agent, that agent is recorded as the new agent's owner unless --no-owner or --owner overrides it.\n\nnext: herdr agent prompt <TARGET> <TEXT> --wait",
+                ),
+        )
+        .subcommand(
+            Command::new("owner")
+                .about("Inspect and change durable agent ownership")
+                .subcommand(
+                    Command::new("set")
+                        .about("Adopt or transfer an agent to a new owner")
+                        .override_usage("herdr agent owner set <TARGET> <OWNER>")
+                        .arg(required("target", "TARGET"))
+                        .arg(required("owner", "OWNER"))
+                        .after_help(
+                            "Sets the current owner. The origin owner recorded when ownership first appeared never changes. Rejects self-ownership and ownership cycles.",
+                        ),
+                )
+                .subcommand(
+                    Command::new("clear")
+                        .about("Release an agent from its current owner")
+                        .override_usage("herdr agent owner clear <TARGET>")
+                        .arg(required("target", "TARGET"))
+                        .after_help(
+                            "Clears the current owner so the agent becomes a root. Origin lineage is preserved. Use this to resolve an orphaned agent deliberately.",
+                        ),
                 ),
         )
         .subcommand(

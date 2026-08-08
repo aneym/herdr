@@ -490,6 +490,10 @@ mod tests {
             last_agent_state_change_seq,
             state_labels: Default::default(),
             tokens: Default::default(),
+            agent_identity: None,
+            owner_pane: None,
+            orphaned: false,
+            tree: Default::default(),
         }
     }
 

@@ -1228,6 +1228,22 @@
     },
     "request": {
       "$defs": {
+        "AgentOwnerSetParams": {
+          "properties": {
+            "owner": {
+              "description": "Agent target (name or pane id) that becomes the current owner.",
+              "type": "string"
+            },
+            "target": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "target",
+            "owner"
+          ],
+          "type": "object"
+        },
         "AgentPromptParams": {
           "properties": {
             "target": {
@@ -1346,11 +1362,25 @@
               },
               "type": "array"
             },
+            "caller_pane_id": {
+              "description": "Pane the request was issued from. When that pane hosts a live agent,\nthe started agent is recorded as owned by it.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "kind": {
               "type": "string"
             },
             "name": {
               "type": "string"
+            },
+            "owner": {
+              "description": "Explicit owner agent target for the started agent. Takes precedence\nover `caller_pane_id`.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "pane_id": {
               "type": "string"
@@ -5126,6 +5156,38 @@
         {
           "properties": {
             "method": {
+              "const": "agent.owner.set",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentOwnerSetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agent.owner.clear",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "agent.prompt",
               "type": "string"
             },
@@ -6158,6 +6220,13 @@
                 "null"
               ]
             },
+            "agent_id": {
+              "description": "Durable identity of this agent occupancy (never a pane id).",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "agent_session": {
               "anyOf": [
                 {
@@ -6203,6 +6272,17 @@
                 "string",
                 "null"
               ]
+            },
+            "ownership": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/AgentOwnershipInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Durable ownership: immutable origin plus transferable current owner."
             },
             "pane_id": {
               "type": "string"
@@ -6334,6 +6414,69 @@
             "source",
             "source_kind",
             "local_override_shadowing_remote"
+          ],
+          "type": "object"
+        },
+        "AgentOwnerInfo": {
+          "properties": {
+            "agent": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "agent_id": {
+              "description": "Durable agent identity of the owner (never a pane id).",
+              "type": "string"
+            },
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pane_id": {
+              "description": "Pane currently hosting the resolved owner, when it resolves.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "resolved": {
+              "description": "Whether the owner reference resolves to a live agent.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "agent_id",
+            "resolved"
+          ],
+          "type": "object"
+        },
+        "AgentOwnershipInfo": {
+          "properties": {
+            "current": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/AgentOwnerInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner the agent currently belongs to; absent after a release."
+            },
+            "origin": {
+              "$ref": "#/schemas/success_response/$defs/AgentOwnerInfo",
+              "description": "The first recorded owner. Immutable for the life of the record."
+            },
+            "orphaned": {
+              "description": "True when the current owner reference no longer resolves.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "origin"
           ],
           "type": "object"
         },

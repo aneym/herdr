@@ -72,6 +72,8 @@ fn agent_start_and_prompt_requests_round_trip() {
             pane_id: "w1:p2".into(),
             args: vec!["--no-session".into()],
             timeout_ms: Some(30_000),
+            owner: None,
+            caller_pane_id: None,
         }),
     };
     let start_json = serde_json::to_value(&start).unwrap();
@@ -80,6 +82,55 @@ fn agent_start_and_prompt_requests_round_trip() {
     assert_eq!(
         serde_json::from_value::<Request>(start_json).unwrap(),
         start
+    );
+
+    let owned_start = Request {
+        id: "start-owned".into(),
+        method: Method::AgentStart(AgentStartParams {
+            name: "worker".into(),
+            kind: "pi".into(),
+            pane_id: "w1:p2".into(),
+            args: Vec::new(),
+            timeout_ms: None,
+            owner: Some("lead".into()),
+            caller_pane_id: Some("w1:p1".into()),
+        }),
+    };
+    let owned_json = serde_json::to_value(&owned_start).unwrap();
+    assert_eq!(owned_json["params"]["owner"], "lead");
+    assert_eq!(owned_json["params"]["caller_pane_id"], "w1:p1");
+    assert_eq!(
+        serde_json::from_value::<Request>(owned_json).unwrap(),
+        owned_start
+    );
+
+    let owner_set = Request {
+        id: "owner-set".into(),
+        method: Method::AgentOwnerSet(AgentOwnerSetParams {
+            target: "worker".into(),
+            owner: "lead".into(),
+        }),
+    };
+    let owner_set_json = serde_json::to_value(&owner_set).unwrap();
+    assert_eq!(owner_set_json["method"], "agent.owner.set");
+    assert_eq!(owner_set_json["params"]["target"], "worker");
+    assert_eq!(owner_set_json["params"]["owner"], "lead");
+    assert_eq!(
+        serde_json::from_value::<Request>(owner_set_json).unwrap(),
+        owner_set
+    );
+
+    let owner_clear = Request {
+        id: "owner-clear".into(),
+        method: Method::AgentOwnerClear(AgentTarget {
+            target: "worker".into(),
+        }),
+    };
+    let owner_clear_json = serde_json::to_value(&owner_clear).unwrap();
+    assert_eq!(owner_clear_json["method"], "agent.owner.clear");
+    assert_eq!(
+        serde_json::from_value::<Request>(owner_clear_json).unwrap(),
+        owner_clear
     );
 
     let prompt = Request {

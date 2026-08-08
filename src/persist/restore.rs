@@ -498,6 +498,10 @@ fn restore_tab(
             .and_then(crate::detect::parse_canonical_agent_label);
         let saved_launch_argv = saved_pane.and_then(|p| p.launch_argv.clone());
         let saved_agent_session = saved_pane.and_then(|p| p.agent_session.as_ref());
+        let saved_agent_identity = saved_pane.and_then(|p| p.agent_identity.clone());
+        let saved_agent_ownership = saved_pane
+            .and_then(|p| p.agent_ownership.as_ref())
+            .map(|ownership| ownership.to_ownership());
         let saved_history =
             old_id.and_then(|old_id| history.and_then(|history| history.panes.get(old_id)));
         let startup = {
@@ -544,6 +548,8 @@ fn restore_tab(
             if let Some(session) = restored_agent_session {
                 terminal.set_persisted_agent_session(session);
             }
+            terminal.agent_identity = saved_agent_identity.clone();
+            terminal.agent_ownership = saved_agent_ownership.clone();
             match (saved_agent_name, saved_managed_agent) {
                 (Some(agent_name), Some(agent)) => {
                     terminal.restore_managed_agent(agent_name, agent)
@@ -640,6 +646,12 @@ fn restore_tab(
                 }
                 if let Some(session) = restored_agent_session {
                     terminal.set_persisted_agent_session(session);
+                }
+                if was_imported {
+                    // The live handed-off process is the same agent occupancy,
+                    // so its durable identity and ownership carry over.
+                    terminal.agent_identity = saved_agent_identity.clone();
+                    terminal.agent_ownership = saved_agent_ownership.clone();
                 }
                 match (saved_agent_name, saved_managed_agent) {
                     (Some(agent_name), Some(agent)) if was_imported => {
@@ -1200,6 +1212,8 @@ mod tests {
                                 value: "opencode-session".into(),
                             }),
                             launch_argv: None,
+                            agent_identity: None,
+                            agent_ownership: None,
                         },
                     )]),
                     zoomed: false,
@@ -1215,6 +1229,7 @@ mod tests {
             sidebar_section_split: None,
             collapsed_space_keys: Default::default(),
             automations_expanded: false,
+            collapsed_agent_group_keys: std::collections::HashSet::new(),
         };
         let (events, _event_rx) = mpsc::channel(4);
 
@@ -1252,6 +1267,193 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn restore_restores_agent_identity_and_ownership_with_resume() {
+        let cwd = std::env::current_dir().unwrap();
+        let ownership = super::super::snapshot::PaneAgentOwnershipSnapshot {
+            origin: super::super::snapshot::PaneAgentOwnerRefSnapshot {
+                agent_id: "agent_origin".into(),
+                name: Some("lead".into()),
+                agent: Some("codex".into()),
+                session: None,
+            },
+            current: Some(super::super::snapshot::PaneAgentOwnerRefSnapshot {
+                agent_id: "agent_current".into(),
+                name: Some("lead2".into()),
+                agent: Some("codex".into()),
+                session: Some(super::super::snapshot::PaneAgentSessionSnapshot {
+                    source: "herdr:codex".into(),
+                    agent: "codex".into(),
+                    kind: crate::agent_resume::AgentSessionRefKind::Id,
+                    value: "owner-session".into(),
+                }),
+            }),
+        };
+        let snapshot = SessionSnapshot {
+            version: super::super::snapshot::SNAPSHOT_VERSION,
+            workspaces: vec![WorkspaceSnapshot {
+                id: Some("workspace".into()),
+                custom_name: None,
+                profiles: Vec::new(),
+                identity_cwd: cwd.clone(),
+                worktree_space: None,
+                public_pane_numbers: HashMap::new(),
+                next_public_pane_number: 0,
+                public_tab_numbers: Vec::new(),
+                next_public_tab_number: 0,
+                tabs: vec![TabSnapshot {
+                    custom_name: None,
+                    layout: LayoutSnapshot::Pane(0),
+                    panes: HashMap::from([(
+                        0,
+                        super::super::snapshot::PaneSnapshot {
+                            cwd,
+                            label: None,
+                            agent_name: Some("worker".into()),
+                            managed_agent_kind: Some("codex".into()),
+                            agent_session: Some(super::super::snapshot::PaneAgentSessionSnapshot {
+                                source: "herdr:codex".into(),
+                                agent: "codex".into(),
+                                kind: crate::agent_resume::AgentSessionRefKind::Id,
+                                value: "worker-session".into(),
+                            }),
+                            launch_argv: None,
+                            agent_identity: Some("agent_worker".into()),
+                            agent_ownership: Some(ownership.clone()),
+                        },
+                    )]),
+                    zoomed: false,
+                    focused: Some(0),
+                    root_pane: Some(0),
+                }],
+                active_tab: 0,
+            }],
+            active: Some(0),
+            active_profile: crate::workspace::DEFAULT_PROFILE.to_string(),
+            selected: 0,
+            sidebar_width: None,
+            sidebar_section_split: None,
+            collapsed_space_keys: Default::default(),
+            automations_expanded: false,
+            collapsed_agent_group_keys: std::collections::HashSet::new(),
+        };
+        let (events, _event_rx) = mpsc::channel(4);
+
+        let (_workspaces, terminals, _runtimes) = restore(
+            &snapshot,
+            None,
+            24,
+            80,
+            0,
+            test_restore_shell(),
+            crate::config::ShellModeConfig::NonLogin,
+            true,
+            events,
+            Arc::new(Notify::new()),
+            Arc::new(RenderSignal::new()),
+        );
+
+        let terminal = terminals
+            .values()
+            .next()
+            .expect("restored terminal should exist");
+        assert!(terminal.pending_agent_resume_plan.is_some());
+        assert_eq!(terminal.agent_identity.as_deref(), Some("agent_worker"));
+        let restored = terminal
+            .agent_ownership
+            .as_ref()
+            .expect("ownership should survive restore");
+        assert_eq!(restored.origin.agent_id, "agent_origin");
+        assert_eq!(restored.origin.name.as_deref(), Some("lead"));
+        let current = restored.current.as_ref().expect("current owner kept");
+        assert_eq!(current.agent_id, "agent_current");
+        let session = current.session.as_ref().expect("owner session kept");
+        assert_eq!(session.session_ref.value, "owner-session");
+    }
+
+    #[tokio::test]
+    async fn restore_without_resume_drops_agent_occupancy_but_loads_safely() {
+        let cwd = std::env::current_dir().unwrap();
+        let snapshot = SessionSnapshot {
+            version: super::super::snapshot::SNAPSHOT_VERSION,
+            workspaces: vec![WorkspaceSnapshot {
+                id: Some("workspace".into()),
+                custom_name: None,
+                profiles: Vec::new(),
+                identity_cwd: cwd.clone(),
+                worktree_space: None,
+                public_pane_numbers: HashMap::new(),
+                next_public_pane_number: 0,
+                public_tab_numbers: Vec::new(),
+                next_public_tab_number: 0,
+                tabs: vec![TabSnapshot {
+                    custom_name: None,
+                    layout: LayoutSnapshot::Pane(0),
+                    panes: HashMap::from([(
+                        0,
+                        super::super::snapshot::PaneSnapshot {
+                            cwd,
+                            label: None,
+                            agent_name: Some("worker".into()),
+                            managed_agent_kind: Some("codex".into()),
+                            agent_session: None,
+                            launch_argv: None,
+                            agent_identity: Some("agent_worker".into()),
+                            agent_ownership: Some(
+                                super::super::snapshot::PaneAgentOwnershipSnapshot {
+                                    origin: super::super::snapshot::PaneAgentOwnerRefSnapshot {
+                                        agent_id: "agent_origin".into(),
+                                        name: None,
+                                        agent: None,
+                                        session: None,
+                                    },
+                                    current: None,
+                                },
+                            ),
+                        },
+                    )]),
+                    zoomed: false,
+                    focused: Some(0),
+                    root_pane: Some(0),
+                }],
+                active_tab: 0,
+            }],
+            active: Some(0),
+            active_profile: crate::workspace::DEFAULT_PROFILE.to_string(),
+            selected: 0,
+            sidebar_width: None,
+            sidebar_section_split: None,
+            collapsed_space_keys: Default::default(),
+            automations_expanded: false,
+            collapsed_agent_group_keys: std::collections::HashSet::new(),
+        };
+        let (events, _event_rx) = mpsc::channel(4);
+
+        let (_workspaces, terminals, _runtimes) = restore(
+            &snapshot,
+            None,
+            24,
+            80,
+            0,
+            test_restore_shell(),
+            crate::config::ShellModeConfig::NonLogin,
+            false,
+            events,
+            Arc::new(Notify::new()),
+            Arc::new(RenderSignal::new()),
+        );
+
+        let terminal = terminals
+            .values()
+            .next()
+            .expect("restored terminal should exist");
+        // The agent process is not coming back without resume, so its
+        // occupancy identity and ownership end with it.
+        assert_eq!(terminal.agent_name, None);
+        assert_eq!(terminal.agent_identity, None);
+        assert!(terminal.agent_ownership.is_none());
+    }
+
+    #[tokio::test]
     async fn restore_preserves_public_id_mapping_after_pane_id_remap() {
         let cwd = std::env::current_dir().unwrap();
         let snapshot = SessionSnapshot {
@@ -1284,6 +1486,8 @@ mod tests {
                                 managed_agent_kind: None,
                                 agent_session: None,
                                 launch_argv: None,
+                                agent_identity: None,
+                                agent_ownership: None,
                             },
                         ),
                         (
@@ -1295,6 +1499,8 @@ mod tests {
                                 managed_agent_kind: None,
                                 agent_session: None,
                                 launch_argv: None,
+                                agent_identity: None,
+                                agent_ownership: None,
                             },
                         ),
                     ]),
@@ -1311,6 +1517,7 @@ mod tests {
             sidebar_section_split: None,
             collapsed_space_keys: Default::default(),
             automations_expanded: false,
+            collapsed_agent_group_keys: std::collections::HashSet::new(),
         };
         let (events, _event_rx) = mpsc::channel(4);
 
@@ -1350,6 +1557,8 @@ mod tests {
                     managed_agent_kind: None,
                     agent_session: None,
                     launch_argv: None,
+                    agent_identity: None,
+                    agent_ownership: None,
                 },
             )
         };
@@ -1365,6 +1574,8 @@ mod tests {
                 value: "codex-session".into(),
             }),
             launch_argv: None,
+            agent_identity: None,
+            agent_ownership: None,
         };
         let snapshot = SessionSnapshot {
             version: super::super::snapshot::SNAPSHOT_VERSION,
@@ -1421,6 +1632,7 @@ mod tests {
             sidebar_section_split: None,
             collapsed_space_keys: Default::default(),
             automations_expanded: false,
+            collapsed_agent_group_keys: std::collections::HashSet::new(),
         };
         let (events, _event_rx) = mpsc::channel(4);
 
@@ -1521,6 +1733,8 @@ mod tests {
                                 value: "codex-session".into(),
                             }),
                             launch_argv: None,
+                            agent_identity: None,
+                            agent_ownership: None,
                         },
                     )]),
                     zoomed: false,
@@ -1536,6 +1750,7 @@ mod tests {
             sidebar_section_split: None,
             collapsed_space_keys: Default::default(),
             automations_expanded: false,
+            collapsed_agent_group_keys: std::collections::HashSet::new(),
         };
         let (events, _event_rx) = mpsc::channel(4);
 
@@ -1684,6 +1899,8 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                agent_identity: None,
+                agent_ownership: None,
             },
         );
         let history = SessionHistorySnapshot {
@@ -1733,6 +1950,7 @@ mod tests {
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: Default::default(),
             automations_expanded: false,
+            collapsed_agent_group_keys: std::collections::HashSet::new(),
         };
         (snapshot, history)
     }

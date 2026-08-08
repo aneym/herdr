@@ -291,7 +291,9 @@ herdr agent rename <target> <name>|--clear
 herdr agent focus <target>
 herdr agent wait <target> [--until STATUS]... [--timeout MS]
 herdr agent attach <target> [--takeover]
-herdr agent start <name> --kind KIND --pane ID [--timeout MS] [-- <agent-args...>]
+herdr agent start <name> --kind KIND --pane ID [--timeout MS] [--owner TARGET|--no-owner] [-- <agent-args...>]
+herdr agent owner set <target> <owner>
+herdr agent owner clear <target>
 herdr agent explain <target> [--json|--verbose]
 herdr agent explain --file PATH --agent LABEL [--json|--verbose]
 ```
@@ -301,6 +303,8 @@ Agent targets are either a unique live agent name or the pane ID that currently 
 `agent start` activates an existing available shell pane: the pane's interactive shell must own the foreground, with no foreground command, editor, or agent running. Topology must be created separately. Names are unique among live agents and must match `[a-z][a-z0-9_-]{0,31}`. The kind selects Herdr's canonical interactive executable, while arguments after `--` are passed to that executable. Supported kinds are `pi`, `claude`, `codex`, `gemini`, `cursor`, `devin`, `agy`, `cline`, `omp`, `mastracode`, `opencode`, `copilot`, `kimi`, `kiro`, `droid`, `amp`, `grok`, `hermes`, `kilo`, `qodercli`, and `maki`. A name follows the current pane occupant and is cleared when that agent exits, is released, or is replaced. Temporary detection uncertainty does not clear it.
 
 Start returns only after the expected agent owns the same terminal and is ready for interactive input. The default startup timeout is 30000 milliseconds; explicit values must be greater than 3000 and no more than 300000.
+
+When `agent start` runs inside a pane that hosts a live agent, the started agent is recorded as owned by that caller. `--owner TARGET` records a specific owner instead, and `--no-owner` keeps the new agent a root. `agent owner set` adopts or transfers an agent to a new current owner, and `agent owner clear` releases it to a root; the immutable origin owner recorded when ownership first appeared never changes. Self-ownership and ownership cycles are rejected. See [Agents](/docs/agents/) for the ownership model, orphan handling, and sidebar behavior.
 
 `agent prompt` honors live bracketed-paste mode and submits text plus encoded Enter atomically, including while the agent is working. With `--wait`, a prompt sent from a non-working state must produce an observed lifecycle change within five seconds or Herdr returns `agent_prompt_stalled`; a caller timeout of five seconds or less keeps the normal `timeout` error. After activity is observed, it waits for the first requested settled status. It does not track individual turns. If the agent is already working, completion of that active turn may satisfy the wait. `--until` narrows the matching states and is rejected unless `--wait` is also present. Standalone `agent wait` returns immediately when the current status matches. Both default to `idle`, `done`, or `blocked`; use `--until unknown` explicitly when needed.
 

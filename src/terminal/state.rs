@@ -145,6 +145,11 @@ pub struct TerminalState {
     pub respawn_shell_on_exit: bool,
     recent_agent_process_exit: Option<RecentAgentProcessExit>,
     pub pending_agent_resume_plan: Option<crate::agent_resume::AgentResumePlan>,
+    /// Durable identity for the current agent occupancy. Survives renames,
+    /// pane moves, and restarts; cleared only when the occupancy ends.
+    pub agent_identity: Option<String>,
+    /// Durable ownership record of the current agent occupancy.
+    pub agent_ownership: Option<crate::agent_ownership::AgentOwnership>,
 }
 
 impl TerminalState {
@@ -178,6 +183,8 @@ impl TerminalState {
             respawn_shell_on_exit: false,
             recent_agent_process_exit: None,
             pending_agent_resume_plan: None,
+            agent_identity: None,
+            agent_ownership: None,
         }
     }
 
@@ -539,6 +546,7 @@ impl TerminalState {
         }
         if agent_released {
             self.clear_agent_name();
+            self.end_agent_occupancy();
         }
         TerminalStateMutation {
             effective_state_change: self.recompute_effective_state(
@@ -1670,6 +1678,7 @@ impl TerminalState {
             self.fallback_visible_blocker = false;
             self.fallback_observed_at = None;
             self.clear_agent_name();
+            self.end_agent_occupancy();
         }
         self.hook_authority = None;
         if !preserve_foreign_persisted_session {
@@ -1815,6 +1824,8 @@ impl TerminalState {
                 observed_expected: false,
             },
         });
+        self.agent_identity = Some(crate::agent_ownership::alloc_agent_identity());
+        self.agent_ownership = None;
     }
 
     pub fn managed_agent_launch_pending(&self) -> bool {
@@ -1861,6 +1872,7 @@ impl TerminalState {
                 && known_agent.is_none();
         if clear {
             self.clear_agent_name();
+            self.end_agent_occupancy();
             return true;
         }
         if let ManagedAgentPhase::Pending {
@@ -1871,6 +1883,7 @@ impl TerminalState {
         {
             if now >= deadline {
                 self.clear_agent_name();
+                self.end_agent_occupancy();
                 return true;
             }
             if ready_after.is_none_or(|ready_after| now >= ready_after) {
@@ -1946,6 +1959,40 @@ impl TerminalState {
         self.recent_agent_process_exit = None;
         self.pending_agent_resume_plan = None;
         self.clear_agent_name();
+        self.end_agent_occupancy();
+    }
+
+    /// End the current agent occupancy: drop its durable identity and
+    /// ownership record. Un-naming an agent does NOT end its occupancy; only
+    /// process exit, hook release, or a respawn reset does.
+    fn end_agent_occupancy(&mut self) {
+        self.agent_identity = None;
+        self.agent_ownership = None;
+    }
+
+    /// Durable identity of the current agent occupancy, assigning one lazily
+    /// when an agent is present but was never identified (e.g. an agent the
+    /// user launched manually).
+    pub fn ensure_agent_identity(&mut self) -> Option<String> {
+        if !self.is_agent_terminal() {
+            return None;
+        }
+        if self.agent_identity.is_none() {
+            self.agent_identity = Some(crate::agent_ownership::alloc_agent_identity());
+        }
+        self.agent_identity.clone()
+    }
+
+    /// Session identity of the current occupancy for owner reconciliation.
+    pub fn current_agent_session(&self) -> Option<crate::agent_resume::PersistedAgentSession> {
+        self.current_session_identity_for_persistence()
+            .map(
+                |(source, agent, kind, value)| crate::agent_resume::PersistedAgentSession {
+                    source,
+                    agent,
+                    session_ref: crate::agent_resume::AgentSessionRef { kind, value },
+                },
+            )
     }
 
     pub fn is_agent_terminal(&self) -> bool {
@@ -2058,6 +2105,82 @@ mod tests {
 
     fn test_terminal() -> TerminalState {
         TerminalState::new(TerminalId::alloc(), "/tmp".into())
+    }
+
+    #[test]
+    fn agent_occupancy_identity_survives_unname_but_not_exit() {
+        let mut terminal = test_terminal();
+        let now = Instant::now();
+        terminal.begin_managed_agent(
+            "worker".into(),
+            Agent::Pi,
+            now,
+            Duration::from_secs(3),
+            Duration::from_secs(30),
+        );
+        let identity = terminal
+            .agent_identity
+            .clone()
+            .expect("managed start assigns a durable identity");
+        terminal.agent_ownership = Some(crate::agent_ownership::AgentOwnership::new(
+            crate::agent_ownership::AgentOwnerRef {
+                agent_id: "agent_lead".into(),
+                name: None,
+                agent: None,
+                session: None,
+            },
+        ));
+        terminal.set_detected_state(Some(Agent::Pi), AgentState::Idle);
+
+        // Un-naming (rename --clear) must not end the occupancy.
+        terminal.clear_agent_name();
+        assert_eq!(terminal.agent_identity.as_deref(), Some(identity.as_str()));
+        assert!(terminal.agent_ownership.is_some());
+
+        // Process exit ends the occupancy and its ownership record.
+        terminal.set_detected_state_with_visible_blocker(
+            None,
+            AgentState::Unknown,
+            false,
+            false,
+            true,
+        );
+        assert_eq!(terminal.agent_identity, None);
+        assert!(terminal.agent_ownership.is_none());
+    }
+
+    #[test]
+    fn failed_managed_launch_ends_the_occupancy() {
+        let mut terminal = test_terminal();
+        let now = Instant::now();
+        terminal.begin_managed_agent(
+            "worker".into(),
+            Agent::Pi,
+            now,
+            Duration::from_secs(3),
+            Duration::from_secs(30),
+        );
+        assert!(terminal.agent_identity.is_some());
+
+        // Startup deadline passes without the expected agent appearing.
+        let after_deadline = now + Duration::from_secs(31);
+        assert!(terminal.reconcile_managed_agent_at(after_deadline, false));
+        assert_eq!(terminal.agent_name, None);
+        assert_eq!(terminal.agent_identity, None);
+        assert!(terminal.agent_ownership.is_none());
+    }
+
+    #[test]
+    fn ensure_agent_identity_requires_an_agent_and_is_stable() {
+        let mut terminal = test_terminal();
+        assert_eq!(terminal.ensure_agent_identity(), None);
+
+        terminal.set_detected_state(Some(Agent::Pi), AgentState::Idle);
+        let first = terminal
+            .ensure_agent_identity()
+            .expect("live agent gets an identity");
+        let second = terminal.ensure_agent_identity().unwrap();
+        assert_eq!(first, second);
     }
 
     fn test_session_path(name: &str) -> String {

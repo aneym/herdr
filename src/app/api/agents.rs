@@ -3,8 +3,8 @@ use std::time::Duration;
 use bytes::Bytes;
 
 use crate::api::schema::{
-    AgentPromptParams, AgentRenameParams, AgentSendKeysParams, AgentStartParams, AgentTarget,
-    PaneReadResult, ResponseResult,
+    AgentOwnerSetParams, AgentPromptParams, AgentRenameParams, AgentSendKeysParams,
+    AgentStartParams, AgentTarget, PaneReadResult, ResponseResult,
 };
 use crate::app::App;
 
@@ -57,6 +57,28 @@ impl App {
         };
 
         encode_success(id, ResponseResult::AgentStarted { agent, argv })
+    }
+
+    pub(super) fn handle_agent_owner_set(
+        &mut self,
+        id: String,
+        params: AgentOwnerSetParams,
+    ) -> String {
+        let agent = match self.set_agent_owner_target(&params.target, &params.owner) {
+            Ok(agent) => agent,
+            Err(err) => return encode_error_body(id, self.agent_owner_error_body(err)),
+        };
+
+        encode_success(id, ResponseResult::AgentInfo { agent })
+    }
+
+    pub(super) fn handle_agent_owner_clear(&mut self, id: String, target: AgentTarget) -> String {
+        let agent = match self.clear_agent_owner_target(&target.target) {
+            Ok(agent) => agent,
+            Err(err) => return encode_error_body(id, self.agent_owner_error_body(err)),
+        };
+
+        encode_success(id, ResponseResult::AgentInfo { agent })
     }
 
     pub(super) fn handle_agent_prompt(&mut self, id: String, params: AgentPromptParams) -> String {
@@ -527,6 +549,414 @@ mod tests {
             panic!("expected agent info response");
         };
         assert_eq!(agent.agent_status, AgentStatus::Idle);
+    }
+
+    fn app_with_named_agents(names: &[&str]) -> App {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            true,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = names.iter().map(|name| Workspace::test_new(name)).collect();
+        app.state.ensure_test_terminals();
+        if !names.is_empty() {
+            app.state.active = Some(0);
+            app.state.selected = 0;
+            app.state.replace_mode(Mode::Terminal);
+        }
+        for (ws_idx, name) in names.iter().enumerate() {
+            let pane_id = app.state.workspaces[ws_idx].tabs[0].root_pane;
+            let terminal_id = app.state.workspaces[ws_idx].tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+            terminal.set_agent_name((*name).to_string());
+            terminal.set_detected_state(Some(Agent::Pi), AgentState::Idle);
+        }
+        app
+    }
+
+    fn agent_json(app: &mut App, target: &str) -> serde_json::Value {
+        let response = app.handle_agent_get(
+            "req-get".into(),
+            AgentTarget {
+                target: target.into(),
+            },
+        );
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        response["result"]["agent"].clone()
+    }
+
+    fn exit_agent_process(app: &mut App, target_ws: usize) {
+        let pane_id = app.state.workspaces[target_ws].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[target_ws].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_state_with_visible_blocker(None, AgentState::Unknown, false, false, true);
+    }
+
+    #[tokio::test]
+    async fn agent_start_records_caller_agent_as_owner() {
+        let mut app = app_with_named_agents(&["lead"]);
+        app.state
+            .workspaces
+            .push(Workspace::test_new("shell-space"));
+        app.state.ensure_test_terminals();
+        let shell_pane = app.state.workspaces[1].tabs[0].root_pane;
+        let shell_terminal_id = app.state.workspaces[1].tabs[0].panes[&shell_pane]
+            .attached_terminal_id
+            .clone();
+        let (runtime, _rx) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
+        app.terminal_runtimes
+            .insert(shell_terminal_id.clone(), runtime);
+        let caller_pane_id = app.public_pane_id(0, app.state.workspaces[0].tabs[0].root_pane);
+        let target_pane_id = app.public_pane_id(1, shell_pane).unwrap();
+
+        let response = app.handle_agent_start(
+            "req-start".into(),
+            AgentStartParams {
+                name: "worker".into(),
+                kind: "pi".into(),
+                pane_id: target_pane_id,
+                args: Vec::new(),
+                timeout_ms: Some(4_000),
+                owner: None,
+                caller_pane_id,
+            },
+        );
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        let agent = &response["result"]["agent"];
+        assert_eq!(agent["name"], "worker");
+        assert!(agent["agent_id"].as_str().unwrap().starts_with("agent_"));
+        let ownership = &agent["ownership"];
+        let lead_identity = agent_json(&mut app, "lead")["agent_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(ownership["origin"]["agent_id"], lead_identity.as_str());
+        assert_eq!(ownership["current"]["agent_id"], lead_identity.as_str());
+        assert_eq!(ownership["current"]["name"], "lead");
+        assert_eq!(ownership["current"]["resolved"], true);
+        assert!(ownership.get("orphaned").is_none_or(|v| v == false));
+    }
+
+    #[tokio::test]
+    async fn agent_start_without_agent_caller_stays_root_and_bad_owner_errors() {
+        let mut app = app_with_named_agents(&[]);
+        app.state.workspaces = vec![
+            Workspace::test_new("caller-shell"),
+            Workspace::test_new("target-shell"),
+        ];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        let target_pane = app.state.workspaces[1].tabs[0].root_pane;
+        let target_terminal_id = app.state.workspaces[1].tabs[0].panes[&target_pane]
+            .attached_terminal_id
+            .clone();
+        let (runtime, _rx) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
+        app.terminal_runtimes.insert(target_terminal_id, runtime);
+        let caller_pane_id = app.public_pane_id(0, app.state.workspaces[0].tabs[0].root_pane);
+        let target_pane_id = app.public_pane_id(1, target_pane).unwrap();
+
+        let response = app.handle_agent_start(
+            "req-root".into(),
+            AgentStartParams {
+                name: "worker".into(),
+                kind: "pi".into(),
+                pane_id: target_pane_id.clone(),
+                args: Vec::new(),
+                timeout_ms: Some(4_000),
+                owner: None,
+                caller_pane_id,
+            },
+        );
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        let agent = &response["result"]["agent"];
+        assert_eq!(agent["name"], "worker");
+        assert!(agent.get("ownership").is_none());
+
+        let rejected = app.handle_agent_start(
+            "req-bad-owner".into(),
+            AgentStartParams {
+                name: "worker2".into(),
+                kind: "pi".into(),
+                pane_id: target_pane_id,
+                args: Vec::new(),
+                timeout_ms: Some(4_000),
+                owner: Some("missing".into()),
+                caller_pane_id: None,
+            },
+        );
+        let rejected: serde_json::Value = serde_json::from_str(&rejected).unwrap();
+        assert_eq!(rejected["error"]["code"], "agent_owner_not_agent");
+    }
+
+    #[tokio::test]
+    async fn agent_owner_set_transfer_and_clear_keep_origin() {
+        let mut app = app_with_named_agents(&["lead", "peer", "worker"]);
+
+        let adopted = app.handle_agent_owner_set(
+            "req-adopt".into(),
+            AgentOwnerSetParams {
+                target: "worker".into(),
+                owner: "lead".into(),
+            },
+        );
+        let adopted: serde_json::Value = serde_json::from_str(&adopted).unwrap();
+        let lead_identity = agent_json(&mut app, "lead")["agent_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let ownership = &adopted["result"]["agent"]["ownership"];
+        assert_eq!(ownership["origin"]["agent_id"], lead_identity.as_str());
+        assert_eq!(ownership["current"]["agent_id"], lead_identity.as_str());
+
+        let transferred = app.handle_agent_owner_set(
+            "req-transfer".into(),
+            AgentOwnerSetParams {
+                target: "worker".into(),
+                owner: "peer".into(),
+            },
+        );
+        let transferred: serde_json::Value = serde_json::from_str(&transferred).unwrap();
+        let peer_identity = agent_json(&mut app, "peer")["agent_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let ownership = &transferred["result"]["agent"]["ownership"];
+        // Origin lineage is immutable; current ownership transfers.
+        assert_eq!(ownership["origin"]["agent_id"], lead_identity.as_str());
+        assert_eq!(ownership["current"]["agent_id"], peer_identity.as_str());
+
+        let released = app.handle_agent_owner_clear(
+            "req-release".into(),
+            AgentTarget {
+                target: "worker".into(),
+            },
+        );
+        let released: serde_json::Value = serde_json::from_str(&released).unwrap();
+        let ownership = &released["result"]["agent"]["ownership"];
+        assert_eq!(ownership["origin"]["agent_id"], lead_identity.as_str());
+        assert!(ownership.get("current").is_none());
+        assert!(ownership.get("orphaned").is_none_or(|v| v == false));
+    }
+
+    #[tokio::test]
+    async fn agent_owner_set_rejects_self_ownership_and_cycles() {
+        let mut app = app_with_named_agents(&["lead", "worker"]);
+
+        let self_owned = app.handle_agent_owner_set(
+            "req-self".into(),
+            AgentOwnerSetParams {
+                target: "lead".into(),
+                owner: "lead".into(),
+            },
+        );
+        let self_owned: serde_json::Value = serde_json::from_str(&self_owned).unwrap();
+        assert_eq!(self_owned["error"]["code"], "agent_owner_invalid");
+
+        let adopted = app.handle_agent_owner_set(
+            "req-adopt".into(),
+            AgentOwnerSetParams {
+                target: "worker".into(),
+                owner: "lead".into(),
+            },
+        );
+        assert!(adopted.contains("\"result\""));
+        let cycle = app.handle_agent_owner_set(
+            "req-cycle".into(),
+            AgentOwnerSetParams {
+                target: "lead".into(),
+                owner: "worker".into(),
+            },
+        );
+        let cycle: serde_json::Value = serde_json::from_str(&cycle).unwrap();
+        assert_eq!(cycle["error"]["code"], "agent_owner_cycle");
+    }
+
+    #[tokio::test]
+    async fn agent_rename_clear_does_not_sever_ownership() {
+        let mut app = app_with_named_agents(&["lead", "worker"]);
+        let response = app.handle_agent_owner_set(
+            "req-adopt".into(),
+            AgentOwnerSetParams {
+                target: "worker".into(),
+                owner: "lead".into(),
+            },
+        );
+        assert!(response.contains("\"result\""));
+        let worker_pane_id = agent_json(&mut app, "worker")["pane_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let renamed = app.handle_agent_rename(
+            "req-unname".into(),
+            AgentRenameParams {
+                target: "worker".into(),
+                name: None,
+            },
+        );
+        assert!(renamed.contains("\"result\""));
+
+        let agent = agent_json(&mut app, &worker_pane_id);
+        assert!(agent.get("name").is_none());
+        assert!(agent["ownership"]["current"]["agent_id"]
+            .as_str()
+            .unwrap()
+            .starts_with("agent_"));
+    }
+
+    #[tokio::test]
+    async fn owner_exit_orphans_worker_and_owner_clear_recovers_it() {
+        let mut app = app_with_named_agents(&["lead", "worker"]);
+        let response = app.handle_agent_owner_set(
+            "req-adopt".into(),
+            AgentOwnerSetParams {
+                target: "worker".into(),
+                owner: "lead".into(),
+            },
+        );
+        assert!(response.contains("\"result\""));
+
+        exit_agent_process(&mut app, 0);
+
+        let orphaned = agent_json(&mut app, "worker");
+        assert_eq!(orphaned["ownership"]["orphaned"], true);
+        assert_eq!(orphaned["ownership"]["current"]["resolved"], false);
+        // The snapshot of who owned it is preserved for the user to act on.
+        assert_eq!(orphaned["ownership"]["current"]["name"], "lead");
+
+        let released = app.handle_agent_owner_clear(
+            "req-release".into(),
+            AgentTarget {
+                target: "worker".into(),
+            },
+        );
+        let released: serde_json::Value = serde_json::from_str(&released).unwrap();
+        let ownership = &released["result"]["agent"]["ownership"];
+        assert!(ownership.get("current").is_none());
+        assert!(ownership.get("orphaned").is_none_or(|v| v == false));
+    }
+
+    #[tokio::test]
+    async fn owner_resolution_reconciles_via_resumed_session() {
+        let mut app = app_with_named_agents(&["lead", "worker", "revived"]);
+        let lead_pane = app.state.workspaces[0].tabs[0].root_pane;
+        let lead_terminal_id = app.state.workspaces[0].tabs[0].panes[&lead_pane]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&lead_terminal_id)
+            .unwrap()
+            .set_persisted_agent_session(crate::agent_resume::PersistedAgentSession {
+                source: "herdr:pi".into(),
+                agent: "pi".into(),
+                session_ref: crate::agent_resume::AgentSessionRef::id("lead-session").unwrap(),
+            });
+        let response = app.handle_agent_owner_set(
+            "req-adopt".into(),
+            AgentOwnerSetParams {
+                target: "worker".into(),
+                owner: "lead".into(),
+            },
+        );
+        assert!(response.contains("\"result\""));
+
+        exit_agent_process(&mut app, 0);
+        assert_eq!(
+            agent_json(&mut app, "worker")["ownership"]["orphaned"],
+            true
+        );
+
+        // The owner's session comes back in a different pane: the durable
+        // reference reconciles through the recorded session identity.
+        let revived_pane = app.state.workspaces[2].tabs[0].root_pane;
+        let revived_terminal_id = app.state.workspaces[2].tabs[0].panes[&revived_pane]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&revived_terminal_id)
+            .unwrap()
+            .set_persisted_agent_session(crate::agent_resume::PersistedAgentSession {
+                source: "herdr:pi".into(),
+                agent: "pi".into(),
+                session_ref: crate::agent_resume::AgentSessionRef::id("lead-session").unwrap(),
+            });
+
+        let agent = agent_json(&mut app, "worker");
+        assert!(agent["ownership"]
+            .get("orphaned")
+            .is_none_or(|v| v == false));
+        assert_eq!(agent["ownership"]["current"]["resolved"], true);
+        assert_eq!(
+            agent["ownership"]["current"]["pane_id"],
+            app.public_pane_id(2, revived_pane).unwrap().as_str()
+        );
+        assert_eq!(agent["ownership"]["current"]["name"], "revived");
+    }
+
+    #[tokio::test]
+    async fn ownership_survives_pane_move_across_tabs() {
+        let mut app = app_with_named_agents(&["lead", "worker"]);
+        let response = app.handle_agent_owner_set(
+            "req-adopt".into(),
+            AgentOwnerSetParams {
+                target: "worker".into(),
+                owner: "lead".into(),
+            },
+        );
+        assert!(response.contains("\"result\""));
+
+        let worker_pane = app.state.workspaces[1].tabs[0].root_pane;
+        let target_tab = app.state.workspaces[0].test_add_tab(Some("target"));
+        let target_pane = app.state.workspaces[0].tabs[target_tab].root_pane;
+        app.state.ensure_test_terminals();
+        let worker_public = app.public_pane_id(1, worker_pane).unwrap();
+        let target_tab_public = app.public_tab_id(0, target_tab).unwrap();
+        let target_public = app.public_pane_id(0, target_pane).unwrap();
+
+        let moved = app.handle_pane_move(
+            "req-move".into(),
+            crate::api::schema::PaneMoveParams {
+                pane_id: worker_public,
+                destination: crate::api::schema::PaneMoveDestination::Tab {
+                    tab_id: target_tab_public,
+                    target_pane_id: Some(target_public),
+                    split: crate::api::schema::SplitDirection::Right,
+                    ratio: None,
+                },
+                focus: false,
+            },
+        );
+        let moved: serde_json::Value = serde_json::from_str(&moved).unwrap();
+        let moved_pane_id = moved["result"]["move_result"]["pane"]["pane_id"]
+            .as_str()
+            .expect("pane move should succeed")
+            .to_string();
+
+        let agent = agent_json(&mut app, &moved_pane_id);
+        assert_eq!(agent["name"], "worker");
+        let lead_identity = agent_json(&mut app, "lead")["agent_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            agent["ownership"]["current"]["agent_id"],
+            lead_identity.as_str()
+        );
+        assert!(agent["ownership"]
+            .get("orphaned")
+            .is_none_or(|v| v == false));
     }
 
     #[test]

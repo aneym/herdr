@@ -375,6 +375,23 @@ fn agent_cli_rejects_invalid_wait_and_rename_grammar_locally() {
         ][..],
         &["agent", "rename", "reviewer"][..],
         &["agent", "rename", "reviewer", "worker", "--clear"][..],
+        &[
+            "agent",
+            "start",
+            "reviewer",
+            "--kind",
+            "pi",
+            "--pane",
+            "w1:p1",
+            "--owner",
+            "lead",
+            "--no-owner",
+        ][..],
+        &["agent", "owner"][..],
+        &["agent", "owner", "set", "worker"][..],
+        &["agent", "owner", "set", "worker", "lead", "extra"][..],
+        &["agent", "owner", "clear"][..],
+        &["agent", "owner", "clear", "worker", "extra"][..],
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_herdr"))
             .args(args)

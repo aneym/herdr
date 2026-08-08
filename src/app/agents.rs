@@ -165,6 +165,8 @@ impl App {
                 candidates: conflicts,
             });
         }
+        let owner_ref = self
+            .agent_owner_ref_for_start(params.owner.as_deref(), params.caller_pane_id.as_deref())?;
         let Some((ws_idx, pane_id)) = self.parse_current_public_pane_id(&params.pane_id) else {
             return Err(AgentStartError::TargetNotFound(params.pane_id));
         };
@@ -211,8 +213,11 @@ impl App {
             .get_mut(&terminal_id)
             .ok_or_else(|| AgentStartError::TargetUnavailable(params.pane_id.clone()))?;
         terminal.begin_managed_agent(name.clone(), kind, now, AGENT_START_SETTLE_DELAY, timeout);
+        terminal.agent_ownership = owner_ref.map(crate::agent_ownership::AgentOwnership::new);
         if let Err(err) = runtime.try_send_bytes(Bytes::from(bytes)) {
             terminal.clear_agent_name();
+            terminal.agent_identity = None;
+            terminal.agent_ownership = None;
             return Err(AgentStartError::InputFailed(err.to_string()));
         }
         self.state.mark_session_dirty();
@@ -222,6 +227,225 @@ impl App {
             .agent_info(ws_idx, pane_id)
             .ok_or(AgentStartError::TargetUnavailable(params.pane_id))?;
         Ok((agent, argv))
+    }
+
+    /// Resolve the owner for a starting agent: an explicit owner target wins,
+    /// otherwise a caller pane that hosts a live agent becomes the owner.
+    fn agent_owner_ref_for_start(
+        &mut self,
+        owner: Option<&str>,
+        caller_pane_id: Option<&str>,
+    ) -> Result<Option<crate::agent_ownership::AgentOwnerRef>, AgentStartError> {
+        if let Some(owner) = owner {
+            let resolved = self
+                .resolve_agent_target(owner)
+                .map_err(|_| AgentStartError::OwnerNotFound(owner.to_string()))?;
+            return self
+                .owner_ref_for_terminal(&resolved.terminal_id)
+                .map(Some)
+                .ok_or_else(|| AgentStartError::OwnerNotFound(owner.to_string()));
+        }
+        let Some(caller) = caller_pane_id else {
+            return Ok(None);
+        };
+        let Some((ws_idx, pane_id)) = self.parse_current_public_pane_id(caller) else {
+            return Ok(None);
+        };
+        let Some(terminal_id) = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .and_then(|workspace| workspace.terminal_id(pane_id))
+            .map(ToString::to_string)
+        else {
+            return Ok(None);
+        };
+        Ok(self.owner_ref_for_terminal(&terminal_id))
+    }
+
+    /// Build an owner reference for the live agent hosted by this terminal,
+    /// assigning its durable identity when missing.
+    fn owner_ref_for_terminal(
+        &mut self,
+        terminal_id: &str,
+    ) -> Option<crate::agent_ownership::AgentOwnerRef> {
+        let terminal = self
+            .state
+            .terminals
+            .values_mut()
+            .find(|terminal| terminal.id.to_string() == terminal_id)?;
+        if terminal.managed_agent_launch_pending() {
+            return None;
+        }
+        let agent_id = terminal.ensure_agent_identity()?;
+        Some(crate::agent_ownership::AgentOwnerRef {
+            agent_id,
+            name: terminal.agent_name.clone(),
+            agent: terminal.effective_agent_label().map(str::to_string),
+            session: terminal.current_agent_session(),
+        })
+    }
+
+    pub(super) fn set_agent_owner_target(
+        &mut self,
+        target: &str,
+        owner: &str,
+    ) -> Result<crate::api::schema::AgentInfo, AgentOwnerError> {
+        let resolved = self
+            .resolve_agent_target(target)
+            .map_err(AgentOwnerError::Target)?;
+        let resolved_owner = self
+            .resolve_agent_target(owner)
+            .map_err(AgentOwnerError::OwnerTarget)?;
+        if resolved.terminal_id == resolved_owner.terminal_id {
+            return Err(AgentOwnerError::SelfOwned);
+        }
+        let owner_ref = self
+            .owner_ref_for_terminal(&resolved_owner.terminal_id)
+            .ok_or(AgentOwnerError::OwnerNotAgent {
+                target: owner.to_string(),
+            })?;
+        let child_identity = self
+            .owner_ref_for_terminal(&resolved.terminal_id)
+            .ok_or(AgentOwnerError::NotAgent {
+                target: target.to_string(),
+            })?
+            .agent_id;
+        if self
+            .state
+            .agent_ownership_would_cycle(&child_identity, &owner_ref.agent_id)
+        {
+            return Err(AgentOwnerError::Cycle);
+        }
+        let Some(terminal) = self
+            .state
+            .terminals
+            .values_mut()
+            .find(|terminal| terminal.id.to_string() == resolved.terminal_id)
+        else {
+            return Err(AgentOwnerError::Target(TerminalTargetError::NotFound {
+                target: target.to_string(),
+            }));
+        };
+        match terminal.agent_ownership.as_mut() {
+            Some(ownership) => ownership.current = Some(owner_ref),
+            None => {
+                terminal.agent_ownership =
+                    Some(crate::agent_ownership::AgentOwnership::new(owner_ref));
+            }
+        }
+        self.state.mark_session_dirty();
+        self.schedule_session_save();
+        self.emit_pane_updated(resolved.ws_idx, resolved.pane_id);
+        self.agent_info(resolved.ws_idx, resolved.pane_id)
+            .ok_or_else(|| {
+                AgentOwnerError::Target(TerminalTargetError::NotFound {
+                    target: target.to_string(),
+                })
+            })
+    }
+
+    pub(super) fn clear_agent_owner_target(
+        &mut self,
+        target: &str,
+    ) -> Result<crate::api::schema::AgentInfo, AgentOwnerError> {
+        let resolved = self
+            .resolve_agent_target(target)
+            .map_err(AgentOwnerError::Target)?;
+        let Some(terminal) = self
+            .state
+            .terminals
+            .values_mut()
+            .find(|terminal| terminal.id.to_string() == resolved.terminal_id)
+        else {
+            return Err(AgentOwnerError::Target(TerminalTargetError::NotFound {
+                target: target.to_string(),
+            }));
+        };
+        let cleared = terminal
+            .agent_ownership
+            .as_mut()
+            .is_some_and(|ownership| ownership.current.take().is_some());
+        if cleared {
+            self.state.mark_session_dirty();
+            self.schedule_session_save();
+            self.emit_pane_updated(resolved.ws_idx, resolved.pane_id);
+        }
+        self.agent_info(resolved.ws_idx, resolved.pane_id)
+            .ok_or_else(|| {
+                AgentOwnerError::Target(TerminalTargetError::NotFound {
+                    target: target.to_string(),
+                })
+            })
+    }
+
+    pub(super) fn agent_owner_error_body(
+        &self,
+        err: AgentOwnerError,
+    ) -> crate::api::schema::ErrorBody {
+        match err {
+            AgentOwnerError::Target(err) | AgentOwnerError::OwnerTarget(err) => {
+                self.agent_target_error_body(err)
+            }
+            AgentOwnerError::SelfOwned => crate::api::schema::ErrorBody {
+                code: "agent_owner_invalid".into(),
+                message: "an agent cannot own itself".into(),
+            },
+            AgentOwnerError::Cycle => crate::api::schema::ErrorBody {
+                code: "agent_owner_cycle".into(),
+                message: "ownership change would create a cycle".into(),
+            },
+            AgentOwnerError::NotAgent { target } => crate::api::schema::ErrorBody {
+                code: "agent_not_ready".into(),
+                message: format!("agent target {target} is not an active agent"),
+            },
+            AgentOwnerError::OwnerNotAgent { target } => crate::api::schema::ErrorBody {
+                code: "agent_owner_not_agent".into(),
+                message: format!("owner target {target} is not an active agent"),
+            },
+        }
+    }
+
+    fn agent_owner_info(
+        &self,
+        owner: &crate::agent_ownership::AgentOwnerRef,
+    ) -> crate::api::schema::AgentOwnerInfo {
+        let resolved = self.state.resolve_agent_owner(owner);
+        let live = resolved.and_then(|(ws_idx, pane_id)| {
+            self.state
+                .workspaces
+                .get(ws_idx)
+                .and_then(|workspace| workspace.pane_state(pane_id))
+                .and_then(|pane| self.state.terminals.get(&pane.attached_terminal_id))
+        });
+        crate::api::schema::AgentOwnerInfo {
+            agent_id: owner.agent_id.clone(),
+            name: live
+                .and_then(|terminal| terminal.agent_name.clone())
+                .or_else(|| owner.name.clone()),
+            agent: live
+                .and_then(|terminal| terminal.effective_agent_label().map(str::to_string))
+                .or_else(|| owner.agent.clone()),
+            pane_id: resolved.and_then(|(ws_idx, pane_id)| self.public_pane_id(ws_idx, pane_id)),
+            resolved: resolved.is_some(),
+        }
+    }
+
+    pub(super) fn agent_ownership_info(
+        &self,
+        terminal: &crate::terminal::TerminalState,
+    ) -> Option<crate::api::schema::AgentOwnershipInfo> {
+        terminal
+            .agent_ownership
+            .as_ref()
+            .map(|ownership| crate::api::schema::AgentOwnershipInfo {
+                origin: self.agent_owner_info(&ownership.origin),
+                current: ownership
+                    .current
+                    .as_ref()
+                    .map(|owner| self.agent_owner_info(owner)),
+                orphaned: self.state.agent_ownership_orphaned(ownership),
+            })
     }
 
     pub(super) fn agent_start_error_body(
@@ -257,6 +481,10 @@ impl App {
             AgentStartError::TargetUnavailable(target) => crate::api::schema::ErrorBody {
                 code: "agent_pane_unavailable".into(),
                 message: format!("agent target pane {target} has no live terminal"),
+            },
+            AgentStartError::OwnerNotFound(target) => crate::api::schema::ErrorBody {
+                code: "agent_owner_not_agent".into(),
+                message: format!("owner target {target} is not an active agent"),
             },
             AgentStartError::InputFailed(message) => crate::api::schema::ErrorBody {
                 code: "agent_start_input_failed".into(),
@@ -369,6 +597,8 @@ impl App {
             return None;
         }
         let pane = self.pane_info(ws_idx, pane_id)?;
+        let agent_id = terminal.agent_identity.clone();
+        let ownership = self.agent_ownership_info(terminal);
         Some(crate::api::schema::AgentInfo {
             terminal_id: pane.terminal_id,
             name: terminal.agent_name.clone(),
@@ -382,6 +612,8 @@ impl App {
             state_labels: pane.state_labels,
             tokens: pane.tokens,
             agent_session: pane.agent_session,
+            agent_id,
+            ownership,
             workspace_id: pane.workspace_id,
             tab_id: pane.tab_id,
             pane_id: pane.pane_id,
@@ -447,11 +679,21 @@ pub(super) enum AgentStartError {
     TargetNotFound(String),
     TargetBusy(String),
     TargetUnavailable(String),
+    OwnerNotFound(String),
     InputFailed(String),
     DuplicateName {
         name: String,
         candidates: Vec<crate::api::schema::AgentInfo>,
     },
+}
+
+pub(super) enum AgentOwnerError {
+    Target(TerminalTargetError),
+    OwnerTarget(TerminalTargetError),
+    SelfOwned,
+    Cycle,
+    NotAgent { target: String },
+    OwnerNotAgent { target: String },
 }
 
 pub(super) enum AgentRenameError {

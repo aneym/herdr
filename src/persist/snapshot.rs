@@ -50,6 +50,8 @@ pub struct SessionSnapshot {
     pub collapsed_space_keys: std::collections::HashSet<String>,
     #[serde(default)]
     pub automations_expanded: bool,
+    #[serde(default)]
+    pub collapsed_agent_group_keys: std::collections::HashSet<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -137,6 +139,10 @@ pub struct PaneSnapshot {
     pub agent_session: Option<PaneAgentSessionSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch_argv: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_identity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_ownership: Option<PaneAgentOwnershipSnapshot>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -145,6 +151,94 @@ pub struct PaneAgentSessionSnapshot {
     pub agent: String,
     pub kind: crate::agent_resume::AgentSessionRefKind,
     pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneAgentOwnershipSnapshot {
+    pub origin: PaneAgentOwnerRefSnapshot,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current: Option<PaneAgentOwnerRefSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneAgentOwnerRefSnapshot {
+    pub agent_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<PaneAgentSessionSnapshot>,
+}
+
+impl PaneAgentSessionSnapshot {
+    fn from_session(session: &crate::agent_resume::PersistedAgentSession) -> Self {
+        Self {
+            source: session.source.clone(),
+            agent: session.agent.clone(),
+            kind: session.session_ref.kind,
+            value: session.session_ref.value.clone(),
+        }
+    }
+
+    fn to_session(&self) -> crate::agent_resume::PersistedAgentSession {
+        crate::agent_resume::PersistedAgentSession {
+            source: self.source.clone(),
+            agent: self.agent.clone(),
+            session_ref: crate::agent_resume::AgentSessionRef {
+                kind: self.kind,
+                value: self.value.clone(),
+            },
+        }
+    }
+}
+
+impl PaneAgentOwnerRefSnapshot {
+    fn from_owner_ref(owner: &crate::agent_ownership::AgentOwnerRef) -> Self {
+        Self {
+            agent_id: owner.agent_id.clone(),
+            name: owner.name.clone(),
+            agent: owner.agent.clone(),
+            session: owner
+                .session
+                .as_ref()
+                .map(PaneAgentSessionSnapshot::from_session),
+        }
+    }
+
+    pub fn to_owner_ref(&self) -> crate::agent_ownership::AgentOwnerRef {
+        crate::agent_ownership::AgentOwnerRef {
+            agent_id: self.agent_id.clone(),
+            name: self.name.clone(),
+            agent: self.agent.clone(),
+            session: self
+                .session
+                .as_ref()
+                .map(PaneAgentSessionSnapshot::to_session),
+        }
+    }
+}
+
+impl PaneAgentOwnershipSnapshot {
+    fn from_ownership(ownership: &crate::agent_ownership::AgentOwnership) -> Self {
+        Self {
+            origin: PaneAgentOwnerRefSnapshot::from_owner_ref(&ownership.origin),
+            current: ownership
+                .current
+                .as_ref()
+                .map(PaneAgentOwnerRefSnapshot::from_owner_ref),
+        }
+    }
+
+    pub fn to_ownership(&self) -> crate::agent_ownership::AgentOwnership {
+        crate::agent_ownership::AgentOwnership {
+            origin: self.origin.to_owner_ref(),
+            current: self
+                .current
+                .as_ref()
+                .map(PaneAgentOwnerRefSnapshot::to_owner_ref),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -219,6 +313,8 @@ struct RawSessionSnapshot {
     collapsed_space_keys: std::collections::HashSet<String>,
     #[serde(default)]
     automations_expanded: bool,
+    #[serde(default)]
+    collapsed_agent_group_keys: std::collections::HashSet<String>,
 }
 
 fn migrate_snapshot(raw: RawSessionSnapshot) -> Result<SessionSnapshot, String> {
@@ -237,6 +333,7 @@ fn migrate_snapshot(raw: RawSessionSnapshot) -> Result<SessionSnapshot, String> 
         sidebar_section_split: raw.sidebar_section_split,
         collapsed_space_keys: raw.collapsed_space_keys,
         automations_expanded: raw.automations_expanded,
+        collapsed_agent_group_keys: raw.collapsed_agent_group_keys,
     })
 }
 
@@ -277,6 +374,17 @@ fn legacy_identity_cwd(snap: &LegacyWorkspaceSnapshot) -> PathBuf {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| "/".into()))
 }
 
+fn owner_session_by_identity(
+    terminals: &HashMap<crate::terminal::TerminalId, crate::terminal::TerminalState>,
+    agent_id: &str,
+) -> Option<PaneAgentSessionSnapshot> {
+    terminals
+        .values()
+        .find(|terminal| terminal.agent_identity.as_deref() == Some(agent_id))
+        .and_then(|terminal| terminal.current_agent_session())
+        .map(|session| PaneAgentSessionSnapshot::from_session(&session))
+}
+
 fn first_pane_id_in_layout(layout: &LayoutSnapshot) -> Option<u32> {
     match layout {
         LayoutSnapshot::Pane(id) => Some(*id),
@@ -301,6 +409,7 @@ pub fn capture(
     sidebar_section_split: f32,
     collapsed_space_keys: std::collections::HashSet<String>,
     automations_expanded: bool,
+    collapsed_agent_group_keys: std::collections::HashSet<String>,
 ) -> SessionSnapshot {
     SessionSnapshot {
         version: SNAPSHOT_VERSION,
@@ -315,6 +424,7 @@ pub fn capture(
         sidebar_section_split: Some(sidebar_section_split),
         collapsed_space_keys,
         automations_expanded,
+        collapsed_agent_group_keys,
     }
 }
 
@@ -402,6 +512,21 @@ fn capture_tab(
                     value: session.session_ref.value.clone(),
                 })
         });
+        let agent_identity = terminal.and_then(|terminal| terminal.agent_identity.clone());
+        let agent_ownership = terminal.and_then(|terminal| {
+            terminal.agent_ownership.as_ref().map(|ownership| {
+                let mut snapshot = PaneAgentOwnershipSnapshot::from_ownership(ownership);
+                // The owner's session identity may appear after ownership was
+                // captured; embed the latest known session so the reference can
+                // be reconciled if the owner's session is resumed elsewhere.
+                if let Some(current) = snapshot.current.as_mut() {
+                    if current.session.is_none() {
+                        current.session = owner_session_by_identity(terminals, &current.agent_id);
+                    }
+                }
+                snapshot
+            })
+        });
         panes.insert(
             id.raw(),
             PaneSnapshot {
@@ -411,6 +536,8 @@ fn capture_tab(
                 managed_agent_kind,
                 agent_session,
                 launch_argv,
+                agent_identity,
+                agent_ownership,
             },
         );
     }
@@ -677,6 +804,7 @@ mod tests {
             state.sidebar_section_split,
             state.collapsed_space_keys.clone(),
             state.automations_expanded,
+            state.collapsed_agent_group_keys.clone(),
         )
     }
 
@@ -743,6 +871,7 @@ mod tests {
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: std::collections::HashSet::new(),
             automations_expanded: false,
+            collapsed_agent_group_keys: std::collections::HashSet::new(),
         };
         let json = serde_json::to_string(&snap).unwrap();
         let restored = parse_snapshot(&json).unwrap();
@@ -786,6 +915,8 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                agent_identity: None,
+                agent_ownership: None,
             },
         );
         panes.insert(
@@ -797,6 +928,8 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                agent_identity: None,
+                agent_ownership: None,
             },
         );
 
@@ -833,6 +966,7 @@ mod tests {
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: std::collections::HashSet::new(),
             automations_expanded: false,
+            collapsed_agent_group_keys: std::collections::HashSet::new(),
             version: SNAPSHOT_VERSION,
         };
 
@@ -1039,6 +1173,95 @@ mod tests {
         assert_eq!(snapshot.sidebar_width, Some(31));
         assert_eq!(snapshot.sidebar_section_split, Some(0.4));
         assert!(snapshot.collapsed_space_keys.contains("repo-key"));
+    }
+
+    #[test]
+    fn capture_contract_tracks_collapsed_agent_group_keys() {
+        let mut state = state_with_workspaces(&["one"]);
+        state.collapsed_agent_group_keys.insert("agent_lead".into());
+
+        let snapshot = capture_from_state(&state);
+        assert!(snapshot.collapsed_agent_group_keys.contains("agent_lead"));
+
+        let json = serde_json::to_string(&snapshot).unwrap();
+        let restored = parse_snapshot(&json).unwrap();
+        assert!(restored.collapsed_agent_group_keys.contains("agent_lead"));
+    }
+
+    #[test]
+    fn capture_records_agent_ownership_and_embeds_owner_session() {
+        let mut state = state_with_workspaces(&["own", "wkr"]);
+
+        let owner_pane = state.workspaces[0].tabs[0].root_pane;
+        let owner_terminal_id = state.workspaces[0].tabs[0].panes[&owner_pane]
+            .attached_terminal_id
+            .clone();
+        let owner = state.terminals.get_mut(&owner_terminal_id).unwrap();
+        owner.set_agent_name("lead".into());
+        owner.set_detected_state(
+            Some(crate::detect::Agent::Pi),
+            crate::detect::AgentState::Idle,
+        );
+        owner.agent_identity = Some("agent_lead".into());
+        owner.set_persisted_agent_session(crate::agent_resume::PersistedAgentSession {
+            source: "herdr:pi".into(),
+            agent: "pi".into(),
+            session_ref: crate::agent_resume::AgentSessionRef::id("lead-session").unwrap(),
+        });
+
+        let worker_pane = state.workspaces[1].tabs[0].root_pane;
+        let worker_terminal_id = state.workspaces[1].tabs[0].panes[&worker_pane]
+            .attached_terminal_id
+            .clone();
+        let worker = state.terminals.get_mut(&worker_terminal_id).unwrap();
+        worker.set_agent_name("worker".into());
+        worker.set_detected_state(
+            Some(crate::detect::Agent::Pi),
+            crate::detect::AgentState::Idle,
+        );
+        worker.agent_identity = Some("agent_worker".into());
+        // Ownership captured before the owner's session ref was known.
+        let owner_ref = crate::agent_ownership::AgentOwnerRef {
+            agent_id: "agent_lead".into(),
+            name: Some("lead".into()),
+            agent: Some("pi".into()),
+            session: None,
+        };
+        worker.agent_ownership = Some(crate::agent_ownership::AgentOwnership::new(owner_ref));
+
+        let snapshot = capture_from_state(&state);
+        let worker_snapshot = snapshot.workspaces[1].tabs[0]
+            .panes
+            .get(&worker_pane.raw())
+            .unwrap();
+        assert_eq!(
+            worker_snapshot.agent_identity.as_deref(),
+            Some("agent_worker")
+        );
+        let ownership = worker_snapshot.agent_ownership.as_ref().unwrap();
+        assert_eq!(ownership.origin.agent_id, "agent_lead");
+        let current = ownership.current.as_ref().unwrap();
+        // The owner's session identity is embedded at capture time so the
+        // reference survives owner-session resumes across restarts.
+        let session = current.session.as_ref().unwrap();
+        assert_eq!(session.value, "lead-session");
+
+        // And the whole thing round-trips through JSON.
+        let json = serde_json::to_string(&snapshot).unwrap();
+        let restored = parse_snapshot(&json).unwrap();
+        let restored_pane = restored.workspaces[1].tabs[0]
+            .panes
+            .get(&worker_pane.raw())
+            .unwrap();
+        assert_eq!(
+            restored_pane
+                .agent_ownership
+                .as_ref()
+                .unwrap()
+                .origin
+                .agent_id,
+            "agent_lead"
+        );
     }
 
     #[test]
@@ -1369,6 +1592,8 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                agent_identity: None,
+                agent_ownership: None,
             },
         );
         panes.insert(
@@ -1382,6 +1607,8 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                agent_identity: None,
+                agent_ownership: None,
             },
         );
 
@@ -1419,6 +1646,7 @@ mod tests {
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: std::collections::HashSet::new(),
             automations_expanded: false,
+            collapsed_agent_group_keys: std::collections::HashSet::new(),
         };
 
         let json = serde_json::to_string(&snap).unwrap();

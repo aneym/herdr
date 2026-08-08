@@ -407,6 +407,7 @@ impl App {
             sidebar_section_split,
             collapsed_space_keys,
             automations_expanded,
+            collapsed_agent_group_keys,
         ) = if no_session {
             (
                 Vec::new(),
@@ -418,6 +419,7 @@ impl App {
                 0.5_f32,
                 std::collections::HashSet::new(),
                 false,
+                std::collections::HashSet::new(),
             )
         } else if let Some(snap) = crate::persist::load() {
             let history = config
@@ -456,6 +458,7 @@ impl App {
                     snap.sidebar_section_split.unwrap_or(0.5),
                     snap.collapsed_space_keys,
                     snap.automations_expanded,
+                    snap.collapsed_agent_group_keys,
                 )
             } else {
                 crate::logging::session_restored(ws.len(), "ok");
@@ -475,6 +478,7 @@ impl App {
                     snap.sidebar_section_split.unwrap_or(0.5),
                     snap.collapsed_space_keys,
                     snap.automations_expanded,
+                    snap.collapsed_agent_group_keys,
                 )
             }
         } else {
@@ -488,6 +492,7 @@ impl App {
                 0.5_f32,
                 std::collections::HashSet::new(),
                 false,
+                std::collections::HashSet::new(),
             )
         };
 
@@ -585,6 +590,7 @@ impl App {
         state.worktree_directory = worktree_directory;
         state.collapsed_space_keys = collapsed_space_keys;
         state.automations_expanded = automations_expanded;
+        state.collapsed_agent_group_keys = collapsed_agent_group_keys;
         state.request_complete_onboarding = false;
         state.name_input = String::new();
         state.name_input_replace_on_type = false;
@@ -880,6 +886,7 @@ impl App {
         }
         app.state.collapsed_space_keys = snapshot.collapsed_space_keys.clone();
         app.state.automations_expanded = snapshot.automations_expanded;
+        app.state.collapsed_agent_group_keys = snapshot.collapsed_agent_group_keys.clone();
         app.state.replace_mode(if app.state.active.is_some() {
             state::Mode::Terminal
         } else {
@@ -2078,6 +2085,7 @@ mod tests {
             0.5,
             std::collections::HashSet::new(),
             false,
+            std::collections::HashSet::new(),
         );
         let mut imports = std::collections::HashMap::new();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -4754,6 +4762,8 @@ mod tests {
                 pane_id,
                 args: Vec::new(),
                 timeout_ms: Some(1_000),
+                owner: None,
+                caller_pane_id: None,
             }),
         });
         let response: serde_json::Value = serde_json::from_str(&response).unwrap();
@@ -4796,6 +4806,8 @@ mod tests {
                 pane_id: pane_id.clone(),
                 args: Vec::new(),
                 timeout_ms: Some(4_000),
+                owner: None,
+                caller_pane_id: None,
             }),
         };
         let response = app.handle_api_request(request());

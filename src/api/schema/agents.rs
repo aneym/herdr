@@ -170,6 +170,48 @@ pub struct AgentStartParams {
     /// Startup timeout in milliseconds. Values must be greater than 3000 and at most 300000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
+    /// Explicit owner agent target for the started agent. Takes precedence
+    /// over `caller_pane_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    /// Pane the request was issued from. When that pane hosts a live agent,
+    /// the started agent is recorded as owned by it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller_pane_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentOwnerSetParams {
+    pub target: String,
+    /// Agent target (name or pane id) that becomes the current owner.
+    pub owner: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentOwnerInfo {
+    /// Durable agent identity of the owner (never a pane id).
+    pub agent_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    /// Pane currently hosting the resolved owner, when it resolves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_id: Option<String>,
+    /// Whether the owner reference resolves to a live agent.
+    pub resolved: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentOwnershipInfo {
+    /// The first recorded owner. Immutable for the life of the record.
+    pub origin: AgentOwnerInfo,
+    /// The owner the agent currently belongs to; absent after a release.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current: Option<AgentOwnerInfo>,
+    /// True when the current owner reference no longer resolves.
+    #[serde(default, skip_serializing_if = "super::is_false")]
+    pub orphaned: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -205,6 +247,12 @@ pub struct AgentInfo {
     pub tokens: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_session: Option<AgentSessionInfo>,
+    /// Durable identity of this agent occupancy (never a pane id).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    /// Durable ownership: immutable origin plus transferable current owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ownership: Option<AgentOwnershipInfo>,
     pub workspace_id: String,
     pub tab_id: String,
     pub pane_id: String,

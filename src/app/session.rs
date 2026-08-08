@@ -4,8 +4,9 @@ use super::{App, SESSION_SAVE_DEBOUNCE};
 
 enum SessionSaveJob {
     Clear,
+    // Boxed: the captured snapshot dwarfs the empty Clear variant.
     Save {
-        snapshot: crate::persist::SessionSnapshot,
+        snapshot: Box<crate::persist::SessionSnapshot>,
         history: Option<crate::persist::SessionHistorySnapshot>,
     },
 }
@@ -51,11 +52,15 @@ impl App {
                 self.state.sidebar_section_split,
                 self.state.collapsed_space_keys.clone(),
                 self.state.automations_expanded,
+                self.state.collapsed_agent_group_keys.clone(),
             );
             let history = self.persist_pane_history.then(|| {
                 crate::persist::capture_history(&self.state.workspaces, &self.terminal_runtimes)
             });
-            SessionSaveJob::Save { snapshot, history }
+            SessionSaveJob::Save {
+                snapshot: Box::new(snapshot),
+                history,
+            }
         }
     }
 

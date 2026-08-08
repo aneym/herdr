@@ -632,6 +632,13 @@ impl AppState {
                         return None;
                     }
 
+                    if let Some(identity) =
+                        self.agent_group_toggle_at(&agent_entries, mouse.column, mouse.row)
+                    {
+                        self.toggle_agent_group_collapsed(identity);
+                        return None;
+                    }
+
                     if let Some((ws_idx, _tab_idx, pane_id)) =
                         self.agent_detail_target_at(&agent_entries, mouse.row)
                     {

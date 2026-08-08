@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- Agents started by another agent now durably belong to that owner: ownership survives renames, pane moves, restarts, and resumable sessions, the sidebar nests owned agents beneath their owner with collapsible groups and orphan markers, and `herdr agent owner set|clear` plus `agent start --owner|--no-owner` manage ownership explicitly.
 - `theme.custom.sidebar_bg` can now give the desktop sidebar its own background without changing built-in theme defaults.
 - Settings and `ui.status_indicators = "symbols"` can now use distinct static shapes for blocked, working, done, idle, and unknown agent states. (#2260)
 - The plugin marketplace now discovers valid manifests at repository roots and subdirectories, groups multiple plugins under each repository, and publishes their versions and exact default-branch commits.
