@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- Switching to a brand-new (or empty) workspace profile now seeds it with a focused workspace rooted at the home directory, so the switch lands somewhere and the profile persists via membership.
 - Agents started by another agent now durably belong to that owner: ownership survives renames, pane moves, restarts, and resumable sessions, the sidebar nests owned agents beneath their owner with collapsible groups and orphan markers, and `herdr agent owner set|clear` plus `agent start --owner|--no-owner` manage ownership explicitly.
 - CLI help now points coding agents to Herdr's plain-text guide, documentation index, and built-in control skill.
 - Added Qwen Code detection for idle, working, and user-confirmation states, plus optional native session restore.

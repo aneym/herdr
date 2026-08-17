@@ -67,6 +67,23 @@ impl App {
             Err(message) => return encode_error(id, "invalid_profile", message),
         };
         self.state.switch_profile(profile);
+        // A brand-new (or emptied) profile has no visible workspace, so the
+        // switch would land on a blank screen and the profile would evaporate
+        // on the next switch (profiles persist only via membership). Seed it
+        // with one workspace rooted at the home directory; membership is
+        // inherited from the now-active profile.
+        if self.state.active.is_none() {
+            let cwd = std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .or_else(|| std::env::current_dir().ok())
+                .unwrap_or_else(|| PathBuf::from("/"));
+            match self.create_workspace_with_launch_env(cwd, true, Vec::new()) {
+                Ok(index) => self.emit_workspace_open_events(index),
+                Err(error) => {
+                    tracing::warn!(%error, "failed to seed workspace for empty profile");
+                }
+            }
+        }
         self.schedule_session_save();
         self.handle_profile_list(id)
     }
@@ -625,6 +642,55 @@ mod tests {
         assert_eq!(app.state.workspaces[0].profiles, vec!["personal"]);
         assert_eq!(app.state.active, None);
         assert_eq!(app.state.active_profile, "work");
+        shutdown_test_runtimes(&mut app);
+    }
+
+    #[tokio::test]
+    async fn switching_to_empty_profile_seeds_home_workspace_with_membership() {
+        use super::super::test_support::{exiting_test_command, shutdown_test_runtimes};
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            true,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.default_shell = exiting_test_command().into();
+
+        let response = app.handle_profile_switch(
+            "switch".into(),
+            ProfileSwitchParams {
+                profile: "fresh".into(),
+            },
+        );
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::ProfileList { active, profiles } = success.result else {
+            panic!("expected profile list");
+        };
+        assert_eq!(active, "fresh");
+        assert!(profiles.contains(&"fresh".to_string()));
+
+        // The empty profile was seeded with a focused workspace whose
+        // membership keeps the profile alive, rooted at the home directory.
+        assert_eq!(app.state.workspaces.len(), 1);
+        assert_eq!(app.state.workspaces[0].profiles, vec!["fresh"]);
+        assert_eq!(app.state.active, Some(0));
+        assert!(app.state.workspace_is_visible(0));
+        let expected_cwd = std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| std::path::PathBuf::from("/"));
+        assert_eq!(app.state.workspaces[0].identity_cwd, expected_cwd);
+
+        // Switching to a profile that already has workspaces seeds nothing.
+        let _ = app.handle_profile_switch(
+            "switch-back".into(),
+            ProfileSwitchParams {
+                profile: "fresh".into(),
+            },
+        );
+        assert_eq!(app.state.workspaces.len(), 1);
         shutdown_test_runtimes(&mut app);
     }
 
