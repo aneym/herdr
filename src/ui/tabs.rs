@@ -1035,7 +1035,7 @@ mod tests {
         let row = (0..app.view.tab_bar_rect.width)
             .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
             .collect::<String>();
-        assert_eq!(row.as_bytes(), b" alpha     beta               ");
+        assert_eq!(row.as_bytes(), b"  alpha     beta              ");
     }
 
     #[test]

@@ -705,7 +705,7 @@ pub(crate) fn next_entry_is_indented_workspace(entries: &[WorkspaceListEntry], i
 }
 
 pub(crate) fn normalized_workspace_scroll(app: &AppState, area: Rect, requested: usize) -> usize {
-    let ws_area = workspace_list_rect(&app, area);
+    let ws_area = workspace_list_rect(app, area);
     let body = workspace_list_body_rect(ws_area, false);
     if body.height == 0 {
         return requested;
@@ -1043,7 +1043,7 @@ fn agent_panel_visible_count_from(
         used_rows = used_rows.saturating_add(height);
         visible += 1;
         used_rows = used_rows
-            .saturating_add(agent_panel_list_entry_gap(app, &entries, index))
+            .saturating_add(agent_panel_list_entry_gap(app, entries, index))
             .min(body.height);
     }
     visible
@@ -1054,7 +1054,7 @@ fn agent_panel_bottom_start(app: &AppState, entries: &[AgentPanelListEntry], are
     let mut used_rows = 0u16;
     let mut start = entries.len();
     for (index, entry) in entries.iter().enumerate().rev() {
-        let gap = agent_panel_list_entry_gap(app, &entries, index);
+        let gap = agent_panel_list_entry_gap(app, entries, index);
         let needed = agent_panel_list_entry_height(app, entry, body.height).saturating_add(gap);
         if used_rows.saturating_add(needed) > body.height {
             break;
@@ -1122,7 +1122,7 @@ pub(crate) fn compute_workspace_list_areas(
     app: &AppState,
     area: Rect,
 ) -> (Vec<crate::app::state::WorkspaceCardArea>, Vec<()>) {
-    let ws_area = workspace_list_rect(&app, area);
+    let ws_area = workspace_list_rect(app, area);
     if ws_area == Rect::default() {
         return (Vec::new(), Vec::new());
     }

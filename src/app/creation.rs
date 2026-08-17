@@ -273,9 +273,11 @@ impl App {
         self.state.workspaces.push(ws);
         let idx = self.state.workspaces.len() - 1;
         self.state.workspaces[idx].profiles = profiles.unwrap_or_else(|| {
-            (self.state.active_profile != crate::workspace::DEFAULT_PROFILE)
-                .then(|| vec![self.state.active_profile.clone()])
-                .unwrap_or_default()
+            if self.state.active_profile != crate::workspace::DEFAULT_PROFILE {
+                vec![self.state.active_profile.clone()]
+            } else {
+                Vec::new()
+            }
         });
         self.state
             .remove_alias_shadowed_by_new_pane(self.state.workspaces[idx].tabs[0].root_pane);
