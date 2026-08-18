@@ -1,9 +1,10 @@
 use crate::api::schema::{
     EmptyParams, LayoutSetSplitRatioParams, Method, PaneFocusDirectionParams, PaneInputSetParams,
-    PaneRenameParams, PaneResizeParams, PaneSplitParams, PaneSwapParams, PaneTarget,
-    PaneZoomParams, TabCreateParams, TabMoveParams, TabRenameParams, TabTarget,
+    PaneRenameParams, PaneResizeParams, PaneSetProfilesParams, PaneSplitParams, PaneSwapParams,
+    PaneTarget, PaneZoomParams, TabCreateParams, TabMoveParams, TabRenameParams, TabTarget,
     WorkspaceCreateParams, WorkspaceMoveBlockParams, WorkspaceMoveParams, WorkspaceRenameParams,
-    WorkspaceTarget, WorktreeCreateParams, WorktreeOpenParams, WorktreeRemoveParams,
+    WorkspaceSetProfilesParams, WorkspaceTarget, WorktreeCreateParams, WorktreeOpenParams,
+    WorktreeRemoveParams,
 };
 
 use super::App;
@@ -35,6 +36,14 @@ impl App {
         params: WorkspaceCreateParams,
     ) -> String {
         self.dispatch_runtime_mutation(id, Method::WorkspaceCreate(params))
+    }
+
+    pub(crate) fn runtime_workspace_set_profiles(
+        &mut self,
+        id: &'static str,
+        params: WorkspaceSetProfilesParams,
+    ) -> String {
+        self.dispatch_runtime_mutation(id, Method::WorkspaceSetProfiles(params))
     }
 
     pub(crate) fn runtime_workspace_rename(
@@ -115,6 +124,14 @@ impl App {
         params: PaneRenameParams,
     ) -> String {
         self.dispatch_runtime_mutation(id, Method::PaneRename(params))
+    }
+
+    pub(crate) fn runtime_pane_set_profiles(
+        &mut self,
+        id: &'static str,
+        params: PaneSetProfilesParams,
+    ) -> String {
+        self.dispatch_runtime_mutation(id, Method::PaneSetProfiles(params))
     }
 
     pub(crate) fn runtime_pane_input_set(

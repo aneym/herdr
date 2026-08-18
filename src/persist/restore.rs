@@ -498,6 +498,9 @@ fn restore_tab(
             .and_then(crate::detect::parse_canonical_agent_label);
         let saved_launch_argv = saved_pane.and_then(|p| p.launch_argv.clone());
         let saved_agent_session = saved_pane.and_then(|p| p.agent_session.as_ref());
+        let saved_profiles = saved_pane
+            .map(|pane| pane.profiles.clone())
+            .unwrap_or_default();
         let saved_agent_identity = saved_pane.and_then(|p| p.agent_identity.clone());
         let saved_agent_ownership = saved_pane
             .and_then(|p| p.agent_ownership.as_ref())
@@ -550,6 +553,7 @@ fn restore_tab(
             }
             terminal.agent_identity = saved_agent_identity.clone();
             terminal.agent_ownership = saved_agent_ownership.clone();
+            terminal.profiles = saved_profiles.clone();
             match (saved_agent_name, saved_managed_agent) {
                 (Some(agent_name), Some(agent)) => {
                     terminal.restore_managed_agent(agent_name, agent)
@@ -653,6 +657,7 @@ fn restore_tab(
                     terminal.agent_identity = saved_agent_identity.clone();
                     terminal.agent_ownership = saved_agent_ownership.clone();
                 }
+                terminal.profiles = saved_profiles.clone();
                 match (saved_agent_name, saved_managed_agent) {
                     (Some(agent_name), Some(agent)) if was_imported => {
                         terminal.restore_managed_agent(agent_name, agent)
@@ -1214,6 +1219,7 @@ mod tests {
                             launch_argv: None,
                             agent_identity: None,
                             agent_ownership: None,
+                            profiles: Vec::new(),
                         },
                     )]),
                     zoomed: false,
@@ -1317,6 +1323,7 @@ mod tests {
                                 value: "worker-session".into(),
                             }),
                             launch_argv: None,
+                            profiles: Vec::new(),
                             agent_identity: Some("agent_worker".into()),
                             agent_ownership: Some(ownership.clone()),
                         },
@@ -1397,6 +1404,7 @@ mod tests {
                             managed_agent_kind: Some("codex".into()),
                             agent_session: None,
                             launch_argv: None,
+                            profiles: Vec::new(),
                             agent_identity: Some("agent_worker".into()),
                             agent_ownership: Some(
                                 super::super::snapshot::PaneAgentOwnershipSnapshot {
@@ -1488,6 +1496,7 @@ mod tests {
                                 launch_argv: None,
                                 agent_identity: None,
                                 agent_ownership: None,
+                                profiles: Vec::new(),
                             },
                         ),
                         (
@@ -1501,6 +1510,7 @@ mod tests {
                                 launch_argv: None,
                                 agent_identity: None,
                                 agent_ownership: None,
+                                profiles: Vec::new(),
                             },
                         ),
                     ]),
@@ -1559,6 +1569,7 @@ mod tests {
                     launch_argv: None,
                     agent_identity: None,
                     agent_ownership: None,
+                    profiles: Vec::new(),
                 },
             )
         };
@@ -1576,6 +1587,7 @@ mod tests {
             launch_argv: None,
             agent_identity: None,
             agent_ownership: None,
+            profiles: Vec::new(),
         };
         let snapshot = SessionSnapshot {
             version: super::super::snapshot::SNAPSHOT_VERSION,
@@ -1735,6 +1747,7 @@ mod tests {
                             launch_argv: None,
                             agent_identity: None,
                             agent_ownership: None,
+                            profiles: Vec::new(),
                         },
                     )]),
                     zoomed: false,
@@ -1899,6 +1912,7 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                profiles: Vec::new(),
                 agent_identity: None,
                 agent_ownership: None,
             },

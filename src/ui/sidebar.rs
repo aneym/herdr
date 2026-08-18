@@ -431,12 +431,23 @@ fn collect_agent_panel_entries_with_runtimes(
     app.workspaces
         .iter()
         .enumerate()
-        .filter(|(ws_idx, _)| app.workspace_is_visible(*ws_idx))
         .flat_map(|(ws_idx, ws)| {
             let multi_tab = ws.tabs.len() > 1;
             let workspace_label = ws.display_name_from(&app.terminals, terminal_runtimes);
             ws.pane_details(&app.terminals)
                 .into_iter()
+                .filter(move |detail| {
+                    let profiles = ws
+                        .pane_state(detail.pane_id)
+                        .and_then(|pane| app.terminals.get(&pane.attached_terminal_id))
+                        .map(|terminal| terminal.profiles.as_slice())
+                        .unwrap_or_default();
+                    if profiles.is_empty() {
+                        app.workspace_is_visible(ws_idx)
+                    } else {
+                        profiles.contains(&app.active_profile)
+                    }
+                })
                 .map(move |detail| {
                     let show_tab = multi_tab
                         || ws
@@ -2275,6 +2286,61 @@ mod tests {
                     .unwrap_or_default()
             })
             .collect()
+    }
+
+    #[test]
+    fn pane_profile_overrides_filter_agent_rows_independently_of_workspace_visibility() {
+        let mut app = AppState::test_new();
+        let personal = Workspace::test_new("personal-space");
+        let mut work = Workspace::test_new("work-space");
+        work.profiles = vec!["work".into()];
+        app.workspaces = vec![personal, work];
+        app.ensure_test_terminals();
+        for terminal in app.terminals.values_mut() {
+            terminal.set_detected_state(Some(Agent::Pi), AgentState::Idle);
+        }
+        let personal_pane = app.workspaces[0].tabs[0].root_pane;
+        let personal_terminal = app.workspaces[0].tabs[0].panes[&personal_pane]
+            .attached_terminal_id
+            .clone();
+        app.terminals.get_mut(&personal_terminal).unwrap().profiles = vec!["work".into()];
+
+        assert!(agent_panel_entries(&app).is_empty());
+
+        app.active_profile = "work".into();
+        let entries = agent_panel_entries(&app);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].ws_idx, 0);
+        assert_eq!(entries[1].ws_idx, 1);
+
+        app.terminals.get_mut(&personal_terminal).unwrap().profiles = vec!["other".into()];
+        let entries = agent_panel_entries(&app);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].ws_idx, 1);
+    }
+
+    #[test]
+    fn filtered_owner_promotes_shared_child_to_top_level() {
+        let mut app = app_with_owned_agents();
+        let lead_pane = app.workspaces[0].tabs[0].root_pane;
+        let lead_terminal = app.workspaces[0].tabs[0].panes[&lead_pane]
+            .attached_terminal_id
+            .clone();
+        app.terminals.get_mut(&lead_terminal).unwrap().profiles = vec!["personal".into()];
+        for ws_idx in [1usize, 2] {
+            let pane_id = app.workspaces[ws_idx].tabs[0].root_pane;
+            let terminal_id = app.workspaces[ws_idx].tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            app.terminals.get_mut(&terminal_id).unwrap().profiles = vec!["work".into()];
+        }
+        app.active_profile = "work".into();
+
+        let entries = agent_panel_entries(&app);
+
+        assert_eq!(entry_names(&entries, &app), ["wkb", "wkc"]);
+        assert!(entries.iter().all(|entry| entry.tree.depth == 0));
+        assert!(entries.iter().all(|entry| !entry.orphaned));
     }
 
     #[test]

@@ -89,17 +89,7 @@ impl App {
     }
 
     pub(super) fn handle_profile_list(&mut self, id: String) -> String {
-        let mut profiles = vec![crate::workspace::DEFAULT_PROFILE.to_string()];
-        for profile in self
-            .state
-            .workspaces
-            .iter()
-            .flat_map(|workspace| workspace.profiles.iter())
-        {
-            if !profiles.contains(profile) {
-                profiles.push(profile.clone());
-            }
-        }
+        let profiles = self.state.profile_roster();
         encode_success(
             id,
             ResponseResult::ProfileList {
@@ -584,6 +574,25 @@ mod tests {
         assert_eq!(active, "work");
         assert_eq!(profiles, vec!["personal", "work"]);
         assert_eq!(app.state.active, Some(0));
+    }
+
+    #[test]
+    fn profile_list_includes_pane_only_tags() {
+        let mut app = app_with_linked_worktree();
+        app.state.ensure_test_terminals();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.state.terminals.get_mut(&terminal_id).unwrap().profiles = vec!["shared".into()];
+
+        let response = app.handle_profile_list("list".into());
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::ProfileList { profiles, .. } = success.result else {
+            panic!("expected profile list");
+        };
+
+        assert_eq!(profiles, ["personal", "shared"]);
     }
 
     #[test]

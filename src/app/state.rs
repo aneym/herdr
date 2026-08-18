@@ -1263,6 +1263,10 @@ pub(crate) struct TabPressState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContextMenuKind {
+    AgentPane {
+        ws_idx: usize,
+        pane_id: PaneId,
+    },
     Workspace {
         ws_idx: usize,
     },
@@ -1287,6 +1291,34 @@ pub enum ContextMenuKind {
 }
 
 /// Right-click context menu state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileMenuTarget {
+    Workspace { ws_idx: usize },
+    Pane { ws_idx: usize, pane_id: PaneId },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileMenuMode {
+    Send,
+    Share,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileMenuEntry {
+    pub profile: Option<String>,
+    pub label: String,
+    pub is_current: bool,
+}
+
+pub struct ProfileMenuState {
+    pub target: ProfileMenuTarget,
+    pub mode: ProfileMenuMode,
+    pub x: u16,
+    pub y: u16,
+    pub list: MenuListState,
+    pub entries: Vec<ProfileMenuEntry>,
+}
+
 pub struct ContextMenuState {
     pub kind: ContextMenuKind,
     pub x: u16,
@@ -1297,16 +1329,41 @@ pub struct ContextMenuState {
 impl ContextMenuState {
     pub fn items(&self) -> Vec<&'static str> {
         match self.kind {
-            ContextMenuKind::Workspace { .. } => vec!["Rename", "Close"],
+            ContextMenuKind::Workspace { .. } => vec![
+                "Rename",
+                "Send to profile...",
+                "Share with profiles...",
+                "Close",
+            ],
+            ContextMenuKind::AgentPane { .. } => vec![
+                "Focus",
+                "Rename",
+                "Send to profile...",
+                "Share with profiles...",
+                "Close",
+            ],
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: false,
                 has_worktree_children: false,
                 ..
-            } => vec!["Rename", "Close", "New worktree", "Open worktree..."],
+            } => vec![
+                "Rename",
+                "Send to profile...",
+                "Share with profiles...",
+                "Close",
+                "New worktree",
+                "Open worktree...",
+            ],
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: true,
                 ..
-            } => vec!["Rename", "Close", "Delete worktree checkout..."],
+            } => vec![
+                "Rename",
+                "Send to profile...",
+                "Share with profiles...",
+                "Close",
+                "Delete worktree checkout...",
+            ],
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: false,
                 has_worktree_children: true,
@@ -1314,6 +1371,8 @@ impl ContextMenuState {
                 ..
             } => vec![
                 "Rename",
+                "Send to profile...",
+                "Share with profiles...",
                 "Close group",
                 "New worktree",
                 "Open worktree...",
@@ -1339,9 +1398,126 @@ impl ContextMenuState {
                 } else {
                     "Send right-clicks to pane"
                 });
-                items.push("Close pane");
+                items.extend(["Send to profile...", "Share with profiles...", "Close pane"]);
                 items
             }
+        }
+    }
+}
+
+impl AppState {
+    pub(crate) fn profile_roster(&self) -> Vec<String> {
+        let mut profiles = vec![crate::workspace::DEFAULT_PROFILE.to_string()];
+        for workspace in &self.workspaces {
+            for profile in &workspace.profiles {
+                if !profiles.contains(profile) {
+                    profiles.push(profile.clone());
+                }
+            }
+        }
+        for workspace in &self.workspaces {
+            for pane_id in workspace.tabs.iter().flat_map(|tab| tab.layout.pane_ids()) {
+                let Some(terminal) = workspace
+                    .pane_state(pane_id)
+                    .and_then(|pane| self.terminals.get(&pane.attached_terminal_id))
+                else {
+                    continue;
+                };
+                for profile in &terminal.profiles {
+                    if !profiles.contains(profile) {
+                        profiles.push(profile.clone());
+                    }
+                }
+            }
+        }
+        profiles
+    }
+
+    pub(crate) fn profile_menu_entries(
+        &self,
+        target: ProfileMenuTarget,
+        mode: ProfileMenuMode,
+    ) -> Vec<ProfileMenuEntry> {
+        let default_membership = [crate::workspace::DEFAULT_PROFILE.to_string()];
+        let (membership, is_following_space) = match target {
+            ProfileMenuTarget::Workspace { ws_idx } => (
+                self.workspaces
+                    .get(ws_idx)
+                    .map(|workspace| workspace.profiles.as_slice())
+                    .unwrap_or_default(),
+                false,
+            ),
+            ProfileMenuTarget::Pane { ws_idx, pane_id } => {
+                let workspace = self.workspaces.get(ws_idx);
+                let own_profiles = workspace
+                    .and_then(|workspace| workspace.pane_state(pane_id))
+                    .and_then(|pane| self.terminals.get(&pane.attached_terminal_id))
+                    .map(|terminal| terminal.profiles.as_slice())
+                    .unwrap_or_default();
+                let membership = if own_profiles.is_empty() {
+                    workspace
+                        .map(|workspace| workspace.profiles.as_slice())
+                        .filter(|profiles| !profiles.is_empty())
+                        .unwrap_or(&default_membership)
+                } else {
+                    own_profiles
+                };
+                (membership, own_profiles.is_empty())
+            }
+        };
+        let mut entries = Vec::new();
+        if matches!(target, ProfileMenuTarget::Pane { .. }) {
+            entries.push(ProfileMenuEntry {
+                profile: None,
+                label: "Follow space".to_string(),
+                is_current: is_following_space,
+            });
+        }
+        entries.extend(self.profile_roster().into_iter().map(|profile| {
+            let is_current = match mode {
+                ProfileMenuMode::Send => membership.len() == 1 && membership[0] == profile,
+                ProfileMenuMode::Share => membership.contains(&profile),
+            };
+            ProfileMenuEntry {
+                label: profile.clone(),
+                profile: Some(profile),
+                is_current,
+            }
+        }));
+        entries
+    }
+
+    pub(crate) fn open_profile_menu(
+        &mut self,
+        target: ProfileMenuTarget,
+        mode: ProfileMenuMode,
+        x: u16,
+        y: u16,
+    ) {
+        let entries = self.profile_menu_entries(target, mode);
+        self.context_menu = None;
+        self.profile_menu = Some(ProfileMenuState {
+            target,
+            mode,
+            x,
+            y,
+            list: MenuListState::new(0),
+            entries,
+        });
+        self.replace_mode(Mode::ContextMenu);
+    }
+
+    pub(crate) fn refresh_profile_menu_entries(&mut self) {
+        let Some(menu) = self.profile_menu.as_ref() else {
+            return;
+        };
+        let target = menu.target;
+        let mode = menu.mode;
+        let highlighted = menu.list.highlighted;
+        let entries = self.profile_menu_entries(target, mode);
+        if let Some(menu) = self.profile_menu.as_mut() {
+            menu.entries = entries;
+            menu.list.highlighted = highlighted.min(menu.entries.len().saturating_sub(1));
         }
     }
 }
@@ -1537,6 +1713,7 @@ pub struct AppState {
     pub(crate) pane_app_drag_selection: Option<PaneId>,
     pub selection_autoscroll: Option<SelectionAutoscroll>,
     pub context_menu: Option<ContextMenuState>,
+    pub profile_menu: Option<ProfileMenuState>,
     // Notifications
     pub update_available: Option<String>,
     pub update_install_command: String,
@@ -2010,6 +2187,7 @@ impl AppState {
             pane_app_drag_selection: None,
             selection_autoscroll: None,
             context_menu: None,
+            profile_menu: None,
             update_available: None,
             update_install_command: "herdr update".into(),
             latest_release_notes_available: false,
@@ -2551,6 +2729,15 @@ impl AppState {
                 ContextMenuKind::Tab { ws_idx, tab_idx } => {
                     assert_tab_index(ws_idx, tab_idx, "context menu tab")
                 }
+                ContextMenuKind::AgentPane { ws_idx, pane_id } => {
+                    assert_workspace_index(ws_idx, "agent context menu workspace");
+                    assert!(
+                        self.workspaces[ws_idx].pane_state(pane_id).is_some(),
+                        "agent context menu references pane {:?} outside workspace {}",
+                        pane_id,
+                        ws_idx
+                    );
+                }
                 ContextMenuKind::Pane {
                     ws_idx,
                     tab_idx,
@@ -2943,6 +3130,62 @@ mod tests {
     }
 
     #[test]
+    fn profile_actions_are_present_on_workspace_agent_and_pane_menus() {
+        let workspace = ContextMenuState {
+            kind: ContextMenuKind::Workspace { ws_idx: 0 },
+            x: 0,
+            y: 0,
+            list: MenuListState::new(0),
+        };
+        assert_eq!(
+            workspace.items(),
+            [
+                "Rename",
+                "Send to profile...",
+                "Share with profiles...",
+                "Close"
+            ]
+        );
+
+        let pane_id = crate::layout::PaneId::from_raw(1);
+        let agent = ContextMenuState {
+            kind: ContextMenuKind::AgentPane { ws_idx: 0, pane_id },
+            x: 0,
+            y: 0,
+            list: MenuListState::new(0),
+        };
+        assert_eq!(
+            agent.items(),
+            [
+                "Focus",
+                "Rename",
+                "Send to profile...",
+                "Share with profiles...",
+                "Close"
+            ]
+        );
+
+        let pane = ContextMenuState {
+            kind: ContextMenuKind::Pane {
+                ws_idx: 0,
+                tab_idx: 0,
+                pane_id,
+                source_pane_id: None,
+                has_manual_label: false,
+                right_click_passthrough: false,
+            },
+            x: 0,
+            y: 0,
+            list: MenuListState::new(0),
+        };
+        assert!(pane.items().ends_with(&[
+            "Send to profile...",
+            "Share with profiles...",
+            "Close pane"
+        ]));
+    }
+
+    #[test]
     fn linked_worktree_context_menu_keeps_safe_close_and_explicit_remove() {
         let menu = ContextMenuState {
             kind: ContextMenuKind::GitWorkspace {
@@ -2958,7 +3201,13 @@ mod tests {
 
         assert_eq!(
             menu.items(),
-            &["Rename", "Close", "Delete worktree checkout..."]
+            &[
+                "Rename",
+                "Send to profile...",
+                "Share with profiles...",
+                "Close",
+                "Delete worktree checkout..."
+            ]
         );
     }
 
@@ -2978,7 +3227,14 @@ mod tests {
 
         assert_eq!(
             menu.items(),
-            &["Rename", "Close", "New worktree", "Open worktree..."]
+            &[
+                "Rename",
+                "Send to profile...",
+                "Share with profiles...",
+                "Close",
+                "New worktree",
+                "Open worktree..."
+            ]
         );
     }
 
@@ -3000,6 +3256,8 @@ mod tests {
             menu.items(),
             &[
                 "Rename",
+                "Send to profile...",
+                "Share with profiles...",
                 "Close group",
                 "New worktree",
                 "Open worktree...",

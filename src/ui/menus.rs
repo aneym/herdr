@@ -313,3 +313,38 @@ pub(super) fn render_context_menu(app: &AppState, frame: &mut Frame) {
     let mut state = ListState::default().with_selected(Some(menu.list.highlighted));
     frame.render_stateful_widget(list, inner, &mut state);
 }
+
+pub(super) fn render_profile_menu(app: &AppState, frame: &mut Frame) {
+    let Some(menu) = &app.profile_menu else {
+        return;
+    };
+    let p = &app.palette;
+    let Some(menu_rect) = app.profile_menu_rect() else {
+        return;
+    };
+    let Some(inner) = render_panel_shell(frame, menu_rect, p.accent, p.panel_bg) else {
+        return;
+    };
+    let items: Vec<ListItem> = menu
+        .entries
+        .iter()
+        .map(|entry| {
+            ListItem::new(Line::from(format!(
+                "{}{}",
+                if entry.is_current { "✓ " } else { "  " },
+                entry.label
+            )))
+        })
+        .collect();
+    let list = List::new(items)
+        .style(Style::default().fg(p.text))
+        .highlight_style(
+            Style::default()
+                .bg(p.accent)
+                .fg(panel_contrast_fg(p))
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol(" ");
+    let mut state = ListState::default().with_selected(Some(menu.list.highlighted));
+    frame.render_stateful_widget(list, inner, &mut state);
+}

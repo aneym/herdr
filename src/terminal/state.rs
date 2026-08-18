@@ -152,6 +152,8 @@ pub struct TerminalState {
     pub agent_identity: Option<String>,
     /// Durable ownership record of the current agent occupancy.
     pub agent_ownership: Option<crate::agent_ownership::AgentOwnership>,
+    /// Profile membership override for this pane. Empty follows its workspace.
+    pub profiles: Vec<String>,
 }
 
 impl TerminalState {
@@ -188,6 +190,7 @@ impl TerminalState {
             pending_agent_resume_plan: None,
             agent_identity: None,
             agent_ownership: None,
+            profiles: Vec::new(),
         }
     }
 

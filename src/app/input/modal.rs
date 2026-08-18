@@ -7,6 +7,7 @@ use crate::{
     app::{
         state::{
             AppState, ContextMenuKind, ContextMenuState, MenuListState, Mode, NavigatorStateFilter,
+            ProfileMenuMode, ProfileMenuState, ProfileMenuTarget,
         },
         App,
     },
@@ -778,6 +779,39 @@ pub(super) fn apply_context_menu_action(
 ) {
     let item = menu.items().get(idx).copied();
     match (menu.kind, item) {
+        (
+            ContextMenuKind::Workspace { ws_idx } | ContextMenuKind::GitWorkspace { ws_idx, .. },
+            Some(action @ ("Send to profile..." | "Share with profiles...")),
+        ) => {
+            state.open_profile_menu(
+                ProfileMenuTarget::Workspace { ws_idx },
+                if action == "Send to profile..." {
+                    ProfileMenuMode::Send
+                } else {
+                    ProfileMenuMode::Share
+                },
+                menu.x,
+                menu.y,
+            );
+        }
+        (
+            ContextMenuKind::Pane {
+                ws_idx, pane_id, ..
+            }
+            | ContextMenuKind::AgentPane { ws_idx, pane_id },
+            Some(action @ ("Send to profile..." | "Share with profiles...")),
+        ) => {
+            state.open_profile_menu(
+                ProfileMenuTarget::Pane { ws_idx, pane_id },
+                if action == "Send to profile..." {
+                    ProfileMenuMode::Send
+                } else {
+                    ProfileMenuMode::Share
+                },
+                menu.x,
+                menu.y,
+            );
+        }
         (ContextMenuKind::GitWorkspace { ws_idx, .. }, Some("New worktree")) => {
             state.request_new_linked_worktree = Some(ws_idx);
             leave_modal(state);
@@ -853,8 +887,23 @@ pub(super) fn apply_context_menu_action(
                 });
             }
         }
-        (ContextMenuKind::Pane { pane_id, .. }, Some("Rename pane")) => {
+        (ContextMenuKind::AgentPane { ws_idx, pane_id }, Some("Focus")) => {
+            state.focus_pane_in_workspace(ws_idx, pane_id);
+            state.replace_mode(Mode::Terminal);
+        }
+        (ContextMenuKind::Pane { pane_id, .. }, Some("Rename pane"))
+        | (ContextMenuKind::AgentPane { pane_id, .. }, Some("Rename")) => {
             open_rename_pane(state, pane_id);
+        }
+        (ContextMenuKind::AgentPane { ws_idx, pane_id }, Some("Close")) => {
+            state.focus_pane_in_workspace(ws_idx, pane_id);
+            if !state.close_pane() {
+                state.replace_mode(if state.active.is_some() {
+                    Mode::Terminal
+                } else {
+                    Mode::Navigate
+                });
+            }
         }
         (
             ContextMenuKind::Pane {
@@ -974,11 +1023,132 @@ pub(super) fn apply_context_menu_action(
 }
 
 #[cfg(test)]
+pub(super) fn apply_profile_menu_action(state: &mut AppState, menu: ProfileMenuState, idx: usize) {
+    let Some(entry) = menu.entries.get(idx) else {
+        leave_modal(state);
+        return;
+    };
+    let profile = entry.profile.clone();
+    let mut should_close = menu.mode == ProfileMenuMode::Send || profile.is_none();
+    match menu.target {
+        ProfileMenuTarget::Workspace { ws_idx } => {
+            let Some(profile) = profile else {
+                leave_modal(state);
+                return;
+            };
+            if let Some(workspace) = state.workspaces.get_mut(ws_idx) {
+                workspace.profiles =
+                    profile_selection(&workspace.profiles, &profile, menu.mode, true);
+                state.mark_session_dirty();
+            }
+        }
+        ProfileMenuTarget::Pane { ws_idx, pane_id } => {
+            let workspace_profiles = state
+                .workspaces
+                .get(ws_idx)
+                .map(|workspace| workspace.profiles.clone())
+                .unwrap_or_default();
+            let terminal_id = state
+                .workspaces
+                .get(ws_idx)
+                .and_then(|workspace| workspace.pane_state(pane_id))
+                .map(|pane| pane.attached_terminal_id.clone());
+            if let Some(terminal) = terminal_id
+                .as_ref()
+                .and_then(|terminal_id| state.terminals.get_mut(terminal_id))
+            {
+                terminal.profiles = match profile {
+                    None => Vec::new(),
+                    Some(profile) => {
+                        let effective = if terminal.profiles.is_empty() {
+                            workspace_profiles.as_slice()
+                        } else {
+                            terminal.profiles.as_slice()
+                        };
+                        profile_selection(
+                            effective,
+                            &profile,
+                            menu.mode,
+                            terminal.profiles.is_empty() && workspace_profiles.is_empty(),
+                        )
+                    }
+                };
+                state.mark_session_dirty();
+            } else {
+                should_close = true;
+            }
+        }
+    }
+    if should_close {
+        state.profile_menu = None;
+        leave_modal(state);
+    } else {
+        state.profile_menu = Some(menu);
+        state.refresh_profile_menu_entries();
+    }
+}
+
+fn profile_selection(
+    current: &[String],
+    profile: &str,
+    mode: ProfileMenuMode,
+    should_seed_personal: bool,
+) -> Vec<String> {
+    if mode == ProfileMenuMode::Send {
+        return vec![profile.to_string()];
+    }
+    let mut profiles = current.to_vec();
+    if let Some(index) = profiles.iter().position(|item| item == profile) {
+        profiles.remove(index);
+    } else {
+        if should_seed_personal
+            && profiles.is_empty()
+            && profile != crate::workspace::DEFAULT_PROFILE
+        {
+            profiles.push(crate::workspace::DEFAULT_PROFILE.to_string());
+        }
+        profiles.push(profile.to_string());
+    }
+    profiles
+}
+
+#[cfg(test)]
+pub(crate) fn handle_profile_menu_key(state: &mut AppState, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => {
+            state.profile_menu = None;
+            leave_modal(state);
+        }
+        KeyCode::Up => {
+            if let Some(menu) = state.profile_menu.as_mut() {
+                menu.list.move_prev();
+            }
+        }
+        KeyCode::Down => {
+            if let Some(menu) = state.profile_menu.as_mut() {
+                menu.list.move_next(menu.entries.len());
+            }
+        }
+        KeyCode::Enter => {
+            if let Some(menu) = state.profile_menu.take() {
+                let idx = menu.list.highlighted;
+                apply_profile_menu_action(state, menu, idx);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn handle_context_menu_key(
     state: &mut AppState,
     terminal_runtimes: &mut crate::terminal::TerminalRuntimeRegistry,
     key: KeyEvent,
 ) {
+    if state.profile_menu.is_some() {
+        handle_profile_menu_key(state, key);
+        return;
+    }
     match key.code {
         KeyCode::Esc => {
             state.context_menu = None;
@@ -1182,6 +1352,10 @@ impl App {
     }
 
     pub(crate) fn handle_context_menu_key_via_api(&mut self, key: KeyEvent) {
+        if self.state.profile_menu.is_some() {
+            self.handle_profile_menu_key_via_api(key);
+            return;
+        }
         match key.code {
             KeyCode::Esc => {
                 self.state.context_menu = None;
@@ -1207,9 +1381,156 @@ impl App {
         }
     }
 
+    pub(crate) fn handle_profile_menu_key_via_api(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.state.profile_menu = None;
+                leave_modal(&mut self.state);
+            }
+            KeyCode::Up => {
+                if let Some(menu) = self.state.profile_menu.as_mut() {
+                    menu.list.move_prev();
+                }
+            }
+            KeyCode::Down => {
+                if let Some(menu) = self.state.profile_menu.as_mut() {
+                    menu.list.move_next(menu.entries.len());
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(menu) = self.state.profile_menu.take() {
+                    let idx = menu.list.highlighted;
+                    self.apply_profile_menu_action_via_api(menu, idx);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn apply_profile_menu_action_via_api(&mut self, menu: ProfileMenuState, idx: usize) {
+        let Some(entry) = menu.entries.get(idx) else {
+            leave_modal(&mut self.state);
+            return;
+        };
+        let profile = entry.profile.clone();
+        let mut should_close = menu.mode == ProfileMenuMode::Send || profile.is_none();
+        match menu.target {
+            ProfileMenuTarget::Workspace { ws_idx } => {
+                let Some(profile) = profile else {
+                    leave_modal(&mut self.state);
+                    return;
+                };
+                let current = self
+                    .state
+                    .workspaces
+                    .get(ws_idx)
+                    .map(|workspace| workspace.profiles.as_slice())
+                    .unwrap_or_default();
+                let profiles = profile_selection(current, &profile, menu.mode, true);
+                if let Some(workspace_id) = self
+                    .state
+                    .workspaces
+                    .get(ws_idx)
+                    .map(|workspace| workspace.id.clone())
+                {
+                    self.runtime_workspace_set_profiles(
+                        "tui.workspace.set_profiles",
+                        crate::api::schema::WorkspaceSetProfilesParams {
+                            workspace_id,
+                            profiles,
+                        },
+                    );
+                } else {
+                    should_close = true;
+                }
+            }
+            ProfileMenuTarget::Pane { ws_idx, pane_id } => {
+                let workspace_profiles = self
+                    .state
+                    .workspaces
+                    .get(ws_idx)
+                    .map(|workspace| workspace.profiles.as_slice())
+                    .unwrap_or_default();
+                let own_profiles = self
+                    .state
+                    .workspaces
+                    .get(ws_idx)
+                    .and_then(|workspace| workspace.pane_state(pane_id))
+                    .and_then(|pane| self.state.terminals.get(&pane.attached_terminal_id))
+                    .map(|terminal| terminal.profiles.as_slice())
+                    .unwrap_or_default();
+                let profiles = match profile {
+                    None => Vec::new(),
+                    Some(profile) => {
+                        let effective = if own_profiles.is_empty() {
+                            workspace_profiles
+                        } else {
+                            own_profiles
+                        };
+                        profile_selection(
+                            effective,
+                            &profile,
+                            menu.mode,
+                            own_profiles.is_empty() && workspace_profiles.is_empty(),
+                        )
+                    }
+                };
+                if let Some(pane_id) = self.public_pane_id(ws_idx, pane_id) {
+                    self.runtime_pane_set_profiles(
+                        "tui.pane.set_profiles",
+                        crate::api::schema::PaneSetProfilesParams { pane_id, profiles },
+                    );
+                } else {
+                    should_close = true;
+                }
+            }
+        }
+        if should_close {
+            self.state.profile_menu = None;
+            leave_modal(&mut self.state);
+        } else {
+            self.state.profile_menu = Some(menu);
+            self.state.refresh_profile_menu_entries();
+        }
+    }
+
     pub(crate) fn apply_context_menu_action_via_api(&mut self, menu: ContextMenuState, idx: usize) {
         let item = menu.items().get(idx).copied();
         match (menu.kind, item) {
+            (
+                ContextMenuKind::Workspace { ws_idx }
+                | ContextMenuKind::GitWorkspace { ws_idx, .. },
+                Some(action @ ("Send to profile..." | "Share with profiles...")),
+            ) => {
+                self.state.open_profile_menu(
+                    ProfileMenuTarget::Workspace { ws_idx },
+                    if action == "Send to profile..." {
+                        ProfileMenuMode::Send
+                    } else {
+                        ProfileMenuMode::Share
+                    },
+                    menu.x,
+                    menu.y,
+                );
+            }
+            (
+                ContextMenuKind::Pane {
+                    ws_idx, pane_id, ..
+                }
+                | ContextMenuKind::AgentPane { ws_idx, pane_id },
+                Some(action @ ("Send to profile..." | "Share with profiles...")),
+            ) => {
+                self.state.open_profile_menu(
+                    ProfileMenuTarget::Pane { ws_idx, pane_id },
+                    if action == "Send to profile..." {
+                        ProfileMenuMode::Send
+                    } else {
+                        ProfileMenuMode::Share
+                    },
+                    menu.x,
+                    menu.y,
+                );
+            }
             (ContextMenuKind::GitWorkspace { ws_idx, .. }, Some("New worktree")) => {
                 self.state.request_new_linked_worktree = Some(ws_idx);
                 leave_modal(&mut self.state);
@@ -1279,8 +1600,25 @@ impl App {
                     leave_modal(&mut self.state);
                 }
             }
-            (ContextMenuKind::Pane { pane_id, .. }, Some("Rename pane")) => {
+            (ContextMenuKind::AgentPane { ws_idx, pane_id }, Some("Focus")) => {
+                self.focus_pane_internal_via_api(ws_idx, pane_id);
+                self.state.replace_mode(Mode::Terminal);
+            }
+            (ContextMenuKind::Pane { pane_id, .. }, Some("Rename pane"))
+            | (ContextMenuKind::AgentPane { pane_id, .. }, Some("Rename")) => {
                 open_rename_pane(&mut self.state, pane_id);
+            }
+            (ContextMenuKind::AgentPane { ws_idx, pane_id }, Some("Close")) => {
+                let was_focused = self.state.active == Some(ws_idx)
+                    && self.state.workspaces[ws_idx].focused_pane_id() == Some(pane_id);
+                self.focus_pane_internal_via_api(ws_idx, pane_id);
+                if !self.close_focused_pane_via_api_requires_confirmation(was_focused) {
+                    self.state.replace_mode(if self.state.active.is_some() {
+                        Mode::Terminal
+                    } else {
+                        Mode::Navigate
+                    });
+                }
             }
             (
                 ContextMenuKind::Pane {
@@ -2267,7 +2605,12 @@ mod tests {
         };
         let mut terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
 
-        apply_context_menu_action(&mut state, &mut terminal_runtimes, menu, 1);
+        let close_idx = menu
+            .items()
+            .iter()
+            .position(|item| *item == "Close group")
+            .expect("close group item");
+        apply_context_menu_action(&mut state, &mut terminal_runtimes, menu, close_idx);
 
         assert_eq!(state.selected, 0);
         assert_eq!(state.mode(), Mode::ConfirmClose);
@@ -2276,6 +2619,130 @@ mod tests {
 
         assert!(state.workspaces.is_empty());
         assert_eq!(state.mode(), Mode::Navigate);
+    }
+
+    fn profile_menu_index(state: &AppState, profile: Option<&str>) -> usize {
+        state
+            .profile_menu
+            .as_ref()
+            .expect("profile menu")
+            .entries
+            .iter()
+            .position(|entry| entry.profile.as_deref() == profile)
+            .expect("profile menu entry")
+    }
+
+    #[test]
+    fn direct_context_and_profile_menu_apply_workspace_send_and_share() {
+        let mut state = state_with_workspaces(&["main", "work"]);
+        state.workspaces[1].profiles = vec!["work".into()];
+        let mut terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+
+        let send_menu = ContextMenuState {
+            kind: ContextMenuKind::Workspace { ws_idx: 0 },
+            x: 4,
+            y: 5,
+            list: MenuListState::new(0),
+        };
+        let send_idx = send_menu
+            .items()
+            .iter()
+            .position(|item| *item == "Send to profile...")
+            .unwrap();
+        apply_context_menu_action(&mut state, &mut terminal_runtimes, send_menu, send_idx);
+        assert_eq!(state.profile_menu.as_ref().unwrap().x, 4);
+        let work_idx = profile_menu_index(&state, Some("work"));
+        let menu = state.profile_menu.take().unwrap();
+        apply_profile_menu_action(&mut state, menu, work_idx);
+        assert_eq!(state.workspaces[0].profiles, ["work"]);
+        assert!(state.profile_menu.is_none());
+
+        state.workspaces[0].profiles.clear();
+        let share_menu = ContextMenuState {
+            kind: ContextMenuKind::Workspace { ws_idx: 0 },
+            x: 0,
+            y: 0,
+            list: MenuListState::new(0),
+        };
+        let share_idx = share_menu
+            .items()
+            .iter()
+            .position(|item| *item == "Share with profiles...")
+            .unwrap();
+        apply_context_menu_action(&mut state, &mut terminal_runtimes, share_menu, share_idx);
+        let work_idx = profile_menu_index(&state, Some("work"));
+        let menu = state.profile_menu.take().unwrap();
+        apply_profile_menu_action(&mut state, menu, work_idx);
+        assert_eq!(state.workspaces[0].profiles, ["personal", "work"]);
+        assert!(state.profile_menu.is_some());
+
+        let work_idx = profile_menu_index(&state, Some("work"));
+        let menu = state.profile_menu.take().unwrap();
+        apply_profile_menu_action(&mut state, menu, work_idx);
+        assert_eq!(state.workspaces[0].profiles, ["personal"]);
+    }
+
+    #[test]
+    fn direct_pane_share_uses_workspace_membership_and_follow_space_clears() {
+        let mut state = state_with_workspaces(&["main", "other"]);
+        state.ensure_test_terminals();
+        state.workspaces[0].profiles = vec!["work".into()];
+        state.workspaces[1].profiles = vec!["other".into()];
+        let pane_id = state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        state.open_profile_menu(
+            ProfileMenuTarget::Pane { ws_idx: 0, pane_id },
+            ProfileMenuMode::Share,
+            0,
+            0,
+        );
+        let other_idx = profile_menu_index(&state, Some("other"));
+        let menu = state.profile_menu.take().unwrap();
+        apply_profile_menu_action(&mut state, menu, other_idx);
+        assert_eq!(state.terminals[&terminal_id].profiles, ["work", "other"]);
+
+        let follow_idx = profile_menu_index(&state, None);
+        let menu = state.profile_menu.take().unwrap();
+        apply_profile_menu_action(&mut state, menu, follow_idx);
+        assert!(state.terminals[&terminal_id].profiles.is_empty());
+        assert!(state.profile_menu.is_none());
+    }
+
+    #[test]
+    fn api_profile_menu_enter_applies_workspace_and_pane_params() {
+        let mut app = app_with_test_workspaces(&["main", "work"]);
+        app.state.workspaces[1].profiles = vec!["work".into()];
+        app.state.open_profile_menu(
+            ProfileMenuTarget::Workspace { ws_idx: 0 },
+            ProfileMenuMode::Send,
+            0,
+            0,
+        );
+        let work_idx = profile_menu_index(&app.state, Some("work"));
+        app.state.profile_menu.as_mut().unwrap().list.highlighted = work_idx;
+        app.handle_profile_menu_key_via_api(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        assert_eq!(app.state.workspaces[0].profiles, ["work"]);
+
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.state.open_profile_menu(
+            ProfileMenuTarget::Pane { ws_idx: 0, pane_id },
+            ProfileMenuMode::Share,
+            0,
+            0,
+        );
+        let personal_idx = profile_menu_index(&app.state, Some("personal"));
+        app.state.profile_menu.as_mut().unwrap().list.highlighted = personal_idx;
+        app.handle_profile_menu_key_via_api(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        assert_eq!(
+            app.state.terminals[&terminal_id].profiles,
+            ["work", "personal"]
+        );
+        assert!(app.state.profile_menu.is_some());
     }
 
     #[test]

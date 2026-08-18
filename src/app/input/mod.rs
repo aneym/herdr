@@ -446,6 +446,9 @@ impl App {
                     MouseAction::ContextMenu { menu, idx } => {
                         self.apply_context_menu_action_via_api(menu, idx)
                     }
+                    MouseAction::ProfileMenu { menu, idx } => {
+                        self.apply_profile_menu_action_via_api(menu, idx)
+                    }
                 }
             }
             if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))

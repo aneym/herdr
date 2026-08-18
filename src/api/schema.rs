@@ -173,6 +173,8 @@ pub enum Method {
     PaneFocus(PaneTarget),
     #[serde(rename = "pane.input.set")]
     PaneInputSet(PaneInputSetParams),
+    #[serde(rename = "pane.set_profiles")]
+    PaneSetProfiles(PaneSetProfilesParams),
     #[serde(rename = "pane.rename")]
     PaneRename(PaneRenameParams),
     #[serde(rename = "pane.send_text")]

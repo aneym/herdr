@@ -6289,12 +6289,18 @@ last_pane = "prefix+tab"
         app.state.active = Some(0);
         app.state.selected = 0;
         app.state.confirm_close = false;
-        app.state.context_menu = Some(state::ContextMenuState {
+        let mut menu = state::ContextMenuState {
             kind: state::ContextMenuKind::Workspace { ws_idx: 1 },
             x: 2,
             y: 2,
-            list: state::MenuListState::new(1),
-        });
+            list: state::MenuListState::new(0),
+        };
+        menu.list.highlighted = menu
+            .items()
+            .iter()
+            .position(|item| *item == "Close")
+            .expect("close item");
+        app.state.context_menu = Some(menu);
         app.state.replace_mode(Mode::ContextMenu);
 
         app.route_client_input(b"\r".to_vec());

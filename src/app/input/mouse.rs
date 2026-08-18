@@ -6,7 +6,8 @@ use tracing::warn;
 use crate::{
     app::state::{
         AppState, ContextMenuKind, ContextMenuState, DragState, DragTarget, MenuListState, Mode,
-        RightClickPassthroughGesture, TabPressState, ViewLayout, WorkspacePressState,
+        ProfileMenuState, RightClickPassthroughGesture, TabPressState, ViewLayout,
+        WorkspacePressState,
     },
     layout::{PaneInfo, SplitBorder},
     selection::Selection,
@@ -58,6 +59,10 @@ pub(super) enum MouseAction {
     ConfirmCloseAccept,
     ContextMenu {
         menu: ContextMenuState,
+        idx: usize,
+    },
+    ProfileMenu {
+        menu: ProfileMenuState,
         idx: usize,
     },
 }
@@ -408,6 +413,18 @@ impl AppState {
                         })
                         .unwrap_or(ModalAction::Cancel);
                     return Some(MouseAction::RenameModal(action));
+                }
+
+                if self.mode() == Mode::ContextMenu && self.profile_menu.is_some() {
+                    let item_idx = self.profile_menu_item_at(mouse.column, mouse.row);
+                    if let Some(menu) = self.profile_menu.take() {
+                        if let Some(idx) = item_idx {
+                            return Some(MouseAction::ProfileMenu { menu, idx });
+                        } else {
+                            leave_modal(self);
+                        }
+                    }
+                    return None;
                 }
 
                 if self.mode() == Mode::ContextMenu {
@@ -1057,6 +1074,15 @@ impl AppState {
                 }
             }
 
+            MouseEventKind::Moved
+                if self.mode() == Mode::ContextMenu && self.profile_menu.is_some() =>
+            {
+                let hovered = self.profile_menu_item_at(mouse.column, mouse.row);
+                if let Some(menu) = &mut self.profile_menu {
+                    menu.list.hover(hovered);
+                }
+            }
+
             MouseEventKind::Moved if self.mode() == Mode::ContextMenu => {
                 let hovered = self.context_menu_item_at(mouse.column, mouse.row);
                 if let Some(menu) = &mut self.context_menu {
@@ -1072,12 +1098,18 @@ impl AppState {
 
             MouseEventKind::Down(MouseButton::Right) if in_sidebar && !self.sidebar_collapsed => {
                 self.clear_chrome_press(source_id);
-                if self
-                    .workspace_list_scrollbar_target_at(mouse.column, mouse.row)
-                    .is_some()
+
+                let new_button = self.sidebar_new_button_rect();
+                if rect_contains(new_button, mouse.column, mouse.row)
+                    || self.on_sidebar_divider(mouse.column, mouse.row)
+                    || self.on_sidebar_section_divider(mouse.column, mouse.row)
+                    || self
+                        .workspace_list_scrollbar_target_at(mouse.column, mouse.row)
+                        .is_some()
                 {
                     return None;
                 }
+
                 if let Some(idx) = self.workspace_at_row(mouse.row) {
                     self.selected = idx;
                     let kind = self
@@ -1114,6 +1146,42 @@ impl AppState {
                         .unwrap_or(ContextMenuKind::Workspace { ws_idx: idx });
                     self.context_menu = Some(ContextMenuState {
                         kind,
+                        x: mouse.column,
+                        y: mouse.row,
+                        list: MenuListState::new(0),
+                    });
+                    self.replace_mode(Mode::ContextMenu);
+                    return None;
+                }
+
+                let agent_entries =
+                    crate::ui::agent_panel_list_entries_from(self, terminal_runtimes);
+                let agent_body = crate::ui::agent_panel_body_rect(
+                    self.agent_panel_rect(),
+                    crate::ui::should_show_scrollbar(crate::ui::agent_panel_scroll_metrics(
+                        self,
+                        &agent_entries,
+                        self.agent_panel_rect(),
+                    )),
+                );
+                if self
+                    .agent_panel_scrollbar_target_at(&agent_entries, mouse.column, mouse.row)
+                    .is_some()
+                    || self.on_agent_panel_sort_toggle(mouse.column, mouse.row)
+                    || self.on_automations_header(&agent_entries, mouse.column, mouse.row)
+                    || self
+                        .agent_group_toggle_at(&agent_entries, mouse.column, mouse.row)
+                        .is_some()
+                    || !rect_contains(agent_body, mouse.column, mouse.row)
+                {
+                    return None;
+                }
+
+                if let Some((ws_idx, _tab_idx, pane_id)) =
+                    self.agent_detail_target_at(&agent_entries, mouse.row)
+                {
+                    self.context_menu = Some(ContextMenuState {
+                        kind: ContextMenuKind::AgentPane { ws_idx, pane_id },
                         x: mouse.column,
                         y: mouse.row,
                         list: MenuListState::new(0),
@@ -1296,6 +1364,44 @@ impl AppState {
         let x = menu.x.min(screen.x + screen.width.saturating_sub(menu_w));
         let y = menu.y.min(screen.y + screen.height.saturating_sub(menu_h));
         Some(Rect::new(x, y, menu_w, menu_h))
+    }
+
+    pub(crate) fn profile_menu_rect(&self) -> Option<Rect> {
+        let menu = self.profile_menu.as_ref()?;
+        let screen = self.screen_rect();
+        let max_item_w = menu
+            .entries
+            .iter()
+            .map(|entry| entry.label.len() as u16 + 2)
+            .max()
+            .unwrap_or(0);
+        let menu_w = (max_item_w + 4).max(14).min(screen.width.max(1));
+        let menu_h = (menu.entries.len() as u16 + 2).min(screen.height.max(1));
+        let x = menu.x.min(screen.x + screen.width.saturating_sub(menu_w));
+        let y = menu.y.min(screen.y + screen.height.saturating_sub(menu_h));
+        Some(Rect::new(x, y, menu_w, menu_h))
+    }
+
+    fn profile_menu_item_at(&self, col: u16, row: u16) -> Option<usize> {
+        let menu_rect = self.profile_menu_rect()?;
+        let inner_x = menu_rect.x + 1;
+        let inner_y = menu_rect.y + 1;
+        let inner_w = menu_rect.width.saturating_sub(2);
+        let inner_h = menu_rect.height.saturating_sub(2);
+        let item_count = self
+            .profile_menu
+            .as_ref()
+            .map(|menu| menu.entries.len() as u16)
+            .unwrap_or(0);
+        if col >= inner_x
+            && col < inner_x + inner_w
+            && row >= inner_y
+            && row < inner_y + inner_h.min(item_count)
+        {
+            Some((row - inner_y) as usize)
+        } else {
+            None
+        }
     }
 
     pub(crate) fn confirm_close_rect(&self) -> Rect {
@@ -2071,6 +2177,137 @@ mod tests {
         detect::{Agent, AgentState},
         workspace::Workspace,
     };
+
+    #[test]
+    fn agent_row_right_click_opens_agent_pane_menu() {
+        let mut app = app_for_mouse_test();
+        let workspace = Workspace::test_new("agent-space");
+        let pane_id = workspace.tabs[0].root_pane;
+        app.state.workspaces = vec![workspace];
+        app.state.ensure_test_terminals();
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_state(Some(Agent::Pi), AgentState::Idle);
+        let entries = crate::ui::agent_panel_list_entries_from(&app.state, &app.terminal_runtimes);
+        let body = crate::ui::agent_panel_body_rect(app.state.agent_panel_rect(), false);
+        assert_eq!(
+            app.state.agent_detail_target_at(&entries, body.y),
+            Some((0, 0, pane_id))
+        );
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Right),
+            body.x,
+            body.y,
+        ));
+
+        assert!(matches!(
+            app.state.context_menu.as_ref().map(|menu| &menu.kind),
+            Some(ContextMenuKind::AgentPane {
+                ws_idx: 0,
+                pane_id: menu_pane_id,
+            }) if *menu_pane_id == pane_id
+        ));
+        assert_eq!(app.state.mode(), Mode::ContextMenu);
+    }
+
+    #[test]
+    fn agent_panel_scrollbar_right_click_does_not_open_agent_menu() {
+        let mut app = app_for_mouse_test();
+        let mut workspace = Workspace::test_new("agents");
+        for _ in 0..7 {
+            workspace.test_split(Direction::Horizontal);
+        }
+        app.state.workspaces = vec![workspace];
+        app.state.ensure_test_terminals();
+        for terminal in app.state.terminals.values_mut() {
+            terminal.set_detected_state(Some(Agent::Pi), AgentState::Idle);
+        }
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 20));
+        let entries = crate::ui::agent_panel_list_entries_from(&app.state, &app.terminal_runtimes);
+        let scrollbar = crate::ui::agent_panel_scrollbar_rect(
+            &app.state,
+            &entries,
+            app.state.agent_panel_rect(),
+        )
+        .expect("agent panel scrollbar");
+        assert!(app
+            .state
+            .agent_detail_target_at(&entries, scrollbar.y)
+            .is_some());
+        let initial_mode = app.state.mode();
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Right),
+            scrollbar.x,
+            scrollbar.y,
+        ));
+
+        assert!(app.state.context_menu.is_none());
+        assert_eq!(app.state.mode(), initial_mode);
+    }
+
+    #[test]
+    fn sidebar_section_divider_right_click_does_not_open_context_menu() {
+        let mut app = app_for_mouse_test();
+        let workspace = Workspace::test_new("agent-space");
+        let pane_id = workspace.tabs[0].root_pane;
+        app.state.workspaces = vec![workspace];
+        app.state.ensure_test_terminals();
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("agent terminal")
+            .set_detected_state(Some(Agent::Pi), AgentState::Idle);
+        app.state.sidebar_section_order = [
+            crate::config::SidebarSection::Agents,
+            crate::config::SidebarSection::Spaces,
+        ];
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 20));
+        let divider =
+            crate::ui::sidebar_section_divider_rect(&app.state, app.state.view.sidebar_rect);
+        assert!(app.state.on_sidebar_section_divider(divider.x, divider.y));
+        let initial_mode = app.state.mode();
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Right),
+            divider.x,
+            divider.y,
+        ));
+
+        assert!(app.state.context_menu.is_none());
+        assert_eq!(app.state.mode(), initial_mode);
+    }
+
+    #[test]
+    fn workspace_row_right_click_still_opens_workspace_menu() {
+        let mut app = app_for_mouse_test();
+        app.state.workspaces = vec![Workspace::test_new("space")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 20));
+        let workspace = app.state.view.workspace_card_areas[0].rect;
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Right),
+            workspace.x,
+            workspace.y,
+        ));
+
+        assert!(matches!(
+            app.state.context_menu.as_ref().map(|menu| &menu.kind),
+            Some(ContextMenuKind::Workspace { ws_idx: 0 })
+        ));
+        assert_eq!(app.state.mode(), Mode::ContextMenu);
+    }
 
     #[test]
     fn tab_click_survives_stray_drag_report_off_the_tab_bar() {
@@ -3638,12 +3875,18 @@ mod tests {
         app.state.selected = 0;
         app.state.replace_mode(Mode::Terminal);
 
-        app.state.context_menu = Some(ContextMenuState {
+        let mut menu = ContextMenuState {
             kind: ContextMenuKind::Workspace { ws_idx: 1 },
             x: 2,
             y: 2,
-            list: MenuListState::new(1),
-        });
+            list: MenuListState::new(0),
+        };
+        menu.list.highlighted = menu
+            .items()
+            .iter()
+            .position(|item| *item == "Close")
+            .expect("close item");
+        app.state.context_menu = Some(menu);
         app.state.replace_mode(Mode::ContextMenu);
         handle_context_menu_key(
             &mut app.state,
@@ -3678,19 +3921,25 @@ mod tests {
         app.state.active = Some(0);
         app.state.selected = 0;
         app.state.confirm_close = false;
-        app.state.context_menu = Some(ContextMenuState {
+        let menu = ContextMenuState {
             kind: ContextMenuKind::Workspace { ws_idx: 1 },
             x: 2,
             y: 2,
-            list: MenuListState::new(1),
-        });
+            list: MenuListState::new(0),
+        };
+        let close_idx = menu
+            .items()
+            .iter()
+            .position(|item| *item == "Close")
+            .expect("close item");
+        app.state.context_menu = Some(menu);
         app.state.replace_mode(Mode::ContextMenu);
 
         let menu = app.state.context_menu_rect().unwrap();
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
             menu.x + 2,
-            menu.y + 2,
+            menu.y + 1 + close_idx as u16,
         ));
 
         assert_eq!(app.state.workspaces.len(), 1);

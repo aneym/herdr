@@ -143,6 +143,12 @@ pub struct PaneSnapshot {
     pub agent_identity: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_ownership: Option<PaneAgentOwnershipSnapshot>,
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "deserialize_profiles"
+    )]
+    pub profiles: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -512,6 +518,9 @@ fn capture_tab(
                     value: session.session_ref.value.clone(),
                 })
         });
+        let profiles = terminal
+            .map(|terminal| terminal.profiles.clone())
+            .unwrap_or_default();
         let agent_identity = terminal.and_then(|terminal| terminal.agent_identity.clone());
         let agent_ownership = terminal.and_then(|terminal| {
             terminal.agent_ownership.as_ref().map(|ownership| {
@@ -538,6 +547,7 @@ fn capture_tab(
                 launch_argv,
                 agent_identity,
                 agent_ownership,
+                profiles,
             },
         );
     }
@@ -882,6 +892,50 @@ mod tests {
     }
 
     #[test]
+    fn pane_profiles_roundtrip_and_default_empty_when_missing() {
+        let mut state = state_with_workspaces(&["one"]);
+        let pane_id = state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        state.terminals.get_mut(&terminal_id).unwrap().profiles = vec!["work".into()];
+        let snapshot = capture_from_state(&state);
+        let mut serialized = serde_json::to_value(snapshot).unwrap();
+
+        let restored = parse_snapshot(&serialized.to_string()).unwrap();
+        assert_eq!(
+            restored.workspaces[0].tabs[0].panes[&pane_id.raw()].profiles,
+            ["work"]
+        );
+
+        serialized["workspaces"][0]["tabs"][0]["panes"][pane_id.raw().to_string()]
+            .as_object_mut()
+            .unwrap()
+            .remove("profiles");
+        let restored = parse_snapshot(&serialized.to_string()).unwrap();
+        assert!(restored.workspaces[0].tabs[0].panes[&pane_id.raw()]
+            .profiles
+            .is_empty());
+    }
+
+    #[test]
+    fn pane_profiles_are_normalized_during_snapshot_load() {
+        let state = state_with_workspaces(&["one"]);
+        let pane_id = state.workspaces[0].tabs[0].root_pane;
+        let snapshot = capture_from_state(&state);
+        let mut serialized = serde_json::to_value(snapshot).unwrap();
+        serialized["workspaces"][0]["tabs"][0]["panes"][pane_id.raw().to_string()]["profiles"] =
+            serde_json::json!([" work ", "work", "wörk"]);
+
+        let restored = parse_snapshot(&serialized.to_string()).unwrap();
+
+        assert_eq!(
+            restored.workspaces[0].tabs[0].panes[&pane_id.raw()].profiles,
+            ["work"]
+        );
+    }
+
+    #[test]
     fn round_trip_layout_snapshot() {
         let layout = LayoutSnapshot::Split {
             direction: DirectionSnapshot::Horizontal,
@@ -917,6 +971,7 @@ mod tests {
                 launch_argv: None,
                 agent_identity: None,
                 agent_ownership: None,
+                profiles: Vec::new(),
             },
         );
         panes.insert(
@@ -930,6 +985,7 @@ mod tests {
                 launch_argv: None,
                 agent_identity: None,
                 agent_ownership: None,
+                profiles: Vec::new(),
             },
         );
 
@@ -1594,6 +1650,7 @@ mod tests {
                 launch_argv: None,
                 agent_identity: None,
                 agent_ownership: None,
+                profiles: Vec::new(),
             },
         );
         panes.insert(
@@ -1609,6 +1666,7 @@ mod tests {
                 launch_argv: None,
                 agent_identity: None,
                 agent_ownership: None,
+                profiles: Vec::new(),
             },
         );
 
