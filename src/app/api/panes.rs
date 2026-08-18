@@ -173,24 +173,14 @@ impl App {
         let Some((ws_idx, pane_id)) = self.parse_pane_id(&params.pane_id) else {
             return pane_not_found(id, &params.pane_id);
         };
-        let profiles = match crate::workspace::normalize_profiles(params.profiles) {
-            Ok(profiles) => profiles,
-            Err(message) => return encode_error(id, "invalid_profile", message),
-        };
-        let Some(terminal_id) = self
+        match self
             .state
-            .workspaces
-            .get(ws_idx)
-            .and_then(|workspace| workspace.pane_state(pane_id))
-            .map(|pane| pane.attached_terminal_id.clone())
-        else {
-            return pane_not_found(id, &params.pane_id);
-        };
-        let Some(terminal) = self.state.terminals.get_mut(&terminal_id) else {
-            return pane_not_found(id, &params.pane_id);
-        };
-        terminal.profiles = profiles;
-        self.state.mark_session_dirty();
+            .set_pane_profiles(ws_idx, pane_id, params.profiles)
+        {
+            Ok(true) => {}
+            Ok(false) => return pane_not_found(id, &params.pane_id),
+            Err(message) => return encode_error(id, "invalid_profile", message),
+        }
         self.schedule_session_save();
         let Some(pane) = self.pane_info(ws_idx, pane_id) else {
             return pane_not_found(id, &params.pane_id);
@@ -1963,6 +1953,84 @@ mod tests {
         let pane_id = app.state.workspaces[0].tabs[0].root_pane;
         let public_pane_id = app.public_pane_id(0, pane_id).unwrap();
         (app, public_pane_id)
+    }
+
+    fn set_test_pane_profiles(app: &mut App, pane_id: String, profiles: &[&str]) {
+        let response = app.handle_pane_set_profiles(
+            "req".into(),
+            PaneSetProfilesParams {
+                pane_id,
+                profiles: profiles.iter().map(|profile| (*profile).into()).collect(),
+            },
+        );
+        let response: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert!(matches!(response.result, ResponseResult::PaneInfo { .. }));
+    }
+
+    #[test]
+    fn pane_profiles_make_untagged_workspace_visible_in_personal_and_work() {
+        let (mut app, public_pane_id) = app_with_test_workspace();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .detected_agent = Some(Agent::Claude);
+
+        set_test_pane_profiles(&mut app, public_pane_id, &["work"]);
+
+        assert_eq!(app.state.workspaces[0].profiles, ["personal", "work"]);
+        assert_eq!(app.state.terminals[&terminal_id].profiles, ["work"]);
+        app.state.active_profile = "work".into();
+        assert!(app.state.workspace_is_visible(0));
+        assert_eq!(crate::ui::agent_panel_entries(&app.state).len(), 1);
+        app.state.active_profile = "personal".into();
+        assert!(app.state.workspace_is_visible(0));
+    }
+
+    #[test]
+    fn pane_profiles_append_only_missing_workspace_profiles() {
+        let (mut app, public_pane_id) = app_with_test_workspace();
+        app.state.workspaces[0].profiles = vec!["work".into()];
+
+        set_test_pane_profiles(&mut app, public_pane_id, &["work", "tasks"]);
+
+        assert_eq!(app.state.workspaces[0].profiles, ["work", "tasks"]);
+    }
+
+    #[test]
+    fn existing_pane_profile_leaves_workspace_profiles_exactly_unchanged() {
+        let (mut app, public_pane_id) = app_with_test_workspace();
+        app.state.workspaces[0].profiles = vec!["tasks".into(), "work".into()];
+        let before = app.state.workspaces[0].profiles.clone();
+
+        set_test_pane_profiles(&mut app, public_pane_id, &["work"]);
+
+        assert_eq!(app.state.workspaces[0].profiles, before);
+    }
+
+    #[test]
+    fn personal_pane_profile_is_appended_to_work_workspace() {
+        let (mut app, public_pane_id) = app_with_test_workspace();
+        app.state.workspaces[0].profiles = vec!["work".into()];
+
+        set_test_pane_profiles(&mut app, public_pane_id, &["personal"]);
+
+        assert_eq!(app.state.workspaces[0].profiles, ["work", "personal"]);
+    }
+
+    #[test]
+    fn clearing_pane_profiles_leaves_workspace_profiles_unchanged() {
+        let (mut app, public_pane_id) = app_with_test_workspace();
+        app.state.workspaces[0].profiles = vec!["work".into(), "tasks".into()];
+        let before = app.state.workspaces[0].profiles.clone();
+
+        set_test_pane_profiles(&mut app, public_pane_id, &[]);
+
+        assert_eq!(app.state.workspaces[0].profiles, before);
     }
 
     #[test]

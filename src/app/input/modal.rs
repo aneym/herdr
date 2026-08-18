@@ -1048,33 +1048,30 @@ pub(super) fn apply_profile_menu_action(state: &mut AppState, menu: ProfileMenuS
                 .get(ws_idx)
                 .map(|workspace| workspace.profiles.clone())
                 .unwrap_or_default();
-            let terminal_id = state
+            let own_profiles = state
                 .workspaces
                 .get(ws_idx)
                 .and_then(|workspace| workspace.pane_state(pane_id))
-                .map(|pane| pane.attached_terminal_id.clone());
-            if let Some(terminal) = terminal_id
-                .as_ref()
-                .and_then(|terminal_id| state.terminals.get_mut(terminal_id))
-            {
-                terminal.profiles = match profile {
-                    None => Vec::new(),
-                    Some(profile) => {
-                        let effective = if terminal.profiles.is_empty() {
-                            workspace_profiles.as_slice()
-                        } else {
-                            terminal.profiles.as_slice()
-                        };
-                        profile_selection(
-                            effective,
-                            &profile,
-                            menu.mode,
-                            terminal.profiles.is_empty() && workspace_profiles.is_empty(),
-                        )
-                    }
-                };
-                state.mark_session_dirty();
-            } else {
+                .and_then(|pane| state.terminals.get(&pane.attached_terminal_id))
+                .map(|terminal| terminal.profiles.as_slice())
+                .unwrap_or_default();
+            let profiles = match profile {
+                None => Vec::new(),
+                Some(profile) => {
+                    let effective = if own_profiles.is_empty() {
+                        workspace_profiles.as_slice()
+                    } else {
+                        own_profiles
+                    };
+                    profile_selection(
+                        effective,
+                        &profile,
+                        menu.mode,
+                        own_profiles.is_empty() && workspace_profiles.is_empty(),
+                    )
+                }
+            };
+            if !matches!(state.set_pane_profiles(ws_idx, pane_id, profiles), Ok(true)) {
                 should_close = true;
             }
         }
@@ -2702,6 +2699,12 @@ mod tests {
         let menu = state.profile_menu.take().unwrap();
         apply_profile_menu_action(&mut state, menu, other_idx);
         assert_eq!(state.terminals[&terminal_id].profiles, ["work", "other"]);
+        assert_eq!(state.workspaces[0].profiles, ["work", "other"]);
+        assert!(profile_menu_index(&state, Some("other")) > 0);
+        assert!(
+            state.profile_menu.as_ref().unwrap().entries[profile_menu_index(&state, Some("other"))]
+                .is_current
+        );
 
         let follow_idx = profile_menu_index(&state, None);
         let menu = state.profile_menu.take().unwrap();
@@ -2742,7 +2745,13 @@ mod tests {
             app.state.terminals[&terminal_id].profiles,
             ["work", "personal"]
         );
+        assert_eq!(app.state.workspaces[0].profiles, ["work", "personal"]);
         assert!(app.state.profile_menu.is_some());
+        assert!(
+            app.state.profile_menu.as_ref().unwrap().entries
+                [profile_menu_index(&app.state, Some("personal"))]
+            .is_current
+        );
     }
 
     #[test]

@@ -1865,6 +1865,56 @@ impl AppState {
         self.session_dirty = true;
     }
 
+    pub(crate) fn set_pane_profiles(
+        &mut self,
+        ws_idx: usize,
+        pane_id: crate::layout::PaneId,
+        profiles: Vec<String>,
+    ) -> Result<bool, String> {
+        let profiles = crate::workspace::normalize_profiles(profiles)?;
+        let Some(terminal_id) = self
+            .workspaces
+            .get(ws_idx)
+            .and_then(|workspace| workspace.pane_state(pane_id))
+            .map(|pane| pane.attached_terminal_id.clone())
+        else {
+            return Ok(false);
+        };
+        if !self.terminals.contains_key(&terminal_id) {
+            return Ok(false);
+        }
+
+        let workspace_profiles = if profiles.is_empty() {
+            None
+        } else {
+            let workspace = &self.workspaces[ws_idx];
+            let mut effective = if workspace.profiles.is_empty() {
+                vec![crate::workspace::DEFAULT_PROFILE.to_string()]
+            } else {
+                workspace.profiles.clone()
+            };
+            let previous_len = effective.len();
+            for profile in &profiles {
+                if !effective.contains(profile) {
+                    effective.push(profile.clone());
+                }
+            }
+            (effective.len() != previous_len)
+                .then(|| crate::workspace::normalize_profiles(effective))
+                .transpose()?
+        };
+
+        let Some(terminal) = self.terminals.get_mut(&terminal_id) else {
+            return Ok(false);
+        };
+        terminal.profiles = profiles;
+        if let Some(workspace_profiles) = workspace_profiles {
+            self.workspaces[ws_idx].profiles = workspace_profiles;
+        }
+        self.mark_session_dirty();
+        Ok(true)
+    }
+
     pub fn workspace_is_visible(&self, idx: usize) -> bool {
         self.workspaces.get(idx).is_some_and(|workspace| {
             (self.active_profile == crate::workspace::DEFAULT_PROFILE
