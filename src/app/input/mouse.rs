@@ -34,10 +34,6 @@ pub(super) enum MouseAction {
     FocusTab {
         tab_idx: usize,
     },
-    FocusWorkspaceTab {
-        ws_idx: usize,
-        tab_idx: usize,
-    },
     FocusPane {
         ws_idx: usize,
         pane_id: crate::layout::PaneId,
@@ -610,37 +606,6 @@ impl AppState {
                         }
                     }
 
-                    if let Some(row) = self
-                        .view
-                        .workspace_tab_row_areas
-                        .iter()
-                        .find(|row| rect_contains(row.rect, mouse.column, mouse.row))
-                        .cloned()
-                    {
-                        if row.is_orchestrator
-                            && rect_contains(
-                                crate::ui::orchestrator_chevron_rect(&row),
-                                mouse.column,
-                                mouse.row,
-                            )
-                        {
-                            if let Some(workspace_id) =
-                                self.workspaces.get(row.ws_idx).map(|ws| ws.id.clone())
-                            {
-                                if !self.collapsed_orchestrator_ids.remove(&workspace_id) {
-                                    self.collapsed_orchestrator_ids.insert(workspace_id);
-                                }
-                                self.mark_session_dirty();
-                            }
-                            return None;
-                        }
-                        self.replace_mode(Mode::Terminal);
-                        return Some(MouseAction::FocusWorkspaceTab {
-                            ws_idx: row.ws_idx,
-                            tab_idx: row.tab_idx,
-                        });
-                    }
-
                     if let Some(idx) = self.workspace_at_row(mouse.row) {
                         self.workspace_presses.insert(
                             source_id,
@@ -1142,25 +1107,6 @@ impl AppState {
                         .workspace_list_scrollbar_target_at(mouse.column, mouse.row)
                         .is_some()
                 {
-                    return None;
-                }
-
-                if let Some(row) = self
-                    .view
-                    .workspace_tab_row_areas
-                    .iter()
-                    .find(|row| rect_contains(row.rect, mouse.column, mouse.row))
-                {
-                    self.context_menu = Some(ContextMenuState {
-                        kind: ContextMenuKind::Tab {
-                            ws_idx: row.ws_idx,
-                            tab_idx: row.tab_idx,
-                        },
-                        x: mouse.column,
-                        y: mouse.row,
-                        list: MenuListState::new(0),
-                    });
-                    self.replace_mode(Mode::ContextMenu);
                     return None;
                 }
 

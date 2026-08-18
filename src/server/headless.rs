@@ -1281,7 +1281,6 @@ impl HeadlessServer {
             self.app.state.sidebar_width,
             self.app.state.sidebar_section_split,
             self.app.state.collapsed_space_keys.clone(),
-            self.app.state.collapsed_orchestrator_ids.clone(),
             self.app.state.automations_expanded,
             self.app.state.collapsed_agent_group_keys.clone(),
         );

@@ -8,7 +8,8 @@ use ratatui::{
 
 use super::sidebar::{
     agent_panel_entries, agent_panel_entries_from, grouped_child_display_label,
-    workspace_list_entries_expanded, AgentPanelEntry, WorkspaceListEntry,
+    next_entry_is_indented_workspace, workspace_list_entries_expanded, AgentPanelEntry,
+    WorkspaceListEntry,
 };
 use super::status::{state_icon, state_icon_symbol};
 use super::text::{display_width_u16, truncate_end};
@@ -113,11 +114,7 @@ pub(crate) fn mobile_switcher_workspace_doc_range(
     // in the entry list, not its raw array index.
     let pos = workspace_list_entries_expanded(app)
         .iter()
-        .filter_map(|entry| match entry {
-            WorkspaceListEntry::Workspace { ws_idx, .. } => Some(*ws_idx),
-            WorkspaceListEntry::Tab { .. } => None,
-        })
-        .position(|ws_idx| ws_idx == idx)
+        .position(|WorkspaceListEntry::Workspace { ws_idx, .. }| *ws_idx == idx)
         .unwrap_or(idx);
     // spaces sit after the agents block, then a title + "new workspace" row.
     let start = mobile_agents_block_height(app) + 2 + pos * 2;
@@ -176,19 +173,13 @@ pub(crate) fn mobile_switcher_target_at(
     cursor += 1;
     // Spaces render in grouped (worktree-tree) order, which differs from raw
     // array order, so map the clicked row to the entry's real workspace index.
-    let space_entries = workspace_list_entries_expanded(app)
-        .into_iter()
-        .filter_map(|entry| match entry {
-            WorkspaceListEntry::Workspace { ws_idx, indented } => Some((ws_idx, indented)),
-            WorkspaceListEntry::Tab { .. } => None,
-        })
-        .collect::<Vec<_>>();
+    let space_entries = workspace_list_entries_expanded(app);
     let spaces_end = cursor + space_entries.len() * 2;
     if doc_row >= cursor && doc_row < spaces_end {
         let entry_idx = (doc_row - cursor) / 2;
-        return space_entries
-            .get(entry_idx)
-            .map(|(ws_idx, _)| MobileSwitcherTarget::Workspace(*ws_idx));
+        return space_entries.get(entry_idx).map(
+            |WorkspaceListEntry::Workspace { ws_idx, .. }| MobileSwitcherTarget::Workspace(*ws_idx),
+        );
     }
     cursor = spaces_end;
 
@@ -595,14 +586,10 @@ fn render_mobile_switcher_content(
         p,
     );
     doc_y += 1;
-    let space_entries = workspace_list_entries_expanded(app)
-        .into_iter()
-        .filter_map(|entry| match entry {
-            WorkspaceListEntry::Workspace { ws_idx, indented } => Some((ws_idx, indented)),
-            WorkspaceListEntry::Tab { .. } => None,
-        })
-        .collect::<Vec<_>>();
-    for (entry_idx, (ws_idx, indented)) in space_entries.iter().enumerate() {
+    let space_entries = workspace_list_entries_expanded(app);
+    for (entry_idx, WorkspaceListEntry::Workspace { ws_idx, indented }) in
+        space_entries.iter().enumerate()
+    {
         let Some(ws) = app.workspaces.get(*ws_idx) else {
             continue;
         };
@@ -617,9 +604,7 @@ fn render_mobile_switcher_content(
         // child gets an L/T connector on its name row and a matching vertical
         // continuation on its detail row.
         let detail_prefix = if *indented {
-            let last_child = !space_entries
-                .get(entry_idx.saturating_add(1))
-                .is_some_and(|(_, next_indented)| *next_indented);
+            let last_child = !next_entry_is_indented_workspace(&space_entries, entry_idx);
             title_spans.push(Span::styled(
                 if last_child { "└─ " } else { "├─ " },
                 Style::default().fg(p.overlay0).bg(bg),

@@ -707,14 +707,6 @@ pub struct WorkspaceCardArea {
     pub indented: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WorkspaceTabRowArea {
-    pub ws_idx: usize,
-    pub tab_idx: usize,
-    pub rect: Rect,
-    pub is_orchestrator: bool,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreeCreateState {
     pub source_workspace_id: String,
@@ -870,7 +862,6 @@ pub struct ViewState {
     pub layout: ViewLayout,
     pub sidebar_rect: Rect,
     pub workspace_card_areas: Vec<WorkspaceCardArea>,
-    pub workspace_tab_row_areas: Vec<WorkspaceTabRowArea>,
     pub tab_bar_rect: Rect,
     pub tab_hit_areas: Vec<Rect>,
     pub tab_scroll_left_hit_area: Rect,
@@ -1723,7 +1714,6 @@ pub struct AppState {
     pub worktree_remove: Option<WorktreeRemoveState>,
     pub worktree_directory: std::path::PathBuf,
     pub collapsed_space_keys: std::collections::HashSet<String>,
-    pub collapsed_orchestrator_ids: std::collections::HashSet<String>,
     pub automations_expanded: bool,
     pub collapsed_agent_group_keys: std::collections::HashSet<String>,
     pub request_complete_onboarding: bool,
@@ -2234,7 +2224,6 @@ impl AppState {
             worktree_remove: None,
             worktree_directory: std::path::PathBuf::from("/tmp/herdr-worktrees"),
             collapsed_space_keys: std::collections::HashSet::new(),
-            collapsed_orchestrator_ids: std::collections::HashSet::new(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
             request_complete_onboarding: false,
@@ -2254,7 +2243,6 @@ impl AppState {
                 layout: ViewLayout::Desktop,
                 sidebar_rect: Rect::default(),
                 workspace_card_areas: Vec::new(),
-                workspace_tab_row_areas: Vec::new(),
                 tab_bar_rect: Rect::default(),
                 tab_hit_areas: Vec::new(),
                 tab_scroll_left_hit_area: Rect::default(),

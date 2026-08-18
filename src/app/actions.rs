@@ -1686,9 +1686,8 @@ impl AppState {
         };
         entries
             .into_iter()
-            .filter_map(|entry| match entry {
-                crate::ui::WorkspaceListEntry::Workspace { ws_idx, .. } => Some(ws_idx),
-                crate::ui::WorkspaceListEntry::Tab { .. } => None,
+            .map(|entry| match entry {
+                crate::ui::WorkspaceListEntry::Workspace { ws_idx, .. } => ws_idx,
             })
             .collect()
     }

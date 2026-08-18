@@ -433,8 +433,7 @@ impl AppState {
                     ws_idx,
                     indented: false,
                 } => Some(ws_idx),
-                crate::ui::WorkspaceListEntry::Workspace { .. }
-                | crate::ui::WorkspaceListEntry::Tab { .. } => None,
+                crate::ui::WorkspaceListEntry::Workspace { .. } => None,
             })
             .collect::<Vec<_>>();
         let source_pos = roots.iter().position(|ws_idx| *ws_idx == source_ws_idx)?;
@@ -592,7 +591,7 @@ impl AppState {
                 detail.tree.expanded?;
                 let rect = crate::ui::agent_group_chevron_rect(body, row_y, &detail.tree);
                 if rect.width > 0 && col >= rect.x && col < rect.x + rect.width {
-                    return detail.agent_identity.clone();
+                    return detail.tree.group_key.clone();
                 }
                 return None;
             }

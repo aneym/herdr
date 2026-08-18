@@ -420,15 +420,6 @@ impl App {
                         self.focus_workspace_idx_via_api(ws_idx)
                     }
                     MouseAction::FocusTab { tab_idx } => self.focus_tab_idx_via_api(tab_idx),
-                    MouseAction::FocusWorkspaceTab { ws_idx, tab_idx } => {
-                        // tab.focus resolves the workspace from the tab id and
-                        // switches to it, so one call covers both moves.
-                        if let Some(tab_id) = self.public_tab_id(ws_idx, tab_idx) {
-                            self.runtime_tab_focus("tui.tab.focus", tab_id);
-                        } else {
-                            self.focus_workspace_idx_via_api(ws_idx);
-                        }
-                    }
                     MouseAction::FocusPane { ws_idx, pane_id } => {
                         self.focus_pane_internal_via_api(ws_idx, pane_id)
                     }
@@ -875,7 +866,6 @@ fn capture_snapshot(state: &AppState) -> crate::persist::SessionSnapshot {
         state.sidebar_width,
         state.sidebar_section_split,
         state.collapsed_space_keys.clone(),
-        state.collapsed_orchestrator_ids.clone(),
         state.automations_expanded,
         state.collapsed_agent_group_keys.clone(),
     )

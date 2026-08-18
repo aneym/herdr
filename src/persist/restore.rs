@@ -1236,7 +1236,6 @@ mod tests {
             sidebar_width: None,
             sidebar_section_split: None,
             collapsed_space_keys: Default::default(),
-            collapsed_orchestrator_ids: Default::default(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
         };
@@ -1344,7 +1343,6 @@ mod tests {
             sidebar_width: None,
             sidebar_section_split: None,
             collapsed_space_keys: Default::default(),
-            collapsed_orchestrator_ids: Default::default(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
         };
@@ -1437,7 +1435,6 @@ mod tests {
             sidebar_width: None,
             sidebar_section_split: None,
             collapsed_space_keys: Default::default(),
-            collapsed_orchestrator_ids: Default::default(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
         };
@@ -1534,7 +1531,6 @@ mod tests {
             sidebar_width: None,
             sidebar_section_split: None,
             collapsed_space_keys: Default::default(),
-            collapsed_orchestrator_ids: Default::default(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
         };
@@ -1653,7 +1649,6 @@ mod tests {
             sidebar_width: None,
             sidebar_section_split: None,
             collapsed_space_keys: Default::default(),
-            collapsed_orchestrator_ids: Default::default(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
         };
@@ -1775,7 +1770,6 @@ mod tests {
             sidebar_width: None,
             sidebar_section_split: None,
             collapsed_space_keys: Default::default(),
-            collapsed_orchestrator_ids: Default::default(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
         };
@@ -1978,7 +1972,6 @@ mod tests {
             sidebar_width: Some(26),
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: Default::default(),
-            collapsed_orchestrator_ids: Default::default(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
         };
