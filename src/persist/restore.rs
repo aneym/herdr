@@ -506,6 +506,7 @@ fn restore_tab(
         let saved_agent_ownership = saved_pane
             .and_then(|p| p.agent_ownership.as_ref())
             .map(|ownership| ownership.to_ownership());
+        let saved_terminal_title = saved_pane.and_then(|p| p.terminal_title.clone());
         let saved_history =
             old_id.and_then(|old_id| history.and_then(|history| history.panes.get(old_id)));
         let startup = {
@@ -555,6 +556,9 @@ fn restore_tab(
             terminal.agent_identity = saved_agent_identity.clone();
             terminal.agent_ownership = saved_agent_ownership.clone();
             terminal.profiles = saved_profiles.clone();
+            // Seed the last known title so sidebar thread titles survive the
+            // restart; the live pane's next title emission overwrites it.
+            terminal.terminal_title = saved_terminal_title.clone();
             match (saved_agent_name, saved_managed_agent) {
                 (Some(agent_name), Some(agent)) => {
                     terminal.restore_managed_agent(agent_name, agent)
@@ -659,6 +663,9 @@ fn restore_tab(
                     terminal.agent_ownership = saved_agent_ownership.clone();
                 }
                 terminal.profiles = saved_profiles.clone();
+                // Seed the last known title so sidebar thread titles survive
+                // the restart; a live title emission overwrites it.
+                terminal.terminal_title = saved_terminal_title.clone();
                 match (saved_agent_name, saved_managed_agent) {
                     (Some(agent_name), Some(agent)) if was_imported => {
                         terminal.restore_managed_agent(agent_name, agent)
@@ -1207,6 +1214,7 @@ mod tests {
                     panes: HashMap::from([(
                         0,
                         super::super::snapshot::PaneSnapshot {
+                            terminal_title: Some("✳ review thread".into()),
                             cwd,
                             label: Some("reviewer".into()),
                             agent_name: Some("reviewer".into()),
@@ -1265,6 +1273,11 @@ mod tests {
         );
         assert_eq!(terminal.agent_name, None);
         assert_eq!(terminal.manual_label.as_deref(), Some("reviewer"));
+        assert_eq!(
+            terminal.terminal_title.as_deref(),
+            Some("✳ review thread"),
+            "saved thread titles must survive restore instead of waiting for the agent to re-emit them"
+        );
         let session = terminal
             .persisted_agent_session
             .as_ref()
@@ -1314,6 +1327,7 @@ mod tests {
                     panes: HashMap::from([(
                         0,
                         super::super::snapshot::PaneSnapshot {
+                            terminal_title: None,
                             cwd,
                             label: None,
                             agent_name: Some("worker".into()),
@@ -1401,6 +1415,7 @@ mod tests {
                     panes: HashMap::from([(
                         0,
                         super::super::snapshot::PaneSnapshot {
+                            terminal_title: None,
                             cwd,
                             label: None,
                             agent_name: Some("worker".into()),
@@ -1492,6 +1507,7 @@ mod tests {
                         (
                             10,
                             super::super::snapshot::PaneSnapshot {
+                                terminal_title: None,
                                 cwd: cwd.clone(),
                                 label: None,
                                 agent_name: None,
@@ -1506,6 +1522,7 @@ mod tests {
                         (
                             20,
                             super::super::snapshot::PaneSnapshot {
+                                terminal_title: None,
                                 cwd: cwd.clone(),
                                 label: None,
                                 agent_name: None,
@@ -1566,6 +1583,7 @@ mod tests {
             (
                 id.parse::<u32>().unwrap(),
                 super::super::snapshot::PaneSnapshot {
+                    terminal_title: None,
                     cwd: cwd.clone(),
                     label: None,
                     agent_name: None,
@@ -1579,6 +1597,7 @@ mod tests {
             )
         };
         let final_pane = super::super::snapshot::PaneSnapshot {
+            terminal_title: None,
             cwd: cwd.clone(),
             label: Some("planner".into()),
             agent_name: Some("planner".into()),
@@ -1741,6 +1760,7 @@ mod tests {
                     panes: HashMap::from([(
                         0,
                         super::super::snapshot::PaneSnapshot {
+                            terminal_title: None,
                             cwd,
                             label: None,
                             agent_name: None,
@@ -1914,6 +1934,7 @@ mod tests {
         panes.insert(
             0,
             super::super::snapshot::PaneSnapshot {
+                terminal_title: None,
                 cwd: cwd.clone(),
                 label: None,
                 agent_name: None,

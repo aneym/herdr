@@ -151,6 +151,10 @@ pub struct PaneSnapshot {
         deserialize_with = "deserialize_profiles"
     )]
     pub profiles: Vec<String>,
+    /// Last synced terminal title (agent thread titles live here), so sidebar
+    /// titles survive restarts instead of waiting for agents to re-emit them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_title: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -540,6 +544,7 @@ fn capture_tab(
                 snapshot
             })
         });
+        let terminal_title = terminal.and_then(|terminal| terminal.terminal_title.clone());
         panes.insert(
             id.raw(),
             PaneSnapshot {
@@ -552,6 +557,7 @@ fn capture_tab(
                 agent_identity,
                 agent_ownership,
                 profiles,
+                terminal_title,
             },
         );
     }
@@ -967,6 +973,7 @@ mod tests {
         panes.insert(
             0,
             PaneSnapshot {
+                terminal_title: None,
                 cwd: PathBuf::from("/home/can/Projects/herdr"),
                 label: None,
                 agent_name: None,
@@ -981,6 +988,7 @@ mod tests {
         panes.insert(
             1,
             PaneSnapshot {
+                terminal_title: None,
                 cwd: PathBuf::from("/home/can/Projects/website"),
                 label: Some("website".into()),
                 agent_name: None,
@@ -1060,6 +1068,7 @@ mod tests {
         panes.insert(
             0,
             PaneSnapshot {
+                terminal_title: None,
                 cwd: PathBuf::from("/repo"),
                 label: None,
                 agent_name: None,
@@ -1711,6 +1720,7 @@ mod tests {
         panes.insert(
             0,
             PaneSnapshot {
+                terminal_title: None,
                 cwd: PathBuf::from("/tmp/this-directory-does-not-exist-for-herdr-test"),
                 label: None,
                 agent_name: None,
@@ -1725,6 +1735,7 @@ mod tests {
         panes.insert(
             1,
             PaneSnapshot {
+                terminal_title: None,
                 cwd: std::env::var("HOME")
                     .map(PathBuf::from)
                     .unwrap_or_else(|_| PathBuf::from("/tmp")),
