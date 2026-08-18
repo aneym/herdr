@@ -485,6 +485,7 @@ mod tests {
             sidebar_width: None,
             sidebar_section_split: None,
             collapsed_space_keys: Default::default(),
+            collapsed_orchestrator_ids: Default::default(),
             active_profile: crate::workspace::DEFAULT_PROFILE.to_string(),
             automations_expanded: false,
             collapsed_agent_group_keys: Default::default(),

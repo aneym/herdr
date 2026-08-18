@@ -34,6 +34,10 @@ pub(super) enum MouseAction {
     FocusTab {
         tab_idx: usize,
     },
+    FocusWorkspaceTab {
+        ws_idx: usize,
+        tab_idx: usize,
+    },
     FocusPane {
         ws_idx: usize,
         pane_id: crate::layout::PaneId,
@@ -606,6 +610,37 @@ impl AppState {
                         }
                     }
 
+                    if let Some(row) = self
+                        .view
+                        .workspace_tab_row_areas
+                        .iter()
+                        .find(|row| rect_contains(row.rect, mouse.column, mouse.row))
+                        .cloned()
+                    {
+                        if row.is_orchestrator
+                            && rect_contains(
+                                crate::ui::orchestrator_chevron_rect(&row),
+                                mouse.column,
+                                mouse.row,
+                            )
+                        {
+                            if let Some(workspace_id) =
+                                self.workspaces.get(row.ws_idx).map(|ws| ws.id.clone())
+                            {
+                                if !self.collapsed_orchestrator_ids.remove(&workspace_id) {
+                                    self.collapsed_orchestrator_ids.insert(workspace_id);
+                                }
+                                self.mark_session_dirty();
+                            }
+                            return None;
+                        }
+                        self.replace_mode(Mode::Terminal);
+                        return Some(MouseAction::FocusWorkspaceTab {
+                            ws_idx: row.ws_idx,
+                            tab_idx: row.tab_idx,
+                        });
+                    }
+
                     if let Some(idx) = self.workspace_at_row(mouse.row) {
                         self.workspace_presses.insert(
                             source_id,
@@ -1110,6 +1145,25 @@ impl AppState {
                     return None;
                 }
 
+                if let Some(row) = self
+                    .view
+                    .workspace_tab_row_areas
+                    .iter()
+                    .find(|row| rect_contains(row.rect, mouse.column, mouse.row))
+                {
+                    self.context_menu = Some(ContextMenuState {
+                        kind: ContextMenuKind::Tab {
+                            ws_idx: row.ws_idx,
+                            tab_idx: row.tab_idx,
+                        },
+                        x: mouse.column,
+                        y: mouse.row,
+                        list: MenuListState::new(0),
+                    });
+                    self.replace_mode(Mode::ContextMenu);
+                    return None;
+                }
+
                 if let Some(idx) = self.workspace_at_row(mouse.row) {
                     self.selected = idx;
                     let kind = self
@@ -1137,13 +1191,20 @@ impl AppState {
                             show_git_menu.then_some(ContextMenuKind::GitWorkspace {
                                 ws_idx: idx,
                                 is_linked_worktree,
+                                orchestrator_mode: ws.orchestrator_mode,
                                 has_worktree_children: group_state.is_some(),
                                 collapsed: group_state
                                     .as_ref()
                                     .is_some_and(|(_, collapsed)| *collapsed),
                             })
                         })
-                        .unwrap_or(ContextMenuKind::Workspace { ws_idx: idx });
+                        .unwrap_or(ContextMenuKind::Workspace {
+                            ws_idx: idx,
+                            orchestrator_mode: self
+                                .workspaces
+                                .get(idx)
+                                .is_some_and(|ws| ws.orchestrator_mode),
+                        });
                     self.context_menu = Some(ContextMenuState {
                         kind,
                         x: mouse.column,
@@ -2304,7 +2365,10 @@ mod tests {
 
         assert!(matches!(
             app.state.context_menu.as_ref().map(|menu| &menu.kind),
-            Some(ContextMenuKind::Workspace { ws_idx: 0 })
+            Some(ContextMenuKind::Workspace {
+                ws_idx: 0,
+                orchestrator_mode: false
+            })
         ));
         assert_eq!(app.state.mode(), Mode::ContextMenu);
     }
@@ -3582,7 +3646,10 @@ mod tests {
     fn hovering_context_menu_updates_highlight() {
         let mut app = app_for_mouse_test();
         app.state.context_menu = Some(ContextMenuState {
-            kind: ContextMenuKind::Workspace { ws_idx: 0 },
+            kind: ContextMenuKind::Workspace {
+                ws_idx: 0,
+                orchestrator_mode: false,
+            },
             x: 2,
             y: 2,
             list: MenuListState::new(0),
@@ -3876,7 +3943,10 @@ mod tests {
         app.state.replace_mode(Mode::Terminal);
 
         let mut menu = ContextMenuState {
-            kind: ContextMenuKind::Workspace { ws_idx: 1 },
+            kind: ContextMenuKind::Workspace {
+                ws_idx: 1,
+                orchestrator_mode: false,
+            },
             x: 2,
             y: 2,
             list: MenuListState::new(0),
@@ -3922,7 +3992,10 @@ mod tests {
         app.state.selected = 0;
         app.state.confirm_close = false;
         let menu = ContextMenuState {
-            kind: ContextMenuKind::Workspace { ws_idx: 1 },
+            kind: ContextMenuKind::Workspace {
+                ws_idx: 1,
+                orchestrator_mode: false,
+            },
             x: 2,
             y: 2,
             list: MenuListState::new(0),

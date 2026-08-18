@@ -420,6 +420,7 @@ impl App {
             sidebar_width_source,
             sidebar_section_split,
             collapsed_space_keys,
+            collapsed_orchestrator_ids,
             automations_expanded,
             collapsed_agent_group_keys,
         ) = if no_session {
@@ -431,6 +432,7 @@ impl App {
                 config.ui.sidebar_width,
                 state::SidebarWidthSource::ConfigDefault,
                 0.5_f32,
+                std::collections::HashSet::new(),
                 std::collections::HashSet::new(),
                 false,
                 std::collections::HashSet::new(),
@@ -471,6 +473,7 @@ impl App {
                     },
                     snap.sidebar_section_split.unwrap_or(0.5),
                     snap.collapsed_space_keys,
+                    snap.collapsed_orchestrator_ids,
                     snap.automations_expanded,
                     snap.collapsed_agent_group_keys,
                 )
@@ -491,6 +494,7 @@ impl App {
                     },
                     snap.sidebar_section_split.unwrap_or(0.5),
                     snap.collapsed_space_keys,
+                    snap.collapsed_orchestrator_ids,
                     snap.automations_expanded,
                     snap.collapsed_agent_group_keys,
                 )
@@ -504,6 +508,7 @@ impl App {
                 config.ui.sidebar_width,
                 state::SidebarWidthSource::ConfigDefault,
                 0.5_f32,
+                std::collections::HashSet::new(),
                 std::collections::HashSet::new(),
                 false,
                 std::collections::HashSet::new(),
@@ -603,6 +608,7 @@ impl App {
         state.worktree_remove = None;
         state.worktree_directory = worktree_directory;
         state.collapsed_space_keys = collapsed_space_keys;
+        state.collapsed_orchestrator_ids = collapsed_orchestrator_ids;
         state.automations_expanded = automations_expanded;
         state.collapsed_agent_group_keys = collapsed_agent_group_keys;
         state.request_complete_onboarding = false;
@@ -630,6 +636,7 @@ impl App {
             layout: state::ViewLayout::Desktop,
             sidebar_rect: Rect::default(),
             workspace_card_areas: Vec::new(),
+            workspace_tab_row_areas: Vec::new(),
             tab_bar_rect: Rect::default(),
             tab_hit_areas: Vec::new(),
             tab_scroll_left_hit_area: Rect::default(),
@@ -913,6 +920,7 @@ impl App {
             app.state.sidebar_section_split = split;
         }
         app.state.collapsed_space_keys = snapshot.collapsed_space_keys.clone();
+        app.state.collapsed_orchestrator_ids = snapshot.collapsed_orchestrator_ids.clone();
         app.state.automations_expanded = snapshot.automations_expanded;
         app.state.collapsed_agent_group_keys = snapshot.collapsed_agent_group_keys.clone();
         app.state.replace_mode(if app.state.active.is_some() {
@@ -2170,6 +2178,7 @@ mod tests {
             0,
             26,
             0.5,
+            std::collections::HashSet::new(),
             std::collections::HashSet::new(),
             false,
             std::collections::HashSet::new(),
@@ -6290,7 +6299,10 @@ last_pane = "prefix+tab"
         app.state.selected = 0;
         app.state.confirm_close = false;
         let mut menu = state::ContextMenuState {
-            kind: state::ContextMenuKind::Workspace { ws_idx: 1 },
+            kind: state::ContextMenuKind::Workspace {
+                ws_idx: 1,
+                orchestrator_mode: false,
+            },
             x: 2,
             y: 2,
             list: state::MenuListState::new(0),

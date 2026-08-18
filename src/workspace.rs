@@ -268,6 +268,7 @@ pub struct Workspace {
     pub(crate) next_public_tab_number: usize,
     pub tabs: Vec<Tab>,
     pub active_tab: usize,
+    pub orchestrator_mode: bool,
     #[cfg(test)]
     pub(crate) test_runtimes: HashMap<PaneId, TerminalRuntime>,
 }
@@ -334,6 +335,7 @@ impl Workspace {
             next_public_tab_number: 2,
             tabs: vec![tab],
             active_tab: 0,
+            orchestrator_mode: false,
             #[cfg(test)]
             test_runtimes: HashMap::new(),
         }
@@ -534,6 +536,7 @@ impl Workspace {
                 next_public_tab_number: 2,
                 tabs: vec![tab],
                 active_tab: 0,
+                orchestrator_mode: false,
                 #[cfg(test)]
                 test_runtimes: HashMap::new(),
             },
@@ -1380,6 +1383,7 @@ impl Workspace {
             next_public_tab_number: 2,
             tabs: vec![tab],
             active_tab: 0,
+            orchestrator_mode: false,
             test_runtimes: HashMap::new(),
         }
     }

@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use crate::api::schema::{
     EventData, EventEnvelope, EventKind, ProfileSwitchParams, ResponseResult,
     WorkspaceCreateParams, WorkspaceListParams, WorkspaceMoveBlockParams, WorkspaceMoveParams,
-    WorkspaceRenameParams, WorkspaceReportMetadataParams, WorkspaceSetProfilesParams,
-    WorkspaceTarget,
+    WorkspaceRenameParams, WorkspaceReportMetadataParams, WorkspaceSetOrchestratorParams,
+    WorkspaceSetProfilesParams, WorkspaceTarget,
 };
 use crate::app::App;
 
@@ -55,6 +55,30 @@ impl App {
                 workspace: self.workspace_info(index),
             },
         )
+    }
+
+    pub(super) fn handle_workspace_set_orchestrator(
+        &mut self,
+        id: String,
+        params: WorkspaceSetOrchestratorParams,
+    ) -> String {
+        let Some(index) = self.parse_workspace_id(&params.workspace_id) else {
+            return workspace_not_found(id, &params.workspace_id);
+        };
+        let Some(workspace) = self.state.workspaces.get_mut(index) else {
+            return workspace_not_found(id, &params.workspace_id);
+        };
+        workspace.orchestrator_mode = params.enabled;
+        self.state.mark_session_dirty();
+        self.schedule_session_save();
+        let workspace = self.workspace_info(index);
+        self.emit_event(EventEnvelope {
+            event: EventKind::WorkspaceUpdated,
+            data: EventData::WorkspaceUpdated {
+                workspace: workspace.clone(),
+            },
+        });
+        encode_success(id, ResponseResult::WorkspaceInfo { workspace })
     }
 
     pub(super) fn handle_profile_switch(

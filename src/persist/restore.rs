@@ -425,6 +425,7 @@ fn restore_workspace(
             next_public_pane_number,
             next_public_tab_number,
             active_tab: snap.active_tab.min(tabs.len().saturating_sub(1)),
+            orchestrator_mode: snap.orchestrator_mode,
             tabs,
             #[cfg(test)]
             test_runtimes: HashMap::new(),
@@ -1227,6 +1228,7 @@ mod tests {
                     root_pane: Some(0),
                 }],
                 active_tab: 0,
+                orchestrator_mode: false,
             }],
             active: Some(0),
             active_profile: crate::workspace::DEFAULT_PROFILE.to_string(),
@@ -1234,6 +1236,7 @@ mod tests {
             sidebar_width: None,
             sidebar_section_split: None,
             collapsed_space_keys: Default::default(),
+            collapsed_orchestrator_ids: Default::default(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
         };
@@ -1333,6 +1336,7 @@ mod tests {
                     root_pane: Some(0),
                 }],
                 active_tab: 0,
+                orchestrator_mode: false,
             }],
             active: Some(0),
             active_profile: crate::workspace::DEFAULT_PROFILE.to_string(),
@@ -1340,6 +1344,7 @@ mod tests {
             sidebar_width: None,
             sidebar_section_split: None,
             collapsed_space_keys: Default::default(),
+            collapsed_orchestrator_ids: Default::default(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
         };
@@ -1424,6 +1429,7 @@ mod tests {
                     root_pane: Some(0),
                 }],
                 active_tab: 0,
+                orchestrator_mode: false,
             }],
             active: Some(0),
             active_profile: crate::workspace::DEFAULT_PROFILE.to_string(),
@@ -1431,6 +1437,7 @@ mod tests {
             sidebar_width: None,
             sidebar_section_split: None,
             collapsed_space_keys: Default::default(),
+            collapsed_orchestrator_ids: Default::default(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
         };
@@ -1519,6 +1526,7 @@ mod tests {
                     root_pane: Some(10),
                 }],
                 active_tab: 0,
+                orchestrator_mode: false,
             }],
             active: Some(0),
             active_profile: crate::workspace::DEFAULT_PROFILE.to_string(),
@@ -1526,6 +1534,7 @@ mod tests {
             sidebar_width: None,
             sidebar_section_split: None,
             collapsed_space_keys: Default::default(),
+            collapsed_orchestrator_ids: Default::default(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
         };
@@ -1636,6 +1645,7 @@ mod tests {
                     },
                 ],
                 active_tab: 3,
+                orchestrator_mode: false,
             }],
             active: Some(0),
             active_profile: crate::workspace::DEFAULT_PROFILE.to_string(),
@@ -1643,6 +1653,7 @@ mod tests {
             sidebar_width: None,
             sidebar_section_split: None,
             collapsed_space_keys: Default::default(),
+            collapsed_orchestrator_ids: Default::default(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
         };
@@ -1702,6 +1713,7 @@ mod tests {
                 root_pane: Some(10),
             }],
             active_tab: 0,
+            orchestrator_mode: false,
         };
         let mut next_public_pane_number = 1;
 
@@ -1755,6 +1767,7 @@ mod tests {
                     root_pane: Some(0),
                 }],
                 active_tab: 0,
+                orchestrator_mode: false,
             }],
             active: Some(0),
             active_profile: crate::workspace::DEFAULT_PROFILE.to_string(),
@@ -1762,6 +1775,7 @@ mod tests {
             sidebar_width: None,
             sidebar_section_split: None,
             collapsed_space_keys: Default::default(),
+            collapsed_orchestrator_ids: Default::default(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
         };
@@ -1956,6 +1970,7 @@ mod tests {
                     root_pane: Some(0),
                 }],
                 active_tab: 0,
+                orchestrator_mode: false,
             }],
             active: Some(0),
             active_profile: crate::workspace::DEFAULT_PROFILE.to_string(),
@@ -1963,6 +1978,7 @@ mod tests {
             sidebar_width: Some(26),
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: Default::default(),
+            collapsed_orchestrator_ids: Default::default(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
         };

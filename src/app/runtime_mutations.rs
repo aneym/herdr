@@ -3,8 +3,8 @@ use crate::api::schema::{
     PaneRenameParams, PaneResizeParams, PaneSetProfilesParams, PaneSplitParams, PaneSwapParams,
     PaneTarget, PaneZoomParams, TabCreateParams, TabMoveParams, TabRenameParams, TabTarget,
     WorkspaceCreateParams, WorkspaceMoveBlockParams, WorkspaceMoveParams, WorkspaceRenameParams,
-    WorkspaceSetProfilesParams, WorkspaceTarget, WorktreeCreateParams, WorktreeOpenParams,
-    WorktreeRemoveParams,
+    WorkspaceSetOrchestratorParams, WorkspaceSetProfilesParams, WorkspaceTarget,
+    WorktreeCreateParams, WorktreeOpenParams, WorktreeRemoveParams,
 };
 
 use super::App;
@@ -44,6 +44,14 @@ impl App {
         params: WorkspaceSetProfilesParams,
     ) -> String {
         self.dispatch_runtime_mutation(id, Method::WorkspaceSetProfiles(params))
+    }
+
+    pub(crate) fn runtime_workspace_set_orchestrator(
+        &mut self,
+        id: &'static str,
+        params: WorkspaceSetOrchestratorParams,
+    ) -> String {
+        self.dispatch_runtime_mutation(id, Method::WorkspaceSetOrchestrator(params))
     }
 
     pub(crate) fn runtime_workspace_rename(

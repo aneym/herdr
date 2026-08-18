@@ -707,6 +707,14 @@ pub struct WorkspaceCardArea {
     pub indented: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorkspaceTabRowArea {
+    pub ws_idx: usize,
+    pub tab_idx: usize,
+    pub rect: Rect,
+    pub is_orchestrator: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreeCreateState {
     pub source_workspace_id: String,
@@ -862,6 +870,7 @@ pub struct ViewState {
     pub layout: ViewLayout,
     pub sidebar_rect: Rect,
     pub workspace_card_areas: Vec<WorkspaceCardArea>,
+    pub workspace_tab_row_areas: Vec<WorkspaceTabRowArea>,
     pub tab_bar_rect: Rect,
     pub tab_hit_areas: Vec<Rect>,
     pub tab_scroll_left_hit_area: Rect,
@@ -1269,10 +1278,12 @@ pub enum ContextMenuKind {
     },
     Workspace {
         ws_idx: usize,
+        orchestrator_mode: bool,
     },
     GitWorkspace {
         ws_idx: usize,
         is_linked_worktree: bool,
+        orchestrator_mode: bool,
         has_worktree_children: bool,
         collapsed: bool,
     },
@@ -1329,10 +1340,17 @@ pub struct ContextMenuState {
 impl ContextMenuState {
     pub fn items(&self) -> Vec<&'static str> {
         match self.kind {
-            ContextMenuKind::Workspace { .. } => vec![
+            ContextMenuKind::Workspace {
+                orchestrator_mode, ..
+            } => vec![
                 "Rename",
                 "Send to profile...",
                 "Share with profiles...",
+                if orchestrator_mode {
+                    "Disable orchestrator mode"
+                } else {
+                    "Enable orchestrator mode"
+                },
                 "Close",
             ],
             ContextMenuKind::AgentPane { .. } => vec![
@@ -1344,28 +1362,41 @@ impl ContextMenuState {
             ],
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: false,
+                orchestrator_mode,
                 has_worktree_children: false,
                 ..
             } => vec![
                 "Rename",
                 "Send to profile...",
                 "Share with profiles...",
+                if orchestrator_mode {
+                    "Disable orchestrator mode"
+                } else {
+                    "Enable orchestrator mode"
+                },
                 "Close",
                 "New worktree",
                 "Open worktree...",
             ],
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: true,
+                orchestrator_mode,
                 ..
             } => vec![
                 "Rename",
                 "Send to profile...",
                 "Share with profiles...",
+                if orchestrator_mode {
+                    "Disable orchestrator mode"
+                } else {
+                    "Enable orchestrator mode"
+                },
                 "Close",
                 "Delete worktree checkout...",
             ],
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: false,
+                orchestrator_mode,
                 has_worktree_children: true,
                 collapsed,
                 ..
@@ -1373,6 +1404,11 @@ impl ContextMenuState {
                 "Rename",
                 "Send to profile...",
                 "Share with profiles...",
+                if orchestrator_mode {
+                    "Disable orchestrator mode"
+                } else {
+                    "Enable orchestrator mode"
+                },
                 "Close group",
                 "New worktree",
                 "Open worktree...",
@@ -1687,6 +1723,7 @@ pub struct AppState {
     pub worktree_remove: Option<WorktreeRemoveState>,
     pub worktree_directory: std::path::PathBuf,
     pub collapsed_space_keys: std::collections::HashSet<String>,
+    pub collapsed_orchestrator_ids: std::collections::HashSet<String>,
     pub automations_expanded: bool,
     pub collapsed_agent_group_keys: std::collections::HashSet<String>,
     pub request_complete_onboarding: bool,
@@ -2197,6 +2234,7 @@ impl AppState {
             worktree_remove: None,
             worktree_directory: std::path::PathBuf::from("/tmp/herdr-worktrees"),
             collapsed_space_keys: std::collections::HashSet::new(),
+            collapsed_orchestrator_ids: std::collections::HashSet::new(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
             request_complete_onboarding: false,
@@ -2216,6 +2254,7 @@ impl AppState {
                 layout: ViewLayout::Desktop,
                 sidebar_rect: Rect::default(),
                 workspace_card_areas: Vec::new(),
+                workspace_tab_row_areas: Vec::new(),
                 tab_bar_rect: Rect::default(),
                 tab_hit_areas: Vec::new(),
                 tab_scroll_left_hit_area: Rect::default(),
@@ -2772,7 +2811,7 @@ impl AppState {
         }
         if let Some(menu) = &self.context_menu {
             match menu.kind {
-                ContextMenuKind::Workspace { ws_idx }
+                ContextMenuKind::Workspace { ws_idx, .. }
                 | ContextMenuKind::GitWorkspace { ws_idx, .. } => {
                     assert_workspace_index(ws_idx, "context menu workspace")
                 }
@@ -3182,7 +3221,10 @@ mod tests {
     #[test]
     fn profile_actions_are_present_on_workspace_agent_and_pane_menus() {
         let workspace = ContextMenuState {
-            kind: ContextMenuKind::Workspace { ws_idx: 0 },
+            kind: ContextMenuKind::Workspace {
+                ws_idx: 0,
+                orchestrator_mode: false,
+            },
             x: 0,
             y: 0,
             list: MenuListState::new(0),
@@ -3193,6 +3235,7 @@ mod tests {
                 "Rename",
                 "Send to profile...",
                 "Share with profiles...",
+                "Enable orchestrator mode",
                 "Close"
             ]
         );
@@ -3236,11 +3279,40 @@ mod tests {
     }
 
     #[test]
+    fn workspace_context_menu_orchestrator_item_tracks_mode() {
+        let enabled = ContextMenuState {
+            kind: ContextMenuKind::Workspace {
+                ws_idx: 0,
+                orchestrator_mode: true,
+            },
+            x: 0,
+            y: 0,
+            list: MenuListState::new(0),
+        };
+        assert!(enabled.items().contains(&"Disable orchestrator mode"));
+
+        let git = ContextMenuState {
+            kind: ContextMenuKind::GitWorkspace {
+                ws_idx: 0,
+                is_linked_worktree: false,
+                orchestrator_mode: true,
+                has_worktree_children: true,
+                collapsed: false,
+            },
+            x: 0,
+            y: 0,
+            list: MenuListState::new(0),
+        };
+        assert!(git.items().contains(&"Disable orchestrator mode"));
+    }
+
+    #[test]
     fn linked_worktree_context_menu_keeps_safe_close_and_explicit_remove() {
         let menu = ContextMenuState {
             kind: ContextMenuKind::GitWorkspace {
                 ws_idx: 0,
                 is_linked_worktree: true,
+                orchestrator_mode: false,
                 has_worktree_children: false,
                 collapsed: false,
             },
@@ -3255,6 +3327,7 @@ mod tests {
                 "Rename",
                 "Send to profile...",
                 "Share with profiles...",
+                "Enable orchestrator mode",
                 "Close",
                 "Delete worktree checkout..."
             ]
@@ -3267,6 +3340,7 @@ mod tests {
             kind: ContextMenuKind::GitWorkspace {
                 ws_idx: 0,
                 is_linked_worktree: false,
+                orchestrator_mode: false,
                 has_worktree_children: false,
                 collapsed: false,
             },
@@ -3281,6 +3355,7 @@ mod tests {
                 "Rename",
                 "Send to profile...",
                 "Share with profiles...",
+                "Enable orchestrator mode",
                 "Close",
                 "New worktree",
                 "Open worktree..."
@@ -3294,6 +3369,7 @@ mod tests {
             kind: ContextMenuKind::GitWorkspace {
                 ws_idx: 0,
                 is_linked_worktree: false,
+                orchestrator_mode: false,
                 has_worktree_children: true,
                 collapsed: false,
             },
@@ -3308,6 +3384,7 @@ mod tests {
                 "Rename",
                 "Send to profile...",
                 "Share with profiles...",
+                "Enable orchestrator mode",
                 "Close group",
                 "New worktree",
                 "Open worktree...",

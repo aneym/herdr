@@ -521,6 +521,7 @@ impl App {
             active_tab_id: self.public_tab_id(index, ws.active_tab).unwrap_or_else(|| {
                 crate::workspace::public_tab_id_for_number(&ws.id, ws.active_tab + 1)
             }),
+            orchestrator_mode: ws.orchestrator_mode,
             agent_status: pane_agent_status(agg_state, seen),
             profiles: ws.profiles.clone(),
             tokens: ws.metadata_tokens.values(),

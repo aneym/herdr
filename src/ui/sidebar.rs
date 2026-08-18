@@ -120,12 +120,7 @@ fn content_fit_sidebar_sections(app: &AppState, area: Rect) -> (Rect, Rect) {
             .take(visible_count)
             .enumerate()
             .fold(0u16, |height, (entry_idx, entry)| {
-                let WorkspaceListEntry::Workspace { ws_idx, indented } = entry;
-                let row_height = app
-                    .workspaces
-                    .get(*ws_idx)
-                    .map(|workspace| workspace_row_height(app, workspace, *indented))
-                    .unwrap_or(0);
+                let row_height = workspace_entry_height(app, entry, u16::MAX);
                 let gap = if entry_idx + 1 < visible_count {
                     workspace_entry_gap(app, &entries, entry_idx)
                 } else {
@@ -629,11 +624,26 @@ fn workspace_row_height_in_body(
     workspace_row_height(app, workspace, indented).min(body_height)
 }
 
+fn workspace_entry_height(app: &AppState, entry: &WorkspaceListEntry, body_height: u16) -> u16 {
+    match entry {
+        WorkspaceListEntry::Workspace { ws_idx, indented } => app
+            .workspaces
+            .get(*ws_idx)
+            .map(|workspace| workspace_row_height_in_body(app, workspace, *indented, body_height))
+            .unwrap_or(0),
+        WorkspaceListEntry::Tab { .. } => 1.min(body_height),
+    }
+}
+
 fn workspace_entry_gap(app: &AppState, entries: &[WorkspaceListEntry], entry_idx: usize) -> u16 {
-    if entry_idx + 1 < entries.len() && !next_entry_is_indented_workspace(entries, entry_idx) {
-        app.sidebar_spaces.row_gap
-    } else {
-        0
+    let Some(next) = entries.get(entry_idx.saturating_add(1)) else {
+        return 0;
+    };
+    match (&entries[entry_idx], next) {
+        (WorkspaceListEntry::Workspace { .. }, WorkspaceListEntry::Tab { .. })
+        | (WorkspaceListEntry::Tab { .. }, WorkspaceListEntry::Tab { .. })
+        | (_, WorkspaceListEntry::Workspace { indented: true, .. }) => 0,
+        _ => app.sidebar_spaces.row_gap,
     }
 }
 
@@ -705,14 +715,26 @@ pub(crate) fn grouped_child_display_label(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum WorkspaceListEntry {
-    Workspace { ws_idx: usize, indented: bool },
+    Workspace {
+        ws_idx: usize,
+        indented: bool,
+    },
+    Tab {
+        ws_idx: usize,
+        tab_idx: usize,
+        ws_indented: bool,
+    },
 }
 
 pub(crate) fn next_entry_is_indented_workspace(entries: &[WorkspaceListEntry], idx: usize) -> bool {
-    matches!(
-        entries.get(idx.saturating_add(1)),
-        Some(WorkspaceListEntry::Workspace { indented: true, .. })
-    )
+    entries
+        .iter()
+        .skip(idx.saturating_add(1))
+        .find_map(|entry| match entry {
+            WorkspaceListEntry::Workspace { indented, .. } => Some(*indented),
+            WorkspaceListEntry::Tab { .. } => None,
+        })
+        .unwrap_or(false)
 }
 
 pub(crate) fn normalized_workspace_scroll(app: &AppState, area: Rect, requested: usize) -> usize {
@@ -738,6 +760,45 @@ pub(crate) fn workspace_list_entries(app: &AppState) -> Vec<WorkspaceListEntry> 
 /// always shows the full worktree tree.
 pub(crate) fn workspace_list_entries_expanded(app: &AppState) -> Vec<WorkspaceListEntry> {
     workspace_list_entries_inner(app, true)
+}
+
+fn push_workspace_entries(
+    app: &AppState,
+    entries: &mut Vec<WorkspaceListEntry>,
+    ws_idx: usize,
+    indented: bool,
+    visible_workspace_idx: Option<usize>,
+    force_expanded: bool,
+) {
+    entries.push(WorkspaceListEntry::Workspace { ws_idx, indented });
+    let Some(workspace) = app.workspaces.get(ws_idx) else {
+        return;
+    };
+    if !workspace.orchestrator_mode || workspace.tabs.is_empty() {
+        return;
+    }
+
+    entries.push(WorkspaceListEntry::Tab {
+        ws_idx,
+        tab_idx: 0,
+        ws_indented: indented,
+    });
+    let is_collapsed = !force_expanded && app.collapsed_orchestrator_ids.contains(&workspace.id);
+    if !is_collapsed {
+        entries.extend(
+            (1..workspace.tabs.len()).map(|tab_idx| WorkspaceListEntry::Tab {
+                ws_idx,
+                tab_idx,
+                ws_indented: indented,
+            }),
+        );
+    } else if visible_workspace_idx == Some(ws_idx) && workspace.active_tab > 0 {
+        entries.push(WorkspaceListEntry::Tab {
+            ws_idx,
+            tab_idx: workspace.active_tab,
+            ws_indented: indented,
+        });
+    }
 }
 
 fn workspace_list_entries_inner(app: &AppState, force_expanded: bool) -> Vec<WorkspaceListEntry> {
@@ -789,10 +850,14 @@ fn workspace_list_entries_inner(app: &AppState, force_expanded: bool) -> Vec<Wor
             .worktree_space()
             .filter(|space| grouped_keys.contains(&space.key))
         else {
-            entries.push(WorkspaceListEntry::Workspace {
+            push_workspace_entries(
+                app,
+                &mut entries,
                 ws_idx,
-                indented: false,
-            });
+                false,
+                visible_group_idx,
+                force_expanded,
+            );
             continue;
         };
 
@@ -809,37 +874,53 @@ fn workspace_list_entries_inner(app: &AppState, force_expanded: bool) -> Vec<Wor
                 .and_then(|member| member.worktree_space())
                 .is_some_and(|member_space| !member_space.is_linked_worktree)
         }) else {
-            entries.push(WorkspaceListEntry::Workspace {
+            push_workspace_entries(
+                app,
+                &mut entries,
                 ws_idx,
-                indented: false,
-            });
+                false,
+                visible_group_idx,
+                force_expanded,
+            );
             continue;
         };
         let collapsed = !force_expanded && app.collapsed_space_keys.contains(&space.key);
-        entries.push(WorkspaceListEntry::Workspace {
-            ws_idx: parent_idx,
-            indented: false,
-        });
+        push_workspace_entries(
+            app,
+            &mut entries,
+            parent_idx,
+            false,
+            visible_group_idx,
+            force_expanded,
+        );
 
         if collapsed {
             if let Some(active_idx) = visible_group_idx
                 .filter(|idx| *idx != parent_idx)
                 .filter(|_| active_group.as_deref() == Some(space.key.as_str()))
             {
-                entries.push(WorkspaceListEntry::Workspace {
-                    ws_idx: active_idx,
-                    indented: true,
-                });
+                push_workspace_entries(
+                    app,
+                    &mut entries,
+                    active_idx,
+                    true,
+                    visible_group_idx,
+                    force_expanded,
+                );
             }
         } else {
             for member_idx in members {
                 if *member_idx == parent_idx {
                     continue;
                 }
-                entries.push(WorkspaceListEntry::Workspace {
-                    ws_idx: *member_idx,
-                    indented: true,
-                });
+                push_workspace_entries(
+                    app,
+                    &mut entries,
+                    *member_idx,
+                    true,
+                    visible_group_idx,
+                    force_expanded,
+                );
             }
         }
     }
@@ -872,17 +953,8 @@ fn workspace_list_visible_count(app: &AppState, area: Rect, scroll: usize) -> us
     let mut visible = 0usize;
     let entries = workspace_list_entries(app);
     for (entry_idx, entry) in entries.iter().enumerate().skip(scroll) {
-        let (row_height, gap) = match entry {
-            WorkspaceListEntry::Workspace { ws_idx, indented } => {
-                let Some(ws) = app.workspaces.get(*ws_idx) else {
-                    continue;
-                };
-                (
-                    workspace_row_height_in_body(app, ws, *indented, body.height),
-                    workspace_entry_gap(app, &entries, entry_idx),
-                )
-            }
-        };
+        let row_height = workspace_entry_height(app, entry, body.height);
+        let gap = workspace_entry_gap(app, &entries, entry_idx);
         if used_rows.saturating_add(row_height) > body.height {
             break;
         }
@@ -899,13 +971,8 @@ fn workspace_list_bottom_start(app: &AppState, area: Rect) -> usize {
     let mut used_rows = 0u16;
     let mut start = entries.len();
     for (entry_idx, entry) in entries.iter().enumerate().rev() {
-        let WorkspaceListEntry::Workspace { ws_idx, indented } = entry;
-        let Some(workspace) = app.workspaces.get(*ws_idx) else {
-            continue;
-        };
         let gap = workspace_entry_gap(app, &entries, entry_idx);
-        let needed = workspace_row_height_in_body(app, workspace, *indented, body.height)
-            .saturating_add(gap);
+        let needed = workspace_entry_height(app, entry, body.height).saturating_add(gap);
         if used_rows.saturating_add(needed) > body.height {
             break;
         }
@@ -1132,7 +1199,10 @@ pub(crate) fn agent_panel_scrollbar_rect(
 pub(crate) fn compute_workspace_list_areas(
     app: &AppState,
     area: Rect,
-) -> (Vec<crate::app::state::WorkspaceCardArea>, Vec<()>) {
+) -> (
+    Vec<crate::app::state::WorkspaceCardArea>,
+    Vec<crate::app::state::WorkspaceTabRowArea>,
+) {
     let ws_area = workspace_list_rect(app, area);
     if ws_area == Rect::default() {
         return (Vec::new(), Vec::new());
@@ -1148,7 +1218,7 @@ pub(crate) fn compute_workspace_list_areas(
     let mut row_y = body.y;
     let body_bottom = body.y + body.height;
     let mut cards = Vec::new();
-    let headers = Vec::new();
+    let mut tab_rows = Vec::new();
 
     let entries = workspace_list_entries(app);
     for (entry_idx, entry) in entries.iter().enumerate().skip(scroll) {
@@ -1172,10 +1242,27 @@ pub(crate) fn compute_workspace_list_areas(
                     .saturating_add(gap)
                     .min(body_bottom);
             }
+            WorkspaceListEntry::Tab {
+                ws_idx, tab_idx, ..
+            } => {
+                if row_y.saturating_add(1) > body_bottom {
+                    break;
+                }
+                tab_rows.push(crate::app::state::WorkspaceTabRowArea {
+                    ws_idx: *ws_idx,
+                    tab_idx: *tab_idx,
+                    rect: Rect::new(body.x, row_y, body.width, 1),
+                    is_orchestrator: *tab_idx == 0,
+                });
+                row_y = row_y
+                    .saturating_add(1)
+                    .saturating_add(workspace_entry_gap(app, &entries, entry_idx))
+                    .min(body_bottom);
+            }
         }
     }
 
-    (cards, headers)
+    (cards, tab_rows)
 }
 
 pub(crate) fn compute_workspace_card_areas(
@@ -1183,6 +1270,18 @@ pub(crate) fn compute_workspace_card_areas(
     area: Rect,
 ) -> Vec<crate::app::state::WorkspaceCardArea> {
     compute_workspace_list_areas(app, area).0
+}
+
+pub(crate) fn orchestrator_chevron_rect(row: &crate::app::state::WorkspaceTabRowArea) -> Rect {
+    if row.rect.width == 0 || row.rect.height == 0 || !row.is_orchestrator {
+        return Rect::default();
+    }
+    Rect::new(
+        row.rect.x + row.rect.width.saturating_sub(1),
+        row.rect.y,
+        1,
+        1,
+    )
 }
 
 pub(crate) fn workspace_group_chevron_rect(card: &crate::app::state::WorkspaceCardArea) -> Rect {
@@ -1268,9 +1367,12 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
         return;
     }
 
-    for (visible_idx, entry) in workspace_list_entries(app).iter().enumerate() {
-        let WorkspaceListEntry::Workspace { ws_idx, .. } = entry;
-        let Some(ws) = app.workspaces.get(*ws_idx) else {
+    let mut visible_idx = 0usize;
+    for entry in workspace_list_entries(app) {
+        let WorkspaceListEntry::Workspace { ws_idx, .. } = entry else {
+            continue;
+        };
+        let Some(ws) = app.workspaces.get(ws_idx) else {
             continue;
         };
         let y = ws_area.y + visible_idx as u16;
@@ -1279,8 +1381,8 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
         }
         let (agg_state, agg_seen) = ws.aggregate_state(&app.terminals);
         let (icon, icon_style) = state_icon(agg_state, agg_seen, app.status_indicators, p);
-        let is_selected = *ws_idx == app.selected && is_navigating;
-        let is_active = Some(*ws_idx) == app.active;
+        let is_selected = ws_idx == app.selected && is_navigating;
+        let is_active = Some(ws_idx) == app.active;
         let row_style = if is_selected {
             Style::default().bg(p.selection_bg)
         } else if is_active {
@@ -1310,6 +1412,7 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
             ])),
             Rect::new(ws_area.x, y, ws_area.width, 1),
         );
+        visible_idx += 1;
     }
 
     if let Some(divider_y) = divider_y {
@@ -1402,7 +1505,7 @@ pub(crate) fn workspace_drop_slots(
                     ws_idx,
                     indented: false,
                 } => Some(*ws_idx),
-                WorkspaceListEntry::Workspace { .. } => None,
+                WorkspaceListEntry::Workspace { .. } | WorkspaceListEntry::Tab { .. } => None,
             })
     };
 
@@ -1433,7 +1536,10 @@ pub(crate) fn workspace_drop_slots(
     let Some(last_entry_idx) = entry_position(last.ws_idx) else {
         return slots;
     };
-    let next_entry = entries.get(last_entry_idx.saturating_add(1));
+    let next_entry = entries
+        .iter()
+        .skip(last_entry_idx.saturating_add(1))
+        .find(|entry| matches!(entry, WorkspaceListEntry::Workspace { .. }));
     if matches!(
         next_entry,
         Some(WorkspaceListEntry::Workspace { indented: true, .. })
@@ -1444,6 +1550,7 @@ pub(crate) fn workspace_drop_slots(
         Some(WorkspaceListEntry::Workspace { ws_idx, .. }) => {
             crate::app::state::WorkspaceDropTarget::Before(*ws_idx)
         }
+        Some(WorkspaceListEntry::Tab { .. }) => return slots,
         None => crate::app::state::WorkspaceDropTarget::End,
     };
     let row = last.rect.y.saturating_add(last.rect.height);
@@ -1888,6 +1995,76 @@ fn render_workspace_list(
                     Style::default().fg(p.accent),
                 )),
                 workspace_group_chevron_rect(card),
+            );
+        }
+    }
+
+    for row in &app.view.workspace_tab_row_areas {
+        let Some(ws) = app.workspaces.get(row.ws_idx) else {
+            continue;
+        };
+        let Some(tab) = ws.tabs.get(row.tab_idx) else {
+            continue;
+        };
+        if row.rect.y >= list_bottom {
+            continue;
+        }
+
+        let is_active = app.active == Some(row.ws_idx) && ws.active_tab == row.tab_idx;
+        if is_active {
+            let buf = frame.buffer_mut();
+            for x in row.rect.x..row.rect.x + row.rect.width {
+                buf[(x, row.rect.y)].set_style(Style::default().bg(p.active_row_bg));
+            }
+        }
+
+        let ws_indented = entries.iter().any(|entry| {
+            matches!(
+                entry,
+                WorkspaceListEntry::Tab {
+                    ws_idx,
+                    tab_idx,
+                    ws_indented: true,
+                } if *ws_idx == row.ws_idx && *tab_idx == row.tab_idx
+            )
+        });
+        let indent = match (ws_indented, row.is_orchestrator) {
+            (false, true) => 3,
+            (false, false) => 5,
+            (true, true) => 8,
+            (true, false) => 10,
+        };
+        let chevron_width = u16::from(row.is_orchestrator);
+        let content_width = row.rect.width.saturating_sub(indent + chevron_width);
+        let mut spans = vec![Span::raw(" ".repeat(indent as usize))];
+        if let Some((icon, style)) = super::tabs::tab_status(app, tab) {
+            spans.push(Span::styled(format!("{icon} "), style));
+        }
+        let name = ws
+            .tab_display_name(row.tab_idx)
+            .unwrap_or_else(|| (row.tab_idx + 1).to_string());
+        let label = if row.is_orchestrator {
+            format!("{name} [{}]", ws.tabs.len().saturating_sub(1))
+        } else {
+            name
+        };
+        let label = truncate_end(&label, content_width as usize);
+        let style = if is_active {
+            Style::default().fg(p.text).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(p.subtext0)
+        };
+        spans.push(Span::styled(label, style));
+        frame.render_widget(Paragraph::new(Line::from(spans)), row.rect);
+
+        if row.is_orchestrator {
+            let is_collapsed = app.collapsed_orchestrator_ids.contains(&ws.id);
+            frame.render_widget(
+                Paragraph::new(Span::styled(
+                    if is_collapsed { "▸" } else { "▾" },
+                    Style::default().fg(p.accent),
+                )),
+                orchestrator_chevron_rect(row),
             );
         }
     }
@@ -4297,6 +4474,198 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
                     indented: false,
                 },
             ]
+        );
+    }
+
+    fn orchestrator_workspace(name: &str, children: &[&str]) -> crate::workspace::Workspace {
+        let mut ws = crate::workspace::Workspace::test_new(name);
+        ws.orchestrator_mode = true;
+        for child in children {
+            ws.test_add_tab(Some(child));
+        }
+        ws
+    }
+
+    #[test]
+    fn workspace_without_orchestrator_mode_emits_no_tab_rows() {
+        let mut app = AppState::test_new();
+        let mut ws = crate::workspace::Workspace::test_new("plain");
+        ws.test_add_tab(Some("build"));
+        app.workspaces = vec![ws];
+
+        assert_eq!(
+            workspace_list_entries(&app),
+            vec![WorkspaceListEntry::Workspace {
+                ws_idx: 0,
+                indented: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn orchestrator_workspace_nests_tab_rows_beneath_its_row() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![orchestrator_workspace("orch", &["build", "tests"])];
+
+        assert_eq!(
+            workspace_list_entries(&app),
+            vec![
+                WorkspaceListEntry::Workspace {
+                    ws_idx: 0,
+                    indented: false,
+                },
+                WorkspaceListEntry::Tab {
+                    ws_idx: 0,
+                    tab_idx: 0,
+                    ws_indented: false,
+                },
+                WorkspaceListEntry::Tab {
+                    ws_idx: 0,
+                    tab_idx: 1,
+                    ws_indented: false,
+                },
+                WorkspaceListEntry::Tab {
+                    ws_idx: 0,
+                    tab_idx: 2,
+                    ws_indented: false,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn collapsed_orchestrator_hides_child_tabs() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![orchestrator_workspace("orch", &["build", "tests"])];
+        let id = app.workspaces[0].id.clone();
+        app.collapsed_orchestrator_ids.insert(id);
+
+        assert_eq!(
+            workspace_list_entries(&app),
+            vec![
+                WorkspaceListEntry::Workspace {
+                    ws_idx: 0,
+                    indented: false,
+                },
+                WorkspaceListEntry::Tab {
+                    ws_idx: 0,
+                    tab_idx: 0,
+                    ws_indented: false,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn collapsed_orchestrator_keeps_active_child_visible() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![orchestrator_workspace("orch", &["build", "tests"])];
+        app.active = Some(0);
+        app.workspaces[0].active_tab = 2;
+        let id = app.workspaces[0].id.clone();
+        app.collapsed_orchestrator_ids.insert(id);
+
+        assert_eq!(
+            workspace_list_entries(&app),
+            vec![
+                WorkspaceListEntry::Workspace {
+                    ws_idx: 0,
+                    indented: false,
+                },
+                WorkspaceListEntry::Tab {
+                    ws_idx: 0,
+                    tab_idx: 0,
+                    ws_indented: false,
+                },
+                WorkspaceListEntry::Tab {
+                    ws_idx: 0,
+                    tab_idx: 2,
+                    ws_indented: false,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn orchestrator_tabs_indent_under_grouped_worktree_child() {
+        let mut app = AppState::test_new();
+        let mut child =
+            workspace_with_worktree_space("issue", Some("repo-key"), "/repo/herdr-issue");
+        child.orchestrator_mode = true;
+        child.test_add_tab(Some("build"));
+        app.workspaces = vec![
+            workspace_with_worktree_space("main", Some("repo-key"), "/repo/herdr"),
+            child,
+        ];
+
+        assert_eq!(
+            workspace_list_entries(&app),
+            vec![
+                WorkspaceListEntry::Workspace {
+                    ws_idx: 0,
+                    indented: false,
+                },
+                WorkspaceListEntry::Workspace {
+                    ws_idx: 1,
+                    indented: true,
+                },
+                WorkspaceListEntry::Tab {
+                    ws_idx: 1,
+                    tab_idx: 0,
+                    ws_indented: true,
+                },
+                WorkspaceListEntry::Tab {
+                    ws_idx: 1,
+                    tab_idx: 1,
+                    ws_indented: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn orchestrator_row_renders_chevron_and_child_count() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![orchestrator_workspace("orch", &["build", "tests"])];
+        let area = Rect::new(0, 0, 30, 24);
+        let (cards, tab_rows) = compute_workspace_list_areas(&app, area);
+        app.view.workspace_card_areas = cards;
+        app.view.workspace_tab_row_areas = tab_rows;
+
+        let buffer = rendered_sidebar(&app, area);
+        let rows: Vec<String> = (0..area.height)
+            .map(|row| row_text(&buffer, row, area.width))
+            .collect();
+        assert!(
+            rows.iter().any(|line| line.contains("[2]")),
+            "rows: {rows:?}"
+        );
+        assert!(rows.iter().any(|line| line.contains("▾")), "rows: {rows:?}");
+        assert!(
+            rows.iter().any(|line| line.contains("build")),
+            "rows: {rows:?}"
+        );
+    }
+
+    #[test]
+    fn collapsed_orchestrator_renders_collapsed_chevron_without_children() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![orchestrator_workspace("orch", &["build", "tests"])];
+        let id = app.workspaces[0].id.clone();
+        app.collapsed_orchestrator_ids.insert(id);
+        let area = Rect::new(0, 0, 30, 24);
+        let (cards, tab_rows) = compute_workspace_list_areas(&app, area);
+        app.view.workspace_card_areas = cards;
+        app.view.workspace_tab_row_areas = tab_rows;
+
+        let buffer = rendered_sidebar(&app, area);
+        let rows: Vec<String> = (0..area.height)
+            .map(|row| row_text(&buffer, row, area.width))
+            .collect();
+        assert!(rows.iter().any(|line| line.contains("▸")), "rows: {rows:?}");
+        assert!(
+            !rows.iter().any(|line| line.contains("build")),
+            "rows: {rows:?}"
         );
     }
 

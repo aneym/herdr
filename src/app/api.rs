@@ -1014,6 +1014,9 @@ impl App {
             Method::WorkspaceSetProfiles(params) => {
                 return self.handle_workspace_set_profiles(request.id, params)
             }
+            Method::WorkspaceSetOrchestrator(params) => {
+                return self.handle_workspace_set_orchestrator(request.id, params)
+            }
             Method::ProfileSwitch(params) => return self.handle_profile_switch(request.id, params),
             Method::ProfileList(_) => return self.handle_profile_list(request.id),
             Method::WorkspaceGet(target) => return self.handle_workspace_get(request.id, target),

@@ -73,7 +73,10 @@ fn tab_width(app: &AppState, ws: &crate::workspace::Workspace, tab_idx: usize) -
         .max(MIN_TAB_WIDTH)
 }
 
-fn tab_agent_state(app: &AppState, tab: &crate::workspace::Tab) -> Option<(AgentState, bool)> {
+pub(crate) fn tab_agent_state(
+    app: &AppState,
+    tab: &crate::workspace::Tab,
+) -> Option<(AgentState, bool)> {
     tab.panes
         .values()
         .filter_map(|pane| {
@@ -90,7 +93,7 @@ fn tab_agent_state(app: &AppState, tab: &crate::workspace::Tab) -> Option<(Agent
         })
 }
 
-fn should_show_tab_status(
+pub(crate) fn should_show_tab_status(
     mode: crate::config::ShowTabStatusConfig,
     state: AgentState,
     seen: bool,
@@ -109,7 +112,10 @@ fn should_show_tab_status(
     }
 }
 
-fn tab_status<'a>(app: &'a AppState, tab: &crate::workspace::Tab) -> Option<(&'a str, Style)> {
+pub(crate) fn tab_status<'a>(
+    app: &'a AppState,
+    tab: &crate::workspace::Tab,
+) -> Option<(&'a str, Style)> {
     let (state, seen) = tab_agent_state(app, tab)?;
     if !should_show_tab_status(app.show_tab_status, state, seen) {
         return None;

@@ -49,6 +49,8 @@ pub struct SessionSnapshot {
     #[serde(default)]
     pub collapsed_space_keys: std::collections::HashSet<String>,
     #[serde(default)]
+    pub collapsed_orchestrator_ids: std::collections::HashSet<String>,
+    #[serde(default)]
     pub automations_expanded: bool,
     #[serde(default)]
     pub collapsed_agent_group_keys: std::collections::HashSet<String>,
@@ -98,6 +100,8 @@ pub struct WorkspaceSnapshot {
     pub tabs: Vec<TabSnapshot>,
     #[serde(default)]
     pub active_tab: usize,
+    #[serde(default)]
+    pub orchestrator_mode: bool,
 }
 
 #[derive(Deserialize)]
@@ -295,6 +299,7 @@ impl From<LegacyWorkspaceSnapshot> for WorkspaceSnapshot {
             next_public_tab_number: 0,
             tabs: vec![tab],
             active_tab: 0,
+            orchestrator_mode: false,
         }
     }
 }
@@ -318,6 +323,8 @@ struct RawSessionSnapshot {
     #[serde(default)]
     collapsed_space_keys: std::collections::HashSet<String>,
     #[serde(default)]
+    collapsed_orchestrator_ids: std::collections::HashSet<String>,
+    #[serde(default)]
     automations_expanded: bool,
     #[serde(default)]
     collapsed_agent_group_keys: std::collections::HashSet<String>,
@@ -338,6 +345,7 @@ fn migrate_snapshot(raw: RawSessionSnapshot) -> Result<SessionSnapshot, String> 
         sidebar_width: raw.sidebar_width,
         sidebar_section_split: raw.sidebar_section_split,
         collapsed_space_keys: raw.collapsed_space_keys,
+        collapsed_orchestrator_ids: raw.collapsed_orchestrator_ids,
         automations_expanded: raw.automations_expanded,
         collapsed_agent_group_keys: raw.collapsed_agent_group_keys,
     })
@@ -414,6 +422,7 @@ pub fn capture(
     sidebar_width: u16,
     sidebar_section_split: f32,
     collapsed_space_keys: std::collections::HashSet<String>,
+    collapsed_orchestrator_ids: std::collections::HashSet<String>,
     automations_expanded: bool,
     collapsed_agent_group_keys: std::collections::HashSet<String>,
 ) -> SessionSnapshot {
@@ -429,6 +438,7 @@ pub fn capture(
         sidebar_width: Some(sidebar_width),
         sidebar_section_split: Some(sidebar_section_split),
         collapsed_space_keys,
+        collapsed_orchestrator_ids,
         automations_expanded,
         collapsed_agent_group_keys,
     }
@@ -464,6 +474,7 @@ fn capture_workspace(
             .map(|tab| capture_tab(tab, terminals, terminal_runtimes))
             .collect(),
         active_tab: ws.active_tab,
+        orchestrator_mode: ws.orchestrator_mode,
     }
 }
 
@@ -813,6 +824,7 @@ mod tests {
             state.sidebar_width,
             state.sidebar_section_split,
             state.collapsed_space_keys.clone(),
+            state.collapsed_orchestrator_ids.clone(),
             state.automations_expanded,
             state.collapsed_agent_group_keys.clone(),
         )
@@ -880,6 +892,7 @@ mod tests {
             sidebar_width: Some(26),
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: std::collections::HashSet::new(),
+            collapsed_orchestrator_ids: std::collections::HashSet::new(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
         };
@@ -1014,6 +1027,7 @@ mod tests {
                     root_pane: Some(0),
                 }],
                 active_tab: 0,
+                orchestrator_mode: false,
             }],
             active: Some(0),
             active_profile: crate::workspace::DEFAULT_PROFILE.to_string(),
@@ -1021,6 +1035,7 @@ mod tests {
             sidebar_width: Some(26),
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: std::collections::HashSet::new(),
+            collapsed_orchestrator_ids: std::collections::HashSet::new(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
             version: SNAPSHOT_VERSION,
@@ -1047,6 +1062,77 @@ mod tests {
         );
         assert_eq!(restored.sidebar_width, Some(26));
         assert_eq!(restored.sidebar_section_split, Some(0.5));
+    }
+
+    #[test]
+    fn orchestrator_fields_round_trip_and_default_off() {
+        let mut panes = HashMap::new();
+        panes.insert(
+            0,
+            PaneSnapshot {
+                cwd: PathBuf::from("/repo"),
+                label: None,
+                agent_name: None,
+                managed_agent_kind: None,
+                agent_session: None,
+                launch_argv: None,
+                agent_identity: None,
+                agent_ownership: None,
+                profiles: Vec::new(),
+            },
+        );
+        let snap = SessionSnapshot {
+            workspaces: vec![WorkspaceSnapshot {
+                id: Some("worch".to_string()),
+                custom_name: None,
+                profiles: Vec::new(),
+                identity_cwd: PathBuf::from("/repo"),
+                worktree_space: None,
+                public_pane_numbers: HashMap::from([(0, 1)]),
+                next_public_pane_number: 2,
+                public_tab_numbers: vec![1],
+                next_public_tab_number: 2,
+                tabs: vec![TabSnapshot {
+                    custom_name: None,
+                    layout: LayoutSnapshot::Pane(0),
+                    panes,
+                    zoomed: false,
+                    focused: Some(0),
+                    root_pane: Some(0),
+                }],
+                active_tab: 0,
+                orchestrator_mode: true,
+            }],
+            active: Some(0),
+            active_profile: crate::workspace::DEFAULT_PROFILE.to_string(),
+            selected: 0,
+            sidebar_width: None,
+            sidebar_section_split: None,
+            collapsed_space_keys: std::collections::HashSet::new(),
+            collapsed_orchestrator_ids: std::collections::HashSet::from(["worch".to_string()]),
+            automations_expanded: false,
+            collapsed_agent_group_keys: std::collections::HashSet::new(),
+            version: SNAPSHOT_VERSION,
+        };
+
+        let json = serde_json::to_string(&snap).unwrap();
+        let restored = parse_snapshot(&json).unwrap();
+        assert!(restored.workspaces[0].orchestrator_mode);
+        assert!(restored.collapsed_orchestrator_ids.contains("worch"));
+
+        // Snapshots written before the feature omit both fields entirely.
+        let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        value["workspaces"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("orchestrator_mode");
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("collapsed_orchestrator_ids");
+        let restored = parse_snapshot(&value.to_string()).unwrap();
+        assert!(!restored.workspaces[0].orchestrator_mode);
+        assert!(restored.collapsed_orchestrator_ids.is_empty());
     }
 
     #[test]
@@ -1696,6 +1782,7 @@ mod tests {
                     root_pane: Some(0),
                 }],
                 active_tab: 0,
+                orchestrator_mode: false,
             }],
             active: Some(0),
             active_profile: crate::workspace::DEFAULT_PROFILE.to_string(),
@@ -1703,6 +1790,7 @@ mod tests {
             sidebar_width: Some(26),
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: std::collections::HashSet::new(),
+            collapsed_orchestrator_ids: std::collections::HashSet::new(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
         };

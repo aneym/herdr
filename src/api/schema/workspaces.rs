@@ -31,6 +31,12 @@ pub struct WorkspaceSetProfilesParams {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct WorkspaceSetOrchestratorParams {
+    pub workspace_id: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProfileSwitchParams {
     pub profile: String,
 }
@@ -76,6 +82,8 @@ pub struct WorkspaceInfo {
     pub pane_count: usize,
     pub tab_count: usize,
     pub active_tab_id: String,
+    #[serde(default)]
+    pub orchestrator_mode: bool,
     pub agent_status: AgentStatus,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub profiles: Vec<String>,

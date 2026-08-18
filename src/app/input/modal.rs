@@ -780,7 +780,8 @@ pub(super) fn apply_context_menu_action(
     let item = menu.items().get(idx).copied();
     match (menu.kind, item) {
         (
-            ContextMenuKind::Workspace { ws_idx } | ContextMenuKind::GitWorkspace { ws_idx, .. },
+            ContextMenuKind::Workspace { ws_idx, .. }
+            | ContextMenuKind::GitWorkspace { ws_idx, .. },
             Some(action @ ("Send to profile..." | "Share with profiles...")),
         ) => {
             state.open_profile_menu(
@@ -846,13 +847,26 @@ pub(super) fn apply_context_menu_action(
             leave_modal(state);
         }
         (
-            ContextMenuKind::Workspace { ws_idx } | ContextMenuKind::GitWorkspace { ws_idx, .. },
+            ContextMenuKind::Workspace { ws_idx, .. }
+            | ContextMenuKind::GitWorkspace { ws_idx, .. },
+            Some("Enable orchestrator mode" | "Disable orchestrator mode"),
+        ) => {
+            if let Some(workspace) = state.workspaces.get_mut(ws_idx) {
+                workspace.orchestrator_mode = !workspace.orchestrator_mode;
+                state.mark_session_dirty();
+            }
+            leave_modal(state);
+        }
+        (
+            ContextMenuKind::Workspace { ws_idx, .. }
+            | ContextMenuKind::GitWorkspace { ws_idx, .. },
             Some("Rename"),
         ) => {
             open_rename_workspace(state, terminal_runtimes, ws_idx);
         }
         (
-            ContextMenuKind::Workspace { ws_idx } | ContextMenuKind::GitWorkspace { ws_idx, .. },
+            ContextMenuKind::Workspace { ws_idx, .. }
+            | ContextMenuKind::GitWorkspace { ws_idx, .. },
             Some("Close" | "Close group"),
         ) => {
             state.selected = ws_idx;
@@ -1495,7 +1509,7 @@ impl App {
         let item = menu.items().get(idx).copied();
         match (menu.kind, item) {
             (
-                ContextMenuKind::Workspace { ws_idx }
+                ContextMenuKind::Workspace { ws_idx, .. }
                 | ContextMenuKind::GitWorkspace { ws_idx, .. },
                 Some(action @ ("Send to profile..." | "Share with profiles...")),
             ) => {
@@ -1563,12 +1577,32 @@ impl App {
                 leave_modal(&mut self.state);
             }
             (
-                ContextMenuKind::Workspace { ws_idx }
+                ContextMenuKind::Workspace { ws_idx, .. }
+                | ContextMenuKind::GitWorkspace { ws_idx, .. },
+                Some("Enable orchestrator mode" | "Disable orchestrator mode"),
+            ) => {
+                let workspace_id = self.public_workspace_id(ws_idx);
+                let enabled = self
+                    .state
+                    .workspaces
+                    .get(ws_idx)
+                    .is_some_and(|workspace| !workspace.orchestrator_mode);
+                self.runtime_workspace_set_orchestrator(
+                    "tui.workspace.set_orchestrator",
+                    crate::api::schema::WorkspaceSetOrchestratorParams {
+                        workspace_id,
+                        enabled,
+                    },
+                );
+                leave_modal(&mut self.state);
+            }
+            (
+                ContextMenuKind::Workspace { ws_idx, .. }
                 | ContextMenuKind::GitWorkspace { ws_idx, .. },
                 Some("Rename"),
             ) => open_rename_workspace(&mut self.state, &self.terminal_runtimes, ws_idx),
             (
-                ContextMenuKind::Workspace { ws_idx }
+                ContextMenuKind::Workspace { ws_idx, .. }
                 | ContextMenuKind::GitWorkspace { ws_idx, .. },
                 Some("Close" | "Close group"),
             ) => {
@@ -2593,6 +2627,7 @@ mod tests {
             kind: ContextMenuKind::GitWorkspace {
                 ws_idx: 0,
                 is_linked_worktree: false,
+                orchestrator_mode: false,
                 has_worktree_children: true,
                 collapsed: false,
             },
@@ -2636,7 +2671,10 @@ mod tests {
         let mut terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
 
         let send_menu = ContextMenuState {
-            kind: ContextMenuKind::Workspace { ws_idx: 0 },
+            kind: ContextMenuKind::Workspace {
+                ws_idx: 0,
+                orchestrator_mode: false,
+            },
             x: 4,
             y: 5,
             list: MenuListState::new(0),
@@ -2656,7 +2694,10 @@ mod tests {
 
         state.workspaces[0].profiles.clear();
         let share_menu = ContextMenuState {
-            kind: ContextMenuKind::Workspace { ws_idx: 0 },
+            kind: ContextMenuKind::Workspace {
+                ws_idx: 0,
+                orchestrator_mode: false,
+            },
             x: 0,
             y: 0,
             list: MenuListState::new(0),

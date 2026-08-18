@@ -1638,6 +1638,7 @@ mod tests {
             app.state.sidebar_width,
             app.state.sidebar_section_split,
             app.state.collapsed_space_keys.clone(),
+            app.state.collapsed_orchestrator_ids.clone(),
             app.state.automations_expanded,
             app.state.collapsed_agent_group_keys.clone(),
         );

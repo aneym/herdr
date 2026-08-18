@@ -69,6 +69,8 @@ pub enum Method {
     WorkspaceList(WorkspaceListParams),
     #[serde(rename = "workspace.set_profiles")]
     WorkspaceSetProfiles(WorkspaceSetProfilesParams),
+    #[serde(rename = "workspace.set_orchestrator")]
+    WorkspaceSetOrchestrator(WorkspaceSetOrchestratorParams),
     #[serde(rename = "profile.switch")]
     ProfileSwitch(ProfileSwitchParams),
     #[serde(rename = "profile.list")]

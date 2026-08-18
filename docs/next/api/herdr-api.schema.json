@@ -1093,6 +1093,10 @@
               "minimum": 0,
               "type": "integer"
             },
+            "orchestrator_mode": {
+              "default": false,
+              "type": "boolean"
+            },
             "pane_count": {
               "format": "uint",
               "minimum": 0,
@@ -4359,6 +4363,21 @@
           ],
           "type": "object"
         },
+        "WorkspaceSetOrchestratorParams": {
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "workspace_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspace_id",
+            "enabled"
+          ],
+          "type": "object"
+        },
         "WorkspaceSetProfilesParams": {
           "properties": {
             "profiles": {
@@ -4734,6 +4753,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/WorkspaceSetProfilesParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "workspace.set_orchestrator",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/WorkspaceSetOrchestratorParams"
             }
           },
           "required": [
@@ -10258,6 +10293,10 @@
               "format": "uint",
               "minimum": 0,
               "type": "integer"
+            },
+            "orchestrator_mode": {
+              "default": false,
+              "type": "boolean"
             },
             "pane_count": {
               "format": "uint",
