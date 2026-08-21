@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -18,7 +18,7 @@ use crate::api::subscriptions::ActiveSubscription;
 use crate::api::wait::{prompt_agent, wait_for_agent, wait_for_event, wait_for_output};
 use crate::api::{request_changes_ui, socket_path, ApiRequestMessage, ApiRequestSender, EventHub};
 use crate::ipc::{
-    bind_local_listener, is_connection_closed_error, local_stream_peer_closed,
+    bind_private_local_listener, is_connection_closed_error, local_stream_peer_closed,
     poll_local_stream_read, remove_socket_file_if_owned, set_local_stream_polling,
     socket_file_identity, LocalStream, LocalStreamRead, SocketFileIdentity,
 };
@@ -34,6 +34,17 @@ const STREAM_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 // is roughly 21.4 MiB after base64 expansion. Keep the line transport bounded
 // while allowing that public API contract plus JSON overhead.
 const MAX_INITIAL_REQUEST_BYTES: usize = 24 * 1024 * 1024;
+const MAX_CONCURRENT_CONNECTIONS: usize = 32;
+
+struct ActiveConnectionGuard {
+    active: Arc<AtomicUsize>,
+}
+
+impl Drop for ActiveConnectionGuard {
+    fn drop(&mut self) {
+        self.active.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 pub struct ServerHandle {
     _thread: std::thread::JoinHandle<()>,
@@ -50,6 +61,9 @@ impl Drop for ServerHandle {
             if err.kind() != std::io::ErrorKind::NotFound {
                 warn!(path = %self.path.display(), err = %err, "failed to remove api socket on shutdown");
             }
+        }
+        if let Err(err) = crate::server::clipboard_image::cleanup_all_api_files() {
+            warn!(err = %err, "failed to remove api clipboard image staging files on shutdown");
         }
     }
 }
@@ -92,23 +106,51 @@ fn start_server_inner(
     let path = socket_path();
     prepare_socket_path(&path)?;
 
-    let listener = bind_local_listener(&path)?;
+    crate::server::clipboard_image::prepare_api_staging()?;
+    let listener = bind_private_local_listener(&path)?;
     restrict_socket_permissions(&path)?;
     let identity = socket_file_identity(&path)?;
     info!(path = %path.display(), "api server listening");
 
     let running = Arc::new(AtomicBool::new(true));
     let listener_running = Arc::clone(&running);
+    let active_connections = Arc::new(AtomicUsize::new(0));
     let thread = std::thread::spawn(move || {
+        let cleanup_running = Arc::clone(&listener_running);
+        std::thread::spawn(move || {
+            while cleanup_running.load(Ordering::Acquire) {
+                std::thread::sleep(crate::server::clipboard_image::API_STAGING_CLEANUP_INTERVAL);
+                if let Err(err) = crate::server::clipboard_image::cleanup_expired_api_files() {
+                    warn!(err = %err, "api clipboard image periodic cleanup failed");
+                }
+            }
+        });
         for stream in listener.incoming() {
             match stream {
                 Ok(stream) => {
+                    if active_connections
+                        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
+                            (active < MAX_CONCURRENT_CONNECTIONS).then_some(active + 1)
+                        })
+                        .is_err()
+                    {
+                        warn!(
+                            limit = MAX_CONCURRENT_CONNECTIONS,
+                            "api connection limit reached"
+                        );
+                        drop(stream);
+                        continue;
+                    }
+                    let guard = ActiveConnectionGuard {
+                        active: Arc::clone(&active_connections),
+                    };
                     let api_tx = api_tx.clone();
                     let event_hub = event_hub.clone();
                     let capabilities = capabilities.clone();
                     let server_stop = server_stop.clone();
                     let connection_running = Arc::clone(&listener_running);
                     std::thread::spawn(move || {
+                        let _guard = guard;
                         if let Err(err) = handle_connection_with_stop(
                             stream,
                             &api_tx,
@@ -407,8 +449,7 @@ fn handle_clipboard_image_write(
         return error_response_json(
             id,
             "invalid_extension",
-            "unsupported clipboard image extension; expected png, jpg, jpeg, gif, webp, or bmp"
-                .into(),
+            "unsupported clipboard image extension; expected png".into(),
         );
     }
 
@@ -447,7 +488,7 @@ fn handle_clipboard_image_write(
         );
     }
 
-    match crate::server::clipboard_image::stage(0, &params.extension, &data) {
+    match crate::server::clipboard_image::stage_api(&params.extension, &data) {
         Ok(staged) => serde_json::to_string(&SuccessResponse {
             id,
             result: ResponseResult::ClipboardImageWritten {
@@ -1024,7 +1065,6 @@ mod tests {
 
     fn clipboard_image_response(extension: &str, data_base64: String) -> serde_json::Value {
         let (mut client, server, path) = local_stream_pair("clipboard-image");
-        let (api_tx, _api_rx) = mpsc::unbounded_channel();
         let request = crate::api::schema::Request {
             id: "clipboard-test".into(),
             method: Method::ClipboardImageWrite(crate::api::schema::ClipboardImageWriteParams {
@@ -1033,6 +1073,10 @@ mod tests {
             }),
         };
         let encoded = serde_json::to_vec(&request).unwrap();
+        client.write_all(&encoded).unwrap();
+        client.write_all(b"\n").unwrap();
+        client.flush().unwrap();
+        let (api_tx, _api_rx) = mpsc::unbounded_channel();
         let running = Arc::new(AtomicBool::new(true));
         let handler_running = running.clone();
         let handler = std::thread::spawn(move || {
@@ -1045,9 +1089,6 @@ mod tests {
             )
             .unwrap();
         });
-        client.write_all(&encoded).unwrap();
-        client.write_all(b"\n").unwrap();
-        client.flush().unwrap();
         let response: serde_json::Value =
             serde_json::from_str(read_line(&mut client).trim()).unwrap();
         handler.join().unwrap();
@@ -1118,12 +1159,24 @@ mod tests {
         (api_tx, responder)
     }
 
+    fn valid_png() -> Vec<u8> {
+        let mut encoded = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut encoded, 1, 1);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer.write_image_data(&[1, 2, 3, 255]).unwrap();
+        }
+        encoded
+    }
+
     #[test]
-    fn clipboard_image_write_stages_exact_bytes_with_private_permissions() {
-        let data = b"exact immutable image bytes";
+    fn clipboard_image_write_stages_exact_png_bytes_with_private_permissions() {
+        let data = valid_png();
         let response = clipboard_image_response(
             "PNG",
-            base64::engine::general_purpose::STANDARD.encode(data),
+            base64::engine::general_purpose::STANDARD.encode(&data),
         );
         assert_eq!(response["result"]["type"], "clipboard_image_written");
         let path = PathBuf::from(response["result"]["paste_text"].as_str().unwrap());
@@ -1151,8 +1204,28 @@ mod tests {
         let empty = clipboard_image_response("png", String::new());
         assert_eq!(empty["error"]["code"], "empty_payload");
 
-        for extension in ["sh", "../png", ".png", "png/../../sh"] {
-            let response = clipboard_image_response(extension, "YQ==".into());
+        let arbitrary = clipboard_image_response(
+            "png",
+            base64::engine::general_purpose::STANDARD.encode(b"arbitrary bytes"),
+        );
+        assert_eq!(arbitrary["error"]["code"], "image_stage_failed");
+
+        let png = valid_png();
+        for extension in [
+            "jpg",
+            "jpeg",
+            "gif",
+            "webp",
+            "bmp",
+            "sh",
+            "../png",
+            ".png",
+            "png/../../sh",
+        ] {
+            let response = clipboard_image_response(
+                extension,
+                base64::engine::general_purpose::STANDARD.encode(&png),
+            );
             assert_eq!(response["error"]["code"], "invalid_extension");
         }
 
@@ -1161,7 +1234,14 @@ mod tests {
             crate::protocol::MAX_CLIPBOARD_IMAGE_PAYLOAD
                 + 1
         ]);
-        let oversized = clipboard_image_response("png", oversized_encoded);
+        let oversized: serde_json::Value = serde_json::from_str(&handle_clipboard_image_write(
+            "clipboard-test".into(),
+            crate::api::schema::ClipboardImageWriteParams {
+                extension: "png".into(),
+                data_base64: oversized_encoded,
+            },
+        ))
+        .unwrap();
         assert_eq!(oversized["error"]["code"], "payload_too_large");
     }
 
