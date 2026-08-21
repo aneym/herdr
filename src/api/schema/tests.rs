@@ -63,6 +63,22 @@ fn request_uses_dot_method_names() {
 }
 
 #[test]
+fn clipboard_image_write_request_round_trips() {
+    let request = Request {
+        id: "clipboard-image".into(),
+        method: Method::ClipboardImageWrite(ClipboardImageWriteParams {
+            extension: "png".into(),
+            data_base64: "iVBORw==".into(),
+        }),
+    };
+
+    let json = serde_json::to_value(&request).unwrap();
+    assert_eq!(json["method"], "clipboard.image.write");
+    assert_eq!(json["params"]["extension"], "png");
+    assert_eq!(serde_json::from_value::<Request>(json).unwrap(), request);
+}
+
+#[test]
 fn agent_start_and_prompt_requests_round_trip() {
     let start = Request {
         id: "start".into(),

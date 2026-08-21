@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use base64::Engine as _;
 use interprocess::local_socket::traits::{ListenerExt as _, Stream as _};
 use tracing::{debug, error, info, warn};
 
@@ -29,7 +30,10 @@ pub(super) const CONNECTION_POLL_INTERVAL: Duration = Duration::from_millis(100)
 pub(super) const APP_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 const INITIAL_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const STREAM_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
-const MAX_INITIAL_REQUEST_BYTES: usize = 1024 * 1024;
+// A clipboard.image.write request containing the maximum 16 MiB decoded image
+// is roughly 21.4 MiB after base64 expansion. Keep the line transport bounded
+// while allowing that public API contract plus JSON overhead.
+const MAX_INITIAL_REQUEST_BYTES: usize = 24 * 1024 * 1024;
 
 pub struct ServerHandle {
     _thread: std::thread::JoinHandle<()>,
@@ -218,6 +222,22 @@ fn handle_connection_with_stop(
             }
             result
         }
+        Method::ClipboardImageWrite(params) => {
+            let response = handle_clipboard_image_write(request_id.clone(), params);
+            let result = write_text_line_allow_disconnect(&mut stream, &response);
+            match &result {
+                Ok(()) => crate::logging::api_request_completed(
+                    &request_id,
+                    method,
+                    api_response_outcome(&response),
+                    changes_ui,
+                ),
+                Err(err) => {
+                    crate::logging::api_request_failed(&request_id, method, &err.to_string())
+                }
+            }
+            result
+        }
         Method::EventsSubscribe(params) => {
             let result = stream_subscriptions(
                 stream,
@@ -379,6 +399,73 @@ fn handle_request(
     dispatch_to_app(request, api_tx, None, response_write_complete, None)
 }
 
+fn handle_clipboard_image_write(
+    id: String,
+    params: crate::api::schema::ClipboardImageWriteParams,
+) -> String {
+    if crate::server::clipboard_image::normalized_extension(&params.extension).is_none() {
+        return error_response_json(
+            id,
+            "invalid_extension",
+            "unsupported clipboard image extension; expected png, jpg, jpeg, gif, webp, or bmp"
+                .into(),
+        );
+    }
+
+    const MAX_BYTES: usize = crate::protocol::MAX_CLIPBOARD_IMAGE_PAYLOAD;
+    const MAX_BASE64_BYTES: usize = MAX_BYTES.div_ceil(3) * 4;
+    if params.data_base64.len() > MAX_BASE64_BYTES {
+        return error_response_json(
+            id,
+            "payload_too_large",
+            format!("clipboard image exceeds the {MAX_BYTES} byte limit"),
+        );
+    }
+
+    let data = match base64::engine::general_purpose::STANDARD.decode(params.data_base64) {
+        Ok(data) => data,
+        Err(_) => {
+            return error_response_json(
+                id,
+                "invalid_base64",
+                "clipboard image data_base64 is not valid standard base64".into(),
+            )
+        }
+    };
+    if data.is_empty() {
+        return error_response_json(
+            id,
+            "empty_payload",
+            "clipboard image payload must not be empty".into(),
+        );
+    }
+    if data.len() > MAX_BYTES {
+        return error_response_json(
+            id,
+            "payload_too_large",
+            format!("clipboard image exceeds the {MAX_BYTES} byte limit"),
+        );
+    }
+
+    match crate::server::clipboard_image::stage(0, &params.extension, &data) {
+        Ok(staged) => serde_json::to_string(&SuccessResponse {
+            id,
+            result: ResponseResult::ClipboardImageWritten {
+                paste_text: staged.paste_text,
+            },
+        })
+        .unwrap_or_else(|_| {
+            r#"{"id":"","error":{"code":"internal_error","message":"failed to encode response"}}"#
+                .to_string()
+        }),
+        Err(err) => error_response_json(
+            id,
+            "image_stage_failed",
+            format!("failed to stage clipboard image: {err}"),
+        ),
+    }
+}
+
 fn api_method_name(method: &Method) -> &'static str {
     match method {
         Method::Ping(_) => "ping",
@@ -387,6 +474,7 @@ fn api_method_name(method: &Method) -> &'static str {
         Method::ServerReloadConfig(_) => "server.reload_config",
         Method::ServerAgentManifests(_) => "server.agent_manifests",
         Method::ServerReloadAgentManifests(_) => "server.reload_agent_manifests",
+        Method::ClipboardImageWrite(_) => "clipboard.image.write",
         Method::NotificationShow(_) => "notification.show",
         Method::ClientWindowTitleSet(_) => "client.window_title.set",
         Method::ClientWindowTitleClear(_) => "client.window_title.clear",
@@ -934,6 +1022,40 @@ mod tests {
         (client, server, path)
     }
 
+    fn clipboard_image_response(extension: &str, data_base64: String) -> serde_json::Value {
+        let (mut client, server, path) = local_stream_pair("clipboard-image");
+        let (api_tx, _api_rx) = mpsc::unbounded_channel();
+        let request = crate::api::schema::Request {
+            id: "clipboard-test".into(),
+            method: Method::ClipboardImageWrite(crate::api::schema::ClipboardImageWriteParams {
+                extension: extension.into(),
+                data_base64,
+            }),
+        };
+        let encoded = serde_json::to_vec(&request).unwrap();
+        let running = Arc::new(AtomicBool::new(true));
+        let handler_running = running.clone();
+        let handler = std::thread::spawn(move || {
+            handle_connection(
+                server,
+                &api_tx,
+                &EventHub::default(),
+                &handler_running,
+                None,
+            )
+            .unwrap();
+        });
+        client.write_all(&encoded).unwrap();
+        client.write_all(b"\n").unwrap();
+        client.flush().unwrap();
+        let response: serde_json::Value =
+            serde_json::from_str(read_line(&mut client).trim()).unwrap();
+        handler.join().unwrap();
+        drop(client);
+        let _ = std::fs::remove_file(path);
+        response
+    }
+
     fn pane_info(
         pane_id: &str,
         agent_status: crate::api::schema::AgentStatus,
@@ -994,6 +1116,53 @@ mod tests {
             }
         });
         (api_tx, responder)
+    }
+
+    #[test]
+    fn clipboard_image_write_stages_exact_bytes_with_private_permissions() {
+        let data = b"exact immutable image bytes";
+        let response = clipboard_image_response(
+            "PNG",
+            base64::engine::general_purpose::STANDARD.encode(data),
+        );
+        assert_eq!(response["result"]["type"], "clipboard_image_written");
+        let path = PathBuf::from(response["result"]["paste_text"].as_str().unwrap());
+        assert_eq!(std::fs::read(&path).unwrap(), data);
+        assert_eq!(
+            std::fs::metadata(path.parent().unwrap())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn clipboard_image_write_rejects_invalid_inputs_without_staging() {
+        let malformed = clipboard_image_response("png", "%%%".into());
+        assert_eq!(malformed["error"]["code"], "invalid_base64");
+
+        let empty = clipboard_image_response("png", String::new());
+        assert_eq!(empty["error"]["code"], "empty_payload");
+
+        for extension in ["sh", "../png", ".png", "png/../../sh"] {
+            let response = clipboard_image_response(extension, "YQ==".into());
+            assert_eq!(response["error"]["code"], "invalid_extension");
+        }
+
+        let oversized_encoded = base64::engine::general_purpose::STANDARD.encode(vec![
+            0_u8;
+            crate::protocol::MAX_CLIPBOARD_IMAGE_PAYLOAD
+                + 1
+        ]);
+        let oversized = clipboard_image_response("png", oversized_encoded);
+        assert_eq!(oversized["error"]["code"], "payload_too_large");
     }
 
     #[test]
@@ -1448,7 +1617,6 @@ mod tests {
 #[cfg(test)]
 mod pane_graphics_request_tests {
     use super::*;
-    use base64::Engine as _;
 
     #[test]
     fn maximum_public_graphics_request_fits_initial_json_line() {

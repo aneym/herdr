@@ -15,7 +15,12 @@ pub(crate) fn stage(
     extension: &str,
     data: &[u8],
 ) -> io::Result<StagedClipboardImage> {
-    let extension = sanitize_extension(extension);
+    let extension = normalized_extension(extension).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "unsupported clipboard image extension",
+        )
+    })?;
     let dir = ensure_staging_dir()?;
     cleanup_stale(&dir);
 
@@ -55,19 +60,19 @@ pub(crate) fn remove_files(paths: Vec<PathBuf>) {
     }
 }
 
-fn sanitize_extension(extension: &str) -> &'static str {
+pub(crate) fn normalized_extension(extension: &str) -> Option<&'static str> {
     if extension.eq_ignore_ascii_case("png") {
-        "png"
+        Some("png")
     } else if extension.eq_ignore_ascii_case("jpg") || extension.eq_ignore_ascii_case("jpeg") {
-        "jpg"
+        Some("jpg")
     } else if extension.eq_ignore_ascii_case("gif") {
-        "gif"
+        Some("gif")
     } else if extension.eq_ignore_ascii_case("webp") {
-        "webp"
+        Some("webp")
     } else if extension.eq_ignore_ascii_case("bmp") {
-        "bmp"
+        Some("bmp")
     } else {
-        "png"
+        None
     }
 }
 
@@ -138,10 +143,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sanitize_extension_accepts_known_image_extensions() {
-        assert_eq!(sanitize_extension("PNG"), "png");
-        assert_eq!(sanitize_extension("jpeg"), "jpg");
-        assert_eq!(sanitize_extension("webp"), "webp");
-        assert_eq!(sanitize_extension("sh"), "png");
+    fn normalized_extension_accepts_only_known_image_extensions() {
+        assert_eq!(normalized_extension("PNG"), Some("png"));
+        assert_eq!(normalized_extension("jpeg"), Some("jpg"));
+        assert_eq!(normalized_extension("webp"), Some("webp"));
+        assert_eq!(normalized_extension("sh"), None);
+        assert_eq!(normalized_extension("../png"), None);
     }
 }

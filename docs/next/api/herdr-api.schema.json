@@ -1746,6 +1746,23 @@
           ],
           "type": "object"
         },
+        "ClipboardImageWriteParams": {
+          "properties": {
+            "data_base64": {
+              "description": "Standard base64-encoded image bytes.",
+              "type": "string"
+            },
+            "extension": {
+              "description": "Recognized image filename extension, without a leading dot.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "extension",
+            "data_base64"
+          ],
+          "type": "object"
+        },
         "EmptyParams": {
           "type": "object"
         },
@@ -4641,6 +4658,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "clipboard.image.write",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/ClipboardImageWriteParams"
             }
           },
           "required": [
@@ -10127,6 +10160,22 @@
                 "type",
                 "status",
                 "diagnostics"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "paste_text": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "clipboard_image_written",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "paste_text"
               ],
               "type": "object"
             },
