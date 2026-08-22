@@ -24,6 +24,21 @@ const WSL_MARKER_ENV_VARS: &[&str] = &["WSL_DISTRO_NAME", "WSL_INTEROP"];
 const PROCESS_DETECTION_ENV_VAR: &str = "HERDR_PROCESS_DETECTION";
 const CHILD_GROUPS_SCAN_LIMIT: usize = 64;
 
+pub(crate) fn process_snapshot() -> std::io::Result<Vec<super::ProcessSnapshotEntry>> {
+    let output = Command::new("ps")
+        .args(["-axo", "pid=,ppid=,pcpu=,rss="])
+        .output()?;
+    if !output.status.success() {
+        return Err(std::io::Error::other(format!(
+            "ps exited with status {}",
+            output.status
+        )));
+    }
+    let stdout = String::from_utf8(output.stdout)
+        .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
+    super::parse_process_snapshot(&stdout)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProcessDetectionMode {
     Native,

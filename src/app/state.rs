@@ -898,6 +898,7 @@ pub enum Mode {
     GlobalMenu,
     KeybindHelp,
     Navigator,
+    Usage,
 }
 
 impl Mode {
@@ -1025,6 +1026,12 @@ pub(crate) struct NavigatorState {
     pub search_entry: bool,
     pub state_filter: Option<NavigatorStateFilter>,
     pub expanded_workspaces: std::collections::HashSet<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct UsageState {
+    pub rows: Vec<crate::api::schema::AgentUsageInfo>,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1723,6 +1730,7 @@ pub struct AppState {
     pub product_announcement: Option<ProductAnnouncementState>,
     pub keybind_help: KeybindHelpState,
     pub navigator: NavigatorState,
+    pub usage: UsageState,
     pub copy_mode: Option<CopyModeState>,
     pub workspace_scroll: usize,
     pub agent_panel_scroll: usize,
@@ -2252,6 +2260,7 @@ impl AppState {
             product_announcement: None,
             keybind_help: KeybindHelpState::default(),
             navigator: NavigatorState::default(),
+            usage: UsageState::default(),
             copy_mode: None,
             workspace_scroll: 0,
             agent_panel_scroll: 0,

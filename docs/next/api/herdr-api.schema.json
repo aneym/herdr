@@ -5149,6 +5149,22 @@
         {
           "properties": {
             "method": {
+              "const": "agent.usage",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "agent.get",
               "type": "string"
             },
@@ -6688,6 +6704,54 @@
             "unknown"
           ],
           "type": "string"
+        },
+        "AgentUsageInfo": {
+          "properties": {
+            "agent": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cpu_percent": {
+              "format": "double",
+              "type": "number"
+            },
+            "mem_bytes": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "pane_id": {
+              "type": "string"
+            },
+            "process_count": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "tab_id": {
+              "type": "string"
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "workspace_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane_id",
+            "workspace_id",
+            "tab_id",
+            "cpu_percent",
+            "mem_bytes",
+            "process_count"
+          ],
+          "type": "object"
         },
         "ClientWindowTitleReason": {
           "enum": [
@@ -9345,6 +9409,25 @@
               "required": [
                 "type",
                 "agents"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "agent_usage",
+                  "type": "string"
+                },
+                "usage": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/AgentUsageInfo"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "type",
+                "usage"
               ],
               "type": "object"
             },

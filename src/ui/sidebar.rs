@@ -195,6 +195,20 @@ pub(crate) fn agent_panel_toggle_rect(area: Rect, sort: AgentPanelSort) -> Rect 
     agent_panel_header_label_rect(area, agent_panel_sort_label(sort))
 }
 
+pub(crate) fn agent_panel_usage_rect(area: Rect, sort: AgentPanelSort) -> Rect {
+    let sort_rect = agent_panel_toggle_rect(area, sort);
+    if sort_rect == Rect::default() {
+        return Rect::default();
+    }
+    let width = display_width_u16("usage").min(sort_rect.x.saturating_sub(area.x));
+    Rect::new(
+        sort_rect.x.saturating_sub(width.saturating_add(1)),
+        sort_rect.y,
+        width,
+        1,
+    )
+}
+
 fn agent_panel_header_label_rect(area: Rect, label: &str) -> Rect {
     if area.width == 0 || area.height < 2 {
         return Rect::default();
@@ -2057,6 +2071,21 @@ fn render_agent_detail(
             toggle_rect,
         );
     }
+    let usage_rect = agent_panel_usage_rect(area, app.agent_panel_sort);
+    if usage_rect != Rect::default() {
+        let color = if app.mode() == Mode::Usage {
+            p.accent
+        } else {
+            p.overlay0
+        };
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                "usage",
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            )),
+            usage_rect,
+        );
+    }
 
     let agents = agent_panel_entries_from(app, terminal_runtimes);
     let automations = automation_panel_entries_from(app, terminal_runtimes);
@@ -2308,6 +2337,18 @@ mod tests {
                     row_text(buffer, row, width)
                 )
             })
+    }
+
+    #[test]
+    fn usage_control_sits_immediately_before_sort_control() {
+        let area = Rect::new(3, 4, 30, 10);
+        let sort = agent_panel_toggle_rect(area, AgentPanelSort::Spaces);
+        let usage = agent_panel_usage_rect(area, AgentPanelSort::Spaces);
+
+        assert_eq!(usage.y, sort.y);
+        assert_eq!(usage.height, 1);
+        assert_eq!(usage.width, 5);
+        assert_eq!(usage.x + usage.width + 1, sort.x);
     }
 
     fn rendered_sidebar(app: &AppState, area: Rect) -> ratatui::buffer::Buffer {

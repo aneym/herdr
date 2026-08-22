@@ -39,6 +39,7 @@ pub(super) enum MouseAction {
         pane_id: crate::layout::PaneId,
     },
     FocusToastTarget,
+    ToggleUsage,
     MoveWorkspace {
         source_ws_idx: usize,
         insert_idx: usize,
@@ -621,6 +622,10 @@ impl AppState {
                     let agent_entries =
                         crate::ui::agent_panel_list_entries_from(self, terminal_runtimes);
 
+                    if self.on_agent_panel_usage(mouse.column, mouse.row) {
+                        return Some(MouseAction::ToggleUsage);
+                    }
+
                     if self.on_agent_panel_sort_toggle(mouse.column, mouse.row) {
                         self.agent_panel_sort = self.agent_panel_sort.next();
                         self.agent_panel_scroll = 0;
@@ -1175,6 +1180,7 @@ impl AppState {
                     .agent_panel_scrollbar_target_at(&agent_entries, mouse.column, mouse.row)
                     .is_some()
                     || self.on_agent_panel_sort_toggle(mouse.column, mouse.row)
+                    || self.on_agent_panel_usage(mouse.column, mouse.row)
                     || self.on_automations_header(&agent_entries, mouse.column, mouse.row)
                     || self
                         .agent_group_toggle_at(&agent_entries, mouse.column, mouse.row)
@@ -2182,6 +2188,24 @@ mod tests {
         detect::{Agent, AgentState},
         workspace::Workspace,
     };
+
+    #[test]
+    fn usage_control_click_requests_overlay_toggle() {
+        let mut app = app_for_mouse_test();
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 30));
+        let (_, detail_area) =
+            crate::ui::ordered_sidebar_sections(&app.state, app.state.view.sidebar_rect);
+        let usage = crate::ui::agent_panel_usage_rect(detail_area, app.state.agent_panel_sort);
+        assert!(usage.width > 0);
+
+        let action = app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            0,
+            mouse(MouseEventKind::Down(MouseButton::Left), usage.x, usage.y),
+        );
+
+        assert!(matches!(action, Some(MouseAction::ToggleUsage)));
+    }
 
     #[test]
     fn agent_row_right_click_opens_agent_pane_menu() {

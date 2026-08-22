@@ -718,6 +718,47 @@ fn success_response_round_trips() {
 }
 
 #[test]
+fn agent_usage_request_and_response_round_trip() {
+    let request = Request {
+        id: "req_usage".into(),
+        method: Method::AgentUsage(EmptyParams::default()),
+    };
+    let request_json = serde_json::to_value(&request).unwrap();
+    assert_eq!(request_json["method"], "agent.usage");
+    assert_eq!(
+        serde_json::from_value::<Request>(request_json).unwrap(),
+        request
+    );
+
+    let response = SuccessResponse {
+        id: "req_usage".into(),
+        result: ResponseResult::AgentUsage {
+            usage: vec![AgentUsageInfo {
+                pane_id: "pane:1".into(),
+                workspace_id: "workspace:1".into(),
+                tab_id: "tab:1".into(),
+                agent: Some("claude".into()),
+                title: Some("review tests".into()),
+                cpu_percent: 27.5,
+                mem_bytes: 64 * 1024 * 1024,
+                process_count: 4,
+            }],
+        },
+    };
+    let response_json = serde_json::to_value(&response).unwrap();
+    assert_eq!(response_json["result"]["type"], "agent_usage");
+    assert_eq!(response_json["result"]["usage"][0]["cpu_percent"], 27.5);
+    assert_eq!(
+        response_json["result"]["usage"][0]["mem_bytes"],
+        64 * 1024 * 1024
+    );
+    assert_eq!(
+        serde_json::from_value::<SuccessResponse>(response_json).unwrap(),
+        response
+    );
+}
+
+#[test]
 fn session_snapshot_request_and_response_round_trip() {
     let request = Request {
         id: "req_snapshot".into(),

@@ -22,6 +22,17 @@ impl App {
         )
     }
 
+    pub(super) fn handle_agent_usage(&mut self, id: String) -> String {
+        match self.collect_agent_usage() {
+            Ok(usage) => encode_success(id, ResponseResult::AgentUsage { usage }),
+            Err(err) => encode_error(
+                id,
+                "process_snapshot_failed",
+                format!("failed to sample process usage: {err}"),
+            ),
+        }
+    }
+
     pub(super) fn handle_agent_get(&mut self, id: String, target: AgentTarget) -> String {
         self.reconcile_managed_agent_target(&target.target);
         let agent = match self.agent_info_for_target(&target.target) {

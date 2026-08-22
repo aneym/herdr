@@ -270,6 +270,20 @@ pub struct AgentInfo {
     pub revision: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentUsageInfo {
+    pub pane_id: String,
+    pub workspace_id: String,
+    pub tab_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    pub cpu_percent: f64,
+    pub mem_bytes: u64,
+    pub process_count: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AgentSessionInfo {
     pub source: String,

@@ -18,6 +18,111 @@ pub struct ForegroundJob {
     pub processes: Vec<ForegroundProcess>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ProcessSnapshotEntry {
+    pub(crate) pid: u32,
+    pub(crate) parent_pid: u32,
+    pub(crate) cpu_percent: f64,
+    pub(crate) rss_kib: u64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct ProcessSubtreeUsage {
+    pub(crate) cpu_percent: f64,
+    pub(crate) mem_bytes: u64,
+    pub(crate) process_count: u32,
+}
+
+pub(crate) fn aggregate_process_subtrees(
+    entries: &[ProcessSnapshotEntry],
+    roots: &[u32],
+) -> std::collections::HashMap<u32, ProcessSubtreeUsage> {
+    use std::collections::{HashMap, HashSet};
+
+    let entries_by_pid: HashMap<u32, ProcessSnapshotEntry> =
+        entries.iter().map(|entry| (entry.pid, *entry)).collect();
+    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+    for entry in entries {
+        children
+            .entry(entry.parent_pid)
+            .or_default()
+            .push(entry.pid);
+    }
+
+    roots
+        .iter()
+        .copied()
+        .map(|root| {
+            let mut usage = ProcessSubtreeUsage::default();
+            let mut pending = vec![root];
+            let mut visited = HashSet::new();
+            while let Some(pid) = pending.pop() {
+                if !visited.insert(pid) {
+                    continue;
+                }
+                let Some(entry) = entries_by_pid.get(&pid) else {
+                    continue;
+                };
+                usage.cpu_percent += entry.cpu_percent;
+                usage.mem_bytes = usage
+                    .mem_bytes
+                    .saturating_add(entry.rss_kib.saturating_mul(1024));
+                usage.process_count = usage.process_count.saturating_add(1);
+                if let Some(descendants) = children.get(&pid) {
+                    pending.extend(descendants);
+                }
+            }
+            (root, usage)
+        })
+        .collect()
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
+pub(crate) fn parse_process_snapshot(output: &str) -> std::io::Result<Vec<ProcessSnapshotEntry>> {
+    output
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            let mut fields = line.split_whitespace();
+            let invalid = || {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("invalid process snapshot row: {line}"),
+                )
+            };
+            let pid = fields
+                .next()
+                .ok_or_else(invalid)?
+                .parse()
+                .map_err(|_| invalid())?;
+            let parent_pid = fields
+                .next()
+                .ok_or_else(invalid)?
+                .parse()
+                .map_err(|_| invalid())?;
+            let cpu_percent = fields
+                .next()
+                .ok_or_else(invalid)?
+                .parse()
+                .map_err(|_| invalid())?;
+            let rss_kib = fields
+                .next()
+                .ok_or_else(invalid)?
+                .parse()
+                .map_err(|_| invalid())?;
+            if fields.next().is_some() {
+                return Err(invalid());
+            }
+            Ok(ProcessSnapshotEntry {
+                pid,
+                parent_pid,
+                cpu_percent,
+                rss_kib,
+            })
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Signal {
     Hangup,
@@ -226,6 +331,99 @@ pub use windows::*;
 mod fallback;
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 pub use fallback::*;
+
+#[cfg(test)]
+mod process_usage_tests {
+    use super::{aggregate_process_subtrees, parse_process_snapshot, ProcessSnapshotEntry};
+
+    #[test]
+    fn aggregates_each_root_and_its_complete_subtree() {
+        let entries = [
+            ProcessSnapshotEntry {
+                pid: 10,
+                parent_pid: 1,
+                cpu_percent: 1.5,
+                rss_kib: 100,
+            },
+            ProcessSnapshotEntry {
+                pid: 11,
+                parent_pid: 10,
+                cpu_percent: 2.25,
+                rss_kib: 200,
+            },
+            ProcessSnapshotEntry {
+                pid: 12,
+                parent_pid: 10,
+                cpu_percent: 3.0,
+                rss_kib: 300,
+            },
+            ProcessSnapshotEntry {
+                pid: 13,
+                parent_pid: 11,
+                cpu_percent: 4.25,
+                rss_kib: 400,
+            },
+            ProcessSnapshotEntry {
+                pid: 20,
+                parent_pid: 1,
+                cpu_percent: 9.0,
+                rss_kib: 900,
+            },
+        ];
+
+        let usage = aggregate_process_subtrees(&entries, &[10, 20, 99]);
+        assert_eq!(usage[&10].cpu_percent, 11.0);
+        assert_eq!(usage[&10].mem_bytes, 1_024_000);
+        assert_eq!(usage[&10].process_count, 4);
+        assert_eq!(usage[&20].cpu_percent, 9.0);
+        assert_eq!(usage[&20].process_count, 1);
+        assert_eq!(usage[&99].process_count, 0);
+    }
+
+    #[test]
+    fn cycle_and_duplicate_entries_are_counted_once() {
+        let entries = [
+            ProcessSnapshotEntry {
+                pid: 10,
+                parent_pid: 11,
+                cpu_percent: 1.0,
+                rss_kib: 10,
+            },
+            ProcessSnapshotEntry {
+                pid: 11,
+                parent_pid: 10,
+                cpu_percent: 2.0,
+                rss_kib: 20,
+            },
+            ProcessSnapshotEntry {
+                pid: 11,
+                parent_pid: 10,
+                cpu_percent: 2.0,
+                rss_kib: 20,
+            },
+        ];
+
+        let usage = aggregate_process_subtrees(&entries, &[10]);
+        assert_eq!(usage[&10].cpu_percent, 3.0);
+        assert_eq!(usage[&10].mem_bytes, 30 * 1024);
+        assert_eq!(usage[&10].process_count, 2);
+    }
+
+    #[test]
+    fn parses_ps_rows_without_a_header() {
+        let entries = parse_process_snapshot("  10  1  12.5  2048\n11 10 0.0 64\n").unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].pid, 10);
+        assert_eq!(entries[0].cpu_percent, 12.5);
+        assert_eq!(entries[1].rss_kib, 64);
+    }
+
+    #[test]
+    fn rejects_malformed_ps_rows() {
+        assert!(parse_process_snapshot("10 1 nope 20\n").is_err());
+        assert!(parse_process_snapshot("10 1 2.0\n").is_err());
+    }
+}
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn available_pane_shell_from_job(child_pid: u32, job: ForegroundJob) -> Option<String> {

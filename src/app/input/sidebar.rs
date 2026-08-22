@@ -512,6 +512,20 @@ impl AppState {
             && row < rect.y + rect.height
     }
 
+    pub(super) fn on_agent_panel_usage(&self, col: u16, row: u16) -> bool {
+        if self.sidebar_collapsed {
+            return false;
+        }
+
+        let (_, detail_area) = crate::ui::ordered_sidebar_sections(self, self.view.sidebar_rect);
+        let rect = crate::ui::agent_panel_usage_rect(detail_area, self.agent_panel_sort);
+        rect.width > 0
+            && col >= rect.x
+            && col < rect.x + rect.width
+            && row >= rect.y
+            && row < rect.y + rect.height
+    }
+
     pub(super) fn on_automations_header(
         &self,
         entries: &[crate::ui::AgentPanelListEntry],

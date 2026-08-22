@@ -446,6 +446,7 @@ impl App {
             NavigateAction::OpenNavigatorSearch => self
                 .state
                 .open_navigator_search_from(&self.terminal_runtimes),
+            NavigateAction::Usage => self.toggle_usage_overlay(),
         }
 
         finish_action_context(&mut self.state, context, previous_mode);
@@ -1511,6 +1512,7 @@ pub(crate) enum NavigateAction {
     Detach,
     OpenNavigator,
     OpenNavigatorSearch,
+    Usage,
 }
 
 fn copy_mode_survives_prefix_action(action: NavigateAction) -> bool {
@@ -1664,6 +1666,7 @@ fn non_indexed_action_for_key(
         (&kb.detach, NavigateAction::Detach),
         (&kb.goto, NavigateAction::OpenNavigator),
         (&kb.search, NavigateAction::OpenNavigatorSearch),
+        (&kb.usage, NavigateAction::Usage),
     ] {
         if action_matches(bindings, key, dispatch) {
             return Some(action);
@@ -1955,6 +1958,7 @@ pub(super) fn execute_navigate_action_in_context(
         }
         NavigateAction::OpenNavigator => state.open_navigator_from(terminal_runtimes),
         NavigateAction::OpenNavigatorSearch => state.open_navigator_search_from(terminal_runtimes),
+        NavigateAction::Usage => state.replace_mode(Mode::Usage),
     }
 
     finish_action_context(state, context, previous_mode);
@@ -3209,6 +3213,21 @@ last_pane = "prefix+tab"
         );
 
         assert_eq!(action, Some(NavigateAction::SwitchTab(1)));
+    }
+
+    #[test]
+    fn usage_action_name_dispatches_configured_prefix_binding() {
+        let mut state = state_with_workspaces(&["one"]);
+        let config: Config = toml::from_str("[keys]\nusage = \"prefix+u\"\n").unwrap();
+        state.keybinds = config.keybinds();
+
+        let action = action_for_key(
+            &state,
+            TerminalKey::new(KeyCode::Char('u'), KeyModifiers::empty()),
+            BindingDispatch::Prefix,
+        );
+
+        assert_eq!(action, Some(NavigateAction::Usage));
     }
 
     #[test]

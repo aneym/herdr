@@ -323,6 +323,7 @@ fn agent_command() -> Command {
     Command::new("agent")
         .about("Control and inspect agent panes")
         .subcommand(Command::new("list").about("List agents"))
+        .subcommand(Command::new("usage").about("Show live agent resource usage"))
         .subcommand(id_command("get", "target", "Show an agent"))
         .subcommand(
             Command::new("read")
@@ -1289,6 +1290,9 @@ mod tests {
         assert!(agent
             .get_subcommands()
             .any(|subcommand| subcommand.get_name() == "wait"));
+        assert!(agent
+            .get_subcommands()
+            .any(|subcommand| subcommand.get_name() == "usage"));
         assert!(agent
             .get_subcommands()
             .all(|subcommand| subcommand.get_name() != "send"));

@@ -192,6 +192,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # open_notification_target = "prefix+o"
 # workspace_picker = "prefix+w"
 # goto = "prefix+g"
+# usage = ""           # optional, unset by default; opens live agent resource usage
 # search = "prefix+f"
 # new_workspace = "prefix+shift+n"
 # new_worktree = "prefix+shift+g"
@@ -1001,6 +1002,11 @@ mod tests {
     fn random_nested_message_comes_from_known_set() {
         let message = random_nested_message();
         assert!(NESTED_HERDR_MESSAGES.contains(&message));
+    }
+
+    #[test]
+    fn default_config_mentions_optional_usage_binding() {
+        assert!(DEFAULT_CONFIG.contains("# usage = \"\""));
     }
 
     #[test]
