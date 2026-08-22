@@ -482,6 +482,23 @@ impl AppState {
             && row < rect.y + rect.height
     }
 
+    pub(super) fn on_agent_panel_usage(&self, col: u16, row: u16) -> bool {
+        if self.sidebar_collapsed || self.agent_view_override.is_some() {
+            return false;
+        }
+
+        let (_, detail_area) = crate::ui::expanded_sidebar_sections(
+            self.view.sidebar_rect,
+            self.sidebar_section_split,
+        );
+        let rect = crate::ui::agent_panel_usage_rect(detail_area, self.agent_panel_sort);
+        rect.width > 0
+            && col >= rect.x
+            && col < rect.x + rect.width
+            && row >= rect.y
+            && row < rect.y + rect.height
+    }
+
     pub(super) fn agent_detail_target_at(
         &self,
         row: u16,

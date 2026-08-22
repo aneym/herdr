@@ -3,6 +3,13 @@ use std::process::Command;
 
 use super::{ClipboardImage, ForegroundJob, Signal};
 
+pub(crate) fn process_snapshot() -> std::io::Result<Vec<super::ProcessSnapshotEntry>> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "process usage snapshots are not supported on this platform",
+    ))
+}
+
 #[cfg(unix)]
 pub(crate) use super::unix_common::set_default_plugin_pane_pwd;
 

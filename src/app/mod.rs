@@ -27,6 +27,7 @@ mod tab_bar_status;
 mod terminal_targets;
 mod terminal_titles;
 mod theme_sync;
+mod usage;
 mod window_title;
 mod worktrees;
 
@@ -130,6 +131,8 @@ pub struct App {
     pub(crate) last_pane_click: Option<PaneClickState>,
     pub(crate) pending_url_click_sources: HashSet<InputSourceId>,
     pub(crate) next_resize_poll: Instant,
+    pub(crate) usage_sampler: usage::UsageSampler,
+    pub(crate) next_usage_refresh: Option<Instant>,
     pub(crate) next_auto_update_check: Option<Instant>,
     pub(crate) next_agent_manifest_update_check: Option<Instant>,
     pub(crate) update_version_check_enabled: bool,
@@ -702,6 +705,7 @@ impl App {
             host_mouse_pixels: None,
             session_dirty: false,
             terminal_runtime_shutdowns: Vec::new(),
+            usage: state::UsageState::default(),
         };
 
         state.terminals = restored_terminals;
@@ -765,6 +769,8 @@ impl App {
             last_pane_click: None,
             pending_url_click_sources: HashSet::new(),
             next_resize_poll: Instant::now() + RESIZE_POLL_INTERVAL,
+            usage_sampler: usage::UsageSampler::default(),
+            next_usage_refresh: None,
             next_auto_update_check: version_check_enabled
                 .then_some(Instant::now() + AUTO_UPDATE_CHECK_INTERVAL),
             next_agent_manifest_update_check: manifest_check_enabled
@@ -1945,6 +1951,12 @@ impl App {
             }
             Mode::Navigator => {
                 input::handle_navigator_key(&mut self.state, &self.terminal_runtimes, key_event);
+            }
+            Mode::Usage => {
+                if key_event.code == crossterm::event::KeyCode::Esc {
+                    self.state.mode = Mode::Terminal;
+                    self.next_usage_refresh = None;
+                }
             }
             Mode::Terminal => {
                 // Should not be called in terminal mode.

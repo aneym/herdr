@@ -39,6 +39,7 @@ pub(super) enum MouseAction {
         pane_id: crate::layout::PaneId,
     },
     FocusToastTarget,
+    ToggleUsage,
     MoveWorkspace {
         source_ws_idx: usize,
         insert_idx: usize,
@@ -598,6 +599,10 @@ impl AppState {
                             },
                         );
                         return None;
+                    }
+
+                    if self.on_agent_panel_usage(mouse.column, mouse.row) {
+                        return Some(MouseAction::ToggleUsage);
                     }
 
                     if self.on_agent_panel_sort_toggle(mouse.column, mouse.row) {

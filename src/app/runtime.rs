@@ -352,6 +352,18 @@ impl App {
         }
 
         if self
+            .next_usage_refresh
+            .is_some_and(|deadline| now >= deadline)
+        {
+            if self.state.mode == super::state::Mode::Usage {
+                self.refresh_usage_overlay();
+                changed = true;
+            } else {
+                self.next_usage_refresh = None;
+            }
+        }
+
+        if self
             .selection_autoscroll_deadline
             .is_some_and(|deadline| now >= deadline)
         {
@@ -617,6 +629,7 @@ impl App {
             self.state.next_pending_agent_notification_deadline(),
             self.state.next_managed_agent_deadline(),
             self.copy_feedback_deadline,
+            self.next_usage_refresh,
             include_git_refresh
                 .then(|| self.git_refresh_deadline())
                 .flatten(),
@@ -672,6 +685,19 @@ mod tests {
     use super::*;
     use crate::app::state;
     use crate::workspace::Workspace;
+
+    #[test]
+    fn usage_refresh_deadline_wakes_the_event_loop() {
+        let (mut app, _) = test_app_with_pane();
+        let now = Instant::now();
+        let deadline = now + Duration::from_millis(750);
+        app.next_usage_refresh = Some(deadline);
+
+        assert_eq!(
+            app.next_headless_loop_deadline_with_git_refresh(now, false, false),
+            Some(deadline)
+        );
+    }
 
     #[test]
     fn hidden_render_attempt_keeps_presentation_cadence_available() {

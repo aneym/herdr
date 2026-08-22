@@ -117,6 +117,12 @@ impl App {
                 Mode::Navigator => {
                     handle_navigator_key(&mut self.state, &self.terminal_runtimes, key_event)
                 }
+                Mode::Usage => {
+                    if key_event.code == KeyCode::Esc {
+                        self.state.mode = Mode::Terminal;
+                        self.next_usage_refresh = None;
+                    }
+                }
                 Mode::Terminal => unreachable!(),
             },
         }
@@ -424,6 +430,7 @@ impl App {
                         self.focus_pane_internal_via_api(ws_idx, pane_id)
                     }
                     MouseAction::FocusToastTarget => self.focus_toast_target_via_api(),
+                    MouseAction::ToggleUsage => self.toggle_usage_overlay(),
                     MouseAction::MoveWorkspace {
                         source_ws_idx,
                         insert_idx,
@@ -934,6 +941,19 @@ mod tests {
             tokio::sync::mpsc::unbounded_channel().1,
             crate::api::EventHub::default(),
         )
+    }
+
+    #[tokio::test]
+    async fn escape_closes_usage_overlay_and_cancels_refresh() {
+        let mut app = test_app();
+        app.state.mode = Mode::Usage;
+        app.next_usage_refresh = Some(std::time::Instant::now());
+
+        app.handle_key(TerminalKey::new(KeyCode::Esc, KeyModifiers::empty()))
+            .await;
+
+        assert_eq!(app.state.mode, Mode::Terminal);
+        assert!(app.next_usage_refresh.is_none());
     }
 
     #[tokio::test]
