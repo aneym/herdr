@@ -272,6 +272,9 @@ pub enum ResponseResult {
         status: crate::config::ConfigReloadStatus,
         diagnostics: Vec<String>,
     },
+    ClipboardImageWritten {
+        paste_text: String,
+    },
     Ok {},
 }
 
