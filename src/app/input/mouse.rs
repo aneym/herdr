@@ -9,7 +9,7 @@ use crate::{
         MenuListState, Mode, RightClickPassthroughGesture, TabPressState, ViewLayout,
         WorkspacePressState,
     },
-    layout::{PaneInfo, SplitBorder},
+    layout::{PaneId, PaneInfo, SplitBorder},
     selection::Selection,
     terminal::TerminalRuntimeRegistry,
 };
@@ -70,12 +70,60 @@ enum MobileMouseResult {
 }
 
 impl AppState {
+    fn pane_copy_button_at(&self, column: u16, row: u16) -> Option<PaneId> {
+        self.pane_frame_at(column, row)
+            .filter(|info| {
+                crate::ui::pane_copy_button_span(info).is_some_and(|(x_start, x_end, y)| {
+                    row == y && column >= x_start && column < x_end
+                })
+            })
+            .map(|info| info.id)
+    }
+
+    fn copy_pane_location_at(&mut self, column: u16, row: u16) -> bool {
+        let Some(pane_id) = self.pane_copy_button_at(column, row) else {
+            return false;
+        };
+        let Some(public_id) = self.active.and_then(|ws_idx| {
+            let workspace = self.workspaces.get(ws_idx)?;
+            let pane_number = workspace.public_pane_number(pane_id)?;
+            Some(crate::workspace::public_pane_id_for_number(
+                &workspace.id,
+                pane_number,
+            ))
+        }) else {
+            return false;
+        };
+
+        self.request_clipboard_write = Some(public_id.clone().into_bytes());
+        self.request_clipboard_feedback = Some(format!("copied {public_id}"));
+        true
+    }
+
+    fn update_pane_hover(&mut self, column: u16, row: u16) {
+        let hover = self.pane_mouse_target(column, row).map(|info| {
+            let on_button = self.pane_copy_button_at(column, row) == Some(info.id);
+            (info.id, on_button)
+        });
+        if self.pane_hover != hover {
+            self.pane_hover = hover;
+        }
+    }
+
     pub(crate) fn handle_pane_mouse_only(
         &mut self,
         terminal_runtimes: &TerminalRuntimeRegistry,
         mouse: MouseEvent,
     ) {
         if self.mode != Mode::Terminal {
+            return;
+        }
+        if matches!(mouse.kind, MouseEventKind::Moved) {
+            self.update_pane_hover(mouse.column, mouse.row);
+        }
+        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+            && self.copy_pane_location_at(mouse.column, mouse.row)
+        {
             return;
         }
         let Some(info) = self.pane_at(mouse.column, mouse.row).cloned() else {
@@ -223,6 +271,12 @@ impl AppState {
 
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
+                if self.mode == Mode::Terminal
+                    && self.copy_pane_location_at(mouse.column, mouse.row)
+                {
+                    return None;
+                }
+
                 self.selection = None;
                 self.selection_autoscroll = None;
                 self.clear_chrome_press(source_id);
@@ -1029,9 +1083,16 @@ impl AppState {
                 }
             }
 
-            MouseEventKind::Moved if self.mode == Mode::Terminal && !in_sidebar => {
-                if let Some(info) = self.pane_at(mouse.column, mouse.row).cloned() {
-                    let _ = self.forward_pane_mouse_motion(terminal_runtimes, &info, mouse);
+            MouseEventKind::Moved if self.mode == Mode::Terminal => {
+                if in_sidebar {
+                    self.pane_hover = None;
+                } else {
+                    self.update_pane_hover(mouse.column, mouse.row);
+                }
+                if !in_sidebar {
+                    if let Some(info) = self.pane_at(mouse.column, mouse.row).cloned() {
+                        let _ = self.forward_pane_mouse_motion(terminal_runtimes, &info, mouse);
+                    }
                 }
             }
 
@@ -2002,10 +2063,90 @@ mod tests {
     use super::*;
     use crate::app::input::modal::handle_context_menu_key;
     use crate::{
-        app::state::{ContextMenuKind, ContextMenuState, MenuListState, Mode, ViewLayout},
+        app::{
+            state::{ContextMenuKind, ContextMenuState, MenuListState, Mode, ViewLayout},
+            App,
+        },
         detect::{Agent, AgentState},
         workspace::Workspace,
     };
+
+    fn app_with_bordered_panes() -> App {
+        let mut app = app_for_mouse_test();
+        let mut workspace = Workspace::test_new("test");
+        workspace.test_split(Direction::Horizontal);
+        app.state.workspaces = vec![workspace];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.pane_borders = true;
+        app.state.pane_outer_borders = true;
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 30));
+        app
+    }
+
+    #[test]
+    fn pane_motion_tracks_copy_control_hover_and_clears_outside_panes() {
+        let mut app = app_with_bordered_panes();
+        let info = app.state.view.pane_infos[0].clone();
+        let (x_start, _, y) = crate::ui::pane_copy_button_span(&info).unwrap();
+
+        app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            0,
+            mouse(MouseEventKind::Moved, info.inner_rect.x, info.inner_rect.y),
+        );
+        assert_eq!(app.state.pane_hover, Some((info.id, false)));
+
+        app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            0,
+            mouse(MouseEventKind::Moved, x_start, y),
+        );
+        assert_eq!(app.state.pane_hover, Some((info.id, true)));
+
+        app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            0,
+            mouse(MouseEventKind::Moved, 0, 0),
+        );
+        assert_eq!(app.state.pane_hover, None);
+    }
+
+    #[test]
+    fn pane_copy_control_click_copies_public_id_without_changing_focus() {
+        let mut app = app_with_bordered_panes();
+        let initial_focus = app.state.workspaces[0].focused_pane_id();
+        let other = app
+            .state
+            .view
+            .pane_infos
+            .iter()
+            .find(|info| Some(info.id) != initial_focus)
+            .cloned()
+            .unwrap();
+        let (x_start, x_end, y) = crate::ui::pane_copy_button_span(&other).unwrap();
+        let pane_number = app.state.workspaces[0]
+            .public_pane_number(other.id)
+            .unwrap();
+        let public_id =
+            crate::workspace::public_pane_id_for_number(&app.state.workspaces[0].id, pane_number);
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x_start, y));
+
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), initial_focus);
+        assert_eq!(
+            app.state.request_clipboard_feedback.as_deref(),
+            Some(format!("copied {public_id}").as_str())
+        );
+        assert!(app.state.drag.is_none());
+        assert!(matches!(
+            app.event_rx.try_recv(),
+            Ok(crate::events::AppEvent::ClipboardWrite { content }) if content == public_id.as_bytes()
+        ));
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x_end, y));
+        assert!(app.event_rx.try_recv().is_err());
+    }
 
     #[test]
     fn tab_click_survives_stray_drag_report_off_the_tab_bar() {
@@ -2796,6 +2937,48 @@ mod tests {
             Bytes::from_static(b"\x1b[<35;3;4M")
         );
         assert!(input_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn pane_mouse_only_tracks_hover_and_consumes_copy_control_click() {
+        let mut app = app_with_bordered_panes();
+        let initial_focus = app.state.workspaces[0].focused_pane_id();
+        let target = app
+            .state
+            .view
+            .pane_infos
+            .iter()
+            .find(|info| Some(info.id) != initial_focus)
+            .cloned()
+            .unwrap();
+        let (x_start, _, y) = crate::ui::pane_copy_button_span(&target).unwrap();
+        let pane_number = app.state.workspaces[0]
+            .public_pane_number(target.id)
+            .unwrap();
+        let public_id =
+            crate::workspace::public_pane_id_for_number(&app.state.workspaces[0].id, pane_number);
+
+        app.state.handle_pane_mouse_only(
+            &app.terminal_runtimes,
+            mouse(MouseEventKind::Moved, x_start, y),
+        );
+        assert_eq!(app.state.pane_hover, Some((target.id, true)));
+
+        app.state.handle_pane_mouse_only(
+            &app.terminal_runtimes,
+            mouse(MouseEventKind::Down(MouseButton::Left), x_start, y),
+        );
+
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), initial_focus);
+        assert_eq!(
+            app.state.request_clipboard_write.as_deref(),
+            Some(public_id.as_bytes())
+        );
+        assert_eq!(
+            app.state.request_clipboard_feedback.as_deref(),
+            Some(format!("copied {public_id}").as_str())
+        );
+        assert!(app.state.drag.is_none());
     }
 
     #[tokio::test]

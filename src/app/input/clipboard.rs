@@ -22,6 +22,7 @@ impl App {
             .try_send(crate::events::AppEvent::ClipboardWrite { content })
             .is_err()
         {
+            self.state.request_clipboard_feedback = None;
             tracing::warn!("failed to queue clipboard write event");
         }
         true

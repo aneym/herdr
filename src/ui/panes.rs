@@ -54,6 +54,18 @@ pub(crate) fn pane_inner_rect(area: Rect, borders: Borders) -> Rect {
     }
 }
 
+pub(crate) fn pane_copy_button_span(info: &PaneInfo) -> Option<(u16, u16, u16)> {
+    if !info.borders.contains(Borders::TOP) || info.rect.width < 8 {
+        return None;
+    }
+    let x_end = info
+        .rect
+        .x
+        .saturating_add(info.rect.width)
+        .saturating_sub(1);
+    Some((x_end.saturating_sub(3), x_end, info.rect.y))
+}
+
 fn ranges_overlap(a_start: u16, a_len: u16, b_start: u16, b_len: u16) -> bool {
     a_start < b_start.saturating_add(b_len) && b_start < a_start.saturating_add(a_len)
 }
@@ -526,6 +538,44 @@ fn render_pane_borders(
     }
 
     render_pane_border_titles(app, ws, pane_infos, frame);
+    render_pane_copy_control(app, pane_infos, frame);
+}
+
+fn render_pane_copy_control(app: &AppState, pane_infos: &[PaneInfo], frame: &mut Frame) {
+    if app.mode != Mode::Terminal || app.popup_pane.is_some() {
+        return;
+    }
+    let Some((pane_id, is_button_hovered)) = app.pane_hover else {
+        return;
+    };
+    let Some((x_start, x_end, y)) = pane_infos
+        .iter()
+        .find(|info| info.id == pane_id)
+        .and_then(pane_copy_button_span)
+    else {
+        return;
+    };
+
+    let buf = frame.buffer_mut();
+    let area = buf.area;
+    if y < area.y
+        || y >= area.y.saturating_add(area.height)
+        || x_start >= area.x.saturating_add(area.width)
+    {
+        return;
+    }
+    let start = x_start.max(area.x);
+    let width = x_end
+        .min(area.x.saturating_add(area.width))
+        .saturating_sub(start) as usize;
+    let style = if is_button_hovered {
+        Style::default()
+            .fg(app.palette.accent)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(app.palette.overlay0)
+    };
+    buf.set_stringn(start, y, " ⧉ ", width, style);
 }
 
 fn add_split_border_cells(
@@ -1017,6 +1067,27 @@ mod tests {
             &app.view.split_borders,
             frame,
         );
+    }
+
+    #[test]
+    fn pane_copy_button_requires_a_wide_top_border() {
+        let mut info = PaneInfo {
+            id: PaneId::from_raw(1),
+            rect: Rect::new(10, 4, 20, 8),
+            inner_rect: Rect::default(),
+            scrollbar_rect: None,
+            borders: Borders::ALL,
+            is_focused: false,
+        };
+
+        assert_eq!(pane_copy_button_span(&info), Some((26, 29, 4)));
+
+        info.borders.remove(Borders::TOP);
+        assert_eq!(pane_copy_button_span(&info), None);
+
+        info.borders.insert(Borders::TOP);
+        info.rect.width = 7;
+        assert_eq!(pane_copy_button_span(&info), None);
     }
 
     #[test]

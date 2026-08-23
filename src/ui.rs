@@ -94,7 +94,7 @@ pub(crate) use self::{
         mobile_switcher_areas, mobile_switcher_max_scroll, mobile_switcher_target_at,
         mobile_switcher_workspace_doc_range, MobileSwitcherTarget,
     },
-    panes::{apply_pane_chrome, pane_inner_rect, pane_is_scrolled_back},
+    panes::{apply_pane_chrome, pane_copy_button_span, pane_inner_rect, pane_is_scrolled_back},
     tab_surface::{tab_surface_cursor, tab_surface_hyperlinks, TabSurfaceView},
     tabs::{compute_tab_bar_view, tab_bar_content_area},
     widgets::{centered_popup_rect, modal_stack_areas},
@@ -219,6 +219,17 @@ fn compute_view_internal(
     resize_panes: bool,
     cell_size: crate::kitty_graphics::HostCellSize,
 ) {
+    if app.popup_pane.is_some()
+        || app.mode != Mode::Terminal
+        || app.pane_hover.is_some_and(|(pane_id, _)| {
+            app.active
+                .and_then(|ws_idx| app.workspaces.get(ws_idx))
+                .and_then(|workspace| workspace.active_tab())
+                .is_none_or(|tab| !tab.layout.pane_ids().contains(&pane_id))
+        })
+    {
+        app.pane_hover = None;
+    }
     if is_mobile_width(area, app.mobile_width_threshold) {
         compute_mobile_view(app, terminal_runtimes, area, resize_panes, cell_size);
         return;
@@ -957,6 +968,29 @@ mod tests {
             app.workspaces[0].tabs[background_tab].runtimes[&background_pane].current_size(),
             (18, 43)
         );
+    }
+
+    #[test]
+    fn workspace_switch_clears_stale_pane_hover_before_switching_back() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
+        app.active = Some(0);
+        app.selected = 0;
+        app.pane_borders = true;
+        app.pane_outer_borders = true;
+        app.mode = Mode::Terminal;
+        let area = Rect::new(0, 0, 120, 30);
+        compute_view(&mut app, area);
+        let hovered = app.view.pane_infos[0].id;
+        app.pane_hover = Some((hovered, true));
+
+        app.switch_workspace(1);
+        compute_view(&mut app, area);
+        assert_eq!(app.pane_hover, None);
+
+        app.switch_workspace(0);
+        compute_view(&mut app, area);
+        assert_eq!(app.pane_hover, None);
     }
 
     #[test]

@@ -127,7 +127,12 @@ impl App {
             crate::selection::write_osc52_bytes(&content);
             #[cfg(test)]
             let _ = content;
-            self.show_clipboard_feedback();
+            let message = self
+                .state
+                .request_clipboard_feedback
+                .take()
+                .unwrap_or_else(|| "copied to clipboard".to_string());
+            self.show_clipboard_feedback(message);
             return Vec::new();
         }
 
@@ -464,15 +469,13 @@ impl App {
         }
     }
 
-    pub(crate) fn show_clipboard_feedback(&mut self) {
+    pub(crate) fn show_clipboard_feedback(&mut self, message: String) {
         if !self.state.toast_config.clipboard.enabled {
             self.state.copy_feedback = None;
             self.copy_feedback_deadline = None;
             return;
         }
-        self.state.copy_feedback = Some(crate::app::state::CopyFeedback {
-            message: "copied to clipboard".to_string(),
-        });
+        self.state.copy_feedback = Some(crate::app::state::CopyFeedback { message });
         self.copy_feedback_deadline = Some(Instant::now() + super::COPY_FEEDBACK_DURATION);
     }
 

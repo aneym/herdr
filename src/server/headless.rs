@@ -2328,7 +2328,15 @@ impl HeadlessServer {
                 // the foreground client instead of broadcasting to every attached client.
                 let data = base64::engine::general_purpose::STANDARD.encode(content.as_slice());
                 if self.send_to_foreground_client(ServerMessage::Clipboard { data }) {
-                    self.app.show_clipboard_feedback();
+                    let message = self
+                        .app
+                        .state
+                        .request_clipboard_feedback
+                        .take()
+                        .unwrap_or_else(|| "copied to clipboard".to_string());
+                    self.app.show_clipboard_feedback(message);
+                } else {
+                    self.app.state.request_clipboard_feedback = None;
                 }
                 true
             }
@@ -2927,6 +2935,7 @@ impl HeadlessServer {
             &events,
             self.app.state.redraw_on_focus_gained,
         );
+        let previous_pane_hover = self.app.state.pane_hover;
         let render_neutral_mouse_motion =
             events_are_render_neutral_mouse_motion(&events, self.app.state.mode);
         if let Some(client) = self.clients.get_mut(&client_id) {
@@ -2989,7 +2998,10 @@ impl HeadlessServer {
 
             false
         } else {
-            foreground_changed || theme_changed || (interaction && !render_neutral_mouse_motion)
+            foreground_changed
+                || theme_changed
+                || self.app.state.pane_hover != previous_pane_hover
+                || (interaction && !render_neutral_mouse_motion)
         }
     }
 
@@ -8656,12 +8668,22 @@ next_tab = ""
         let row = pane.inner_rect.y + 3;
         let input = format!("\x1b[<35;{};{}M", column + 1, row + 1).into_bytes();
 
+        assert!(server.handle_server_event(ServerEvent::ClientInput {
+            client_id: 1,
+            data: input.clone(),
+        }));
+        assert_eq!(
+            input_rx.try_recv().expect("forwarded mouse motion"),
+            Bytes::from_static(b"\x1b[<35;3;4M")
+        );
         assert!(!server.handle_server_event(ServerEvent::ClientInput {
             client_id: 1,
             data: input,
         }));
         assert_eq!(
-            input_rx.try_recv().expect("forwarded mouse motion"),
+            input_rx
+                .try_recv()
+                .expect("forwarded repeated mouse motion"),
             Bytes::from_static(b"\x1b[<35;3;4M")
         );
         assert_eq!(
@@ -10665,6 +10687,49 @@ next_tab = ""
             server.app.state.copy_feedback.is_none(),
             "clipboard feedback should only show when a foreground client can receive the write"
         );
+    }
+
+    #[test]
+    fn dropped_clipboard_feedback_does_not_surface_on_later_copy() {
+        let mut server = test_headless_server();
+        server.app.state.request_clipboard_feedback = Some("copied w1:p1".to_string());
+
+        server.handle_internal_event_with_forwarding(AppEvent::ClipboardWrite {
+            content: b"first".to_vec(),
+        });
+        assert!(server.app.state.request_clipboard_feedback.is_none());
+
+        let (foreground_tx, foreground_control_rx, _foreground_rx) = test_client_writer();
+        server.clients.insert(
+            1,
+            ClientConnection::new(
+                (80, 24),
+                crate::kitty_graphics::HostCellSize::default(),
+                crate::terminal_theme::TerminalTheme::default(),
+                None,
+                1,
+                RenderEncoding::SemanticFrame,
+                Some(foreground_tx),
+            ),
+        );
+        server.foreground_client_id = Some(1);
+        server.sync_foreground_client_state();
+        server.handle_internal_event_with_forwarding(AppEvent::ClipboardWrite {
+            content: b"second".to_vec(),
+        });
+
+        assert_eq!(
+            server
+                .app
+                .state
+                .copy_feedback
+                .as_ref()
+                .map(|feedback| feedback.message.as_str()),
+            Some("copied to clipboard")
+        );
+        assert!(foreground_control_rx
+            .recv_timeout(Duration::from_millis(100))
+            .is_ok());
     }
 
     #[test]
