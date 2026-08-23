@@ -1888,8 +1888,11 @@ impl App {
                     if self.state.popup_pane.is_some() || self.state.mouse_capture {
                         self.handle_mouse_event_headless(source_id, mouse);
                     } else {
-                        self.state
-                            .handle_pane_mouse_only(&self.terminal_runtimes, mouse);
+                        self.state.handle_pane_mouse_only(
+                            &self.terminal_runtimes,
+                            source_id,
+                            mouse,
+                        );
                     }
                 }
                 crate::raw_input::RawInputEvent::Paste(text) => {
