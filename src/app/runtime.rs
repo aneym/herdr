@@ -241,6 +241,7 @@ impl App {
                         crate::app::LOCAL_INPUT_SOURCE,
                         mouse,
                     );
+                    self.dispatch_pending_clipboard_write();
                 }
                 changes_view || self.state.pane_hover != previous_pane_hover
             }
@@ -935,6 +936,45 @@ mod tests {
         // At scrollback bottom, can't scroll further down — should stop
         assert!(app.state.selection_autoscroll.is_none());
         assert!(app.selection_autoscroll_deadline.is_none());
+    }
+
+    #[tokio::test]
+    async fn pane_only_copy_click_emits_clipboard_write_event() {
+        let (mut app, pane_id) = test_app_with_pane();
+        app.state.replace_mode(crate::app::Mode::Terminal);
+        app.state.view.pane_infos[0] = crate::layout::PaneInfo {
+            id: pane_id,
+            rect: ratatui::layout::Rect::new(0, 0, 80, 24),
+            inner_rect: ratatui::layout::Rect::new(1, 1, 78, 22),
+            scrollbar_rect: None,
+            borders: ratatui::widgets::Borders::ALL,
+            is_focused: true,
+        };
+        let public_id = crate::workspace::public_pane_id_for_number(
+            &app.state.workspaces[0].id,
+            app.state.workspaces[0]
+                .public_pane_number(pane_id)
+                .expect("public pane number"),
+        );
+        let (column, _, row) = crate::ui::pane_copy_button_span(&app.state.view.pane_infos[0])
+            .expect("copy button span");
+
+        app.handle_raw_input_event(crate::raw_input::RawInputEvent::Mouse(
+            crossterm::event::MouseEvent {
+                kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                column,
+                row,
+                modifiers: crossterm::event::KeyModifiers::empty(),
+            },
+        ))
+        .await;
+
+        assert!(matches!(
+            app.event_rx.try_recv(),
+            Ok(crate::events::AppEvent::ClipboardWrite { content, feedback })
+                if content == public_id.as_bytes()
+                    && feedback.as_deref() == Some(format!("copied {public_id}").as_str())
+        ));
     }
 
     #[tokio::test]

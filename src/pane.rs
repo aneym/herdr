@@ -1963,7 +1963,10 @@ impl PaneRuntime {
                     publish_reported_cwd(pane_id, cwd, &reported_cwd, &read_events);
                 }
                 for content in result.clipboard_writes {
-                    if let Err(err) = read_events.try_send(AppEvent::ClipboardWrite { content }) {
+                    if let Err(err) = read_events.try_send(AppEvent::ClipboardWrite {
+                        content,
+                        feedback: None,
+                    }) {
                         warn!(
                             pane = pane_id.raw(),
                             err = %err,
@@ -2134,7 +2137,10 @@ impl PaneRuntime {
                     publish_reported_cwd(pane_id, cwd, &reported_cwd, &events);
                 }
                 for content in result.clipboard_writes {
-                    if let Err(err) = events.try_send(AppEvent::ClipboardWrite { content }) {
+                    if let Err(err) = events.try_send(AppEvent::ClipboardWrite {
+                        content,
+                        feedback: None,
+                    }) {
                         warn!(
                             pane = pane_id.raw(),
                             err = %err,

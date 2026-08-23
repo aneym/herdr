@@ -2578,6 +2578,7 @@ mod tests {
 
         app.handle_internal_event(AppEvent::ClipboardWrite {
             content: b"copied".to_vec(),
+            feedback: None,
         });
 
         assert!(app.state.toast.is_none());
@@ -2593,6 +2594,7 @@ mod tests {
 
         app.handle_internal_event(AppEvent::ClipboardWrite {
             content: b"copied".to_vec(),
+            feedback: None,
         });
 
         assert!(app.state.copy_feedback.is_none());
@@ -2613,6 +2615,7 @@ mod tests {
 
         app.handle_internal_event(AppEvent::ClipboardWrite {
             content: b"copied".to_vec(),
+            feedback: None,
         });
 
         assert_eq!(app.state.toast, original_toast);

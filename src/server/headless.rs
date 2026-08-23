@@ -2327,20 +2327,16 @@ impl HeadlessServer {
                 }
                 false
             }
-            AppEvent::ClipboardWrite { content } => {
+            AppEvent::ClipboardWrite { content, feedback } => {
                 // Clipboard writes are client-local side effects. Forward them only to
                 // the foreground client instead of broadcasting to every attached client.
                 let data = base64::engine::general_purpose::STANDARD.encode(content.as_slice());
                 if self.send_to_foreground_client(ServerMessage::Clipboard { data }) {
-                    let message = self
-                        .app
-                        .state
-                        .request_clipboard_feedback
-                        .take()
-                        .unwrap_or_else(|| "copied to clipboard".to_string());
-                    self.app.show_clipboard_feedback(message);
-                } else {
-                    self.app.state.request_clipboard_feedback = None;
+                    self.app.show_clipboard_feedback(
+                        feedback
+                            .clone()
+                            .unwrap_or_else(|| "copied to clipboard".to_string()),
+                    );
                 }
                 true
             }
@@ -10703,6 +10699,7 @@ next_tab = ""
 
         let changed = server.handle_internal_event_with_forwarding(AppEvent::ClipboardWrite {
             content: b"test".to_vec(),
+            feedback: None,
         });
 
         assert!(changed);
@@ -10738,6 +10735,7 @@ next_tab = ""
 
         let changed = server.handle_internal_event_with_forwarding(AppEvent::ClipboardWrite {
             content: b"test".to_vec(),
+            feedback: None,
         });
 
         assert!(changed);
@@ -10765,10 +10763,9 @@ next_tab = ""
         );
         server.foreground_client_id = Some(1);
         server.sync_foreground_client_state();
-        server.app.state.request_clipboard_feedback = Some("copied custom pane".to_string());
-
         server.handle_internal_event_with_forwarding(AppEvent::ClipboardWrite {
             content: b"test".to_vec(),
+            feedback: Some("copied custom pane".to_string()),
         });
 
         assert_eq!(
@@ -10788,12 +10785,11 @@ next_tab = ""
     #[test]
     fn dropped_clipboard_feedback_does_not_surface_on_later_copy() {
         let mut server = test_headless_server();
-        server.app.state.request_clipboard_feedback = Some("copied w1:p1".to_string());
 
         server.handle_internal_event_with_forwarding(AppEvent::ClipboardWrite {
             content: b"first".to_vec(),
+            feedback: Some("copied w1:p1".to_string()),
         });
-        assert!(server.app.state.request_clipboard_feedback.is_none());
 
         let (foreground_tx, foreground_control_rx, _foreground_rx) = test_client_writer();
         server.clients.insert(
@@ -10812,6 +10808,7 @@ next_tab = ""
         server.sync_foreground_client_state();
         server.handle_internal_event_with_forwarding(AppEvent::ClipboardWrite {
             content: b"second".to_vec(),
+            feedback: None,
         });
 
         assert_eq!(
@@ -10851,6 +10848,7 @@ next_tab = ""
 
         let changed = server.handle_internal_event_with_forwarding(AppEvent::ClipboardWrite {
             content: b"test".to_vec(),
+            feedback: None,
         });
 
         assert!(changed);

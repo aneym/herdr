@@ -100,8 +100,10 @@ impl AppState {
             return false;
         };
 
-        self.request_clipboard_write = Some(public_id.clone().into_bytes());
-        self.request_clipboard_feedback = Some(format!("copied {public_id}"));
+        self.request_clipboard_write = Some((
+            public_id.clone().into_bytes(),
+            Some(format!("copied {public_id}")),
+        ));
         true
     }
 
@@ -2331,14 +2333,12 @@ mod tests {
         app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x_start, y));
 
         assert_eq!(app.state.workspaces[0].focused_pane_id(), initial_focus);
-        assert_eq!(
-            app.state.request_clipboard_feedback.as_deref(),
-            Some(format!("copied {public_id}").as_str())
-        );
         assert!(app.state.drag.is_none());
         assert!(matches!(
             app.event_rx.try_recv(),
-            Ok(crate::events::AppEvent::ClipboardWrite { content }) if content == public_id.as_bytes()
+            Ok(crate::events::AppEvent::ClipboardWrite { content, feedback })
+                if content == public_id.as_bytes()
+                    && feedback.as_deref() == Some(format!("copied {public_id}").as_str())
         ));
 
         app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x_end, y));
@@ -3372,12 +3372,14 @@ mod tests {
         );
 
         assert_eq!(app.state.workspaces[0].focused_pane_id(), initial_focus);
+        let (content, feedback) = app
+            .state
+            .request_clipboard_write
+            .as_ref()
+            .expect("pending clipboard write");
+        assert_eq!(content, public_id.as_bytes());
         assert_eq!(
-            app.state.request_clipboard_write.as_deref(),
-            Some(public_id.as_bytes())
-        );
-        assert_eq!(
-            app.state.request_clipboard_feedback.as_deref(),
+            feedback.as_deref(),
             Some(format!("copied {public_id}").as_str())
         );
         assert!(app.state.drag.is_none());

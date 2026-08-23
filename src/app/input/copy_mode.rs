@@ -1120,9 +1120,10 @@ mod tests {
 
     fn copy_mode_clipboard_text(app: &mut App) -> String {
         match app.event_rx.try_recv().expect("clipboard event") {
-            AppEvent::ClipboardWrite { content } => {
-                String::from_utf8(content).expect("utf8 clipboard")
-            }
+            AppEvent::ClipboardWrite {
+                content,
+                feedback: None,
+            } => String::from_utf8(content).expect("utf8 clipboard"),
             other => panic!("unexpected event: {other:?}"),
         }
     }
@@ -2124,7 +2125,10 @@ mod tests {
         app.handle_copy_mode_key(TerminalKey::new(KeyCode::Char('y'), KeyModifiers::empty()));
 
         match app.event_rx.try_recv().expect("clipboard event") {
-            AppEvent::ClipboardWrite { content } => assert_eq!(content, b"alp"),
+            AppEvent::ClipboardWrite {
+                content,
+                feedback: None,
+            } => assert_eq!(content, b"alp"),
             other => panic!("unexpected event: {other:?}"),
         }
         assert_eq!(app.state.mode(), Mode::Terminal);

@@ -13,16 +13,15 @@ fn is_retained_selection_copy_key(key: &TerminalKey) -> bool {
 }
 
 impl App {
-    pub(super) fn dispatch_pending_clipboard_write(&mut self) -> bool {
-        let Some(content) = self.state.request_clipboard_write.take() else {
+    pub(crate) fn dispatch_pending_clipboard_write(&mut self) -> bool {
+        let Some((content, feedback)) = self.state.request_clipboard_write.take() else {
             return false;
         };
         if self
             .event_tx
-            .try_send(crate::events::AppEvent::ClipboardWrite { content })
+            .try_send(crate::events::AppEvent::ClipboardWrite { content, feedback })
             .is_err()
         {
-            self.state.request_clipboard_feedback = None;
             tracing::warn!("failed to queue clipboard write event");
         }
         true
@@ -117,7 +116,10 @@ mod tests {
 
     fn clipboard_write_content(app: &mut App) -> Vec<u8> {
         match app.event_rx.try_recv().expect("clipboard write event") {
-            AppEvent::ClipboardWrite { content } => content,
+            AppEvent::ClipboardWrite {
+                content,
+                feedback: None,
+            } => content,
             event => panic!("unexpected event: {event:?}"),
         }
     }
@@ -159,7 +161,10 @@ mod tests {
         assert!(app.state.selection.is_none());
         assert!(input_rx.try_recv().is_err());
 
-        app.handle_internal_event(AppEvent::ClipboardWrite { content });
+        app.handle_internal_event(AppEvent::ClipboardWrite {
+            content,
+            feedback: None,
+        });
         assert_eq!(
             app.state
                 .copy_feedback

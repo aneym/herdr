@@ -1711,9 +1711,7 @@ pub struct AppState {
     pub request_client_config_reload: bool,
     /// Set when UI interaction requested a clipboard write that must be
     /// handled by the outer App/event loop instead of directly from AppState.
-    pub request_clipboard_write: Option<Vec<u8>>,
-    /// Custom message queued for the next successful clipboard delivery.
-    pub(crate) request_clipboard_feedback: Option<String>,
+    pub request_clipboard_write: Option<(Vec<u8>, Option<String>)>,
     pub creating_new_tab: bool,
     pub requested_new_tab_name: Option<String>,
     pub pending_workspace_create_cwd: Option<std::path::PathBuf>,
@@ -2250,7 +2248,6 @@ impl AppState {
             request_reload_config: false,
             request_client_config_reload: false,
             request_clipboard_write: None,
-            request_clipboard_feedback: None,
             creating_new_tab: false,
             requested_new_tab_name: None,
             pending_workspace_create_cwd: None,
@@ -2621,6 +2618,14 @@ impl AppState {
                 "empty app state must not keep tab press state"
             );
             assert!(
+                self.pane_copy_presses.is_empty(),
+                "empty app state must not keep pane copy press state"
+            );
+            assert!(
+                self.pane_hover.is_none(),
+                "empty app state must not keep pane hover state"
+            );
+            assert!(
                 self.context_menu.is_none(),
                 "empty app state must not keep context menu"
             );
@@ -2836,6 +2841,16 @@ impl AppState {
         for press in self.tab_presses.values() {
             assert_tab_index(press.ws_idx, press.tab_idx, "tab press");
         }
+        for source_id in &self.pane_copy_presses {
+            assert!(
+                !self.workspace_presses.contains_key(source_id)
+                    && !self.tab_presses.contains_key(source_id),
+                "pane copy press source {source_id} must not also own a chrome press"
+            );
+        }
+        if let Some((pane_id, _)) = self.pane_hover {
+            assert_live_pane(pane_id, "pane hover");
+        }
         if let Some(menu) = &self.context_menu {
             match menu.kind {
                 ContextMenuKind::Workspace { ws_idx, .. }
@@ -2967,6 +2982,33 @@ mod tests {
         state.active_profile = "empty".into();
         assert!(state.reveal_workspace(0));
         assert_eq!(state.active_profile, "work");
+    }
+
+    #[test]
+    #[should_panic(expected = "pane hover references missing pane")]
+    fn invariants_reject_hover_for_missing_pane() {
+        let mut state = AppState::test_with_adversarial_identity_state();
+        state.pane_hover = Some((PaneId::alloc(), true));
+
+        state.assert_invariants_for_test();
+    }
+
+    #[test]
+    #[should_panic(expected = "must not also own a chrome press")]
+    fn invariants_reject_copy_and_chrome_press_for_same_input_source() {
+        let mut state = AppState::test_with_adversarial_identity_state();
+        state.pane_copy_presses.insert(41);
+        state.tab_presses.insert(
+            41,
+            TabPressState {
+                ws_idx: 0,
+                tab_idx: 0,
+                start_col: 0,
+                start_row: 0,
+            },
+        );
+
+        state.assert_invariants_for_test();
     }
 
     #[test]
