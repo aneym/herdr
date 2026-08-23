@@ -1712,6 +1712,7 @@ pub struct AppState {
     /// Set when UI interaction requested a clipboard write that must be
     /// handled by the outer App/event loop instead of directly from AppState.
     pub request_clipboard_write: Option<Vec<u8>>,
+    pub(crate) request_clipboard_feedback: Option<String>,
     pub creating_new_tab: bool,
     pub requested_new_tab_name: Option<String>,
     pub pending_workspace_create_cwd: Option<std::path::PathBuf>,
@@ -1744,6 +1745,7 @@ pub struct AppState {
         std::collections::HashMap<crate::app::InputSourceId, WorkspacePressState>,
     pub(crate) tab_presses: std::collections::HashMap<crate::app::InputSourceId, TabPressState>,
     pub selection: Option<Selection>,
+    pub(crate) pane_hover: Option<(PaneId, bool)>,
     pub(crate) pane_app_drag_gesture: Option<(PaneId, bool)>,
     pub(crate) pane_app_drag_selection: Option<PaneId>,
     pub selection_autoscroll: Option<SelectionAutoscroll>,
@@ -2242,6 +2244,7 @@ impl AppState {
             request_reload_config: false,
             request_client_config_reload: false,
             request_clipboard_write: None,
+            request_clipboard_feedback: None,
             creating_new_tab: false,
             requested_new_tab_name: None,
             pending_workspace_create_cwd: None,
@@ -2288,6 +2291,7 @@ impl AppState {
             workspace_presses: std::collections::HashMap::new(),
             tab_presses: std::collections::HashMap::new(),
             selection: None,
+            pane_hover: None,
             pane_app_drag_gesture: None,
             pane_app_drag_selection: None,
             selection_autoscroll: None,

@@ -390,8 +390,18 @@ impl App {
             return;
         }
 
-        let handled_pane_double_click = self.handle_pane_double_click(mouse);
-        if !handled_pane_double_click {
+        let on_pane_copy_button = self.state.mode() == Mode::Terminal
+            && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+            && self
+                .state
+                .pane_frame_at(mouse.column, mouse.row)
+                .and_then(crate::ui::pane_copy_button_span)
+                .is_some_and(|(x_start, x_end, y)| {
+                    mouse.row == y && mouse.column >= x_start && mouse.column < x_end
+                });
+        let handled_pane_double_click =
+            !on_pane_copy_button && self.handle_pane_double_click(mouse);
+        if !handled_pane_double_click && !on_pane_copy_button {
             self.focus_pane_before_mouse_press(mouse);
         }
 

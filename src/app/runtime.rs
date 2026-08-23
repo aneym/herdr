@@ -230,6 +230,7 @@ impl App {
                 true
             }
             crate::raw_input::RawInputEvent::Mouse(mouse) => {
+                let previous_pane_hover = self.state.pane_hover;
                 let changes_view = !matches!(mouse.kind, crossterm::event::MouseEventKind::Moved)
                     || self.state.mode().mouse_motion_changes_view();
                 if self.state.popup_pane.is_some() || self.state.mouse_capture {
@@ -238,7 +239,7 @@ impl App {
                     self.state
                         .handle_pane_mouse_only(&self.terminal_runtimes, mouse);
                 }
-                changes_view
+                changes_view || self.state.pane_hover != previous_pane_hover
             }
             crate::raw_input::RawInputEvent::OuterFocusGained => {
                 #[cfg(not(windows))]
@@ -946,6 +947,7 @@ mod tests {
             })
         };
 
+        assert!(app.handle_raw_input_event(motion()).await);
         assert!(!app.handle_raw_input_event(motion()).await);
         app.state.replace_mode(crate::app::Mode::GlobalMenu);
         assert!(app.handle_raw_input_event(motion()).await);
