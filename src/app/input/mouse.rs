@@ -2031,7 +2031,8 @@ impl AppState {
                     .pane_app_drag_gesture
                     .take()
                     .is_some_and(|(pane_id, is_drag)| pane_id == info.id && is_drag);
-                self.pane_app_drag_selection = was_drag.then_some(info.id);
+                self.pane_app_drag_selection =
+                    was_drag.then(|| (info.id, std::time::Instant::now()));
             }
             _ => {}
         }

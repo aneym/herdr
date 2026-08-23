@@ -23,8 +23,17 @@ enum PreparedPopupInput {
     },
 }
 
+const PANE_APP_DRAG_SELECTION_TTL: std::time::Duration = std::time::Duration::from_secs(10);
+
 fn is_modifier_only_key(code: &KeyCode) -> bool {
     matches!(code, KeyCode::Modifier(_))
+}
+
+fn pane_app_drag_selection_is_fresh(
+    completed_at: std::time::Instant,
+    now: std::time::Instant,
+) -> bool {
+    now.saturating_duration_since(completed_at) <= PANE_APP_DRAG_SELECTION_TTL
 }
 
 impl App {
@@ -142,13 +151,23 @@ impl App {
         let is_super_c = matches!(key.code, KeyCode::Char('c' | 'C'))
             && key.modifiers == crossterm::event::KeyModifiers::SUPER;
         let key = if is_super_c {
-            if self.state.pane_app_drag_selection != Some(pane_id) {
-                // Claude Code's cmd+c selection binding clears its selection before copying.
-                // Swallowing without a tracked drag also avoids typing "c" in legacy panes
-                // and can never turn an unselected copy attempt into an interrupt.
+            let (selection_pane_id, completed_at) = self.state.pane_app_drag_selection?;
+            if selection_pane_id != pane_id {
                 return None;
             }
-            // Plain ctrl+c is consumed as copy when Claude Code still has a selection.
+            if !pane_app_drag_selection_is_fresh(completed_at, std::time::Instant::now()) {
+                self.state.pane_app_drag_selection = None;
+                return None;
+            }
+            let terminal = self.state.terminals.get(&terminal_id)?;
+            if !matches!(
+                terminal.effective_known_agent(),
+                Some(crate::detect::Agent::Claude | crate::detect::Agent::Hermes)
+            ) || terminal.state == crate::detect::AgentState::Working
+            {
+                return None;
+            }
+            // These agent TUIs consume plain ctrl+c as copy while their selection remains active.
             self.state.pane_app_drag_selection = None;
             let mut key = key;
             key.code = KeyCode::Char('c');
@@ -502,6 +521,7 @@ mod tests {
         let mut app = app_for_mouse_test();
         let mut ws = Workspace::test_new("test");
         let pane_id = ws.tabs[0].root_pane;
+        let terminal_id = ws.terminal_id(pane_id).expect("pane terminal").clone();
         let pane_infos = ws.tabs[0].layout.panes(Rect::new(26, 2, 80, 18));
         let info = pane_infos[0].clone();
         let (runtime, input_rx) =
@@ -513,12 +533,36 @@ mod tests {
                 8,
             );
         ws.insert_test_runtime(pane_id, runtime);
+        let mut terminal = crate::terminal::TerminalState::new(
+            terminal_id.clone(),
+            std::env::current_dir().unwrap_or_default(),
+        );
+        terminal.set_detected_state(
+            Some(crate::detect::Agent::Claude),
+            crate::detect::AgentState::Idle,
+        );
+        app.state.terminals.insert(terminal_id, terminal);
         app.state.workspaces = vec![ws];
         app.state.active = Some(0);
         app.state.selected = 0;
         app.state.replace_mode(Mode::Terminal);
         app.state.view.pane_infos = pane_infos;
         (app, info, input_rx)
+    }
+
+    fn set_focused_agent_state(
+        app: &mut App,
+        agent: crate::detect::Agent,
+        state: crate::detect::AgentState,
+    ) {
+        let workspace = &app.state.workspaces[0];
+        let pane_id = workspace.focused_pane_id().expect("focused pane");
+        let terminal_id = workspace.terminal_id(pane_id).expect("pane terminal");
+        app.state
+            .terminals
+            .get_mut(terminal_id)
+            .expect("terminal state")
+            .set_detected_state(Some(agent), state);
     }
 
     fn double_click(app: &mut App, col: u16, row: u16) {
@@ -1332,6 +1376,68 @@ mod tests {
         assert!(app.state.pane_app_drag_selection.is_none());
 
         app.handle_terminal_key_headless(TerminalKey::new(KeyCode::Char('c'), KeyModifiers::SUPER));
+        assert!(input_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn pane_app_drag_selection_freshness_uses_ten_second_ttl() {
+        let completed_at = std::time::Instant::now();
+
+        assert!(pane_app_drag_selection_is_fresh(
+            completed_at,
+            completed_at + std::time::Duration::from_secs(10)
+        ));
+        assert!(!pane_app_drag_selection_is_fresh(
+            completed_at,
+            completed_at + std::time::Duration::from_secs(10) + std::time::Duration::from_nanos(1)
+        ));
+    }
+
+    #[tokio::test]
+    async fn expired_pane_app_drag_super_c_is_swallowed_and_cleared() {
+        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime();
+        let pane_id = info.id;
+        app.state.pane_app_drag_selection = Some((
+            pane_id,
+            std::time::Instant::now()
+                - PANE_APP_DRAG_SELECTION_TTL
+                - std::time::Duration::from_nanos(1),
+        ));
+
+        app.handle_terminal_key_headless(TerminalKey::new(KeyCode::Char('c'), KeyModifiers::SUPER));
+
+        assert!(input_rx.try_recv().is_err());
+        assert!(app.state.pane_app_drag_selection.is_none());
+    }
+
+    #[tokio::test]
+    async fn working_claude_pane_super_c_is_swallowed() {
+        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime();
+        set_focused_agent_state(
+            &mut app,
+            crate::detect::Agent::Claude,
+            crate::detect::AgentState::Working,
+        );
+        app.state.pane_app_drag_selection = Some((info.id, std::time::Instant::now()));
+
+        app.handle_terminal_key_headless(TerminalKey::new(KeyCode::Char('c'), KeyModifiers::SUPER));
+
+        assert!(input_rx.try_recv().is_err());
+        assert!(app.state.pane_app_drag_selection.is_some());
+    }
+
+    #[tokio::test]
+    async fn non_allowlisted_agent_super_c_is_swallowed() {
+        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime();
+        set_focused_agent_state(
+            &mut app,
+            crate::detect::Agent::Codex,
+            crate::detect::AgentState::Idle,
+        );
+        app.state.pane_app_drag_selection = Some((info.id, std::time::Instant::now()));
+
+        app.handle_terminal_key_headless(TerminalKey::new(KeyCode::Char('c'), KeyModifiers::SUPER));
+
         assert!(input_rx.try_recv().is_err());
     }
 

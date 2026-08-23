@@ -1747,7 +1747,7 @@ pub struct AppState {
     pub selection: Option<Selection>,
     pub(crate) pane_hover: Option<(PaneId, bool)>,
     pub(crate) pane_app_drag_gesture: Option<(PaneId, bool)>,
-    pub(crate) pane_app_drag_selection: Option<PaneId>,
+    pub(crate) pane_app_drag_selection: Option<(PaneId, std::time::Instant)>,
     pub selection_autoscroll: Option<SelectionAutoscroll>,
     pub context_menu: Option<ContextMenuState>,
     pub profile_menu: Option<ProfileMenuState>,
