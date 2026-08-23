@@ -113,18 +113,30 @@ impl AppState {
     pub(crate) fn handle_pane_mouse_only(
         &mut self,
         terminal_runtimes: &TerminalRuntimeRegistry,
+        source_id: crate::app::InputSourceId,
         mouse: MouseEvent,
     ) {
         if self.mode != Mode::Terminal {
             return;
         }
-        if matches!(mouse.kind, MouseEventKind::Moved) {
-            self.update_pane_hover(mouse.column, mouse.row);
-        }
-        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
-            && self.copy_pane_location_at(mouse.column, mouse.row)
-        {
-            return;
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                self.pane_copy_presses.remove(&source_id);
+                if self.copy_pane_location_at(mouse.column, mouse.row) {
+                    self.pane_copy_presses.insert(source_id);
+                    return;
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left)
+                if self.pane_copy_presses.contains(&source_id) =>
+            {
+                return;
+            }
+            MouseEventKind::Up(MouseButton::Left) if self.pane_copy_presses.remove(&source_id) => {
+                return;
+            }
+            MouseEventKind::Moved => self.update_pane_hover(mouse.column, mouse.row),
+            _ => {}
         }
         let Some(info) = self.pane_at(mouse.column, mouse.row).cloned() else {
             return;
@@ -271,9 +283,11 @@ impl AppState {
 
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
+                self.pane_copy_presses.remove(&source_id);
                 if self.mode == Mode::Terminal
                     && self.copy_pane_location_at(mouse.column, mouse.row)
                 {
+                    self.pane_copy_presses.insert(source_id);
                     return None;
                 }
 
@@ -2862,6 +2876,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn captured_copy_control_consumes_drag_and_up_then_allows_fresh_click() {
+        let mut app = app_with_bordered_panes();
+        let target = app.state.view.pane_infos[0].clone();
+        let (x_start, _, y) = crate::ui::pane_copy_button_span(&target).unwrap();
+        let (runtime, mut input_rx) =
+            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+                target.inner_rect.width,
+                target.inner_rect.height,
+                0,
+                b"\x1b[?1002h\x1b[?1006h",
+                4,
+            );
+        app.state.insert_test_runtime(target.id, runtime);
+
+        app.handle_mouse_from_input_source(
+            41,
+            mouse(MouseEventKind::Down(MouseButton::Left), x_start, y),
+        );
+        app.handle_mouse_from_input_source(
+            41,
+            mouse(
+                MouseEventKind::Drag(MouseButton::Left),
+                target.inner_rect.x,
+                target.inner_rect.y,
+            ),
+        );
+        app.handle_mouse_from_input_source(
+            41,
+            mouse(
+                MouseEventKind::Up(MouseButton::Left),
+                target.inner_rect.x,
+                target.inner_rect.y,
+            ),
+        );
+
+        assert!(input_rx.try_recv().is_err());
+        assert!(!app.state.pane_copy_presses.contains(&41));
+
+        app.handle_mouse_from_input_source(
+            41,
+            mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                target.inner_rect.x,
+                target.inner_rect.y,
+            ),
+        );
+        assert!(input_rx.try_recv().is_ok());
+    }
+
+    #[tokio::test]
     async fn captured_left_press_focuses_target_before_forwarding() {
         let mut app = app_for_mouse_test();
         let mut ws = Workspace::test_new("test");
@@ -2925,6 +2989,7 @@ mod tests {
 
         app.state.handle_pane_mouse_only(
             &app.terminal_runtimes,
+            0,
             mouse(
                 MouseEventKind::Moved,
                 info.inner_rect.x + 2,
@@ -2960,12 +3025,14 @@ mod tests {
 
         app.state.handle_pane_mouse_only(
             &app.terminal_runtimes,
+            0,
             mouse(MouseEventKind::Moved, x_start, y),
         );
         assert_eq!(app.state.pane_hover, Some((target.id, true)));
 
         app.state.handle_pane_mouse_only(
             &app.terminal_runtimes,
+            0,
             mouse(MouseEventKind::Down(MouseButton::Left), x_start, y),
         );
 
@@ -2979,6 +3046,62 @@ mod tests {
             Some(format!("copied {public_id}").as_str())
         );
         assert!(app.state.drag.is_none());
+    }
+
+    #[tokio::test]
+    async fn pane_mouse_only_copy_control_consumes_drag_and_up_then_allows_fresh_click() {
+        let mut app = app_with_bordered_panes();
+        let target = app.state.view.pane_infos[0].clone();
+        let (x_start, _, y) = crate::ui::pane_copy_button_span(&target).unwrap();
+        let (runtime, mut input_rx) =
+            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+                target.inner_rect.width,
+                target.inner_rect.height,
+                0,
+                b"\x1b[?1002h\x1b[?1006h",
+                4,
+            );
+        app.state.insert_test_runtime(target.id, runtime);
+        app.state.pane_hover = Some((target.id, true));
+
+        app.state.handle_pane_mouse_only(
+            &app.terminal_runtimes,
+            41,
+            mouse(MouseEventKind::Down(MouseButton::Left), x_start, y),
+        );
+        app.state.handle_pane_mouse_only(
+            &app.terminal_runtimes,
+            41,
+            mouse(
+                MouseEventKind::Drag(MouseButton::Left),
+                target.inner_rect.x,
+                target.inner_rect.y,
+            ),
+        );
+        assert_eq!(app.state.pane_hover, Some((target.id, true)));
+        app.state.handle_pane_mouse_only(
+            &app.terminal_runtimes,
+            41,
+            mouse(
+                MouseEventKind::Up(MouseButton::Left),
+                target.inner_rect.x,
+                target.inner_rect.y,
+            ),
+        );
+
+        assert!(input_rx.try_recv().is_err());
+        assert!(!app.state.pane_copy_presses.contains(&41));
+
+        app.state.handle_pane_mouse_only(
+            &app.terminal_runtimes,
+            41,
+            mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                target.inner_rect.x,
+                target.inner_rect.y,
+            ),
+        );
+        assert!(input_rx.try_recv().is_ok());
     }
 
     #[tokio::test]
@@ -3007,6 +3130,7 @@ mod tests {
 
         app.state.handle_pane_mouse_only(
             &app.terminal_runtimes,
+            0,
             mouse(
                 MouseEventKind::Moved,
                 info.inner_rect.x + 2,

@@ -352,6 +352,20 @@ impl App {
             _ => {}
         }
 
+        match mouse.kind {
+            MouseEventKind::Drag(MouseButton::Left)
+                if self.state.pane_copy_presses.contains(&source_id) =>
+            {
+                return;
+            }
+            MouseEventKind::Up(MouseButton::Left)
+                if self.state.pane_copy_presses.remove(&source_id) =>
+            {
+                return;
+            }
+            _ => {}
+        }
+
         if self.state.popup_pane.is_some() {
             self.handle_popup_mouse(mouse);
             return;

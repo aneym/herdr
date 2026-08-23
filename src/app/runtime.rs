@@ -236,8 +236,11 @@ impl App {
                 if self.state.popup_pane.is_some() || self.state.mouse_capture {
                     self.handle_mouse(mouse);
                 } else {
-                    self.state
-                        .handle_pane_mouse_only(&self.terminal_runtimes, mouse);
+                    self.state.handle_pane_mouse_only(
+                        &self.terminal_runtimes,
+                        crate::app::LOCAL_INPUT_SOURCE,
+                        mouse,
+                    );
                 }
                 changes_view || self.state.pane_hover != previous_pane_hover
             }
