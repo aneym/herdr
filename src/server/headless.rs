@@ -2339,6 +2339,8 @@ impl HeadlessServer {
                         .take()
                         .unwrap_or_else(|| "copied to clipboard".to_string());
                     self.app.show_clipboard_feedback(message);
+                } else {
+                    self.app.state.request_clipboard_feedback = None;
                 }
                 true
             }
@@ -10743,6 +10745,49 @@ next_tab = ""
             server.app.state.copy_feedback.is_none(),
             "clipboard feedback should only show when a foreground client can receive the write"
         );
+    }
+
+    #[test]
+    fn dropped_clipboard_feedback_does_not_surface_on_later_copy() {
+        let mut server = test_headless_server();
+        server.app.state.request_clipboard_feedback = Some("copied w1:p1".to_string());
+
+        server.handle_internal_event_with_forwarding(AppEvent::ClipboardWrite {
+            content: b"first".to_vec(),
+        });
+        assert!(server.app.state.request_clipboard_feedback.is_none());
+
+        let (foreground_tx, foreground_control_rx, _foreground_rx) = test_client_writer();
+        server.clients.insert(
+            1,
+            ClientConnection::new(
+                (80, 24),
+                crate::kitty_graphics::HostCellSize::default(),
+                crate::terminal_theme::TerminalTheme::default(),
+                None,
+                1,
+                RenderEncoding::SemanticFrame,
+                Some(foreground_tx),
+            ),
+        );
+        server.foreground_client_id = Some(1);
+        server.sync_foreground_client_state();
+        server.handle_internal_event_with_forwarding(AppEvent::ClipboardWrite {
+            content: b"second".to_vec(),
+        });
+
+        assert_eq!(
+            server
+                .app
+                .state
+                .copy_feedback
+                .as_ref()
+                .map(|feedback| feedback.message.as_str()),
+            Some("copied to clipboard")
+        );
+        assert!(foreground_control_rx
+            .recv_timeout(Duration::from_millis(100))
+            .is_ok());
     }
 
     #[test]

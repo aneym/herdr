@@ -1895,6 +1895,9 @@ impl AppState {
         if self.mode_state.mode == Mode::ConfirmClose && mode != Mode::ConfirmClose {
             self.pending_agent_close_focus = None;
         }
+        if mode != Mode::Terminal {
+            self.pane_hover = None;
+        }
         self.mode_state.mode = mode;
     }
 

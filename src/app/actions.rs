@@ -2690,6 +2690,7 @@ impl AppState {
         self.selection = Some(selection);
         self.selection_autoscroll = None;
         if let Some(text) = text {
+            self.request_clipboard_feedback = None;
             self.request_clipboard_write = Some(text.into_bytes());
             info!("copied double-clicked token to clipboard");
         }
@@ -2761,6 +2762,7 @@ impl AppState {
             .and_then(|rt| rt.extract_selection(&sel));
         if let Some(text) = text {
             if !text.is_empty() {
+                self.request_clipboard_feedback = None;
                 self.request_clipboard_write = Some(text.into_bytes());
                 info!("copied selection to clipboard");
             }
