@@ -574,7 +574,6 @@ impl App {
             request_reload_config: false,
             request_client_config_reload: false,
             request_clipboard_write: None,
-            request_clipboard_feedback: None,
             creating_new_tab: false,
             requested_new_tab_name: None,
             pending_workspace_create_cwd: None,
@@ -2485,6 +2484,7 @@ mod tests {
 
         app.handle_internal_event(AppEvent::ClipboardWrite {
             content: b"copied".to_vec(),
+            feedback: None,
         });
 
         assert!(app.state.toast.is_none());
@@ -2500,6 +2500,7 @@ mod tests {
 
         app.handle_internal_event(AppEvent::ClipboardWrite {
             content: b"copied".to_vec(),
+            feedback: None,
         });
 
         assert!(app.state.copy_feedback.is_none());
@@ -2520,6 +2521,7 @@ mod tests {
 
         app.handle_internal_event(AppEvent::ClipboardWrite {
             content: b"copied".to_vec(),
+            feedback: None,
         });
 
         assert_eq!(app.state.toast, original_toast);

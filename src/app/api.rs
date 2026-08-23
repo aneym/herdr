@@ -122,17 +122,14 @@ impl App {
             return Vec::new();
         }
 
-        if let AppEvent::ClipboardWrite { content } = ev {
+        if let AppEvent::ClipboardWrite { content, feedback } = ev {
             #[cfg(not(test))]
             crate::selection::write_osc52_bytes(&content);
             #[cfg(test)]
             let _ = content;
-            let message = self
-                .state
-                .request_clipboard_feedback
-                .take()
-                .unwrap_or_else(|| "copied to clipboard".to_string());
-            self.show_clipboard_feedback(message);
+            self.show_clipboard_feedback(
+                feedback.unwrap_or_else(|| "copied to clipboard".to_string()),
+            );
             return Vec::new();
         }
 

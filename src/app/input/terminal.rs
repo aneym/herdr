@@ -497,7 +497,10 @@ mod tests {
 
     fn clipboard_write_content(app: &mut App) -> Vec<u8> {
         match app.event_rx.try_recv().expect("clipboard write event") {
-            AppEvent::ClipboardWrite { content } => content,
+            AppEvent::ClipboardWrite {
+                content,
+                feedback: None,
+            } => content,
             event => panic!("unexpected event: {event:?}"),
         }
     }
