@@ -27,6 +27,24 @@ impl App {
         true
     }
 
+    /// Copy the text captured from the last left-drag that herdr forwarded to a
+    /// mouse-reporting pane app. These panes own the mouse, so herdr never builds
+    /// a visible selection of its own for them and
+    /// [`Self::try_copy_retained_selection`] cannot fire.
+    pub(super) fn copy_pane_app_drag_selection(&mut self, pane_id: crate::layout::PaneId) {
+        let text = self
+            .state
+            .pane_app_drag_copy
+            .take_if(|(copy_pane_id, _)| *copy_pane_id == pane_id)
+            .map(|(_, text)| text);
+        let Some(text) = text else {
+            self.show_clipboard_feedback("nothing selected to copy".to_string());
+            return;
+        };
+        self.state.request_clipboard_write = Some((text.into_bytes(), None));
+        self.dispatch_pending_clipboard_write();
+    }
+
     pub(super) fn try_copy_retained_selection(
         &mut self,
         source_id: InputSourceId,

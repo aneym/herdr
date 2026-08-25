@@ -2032,27 +2032,77 @@ impl AppState {
         }
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
-                self.pane_app_drag_gesture = Some((info.id, false));
-                self.pane_app_drag_selection = None;
+                self.begin_pane_app_drag_shadow(terminal_runtimes, info, mouse);
             }
             MouseEventKind::Drag(MouseButton::Left) => {
-                if let Some((pane_id, is_drag)) = self.pane_app_drag_gesture.as_mut() {
-                    if *pane_id == info.id {
-                        *is_drag = true;
-                    }
-                }
+                self.extend_pane_app_drag_shadow(terminal_runtimes, info, mouse);
             }
             MouseEventKind::Up(MouseButton::Left) => {
-                let was_drag = self
-                    .pane_app_drag_gesture
-                    .take()
-                    .is_some_and(|(pane_id, is_drag)| pane_id == info.id && is_drag);
-                self.pane_app_drag_selection =
-                    was_drag.then(|| (info.id, std::time::Instant::now()));
+                self.capture_pane_app_drag_shadow(terminal_runtimes, ws_idx, info);
             }
             _ => {}
         }
         true
+    }
+
+    /// Start tracking a shadow selection for a left-drag that is being forwarded
+    /// to a mouse-reporting pane app. Herdr clears its own visible selection for
+    /// these panes, so this is the only record of what the drag covered.
+    fn begin_pane_app_drag_shadow(
+        &mut self,
+        terminal_runtimes: &TerminalRuntimeRegistry,
+        info: &PaneInfo,
+        mouse: MouseEvent,
+    ) {
+        let metrics = self.pane_scroll_metrics(terminal_runtimes, info.id);
+        self.pane_app_drag_shadow = Some(crate::selection::Selection::anchor(
+            info.id,
+            mouse.row.saturating_sub(info.inner_rect.y),
+            mouse.column.saturating_sub(info.inner_rect.x),
+            metrics,
+        ));
+        self.pane_app_drag_copy = None;
+    }
+
+    pub(super) fn extend_pane_app_drag_shadow(
+        &mut self,
+        terminal_runtimes: &TerminalRuntimeRegistry,
+        info: &PaneInfo,
+        mouse: MouseEvent,
+    ) {
+        if !self
+            .pane_app_drag_shadow
+            .as_ref()
+            .is_some_and(|selection| selection.pane_id == info.id)
+        {
+            return;
+        }
+        let metrics = self.pane_scroll_metrics(terminal_runtimes, info.id);
+        if let Some(selection) = self.pane_app_drag_shadow.as_mut() {
+            selection.drag(mouse.column, mouse.row, info.inner_rect, metrics);
+        }
+    }
+
+    /// Read the dragged text out of the grid at button release. Capturing here
+    /// rather than at copy time means the text stays correct no matter how much
+    /// the pane app redraws afterwards.
+    fn capture_pane_app_drag_shadow(
+        &mut self,
+        terminal_runtimes: &TerminalRuntimeRegistry,
+        ws_idx: usize,
+        info: &PaneInfo,
+    ) {
+        let Some(mut selection) = self.pane_app_drag_shadow.take() else {
+            return;
+        };
+        if selection.pane_id != info.id || !selection.finish() {
+            return;
+        }
+        self.pane_app_drag_copy = self
+            .runtime_for_pane_in_workspace(terminal_runtimes, ws_idx, info.id)
+            .and_then(|rt| rt.extract_selection(&selection))
+            .filter(|text| !text.is_empty())
+            .map(|text| (info.id, text));
     }
 
     pub(super) fn forward_pane_mouse_motion(
@@ -2077,11 +2127,7 @@ impl AppState {
         if let Err(err) = rt.try_send_bytes(Bytes::from(bytes)) {
             warn!(pane = info.id.raw(), err = %err, kind = ?mouse.kind, "failed to forward mouse motion event");
         }
-        if let Some((pane_id, is_drag)) = self.pane_app_drag_gesture.as_mut() {
-            if *pane_id == info.id {
-                *is_drag = true;
-            }
-        }
+        self.extend_pane_app_drag_shadow(terminal_runtimes, info, mouse);
         true
     }
 

@@ -23,17 +23,8 @@ enum PreparedPopupInput {
     },
 }
 
-const PANE_APP_DRAG_SELECTION_TTL: std::time::Duration = std::time::Duration::from_secs(10);
-
 fn is_modifier_only_key(code: &KeyCode) -> bool {
     matches!(code, KeyCode::Modifier(_))
-}
-
-fn pane_app_drag_selection_is_fresh(
-    completed_at: std::time::Instant,
-    now: std::time::Instant,
-) -> bool {
-    now.saturating_duration_since(completed_at) <= PANE_APP_DRAG_SELECTION_TTL
 }
 
 impl App {
@@ -148,35 +139,16 @@ impl App {
         let ws = self.state.workspaces.get(ws_idx)?;
         let pane_id = ws.focused_pane_id()?;
         let terminal_id = ws.terminal_id(pane_id)?.clone();
-        let is_super_c = matches!(key.code, KeyCode::Char('c' | 'C'))
-            && key.modifiers == crossterm::event::KeyModifiers::SUPER;
-        let key = if is_super_c {
-            let (selection_pane_id, completed_at) = self.state.pane_app_drag_selection?;
-            if selection_pane_id != pane_id {
-                return None;
-            }
-            if !pane_app_drag_selection_is_fresh(completed_at, std::time::Instant::now()) {
-                self.state.pane_app_drag_selection = None;
-                return None;
-            }
-            let terminal = self.state.terminals.get(&terminal_id)?;
-            if !matches!(
-                terminal.effective_known_agent(),
-                Some(crate::detect::Agent::Claude | crate::detect::Agent::Hermes)
-            ) || terminal.state == crate::detect::AgentState::Working
-            {
-                return None;
-            }
-            // These agent TUIs consume plain ctrl+c as copy while their selection remains active.
-            self.state.pane_app_drag_selection = None;
-            let mut key = key;
-            key.code = KeyCode::Char('c');
-            key.modifiers = crossterm::event::KeyModifiers::CONTROL;
-            key
-        } else {
-            self.state.pane_app_drag_selection = None;
-            key
-        };
+        // Cmd+C over a mouse-reporting pane app copies the text herdr captured when
+        // the forwarded drag was released. Herdr writes the clipboard itself and
+        // never rewrites the chord to ctrl+c, so a copy can no longer interrupt the
+        // pane's process. Plain ctrl+c still reaches the pane untouched.
+        if matches!(key.code, KeyCode::Char('c' | 'C'))
+            && key.modifiers == crossterm::event::KeyModifiers::SUPER
+        {
+            self.copy_pane_app_drag_selection(pane_id);
+            return None;
+        }
         let rt =
             self.state
                 .runtime_for_pane_in_workspace(&self.terminal_runtimes, ws_idx, pane_id)?;
@@ -518,6 +490,18 @@ mod tests {
         crate::layout::PaneInfo,
         tokio::sync::mpsc::Receiver<Bytes>,
     ) {
+        app_with_mouse_reporting_runtime_text(b"")
+    }
+
+    /// Mouse-reporting pane seeded with `text` on the first screen row, so a
+    /// forwarded drag has something for the shadow selection to extract.
+    fn app_with_mouse_reporting_runtime_text(
+        text: &[u8],
+    ) -> (
+        App,
+        crate::layout::PaneInfo,
+        tokio::sync::mpsc::Receiver<Bytes>,
+    ) {
         let mut app = app_for_mouse_test();
         let mut ws = Workspace::test_new("test");
         let pane_id = ws.tabs[0].root_pane;
@@ -529,7 +513,7 @@ mod tests {
                 info.inner_rect.width,
                 info.inner_rect.height,
                 0,
-                b"\x1b[?1002h\x1b[?1006h",
+                &[b"\x1b[?1002h\x1b[?1006h".as_slice(), text].concat(),
                 8,
             );
         ws.insert_test_runtime(pane_id, runtime);
@@ -1401,141 +1385,56 @@ mod tests {
         assert!(app.state.selection.is_none());
     }
 
-    #[tokio::test]
-    async fn pane_app_drag_translates_one_super_c_to_control_c() {
-        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime();
-        let col = info.inner_rect.x + 2;
-        let row = info.inner_rect.y + 3;
+    /// Drag-select over a mouse-reporting pane, then Cmd+C.
+    fn drag_select_forwarded(
+        app: &mut App,
+        info: &crate::layout::PaneInfo,
+        cols: std::ops::Range<u16>,
+    ) {
+        let row = info.inner_rect.y;
+        let start = info.inner_rect.x + cols.start;
+        let end = info.inner_rect.x + cols.end;
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), start, row));
+        app.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), end, row));
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), end, row));
+    }
 
-        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
-        app.handle_mouse(mouse(
-            MouseEventKind::Drag(MouseButton::Left),
-            col + 1,
-            row + 1,
-        ));
-        app.handle_mouse(mouse(
-            MouseEventKind::Up(MouseButton::Left),
-            col + 1,
-            row + 1,
-        ));
+    fn super_c(app: &mut App) {
+        app.handle_terminal_key_headless(TerminalKey::new(KeyCode::Char('c'), KeyModifiers::SUPER));
+    }
+
+    fn drained_clipboard_text(app: &mut App) -> Option<String> {
+        match app.event_rx.try_recv().ok()? {
+            crate::events::AppEvent::ClipboardWrite { content, .. } => {
+                Some(String::from_utf8_lossy(&content).into_owned())
+            }
+            event => panic!("unexpected event: {event:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn pane_app_drag_super_c_copies_captured_text() {
+        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime_text(b"alpha beta");
+        drag_select_forwarded(&mut app, &info, 0..4);
         for _ in 0..3 {
             input_rx.try_recv().expect("forwarded mouse event");
         }
 
-        app.handle_terminal_key_headless(TerminalKey::new(KeyCode::Char('c'), KeyModifiers::SUPER));
-        assert_eq!(
-            input_rx.try_recv().expect("translated copy chord").as_ref(),
-            b"\x03"
-        );
-        assert!(app.state.pane_app_drag_selection.is_none());
+        super_c(&mut app);
 
-        app.handle_terminal_key_headless(TerminalKey::new(KeyCode::Char('c'), KeyModifiers::SUPER));
+        assert_eq!(drained_clipboard_text(&mut app).as_deref(), Some("alpha"));
+        // The chord is never rewritten to ctrl+c, so the pane app sees nothing.
         assert!(input_rx.try_recv().is_err());
-    }
+        assert!(app.state.pane_app_drag_copy.is_none());
 
-    #[test]
-    fn pane_app_drag_selection_freshness_uses_ten_second_ttl() {
-        let completed_at = std::time::Instant::now();
-
-        assert!(pane_app_drag_selection_is_fresh(
-            completed_at,
-            completed_at + std::time::Duration::from_secs(10)
-        ));
-        assert!(!pane_app_drag_selection_is_fresh(
-            completed_at,
-            completed_at + std::time::Duration::from_secs(10) + std::time::Duration::from_nanos(1)
-        ));
+        super_c(&mut app);
+        assert!(drained_clipboard_text(&mut app).is_none());
     }
 
     #[tokio::test]
-    async fn expired_pane_app_drag_super_c_is_swallowed_and_cleared() {
-        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime();
-        let pane_id = info.id;
-        app.state.pane_app_drag_selection = Some((
-            pane_id,
-            std::time::Instant::now()
-                - PANE_APP_DRAG_SELECTION_TTL
-                - std::time::Duration::from_nanos(1),
-        ));
-
-        app.handle_terminal_key_headless(TerminalKey::new(KeyCode::Char('c'), KeyModifiers::SUPER));
-
-        assert!(input_rx.try_recv().is_err());
-        assert!(app.state.pane_app_drag_selection.is_none());
-    }
-
-    #[tokio::test]
-    async fn working_claude_pane_super_c_is_swallowed() {
-        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime();
-        set_focused_agent_state(
-            &mut app,
-            crate::detect::Agent::Claude,
-            crate::detect::AgentState::Working,
-        );
-        app.state.pane_app_drag_selection = Some((info.id, std::time::Instant::now()));
-
-        app.handle_terminal_key_headless(TerminalKey::new(KeyCode::Char('c'), KeyModifiers::SUPER));
-
-        assert!(input_rx.try_recv().is_err());
-        assert!(app.state.pane_app_drag_selection.is_some());
-    }
-
-    #[tokio::test]
-    async fn non_allowlisted_agent_super_c_is_swallowed() {
-        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime();
-        set_focused_agent_state(
-            &mut app,
-            crate::detect::Agent::Codex,
-            crate::detect::AgentState::Idle,
-        );
-        app.state.pane_app_drag_selection = Some((info.id, std::time::Instant::now()));
-
-        app.handle_terminal_key_headless(TerminalKey::new(KeyCode::Char('c'), KeyModifiers::SUPER));
-
-        assert!(input_rx.try_recv().is_err());
-    }
-
-    #[tokio::test]
-    async fn super_c_without_pane_app_drag_is_swallowed() {
-        let (mut app, _info, mut input_rx) = app_with_mouse_reporting_runtime();
-
-        app.handle_terminal_key_headless(TerminalKey::new(KeyCode::Char('c'), KeyModifiers::SUPER));
-
-        assert!(input_rx.try_recv().is_err());
-    }
-
-    #[tokio::test]
-    async fn pane_app_click_does_not_enable_super_c_bridge() {
-        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime();
-        let col = info.inner_rect.x + 2;
-        let row = info.inner_rect.y + 3;
-
-        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
-        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), col, row));
-        input_rx.try_recv().expect("forwarded mouse down");
-        input_rx.try_recv().expect("forwarded mouse up");
-        app.handle_terminal_key_headless(TerminalKey::new(KeyCode::Char('c'), KeyModifiers::SUPER));
-
-        assert!(input_rx.try_recv().is_err());
-    }
-
-    #[tokio::test]
-    async fn forwarded_key_clears_pane_app_drag_selection() {
-        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime();
-        let col = info.inner_rect.x + 2;
-        let row = info.inner_rect.y + 3;
-
-        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
-        app.handle_mouse(mouse(
-            MouseEventKind::Drag(MouseButton::Left),
-            col + 1,
-            row + 1,
-        ));
-        app.handle_mouse(mouse(
-            MouseEventKind::Up(MouseButton::Left),
-            col + 1,
-            row + 1,
-        ));
+    async fn pane_app_drag_capture_survives_intervening_keys() {
+        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime_text(b"alpha beta");
+        drag_select_forwarded(&mut app, &info, 0..4);
         for _ in 0..3 {
             input_rx.try_recv().expect("forwarded mouse event");
         }
@@ -1545,8 +1444,101 @@ mod tests {
             KeyModifiers::empty(),
         ));
         assert_eq!(input_rx.try_recv().expect("unrelated key").as_ref(), b"x");
-        app.handle_terminal_key_headless(TerminalKey::new(KeyCode::Char('c'), KeyModifiers::SUPER));
+
+        super_c(&mut app);
+        assert_eq!(drained_clipboard_text(&mut app).as_deref(), Some("alpha"));
+    }
+
+    #[tokio::test]
+    async fn pane_app_drag_capture_copies_while_agent_is_working() {
+        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime_text(b"alpha beta");
+        set_focused_agent_state(
+            &mut app,
+            crate::detect::Agent::Claude,
+            crate::detect::AgentState::Working,
+        );
+        drag_select_forwarded(&mut app, &info, 0..4);
+        for _ in 0..3 {
+            input_rx.try_recv().expect("forwarded mouse event");
+        }
+
+        super_c(&mut app);
+
+        assert_eq!(drained_clipboard_text(&mut app).as_deref(), Some("alpha"));
+        // Critically: no ctrl+c reaches a mid-turn agent.
         assert!(input_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn pane_app_drag_capture_copies_for_any_agent() {
+        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime_text(b"alpha beta");
+        set_focused_agent_state(
+            &mut app,
+            crate::detect::Agent::Codex,
+            crate::detect::AgentState::Idle,
+        );
+        drag_select_forwarded(&mut app, &info, 0..4);
+        for _ in 0..3 {
+            input_rx.try_recv().expect("forwarded mouse event");
+        }
+
+        super_c(&mut app);
+
+        assert_eq!(drained_clipboard_text(&mut app).as_deref(), Some("alpha"));
+        assert!(input_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn super_c_without_pane_app_drag_reports_nothing_to_copy() {
+        let (mut app, _info, mut input_rx) = app_with_mouse_reporting_runtime();
+
+        super_c(&mut app);
+
+        assert!(input_rx.try_recv().is_err());
+        assert!(drained_clipboard_text(&mut app).is_none());
+        assert_eq!(
+            app.state
+                .copy_feedback
+                .as_ref()
+                .map(|feedback| feedback.message.as_str()),
+            Some("nothing selected to copy")
+        );
+    }
+
+    #[tokio::test]
+    async fn pane_app_click_does_not_capture_a_selection() {
+        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime_text(b"alpha beta");
+        let col = info.inner_rect.x + 2;
+        let row = info.inner_rect.y;
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), col, row));
+        input_rx.try_recv().expect("forwarded mouse down");
+        input_rx.try_recv().expect("forwarded mouse up");
+
+        super_c(&mut app);
+
+        assert!(input_rx.try_recv().is_err());
+        assert!(drained_clipboard_text(&mut app).is_none());
+    }
+
+    #[tokio::test]
+    async fn new_pane_app_drag_discards_the_previous_capture() {
+        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime_text(b"alpha beta");
+        drag_select_forwarded(&mut app, &info, 0..4);
+        assert!(app.state.pane_app_drag_copy.is_some());
+
+        let row = info.inner_rect.y;
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            info.inner_rect.x,
+            row,
+        ));
+        assert!(app.state.pane_app_drag_copy.is_none());
+        while input_rx.try_recv().is_ok() {}
+
+        super_c(&mut app);
+        assert!(drained_clipboard_text(&mut app).is_none());
     }
 
     #[tokio::test]

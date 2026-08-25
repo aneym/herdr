@@ -1758,8 +1758,13 @@ pub struct AppState {
     /// Hovered pane ID and whether the copy button itself is hovered.
     pub(crate) pane_hover: Option<(PaneId, bool)>,
     pub(crate) pane_copy_presses: std::collections::HashSet<crate::app::InputSourceId>,
-    pub(crate) pane_app_drag_gesture: Option<(PaneId, bool)>,
-    pub(crate) pane_app_drag_selection: Option<(PaneId, std::time::Instant)>,
+    /// In-flight shadow selection tracked while a left-drag is forwarded to a
+    /// mouse-reporting pane app. Never rendered; the pane app draws its own
+    /// highlight. Used only to capture the dragged text at button release.
+    pub(crate) pane_app_drag_shadow: Option<crate::selection::Selection>,
+    /// Text captured from the last completed forwarded drag, kept until the
+    /// next drag starts or a copy shortcut consumes it.
+    pub(crate) pane_app_drag_copy: Option<(PaneId, String)>,
     pub selection_autoscroll: Option<SelectionAutoscroll>,
     pub context_menu: Option<ContextMenuState>,
     pub profile_menu: Option<ProfileMenuState>,
@@ -2308,8 +2313,8 @@ impl AppState {
             selection: None,
             pane_hover: None,
             pane_copy_presses: std::collections::HashSet::new(),
-            pane_app_drag_gesture: None,
-            pane_app_drag_selection: None,
+            pane_app_drag_shadow: None,
+            pane_app_drag_copy: None,
             selection_autoscroll: None,
             context_menu: None,
             profile_menu: None,
