@@ -654,6 +654,15 @@ impl Palette {
         if let Some(c) = &custom.panel_bg {
             self.panel_bg = parse_color(c);
         }
+        if let Some(c) = &custom.sidebar_bg {
+            self.sidebar_bg = parse_color(c);
+        }
+        if let Some(c) = &custom.active_row_bg {
+            self.active_row_bg = parse_color(c);
+        }
+        if let Some(c) = &custom.selection_bg {
+            self.selection_bg = parse_color(c);
+        }
         if let Some(c) = &custom.surface0 {
             self.surface0 = parse_color(c);
         }
@@ -1690,6 +1699,8 @@ pub struct AppState {
     pub(crate) deferred_attention_read: Option<DeferredAttentionRead>,
     pub selected: usize,
     mode_state: AppModeState,
+    /// Stable workspace identity captured when the close confirmation opens.
+    pub(crate) confirm_close_workspace_id: Option<String>,
     pub should_quit: bool,
     /// In monolithic --no-session mode, detach exits the app because there is no server to detach from.
     pub detach_exits: bool,
@@ -2233,6 +2244,7 @@ impl AppState {
             deferred_attention_read: None,
             selected: 0,
             mode_state: AppModeState::new(mode),
+            confirm_close_workspace_id: None,
             should_quit: false,
             detach_exits: false,
             detach_requested: false,

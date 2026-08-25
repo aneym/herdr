@@ -84,6 +84,7 @@ fn apply_pane_terminal_env(cmd: &mut CommandBuilder) {
     // terminal identity rather than capability queries.
     cmd.env("TERM_PROGRAM", PANE_TERM_PROGRAM);
     cmd.env("TERM_PROGRAM_VERSION", PANE_TERM_PROGRAM_VERSION);
+    cmd.env_remove("WT_SESSION");
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -3111,6 +3112,16 @@ mod tests {
         apply_pane_launch_env(&mut cmd, &PaneLaunchEnv::default());
 
         assert!(cmd.get_env("CODEX_THREAD_ID").is_none());
+    }
+
+    #[test]
+    fn pane_terminal_identity_removes_outer_windows_terminal_session() {
+        let mut cmd = CommandBuilder::new("shell");
+        cmd.env("WT_SESSION", "outer-session");
+
+        apply_pane_terminal_env(&mut cmd);
+
+        assert!(cmd.get_env("WT_SESSION").is_none());
     }
 
     #[tokio::test]

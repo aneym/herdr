@@ -131,6 +131,9 @@ pub struct CustomThemeColors {
 pub struct ModeThemeColors {
     pub accent: Option<String>,
     pub panel_bg: Option<String>,
+    pub sidebar_bg: Option<String>,
+    pub active_row_bg: Option<String>,
+    pub selection_bg: Option<String>,
     pub surface0: Option<String>,
     pub surface1: Option<String>,
     pub surface_dim: Option<String>,
@@ -318,9 +321,12 @@ accent = "#010203"
 [theme.custom.light]
 accent = "#040506"
 text = "#070809"
+selection_bg = "#101112"
 
 [theme.custom.dark]
 panel_bg = "#0a0b0c"
+sidebar_bg = "#0d0e0f"
+active_row_bg = "#131415"
 "##;
         let config: Config = toml::from_str(toml).unwrap();
         let custom = config.theme.custom.as_ref().unwrap();
@@ -328,8 +334,11 @@ panel_bg = "#0a0b0c"
         let light = custom.light.as_ref().unwrap();
         assert_eq!(light.accent.as_deref(), Some("#040506"));
         assert_eq!(light.text.as_deref(), Some("#070809"));
+        assert_eq!(light.selection_bg.as_deref(), Some("#101112"));
         let dark = custom.dark.as_ref().unwrap();
         assert_eq!(dark.panel_bg.as_deref(), Some("#0a0b0c"));
+        assert_eq!(dark.sidebar_bg.as_deref(), Some("#0d0e0f"));
+        assert_eq!(dark.active_row_bg.as_deref(), Some("#131415"));
     }
 
     #[test]

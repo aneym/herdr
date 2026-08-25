@@ -755,6 +755,7 @@ impl App {
         state.host_mouse_pixels = None;
         state.session_dirty = false;
         state.terminal_runtime_shutdowns = Vec::new();
+        state.confirm_close_workspace_id = None;
 
         state.terminals = restored_terminals;
 
@@ -2925,6 +2926,17 @@ mod tests {
     fn theme_auto_switch_is_opt_in_and_preserves_manual_default() {
         let mut config = Config::default();
         config.theme.name = Some("tokyo-night".to_string());
+        config.theme.custom = Some(crate::config::CustomThemeColors {
+            light: Some(crate::config::ModeThemeColors {
+                accent: Some("#010203".to_string()),
+                ..Default::default()
+            }),
+            dark: Some(crate::config::ModeThemeColors {
+                accent: Some("#040506".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let app = App::new(&config, true, None, api_rx, crate::api::EventHub::default());
