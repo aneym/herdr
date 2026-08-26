@@ -2841,14 +2841,10 @@ impl AppState {
             return false;
         }
 
-        // Leave mouse input to terminal apps that requested it.
         let Some(rt) = self.runtime_for_pane_in_workspace(terminal_runtimes, ws_idx, pane_id)
         else {
             return false;
         };
-        if rt.mouse_reporting_enabled() {
-            return false;
-        }
 
         // Read the visible row and identify the clicked token bounds.
         let metrics = self.pane_scroll_metrics(terminal_runtimes, pane_id);
@@ -2868,6 +2864,17 @@ impl AppState {
 
         let mut selection = Selection::range(pane_id, viewport_row, start_col, end_col, metrics);
         if !selection.finish() {
+            return false;
+        }
+
+        // Mouse-reporting apps own the click: forward it so they can draw their
+        // own highlight, but stash the word herdr read from the grid so a copy
+        // shortcut can still copy it (mirrors the drag-shadow capture).
+        if rt.mouse_reporting_enabled() {
+            self.pane_app_pending_word_copy = rt
+                .extract_selection(&selection)
+                .filter(|text| !text.is_empty())
+                .map(|text| (pane_id, text));
             return false;
         }
 

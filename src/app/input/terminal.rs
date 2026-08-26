@@ -1522,6 +1522,51 @@ mod tests {
         assert!(drained_clipboard_text(&mut app).is_none());
     }
 
+    /// Double-click over a mouse-reporting pane, forwarding every event.
+    fn double_click_forwarded(app: &mut App, info: &crate::layout::PaneInfo, col: u16) {
+        let row = info.inner_rect.y;
+        let col = info.inner_rect.x + col;
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), col, row));
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), col, row));
+    }
+
+    #[tokio::test]
+    async fn pane_app_double_click_super_c_copies_word() {
+        let (mut app, info, mut input_rx) =
+            app_with_mouse_reporting_runtime_text(b"alpha beta-gamma");
+        double_click_forwarded(&mut app, &info, 8);
+        while input_rx.try_recv().is_ok() {}
+
+        super_c(&mut app);
+
+        assert_eq!(
+            drained_clipboard_text(&mut app).as_deref(),
+            Some("beta-gamma")
+        );
+        // The chord never reaches the pane app.
+        assert!(input_rx.try_recv().is_err());
+        // Herdr renders no selection of its own; the pane app draws the highlight.
+        assert!(app.state.selection.is_none());
+    }
+
+    #[tokio::test]
+    async fn pane_app_click_after_double_click_discards_word_capture() {
+        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime_text(b"alpha beta");
+        double_click_forwarded(&mut app, &info, 2);
+        assert!(app.state.pane_app_drag_copy.is_some());
+
+        let row = info.inner_rect.y;
+        let col = info.inner_rect.x + 7;
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), col, row));
+        while input_rx.try_recv().is_ok() {}
+
+        super_c(&mut app);
+        assert!(drained_clipboard_text(&mut app).is_none());
+    }
+
     #[tokio::test]
     async fn new_pane_app_drag_discards_the_previous_capture() {
         let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime_text(b"alpha beta");

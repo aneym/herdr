@@ -656,6 +656,12 @@ impl App {
     }
 
     fn handle_pane_double_click(&mut self, mouse: MouseEvent) -> bool {
+        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+            // Any new press invalidates a stashed word capture that never got
+            // installed (e.g. the double-click's press was not forwarded).
+            self.state.pane_app_pending_word_copy = None;
+        }
+
         // A pane press stops being a double-click candidate once it becomes
         // a drag or completes as a real text selection.
         match mouse.kind {

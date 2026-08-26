@@ -2121,7 +2121,12 @@ impl AppState {
             mouse.column.saturating_sub(info.inner_rect.x),
             metrics,
         ));
-        self.pane_app_drag_copy = None;
+        // A double-click detected just before this press stashed the clicked
+        // word; install it as the capture instead of discarding it.
+        self.pane_app_drag_copy = self
+            .pane_app_pending_word_copy
+            .take()
+            .filter(|(pane_id, _)| *pane_id == info.id);
     }
 
     pub(super) fn extend_pane_app_drag_shadow(
