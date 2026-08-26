@@ -131,6 +131,8 @@ pub struct App {
     pub(crate) next_api_worktree_operation_id: u64,
     pub(crate) last_sidebar_divider_click: Option<Instant>,
     pub(crate) last_pane_click: Option<PaneClickState>,
+    /// Consecutive rapid clicks at the same cell: 2 = word, 3 = line.
+    pub(crate) pane_click_streak: u8,
     pub(crate) pending_url_click_sources: HashSet<InputSourceId>,
     pub(crate) next_resize_poll: Instant,
     pub(crate) next_animation_tick: Option<Instant>,
@@ -851,6 +853,7 @@ impl App {
             next_api_worktree_operation_id: 1,
             last_sidebar_divider_click: None,
             last_pane_click: None,
+            pane_click_streak: 0,
             pending_url_click_sources: HashSet::new(),
             next_resize_poll: Instant::now() + RESIZE_POLL_INTERVAL,
             next_animation_tick: None,

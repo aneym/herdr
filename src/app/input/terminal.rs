@@ -1567,6 +1567,68 @@ mod tests {
         assert!(drained_clipboard_text(&mut app).is_none());
     }
 
+    /// Triple-click over a mouse-reporting pane, forwarding every event.
+    fn triple_click_forwarded(app: &mut App, info: &crate::layout::PaneInfo, col: u16) {
+        double_click_forwarded(app, info, col);
+        let row = info.inner_rect.y;
+        let col = info.inner_rect.x + col;
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), col, row));
+    }
+
+    #[tokio::test]
+    async fn pane_app_triple_click_super_c_copies_line() {
+        let (mut app, info, mut input_rx) =
+            app_with_mouse_reporting_runtime_text(b"alpha beta-gamma");
+        triple_click_forwarded(&mut app, &info, 2);
+        while input_rx.try_recv().is_ok() {}
+
+        super_c(&mut app);
+
+        assert_eq!(
+            drained_clipboard_text(&mut app).as_deref(),
+            Some("alpha beta-gamma")
+        );
+        // The chord never reaches the pane app.
+        assert!(input_rx.try_recv().is_err());
+        // Herdr renders no selection of its own; the pane app draws the highlight.
+        assert!(app.state.selection.is_none());
+    }
+
+    #[tokio::test]
+    async fn triple_click_selects_and_copies_line() {
+        let (mut app, info) = app_with_screen_bytes(b"alpha beta gamma");
+        let col = info.inner_rect.x + 2;
+        let row = info.inner_rect.y;
+
+        double_click(&mut app, col, row);
+        assert_eq!(clipboard_write_content(&mut app), b"alpha");
+
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), col, row));
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+
+        assert_eq!(clipboard_write_content(&mut app), b"alpha beta gamma");
+        assert_visible_selection(&app);
+    }
+
+    #[tokio::test]
+    async fn fourth_rapid_click_starts_a_new_streak() {
+        let (mut app, info) = app_with_screen_bytes(b"alpha beta");
+        let col = info.inner_rect.x + 2;
+        let row = info.inner_rect.y;
+
+        double_click(&mut app, col, row);
+        assert_eq!(clipboard_write_content(&mut app), b"alpha");
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), col, row));
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+        assert_eq!(clipboard_write_content(&mut app), b"alpha beta");
+
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), col, row));
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+
+        assert!(app.event_rx.try_recv().is_err());
+    }
+
     #[tokio::test]
     async fn new_pane_app_drag_discards_the_previous_capture() {
         let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime_text(b"alpha beta");

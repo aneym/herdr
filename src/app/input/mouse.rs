@@ -2121,8 +2121,8 @@ impl AppState {
             mouse.column.saturating_sub(info.inner_rect.x),
             metrics,
         ));
-        // A double-click detected just before this press stashed the clicked
-        // word; install it as the capture instead of discarding it.
+        // A double- or triple-click detected just before this press stashed the
+        // clicked word/line; install it as the capture instead of discarding it.
         self.pane_app_drag_copy = self
             .pane_app_pending_word_copy
             .take()

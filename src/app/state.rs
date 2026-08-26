@@ -1794,8 +1794,9 @@ pub struct AppState {
     /// Text captured from the last completed forwarded drag, kept until the
     /// next drag starts or a copy shortcut consumes it.
     pub(crate) pane_app_drag_copy: Option<(PaneId, String)>,
-    /// Word stashed by a double-click over a mouse-reporting pane app, waiting
-    /// for the forwarded press to install it as `pane_app_drag_copy`.
+    /// Word or line stashed by a double- or triple-click over a mouse-reporting
+    /// pane app, waiting for the forwarded press to install it as
+    /// `pane_app_drag_copy`.
     pub(crate) pane_app_pending_word_copy: Option<(PaneId, String)>,
     pub selection_autoscroll: Option<SelectionAutoscroll>,
     pub context_menu: Option<ContextMenuState>,

@@ -2900,6 +2900,77 @@ impl AppState {
         true
     }
 
+    pub(crate) fn select_line_at_pane_cell(
+        &mut self,
+        terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
+        pane_id: crate::layout::PaneId,
+        viewport_row: u16,
+    ) -> bool {
+        // Resolve the active pane row the triple-click landed on.
+        let Some(ws_idx) = self
+            .active
+            .filter(|idx| self.workspaces.get(*idx).is_some())
+        else {
+            return false;
+        };
+
+        let Some(info) = self.pane_info_by_id(pane_id) else {
+            return false;
+        };
+        if viewport_row >= info.inner_rect.height {
+            return false;
+        }
+
+        let Some(rt) = self.runtime_for_pane_in_workspace(terminal_runtimes, ws_idx, pane_id)
+        else {
+            return false;
+        };
+
+        let metrics = self.pane_scroll_metrics(terminal_runtimes, pane_id);
+        let mut selection = Selection::range(
+            pane_id,
+            viewport_row,
+            0,
+            info.inner_rect.width.saturating_sub(1),
+            metrics,
+        );
+        if !selection.finish() {
+            return false;
+        }
+
+        let extract_line = |rt: &crate::terminal::TerminalRuntime| {
+            rt.extract_selection(&selection)
+                .map(|text| text.trim_end().to_string())
+                .filter(|text| !text.is_empty())
+        };
+
+        // Mouse-reporting apps own the click: forward it so they can draw their
+        // own line highlight, but stash the line herdr read from the grid so a
+        // copy shortcut can still copy it (mirrors the double-click capture).
+        if rt.mouse_reporting_enabled() {
+            self.pane_app_pending_word_copy = extract_line(rt).map(|text| (pane_id, text));
+            return false;
+        }
+
+        let text = if self.copy_on_select {
+            let Some(text) = extract_line(rt) else {
+                self.clear_selection();
+                return false;
+            };
+            Some(text)
+        } else {
+            None
+        };
+
+        self.selection = Some(selection);
+        self.selection_autoscroll = None;
+        if let Some(text) = text {
+            self.request_clipboard_write = Some((text.into_bytes(), None));
+            info!("copied triple-clicked line to clipboard");
+        }
+        true
+    }
+
     pub(crate) fn url_at_pane_cell(
         &self,
         terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,

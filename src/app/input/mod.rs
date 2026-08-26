@@ -662,24 +662,12 @@ impl App {
             self.state.pane_app_pending_word_copy = None;
         }
 
-        // A pane press stops being a double-click candidate once it becomes
-        // a drag or completes as a real text selection.
-        match mouse.kind {
-            MouseEventKind::Drag(MouseButton::Left) => {
-                self.last_pane_click = None;
-                return false;
-            }
-            MouseEventKind::Up(MouseButton::Left)
-                if self
-                    .state
-                    .selection
-                    .as_ref()
-                    .is_some_and(|selection| selection.is_visible()) =>
-            {
-                self.last_pane_click = None;
-                return false;
-            }
-            _ => {}
+        // A pane press stops being a multi-click candidate once it becomes a
+        // drag. A double-click's own finalized word selection must NOT clear
+        // the candidate at button release, or a triple-click could never form.
+        if matches!(mouse.kind, MouseEventKind::Drag(MouseButton::Left)) {
+            self.last_pane_click = None;
+            return false;
         }
 
         // Only terminal-pane left-clicks can start this gesture; other clicks
@@ -688,13 +676,13 @@ impl App {
             return false;
         };
 
-        // Require the second click to land near the first click in the same pane
-        // and within the double-click window so adjacent interactions do not select a word.
-        if !self.take_pane_double_click(click) {
-            return false;
+        // Require each follow-up click to land near the previous one in the same
+        // pane and within the click window so adjacent interactions do not chain.
+        match self.advance_pane_click_streak(click) {
+            2 => self.select_double_clicked_word(click),
+            3 => self.select_triple_clicked_line(click),
+            _ => false,
         }
-
-        self.select_double_clicked_word(click)
     }
 
     fn pane_click_candidate(&mut self, mouse: MouseEvent) -> Option<PaneClickState> {
@@ -725,17 +713,20 @@ impl App {
         })
     }
 
-    fn take_pane_double_click(&mut self, click: PaneClickState) -> bool {
-        if !self
+    fn advance_pane_click_streak(&mut self, click: PaneClickState) -> u8 {
+        let chained = self
             .last_pane_click
-            .is_some_and(|last| last.is_double_click_for(click))
-        {
-            self.last_pane_click = Some(click);
-            return false;
-        }
-
-        self.last_pane_click = None;
-        true
+            .is_some_and(|last| last.is_double_click_for(click));
+        let streak = if chained {
+            self.pane_click_streak.saturating_add(1)
+        } else {
+            1
+        };
+        // A fourth rapid click starts over instead of repeating the line.
+        let streak = if streak > 3 { 1 } else { streak };
+        self.last_pane_click = Some(click);
+        self.pane_click_streak = streak;
+        streak
     }
 
     fn select_double_clicked_word(&mut self, click: PaneClickState) -> bool {
@@ -744,6 +735,21 @@ impl App {
             click.pane_id,
             click.viewport_row,
             click.col,
+        );
+        if selected {
+            self.selection_highlight_clear_deadline = self
+                .state
+                .copy_on_select
+                .then(|| std::time::Instant::now() + super::PANE_COPY_HIGHLIGHT_DURATION);
+        }
+        selected
+    }
+
+    fn select_triple_clicked_line(&mut self, click: PaneClickState) -> bool {
+        let selected = self.state.select_line_at_pane_cell(
+            &self.terminal_runtimes,
+            click.pane_id,
+            click.viewport_row,
         );
         if selected {
             self.selection_highlight_clear_deadline = self
