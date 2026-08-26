@@ -210,6 +210,11 @@ mod tests {
             collapsed_space_keys: std::collections::HashSet::new(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
+            tree_show_spaces: true,
+            tree_show_tabs: true,
+            tree_show_agents: true,
+            tree_collapsed_spaces: std::collections::HashSet::new(),
+            tree_collapsed_tabs: std::collections::HashSet::new(),
         }
     }
 

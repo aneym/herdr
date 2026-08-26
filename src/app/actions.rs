@@ -1918,6 +1918,20 @@ impl AppState {
 
     #[cfg(test)]
     fn cycle_agent_entry(&mut self, forward: bool) {
+        /// Cmd+E ordering. Higher wins. Blocked agents are waiting on Alex, so
+        /// they come first. An unread completion is the next thing worth
+        /// reading. A read completion is still visitable. A working agent has
+        /// nothing to read yet, so it ranks last among live states.
+        fn cycle_attention_rank(state: AgentState, seen: bool) -> u8 {
+            match (state, seen) {
+                (AgentState::Blocked, _) => 4,
+                (AgentState::Idle, false) => 3,
+                (AgentState::Idle, true) => 2,
+                (AgentState::Working, _) => 1,
+                (AgentState::Unknown, _) => 0,
+            }
+        }
+
         let entries = crate::ui::agent_panel_entries(self);
         if entries.is_empty() {
             return;
@@ -1929,30 +1943,193 @@ impl AppState {
             .and_then(crate::workspace::Workspace::focused_pane_id);
         let current_idx =
             focused.and_then(|pane_id| entries.iter().position(|entry| entry.pane_id == pane_id));
-        let target_idx = match (current_idx, forward) {
-            (Some(idx), true) => (idx + 1) % entries.len(),
-            (Some(0), false) => entries.len() - 1,
-            (Some(idx), false) => idx - 1,
-            (None, true) => 0,
-            (None, false) => entries.len() - 1,
+        // Priority and triage already sort the panel by attention, so their
+        // positional order IS the attention order. Spaces and tree hold a
+        // deliberately stable order, so the key must rank for itself there.
+        let panel_is_attention_sorted = matches!(
+            self.agent_panel_sort,
+            crate::app::state::AgentPanelSort::Priority | crate::app::state::AgentPanelSort::Triage
+        );
+
+        // Recomputed on every press: the ranking is read fresh from current
+        // agent state, so a completion landing between presses is picked up.
+        let ranked = |idx: usize| {
+            if panel_is_attention_sorted {
+                0
+            } else {
+                cycle_attention_rank(entries[idx].state, entries[idx].seen)
+            }
         };
+
+        let step = |idx: usize| {
+            if forward {
+                (idx + 1) % entries.len()
+            } else {
+                (idx + entries.len() - 1) % entries.len()
+            }
+        };
+
+        // With tab headers visible the tab is the unit Alex navigates, so a
+        // press moves to the next TAB rather than the next agent inside the
+        // current one. A tab ranks by its most demanding agent, and focus
+        // lands on that agent.
+        let scope_to_tabs = crate::ui::tree_view_active(self) && self.tree_show_tabs;
+        if scope_to_tabs {
+            let current_tab = current_idx.map(|idx| (entries[idx].ws_idx, entries[idx].tab_idx));
+
+            // Tabs in panel order, each ranked by its strongest agent.
+            let mut tab_order: Vec<(usize, usize)> = Vec::new();
+            for entry in &entries {
+                let key = (entry.ws_idx, entry.tab_idx);
+                if !tab_order.contains(&key) {
+                    tab_order.push(key);
+                }
+            }
+            if tab_order.len() > 1 {
+                let here = current_tab.and_then(|key| tab_order.iter().position(|k| *k == key));
+                let len = tab_order.len();
+                let step = |i: usize| {
+                    if forward {
+                        (i + 1) % len
+                    } else {
+                        (i + len - 1) % len
+                    }
+                };
+                let start = match here {
+                    Some(i) => step(i),
+                    None => {
+                        if forward {
+                            0
+                        } else {
+                            len - 1
+                        }
+                    }
+                };
+                let mut order = Vec::with_capacity(len);
+                let mut i = start;
+                for _ in 0..len {
+                    if Some(i) != here {
+                        order.push(i);
+                    }
+                    i = step(i);
+                }
+                let tab_rank = |i: usize| {
+                    let key = tab_order[i];
+                    entries
+                        .iter()
+                        .filter(|e| (e.ws_idx, e.tab_idx) == key)
+                        .map(|e| cycle_attention_rank(e.state, e.seen))
+                        .max()
+                        .unwrap_or(0)
+                };
+                let best_tab = order.iter().map(|i| tab_rank(*i)).max().unwrap_or(0);
+                if let Some(target_tab) = order.into_iter().find(|i| tab_rank(*i) == best_tab) {
+                    let key = tab_order[target_tab];
+                    // Inside the chosen tab, land on its most demanding agent.
+                    if let Some(idx) = entries
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, e)| (e.ws_idx, e.tab_idx) == key)
+                        .max_by_key(|(_, e)| cycle_attention_rank(e.state, e.seen))
+                        .map(|(idx, _)| idx)
+                    {
+                        self.focus_agent_entry(idx);
+                        return;
+                    }
+                }
+            }
+        }
+
+        // Candidates exclude whatever is focused now. Ranking the current
+        // agent alongside the rest is what made the key look dead: when the
+        // focused agent was the only one at the top rank, the search wrapped
+        // straight back onto it.
+        let start = match current_idx {
+            Some(idx) => step(idx),
+            None => {
+                if forward {
+                    0
+                } else {
+                    entries.len() - 1
+                }
+            }
+        };
+        let mut order = Vec::with_capacity(entries.len());
+        let mut idx = start;
+        for _ in 0..entries.len() {
+            if Some(idx) != current_idx {
+                order.push(idx);
+            }
+            idx = step(idx);
+        }
+        if order.is_empty() {
+            return;
+        }
+
+        // Walk from the neighbour outward and take the first candidate at the
+        // highest rank present. Walking in that order, rather than from index
+        // zero, makes repeated presses visit every peer at a rank before
+        // coming back around.
+        let best = order.iter().map(|i| ranked(*i)).max().unwrap_or(0);
+        let target_idx = order
+            .into_iter()
+            .find(|i| ranked(*i) == best)
+            .unwrap_or(start);
 
         self.focus_agent_entry(target_idx);
     }
 
+    /// `idx` indexes the flat agent list from `crate::ui::agent_panel_entries`.
+    /// In tree mode `crate::ui::agent_panel_list_entries` interleaves space/tab
+    /// header rows, so the flat index is remapped to the target agent's
+    /// identity before locating its row in the list-entry vector.
     pub(crate) fn ensure_agent_panel_entry_visible(&mut self, idx: usize) {
         if self.sidebar_collapsed {
             return;
         }
 
+        let flat_entries = crate::ui::agent_panel_entries(self);
+        let Some(target) = flat_entries.get(idx) else {
+            return;
+        };
+        let ws_idx = target.ws_idx;
+        let tab_idx = target.tab_idx;
+        let pane_id = target.pane_id;
+
+        if crate::ui::tree_view_active(self) {
+            // The target has no row while an enclosing group is collapsed, so
+            // expand its space and tab first. Only a real change dirties the
+            // session; Cmd+E runs often.
+            let mut expanded = false;
+            if let Some(key) = crate::ui::tree_space_key(self, ws_idx) {
+                expanded |= self.tree_collapsed_spaces.remove(&key);
+            }
+            if let Some(key) = crate::ui::tree_tab_key(self, ws_idx, tab_idx) {
+                expanded |= self.tree_collapsed_tabs.remove(&key);
+            }
+            if expanded {
+                self.mark_session_dirty();
+            }
+        }
+
         let entries = crate::ui::agent_panel_list_entries(self);
+        let Some(list_idx) = entries.iter().position(|entry| match entry {
+            crate::ui::AgentPanelListEntry::Agent(detail)
+            | crate::ui::AgentPanelListEntry::Automation(detail) => {
+                detail.ws_idx == ws_idx && detail.pane_id == pane_id
+            }
+            _ => false,
+        }) else {
+            return;
+        };
+
         let (_, detail_area) = crate::ui::ordered_sidebar_sections(self, self.view.sidebar_rect);
         self.agent_panel_scroll = crate::ui::agent_panel_scroll_for_target(
             self,
             &entries,
             detail_area,
             self.agent_panel_scroll,
-            idx,
+            list_idx,
         );
     }
 
@@ -4856,6 +5033,109 @@ mod tests {
 
     fn mark_agent(state: &mut AppState, ws_idx: usize, tab_idx: usize, pane_id: PaneId) {
         set_agent_state(state, ws_idx, tab_idx, pane_id, AgentState::Idle);
+    }
+
+    /// Builds one workspace of `states.len()` agent panes and marks each with
+    /// its (state, seen) pair. Returns the pane ids in panel order.
+    fn tree_cycle_fixture(states: &[(AgentState, bool)]) -> (AppState, Vec<PaneId>) {
+        let mut workspace = Workspace::test_new("space");
+        let mut panes = vec![workspace.tabs[0].root_pane];
+        for _ in 1..states.len() {
+            panes.push(workspace.test_split(Direction::Horizontal));
+        }
+        workspace.tabs[0].layout.focus_pane(panes[0]);
+
+        let mut state = AppState::test_new();
+        state.workspaces = vec![workspace];
+        state.ensure_test_terminals();
+        state.active = Some(0);
+        state.selected = 0;
+        state.replace_mode(Mode::Terminal);
+        state.agent_panel_sort = crate::app::state::AgentPanelSort::Tree;
+        for (pane, (agent_state, seen)) in panes.iter().zip(states) {
+            set_agent_state(&mut state, 0, 0, *pane, *agent_state);
+            if let Some(slot) = state.workspaces[0].tabs[0].panes.get_mut(pane) {
+                slot.seen = *seen;
+            }
+        }
+        (state, panes)
+    }
+
+    /// The focus sequence over repeated presses, as panel indices.
+    fn cycle_sequence(state: &mut AppState, panes: &[PaneId], presses: usize) -> Vec<usize> {
+        (0..presses)
+            .map(|_| {
+                state.next_agent();
+                let focused = state.workspaces[0].focused_pane_id();
+                panes
+                    .iter()
+                    .position(|pane| Some(*pane) == focused)
+                    .expect("focus landed on a known pane")
+            })
+            .collect()
+    }
+
+    #[test]
+    fn cmd_e_prefers_unread_completions_over_positional_order() {
+        // index 0 focused. 1 is working, 2 is an unread completion.
+        // Positional order would pick 1; attention order must pick 2.
+        let (mut state, panes) = tree_cycle_fixture(&[
+            (AgentState::Working, true),
+            (AgentState::Working, true),
+            (AgentState::Idle, false),
+        ]);
+        assert_eq!(cycle_sequence(&mut state, &panes, 1), vec![2]);
+    }
+
+    #[test]
+    fn cmd_e_puts_blocked_ahead_of_unread_completions() {
+        let (mut state, panes) = tree_cycle_fixture(&[
+            (AgentState::Working, true),
+            (AgentState::Idle, false),
+            (AgentState::Blocked, true),
+        ]);
+        assert_eq!(cycle_sequence(&mut state, &panes, 1), vec![2]);
+    }
+
+    #[test]
+    fn cmd_e_visits_every_unread_completion_before_repeating() {
+        // Three unread completions at 1, 2, 3 and a working agent at 4.
+        // Focus starts at 0. Reading an agent clears its unread flag, so the
+        // pool drains and the working agent comes last.
+        let (mut state, panes) = tree_cycle_fixture(&[
+            (AgentState::Working, true),
+            (AgentState::Idle, false),
+            (AgentState::Idle, false),
+            (AgentState::Idle, false),
+            (AgentState::Working, true),
+        ]);
+        assert_eq!(cycle_sequence(&mut state, &panes, 3), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn cmd_e_never_stalls_when_the_focused_agent_is_the_only_top_rank() {
+        // The regression Alex hit: focus sits on the ONLY unread completion.
+        // Ranking the focused agent alongside the rest wrapped straight back
+        // onto it and the key looked dead. It must move on.
+        let (mut state, panes) = tree_cycle_fixture(&[
+            (AgentState::Idle, false),
+            (AgentState::Working, true),
+            (AgentState::Idle, true),
+        ]);
+        let seq = cycle_sequence(&mut state, &panes, 2);
+        assert_ne!(seq[0], 0, "cmd+E stalled on the focused agent");
+        assert_ne!(seq[1], seq[0], "cmd+E stalled after one hop");
+    }
+
+    #[test]
+    fn cmd_e_falls_back_to_positional_order_when_nothing_is_unread() {
+        // All equal rank: behaviour must match the plain positional cycle.
+        let (mut state, panes) = tree_cycle_fixture(&[
+            (AgentState::Working, true),
+            (AgentState::Working, true),
+            (AgentState::Working, true),
+        ]);
+        assert_eq!(cycle_sequence(&mut state, &panes, 4), vec![1, 2, 0, 1]);
     }
 
     fn set_agent_state(

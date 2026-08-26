@@ -263,6 +263,7 @@ fn agent_panel_sort_from_config(
         crate::config::AgentPanelSortConfig::Spaces => state::AgentPanelSort::Spaces,
         crate::config::AgentPanelSortConfig::Priority => state::AgentPanelSort::Priority,
         crate::config::AgentPanelSortConfig::Triage => state::AgentPanelSort::Triage,
+        crate::config::AgentPanelSortConfig::Tree => state::AgentPanelSort::Tree,
     }
 }
 
@@ -428,6 +429,11 @@ impl App {
             collapsed_space_keys,
             automations_expanded,
             collapsed_agent_group_keys,
+            tree_show_spaces,
+            tree_show_tabs,
+            tree_show_agents,
+            tree_collapsed_spaces,
+            tree_collapsed_tabs,
         ) = if no_session {
             (
                 Vec::new(),
@@ -439,6 +445,11 @@ impl App {
                 0.5_f32,
                 std::collections::HashSet::new(),
                 false,
+                std::collections::HashSet::new(),
+                true,
+                true,
+                true,
+                std::collections::HashSet::new(),
                 std::collections::HashSet::new(),
             )
         } else if let Some(snap) = crate::persist::load() {
@@ -479,6 +490,11 @@ impl App {
                     snap.collapsed_space_keys,
                     snap.automations_expanded,
                     snap.collapsed_agent_group_keys,
+                    snap.tree_show_spaces,
+                    snap.tree_show_tabs,
+                    snap.tree_show_agents,
+                    snap.tree_collapsed_spaces,
+                    snap.tree_collapsed_tabs,
                 )
             } else {
                 crate::logging::session_restored(ws.len(), "ok");
@@ -499,6 +515,11 @@ impl App {
                     snap.collapsed_space_keys,
                     snap.automations_expanded,
                     snap.collapsed_agent_group_keys,
+                    snap.tree_show_spaces,
+                    snap.tree_show_tabs,
+                    snap.tree_show_agents,
+                    snap.tree_collapsed_spaces,
+                    snap.tree_collapsed_tabs,
                 )
             }
         } else {
@@ -512,6 +533,11 @@ impl App {
                 0.5_f32,
                 std::collections::HashSet::new(),
                 false,
+                std::collections::HashSet::new(),
+                true,
+                true,
+                true,
+                std::collections::HashSet::new(),
                 std::collections::HashSet::new(),
             )
         };
@@ -611,6 +637,11 @@ impl App {
         state.collapsed_space_keys = collapsed_space_keys;
         state.automations_expanded = automations_expanded;
         state.collapsed_agent_group_keys = collapsed_agent_group_keys;
+        state.tree_show_spaces = tree_show_spaces;
+        state.tree_show_tabs = tree_show_tabs;
+        state.tree_show_agents = tree_show_agents;
+        state.tree_collapsed_spaces = tree_collapsed_spaces;
+        state.tree_collapsed_tabs = tree_collapsed_tabs;
         state.request_complete_onboarding = false;
         state.name_input = String::new();
         state.name_input_replace_on_type = false;
@@ -688,6 +719,7 @@ impl App {
         state.sidebar_agents = config.ui.sidebar.agents.clone();
         state.sidebar_automations = config.ui.sidebar.automations.clone();
         state.sidebar_spaces = config.ui.sidebar.spaces.clone();
+        state.sidebar_debug_bounds = config.ui.sidebar.debug_bounds;
         state.next_agent_state_change_seq = 0;
         state.mouse_capture = config.ui.mouse_capture;
         state.copy_on_select = config.ui.copy_on_select;
@@ -925,6 +957,11 @@ impl App {
         app.state.collapsed_space_keys = snapshot.collapsed_space_keys.clone();
         app.state.automations_expanded = snapshot.automations_expanded;
         app.state.collapsed_agent_group_keys = snapshot.collapsed_agent_group_keys.clone();
+        app.state.tree_show_spaces = snapshot.tree_show_spaces;
+        app.state.tree_show_tabs = snapshot.tree_show_tabs;
+        app.state.tree_show_agents = snapshot.tree_show_agents;
+        app.state.tree_collapsed_spaces = snapshot.tree_collapsed_spaces.clone();
+        app.state.tree_collapsed_tabs = snapshot.tree_collapsed_tabs.clone();
         app.state.replace_mode(if app.state.active.is_some() {
             state::Mode::Terminal
         } else {
@@ -1583,6 +1620,7 @@ impl App {
                 self.state.sidebar_agents = config.ui.sidebar.agents.clone();
                 self.state.sidebar_automations = config.ui.sidebar.automations.clone();
                 self.state.sidebar_spaces = config.ui.sidebar.spaces.clone();
+                self.state.sidebar_debug_bounds = config.ui.sidebar.debug_bounds;
                 self.state.agent_panel_scroll = 0;
                 self.state.accent = crate::config::parse_color(&config.ui.accent);
                 if !self.state.local_sound_playback && self.state.sound != config.ui.sound {
@@ -2193,6 +2231,11 @@ mod tests {
             0.5,
             std::collections::HashSet::new(),
             false,
+            std::collections::HashSet::new(),
+            true,
+            true,
+            true,
+            std::collections::HashSet::new(),
             std::collections::HashSet::new(),
         );
         let mut imports = std::collections::HashMap::new();

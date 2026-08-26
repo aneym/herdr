@@ -535,6 +535,10 @@ pub struct SidebarConfig {
     pub agents: AgentsSidebarConfig,
     pub automations: AutomationsSidebarConfig,
     pub spaces: SpacesSidebarConfig,
+    /// TEMPORARY diagnostic. Tints each sidebar row's whole container block so
+    /// the box boundaries are visible. Remove once the layout is settled.
+    #[serde(default)]
+    pub debug_bounds: bool,
 }
 
 impl Default for SidebarConfig {
@@ -546,6 +550,7 @@ impl Default for SidebarConfig {
             agents: AgentsSidebarConfig::default(),
             automations: AutomationsSidebarConfig::default(),
             spaces: SpacesSidebarConfig::default(),
+            debug_bounds: false,
         }
     }
 }

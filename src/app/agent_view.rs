@@ -62,7 +62,7 @@ pub(crate) fn apply_agent_view(app: &AppState, entries: &mut Vec<AgentPanelEntry
     }
 
     match app.agent_panel_sort {
-        crate::app::state::AgentPanelSort::Spaces => {}
+        crate::app::state::AgentPanelSort::Spaces | crate::app::state::AgentPanelSort::Tree => {}
         crate::app::state::AgentPanelSort::Priority => {
             entries.sort_by_key(|entry| {
                 (

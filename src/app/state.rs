@@ -114,7 +114,7 @@ impl Palette {
             accent: Color::Rgb(137, 180, 250), // blue
             panel_bg: Color::Rgb(24, 24, 37),
             sidebar_bg: Color::Reset,
-            active_row_bg: Color::Rgb(30, 30, 46),
+            active_row_bg: Color::Rgb(38, 39, 56),
             selection_bg: Color::Rgb(49, 50, 68),
             surface0: Color::Rgb(49, 50, 68),
             surface1: Color::Rgb(69, 71, 90),
@@ -189,7 +189,7 @@ impl Palette {
             accent: Color::Rgb(122, 162, 247), // blue
             panel_bg: Color::Rgb(26, 27, 38),
             sidebar_bg: Color::Reset,
-            active_row_bg: Color::Rgb(35, 38, 54),
+            active_row_bg: Color::Rgb(36, 40, 59),
             selection_bg: Color::Rgb(45, 54, 80),
             surface0: Color::Rgb(36, 40, 59),
             surface1: Color::Rgb(65, 72, 104),
@@ -289,7 +289,7 @@ impl Palette {
             accent: Color::Rgb(215, 153, 33), // yellow
             panel_bg: Color::Rgb(40, 40, 40),
             sidebar_bg: Color::Reset,
-            active_row_bg: Color::Rgb(50, 49, 48),
+            active_row_bg: Color::Rgb(60, 56, 54),
             selection_bg: Color::Rgb(75, 63, 39),
             surface0: Color::Rgb(60, 56, 54),
             surface1: Color::Rgb(80, 73, 69),
@@ -1087,16 +1087,8 @@ pub enum AgentPanelSort {
     Spaces,
     Priority,
     Triage,
-}
-
-impl AgentPanelSort {
-    pub(crate) fn next(self) -> Self {
-        match self {
-            Self::Spaces => Self::Priority,
-            Self::Priority => Self::Triage,
-            Self::Triage => Self::Spaces,
-        }
-    }
+    /// Unified space → tab → agent tree replacing the separate spaces section.
+    Tree,
 }
 
 // ---------------------------------------------------------------------------
@@ -1306,6 +1298,13 @@ pub enum ContextMenuKind {
         has_manual_label: bool,
         right_click_passthrough: bool,
     },
+    /// Sidebar view picker: which agent list view, plus the tree layer toggles.
+    SidebarView {
+        sort: AgentPanelSort,
+        show_spaces: bool,
+        show_tabs: bool,
+        show_agents: bool,
+    },
 }
 
 /// Right-click context menu state.
@@ -1442,6 +1441,33 @@ impl ContextMenuState {
                     "Send right-clicks to pane"
                 });
                 items.extend(["Send to profile...", "Share with profiles...", "Close pane"]);
+                items
+            }
+            ContextMenuKind::SidebarView {
+                sort,
+                show_spaces,
+                show_tabs,
+                show_agents,
+            } => {
+                let mark = |active: bool, on: &'static str, off: &'static str| {
+                    if active {
+                        on
+                    } else {
+                        off
+                    }
+                };
+                let mut items = vec![
+                    mark(sort == AgentPanelSort::Tree, "● tree", "  tree"),
+                    mark(sort == AgentPanelSort::Spaces, "● grouped", "  grouped"),
+                    mark(sort == AgentPanelSort::Priority, "● priority", "  priority"),
+                    mark(sort == AgentPanelSort::Triage, "● triage", "  triage"),
+                ];
+                if sort == AgentPanelSort::Tree {
+                    items.push("──────────");
+                    items.push(mark(show_spaces, "✓ spaces", "  spaces"));
+                    items.push(mark(show_tabs, "✓ tabs", "  tabs"));
+                    items.push(mark(show_agents, "✓ agents", "  agents"));
+                }
                 items
             }
         }
@@ -1808,6 +1834,18 @@ pub struct AppState {
     pub sidebar_agents: crate::config::AgentsSidebarConfig,
     pub sidebar_automations: crate::config::AutomationsSidebarConfig,
     pub sidebar_spaces: crate::config::SpacesSidebarConfig,
+    /// TEMPORARY diagnostic: tint each sidebar row's container block.
+    pub sidebar_debug_bounds: bool,
+    /// Tree view: render space header rows.
+    pub tree_show_spaces: bool,
+    /// Tree view: render tab header rows.
+    pub tree_show_tabs: bool,
+    /// Tree view: render agent rows.
+    pub tree_show_agents: bool,
+    /// Tree view: collapsed space groups, keyed by workspace id.
+    pub tree_collapsed_spaces: std::collections::HashSet<String>,
+    /// Tree view: collapsed tab groups, keyed by `<workspace-id>#<tab-number>`.
+    pub tree_collapsed_tabs: std::collections::HashSet<String>,
     pub next_agent_state_change_seq: u64,
     /// Capture mouse input for Herdr's own mouse UI. When false, Herdr only
     /// captures mouse while the focused pane app requests mouse reporting.
@@ -2276,6 +2314,11 @@ impl AppState {
             collapsed_space_keys: std::collections::HashSet::new(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
+            tree_show_spaces: true,
+            tree_show_tabs: true,
+            tree_show_agents: true,
+            tree_collapsed_spaces: std::collections::HashSet::new(),
+            tree_collapsed_tabs: std::collections::HashSet::new(),
             request_complete_onboarding: false,
             name_input: String::new(),
             name_input_replace_on_type: false,
@@ -2357,6 +2400,7 @@ impl AppState {
             sidebar_agents: crate::config::AgentsSidebarConfig::default(),
             sidebar_automations: crate::config::AutomationsSidebarConfig::default(),
             sidebar_spaces: crate::config::SpacesSidebarConfig::default(),
+            sidebar_debug_bounds: false,
             next_agent_state_change_seq: 0,
             mouse_capture: true,
             copy_on_select: true,
@@ -2886,6 +2930,8 @@ impl AppState {
                         ws_idx
                     );
                 }
+                // Purely a view picker; carries no workspace/pane identity.
+                ContextMenuKind::SidebarView { .. } => {}
                 ContextMenuKind::Pane {
                     ws_idx,
                     tab_idx,

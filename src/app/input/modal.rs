@@ -1036,8 +1036,54 @@ pub(super) fn apply_context_menu_action(
                 });
             }
         }
+        (ContextMenuKind::SidebarView { .. }, Some("● tree" | "  tree")) => {
+            set_sidebar_view(state, crate::app::state::AgentPanelSort::Tree);
+        }
+        (ContextMenuKind::SidebarView { .. }, Some("● grouped" | "  grouped")) => {
+            set_sidebar_view(state, crate::app::state::AgentPanelSort::Spaces);
+        }
+        (ContextMenuKind::SidebarView { .. }, Some("● priority" | "  priority")) => {
+            set_sidebar_view(state, crate::app::state::AgentPanelSort::Priority);
+        }
+        (ContextMenuKind::SidebarView { .. }, Some("● triage" | "  triage")) => {
+            set_sidebar_view(state, crate::app::state::AgentPanelSort::Triage);
+        }
+        (ContextMenuKind::SidebarView { .. }, Some("✓ spaces" | "  spaces")) => {
+            toggle_tree_layer(state, TreeLayer::Spaces);
+        }
+        (ContextMenuKind::SidebarView { .. }, Some("✓ tabs" | "  tabs")) => {
+            toggle_tree_layer(state, TreeLayer::Tabs);
+        }
+        (ContextMenuKind::SidebarView { .. }, Some("✓ agents" | "  agents")) => {
+            toggle_tree_layer(state, TreeLayer::Agents);
+        }
         _ => leave_modal(state),
     }
+}
+
+fn set_sidebar_view(state: &mut AppState, sort: crate::app::state::AgentPanelSort) {
+    state.agent_panel_sort = sort;
+    state.agent_panel_scroll = 0;
+    state.mark_session_dirty();
+    leave_modal(state);
+}
+
+/// Which nesting layer a sidebar-view menu toggle targets.
+enum TreeLayer {
+    Spaces,
+    Tabs,
+    Agents,
+}
+
+fn toggle_tree_layer(state: &mut AppState, layer: TreeLayer) {
+    match layer {
+        TreeLayer::Spaces => state.tree_show_spaces = !state.tree_show_spaces,
+        TreeLayer::Tabs => state.tree_show_tabs = !state.tree_show_tabs,
+        TreeLayer::Agents => state.tree_show_agents = !state.tree_show_agents,
+    }
+    state.agent_panel_scroll = 0;
+    state.mark_session_dirty();
+    leave_modal(state);
 }
 
 #[cfg(test)]
@@ -1765,6 +1811,27 @@ impl App {
                         Mode::Navigate
                     });
                 }
+            }
+            (ContextMenuKind::SidebarView { .. }, Some("● tree" | "  tree")) => {
+                set_sidebar_view(&mut self.state, crate::app::state::AgentPanelSort::Tree);
+            }
+            (ContextMenuKind::SidebarView { .. }, Some("● grouped" | "  grouped")) => {
+                set_sidebar_view(&mut self.state, crate::app::state::AgentPanelSort::Spaces);
+            }
+            (ContextMenuKind::SidebarView { .. }, Some("● priority" | "  priority")) => {
+                set_sidebar_view(&mut self.state, crate::app::state::AgentPanelSort::Priority);
+            }
+            (ContextMenuKind::SidebarView { .. }, Some("● triage" | "  triage")) => {
+                set_sidebar_view(&mut self.state, crate::app::state::AgentPanelSort::Triage);
+            }
+            (ContextMenuKind::SidebarView { .. }, Some("✓ spaces" | "  spaces")) => {
+                toggle_tree_layer(&mut self.state, TreeLayer::Spaces);
+            }
+            (ContextMenuKind::SidebarView { .. }, Some("✓ tabs" | "  tabs")) => {
+                toggle_tree_layer(&mut self.state, TreeLayer::Tabs);
+            }
+            (ContextMenuKind::SidebarView { .. }, Some("✓ agents" | "  agents")) => {
+                toggle_tree_layer(&mut self.state, TreeLayer::Agents);
             }
             _ => leave_modal(&mut self.state),
         }

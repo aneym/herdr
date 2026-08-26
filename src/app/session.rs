@@ -53,6 +53,11 @@ impl App {
                 self.state.collapsed_space_keys.clone(),
                 self.state.automations_expanded,
                 self.state.collapsed_agent_group_keys.clone(),
+                self.state.tree_show_spaces,
+                self.state.tree_show_tabs,
+                self.state.tree_show_agents,
+                self.state.tree_collapsed_spaces.clone(),
+                self.state.tree_collapsed_tabs.clone(),
             );
             let history = self.persist_pane_history.then(|| {
                 crate::persist::capture_history(&self.state.workspaces, &self.terminal_runtimes)

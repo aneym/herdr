@@ -4,9 +4,13 @@ use crate::detect::{Agent, AgentDetection, AgentState};
 
 pub(super) const AGENT_PENDING_IDLE_RECHECK: std::time::Duration =
     std::time::Duration::from_millis(100);
-const AGENT_PENDING_IDLE_CONFIRMATIONS: u8 = 3;
+// Claude's TUI drops its working marker for a frame or two during redraws,
+// and under machine load those gaps ran past a 700ms cap, publishing a false
+// completion. Widening the window absorbs the redraw: a real completion shows
+// up to a second later, which beats a dot that flickers.
+const AGENT_PENDING_IDLE_CONFIRMATIONS: u8 = 5;
 pub(super) const AGENT_PENDING_IDLE_CAP: std::time::Duration =
-    std::time::Duration::from_millis(700);
+    std::time::Duration::from_millis(1800);
 pub(super) const STABLE_VISIBLE_SIGNAL_REFRESH: std::time::Duration =
     std::time::Duration::from_millis(800);
 pub(super) const AGENT_STARTUP_GRACE_WINDOW: std::time::Duration =
@@ -433,27 +437,26 @@ mod tests {
         let next = publish_state(AgentState::Idle);
         let mut pending = PendingIdleConfirmation::default();
 
-        assert!(pending.should_hold_working_to_idle(previous, next, false, false, now));
-        assert!(pending.should_hold_working_to_idle(
-            previous,
-            next,
-            false,
-            false,
-            now + AGENT_PENDING_IDLE_RECHECK
-        ));
-        assert!(pending.should_hold_working_to_idle(
-            previous,
-            next,
-            false,
-            false,
-            now + AGENT_PENDING_IDLE_RECHECK * 2
-        ));
+        // Driven off the constant so raising the confirmation count does not
+        // silently leave this test asserting the old behaviour.
+        for tick in 0..AGENT_PENDING_IDLE_CONFIRMATIONS {
+            assert!(
+                pending.should_hold_working_to_idle(
+                    previous,
+                    next,
+                    false,
+                    false,
+                    now + AGENT_PENDING_IDLE_RECHECK * u32::from(tick)
+                ),
+                "hold released early at confirmation {tick}"
+            );
+        }
         assert!(!pending.should_hold_working_to_idle(
             previous,
             next,
             false,
             false,
-            now + AGENT_PENDING_IDLE_RECHECK * 3
+            now + AGENT_PENDING_IDLE_RECHECK * u32::from(AGENT_PENDING_IDLE_CONFIRMATIONS)
         ));
     }
 

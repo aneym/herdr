@@ -697,10 +697,59 @@ impl AppState {
                     }
 
                     if self.on_agent_panel_sort_toggle(mouse.column, mouse.row) {
-                        self.agent_panel_sort = self.agent_panel_sort.next();
-                        self.agent_panel_scroll = 0;
-                        self.mark_session_dirty();
+                        self.context_menu = Some(ContextMenuState {
+                            kind: ContextMenuKind::SidebarView {
+                                sort: self.agent_panel_sort,
+                                show_spaces: self.tree_show_spaces,
+                                show_tabs: self.tree_show_tabs,
+                                show_agents: self.tree_show_agents,
+                            },
+                            x: mouse.column,
+                            y: mouse.row.saturating_add(1),
+                            list: MenuListState::new(0),
+                        });
+                        self.replace_mode(Mode::ContextMenu);
                         return None;
+                    }
+
+                    if let Some(hit) = self.tree_header_at(&agent_entries, mouse.column, mouse.row)
+                    {
+                        match hit {
+                            super::sidebar::TreeHeaderHit::Toggle { space, key } => {
+                                let set = if space {
+                                    &mut self.tree_collapsed_spaces
+                                } else {
+                                    &mut self.tree_collapsed_tabs
+                                };
+                                if !set.remove(&key) {
+                                    set.insert(key);
+                                }
+                                self.mark_session_dirty();
+                                return None;
+                            }
+                            super::sidebar::TreeHeaderHit::Focus { ws_idx, tab_idx } => {
+                                self.replace_mode(Mode::Terminal);
+                                let Some(tab_idx) = tab_idx else {
+                                    return Some(MouseAction::FocusWorkspace { ws_idx });
+                                };
+                                self.switch_workspace_tab(ws_idx, tab_idx);
+                                // Focus the tab's own pane. Routing this
+                                // through FocusWorkspace re-derives the
+                                // workspace's remembered tab and can undo the
+                                // switch we just made.
+                                let pane_id = self
+                                    .workspaces
+                                    .get(ws_idx)
+                                    .and_then(|ws| ws.tabs.get(tab_idx))
+                                    .map(|tab| tab.layout.focused());
+                                return match pane_id {
+                                    Some(pane_id) => {
+                                        Some(MouseAction::FocusPane { ws_idx, pane_id })
+                                    }
+                                    None => Some(MouseAction::FocusWorkspace { ws_idx }),
+                                };
+                            }
+                        }
                     }
 
                     if self.on_automations_header(&agent_entries, mouse.column, mouse.row) {
@@ -2582,7 +2631,6 @@ mod tests {
             workspace.x,
             workspace.y,
         ));
-
         assert!(matches!(
             app.state.context_menu.as_ref().map(|menu| &menu.kind),
             Some(ContextMenuKind::Workspace {

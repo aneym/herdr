@@ -67,6 +67,8 @@ pub(crate) struct AgentTreeRender {
     /// the owner's agent identity, or `orch:<workspace-id>` for orchestrator
     /// groups.
     pub group_key: Option<String>,
+    /// Leading columns contributed by enclosing tree headers (tree view only).
+    pub indent: u8,
 }
 
 fn sidebar_section_heights(total_h: u16, split_ratio: f32) -> (u16, u16) {
@@ -99,6 +101,22 @@ pub(crate) fn expanded_sidebar_sections(area: Rect, split_ratio: f32) -> (Rect, 
 }
 
 pub(crate) fn ordered_sidebar_sections(app: &AppState, area: Rect) -> (Rect, Rect) {
+    if tree_view_active(app) {
+        // Spaces live inside the agents tree; keep only a one-row footer strip
+        // for the new/menu buttons.
+        let content = Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height);
+        if content.width == 0 || content.height == 0 {
+            return (Rect::default(), Rect::default());
+        }
+        if content.height < 2 {
+            return (Rect::default(), content);
+        }
+        let agents_h = content.height - 1;
+        return (
+            Rect::new(content.x, content.y + agents_h, content.width, 1),
+            Rect::new(content.x, content.y, content.width, agents_h),
+        );
+    }
     if app.sidebar_spaces.max_visible > 0 && area.height >= 6 {
         return content_fit_sidebar_sections(app, area);
     }
@@ -168,6 +186,9 @@ fn content_fit_sidebar_sections(app: &AppState, area: Rect) -> (Rect, Rect) {
 }
 
 pub(crate) fn sidebar_section_divider_rect(app: &AppState, area: Rect) -> Rect {
+    if tree_view_active(app) {
+        return Rect::default();
+    }
     let content = Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height);
     if content.width == 0 || content.height < 6 {
         return Rect::default();
@@ -188,7 +209,14 @@ fn agent_panel_sort_label(sort: AgentPanelSort) -> &'static str {
         AgentPanelSort::Spaces => "grouped",
         AgentPanelSort::Priority => "priority",
         AgentPanelSort::Triage => "triage",
+        AgentPanelSort::Tree => "tree",
     }
+}
+
+/// The unified space → tab → agent tree replaces the separate spaces section.
+/// A transient agent-view override falls back to the stock flat list.
+pub(crate) fn tree_view_active(app: &AppState) -> bool {
+    app.agent_panel_sort == AgentPanelSort::Tree && app.agent_view_override.is_none()
 }
 
 pub(crate) fn agent_panel_toggle_rect(area: Rect, sort: AgentPanelSort) -> Rect {
@@ -571,6 +599,201 @@ pub(crate) enum AgentPanelListEntry {
     Agent(AgentPanelEntry),
     AutomationsHeader,
     Automation(AgentPanelEntry),
+    /// Tree view: a space (workspace) grouping row.
+    SpaceHeader(TreeHeader),
+    /// Tree view: a tab grouping row inside a space.
+    TabHeader(TreeHeader),
+}
+
+/// A space or tab grouping row in the unified tree view.
+pub(crate) struct TreeHeader {
+    pub ws_idx: usize,
+    /// `None` on a space header; the tab index on a tab header.
+    pub tab_idx: Option<usize>,
+    pub label: String,
+    /// Collapse-set key: workspace id, or `<workspace-id>#<tab-number>`.
+    pub key: String,
+    pub collapsed: bool,
+    /// Agents grouped under this header, collapsed or not.
+    pub child_count: usize,
+    /// Highest-attention (state, seen) among agent rows omitted beneath this header.
+    pub hidden_state: Option<(AgentState, bool)>,
+    /// One entry per agent this header stands in for, in panel order, so the
+    /// header can show a dot per agent instead of a bare count.
+    pub child_states: Vec<(AgentState, bool)>,
+    /// This header has rows underneath it that a collapse would actually
+    /// hide. A header with nothing to hide shows no chevron.
+    pub collapsible: bool,
+    pub indent: u8,
+    /// This header's workspace/tab holds the active pane.
+    pub active: bool,
+}
+
+pub(crate) fn tree_space_key(app: &AppState, ws_idx: usize) -> Option<String> {
+    app.workspaces.get(ws_idx).map(|ws| ws.id.clone())
+}
+
+pub(crate) fn tree_tab_key(app: &AppState, ws_idx: usize, tab_idx: usize) -> Option<String> {
+    let ws = app.workspaces.get(ws_idx)?;
+    let tab = ws.tabs.get(tab_idx)?;
+    Some(format!("{}#{}", ws.id, tab.number))
+}
+
+/// Highest-attention (state, seen) among a run of agent rows, matching the
+/// ordering the workspace list uses for its own roll-up badges.
+fn tree_rollup_state(entries: &[AgentPanelEntry]) -> Option<(AgentState, bool)> {
+    entries
+        .iter()
+        .map(|entry| (entry.state, entry.seen))
+        .max_by_key(|(state, seen)| agent_attention_priority(*state, *seen))
+}
+
+/// One (state, seen) per agent, in panel order, for a header that stands in
+/// for rows it is not rendering.
+fn tree_child_states(entries: &[AgentPanelEntry]) -> Vec<(AgentState, bool)> {
+    entries
+        .iter()
+        .map(|entry| (entry.state, entry.seen))
+        .collect()
+}
+
+/// Group agents into space → tab → agent rows, preserving the incoming order
+/// so nothing reshuffles on its own. Layer visibility and collapse state come
+/// from the three tree layer toggles and the two collapse sets.
+fn tree_list_entries(app: &AppState, agents: Vec<AgentPanelEntry>) -> Vec<AgentPanelListEntry> {
+    let mut ws_order: Vec<usize> = Vec::new();
+    let mut by_ws: std::collections::HashMap<usize, Vec<AgentPanelEntry>> =
+        std::collections::HashMap::new();
+    for entry in agents {
+        by_ws.entry(entry.ws_idx).or_insert_with(|| {
+            ws_order.push(entry.ws_idx);
+            Vec::new()
+        });
+        if let Some(bucket) = by_ws.get_mut(&entry.ws_idx) {
+            bucket.push(entry);
+        }
+    }
+
+    let mut out = Vec::new();
+    for ws_idx in ws_order {
+        let Some(ws_entries) = by_ws.remove(&ws_idx) else {
+            continue;
+        };
+        let space_indent = u8::from(app.tree_show_spaces);
+        if app.tree_show_spaces {
+            let key = tree_space_key(app, ws_idx).unwrap_or_default();
+            let collapsed = app.tree_collapsed_spaces.contains(&key);
+            // Reuse the label the entries already resolved; recomputing it
+            // here would repeat identity work in a per-render loop.
+            let label = ws_entries
+                .first()
+                .map(|entry| entry.primary_label.clone())
+                .filter(|label| !label.is_empty())
+                .or_else(|| {
+                    app.workspaces
+                        .get(ws_idx)
+                        .map(|ws| ws.display_name_from_terminals(&app.terminals))
+                })
+                .unwrap_or_default();
+            out.push(AgentPanelListEntry::SpaceHeader(TreeHeader {
+                ws_idx,
+                tab_idx: None,
+                label,
+                key,
+                collapsed,
+                child_count: ws_entries.len(),
+                hidden_state: (collapsed || (!app.tree_show_tabs && !app.tree_show_agents))
+                    .then(|| tree_rollup_state(&ws_entries))
+                    .flatten(),
+                child_states: (collapsed || (!app.tree_show_tabs && !app.tree_show_agents))
+                    .then(|| tree_child_states(&ws_entries))
+                    .unwrap_or_default(),
+                collapsible: !ws_entries.is_empty() && (app.tree_show_tabs || app.tree_show_agents),
+                indent: 0,
+                // A space row separates groups; it is never the selection.
+                // Highlighting it while a tab inside it is selected reads as
+                // two things being active at once.
+                active: false,
+            }));
+            if collapsed {
+                continue;
+            }
+        }
+
+        // Tabs, in first-appearance order within the space.
+        let mut tab_order: Vec<usize> = Vec::new();
+        let mut by_tab: std::collections::HashMap<usize, Vec<AgentPanelEntry>> =
+            std::collections::HashMap::new();
+        for entry in ws_entries {
+            by_tab.entry(entry.tab_idx).or_insert_with(|| {
+                tab_order.push(entry.tab_idx);
+                Vec::new()
+            });
+            if let Some(bucket) = by_tab.get_mut(&entry.tab_idx) {
+                bucket.push(entry);
+            }
+        }
+
+        for tab_idx in tab_order {
+            let Some(mut tab_entries) = by_tab.remove(&tab_idx) else {
+                continue;
+            };
+            let mut agent_indent = space_indent;
+            if app.tree_show_tabs {
+                let key = tree_tab_key(app, ws_idx, tab_idx).unwrap_or_default();
+                let collapsed = app.tree_collapsed_tabs.contains(&key);
+                let label = app
+                    .workspaces
+                    .get(ws_idx)
+                    .and_then(|ws| ws.tab_display_name(tab_idx))
+                    .unwrap_or_else(|| (tab_idx + 1).to_string());
+                out.push(AgentPanelListEntry::TabHeader(TreeHeader {
+                    ws_idx,
+                    tab_idx: Some(tab_idx),
+                    label,
+                    key,
+                    collapsed,
+                    child_count: tab_entries.len(),
+                    hidden_state: (collapsed || !app.tree_show_agents)
+                        .then(|| tree_rollup_state(&tab_entries))
+                        .flatten(),
+                    child_states: (collapsed || !app.tree_show_agents)
+                        .then(|| tree_child_states(&tab_entries))
+                        .unwrap_or_default(),
+                    collapsible: !tab_entries.is_empty() && app.tree_show_agents,
+                    indent: space_indent,
+                    active: !app.tree_show_agents
+                        && app.active == Some(ws_idx)
+                        && app
+                            .workspaces
+                            .get(ws_idx)
+                            .is_some_and(|ws| ws.active_tab == tab_idx),
+                }));
+                if collapsed {
+                    continue;
+                }
+                agent_indent = agent_indent.saturating_add(1);
+            }
+
+            if !app.tree_show_agents {
+                continue;
+            }
+
+            for entry in &mut tab_entries {
+                entry.tree.indent = agent_indent;
+                // The headers already name the space and tab; drop the
+                // duplicate labels from the row tokens.
+                if app.tree_show_spaces {
+                    entry.primary_label.clear();
+                }
+                if app.tree_show_tabs {
+                    entry.primary_tab_label = None;
+                }
+            }
+            out.extend(tab_entries.into_iter().map(AgentPanelListEntry::Agent));
+        }
+    }
+    out
 }
 
 pub(crate) fn agent_panel_list_entries(app: &AppState) -> Vec<AgentPanelListEntry> {
@@ -591,14 +814,19 @@ fn agent_panel_list_entries_from_partition(
     app: &AppState,
     (agents, automations): (Vec<AgentPanelEntry>, Vec<AgentPanelEntry>),
 ) -> Vec<AgentPanelListEntry> {
+    let flatten = |agents: Vec<AgentPanelEntry>| -> Vec<AgentPanelListEntry> {
+        if tree_view_active(app) {
+            tree_list_entries(app, agents)
+        } else {
+            agents.into_iter().map(AgentPanelListEntry::Agent).collect()
+        }
+    };
+
     if automations.is_empty() {
-        return agents.into_iter().map(AgentPanelListEntry::Agent).collect();
+        return flatten(agents);
     }
 
-    let mut entries = agents
-        .into_iter()
-        .map(AgentPanelListEntry::Agent)
-        .collect::<Vec<_>>();
+    let mut entries = flatten(agents);
     entries.push(AgentPanelListEntry::AutomationsHeader);
     if app.automations_expanded {
         entries.extend(automations.into_iter().map(AgentPanelListEntry::Automation));
@@ -1044,6 +1272,38 @@ pub(crate) fn agent_group_chevron_rect(body: Rect, row_y: u16, tree: &AgentTreeR
     Rect::new(body.x + body.width.saturating_sub(width), row_y, width, 1)
 }
 
+/// Left-aligned disclosure hit region on a tree space/tab header row. Header
+/// chevrons sit on the left because they anchor the hierarchy; agent ownership
+/// groups keep their right-aligned chevron.
+pub(crate) fn tree_header_chevron_rect(body: Rect, row_y: u16, indent: u8) -> Rect {
+    let _ = indent;
+    // The chevron is pinned to the right edge, after any status dots, so the
+    // left column stays clean. Two cells covers the glyph and its trailing pad.
+    let width = 2u16.min(body.width);
+    if width == 0 {
+        return Rect::default();
+    }
+    Rect::new(body.x + body.width.saturating_sub(width), row_y, width, 1)
+}
+
+/// Paints half of a padding row in the selection colour, so a selected item
+/// gets roughly half a cell of padding on each side. A terminal cell is the
+/// smallest unit of layout, but a half-block glyph splits one visually, which
+/// is the only way to spend less than a whole row on padding.
+fn paint_half_pad(frame: &mut Frame, rect: Rect, bg: Color, top_half: bool) {
+    if rect.width == 0 || rect.height == 0 {
+        return;
+    }
+    let glyph = if top_half { "▀" } else { "▄" };
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            glyph.repeat(rect.width as usize),
+            Style::default().fg(bg),
+        ))),
+        rect,
+    );
+}
+
 pub(crate) fn agent_panel_body_rect(area: Rect, has_scrollbar: bool) -> Rect {
     if area.width == 0 || area.height <= AGENT_PANEL_HEADER_ROWS {
         return Rect::default();
@@ -1094,23 +1354,74 @@ pub(crate) fn agent_panel_list_entry_height(
     body_height: u16,
 ) -> u16 {
     match entry {
-        AgentPanelListEntry::Agent(entry) | AgentPanelListEntry::Automation(entry) => {
-            agent_entry_height_in_body(app, entry, body_height)
+        AgentPanelListEntry::Agent(inner) | AgentPanelListEntry::Automation(inner) => {
+            agent_entry_height_in_body(app, inner, body_height)
         }
-        AgentPanelListEntry::AutomationsHeader => 1.min(body_height),
+        AgentPanelListEntry::AutomationsHeader
+        | AgentPanelListEntry::SpaceHeader(_)
+        | AgentPanelListEntry::TabHeader(_) => 1,
     }
+    .saturating_add(agent_panel_list_entry_padding(app, entry))
+    .min(body_height)
 }
 
-fn agent_panel_list_entry_gap(
+/// The gap drawn immediately BEFORE `index`, which belongs to the previous
+/// entry's advance. A selected row paints it so the spacing reads as padding
+/// inside the selection instead of margin around it.
+pub(crate) fn agent_panel_list_entry_leading_gap(
     app: &AppState,
     entries: &[AgentPanelListEntry],
     index: usize,
 ) -> u16 {
-    match entries.get(index) {
+    match index.checked_sub(1) {
+        Some(prev) => agent_panel_list_entry_gap(app, entries, prev),
+        None => 0,
+    }
+}
+
+pub(crate) fn agent_panel_list_entry_gap(
+    app: &AppState,
+    entries: &[AgentPanelListEntry],
+    index: usize,
+) -> u16 {
+    let own = match entries.get(index) {
         Some(AgentPanelListEntry::Agent(_)) | Some(AgentPanelListEntry::Automation(_)) => {
             agent_entry_gap(app, index, entries.len())
         }
-        Some(AgentPanelListEntry::AutomationsHeader) | None => 0,
+        Some(AgentPanelListEntry::AutomationsHeader)
+        | Some(AgentPanelListEntry::SpaceHeader(_))
+        | Some(AgentPanelListEntry::TabHeader(_))
+        | None => 0,
+    };
+    if !tree_view_active(app) {
+        return own;
+    }
+    // Tree view folds padding into the row height instead, so nothing extra
+    // sits between rows.
+    0
+}
+
+/// Total padding rows owned by an entry, split evenly above and below its
+/// content. Folded into the entry's height so every row-walker covers it and
+/// none of them can drift from the renderer.
+pub(crate) fn agent_panel_list_entry_padding(app: &AppState, entry: &AgentPanelListEntry) -> u16 {
+    if !tree_view_active(app) {
+        return 0;
+    }
+    match entry {
+        // A space label is a separator, so its air sits above the group only.
+        // Doubling it here would balloon the whole list.
+        AgentPanelListEntry::SpaceHeader(_) => app.sidebar_spaces.row_gap,
+        // Tabs and agents get EVEN padding: one row above and one below, so
+        // the selection is a balanced block around the text.
+        // One pad row per item, above its content. The boundary row is shared
+        // with the neighbour, so spacing stays tight; the selection still
+        // reads as evenly padded because it paints HALF of each boundary row
+        // with a half-block glyph. See `paint_half_pad`.
+        AgentPanelListEntry::TabHeader(_)
+        | AgentPanelListEntry::Agent(_)
+        | AgentPanelListEntry::Automation(_) => app.sidebar_agents.row_gap,
+        AgentPanelListEntry::AutomationsHeader => 0,
     }
 }
 
@@ -2110,6 +2421,150 @@ fn render_agent_detail(
     let mut row_y = body.y;
     let body_bottom = body.y + body.height;
     for (index, list_entry) in details.iter().enumerate().skip(scroll) {
+        // Each row owns a padding block split evenly above and below its
+        // content. `row_y` is the top of that block; content draws inside it.
+        let pad = agent_panel_list_entry_padding(app, list_entry);
+        if app.sidebar_debug_bounds {
+            // TEMPORARY: paint each row's full container block so the box
+            // boundaries and padding are visible.
+            let tint = match list_entry {
+                AgentPanelListEntry::SpaceHeader(_) => Color::Rgb(70, 30, 30),
+                AgentPanelListEntry::TabHeader(_) => Color::Rgb(30, 40, 80),
+                AgentPanelListEntry::Agent(_) | AgentPanelListEntry::Automation(_) => {
+                    Color::Rgb(25, 60, 40)
+                }
+                AgentPanelListEntry::AutomationsHeader => Color::Rgb(60, 50, 20),
+            };
+            let block = agent_panel_list_entry_height(app, list_entry, body.height)
+                .min(body_bottom.saturating_sub(row_y));
+            if block > 0 {
+                frame.render_widget(
+                    Paragraph::new(Line::default()).style(Style::default().bg(tint)),
+                    Rect::new(body.x, row_y, body.width, block),
+                );
+            }
+        }
+        // The pad row sits above the content and is shared with the item
+        // above; the selection claims only half of it.
+        let content_y = row_y.saturating_add(pad);
+        if let AgentPanelListEntry::SpaceHeader(header) | AgentPanelListEntry::TabHeader(header) =
+            list_entry
+        {
+            if row_y.saturating_add(1) > body_bottom {
+                break;
+            }
+            let is_space = matches!(list_entry, AgentPanelListEntry::SpaceHeader(_));
+            // The tab is the unit Alex scans, so it carries the strongest
+            // weight. The space reads as the container above it, and agent
+            // titles below stay lighter than both.
+            let label_style = if is_space {
+                Style::default().fg(p.overlay0).add_modifier(Modifier::BOLD)
+            } else if header.active {
+                Style::default().fg(p.text).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(p.subtext0).add_modifier(Modifier::BOLD)
+            };
+            let indent_cols = header.indent as usize;
+            let mut spans = vec![Span::raw(" ")];
+            if indent_cols > 0 {
+                spans.push(Span::raw(" ".repeat(indent_cols)));
+            }
+            let prefix_width = 1 + indent_cols;
+            let trailing_width = 6usize;
+            spans.push(Span::styled(
+                truncate_end(
+                    &header.label,
+                    body.width
+                        .saturating_sub((prefix_width + trailing_width) as u16)
+                        as usize,
+                ),
+                label_style,
+            ));
+            let header_style = if header.active {
+                Style::default().bg(p.active_row_bg)
+            } else {
+                Style::default()
+            };
+            if header.active {
+                if pad > 0 && content_y > body.y {
+                    paint_half_pad(
+                        frame,
+                        Rect::new(body.x, content_y - 1, body.width, 1),
+                        p.active_row_bg,
+                        false,
+                    );
+                }
+                frame.render_widget(
+                    Paragraph::new(Line::default()).style(header_style),
+                    Rect::new(body.x, content_y, body.width, 1),
+                );
+                let below = content_y + 1;
+                let next_has_pad = details
+                    .get(index + 1)
+                    .is_some_and(|next| agent_panel_list_entry_padding(app, next) > 0);
+                if next_has_pad && below < body_bottom {
+                    paint_half_pad(
+                        frame,
+                        Rect::new(body.x, below, body.width, 1),
+                        p.active_row_bg,
+                        true,
+                    );
+                }
+            }
+            frame.render_widget(
+                Paragraph::new(Line::from(spans)).style(header_style),
+                Rect::new(body.x, content_y, body.width, 1),
+            );
+            if !header.child_states.is_empty() {
+                // One dot per agent this header stands in for, so a collapsed
+                // tab still reports every agent's state rather than a count.
+                // Past the cap the dots would crowd the label, so the rest
+                // collapse into a trailing count.
+                const MAX_DOTS: usize = 6;
+                let shown = header.child_states.len().min(MAX_DOTS);
+                let mut trailing: Vec<Span> = header.child_states[..shown]
+                    .iter()
+                    .map(|(state, seen)| {
+                        Span::styled(
+                            "●",
+                            Style::default().fg(state_label_color(*state, *seen, p)),
+                        )
+                    })
+                    .collect();
+                if header.child_states.len() > shown {
+                    trailing.push(Span::styled(
+                        format!("+{}", header.child_states.len() - shown),
+                        Style::default().fg(p.overlay0),
+                    ));
+                }
+                trailing.push(Span::raw(" "));
+                if header.collapsible {
+                    trailing.push(Span::styled(
+                        if header.collapsed { "▸" } else { "▾" },
+                        Style::default().fg(p.overlay0),
+                    ));
+                }
+                trailing.push(Span::raw(" "));
+                frame.render_widget(
+                    Paragraph::new(Line::from(trailing)).alignment(Alignment::Right),
+                    Rect::new(body.x, content_y, body.width, 1),
+                );
+            } else if header.collapsible {
+                frame.render_widget(
+                    Paragraph::new(Line::from(vec![
+                        Span::styled(
+                            if header.collapsed { "▸" } else { "▾" },
+                            Style::default().fg(p.overlay0),
+                        ),
+                        Span::raw(" "),
+                    ]))
+                    .alignment(Alignment::Right),
+                    Rect::new(body.x, content_y, body.width, 1),
+                );
+            }
+            row_y = row_y.saturating_add(1).saturating_add(pad).min(body_bottom);
+            continue;
+        }
         if matches!(list_entry, AgentPanelListEntry::AutomationsHeader) {
             if row_y.saturating_add(1) > body_bottom {
                 break;
@@ -2131,25 +2586,67 @@ fn render_agent_detail(
         }
         let detail = match list_entry {
             AgentPanelListEntry::Agent(detail) | AgentPanelListEntry::Automation(detail) => detail,
-            AgentPanelListEntry::AutomationsHeader => continue,
+            AgentPanelListEntry::AutomationsHeader
+            | AgentPanelListEntry::SpaceHeader(_)
+            | AgentPanelListEntry::TabHeader(_) => continue,
         };
         let label_color = state_label_color(detail.state, detail.seen, p);
         let rows = resolved_agent_rows(app, detail);
-        let height = (rows.len().max(1) as u16).min(body.height);
+        // Height already carries this row's padding.
+        let content_height = (rows.len().max(1) as u16).min(body.height);
+        let height = content_height.saturating_add(pad).min(body.height);
         if row_y.saturating_add(height) > body_bottom {
             break;
         }
 
         let is_active = app.is_active_pane(detail.ws_idx, detail.tab_idx, detail.pane_id);
+        if is_active {
+            // Fill the row's whole padding block so the selection reads as a
+            // padded item rather than a thin band around the text.
+            if pad > 0 && content_y > body.y {
+                paint_half_pad(
+                    frame,
+                    Rect::new(body.x, content_y - 1, body.width, 1),
+                    p.active_row_bg,
+                    false,
+                );
+            }
+            frame.render_widget(
+                Paragraph::new(Line::default()).style(Style::default().bg(p.active_row_bg)),
+                Rect::new(body.x, content_y, body.width, content_height),
+            );
+            let below = content_y + content_height;
+            let next_has_pad = details
+                .get(index + 1)
+                .is_some_and(|next| agent_panel_list_entry_padding(app, next) > 0);
+            if next_has_pad && below < body_bottom {
+                paint_half_pad(
+                    frame,
+                    Rect::new(body.x, below, body.width, 1),
+                    p.active_row_bg,
+                    true,
+                );
+            }
+        }
         let row_style = if is_active {
             Style::default().bg(p.active_row_bg)
         } else {
             Style::default()
         };
-        let name_style = if is_active {
-            Style::default().fg(p.text).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(p.subtext0).add_modifier(Modifier::BOLD)
+        // In tree view the tab header carries the bold weight, so agent titles
+        // drop to regular to keep the hierarchy readable.
+        let title_bold = !(tree_view_active(app) && app.tree_show_tabs);
+        let name_style = {
+            let base = if is_active {
+                Style::default().fg(p.text)
+            } else {
+                Style::default().fg(p.subtext0)
+            };
+            if title_bold {
+                base.add_modifier(Modifier::BOLD)
+            } else {
+                base
+            }
         };
         let status_style = if is_active {
             Style::default().fg(label_color)
@@ -2169,9 +2666,14 @@ fn render_agent_detail(
         let tree = &detail.tree;
         let depth = tree.depth as usize;
         let group_trailing_width = agent_group_trailing_width(tree);
-        for (row_index, resolved) in rows.iter().take(height as usize).enumerate() {
+        for (row_index, resolved) in rows.iter().take(content_height as usize).enumerate() {
             let mut spans = vec![Span::raw(" ")];
             let mut prefix_width = 1usize;
+            if tree.indent > 0 {
+                let cols = tree.indent as usize;
+                spans.push(Span::raw(" ".repeat(cols)));
+                prefix_width += cols;
+            }
             if depth > 0 {
                 if depth > 1 {
                     spans.push(Span::raw("   ".repeat(depth - 1)));
@@ -2225,7 +2727,7 @@ fn render_agent_detail(
             ));
             frame.render_widget(
                 Paragraph::new(Line::from(spans)).style(row_style),
-                Rect::new(body.x, row_y + row_index as u16, body.width, 1),
+                Rect::new(body.x, content_y + row_index as u16, body.width, 1),
             );
         }
         if tree.expanded.is_some() || tree.group_count.is_some() {
@@ -2254,13 +2756,10 @@ fn render_agent_detail(
             }
             frame.render_widget(
                 Paragraph::new(Line::from(trailing)).alignment(Alignment::Right),
-                agent_group_chevron_rect(body, row_y, tree),
+                agent_group_chevron_rect(body, content_y, tree),
             );
         }
-        row_y = row_y
-            .saturating_add(height)
-            .saturating_add(agent_panel_list_entry_gap(app, &details, index))
-            .min(body_bottom);
+        row_y = row_y.saturating_add(height).min(body_bottom);
     }
 
     if let Some(track) = scrollbar_rect {
@@ -3011,7 +3510,7 @@ mod tests {
         let marker_x = find_symbol_x(buffer, body.y, body.width, "●");
         assert_eq!(
             buffer[(marker_x, body.y)].style().fg,
-            Some(app.palette.teal)
+            Some(app.palette.green)
         );
     }
 
@@ -3884,7 +4383,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         assert_eq!(buffer[(detail_area.x + 2, detail_area.y + 1)].symbol(), "✓");
         assert_eq!(
             buffer[(detail_area.x + 2, detail_area.y + 1)].style().fg,
-            Some(app.palette.teal)
+            Some(app.palette.green)
         );
     }
 
@@ -4681,5 +5180,329 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
                 },
             ]
         );
+    }
+
+    /// Two spaces, two named tabs each, one agent per tab. Enough cardinality
+    /// to tell workspace order, tab order, and per-branch collapse apart.
+    fn app_with_tree_agents() -> AppState {
+        let mut app = AppState::test_new();
+        let mut alpha = Workspace::test_new("alpha-space");
+        alpha.test_add_tab(Some("alpha-two"));
+        let mut beta = Workspace::test_new("beta-space");
+        beta.test_add_tab(Some("beta-two"));
+        app.workspaces = vec![alpha, beta];
+        app.ensure_test_terminals();
+        app.active = Some(0);
+        app.selected = 0;
+        app.agent_panel_sort = AgentPanelSort::Tree;
+        for ws_idx in 0..app.workspaces.len() {
+            for tab_idx in 0..app.workspaces[ws_idx].tabs.len() {
+                let pane_id = app.workspaces[ws_idx].tabs[tab_idx].root_pane;
+                let terminal_id = app.workspaces[ws_idx].tabs[tab_idx].panes[&pane_id]
+                    .attached_terminal_id
+                    .clone();
+                let terminal = app.terminals.get_mut(&terminal_id).expect("agent terminal");
+                terminal.set_agent_name(format!("agent-{ws_idx}-{tab_idx}"));
+                terminal.set_detected_state(Some(Agent::Pi), AgentState::Idle);
+            }
+        }
+        app
+    }
+
+    /// Row kinds and their space/tab identity, in list order.
+    fn tree_shape(app: &AppState) -> Vec<String> {
+        agent_panel_list_entries(app)
+            .iter()
+            .map(|entry| match entry {
+                AgentPanelListEntry::SpaceHeader(header) => format!("space:{}", header.ws_idx),
+                AgentPanelListEntry::TabHeader(header) => format!(
+                    "tab:{}.{}",
+                    header.ws_idx,
+                    header.tab_idx.expect("tab header carries a tab index")
+                ),
+                AgentPanelListEntry::Agent(agent) => {
+                    format!("agent:{}.{}", agent.ws_idx, agent.tab_idx)
+                }
+                AgentPanelListEntry::Automation(_) => "automation".to_string(),
+                AgentPanelListEntry::AutomationsHeader => "automations".to_string(),
+            })
+            .collect()
+    }
+
+    fn tree_header(app: &AppState, want: &str) -> TreeHeader {
+        agent_panel_list_entries(app)
+            .into_iter()
+            .find_map(|entry| match entry {
+                AgentPanelListEntry::SpaceHeader(header)
+                    if want == format!("space:{}", header.ws_idx) =>
+                {
+                    Some(header)
+                }
+                AgentPanelListEntry::TabHeader(header)
+                    if header.tab_idx.is_some_and(|tab_idx| {
+                        want == format!("tab:{}.{}", header.ws_idx, tab_idx)
+                    }) =>
+                {
+                    Some(header)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no {want} header in the tree"))
+    }
+
+    #[test]
+    fn tree_nests_spaces_then_tabs_then_agents_in_workspace_order() {
+        let app = app_with_tree_agents();
+
+        assert_eq!(
+            tree_shape(&app),
+            [
+                "space:0",
+                "tab:0.0",
+                "agent:0.0",
+                "tab:0.1",
+                "agent:0.1",
+                "space:1",
+                "tab:1.0",
+                "agent:1.0",
+                "tab:1.1",
+                "agent:1.1",
+            ]
+        );
+
+        // Each nesting layer adds one indent step for the rows beneath it.
+        let entries = agent_panel_list_entries(&app);
+        for entry in &entries {
+            match entry {
+                AgentPanelListEntry::SpaceHeader(header) => assert_eq!(header.indent, 0),
+                AgentPanelListEntry::TabHeader(header) => assert_eq!(header.indent, 1),
+                AgentPanelListEntry::Agent(agent) => assert_eq!(agent.tree.indent, 2),
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn tree_layer_toggles_drop_their_header_rows() {
+        let mut app = app_with_tree_agents();
+
+        app.tree_show_spaces = false;
+        assert_eq!(
+            tree_shape(&app),
+            [
+                "tab:0.0",
+                "agent:0.0",
+                "tab:0.1",
+                "agent:0.1",
+                "tab:1.0",
+                "agent:1.0",
+                "tab:1.1",
+                "agent:1.1",
+            ]
+        );
+
+        app.tree_show_spaces = true;
+        app.tree_show_tabs = false;
+        assert_eq!(
+            tree_shape(&app),
+            [
+                "space:0",
+                "agent:0.0",
+                "agent:0.1",
+                "space:1",
+                "agent:1.0",
+                "agent:1.1",
+            ]
+        );
+
+        // Both layers off degrades to the plain flat agent list.
+        app.tree_show_spaces = false;
+        assert_eq!(
+            tree_shape(&app),
+            ["agent:0.0", "agent:0.1", "agent:1.0", "agent:1.1"]
+        );
+        for entry in agent_panel_list_entries(&app) {
+            let AgentPanelListEntry::Agent(agent) = entry else {
+                panic!("both layers off must leave only agent rows");
+            };
+            assert_eq!(agent.tree.indent, 0);
+        }
+    }
+
+    #[test]
+    fn hidden_agents_leave_only_space_and_tab_headers() {
+        let mut app = app_with_tree_agents();
+        app.tree_show_agents = false;
+
+        assert_eq!(
+            tree_shape(&app),
+            ["space:0", "tab:0.0", "tab:0.1", "space:1", "tab:1.0", "tab:1.1",]
+        );
+
+        let tab = tree_header(&app, "tab:0.0");
+        assert_eq!(tab.child_count, 1);
+        assert_eq!(tab.hidden_state, Some((AgentState::Idle, true)));
+        assert_eq!(tree_header(&app, "space:0").hidden_state, None);
+    }
+
+    #[test]
+    fn hiding_all_tree_layers_yields_an_empty_list() {
+        let mut app = app_with_tree_agents();
+        app.tree_show_spaces = false;
+        app.tree_show_tabs = false;
+        app.tree_show_agents = false;
+
+        assert!(agent_panel_list_entries(&app).is_empty());
+    }
+
+    #[test]
+    fn hidden_agents_do_not_change_the_flat_cmd_e_list() {
+        let mut app = app_with_tree_agents();
+        let identity = |entries: Vec<AgentPanelEntry>| {
+            entries
+                .into_iter()
+                .map(|entry| (entry.ws_idx, entry.tab_idx, entry.pane_id))
+                .collect::<Vec<_>>()
+        };
+        let visible = identity(agent_panel_entries(&app));
+
+        app.tree_show_agents = false;
+
+        assert_eq!(identity(agent_panel_entries(&app)), visible);
+    }
+
+    #[test]
+    fn collapsed_space_hides_its_agents_and_counts_them() {
+        let mut app = app_with_tree_agents();
+        let key = tree_space_key(&app, 0).expect("space key");
+        app.tree_collapsed_spaces.insert(key);
+
+        assert_eq!(
+            tree_shape(&app),
+            [
+                "space:0",
+                "space:1",
+                "tab:1.0",
+                "agent:1.0",
+                "tab:1.1",
+                "agent:1.1"
+            ]
+        );
+
+        let collapsed = tree_header(&app, "space:0");
+        assert!(collapsed.collapsed);
+        // Both tabs' agents are hidden, so the badge counts two, not two tabs.
+        assert_eq!(collapsed.child_count, 2);
+        assert_eq!(collapsed.hidden_state, Some((AgentState::Idle, true)));
+
+        let untouched = tree_header(&app, "space:1");
+        assert!(!untouched.collapsed);
+        assert_eq!(untouched.hidden_state, None);
+    }
+
+    #[test]
+    fn collapsed_tab_hides_only_that_tabs_agents() {
+        let mut app = app_with_tree_agents();
+        let key = tree_tab_key(&app, 0, 1).expect("tab key");
+        app.tree_collapsed_tabs.insert(key);
+
+        assert_eq!(
+            tree_shape(&app),
+            [
+                "space:0",
+                "tab:0.0",
+                "agent:0.0",
+                "tab:0.1",
+                "space:1",
+                "tab:1.0",
+                "agent:1.0",
+                "tab:1.1",
+                "agent:1.1",
+            ]
+        );
+
+        let collapsed = tree_header(&app, "tab:0.1");
+        assert!(collapsed.collapsed);
+        assert_eq!(collapsed.child_count, 1);
+        // The sibling tab in the same space keeps its agent row.
+        assert!(!tree_header(&app, "tab:0.0").collapsed);
+    }
+
+    #[test]
+    fn tree_view_keeps_the_flat_agent_list_cmd_e_walks() {
+        let mut app = app_with_tree_agents();
+        let identity = |entries: Vec<AgentPanelEntry>| {
+            entries
+                .into_iter()
+                .map(|entry| (entry.ws_idx, entry.tab_idx, entry.pane_id))
+                .collect::<Vec<_>>()
+        };
+
+        let tree = identity(agent_panel_entries(&app));
+        app.agent_panel_sort = AgentPanelSort::Spaces;
+        let spaces = identity(agent_panel_entries(&app));
+
+        assert_eq!(tree, spaces);
+        assert_eq!(tree.len(), 4);
+    }
+
+    #[test]
+    fn tree_view_gives_the_agents_panel_the_whole_sidebar() {
+        let mut app = app_with_tree_agents();
+        let area = Rect::new(0, 0, 26, 20);
+
+        let (spaces, agents) = ordered_sidebar_sections(&app, area);
+        assert_eq!(agents.y, area.y);
+        assert_eq!(agents.height, area.height - 1);
+        assert_eq!(spaces.height, 1);
+        // Nothing is left to drag, so the section divider goes away.
+        assert_eq!(sidebar_section_divider_rect(&app, area), Rect::default());
+
+        // Alex's config sets max_visible = 8; the content-fit path must not
+        // claw rows back from the tree.
+        app.sidebar_spaces.max_visible = 8;
+        assert_eq!(ordered_sidebar_sections(&app, area), (spaces, agents));
+
+        // The stock grouped view still splits the sidebar in two.
+        app.agent_panel_sort = AgentPanelSort::Spaces;
+        let (grouped_spaces, grouped_agents) = ordered_sidebar_sections(&app, area);
+        assert!(grouped_spaces.height > 1);
+        assert!(grouped_agents.height < area.height - 1);
+    }
+
+    /// Renders the tree sidebar and prints it as text, marking which cells
+    /// carry the active-row background with `#`. Not an assertion: this is the
+    /// visual check for spacing, selection fill, and column alignment.
+    /// Run with:
+    ///   cargo nextest run dump_tree_sidebar --no-capture
+    #[test]
+    fn dump_tree_sidebar() {
+        let mut app = app_with_tree_agents();
+        app.tree_show_spaces = true;
+        app.tree_show_tabs = true;
+        app.tree_show_agents = true;
+        app.sidebar_agents.row_gap = 1;
+        app.sidebar_spaces.row_gap = 1;
+
+        let area = Rect::new(0, 0, 30, 24);
+        let buffer = rendered_sidebar(&app, area);
+        let (_, detail) = ordered_sidebar_sections(&app, area);
+
+        eprintln!("\n     +{}+  bg", "-".repeat(area.width as usize));
+        for y in detail.y..(detail.y + detail.height).min(area.height) {
+            let mut text = String::new();
+            let mut bg = String::new();
+            for x in area.x..area.x + area.width {
+                let cell = &buffer[(x, y)];
+                text.push_str(cell.symbol());
+                bg.push(if cell.style().bg == Some(app.palette.active_row_bg) {
+                    '#'
+                } else {
+                    '.'
+                });
+            }
+            eprintln!("{y:>4} |{text}| {bg}");
+        }
+        eprintln!("     +{}+", "-".repeat(area.width as usize));
     }
 }

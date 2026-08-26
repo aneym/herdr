@@ -1246,6 +1246,11 @@ mod tests {
             collapsed_space_keys: Default::default(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
+            tree_show_spaces: true,
+            tree_show_tabs: true,
+            tree_show_agents: true,
+            tree_collapsed_spaces: Default::default(),
+            tree_collapsed_tabs: Default::default(),
         };
         let (events, _event_rx) = mpsc::channel(4);
 
@@ -1359,6 +1364,11 @@ mod tests {
             collapsed_space_keys: Default::default(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
+            tree_show_spaces: true,
+            tree_show_tabs: true,
+            tree_show_agents: true,
+            tree_collapsed_spaces: Default::default(),
+            tree_collapsed_tabs: Default::default(),
         };
         let (events, _event_rx) = mpsc::channel(4);
 
@@ -1452,6 +1462,11 @@ mod tests {
             collapsed_space_keys: Default::default(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
+            tree_show_spaces: true,
+            tree_show_tabs: true,
+            tree_show_agents: true,
+            tree_collapsed_spaces: Default::default(),
+            tree_collapsed_tabs: Default::default(),
         };
         let (events, _event_rx) = mpsc::channel(4);
 
@@ -1550,6 +1565,11 @@ mod tests {
             collapsed_space_keys: Default::default(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
+            tree_show_spaces: true,
+            tree_show_tabs: true,
+            tree_show_agents: true,
+            tree_collapsed_spaces: Default::default(),
+            tree_collapsed_tabs: Default::default(),
         };
         let (events, _event_rx) = mpsc::channel(4);
 
@@ -1670,6 +1690,11 @@ mod tests {
             collapsed_space_keys: Default::default(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
+            tree_show_spaces: true,
+            tree_show_tabs: true,
+            tree_show_agents: true,
+            tree_collapsed_spaces: Default::default(),
+            tree_collapsed_tabs: Default::default(),
         };
         let (events, _event_rx) = mpsc::channel(4);
 
@@ -1792,6 +1817,11 @@ mod tests {
             collapsed_space_keys: Default::default(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
+            tree_show_spaces: true,
+            tree_show_tabs: true,
+            tree_show_agents: true,
+            tree_collapsed_spaces: Default::default(),
+            tree_collapsed_tabs: Default::default(),
         };
         let (events, _event_rx) = mpsc::channel(4);
 
@@ -1995,6 +2025,11 @@ mod tests {
             collapsed_space_keys: Default::default(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
+            tree_show_spaces: true,
+            tree_show_tabs: true,
+            tree_show_agents: true,
+            tree_collapsed_spaces: Default::default(),
+            tree_collapsed_tabs: Default::default(),
         };
         (snapshot, history)
     }

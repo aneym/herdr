@@ -4,6 +4,17 @@ use crate::app::state::{AppState, ViewLayout};
 
 use super::ScrollbarClickTarget;
 
+/// What a click on a tree-view space/tab header row landed on.
+pub(super) enum TreeHeaderHit {
+    /// The disclosure chevron: collapse or expand this group.
+    Toggle { space: bool, key: String },
+    /// The row body: focus the space, and the tab when the header names one.
+    Focus {
+        ws_idx: usize,
+        tab_idx: Option<usize>,
+    },
+}
+
 impl AppState {
     pub(super) fn workspace_list_rect(&self) -> Rect {
         let sidebar = self.view.sidebar_rect;
@@ -568,6 +579,65 @@ impl AppState {
         false
     }
 
+    /// A tree-view space/tab header row hit at (col, row): its disclosure
+    /// chevron, or the row body (which focuses the space or tab).
+    pub(super) fn tree_header_at(
+        &self,
+        entries: &[crate::ui::AgentPanelListEntry],
+        col: u16,
+        row: u16,
+    ) -> Option<TreeHeaderHit> {
+        if self.sidebar_collapsed {
+            return None;
+        }
+
+        let detail_area = self.agent_panel_rect();
+        let metrics = crate::ui::agent_panel_scroll_metrics(self, entries, detail_area);
+        let body = crate::ui::agent_panel_body_rect(
+            detail_area,
+            crate::ui::should_show_scrollbar(metrics),
+        );
+        if body.height == 0 || row < body.y || row >= body.y + body.height {
+            return None;
+        }
+
+        let mut row_y = body.y;
+        let body_bottom = body.y + body.height;
+        let scroll = self.agent_panel_scroll.min(metrics.max_offset_from_bottom);
+        for (index, entry) in entries.iter().enumerate().skip(scroll) {
+            let height = crate::ui::agent_panel_list_entry_height(self, entry, body.height);
+            if row_y.saturating_add(height) > body_bottom {
+                break;
+            }
+            if row >= row_y && row < row_y.saturating_add(height) {
+                let (header, is_space) = match entry {
+                    crate::ui::AgentPanelListEntry::SpaceHeader(header) => (header, true),
+                    crate::ui::AgentPanelListEntry::TabHeader(header) => (header, false),
+                    _ => return None,
+                };
+                let chevron = crate::ui::tree_header_chevron_rect(body, row_y, header.indent);
+                if chevron.width > 0
+                    && col >= chevron.x
+                    && col < chevron.x.saturating_add(chevron.width)
+                {
+                    return Some(TreeHeaderHit::Toggle {
+                        space: is_space,
+                        key: header.key.clone(),
+                    });
+                }
+                return Some(TreeHeaderHit::Focus {
+                    ws_idx: header.ws_idx,
+                    tab_idx: header.tab_idx,
+                });
+            }
+            row_y = row_y
+                .saturating_add(height)
+                .saturating_add(crate::ui::agent_panel_list_entry_gap(self, entries, index))
+                .min(body_bottom);
+        }
+        None
+    }
+
     /// The durable agent identity whose group chevron sits at (col, row), if
     /// any. Only owner rows with children expose a chevron.
     pub(super) fn agent_group_toggle_at(
@@ -667,7 +737,9 @@ impl AppState {
                     | crate::ui::AgentPanelListEntry::Automation(detail) => {
                         Some((detail.ws_idx, detail.tab_idx, detail.pane_id))
                     }
-                    crate::ui::AgentPanelListEntry::AutomationsHeader => None,
+                    crate::ui::AgentPanelListEntry::AutomationsHeader
+                    | crate::ui::AgentPanelListEntry::SpaceHeader(_)
+                    | crate::ui::AgentPanelListEntry::TabHeader(_) => None,
                 };
             }
             let gap = match entry {
@@ -697,7 +769,7 @@ mod tests {
 
     use super::super::{app_for_mouse_test, capture_snapshot, mouse, unique_temp_path};
     use crate::{
-        app::state::{AgentPanelSort, DragTarget, Mode},
+        app::state::{AgentPanelSort, ContextMenuKind, ContextMenuState, DragTarget, Mode},
         config::SidebarCollapsedModeConfig,
         detect::{Agent, AgentState},
         workspace::Workspace,
@@ -1178,8 +1250,29 @@ mod tests {
         );
     }
 
+    fn open_sidebar_view_picker(app: &mut crate::app::App) -> ContextMenuState {
+        // Tree view hands the whole sidebar to the agents panel, so the header
+        // label only lines up when the rect comes from the ordered sections.
+        let (_, detail_area) =
+            crate::ui::ordered_sidebar_sections(&app.state, app.state.view.sidebar_rect);
+        let toggle = crate::ui::agent_panel_toggle_rect(detail_area, app.state.agent_panel_sort);
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            toggle.x,
+            toggle.y,
+        ));
+        app.state.context_menu.take().expect("sidebar view picker")
+    }
+
+    fn picker_item_index(menu: &ContextMenuState, suffix: &str) -> usize {
+        menu.items()
+            .iter()
+            .position(|item| item.ends_with(suffix))
+            .unwrap_or_else(|| panic!("no {suffix} entry in the sidebar view picker"))
+    }
+
     #[test]
-    fn clicking_agent_panel_toggle_switches_sort() {
+    fn clicking_agent_panel_toggle_opens_view_picker() {
         let mut app = app_for_mouse_test();
         app.state.workspaces = vec![Workspace::test_new("test")];
         app.state.active = Some(0);
@@ -1187,39 +1280,55 @@ mod tests {
         app.state.replace_mode(Mode::Terminal);
         app.state.agent_panel_scroll = 3;
 
-        let (_, detail_area) = crate::ui::expanded_sidebar_sections(
-            app.state.view.sidebar_rect,
-            app.state.sidebar_section_split,
-        );
-        let toggle = crate::ui::agent_panel_toggle_rect(detail_area, app.state.agent_panel_sort);
-        app.handle_mouse(mouse(
-            MouseEventKind::Down(MouseButton::Left),
-            toggle.x,
-            toggle.y,
+        let menu = open_sidebar_view_picker(&mut app);
+
+        // The label opens the picker; it no longer cycles sorts on its own, so
+        // neither the sort nor the scroll offset moves until an item is picked.
+        assert!(matches!(
+            menu.kind,
+            ContextMenuKind::SidebarView {
+                sort: AgentPanelSort::Spaces,
+                show_spaces: true,
+                show_tabs: true,
+                show_agents: true,
+            }
         ));
+        assert_eq!(app.state.mode(), Mode::ContextMenu);
+        assert_eq!(app.state.agent_panel_sort, AgentPanelSort::Spaces);
+        assert_eq!(app.state.agent_panel_scroll, 3);
+
+        let priority = picker_item_index(&menu, "priority");
+        app.apply_context_menu_action_via_api(menu, priority);
 
         assert_eq!(app.state.agent_panel_sort, AgentPanelSort::Priority);
         assert_eq!(app.state.agent_panel_scroll, 0);
+    }
 
-        let (_, detail_area) = crate::ui::expanded_sidebar_sections(
-            app.state.view.sidebar_rect,
-            app.state.sidebar_section_split,
-        );
-        let toggle = crate::ui::agent_panel_toggle_rect(detail_area, app.state.agent_panel_sort);
-        app.handle_mouse(mouse(
-            MouseEventKind::Down(MouseButton::Left),
-            toggle.x,
-            toggle.y,
-        ));
-        assert_eq!(app.state.agent_panel_sort, AgentPanelSort::Triage);
+    #[test]
+    fn view_picker_selects_tree_then_toggles_its_layers() {
+        let mut app = app_for_mouse_test();
+        app.state.workspaces = vec![Workspace::test_new("test")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.replace_mode(Mode::Terminal);
 
-        let toggle = crate::ui::agent_panel_toggle_rect(detail_area, app.state.agent_panel_sort);
-        app.handle_mouse(mouse(
-            MouseEventKind::Down(MouseButton::Left),
-            toggle.x,
-            toggle.y,
-        ));
-        assert_eq!(app.state.agent_panel_sort, AgentPanelSort::Spaces);
+        let menu = open_sidebar_view_picker(&mut app);
+        let tree = picker_item_index(&menu, "tree");
+        app.apply_context_menu_action_via_api(menu, tree);
+        assert_eq!(app.state.agent_panel_sort, AgentPanelSort::Tree);
+
+        // The layer toggles only exist once the tree view is the active one.
+        let menu = open_sidebar_view_picker(&mut app);
+        let spaces = picker_item_index(&menu, "spaces");
+        app.apply_context_menu_action_via_api(menu, spaces);
+        assert!(!app.state.tree_show_spaces);
+        assert!(app.state.tree_show_tabs);
+
+        let menu = open_sidebar_view_picker(&mut app);
+        let tabs = picker_item_index(&menu, "tabs");
+        app.apply_context_menu_action_via_api(menu, tabs);
+        assert!(!app.state.tree_show_spaces);
+        assert!(!app.state.tree_show_tabs);
     }
 
     #[test]

@@ -919,6 +919,11 @@ fn capture_snapshot(state: &AppState) -> crate::persist::SessionSnapshot {
         state.collapsed_space_keys.clone(),
         state.automations_expanded,
         state.collapsed_agent_group_keys.clone(),
+        state.tree_show_spaces,
+        state.tree_show_tabs,
+        state.tree_show_agents,
+        state.tree_collapsed_spaces.clone(),
+        state.tree_collapsed_tabs.clone(),
     )
 }
 

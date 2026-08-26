@@ -269,9 +269,13 @@ pub(super) fn state_label(state: AgentState, seen: bool) -> &'static str {
 pub(super) fn state_label_color(state: AgentState, seen: bool, p: &Palette) -> Color {
     match (state, seen) {
         (AgentState::Blocked, _) => p.red,
-        (AgentState::Working, _) => p.yellow,
-        (AgentState::Idle, false) => p.teal,
-        (AgentState::Idle, true) => p.green,
+        // Peach, not yellow: the pale yellows in the dark themes sit too close
+        // to green in hue and lightness to tell apart at dot size.
+        (AgentState::Working, _) => p.peach,
+        // Unread completion is the thing worth looking at, so it keeps the
+        // strong colour. Once read, the dot recedes to grey.
+        (AgentState::Idle, false) => p.green,
+        (AgentState::Idle, true) => p.overlay0,
         (AgentState::Unknown, _) => p.overlay0,
     }
 }
@@ -306,9 +310,9 @@ mod tests {
         ] {
             for ((state, seen, color), expected_symbol) in [
                 (AgentState::Blocked, true, palette.red),
-                (AgentState::Working, true, palette.yellow),
-                (AgentState::Idle, false, palette.teal),
-                (AgentState::Idle, true, palette.green),
+                (AgentState::Working, true, palette.peach),
+                (AgentState::Idle, false, palette.green),
+                (AgentState::Idle, true, palette.overlay0),
                 (AgentState::Unknown, true, palette.overlay0),
             ]
             .into_iter()

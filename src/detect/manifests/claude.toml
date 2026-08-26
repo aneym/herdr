@@ -115,7 +115,11 @@ id = "live_prompt_box"
 state = "idle"
 priority = 950
 region = "prompt_box_body"
-visible_idle = true
+# NOT visible_idle. Claude keeps the prompt box on screen during a turn, so a
+# transient redraw that drops the working marker still matches this rule. With
+# visible_idle the Working-to-Idle confirmation delay is bypassed and Herdr
+# publishes a false completion immediately, measured at ~44 flips per minute.
+# Letting the delay apply absorbs the redraw.
 line_regex = ['^\s*❯']
 not = [
   { contains = ["enter to select"] },

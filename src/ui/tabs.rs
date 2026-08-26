@@ -999,7 +999,7 @@ mod tests {
             }
             if state == AgentState::Idle && !seen {
                 assert_eq!(expected.0, "●");
-                assert_eq!(expected.1.fg, Some(app.palette.teal));
+                assert_eq!(expected.1.fg, Some(app.palette.green));
                 assert!(actual.is_some());
             }
         }

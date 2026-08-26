@@ -100,6 +100,7 @@ pub enum AgentPanelSortConfig {
     Spaces,
     Priority,
     Triage,
+    Tree,
 }
 
 impl AgentPanelSortConfig {
@@ -108,6 +109,7 @@ impl AgentPanelSortConfig {
             Self::Spaces => "spaces",
             Self::Priority => "priority",
             Self::Triage => "triage",
+            Self::Tree => "tree",
         }
     }
 }

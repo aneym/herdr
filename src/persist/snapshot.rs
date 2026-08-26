@@ -12,6 +12,10 @@ fn default_profile() -> String {
     DEFAULT_PROFILE.to_string()
 }
 
+fn default_true() -> bool {
+    true
+}
+
 fn deserialize_profile<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -52,6 +56,16 @@ pub struct SessionSnapshot {
     pub automations_expanded: bool,
     #[serde(default)]
     pub collapsed_agent_group_keys: std::collections::HashSet<String>,
+    #[serde(default = "default_true")]
+    pub tree_show_spaces: bool,
+    #[serde(default = "default_true")]
+    pub tree_show_tabs: bool,
+    #[serde(default = "default_true")]
+    pub tree_show_agents: bool,
+    #[serde(default)]
+    pub tree_collapsed_spaces: std::collections::HashSet<String>,
+    #[serde(default)]
+    pub tree_collapsed_tabs: std::collections::HashSet<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -328,6 +342,16 @@ struct RawSessionSnapshot {
     automations_expanded: bool,
     #[serde(default)]
     collapsed_agent_group_keys: std::collections::HashSet<String>,
+    #[serde(default = "default_true")]
+    tree_show_spaces: bool,
+    #[serde(default = "default_true")]
+    tree_show_tabs: bool,
+    #[serde(default = "default_true")]
+    tree_show_agents: bool,
+    #[serde(default)]
+    tree_collapsed_spaces: std::collections::HashSet<String>,
+    #[serde(default)]
+    tree_collapsed_tabs: std::collections::HashSet<String>,
 }
 
 fn migrate_snapshot(raw: RawSessionSnapshot) -> Result<SessionSnapshot, String> {
@@ -347,6 +371,11 @@ fn migrate_snapshot(raw: RawSessionSnapshot) -> Result<SessionSnapshot, String> 
         collapsed_space_keys: raw.collapsed_space_keys,
         automations_expanded: raw.automations_expanded,
         collapsed_agent_group_keys: raw.collapsed_agent_group_keys,
+        tree_show_spaces: raw.tree_show_spaces,
+        tree_show_tabs: raw.tree_show_tabs,
+        tree_show_agents: raw.tree_show_agents,
+        tree_collapsed_spaces: raw.tree_collapsed_spaces,
+        tree_collapsed_tabs: raw.tree_collapsed_tabs,
     })
 }
 
@@ -423,6 +452,11 @@ pub fn capture(
     collapsed_space_keys: std::collections::HashSet<String>,
     automations_expanded: bool,
     collapsed_agent_group_keys: std::collections::HashSet<String>,
+    tree_show_spaces: bool,
+    tree_show_tabs: bool,
+    tree_show_agents: bool,
+    tree_collapsed_spaces: std::collections::HashSet<String>,
+    tree_collapsed_tabs: std::collections::HashSet<String>,
 ) -> SessionSnapshot {
     SessionSnapshot {
         version: SNAPSHOT_VERSION,
@@ -438,6 +472,11 @@ pub fn capture(
         collapsed_space_keys,
         automations_expanded,
         collapsed_agent_group_keys,
+        tree_show_spaces,
+        tree_show_tabs,
+        tree_show_agents,
+        tree_collapsed_spaces,
+        tree_collapsed_tabs,
     }
 }
 
@@ -825,6 +864,11 @@ mod tests {
             state.collapsed_space_keys.clone(),
             state.automations_expanded,
             state.collapsed_agent_group_keys.clone(),
+            state.tree_show_spaces,
+            state.tree_show_tabs,
+            state.tree_show_agents,
+            state.tree_collapsed_spaces.clone(),
+            state.tree_collapsed_tabs.clone(),
         )
     }
 
@@ -892,6 +936,11 @@ mod tests {
             collapsed_space_keys: std::collections::HashSet::new(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
+            tree_show_spaces: true,
+            tree_show_tabs: true,
+            tree_show_agents: true,
+            tree_collapsed_spaces: std::collections::HashSet::new(),
+            tree_collapsed_tabs: std::collections::HashSet::new(),
         };
         let json = serde_json::to_string(&snap).unwrap();
         let restored = parse_snapshot(&json).unwrap();
@@ -1036,6 +1085,11 @@ mod tests {
             collapsed_space_keys: std::collections::HashSet::new(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
+            tree_show_spaces: true,
+            tree_show_tabs: true,
+            tree_show_agents: true,
+            tree_collapsed_spaces: std::collections::HashSet::new(),
+            tree_collapsed_tabs: std::collections::HashSet::new(),
             version: SNAPSHOT_VERSION,
         };
 
@@ -1110,6 +1164,11 @@ mod tests {
             collapsed_space_keys: std::collections::HashSet::new(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
+            tree_show_spaces: true,
+            tree_show_tabs: true,
+            tree_show_agents: true,
+            tree_collapsed_spaces: std::collections::HashSet::new(),
+            tree_collapsed_tabs: std::collections::HashSet::new(),
             version: SNAPSHOT_VERSION,
         };
 
@@ -1320,6 +1379,48 @@ mod tests {
         let json = serde_json::to_string(&snapshot).unwrap();
         let restored = parse_snapshot(&json).unwrap();
         assert!(restored.collapsed_agent_group_keys.contains("agent_lead"));
+    }
+
+    #[test]
+    fn capture_contract_tracks_tree_state() {
+        let mut state = state_with_workspaces(&["one"]);
+        state.tree_show_spaces = false;
+        state.tree_show_tabs = false;
+        state.tree_show_agents = false;
+        state.tree_collapsed_spaces.insert("repo-key".into());
+        state.tree_collapsed_tabs.insert("repo-key#0".into());
+
+        let snapshot = capture_from_state(&state);
+        assert!(!snapshot.tree_show_spaces);
+        assert!(!snapshot.tree_show_tabs);
+        assert!(!snapshot.tree_show_agents);
+        assert!(snapshot.tree_collapsed_spaces.contains("repo-key"));
+        assert!(snapshot.tree_collapsed_tabs.contains("repo-key#0"));
+
+        let json = serde_json::to_string(&snapshot).unwrap();
+        let restored = parse_snapshot(&json).unwrap();
+        assert!(!restored.tree_show_spaces);
+        assert!(!restored.tree_show_tabs);
+        assert!(!restored.tree_show_agents);
+        assert!(restored.tree_collapsed_spaces.contains("repo-key"));
+        assert!(restored.tree_collapsed_tabs.contains("repo-key#0"));
+    }
+
+    #[test]
+    fn tree_show_flags_default_true_when_missing() {
+        let state = state_with_workspaces(&["one"]);
+        let snapshot = capture_from_state(&state);
+        let serialized = serde_json::to_value(&snapshot).unwrap();
+
+        let mut old = serialized;
+        let obj = old.as_object_mut().unwrap();
+        obj.remove("tree_show_spaces");
+        obj.remove("tree_show_tabs");
+        obj.remove("tree_show_agents");
+        let migrated = migrate_snapshot(serde_json::from_value(old).unwrap()).unwrap();
+        assert!(migrated.tree_show_spaces);
+        assert!(migrated.tree_show_tabs);
+        assert!(migrated.tree_show_agents);
     }
 
     #[test]
@@ -1786,6 +1887,11 @@ mod tests {
             collapsed_space_keys: std::collections::HashSet::new(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
+            tree_show_spaces: true,
+            tree_show_tabs: true,
+            tree_show_agents: true,
+            tree_collapsed_spaces: std::collections::HashSet::new(),
+            tree_collapsed_tabs: std::collections::HashSet::new(),
         };
 
         let json = serde_json::to_string(&snap).unwrap();

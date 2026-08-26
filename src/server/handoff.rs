@@ -488,6 +488,11 @@ mod tests {
             active_profile: crate::workspace::DEFAULT_PROFILE.to_string(),
             automations_expanded: false,
             collapsed_agent_group_keys: Default::default(),
+            tree_show_spaces: true,
+            tree_show_tabs: true,
+            tree_show_agents: true,
+            tree_collapsed_spaces: Default::default(),
+            tree_collapsed_tabs: Default::default(),
         }
     }
 

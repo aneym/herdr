@@ -116,6 +116,9 @@ impl App {
             crate::app::state::AgentPanelSort::Triage => {
                 crate::config::AgentPanelSortConfig::Triage.as_str()
             }
+            crate::app::state::AgentPanelSort::Tree => {
+                crate::config::AgentPanelSortConfig::Tree.as_str()
+            }
         };
         if self.update_config_file("agent panel sort", |content| {
             crate::config::upsert_section_value(
