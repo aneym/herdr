@@ -1918,6 +1918,21 @@ impl AppState {
 
     #[cfg(test)]
     fn cycle_agent_entry(&mut self, forward: bool) {
+        let entries = crate::ui::agent_panel_entries(self);
+        if let Some(idx) = self.agent_cycle_target(&entries, forward) {
+            self.focus_agent_entry(idx);
+        }
+    }
+
+    /// Cmd+E target selection over the flat panel entries. Shared by the
+    /// runtime key path (`relative_agent_entry`, which passes runtime-aware
+    /// entries) and the test-only `cycle_agent_entry` wrapper, so the tested
+    /// logic IS the shipped logic. Returns the panel index to focus.
+    pub(crate) fn agent_cycle_target(
+        &self,
+        entries: &[crate::ui::AgentPanelEntry],
+        forward: bool,
+    ) -> Option<usize> {
         /// Cmd+E ordering. Higher wins. Blocked agents are waiting on Alex, so
         /// they come first. An unread completion is the next thing worth
         /// reading. A read completion is still visitable. A working agent has
@@ -1932,9 +1947,8 @@ impl AppState {
             }
         }
 
-        let entries = crate::ui::agent_panel_entries(self);
         if entries.is_empty() {
-            return;
+            return None;
         }
 
         let focused = self
@@ -1979,7 +1993,7 @@ impl AppState {
 
             // Tabs in panel order, each ranked by its strongest agent.
             let mut tab_order: Vec<(usize, usize)> = Vec::new();
-            for entry in &entries {
+            for entry in entries {
                 let key = (entry.ws_idx, entry.tab_idx);
                 if !tab_order.contains(&key) {
                     tab_order.push(key);
@@ -2033,8 +2047,7 @@ impl AppState {
                         .max_by_key(|(_, e)| cycle_attention_rank(e.state, e.seen))
                         .map(|(idx, _)| idx)
                     {
-                        self.focus_agent_entry(idx);
-                        return;
+                        return Some(idx);
                     }
                 }
             }
@@ -2063,7 +2076,7 @@ impl AppState {
             idx = step(idx);
         }
         if order.is_empty() {
-            return;
+            return None;
         }
 
         // Walk from the neighbour outward and take the first candidate at the
@@ -2076,7 +2089,7 @@ impl AppState {
             .find(|i| ranked(*i) == best)
             .unwrap_or(start);
 
-        self.focus_agent_entry(target_idx);
+        Some(target_idx)
     }
 
     /// `idx` indexes the flat agent list from `crate::ui::agent_panel_entries`.

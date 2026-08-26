@@ -851,25 +851,12 @@ impl App {
     }
 
     fn relative_agent_entry(&self, forward: bool) -> Option<(usize, usize, crate::layout::PaneId)> {
+        // Attention-aware selection shared with the tested cycle logic in
+        // `AppState::agent_cycle_target`. This used to step positionally,
+        // which in the stable-ordered tree view sent cmd+E to whatever row
+        // happened to sit next rather than the agent needing attention.
         let entries = crate::ui::agent_panel_entries_from(&self.state, &self.terminal_runtimes);
-        if entries.is_empty() {
-            return None;
-        }
-        let focused = self
-            .state
-            .active
-            .and_then(|idx| self.state.workspaces.get(idx))
-            .and_then(crate::workspace::Workspace::focused_pane_id);
-        let current_idx = entries
-            .iter()
-            .position(|entry| Some(entry.pane_id) == focused);
-        let next_idx = match (current_idx, forward) {
-            (Some(idx), true) => (idx + 1) % entries.len(),
-            (Some(0), false) => entries.len() - 1,
-            (Some(idx), false) => idx - 1,
-            (None, true) => 0,
-            (None, false) => entries.len() - 1,
-        };
+        let next_idx = self.state.agent_cycle_target(&entries, forward)?;
         let target = entries.get(next_idx)?;
         Some((next_idx, target.ws_idx, target.pane_id))
     }
@@ -2227,6 +2214,38 @@ mod tests {
         app.execute_tui_navigate_action(NavigateAction::NextAgent, ActionContext::Prefix);
 
         assert_eq!(app.state.active, Some(1));
+    }
+
+    #[test]
+    fn next_agent_prefers_unread_completion_over_positional_order_in_tree_view() {
+        // Regression: the runtime key path stepped positionally and never ran
+        // the attention ranking, so in tree view cmd+E landed on whatever row
+        // sat next instead of the unread completion.
+        let mut app = app_with_test_workspaces(&["first", "second", "third"]);
+        app.state.agent_panel_sort = crate::app::state::AgentPanelSort::Tree;
+        let states = [
+            crate::detect::AgentState::Working,
+            crate::detect::AgentState::Working,
+            crate::detect::AgentState::Idle,
+        ];
+        for (ws_idx, agent_state) in states.iter().enumerate() {
+            let pane_id = app.state.workspaces[ws_idx].tabs[0].root_pane;
+            let terminal_id = app.state.workspaces[ws_idx].tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+            terminal.detected_agent = Some(crate::detect::Agent::Claude);
+            terminal.state = *agent_state;
+            app.state.workspaces[ws_idx].tabs[0]
+                .panes
+                .get_mut(&pane_id)
+                .unwrap()
+                .seen = ws_idx != 2;
+        }
+
+        app.execute_tui_navigate_action(NavigateAction::NextAgent, ActionContext::Prefix);
+
+        assert_eq!(app.state.active, Some(2));
     }
 
     fn mark_all_workspaces_as_agents(app: &mut App) {
