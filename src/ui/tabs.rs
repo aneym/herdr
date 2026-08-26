@@ -66,21 +66,37 @@ fn tab_width(app: &AppState, ws: &crate::workspace::Workspace, tab_idx: usize) -
         .tabs
         .get(tab_idx)
         .and_then(|tab| tab_status(app, tab))
-        .map(|(glyph, _)| display_width_u16(glyph).saturating_add(1))
+        .map(|icons| {
+            icons
+                .iter()
+                .fold(0_u16, |width, (glyph, _)| {
+                    width.saturating_add(display_width_u16(glyph))
+                })
+                .saturating_add(1)
+        })
         .unwrap_or(0);
     display_width_u16(&tab_chrome_label(ws, tab_idx))
         .saturating_add(4 + status_width)
         .max(MIN_TAB_WIDTH)
 }
 
-fn tab_agent_state(app: &AppState, tab: &crate::workspace::Tab) -> Option<(AgentState, bool)> {
-    tab.panes
-        .values()
-        .filter_map(|pane| {
-            app.terminals
-                .get(&pane.attached_terminal_id)
-                .map(|terminal| (terminal.state, pane.seen))
+/// One (state, seen) per pane in layout order, so the tab bar can show a
+/// glyph per pane rather than one aggregate for the whole tab.
+fn tab_pane_states(app: &AppState, tab: &crate::workspace::Tab) -> Vec<(AgentState, bool)> {
+    tab.layout
+        .pane_ids()
+        .into_iter()
+        .filter_map(|pane_id| {
+            let pane = tab.panes.get(&pane_id)?;
+            let terminal = app.terminals.get(&pane.attached_terminal_id)?;
+            Some((terminal.state, pane.seen))
         })
+        .collect()
+}
+
+fn tab_agent_state(app: &AppState, tab: &crate::workspace::Tab) -> Option<(AgentState, bool)> {
+    tab_pane_states(app, tab)
+        .into_iter()
         .max_by_key(|(state, seen)| match (state, seen) {
             (AgentState::Blocked, _) => 4,
             (AgentState::Idle, false) => 3,
@@ -109,20 +125,29 @@ fn should_show_tab_status(
     }
 }
 
-fn tab_status<'a>(app: &'a AppState, tab: &crate::workspace::Tab) -> Option<(&'a str, Style)> {
+/// The glyphs a tab shows: one per pane, in layout order. Visibility is
+/// gated on the tab's highest-attention pane so the show_tab_status modes
+/// keep their meaning; once shown, every pane reports its own state.
+fn tab_status<'a>(app: &'a AppState, tab: &crate::workspace::Tab) -> Option<Vec<(&'a str, Style)>> {
     let (state, seen) = tab_agent_state(app, tab)?;
     if !should_show_tab_status(app.show_tab_status, state, seen) {
         return None;
     }
-    let icon = resolved_agent_icon(
-        &app.sidebar_agents,
-        state,
-        seen,
-        app.status_indicators,
-        app.animation_tick,
-        &app.palette,
-    );
-    (!icon.0.is_empty()).then_some(icon)
+    let icons: Vec<(&str, Style)> = tab_pane_states(app, tab)
+        .into_iter()
+        .map(|(state, seen)| {
+            resolved_agent_icon(
+                &app.sidebar_agents,
+                state,
+                seen,
+                app.status_indicators,
+                app.animation_tick,
+                &app.palette,
+            )
+        })
+        .filter(|(glyph, _)| !glyph.is_empty())
+        .collect();
+    (!icons.is_empty()).then_some(icons)
 }
 
 fn tab_chrome_label(ws: &crate::workspace::Workspace, tab_idx: usize) -> String {
@@ -517,7 +542,14 @@ pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
         let name = tab_chrome_label(ws, idx);
         let status = tab_status(app, tab);
         let status_width = status
-            .map(|(glyph, _)| display_width(glyph).saturating_add(1))
+            .as_ref()
+            .map(|icons| {
+                icons
+                    .iter()
+                    .map(|(glyph, _)| display_width(glyph))
+                    .sum::<usize>()
+                    .saturating_add(1)
+            })
             .unwrap_or(0);
         // Pad by terminal columns, not chars, so wide glyphs stay centered.
         let padding = width
@@ -530,8 +562,10 @@ pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
             right = padding - left
         );
         let mut line = ratatui::text::Line::from(Span::styled(text, style));
-        if let Some((glyph, icon_style)) = status {
-            line.push_span(Span::styled(glyph, style.patch(icon_style)));
+        if let Some(icons) = status {
+            for (glyph, icon_style) in icons {
+                line.push_span(Span::styled(glyph, style.patch(icon_style)));
+            }
             line.push_span(Span::styled(" ", style));
         }
         frame.render_widget(Paragraph::new(line), rect);
@@ -995,7 +1029,7 @@ mod tests {
             if expected.0.is_empty() {
                 assert!(actual.is_none(), "state={state:?}, seen={seen}");
             } else {
-                assert_eq!(actual, Some(expected), "state={state:?}, seen={seen}");
+                assert_eq!(actual, Some(vec![expected]), "state={state:?}, seen={seen}");
             }
             if state == AgentState::Idle && !seen {
                 assert_eq!(expected.0, "●");
@@ -1003,6 +1037,52 @@ mod tests {
                 assert!(actual.is_some());
             }
         }
+    }
+
+    #[test]
+    fn tab_status_shows_one_glyph_per_pane_in_layout_order() {
+        let mut app = AppState::test_new();
+        let mut ws = Workspace::test_new("test");
+        let second_pane = ws.tabs[0]
+            .layout
+            .split_focused(ratatui::layout::Direction::Horizontal);
+        ws.tabs[0].panes.insert(
+            second_pane,
+            crate::pane::PaneState::new(crate::terminal::TerminalId::alloc()),
+        );
+        app.workspaces = vec![ws];
+        app.ensure_test_terminals();
+        app.show_tab_status = crate::config::ShowTabStatusConfig::All;
+
+        let root_pane = app.workspaces[0].tabs[0].root_pane;
+        let root_terminal = app.workspaces[0].tabs[0].panes[&root_pane]
+            .attached_terminal_id
+            .clone();
+        let second_terminal = app.workspaces[0].tabs[0].panes[&second_pane]
+            .attached_terminal_id
+            .clone();
+        app.terminals.get_mut(&root_terminal).unwrap().state = AgentState::Blocked;
+        app.terminals.get_mut(&second_terminal).unwrap().state = AgentState::Idle;
+        app.workspaces[0].tabs[0]
+            .panes
+            .get_mut(&second_pane)
+            .unwrap()
+            .seen = true;
+
+        let icons = tab_status(&app, &app.workspaces[0].tabs[0]).unwrap();
+        assert_eq!(icons.len(), 2);
+        assert_eq!(icons[0].1.fg, Some(app.palette.red));
+        assert_eq!(icons[1].1.fg, Some(app.palette.overlay0));
+
+        // Width accounts for every pane glyph plus the trailing space.
+        let glyph_width: u16 = icons
+            .iter()
+            .map(|(glyph, _)| display_width_u16(glyph))
+            .sum();
+        let expected = display_width_u16(&tab_chrome_label(&app.workspaces[0], 0))
+            .saturating_add(4 + glyph_width + 1)
+            .max(MIN_TAB_WIDTH);
+        assert_eq!(tab_width(&app, &app.workspaces[0], 0), expected);
     }
 
     #[test]

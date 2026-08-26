@@ -256,6 +256,22 @@ pub(super) fn resolved_agent_icon<'a>(
     )
 }
 
+/// Config-aware state glyph without the working-state spinner animation, for
+/// roll-up dots that stand in for panes rather than a live agent row.
+pub(super) fn resolved_state_dot<'a>(
+    config: &'a crate::config::AgentsSidebarConfig,
+    state: AgentState,
+    seen: bool,
+    indicator_style: StatusIndicatorStyle,
+    p: &Palette,
+) -> (&'a str, Style) {
+    let default_icon = state_icon(state, seen, indicator_style, p);
+    (
+        config.state_icon(state, seen).unwrap_or(default_icon.0),
+        default_icon.1,
+    )
+}
+
 pub(super) fn state_label(state: AgentState, seen: bool) -> &'static str {
     match (state, seen) {
         (AgentState::Blocked, _) => "blocked",

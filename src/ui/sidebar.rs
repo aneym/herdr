@@ -10,9 +10,7 @@ use ratatui::{
 
 use self::tokens::{ResolvedToken, ResolvedTokenKind, SpaceTokenContext};
 use super::scrollbar::{render_scrollbar, should_show_scrollbar};
-use super::status::{
-    animated_state_icon, resolved_agent_icon, state_icon, state_label, state_label_color,
-};
+use super::status::{resolved_agent_icon, resolved_state_dot, state_label, state_label_color};
 use super::text::{display_width, display_width_u16, truncate_end};
 use crate::app::state::{AgentPanelSort, Palette};
 use crate::app::{AppState, Mode};
@@ -1688,7 +1686,13 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
             break;
         }
         let (agg_state, agg_seen) = ws.aggregate_state(&app.terminals);
-        let (icon, icon_style) = state_icon(agg_state, agg_seen, app.status_indicators, p);
+        let (icon, icon_style) = resolved_state_dot(
+            &app.sidebar_agents,
+            agg_state,
+            agg_seen,
+            app.status_indicators,
+            p,
+        );
         let is_selected = *ws_idx == app.selected && is_navigating;
         let is_active = Some(*ws_idx) == app.active;
         let selection_bg = workspace_selection_background(p, is_active);
@@ -1755,7 +1759,8 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
             } else {
                 Style::default().fg(p.overlay0)
             };
-            let (icon, icon_style) = animated_state_icon(
+            let (icon, icon_style) = resolved_agent_icon(
+                &app.sidebar_agents,
                 detail.state,
                 detail.seen,
                 app.status_indicators,
@@ -2219,7 +2224,13 @@ fn render_workspace_list(
             .filter(|(_, collapsed)| *collapsed)
             .map(|(key, _)| space_aggregate_state(app, key))
             .unwrap_or((agg_state, agg_seen));
-        let state_icon = state_icon(display_state, display_seen, app.status_indicators, p);
+        let state_icon = resolved_state_dot(
+            &app.sidebar_agents,
+            display_state,
+            display_seen,
+            app.status_indicators,
+            p,
+        );
         let state_text_style = Style::default()
             .fg(state_label_color(display_state, display_seen, p))
             .add_modifier(Modifier::DIM);
@@ -2533,16 +2544,29 @@ fn render_agent_detail(
                 // Past the cap the dots would crowd the label, so the rest
                 // collapse into a trailing count.
                 const MAX_DOTS: usize = 6;
-                let shown = header.child_states.len().min(MAX_DOTS);
-                trailing.extend(header.child_states[..shown].iter().map(|(state, seen)| {
-                    Span::styled(
-                        "●",
-                        Style::default().fg(state_label_color(*state, *seen, p)),
-                    )
-                }));
-                if header.child_states.len() > shown {
+                let dots: Vec<(&str, Style)> = header
+                    .child_states
+                    .iter()
+                    .map(|(state, seen)| {
+                        resolved_state_dot(
+                            &app.sidebar_agents,
+                            *state,
+                            *seen,
+                            app.status_indicators,
+                            p,
+                        )
+                    })
+                    .filter(|(glyph, _)| !glyph.is_empty())
+                    .collect();
+                let shown = dots.len().min(MAX_DOTS);
+                trailing.extend(
+                    dots[..shown]
+                        .iter()
+                        .map(|(glyph, style)| Span::styled(*glyph, *style)),
+                );
+                if dots.len() > shown {
                     trailing.push(Span::styled(
-                        format!("+{}", header.child_states.len() - shown),
+                        format!("+{}", dots.len() - shown),
                         Style::default().fg(p.overlay0),
                     ));
                 }
@@ -5414,6 +5438,40 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         let untouched = tree_header(&app, "space:1");
         assert!(!untouched.collapsed);
         assert_eq!(untouched.hidden_state, None);
+    }
+
+    #[test]
+    fn tree_header_dots_use_configured_state_icons() {
+        let mut app = app_with_tree_agents();
+        app.sidebar_agents
+            .state_icons
+            .insert("working".into(), "■".into());
+        app.sidebar_agents
+            .state_icons
+            .insert("working_unseen".into(), "■".into());
+        let pane_id = app.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.terminals
+            .get_mut(&terminal_id)
+            .expect("agent terminal")
+            .set_detected_state(Some(Agent::Pi), AgentState::Working);
+        let key = tree_tab_key(&app, 0, 0).expect("tab key");
+        app.tree_collapsed_tabs.insert(key);
+
+        let area = Rect::new(0, 0, 30, 24);
+        let mut terminal = Terminal::new(TestBackend::new(30, 24)).unwrap();
+        terminal
+            .draw(|frame| render_sidebar(&app, &TerminalRuntimeRegistry::new(), frame, area))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let square = (area.y..area.y + area.height)
+            .any(|y| (area.x..area.x + area.width).any(|x| buffer[(x, y)].symbol() == "■"));
+        assert!(
+            square,
+            "collapsed tab header roll-up must use the configured working icon"
+        );
     }
 
     #[test]
