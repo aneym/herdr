@@ -308,6 +308,18 @@ impl App {
                 None
             };
         let terminal_cwd_reported = matches!(ev, AppEvent::TerminalCwdReported { .. });
+        if let AppEvent::PaneDied { pane_id } = &ev {
+            // A pinned space keeps a live tab: grow a fresh shell tab before
+            // the died pane's removal takes the whole workspace with it.
+            if let Some((ws_idx, _)) = self.find_pane(*pane_id) {
+                if self
+                    .state
+                    .close_pane_would_close_workspace(ws_idx, *pane_id)
+                {
+                    self.respawn_tab_for_pinned_workspace(ws_idx);
+                }
+            }
+        }
         let previous_toast = self.state.toast.clone();
         let pane_updates = self.state.handle_app_event(ev);
         if let Some(agents) = manifest_update_agents {
@@ -1407,6 +1419,55 @@ mod tests {
             .status()
             .unwrap();
         assert!(status.success(), "git init failed for {}", path.display());
+    }
+
+    #[tokio::test]
+    async fn pane_died_in_pinned_workspace_respawns_tab_instead_of_closing() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &crate::config::Config::default(),
+            true,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("pinned")];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        let workspace_id = app.state.workspaces[0].id.clone();
+        app.state.tree_pinned_spaces.insert(workspace_id.clone());
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+
+        app.handle_internal_event(AppEvent::PaneDied { pane_id });
+
+        assert_eq!(app.state.workspaces.len(), 1);
+        assert_eq!(app.state.workspaces[0].id, workspace_id);
+        assert_eq!(app.state.workspaces[0].tabs.len(), 1);
+        assert_ne!(app.state.workspaces[0].tabs[0].root_pane, pane_id);
+        assert!(app.state.tree_pinned_spaces.contains(&workspace_id));
+        super::test_support::shutdown_test_runtimes(&mut app);
+    }
+
+    #[test]
+    fn pane_died_in_unpinned_workspace_still_closes_it() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &crate::config::Config::default(),
+            true,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("plain")];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+
+        app.handle_internal_event(AppEvent::PaneDied { pane_id });
+
+        assert!(app.state.workspaces.is_empty());
     }
 
     fn app_with_overlay(

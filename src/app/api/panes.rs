@@ -1598,6 +1598,11 @@ impl App {
                 "closing this pane would close a worktree group",
             ));
         }
+        if self.state.close_pane_would_close_workspace(ws_idx, pane_id) {
+            // A pinned space keeps a live tab instead of closing with its
+            // last pane.
+            self.respawn_tab_for_pinned_workspace(ws_idx);
+        }
         let workspace_snapshot = self.workspace_info(ws_idx);
         let terminal_id = self.state.terminal_id_for_pane(ws_idx, pane_id);
         let should_close_workspace = {
@@ -2416,6 +2421,32 @@ mod tests {
         assert_eq!(success.id, "req");
         assert_eq!(app.state.request_remove_linked_worktree, None);
         assert!(app.state.workspaces.is_empty());
+    }
+
+    #[tokio::test]
+    async fn api_pane_close_last_pane_of_pinned_workspace_respawns_tab() {
+        let (mut app, public_pane_id) = app_with_test_workspace();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        let workspace_id = app.state.workspaces[0].id.clone();
+        app.state.tree_pinned_spaces.insert(workspace_id.clone());
+        let old_tab_id = app.public_tab_id(0, 0).unwrap();
+
+        let response = app.handle_pane_close(
+            "req".into(),
+            PaneTarget {
+                pane_id: public_pane_id,
+            },
+        );
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(success.id, "req");
+        assert_eq!(app.state.workspaces.len(), 1);
+        assert_eq!(app.state.workspaces[0].id, workspace_id);
+        assert_eq!(app.state.workspaces[0].tabs.len(), 1);
+        assert_ne!(app.public_tab_id(0, 0).unwrap(), old_tab_id);
+        assert!(app.state.tree_pinned_spaces.contains(&workspace_id));
+        super::super::test_support::shutdown_test_runtimes(&mut app);
     }
 
     #[test]

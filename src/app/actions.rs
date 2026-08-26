@@ -2323,6 +2323,9 @@ impl AppState {
             pane_ids.extend(self.pane_ids_for_workspace(*idx));
             if let Some(workspace_id) = self.workspaces.get(*idx).map(|ws| ws.id.clone()) {
                 crate::logging::workspace_closed(&workspace_id);
+                // An explicit workspace close outranks the pin; drop it so
+                // the stale key doesn't linger in the session snapshot.
+                self.tree_pinned_spaces.remove(&workspace_id);
             }
         }
         let active_workspace_id = self
@@ -5954,6 +5957,19 @@ mod tests {
         assert_eq!(state.selected, 1);
         assert_eq!(state.active, Some(1));
         assert_eq!(state.workspaces[1].custom_name.as_deref(), Some("c"));
+    }
+
+    #[test]
+    fn explicit_workspace_close_drops_its_pin() {
+        let mut state = app_with_workspaces(&["a", "b"]);
+        let pinned_id = state.workspaces[0].id.clone();
+        state.tree_pinned_spaces.insert(pinned_id.clone());
+        state.selected = 0;
+
+        state.close_selected_workspace();
+
+        assert!(!state.tree_pinned_spaces.contains(&pinned_id));
+        assert_eq!(state.workspaces.len(), 1);
     }
 
     #[test]

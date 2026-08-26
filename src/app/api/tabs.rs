@@ -129,6 +129,63 @@ impl App {
         }
     }
 
+    /// A pinned space keeps a live tab: when a close is about to remove the
+    /// workspace's last tab, grow a fresh shell tab first so the workspace
+    /// (and its pinned header row) survives. Returns true when a replacement
+    /// tab was created.
+    pub(crate) fn respawn_tab_for_pinned_workspace(&mut self, ws_idx: usize) -> bool {
+        let pinned = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .is_some_and(|ws| self.state.tree_pinned_spaces.contains(&ws.id));
+        if !pinned {
+            return false;
+        }
+        let cwd = self.resolve_new_terminal_cwd(self.focused_pane_cwd_in_workspace(ws_idx));
+        let (rows, cols) = self.state.estimate_pane_size();
+        let default_shell = self.state.default_shell.clone();
+        let scrollback_limit_bytes = self.state.pane_scrollback_limit_bytes;
+        let host_terminal_theme = self.state.host_terminal_theme;
+        let host_terminal_appearance = self.state.host_terminal_appearance;
+        let result = self
+            .state
+            .workspaces
+            .get_mut(ws_idx)
+            .ok_or_else(|| std::io::Error::other("workspace disappeared"))
+            .and_then(|ws| {
+                ws.create_tab(
+                    rows,
+                    cols,
+                    cwd,
+                    scrollback_limit_bytes,
+                    host_terminal_theme,
+                    host_terminal_appearance,
+                    crate::pane::PaneShellConfig::new(&default_shell, self.state.shell_mode),
+                    Vec::new(),
+                )
+            });
+        match result {
+            Ok((tab_idx, terminal, runtime)) => {
+                self.terminal_runtimes.insert(terminal.id.clone(), runtime);
+                self.state.terminals.insert(terminal.id.clone(), terminal);
+                self.state.remove_alias_shadowed_by_new_pane(
+                    self.state.workspaces[ws_idx].tabs[tab_idx].root_pane,
+                );
+                self.schedule_session_save();
+                self.emit_tab_created_events(ws_idx, tab_idx);
+                true
+            }
+            Err(err) => {
+                tracing::warn!(
+                    err = %err,
+                    "failed to grow replacement tab for pinned space; workspace will close"
+                );
+                false
+            }
+        }
+    }
+
     pub(super) fn handle_tab_focus(&mut self, id: String, target: TabTarget) -> String {
         let Some((ws_idx, tab_idx)) = self.parse_tab_id(&target.tab_id) else {
             return tab_not_found(id, &target.tab_id);
@@ -232,6 +289,16 @@ impl App {
             return tab_not_found(id, &target.tab_id);
         };
         let workspace_id = self.public_workspace_id(ws_idx);
+        if self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .is_some_and(|ws| ws.tabs.len() <= 1)
+        {
+            // A pinned space keeps a live tab instead of closing with its
+            // last one.
+            self.respawn_tab_for_pinned_workspace(ws_idx);
+        }
         let Some(ws) = self.state.workspaces.get(ws_idx) else {
             return tab_not_found(id, &target.tab_id);
         };
@@ -378,6 +445,43 @@ mod tests {
             } if closed_workspace_id == &workspace_id
                 && workspace.workspace_id == workspace_id
         ));
+    }
+
+    #[tokio::test]
+    async fn api_tab_close_last_tab_of_pinned_workspace_respawns_tab() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub.clone());
+        app.state.workspaces = vec![Workspace::test_new("tabs")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        let workspace_id = app.state.workspaces[0].id.clone();
+        app.state.tree_pinned_spaces.insert(workspace_id.clone());
+        let tab_id = app.public_tab_id(0, 0).unwrap();
+
+        let response = app.handle_tab_close(
+            "req".into(),
+            TabTarget {
+                tab_id: tab_id.clone(),
+            },
+        );
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(success.result, ResponseResult::Ok {});
+        assert_eq!(app.state.workspaces.len(), 1);
+        assert_eq!(app.state.workspaces[0].id, workspace_id);
+        assert_eq!(app.state.workspaces[0].tabs.len(), 1);
+        assert_ne!(app.public_tab_id(0, 0).unwrap(), tab_id);
+        assert!(app.state.tree_pinned_spaces.contains(&workspace_id));
+        let kinds: Vec<_> = event_hub
+            .events_after(0)
+            .iter()
+            .map(|(_, event)| event.event)
+            .collect();
+        assert!(kinds.contains(&EventKind::TabCreated));
+        assert!(kinds.contains(&EventKind::TabClosed));
+        assert!(!kinds.contains(&EventKind::WorkspaceClosed));
+        shutdown_test_runtimes(&mut app);
     }
 
     #[test]
