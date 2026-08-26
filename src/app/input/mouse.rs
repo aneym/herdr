@@ -727,6 +727,17 @@ impl AppState {
                                 self.mark_session_dirty();
                                 return None;
                             }
+                            super::sidebar::TreeHeaderHit::NewTab { ws_idx } => {
+                                self.requested_new_tab_workspace_id =
+                                    self.workspaces.get(ws_idx).map(|ws| ws.id.clone());
+                                if self.prompt_new_tab_name {
+                                    open_new_tab_dialog(self);
+                                } else {
+                                    self.request_new_tab = true;
+                                    self.replace_mode(Mode::Terminal);
+                                }
+                                return None;
+                            }
                             super::sidebar::TreeHeaderHit::Focus { ws_idx, tab_idx } => {
                                 self.replace_mode(Mode::Terminal);
                                 let Some(tab_idx) = tab_idx else {
@@ -5518,6 +5529,80 @@ mod tests {
         assert!(!app.state.creating_new_tab);
         assert!(app.state.request_new_tab);
         assert!(app.state.requested_new_tab_name.is_none());
+    }
+
+    /// Two spaces with one detected agent each, tree view on, and the plus
+    /// hit location on the second space's header row.
+    fn tree_app_with_plus_on_second_space() -> (App, u16, u16) {
+        let mut app = app_for_mouse_test();
+        app.state.workspaces = vec![Workspace::test_new("alpha"), Workspace::test_new("beta")];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.agent_panel_sort = crate::app::state::AgentPanelSort::Tree;
+        for ws_idx in 0..2 {
+            let pane_id = app.state.workspaces[ws_idx].tabs[0].root_pane;
+            let terminal_id = app.state.workspaces[ws_idx].tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            app.state
+                .terminals
+                .get_mut(&terminal_id)
+                .expect("agent terminal")
+                .set_detected_state(Some(Agent::Pi), AgentState::Idle);
+        }
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 40));
+
+        let entries = crate::ui::agent_panel_list_entries_from(&app.state, &app.terminal_runtimes);
+        let panel = app.state.agent_panel_rect();
+        let mut plus_at = None;
+        for row in panel.y..panel.y + panel.height {
+            for col in panel.x..panel.x + panel.width {
+                if let Some(super::super::sidebar::TreeHeaderHit::NewTab { ws_idx }) =
+                    app.state.tree_header_at(&entries, col, row)
+                {
+                    if ws_idx == 1 {
+                        plus_at = Some((col, row));
+                    }
+                }
+            }
+        }
+        let (col, row) = plus_at.expect("second space header exposes a plus hit");
+        (app, col, row)
+    }
+
+    #[test]
+    fn tree_space_header_plus_requests_new_tab_in_that_space() {
+        let (mut app, col, row) = tree_app_with_plus_on_second_space();
+        app.state.prompt_new_tab_name = false;
+        let beta_id = app.state.workspaces[1].id.clone();
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+
+        assert_eq!(app.state.mode(), Mode::Terminal);
+        assert!(app.state.request_new_tab);
+        assert_eq!(
+            app.state.requested_new_tab_workspace_id.as_deref(),
+            Some(beta_id.as_str())
+        );
+    }
+
+    #[test]
+    fn tree_space_header_plus_opens_dialog_targeting_that_space() {
+        let (mut app, col, row) = tree_app_with_plus_on_second_space();
+        app.state.prompt_new_tab_name = true;
+        let beta_id = app.state.workspaces[1].id.clone();
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+
+        assert_eq!(app.state.mode(), Mode::RenameTab);
+        assert!(app.state.creating_new_tab);
+        assert_eq!(
+            app.state.requested_new_tab_workspace_id.as_deref(),
+            Some(beta_id.as_str())
+        );
+        // The suggested name counts the TARGET space's tabs, not the active one.
+        assert_eq!(app.state.name_input, "2");
     }
 
     #[test]

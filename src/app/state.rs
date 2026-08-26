@@ -1751,6 +1751,9 @@ pub struct AppState {
     pub request_clipboard_write: Option<(Vec<u8>, Option<String>)>,
     pub creating_new_tab: bool,
     pub requested_new_tab_name: Option<String>,
+    /// Workspace the pending new-tab request targets; `None` means the
+    /// active workspace.
+    pub requested_new_tab_workspace_id: Option<String>,
     pub pending_workspace_create_cwd: Option<std::path::PathBuf>,
     pub rename_pane_target: Option<PaneId>,
     pub worktree_create: Option<WorktreeCreateState>,
@@ -2309,6 +2312,7 @@ impl AppState {
             request_clipboard_write: None,
             creating_new_tab: false,
             requested_new_tab_name: None,
+            requested_new_tab_workspace_id: None,
             pending_workspace_create_cwd: None,
             rename_pane_target: None,
             worktree_create: None,

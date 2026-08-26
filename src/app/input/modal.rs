@@ -394,6 +394,7 @@ pub(crate) fn open_new_workspace_dialog(state: &mut AppState, cwd: std::path::Pa
     let suggested_name = crate::workspace::derive_label_from_cwd(&cwd);
     state.creating_new_tab = false;
     state.requested_new_tab_name = None;
+    state.requested_new_tab_workspace_id = None;
     state.pending_workspace_create_cwd = Some(cwd);
     state.rename_pane_target = None;
     state.name_input = suggested_name;
@@ -404,6 +405,7 @@ pub(crate) fn open_new_workspace_dialog(state: &mut AppState, cwd: std::path::Pa
 pub(super) fn open_rename_active_tab(state: &mut AppState, replace_on_type: bool) {
     state.creating_new_tab = false;
     state.requested_new_tab_name = None;
+    state.requested_new_tab_workspace_id = None;
     state.pending_workspace_create_cwd = None;
     state.rename_pane_target = None;
     if let Some(ws) = state.active.and_then(|i| state.workspaces.get(i)) {
@@ -425,6 +427,7 @@ pub(super) fn open_rename_pane(state: &mut AppState, pane_id: crate::layout::Pan
     let terminal = state.terminals.get(&pane.attached_terminal_id);
     state.creating_new_tab = false;
     state.requested_new_tab_name = None;
+    state.requested_new_tab_workspace_id = None;
     state.pending_workspace_create_cwd = None;
     state.rename_pane_target = Some(pane_id);
     state.name_input = terminal
@@ -441,8 +444,10 @@ fn workspace_create_label(input: &str, suggested_name: &str) -> Option<String> {
 
 fn next_new_tab_default_name(state: &AppState) -> String {
     state
-        .active
-        .and_then(|i| state.workspaces.get(i))
+        .requested_new_tab_workspace_id
+        .as_deref()
+        .and_then(|id| state.workspaces.iter().find(|ws| ws.id == id))
+        .or_else(|| state.active.and_then(|i| state.workspaces.get(i)))
         .map(|ws| (ws.tabs.len() + 1).to_string())
         .unwrap_or_else(|| "1".to_string())
 }
@@ -603,6 +608,7 @@ pub(super) fn apply_rename_action(state: &mut AppState, action: ModalAction) {
         ModalAction::Cancel => {
             state.creating_new_tab = false;
             state.requested_new_tab_name = None;
+            state.requested_new_tab_workspace_id = None;
             state.pending_workspace_create_cwd = None;
             state.rename_pane_target = None;
             state.name_input.clear();
@@ -1285,10 +1291,11 @@ impl App {
                 } else {
                     Some(new_name)
                 };
+                let workspace_id = self.state.requested_new_tab_workspace_id.take();
                 self.runtime_tab_create(
                     "tui.tab.create_named",
                     crate::api::schema::TabCreateParams {
-                        workspace_id: None,
+                        workspace_id,
                         cwd: None,
                         focus: true,
                         label,
@@ -1841,6 +1848,7 @@ impl App {
 fn cancel_rename_modal(state: &mut AppState) {
     state.creating_new_tab = false;
     state.requested_new_tab_name = None;
+    state.requested_new_tab_workspace_id = None;
     state.pending_workspace_create_cwd = None;
     state.rename_pane_target = None;
     state.name_input.clear();

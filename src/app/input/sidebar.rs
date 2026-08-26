@@ -13,6 +13,8 @@ pub(super) enum TreeHeaderHit {
         ws_idx: usize,
         tab_idx: Option<usize>,
     },
+    /// The space header's plus: create a new tab in that space and focus it.
+    NewTab { ws_idx: usize },
 }
 
 impl AppState {
@@ -624,6 +626,14 @@ impl AppState {
                         space: is_space,
                         key: header.key.clone(),
                     });
+                }
+                if is_space {
+                    let plus = crate::ui::tree_header_plus_rect(body, row_y);
+                    if plus.width > 0 && col >= plus.x && col < plus.x.saturating_add(plus.width) {
+                        return Some(TreeHeaderHit::NewTab {
+                            ws_idx: header.ws_idx,
+                        });
+                    }
                 }
                 return Some(TreeHeaderHit::Focus {
                     ws_idx: header.ws_idx,

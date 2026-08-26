@@ -628,6 +628,7 @@ impl App {
         state.request_clipboard_write = None;
         state.creating_new_tab = false;
         state.requested_new_tab_name = None;
+        state.requested_new_tab_workspace_id = None;
         state.pending_workspace_create_cwd = None;
         state.rename_pane_target = None;
         state.worktree_create = None;
@@ -1091,10 +1092,11 @@ impl App {
             if self.state.request_new_tab {
                 self.state.request_new_tab = false;
                 let label = self.state.requested_new_tab_name.take();
+                let workspace_id = self.state.requested_new_tab_workspace_id.take();
                 self.runtime_tab_create(
                     "tui.tab.create",
                     crate::api::schema::TabCreateParams {
-                        workspace_id: None,
+                        workspace_id,
                         cwd: None,
                         focus: true,
                         label,

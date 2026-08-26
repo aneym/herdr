@@ -1286,6 +1286,16 @@ pub(crate) fn tree_header_chevron_rect(body: Rect, row_y: u16, indent: u8) -> Re
     Rect::new(body.x + body.width.saturating_sub(width), row_y, width, 1)
 }
 
+/// Hit region for the new-tab plus on a tree space header row: the cell pair
+/// immediately left of the chevron slot. The chevron slot is reserved whether
+/// or not a chevron is drawn, so this rect never moves.
+pub(crate) fn tree_header_plus_rect(body: Rect, row_y: u16) -> Rect {
+    if body.width < 4 {
+        return Rect::default();
+    }
+    Rect::new(body.x + body.width.saturating_sub(4), row_y, 2, 1)
+}
+
 /// Paints half of a padding row in the selection colour, so a selected item
 /// gets roughly half a cell of padding on each side. A terminal cell is the
 /// smallest unit of layout, but a half-block glyph splits one visually, which
@@ -2470,7 +2480,8 @@ fn render_agent_detail(
                 spans.push(Span::raw(" ".repeat(indent_cols)));
             }
             let prefix_width = 1 + indent_cols;
-            let trailing_width = 6usize;
+            // Space headers reserve two extra cells for the new-tab plus.
+            let trailing_width = if is_space { 8usize } else { 6usize };
             spans.push(Span::styled(
                 truncate_end(
                     &header.label,
@@ -2515,6 +2526,7 @@ fn render_agent_detail(
                 Paragraph::new(Line::from(spans)).style(header_style),
                 Rect::new(body.x, content_y, body.width, 1),
             );
+            let mut trailing: Vec<Span> = Vec::new();
             if !header.child_states.is_empty() {
                 // One dot per agent this header stands in for, so a collapsed
                 // tab still reports every agent's state rather than a count.
@@ -2522,15 +2534,12 @@ fn render_agent_detail(
                 // collapse into a trailing count.
                 const MAX_DOTS: usize = 6;
                 let shown = header.child_states.len().min(MAX_DOTS);
-                let mut trailing: Vec<Span> = header.child_states[..shown]
-                    .iter()
-                    .map(|(state, seen)| {
-                        Span::styled(
-                            "●",
-                            Style::default().fg(state_label_color(*state, *seen, p)),
-                        )
-                    })
-                    .collect();
+                trailing.extend(header.child_states[..shown].iter().map(|(state, seen)| {
+                    Span::styled(
+                        "●",
+                        Style::default().fg(state_label_color(*state, *seen, p)),
+                    )
+                }));
                 if header.child_states.len() > shown {
                     trailing.push(Span::styled(
                         format!("+{}", header.child_states.len() - shown),
@@ -2538,27 +2547,34 @@ fn render_agent_detail(
                     ));
                 }
                 trailing.push(Span::raw(" "));
+            }
+            if is_space {
+                // New-tab plus, one cell pair left of the chevron slot so its
+                // hit region (`tree_header_plus_rect`) stays fixed whether or
+                // not this header draws a chevron.
+                trailing.push(Span::styled("+", Style::default().fg(p.overlay0)));
+                trailing.push(Span::raw(" "));
                 if header.collapsible {
                     trailing.push(Span::styled(
                         if header.collapsed { "▸" } else { "▾" },
                         Style::default().fg(p.overlay0),
                     ));
+                    trailing.push(Span::raw(" "));
+                } else {
+                    trailing.push(Span::raw("  "));
                 }
+            } else if header.collapsible {
+                trailing.push(Span::styled(
+                    if header.collapsed { "▸" } else { "▾" },
+                    Style::default().fg(p.overlay0),
+                ));
                 trailing.push(Span::raw(" "));
+            } else if !trailing.is_empty() {
+                trailing.push(Span::raw(" "));
+            }
+            if !trailing.is_empty() {
                 frame.render_widget(
                     Paragraph::new(Line::from(trailing)).alignment(Alignment::Right),
-                    Rect::new(body.x, content_y, body.width, 1),
-                );
-            } else if header.collapsible {
-                frame.render_widget(
-                    Paragraph::new(Line::from(vec![
-                        Span::styled(
-                            if header.collapsed { "▸" } else { "▾" },
-                            Style::default().fg(p.overlay0),
-                        ),
-                        Span::raw(" "),
-                    ]))
-                    .alignment(Alignment::Right),
                     Rect::new(body.x, content_y, body.width, 1),
                 );
             }

@@ -950,7 +950,8 @@ impl HeadlessServer {
         if self.app.state.request_new_tab {
             self.app.state.request_new_tab = false;
             let label = self.app.state.requested_new_tab_name.take();
-            let response = self.headless_tab_create("headless.tab.create", label);
+            let workspace_id = self.app.state.requested_new_tab_workspace_id.take();
+            let response = self.headless_tab_create("headless.tab.create", label, workspace_id);
             if let Err(error) = response {
                 error!(
                     code = %error.code,
@@ -1051,11 +1052,12 @@ impl HeadlessServer {
         &mut self,
         id: &'static str,
         label: Option<String>,
+        workspace_id: Option<String>,
     ) -> Result<(), api::schema::ErrorBody> {
         self.dispatch_headless_runtime_mutation(
             id,
             api::schema::Method::TabCreate(api::schema::TabCreateParams {
-                workspace_id: None,
+                workspace_id,
                 cwd: None,
                 focus: true,
                 label,
@@ -5711,6 +5713,35 @@ mod tests {
             })
             .expect("tab created event");
         assert_eq!(tab_created.label, "ops");
+        shutdown_test_runtimes(&mut server);
+    }
+
+    #[tokio::test]
+    async fn headless_deferred_tab_create_targets_requested_workspace() {
+        let mut server = test_headless_server();
+        server
+            .app
+            .create_workspace_with_options(std::env::temp_dir(), true)
+            .unwrap();
+        server
+            .app
+            .create_workspace_with_options(std::env::temp_dir(), true)
+            .unwrap();
+        assert_eq!(server.app.state.active, Some(1));
+        let target_id = server.app.state.workspaces[0].id.clone();
+
+        server.app.state.request_new_tab = true;
+        server.app.state.requested_new_tab_workspace_id = Some(target_id);
+
+        assert!(server.handle_deferred_requests_headless());
+        assert!(!server.app.state.request_new_tab);
+        assert_eq!(server.app.state.requested_new_tab_workspace_id, None);
+        // The tab landed in the requested workspace, not the active one, and
+        // focus followed it.
+        assert_eq!(server.app.state.workspaces[0].tabs.len(), 2);
+        assert_eq!(server.app.state.workspaces[1].tabs.len(), 1);
+        assert_eq!(server.app.state.active, Some(0));
+        assert_eq!(server.app.state.workspaces[0].active_tab, 1);
         shutdown_test_runtimes(&mut server);
     }
 
