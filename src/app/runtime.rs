@@ -245,6 +245,11 @@ impl App {
                 }
                 changes_view || self.state.pane_hover != previous_pane_hover
             }
+            // Navigation buttons act on press. The matching release carries no
+            // extra meaning and must not re-trigger the action.
+            crate::raw_input::RawInputEvent::MouseNavButton { button, pressed } => {
+                pressed && self.handle_mouse_nav_button(button)
+            }
             crate::raw_input::RawInputEvent::OuterFocusGained => {
                 #[cfg(not(windows))]
                 self.query_host_terminal_appearance();
@@ -936,6 +941,99 @@ mod tests {
         // At scrollback bottom, can't scroll further down — should stop
         assert!(app.state.selection_autoscroll.is_none());
         assert!(app.selection_autoscroll_deadline.is_none());
+    }
+
+    /// Build a two-pane app whose focus history has `root` behind the
+    /// currently focused `other` pane.
+    fn test_app_with_focus_history() -> (
+        super::super::App,
+        crate::layout::PaneId,
+        crate::layout::PaneId,
+    ) {
+        let (mut app, root) = test_app_with_pane();
+        let other = app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
+        app.state.focus_pane_in_workspace(0, root);
+        app.state.focus_pane_in_workspace(0, other);
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(other));
+        (app, root, other)
+    }
+
+    #[tokio::test]
+    async fn mouse_back_button_navigates_focus_back() {
+        let (mut app, root, other) = test_app_with_focus_history();
+
+        app.handle_raw_input_event(crate::raw_input::RawInputEvent::MouseNavButton {
+            button: crate::raw_input::MouseNavButton::Back,
+            pressed: true,
+        })
+        .await;
+
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(root));
+        assert_ne!(app.state.workspaces[0].focused_pane_id(), Some(other));
+    }
+
+    #[tokio::test]
+    async fn mouse_forward_button_navigates_focus_forward() {
+        let (mut app, root, other) = test_app_with_focus_history();
+
+        app.handle_raw_input_event(crate::raw_input::RawInputEvent::MouseNavButton {
+            button: crate::raw_input::MouseNavButton::Back,
+            pressed: true,
+        })
+        .await;
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(root));
+
+        app.handle_raw_input_event(crate::raw_input::RawInputEvent::MouseNavButton {
+            button: crate::raw_input::MouseNavButton::Forward,
+            pressed: true,
+        })
+        .await;
+
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(other));
+    }
+
+    #[tokio::test]
+    async fn mouse_nav_button_release_does_not_navigate() {
+        let (mut app, _root, other) = test_app_with_focus_history();
+
+        app.handle_raw_input_event(crate::raw_input::RawInputEvent::MouseNavButton {
+            button: crate::raw_input::MouseNavButton::Back,
+            pressed: false,
+        })
+        .await;
+
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(other));
+    }
+
+    #[tokio::test]
+    async fn mouse_nav_button_configured_off_is_ignored() {
+        let (mut app, _root, other) = test_app_with_focus_history();
+        app.state.mouse_back_button_action = crate::config::MouseNavButtonActionConfig::Off;
+
+        app.handle_raw_input_event(crate::raw_input::RawInputEvent::MouseNavButton {
+            button: crate::raw_input::MouseNavButton::Back,
+            pressed: true,
+        })
+        .await;
+
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(other));
+    }
+
+    #[tokio::test]
+    async fn mouse_nav_buttons_are_not_forwarded_to_the_focused_pane() {
+        // The pane forwarding path only ever consumes `RawInputEvent::Mouse`,
+        // so a nav button cannot produce pane-bound bytes. Drive the real byte
+        // sequence through the parser to prove nothing reaches a pane.
+        let events = crate::raw_input::parse_raw_input_bytes_sync(b"\x1b[<128;20;10M");
+
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            events[0],
+            crate::raw_input::RawInputEvent::MouseNavButton {
+                button: crate::raw_input::MouseNavButton::Back,
+                pressed: true,
+            }
+        ));
     }
 
     #[tokio::test]

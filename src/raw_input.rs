@@ -14,6 +14,17 @@ pub fn parse_raw_input_bytes(data: &[u8]) -> Vec<RawInputEvent> {
     parse_raw_input_bytes_sync(data)
 }
 
+/// A physical mouse navigation button, as found on the side of most mice.
+///
+/// These are the buttons a browser maps to page back and forward. Terminals
+/// report them as extended mouse buttons 8 and 9, which the crossterm
+/// `MouseButton` enum cannot represent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseNavButton {
+    Back,
+    Forward,
+}
+
 /// A raw input event paired with the byte range it consumed from the original buffer.
 #[cfg(test)]
 #[derive(Debug)]
@@ -132,6 +143,11 @@ pub enum RawInputEvent {
     Text(TextCommit),
     Paste(String),
     Mouse(MouseEvent),
+    /// A press or release of a physical mouse navigation (thumb) button.
+    MouseNavButton {
+        button: MouseNavButton,
+        pressed: bool,
+    },
     OuterFocusGained,
     OuterFocusLost,
     HostDefaultColor {
@@ -877,8 +893,14 @@ fn extract_one_event(buffer: &[u8]) -> Option<(RawInputEvent, usize)> {
             ));
         }
 
-        if let Some(mouse) = parse_sgr_mouse(seq) {
-            return Some((RawInputEvent::Mouse(mouse), seq_len));
+        match parse_sgr_mouse_event(seq) {
+            Some(SgrMouseEvent::Mouse(mouse)) => {
+                return Some((RawInputEvent::Mouse(mouse), seq_len));
+            }
+            Some(SgrMouseEvent::NavButton { button, pressed }) => {
+                return Some((RawInputEvent::MouseNavButton { button, pressed }, seq_len));
+            }
+            None => {}
         }
 
         if let Some(key) = parse_terminal_key_sequence(seq) {
@@ -1033,7 +1055,7 @@ fn complete_escape_sequence_len(buffer: &[u8]) -> Option<usize> {
     if buffer.starts_with(b"\x1b\x1b[<") {
         if let Some(mouse_len) = find_csi_final(&buffer[1..], b"Mm") {
             let mouse_sequence = std::str::from_utf8(&buffer[1..1 + mouse_len]).ok()?;
-            if parse_sgr_mouse(mouse_sequence).is_some() {
+            if parse_sgr_mouse_event(mouse_sequence).is_some() {
                 return Some(1);
             }
         }
@@ -1119,7 +1141,7 @@ fn discard_complete_orphaned_sgr_mouse_tail(buffer: &mut Vec<u8>) -> bool {
     let Ok(sequence) = std::str::from_utf8(&sequence) else {
         return false;
     };
-    if parse_sgr_mouse(sequence).is_none() {
+    if parse_sgr_mouse_event(sequence).is_none() {
         return false;
     }
     buffer.drain(..terminator_len);
@@ -1256,7 +1278,21 @@ fn parse_default_mouse(sequence: &[u8]) -> Option<MouseEvent> {
     })
 }
 
-fn parse_sgr_mouse(sequence: &str) -> Option<MouseEvent> {
+/// A decoded SGR mouse report.
+///
+/// Extended navigation buttons are reported separately because the crossterm
+/// `MouseButton` enum only models left/right/middle, so they cannot be carried
+/// inside a `MouseEvent`. Keeping them out of `MouseEvent` also guarantees they
+/// can never reach pane mouse forwarding or the pointer gesture handlers.
+enum SgrMouseEvent {
+    Mouse(MouseEvent),
+    NavButton {
+        button: MouseNavButton,
+        pressed: bool,
+    },
+}
+
+fn parse_sgr_mouse_event(sequence: &str) -> Option<SgrMouseEvent> {
     let body = sequence.strip_prefix("\x1b[<")?;
     let final_char = body.chars().last()?;
     if final_char != 'M' && final_char != 'm' {
@@ -1268,6 +1304,14 @@ fn parse_sgr_mouse(sequence: &str) -> Option<MouseEvent> {
     let cb = parts.next()?.parse::<u8>().ok()?;
     let column = parts.next()?.parse::<u16>().ok()?.checked_sub(1)?;
     let row = parts.next()?.parse::<u16>().ok()?.checked_sub(1)?;
+
+    if let Some(button) = nav_button_from_cb(cb) {
+        return Some(SgrMouseEvent::NavButton {
+            button,
+            pressed: final_char == 'M',
+        });
+    }
+
     let (kind, modifiers) = parse_mouse_cb(cb)?;
 
     let kind = if final_char == 'm' {
@@ -1279,12 +1323,29 @@ fn parse_sgr_mouse(sequence: &str) -> Option<MouseEvent> {
         kind
     };
 
-    Some(MouseEvent {
+    Some(SgrMouseEvent::Mouse(MouseEvent {
         kind,
         column,
         row,
         modifiers,
-    })
+    }))
+}
+
+/// Decode the extended navigation buttons from an SGR button code.
+///
+/// Terminals report the physical back/forward thumb buttons as extended mouse
+/// buttons 8 and 9 (base codes 128 and 129, plus modifier bits). Drags are
+/// deliberately excluded here so they keep their existing motion handling.
+fn nav_button_from_cb(cb: u8) -> Option<MouseNavButton> {
+    if cb & 0b0010_0000 != 0 {
+        return None;
+    }
+
+    match (cb & 0b0000_0011) | ((cb & 0b1100_0000) >> 4) {
+        8 => Some(MouseNavButton::Back),
+        9 => Some(MouseNavButton::Forward),
+        _ => None,
+    }
 }
 
 fn parse_mouse_cb(cb: u8) -> Option<(MouseEventKind, KeyModifiers)> {
@@ -1486,6 +1547,109 @@ mod tests {
                 panic!("expected mouse");
             };
             assert_eq!(mouse.kind, MouseEventKind::Moved);
+            assert_eq!((mouse.column, mouse.row), (19, 9));
+        }
+    }
+
+    #[test]
+    fn parses_mouse_nav_buttons_press_and_release() {
+        let cases = [
+            (b"\x1b[<128;20;10M".as_slice(), MouseNavButton::Back, true),
+            (b"\x1b[<128;20;10m".as_slice(), MouseNavButton::Back, false),
+            (
+                b"\x1b[<129;20;10M".as_slice(),
+                MouseNavButton::Forward,
+                true,
+            ),
+            (
+                b"\x1b[<129;20;10m".as_slice(),
+                MouseNavButton::Forward,
+                false,
+            ),
+        ];
+
+        for (input, expected_button, expected_pressed) in cases {
+            let (event, consumed) = extract_one_event(input).expect("nav button event");
+            assert_eq!(consumed, input.len());
+            let RawInputEvent::MouseNavButton { button, pressed } = event else {
+                panic!("expected nav button for {input:?}");
+            };
+            assert_eq!(button, expected_button);
+            assert_eq!(pressed, expected_pressed);
+        }
+    }
+
+    #[test]
+    fn mouse_nav_buttons_never_become_mouse_events() {
+        // Nav buttons must not reach pane mouse forwarding or the pointer
+        // gesture handlers, both of which only ever see `RawInputEvent::Mouse`.
+        for input in [
+            b"\x1b[<128;20;10M".as_slice(),
+            b"\x1b[<128;20;10m".as_slice(),
+            b"\x1b[<129;20;10M".as_slice(),
+            b"\x1b[<129;20;10m".as_slice(),
+        ] {
+            let (event, _) = extract_one_event(input).expect("event");
+            assert!(
+                !matches!(event, RawInputEvent::Mouse(_)),
+                "nav button leaked into a mouse event for {input:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parses_mouse_nav_buttons_with_modifiers() {
+        // Modifier bits must not disturb the extended button number.
+        let cases = [
+            (b"\x1b[<132;20;10M".as_slice(), MouseNavButton::Back),
+            (b"\x1b[<136;20;10M".as_slice(), MouseNavButton::Back),
+            (b"\x1b[<144;20;10M".as_slice(), MouseNavButton::Back),
+            (b"\x1b[<133;20;10M".as_slice(), MouseNavButton::Forward),
+            (b"\x1b[<145;20;10M".as_slice(), MouseNavButton::Forward),
+        ];
+
+        for (input, expected_button) in cases {
+            let (event, _) = extract_one_event(input).expect("nav button event");
+            let RawInputEvent::MouseNavButton { button, .. } = event else {
+                panic!("expected nav button for {input:?}");
+            };
+            assert_eq!(button, expected_button);
+        }
+    }
+
+    #[test]
+    fn standard_mouse_buttons_are_unchanged_by_nav_button_decoding() {
+        let cases = [
+            (
+                b"\x1b[<0;20;10M".as_slice(),
+                MouseEventKind::Down(MouseButton::Left),
+            ),
+            (
+                b"\x1b[<0;20;10m".as_slice(),
+                MouseEventKind::Up(MouseButton::Left),
+            ),
+            (
+                b"\x1b[<1;20;10M".as_slice(),
+                MouseEventKind::Down(MouseButton::Middle),
+            ),
+            (
+                b"\x1b[<2;20;10M".as_slice(),
+                MouseEventKind::Down(MouseButton::Right),
+            ),
+            (
+                b"\x1b[<32;20;10M".as_slice(),
+                MouseEventKind::Drag(MouseButton::Left),
+            ),
+            (b"\x1b[<64;20;10M".as_slice(), MouseEventKind::ScrollUp),
+            (b"\x1b[<65;20;10M".as_slice(), MouseEventKind::ScrollDown),
+        ];
+
+        for (input, expected_kind) in cases {
+            let (event, _) = extract_one_event(input).expect("mouse event");
+            let RawInputEvent::Mouse(mouse) = event else {
+                panic!("expected mouse for {input:?}");
+            };
+            assert_eq!(mouse.kind, expected_kind);
             assert_eq!((mouse.column, mouse.row), (19, 9));
         }
     }

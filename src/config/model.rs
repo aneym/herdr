@@ -173,6 +173,23 @@ pub enum HostCursorModeConfig {
     Drawn,
 }
 
+/// Action bound to one of the mouse navigation buttons (the physical thumb
+/// buttons, reported as extended mouse buttons 8 and 9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MouseNavButtonActionConfig {
+    /// Ignore the button.
+    Off,
+    /// Navigate backward through pane focus history.
+    FocusBack,
+    /// Navigate forward through pane focus history.
+    FocusForward,
+    /// Focus the next agent in the agent panel.
+    NextAgent,
+    /// Focus the previous agent in the agent panel.
+    PreviousAgent,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SidebarCollapsedModeConfig {
@@ -921,6 +938,10 @@ pub struct UiConfig {
     pub host_cursor: HostCursorModeConfig,
     /// Modifier that lets right-click gestures pass through to pane apps. Empty disables it.
     pub right_click_passthrough_modifier: RightClickPassthroughModifierConfig,
+    /// Action for the mouse back button (thumb button, extended button 8). Default: "focus-back".
+    pub mouse_back_button: MouseNavButtonActionConfig,
+    /// Action for the mouse forward button (thumb button, extended button 9). Default: "focus-forward".
+    pub mouse_forward_button: MouseNavButtonActionConfig,
     /// Force a full host-terminal redraw when the outer terminal regains focus. Default: true.
     pub redraw_on_focus_gained: bool,
     /// Lines to scroll per mouse wheel notch. Default: 3.
@@ -1175,6 +1196,8 @@ impl Default for UiConfig {
             copy_on_select: true,
             host_cursor: HostCursorModeConfig::Auto,
             right_click_passthrough_modifier: RightClickPassthroughModifierConfig::default(),
+            mouse_back_button: MouseNavButtonActionConfig::FocusBack,
+            mouse_forward_button: MouseNavButtonActionConfig::FocusForward,
             redraw_on_focus_gained: true,
             mouse_scroll_lines: None,
             confirm_close: true,

@@ -724,6 +724,8 @@ impl App {
         state.mouse_capture = config.ui.mouse_capture;
         state.copy_on_select = config.ui.copy_on_select;
         state.right_click_passthrough_modifiers = config.ui.right_click_passthrough_modifiers();
+        state.mouse_back_button_action = config.ui.mouse_back_button;
+        state.mouse_forward_button_action = config.ui.mouse_forward_button;
         state.right_click_passthrough = None;
         state.redraw_on_focus_gained = config.ui.redraw_on_focus_gained;
         state.mouse_scroll_lines = config.ui.mouse_scroll_lines();
@@ -1589,6 +1591,8 @@ impl App {
                 self.state.mouse_scroll_lines = config.ui.mouse_scroll_lines();
                 self.state.right_click_passthrough_modifiers =
                     config.ui.right_click_passthrough_modifiers();
+                self.state.mouse_back_button_action = config.ui.mouse_back_button;
+                self.state.mouse_forward_button_action = config.ui.mouse_forward_button;
                 self.state.confirm_close = config.ui.confirm_close;
                 self.state.prompt_new_tab_name = config.ui.prompt_new_tab_name;
                 self.state.prompt_new_workspace_name = config.ui.prompt_new_workspace_name;
@@ -1932,6 +1936,13 @@ impl App {
                             source_id,
                             mouse,
                         );
+                    }
+                }
+                // Navigation buttons act on press. The matching release carries
+                // no extra meaning and must not re-trigger the action.
+                crate::raw_input::RawInputEvent::MouseNavButton { button, pressed } => {
+                    if pressed {
+                        self.handle_mouse_nav_button(button);
                     }
                 }
                 crate::raw_input::RawInputEvent::Paste(text) => {

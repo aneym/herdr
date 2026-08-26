@@ -167,6 +167,29 @@ impl App {
         }
     }
 
+    /// Handle a press of a physical mouse navigation (thumb) button.
+    ///
+    /// These buttons never reach pane mouse forwarding: they are decoded out of
+    /// the SGR mouse stream as a distinct raw input event and dispatched here,
+    /// so a pane app cannot see them and the pointer gesture handlers are not
+    /// involved. Returns whether the view needs a repaint.
+    pub(crate) fn handle_mouse_nav_button(
+        &mut self,
+        button: crate::raw_input::MouseNavButton,
+    ) -> bool {
+        let configured = match button {
+            crate::raw_input::MouseNavButton::Back => self.state.mouse_back_button_action,
+            crate::raw_input::MouseNavButton::Forward => self.state.mouse_forward_button_action,
+        };
+
+        let Some(action) = navigate_action_for_mouse_nav_button(configured) else {
+            return false;
+        };
+
+        self.execute_tui_navigate_action(action, ActionContext::Direct);
+        true
+    }
+
     pub(super) fn execute_tui_navigate_action(
         &mut self,
         action: NavigateAction,
@@ -1513,6 +1536,25 @@ pub(crate) enum NavigateAction {
     OpenNavigator,
     OpenNavigatorSearch,
     Usage,
+}
+
+/// Map a configured mouse navigation button action onto a navigate action.
+///
+/// `None` means the button is configured off and must be ignored.
+fn navigate_action_for_mouse_nav_button(
+    config: crate::config::MouseNavButtonActionConfig,
+) -> Option<NavigateAction> {
+    match config {
+        crate::config::MouseNavButtonActionConfig::Off => None,
+        crate::config::MouseNavButtonActionConfig::FocusBack => Some(NavigateAction::FocusBack),
+        crate::config::MouseNavButtonActionConfig::FocusForward => {
+            Some(NavigateAction::FocusForward)
+        }
+        crate::config::MouseNavButtonActionConfig::NextAgent => Some(NavigateAction::NextAgent),
+        crate::config::MouseNavButtonActionConfig::PreviousAgent => {
+            Some(NavigateAction::PreviousAgent)
+        }
+    }
 }
 
 fn copy_mode_survives_prefix_action(action: NavigateAction) -> bool {
@@ -2972,6 +3014,67 @@ resize_pane_left = "prefix+shift+left"
         );
 
         assert_eq!(action, Some(NavigateAction::LastPane));
+    }
+
+    #[test]
+    fn mouse_nav_button_actions_map_to_navigation_actions() {
+        use crate::config::MouseNavButtonActionConfig as ButtonAction;
+
+        assert_eq!(
+            navigate_action_for_mouse_nav_button(ButtonAction::FocusBack),
+            Some(NavigateAction::FocusBack)
+        );
+        assert_eq!(
+            navigate_action_for_mouse_nav_button(ButtonAction::FocusForward),
+            Some(NavigateAction::FocusForward)
+        );
+        assert_eq!(
+            navigate_action_for_mouse_nav_button(ButtonAction::NextAgent),
+            Some(NavigateAction::NextAgent)
+        );
+        assert_eq!(
+            navigate_action_for_mouse_nav_button(ButtonAction::PreviousAgent),
+            Some(NavigateAction::PreviousAgent)
+        );
+        assert_eq!(
+            navigate_action_for_mouse_nav_button(ButtonAction::Off),
+            None
+        );
+    }
+
+    #[test]
+    fn mouse_nav_buttons_default_to_focus_history() {
+        let config = crate::config::Config::default();
+
+        assert_eq!(
+            config.ui.mouse_back_button,
+            crate::config::MouseNavButtonActionConfig::FocusBack
+        );
+        assert_eq!(
+            config.ui.mouse_forward_button,
+            crate::config::MouseNavButtonActionConfig::FocusForward
+        );
+    }
+
+    #[test]
+    fn mouse_nav_buttons_are_configurable() {
+        let config: Config = toml::from_str(
+            r#"
+[ui]
+mouse_back_button = "previous-agent"
+mouse_forward_button = "off"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.ui.mouse_back_button,
+            crate::config::MouseNavButtonActionConfig::PreviousAgent
+        );
+        assert_eq!(
+            config.ui.mouse_forward_button,
+            crate::config::MouseNavButtonActionConfig::Off
+        );
     }
 
     #[test]

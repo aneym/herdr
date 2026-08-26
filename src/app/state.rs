@@ -1852,6 +1852,10 @@ pub struct AppState {
     pub mouse_capture: bool,
     pub copy_on_select: bool,
     pub right_click_passthrough_modifiers: Option<KeyModifiers>,
+    /// Action for the physical mouse back button (extended button 8).
+    pub mouse_back_button_action: crate::config::MouseNavButtonActionConfig,
+    /// Action for the physical mouse forward button (extended button 9).
+    pub mouse_forward_button_action: crate::config::MouseNavButtonActionConfig,
     pub right_click_passthrough: Option<RightClickPassthroughGesture>,
     pub redraw_on_focus_gained: bool,
     pub mouse_scroll_lines: usize,
@@ -2405,6 +2409,8 @@ impl AppState {
             mouse_capture: true,
             copy_on_select: true,
             right_click_passthrough_modifiers: None,
+            mouse_back_button_action: crate::config::MouseNavButtonActionConfig::FocusBack,
+            mouse_forward_button_action: crate::config::MouseNavButtonActionConfig::FocusForward,
             right_click_passthrough: None,
             redraw_on_focus_gained: true,
             mouse_scroll_lines: crate::config::DEFAULT_MOUSE_SCROLL_LINES,

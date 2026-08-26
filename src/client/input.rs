@@ -553,7 +553,11 @@ fn windows_client_input_event_from_raw(
         crate::raw_input::RawInputEvent::OuterFocusLost => {
             Some(crate::protocol::ClientInputEvent::FocusLost)
         }
-        crate::raw_input::RawInputEvent::HostDefaultColor { .. }
+        // The wire protocol has no representation for extended mouse buttons,
+        // so the Windows console client cannot forward them. Unix clients send
+        // raw bytes and the server decodes these itself.
+        crate::raw_input::RawInputEvent::MouseNavButton { .. }
+        | crate::raw_input::RawInputEvent::HostDefaultColor { .. }
         | crate::raw_input::RawInputEvent::HostPaletteColors { .. }
         | crate::raw_input::RawInputEvent::HostColorSchemeChanged(_)
         | crate::raw_input::RawInputEvent::HostCellSizeReport { .. }
