@@ -612,9 +612,13 @@ pub(crate) struct TreeHeader {
     /// Collapse-set key: workspace id, or `<workspace-id>#<tab-number>`.
     pub key: String,
     pub collapsed: bool,
-    /// Agents grouped under this header, collapsed or not.
+    /// Agents grouped under this header, collapsed or not. Read only by the
+    /// tree tests asserting roll-up behaviour; rendering uses `child_states`.
+    #[allow(dead_code)]
     pub child_count: usize,
-    /// Highest-attention (state, seen) among agent rows omitted beneath this header.
+    /// Highest-attention (state, seen) among agent rows omitted beneath this
+    /// header. Read only by tests; rendering draws per-agent `child_states`.
+    #[allow(dead_code)]
     pub hidden_state: Option<(AgentState, bool)>,
     /// One entry per agent this header stands in for, in panel order, so the
     /// header can show a dot per agent instead of a bare count.
@@ -703,9 +707,11 @@ fn tree_list_entries(app: &AppState, agents: Vec<AgentPanelEntry>) -> Vec<AgentP
                 hidden_state: (collapsed || (!app.tree_show_tabs && !app.tree_show_agents))
                     .then(|| tree_rollup_state(&ws_entries))
                     .flatten(),
-                child_states: (collapsed || (!app.tree_show_tabs && !app.tree_show_agents))
-                    .then(|| tree_child_states(&ws_entries))
-                    .unwrap_or_default(),
+                child_states: if collapsed || (!app.tree_show_tabs && !app.tree_show_agents) {
+                    tree_child_states(&ws_entries)
+                } else {
+                    Vec::new()
+                },
                 collapsible: !ws_entries.is_empty() && (app.tree_show_tabs || app.tree_show_agents),
                 indent: 0,
                 // A space row separates groups; it is never the selection.
@@ -755,9 +761,11 @@ fn tree_list_entries(app: &AppState, agents: Vec<AgentPanelEntry>) -> Vec<AgentP
                     hidden_state: (collapsed || !app.tree_show_agents)
                         .then(|| tree_rollup_state(&tab_entries))
                         .flatten(),
-                    child_states: (collapsed || !app.tree_show_agents)
-                        .then(|| tree_child_states(&tab_entries))
-                        .unwrap_or_default(),
+                    child_states: if collapsed || !app.tree_show_agents {
+                        tree_child_states(&tab_entries)
+                    } else {
+                        Vec::new()
+                    },
                     collapsible: !tab_entries.is_empty() && app.tree_show_agents,
                     indent: space_indent,
                     active: !app.tree_show_agents
@@ -1371,20 +1379,6 @@ pub(crate) fn agent_panel_list_entry_height(
     }
     .saturating_add(agent_panel_list_entry_padding(app, entry))
     .min(body_height)
-}
-
-/// The gap drawn immediately BEFORE `index`, which belongs to the previous
-/// entry's advance. A selected row paints it so the spacing reads as padding
-/// inside the selection instead of margin around it.
-pub(crate) fn agent_panel_list_entry_leading_gap(
-    app: &AppState,
-    entries: &[AgentPanelListEntry],
-    index: usize,
-) -> u16 {
-    match index.checked_sub(1) {
-        Some(prev) => agent_panel_list_entry_gap(app, entries, prev),
-        None => 0,
-    }
 }
 
 pub(crate) fn agent_panel_list_entry_gap(

@@ -437,6 +437,10 @@ fn first_pane_id_in_layout(layout: &LayoutSnapshot) -> Option<u32> {
 }
 
 /// Capture the current app state into a serializable snapshot.
+// Known debt from the tree-view work: the signature grew to 16 positional
+// args. The next change to this function must bundle the UI prefs into one
+// struct instead of widening the list again.
+#[allow(clippy::too_many_arguments)]
 pub fn capture(
     workspaces: &[Workspace],
     terminals: &std::collections::HashMap<

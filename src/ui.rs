@@ -78,7 +78,7 @@ pub(crate) use self::{
         SETTINGS_POPUP_WIDTH,
     },
     sidebar::{
-        agent_entry_gap, agent_group_chevron_rect, agent_panel_body_rect, agent_panel_entries,
+        agent_group_chevron_rect, agent_panel_body_rect, agent_panel_entries,
         agent_panel_entries_from, agent_panel_list_entries, agent_panel_list_entries_from,
         agent_panel_list_entry_gap, agent_panel_list_entry_height, agent_panel_scroll_for_target,
         agent_panel_scroll_metrics, agent_panel_scrollbar_rect, agent_panel_toggle_rect,
