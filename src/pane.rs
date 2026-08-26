@@ -380,6 +380,19 @@ fn foreground_shell_agent_action(
     ForegroundShellAgentAction::ObserveProbe
 }
 
+/// Whether an observed foreground-agent change must drop the retained OSC
+/// title/progress evidence. Evidence must not leak from one agent process to
+/// its replacement, so any change away from a known agent (Some -> Some, a
+/// same-agent replacement, or an exit to None) clears. First acquisition
+/// (None -> Some) keeps it: the bytes seen so far were emitted by the very
+/// process being identified. Clearing there raced the probe against agents
+/// that set their title once at startup (Claude), wiping the title seconds
+/// after it arrived and leaving the osc_title rules without evidence until
+/// the agent's next title change.
+fn agent_change_clears_osc_evidence(previous_agent: Option<Agent>) -> bool {
+    previous_agent.is_some()
+}
+
 fn apply_foreground_shell_agent_action(
     agent_presence: &mut AgentDetectionPresence,
     action: ForegroundShellAgentAction,
@@ -837,9 +850,12 @@ fn spawn_basic_detection_task(
                     if agent_changed {
                         pending_idle.clear();
                         last_screen_scan_detection_content_seq = None;
-                        // A new foreground agent must not inherit OSC
-                        // title/progress evidence from the previous process.
-                        terminal.clear_agent_osc_state();
+                        // A replacement agent must not inherit OSC evidence
+                        // from the previous process; a first acquisition keeps
+                        // the evidence its own process already emitted.
+                        if agent_change_clears_osc_evidence(previous_agent) {
+                            terminal.clear_agent_osc_state();
+                        }
                         if let Some(agent) = agent {
                             agent_startup_grace_until = Some(now + AGENT_STARTUP_GRACE_WINDOW);
                             state = AgentState::Unknown;
@@ -2375,9 +2391,13 @@ impl PaneRuntime {
                                 {
                                     pending_idle.clear();
                                     last_screen_scan_detection_content_seq = None;
-                                    // A new foreground agent must not inherit OSC
-                                    // title/progress evidence from the previous process.
-                                    terminal.clear_agent_osc_state();
+                                    // A replacement agent must not inherit OSC
+                                    // evidence from the previous process; a first
+                                    // acquisition keeps the evidence its own
+                                    // process already emitted.
+                                    if agent_change_clears_osc_evidence(previous_agent) {
+                                        terminal.clear_agent_osc_state();
+                                    }
                                     if let Some(agent) = agent {
                                         agent_startup_grace_until =
                                             Some(now + AGENT_STARTUP_GRACE_WINDOW);
@@ -3750,6 +3770,16 @@ mod tests {
             foreground_shell_agent_action(Some(Agent::Claude), None, false, false),
             ForegroundShellAgentAction::ObserveProbe
         );
+    }
+
+    #[test]
+    fn first_agent_acquisition_keeps_osc_evidence_replacement_clears_it() {
+        // None -> Some is the startup race: the title already on the wire came
+        // from the process being identified, so it must survive.
+        assert!(!agent_change_clears_osc_evidence(None));
+        // Any change away from a known agent clears — replacement processes
+        // and agent switches must not inherit the previous process's titles.
+        assert!(agent_change_clears_osc_evidence(Some(Agent::Claude)));
     }
 
     #[test]
