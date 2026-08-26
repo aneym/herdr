@@ -444,10 +444,8 @@ fn workspace_create_label(input: &str, suggested_name: &str) -> Option<String> {
 
 fn next_new_tab_default_name(state: &AppState) -> String {
     state
-        .requested_new_tab_workspace_id
-        .as_deref()
-        .and_then(|id| state.workspaces.iter().find(|ws| ws.id == id))
-        .or_else(|| state.active.and_then(|i| state.workspaces.get(i)))
+        .active
+        .and_then(|i| state.workspaces.get(i))
         .map(|ws| (ws.tabs.len() + 1).to_string())
         .unwrap_or_else(|| "1".to_string())
 }

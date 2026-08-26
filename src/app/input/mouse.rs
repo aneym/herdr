@@ -728,14 +728,14 @@ impl AppState {
                                 return None;
                             }
                             super::sidebar::TreeHeaderHit::NewTab { ws_idx } => {
+                                // Deliberately never prompts for a name, even
+                                // with prompt_new_tab_name on: the space plus
+                                // just makes the next-numbered tab (Alex,
+                                // 2026-08-26).
                                 self.requested_new_tab_workspace_id =
                                     self.workspaces.get(ws_idx).map(|ws| ws.id.clone());
-                                if self.prompt_new_tab_name {
-                                    open_new_tab_dialog(self);
-                                } else {
-                                    self.request_new_tab = true;
-                                    self.replace_mode(Mode::Terminal);
-                                }
+                                self.request_new_tab = true;
+                                self.replace_mode(Mode::Terminal);
                                 return None;
                             }
                             super::sidebar::TreeHeaderHit::Focus { ws_idx, tab_idx } => {
@@ -5588,21 +5588,21 @@ mod tests {
     }
 
     #[test]
-    fn tree_space_header_plus_opens_dialog_targeting_that_space() {
+    fn tree_space_header_plus_skips_name_prompt_even_when_enabled() {
         let (mut app, col, row) = tree_app_with_plus_on_second_space();
         app.state.prompt_new_tab_name = true;
         let beta_id = app.state.workspaces[1].id.clone();
 
         app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
 
-        assert_eq!(app.state.mode(), Mode::RenameTab);
-        assert!(app.state.creating_new_tab);
+        assert_eq!(app.state.mode(), Mode::Terminal);
+        assert!(!app.state.creating_new_tab);
+        assert!(app.state.request_new_tab);
+        assert!(app.state.requested_new_tab_name.is_none());
         assert_eq!(
             app.state.requested_new_tab_workspace_id.as_deref(),
             Some(beta_id.as_str())
         );
-        // The suggested name counts the TARGET space's tabs, not the active one.
-        assert_eq!(app.state.name_input, "2");
     }
 
     #[test]
