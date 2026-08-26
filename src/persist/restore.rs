@@ -1251,6 +1251,7 @@ mod tests {
             tree_show_agents: true,
             tree_collapsed_spaces: Default::default(),
             tree_collapsed_tabs: Default::default(),
+            tree_pinned_spaces: Default::default(),
         };
         let (events, _event_rx) = mpsc::channel(4);
 
@@ -1369,6 +1370,7 @@ mod tests {
             tree_show_agents: true,
             tree_collapsed_spaces: Default::default(),
             tree_collapsed_tabs: Default::default(),
+            tree_pinned_spaces: Default::default(),
         };
         let (events, _event_rx) = mpsc::channel(4);
 
@@ -1467,6 +1469,7 @@ mod tests {
             tree_show_agents: true,
             tree_collapsed_spaces: Default::default(),
             tree_collapsed_tabs: Default::default(),
+            tree_pinned_spaces: Default::default(),
         };
         let (events, _event_rx) = mpsc::channel(4);
 
@@ -1570,6 +1573,7 @@ mod tests {
             tree_show_agents: true,
             tree_collapsed_spaces: Default::default(),
             tree_collapsed_tabs: Default::default(),
+            tree_pinned_spaces: Default::default(),
         };
         let (events, _event_rx) = mpsc::channel(4);
 
@@ -1695,6 +1699,7 @@ mod tests {
             tree_show_agents: true,
             tree_collapsed_spaces: Default::default(),
             tree_collapsed_tabs: Default::default(),
+            tree_pinned_spaces: Default::default(),
         };
         let (events, _event_rx) = mpsc::channel(4);
 
@@ -1822,6 +1827,7 @@ mod tests {
             tree_show_agents: true,
             tree_collapsed_spaces: Default::default(),
             tree_collapsed_tabs: Default::default(),
+            tree_pinned_spaces: Default::default(),
         };
         let (events, _event_rx) = mpsc::channel(4);
 
@@ -2030,6 +2036,7 @@ mod tests {
             tree_show_agents: true,
             tree_collapsed_spaces: Default::default(),
             tree_collapsed_tabs: Default::default(),
+            tree_pinned_spaces: Default::default(),
         };
         (snapshot, history)
     }

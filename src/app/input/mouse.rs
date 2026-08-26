@@ -738,6 +738,13 @@ impl AppState {
                                 self.replace_mode(Mode::Terminal);
                                 return None;
                             }
+                            super::sidebar::TreeHeaderHit::PinToggle { key } => {
+                                if !self.tree_pinned_spaces.remove(&key) {
+                                    self.tree_pinned_spaces.insert(key);
+                                }
+                                self.mark_session_dirty();
+                                return None;
+                            }
                             super::sidebar::TreeHeaderHit::Focus { ws_idx, tab_idx } => {
                                 self.replace_mode(Mode::Terminal);
                                 let Some(tab_idx) = tab_idx else {
@@ -5590,6 +5597,34 @@ mod tests {
             app.state.requested_new_tab_workspace_id.as_deref(),
             Some(beta_id.as_str())
         );
+    }
+
+    #[test]
+    fn tree_space_header_pin_click_toggles_pinned_space() {
+        let (mut app, _, _) = tree_app_with_plus_on_second_space();
+        let entries = crate::ui::agent_panel_list_entries_from(&app.state, &app.terminal_runtimes);
+        let panel = app.state.agent_panel_rect();
+        let beta_id = app.state.workspaces[1].id.clone();
+        let mut pin_at = None;
+        for row in panel.y..panel.y + panel.height {
+            for col in panel.x..panel.x + panel.width {
+                if let Some(super::super::sidebar::TreeHeaderHit::PinToggle { key }) =
+                    app.state.tree_header_at(&entries, col, row)
+                {
+                    if key == beta_id {
+                        pin_at = Some((col, row));
+                    }
+                }
+            }
+        }
+        let (col, row) = pin_at.expect("second space header exposes a pin hit");
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+        assert!(app.state.tree_pinned_spaces.contains(&beta_id));
+        assert!(app.state.session_dirty);
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+        assert!(!app.state.tree_pinned_spaces.contains(&beta_id));
     }
 
     #[test]

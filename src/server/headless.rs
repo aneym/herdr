@@ -1299,16 +1299,7 @@ impl HeadlessServer {
             self.app.state.active,
             self.app.state.active_profile.clone(),
             self.app.state.selected,
-            self.app.state.sidebar_width,
-            self.app.state.sidebar_section_split,
-            self.app.state.collapsed_space_keys.clone(),
-            self.app.state.automations_expanded,
-            self.app.state.collapsed_agent_group_keys.clone(),
-            self.app.state.tree_show_spaces,
-            self.app.state.tree_show_tabs,
-            self.app.state.tree_show_agents,
-            self.app.state.tree_collapsed_spaces.clone(),
-            self.app.state.tree_collapsed_tabs.clone(),
+            self.app.state.snapshot_ui_prefs(),
         );
 
         let mut handoff_entries = Vec::new();

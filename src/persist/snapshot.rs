@@ -66,6 +66,8 @@ pub struct SessionSnapshot {
     pub tree_collapsed_spaces: std::collections::HashSet<String>,
     #[serde(default)]
     pub tree_collapsed_tabs: std::collections::HashSet<String>,
+    #[serde(default)]
+    pub tree_pinned_spaces: std::collections::HashSet<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -352,6 +354,8 @@ struct RawSessionSnapshot {
     tree_collapsed_spaces: std::collections::HashSet<String>,
     #[serde(default)]
     tree_collapsed_tabs: std::collections::HashSet<String>,
+    #[serde(default)]
+    tree_pinned_spaces: std::collections::HashSet<String>,
 }
 
 fn migrate_snapshot(raw: RawSessionSnapshot) -> Result<SessionSnapshot, String> {
@@ -376,6 +380,7 @@ fn migrate_snapshot(raw: RawSessionSnapshot) -> Result<SessionSnapshot, String> 
         tree_show_agents: raw.tree_show_agents,
         tree_collapsed_spaces: raw.tree_collapsed_spaces,
         tree_collapsed_tabs: raw.tree_collapsed_tabs,
+        tree_pinned_spaces: raw.tree_pinned_spaces,
     })
 }
 
@@ -436,11 +441,42 @@ fn first_pane_id_in_layout(layout: &LayoutSnapshot) -> Option<u32> {
     }
 }
 
+/// UI preferences captured alongside the session. Bundled into one struct so
+/// `capture` stops growing a positional argument per preference (this retires
+/// the 16-positional-args debt from the tree-view work).
+pub struct UiPrefs {
+    pub sidebar_width: u16,
+    pub sidebar_section_split: f32,
+    pub collapsed_space_keys: std::collections::HashSet<String>,
+    pub automations_expanded: bool,
+    pub collapsed_agent_group_keys: std::collections::HashSet<String>,
+    pub tree_show_spaces: bool,
+    pub tree_show_tabs: bool,
+    pub tree_show_agents: bool,
+    pub tree_collapsed_spaces: std::collections::HashSet<String>,
+    pub tree_collapsed_tabs: std::collections::HashSet<String>,
+    pub tree_pinned_spaces: std::collections::HashSet<String>,
+}
+
+impl Default for UiPrefs {
+    fn default() -> Self {
+        Self {
+            sidebar_width: 0,
+            sidebar_section_split: 0.5,
+            collapsed_space_keys: Default::default(),
+            automations_expanded: false,
+            collapsed_agent_group_keys: Default::default(),
+            tree_show_spaces: true,
+            tree_show_tabs: true,
+            tree_show_agents: true,
+            tree_collapsed_spaces: Default::default(),
+            tree_collapsed_tabs: Default::default(),
+            tree_pinned_spaces: Default::default(),
+        }
+    }
+}
+
 /// Capture the current app state into a serializable snapshot.
-// Known debt from the tree-view work: the signature grew to 16 positional
-// args. The next change to this function must bundle the UI prefs into one
-// struct instead of widening the list again.
-#[allow(clippy::too_many_arguments)]
 pub fn capture(
     workspaces: &[Workspace],
     terminals: &std::collections::HashMap<
@@ -451,16 +487,7 @@ pub fn capture(
     active: Option<usize>,
     active_profile: String,
     selected: usize,
-    sidebar_width: u16,
-    sidebar_section_split: f32,
-    collapsed_space_keys: std::collections::HashSet<String>,
-    automations_expanded: bool,
-    collapsed_agent_group_keys: std::collections::HashSet<String>,
-    tree_show_spaces: bool,
-    tree_show_tabs: bool,
-    tree_show_agents: bool,
-    tree_collapsed_spaces: std::collections::HashSet<String>,
-    tree_collapsed_tabs: std::collections::HashSet<String>,
+    ui: UiPrefs,
 ) -> SessionSnapshot {
     SessionSnapshot {
         version: SNAPSHOT_VERSION,
@@ -471,16 +498,17 @@ pub fn capture(
         active,
         active_profile,
         selected,
-        sidebar_width: Some(sidebar_width),
-        sidebar_section_split: Some(sidebar_section_split),
-        collapsed_space_keys,
-        automations_expanded,
-        collapsed_agent_group_keys,
-        tree_show_spaces,
-        tree_show_tabs,
-        tree_show_agents,
-        tree_collapsed_spaces,
-        tree_collapsed_tabs,
+        sidebar_width: Some(ui.sidebar_width),
+        sidebar_section_split: Some(ui.sidebar_section_split),
+        collapsed_space_keys: ui.collapsed_space_keys,
+        automations_expanded: ui.automations_expanded,
+        collapsed_agent_group_keys: ui.collapsed_agent_group_keys,
+        tree_show_spaces: ui.tree_show_spaces,
+        tree_show_tabs: ui.tree_show_tabs,
+        tree_show_agents: ui.tree_show_agents,
+        tree_collapsed_spaces: ui.tree_collapsed_spaces,
+        tree_collapsed_tabs: ui.tree_collapsed_tabs,
+        tree_pinned_spaces: ui.tree_pinned_spaces,
     }
 }
 
@@ -863,16 +891,7 @@ mod tests {
             state.active,
             state.active_profile.clone(),
             state.selected,
-            state.sidebar_width,
-            state.sidebar_section_split,
-            state.collapsed_space_keys.clone(),
-            state.automations_expanded,
-            state.collapsed_agent_group_keys.clone(),
-            state.tree_show_spaces,
-            state.tree_show_tabs,
-            state.tree_show_agents,
-            state.tree_collapsed_spaces.clone(),
-            state.tree_collapsed_tabs.clone(),
+            state.snapshot_ui_prefs(),
         )
     }
 
@@ -945,6 +964,7 @@ mod tests {
             tree_show_agents: true,
             tree_collapsed_spaces: std::collections::HashSet::new(),
             tree_collapsed_tabs: std::collections::HashSet::new(),
+            tree_pinned_spaces: std::collections::HashSet::new(),
         };
         let json = serde_json::to_string(&snap).unwrap();
         let restored = parse_snapshot(&json).unwrap();
@@ -1094,6 +1114,7 @@ mod tests {
             tree_show_agents: true,
             tree_collapsed_spaces: std::collections::HashSet::new(),
             tree_collapsed_tabs: std::collections::HashSet::new(),
+            tree_pinned_spaces: std::collections::HashSet::new(),
             version: SNAPSHOT_VERSION,
         };
 
@@ -1173,6 +1194,7 @@ mod tests {
             tree_show_agents: true,
             tree_collapsed_spaces: std::collections::HashSet::new(),
             tree_collapsed_tabs: std::collections::HashSet::new(),
+            tree_pinned_spaces: std::collections::HashSet::new(),
             version: SNAPSHOT_VERSION,
         };
 
@@ -1393,6 +1415,7 @@ mod tests {
         state.tree_show_agents = false;
         state.tree_collapsed_spaces.insert("repo-key".into());
         state.tree_collapsed_tabs.insert("repo-key#0".into());
+        state.tree_pinned_spaces.insert("repo-key".into());
 
         let snapshot = capture_from_state(&state);
         assert!(!snapshot.tree_show_spaces);
@@ -1400,6 +1423,7 @@ mod tests {
         assert!(!snapshot.tree_show_agents);
         assert!(snapshot.tree_collapsed_spaces.contains("repo-key"));
         assert!(snapshot.tree_collapsed_tabs.contains("repo-key#0"));
+        assert!(snapshot.tree_pinned_spaces.contains("repo-key"));
 
         let json = serde_json::to_string(&snapshot).unwrap();
         let restored = parse_snapshot(&json).unwrap();
@@ -1408,6 +1432,7 @@ mod tests {
         assert!(!restored.tree_show_agents);
         assert!(restored.tree_collapsed_spaces.contains("repo-key"));
         assert!(restored.tree_collapsed_tabs.contains("repo-key#0"));
+        assert!(restored.tree_pinned_spaces.contains("repo-key"));
     }
 
     #[test]
@@ -1896,6 +1921,7 @@ mod tests {
             tree_show_agents: true,
             tree_collapsed_spaces: std::collections::HashSet::new(),
             tree_collapsed_tabs: std::collections::HashSet::new(),
+            tree_pinned_spaces: std::collections::HashSet::new(),
         };
 
         let json = serde_json::to_string(&snap).unwrap();

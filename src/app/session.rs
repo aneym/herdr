@@ -48,16 +48,7 @@ impl App {
                 self.state.active,
                 self.state.active_profile.clone(),
                 self.state.selected,
-                self.state.sidebar_width,
-                self.state.sidebar_section_split,
-                self.state.collapsed_space_keys.clone(),
-                self.state.automations_expanded,
-                self.state.collapsed_agent_group_keys.clone(),
-                self.state.tree_show_spaces,
-                self.state.tree_show_tabs,
-                self.state.tree_show_agents,
-                self.state.tree_collapsed_spaces.clone(),
-                self.state.tree_collapsed_tabs.clone(),
+                self.state.snapshot_ui_prefs(),
             );
             let history = self.persist_pane_history.then(|| {
                 crate::persist::capture_history(&self.state.workspaces, &self.terminal_runtimes)

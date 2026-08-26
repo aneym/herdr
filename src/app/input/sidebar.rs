@@ -15,6 +15,9 @@ pub(super) enum TreeHeaderHit {
     },
     /// The space header's plus: create a new tab in that space and focus it.
     NewTab { ws_idx: usize },
+    /// The space header's pin: toggle whether the space stays listed when no
+    /// agent rows remain beneath it.
+    PinToggle { key: String },
 }
 
 impl AppState {
@@ -632,6 +635,12 @@ impl AppState {
                     if plus.width > 0 && col >= plus.x && col < plus.x.saturating_add(plus.width) {
                         return Some(TreeHeaderHit::NewTab {
                             ws_idx: header.ws_idx,
+                        });
+                    }
+                    let pin = crate::ui::tree_header_pin_rect(body, row_y);
+                    if pin.width > 0 && col >= pin.x && col < pin.x.saturating_add(pin.width) {
+                        return Some(TreeHeaderHit::PinToggle {
+                            key: header.key.clone(),
                         });
                     }
                 }

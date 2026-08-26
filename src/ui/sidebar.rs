@@ -626,6 +626,9 @@ pub(crate) struct TreeHeader {
     /// This header has rows underneath it that a collapse would actually
     /// hide. A header with nothing to hide shows no chevron.
     pub collapsible: bool,
+    /// Space headers: this space is pinned, so it stays listed even when no
+    /// agent rows remain beneath it. Always false on tab headers.
+    pub pinned: bool,
     pub indent: u8,
     /// This header's workspace/tab holds the active pane.
     pub active: bool,
@@ -697,6 +700,7 @@ fn tree_list_entries(app: &AppState, agents: Vec<AgentPanelEntry>) -> Vec<AgentP
                         .map(|ws| ws.display_name_from_terminals(&app.terminals))
                 })
                 .unwrap_or_default();
+            let pinned = app.tree_pinned_spaces.contains(&key);
             out.push(AgentPanelListEntry::SpaceHeader(TreeHeader {
                 ws_idx,
                 tab_idx: None,
@@ -713,6 +717,7 @@ fn tree_list_entries(app: &AppState, agents: Vec<AgentPanelEntry>) -> Vec<AgentP
                     Vec::new()
                 },
                 collapsible: !ws_entries.is_empty() && (app.tree_show_tabs || app.tree_show_agents),
+                pinned,
                 indent: 0,
                 // A space row separates groups; it is never the selection.
                 // Highlighting it while a tab inside it is selected reads as
@@ -767,6 +772,7 @@ fn tree_list_entries(app: &AppState, agents: Vec<AgentPanelEntry>) -> Vec<AgentP
                         Vec::new()
                     },
                     collapsible: !tab_entries.is_empty() && app.tree_show_agents,
+                    pinned: false,
                     indent: space_indent,
                     active: !app.tree_show_agents
                         && app.active == Some(ws_idx)
@@ -797,6 +803,51 @@ fn tree_list_entries(app: &AppState, agents: Vec<AgentPanelEntry>) -> Vec<AgentP
                 }
             }
             out.extend(tab_entries.into_iter().map(AgentPanelListEntry::Agent));
+        }
+    }
+
+    // Pinned spaces stay listed even when nothing runs in them, so a space
+    // keeps its header (and its new-tab plus) instead of vanishing when its
+    // last agent goes away. They follow the agent-bearing spaces, in
+    // workspace order.
+    if app.tree_show_spaces && !app.tree_pinned_spaces.is_empty() {
+        let spaces_with_agents: std::collections::HashSet<usize> = out
+            .iter()
+            .filter_map(|entry| match entry {
+                AgentPanelListEntry::SpaceHeader(header) => Some(header.ws_idx),
+                _ => None,
+            })
+            .collect();
+        for ws_idx in 0..app.workspaces.len() {
+            if spaces_with_agents.contains(&ws_idx) || !app.workspace_is_visible(ws_idx) {
+                continue;
+            }
+            let Some(key) = tree_space_key(app, ws_idx) else {
+                continue;
+            };
+            if !app.tree_pinned_spaces.contains(&key) {
+                continue;
+            }
+            let label = app
+                .workspaces
+                .get(ws_idx)
+                .map(|ws| ws.display_name_from_terminals(&app.terminals))
+                .unwrap_or_default();
+            let collapsed = app.tree_collapsed_spaces.contains(&key);
+            out.push(AgentPanelListEntry::SpaceHeader(TreeHeader {
+                ws_idx,
+                tab_idx: None,
+                label,
+                key,
+                collapsed,
+                child_count: 0,
+                hidden_state: None,
+                child_states: Vec::new(),
+                collapsible: false,
+                pinned: true,
+                indent: 0,
+                active: false,
+            }));
         }
     }
     out
@@ -1300,6 +1351,16 @@ pub(crate) fn tree_header_plus_rect(body: Rect, row_y: u16) -> Rect {
         return Rect::default();
     }
     Rect::new(body.x + body.width.saturating_sub(4), row_y, 2, 1)
+}
+
+/// Hit region for the pin toggle on a tree space header row: the cell pair
+/// immediately left of the new-tab plus. Like the plus, the slot is drawn on
+/// every space header, so this rect never moves either.
+pub(crate) fn tree_header_pin_rect(body: Rect, row_y: u16) -> Rect {
+    if body.width < 6 {
+        return Rect::default();
+    }
+    Rect::new(body.x + body.width.saturating_sub(6), row_y, 2, 1)
 }
 
 /// Paints half of a padding row in the selection colour, so a selected item
@@ -2485,8 +2546,8 @@ fn render_agent_detail(
                 spans.push(Span::raw(" ".repeat(indent_cols)));
             }
             let prefix_width = 1 + indent_cols;
-            // Space headers reserve two extra cells for the new-tab plus.
-            let trailing_width = if is_space { 8usize } else { 6usize };
+            // Space headers reserve extra cells for the pin and new-tab plus.
+            let trailing_width = if is_space { 10usize } else { 6usize };
             spans.push(Span::styled(
                 truncate_end(
                     &header.label,
@@ -2567,6 +2628,19 @@ fn render_agent_detail(
                 trailing.push(Span::raw(" "));
             }
             if is_space {
+                // Pin toggle, one cell pair left of the plus, so the trailing
+                // strip reads [pin][+][chevron]; hit region
+                // `tree_header_pin_rect`. A pinned space keeps its header row
+                // even when no agents remain beneath it.
+                trailing.push(Span::styled(
+                    "⚲",
+                    if header.pinned {
+                        Style::default().fg(p.accent)
+                    } else {
+                        Style::default().fg(p.overlay0)
+                    },
+                ));
+                trailing.push(Span::raw(" "));
                 // New-tab plus, one cell pair left of the chevron slot so its
                 // hit region (`tree_header_plus_rect`) stays fixed whether or
                 // not this header draws a chevron.
@@ -5314,6 +5388,65 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
                 _ => {}
             }
         }
+    }
+
+    /// Two spaces where only the first runs an agent, so the second would
+    /// normally drop out of the tree entirely.
+    fn app_with_agentless_beta() -> AppState {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![
+            Workspace::test_new("alpha-space"),
+            Workspace::test_new("beta-space"),
+        ];
+        app.ensure_test_terminals();
+        app.active = Some(0);
+        app.selected = 0;
+        app.agent_panel_sort = AgentPanelSort::Tree;
+        let pane_id = app.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let terminal = app.terminals.get_mut(&terminal_id).expect("agent terminal");
+        terminal.set_agent_name("agent-0-0".to_string());
+        terminal.set_detected_state(Some(Agent::Pi), AgentState::Idle);
+        app
+    }
+
+    #[test]
+    fn unpinned_agentless_space_drops_out_of_the_tree() {
+        let app = app_with_agentless_beta();
+        assert_eq!(tree_shape(&app), ["space:0", "tab:0.0", "agent:0.0"]);
+    }
+
+    #[test]
+    fn pinned_agentless_space_keeps_its_header_row() {
+        let mut app = app_with_agentless_beta();
+        let beta_key = app.workspaces[1].id.clone();
+        app.tree_pinned_spaces.insert(beta_key);
+
+        assert_eq!(
+            tree_shape(&app),
+            ["space:0", "tab:0.0", "agent:0.0", "space:1"]
+        );
+        let header = tree_header(&app, "space:1");
+        assert!(header.pinned);
+        assert!(!header.collapsible);
+        assert!(header.child_states.is_empty());
+    }
+
+    #[test]
+    fn pinned_space_with_agents_is_not_duplicated() {
+        let mut app = app_with_tree_agents();
+        let alpha_key = app.workspaces[0].id.clone();
+        app.tree_pinned_spaces.insert(alpha_key);
+
+        let spaces: Vec<String> = tree_shape(&app)
+            .into_iter()
+            .filter(|row| row.starts_with("space:"))
+            .collect();
+        assert_eq!(spaces, ["space:0", "space:1"]);
+        assert!(tree_header(&app, "space:0").pinned);
+        assert!(!tree_header(&app, "space:1").pinned);
     }
 
     #[test]

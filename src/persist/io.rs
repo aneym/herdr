@@ -215,6 +215,7 @@ mod tests {
             tree_show_agents: true,
             tree_collapsed_spaces: std::collections::HashSet::new(),
             tree_collapsed_tabs: std::collections::HashSet::new(),
+            tree_pinned_spaces: std::collections::HashSet::new(),
         }
     }
 

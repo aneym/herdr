@@ -1948,16 +1948,7 @@ mod tests {
             app.state.active,
             app.state.active_profile.clone(),
             app.state.selected,
-            app.state.sidebar_width,
-            app.state.sidebar_section_split,
-            app.state.collapsed_space_keys.clone(),
-            app.state.automations_expanded,
-            app.state.collapsed_agent_group_keys.clone(),
-            app.state.tree_show_spaces,
-            app.state.tree_show_tabs,
-            app.state.tree_show_agents,
-            app.state.tree_collapsed_spaces.clone(),
-            app.state.tree_collapsed_tabs.clone(),
+            app.state.snapshot_ui_prefs(),
         );
         assert_eq!(snapshot.workspaces[0].tabs[0].panes.len(), 1);
         assert!(matches!(

@@ -1853,6 +1853,9 @@ pub struct AppState {
     pub tree_collapsed_spaces: std::collections::HashSet<String>,
     /// Tree view: collapsed tab groups, keyed by `<workspace-id>#<tab-number>`.
     pub tree_collapsed_tabs: std::collections::HashSet<String>,
+    /// Tree view: pinned spaces keep their header row listed even when no
+    /// agent rows remain beneath them. Keyed by workspace id.
+    pub tree_pinned_spaces: std::collections::HashSet<String>,
     pub next_agent_state_change_seq: u64,
     /// Capture mouse input for Herdr's own mouse UI. When false, Herdr only
     /// captures mouse while the focused pane app requests mouse reporting.
@@ -1969,6 +1972,23 @@ impl AppState {
 
     pub(crate) fn mark_session_dirty(&mut self) {
         self.session_dirty = true;
+    }
+
+    /// The UI preferences a session snapshot carries, cloned for `capture`.
+    pub(crate) fn snapshot_ui_prefs(&self) -> crate::persist::UiPrefs {
+        crate::persist::UiPrefs {
+            sidebar_width: self.sidebar_width,
+            sidebar_section_split: self.sidebar_section_split,
+            collapsed_space_keys: self.collapsed_space_keys.clone(),
+            automations_expanded: self.automations_expanded,
+            collapsed_agent_group_keys: self.collapsed_agent_group_keys.clone(),
+            tree_show_spaces: self.tree_show_spaces,
+            tree_show_tabs: self.tree_show_tabs,
+            tree_show_agents: self.tree_show_agents,
+            tree_collapsed_spaces: self.tree_collapsed_spaces.clone(),
+            tree_collapsed_tabs: self.tree_collapsed_tabs.clone(),
+            tree_pinned_spaces: self.tree_pinned_spaces.clone(),
+        }
     }
 
     pub(crate) fn set_pane_profiles(
@@ -2331,6 +2351,7 @@ impl AppState {
             tree_show_agents: true,
             tree_collapsed_spaces: std::collections::HashSet::new(),
             tree_collapsed_tabs: std::collections::HashSet::new(),
+            tree_pinned_spaces: std::collections::HashSet::new(),
             request_complete_onboarding: false,
             name_input: String::new(),
             name_input_replace_on_type: false,

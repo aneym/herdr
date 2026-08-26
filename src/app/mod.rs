@@ -436,6 +436,7 @@ impl App {
             tree_show_agents,
             tree_collapsed_spaces,
             tree_collapsed_tabs,
+            tree_pinned_spaces,
         ) = if no_session {
             (
                 Vec::new(),
@@ -451,6 +452,7 @@ impl App {
                 true,
                 true,
                 true,
+                std::collections::HashSet::new(),
                 std::collections::HashSet::new(),
                 std::collections::HashSet::new(),
             )
@@ -497,6 +499,7 @@ impl App {
                     snap.tree_show_agents,
                     snap.tree_collapsed_spaces,
                     snap.tree_collapsed_tabs,
+                    snap.tree_pinned_spaces,
                 )
             } else {
                 crate::logging::session_restored(ws.len(), "ok");
@@ -522,6 +525,7 @@ impl App {
                     snap.tree_show_agents,
                     snap.tree_collapsed_spaces,
                     snap.tree_collapsed_tabs,
+                    snap.tree_pinned_spaces,
                 )
             }
         } else {
@@ -539,6 +543,7 @@ impl App {
                 true,
                 true,
                 true,
+                std::collections::HashSet::new(),
                 std::collections::HashSet::new(),
                 std::collections::HashSet::new(),
             )
@@ -645,6 +650,7 @@ impl App {
         state.tree_show_agents = tree_show_agents;
         state.tree_collapsed_spaces = tree_collapsed_spaces;
         state.tree_collapsed_tabs = tree_collapsed_tabs;
+        state.tree_pinned_spaces = tree_pinned_spaces;
         state.request_complete_onboarding = false;
         state.name_input = String::new();
         state.name_input_replace_on_type = false;
@@ -968,6 +974,7 @@ impl App {
         app.state.tree_show_agents = snapshot.tree_show_agents;
         app.state.tree_collapsed_spaces = snapshot.tree_collapsed_spaces.clone();
         app.state.tree_collapsed_tabs = snapshot.tree_collapsed_tabs.clone();
+        app.state.tree_pinned_spaces = snapshot.tree_pinned_spaces.clone();
         app.state.replace_mode(if app.state.active.is_some() {
             state::Mode::Terminal
         } else {
@@ -2243,16 +2250,10 @@ mod tests {
             None,
             crate::workspace::DEFAULT_PROFILE.to_string(),
             0,
-            26,
-            0.5,
-            std::collections::HashSet::new(),
-            false,
-            std::collections::HashSet::new(),
-            true,
-            true,
-            true,
-            std::collections::HashSet::new(),
-            std::collections::HashSet::new(),
+            crate::persist::UiPrefs {
+                sidebar_width: 26,
+                ..Default::default()
+            },
         );
         let mut imports = std::collections::HashMap::new();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
