@@ -494,6 +494,8 @@ mod tests {
             tree_collapsed_spaces: Default::default(),
             tree_collapsed_tabs: Default::default(),
             tree_pinned_spaces: Default::default(),
+            tree_show_hidden_spaces: false,
+            hidden_spaces_expanded: false,
         }
     }
 

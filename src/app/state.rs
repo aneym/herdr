@@ -1870,12 +1870,11 @@ pub struct AppState {
     /// Tree view: pinned spaces keep their header row listed even when no
     /// agent rows remain beneath them. Keyed by workspace id.
     pub tree_pinned_spaces: std::collections::HashSet<String>,
-    /// Transient reveal of profile-hidden spaces in the tree view. Not
-    /// persisted: a fresh session starts focused again.
+    /// Collapsed spaces move into the tree's `hidden` section instead of
+    /// keeping their slot. Persisted with the other tree prefs.
     pub tree_show_hidden_spaces: bool,
-    /// The revealed `hidden` section is open. Starts closed so turning the
-    /// reveal on costs one row, not a wall of foreign spaces. Session-local,
-    /// like the reveal itself.
+    /// The `hidden` section is open. Starts closed, so demoting a space
+    /// costs one shared row rather than one row each.
     pub hidden_spaces_expanded: bool,
     pub next_agent_state_change_seq: u64,
     /// Capture mouse input for Herdr's own mouse UI. When false, Herdr only
@@ -2009,6 +2008,8 @@ impl AppState {
             tree_collapsed_spaces: self.tree_collapsed_spaces.clone(),
             tree_collapsed_tabs: self.tree_collapsed_tabs.clone(),
             tree_pinned_spaces: self.tree_pinned_spaces.clone(),
+            tree_show_hidden_spaces: self.tree_show_hidden_spaces,
+            hidden_spaces_expanded: self.hidden_spaces_expanded,
         }
     }
 

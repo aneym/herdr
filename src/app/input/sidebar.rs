@@ -2802,16 +2802,14 @@ mod tests {
     #[test]
     fn clicking_the_hidden_section_header_toggles_it() {
         let mut app = app_for_mouse_test();
-        app.state.workspaces = vec![
-            Workspace::test_new("resident"),
-            Workspace::test_new("foreign"),
-        ];
+        app.state.workspaces = vec![Workspace::test_new("open"), Workspace::test_new("folded")];
         app.state.ensure_test_terminals();
-        app.state.workspaces[1].profiles = vec!["work".into()];
         app.state.active = Some(0);
         app.state.selected = 0;
         app.state.agent_panel_sort = AgentPanelSort::Tree;
         app.state.tree_show_hidden_spaces = true;
+        let folded_key = app.state.workspaces[1].id.clone();
+        app.state.tree_collapsed_spaces.insert(folded_key);
         app.state.replace_mode(Mode::Terminal);
         for ws_idx in 0..2 {
             let pane_id = app.state.workspaces[ws_idx].tabs[0].root_pane;

@@ -437,6 +437,8 @@ impl App {
             tree_collapsed_spaces,
             tree_collapsed_tabs,
             tree_pinned_spaces,
+            tree_show_hidden_spaces,
+            hidden_spaces_expanded,
         ) = if no_session {
             (
                 Vec::new(),
@@ -455,6 +457,8 @@ impl App {
                 std::collections::HashSet::new(),
                 std::collections::HashSet::new(),
                 std::collections::HashSet::new(),
+                false,
+                false,
             )
         } else if let Some(snap) = crate::persist::load() {
             let history = config
@@ -500,6 +504,8 @@ impl App {
                     snap.tree_collapsed_spaces,
                     snap.tree_collapsed_tabs,
                     snap.tree_pinned_spaces,
+                    snap.tree_show_hidden_spaces,
+                    snap.hidden_spaces_expanded,
                 )
             } else {
                 crate::logging::session_restored(ws.len(), "ok");
@@ -526,6 +532,8 @@ impl App {
                     snap.tree_collapsed_spaces,
                     snap.tree_collapsed_tabs,
                     snap.tree_pinned_spaces,
+                    snap.tree_show_hidden_spaces,
+                    snap.hidden_spaces_expanded,
                 )
             }
         } else {
@@ -546,6 +554,8 @@ impl App {
                 std::collections::HashSet::new(),
                 std::collections::HashSet::new(),
                 std::collections::HashSet::new(),
+                false,
+                false,
             )
         };
 
@@ -651,6 +661,8 @@ impl App {
         state.tree_collapsed_spaces = tree_collapsed_spaces;
         state.tree_collapsed_tabs = tree_collapsed_tabs;
         state.tree_pinned_spaces = tree_pinned_spaces;
+        state.tree_show_hidden_spaces = tree_show_hidden_spaces;
+        state.hidden_spaces_expanded = hidden_spaces_expanded;
         state.request_complete_onboarding = false;
         state.name_input = String::new();
         state.name_input_replace_on_type = false;
@@ -975,6 +987,8 @@ impl App {
         app.state.tree_collapsed_spaces = snapshot.tree_collapsed_spaces.clone();
         app.state.tree_collapsed_tabs = snapshot.tree_collapsed_tabs.clone();
         app.state.tree_pinned_spaces = snapshot.tree_pinned_spaces.clone();
+        app.state.tree_show_hidden_spaces = snapshot.tree_show_hidden_spaces;
+        app.state.hidden_spaces_expanded = snapshot.hidden_spaces_expanded;
         app.state.replace_mode(if app.state.active.is_some() {
             state::Mode::Terminal
         } else {
