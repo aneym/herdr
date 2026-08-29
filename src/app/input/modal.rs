@@ -1061,6 +1061,9 @@ pub(super) fn apply_context_menu_action(
         (ContextMenuKind::SidebarView { .. }, Some("✓ agents" | "  agents")) => {
             toggle_tree_layer(state, TreeLayer::Agents);
         }
+        (ContextMenuKind::SidebarView { .. }, Some("✓ hidden" | "  hidden")) => {
+            toggle_hidden_spaces(state);
+        }
         _ => leave_modal(state),
     }
 }
@@ -1087,6 +1090,14 @@ fn toggle_tree_layer(state: &mut AppState, layer: TreeLayer) {
     }
     state.agent_panel_scroll = 0;
     state.mark_session_dirty();
+    leave_modal(state);
+}
+
+/// Reveal or re-hide profile-hidden spaces in the tree. Deliberately not
+/// persisted: the reveal is a peek, and a fresh session starts focused.
+fn toggle_hidden_spaces(state: &mut AppState) {
+    state.tree_show_hidden_spaces = !state.tree_show_hidden_spaces;
+    state.agent_panel_scroll = 0;
     leave_modal(state);
 }
 
@@ -1837,6 +1848,9 @@ impl App {
             }
             (ContextMenuKind::SidebarView { .. }, Some("✓ agents" | "  agents")) => {
                 toggle_tree_layer(&mut self.state, TreeLayer::Agents);
+            }
+            (ContextMenuKind::SidebarView { .. }, Some("✓ hidden" | "  hidden")) => {
+                toggle_hidden_spaces(&mut self.state);
             }
             _ => leave_modal(&mut self.state),
         }

@@ -1216,6 +1216,13 @@ pub(crate) enum DragTarget {
         source_ws_idx: usize,
         drop_target: Option<WorkspaceDropTarget>,
     },
+    /// Reorder a space by dragging its header row in the agents tree. Reuses
+    /// the workspace drop-target semantics; only the slot rows differ.
+    TreeSpaceReorder {
+        source_id: crate::app::InputSourceId,
+        source_ws_idx: usize,
+        drop_target: Option<WorkspaceDropTarget>,
+    },
     TabReorder {
         source_id: crate::app::InputSourceId,
         ws_idx: usize,
@@ -1304,6 +1311,7 @@ pub enum ContextMenuKind {
         show_spaces: bool,
         show_tabs: bool,
         show_agents: bool,
+        show_hidden: bool,
     },
 }
 
@@ -1448,6 +1456,7 @@ impl ContextMenuState {
                 show_spaces,
                 show_tabs,
                 show_agents,
+                show_hidden,
             } => {
                 let mark = |active: bool, on: &'static str, off: &'static str| {
                     if active {
@@ -1467,6 +1476,7 @@ impl ContextMenuState {
                     items.push(mark(show_spaces, "✓ spaces", "  spaces"));
                     items.push(mark(show_tabs, "✓ tabs", "  tabs"));
                     items.push(mark(show_agents, "✓ agents", "  agents"));
+                    items.push(mark(show_hidden, "✓ hidden", "  hidden"));
                 }
                 items
             }
@@ -1783,6 +1793,10 @@ pub struct AppState {
     pub(crate) workspace_presses:
         std::collections::HashMap<crate::app::InputSourceId, WorkspacePressState>,
     pub(crate) tab_presses: std::collections::HashMap<crate::app::InputSourceId, TabPressState>,
+    /// Pending press on a tree space header row: click focuses on release,
+    /// a drag past the threshold reorders the space instead.
+    pub(crate) tree_space_presses:
+        std::collections::HashMap<crate::app::InputSourceId, WorkspacePressState>,
     pub selection: Option<Selection>,
     /// Hovered pane ID and whether the copy button itself is hovered.
     pub(crate) pane_hover: Option<(PaneId, bool)>,
@@ -1856,6 +1870,9 @@ pub struct AppState {
     /// Tree view: pinned spaces keep their header row listed even when no
     /// agent rows remain beneath them. Keyed by workspace id.
     pub tree_pinned_spaces: std::collections::HashSet<String>,
+    /// Transient reveal of profile-hidden spaces in the tree view. Not
+    /// persisted: a fresh session starts focused again.
+    pub tree_show_hidden_spaces: bool,
     pub next_agent_state_change_seq: u64,
     /// Capture mouse input for Herdr's own mouse UI. When false, Herdr only
     /// captures mouse while the focused pane app requests mouse reporting.
@@ -2352,6 +2369,7 @@ impl AppState {
             tree_collapsed_spaces: std::collections::HashSet::new(),
             tree_collapsed_tabs: std::collections::HashSet::new(),
             tree_pinned_spaces: std::collections::HashSet::new(),
+            tree_show_hidden_spaces: false,
             request_complete_onboarding: false,
             name_input: String::new(),
             name_input_replace_on_type: false,
@@ -2386,6 +2404,7 @@ impl AppState {
             drag: None,
             workspace_presses: std::collections::HashMap::new(),
             tab_presses: std::collections::HashMap::new(),
+            tree_space_presses: std::collections::HashMap::new(),
             selection: None,
             pane_hover: None,
             pane_copy_presses: std::collections::HashSet::new(),
@@ -2713,6 +2732,10 @@ impl AppState {
             assert!(
                 self.tab_presses.is_empty(),
                 "empty app state must not keep tab press state"
+            );
+            assert!(
+                self.tree_space_presses.is_empty(),
+                "empty app state must not keep tree space press state"
             );
             assert!(
                 self.pane_copy_presses.is_empty(),

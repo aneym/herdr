@@ -855,10 +855,20 @@ impl App {
         // `AppState::agent_cycle_target`. This used to step positionally,
         // which in the stable-ordered tree view sent cmd+E to whatever row
         // happened to sit next rather than the agent needing attention.
+        // Agents inside collapsed tree spaces drop out of the rotation; the
+        // returned index stays in the unfiltered panel list.
         let entries = crate::ui::agent_panel_entries_from(&self.state, &self.terminal_runtimes);
-        let next_idx = self.state.agent_cycle_target(&entries, forward)?;
-        let target = entries.get(next_idx)?;
-        Some((next_idx, target.ws_idx, target.pane_id))
+        let mut flat_indices = Vec::with_capacity(entries.len());
+        let mut candidates = Vec::with_capacity(entries.len());
+        for (idx, entry) in entries.into_iter().enumerate() {
+            if !self.state.agent_cycle_skips_workspace(entry.ws_idx) {
+                flat_indices.push(idx);
+                candidates.push(entry);
+            }
+        }
+        let next_idx = self.state.agent_cycle_target(&candidates, forward)?;
+        let target = candidates.get(next_idx)?;
+        Some((flat_indices[next_idx], target.ws_idx, target.pane_id))
     }
 
     fn pass_through_key_to_focused_pane(&mut self, key: TerminalKey) -> bool {

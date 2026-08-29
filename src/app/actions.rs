@@ -1919,9 +1919,27 @@ impl AppState {
     #[cfg(test)]
     fn cycle_agent_entry(&mut self, forward: bool) {
         let entries = crate::ui::agent_panel_entries(self);
-        if let Some(idx) = self.agent_cycle_target(&entries, forward) {
-            self.focus_agent_entry(idx);
+        let mut flat_indices = Vec::with_capacity(entries.len());
+        let mut candidates = Vec::with_capacity(entries.len());
+        for (idx, entry) in entries.into_iter().enumerate() {
+            if !self.agent_cycle_skips_workspace(entry.ws_idx) {
+                flat_indices.push(idx);
+                candidates.push(entry);
+            }
         }
+        if let Some(idx) = self.agent_cycle_target(&candidates, forward) {
+            self.focus_agent_entry(flat_indices[idx]);
+        }
+    }
+
+    /// True when the tree view is active and this workspace's space is
+    /// collapsed. What Alex folded away should not catch cmd+E, so its
+    /// agents leave the attention rotation until the space reopens.
+    pub(crate) fn agent_cycle_skips_workspace(&self, ws_idx: usize) -> bool {
+        crate::ui::tree_view_active(self)
+            && self.tree_show_spaces
+            && crate::ui::tree_space_key(self, ws_idx)
+                .is_some_and(|key| self.tree_collapsed_spaces.contains(&key))
     }
 
     /// Cmd+E target selection over the flat panel entries. Shared by the
@@ -5297,6 +5315,45 @@ mod tests {
         state.previous_agent();
         assert_eq!(state.active, Some(0));
         assert_eq!(state.workspaces[0].focused_pane_id(), Some(first_second));
+        state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn next_agent_skips_agents_in_collapsed_tree_spaces() {
+        let mut first = Workspace::test_new("one");
+        let first_root = first.tabs[0].root_pane;
+        let first_second = first.test_split(Direction::Horizontal);
+        first.tabs[0].layout.focus_pane(first_root);
+        let second = Workspace::test_new("two");
+        let second_root = second.tabs[0].root_pane;
+
+        let mut state = AppState::test_new();
+        state.workspaces = vec![first, second];
+        state.ensure_test_terminals();
+        state.active = Some(0);
+        state.selected = 0;
+        state.replace_mode(Mode::Terminal);
+        state.agent_panel_sort = crate::app::state::AgentPanelSort::Tree;
+        mark_agent(&mut state, 0, 0, first_root);
+        mark_agent(&mut state, 0, 0, first_second);
+        mark_agent(&mut state, 1, 0, second_root);
+        let second_key = state.workspaces[1].id.clone();
+        state.tree_collapsed_spaces.insert(second_key);
+
+        // The collapsed space's agent leaves the rotation entirely: cmd+E
+        // bounces between the two visible agents.
+        state.next_agent();
+        assert_eq!(state.active, Some(0));
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(first_second));
+        state.next_agent();
+        assert_eq!(state.active, Some(0));
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(first_root));
+
+        // Reopening the space puts its agent back in rotation.
+        state.tree_collapsed_spaces.clear();
+        state.next_agent();
+        assert_eq!(state.active, Some(1));
+        assert_eq!(state.workspaces[1].focused_pane_id(), Some(second_root));
         state.assert_invariants_for_test();
     }
 

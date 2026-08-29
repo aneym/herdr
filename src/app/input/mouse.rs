@@ -703,6 +703,7 @@ impl AppState {
                                 show_spaces: self.tree_show_spaces,
                                 show_tabs: self.tree_show_tabs,
                                 show_agents: self.tree_show_agents,
+                                show_hidden: self.tree_show_hidden_spaces,
                             },
                             x: mouse.column,
                             y: mouse.row.saturating_add(1),
@@ -748,7 +749,19 @@ impl AppState {
                             super::sidebar::TreeHeaderHit::Focus { ws_idx, tab_idx } => {
                                 self.replace_mode(Mode::Terminal);
                                 let Some(tab_idx) = tab_idx else {
-                                    return Some(MouseAction::FocusWorkspace { ws_idx });
+                                    // A space header press arms a possible
+                                    // reorder drag; the focus happens on
+                                    // release when none started (mirrors the
+                                    // workspace rows below).
+                                    self.tree_space_presses.insert(
+                                        source_id,
+                                        WorkspacePressState {
+                                            ws_idx,
+                                            start_col: mouse.column,
+                                            start_row: mouse.row,
+                                        },
+                                    );
+                                    return None;
                                 };
                                 self.switch_workspace_tab(ws_idx, tab_idx);
                                 // Focus the tab's own pane. Routing this
@@ -905,6 +918,32 @@ impl AppState {
                                 },
                             });
                         }
+                    } else if let Some(press) = self.tree_space_presses.get(&source_id) {
+                        let source_ws_idx = press.ws_idx;
+                        let delta_col = mouse.column.abs_diff(press.start_col);
+                        let delta_row = mouse.row.abs_diff(press.start_row);
+                        let can_reorder = self.workspaces.get(source_ws_idx).is_some_and(|ws| {
+                            ws.worktree_space()
+                                .is_none_or(|space| !space.is_linked_worktree)
+                        });
+                        if can_reorder && delta_col.max(delta_row) >= WORKSPACE_DRAG_THRESHOLD {
+                            let entries =
+                                crate::ui::agent_panel_list_entries_from(self, terminal_runtimes);
+                            // Require a real drop slot before opening the
+                            // reorder, so a drag that leaves the panel cannot
+                            // start with nowhere to land.
+                            if let Some(drop_target) =
+                                self.tree_space_drop_target_at(&entries, mouse.row)
+                            {
+                                self.drag = Some(DragState {
+                                    target: DragTarget::TreeSpaceReorder {
+                                        source_id,
+                                        source_ws_idx,
+                                        drop_target: Some(drop_target),
+                                    },
+                                });
+                            }
+                        }
                     }
                 }
 
@@ -933,9 +972,28 @@ impl AppState {
                     if *drag_source_id == source_id && self.active == Some(*ws_idx) {
                         *insert_idx = tab_drop_index;
                     }
+                } else if matches!(
+                    &self.drag,
+                    Some(DragState {
+                        target: DragTarget::TreeSpaceReorder {
+                            source_id: drag_source_id,
+                            ..
+                        },
+                    }) if *drag_source_id == source_id
+                ) {
+                    let entries = crate::ui::agent_panel_list_entries_from(self, terminal_runtimes);
+                    let new_target = self.tree_space_drop_target_at(&entries, mouse.row);
+                    if let Some(DragState {
+                        target: DragTarget::TreeSpaceReorder { drop_target, .. },
+                    }) = &mut self.drag
+                    {
+                        *drop_target = new_target;
+                    }
                 } else if let Some(drag) = &self.drag {
                     match &drag.target {
-                        DragTarget::WorkspaceReorder { .. } | DragTarget::TabReorder { .. } => {}
+                        DragTarget::WorkspaceReorder { .. }
+                        | DragTarget::TabReorder { .. }
+                        | DragTarget::TreeSpaceReorder { .. } => {}
                         DragTarget::WorkspaceListScrollbar { grab_row_offset } => {
                             if let Some(offset_from_bottom) =
                                 self.workspace_list_offset_for_drag_row(mouse.row, *grab_row_offset)
@@ -1052,8 +1110,9 @@ impl AppState {
 
                 let workspace_press = self.workspace_presses.remove(&source_id);
                 let tab_press = self.tab_presses.remove(&source_id);
+                let tree_press = self.tree_space_presses.remove(&source_id);
                 if foreign_chrome_drag {
-                    return self.chrome_press_action(workspace_press, tab_press);
+                    return self.chrome_press_action(workspace_press, tab_press, tree_press);
                 }
 
                 match self.drag.take() {
@@ -1108,8 +1167,24 @@ impl AppState {
                             });
                         }
                     }
+                    Some(DragState {
+                        target:
+                            DragTarget::TreeSpaceReorder {
+                                source_ws_idx,
+                                drop_target: Some(drop_target),
+                                ..
+                            },
+                    }) => {
+                        if let Some(params) =
+                            self.tree_space_move_params(source_ws_idx, drop_target)
+                        {
+                            return Some(MouseAction::MoveWorkspaceBlock { params });
+                        }
+                    }
                     Some(_) => {}
-                    None => return self.chrome_press_action(workspace_press, tab_press),
+                    None => {
+                        return self.chrome_press_action(workspace_press, tab_press, tree_press)
+                    }
                 }
             }
 
@@ -1760,7 +1835,9 @@ impl AppState {
     }
 
     fn chrome_press_pending(&self, source_id: crate::app::InputSourceId) -> bool {
-        self.tab_presses.contains_key(&source_id) || self.workspace_presses.contains_key(&source_id)
+        self.tab_presses.contains_key(&source_id)
+            || self.workspace_presses.contains_key(&source_id)
+            || self.tree_space_presses.contains_key(&source_id)
     }
 
     fn chrome_drag_owned_by_other(&self, source_id: crate::app::InputSourceId) -> bool {
@@ -1773,6 +1850,9 @@ impl AppState {
                 } | DragTarget::TabReorder {
                     source_id: drag_source_id,
                     ..
+                } | DragTarget::TreeSpaceReorder {
+                    source_id: drag_source_id,
+                    ..
                 } if drag_source_id != source_id
             )
         })
@@ -1782,8 +1862,9 @@ impl AppState {
         &mut self,
         workspace_press: Option<WorkspacePressState>,
         tab_press: Option<TabPressState>,
+        tree_press: Option<WorkspacePressState>,
     ) -> Option<MouseAction> {
-        if let Some(press) = workspace_press {
+        if let Some(press) = workspace_press.or(tree_press) {
             self.replace_mode(Mode::Terminal);
             return Some(MouseAction::FocusWorkspace {
                 ws_idx: press.ws_idx,
@@ -1810,6 +1891,9 @@ impl AppState {
                 } | DragTarget::TabReorder {
                     source_id: drag_source_id,
                     ..
+                } | DragTarget::TreeSpaceReorder {
+                    source_id: drag_source_id,
+                    ..
                 } if drag_source_id == source_id
             )
         }) {
@@ -1821,6 +1905,7 @@ impl AppState {
     fn clear_chrome_press(&mut self, source_id: crate::app::InputSourceId) {
         self.tab_presses.remove(&source_id);
         self.workspace_presses.remove(&source_id);
+        self.tree_space_presses.remove(&source_id);
     }
 
     fn mouse_pane_focus_action(&self, pane_id: crate::layout::PaneId) -> Option<MouseAction> {

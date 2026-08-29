@@ -447,10 +447,19 @@ impl App {
                         }
                     },
                     MouseAction::FocusWorkspace { ws_idx } => {
+                        // A revealed hidden space lives outside the active
+                        // profile; focusing it switches to a profile that
+                        // actually shows it.
+                        if !self.state.workspace_is_visible(ws_idx) {
+                            self.state.reveal_workspace(ws_idx);
+                        }
                         self.focus_workspace_idx_via_api(ws_idx)
                     }
                     MouseAction::FocusTab { tab_idx } => self.focus_tab_idx_via_api(tab_idx),
                     MouseAction::FocusPane { ws_idx, pane_id } => {
+                        if !self.state.workspace_is_visible(ws_idx) {
+                            self.state.reveal_workspace(ws_idx);
+                        }
                         self.focus_pane_internal_via_api(ws_idx, pane_id)
                     }
                     MouseAction::FocusToastTarget => self.focus_toast_target_via_api(),

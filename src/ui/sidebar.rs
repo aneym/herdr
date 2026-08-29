@@ -530,6 +530,9 @@ fn collect_agent_panel_entries_with_runtimes(
         }
     };
 
+    // Revealing hidden spaces is a tree-view affordance; the other sorts
+    // have no way to mark a row as foreign to the active profile.
+    let show_hidden = tree_view_active(app) && app.tree_show_hidden_spaces;
     app.workspaces
         .iter()
         .enumerate()
@@ -539,6 +542,9 @@ fn collect_agent_panel_entries_with_runtimes(
             ws.pane_details(&app.terminals)
                 .into_iter()
                 .filter(move |detail| {
+                    if show_hidden {
+                        return true;
+                    }
                     let profiles = ws
                         .pane_state(detail.pane_id)
                         .and_then(|pane| app.terminals.get(&pane.attached_terminal_id))
@@ -632,6 +638,10 @@ pub(crate) struct TreeHeader {
     pub indent: u8,
     /// This header's workspace/tab holds the active pane.
     pub active: bool,
+    /// Space headers: the workspace is outside the active profile and is
+    /// listed only because hidden spaces are revealed. Always false on tab
+    /// headers.
+    pub hidden: bool,
 }
 
 pub(crate) fn tree_space_key(app: &AppState, ws_idx: usize) -> Option<String> {
@@ -701,6 +711,11 @@ fn tree_list_entries(app: &AppState, agents: Vec<AgentPanelEntry>) -> Vec<AgentP
                 })
                 .unwrap_or_default();
             let pinned = app.tree_pinned_spaces.contains(&key);
+            // A collapsed space is deliberately folded out of sight; its
+            // status dots would keep pulling attention to it, so they hide
+            // with the rows. Dots on an expanded header still stand in for
+            // agents hidden by the layer toggles.
+            let layers_hidden = !app.tree_show_tabs && !app.tree_show_agents;
             out.push(AgentPanelListEntry::SpaceHeader(TreeHeader {
                 ws_idx,
                 tab_idx: None,
@@ -708,10 +723,10 @@ fn tree_list_entries(app: &AppState, agents: Vec<AgentPanelEntry>) -> Vec<AgentP
                 key,
                 collapsed,
                 child_count: ws_entries.len(),
-                hidden_state: (collapsed || (!app.tree_show_tabs && !app.tree_show_agents))
+                hidden_state: (!collapsed && layers_hidden)
                     .then(|| tree_rollup_state(&ws_entries))
                     .flatten(),
-                child_states: if collapsed || (!app.tree_show_tabs && !app.tree_show_agents) {
+                child_states: if !collapsed && layers_hidden {
                     tree_child_states(&ws_entries)
                 } else {
                     Vec::new()
@@ -723,6 +738,7 @@ fn tree_list_entries(app: &AppState, agents: Vec<AgentPanelEntry>) -> Vec<AgentP
                 // Highlighting it while a tab inside it is selected reads as
                 // two things being active at once.
                 active: false,
+                hidden: !app.workspace_is_visible(ws_idx),
             }));
             if collapsed {
                 continue;
@@ -780,6 +796,7 @@ fn tree_list_entries(app: &AppState, agents: Vec<AgentPanelEntry>) -> Vec<AgentP
                             .workspaces
                             .get(ws_idx)
                             .is_some_and(|ws| ws.active_tab == tab_idx),
+                    hidden: false,
                 }));
                 if collapsed {
                     continue;
@@ -819,7 +836,8 @@ fn tree_list_entries(app: &AppState, agents: Vec<AgentPanelEntry>) -> Vec<AgentP
             })
             .collect();
         for ws_idx in 0..app.workspaces.len() {
-            if spaces_with_agents.contains(&ws_idx) || !app.workspace_is_visible(ws_idx) {
+            let visible = app.workspace_is_visible(ws_idx);
+            if spaces_with_agents.contains(&ws_idx) || (!visible && !app.tree_show_hidden_spaces) {
                 continue;
             }
             let Some(key) = tree_space_key(app, ws_idx) else {
@@ -847,6 +865,7 @@ fn tree_list_entries(app: &AppState, agents: Vec<AgentPanelEntry>) -> Vec<AgentP
                 pinned: true,
                 indent: 0,
                 active: false,
+                hidden: !visible,
             }));
         }
     }
@@ -1361,6 +1380,58 @@ pub(crate) fn tree_header_pin_rect(body: Rect, row_y: u16) -> Rect {
         return Rect::default();
     }
     Rect::new(body.x + body.width.saturating_sub(6), row_y, 2, 1)
+}
+
+/// Insertion slots for a tree-space drag: one row per visible space header
+/// (dropping there lands before that space) plus one end slot after the last
+/// listed row. Rows mirror the panel's own walk, so slots line up with what
+/// is actually drawn at the current scroll offset.
+pub(crate) fn tree_space_drop_slots(
+    app: &AppState,
+    entries: &[AgentPanelListEntry],
+    body: Rect,
+    scroll: usize,
+) -> Vec<(crate::app::state::WorkspaceDropTarget, u16)> {
+    if body.height == 0 {
+        return Vec::new();
+    }
+    let mut slots = Vec::new();
+    let mut row_y = body.y;
+    let body_bottom = body.y + body.height;
+    for (index, entry) in entries.iter().enumerate().skip(scroll) {
+        let height = agent_panel_list_entry_height(app, entry, body.height);
+        if row_y.saturating_add(height) > body_bottom {
+            break;
+        }
+        if let AgentPanelListEntry::SpaceHeader(header) = entry {
+            slots.push((
+                crate::app::state::WorkspaceDropTarget::Before(header.ws_idx),
+                row_y,
+            ));
+        }
+        row_y = row_y
+            .saturating_add(height)
+            .saturating_add(agent_panel_list_entry_gap(app, entries, index))
+            .min(body_bottom);
+    }
+    slots.push((
+        crate::app::state::WorkspaceDropTarget::End,
+        row_y.min(body_bottom.saturating_sub(1)),
+    ));
+    slots
+}
+
+/// Row for the drop indicator line of an active tree-space drag.
+pub(crate) fn tree_space_drop_indicator_row(
+    app: &AppState,
+    entries: &[AgentPanelListEntry],
+    body: Rect,
+    scroll: usize,
+    target: crate::app::state::WorkspaceDropTarget,
+) -> Option<u16> {
+    tree_space_drop_slots(app, entries, body, scroll)
+        .into_iter()
+        .find_map(|(candidate, row)| (candidate == target).then_some(row))
 }
 
 /// Paints half of a padding row in the selection colour, so a selected item
@@ -2533,7 +2604,11 @@ fn render_agent_detail(
             // The tab is the unit Alex scans, so it carries the strongest
             // weight. The space reads as the container above it, and agent
             // titles below stay lighter than both.
-            let label_style = if is_space {
+            let label_style = if is_space && header.hidden {
+                // Revealed hidden spaces read as visitors from another
+                // profile: present, but dimmer than the resident spaces.
+                Style::default().fg(p.overlay0).add_modifier(Modifier::DIM)
+            } else if is_space {
                 Style::default().fg(p.overlay0).add_modifier(Modifier::BOLD)
             } else if header.active {
                 Style::default().fg(p.text).add_modifier(Modifier::BOLD)
@@ -2557,7 +2632,17 @@ fn render_agent_detail(
                 ),
                 label_style,
             ));
-            let header_style = if header.active {
+            let is_dragged = is_space
+                && matches!(
+                    app.drag.as_ref().map(|drag| &drag.target),
+                    Some(crate::app::state::DragTarget::TreeSpaceReorder {
+                        source_ws_idx,
+                        ..
+                    }) if *source_ws_idx == header.ws_idx
+                );
+            let header_style = if is_dragged {
+                Style::default().bg(p.surface1)
+            } else if header.active {
                 Style::default().bg(p.active_row_bg)
             } else {
                 Style::default()
@@ -2868,6 +2953,25 @@ fn render_agent_detail(
             );
         }
         row_y = row_y.saturating_add(height).min(body_bottom);
+    }
+
+    // Insertion line for an active tree-space drag, drawn over the rows so
+    // the drop position is visible while the mouse moves.
+    if let Some(crate::app::state::DragTarget::TreeSpaceReorder {
+        drop_target: Some(drop_target),
+        ..
+    }) = app.drag.as_ref().map(|drag| &drag.target)
+    {
+        if let Some(y) = tree_space_drop_indicator_row(app, &details, body, scroll, *drop_target) {
+            let indicator_right = scrollbar_rect
+                .map(|rect| rect.x)
+                .unwrap_or(body.x + body.width);
+            let buf = frame.buffer_mut();
+            for x in body.x..indicator_right {
+                buf[(x, y)].set_symbol("─");
+                buf[(x, y)].set_style(Style::default().fg(p.accent));
+            }
+        }
     }
 
     if let Some(track) = scrollbar_rect {
@@ -5450,6 +5554,73 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
     }
 
     #[test]
+    fn collapsed_space_header_hides_status_dots() {
+        let mut app = app_with_tree_agents();
+        let alpha_key = app.workspaces[0].id.clone();
+        app.tree_collapsed_spaces.insert(alpha_key);
+
+        let header = tree_header(&app, "space:0");
+        assert!(header.collapsed);
+        assert!(header.child_states.is_empty());
+        assert!(header.hidden_state.is_none());
+
+        // Dots still stand in for layer-hidden agents on an EXPANDED header.
+        app.tree_collapsed_spaces.clear();
+        app.tree_show_tabs = false;
+        app.tree_show_agents = false;
+        let header = tree_header(&app, "space:0");
+        assert!(!header.child_states.is_empty());
+    }
+
+    #[test]
+    fn hidden_spaces_reveal_toggle_lists_foreign_profile_spaces() {
+        let mut app = app_with_tree_agents();
+        app.workspaces[1].profiles = vec!["work".into()];
+
+        // Hidden by default: the tree shows only the active profile.
+        assert_eq!(
+            tree_shape(&app),
+            ["space:0", "tab:0.0", "agent:0.0", "tab:0.1", "agent:0.1"]
+        );
+
+        app.tree_show_hidden_spaces = true;
+        assert_eq!(
+            tree_shape(&app),
+            [
+                "space:0",
+                "tab:0.0",
+                "agent:0.0",
+                "tab:0.1",
+                "agent:0.1",
+                "space:1",
+                "tab:1.0",
+                "agent:1.0",
+                "tab:1.1",
+                "agent:1.1",
+            ]
+        );
+        assert!(tree_header(&app, "space:1").hidden);
+        assert!(!tree_header(&app, "space:0").hidden);
+    }
+
+    #[test]
+    fn hidden_pinned_space_obeys_the_reveal_toggle() {
+        let mut app = app_with_agentless_beta();
+        app.workspaces[1].profiles = vec!["work".into()];
+        let beta_key = app.workspaces[1].id.clone();
+        app.tree_pinned_spaces.insert(beta_key);
+
+        assert_eq!(tree_shape(&app), ["space:0", "tab:0.0", "agent:0.0"]);
+
+        app.tree_show_hidden_spaces = true;
+        assert_eq!(
+            tree_shape(&app),
+            ["space:0", "tab:0.0", "agent:0.0", "space:1"]
+        );
+        assert!(tree_header(&app, "space:1").hidden);
+    }
+
+    #[test]
     fn tree_layer_toggles_drop_their_header_rows() {
         let mut app = app_with_tree_agents();
 
@@ -5558,9 +5729,11 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
 
         let collapsed = tree_header(&app, "space:0");
         assert!(collapsed.collapsed);
-        // Both tabs' agents are hidden, so the badge counts two, not two tabs.
         assert_eq!(collapsed.child_count, 2);
-        assert_eq!(collapsed.hidden_state, Some((AgentState::Idle, true)));
+        // A collapsed space is folded away on purpose; it shows no status
+        // dots so it stops pulling attention (Alex, 2026-08-29).
+        assert_eq!(collapsed.hidden_state, None);
+        assert!(collapsed.child_states.is_empty());
 
         let untouched = tree_header(&app, "space:1");
         assert!(!untouched.collapsed);

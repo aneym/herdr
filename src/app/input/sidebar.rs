@@ -429,6 +429,82 @@ impl AppState {
             .map(|(_, (target, _))| target)
     }
 
+    /// Insertion target for a tree-space drag at `row`: the nearest
+    /// space-boundary slot in the agents tree.
+    pub(super) fn tree_space_drop_target_at(
+        &self,
+        entries: &[crate::ui::AgentPanelListEntry],
+        row: u16,
+    ) -> Option<crate::app::state::WorkspaceDropTarget> {
+        if self.sidebar_collapsed {
+            return None;
+        }
+        let detail_area = self.agent_panel_rect();
+        let metrics = crate::ui::agent_panel_scroll_metrics(self, entries, detail_area);
+        let body = crate::ui::agent_panel_body_rect(
+            detail_area,
+            crate::ui::should_show_scrollbar(metrics),
+        );
+        if body.height == 0 || row < body.y || row >= body.y + body.height {
+            return None;
+        }
+        let scroll = self.agent_panel_scroll.min(metrics.max_offset_from_bottom);
+        crate::ui::tree_space_drop_slots(self, entries, body, scroll)
+            .into_iter()
+            .enumerate()
+            .min_by_key(|(slot_idx, (_, slot_row))| (row.abs_diff(*slot_row), *slot_idx))
+            .map(|(_, (target, _))| target)
+    }
+
+    /// Move parameters for a completed tree-space drag. Unlike the workspace
+    /// list variant this works over the full workspace order, so revealed
+    /// hidden spaces reorder too. A worktree group still moves as one block.
+    pub(super) fn tree_space_move_params(
+        &self,
+        source_ws_idx: usize,
+        drop_target: crate::app::state::WorkspaceDropTarget,
+    ) -> Option<crate::api::schema::WorkspaceMoveBlockParams> {
+        let source = self.workspaces.get(source_ws_idx)?;
+        if source
+            .worktree_space()
+            .is_some_and(|space| space.is_linked_worktree)
+        {
+            return None;
+        }
+        let workspace_ids = match source.worktree_space() {
+            Some(source_space) => {
+                let mut ids = vec![source.id.clone()];
+                ids.extend(
+                    self.workspaces
+                        .iter()
+                        .filter(|workspace| workspace.id != source.id)
+                        .filter(|workspace| {
+                            workspace
+                                .worktree_space()
+                                .is_some_and(|space| space.key == source_space.key)
+                        })
+                        .map(|workspace| workspace.id.clone()),
+                );
+                ids
+            }
+            None => vec![source.id.clone()],
+        };
+        let before_workspace_id = match drop_target {
+            crate::app::state::WorkspaceDropTarget::Before(target_ws_idx) => {
+                let target = self.workspaces.get(target_ws_idx)?;
+                if workspace_ids.contains(&target.id) {
+                    return None;
+                }
+                Some(target.id.clone())
+            }
+            crate::app::state::WorkspaceDropTarget::End => None,
+        };
+        Some(crate::api::schema::WorkspaceMoveBlockParams {
+            workspace_ids,
+            before_workspace_id,
+        })
+    }
+
     pub(super) fn workspace_move_block_params(
         &self,
         source_ws_idx: usize,
@@ -1310,6 +1386,7 @@ mod tests {
                 show_spaces: true,
                 show_tabs: true,
                 show_agents: true,
+                show_hidden: false,
             }
         ));
         assert_eq!(app.state.mode(), Mode::ContextMenu);
@@ -2459,5 +2536,195 @@ mod tests {
         assert!(app.state.drag.is_none());
         let snapshot = capture_snapshot(&app.state);
         assert_eq!(snapshot.sidebar_width, Some(26));
+    }
+
+    fn tree_app_with_agent_spaces(names: &[&str]) -> super::super::App {
+        let mut app = app_for_mouse_test();
+        app.state.workspaces = names.iter().map(|name| Workspace::test_new(name)).collect();
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.agent_panel_sort = AgentPanelSort::Tree;
+        app.state.replace_mode(Mode::Terminal);
+        for ws_idx in 0..app.state.workspaces.len() {
+            let pane_id = app.state.workspaces[ws_idx].tabs[0].root_pane;
+            let terminal_id = app.state.workspaces[ws_idx].tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            app.state
+                .terminals
+                .get_mut(&terminal_id)
+                .expect("agent terminal")
+                .set_detected_state(Some(Agent::Pi), AgentState::Idle);
+        }
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 40));
+        app
+    }
+
+    /// Row of each requested space header in the rendered tree panel.
+    fn tree_space_header_rows(app: &super::super::App, wanted: &[usize]) -> Vec<u16> {
+        let entries = crate::ui::agent_panel_list_entries_from(&app.state, &app.terminal_runtimes);
+        let panel = app.state.agent_panel_rect();
+        wanted
+            .iter()
+            .map(|want| {
+                (panel.y..panel.y + panel.height)
+                    .find(|row| {
+                        matches!(
+                            app.state.tree_header_at(&entries, panel.x + 2, *row),
+                            Some(super::TreeHeaderHit::Focus {
+                                ws_idx,
+                                tab_idx: None,
+                            }) if ws_idx == *want
+                        )
+                    })
+                    .unwrap_or_else(|| panic!("no header row for space {want}"))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn dragging_tree_space_header_reorders_workspaces() {
+        let mut app = tree_app_with_agent_spaces(&["a", "b", "c"]);
+        let panel = app.state.agent_panel_rect();
+        let rows = tree_space_header_rows(&app, &[2, 0]);
+        let (source_row, target_row) = (rows[0], rows[1]);
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            panel.x + 2,
+            source_row,
+        ));
+        assert!(app.state.drag.is_none());
+        app.handle_mouse(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            panel.x + 2,
+            target_row,
+        ));
+        assert!(matches!(
+            app.state.drag.as_ref().map(|drag| &drag.target),
+            Some(DragTarget::TreeSpaceReorder {
+                source_ws_idx: 2,
+                drop_target: Some(crate::app::state::WorkspaceDropTarget::Before(0)),
+                ..
+            })
+        ));
+        app.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            panel.x + 2,
+            target_row,
+        ));
+
+        let names: Vec<_> = app
+            .state
+            .workspaces
+            .iter()
+            .map(|ws| ws.display_name())
+            .collect();
+        assert_eq!(names, vec!["c", "a", "b"]);
+        assert!(app.state.drag.is_none());
+        assert!(app.state.tree_space_presses.is_empty());
+        let snapshot = capture_snapshot(&app.state);
+        let captured_names: Vec<_> = snapshot
+            .workspaces
+            .iter()
+            .map(|ws| ws.custom_name.clone().unwrap())
+            .collect();
+        assert_eq!(captured_names, vec!["c", "a", "b"]);
+    }
+
+    #[test]
+    fn dragging_tree_space_header_to_the_end_moves_it_last() {
+        let mut app = tree_app_with_agent_spaces(&["a", "b", "c"]);
+        let panel = app.state.agent_panel_rect();
+        let rows = tree_space_header_rows(&app, &[0]);
+        let source_row = rows[0];
+        let entries = crate::ui::agent_panel_list_entries_from(&app.state, &app.terminal_runtimes);
+        // The end slot sits after the last listed row.
+        let end_row = (panel.y..panel.y + panel.height)
+            .rev()
+            .find(|row| {
+                matches!(
+                    app.state.tree_space_drop_target_at(&entries, *row),
+                    Some(crate::app::state::WorkspaceDropTarget::End)
+                )
+            })
+            .expect("end drop slot row");
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            panel.x + 2,
+            source_row,
+        ));
+        app.handle_mouse(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            panel.x + 2,
+            end_row,
+        ));
+        app.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            panel.x + 2,
+            end_row,
+        ));
+
+        let names: Vec<_> = app
+            .state
+            .workspaces
+            .iter()
+            .map(|ws| ws.display_name())
+            .collect();
+        assert_eq!(names, vec!["b", "c", "a"]);
+    }
+
+    #[test]
+    fn clicking_tree_space_header_focuses_on_release() {
+        let mut app = tree_app_with_agent_spaces(&["a", "b"]);
+        let panel = app.state.agent_panel_rect();
+        let rows = tree_space_header_rows(&app, &[1]);
+        let header_row = rows[0];
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            panel.x + 2,
+            header_row,
+        ));
+        // The press arms a possible drag; nothing focuses yet.
+        assert_eq!(app.state.active, Some(0));
+        assert!(app.state.drag.is_none());
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            panel.x + 2,
+            header_row,
+        ));
+        assert_eq!(app.state.active, Some(1));
+        assert!(app.state.tree_space_presses.is_empty());
+        let order: Vec<_> = app
+            .state
+            .workspaces
+            .iter()
+            .map(|ws| ws.display_name())
+            .collect();
+        assert_eq!(order, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn view_picker_toggles_hidden_spaces() {
+        let mut app = app_for_mouse_test();
+        app.state.workspaces = vec![Workspace::test_new("test")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.agent_panel_sort = AgentPanelSort::Tree;
+        app.state.replace_mode(Mode::Terminal);
+
+        let menu = open_sidebar_view_picker(&mut app);
+        let hidden = picker_item_index(&menu, "hidden");
+        app.apply_context_menu_action_via_api(menu, hidden);
+        assert!(app.state.tree_show_hidden_spaces);
+
+        let menu = open_sidebar_view_picker(&mut app);
+        let hidden = picker_item_index(&menu, "hidden");
+        app.apply_context_menu_action_via_api(menu, hidden);
+        assert!(!app.state.tree_show_hidden_spaces);
     }
 }
