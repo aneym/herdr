@@ -618,6 +618,56 @@ impl AppState {
             && row < rect.y + rect.height
     }
 
+    /// True when (col, row) lands on the revealed `hidden` section header,
+    /// whose whole row toggles the section open or closed.
+    pub(super) fn on_hidden_spaces_header(
+        &self,
+        entries: &[crate::ui::AgentPanelListEntry],
+        col: u16,
+        row: u16,
+    ) -> bool {
+        if self.sidebar_collapsed
+            || !entries.iter().any(|entry| {
+                matches!(
+                    entry,
+                    crate::ui::AgentPanelListEntry::HiddenSpacesHeader { .. }
+                )
+            })
+        {
+            return false;
+        }
+
+        let detail_area = self.agent_panel_rect();
+        let metrics = crate::ui::agent_panel_scroll_metrics(self, entries, detail_area);
+        let body = crate::ui::agent_panel_body_rect(
+            detail_area,
+            crate::ui::should_show_scrollbar(metrics),
+        );
+        if col < body.x || col >= body.x + body.width || row < body.y || row >= body.y + body.height
+        {
+            return false;
+        }
+
+        let mut row_y = body.y;
+        let scroll = self.agent_panel_scroll.min(metrics.max_offset_from_bottom);
+        for (index, entry) in entries.iter().enumerate().skip(scroll) {
+            let height = crate::ui::agent_panel_list_entry_height(self, entry, body.height);
+            if matches!(
+                entry,
+                crate::ui::AgentPanelListEntry::HiddenSpacesHeader { .. }
+            ) {
+                return row >= row_y && row < row_y.saturating_add(height);
+            }
+            row_y = row_y
+                .saturating_add(height)
+                .saturating_add(crate::ui::agent_panel_list_entry_gap(self, entries, index));
+            if row_y >= body.y + body.height {
+                break;
+            }
+        }
+        false
+    }
+
     pub(super) fn on_automations_header(
         &self,
         entries: &[crate::ui::AgentPanelListEntry],
@@ -833,6 +883,7 @@ impl AppState {
                         Some((detail.ws_idx, detail.tab_idx, detail.pane_id))
                     }
                     crate::ui::AgentPanelListEntry::AutomationsHeader
+                    | crate::ui::AgentPanelListEntry::HiddenSpacesHeader { .. }
                     | crate::ui::AgentPanelListEntry::SpaceHeader(_)
                     | crate::ui::AgentPanelListEntry::TabHeader(_) => None,
                 };
@@ -2726,5 +2777,78 @@ mod tests {
         let hidden = picker_item_index(&menu, "hidden");
         app.apply_context_menu_action_via_api(menu, hidden);
         assert!(!app.state.tree_show_hidden_spaces);
+    }
+
+    #[test]
+    fn turning_the_reveal_off_closes_the_hidden_section() {
+        let mut app = app_for_mouse_test();
+        app.state.workspaces = vec![Workspace::test_new("test")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.agent_panel_sort = AgentPanelSort::Tree;
+        app.state.replace_mode(Mode::Terminal);
+        app.state.tree_show_hidden_spaces = true;
+        app.state.hidden_spaces_expanded = true;
+
+        let menu = open_sidebar_view_picker(&mut app);
+        let hidden = picker_item_index(&menu, "hidden");
+        app.apply_context_menu_action_via_api(menu, hidden);
+
+        assert!(!app.state.tree_show_hidden_spaces);
+        // Re-revealing starts compact instead of resuming a stale expansion.
+        assert!(!app.state.hidden_spaces_expanded);
+    }
+
+    #[test]
+    fn clicking_the_hidden_section_header_toggles_it() {
+        let mut app = app_for_mouse_test();
+        app.state.workspaces = vec![
+            Workspace::test_new("resident"),
+            Workspace::test_new("foreign"),
+        ];
+        app.state.ensure_test_terminals();
+        app.state.workspaces[1].profiles = vec!["work".into()];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.agent_panel_sort = AgentPanelSort::Tree;
+        app.state.tree_show_hidden_spaces = true;
+        app.state.replace_mode(Mode::Terminal);
+        for ws_idx in 0..2 {
+            let pane_id = app.state.workspaces[ws_idx].tabs[0].root_pane;
+            let terminal_id = app.state.workspaces[ws_idx].tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            app.state
+                .terminals
+                .get_mut(&terminal_id)
+                .expect("agent terminal")
+                .set_detected_state(Some(Agent::Pi), AgentState::Idle);
+        }
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 40));
+
+        let entries = crate::ui::agent_panel_list_entries_from(&app.state, &app.terminal_runtimes);
+        let panel = app.state.agent_panel_rect();
+        let header_row = (panel.y..panel.y + panel.height)
+            .find(|row| {
+                app.state
+                    .on_hidden_spaces_header(&entries, panel.x + 2, *row)
+            })
+            .expect("hidden section header row");
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            panel.x + 2,
+            header_row,
+        ));
+        assert!(app.state.hidden_spaces_expanded);
+        // The click stays on the section: it must not focus a space.
+        assert_eq!(app.state.active, Some(0));
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            panel.x + 2,
+            header_row,
+        ));
+        assert!(!app.state.hidden_spaces_expanded);
     }
 }

@@ -1873,6 +1873,10 @@ pub struct AppState {
     /// Transient reveal of profile-hidden spaces in the tree view. Not
     /// persisted: a fresh session starts focused again.
     pub tree_show_hidden_spaces: bool,
+    /// The revealed `hidden` section is open. Starts closed so turning the
+    /// reveal on costs one row, not a wall of foreign spaces. Session-local,
+    /// like the reveal itself.
+    pub hidden_spaces_expanded: bool,
     pub next_agent_state_change_seq: u64,
     /// Capture mouse input for Herdr's own mouse UI. When false, Herdr only
     /// captures mouse while the focused pane app requests mouse reporting.
@@ -2370,6 +2374,7 @@ impl AppState {
             tree_collapsed_tabs: std::collections::HashSet::new(),
             tree_pinned_spaces: std::collections::HashSet::new(),
             tree_show_hidden_spaces: false,
+            hidden_spaces_expanded: false,
             request_complete_onboarding: false,
             name_input: String::new(),
             name_input_replace_on_type: false,

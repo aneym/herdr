@@ -1097,6 +1097,9 @@ fn toggle_tree_layer(state: &mut AppState, layer: TreeLayer) {
 /// persisted: the reveal is a peek, and a fresh session starts focused.
 fn toggle_hidden_spaces(state: &mut AppState) {
     state.tree_show_hidden_spaces = !state.tree_show_hidden_spaces;
+    // Turning the reveal off closes the section too, so switching it back on
+    // starts compact rather than resuming a stale expansion.
+    state.hidden_spaces_expanded = false;
     state.agent_panel_scroll = 0;
     leave_modal(state);
 }

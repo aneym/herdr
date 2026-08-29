@@ -783,6 +783,12 @@ impl AppState {
                         }
                     }
 
+                    if self.on_hidden_spaces_header(&agent_entries, mouse.column, mouse.row) {
+                        self.hidden_spaces_expanded = !self.hidden_spaces_expanded;
+                        self.agent_panel_scroll = 0;
+                        return None;
+                    }
+
                     if self.on_automations_header(&agent_entries, mouse.column, mouse.row) {
                         self.automations_expanded = !self.automations_expanded;
                         self.agent_panel_scroll = 0;

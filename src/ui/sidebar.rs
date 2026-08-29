@@ -603,6 +603,13 @@ pub(crate) enum AgentPanelListEntry {
     Agent(AgentPanelEntry),
     AutomationsHeader,
     Automation(AgentPanelEntry),
+    /// Tree view: the collapsible section grouping spaces that the active
+    /// profile hides. Only emitted while the hidden reveal is on.
+    HiddenSpacesHeader {
+        /// Spaces grouped beneath it, hidden or not.
+        count: usize,
+        collapsed: bool,
+    },
     /// Tree view: a space (workspace) grouping row.
     SpaceHeader(TreeHeader),
     /// Tree view: a tab grouping row inside a space.
@@ -690,10 +697,20 @@ fn tree_list_entries(app: &AppState, agents: Vec<AgentPanelEntry>) -> Vec<AgentP
     }
 
     let mut out = Vec::new();
+    // Spaces the active profile hides collect separately and land under one
+    // collapsible section at the bottom, so a reveal never scatters foreign
+    // spaces through the resident ones.
+    let mut hidden_out: Vec<AgentPanelListEntry> = Vec::new();
+    let mut hidden_ws: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
     for ws_idx in ws_order {
         let Some(ws_entries) = by_ws.remove(&ws_idx) else {
             continue;
         };
+        let visible = app.workspace_is_visible(ws_idx);
+        if !visible {
+            hidden_ws.insert(ws_idx);
+        }
+        let out = if visible { &mut out } else { &mut hidden_out };
         let space_indent = u8::from(app.tree_show_spaces);
         if app.tree_show_spaces {
             let key = tree_space_key(app, ws_idx).unwrap_or_default();
@@ -738,7 +755,7 @@ fn tree_list_entries(app: &AppState, agents: Vec<AgentPanelEntry>) -> Vec<AgentP
                 // Highlighting it while a tab inside it is selected reads as
                 // two things being active at once.
                 active: false,
-                hidden: !app.workspace_is_visible(ws_idx),
+                hidden: !visible,
             }));
             if collapsed {
                 continue;
@@ -830,6 +847,7 @@ fn tree_list_entries(app: &AppState, agents: Vec<AgentPanelEntry>) -> Vec<AgentP
     if app.tree_show_spaces && !app.tree_pinned_spaces.is_empty() {
         let spaces_with_agents: std::collections::HashSet<usize> = out
             .iter()
+            .chain(hidden_out.iter())
             .filter_map(|entry| match entry {
                 AgentPanelListEntry::SpaceHeader(header) => Some(header.ws_idx),
                 _ => None,
@@ -852,7 +870,7 @@ fn tree_list_entries(app: &AppState, agents: Vec<AgentPanelEntry>) -> Vec<AgentP
                 .map(|ws| ws.display_name_from_terminals(&app.terminals))
                 .unwrap_or_default();
             let collapsed = app.tree_collapsed_spaces.contains(&key);
-            out.push(AgentPanelListEntry::SpaceHeader(TreeHeader {
+            let header = AgentPanelListEntry::SpaceHeader(TreeHeader {
                 ws_idx,
                 tab_idx: None,
                 label,
@@ -866,7 +884,26 @@ fn tree_list_entries(app: &AppState, agents: Vec<AgentPanelEntry>) -> Vec<AgentP
                 indent: 0,
                 active: false,
                 hidden: !visible,
-            }));
+            });
+            if visible {
+                out.push(header);
+            } else {
+                hidden_ws.insert(ws_idx);
+                hidden_out.push(header);
+            }
+        }
+    }
+
+    // One collapsible section carries every profile-hidden space, so the
+    // resident tree above it stays exactly as focused as it was.
+    if !hidden_out.is_empty() {
+        let collapsed = !app.hidden_spaces_expanded;
+        out.push(AgentPanelListEntry::HiddenSpacesHeader {
+            count: hidden_ws.len(),
+            collapsed,
+        });
+        if !collapsed {
+            out.append(&mut hidden_out);
         }
     }
     out
@@ -1506,6 +1543,7 @@ pub(crate) fn agent_panel_list_entry_height(
             agent_entry_height_in_body(app, inner, body_height)
         }
         AgentPanelListEntry::AutomationsHeader
+        | AgentPanelListEntry::HiddenSpacesHeader { .. }
         | AgentPanelListEntry::SpaceHeader(_)
         | AgentPanelListEntry::TabHeader(_) => 1,
     }
@@ -1523,6 +1561,7 @@ pub(crate) fn agent_panel_list_entry_gap(
             agent_entry_gap(app, index, entries.len())
         }
         Some(AgentPanelListEntry::AutomationsHeader)
+        | Some(AgentPanelListEntry::HiddenSpacesHeader { .. })
         | Some(AgentPanelListEntry::SpaceHeader(_))
         | Some(AgentPanelListEntry::TabHeader(_))
         | None => 0,
@@ -1555,6 +1594,8 @@ pub(crate) fn agent_panel_list_entry_padding(app: &AppState, entry: &AgentPanelL
         AgentPanelListEntry::TabHeader(_)
         | AgentPanelListEntry::Agent(_)
         | AgentPanelListEntry::Automation(_) => app.sidebar_agents.row_gap,
+        // Section dividers own the air above the group they introduce.
+        AgentPanelListEntry::HiddenSpacesHeader { .. } => app.sidebar_spaces.row_gap,
         AgentPanelListEntry::AutomationsHeader => 0,
     }
 }
@@ -2580,7 +2621,8 @@ fn render_agent_detail(
                 AgentPanelListEntry::Agent(_) | AgentPanelListEntry::Automation(_) => {
                     Color::Rgb(25, 60, 40)
                 }
-                AgentPanelListEntry::AutomationsHeader => Color::Rgb(60, 50, 20),
+                AgentPanelListEntry::AutomationsHeader
+                | AgentPanelListEntry::HiddenSpacesHeader { .. } => Color::Rgb(60, 50, 20),
             };
             let block = agent_panel_list_entry_height(app, list_entry, body.height)
                 .min(body_bottom.saturating_sub(row_y));
@@ -2758,6 +2800,28 @@ fn render_agent_detail(
             row_y = row_y.saturating_add(1).saturating_add(pad).min(body_bottom);
             continue;
         }
+        if let AgentPanelListEntry::HiddenSpacesHeader { count, collapsed } = list_entry {
+            if content_y.saturating_add(1) > body_bottom {
+                break;
+            }
+            // Muted on purpose: this section names spaces the active profile
+            // does not own, so it must never outrank a resident space label.
+            let header_style = Style::default().fg(p.overlay0).add_modifier(Modifier::DIM);
+            frame.render_widget(
+                Paragraph::new(Span::styled(" hidden", header_style)),
+                Rect::new(body.x, content_y, body.width, 1),
+            );
+            frame.render_widget(
+                Paragraph::new(Span::styled(
+                    format!("{count} {} ", if *collapsed { "▸" } else { "▾" }),
+                    header_style,
+                ))
+                .alignment(Alignment::Right),
+                Rect::new(body.x, content_y, body.width, 1),
+            );
+            row_y = row_y.saturating_add(1).saturating_add(pad).min(body_bottom);
+            continue;
+        }
         if matches!(list_entry, AgentPanelListEntry::AutomationsHeader) {
             if row_y.saturating_add(1) > body_bottom {
                 break;
@@ -2780,6 +2844,7 @@ fn render_agent_detail(
         let detail = match list_entry {
             AgentPanelListEntry::Agent(detail) | AgentPanelListEntry::Automation(detail) => detail,
             AgentPanelListEntry::AutomationsHeader
+            | AgentPanelListEntry::HiddenSpacesHeader { .. }
             | AgentPanelListEntry::SpaceHeader(_)
             | AgentPanelListEntry::TabHeader(_) => continue,
         };
@@ -5437,6 +5502,12 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
                 }
                 AgentPanelListEntry::Automation(_) => "automation".to_string(),
                 AgentPanelListEntry::AutomationsHeader => "automations".to_string(),
+                AgentPanelListEntry::HiddenSpacesHeader { count, collapsed } => {
+                    format!(
+                        "hidden:{count}:{}",
+                        if *collapsed { "closed" } else { "open" }
+                    )
+                }
             })
             .collect()
     }
@@ -5583,6 +5654,8 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
             ["space:0", "tab:0.0", "agent:0.0", "tab:0.1", "agent:0.1"]
         );
 
+        // Revealed, the hidden space collects under one closed section rather
+        // than landing inline among the resident spaces.
         app.tree_show_hidden_spaces = true;
         assert_eq!(
             tree_shape(&app),
@@ -5592,6 +5665,20 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
                 "agent:0.0",
                 "tab:0.1",
                 "agent:0.1",
+                "hidden:1:closed",
+            ]
+        );
+
+        app.hidden_spaces_expanded = true;
+        assert_eq!(
+            tree_shape(&app),
+            [
+                "space:0",
+                "tab:0.0",
+                "agent:0.0",
+                "tab:0.1",
+                "agent:0.1",
+                "hidden:1:open",
                 "space:1",
                 "tab:1.0",
                 "agent:1.0",
@@ -5604,6 +5691,29 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
     }
 
     #[test]
+    fn hidden_section_counts_spaces_not_agents() {
+        let mut app = app_with_tree_agents();
+        // Both spaces leave the active profile, so the section stands alone
+        // and counts two spaces despite carrying four agents.
+        app.workspaces[0].profiles = vec!["work".into()];
+        app.workspaces[1].profiles = vec!["work".into()];
+        app.tree_show_hidden_spaces = true;
+
+        assert_eq!(tree_shape(&app), ["hidden:2:closed"]);
+    }
+
+    #[test]
+    fn no_hidden_section_without_hidden_spaces() {
+        let mut app = app_with_tree_agents();
+        app.tree_show_hidden_spaces = true;
+
+        // The reveal is on but every space is resident, so no section row.
+        assert!(!tree_shape(&app)
+            .iter()
+            .any(|row| row.starts_with("hidden:")));
+    }
+
+    #[test]
     fn hidden_pinned_space_obeys_the_reveal_toggle() {
         let mut app = app_with_agentless_beta();
         app.workspaces[1].profiles = vec!["work".into()];
@@ -5612,10 +5722,24 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
 
         assert_eq!(tree_shape(&app), ["space:0", "tab:0.0", "agent:0.0"]);
 
+        // A hidden PINNED space joins the section too, rather than keeping
+        // its old slot among the resident pinned headers.
         app.tree_show_hidden_spaces = true;
         assert_eq!(
             tree_shape(&app),
-            ["space:0", "tab:0.0", "agent:0.0", "space:1"]
+            ["space:0", "tab:0.0", "agent:0.0", "hidden:1:closed"]
+        );
+
+        app.hidden_spaces_expanded = true;
+        assert_eq!(
+            tree_shape(&app),
+            [
+                "space:0",
+                "tab:0.0",
+                "agent:0.0",
+                "hidden:1:open",
+                "space:1"
+            ]
         );
         assert!(tree_header(&app, "space:1").hidden);
     }
