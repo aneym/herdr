@@ -72,6 +72,13 @@ mod windows {
             self.data_tx.send(bytes).await
         }
 
+        pub(crate) async fn write_user_input_barrier(
+            &self,
+            bytes: Bytes,
+        ) -> Result<(), mpsc::error::SendError<Bytes>> {
+            self.write_user_input(bytes).await
+        }
+
         pub(crate) fn try_write_user_input(
             &self,
             bytes: Bytes,
@@ -84,6 +91,13 @@ mod windows {
                 return Err(mpsc::error::TrySendError::Closed(bytes));
             }
             self.data_tx.try_send(bytes)
+        }
+
+        pub(crate) fn try_write_user_input_barrier(
+            &self,
+            bytes: Bytes,
+        ) -> Result<(), mpsc::error::TrySendError<Bytes>> {
+            self.try_write_user_input(bytes)
         }
 
         pub(crate) fn write_terminal_response(&self, response: impl FnOnce() -> Option<Bytes>) {

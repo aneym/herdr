@@ -1203,6 +1203,28 @@ impl PaneRuntimeIo {
         }
     }
 
+    async fn send_bytes_with_barrier(
+        &self,
+        bytes: Bytes,
+    ) -> Result<(), mpsc::error::SendError<Bytes>> {
+        match self {
+            PaneRuntimeIo::Actor(actor) => actor.write_user_input_barrier(bytes).await,
+            #[cfg(test)]
+            PaneRuntimeIo::TestChannel { sender, .. } => sender.send(bytes).await,
+        }
+    }
+
+    fn try_send_bytes_with_barrier(
+        &self,
+        bytes: Bytes,
+    ) -> Result<(), mpsc::error::TrySendError<Bytes>> {
+        match self {
+            PaneRuntimeIo::Actor(actor) => actor.try_write_user_input_barrier(bytes),
+            #[cfg(test)]
+            PaneRuntimeIo::TestChannel { sender, .. } => sender.try_send(bytes),
+        }
+    }
+
     fn write_terminal_response(&self, response: impl FnOnce() -> Option<Bytes>) {
         match self {
             PaneRuntimeIo::Actor(actor) => actor.write_terminal_response(response),
@@ -2879,11 +2901,14 @@ impl PaneRuntime {
     }
 
     pub async fn send_paste(&self, text: String) -> Result<(), mpsc::error::SendError<Bytes>> {
-        self.send_bytes(self.paste_payload(text)).await
+        self.io
+            .send_bytes_with_barrier(self.paste_payload(text))
+            .await
     }
 
     pub fn try_send_paste(&self, text: String) -> Result<(), mpsc::error::TrySendError<Bytes>> {
-        self.try_send_bytes(self.paste_payload(text))
+        self.io
+            .try_send_bytes_with_barrier(self.paste_payload(text))
     }
 
     fn paste_payload(&self, text: String) -> Bytes {

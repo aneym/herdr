@@ -18,6 +18,7 @@ use crate::pty::fd;
 const ACTOR_IDLE_POLL_MS: i32 = 1000;
 const ACTOR_COMMAND_BUFFER: usize = 1024;
 const HANDOFF_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
+const PASTE_FOLLOWUP_GRACE: Duration = Duration::from_millis(16);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ActorState {
@@ -73,6 +74,16 @@ pub(crate) struct PtyIoActorConfig {
 
 enum PtyIoDataCommand {
     WriteUserInput(Bytes),
+    /// Flush this input completely before accepting later data commands.
+    WriteUserInputBarrier(Bytes),
+}
+
+impl PtyIoDataCommand {
+    fn into_bytes(self) -> Bytes {
+        match self {
+            Self::WriteUserInput(bytes) | Self::WriteUserInputBarrier(bytes) => bytes,
+        }
+    }
 }
 
 enum PtyIoControlCommand {
@@ -104,19 +115,35 @@ impl PtyIoActorHandle {
         &self,
         bytes: Bytes,
     ) -> Result<(), mpsc::error::SendError<Bytes>> {
+        self.write_user_input_command(PtyIoDataCommand::WriteUserInput(bytes))
+            .await
+    }
+
+    pub(crate) async fn write_user_input_barrier(
+        &self,
+        bytes: Bytes,
+    ) -> Result<(), mpsc::error::SendError<Bytes>> {
+        self.write_user_input_command(PtyIoDataCommand::WriteUserInputBarrier(bytes))
+            .await
+    }
+
+    async fn write_user_input_command(
+        &self,
+        command: PtyIoDataCommand,
+    ) -> Result<(), mpsc::error::SendError<Bytes>> {
         {
             let user_writes = self
                 .user_writes
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             if !user_writes.accepting {
-                return Err(mpsc::error::SendError(bytes));
+                return Err(mpsc::error::SendError(command.into_bytes()));
             }
         }
 
         let permit = match self.data_tx.reserve().await {
             Ok(permit) => permit,
-            Err(_) => return Err(mpsc::error::SendError(bytes)),
+            Err(_) => return Err(mpsc::error::SendError(command.into_bytes())),
         };
 
         let user_writes = self
@@ -124,9 +151,9 @@ impl PtyIoActorHandle {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if !user_writes.accepting {
-            return Err(mpsc::error::SendError(bytes));
+            return Err(mpsc::error::SendError(command.into_bytes()));
         }
-        permit.send(PtyIoDataCommand::WriteUserInput(bytes));
+        permit.send(command);
         self.wake_actor();
         Ok(())
     }
@@ -135,26 +162,37 @@ impl PtyIoActorHandle {
         &self,
         bytes: Bytes,
     ) -> Result<(), mpsc::error::TrySendError<Bytes>> {
+        self.try_write_user_input_command(PtyIoDataCommand::WriteUserInput(bytes))
+    }
+
+    pub(crate) fn try_write_user_input_barrier(
+        &self,
+        bytes: Bytes,
+    ) -> Result<(), mpsc::error::TrySendError<Bytes>> {
+        self.try_write_user_input_command(PtyIoDataCommand::WriteUserInputBarrier(bytes))
+    }
+
+    fn try_write_user_input_command(
+        &self,
+        command: PtyIoDataCommand,
+    ) -> Result<(), mpsc::error::TrySendError<Bytes>> {
         let user_writes = self
             .user_writes
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if !user_writes.accepting {
-            return Err(mpsc::error::TrySendError::Closed(bytes));
+            return Err(mpsc::error::TrySendError::Closed(command.into_bytes()));
         }
-        match self
-            .data_tx
-            .try_send(PtyIoDataCommand::WriteUserInput(bytes))
-        {
+        match self.data_tx.try_send(command) {
             Ok(()) => {
                 self.wake_actor();
                 Ok(())
             }
-            Err(mpsc::error::TrySendError::Full(PtyIoDataCommand::WriteUserInput(bytes))) => {
-                Err(mpsc::error::TrySendError::Full(bytes))
+            Err(mpsc::error::TrySendError::Full(command)) => {
+                Err(mpsc::error::TrySendError::Full(command.into_bytes()))
             }
-            Err(mpsc::error::TrySendError::Closed(PtyIoDataCommand::WriteUserInput(bytes))) => {
-                Err(mpsc::error::TrySendError::Closed(bytes))
+            Err(mpsc::error::TrySendError::Closed(command)) => {
+                Err(mpsc::error::TrySendError::Closed(command.into_bytes()))
             }
         }
     }
@@ -391,6 +429,8 @@ impl PtyIoActor {
             },
             pending_writes: VecDeque::new(),
             current_write_offset: 0,
+            input_barrier_active: false,
+            input_barrier_release_at: None,
             wake_read_fd: wake_pipe.read_fd,
             controls,
             response_order,
@@ -423,6 +463,8 @@ struct PtyIoActorRunner {
     state: ActorState,
     pending_writes: VecDeque<Bytes>,
     current_write_offset: usize,
+    input_barrier_active: bool,
+    input_barrier_release_at: Option<Instant>,
     wake_read_fd: OwnedFd,
     controls: Arc<Mutex<SharedPtyControls>>,
     response_order: Arc<Mutex<()>>,
@@ -461,7 +503,7 @@ impl PtyIoActorRunner {
                 self.wake_read_fd.as_raw_fd(),
                 self.state == ActorState::Running,
                 !self.pending_writes.is_empty(),
-                ACTOR_IDLE_POLL_MS,
+                self.poll_timeout_ms(),
             ) {
                 Ok(readiness) => {
                     if readiness.wake_ready {
@@ -522,12 +564,31 @@ impl PtyIoActorRunner {
     }
 
     fn drain_data_commands(&mut self) -> bool {
+        // A bracketed paste is a semantic unit. Keep later keystrokes in the
+        // channel until every byte of the paste has reached the PTY.
+        if self.input_barrier_active {
+            if !self.pending_writes.is_empty() {
+                return false;
+            }
+            if self
+                .input_barrier_release_at
+                .is_some_and(|release_at| Instant::now() < release_at)
+            {
+                return false;
+            }
+            self.input_barrier_active = false;
+            self.input_barrier_release_at = None;
+        }
         let mut should_exit = false;
         loop {
             match self.data_rx.try_recv() {
                 Ok(command) => {
+                    let barrier = matches!(command, PtyIoDataCommand::WriteUserInputBarrier(_));
                     if self.handle_data_command(command) {
                         should_exit = true;
+                        break;
+                    }
+                    if barrier {
                         break;
                     }
                 }
@@ -546,6 +607,13 @@ impl PtyIoActorRunner {
             PtyIoDataCommand::WriteUserInput(bytes) => {
                 if self.state == ActorState::Running {
                     self.enqueue_write(bytes);
+                }
+            }
+            PtyIoDataCommand::WriteUserInputBarrier(bytes) => {
+                if self.state == ActorState::Running {
+                    self.enqueue_write(bytes);
+                    self.input_barrier_active = true;
+                    self.input_barrier_release_at = None;
                 }
             }
         }
@@ -641,7 +709,11 @@ impl PtyIoActorRunner {
     }
 
     fn drain_pre_quiesce_commands(&mut self) {
-        while let Ok(PtyIoDataCommand::WriteUserInput(bytes)) = self.data_rx.try_recv() {
+        while let Ok(command) = self.data_rx.try_recv() {
+            let bytes = match command {
+                PtyIoDataCommand::WriteUserInput(bytes)
+                | PtyIoDataCommand::WriteUserInputBarrier(bytes) => bytes,
+            };
             if self.state != ActorState::Released {
                 self.enqueue_write(bytes);
             }
@@ -742,7 +814,18 @@ impl PtyIoActorRunner {
                 }
             }
         }
+        if self.input_barrier_active && self.input_barrier_release_at.is_none() {
+            self.input_barrier_release_at = Some(Instant::now() + PASTE_FOLLOWUP_GRACE);
+        }
         let _ = self.file.flush();
+    }
+
+    fn poll_timeout_ms(&self) -> i32 {
+        let Some(release_at) = self.input_barrier_release_at else {
+            return ACTOR_IDLE_POLL_MS;
+        };
+        let remaining = release_at.saturating_duration_since(Instant::now());
+        remaining.as_millis().max(1).min(ACTOR_IDLE_POLL_MS as u128) as i32
     }
 
     fn resize(&self, resize: PtyResize) {
@@ -879,6 +962,8 @@ mod tests {
             state: ActorState::Running,
             pending_writes: VecDeque::new(),
             current_write_offset: 0,
+            input_barrier_active: false,
+            input_barrier_release_at: None,
             wake_read_fd: wake_pipe.read_fd,
             controls: Arc::new(Mutex::new(SharedPtyControls::default())),
             response_order: Arc::new(Mutex::new(())),
@@ -896,6 +981,67 @@ mod tests {
         assert!(!runner.handle_data_command(PtyIoDataCommand::WriteUserInput(Bytes::new())));
 
         assert!(runner.pending_writes.is_empty());
+    }
+
+    #[test]
+    fn paste_barrier_defers_followup_input_until_grace_period_expires() {
+        let (actor_socket, _peer) = UnixStream::pair().expect("socket pair");
+        actor_socket
+            .set_nonblocking(true)
+            .expect("actor socket nonblocking");
+        let owned = unsafe { OwnedFd::from_raw_fd(actor_socket.into_raw_fd()) };
+        let (data_tx, data_rx) = mpsc::channel(ACTOR_COMMAND_BUFFER);
+        let (_control_tx, control_rx) = std_mpsc::channel();
+        let wake_pipe = fd::create_wake_pipe().expect("wake pipe");
+        let mut runner = PtyIoActorRunner {
+            pane_id: 1,
+            file: std::fs::File::from(owned),
+            data_rx,
+            control_rx,
+            state: ActorState::Running,
+            pending_writes: VecDeque::new(),
+            current_write_offset: 0,
+            input_barrier_active: false,
+            input_barrier_release_at: None,
+            wake_read_fd: wake_pipe.read_fd,
+            controls: Arc::new(Mutex::new(SharedPtyControls::default())),
+            response_order: Arc::new(Mutex::new(())),
+            on_read: Box::new(|_| PtyReadResult::empty()),
+            on_reader_exit: None,
+            poll_observer: None,
+        };
+        let mut body = (0..146)
+            .map(|line| format!("Slack transcript line {line:03}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        body.push_str(&"x".repeat(9_361 - body.len()));
+        assert_eq!(body.len(), 9_361);
+        assert_eq!(body.lines().count(), 146);
+        let paste = Bytes::from(format!("\x1b[200~{body}\x1b[201~"));
+        assert!(paste.len() > 8 * 1024, "fixture spans multiple stdin reads");
+        let suffix = Bytes::from_static(b" lets conitnue this work");
+
+        data_tx
+            .try_send(PtyIoDataCommand::WriteUserInputBarrier(paste.clone()))
+            .expect("queue paste");
+        data_tx
+            .try_send(PtyIoDataCommand::WriteUserInput(suffix.clone()))
+            .expect("queue typed suffix");
+
+        assert!(!runner.drain_data_commands());
+        assert_eq!(runner.pending_writes, VecDeque::from([paste.clone()]));
+        assert_eq!(runner.data_rx.len(), 1);
+        assert!(!runner.drain_data_commands());
+        assert_eq!(runner.pending_writes, VecDeque::from([paste]));
+        assert_eq!(runner.data_rx.len(), 1);
+        runner.pending_writes.clear();
+        runner.input_barrier_release_at = Some(Instant::now() + PASTE_FOLLOWUP_GRACE);
+        assert!(!runner.drain_data_commands());
+        assert!(runner.pending_writes.is_empty());
+        assert_eq!(runner.data_rx.len(), 1);
+        runner.input_barrier_release_at = Some(Instant::now() - Duration::from_millis(1));
+        assert!(!runner.drain_data_commands());
+        assert_eq!(runner.pending_writes, VecDeque::from([suffix]));
     }
 
     #[test]
@@ -1205,6 +1351,8 @@ mod tests {
             state: ActorState::Running,
             pending_writes: VecDeque::new(),
             current_write_offset: 0,
+            input_barrier_active: false,
+            input_barrier_release_at: None,
             wake_read_fd: wake_pipe.read_fd,
             controls: Arc::clone(&controls),
             response_order: Arc::clone(&response_order),
@@ -1431,6 +1579,8 @@ mod tests {
             state: ActorState::Running,
             pending_writes: VecDeque::new(),
             current_write_offset: 0,
+            input_barrier_active: false,
+            input_barrier_release_at: None,
             wake_read_fd: fd::create_wake_pipe().expect("wake pipe").read_fd,
             controls: Arc::new(Mutex::new(SharedPtyControls::default())),
             response_order: Arc::new(Mutex::new(())),
