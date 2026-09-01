@@ -278,12 +278,15 @@ impl AppState {
         let margin_y = (area.height / 10).max(1);
         let width = area.width.saturating_sub(margin_x.saturating_mul(2));
         let height = area.height.saturating_sub(margin_y.saturating_mul(2));
+        // The 4-cell floors can push past a frame smaller than the floors
+        // themselves; never hand out a rectangle outside the frame.
         Rect::new(
             area.x + margin_x,
             area.y + margin_y,
             width.max(4),
             height.max(4),
         )
+        .intersection(area)
     }
 
     fn navigator_search_is_active(&self) -> bool {
@@ -788,6 +791,16 @@ mod tests {
         );
 
         assert_eq!(app.state.navigator_popup_rect(), expected);
+    }
+
+    #[test]
+    fn goto_navigator_popup_never_exceeds_a_tiny_frame() {
+        let area = Rect::new(0, 0, 3, 3);
+        let app = navigator_app(area, false);
+
+        let popup = app.state.navigator_popup_rect();
+
+        assert_eq!(popup, popup.intersection(area));
     }
 
     #[test]

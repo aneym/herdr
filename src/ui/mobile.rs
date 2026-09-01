@@ -11,7 +11,8 @@ use super::sidebar::{
     next_entry_is_indented_workspace, workspace_list_entries_expanded, AgentPanelEntry,
     WorkspaceListEntry,
 };
-use super::status::{state_icon, state_icon_symbol};
+use super::status::{resolved_agent_icon, resolved_state_dot, state_icon_symbol};
+use super::tabs::tab_status;
 use super::text::{display_width_u16, truncate_end};
 use crate::app::state::{Palette, ToastKind, ToastNotification};
 use crate::app::AppState;
@@ -327,7 +328,8 @@ fn render_header_status(
     };
 
     let (state, seen) = ws.aggregate_state(&app.terminals);
-    let (dot, dot_style) = state_icon(state, seen, app.status_indicators, p);
+    let (dot, dot_style) =
+        resolved_state_dot(&app.sidebar_agents, state, seen, app.status_indicators, p);
     let tab_label = mobile_tab_status(ws);
     let row1 = Rect::new(area.x, area.y, area.width, 1);
     let tab_w = display_width_u16(&tab_label)
@@ -335,22 +337,25 @@ fn render_header_status(
         .min(area.width);
     let name_w = area.width.saturating_sub(tab_w);
 
+    let mut name_spans = vec![Span::raw(" ")];
+    // An explicitly blank configured glyph drops the dot entirely, matching the
+    // desktop roll-ups.
+    if !dot.is_empty() {
+        name_spans.push(Span::styled(dot, dot_style.bg(p.panel_bg)));
+        name_spans.push(Span::raw(" "));
+    }
+    name_spans.push(Span::styled(
+        truncate_end(
+            &ws.display_name_from(&app.terminals, terminal_runtimes),
+            name_w.saturating_sub(4) as usize,
+        ),
+        Style::default()
+            .fg(p.text)
+            .bg(p.panel_bg)
+            .add_modifier(Modifier::BOLD),
+    ));
     frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::raw(" "),
-            Span::styled(dot, dot_style.bg(p.panel_bg)),
-            Span::raw(" "),
-            Span::styled(
-                truncate_end(
-                    &ws.display_name_from(&app.terminals, terminal_runtimes),
-                    name_w.saturating_sub(4) as usize,
-                ),
-                Style::default()
-                    .fg(p.text)
-                    .bg(p.panel_bg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ])),
+        Paragraph::new(Line::from(name_spans)),
         Rect::new(row1.x, row1.y, name_w, 1),
     );
     frame.render_widget(
@@ -407,10 +412,18 @@ fn render_switch_button(app: &AppState, frame: &mut Frame, area: Rect) {
     // "tap me" without the user reading the summary row.
     if global_agent_counts(app).blocked > 0 {
         let bx = area.x + area.width.saturating_sub(1);
-        let (symbol, style) = state_icon(AgentState::Blocked, true, app.status_indicators, p);
-        frame.buffer_mut()[(bx, area.y)]
-            .set_symbol(symbol)
-            .set_style(style.bg(p.surface0));
+        let (symbol, style) = resolved_state_dot(
+            &app.sidebar_agents,
+            AgentState::Blocked,
+            true,
+            app.status_indicators,
+            p,
+        );
+        if !symbol.is_empty() {
+            frame.buffer_mut()[(bx, area.y)]
+                .set_symbol(symbol)
+                .set_style(style.bg(p.surface0));
+        }
     }
 }
 
@@ -534,23 +547,38 @@ fn render_mobile_switcher_content(
                 entry.ws_idx == ws_idx && entry.tab_idx == tab_idx && entry.pane_id == pane_id
             });
             let bg = mobile_item_bg(false, active, p);
-            let (icon, icon_style) = state_icon(entry.state, entry.seen, app.status_indicators, p);
-            let title = Line::from(vec![
-                Span::styled("  ", Style::default().bg(bg)),
-                Span::styled(icon, icon_style.bg(bg)),
-                Span::styled(" ", Style::default().bg(bg)),
-                Span::styled(
-                    truncate_end(
-                        &entry.primary_label,
-                        content.width.saturating_sub(5) as usize,
-                    ),
-                    Style::default()
-                        .fg(p.text)
-                        .bg(bg)
-                        .add_modifier(Modifier::BOLD),
+            let (icon, icon_style) = resolved_agent_icon(
+                &app.sidebar_agents,
+                entry.state,
+                entry.seen,
+                app.status_indicators,
+                app.animation_tick,
+                p,
+            );
+            // Title-first, like the sidebar: the live thread title is what the
+            // user triages by. Fall back to the workspace label when the agent
+            // has no title yet.
+            let thread_title = entry
+                .terminal_title_stripped
+                .as_deref()
+                .filter(|title| !title.trim().is_empty());
+            let mut title_spans = vec![Span::styled("  ", Style::default().bg(bg))];
+            if !icon.is_empty() {
+                title_spans.push(Span::styled(icon, icon_style.bg(bg)));
+                title_spans.push(Span::styled(" ", Style::default().bg(bg)));
+            }
+            title_spans.push(Span::styled(
+                truncate_end(
+                    thread_title.unwrap_or(&entry.primary_label),
+                    content.width.saturating_sub(5) as usize,
                 ),
-            ]);
-            let detail = mobile_agent_detail(entry);
+                Style::default()
+                    .fg(p.text)
+                    .bg(bg)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            let title = Line::from(title_spans);
+            let detail = mobile_agent_detail(entry, thread_title.is_some());
             render_two_line_item(
                 frame,
                 viewport,
@@ -597,7 +625,8 @@ fn render_mobile_switcher_content(
         let selected = *ws_idx == app.selected;
         let bg = mobile_item_bg(selected, active, p);
         let (state, seen) = ws.aggregate_state(&app.terminals);
-        let (dot, dot_style) = state_icon(state, seen, app.status_indicators, p);
+        let (dot, dot_style) =
+            resolved_state_dot(&app.sidebar_agents, state, seen, app.status_indicators, p);
 
         let mut title_spans = vec![Span::styled("  ", Style::default().bg(bg))];
         // Worktrees of the same space render as branches off their parent, so a
@@ -618,8 +647,10 @@ fn render_mobile_switcher_content(
             "  "
         };
 
-        title_spans.push(Span::styled(dot, dot_style.bg(bg)));
-        title_spans.push(Span::styled(" ", Style::default().bg(bg)));
+        if !dot.is_empty() {
+            title_spans.push(Span::styled(dot, dot_style.bg(bg)));
+            title_spans.push(Span::styled(" ", Style::default().bg(bg)));
+        }
         let raw_label = ws.display_name_from(&app.terminals, terminal_runtimes);
         let name = if *indented {
             grouped_child_display_label(
@@ -690,16 +721,28 @@ fn render_mobile_switcher_content(
             } else {
                 format!("{} · {display_name}", idx + 1)
             };
-            let title = Line::from(vec![
+            // Per-pane state glyphs, matching the tab bar: attention in another
+            // tab stays visible from the switcher's tab list.
+            let glyphs = tab_status(app, tab).unwrap_or_default();
+            let glyph_w: usize = glyphs
+                .iter()
+                .map(|(glyph, _)| glyph.chars().count() + 1)
+                .sum();
+            let mut title_spans = vec![
                 Span::styled("  ", Style::default().bg(bg)),
                 Span::styled(
-                    truncate_end(&label, content.width.saturating_sub(3) as usize),
+                    truncate_end(&label, (content.width as usize).saturating_sub(3 + glyph_w)),
                     Style::default()
                         .fg(p.text)
                         .bg(bg)
                         .add_modifier(Modifier::BOLD),
                 ),
-            ]);
+            ];
+            for (glyph, style) in glyphs {
+                title_spans.push(Span::styled(" ", Style::default().bg(bg)));
+                title_spans.push(Span::styled(glyph, style.bg(bg)));
+            }
+            let title = Line::from(title_spans);
             render_one_line_item(
                 frame,
                 viewport,
@@ -735,8 +778,13 @@ fn render_mobile_switcher_content(
     }
 }
 
-fn mobile_agent_detail(entry: &AgentPanelEntry) -> String {
+/// Detail line under an agent row. When the row leads with the thread title,
+/// the workspace context moves down here so it is never lost.
+fn mobile_agent_detail(entry: &AgentPanelEntry, title_first: bool) -> String {
     let mut parts = Vec::new();
+    if title_first {
+        parts.push(entry.primary_label.clone());
+    }
     if let Some(tab_label) = entry.primary_tab_label.as_deref() {
         parts.push(tab_label.to_string());
     }
@@ -1015,6 +1063,7 @@ enum SummaryTone {
 fn agent_summary_segments(
     counts: GlobalAgentCounts,
     indicator_style: StatusIndicatorStyle,
+    config: &crate::config::AgentsSidebarConfig,
 ) -> Vec<(String, SummaryTone)> {
     if counts.total() == 0 {
         return vec![("no agents".to_string(), SummaryTone::Muted)];
@@ -1027,6 +1076,7 @@ fn agent_summary_segments(
         segments.push((
             agent_summary_text(
                 indicator_style,
+                config,
                 AgentState::Blocked,
                 true,
                 Some("◉"),
@@ -1040,6 +1090,7 @@ fn agent_summary_segments(
         segments.push((
             agent_summary_text(
                 indicator_style,
+                config,
                 AgentState::Idle,
                 false,
                 Some("●"),
@@ -1053,6 +1104,7 @@ fn agent_summary_segments(
         segments.push((
             agent_summary_text(
                 indicator_style,
+                config,
                 AgentState::Working,
                 true,
                 None,
@@ -1066,6 +1118,7 @@ fn agent_summary_segments(
         segments.push((
             agent_summary_text(
                 indicator_style,
+                config,
                 AgentState::Idle,
                 true,
                 None,
@@ -1080,15 +1133,22 @@ fn agent_summary_segments(
 
 fn agent_summary_text(
     indicator_style: StatusIndicatorStyle,
+    config: &crate::config::AgentsSidebarConfig,
     state: AgentState,
     seen: bool,
     dot_style_symbol: Option<&str>,
     count: usize,
     label: &str,
 ) -> String {
-    let symbol = match indicator_style {
-        StatusIndicatorStyle::Dots => dot_style_symbol,
-        StatusIndicatorStyle::Symbols => Some(state_icon_symbol(state, seen, indicator_style)),
+    // A configured state icon wins so the summary speaks the same glyph
+    // language as the sidebar and tab bar; an explicitly blank icon drops the
+    // symbol for that state.
+    let symbol = match config.state_icon(state, seen) {
+        Some(configured) => (!configured.is_empty()).then_some(configured),
+        None => match indicator_style {
+            StatusIndicatorStyle::Dots => dot_style_symbol,
+            StatusIndicatorStyle::Symbols => Some(state_icon_symbol(state, seen, indicator_style)),
+        },
     };
     match symbol {
         Some(symbol) => format!("{symbol} {count} {label}"),
@@ -1120,7 +1180,11 @@ fn fit_summary_segments(
 }
 
 fn agent_summary_line(app: &AppState, p: &Palette, max_width: u16) -> Line<'static> {
-    let segments = agent_summary_segments(global_agent_counts(app), app.status_indicators);
+    let segments = agent_summary_segments(
+        global_agent_counts(app),
+        app.status_indicators,
+        &app.sidebar_agents,
+    );
     let (shown, truncated) = fit_summary_segments(segments, max_width as usize);
 
     let mut spans = vec![Span::styled(" ", Style::default().bg(p.panel_bg))];
@@ -1275,7 +1339,8 @@ mod tests {
             working: 2,
             idle: 1,
         };
-        let segments = agent_summary_segments(counts, StatusIndicatorStyle::Dots);
+        let segments =
+            agent_summary_segments(counts, StatusIndicatorStyle::Dots, &Default::default());
         let labels: Vec<&str> = segments.iter().map(|(text, _)| text.as_str()).collect();
         assert_eq!(
             labels,
@@ -1292,10 +1357,11 @@ mod tests {
             working: 2,
             idle: 1,
         };
-        let labels: Vec<String> = agent_summary_segments(counts, StatusIndicatorStyle::Symbols)
-            .into_iter()
-            .map(|(text, _)| text)
-            .collect();
+        let labels: Vec<String> =
+            agent_summary_segments(counts, StatusIndicatorStyle::Symbols, &Default::default())
+                .into_iter()
+                .map(|(text, _)| text)
+                .collect();
         assert_eq!(
             labels,
             ["× 2 blocked", "✓ 1 done", "◐ 2 working", "○ 1 idle"]
@@ -1330,6 +1396,184 @@ mod tests {
         );
     }
 
+    fn state_icons_config(pairs: &[(&str, &str)]) -> crate::config::AgentsSidebarConfig {
+        let mut config = crate::config::AgentsSidebarConfig::default();
+        for (key, glyph) in pairs {
+            config
+                .state_icons
+                .insert((*key).to_string(), (*glyph).to_string());
+        }
+        config
+    }
+
+    #[test]
+    fn configured_state_icons_flow_through_summary_segments() {
+        let counts = GlobalAgentCounts {
+            blocked: 2,
+            done: 1,
+            working: 2,
+            idle: 1,
+        };
+        let config = state_icons_config(&[
+            ("blocked", "■"),
+            ("idle_unseen", "●"),
+            ("working", "■"),
+            ("idle", "●"),
+        ]);
+        let labels: Vec<String> =
+            agent_summary_segments(counts, StatusIndicatorStyle::Dots, &config)
+                .into_iter()
+                .map(|(text, _)| text)
+                .collect();
+        assert_eq!(
+            labels,
+            ["■ 2 blocked", "● 1 done", "■ 2 working", "● 1 idle"]
+        );
+    }
+
+    #[test]
+    fn blank_configured_state_icon_drops_summary_symbol() {
+        let counts = GlobalAgentCounts {
+            blocked: 1,
+            ..Default::default()
+        };
+        let config = state_icons_config(&[("blocked", "")]);
+        let labels: Vec<String> =
+            agent_summary_segments(counts, StatusIndicatorStyle::Dots, &config)
+                .into_iter()
+                .map(|(text, _)| text)
+                .collect();
+        assert_eq!(labels, ["1 blocked"]);
+    }
+
+    #[test]
+    fn configured_state_icons_update_mobile_blocked_badge() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![crate::workspace::Workspace::test_new("blocked")];
+        app.ensure_test_terminals();
+        app.sidebar_agents = state_icons_config(&[("blocked", "■")]);
+        let pane_id = app.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let terminal_state = app.terminals.get_mut(&terminal_id).unwrap();
+        terminal_state.detected_agent = Some(crate::detect::Agent::Claude);
+        terminal_state.state = AgentState::Blocked;
+
+        let area = Rect::new(0, 0, 12, 2);
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(area.width, area.height))
+                .unwrap();
+        terminal
+            .draw(|frame| render_switch_button(&app, frame, area))
+            .unwrap();
+
+        assert_eq!(
+            terminal.backend().buffer()[(area.width - 1, 0)].symbol(),
+            "■"
+        );
+    }
+
+    #[test]
+    fn mobile_agent_detail_leads_with_workspace_when_title_first() {
+        let entry = agent_entry(Some("build"), Some("pi"));
+
+        assert_eq!(
+            mobile_agent_detail(&entry, true),
+            "  herdr · build · idle · pi"
+        );
+    }
+
+    #[test]
+    fn switcher_agent_row_prefers_thread_title() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![crate::workspace::Workspace::test_new("titled")];
+        app.ensure_test_terminals();
+        app.active = Some(0);
+        app.selected = 0;
+        app.view.mobile_header_rect = Rect::new(0, 0, 40, 2);
+        app.view.terminal_area = Rect::new(0, 2, 40, 18);
+        let pane_id = app.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let terminal_state = app.terminals.get_mut(&terminal_id).unwrap();
+        terminal_state.detected_agent = Some(crate::detect::Agent::Claude);
+        terminal_state.state = AgentState::Idle;
+        terminal_state.terminal_title = Some("✳ Fix mobile rows".to_string());
+
+        let backend = ratatui::backend::TestBackend::new(40, 20);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                render_mobile_panel(
+                    &app,
+                    &TerminalRuntimeRegistry::new(),
+                    frame,
+                    Rect::new(0, 0, 40, 20),
+                )
+            })
+            .unwrap();
+
+        let screen: Vec<String> = (0..20)
+            .map(|y| {
+                (0..40)
+                    .map(|x| terminal.backend().buffer()[(x, y)].symbol())
+                    .collect()
+            })
+            .collect();
+        let title_row = screen.iter().find(|row| row.contains("Fix mobile rows"));
+        assert!(title_row.is_some(), "screen: {screen:#?}");
+        // The workspace context moves to the detail line.
+        let detail_row = screen.iter().find(|row| row.contains("titled ·"));
+        assert!(detail_row.is_some(), "screen: {screen:#?}");
+    }
+
+    #[test]
+    fn switcher_tab_rows_show_per_pane_state_glyphs() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![crate::workspace::Workspace::test_new("tabs-glyph")];
+        app.ensure_test_terminals();
+        app.active = Some(0);
+        app.selected = 0;
+        app.show_tab_status = crate::config::ShowTabStatusConfig::All;
+        app.sidebar_agents = state_icons_config(&[("working", "■")]);
+        app.view.mobile_header_rect = Rect::new(0, 0, 40, 2);
+        app.view.terminal_area = Rect::new(0, 2, 40, 18);
+        let pane_id = app.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let terminal_state = app.terminals.get_mut(&terminal_id).unwrap();
+        terminal_state.detected_agent = Some(crate::detect::Agent::Claude);
+        terminal_state.state = AgentState::Working;
+
+        let backend = ratatui::backend::TestBackend::new(40, 20);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                render_mobile_panel(
+                    &app,
+                    &TerminalRuntimeRegistry::new(),
+                    frame,
+                    Rect::new(0, 0, 40, 20),
+                )
+            })
+            .unwrap();
+
+        let screen: Vec<String> = (0..20)
+            .map(|y| {
+                (0..40)
+                    .map(|x| terminal.backend().buffer()[(x, y)].symbol())
+                    .collect()
+            })
+            .collect();
+        let tab_row = screen
+            .iter()
+            .find(|row| row.contains("tab 1") && row.contains("■"));
+        assert!(tab_row.is_some(), "screen: {screen:#?}");
+    }
+
     #[test]
     fn agent_summary_hides_empty_categories() {
         let counts = GlobalAgentCounts {
@@ -1337,10 +1581,11 @@ mod tests {
             working: 2,
             ..Default::default()
         };
-        let labels: Vec<String> = agent_summary_segments(counts, StatusIndicatorStyle::Dots)
-            .into_iter()
-            .map(|(text, _)| text)
-            .collect();
+        let labels: Vec<String> =
+            agent_summary_segments(counts, StatusIndicatorStyle::Dots, &Default::default())
+                .into_iter()
+                .map(|(text, _)| text)
+                .collect();
         assert_eq!(
             labels,
             vec!["● 1 done".to_string(), "2 working".to_string()]
@@ -1354,7 +1599,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            agent_summary_segments(counts, StatusIndicatorStyle::Dots),
+            agent_summary_segments(counts, StatusIndicatorStyle::Dots, &Default::default()),
             vec![("all idle".to_string(), SummaryTone::Muted)]
         );
     }
@@ -1368,7 +1613,7 @@ mod tests {
             idle: 1,
         };
         let (shown, truncated) = fit_summary_segments(
-            agent_summary_segments(counts, StatusIndicatorStyle::Dots),
+            agent_summary_segments(counts, StatusIndicatorStyle::Dots, &Default::default()),
             24,
         );
         let labels: Vec<&str> = shown.iter().map(|(text, _)| text.as_str()).collect();
@@ -1385,7 +1630,7 @@ mod tests {
             idle: 1,
         };
         let (shown, truncated) = fit_summary_segments(
-            agent_summary_segments(counts, StatusIndicatorStyle::Dots),
+            agent_summary_segments(counts, StatusIndicatorStyle::Dots, &Default::default()),
             60,
         );
         assert_eq!(shown.len(), 4);
@@ -1395,7 +1640,11 @@ mod tests {
     #[test]
     fn agent_summary_reports_no_agents_when_empty() {
         assert_eq!(
-            agent_summary_segments(GlobalAgentCounts::default(), StatusIndicatorStyle::Dots,),
+            agent_summary_segments(
+                GlobalAgentCounts::default(),
+                StatusIndicatorStyle::Dots,
+                &Default::default()
+            ),
             vec![("no agents".to_string(), SummaryTone::Muted)]
         );
     }
@@ -1492,14 +1741,17 @@ mod tests {
     fn mobile_agent_detail_includes_tab_context_when_available() {
         let entry = agent_entry(Some("mobile-state"), Some("pi"));
 
-        assert_eq!(mobile_agent_detail(&entry), "  mobile-state · idle · pi");
+        assert_eq!(
+            mobile_agent_detail(&entry, false),
+            "  mobile-state · idle · pi"
+        );
     }
 
     #[test]
     fn mobile_agent_detail_keeps_existing_compact_detail_without_tab_context() {
         let entry = agent_entry(None, Some("pi"));
 
-        assert_eq!(mobile_agent_detail(&entry), "  idle · pi");
+        assert_eq!(mobile_agent_detail(&entry, false), "  idle · pi");
     }
 
     #[test]

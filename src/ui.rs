@@ -110,6 +110,9 @@ use crate::app::{AppState, Mode};
 use crate::terminal::TerminalRuntimeRegistry;
 
 const COLLAPSED_WIDTH: u16 = 4; // num + space + dot + separator
+/// Columns the main (tab bar + terminal) area keeps when an expanded sidebar
+/// width saved on a larger frame meets a smaller one.
+const MIN_MAIN_AREA_WIDTH: u16 = 40;
 const SPINNERS: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 pub(super) fn spinner_frame(tick: u32) -> &'static str {
@@ -252,8 +255,18 @@ fn compute_view_internal(
             crate::config::SidebarCollapsedModeConfig::Hidden => 0,
         }
     } else {
-        app.sidebar_width
-            .clamp(app.sidebar_min_width, app.sidebar_max_width)
+        // The persisted width is an absolute cell count and sidebar_max_width
+        // is user-raisable, so a width saved on a large display can exceed a
+        // smaller client's frame. Cap at render time only — the persisted
+        // value survives untouched for the larger display.
+        let configured = app
+            .sidebar_width
+            .clamp(app.sidebar_min_width, app.sidebar_max_width);
+        let cap = area
+            .width
+            .saturating_sub(MIN_MAIN_AREA_WIDTH)
+            .max(area.width / 2);
+        configured.min(cap)
     };
 
     let [sidebar_area, main_area] =
@@ -757,6 +770,29 @@ mod tests {
             app.view.mobile_menu_hit_area.x + app.view.mobile_menu_hit_area.width,
             44
         );
+    }
+
+    #[test]
+    fn oversized_persisted_sidebar_width_keeps_main_area_usable() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one")];
+        app.active = Some(0);
+        app.selected = 0;
+        app.replace_mode(Mode::Terminal);
+        // A width dragged out on a large display under a raised
+        // sidebar_max_width, now meeting an iPhone-landscape-sized frame.
+        app.sidebar_max_width = u16::MAX;
+        app.sidebar_width = 200;
+
+        compute_view(&mut app, Rect::new(0, 0, 95, 22));
+
+        assert_eq!(app.view.layout, ViewLayout::Desktop);
+        assert_eq!(app.view.sidebar_rect.width, 55);
+        assert!(app.view.terminal_area.width >= 40);
+
+        // A frame that fits the persisted width keeps it untouched.
+        compute_view(&mut app, Rect::new(0, 0, 260, 40));
+        assert_eq!(app.view.sidebar_rect.width, 200);
     }
 
     #[test]

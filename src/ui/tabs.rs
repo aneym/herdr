@@ -128,7 +128,10 @@ fn should_show_tab_status(
 /// The glyphs a tab shows: one per pane, in layout order. Visibility is
 /// gated on the tab's highest-attention pane so the show_tab_status modes
 /// keep their meaning; once shown, every pane reports its own state.
-fn tab_status<'a>(app: &'a AppState, tab: &crate::workspace::Tab) -> Option<Vec<(&'a str, Style)>> {
+pub(super) fn tab_status<'a>(
+    app: &'a AppState,
+    tab: &crate::workspace::Tab,
+) -> Option<Vec<(&'a str, Style)>> {
     let (state, seen) = tab_agent_state(app, tab)?;
     if !should_show_tab_status(app.show_tab_status, state, seen) {
         return None;
