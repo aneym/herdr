@@ -399,6 +399,27 @@ fn compute_mobile_view(
         resize_popup_pane(app, terminal_runtimes, terminal_area, cell_size);
     }
     let header_hits = compute_mobile_header_hit_areas(app, header_rect);
+    let tab_bar_rect = Rect::new(
+        header_rect.x,
+        header_rect.y + 1,
+        header_hits.menu.x.saturating_sub(header_rect.x),
+        u16::from(header_rect.height > 1),
+    );
+    let tab_bar_view = app
+        .active
+        .and_then(|ws_idx| app.workspaces.get(ws_idx))
+        .map(|ws| {
+            tabs::compute_mobile_tab_bar_view(
+                app,
+                ws,
+                tab_bar_rect,
+                app.tab_scroll,
+                app.tab_scroll_follow_active,
+                app.mouse_capture,
+            )
+        })
+        .unwrap_or_default();
+    app.tab_scroll = tab_bar_view.scroll;
 
     let toast_hit_area = app
         .toast
@@ -410,11 +431,11 @@ fn compute_mobile_view(
         layout: ViewLayout::Mobile,
         sidebar_rect: Rect::default(),
         workspace_card_areas: Vec::new(),
-        tab_bar_rect: Rect::default(),
-        tab_hit_areas: Vec::new(),
-        tab_scroll_left_hit_area: Rect::default(),
-        tab_scroll_right_hit_area: Rect::default(),
-        new_tab_hit_area: Rect::default(),
+        tab_bar_rect,
+        tab_hit_areas: tab_bar_view.tab_hit_areas,
+        tab_scroll_left_hit_area: tab_bar_view.scroll_left_hit_area,
+        tab_scroll_right_hit_area: tab_bar_view.scroll_right_hit_area,
+        new_tab_hit_area: tab_bar_view.new_tab_hit_area,
         session_badge_rect: Rect::default(),
         terminal_area,
         mobile_header_rect: header_rect,
@@ -762,7 +783,7 @@ mod tests {
 
         assert_eq!(app.view.layout, ViewLayout::Mobile);
         assert_eq!(app.view.sidebar_rect, Rect::default());
-        assert_eq!(app.view.tab_bar_rect, Rect::default());
+        assert_eq!(app.view.tab_bar_rect, Rect::new(0, 1, 34, 1));
         assert_eq!(app.view.mobile_header_rect, Rect::new(0, 0, 44, 2));
         assert_eq!(app.view.terminal_area, Rect::new(0, 2, 44, 18));
         assert_eq!(app.view.mobile_menu_hit_area.height, 2);

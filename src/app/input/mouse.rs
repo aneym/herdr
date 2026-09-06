@@ -1205,14 +1205,20 @@ impl AppState {
                 }
             }
 
-            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+            MouseEventKind::ScrollUp
+            | MouseEventKind::ScrollDown
+            | MouseEventKind::ScrollLeft
+            | MouseEventKind::ScrollRight
                 if self.mode_bar_covers_tab_row(mouse.column, mouse.row) => {}
 
-            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+            MouseEventKind::ScrollUp
+            | MouseEventKind::ScrollDown
+            | MouseEventKind::ScrollLeft
+            | MouseEventKind::ScrollRight
                 if self.on_tab_bar(mouse.column, mouse.row) =>
             {
                 match mouse.kind {
-                    MouseEventKind::ScrollUp => {
+                    MouseEventKind::ScrollUp | MouseEventKind::ScrollLeft => {
                         if let Some(ws) = self.active.and_then(|i| self.workspaces.get(i)) {
                             if !ws.tabs.is_empty() {
                                 let prev = if ws.active_tab == 0 {
@@ -1224,7 +1230,7 @@ impl AppState {
                             }
                         }
                     }
-                    MouseEventKind::ScrollDown => {
+                    MouseEventKind::ScrollDown | MouseEventKind::ScrollRight => {
                         if let Some(ws) = self.active.and_then(|i| self.workspaces.get(i)) {
                             if !ws.tabs.is_empty() {
                                 let next = (ws.active_tab + 1) % ws.tabs.len();
@@ -5256,6 +5262,42 @@ mod tests {
             tab_bar.y,
         ));
         assert_eq!(app.state.workspaces[0].active_tab, 2);
+    }
+
+    #[test]
+    fn mobile_header_tabs_handle_taps_and_both_wheel_axes() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("one");
+        ws.test_add_tab(Some("two"));
+        ws.test_add_tab(Some("three"));
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.replace_mode(Mode::Terminal);
+
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 44, 20));
+        let second_tab = app.state.view.tab_hit_areas[1];
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            second_tab.x + 1,
+            second_tab.y,
+        ));
+        app.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            second_tab.x + 1,
+            second_tab.y,
+        ));
+        assert_eq!(app.state.workspaces[0].active_tab, 1);
+
+        let tab_bar = app.state.view.tab_bar_rect;
+        app.handle_mouse(mouse(MouseEventKind::ScrollRight, tab_bar.x + 1, tab_bar.y));
+        assert_eq!(app.state.workspaces[0].active_tab, 2);
+        app.handle_mouse(mouse(MouseEventKind::ScrollLeft, tab_bar.x + 1, tab_bar.y));
+        assert_eq!(app.state.workspaces[0].active_tab, 1);
+        app.handle_mouse(mouse(MouseEventKind::ScrollDown, tab_bar.x + 1, tab_bar.y));
+        assert_eq!(app.state.workspaces[0].active_tab, 2);
+        app.handle_mouse(mouse(MouseEventKind::ScrollUp, tab_bar.x + 1, tab_bar.y));
+        assert_eq!(app.state.workspaces[0].active_tab, 1);
     }
 
     #[test]

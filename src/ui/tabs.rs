@@ -309,11 +309,54 @@ pub(crate) fn compute_tab_bar_view(
     follow_active: bool,
     mouse_chrome: bool,
 ) -> TabBarView {
+    compute_tab_bar_view_inner(
+        app,
+        ws,
+        area,
+        current_scroll,
+        follow_active,
+        mouse_chrome,
+        true,
+    )
+}
+
+pub(crate) fn compute_mobile_tab_bar_view(
+    app: &AppState,
+    ws: &crate::workspace::Workspace,
+    area: Rect,
+    current_scroll: usize,
+    follow_active: bool,
+    mouse_chrome: bool,
+) -> TabBarView {
+    compute_tab_bar_view_inner(
+        app,
+        ws,
+        area,
+        current_scroll,
+        follow_active,
+        mouse_chrome,
+        false,
+    )
+}
+
+fn compute_tab_bar_view_inner(
+    app: &AppState,
+    ws: &crate::workspace::Workspace,
+    area: Rect,
+    current_scroll: usize,
+    follow_active: bool,
+    mouse_chrome: bool,
+    show_session_badge: bool,
+) -> TabBarView {
     if area.width == 0 || area.height == 0 {
         return TabBarView::default();
     }
 
-    let (content_area, session_badge_rect) = session_badge_layout(app, area, mouse_chrome);
+    let (content_area, session_badge_rect) = if show_session_badge {
+        session_badge_layout(app, area, mouse_chrome)
+    } else {
+        (area, Rect::default())
+    };
 
     if !mouse_chrome {
         let max_scroll = max_tab_scroll(app, ws, content_area);
@@ -452,7 +495,7 @@ fn tab_drop_indicator_x(
     None
 }
 
-pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
+pub(crate) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
     if area.width == 0 || area.height == 0 {
         return;
     }

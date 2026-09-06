@@ -231,6 +231,7 @@ pub(crate) fn render_mobile_header(
     let status = Rect::new(area.x, area.y, status_w, area.height);
 
     render_header_status(app, terminal_runtimes, frame, status);
+    crate::ui::tabs::render_tab_bar(app, frame, app.view.tab_bar_rect);
     render_switch_button(app, frame, switch);
 }
 
@@ -346,16 +347,22 @@ fn render_header_status(
     let profile_label = format!(" · {}", app.active_profile);
     let fixed_width = 1 + usize::from(!dot.is_empty()) * 2;
     let available_width = area.width as usize;
-    let show_profile = fixed_width
+    let summary = agent_summary_line(app, p, area.width);
+    let summary_width = summary.width();
+    let full_identity_width = fixed_width
         + display_width_u16(&workspace_name) as usize
-        + display_width_u16(&profile_label) as usize
-        <= available_width;
+        + display_width_u16(&profile_label) as usize;
+    let show_summary = summary_width > 1
+        && full_identity_width.saturating_add(summary_width + 1) <= available_width;
+    let summary_reserved = if show_summary { summary_width + 1 } else { 0 };
+    let identity_width = available_width.saturating_sub(summary_reserved);
+    let show_profile = full_identity_width <= identity_width;
     let profile_width = if show_profile {
         display_width_u16(&profile_label) as usize
     } else {
         0
     };
-    let name_budget = available_width.saturating_sub(fixed_width + profile_width);
+    let name_budget = identity_width.saturating_sub(fixed_width + profile_width);
 
     let mut name_spans = vec![Span::raw(" ")];
     // An explicitly blank configured glyph drops the dot entirely, matching the
@@ -381,11 +388,15 @@ fn render_header_status(
         ));
     }
     frame.render_widget(Paragraph::new(Line::from(name_spans)), row1);
-
-    if area.height > 1 {
+    if show_summary {
         frame.render_widget(
-            Paragraph::new(agent_summary_line(app, p, area.width)),
-            Rect::new(area.x, area.y + 1, area.width, 1),
+            Paragraph::new(summary).alignment(Alignment::Right),
+            Rect::new(
+                row1.x + row1.width.saturating_sub(summary_width as u16),
+                row1.y,
+                summary_width as u16,
+                1,
+            ),
         );
     }
 }
@@ -1541,6 +1552,94 @@ mod tests {
             .collect::<String>();
 
         assert!(row.contains("workspace · team"), "header row: {row:?}");
+    }
+
+    #[test]
+    fn mobile_header_drops_agent_summary_before_profile_and_workspace() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![crate::workspace::Workspace::test_new("workspace")];
+        app.ensure_test_terminals();
+        app.active = Some(0);
+        app.active_profile = "team".to_string();
+        let pane_id = app.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let terminal_state = app.terminals.get_mut(&terminal_id).unwrap();
+        terminal_state.detected_agent = Some(crate::detect::Agent::Claude);
+        terminal_state.state = AgentState::Blocked;
+
+        let backend = ratatui::backend::TestBackend::new(26, 2);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                render_header_status(
+                    &app,
+                    &TerminalRuntimeRegistry::new(),
+                    frame,
+                    Rect::new(0, 0, 26, 2),
+                )
+            })
+            .unwrap();
+        let row = (0..26)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+            .collect::<String>();
+
+        assert!(row.contains("workspace · team"), "header row: {row:?}");
+        assert!(!row.contains("blocked"), "header row: {row:?}");
+    }
+
+    #[test]
+    fn mobile_header_tab_strip_uses_desktop_active_style_and_centered_scroll() {
+        let mut app = crate::app::state::AppState::test_new();
+        let mut workspace = crate::workspace::Workspace::test_new("workspace");
+        for name in ["two", "three", "four", "five"] {
+            workspace.test_add_tab(Some(name));
+        }
+        workspace.active_tab = 2;
+        app.workspaces = vec![workspace];
+        app.active = Some(0);
+        app.selected = 0;
+        app.mouse_capture = true;
+        app.view.mobile_header_rect = Rect::new(0, 0, 44, 2);
+        app.view.mobile_menu_hit_area = Rect::new(34, 0, 10, 2);
+        app.view.tab_bar_rect = Rect::new(0, 1, 34, 1);
+        let view = crate::ui::tabs::compute_mobile_tab_bar_view(
+            &app,
+            &app.workspaces[0],
+            app.view.tab_bar_rect,
+            0,
+            true,
+            true,
+        );
+        app.tab_scroll = view.scroll;
+        app.view.tab_hit_areas = view.tab_hit_areas;
+        app.view.tab_scroll_left_hit_area = view.scroll_left_hit_area;
+        app.view.tab_scroll_right_hit_area = view.scroll_right_hit_area;
+        app.view.new_tab_hit_area = view.new_tab_hit_area;
+
+        let backend = ratatui::backend::TestBackend::new(44, 2);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                render_mobile_header(
+                    &app,
+                    &TerminalRuntimeRegistry::new(),
+                    frame,
+                    Rect::new(0, 0, 44, 2),
+                )
+            })
+            .unwrap();
+
+        assert!(app.tab_scroll > 0);
+        assert!(app.view.tab_scroll_left_hit_area.width > 0);
+        assert!(app.view.tab_scroll_right_hit_area.width > 0);
+        assert!(app.view.new_tab_hit_area.width > 0);
+        let active = app.view.tab_hit_areas[2];
+        assert_eq!(
+            terminal.backend().buffer()[(active.x, active.y)].bg,
+            app.palette.accent
+        );
     }
 
     #[test]
