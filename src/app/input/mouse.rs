@@ -26,6 +26,9 @@ use super::{
 };
 
 pub(super) enum MouseAction {
+    SwitchProfile {
+        profile: String,
+    },
     NewWorkspace,
     Settings(SettingsAction),
     FocusWorkspace {
@@ -1530,6 +1533,13 @@ impl AppState {
         }
 
         match crate::ui::mobile_switcher_target_at(self, mouse.column, mouse.row) {
+            Some(crate::ui::MobileSwitcherTarget::Profile(profile_idx)) => {
+                let Some(profile) = self.profile_roster().get(profile_idx).cloned() else {
+                    return MobileMouseResult::Consumed;
+                };
+                self.replace_mode(Mode::Terminal);
+                return MobileMouseResult::Action(MouseAction::SwitchProfile { profile });
+            }
             Some(crate::ui::MobileSwitcherTarget::NewWorkspace) => {
                 return MobileMouseResult::Action(MouseAction::NewWorkspace);
             }
@@ -5294,10 +5304,58 @@ mod tests {
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
             viewport.x + 2,
-            viewport.y + 4,
+            viewport.y + 6,
         ));
 
         assert_eq!(app.state.active, Some(1));
+        assert_eq!(app.state.mode(), Mode::Terminal);
+    }
+
+    #[test]
+    fn mobile_profile_row_switches_profile_and_visible_workspace() {
+        let mut app = app_for_mouse_test();
+        let default_workspace = Workspace::test_new("default");
+        let mut work_workspace = Workspace::test_new("work");
+        work_workspace.profiles = vec!["work".to_string()];
+        app.state.workspaces = vec![default_workspace, work_workspace];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.replace_mode(Mode::Navigate);
+
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 44, 20));
+        let viewport = crate::ui::mobile_switcher_areas(&app.state).viewport;
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            viewport.x + 2,
+            viewport.y + 2,
+        ));
+
+        assert_eq!(app.state.active_profile, "work");
+        assert_eq!(app.state.active, Some(1));
+        assert_eq!(app.state.selected, 1);
+        assert_eq!(app.state.mode(), Mode::Terminal);
+    }
+
+    #[test]
+    fn mobile_active_profile_row_only_closes_switcher() {
+        let mut app = app_for_mouse_test();
+        app.state.workspaces = vec![Workspace::test_new("default")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.replace_mode(Mode::Navigate);
+        app.state.session_dirty = false;
+
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 44, 20));
+        let viewport = crate::ui::mobile_switcher_areas(&app.state).viewport;
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            viewport.x + 2,
+            viewport.y + 1,
+        ));
+
+        assert_eq!(app.state.active_profile, crate::workspace::DEFAULT_PROFILE);
+        assert_eq!(app.state.active, Some(0));
+        assert!(!app.state.session_dirty);
         assert_eq!(app.state.mode(), Mode::Terminal);
     }
 
@@ -5332,7 +5390,7 @@ mod tests {
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
             viewport.x + 2,
-            viewport.y + 2,
+            viewport.y + 4,
         ));
 
         assert_eq!(app.state.active, Some(1));
@@ -5375,7 +5433,7 @@ mod tests {
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
             viewport.x + 2,
-            viewport.y + 4,
+            viewport.y + 6,
         ));
         assert_eq!(app.state.workspaces[0].active_tab, 2);
     }
@@ -5400,7 +5458,7 @@ mod tests {
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
             viewport.x + 2,
-            viewport.y + 1,
+            viewport.y + 3,
         ));
 
         assert_eq!(app.state.mode(), Mode::RenameWorkspace);
@@ -5573,7 +5631,7 @@ mod tests {
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
             viewport.x + 2,
-            viewport.y + 5,
+            viewport.y + 7,
         ));
 
         assert_eq!(app.state.mode(), Mode::RenameTab);
@@ -5603,7 +5661,7 @@ mod tests {
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
             viewport.x + 2,
-            viewport.y + 5,
+            viewport.y + 7,
         ));
         assert_eq!(app.state.mode(), Mode::Terminal);
         assert!(!app.state.creating_new_tab);

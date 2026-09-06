@@ -427,6 +427,12 @@ impl App {
                     .handle_mouse(&mut self.terminal_runtimes, source_id, mouse)
             {
                 match action {
+                    MouseAction::SwitchProfile { profile } => {
+                        self.handle_profile_switch(
+                            "tui.mouse.profile.switch".to_string(),
+                            crate::api::schema::ProfileSwitchParams { profile },
+                        );
+                    }
                     MouseAction::NewWorkspace => {
                         self.begin_tui_workspace_create("tui.mouse.workspace.create")
                     }

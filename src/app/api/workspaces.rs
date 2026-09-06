@@ -81,7 +81,7 @@ impl App {
         encode_success(id, ResponseResult::WorkspaceInfo { workspace })
     }
 
-    pub(super) fn handle_profile_switch(
+    pub(crate) fn handle_profile_switch(
         &mut self,
         id: String,
         params: ProfileSwitchParams,

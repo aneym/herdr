@@ -36,6 +36,7 @@ pub(crate) struct MobileSwitcherAreas {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MobileSwitcherTarget {
+    Profile(usize),
     NewWorkspace,
     Workspace(usize),
     NewTab,
@@ -107,6 +108,10 @@ fn mobile_agents_block_height(app: &AppState) -> usize {
     }
 }
 
+fn mobile_profiles_block_height(app: &AppState) -> usize {
+    1 + app.profile_roster().len()
+}
+
 pub(crate) fn mobile_switcher_workspace_doc_range(
     app: &AppState,
     idx: usize,
@@ -117,8 +122,8 @@ pub(crate) fn mobile_switcher_workspace_doc_range(
         .iter()
         .position(|WorkspaceListEntry::Workspace { ws_idx, .. }| *ws_idx == idx)
         .unwrap_or(idx);
-    // spaces sit after the agents block, then a title + "new workspace" row.
-    let start = mobile_agents_block_height(app) + 2 + pos * 2;
+    // Spaces sit after profiles and agents, then a title + "new workspace" row.
+    let start = mobile_profiles_block_height(app) + mobile_agents_block_height(app) + 2 + pos * 2;
     start..start + 2
 }
 
@@ -146,8 +151,14 @@ pub(crate) fn mobile_switcher_target_at(
     let doc_row = scroll.saturating_add(row.saturating_sub(areas.viewport.y) as usize);
     let mut cursor = 0usize;
 
-    // Agents lead the switcher: the primary job is switching between running
-    // agents. Spaces/tabs/create actions follow for navigation and management.
+    cursor += 1; // profiles title
+    let profiles = app.profile_roster();
+    let profiles_end = cursor + profiles.len();
+    if doc_row >= cursor && doc_row < profiles_end {
+        return Some(MobileSwitcherTarget::Profile(doc_row - cursor));
+    }
+    cursor = profiles_end;
+
     let agents = agent_panel_entries(app);
     if !agents.is_empty() || app.agent_view_override.is_some() {
         cursor += 1; // agents title
@@ -330,12 +341,21 @@ fn render_header_status(
     let (state, seen) = ws.aggregate_state(&app.terminals);
     let (dot, dot_style) =
         resolved_state_dot(&app.sidebar_agents, state, seen, app.status_indicators, p);
-    let tab_label = mobile_tab_status(ws);
     let row1 = Rect::new(area.x, area.y, area.width, 1);
-    let tab_w = display_width_u16(&tab_label)
-        .saturating_add(1)
-        .min(area.width);
-    let name_w = area.width.saturating_sub(tab_w);
+    let workspace_name = ws.display_name_from(&app.terminals, terminal_runtimes);
+    let profile_label = format!(" · {}", app.active_profile);
+    let fixed_width = 1 + usize::from(!dot.is_empty()) * 2;
+    let available_width = area.width as usize;
+    let show_profile = fixed_width
+        + display_width_u16(&workspace_name) as usize
+        + display_width_u16(&profile_label) as usize
+        <= available_width;
+    let profile_width = if show_profile {
+        display_width_u16(&profile_label) as usize
+    } else {
+        0
+    };
+    let name_budget = available_width.saturating_sub(fixed_width + profile_width);
 
     let mut name_spans = vec![Span::raw(" ")];
     // An explicitly blank configured glyph drops the dot entirely, matching the
@@ -345,25 +365,22 @@ fn render_header_status(
         name_spans.push(Span::raw(" "));
     }
     name_spans.push(Span::styled(
-        truncate_end(
-            &ws.display_name_from(&app.terminals, terminal_runtimes),
-            name_w.saturating_sub(4) as usize,
-        ),
+        truncate_end(&workspace_name, name_budget),
         Style::default()
             .fg(p.text)
             .bg(p.panel_bg)
             .add_modifier(Modifier::BOLD),
     ));
-    frame.render_widget(
-        Paragraph::new(Line::from(name_spans)),
-        Rect::new(row1.x, row1.y, name_w, 1),
-    );
-    frame.render_widget(
-        Paragraph::new(tab_label)
-            .style(Style::default().fg(p.overlay1).bg(p.panel_bg))
-            .alignment(Alignment::Right),
-        Rect::new(row1.x + name_w, row1.y, tab_w, 1),
-    );
+    if show_profile {
+        name_spans.push(Span::styled(
+            profile_label,
+            Style::default()
+                .fg(p.overlay1)
+                .bg(p.panel_bg)
+                .add_modifier(Modifier::DIM),
+        ));
+    }
+    frame.render_widget(Paragraph::new(Line::from(name_spans)), row1);
 
     if area.height > 1 {
         frame.render_widget(
@@ -474,8 +491,9 @@ fn mobile_switcher_content_height(app: &AppState) -> usize {
         .map(|ws| 2 + ws.tabs.len())
         .unwrap_or(0);
     let agents_h = mobile_agents_block_height(app);
+    let profiles_h = mobile_profiles_block_height(app);
     let menu_h = 1 + app.global_menu_labels().len();
-    spaces_h + tabs_h + agents_h + menu_h
+    spaces_h + tabs_h + agents_h + profiles_h + menu_h
 }
 
 fn render_mobile_switcher_content(
@@ -504,6 +522,31 @@ fn render_mobile_switcher_content(
     }
 
     let mut doc_y = 0usize;
+
+    render_section_title_at(
+        frame,
+        viewport,
+        content,
+        doc_y,
+        app.mobile_switcher_scroll,
+        "profiles",
+        p,
+    );
+    doc_y += 1;
+    for profile in app.profile_roster() {
+        let active = profile == app.active_profile;
+        let bg = mobile_item_bg(false, active, p);
+        render_one_line_item(
+            frame,
+            viewport,
+            content,
+            doc_y,
+            app.mobile_switcher_scroll,
+            bg,
+            Line::from(Span::styled(profile, Style::default().fg(p.text).bg(bg))),
+        );
+        doc_y += 1;
+    }
 
     let entries = agent_panel_entries_from(app, terminal_runtimes);
     if !entries.is_empty() || app.agent_view_override.is_some() {
@@ -1475,6 +1518,59 @@ mod tests {
     }
 
     #[test]
+    fn mobile_header_shows_profile_badge_when_it_fits() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![crate::workspace::Workspace::test_new("workspace")];
+        app.active = Some(0);
+        app.active_profile = "team".to_string();
+
+        let backend = ratatui::backend::TestBackend::new(40, 2);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                render_header_status(
+                    &app,
+                    &TerminalRuntimeRegistry::new(),
+                    frame,
+                    Rect::new(0, 0, 40, 2),
+                )
+            })
+            .unwrap();
+        let row = (0..40)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+            .collect::<String>();
+
+        assert!(row.contains("workspace · team"), "header row: {row:?}");
+    }
+
+    #[test]
+    fn mobile_header_drops_profile_badge_before_workspace_name() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![crate::workspace::Workspace::test_new("workspace")];
+        app.active = Some(0);
+        app.active_profile = "team".to_string();
+
+        let backend = ratatui::backend::TestBackend::new(12, 2);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                render_header_status(
+                    &app,
+                    &TerminalRuntimeRegistry::new(),
+                    frame,
+                    Rect::new(0, 0, 12, 2),
+                )
+            })
+            .unwrap();
+        let row = (0..12)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+            .collect::<String>();
+
+        assert!(row.contains("workspace"), "header row: {row:?}");
+        assert!(!row.contains(" · team"), "header row: {row:?}");
+    }
+
+    #[test]
     fn mobile_agent_detail_leads_with_workspace_when_title_first() {
         let entry = agent_entry(Some("build"), Some("pi"));
 
@@ -1650,6 +1746,67 @@ mod tests {
     }
 
     #[test]
+    fn switcher_profiles_render_first_in_roster_order() {
+        let mut app = crate::app::state::AppState::test_new();
+        let mut workspace = crate::workspace::Workspace::test_new("work");
+        workspace.profiles = vec!["work".to_string(), "personal".to_string()];
+        app.workspaces = vec![workspace];
+        app.active_profile = "work".to_string();
+        app.active = Some(0);
+        app.selected = 0;
+        app.view.mobile_header_rect = Rect::new(0, 0, 40, 2);
+        app.view.terminal_area = Rect::new(0, 2, 40, 18);
+
+        let backend = ratatui::backend::TestBackend::new(40, 20);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                render_mobile_panel(
+                    &app,
+                    &TerminalRuntimeRegistry::new(),
+                    frame,
+                    Rect::new(0, 0, 40, 20),
+                )
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let rows: Vec<String> = (3..9)
+            .map(|y| (0..40).map(|x| buffer[(x, y)].symbol()).collect())
+            .collect();
+        assert!(rows[0].contains("profiles"), "rows: {rows:#?}");
+        assert!(rows[1].contains("personal"), "rows: {rows:#?}");
+        assert!(rows[2].contains("work"), "rows: {rows:#?}");
+        assert!(rows[3].contains("spaces"), "rows: {rows:#?}");
+        assert_eq!(buffer[(1, 5)].bg, mobile_item_bg(false, true, &app.palette));
+        assert_ne!(buffer[(1, 4)].bg, mobile_item_bg(false, true, &app.palette));
+    }
+
+    #[test]
+    fn switcher_profile_rows_shift_all_following_targets() {
+        let mut app = crate::app::state::AppState::test_new();
+        let mut workspace = crate::workspace::Workspace::test_new("work");
+        workspace.profiles = vec!["work".to_string()];
+        workspace.test_add_tab(Some("logs"));
+        app.workspaces = vec![workspace];
+        app.active_profile = "work".to_string();
+        app.active = Some(0);
+        app.selected = 0;
+        app.view.mobile_header_rect = Rect::new(0, 0, 40, 2);
+        app.view.terminal_area = Rect::new(0, 2, 40, 30);
+
+        let viewport = mobile_switcher_areas(&app).viewport;
+        let hit = |doc_y| mobile_switcher_target_at(&app, viewport.x + 2, viewport.y + doc_y);
+        assert_eq!(hit(1), Some(MobileSwitcherTarget::Profile(0)));
+        assert_eq!(hit(2), Some(MobileSwitcherTarget::Profile(1)));
+        assert_eq!(hit(4), Some(MobileSwitcherTarget::NewWorkspace));
+        assert_eq!(hit(5), Some(MobileSwitcherTarget::Workspace(0)));
+        assert_eq!(hit(8), Some(MobileSwitcherTarget::NewTab));
+        assert_eq!(hit(10), Some(MobileSwitcherTarget::Tab(1)));
+        assert_eq!(hit(12), Some(MobileSwitcherTarget::Menu(0)));
+    }
+
+    #[test]
     fn switcher_leads_with_agents_and_shifts_spaces_below() {
         let mut app = crate::app::state::AppState::test_new();
         let mut workspace = crate::workspace::Workspace::test_new("agents-first");
@@ -1666,18 +1823,21 @@ mod tests {
         app.view.terminal_area = Rect::new(0, 2, 40, 18);
 
         assert_eq!(agent_panel_entries(&app).len(), 2);
-        // agents title (1) + 2 agents * 2 rows = 5, then spaces title + "new
-        // workspace" (2) before the first workspace ribbon at doc row 7.
-        assert_eq!(mobile_switcher_workspace_doc_range(&app, 0).start, 7);
+        // Profiles occupy two rows. The agents title and two agent entries occupy
+        // five more. Spaces then uses two rows before the first workspace.
+        assert_eq!(mobile_switcher_workspace_doc_range(&app, 0).start, 9);
 
         let viewport = mobile_switcher_areas(&app).viewport;
-        app.mobile_switcher_scroll = 100;
-        let agent_hit = mobile_switcher_target_at(&app, viewport.x + 2, viewport.y + 1);
+        assert_eq!(
+            mobile_switcher_target_at(&app, viewport.x + 2, viewport.y + 1),
+            Some(MobileSwitcherTarget::Profile(0))
+        );
+        let agent_hit = mobile_switcher_target_at(&app, viewport.x + 2, viewport.y + 3);
         assert!(matches!(
             agent_hit,
             Some(MobileSwitcherTarget::Agent { .. })
         ));
-        let workspace_hit = mobile_switcher_target_at(&app, viewport.x + 2, viewport.y + 7);
+        let workspace_hit = mobile_switcher_target_at(&app, viewport.x + 2, viewport.y + 9);
         assert_eq!(workspace_hit, Some(MobileSwitcherTarget::Workspace(0)));
     }
 
@@ -1709,19 +1869,19 @@ mod tests {
         // Grouped order pulls the worktree (idx 2) up under its parent (idx 0),
         // ahead of the unrelated "other" workspace (idx 1): rows are main,
         // feature, other.
-        assert_eq!(mobile_switcher_workspace_doc_range(&app, 2).start, 4);
-        assert_eq!(mobile_switcher_workspace_doc_range(&app, 1).start, 6);
+        assert_eq!(mobile_switcher_workspace_doc_range(&app, 2).start, 6);
+        assert_eq!(mobile_switcher_workspace_doc_range(&app, 1).start, 8);
 
         let viewport = mobile_switcher_areas(&app).viewport;
         // The second space row on screen is the worktree, not workspaces[1].
-        let hit = mobile_switcher_target_at(&app, viewport.x + 2, viewport.y + 4);
+        let hit = mobile_switcher_target_at(&app, viewport.x + 2, viewport.y + 6);
         assert_eq!(hit, Some(MobileSwitcherTarget::Workspace(2)));
 
         // Mobile ignores collapse: even with the space folded on desktop, the
         // worktree child still renders in the same position.
         app.collapsed_space_keys.insert("repo-key".to_string());
-        assert_eq!(mobile_switcher_workspace_doc_range(&app, 2).start, 4);
-        let hit = mobile_switcher_target_at(&app, viewport.x + 2, viewport.y + 4);
+        assert_eq!(mobile_switcher_workspace_doc_range(&app, 2).start, 6);
+        let hit = mobile_switcher_target_at(&app, viewport.x + 2, viewport.y + 6);
         assert_eq!(hit, Some(MobileSwitcherTarget::Workspace(2)));
     }
 
@@ -1732,9 +1892,9 @@ mod tests {
         app.active = Some(0);
         app.selected = 0;
 
-        // No attached terminals -> no agents -> no agents header, spaces lead.
+        // No attached terminals means profiles lead, followed by spaces.
         assert_eq!(agent_panel_entries(&app).len(), 0);
-        assert_eq!(mobile_switcher_workspace_doc_range(&app, 0).start, 2);
+        assert_eq!(mobile_switcher_workspace_doc_range(&app, 0).start, 4);
     }
 
     #[test]
@@ -1793,7 +1953,7 @@ mod tests {
             .unwrap();
 
         let row = (0..40)
-            .map(|x| terminal.backend().buffer()[(x, 10)].symbol())
+            .map(|x| terminal.backend().buffer()[(x, 12)].symbol())
             .collect::<String>();
 
         assert!(row.contains("tab 2"), "mobile tab row: {row:?}");
