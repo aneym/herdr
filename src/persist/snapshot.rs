@@ -165,6 +165,9 @@ pub struct PaneSnapshot {
     pub agent_identity: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_ownership: Option<PaneAgentOwnershipSnapshot>,
+    /// Explicit sidebar placement of the agent occupancy. Absent = automatic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_group: Option<PaneAgentGroupSnapshot>,
     #[serde(
         default,
         skip_serializing_if = "Vec::is_empty",
@@ -190,6 +193,38 @@ pub struct PaneAgentOwnershipSnapshot {
     pub origin: PaneAgentOwnerRefSnapshot,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current: Option<PaneAgentOwnerRefSnapshot>,
+}
+
+/// Persisted form of [`crate::agent_ownership::AgentGroupPlacement`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneAgentGroupSnapshot {
+    /// `hands_on` or `under`.
+    pub placement: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<PaneAgentOwnerRefSnapshot>,
+}
+
+impl PaneAgentGroupSnapshot {
+    fn from_placement(placement: &crate::agent_ownership::AgentGroupPlacement) -> Self {
+        Self {
+            placement: placement.kind_name().to_string(),
+            parent: placement
+                .parent()
+                .map(PaneAgentOwnerRefSnapshot::from_owner_ref),
+        }
+    }
+
+    /// Rebuild the placement. An unknown kind, or an `under` record with no
+    /// parent, reads as automatic placement rather than failing the restore.
+    pub fn to_placement(&self) -> Option<crate::agent_ownership::AgentGroupPlacement> {
+        match self.placement.as_str() {
+            "hands_on" => Some(crate::agent_ownership::AgentGroupPlacement::HandsOn),
+            "under" => self.parent.as_ref().map(|parent| {
+                crate::agent_ownership::AgentGroupPlacement::Under(parent.to_owner_ref())
+            }),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -631,6 +666,19 @@ fn capture_tab(
                 snapshot
             })
         });
+        let agent_group = terminal.and_then(|terminal| {
+            terminal.agent_group.as_ref().map(|placement| {
+                let mut snapshot = PaneAgentGroupSnapshot::from_placement(placement);
+                // Same reconciliation aid as ownership: carry the parent's
+                // latest session so an explicit nesting survives a resume.
+                if let Some(parent) = snapshot.parent.as_mut() {
+                    if parent.session.is_none() {
+                        parent.session = owner_session_by_identity(terminals, &parent.agent_id);
+                    }
+                }
+                snapshot
+            })
+        });
         let terminal_title = terminal.and_then(|terminal| terminal.terminal_title.clone());
         panes.insert(
             id.raw(),
@@ -643,6 +691,7 @@ fn capture_tab(
                 launch_argv,
                 agent_identity,
                 agent_ownership,
+                agent_group,
                 profiles,
                 terminal_title,
             },
@@ -1073,6 +1122,7 @@ mod tests {
                 launch_argv: None,
                 agent_identity: None,
                 agent_ownership: None,
+                agent_group: None,
                 profiles: Vec::new(),
             },
         );
@@ -1088,6 +1138,7 @@ mod tests {
                 launch_argv: None,
                 agent_identity: None,
                 agent_ownership: None,
+                agent_group: None,
                 profiles: Vec::new(),
             },
         );
@@ -1176,6 +1227,7 @@ mod tests {
                 launch_argv: None,
                 agent_identity: None,
                 agent_ownership: None,
+                agent_group: None,
                 profiles: Vec::new(),
             },
         );
@@ -1414,6 +1466,114 @@ mod tests {
         assert_eq!(snapshot.sidebar_width, Some(31));
         assert_eq!(snapshot.sidebar_section_split, Some(0.4));
         assert!(snapshot.collapsed_space_keys.contains("repo-key"));
+    }
+
+    #[test]
+    fn capture_persists_agent_group_placement_and_missing_field_reads_auto() {
+        let mut state = state_with_workspaces(&["one", "two"]);
+        for (ws_idx, name) in [(0usize, "lead"), (1, "worker")] {
+            let pane_id = state.workspaces[ws_idx].tabs[0].root_pane;
+            let terminal_id = state.workspaces[ws_idx].tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            let terminal = state.terminals.get_mut(&terminal_id).unwrap();
+            terminal.set_agent_name(name.to_string());
+            terminal.set_detected_state(
+                Some(crate::detect::Agent::Pi),
+                crate::detect::AgentState::Idle,
+            );
+            terminal.agent_identity = Some(format!("agent_{name}"));
+        }
+        let worker_pane = state.workspaces[1].tabs[0].root_pane;
+        let worker_terminal = state.workspaces[1].tabs[0].panes[&worker_pane]
+            .attached_terminal_id
+            .clone();
+        state
+            .terminals
+            .get_mut(&worker_terminal)
+            .unwrap()
+            .agent_group = Some(crate::agent_ownership::AgentGroupPlacement::Under(
+            crate::agent_ownership::AgentOwnerRef {
+                agent_id: "agent_lead".into(),
+                name: Some("lead".into()),
+                agent: Some("pi".into()),
+                session: None,
+            },
+        ));
+        let lead_pane = state.workspaces[0].tabs[0].root_pane;
+        let lead_terminal = state.workspaces[0].tabs[0].panes[&lead_pane]
+            .attached_terminal_id
+            .clone();
+        state.terminals.get_mut(&lead_terminal).unwrap().agent_group =
+            Some(crate::agent_ownership::AgentGroupPlacement::HandsOn);
+
+        let snapshot = capture_from_state(&state);
+        let lead = snapshot.workspaces[0].tabs[0]
+            .panes
+            .values()
+            .next()
+            .unwrap();
+        let worker = snapshot.workspaces[1].tabs[0]
+            .panes
+            .values()
+            .next()
+            .unwrap();
+        assert_eq!(lead.agent_group.as_ref().unwrap().placement, "hands_on");
+        assert!(lead.agent_group.as_ref().unwrap().parent.is_none());
+        let worker_group = worker.agent_group.as_ref().unwrap();
+        assert_eq!(worker_group.placement, "under");
+        assert_eq!(
+            worker_group.parent.as_ref().map(|p| p.agent_id.as_str()),
+            Some("agent_lead")
+        );
+
+        // Round trip through JSON, then rebuild the placements.
+        let restored = parse_snapshot(&serde_json::to_string(&snapshot).unwrap()).unwrap();
+        let worker = restored.workspaces[1].tabs[0]
+            .panes
+            .values()
+            .next()
+            .unwrap();
+        let Some(crate::agent_ownership::AgentGroupPlacement::Under(parent)) =
+            worker.agent_group.as_ref().unwrap().to_placement()
+        else {
+            panic!("worker placement should rebuild as Under");
+        };
+        assert_eq!(parent.agent_id, "agent_lead");
+        let lead = restored.workspaces[0].tabs[0]
+            .panes
+            .values()
+            .next()
+            .unwrap();
+        assert_eq!(
+            lead.agent_group.as_ref().unwrap().to_placement(),
+            Some(crate::agent_ownership::AgentGroupPlacement::HandsOn)
+        );
+
+        // Older session files have no field: that reads as automatic.
+        let mut serialized = serde_json::to_value(&snapshot).unwrap();
+        for pane in serialized["workspaces"][1]["tabs"][0]["panes"]
+            .as_object_mut()
+            .unwrap()
+            .values_mut()
+        {
+            pane.as_object_mut().unwrap().remove("agent_group");
+        }
+        let legacy = parse_snapshot(&serialized.to_string()).unwrap();
+        let worker = legacy.workspaces[1].tabs[0].panes.values().next().unwrap();
+        assert!(worker.agent_group.is_none());
+
+        // An unknown kind, or `under` without a parent, also reads as automatic.
+        let odd = PaneAgentGroupSnapshot {
+            placement: "sideways".into(),
+            parent: None,
+        };
+        assert!(odd.to_placement().is_none());
+        let bare_under = PaneAgentGroupSnapshot {
+            placement: "under".into(),
+            parent: None,
+        };
+        assert!(bare_under.to_placement().is_none());
     }
 
     #[test]
@@ -1900,6 +2060,7 @@ mod tests {
                 launch_argv: None,
                 agent_identity: None,
                 agent_ownership: None,
+                agent_group: None,
                 profiles: Vec::new(),
             },
         );
@@ -1917,6 +2078,7 @@ mod tests {
                 launch_argv: None,
                 agent_identity: None,
                 agent_ownership: None,
+                agent_group: None,
                 profiles: Vec::new(),
             },
         );

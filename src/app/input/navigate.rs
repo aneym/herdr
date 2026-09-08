@@ -470,6 +470,43 @@ impl App {
                 .state
                 .open_navigator_search_from(&self.terminal_runtimes),
             NavigateAction::Usage => self.toggle_usage_overlay(),
+            NavigateAction::ToggleAgentGroup => {
+                if let Some(key) = self.state.focused_agent_group_key() {
+                    self.state.toggle_agent_group_collapsed(key);
+                }
+            }
+            NavigateAction::ToggleHandsOn => {
+                if let Some((ws_idx, pane_id)) = self.state.active.and_then(|ws_idx| {
+                    self.state
+                        .workspaces
+                        .get(ws_idx)
+                        .and_then(|workspace| workspace.focused_pane_id())
+                        .map(|pane_id| (ws_idx, pane_id))
+                }) {
+                    let hands_on = self
+                        .state
+                        .workspaces
+                        .get(ws_idx)
+                        .and_then(|workspace| workspace.pane_state(pane_id))
+                        .and_then(|pane| self.state.terminals.get(&pane.attached_terminal_id))
+                        .is_some_and(|terminal| {
+                            matches!(
+                                terminal.agent_group,
+                                Some(crate::agent_ownership::AgentGroupPlacement::HandsOn)
+                            )
+                        });
+                    self.set_agent_group_via_api(
+                        ws_idx,
+                        pane_id,
+                        if hands_on {
+                            crate::api::schema::AgentGroupPlacementKind::Auto
+                        } else {
+                            crate::api::schema::AgentGroupPlacementKind::HandsOn
+                        },
+                        None,
+                    );
+                }
+            }
         }
 
         finish_action_context(&mut self.state, context, previous_mode);
@@ -1533,6 +1570,10 @@ pub(crate) enum NavigateAction {
     OpenNavigator,
     OpenNavigatorSearch,
     Usage,
+    /// Collapse or expand the sidebar group the focused agent owns or sits in.
+    ToggleAgentGroup,
+    /// Pin or unpin the focused agent as hands-on (top-level in the sidebar).
+    ToggleHandsOn,
 }
 
 /// Map a configured mouse navigation button action onto a navigate action.
@@ -1706,6 +1747,8 @@ fn non_indexed_action_for_key(
         (&kb.goto, NavigateAction::OpenNavigator),
         (&kb.search, NavigateAction::OpenNavigatorSearch),
         (&kb.usage, NavigateAction::Usage),
+        (&kb.toggle_agent_group, NavigateAction::ToggleAgentGroup),
+        (&kb.toggle_hands_on, NavigateAction::ToggleHandsOn),
     ] {
         if action_matches(bindings, key, dispatch) {
             return Some(action);
@@ -1998,6 +2041,22 @@ pub(super) fn execute_navigate_action_in_context(
         NavigateAction::OpenNavigator => state.open_navigator_from(terminal_runtimes),
         NavigateAction::OpenNavigatorSearch => state.open_navigator_search_from(terminal_runtimes),
         NavigateAction::Usage => state.replace_mode(Mode::Usage),
+        NavigateAction::ToggleAgentGroup => {
+            if let Some(key) = state.focused_agent_group_key() {
+                state.toggle_agent_group_collapsed(key);
+            }
+        }
+        NavigateAction::ToggleHandsOn => {
+            if let Some((ws_idx, pane_id)) = state.active.and_then(|ws_idx| {
+                state
+                    .workspaces
+                    .get(ws_idx)
+                    .and_then(|workspace| workspace.focused_pane_id())
+                    .map(|pane_id| (ws_idx, pane_id))
+            }) {
+                state.toggle_agent_hands_on(ws_idx, pane_id);
+            }
+        }
     }
 
     finish_action_context(state, context, previous_mode);
@@ -3345,6 +3404,71 @@ last_pane = "prefix+tab"
         );
 
         assert_eq!(action, Some(NavigateAction::SwitchTab(1)));
+    }
+
+    #[test]
+    fn sidebar_group_bindings_dispatch_their_actions() {
+        let mut state = state_with_workspaces(&["one"]);
+        let config: Config = toml::from_str(
+            "[keys]\ntoggle_agent_group = \"prefix+shift+g\"\ntoggle_hands_on = \"prefix+shift+o\"\n",
+        )
+        .unwrap();
+        state.keybinds = config.keybinds();
+
+        assert_eq!(
+            action_for_key(
+                &state,
+                TerminalKey::new(KeyCode::Char('G'), KeyModifiers::SHIFT),
+                BindingDispatch::Prefix,
+            ),
+            Some(NavigateAction::ToggleAgentGroup)
+        );
+        assert_eq!(
+            action_for_key(
+                &state,
+                TerminalKey::new(KeyCode::Char('O'), KeyModifiers::SHIFT),
+                BindingDispatch::Prefix,
+            ),
+            Some(NavigateAction::ToggleHandsOn)
+        );
+    }
+
+    #[test]
+    fn toggle_hands_on_action_pins_the_focused_agent() {
+        let mut state = state_with_workspaces(&["one"]);
+        state.ensure_test_terminals();
+        state.active = Some(0);
+        let pane_id = state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        {
+            let terminal = state.terminals.get_mut(&terminal_id).unwrap();
+            terminal.set_agent_name("lead".into());
+            terminal.set_detected_state(
+                Some(crate::detect::Agent::Pi),
+                crate::detect::AgentState::Idle,
+            );
+        }
+        let mut runtimes = TerminalRuntimeRegistry::new();
+
+        execute_navigate_action_in_context(
+            &mut state,
+            &mut runtimes,
+            NavigateAction::ToggleHandsOn,
+            ActionContext::Prefix,
+        );
+        assert!(matches!(
+            state.terminals[&terminal_id].agent_group,
+            Some(crate::agent_ownership::AgentGroupPlacement::HandsOn)
+        ));
+        execute_navigate_action_in_context(
+            &mut state,
+            &mut runtimes,
+            NavigateAction::ToggleHandsOn,
+            ActionContext::Prefix,
+        );
+        assert!(state.terminals[&terminal_id].agent_group.is_none());
     }
 
     #[test]

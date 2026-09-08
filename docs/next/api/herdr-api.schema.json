@@ -1238,6 +1238,64 @@
     },
     "request": {
       "$defs": {
+        "AgentGroupCollapseParams": {
+          "properties": {
+            "collapsed": {
+              "type": "boolean"
+            },
+            "target": {
+              "description": "The agent whose sidebar group is collapsed or expanded.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "target",
+            "collapsed"
+          ],
+          "type": "object"
+        },
+        "AgentGroupPlacementKind": {
+          "description": "Explicit sidebar placement kinds for `agent.group.set`.",
+          "oneOf": [
+            {
+              "const": "auto",
+              "description": "Clear the explicit placement: follow ownership and orchestrator mode.",
+              "type": "string"
+            },
+            {
+              "const": "hands_on",
+              "description": "Keep the agent top-level and visible, outside any collapsed group.",
+              "type": "string"
+            },
+            {
+              "const": "under",
+              "description": "Nest the agent beneath `parent` in the sidebar without changing ownership.",
+              "type": "string"
+            }
+          ]
+        },
+        "AgentGroupSetParams": {
+          "properties": {
+            "parent": {
+              "description": "Agent target (name or pane id) to nest beneath. Required for `under`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "placement": {
+              "$ref": "#/schemas/request/$defs/AgentGroupPlacementKind"
+            },
+            "target": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "target",
+            "placement"
+          ],
+          "type": "object"
+        },
         "AgentOwnerSetParams": {
           "properties": {
             "owner": {
@@ -5355,6 +5413,38 @@
         {
           "properties": {
             "method": {
+              "const": "agent.group.set",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentGroupSetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agent.group.collapse",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentGroupCollapseParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "agent.prompt",
               "type": "string"
             },
@@ -6411,6 +6501,57 @@
     },
     "success_response": {
       "$defs": {
+        "AgentGroupInfo": {
+          "properties": {
+            "collapsed": {
+              "description": "True when the sidebar group this agent owns is collapsed.",
+              "type": "boolean"
+            },
+            "orphaned": {
+              "description": "True when the explicit parent no longer resolves to a live agent.",
+              "type": "boolean"
+            },
+            "parent": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/AgentOwnerInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Explicit sidebar parent when placement is `under`."
+            },
+            "placement": {
+              "$ref": "#/schemas/success_response/$defs/AgentGroupPlacementKind",
+              "description": "`auto`, `hands_on`, or `under`."
+            }
+          },
+          "required": [
+            "placement"
+          ],
+          "type": "object"
+        },
+        "AgentGroupPlacementKind": {
+          "description": "Explicit sidebar placement kinds for `agent.group.set`.",
+          "oneOf": [
+            {
+              "const": "auto",
+              "description": "Clear the explicit placement: follow ownership and orchestrator mode.",
+              "type": "string"
+            },
+            {
+              "const": "hands_on",
+              "description": "Keep the agent top-level and visible, outside any collapsed group.",
+              "type": "string"
+            },
+            {
+              "const": "under",
+              "description": "Nest the agent beneath `parent` in the sidebar without changing ownership.",
+              "type": "string"
+            }
+          ]
+        },
         "AgentInfo": {
           "properties": {
             "agent": {
@@ -6459,6 +6600,17 @@
                 "string",
                 "null"
               ]
+            },
+            "group": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/AgentGroupInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sidebar placement: explicit hands-on pin or nesting override, plus\nthe collapse state of the group this agent owns."
             },
             "interactive_ready": {
               "type": "boolean"

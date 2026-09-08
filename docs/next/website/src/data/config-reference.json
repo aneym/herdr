@@ -548,6 +548,18 @@
           "description": "Toggle the live agent resource usage overlay. Unset by default."
         },
         {
+          "key": "keys.toggle_agent_group",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Collapse or expand the sidebar agent group the focused agent owns or sits in. Unset by default."
+        },
+        {
+          "key": "keys.toggle_hands_on",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Pin or unpin the focused agent as hands-on, keeping it top-level in the sidebar. Unset by default."
+        },
+        {
           "key": "keys.navigate_workspace_up",
           "type": "keybinding",
           "default": "\"up\"",

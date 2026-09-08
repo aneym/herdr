@@ -381,11 +381,136 @@ impl App {
             })
     }
 
+    /// Set or clear the explicit sidebar placement of an agent. Placement is
+    /// presentation only: the ownership record is never touched.
+    pub(super) fn set_agent_group_target(
+        &mut self,
+        target: &str,
+        placement: crate::api::schema::AgentGroupPlacementKind,
+        parent: Option<&str>,
+    ) -> Result<crate::api::schema::AgentInfo, AgentOwnerError> {
+        use crate::api::schema::AgentGroupPlacementKind;
+
+        let resolved = self
+            .resolve_agent_target(target)
+            .map_err(AgentOwnerError::Target)?;
+        let next = match placement {
+            AgentGroupPlacementKind::Auto => None,
+            AgentGroupPlacementKind::HandsOn => {
+                Some(crate::agent_ownership::AgentGroupPlacement::HandsOn)
+            }
+            AgentGroupPlacementKind::Under => {
+                let parent = parent.ok_or(AgentOwnerError::ParentMissing)?;
+                let resolved_parent = self
+                    .resolve_agent_target(parent)
+                    .map_err(AgentOwnerError::OwnerTarget)?;
+                if resolved.terminal_id == resolved_parent.terminal_id {
+                    return Err(AgentOwnerError::SelfOwned);
+                }
+                let parent_ref = self
+                    .owner_ref_for_terminal(&resolved_parent.terminal_id)
+                    .ok_or(AgentOwnerError::OwnerNotAgent {
+                        target: parent.to_string(),
+                    })?;
+                let child_identity = self
+                    .owner_ref_for_terminal(&resolved.terminal_id)
+                    .ok_or(AgentOwnerError::NotAgent {
+                        target: target.to_string(),
+                    })?
+                    .agent_id;
+                if self
+                    .state
+                    .agent_group_would_cycle(&child_identity, &parent_ref.agent_id)
+                {
+                    return Err(AgentOwnerError::Cycle);
+                }
+                Some(crate::agent_ownership::AgentGroupPlacement::Under(
+                    parent_ref,
+                ))
+            }
+        };
+        let Some(terminal) = self
+            .state
+            .terminals
+            .values_mut()
+            .find(|terminal| terminal.id.to_string() == resolved.terminal_id)
+        else {
+            return Err(AgentOwnerError::Target(TerminalTargetError::NotFound {
+                target: target.to_string(),
+            }));
+        };
+        if !terminal.is_agent_terminal() {
+            return Err(AgentOwnerError::NotAgent {
+                target: target.to_string(),
+            });
+        }
+        if next.is_some() {
+            // A placement must survive the pane; anchor it to a durable identity.
+            terminal.ensure_agent_identity();
+        }
+        if terminal.agent_group != next {
+            terminal.agent_group = next;
+            self.state.mark_session_dirty();
+            self.schedule_session_save();
+            self.emit_pane_updated(resolved.ws_idx, resolved.pane_id);
+        }
+        self.agent_info(resolved.ws_idx, resolved.pane_id)
+            .ok_or_else(|| {
+                AgentOwnerError::Target(TerminalTargetError::NotFound {
+                    target: target.to_string(),
+                })
+            })
+    }
+
+    /// Collapse or expand the sidebar group this agent owns.
+    pub(super) fn set_agent_group_collapsed_target(
+        &mut self,
+        target: &str,
+        collapsed: bool,
+    ) -> Result<crate::api::schema::AgentInfo, AgentOwnerError> {
+        let resolved = self
+            .resolve_agent_target(target)
+            .map_err(AgentOwnerError::Target)?;
+        // Make sure the group has a durable key before it is recorded.
+        self.owner_ref_for_terminal(&resolved.terminal_id)
+            .ok_or(AgentOwnerError::NotAgent {
+                target: target.to_string(),
+            })?;
+        let Some(key) = self
+            .state
+            .agent_group_key(resolved.ws_idx, resolved.pane_id)
+        else {
+            return Err(AgentOwnerError::NotAgent {
+                target: target.to_string(),
+            });
+        };
+        let changed = if collapsed {
+            self.state.collapsed_agent_group_keys.insert(key)
+        } else {
+            self.state.collapsed_agent_group_keys.remove(&key)
+        };
+        if changed {
+            self.state.mark_session_dirty();
+            self.schedule_session_save();
+            self.emit_pane_updated(resolved.ws_idx, resolved.pane_id);
+        }
+        self.agent_info(resolved.ws_idx, resolved.pane_id)
+            .ok_or_else(|| {
+                AgentOwnerError::Target(TerminalTargetError::NotFound {
+                    target: target.to_string(),
+                })
+            })
+    }
+
     pub(super) fn agent_owner_error_body(
         &self,
         err: AgentOwnerError,
     ) -> crate::api::schema::ErrorBody {
         match err {
+            AgentOwnerError::ParentMissing => crate::api::schema::ErrorBody {
+                code: "agent_group_parent_required".into(),
+                message: "placement `under` requires a parent agent target".into(),
+            },
             AgentOwnerError::Target(err) | AgentOwnerError::OwnerTarget(err) => {
                 self.agent_target_error_body(err)
             }
@@ -431,6 +556,41 @@ impl App {
             pane_id: resolved.and_then(|(ws_idx, pane_id)| self.public_pane_id(ws_idx, pane_id)),
             resolved: resolved.is_some(),
         }
+    }
+
+    /// Sidebar placement report for an agent: the explicit placement when one
+    /// is set, plus the collapse state of the group this agent owns. Absent
+    /// when nothing is configured and the group is expanded, so unconfigured
+    /// agents keep their old JSON shape.
+    pub(super) fn agent_group_info(
+        &self,
+        ws_idx: usize,
+        pane_id: crate::layout::PaneId,
+        terminal: &crate::terminal::TerminalState,
+    ) -> Option<crate::api::schema::AgentGroupInfo> {
+        use crate::agent_ownership::AgentGroupPlacement;
+        use crate::api::schema::AgentGroupPlacementKind;
+
+        let collapsed = self
+            .state
+            .agent_group_key(ws_idx, pane_id)
+            .is_some_and(|key| self.state.collapsed_agent_group_keys.contains(&key));
+        let (placement, parent, orphaned) = match terminal.agent_group.as_ref() {
+            None if !collapsed => return None,
+            None => (AgentGroupPlacementKind::Auto, None, false),
+            Some(AgentGroupPlacement::HandsOn) => (AgentGroupPlacementKind::HandsOn, None, false),
+            Some(AgentGroupPlacement::Under(parent)) => (
+                AgentGroupPlacementKind::Under,
+                Some(self.agent_owner_info(parent)),
+                self.state.resolve_agent_owner(parent).is_none(),
+            ),
+        };
+        Some(crate::api::schema::AgentGroupInfo {
+            placement,
+            parent,
+            orphaned,
+            collapsed,
+        })
     }
 
     pub(super) fn agent_ownership_info(
@@ -600,6 +760,7 @@ impl App {
         let pane = self.pane_info(ws_idx, pane_id)?;
         let agent_id = terminal.agent_identity.clone();
         let ownership = self.agent_ownership_info(terminal);
+        let group = self.agent_group_info(ws_idx, pane_id, terminal);
         Some(crate::api::schema::AgentInfo {
             terminal_id: pane.terminal_id,
             name: terminal.agent_name.clone(),
@@ -615,6 +776,7 @@ impl App {
             agent_session: pane.agent_session,
             agent_id,
             ownership,
+            group,
             workspace_id: pane.workspace_id,
             tab_id: pane.tab_id,
             pane_id: pane.pane_id,
@@ -693,8 +855,14 @@ pub(super) enum AgentOwnerError {
     OwnerTarget(TerminalTargetError),
     SelfOwned,
     Cycle,
-    NotAgent { target: String },
-    OwnerNotAgent { target: String },
+    NotAgent {
+        target: String,
+    },
+    OwnerNotAgent {
+        target: String,
+    },
+    /// `agent.group.set` with placement `under` and no parent.
+    ParentMissing,
 }
 
 pub(super) enum AgentRenameError {

@@ -807,7 +807,9 @@ pub(super) fn apply_context_menu_action(
             ContextMenuKind::Pane {
                 ws_idx, pane_id, ..
             }
-            | ContextMenuKind::AgentPane { ws_idx, pane_id },
+            | ContextMenuKind::AgentPane {
+                ws_idx, pane_id, ..
+            },
             Some(action @ ("Send to profile..." | "Share with profiles...")),
         ) => {
             state.open_profile_menu(
@@ -909,7 +911,12 @@ pub(super) fn apply_context_menu_action(
                 });
             }
         }
-        (ContextMenuKind::AgentPane { ws_idx, pane_id }, Some("Focus")) => {
+        (
+            ContextMenuKind::AgentPane {
+                ws_idx, pane_id, ..
+            },
+            Some("Focus"),
+        ) => {
             state.focus_pane_in_workspace(ws_idx, pane_id);
             state.replace_mode(Mode::Terminal);
         }
@@ -917,7 +924,54 @@ pub(super) fn apply_context_menu_action(
         | (ContextMenuKind::AgentPane { pane_id, .. }, Some("Rename")) => {
             open_rename_pane(state, pane_id);
         }
-        (ContextMenuKind::AgentPane { ws_idx, pane_id }, Some("Close")) => {
+        (
+            ContextMenuKind::AgentPane {
+                ws_idx, pane_id, ..
+            },
+            Some("Pin hands-on" | "Unpin hands-on"),
+        ) => {
+            state.toggle_agent_hands_on(ws_idx, pane_id);
+            leave_modal(state);
+        }
+        (
+            ContextMenuKind::AgentPane {
+                ws_idx, pane_id, ..
+            },
+            Some("Nest under..."),
+        ) => {
+            state.open_profile_menu(
+                ProfileMenuTarget::Pane { ws_idx, pane_id },
+                ProfileMenuMode::NestUnder,
+                menu.x,
+                menu.y,
+            );
+        }
+        (
+            ContextMenuKind::AgentPane {
+                ws_idx, pane_id, ..
+            },
+            Some("Clear nesting"),
+        ) => {
+            state.set_agent_group_parent_local(ws_idx, pane_id, None);
+            leave_modal(state);
+        }
+        (
+            ContextMenuKind::AgentPane {
+                ws_idx, pane_id, ..
+            },
+            Some("Collapse group" | "Expand group"),
+        ) => {
+            if let Some(key) = state.agent_group_key(ws_idx, pane_id) {
+                state.toggle_agent_group_collapsed(key);
+            }
+            leave_modal(state);
+        }
+        (
+            ContextMenuKind::AgentPane {
+                ws_idx, pane_id, ..
+            },
+            Some("Close"),
+        ) => {
             state.focus_pane_in_workspace(ws_idx, pane_id);
             if !state.close_pane() {
                 state.replace_mode(if state.active.is_some() {
@@ -1112,6 +1166,17 @@ pub(super) fn apply_profile_menu_action(state: &mut AppState, menu: ProfileMenuS
         return;
     };
     let profile = entry.profile.clone();
+    if menu.mode == ProfileMenuMode::NestUnder {
+        if let ProfileMenuTarget::Pane { ws_idx, pane_id } = menu.target {
+            let parent = profile
+                .as_deref()
+                .and_then(|public_id| state.parse_public_pane_id_local(public_id));
+            state.set_agent_group_parent_local(ws_idx, pane_id, parent);
+        }
+        state.profile_menu = None;
+        leave_modal(state);
+        return;
+    }
     let mut should_close = menu.mode == ProfileMenuMode::Send || profile.is_none();
     match menu.target {
         ProfileMenuTarget::Workspace { ws_idx } => {
@@ -1493,6 +1558,19 @@ impl App {
             return;
         };
         let profile = entry.profile.clone();
+        if menu.mode == ProfileMenuMode::NestUnder {
+            if let ProfileMenuTarget::Pane { ws_idx, pane_id } = menu.target {
+                let placement = if profile.is_some() {
+                    crate::api::schema::AgentGroupPlacementKind::Under
+                } else {
+                    crate::api::schema::AgentGroupPlacementKind::Auto
+                };
+                self.set_agent_group_via_api(ws_idx, pane_id, placement, profile);
+            }
+            self.state.profile_menu = None;
+            leave_modal(&mut self.state);
+            return;
+        }
         let mut should_close = menu.mode == ProfileMenuMode::Send || profile.is_none();
         match menu.target {
             ProfileMenuTarget::Workspace { ws_idx } => {
@@ -1597,7 +1675,9 @@ impl App {
                 ContextMenuKind::Pane {
                     ws_idx, pane_id, ..
                 }
-                | ContextMenuKind::AgentPane { ws_idx, pane_id },
+                | ContextMenuKind::AgentPane {
+                    ws_idx, pane_id, ..
+                },
                 Some(action @ ("Send to profile..." | "Share with profiles...")),
             ) => {
                 self.state.open_profile_menu(
@@ -1700,7 +1780,12 @@ impl App {
                     leave_modal(&mut self.state);
                 }
             }
-            (ContextMenuKind::AgentPane { ws_idx, pane_id }, Some("Focus")) => {
+            (
+                ContextMenuKind::AgentPane {
+                    ws_idx, pane_id, ..
+                },
+                Some("Focus"),
+            ) => {
                 self.focus_pane_internal_via_api(ws_idx, pane_id);
                 self.state.replace_mode(Mode::Terminal);
             }
@@ -1708,7 +1793,71 @@ impl App {
             | (ContextMenuKind::AgentPane { pane_id, .. }, Some("Rename")) => {
                 open_rename_pane(&mut self.state, pane_id);
             }
-            (ContextMenuKind::AgentPane { ws_idx, pane_id }, Some("Close")) => {
+            (
+                ContextMenuKind::AgentPane {
+                    ws_idx,
+                    pane_id,
+                    hands_on,
+                    ..
+                },
+                Some("Pin hands-on" | "Unpin hands-on"),
+            ) => {
+                self.set_agent_group_via_api(
+                    ws_idx,
+                    pane_id,
+                    if hands_on {
+                        crate::api::schema::AgentGroupPlacementKind::Auto
+                    } else {
+                        crate::api::schema::AgentGroupPlacementKind::HandsOn
+                    },
+                    None,
+                );
+                leave_modal(&mut self.state);
+            }
+            (
+                ContextMenuKind::AgentPane {
+                    ws_idx, pane_id, ..
+                },
+                Some("Nest under..."),
+            ) => {
+                self.state.open_profile_menu(
+                    ProfileMenuTarget::Pane { ws_idx, pane_id },
+                    ProfileMenuMode::NestUnder,
+                    menu.x,
+                    menu.y,
+                );
+            }
+            (
+                ContextMenuKind::AgentPane {
+                    ws_idx, pane_id, ..
+                },
+                Some("Clear nesting"),
+            ) => {
+                self.set_agent_group_via_api(
+                    ws_idx,
+                    pane_id,
+                    crate::api::schema::AgentGroupPlacementKind::Auto,
+                    None,
+                );
+                leave_modal(&mut self.state);
+            }
+            (
+                ContextMenuKind::AgentPane {
+                    ws_idx, pane_id, ..
+                },
+                Some("Collapse group" | "Expand group"),
+            ) => {
+                if let Some(key) = self.state.agent_group_key(ws_idx, pane_id) {
+                    self.state.toggle_agent_group_collapsed(key);
+                }
+                leave_modal(&mut self.state);
+            }
+            (
+                ContextMenuKind::AgentPane {
+                    ws_idx, pane_id, ..
+                },
+                Some("Close"),
+            ) => {
                 let was_focused = self.state.active == Some(ws_idx)
                     && self.state.workspaces[ws_idx].focused_pane_id() == Some(pane_id);
                 self.focus_pane_internal_via_api(ws_idx, pane_id);
@@ -2846,6 +2995,150 @@ mod tests {
         apply_profile_menu_action(&mut state, menu, follow_idx);
         assert!(state.terminals[&terminal_id].profiles.is_empty());
         assert!(state.profile_menu.is_none());
+    }
+
+    fn name_agents(app: &mut App, names: &[(usize, &str)]) {
+        for (ws_idx, name) in names {
+            let pane_id = app.state.workspaces[*ws_idx].tabs[0].root_pane;
+            let terminal_id = app.state.workspaces[*ws_idx].tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+            terminal.set_agent_name((*name).to_string());
+            terminal.set_detected_state(
+                Some(crate::detect::Agent::Pi),
+                crate::detect::AgentState::Idle,
+            );
+        }
+    }
+
+    #[test]
+    fn agent_context_menu_pin_and_nest_route_through_the_api() {
+        let mut app = app_with_test_workspaces(&["lead-space"]);
+        app.state.workspaces[0].test_add_tab(Some("worker"));
+        app.state.ensure_test_terminals();
+        name_agents(&mut app, &[(0, "lead")]);
+        let worker_pane = app.state.workspaces[0].tabs[1].root_pane;
+        let worker_terminal = app.state.workspaces[0].tabs[1].panes[&worker_pane]
+            .attached_terminal_id
+            .clone();
+        {
+            let terminal = app.state.terminals.get_mut(&worker_terminal).unwrap();
+            terminal.set_agent_name("worker".into());
+            terminal.set_detected_state(
+                Some(crate::detect::Agent::Pi),
+                crate::detect::AgentState::Idle,
+            );
+        }
+
+        // Pin: the menu offers the verb, choosing it sets the placement.
+        let menu = ContextMenuState {
+            kind: app.state.agent_pane_context_menu_kind(0, worker_pane),
+            x: 0,
+            y: 0,
+            list: MenuListState::new(0),
+        };
+        let items = menu.items();
+        assert!(items.contains(&"Pin hands-on"));
+        assert!(items.contains(&"Nest under..."));
+        assert!(!items.contains(&"Clear nesting"));
+        let pin_idx = items
+            .iter()
+            .position(|item| *item == "Pin hands-on")
+            .unwrap();
+        app.apply_context_menu_action_via_api(menu, pin_idx);
+        assert!(matches!(
+            app.state.terminals[&worker_terminal].agent_group,
+            Some(crate::agent_ownership::AgentGroupPlacement::HandsOn)
+        ));
+        let menu = ContextMenuState {
+            kind: app.state.agent_pane_context_menu_kind(0, worker_pane),
+            x: 0,
+            y: 0,
+            list: MenuListState::new(0),
+        };
+        assert!(menu.items().contains(&"Unpin hands-on"));
+
+        // Nest under...: the picker lists the other agent in the workspace
+        // by name and pane id, and choosing it nests without owning.
+        let nest_idx = menu
+            .items()
+            .iter()
+            .position(|item| *item == "Nest under...")
+            .unwrap();
+        app.apply_context_menu_action_via_api(menu, nest_idx);
+        let picker = app.state.profile_menu.as_ref().expect("nest picker opens");
+        assert_eq!(picker.mode, ProfileMenuMode::NestUnder);
+        assert_eq!(picker.entries[0].label, "Automatic");
+        assert!(picker.entries[0].is_current);
+        let lead_idx = picker
+            .entries
+            .iter()
+            .position(|entry| entry.label.starts_with("lead"))
+            .expect("lead is offered as a parent");
+        assert!(!picker
+            .entries
+            .iter()
+            .any(|entry| entry.label.starts_with("worker")));
+        app.state.profile_menu.as_mut().unwrap().list.highlighted = lead_idx;
+        app.handle_profile_menu_key_via_api(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        assert!(app.state.profile_menu.is_none());
+        let placement = app.state.terminals[&worker_terminal].agent_group.clone();
+        let Some(crate::agent_ownership::AgentGroupPlacement::Under(parent)) = placement else {
+            panic!("worker should be nested under lead, got {placement:?}");
+        };
+        assert_eq!(parent.name.as_deref(), Some("lead"));
+        assert!(app.state.terminals[&worker_terminal]
+            .agent_ownership
+            .is_none());
+
+        // Clear nesting returns to automatic placement.
+        let menu = ContextMenuState {
+            kind: app.state.agent_pane_context_menu_kind(0, worker_pane),
+            x: 0,
+            y: 0,
+            list: MenuListState::new(0),
+        };
+        let items = menu.items();
+        let clear_idx = items
+            .iter()
+            .position(|item| *item == "Clear nesting")
+            .expect("nested agent offers Clear nesting");
+        app.apply_context_menu_action_via_api(menu, clear_idx);
+        assert!(app.state.terminals[&worker_terminal].agent_group.is_none());
+    }
+
+    #[test]
+    fn agent_context_menu_collapse_uses_the_shared_group_key() {
+        let mut app = app_with_test_workspaces(&["lead-space", "worker-space"]);
+        name_agents(&mut app, &[(0, "lead"), (1, "worker")]);
+        let lead_pane = app.state.workspaces[0].tabs[0].root_pane;
+        let worker_pane = app.state.workspaces[1].tabs[0].root_pane;
+        app.state
+            .set_agent_group_parent_local(1, worker_pane, Some((0, lead_pane)));
+
+        let menu = ContextMenuState {
+            kind: app.state.agent_pane_context_menu_kind(0, lead_pane),
+            x: 0,
+            y: 0,
+            list: MenuListState::new(0),
+        };
+        let items = menu.items();
+        let collapse_idx = items
+            .iter()
+            .position(|item| *item == "Collapse group")
+            .expect("group owner offers Collapse group");
+        app.apply_context_menu_action_via_api(menu, collapse_idx);
+        let key = app.state.agent_group_key(0, lead_pane).unwrap();
+        assert!(app.state.collapsed_agent_group_keys.contains(&key));
+
+        let menu = ContextMenuState {
+            kind: app.state.agent_pane_context_menu_kind(0, lead_pane),
+            x: 0,
+            y: 0,
+            list: MenuListState::new(0),
+        };
+        assert!(menu.items().contains(&"Expand group"));
     }
 
     #[test]

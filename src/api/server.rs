@@ -557,6 +557,8 @@ fn api_method_name(method: &Method) -> &'static str {
         Method::AgentStart(_) => "agent.start",
         Method::AgentOwnerSet(_) => "agent.owner.set",
         Method::AgentOwnerClear(_) => "agent.owner.clear",
+        Method::AgentGroupSet(_) => "agent.group.set",
+        Method::AgentGroupCollapse(_) => "agent.group.collapse",
         Method::AgentPrompt(_) => "agent.prompt",
         Method::AgentWait(_) => "agent.wait",
         Method::PaneSplit(_) => "pane.split",

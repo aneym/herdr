@@ -818,7 +818,7 @@ impl AppState {
                     return None;
                 };
                 detail.tree.expanded?;
-                let rect = crate::ui::agent_group_chevron_rect(body, row_y, &detail.tree);
+                let rect = crate::ui::agent_group_chevron_rect(self, body, row_y, &detail.tree);
                 if rect.width > 0 && col >= rect.x && col < rect.x + rect.width {
                     return detail.tree.group_key.clone();
                 }
@@ -1308,7 +1308,8 @@ mod tests {
         let crate::ui::AgentPanelListEntry::Agent(owner_entry) = &entries[0] else {
             panic!("expected owner agent row");
         };
-        let chevron = crate::ui::agent_group_chevron_rect(body, body.y, &owner_entry.tree);
+        let chevron =
+            crate::ui::agent_group_chevron_rect(&app.state, body, body.y, &owner_entry.tree);
         assert!(chevron.width > 0);
 
         // A click outside the chevron cell is not a toggle.
@@ -1334,7 +1335,7 @@ mod tests {
         assert_eq!(collapsed_owner.tree.expanded, Some(false));
         assert_eq!(collapsed_owner.tree.hidden_children, 1);
         let collapsed_chevron =
-            crate::ui::agent_group_chevron_rect(body, body.y, &collapsed_owner.tree);
+            crate::ui::agent_group_chevron_rect(&app.state, body, body.y, &collapsed_owner.tree);
         let reopened = app
             .state
             .agent_group_toggle_at(&collapsed_entries, collapsed_chevron.x, body.y)

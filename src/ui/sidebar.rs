@@ -41,10 +41,24 @@ pub(crate) struct AgentPanelEntry {
     pub agent_identity: Option<String>,
     /// Pane hosting this agent's resolved current owner, when it resolves.
     pub owner_pane: Option<(usize, crate::layout::PaneId)>,
-    /// The current owner reference no longer resolves to a live agent.
+    /// The current owner reference, or the explicit sidebar parent, no longer
+    /// resolves to a live agent.
     pub orphaned: bool,
+    /// Explicit sidebar placement resolved against live state.
+    pub placement: AgentPlacementRender,
     /// Hierarchy placement computed by `arrange_agent_hierarchy`.
     pub tree: AgentTreeRender,
+}
+
+/// Explicit placement input for one agent panel row, resolved against the
+/// live pane set. Explicit placement wins over owner and orchestrator
+/// nesting in `arrange_agent_hierarchy`.
+#[derive(Default, Clone, PartialEq, Eq, Debug)]
+pub(crate) struct AgentPlacementRender {
+    /// Pinned hands-on: always a root, never adopted by a group.
+    pub hands_on: bool,
+    /// Pane hosting the explicit `under` parent, when it resolves.
+    pub parent_pane: Option<(usize, crate::layout::PaneId)>,
 }
 
 /// Presentation-only hierarchy data for one agent panel row.
@@ -57,6 +71,9 @@ pub(crate) struct AgentTreeRender {
     pub hidden_children: usize,
     /// Highest-attention (state, seen) among hidden descendants.
     pub hidden_state: Option<(AgentState, bool)>,
+    /// Every hidden descendant's (state, seen), in tree order, so a collapsed
+    /// owner row can draw one glyph per hidden agent.
+    pub hidden_states: Vec<(AgentState, bool)>,
     /// This row is the last child within its parent group.
     pub last_in_group: bool,
     /// Always-visible open-tab count for an orchestrator-mode group owner.
@@ -341,23 +358,38 @@ fn arrange_agent_hierarchy(app: &AppState, entries: Vec<AgentPanelEntry>) -> Vec
         .collect();
     let mut children: Vec<Vec<usize>> = vec![Vec::new(); entries.len()];
     let mut has_parent = vec![false; entries.len()];
+    // Parent selection, in priority order: a hands-on pin makes the row a
+    // root no matter what; an explicit `under` parent that resolves wins over
+    // ownership; otherwise the current owner. An explicit parent that does
+    // not resolve was already flagged orphaned at collection time and falls
+    // through to the owner edge so the row never disappears.
     for (idx, entry) in entries.iter().enumerate() {
-        let Some(owner_idx) = entry
-            .owner_pane
-            .and_then(|owner| index_by_pane.get(&owner).copied())
-            .filter(|owner_idx| *owner_idx != idx)
-        else {
+        if entry.placement.hands_on {
+            continue;
+        }
+        let parent = entry
+            .placement
+            .parent_pane
+            .and_then(|parent| index_by_pane.get(&parent).copied())
+            .or_else(|| {
+                entry
+                    .owner_pane
+                    .and_then(|owner| index_by_pane.get(&owner).copied())
+            })
+            .filter(|parent_idx| *parent_idx != idx);
+        let Some(parent_idx) = parent else {
             continue;
         };
-        children[owner_idx].push(idx);
+        children[parent_idx].push(idx);
         has_parent[idx] = true;
     }
 
     // Orchestrator-mode workspaces: the first tab's agent adopts the
     // workspace's other top-level agents, so the whole workspace herds as one
-    // collapsible group. Ownership edges win — an owned agent stays under its
-    // owner. Pathological owner cycles stay safe via push_subtree's visited
-    // guard, same as stale ownership state.
+    // collapsible group. Ownership and explicit edges win — a parented agent
+    // stays under its parent — and a hands-on agent is never adopted.
+    // Pathological owner cycles stay safe via push_subtree's visited guard,
+    // same as stale ownership state.
     let mut orchestrator_by_ws = std::collections::HashMap::new();
     for (idx, entry) in entries.iter().enumerate() {
         if orchestrator_group_count(app, entry).is_some() {
@@ -369,7 +401,7 @@ fn arrange_agent_hierarchy(app: &AppState, entries: Vec<AgentPanelEntry>) -> Vec
         group_counts[owner_idx] = orchestrator_group_count(app, &entries[owner_idx]);
     }
     for idx in 0..entries.len() {
-        if has_parent[idx] {
+        if has_parent[idx] || entries[idx].placement.hands_on {
             continue;
         }
         let Some(&owner_idx) = orchestrator_by_ws.get(&entries[idx].ws_idx) else {
@@ -393,6 +425,7 @@ fn arrange_agent_hierarchy(app: &AppState, entries: Vec<AgentPanelEntry>) -> Vec
         visited: &mut [bool],
         count: &mut usize,
         state: &mut Option<(AgentState, bool)>,
+        states: &mut Vec<(AgentState, bool)>,
     ) {
         for &child in &children[idx] {
             if visited[child] {
@@ -401,6 +434,7 @@ fn arrange_agent_hierarchy(app: &AppState, entries: Vec<AgentPanelEntry>) -> Vec
             visited[child] = true;
             *count += 1;
             if let Some(entry) = entries[child].as_ref() {
+                states.push((entry.state, entry.seen));
                 let replace = state.is_none_or(|(current_state, current_seen)| {
                     agent_attention_priority(entry.state, entry.seen)
                         > agent_attention_priority(current_state, current_seen)
@@ -409,7 +443,7 @@ fn arrange_agent_hierarchy(app: &AppState, entries: Vec<AgentPanelEntry>) -> Vec
                     *state = Some((entry.state, entry.seen));
                 }
             }
-            hidden_summary(child, entries, children, visited, count, state);
+            hidden_summary(child, entries, children, visited, count, state, states);
         }
     }
 
@@ -459,9 +493,19 @@ fn arrange_agent_hierarchy(app: &AppState, entries: Vec<AgentPanelEntry>) -> Vec
         if !expanded {
             let mut count = 0;
             let mut state = None;
-            hidden_summary(idx, entries, children, visited, &mut count, &mut state);
+            let mut states = Vec::new();
+            hidden_summary(
+                idx,
+                entries,
+                children,
+                visited,
+                &mut count,
+                &mut state,
+                &mut states,
+            );
             entry.tree.hidden_children = count;
             entry.tree.hidden_state = state;
+            entry.tree.hidden_states = states;
             arranged.push(entry);
             return;
         }
@@ -565,7 +609,20 @@ fn collect_agent_panel_entries_with_runtimes(
                         .and_then(|terminal| terminal.agent_ownership.as_ref())
                         .and_then(|ownership| ownership.current.as_ref());
                     let owner_pane = current_owner.and_then(|owner| app.resolve_agent_owner(owner));
-                    let orphaned = current_owner.is_some() && owner_pane.is_none();
+                    let mut orphaned = current_owner.is_some() && owner_pane.is_none();
+                    let mut placement = AgentPlacementRender::default();
+                    match terminal.and_then(|terminal| terminal.agent_group.as_ref()) {
+                        Some(crate::agent_ownership::AgentGroupPlacement::HandsOn) => {
+                            placement.hands_on = true;
+                        }
+                        Some(crate::agent_ownership::AgentGroupPlacement::Under(parent)) => {
+                            placement.parent_pane = app.resolve_agent_owner(parent);
+                            // An explicit parent that is gone is as visible a
+                            // loss as a vanished owner: same marker.
+                            orphaned |= placement.parent_pane.is_none();
+                        }
+                        None => {}
+                    }
                     AgentPanelEntry {
                         ws_idx,
                         tab_idx: detail.tab_idx,
@@ -586,6 +643,7 @@ fn collect_agent_panel_entries_with_runtimes(
                         agent_identity,
                         owner_pane,
                         orphaned,
+                        placement,
                         tree: AgentTreeRender::default(),
                     }
                 })
@@ -1350,7 +1408,40 @@ pub(crate) fn workspace_list_scrollbar_rect(app: &AppState, area: Rect) -> Optio
     ))
 }
 
-fn agent_group_trailing_width(tree: &AgentTreeRender) -> usize {
+/// Most hidden-child glyphs a collapsed agent group draws before the rest
+/// fold into a `+K` count, matching the tree-header dot cap.
+const MAX_COLLAPSED_GROUP_DOTS: usize = 6;
+
+/// One state glyph per hidden descendant of a collapsed agent group, resolved
+/// through the configured `state_icons` so the run matches every other
+/// roll-up in the sidebar. Empty configured glyphs drop out. Returns the
+/// styled glyphs plus the overflow count past the cap.
+fn collapsed_group_dots<'a>(
+    app: &'a AppState,
+    tree: &AgentTreeRender,
+) -> (Vec<(&'a str, Style)>, usize) {
+    let dots: Vec<(&'a str, Style)> = tree
+        .hidden_states
+        .iter()
+        .map(|(state, seen)| {
+            resolved_state_dot(
+                &app.sidebar_agents,
+                *state,
+                *seen,
+                app.status_indicators,
+                &app.palette,
+            )
+        })
+        .filter(|(glyph, _)| !glyph.is_empty())
+        .collect();
+    let shown = dots.len().min(MAX_COLLAPSED_GROUP_DOTS);
+    let overflow = dots.len() - shown;
+    let mut dots = dots;
+    dots.truncate(shown);
+    (dots, overflow)
+}
+
+fn agent_group_trailing_width(app: &AppState, tree: &AgentTreeRender) -> usize {
     let count_width = tree
         .group_count
         .map(|count| format!("[{count}] ").len())
@@ -1360,20 +1451,35 @@ fn agent_group_trailing_width(tree: &AgentTreeRender) -> usize {
             None => 0,
             Some(true) => 2,
             Some(false) => {
-                // "+N " summary plus the chevron cell.
-                2 + if tree.hidden_children > 0 {
+                // "+N " summary, the hidden-state glyph run, plus the chevron.
+                let summary = if tree.hidden_children > 0 {
                     format!("+{} ", tree.hidden_children).len()
                 } else {
                     0
+                };
+                let (dots, overflow) = collapsed_group_dots(app, tree);
+                let mut dots_width: usize =
+                    dots.iter().map(|(glyph, _)| display_width(glyph)).sum();
+                if overflow > 0 {
+                    dots_width += format!("+{overflow}").len();
                 }
+                if dots_width > 0 {
+                    dots_width += 1;
+                }
+                2 + summary + dots_width
             }
         }
 }
 
 /// Right-aligned chevron (and collapsed-group summary) hit region on an agent
 /// group's first row.
-pub(crate) fn agent_group_chevron_rect(body: Rect, row_y: u16, tree: &AgentTreeRender) -> Rect {
-    let width = (agent_group_trailing_width(tree) as u16).min(body.width);
+pub(crate) fn agent_group_chevron_rect(
+    app: &AppState,
+    body: Rect,
+    row_y: u16,
+    tree: &AgentTreeRender,
+) -> Rect {
+    let width = (agent_group_trailing_width(app, tree) as u16).min(body.width);
     Rect::new(body.x + body.width.saturating_sub(width), row_y, width, 1)
 }
 
@@ -2911,7 +3017,7 @@ fn render_agent_detail(
 
         let tree = &detail.tree;
         let depth = tree.depth as usize;
-        let group_trailing_width = agent_group_trailing_width(tree);
+        let group_trailing_width = agent_group_trailing_width(app, tree);
         for (row_index, resolved) in rows.iter().take(content_height as usize).enumerate() {
             let mut spans = vec![Span::raw(" ")];
             let mut prefix_width = 1usize;
@@ -2943,6 +3049,14 @@ fn render_agent_detail(
                 prefix_width += 3;
             } else if row_index != 0 {
                 spans.push(Span::raw("  "));
+                prefix_width += 2;
+            }
+            if row_index == 0 && detail.placement.hands_on {
+                // Same pin glyph as a pinned space: this row stays put.
+                spans.push(Span::styled(
+                    "⚲ ",
+                    Style::default().fg(p.accent).add_modifier(Modifier::BOLD),
+                ));
                 prefix_width += 2;
             }
             if row_index == 0 && detail.orphaned {
@@ -2994,6 +3108,23 @@ fn render_agent_detail(
                             .fg(state_label_color(hidden_state, hidden_seen, p))
                             .add_modifier(Modifier::BOLD),
                     ));
+                    // One glyph per hidden agent so a folded group still says
+                    // who is blocked, working, or waiting to be read.
+                    let (dots, overflow) = collapsed_group_dots(app, tree);
+                    let has_dots = !dots.is_empty();
+                    trailing.extend(
+                        dots.into_iter()
+                            .map(|(glyph, style)| Span::styled(glyph, style)),
+                    );
+                    if overflow > 0 {
+                        trailing.push(Span::styled(
+                            format!("+{overflow}"),
+                            Style::default().fg(p.overlay0),
+                        ));
+                    }
+                    if has_dots {
+                        trailing.push(Span::raw(" "));
+                    }
                 }
                 trailing.push(Span::styled(
                     if expanded { "▾" } else { "▸" },
@@ -3002,7 +3133,7 @@ fn render_agent_detail(
             }
             frame.render_widget(
                 Paragraph::new(Line::from(trailing)).alignment(Alignment::Right),
-                agent_group_chevron_rect(body, content_y, tree),
+                agent_group_chevron_rect(app, body, content_y, tree),
             );
         }
         row_y = row_y.saturating_add(height).min(body_bottom);
@@ -3413,6 +3544,178 @@ mod tests {
             first_child_row.contains("├─"),
             "first child row should carry a tree guide: {first_child_row:?}"
         );
+    }
+
+    fn terminal_id_of(app: &AppState, ws_idx: usize) -> crate::terminal::TerminalId {
+        let pane_id = app.workspaces[ws_idx].tabs[0].root_pane;
+        app.workspaces[ws_idx].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone()
+    }
+
+    fn owner_ref(name: &str) -> crate::agent_ownership::AgentOwnerRef {
+        crate::agent_ownership::AgentOwnerRef {
+            agent_id: format!("agent_{name}"),
+            name: Some(name.into()),
+            agent: Some("pi".into()),
+            session: None,
+        }
+    }
+
+    #[test]
+    fn hands_on_agent_stays_top_level_outside_its_owner_group() {
+        let mut app = app_with_owned_agents();
+        let wkb = terminal_id_of(&app, 1);
+        app.terminals.get_mut(&wkb).unwrap().agent_group =
+            Some(crate::agent_ownership::AgentGroupPlacement::HandsOn);
+
+        let entries = agent_panel_entries(&app);
+        assert_eq!(entry_names(&entries, &app), ["lead", "wkc", "wkb"]);
+        assert_eq!(entries[1].tree.depth, 1, "wkc still nests under lead");
+        assert_eq!(entries[2].tree.depth, 0, "hands-on wkb is a root");
+        assert!(entries[2].placement.hands_on);
+        assert!(!entries[2].orphaned, "hands-on is a choice, not a loss");
+        // Ownership is untouched: the sidebar still knows wkb's owner.
+        assert!(entries[2].owner_pane.is_some());
+
+        // Collapsing lead hides wkc only; the hands-on agent stays reachable.
+        app.collapsed_agent_group_keys.insert("agent_lead".into());
+        let entries = agent_panel_entries(&app);
+        assert_eq!(entry_names(&entries, &app), ["lead", "wkb"]);
+        assert_eq!(entries[0].tree.hidden_children, 1);
+
+        let area = Rect::new(0, 0, 30, 24);
+        let buffer = rendered_sidebar(&app, area);
+        let pinned = (0..area.height).any(|y| row_text(&buffer, y, area.width).contains('⚲'));
+        assert!(pinned, "hands-on row should carry the ⚲ pin marker");
+    }
+
+    #[test]
+    fn hands_on_agent_is_not_adopted_by_orchestrator_mode() {
+        let mut app = app_with_orchestrator_workspace();
+        let builder_pane = app.workspaces[0].tabs[1].root_pane;
+        let builder_terminal = app.workspaces[0].tabs[1].panes[&builder_pane]
+            .attached_terminal_id
+            .clone();
+        app.terminals
+            .get_mut(&builder_terminal)
+            .unwrap()
+            .agent_group = Some(crate::agent_ownership::AgentGroupPlacement::HandsOn);
+
+        let entries = agent_panel_entries(&app);
+        assert_eq!(
+            orchestrator_entry_names(&entries, &app),
+            ["orch", "tester", "builder"]
+        );
+        assert_eq!(entries[1].tree.depth, 1);
+        assert_eq!(entries[2].tree.depth, 0);
+        // The open-tab count is about tabs, not nesting, so it is unchanged.
+        assert_eq!(entries[0].tree.group_count, Some(2));
+
+        app.collapsed_agent_group_keys
+            .insert(format!("orch:{}", app.workspaces[0].id));
+        let entries = agent_panel_entries(&app);
+        assert_eq!(
+            orchestrator_entry_names(&entries, &app),
+            ["orch", "builder"]
+        );
+        assert_eq!(entries[0].tree.hidden_children, 1);
+    }
+
+    #[test]
+    fn explicit_parent_wins_over_owner_nesting_without_touching_ownership() {
+        let mut app = app_with_owned_agents();
+        let wkc = terminal_id_of(&app, 2);
+        app.terminals.get_mut(&wkc).unwrap().agent_group = Some(
+            crate::agent_ownership::AgentGroupPlacement::Under(owner_ref("wkb")),
+        );
+
+        let entries = agent_panel_entries(&app);
+        assert_eq!(entry_names(&entries, &app), ["lead", "wkb", "wkc"]);
+        assert_eq!(entries[1].tree.depth, 1);
+        assert_eq!(entries[1].tree.expanded, Some(true));
+        assert_eq!(entries[1].tree.group_key.as_deref(), Some("agent_wkb"));
+        assert_eq!(entries[2].tree.depth, 2, "wkc nests under wkb, not lead");
+        assert!(!entries[2].orphaned);
+        let wkc_ownership = app.terminals[&wkc].agent_ownership.as_ref().unwrap();
+        assert_eq!(
+            wkc_ownership
+                .current
+                .as_ref()
+                .map(|owner| owner.agent_id.as_str()),
+            Some("agent_lead"),
+            "placement must not rewrite ownership"
+        );
+
+        // Collapsing the explicit group folds only its subtree.
+        app.collapsed_agent_group_keys.insert("agent_wkb".into());
+        let entries = agent_panel_entries(&app);
+        assert_eq!(entry_names(&entries, &app), ["lead", "wkb"]);
+        assert_eq!(entries[1].tree.hidden_children, 1);
+        assert_eq!(
+            entries[1].tree.hidden_states,
+            vec![(AgentState::Idle, true)]
+        );
+    }
+
+    #[test]
+    fn unresolved_explicit_parent_falls_back_to_owner_with_orphan_marker() {
+        let mut app = app_with_owned_agents();
+        let wkc = terminal_id_of(&app, 2);
+        app.terminals.get_mut(&wkc).unwrap().agent_group = Some(
+            crate::agent_ownership::AgentGroupPlacement::Under(owner_ref("gone")),
+        );
+
+        let entries = agent_panel_entries(&app);
+        assert_eq!(entry_names(&entries, &app), ["lead", "wkb", "wkc"]);
+        assert_eq!(entries[2].tree.depth, 1, "falls back to the owner edge");
+        assert!(
+            entries[2].orphaned,
+            "a vanished parent is visible, not silent"
+        );
+        assert!(entries[2].placement.parent_pane.is_none());
+    }
+
+    #[test]
+    fn collapsed_group_summary_lists_every_hidden_state_through_configured_icons() {
+        let mut app = app_with_owned_agents();
+        let wkb = terminal_id_of(&app, 1);
+        app.terminals
+            .get_mut(&wkb)
+            .unwrap()
+            .set_detected_state(Some(Agent::Pi), AgentState::Blocked);
+        app.collapsed_agent_group_keys.insert("agent_lead".into());
+
+        let entries = agent_panel_entries(&app);
+        assert_eq!(entries.len(), 1);
+        let owner = &entries[0];
+        assert_eq!(owner.tree.hidden_children, 2);
+        assert_eq!(
+            owner.tree.hidden_states,
+            vec![(AgentState::Blocked, true), (AgentState::Idle, true)]
+        );
+        assert_eq!(owner.tree.hidden_state, Some((AgentState::Blocked, true)));
+
+        // The chevron hit region grows to cover "+2 ", one glyph per hidden
+        // agent, and the chevron itself, so a click on the summary toggles.
+        let (dots, overflow) = collapsed_group_dots(&app, &owner.tree);
+        assert_eq!(dots.len(), 2);
+        assert_eq!(overflow, 0);
+        let expected = "+2 ".len()
+            + dots
+                .iter()
+                .map(|(glyph, _)| display_width(glyph))
+                .sum::<usize>()
+            + 1
+            + 2;
+        assert_eq!(agent_group_trailing_width(&app, &owner.tree), expected);
+
+        // Empty configured glyphs drop out of the run, like tree-header dots.
+        app.sidebar_agents
+            .state_icons
+            .insert("blocked".into(), String::new());
+        let (dots, _) = collapsed_group_dots(&app, &owner.tree);
+        assert_eq!(dots.len(), 1);
     }
 
     #[test]

@@ -1428,7 +1428,7 @@ impl AppState {
                     self.agent_detail_target_at(&agent_entries, mouse.row)
                 {
                     self.context_menu = Some(ContextMenuState {
-                        kind: ContextMenuKind::AgentPane { ws_idx, pane_id },
+                        kind: self.agent_pane_context_menu_kind(ws_idx, pane_id),
                         x: mouse.column,
                         y: mouse.row,
                         list: MenuListState::new(0),
@@ -2671,6 +2671,7 @@ mod tests {
             Some(ContextMenuKind::AgentPane {
                 ws_idx: 0,
                 pane_id: menu_pane_id,
+                ..
             }) if *menu_pane_id == pane_id
         ));
         assert_eq!(app.state.mode(), Mode::ContextMenu);

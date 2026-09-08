@@ -493,6 +493,7 @@ mod tests {
             agent_identity: None,
             owner_pane: None,
             orphaned: false,
+            placement: Default::default(),
             tree: Default::default(),
         }
     }

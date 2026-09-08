@@ -3,8 +3,9 @@ use std::time::Duration;
 use bytes::Bytes;
 
 use crate::api::schema::{
-    AgentOwnerSetParams, AgentPromptParams, AgentRenameParams, AgentSendKeysParams,
-    AgentStartParams, AgentTarget, PaneReadResult, ResponseResult,
+    AgentGroupCollapseParams, AgentGroupSetParams, AgentOwnerSetParams, AgentPromptParams,
+    AgentRenameParams, AgentSendKeysParams, AgentStartParams, AgentTarget, PaneReadResult,
+    ResponseResult,
 };
 use crate::app::App;
 
@@ -85,6 +86,36 @@ impl App {
 
     pub(super) fn handle_agent_owner_clear(&mut self, id: String, target: AgentTarget) -> String {
         let agent = match self.clear_agent_owner_target(&target.target) {
+            Ok(agent) => agent,
+            Err(err) => return encode_error_body(id, self.agent_owner_error_body(err)),
+        };
+
+        encode_success(id, ResponseResult::AgentInfo { agent })
+    }
+
+    pub(super) fn handle_agent_group_set(
+        &mut self,
+        id: String,
+        params: AgentGroupSetParams,
+    ) -> String {
+        let agent = match self.set_agent_group_target(
+            &params.target,
+            params.placement,
+            params.parent.as_deref(),
+        ) {
+            Ok(agent) => agent,
+            Err(err) => return encode_error_body(id, self.agent_owner_error_body(err)),
+        };
+
+        encode_success(id, ResponseResult::AgentInfo { agent })
+    }
+
+    pub(super) fn handle_agent_group_collapse(
+        &mut self,
+        id: String,
+        params: AgentGroupCollapseParams,
+    ) -> String {
+        let agent = match self.set_agent_group_collapsed_target(&params.target, params.collapsed) {
             Ok(agent) => agent,
             Err(err) => return encode_error_body(id, self.agent_owner_error_body(err)),
         };
@@ -341,7 +372,7 @@ fn agent_not_found(id: String, target: &str) -> String {
 mod tests {
     use super::*;
     use crate::{
-        api::schema::{AgentStatus, SuccessResponse},
+        api::schema::{AgentGroupPlacementKind, AgentStatus, SuccessResponse},
         app::Mode,
         config::Config,
         detect::{Agent, AgentState},
@@ -889,6 +920,172 @@ mod tests {
         );
         let cycle: serde_json::Value = serde_json::from_str(&cycle).unwrap();
         assert_eq!(cycle["error"]["code"], "agent_owner_cycle");
+    }
+
+    #[tokio::test]
+    async fn agent_group_set_places_without_touching_ownership() {
+        let mut app = app_with_named_agents(&["lead", "worker"]);
+        let adopted = app.handle_agent_owner_set(
+            "req-adopt".into(),
+            AgentOwnerSetParams {
+                target: "worker".into(),
+                owner: "lead".into(),
+            },
+        );
+        assert!(adopted.contains("\"result\""));
+        assert!(agent_json(&mut app, "worker").get("group").is_none());
+
+        let pinned = app.handle_agent_group_set(
+            "req-pin".into(),
+            AgentGroupSetParams {
+                target: "worker".into(),
+                placement: AgentGroupPlacementKind::HandsOn,
+                parent: None,
+            },
+        );
+        let pinned: serde_json::Value = serde_json::from_str(&pinned).unwrap();
+        let agent = &pinned["result"]["agent"];
+        assert_eq!(agent["group"]["placement"], "hands_on");
+        assert!(agent["group"].get("parent").is_none());
+        assert_eq!(
+            agent["ownership"]["current"]["name"], "lead",
+            "placement leaves ownership alone"
+        );
+        assert!(app.state.session_dirty);
+
+        let nested = app.handle_agent_group_set(
+            "req-nest".into(),
+            AgentGroupSetParams {
+                target: "worker".into(),
+                placement: AgentGroupPlacementKind::Under,
+                parent: Some("lead".into()),
+            },
+        );
+        let nested: serde_json::Value = serde_json::from_str(&nested).unwrap();
+        let group = &nested["result"]["agent"]["group"];
+        assert_eq!(group["placement"], "under");
+        assert_eq!(group["parent"]["name"], "lead");
+        assert_eq!(group["parent"]["resolved"], true);
+        assert!(group.get("orphaned").is_none_or(|v| v == false));
+
+        // The parent leaving marks the placement orphaned instead of erasing it.
+        exit_agent_process(&mut app, 0);
+        let orphaned = agent_json(&mut app, "worker");
+        assert_eq!(orphaned["group"]["orphaned"], true);
+        assert_eq!(orphaned["group"]["parent"]["resolved"], false);
+
+        let cleared = app.handle_agent_group_set(
+            "req-auto".into(),
+            AgentGroupSetParams {
+                target: "worker".into(),
+                placement: AgentGroupPlacementKind::Auto,
+                parent: None,
+            },
+        );
+        let cleared: serde_json::Value = serde_json::from_str(&cleared).unwrap();
+        assert!(cleared["result"]["agent"].get("group").is_none());
+    }
+
+    #[tokio::test]
+    async fn agent_group_under_rejects_bad_parents() {
+        let mut app = app_with_named_agents(&["lead", "worker"]);
+        let missing = app.handle_agent_group_set(
+            "req-missing".into(),
+            AgentGroupSetParams {
+                target: "worker".into(),
+                placement: AgentGroupPlacementKind::Under,
+                parent: None,
+            },
+        );
+        let missing: serde_json::Value = serde_json::from_str(&missing).unwrap();
+        assert_eq!(missing["error"]["code"], "agent_group_parent_required");
+
+        let self_nested = app.handle_agent_group_set(
+            "req-self".into(),
+            AgentGroupSetParams {
+                target: "worker".into(),
+                placement: AgentGroupPlacementKind::Under,
+                parent: Some("worker".into()),
+            },
+        );
+        let self_nested: serde_json::Value = serde_json::from_str(&self_nested).unwrap();
+        assert_eq!(self_nested["error"]["code"], "agent_owner_invalid");
+
+        let nested = app.handle_agent_group_set(
+            "req-nest".into(),
+            AgentGroupSetParams {
+                target: "worker".into(),
+                placement: AgentGroupPlacementKind::Under,
+                parent: Some("lead".into()),
+            },
+        );
+        assert!(nested.contains("\"result\""));
+        let cycle = app.handle_agent_group_set(
+            "req-cycle".into(),
+            AgentGroupSetParams {
+                target: "lead".into(),
+                placement: AgentGroupPlacementKind::Under,
+                parent: Some("worker".into()),
+            },
+        );
+        let cycle: serde_json::Value = serde_json::from_str(&cycle).unwrap();
+        assert_eq!(cycle["error"]["code"], "agent_owner_cycle");
+
+        let unknown = app.handle_agent_group_set(
+            "req-unknown".into(),
+            AgentGroupSetParams {
+                target: "worker".into(),
+                placement: AgentGroupPlacementKind::Under,
+                parent: Some("nobody".into()),
+            },
+        );
+        assert!(unknown.contains("\"error\""));
+    }
+
+    #[tokio::test]
+    async fn agent_group_collapse_records_the_owner_key() {
+        let mut app = app_with_named_agents(&["lead", "worker"]);
+        let collapsed = app.handle_agent_group_collapse(
+            "req-collapse".into(),
+            AgentGroupCollapseParams {
+                target: "lead".into(),
+                collapsed: true,
+            },
+        );
+        let collapsed: serde_json::Value = serde_json::from_str(&collapsed).unwrap();
+        let agent = &collapsed["result"]["agent"];
+        assert_eq!(agent["group"]["collapsed"], true);
+        assert_eq!(agent["group"]["placement"], "auto");
+        let lead_identity = agent["agent_id"].as_str().unwrap().to_string();
+        assert!(app
+            .state
+            .collapsed_agent_group_keys
+            .contains(&lead_identity));
+
+        let expanded = app.handle_agent_group_collapse(
+            "req-expand".into(),
+            AgentGroupCollapseParams {
+                target: "lead".into(),
+                collapsed: false,
+            },
+        );
+        let expanded: serde_json::Value = serde_json::from_str(&expanded).unwrap();
+        assert!(expanded["result"]["agent"].get("group").is_none());
+        assert!(app.state.collapsed_agent_group_keys.is_empty());
+
+        // An orchestrator workspace's first-tab agent collapses by the
+        // synthetic orchestrator key so the CLI and the chevron agree.
+        app.state.workspaces[0].orchestrator_mode = true;
+        let orch = app.handle_agent_group_collapse(
+            "req-orch".into(),
+            AgentGroupCollapseParams {
+                target: "lead".into(),
+                collapsed: true,
+            },
+        );
+        assert!(orch.contains("\"result\""));
+        let key = format!("orch:{}", app.state.workspaces[0].id);
+        assert!(app.state.collapsed_agent_group_keys.contains(&key));
     }
 
     #[tokio::test]

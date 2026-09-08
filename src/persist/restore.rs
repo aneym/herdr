@@ -506,6 +506,9 @@ fn restore_tab(
         let saved_agent_ownership = saved_pane
             .and_then(|p| p.agent_ownership.as_ref())
             .map(|ownership| ownership.to_ownership());
+        let saved_agent_group = saved_pane
+            .and_then(|p| p.agent_group.as_ref())
+            .and_then(|group| group.to_placement());
         let saved_terminal_title = saved_pane.and_then(|p| p.terminal_title.clone());
         let saved_history =
             old_id.and_then(|old_id| history.and_then(|history| history.panes.get(old_id)));
@@ -555,6 +558,7 @@ fn restore_tab(
             }
             terminal.agent_identity = saved_agent_identity.clone();
             terminal.agent_ownership = saved_agent_ownership.clone();
+            terminal.agent_group = saved_agent_group.clone();
             terminal.profiles = saved_profiles.clone();
             // Seed the last known title so sidebar thread titles survive the
             // restart; the live pane's next title emission overwrites it.
@@ -661,6 +665,7 @@ fn restore_tab(
                     // so its durable identity and ownership carry over.
                     terminal.agent_identity = saved_agent_identity.clone();
                     terminal.agent_ownership = saved_agent_ownership.clone();
+                    terminal.agent_group = saved_agent_group.clone();
                 }
                 terminal.profiles = saved_profiles.clone();
                 // Seed the last known title so sidebar thread titles survive
@@ -1228,6 +1233,7 @@ mod tests {
                             launch_argv: None,
                             agent_identity: None,
                             agent_ownership: None,
+                            agent_group: None,
                             profiles: Vec::new(),
                         },
                     )]),
@@ -1350,6 +1356,7 @@ mod tests {
                             profiles: Vec::new(),
                             agent_identity: Some("agent_worker".into()),
                             agent_ownership: Some(ownership.clone()),
+                            agent_group: None,
                         },
                     )]),
                     zoomed: false,
@@ -1451,6 +1458,7 @@ mod tests {
                                     current: None,
                                 },
                             ),
+                            agent_group: None,
                         },
                     )]),
                     zoomed: false,
@@ -1540,6 +1548,7 @@ mod tests {
                                 launch_argv: None,
                                 agent_identity: None,
                                 agent_ownership: None,
+                                agent_group: None,
                                 profiles: Vec::new(),
                             },
                         ),
@@ -1555,6 +1564,7 @@ mod tests {
                                 launch_argv: None,
                                 agent_identity: None,
                                 agent_ownership: None,
+                                agent_group: None,
                                 profiles: Vec::new(),
                             },
                         ),
@@ -1624,6 +1634,7 @@ mod tests {
                     launch_argv: None,
                     agent_identity: None,
                     agent_ownership: None,
+                    agent_group: None,
                     profiles: Vec::new(),
                 },
             )
@@ -1643,6 +1654,7 @@ mod tests {
             launch_argv: None,
             agent_identity: None,
             agent_ownership: None,
+            agent_group: None,
             profiles: Vec::new(),
         };
         let snapshot = SessionSnapshot {
@@ -1814,6 +1826,7 @@ mod tests {
                             launch_argv: None,
                             agent_identity: None,
                             agent_ownership: None,
+                            agent_group: None,
                             profiles: Vec::new(),
                         },
                     )]),
@@ -1992,6 +2005,7 @@ mod tests {
                 profiles: Vec::new(),
                 agent_identity: None,
                 agent_ownership: None,
+                agent_group: None,
             },
         );
         let history = SessionHistorySnapshot {

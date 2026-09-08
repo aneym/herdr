@@ -409,6 +409,10 @@ pub struct KeysConfig {
     pub goto: BindingConfig,
     /// Open live pane resource usage. Unset by default.
     pub usage: BindingConfig,
+    /// Collapse or expand the sidebar agent group the focused agent owns or sits in. Unset by default.
+    pub toggle_agent_group: BindingConfig,
+    /// Pin or unpin the focused agent as hands-on, keeping it top-level in the sidebar. Unset by default.
+    pub toggle_hands_on: BindingConfig,
     /// Open the session navigator with search focused. Default: "prefix+f"
     pub search: BindingConfig,
     /// Move workspace selection up in navigate mode. Default: "up".
@@ -549,6 +553,10 @@ pub(crate) struct KeysConfigOverlay {
     #[serde(skip_serializing_if = "Option::is_none")]
     usage: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    toggle_agent_group: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    toggle_hands_on: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     search: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     navigate_workspace_up: Option<BindingConfig>,
@@ -685,6 +693,8 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(workspace_picker);
         apply_field!(goto);
         apply_field!(usage);
+        apply_field!(toggle_agent_group);
+        apply_field!(toggle_hands_on);
         apply_field!(search);
         apply_field!(navigate_workspace_up);
         apply_field!(navigate_workspace_down);
@@ -793,6 +803,8 @@ impl KeysConfig {
         copy_effective_action_field!(workspace_picker, keybinds.workspace_picker);
         copy_effective_action_field!(goto, keybinds.goto);
         copy_effective_action_field!(usage, keybinds.usage);
+        copy_effective_action_field!(toggle_agent_group, keybinds.toggle_agent_group);
+        copy_effective_action_field!(toggle_hands_on, keybinds.toggle_hands_on);
         copy_effective_action_field!(search, keybinds.search);
         copy_effective_action_field!(navigate_workspace_up, keybinds.navigate.workspace_up);
         copy_effective_action_field!(navigate_workspace_down, keybinds.navigate.workspace_down);
@@ -1117,6 +1129,8 @@ impl Default for KeysConfig {
             workspace_picker: BindingConfig::one("prefix+w"),
             goto: BindingConfig::one("prefix+g"),
             usage: BindingConfig::empty(),
+            toggle_agent_group: BindingConfig::empty(),
+            toggle_hands_on: BindingConfig::empty(),
             search: BindingConfig::one("prefix+f"),
             navigate_workspace_up: BindingConfig::one("up"),
             navigate_workspace_down: BindingConfig::one("down"),

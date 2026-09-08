@@ -469,6 +469,46 @@ fn agent_command() -> Command {
                 ),
         )
         .subcommand(
+            Command::new("group")
+                .about("Arrange agents in the sidebar without changing ownership")
+                .subcommand(
+                    Command::new("hands-on")
+                        .visible_alias("pin")
+                        .about("Pin an agent top-level so it stays visible outside any collapsed group")
+                        .override_usage("herdr agent group hands-on <TARGET>")
+                        .arg(required("target", "TARGET")),
+                )
+                .subcommand(
+                    Command::new("under")
+                        .about("Nest an agent beneath another agent in the sidebar")
+                        .override_usage("herdr agent group under <TARGET> <PARENT>")
+                        .arg(required("target", "TARGET"))
+                        .arg(required("parent", "PARENT"))
+                        .after_help(
+                            "Sidebar placement only: ownership, permissions, and reporting lines do not change. Rejects self-nesting and cycles. If the parent later disappears the agent falls back to automatic placement with an orphan marker.",
+                        ),
+                )
+                .subcommand(
+                    Command::new("auto")
+                        .visible_alias("clear")
+                        .about("Clear the explicit placement and follow ownership and orchestrator mode again")
+                        .override_usage("herdr agent group auto <TARGET>")
+                        .arg(required("target", "TARGET")),
+                )
+                .subcommand(
+                    Command::new("collapse")
+                        .about("Collapse the sidebar group this agent owns")
+                        .override_usage("herdr agent group collapse <TARGET>")
+                        .arg(required("target", "TARGET")),
+                )
+                .subcommand(
+                    Command::new("expand")
+                        .about("Expand the sidebar group this agent owns")
+                        .override_usage("herdr agent group expand <TARGET>")
+                        .arg(required("target", "TARGET")),
+                ),
+        )
+        .subcommand(
             Command::new("explain")
                 .about("Explain agent detection state")
                 .arg(Arg::new("target").value_name("TARGET"))

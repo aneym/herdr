@@ -1,10 +1,11 @@
 use crate::api::schema::{
-    EmptyParams, LayoutSetSplitRatioParams, Method, PaneFocusDirectionParams, PaneInputSetParams,
-    PaneRenameParams, PaneResizeParams, PaneSetProfilesParams, PaneSplitParams, PaneSwapParams,
-    PaneTarget, PaneZoomParams, TabCreateParams, TabMoveParams, TabRenameParams, TabTarget,
-    WorkspaceCloseParams, WorkspaceCreateParams, WorkspaceMoveBlockParams, WorkspaceMoveParams,
-    WorkspaceRenameParams, WorkspaceSetOrchestratorParams, WorkspaceSetProfilesParams,
-    WorkspaceTarget, WorktreeCreateParams, WorktreeOpenParams, WorktreeRemoveParams,
+    AgentGroupPlacementKind, AgentGroupSetParams, EmptyParams, LayoutSetSplitRatioParams, Method,
+    PaneFocusDirectionParams, PaneInputSetParams, PaneRenameParams, PaneResizeParams,
+    PaneSetProfilesParams, PaneSplitParams, PaneSwapParams, PaneTarget, PaneZoomParams,
+    TabCreateParams, TabMoveParams, TabRenameParams, TabTarget, WorkspaceCloseParams,
+    WorkspaceCreateParams, WorkspaceMoveBlockParams, WorkspaceMoveParams, WorkspaceRenameParams,
+    WorkspaceSetOrchestratorParams, WorkspaceSetProfilesParams, WorkspaceTarget,
+    WorktreeCreateParams, WorktreeOpenParams, WorktreeRemoveParams,
 };
 
 use super::App;
@@ -12,6 +13,37 @@ use super::App;
 impl App {
     pub(crate) fn dispatch_runtime_mutation(&mut self, id: &'static str, method: Method) -> String {
         self.dispatch_api_request(id, method)
+    }
+
+    pub(crate) fn runtime_agent_group_set(
+        &mut self,
+        id: &'static str,
+        params: AgentGroupSetParams,
+    ) -> String {
+        self.dispatch_runtime_mutation(id, Method::AgentGroupSet(params))
+    }
+
+    /// TUI entry point for sidebar placement changes: resolves the pane to
+    /// its public id and routes through the same API the CLI uses, so the
+    /// mutation, persistence, and events are shared.
+    pub(crate) fn set_agent_group_via_api(
+        &mut self,
+        ws_idx: usize,
+        pane_id: crate::layout::PaneId,
+        placement: AgentGroupPlacementKind,
+        parent: Option<String>,
+    ) {
+        let Some(target) = self.public_pane_id(ws_idx, pane_id) else {
+            return;
+        };
+        self.runtime_agent_group_set(
+            "tui.agent.group.set",
+            AgentGroupSetParams {
+                target,
+                placement,
+                parent,
+            },
+        );
     }
 
     pub(crate) fn dispatch_deferred_runtime_mutation(

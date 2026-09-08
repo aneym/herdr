@@ -177,6 +177,54 @@ fn agent_start_and_prompt_requests_round_trip() {
         owner_clear
     );
 
+    let group_under = Request {
+        id: "group-under".into(),
+        method: Method::AgentGroupSet(AgentGroupSetParams {
+            target: "worker".into(),
+            placement: AgentGroupPlacementKind::Under,
+            parent: Some("lead".into()),
+        }),
+    };
+    let group_under_json = serde_json::to_value(&group_under).unwrap();
+    assert_eq!(group_under_json["method"], "agent.group.set");
+    assert_eq!(group_under_json["params"]["placement"], "under");
+    assert_eq!(group_under_json["params"]["parent"], "lead");
+    assert_eq!(
+        serde_json::from_value::<Request>(group_under_json).unwrap(),
+        group_under
+    );
+
+    let group_hands_on = Request {
+        id: "group-hands-on".into(),
+        method: Method::AgentGroupSet(AgentGroupSetParams {
+            target: "worker".into(),
+            placement: AgentGroupPlacementKind::HandsOn,
+            parent: None,
+        }),
+    };
+    let group_hands_on_json = serde_json::to_value(&group_hands_on).unwrap();
+    assert_eq!(group_hands_on_json["params"]["placement"], "hands_on");
+    assert!(group_hands_on_json["params"].get("parent").is_none());
+    assert_eq!(
+        serde_json::from_value::<Request>(group_hands_on_json).unwrap(),
+        group_hands_on
+    );
+
+    let group_collapse = Request {
+        id: "group-collapse".into(),
+        method: Method::AgentGroupCollapse(AgentGroupCollapseParams {
+            target: "lead".into(),
+            collapsed: true,
+        }),
+    };
+    let group_collapse_json = serde_json::to_value(&group_collapse).unwrap();
+    assert_eq!(group_collapse_json["method"], "agent.group.collapse");
+    assert_eq!(group_collapse_json["params"]["collapsed"], true);
+    assert_eq!(
+        serde_json::from_value::<Request>(group_collapse_json).unwrap(),
+        group_collapse
+    );
+
     let prompt = Request {
         id: "prompt".into(),
         method: Method::AgentPrompt(AgentPromptParams {

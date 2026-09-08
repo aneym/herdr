@@ -1,10 +1,10 @@
 use std::time::{Duration, Instant};
 
 use crate::api::schema::{
-    AgentOwnerSetParams, AgentPromptParams, AgentPromptWaitOptions, AgentReadParams,
-    AgentRenameParams, AgentSendKeysParams, AgentStartParams, AgentTarget, AgentWaitParams,
-    EmptyParams, ErrorBody, ErrorResponse, Method, PaneProcessInfoParams, PaneTarget, ReadFormat,
-    ReadSource, Request,
+    AgentGroupCollapseParams, AgentGroupPlacementKind, AgentGroupSetParams, AgentOwnerSetParams,
+    AgentPromptParams, AgentPromptWaitOptions, AgentReadParams, AgentRenameParams,
+    AgentSendKeysParams, AgentStartParams, AgentTarget, AgentWaitParams, EmptyParams, ErrorBody,
+    ErrorResponse, Method, PaneProcessInfoParams, PaneTarget, ReadFormat, ReadSource, Request,
 };
 
 const AGENT_START_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -29,6 +29,7 @@ pub(super) fn run_agent_command(args: &[String]) -> std::io::Result<i32> {
         "attach" => agent_attach(&args[1..]),
         "start" => agent_start(&args[1..]),
         "owner" => agent_owner(&args[1..]),
+        "group" => agent_group(&args[1..]),
         "explain" => agent_explain(&args[1..]),
         "help" | "--help" | "-h" => {
             print_agent_help();
@@ -1005,6 +1006,74 @@ fn agent_owner(args: &[String]) -> std::io::Result<i32> {
     }
 }
 
+fn agent_group(args: &[String]) -> std::io::Result<i32> {
+    const USAGE: &str = "usage: herdr agent group hands-on <target>\n       herdr agent group under <target> <parent>\n       herdr agent group auto <target>\n       herdr agent group collapse <target>\n       herdr agent group expand <target>";
+    let Some(subcommand) = args.first().map(|arg| arg.as_str()) else {
+        eprintln!("{USAGE}");
+        return Ok(2);
+    };
+    let one_target = |name: &str| -> Result<String, i32> {
+        match (args.get(1), args.get(2)) {
+            (Some(target), None) => Ok(target.clone()),
+            _ => {
+                eprintln!("usage: herdr agent group {name} <target>");
+                Err(2)
+            }
+        }
+    };
+    let placement = match subcommand {
+        "hands-on" | "pin" => match one_target("hands-on") {
+            Ok(target) => (target, AgentGroupPlacementKind::HandsOn, None),
+            Err(code) => return Ok(code),
+        },
+        "auto" | "clear" => match one_target("auto") {
+            Ok(target) => (target, AgentGroupPlacementKind::Auto, None),
+            Err(code) => return Ok(code),
+        },
+        "under" => {
+            let (Some(target), Some(parent), None) = (args.get(1), args.get(2), args.get(3)) else {
+                eprintln!("usage: herdr agent group under <target> <parent>");
+                return Ok(2);
+            };
+            (
+                target.clone(),
+                AgentGroupPlacementKind::Under,
+                Some(parent.clone()),
+            )
+        }
+        "collapse" | "expand" => {
+            let target = match one_target(subcommand) {
+                Ok(target) => target,
+                Err(code) => return Ok(code),
+            };
+            return super::print_response(&super::send_request(&Request {
+                id: "cli:agent:group:collapse".into(),
+                method: Method::AgentGroupCollapse(AgentGroupCollapseParams {
+                    target,
+                    collapsed: subcommand == "collapse",
+                }),
+            })?);
+        }
+        "help" | "--help" | "-h" => {
+            eprintln!("{USAGE}");
+            return Ok(0);
+        }
+        _ => {
+            eprintln!("{USAGE}");
+            return Ok(2);
+        }
+    };
+    let (target, placement, parent) = placement;
+    super::print_response(&super::send_request(&Request {
+        id: "cli:agent:group:set".into(),
+        method: Method::AgentGroupSet(AgentGroupSetParams {
+            target,
+            placement,
+            parent,
+        }),
+    })?)
+}
+
 fn print_agent_help() {
     eprintln!("herdr agent commands:");
     eprintln!("  herdr agent list");
@@ -1022,6 +1091,8 @@ fn print_agent_help() {
     );
     eprintln!("  herdr agent owner set <target> <owner>");
     eprintln!("  herdr agent owner clear <target>");
+    eprintln!("  herdr agent group hands-on|auto|collapse|expand <target>");
+    eprintln!("  herdr agent group under <target> <parent>");
     eprintln!("  herdr agent explain <target> [--json|--format text|json] [--verbose]");
     eprintln!(
         "  herdr agent explain --file PATH --agent LABEL [--json|--format text|json] [--verbose]"

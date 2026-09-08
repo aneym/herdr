@@ -317,6 +317,8 @@ pub struct Keybinds {
     pub workspace_picker: ActionKeybinds,
     pub goto: ActionKeybinds,
     pub usage: ActionKeybinds,
+    pub toggle_agent_group: ActionKeybinds,
+    pub toggle_hands_on: ActionKeybinds,
     pub search: ActionKeybinds,
     pub detach: ActionKeybinds,
     pub reload_config: ActionKeybinds,
@@ -489,6 +491,8 @@ impl Config {
             workspace_picker: empty_action!(),
             goto: empty_action!(),
             usage: empty_action!(),
+            toggle_agent_group: empty_action!(),
+            toggle_hands_on: empty_action!(),
             search: empty_action!(),
             detach: empty_action!(),
             reload_config: empty_action!(),
@@ -621,6 +625,8 @@ impl Config {
             apply_action!(keybinds.workspace_picker, workspace_picker, source);
             apply_action!(keybinds.goto, goto, source);
             apply_action!(keybinds.usage, usage, source);
+            apply_action!(keybinds.toggle_agent_group, toggle_agent_group, source);
+            apply_action!(keybinds.toggle_hands_on, toggle_hands_on, source);
             apply_action!(keybinds.search, search, source);
             apply_action!(keybinds.detach, detach, source);
             apply_action!(keybinds.reload_config, reload_config, source);

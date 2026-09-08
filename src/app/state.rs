@@ -1281,6 +1281,12 @@ pub enum ContextMenuKind {
     AgentPane {
         ws_idx: usize,
         pane_id: PaneId,
+        /// Pinned hands-on (top-level) placement is set on this agent.
+        hands_on: bool,
+        /// An explicit `under` parent is set on this agent.
+        nested: bool,
+        /// `Some(expanded)` when this agent owns a sidebar group.
+        group: Option<bool>,
     },
     Workspace {
         ws_idx: usize,
@@ -1326,6 +1332,10 @@ pub enum ProfileMenuTarget {
 pub enum ProfileMenuMode {
     Send,
     Share,
+    /// Pick a sidebar parent for an agent. Reuses the profile picker shell:
+    /// each entry's `profile` slot carries the parent's public pane id, and
+    /// the `None` entry means automatic placement.
+    NestUnder,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1367,13 +1377,33 @@ impl ContextMenuState {
                 },
                 "Close",
             ],
-            ContextMenuKind::AgentPane { .. } => vec![
-                "Focus",
-                "Rename",
-                "Send to profile...",
-                "Share with profiles...",
-                "Close",
-            ],
+            ContextMenuKind::AgentPane {
+                hands_on,
+                nested,
+                group,
+                ..
+            } => {
+                let mut items = vec![
+                    "Focus",
+                    "Rename",
+                    if hands_on {
+                        "Unpin hands-on"
+                    } else {
+                        "Pin hands-on"
+                    },
+                    "Nest under...",
+                ];
+                if nested {
+                    items.push("Clear nesting");
+                }
+                match group {
+                    Some(true) => items.push("Collapse group"),
+                    Some(false) => items.push("Expand group"),
+                    None => {}
+                }
+                items.extend(["Send to profile...", "Share with profiles...", "Close"]);
+                items
+            }
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: false,
                 orchestrator_mode,
@@ -1517,6 +1547,14 @@ impl AppState {
         target: ProfileMenuTarget,
         mode: ProfileMenuMode,
     ) -> Vec<ProfileMenuEntry> {
+        if mode == ProfileMenuMode::NestUnder {
+            return match target {
+                ProfileMenuTarget::Pane { ws_idx, pane_id } => {
+                    self.nest_under_menu_entries(ws_idx, pane_id)
+                }
+                ProfileMenuTarget::Workspace { .. } => Vec::new(),
+            };
+        }
         let default_membership = [crate::workspace::DEFAULT_PROFILE.to_string()];
         let (membership, is_following_space) = match target {
             ProfileMenuTarget::Workspace { ws_idx } => (
@@ -1556,6 +1594,7 @@ impl AppState {
             let is_current = match mode {
                 ProfileMenuMode::Send => membership.len() == 1 && membership[0] == profile,
                 ProfileMenuMode::Share => membership.contains(&profile),
+                ProfileMenuMode::NestUnder => false,
             };
             ProfileMenuEntry {
                 label: profile.clone(),
@@ -1564,6 +1603,137 @@ impl AppState {
             }
         }));
         entries
+    }
+
+    /// Candidate sidebar parents for the agent in this pane: an "Automatic"
+    /// entry plus every other live agent in the same workspace, in panel
+    /// order. Entry values are public pane ids so the choice can be sent
+    /// straight to `agent.group.set`.
+    fn nest_under_menu_entries(&self, ws_idx: usize, pane_id: PaneId) -> Vec<ProfileMenuEntry> {
+        use crate::agent_ownership::AgentGroupPlacement;
+        let terminal = self
+            .workspaces
+            .get(ws_idx)
+            .and_then(|workspace| workspace.pane_state(pane_id))
+            .and_then(|pane| self.terminals.get(&pane.attached_terminal_id));
+        let explicit_parent = terminal
+            .and_then(|terminal| terminal.agent_group.as_ref())
+            .and_then(|placement| match placement {
+                AgentGroupPlacement::Under(parent) => self.resolve_agent_owner(parent),
+                AgentGroupPlacement::HandsOn => None,
+            });
+        let mut entries = vec![ProfileMenuEntry {
+            profile: None,
+            label: "Automatic".to_string(),
+            is_current: explicit_parent.is_none(),
+        }];
+        let Some(workspace) = self.workspaces.get(ws_idx) else {
+            return entries;
+        };
+        let own_identity = terminal.and_then(|terminal| terminal.agent_identity.clone());
+        for entry in crate::ui::agent_panel_entries(self) {
+            if entry.ws_idx != ws_idx || entry.pane_id == pane_id {
+                continue;
+            }
+            // A descendant can never be the parent; leave it out rather than
+            // offering a choice the API would reject.
+            let would_cycle = match (&own_identity, &entry.agent_identity) {
+                (Some(own), Some(candidate)) => self.agent_group_would_cycle(own, candidate),
+                _ => false,
+            };
+            if would_cycle {
+                continue;
+            }
+            let Some(number) = workspace.public_pane_number(entry.pane_id) else {
+                continue;
+            };
+            let public_id = crate::workspace::public_pane_id_for_number(&workspace.id, number);
+            let name = entry
+                .agent_label
+                .clone()
+                .filter(|label| !label.is_empty())
+                .or_else(|| entry.pane_label.clone())
+                .or_else(|| entry.terminal_title_stripped.clone())
+                .unwrap_or_else(|| public_id.clone());
+            let label = if name == public_id {
+                public_id.clone()
+            } else {
+                format!("{name}  {public_id}")
+            };
+            entries.push(ProfileMenuEntry {
+                profile: Some(public_id),
+                label,
+                is_current: explicit_parent == Some((entry.ws_idx, entry.pane_id)),
+            });
+        }
+        entries
+    }
+
+    /// Build the agent-row context menu for this pane, reading the current
+    /// placement and group state so the menu offers the right verbs.
+    pub(crate) fn agent_pane_context_menu_kind(
+        &self,
+        ws_idx: usize,
+        pane_id: PaneId,
+    ) -> ContextMenuKind {
+        use crate::agent_ownership::AgentGroupPlacement;
+        let terminal = self
+            .workspaces
+            .get(ws_idx)
+            .and_then(|workspace| workspace.pane_state(pane_id))
+            .and_then(|pane| self.terminals.get(&pane.attached_terminal_id));
+        let placement = terminal.and_then(|terminal| terminal.agent_group.as_ref());
+        let hands_on = matches!(placement, Some(AgentGroupPlacement::HandsOn));
+        let nested = matches!(placement, Some(AgentGroupPlacement::Under(_)));
+        let group = crate::ui::agent_panel_entries(self)
+            .into_iter()
+            .find(|entry| entry.ws_idx == ws_idx && entry.pane_id == pane_id)
+            .and_then(|entry| entry.tree.expanded);
+        ContextMenuKind::AgentPane {
+            ws_idx,
+            pane_id,
+            hands_on,
+            nested,
+            group,
+        }
+    }
+
+    /// Collapse key of the group the focused agent belongs to: its own group
+    /// when it owns one, otherwise the nearest enclosing group in the panel.
+    pub(crate) fn focused_agent_group_key(&self) -> Option<String> {
+        use crate::agent_ownership::AgentGroupPlacement;
+        let ws_idx = self.active?;
+        let workspace = self.workspaces.get(ws_idx)?;
+        let pane_id = workspace.focused_pane_id()?;
+        // Own group first: the panel already knows whether this row owns one.
+        let own = crate::ui::agent_panel_entries(self)
+            .into_iter()
+            .find(|entry| entry.ws_idx == ws_idx && entry.pane_id == pane_id)
+            .and_then(|entry| entry.tree.group_key);
+        if own.is_some() {
+            return own;
+        }
+        // Otherwise the enclosing group, derived from state so a row hidden
+        // inside a collapsed group can still reopen it from the keyboard.
+        let terminal = self.agent_terminal(ws_idx, pane_id)?;
+        let parent = match terminal.agent_group.as_ref() {
+            Some(AgentGroupPlacement::HandsOn) => return None,
+            Some(AgentGroupPlacement::Under(parent)) => Some(parent),
+            None => terminal
+                .agent_ownership
+                .as_ref()
+                .and_then(|ownership| ownership.current.as_ref()),
+        };
+        if let Some(parent) = parent {
+            if let Some((parent_ws, parent_pane)) = self.resolve_agent_owner(parent) {
+                return self.agent_group_key(parent_ws, parent_pane);
+            }
+        }
+        let tab_idx = workspace
+            .tabs
+            .iter()
+            .position(|tab| tab.panes.contains_key(&pane_id))?;
+        (workspace.orchestrator_mode && tab_idx != 0).then(|| format!("orch:{}", workspace.id))
     }
 
     pub(crate) fn open_profile_menu(
@@ -2625,6 +2795,211 @@ impl AppState {
         }
         false
     }
+
+    /// Terminal hosting this pane's agent, when the pane hosts one.
+    fn agent_terminal(
+        &self,
+        ws_idx: usize,
+        pane_id: crate::layout::PaneId,
+    ) -> Option<&crate::terminal::TerminalState> {
+        self.workspaces
+            .get(ws_idx)
+            .and_then(|workspace| workspace.pane_state(pane_id))
+            .and_then(|pane| self.terminals.get(&pane.attached_terminal_id))
+            .filter(|terminal| terminal.is_agent_terminal())
+    }
+
+    /// The sidebar parent this agent would sit under after explicit
+    /// placement is applied: an explicit `Under` parent wins, hands-on has no
+    /// parent, otherwise the current owner. Orchestrator adoption is not part
+    /// of this chain because it never nests deeper than one level.
+    fn effective_agent_group_parent(
+        &self,
+        terminal: &crate::terminal::TerminalState,
+    ) -> Option<crate::agent_ownership::AgentOwnerRef> {
+        use crate::agent_ownership::AgentGroupPlacement;
+        match terminal.agent_group.as_ref() {
+            Some(AgentGroupPlacement::HandsOn) => None,
+            Some(AgentGroupPlacement::Under(parent)) => Some(parent.clone()),
+            None => terminal
+                .agent_ownership
+                .as_ref()
+                .and_then(|ownership| ownership.current.clone()),
+        }
+    }
+
+    /// Whether nesting `child_identity` beneath `parent_identity` in the
+    /// sidebar would create a cycle through explicit placements and
+    /// ownership edges.
+    pub fn agent_group_would_cycle(&self, child_identity: &str, parent_identity: &str) -> bool {
+        if child_identity == parent_identity {
+            return true;
+        }
+        let mut visited = std::collections::HashSet::new();
+        let mut cursor = parent_identity.to_string();
+        while visited.insert(cursor.clone()) {
+            let Some((ws_idx, pane_id)) = self.agent_pane_by_identity(&cursor) else {
+                return false;
+            };
+            let Some(next) = self
+                .agent_terminal(ws_idx, pane_id)
+                .and_then(|terminal| self.effective_agent_group_parent(terminal))
+            else {
+                return false;
+            };
+            if next.agent_id == child_identity {
+                return true;
+            }
+            cursor = next.agent_id;
+        }
+        false
+    }
+
+    /// Collapse key of the sidebar group this agent owns: the synthetic
+    /// `orch:<workspace-id>` key for an orchestrator workspace's first-tab
+    /// agent, otherwise the agent's durable identity. Shared by the sidebar
+    /// arrangement and the `agent.group.collapse` API so both agree.
+    pub fn agent_group_key(&self, ws_idx: usize, pane_id: crate::layout::PaneId) -> Option<String> {
+        let workspace = self.workspaces.get(ws_idx)?;
+        let tab_idx = workspace
+            .tabs
+            .iter()
+            .position(|tab| tab.panes.contains_key(&pane_id))?;
+        if tab_idx == 0 && workspace.orchestrator_mode {
+            return Some(format!("orch:{}", workspace.id));
+        }
+        self.agent_terminal(ws_idx, pane_id)?.agent_identity.clone()
+    }
+
+    /// Parse a public pane id of the `<workspace-id>:p<N>` form against
+    /// local state. Used by the test-only state path of the nest picker,
+    /// whose entries are built from the same encoder, so no alias or legacy
+    /// forms are needed here. The runtime path goes through the API.
+    #[cfg(test)]
+    pub(crate) fn parse_public_pane_id_local(
+        &self,
+        id: &str,
+    ) -> Option<(usize, crate::layout::PaneId)> {
+        let (ws_raw, pane_number_raw) = id.rsplit_once(":p")?;
+        let ws_idx = self
+            .workspaces
+            .iter()
+            .position(|workspace| workspace.id == ws_raw)?;
+        let pane_number = crate::workspace::decode_public_number(pane_number_raw)?;
+        let workspace = self.workspaces.get(ws_idx)?;
+        let pane_id = workspace
+            .public_pane_numbers
+            .iter()
+            .find_map(|(pane_id, number)| (*number == pane_number).then_some(*pane_id))?;
+        Some((ws_idx, pane_id))
+    }
+
+    /// Owner-style reference to the live agent hosted by this pane, assigning
+    /// its durable identity when missing. Test-only state path; the runtime
+    /// builds the same reference inside the API handler.
+    #[cfg(test)]
+    fn agent_owner_ref_for_pane(
+        &mut self,
+        ws_idx: usize,
+        pane_id: crate::layout::PaneId,
+    ) -> Option<crate::agent_ownership::AgentOwnerRef> {
+        let terminal_id = self
+            .workspaces
+            .get(ws_idx)
+            .and_then(|workspace| workspace.pane_state(pane_id))
+            .map(|pane| pane.attached_terminal_id.clone())?;
+        let terminal = self.terminals.get_mut(&terminal_id)?;
+        if !terminal.is_agent_terminal() || terminal.managed_agent_launch_pending() {
+            return None;
+        }
+        let agent_id = terminal.ensure_agent_identity()?;
+        Some(crate::agent_ownership::AgentOwnerRef {
+            agent_id,
+            name: terminal.agent_name.clone(),
+            agent: terminal.effective_agent_label().map(str::to_string),
+            session: terminal.current_agent_session(),
+        })
+    }
+
+    /// Set (or with `None`, clear) the explicit sidebar parent of the agent
+    /// in this pane, directly on local state. Self-nesting and cycles are
+    /// refused. Returns whether the placement changed. Test-only state path;
+    /// the runtime routes through `agent.group.set`.
+    #[cfg(test)]
+    pub(crate) fn set_agent_group_parent_local(
+        &mut self,
+        ws_idx: usize,
+        pane_id: crate::layout::PaneId,
+        parent: Option<(usize, crate::layout::PaneId)>,
+    ) -> bool {
+        use crate::agent_ownership::AgentGroupPlacement;
+        let next = match parent {
+            None => None,
+            Some((parent_ws, parent_pane)) => {
+                if (parent_ws, parent_pane) == (ws_idx, pane_id) {
+                    return false;
+                }
+                let Some(parent_ref) = self.agent_owner_ref_for_pane(parent_ws, parent_pane) else {
+                    return false;
+                };
+                let Some(child) = self.agent_owner_ref_for_pane(ws_idx, pane_id) else {
+                    return false;
+                };
+                if self.agent_group_would_cycle(&child.agent_id, &parent_ref.agent_id) {
+                    return false;
+                }
+                Some(AgentGroupPlacement::Under(parent_ref))
+            }
+        };
+        let Some(terminal_id) = self
+            .workspaces
+            .get(ws_idx)
+            .and_then(|workspace| workspace.pane_state(pane_id))
+            .map(|pane| pane.attached_terminal_id.clone())
+        else {
+            return false;
+        };
+        let Some(terminal) = self.terminals.get_mut(&terminal_id) else {
+            return false;
+        };
+        if !terminal.is_agent_terminal() || terminal.agent_group == next {
+            return false;
+        }
+        terminal.agent_group = next;
+        self.mark_session_dirty();
+        true
+    }
+
+    /// Toggle hands-on placement on the agent hosted by this pane, directly
+    /// on local state. Returns the new placement, or `None` when the pane
+    /// hosts no agent. Test-only state path; the runtime routes through
+    /// `agent.group.set`.
+    #[cfg(test)]
+    pub(crate) fn toggle_agent_hands_on(
+        &mut self,
+        ws_idx: usize,
+        pane_id: crate::layout::PaneId,
+    ) -> Option<bool> {
+        use crate::agent_ownership::AgentGroupPlacement;
+        let terminal_id = self
+            .workspaces
+            .get(ws_idx)
+            .and_then(|workspace| workspace.pane_state(pane_id))
+            .map(|pane| pane.attached_terminal_id.clone())?;
+        let terminal = self.terminals.get_mut(&terminal_id)?;
+        if !terminal.is_agent_terminal() {
+            return None;
+        }
+        let hands_on = !matches!(terminal.agent_group, Some(AgentGroupPlacement::HandsOn));
+        if hands_on {
+            terminal.ensure_agent_identity();
+            terminal.agent_group = Some(AgentGroupPlacement::HandsOn);
+        } else {
+            terminal.agent_group = None;
+        }
+        self.mark_session_dirty();
+        Some(hands_on)
+    }
 }
 
 #[cfg(test)]
@@ -2986,7 +3361,9 @@ impl AppState {
                 ContextMenuKind::Tab { ws_idx, tab_idx } => {
                     assert_tab_index(ws_idx, tab_idx, "context menu tab")
                 }
-                ContextMenuKind::AgentPane { ws_idx, pane_id } => {
+                ContextMenuKind::AgentPane {
+                    ws_idx, pane_id, ..
+                } => {
                     assert_workspace_index(ws_idx, "agent context menu workspace");
                     assert!(
                         self.workspaces[ws_idx].pane_state(pane_id).is_some(),
@@ -3439,7 +3816,13 @@ mod tests {
 
         let pane_id = crate::layout::PaneId::from_raw(1);
         let agent = ContextMenuState {
-            kind: ContextMenuKind::AgentPane { ws_idx: 0, pane_id },
+            kind: ContextMenuKind::AgentPane {
+                ws_idx: 0,
+                pane_id,
+                hands_on: false,
+                nested: false,
+                group: None,
+            },
             x: 0,
             y: 0,
             list: MenuListState::new(0),
@@ -3449,6 +3832,8 @@ mod tests {
             [
                 "Focus",
                 "Rename",
+                "Pin hands-on",
+                "Nest under...",
                 "Send to profile...",
                 "Share with profiles...",
                 "Close"
@@ -3473,6 +3858,169 @@ mod tests {
             "Share with profiles...",
             "Close pane"
         ]));
+    }
+
+    #[test]
+    fn agent_context_menu_items_follow_placement_and_group_state() {
+        let pane_id = crate::layout::PaneId::from_raw(1);
+        let plain = ContextMenuState {
+            kind: ContextMenuKind::AgentPane {
+                ws_idx: 0,
+                pane_id,
+                hands_on: false,
+                nested: false,
+                group: None,
+            },
+            x: 0,
+            y: 0,
+            list: MenuListState::new(0),
+        };
+        assert_eq!(
+            plain.items(),
+            vec![
+                "Focus",
+                "Rename",
+                "Pin hands-on",
+                "Nest under...",
+                "Send to profile...",
+                "Share with profiles...",
+                "Close",
+            ]
+        );
+
+        let configured = ContextMenuState {
+            kind: ContextMenuKind::AgentPane {
+                ws_idx: 0,
+                pane_id,
+                hands_on: true,
+                nested: true,
+                group: Some(false),
+            },
+            x: 0,
+            y: 0,
+            list: MenuListState::new(0),
+        };
+        let items = configured.items();
+        assert!(items.contains(&"Unpin hands-on"));
+        assert!(items.contains(&"Clear nesting"));
+        assert!(items.contains(&"Expand group"));
+        assert!(!items.contains(&"Collapse group"));
+    }
+
+    fn state_with_named_agents(names: &[&str]) -> AppState {
+        let mut state = AppState::test_new();
+        state.workspaces = names
+            .iter()
+            .map(|name| Workspace::test_new(&format!("{name}-space")))
+            .collect();
+        state.ensure_test_terminals();
+        state.active = Some(0);
+        state.selected = 0;
+        for (ws_idx, name) in names.iter().enumerate() {
+            let pane_id = state.workspaces[ws_idx].tabs[0].root_pane;
+            let terminal_id = state.workspaces[ws_idx].tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            let terminal = state.terminals.get_mut(&terminal_id).unwrap();
+            terminal.set_agent_name((*name).to_string());
+            terminal.set_detected_state(
+                Some(crate::detect::Agent::Pi),
+                crate::detect::AgentState::Idle,
+            );
+            terminal.agent_identity = Some(format!("agent_{name}"));
+        }
+        state
+    }
+
+    #[test]
+    fn explicit_group_placement_rejects_cycles_through_owners_and_parents() {
+        let mut state = state_with_named_agents(&["lead", "mid", "leaf"]);
+        let lead_pane = state.workspaces[0].tabs[0].root_pane;
+        let mid_pane = state.workspaces[1].tabs[0].root_pane;
+        let leaf_pane = state.workspaces[2].tabs[0].root_pane;
+
+        // mid is owned by lead; leaf is explicitly nested under mid.
+        let mid_terminal = state.workspaces[1].tabs[0].panes[&mid_pane]
+            .attached_terminal_id
+            .clone();
+        state
+            .terminals
+            .get_mut(&mid_terminal)
+            .unwrap()
+            .agent_ownership = Some(crate::agent_ownership::AgentOwnership::new(
+            crate::agent_ownership::AgentOwnerRef {
+                agent_id: "agent_lead".into(),
+                name: Some("lead".into()),
+                agent: Some("pi".into()),
+                session: None,
+            },
+        ));
+        assert!(state.set_agent_group_parent_local(2, leaf_pane, Some((1, mid_pane))));
+
+        // lead under leaf would loop lead -> leaf -> mid -> lead.
+        assert!(state.agent_group_would_cycle("agent_lead", "agent_leaf"));
+        assert!(!state.set_agent_group_parent_local(0, lead_pane, Some((2, leaf_pane))));
+        assert!(state.terminals
+            [&state.workspaces[0].tabs[0].panes[&lead_pane].attached_terminal_id]
+            .agent_group
+            .is_none());
+        // Self-nesting is refused too.
+        assert!(!state.set_agent_group_parent_local(2, leaf_pane, Some((2, leaf_pane))));
+        // A hands-on pin breaks the chain: nothing above it counts.
+        assert!(state.toggle_agent_hands_on(1, mid_pane).unwrap());
+        assert!(!state.agent_group_would_cycle("agent_lead", "agent_leaf"));
+    }
+
+    #[test]
+    fn focused_agent_group_key_reaches_the_enclosing_group() {
+        let mut state = state_with_named_agents(&["lead", "worker"]);
+        let lead_pane = state.workspaces[0].tabs[0].root_pane;
+        let worker_pane = state.workspaces[1].tabs[0].root_pane;
+        assert!(state.set_agent_group_parent_local(1, worker_pane, Some((0, lead_pane))));
+
+        // Focused on the owner: its own group.
+        state.active = Some(0);
+        assert_eq!(
+            state.focused_agent_group_key().as_deref(),
+            Some("agent_lead")
+        );
+        // Focused on the child: the parent's group, even once collapsed.
+        state.active = Some(1);
+        assert_eq!(
+            state.focused_agent_group_key().as_deref(),
+            Some("agent_lead")
+        );
+        state.collapsed_agent_group_keys.insert("agent_lead".into());
+        assert_eq!(
+            state.focused_agent_group_key().as_deref(),
+            Some("agent_lead")
+        );
+        // A hands-on agent belongs to no group.
+        state.toggle_agent_hands_on(1, worker_pane);
+        assert_eq!(state.focused_agent_group_key(), None);
+        // An orchestrator workspace's other tabs resolve to the orchestrator key.
+        state.active = Some(0);
+        state.workspaces[0].orchestrator_mode = true;
+        state.workspaces[0].test_add_tab(Some("build"));
+        state.ensure_test_terminals();
+        let build_pane = state.workspaces[0].tabs[1].root_pane;
+        let build_terminal = state.workspaces[0].tabs[1].panes[&build_pane]
+            .attached_terminal_id
+            .clone();
+        {
+            let terminal = state.terminals.get_mut(&build_terminal).unwrap();
+            terminal.set_agent_name("builder".into());
+            terminal.set_detected_state(
+                Some(crate::detect::Agent::Pi),
+                crate::detect::AgentState::Idle,
+            );
+        }
+        state.workspaces[0].active_tab = 1;
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(build_pane));
+        assert_eq!(
+            state.focused_agent_group_key(),
+            Some(format!("orch:{}", state.workspaces[0].id))
+        );
     }
 
     #[test]

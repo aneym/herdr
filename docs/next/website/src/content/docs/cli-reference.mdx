@@ -301,6 +301,11 @@ herdr agent attach <target> [--takeover]
 herdr agent start <name> --kind KIND --pane ID [--timeout MS] [--owner TARGET|--no-owner] [-- <agent-args...>]
 herdr agent owner set <target> <owner>
 herdr agent owner clear <target>
+herdr agent group hands-on <target>
+herdr agent group under <target> <parent>
+herdr agent group auto <target>
+herdr agent group collapse <target>
+herdr agent group expand <target>
 herdr agent explain <target> [--json|--verbose]
 herdr agent explain --file PATH --agent LABEL [--json|--verbose]
 ```
@@ -312,6 +317,8 @@ Agent targets are either a unique live agent name or the pane ID that currently 
 A successful start returns only after the expected agent owns the same terminal and is ready for interactive input. If detection reports `blocked` during startup, the command returns `agent_not_ready` immediately. The name remains available for `agent read` and `agent send-keys`, and becomes ready for prompts after detection reports `idle`. The default startup timeout is 30000 milliseconds; explicit values must be greater than 3000 and no more than 300000.
 
 When `agent start` runs inside a pane that hosts a live agent, the started agent is recorded as owned by that caller. `--owner TARGET` records a specific owner instead, and `--no-owner` keeps the new agent a root. `agent owner set` adopts or transfers an agent to a new current owner, and `agent owner clear` releases it to a root; the immutable origin owner recorded when ownership first appeared never changes. Self-ownership and ownership cycles are rejected. See [Agents](/docs/agents/) for the ownership model, orphan handling, and sidebar behavior.
+
+`agent group` arranges the sidebar without touching ownership. `hands-on` (alias `pin`) keeps an agent top-level and visible outside any collapsed owner or orchestrator group; `under` nests it beneath another agent; `auto` (alias `clear`) removes the explicit placement; `collapse` and `expand` fold or open the group the target owns. Self-nesting and cycles are rejected, and a parent that later disappears leaves the agent marked orphaned rather than silently moved. Each command returns the updated agent, whose `group` object reports `placement`, `parent`, `orphaned`, and `collapsed`.
 
 `agent prompt` honors live bracketed-paste mode and sends text followed by encoded Enter after a short delay, including while the agent is working. If the agent is already `blocked`, it returns `agent_blocked` without sending input. With `--wait`, an accepted prompt sent from another non-working state must produce an observed lifecycle change within five seconds or Herdr returns `agent_prompt_stalled`; a caller timeout of five seconds or less keeps the normal `timeout` error. After activity is observed, it waits for the first requested settled status. It does not track individual turns. If the agent is already working, completion of that active turn may satisfy the wait. `--until` narrows the matching states and is rejected unless `--wait` is also present. Standalone `agent wait` returns immediately when the current status matches. Both default to `idle`, `done`, or `blocked`; use `--until unknown` explicitly when needed.
 

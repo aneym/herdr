@@ -171,4 +171,18 @@ herdr agent owner clear worker        # release to a root agent
 
 When a current owner can no longer be resolved — for example the owner exited and its session was not resumed — the owned agent is marked orphaned rather than silently flattened. Orphaned agents carry a `◌` marker in the sidebar and stay actionable: adopt them with `agent owner set` or release them with `agent owner clear`. If the owner's agent session comes back elsewhere, the reference reconciles automatically through the recorded session identity.
 
-In the sidebar, owner rows show a chevron that collapses or expands their subtree. A collapsed group shows how many agents it hides and inherits their highest-attention status color, so blocked or unseen work stays visible. Collapse state persists across restarts.
+In the sidebar, owner rows show a chevron that collapses or expands their subtree. A collapsed group shows how many agents it hides, one status glyph per hidden agent, and inherits their highest-attention status color, so blocked or unseen work stays visible. Collapse state persists across restarts.
+
+Sidebar placement can also be set by hand, independently of ownership. A placement never changes who an agent belongs to, what it may do, or where `agent start` records its owner; it only decides where the row sits in the sidebar:
+
+```bash
+herdr agent group hands-on reviewer   # pin top-level, outside any collapsed group
+herdr agent group under worker lead   # nest beneath lead without adopting it
+herdr agent group auto worker         # back to ownership-driven placement
+herdr agent group collapse lead       # fold the group lead owns
+herdr agent group expand lead
+```
+
+A hands-on agent always stays a top-level row with a `⚲` pin marker, so it is never folded into an owner group or an orchestrator group and stays in the agent cycle. An explicit `under` parent wins over the owner edge and over orchestrator adoption; if that parent later disappears, the row falls back to automatic placement and carries the `◌` marker instead of vanishing. Self-nesting and cycles are rejected. `agent list` and `agent get` report a `group` object with `placement` (`auto`, `hands_on`, or `under`), the resolved `parent`, `orphaned`, and `collapsed`. Placement survives pane moves, restarts, and session handoff like ownership does; it ends with the agent occupancy.
+
+The same controls live in the sidebar: right-click an agent row for **Pin hands-on**, **Nest under...** (a picker of the workspace's other agents), **Clear nesting**, and **Collapse group** or **Expand group** on group owners. The `keys.toggle_agent_group` and `keys.toggle_hands_on` bindings act on the focused agent from the keyboard; both are unset by default.

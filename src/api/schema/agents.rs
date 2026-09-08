@@ -202,6 +202,49 @@ pub struct AgentOwnerInfo {
     pub resolved: bool,
 }
 
+/// Explicit sidebar placement kinds for `agent.group.set`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentGroupPlacementKind {
+    /// Clear the explicit placement: follow ownership and orchestrator mode.
+    Auto,
+    /// Keep the agent top-level and visible, outside any collapsed group.
+    HandsOn,
+    /// Nest the agent beneath `parent` in the sidebar without changing ownership.
+    Under,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentGroupSetParams {
+    pub target: String,
+    pub placement: AgentGroupPlacementKind,
+    /// Agent target (name or pane id) to nest beneath. Required for `under`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentGroupCollapseParams {
+    /// The agent whose sidebar group is collapsed or expanded.
+    pub target: String,
+    pub collapsed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentGroupInfo {
+    /// `auto`, `hands_on`, or `under`.
+    pub placement: AgentGroupPlacementKind,
+    /// Explicit sidebar parent when placement is `under`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<AgentOwnerInfo>,
+    /// True when the explicit parent no longer resolves to a live agent.
+    #[serde(default, skip_serializing_if = "super::is_false")]
+    pub orphaned: bool,
+    /// True when the sidebar group this agent owns is collapsed.
+    #[serde(default, skip_serializing_if = "super::is_false")]
+    pub collapsed: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AgentOwnershipInfo {
     /// The first recorded owner. Immutable for the life of the record.
@@ -253,6 +296,10 @@ pub struct AgentInfo {
     /// Durable ownership: immutable origin plus transferable current owner.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ownership: Option<AgentOwnershipInfo>,
+    /// Sidebar placement: explicit hands-on pin or nesting override, plus
+    /// the collapse state of the group this agent owns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<AgentGroupInfo>,
     pub workspace_id: String,
     pub tab_id: String,
     pub pane_id: String,

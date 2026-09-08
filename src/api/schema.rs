@@ -139,6 +139,10 @@ pub enum Method {
     AgentOwnerSet(AgentOwnerSetParams),
     #[serde(rename = "agent.owner.clear")]
     AgentOwnerClear(AgentTarget),
+    #[serde(rename = "agent.group.set")]
+    AgentGroupSet(AgentGroupSetParams),
+    #[serde(rename = "agent.group.collapse")]
+    AgentGroupCollapse(AgentGroupCollapseParams),
     #[serde(rename = "agent.prompt")]
     AgentPrompt(AgentPromptParams),
     #[serde(rename = "agent.wait")]

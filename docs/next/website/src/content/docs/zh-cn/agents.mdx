@@ -171,4 +171,18 @@ herdr agent owner clear worker        # 释放为根智能体
 
 当当前所有者无法再解析时 — 例如所有者已退出且其会话未恢复 — 被拥有的智能体会被标记为 orphaned,而不是被静默扁平化。孤儿智能体在侧边栏带有 `◌` 标记,并保持可操作:用 `agent owner set` 收养它们,或用 `agent owner clear` 释放。若所有者的会话在别处恢复,引用会通过记录的会话标识自动重新解析。
 
-在侧边栏中,所有者行显示一个折叠/展开子树的箭头。折叠的分组会显示隐藏的智能体数量,并继承其中最需要注意的状态颜色,因此 blocked 或未读的工作始终可见。折叠状态在重启后保持。
+在侧边栏中,所有者行显示一个折叠/展开子树的箭头。折叠的分组会显示隐藏的智能体数量、每个隐藏智能体的状态符号,并继承其中最需要注意的状态颜色,因此 blocked 或未读的工作始终可见。折叠状态在重启后保持。
+
+侧边栏中的位置也可以手动设置,与所有权无关。位置设置不会改变智能体归谁所有、能做什么,或 `agent start` 记录的所有者;它只决定该行在侧边栏中的位置:
+
+```bash
+herdr agent group hands-on reviewer   # 固定在顶层,置于任何折叠分组之外
+herdr agent group under worker lead   # 嵌套在 lead 之下,但不收养
+herdr agent group auto worker         # 恢复按所有权自动放置
+herdr agent group collapse lead       # 折叠 lead 拥有的分组
+herdr agent group expand lead
+```
+
+hands-on 智能体始终是带 `⚲` 图钉标记的顶层行,不会被折叠进所有者分组或编排器分组,并且保留在智能体循环中。显式的 `under` 父级优先于所有者边和编排器收养;如果该父级之后消失,该行会回退到自动放置并带上 `◌` 标记,而不是消失。自嵌套和循环会被拒绝。`agent list` 和 `agent get` 会返回一个 `group` 对象,包含 `placement`(`auto`、`hands_on` 或 `under`)、已解析的 `parent`、`orphaned` 和 `collapsed`。位置设置像所有权一样在窗格移动、重启和会话交接后保留,并随智能体占用结束而结束。
+
+同样的控制也在侧边栏中提供:右键点击智能体行可见 **Pin hands-on**、**Nest under...**(从同一工作区的其他智能体中选择)、**Clear nesting**,以及分组所有者上的 **Collapse group** 或 **Expand group**。`keys.toggle_agent_group` 与 `keys.toggle_hands_on` 快捷键从键盘对当前聚焦的智能体执行同样的操作;两者默认均未设置。

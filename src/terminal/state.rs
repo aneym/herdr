@@ -152,6 +152,9 @@ pub struct TerminalState {
     pub agent_identity: Option<String>,
     /// Durable ownership record of the current agent occupancy.
     pub agent_ownership: Option<crate::agent_ownership::AgentOwnership>,
+    /// Explicit sidebar placement of the current agent occupancy. `None`
+    /// follows ownership and orchestrator mode automatically.
+    pub agent_group: Option<crate::agent_ownership::AgentGroupPlacement>,
     /// Profile membership override for this pane. Empty follows its workspace.
     pub profiles: Vec<String>,
 }
@@ -190,6 +193,7 @@ impl TerminalState {
             pending_agent_resume_plan: None,
             agent_identity: None,
             agent_ownership: None,
+            agent_group: None,
             profiles: Vec::new(),
         }
     }
@@ -1928,6 +1932,7 @@ impl TerminalState {
         });
         self.agent_identity = Some(crate::agent_ownership::alloc_agent_identity());
         self.agent_ownership = None;
+        self.agent_group = None;
     }
 
     pub fn managed_agent_launch_pending(&self) -> bool {
@@ -2090,6 +2095,7 @@ impl TerminalState {
     fn end_agent_occupancy(&mut self) {
         self.agent_identity = None;
         self.agent_ownership = None;
+        self.agent_group = None;
     }
 
     /// Durable identity of the current agent occupancy, assigning one lazily
