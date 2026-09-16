@@ -107,13 +107,16 @@ pub(super) fn render_agent_panel(
     }
 
     let rows = agent_rows(snapshot, config, None);
-    let entries = if super::tree::tree_view_active(config) && snapshot.agent_view_label.is_none() {
-        super::tree::tree_list_entries(snapshot, tree, rows)
-    } else {
-        rows.into_iter()
-            .map(super::tree::AgentPanelListEntry::Agent)
-            .collect()
-    };
+    let (rows, automations) = super::tree::partition_automations(snapshot, config, rows);
+    let mut entries =
+        if super::tree::tree_view_active(config) && snapshot.agent_view_label.is_none() {
+            super::tree::tree_list_entries(snapshot, tree, rows)
+        } else {
+            rows.into_iter()
+                .map(super::tree::AgentPanelListEntry::Agent)
+                .collect()
+        };
+    super::tree::append_automations(&mut entries, tree, automations);
     render_agent_list(
         buffer,
         area,
@@ -157,9 +160,26 @@ fn render_panel_list_entry(
 ) {
     use super::tree::AgentPanelListEntry;
     match entry {
-        AgentPanelListEntry::Agent(row) => {
+        AgentPanelListEntry::Agent(row) | AgentPanelListEntry::Automation(row) => {
             hits.agents.push((rect, row.pane_id.clone()));
             render_agent_row(buffer, rect, row, config);
+        }
+        AgentPanelListEntry::AutomationsHeader(summary) => {
+            let style = Style::default()
+                .fg(summary.color(&config.palette))
+                .add_modifier(Modifier::BOLD);
+            put_text(buffer, rect.x, rect.y, rect.width, " automations", style);
+            let label = summary.label();
+            let width = (display_width(&label) as u16).min(rect.width);
+            put_text(
+                buffer,
+                rect.right().saturating_sub(width),
+                rect.y,
+                width,
+                &label,
+                style,
+            );
+            hits.automations_header = rect;
         }
         AgentPanelListEntry::SpaceHeader(header) => {
             render_tree_header(buffer, rect, header, true, config, hits);

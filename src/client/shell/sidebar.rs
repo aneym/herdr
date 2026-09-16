@@ -195,10 +195,24 @@ pub(crate) fn render_sidebar(
     } else {
         Rect::new(area.right().saturating_sub(1), area.y, 1, area.height)
     };
-    let (workspace_area, detail_area) =
-        crate::ui::expanded_sidebar_sections(area, state.sidebar_section_split);
-    hits.sidebar_section_divider =
-        crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split);
+    let (workspace_area, detail_area) = ordered_sidebar_sections(area, snapshot, config, state);
+    hits.sidebar_section_divider = sidebar_section_divider_rect(area, config, state);
+    if super::tree::tree_view_active(config) {
+        // Spaces live inside the agents tree, so the spaces strip keeps only the
+        // footer controls.
+        render_sidebar_footer(buffer, workspace_area, snapshot, config, hits);
+        super::render_agent_panel(
+            buffer,
+            detail_area,
+            snapshot,
+            config,
+            state.tree,
+            state.agent_scroll,
+            hits,
+        );
+        render_sidebar_toggle(buffer, area, palette, hits);
+        return;
+    }
     put_text(
         buffer,
         workspace_area.x,
@@ -209,6 +223,17 @@ pub(crate) fn render_sidebar(
             .fg(palette.overlay0)
             .add_modifier(Modifier::BOLD),
     );
+    if config.mouse_capture && config.new_button == crate::config::SidebarNewButtonConfig::Header {
+        hits.new_workspace = new_button_header_rect(workspace_area);
+        put_text(
+            buffer,
+            hits.new_workspace.x,
+            hits.new_workspace.y,
+            hits.new_workspace.width,
+            " + ",
+            Style::default().fg(palette.overlay0),
+        );
+    }
 
     let entries = workspace_entries(snapshot, state.collapsed_groups);
     let body = Rect::new(
@@ -359,60 +384,7 @@ pub(crate) fn render_sidebar(
         );
     }
 
-    let footer_y = workspace_area.bottom().saturating_sub(1);
-    if config.mouse_capture {
-        hits.new_workspace = Rect::new(
-            workspace_area.x,
-            footer_y,
-            5.min(workspace_area.width),
-            u16::from(workspace_area.height > 0),
-        );
-        put_text(
-            buffer,
-            workspace_area.x,
-            footer_y,
-            workspace_area.width,
-            " new",
-            Style::default().fg(palette.overlay0),
-        );
-        let attention = super::super::global_menu::global_menu_attention(snapshot);
-        let launcher_width = if attention { 8 } else { 6 }.min(workspace_area.width);
-        hits.global_launcher = Rect::new(
-            workspace_area.right().saturating_sub(launcher_width),
-            footer_y,
-            launcher_width,
-            1,
-        );
-        if attention {
-            let start_x = workspace_area.right().saturating_sub(6);
-            put_text(
-                buffer,
-                start_x,
-                footer_y,
-                2,
-                "● ",
-                Style::default()
-                    .fg(palette.accent)
-                    .add_modifier(Modifier::BOLD),
-            );
-            put_text(
-                buffer,
-                start_x.saturating_add(2),
-                footer_y,
-                4,
-                "menu",
-                Style::default().fg(palette.overlay0),
-            );
-        } else {
-            put_right_text(
-                buffer,
-                workspace_area,
-                footer_y,
-                "menu",
-                Style::default().fg(palette.overlay0),
-            );
-        }
-    }
+    render_sidebar_footer(buffer, workspace_area, snapshot, config, hits);
 
     super::render_agent_panel(
         buffer,
@@ -424,6 +396,15 @@ pub(crate) fn render_sidebar(
         hits,
     );
 
+    render_sidebar_toggle(buffer, area, palette, hits);
+}
+
+fn render_sidebar_toggle(
+    buffer: &mut Buffer,
+    area: Rect,
+    palette: &Palette,
+    hits: &mut ShellHitMap,
+) {
     hits.sidebar_toggle = Rect::new(
         area.right().saturating_sub(2),
         area.bottom().saturating_sub(1),
@@ -435,9 +416,229 @@ pub(crate) fn render_sidebar(
         hits.sidebar_toggle.x,
         hits.sidebar_toggle.y,
         hits.sidebar_toggle.width,
-        "«",
+        "\u{ab}",
         Style::default().fg(palette.overlay0),
     );
+}
+
+/// The new-workspace control when `sidebar.new_button = "header"`: three cells
+/// at the right of the spaces header row, clear of the separator column.
+fn new_button_header_rect(workspace_area: Rect) -> Rect {
+    if workspace_area.is_empty() {
+        return Rect::default();
+    }
+    let content_width = workspace_area.width.saturating_sub(1);
+    Rect::new(
+        workspace_area.x + content_width.saturating_sub(3),
+        workspace_area.y,
+        3.min(content_width),
+        1,
+    )
+}
+
+/// The bottom row of the spaces section: the new-workspace control (unless it
+/// has moved to the header) and the global menu on its configured side.
+fn render_sidebar_footer(
+    buffer: &mut Buffer,
+    workspace_area: Rect,
+    snapshot: &ClientShellSnapshot,
+    config: &ClientShellConfig,
+    hits: &mut ShellHitMap,
+) {
+    if !config.mouse_capture || workspace_area.is_empty() {
+        return;
+    }
+    let palette = &config.palette;
+    let footer_y = workspace_area.bottom().saturating_sub(1);
+    if config.new_button == crate::config::SidebarNewButtonConfig::Footer {
+        hits.new_workspace = Rect::new(workspace_area.x, footer_y, 5.min(workspace_area.width), 1);
+        put_text(
+            buffer,
+            workspace_area.x,
+            footer_y,
+            workspace_area.width,
+            " new",
+            Style::default().fg(palette.overlay0),
+        );
+    }
+    let attention = super::super::global_menu::global_menu_attention(snapshot);
+    let launcher_width = if attention { 8 } else { 6 }.min(workspace_area.width);
+    let left_aligned = config.menu_position == crate::config::SidebarMenuPositionConfig::Left;
+    let launcher_x = if left_aligned {
+        workspace_area.x
+    } else {
+        workspace_area.right().saturating_sub(launcher_width)
+    };
+    hits.global_launcher = Rect::new(launcher_x, footer_y, launcher_width, 1);
+    let start_x = if left_aligned {
+        workspace_area.x
+    } else {
+        workspace_area.right().saturating_sub(6)
+    };
+    if attention {
+        put_text(
+            buffer,
+            start_x,
+            footer_y,
+            2,
+            "\u{25cf} ",
+            Style::default()
+                .fg(palette.accent)
+                .add_modifier(Modifier::BOLD),
+        );
+        put_text(
+            buffer,
+            start_x.saturating_add(2),
+            footer_y,
+            4,
+            "menu",
+            Style::default().fg(palette.overlay0),
+        );
+    } else if left_aligned {
+        put_text(
+            buffer,
+            start_x,
+            footer_y,
+            4,
+            "menu",
+            Style::default().fg(palette.overlay0),
+        );
+    } else {
+        put_right_text(
+            buffer,
+            workspace_area,
+            footer_y,
+            "menu",
+            Style::default().fg(palette.overlay0),
+        );
+    }
+}
+
+/// Spaces and agents areas, honouring `sidebar.section_order`,
+/// `sidebar.spaces.max_visible` and the tree view.
+pub(in crate::client::shell) fn ordered_sidebar_sections(
+    area: Rect,
+    snapshot: &ClientShellSnapshot,
+    config: &ClientShellConfig,
+    state: &ShellRenderState<'_>,
+) -> (Rect, Rect) {
+    let content = Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height);
+    if content.width == 0 || content.height == 0 {
+        return (Rect::default(), Rect::default());
+    }
+    if super::tree::tree_view_active(config) {
+        // Spaces live inside the agents tree; keep only a one-row footer strip
+        // for the new and menu controls.
+        if content.height < 2 {
+            return (Rect::default(), content);
+        }
+        let agents_height = content.height - 1;
+        return (
+            Rect::new(content.x, content.y + agents_height, content.width, 1),
+            Rect::new(content.x, content.y, content.width, agents_height),
+        );
+    }
+    let agents_first = config.section_order[0] == crate::config::SidebarSection::Agents;
+    let spaces_height = if config.spaces.max_visible > 0 && content.height >= 6 {
+        content_fit_spaces_height(content, snapshot, config, state)
+    } else {
+        let ratio = if agents_first {
+            1.0 - state.sidebar_section_split
+        } else {
+            state.sidebar_section_split
+        };
+        let (first, _) = crate::ui::expanded_sidebar_sections(area, ratio);
+        if agents_first {
+            content.height.saturating_sub(first.height)
+        } else {
+            first.height
+        }
+    };
+    let agents_height = content.height.saturating_sub(spaces_height);
+    if agents_first {
+        (
+            Rect::new(
+                content.x,
+                content.y + agents_height,
+                content.width,
+                spaces_height,
+            ),
+            Rect::new(content.x, content.y, content.width, agents_height),
+        )
+    } else {
+        (
+            Rect::new(content.x, content.y, content.width, spaces_height),
+            Rect::new(
+                content.x,
+                content.y + spaces_height,
+                content.width,
+                agents_height,
+            ),
+        )
+    }
+}
+
+/// Height the spaces section needs to show up to `spaces.max_visible` entries,
+/// so the list hugs its content and the remainder goes to the agents panel.
+fn content_fit_spaces_height(
+    content: Rect,
+    snapshot: &ClientShellSnapshot,
+    config: &ClientShellConfig,
+    state: &ShellRenderState<'_>,
+) -> u16 {
+    let entries = workspace_entries(snapshot, state.collapsed_groups);
+    let visible = entries.len().min(config.spaces.max_visible);
+    let body_height =
+        entries
+            .iter()
+            .take(visible)
+            .enumerate()
+            .fold(0u16, |height, (position, entry)| {
+                let rows = snapshot
+                    .workspaces
+                    .get(entry.index)
+                    .map(|workspace| {
+                        workspace_rows(
+                            workspace,
+                            displayed_workspace_status(snapshot, workspace, state.collapsed_groups),
+                            entry.indented,
+                            &config.spaces,
+                        )
+                        .len()
+                        .max(1)
+                        .min(u16::MAX as usize) as u16
+                    })
+                    .unwrap_or(1);
+                let gap = if position + 1 < visible {
+                    entries
+                        .get(position + 1)
+                        .map_or(0, |next| u16::from(!next.indented) * config.spaces.row_gap)
+                } else {
+                    0
+                };
+                height.saturating_add(rows).saturating_add(gap)
+            });
+    body_height
+        .saturating_add(WORKSPACE_HEADER_ROWS + 1)
+        .clamp(3, content.height.saturating_sub(3))
+}
+
+/// Draggable divider between the two sidebar sections. Hidden in the tree view,
+/// which has only one section.
+pub(in crate::client::shell) fn sidebar_section_divider_rect(
+    area: Rect,
+    config: &ClientShellConfig,
+    state: &ShellRenderState<'_>,
+) -> Rect {
+    if super::tree::tree_view_active(config) || config.spaces.max_visible > 0 {
+        return Rect::default();
+    }
+    let ratio = if config.section_order[0] == crate::config::SidebarSection::Agents {
+        1.0 - state.sidebar_section_split
+    } else {
+        state.sidebar_section_split
+    };
+    crate::ui::sidebar_section_divider_rect(area, ratio)
 }
 
 pub(crate) fn workspace_entries(

@@ -123,6 +123,10 @@ pub(super) struct TreeHeader {
 
 pub(super) enum AgentPanelListEntry {
     Agent(AgentRow),
+    /// The header of the automations section, carrying its activity summary.
+    AutomationsHeader(AutomationSummary),
+    /// An agent in a workspace named by `ui.sidebar.automations.workspaces`.
+    Automation(AgentRow),
     /// The collapsible section collecting spaces that were folded away. Only
     /// emitted while the hidden reveal is on.
     HiddenSpacesHeader {
@@ -136,9 +140,100 @@ pub(super) enum AgentPanelListEntry {
 impl AgentPanelListEntry {
     pub(super) fn line_count(&self) -> usize {
         match self {
-            Self::Agent(row) => row.rows.len().max(1),
+            Self::Agent(row) | Self::Automation(row) => row.rows.len().max(1),
             _ => 1,
         }
+    }
+}
+
+/// What the automations header reports about the rows it stands for. Long-lived
+/// background work should not shout; the header only turns red when something
+/// is actually blocked.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct AutomationSummary {
+    pub(super) blocked: usize,
+    pub(super) working: usize,
+    pub(super) done: usize,
+    pub(super) total: usize,
+}
+
+impl AutomationSummary {
+    fn of(rows: &[AgentRow]) -> Self {
+        use crate::api::schema::AgentStatus;
+        let mut summary = Self {
+            total: rows.len(),
+            ..Self::default()
+        };
+        for row in rows {
+            match row.status {
+                AgentStatus::Blocked => summary.blocked += 1,
+                AgentStatus::Working => summary.working += 1,
+                AgentStatus::Done => summary.done += 1,
+                AgentStatus::Idle | AgentStatus::Unknown => {}
+            }
+        }
+        summary
+    }
+
+    pub(super) fn label(&self) -> String {
+        let mut parts = Vec::new();
+        if self.blocked > 0 {
+            parts.push(format!("{} blocked", self.blocked));
+        }
+        if self.working > 0 {
+            parts.push(format!("{} working", self.working));
+        }
+        if self.done > 0 {
+            parts.push(format!("{} done", self.done));
+        }
+        if parts.is_empty() {
+            parts.push(self.total.to_string());
+        }
+        parts.join(" \u{b7} ")
+    }
+
+    pub(super) fn color(&self, palette: &Palette) -> ratatui::style::Color {
+        if self.blocked > 0 {
+            palette.red
+        } else {
+            palette.overlay0
+        }
+    }
+}
+
+/// Split the panel rows into ordinary agents and automations. A row is an
+/// automation when its workspace label is listed in
+/// `ui.sidebar.automations.workspaces`.
+pub(super) fn partition_automations(
+    snapshot: &ClientShellSnapshot,
+    config: &ClientShellConfig,
+    rows: Vec<AgentRow>,
+) -> (Vec<AgentRow>, Vec<AgentRow>) {
+    if config.automations.workspaces.is_empty() {
+        return (rows, Vec::new());
+    }
+    rows.into_iter().partition(|row| {
+        !config
+            .automations
+            .workspaces
+            .contains(&workspace_label(snapshot, &row.workspace_id))
+    })
+}
+
+/// Append the automations section to a finished panel list.
+pub(super) fn append_automations(
+    entries: &mut Vec<AgentPanelListEntry>,
+    tree: &ClientTreeChrome,
+    automations: Vec<AgentRow>,
+) {
+    if automations.is_empty() {
+        return;
+    }
+    entries.push(AgentPanelListEntry::AutomationsHeader(
+        AutomationSummary::of(&automations),
+    ));
+    if tree.automations_expanded {
+        entries.extend(automations.into_iter().map(AgentPanelListEntry::Automation));
     }
 }
 

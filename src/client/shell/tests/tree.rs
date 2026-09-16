@@ -122,9 +122,7 @@ fn tree_state(tree: ClientTreeChrome) -> ClientShellState {
 }
 
 fn shape(state: &ClientShellState, tree: &ClientTreeChrome) -> Vec<String> {
-    let snapshot = state.snapshot.as_deref().expect("snapshot");
-    let rows = crate::client::shell::agent_sidebar::agent_rows(snapshot, &state.config, None);
-    tree_list_entries(snapshot, tree, rows)
+    panel_entries(state, tree)
         .iter()
         .map(|entry| match entry {
             AgentPanelListEntry::SpaceHeader(header) => {
@@ -138,8 +136,26 @@ fn shape(state: &ClientShellState, tree: &ClientTreeChrome) -> Vec<String> {
                     if *collapsed { "closed" } else { "open" }
                 )
             }
+            AgentPanelListEntry::AutomationsHeader(summary) => {
+                format!("automations:{}", summary.label())
+            }
+            AgentPanelListEntry::Automation(row) => format!("automation:{}", row.pane_id),
         })
         .collect()
+}
+
+fn panel_entries(state: &ClientShellState, tree: &ClientTreeChrome) -> Vec<AgentPanelListEntry> {
+    let snapshot = state.snapshot.as_deref().expect("snapshot");
+    let rows = crate::client::shell::agent_sidebar::agent_rows(snapshot, &state.config, None);
+    let (rows, automations) =
+        crate::client::shell::tree::partition_automations(snapshot, &state.config, rows);
+    let mut entries = if crate::client::shell::tree::tree_view_active(&state.config) {
+        tree_list_entries(snapshot, tree, rows)
+    } else {
+        rows.into_iter().map(AgentPanelListEntry::Agent).collect()
+    };
+    crate::client::shell::tree::append_automations(&mut entries, tree, automations);
+    entries
 }
 
 #[test]
@@ -731,4 +747,181 @@ fn revealing_folded_spaces_starts_the_section_compact() {
         .expect("local tree chrome");
     assert!(!tree.show_hidden_spaces);
     assert!(!tree.hidden_spaces_expanded);
+}
+
+fn automation_config() -> ClientShellConfig {
+    let mut config = Config::default();
+    config.ui.sidebar.automations.workspaces = vec!["beta".into()];
+    ClientShellConfig::from_config(&config)
+}
+
+#[test]
+fn automation_entries_are_partitioned_and_expand_after_the_header() {
+    let mut config = automation_config();
+    config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    let mut state = ClientShellState::new(config);
+    state.set_snapshot(Box::new(tree_snapshot()));
+    let mut tree = ClientTreeChrome::default();
+
+    assert_eq!(
+        shape(&state, &tree),
+        [
+            "space:alpha",
+            "tab:one",
+            "agent:pane_1",
+            "tab:two",
+            "agent:pane_2",
+            "automations:1",
+        ]
+    );
+
+    tree.automations_expanded = true;
+    assert_eq!(
+        shape(&state, &tree),
+        [
+            "space:alpha",
+            "tab:one",
+            "agent:pane_1",
+            "tab:two",
+            "agent:pane_2",
+            "automations:1",
+            "automation:pane_3",
+        ]
+    );
+}
+
+#[test]
+fn empty_automation_config_preserves_the_stock_render() {
+    let tree = ClientTreeChrome::default();
+    let state = tree_state(tree.clone());
+
+    assert!(!shape(&state, &tree)
+        .iter()
+        .any(|row| row.starts_with("automations:")));
+}
+
+#[test]
+fn automation_summary_reports_blocked_before_working() {
+    let mut config = automation_config();
+    config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    let mut state = ClientShellState::new(config);
+    let mut snapshot = tree_snapshot();
+    snapshot
+        .agents
+        .push(agent("pane_4", "ws_2", "tab_3", AgentStatus::Blocked, 4));
+    snapshot
+        .agents
+        .push(agent("pane_5", "ws_2", "tab_3", AgentStatus::Working, 5));
+    state.set_snapshot(Box::new(snapshot));
+    let tree = ClientTreeChrome::default();
+
+    let header = shape(&state, &tree)
+        .into_iter()
+        .find(|row| row.starts_with("automations:"))
+        .expect("automations header");
+    assert!(header.starts_with("automations:1 blocked"));
+    assert!(header.contains("1 working"));
+}
+
+#[test]
+fn clicking_the_automations_header_expands_the_section() {
+    let mut config = automation_config();
+    config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    let mut state = ClientShellState::new(config);
+    state.set_snapshot(Box::new(tree_snapshot()));
+    state.set_pane_surface(surface());
+    state.compose(106, 40).expect("composed frame");
+    let header = state.hits.automations_header;
+    assert!(header.width > 0);
+
+    state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: header.x + 1,
+        row: header.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+
+    assert!(
+        state
+            .tree_chrome
+            .get(&crate::client::endpoint::ClientEndpointId::Local)
+            .expect("local tree chrome")
+            .automations_expanded
+    );
+}
+
+#[test]
+fn tree_view_gives_the_agents_panel_the_whole_sidebar() {
+    let tree = ClientTreeChrome::default();
+    let mut state = tree_state(tree);
+    state.set_pane_surface(surface());
+    state.compose(106, 40).expect("composed frame");
+
+    // Only the one-row footer strip is left for the spaces section, so no
+    // workspace rows are drawn and the section divider is gone.
+    assert!(state.hits.workspaces.is_empty());
+    assert_eq!(state.hits.sidebar_section_divider, Rect::default());
+    assert!(state.hits.global_launcher.width > 0);
+    assert!(state.hits.agent_body.height > 30);
+}
+
+#[test]
+fn content_fit_spaces_hug_their_rows_and_leave_the_rest_to_agents() {
+    let mut config = Config::default();
+    config.ui.sidebar.spaces.max_visible = 1;
+    let mut ratio = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut fitted = ClientShellState::new(ClientShellConfig::from_config(&config));
+    for state in [&mut ratio, &mut fitted] {
+        state.set_snapshot(Box::new(tree_snapshot()));
+        state.set_pane_surface(surface());
+        state.compose(106, 40).expect("composed frame");
+    }
+
+    assert!(fitted.hits.agent_body.height > ratio.hits.agent_body.height);
+    // The fitted list still shows its one entry.
+    assert_eq!(fitted.hits.workspaces.len(), 1);
+    // A content-fit sidebar has no draggable split.
+    assert_eq!(fitted.hits.sidebar_section_divider, Rect::default());
+}
+
+#[test]
+fn agents_first_section_order_puts_the_spaces_list_at_the_bottom() {
+    let mut config = Config::default();
+    config.ui.sidebar.section_order = [
+        crate::config::SidebarSection::Agents,
+        crate::config::SidebarSection::Spaces,
+    ];
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(tree_snapshot()));
+    state.set_pane_surface(surface());
+    state.compose(106, 40).expect("composed frame");
+
+    assert!(state.hits.workspaces[0].rect.y > state.hits.agent_body.y);
+}
+
+#[test]
+fn header_new_button_moves_out_of_the_footer() {
+    let mut config = Config::default();
+    config.ui.sidebar.new_button = crate::config::SidebarNewButtonConfig::Header;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(tree_snapshot()));
+    state.set_pane_surface(surface());
+    state.compose(106, 40).expect("composed frame");
+
+    let new_button = state.hits.new_workspace;
+    assert_eq!(new_button.y, 0);
+    assert!(new_button.x > state.hits.global_launcher.x.saturating_sub(40));
+    assert_ne!(new_button.y, state.hits.global_launcher.y);
+}
+
+#[test]
+fn left_menu_position_moves_the_launcher_to_the_footer_start() {
+    let mut config = Config::default();
+    config.ui.sidebar.menu_position = crate::config::SidebarMenuPositionConfig::Left;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(tree_snapshot()));
+    state.set_pane_surface(surface());
+    state.compose(106, 40).expect("composed frame");
+
+    assert_eq!(state.hits.global_launcher.x, 0);
 }

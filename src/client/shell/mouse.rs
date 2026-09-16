@@ -2421,6 +2421,14 @@ impl ClientShellState {
         mouse: crossterm::event::MouseEvent,
         outcome: &mut ClientShellInput,
     ) -> bool {
+        if super::contains(self.hits.automations_header, point) {
+            let tree = self.tree_chrome_mut();
+            tree.automations_expanded = !tree.automations_expanded;
+            self.agent_scroll = 0;
+            self.persist_chrome_preferences(outcome);
+            outcome.repaint = true;
+            return true;
+        }
         if super::contains(self.hits.tree_hidden_header, point) {
             let tree = self.tree_chrome_mut();
             tree.hidden_spaces_expanded = !tree.hidden_spaces_expanded;
