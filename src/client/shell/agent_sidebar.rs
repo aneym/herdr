@@ -139,6 +139,15 @@ pub(super) fn tree_header_chevron_rect(rect: Rect) -> Rect {
     Rect::new(rect.right().saturating_sub(width), rect.y, width, 1)
 }
 
+/// Pin toggle on a space header: the cell pair two slots left of the chevron,
+/// leaving the slot between them for the new-tab plus.
+pub(super) fn tree_header_pin_rect(rect: Rect) -> Rect {
+    if rect.width < 6 {
+        return Rect::default();
+    }
+    Rect::new(rect.right().saturating_sub(6), rect.y, 2, 1)
+}
+
 fn render_panel_list_entry(
     buffer: &mut Buffer,
     rect: Rect,
@@ -157,6 +166,29 @@ fn render_panel_list_entry(
         }
         AgentPanelListEntry::TabHeader(header) => {
             render_tree_header(buffer, rect, header, false, config, hits);
+        }
+        AgentPanelListEntry::HiddenSpacesHeader { count, collapsed } => {
+            let palette = &config.palette;
+            // Muted on purpose: this section names what was folded away, so it
+            // must never outrank a space still meant to be seen.
+            let style = Style::default()
+                .fg(palette.overlay0)
+                .add_modifier(Modifier::DIM);
+            put_text(buffer, rect.x, rect.y, rect.width, " hidden", style);
+            let trailing = format!(
+                "{count} {} ",
+                if *collapsed { "\u{25b8}" } else { "\u{25be}" }
+            );
+            let width = (display_width(&trailing) as u16).min(rect.width);
+            put_text(
+                buffer,
+                rect.right().saturating_sub(width),
+                rect.y,
+                width,
+                &trailing,
+                style,
+            );
+            hits.tree_hidden_header = rect;
         }
     }
 }
@@ -231,10 +263,20 @@ fn render_tree_header(
         )
     };
     if is_space {
-        // The pin and new-tab controls live in these reserved slots; they are
-        // drawn blank until those features land so the trailing strip keeps a
-        // fixed geometry.
-        trailing.push(("    ".to_owned(), Style::default()));
+        // Pin toggle, one cell pair left of the plus, so the trailing strip
+        // reads [pin][+][chevron]. A pinned space keeps its header row even when
+        // no agents remain beneath it.
+        trailing.push((
+            "\u{26b2} ".to_owned(),
+            if header.pinned {
+                Style::default().fg(palette.accent)
+            } else {
+                Style::default().fg(palette.overlay0)
+            },
+        ));
+        // The new-tab control lands in the next reserved slot; it is drawn blank
+        // until that feature lands so the trailing strip keeps a fixed geometry.
+        trailing.push(("  ".to_owned(), Style::default()));
         trailing.push(if header.collapsible {
             chevron(header.collapsed)
         } else {
@@ -264,9 +306,15 @@ fn render_tree_header(
         } else {
             Rect::default()
         },
+        pin: if is_space {
+            tree_header_pin_rect(rect)
+        } else {
+            Rect::default()
+        },
         workspace_id: header.workspace_id.clone(),
         tab_id: header.tab_id.clone(),
         key: header.key.clone(),
+        pinned: header.pinned,
     });
 }
 

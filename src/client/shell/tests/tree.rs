@@ -132,6 +132,12 @@ fn shape(state: &ClientShellState, tree: &ClientTreeChrome) -> Vec<String> {
             }
             AgentPanelListEntry::TabHeader(header) => format!("tab:{}", header.label),
             AgentPanelListEntry::Agent(row) => format!("agent:{}", row.pane_id),
+            AgentPanelListEntry::HiddenSpacesHeader { count, collapsed } => {
+                format!(
+                    "hidden:{count}:{}",
+                    if *collapsed { "closed" } else { "open" }
+                )
+            }
         })
         .collect()
 }
@@ -432,4 +438,297 @@ fn tree_tab_header_click_focuses_that_tab() {
                 crate::api::schema::Method::TabFocus(target) if target.tab_id == "tab_2"
             )
     ));
+}
+
+#[test]
+fn pinned_space_keeps_its_header_without_any_agents() {
+    let mut tree = ClientTreeChrome::default();
+    tree.pinned_spaces.insert("ws_2".into());
+    let mut state = tree_state(tree.clone());
+    let mut snapshot = tree_snapshot();
+    // Nothing runs in beta any more.
+    snapshot.agents.retain(|agent| agent.workspace_id != "ws_2");
+    state.set_snapshot(Box::new(snapshot));
+
+    assert_eq!(
+        shape(&state, &tree),
+        [
+            "space:alpha",
+            "tab:one",
+            "agent:pane_1",
+            "tab:two",
+            "agent:pane_2",
+            "space:beta",
+        ]
+    );
+}
+
+#[test]
+fn unpinned_agentless_space_drops_out_of_the_tree() {
+    let tree = ClientTreeChrome::default();
+    let mut state = tree_state(tree.clone());
+    let mut snapshot = tree_snapshot();
+    snapshot.agents.retain(|agent| agent.workspace_id != "ws_2");
+    state.set_snapshot(Box::new(snapshot));
+
+    assert!(!shape(&state, &tree).contains(&"space:beta".to_owned()));
+}
+
+#[test]
+fn collapsed_spaces_move_into_the_hidden_section() {
+    let mut tree = ClientTreeChrome {
+        show_hidden_spaces: true,
+        ..ClientTreeChrome::default()
+    };
+    tree.collapsed_spaces.insert("ws_1".into());
+    let state = tree_state(tree.clone());
+
+    assert_eq!(
+        shape(&state, &tree),
+        ["space:beta", "tab:three", "agent:pane_3", "hidden:1:closed"]
+    );
+}
+
+#[test]
+fn expanding_the_hidden_section_lists_the_folded_spaces() {
+    let mut tree = ClientTreeChrome {
+        show_hidden_spaces: true,
+        hidden_spaces_expanded: true,
+        ..ClientTreeChrome::default()
+    };
+    tree.collapsed_spaces.insert("ws_1".into());
+    let state = tree_state(tree.clone());
+
+    assert_eq!(
+        shape(&state, &tree),
+        [
+            "space:beta",
+            "tab:three",
+            "agent:pane_3",
+            "hidden:1:open",
+            "space:alpha",
+        ]
+    );
+}
+
+#[test]
+fn no_hidden_section_without_the_reveal() {
+    let mut tree = ClientTreeChrome::default();
+    tree.collapsed_spaces.insert("ws_1".into());
+    let state = tree_state(tree.clone());
+
+    assert!(!shape(&state, &tree)
+        .iter()
+        .any(|row| row.starts_with("hidden:")));
+}
+
+#[test]
+fn hidden_section_counts_spaces_not_agents() {
+    let mut tree = ClientTreeChrome {
+        show_hidden_spaces: true,
+        ..ClientTreeChrome::default()
+    };
+    tree.collapsed_spaces.insert("ws_1".into());
+    tree.collapsed_spaces.insert("ws_2".into());
+    let state = tree_state(tree.clone());
+
+    assert_eq!(shape(&state, &tree), ["hidden:2:closed"]);
+}
+
+#[test]
+fn collapsed_space_header_hides_its_status_dots() {
+    let mut tree = ClientTreeChrome {
+        show_tabs: false,
+        show_agents: false,
+        ..ClientTreeChrome::default()
+    };
+    tree.collapsed_spaces.insert("ws_1".into());
+    let state = tree_state(tree.clone());
+    let snapshot = state.snapshot.as_deref().expect("snapshot");
+    let rows = crate::client::shell::agent_sidebar::agent_rows(snapshot, &state.config, None);
+    let headers = tree_list_entries(snapshot, &tree, rows)
+        .into_iter()
+        .filter_map(|entry| match entry {
+            AgentPanelListEntry::SpaceHeader(header) => Some((header.label, header.child_states)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    let beta_status = snapshot
+        .agents
+        .iter()
+        .find(|agent| agent.pane_id == "pane_3")
+        .expect("beta agent")
+        .agent_status;
+    assert_eq!(
+        headers,
+        [
+            ("alpha".to_owned(), Vec::new()),
+            ("beta".to_owned(), vec![beta_status]),
+        ]
+    );
+}
+
+#[test]
+fn space_order_moves_whole_space_blocks() {
+    let tree = ClientTreeChrome {
+        space_order: vec!["ws_2".into(), "ws_1".into()],
+        ..ClientTreeChrome::default()
+    };
+    let state = tree_state(tree.clone());
+
+    assert_eq!(
+        shape(&state, &tree),
+        [
+            "space:beta",
+            "tab:three",
+            "agent:pane_3",
+            "space:alpha",
+            "tab:one",
+            "agent:pane_1",
+            "tab:two",
+            "agent:pane_2",
+        ]
+    );
+}
+
+#[test]
+fn pin_click_toggles_the_pin_and_tells_the_endpoint() {
+    let tree = ClientTreeChrome::default();
+    let mut state = tree_state(tree);
+    state.set_pane_surface(surface());
+    state.compose(106, 40).expect("composed frame");
+
+    let pin = state
+        .hits
+        .tree_headers
+        .iter()
+        .find(|hit| hit.key == "ws_1" && hit.tab_id.is_none())
+        .expect("space header hit")
+        .pin;
+    assert!(pin.width > 0);
+
+    let outcome = state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: pin.x,
+        row: pin.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+
+    assert!(state
+        .tree_chrome
+        .get(&crate::client::endpoint::ClientEndpointId::Local)
+        .expect("local tree chrome")
+        .pinned_spaces
+        .contains("ws_1"));
+    assert!(matches!(
+        &outcome.actions[..],
+        [ClientShellAction::Endpoint { request, .. }]
+            if matches!(
+                &request.method,
+                crate::api::schema::Method::WorkspaceSetPinned(params)
+                    if params.workspace_id == "ws_1" && params.pinned
+            )
+    ));
+}
+
+#[test]
+fn dragging_a_space_header_records_the_new_order() {
+    let tree = ClientTreeChrome::default();
+    let mut state = tree_state(tree);
+    state.set_pane_surface(surface());
+    state.compose(106, 40).expect("composed frame");
+
+    let (alpha, beta) = {
+        let headers = state
+            .hits
+            .tree_headers
+            .iter()
+            .filter(|hit| hit.tab_id.is_none())
+            .collect::<Vec<_>>();
+        (headers[0].rect, headers[1].rect)
+    };
+
+    state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: alpha.x + 1,
+        row: alpha.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert!(state.tree_space_press.is_some());
+    state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column: beta.x + 1,
+        row: beta.y + 1,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+        kind: MouseEventKind::Up(MouseButton::Left),
+        column: beta.x + 1,
+        row: beta.y + 1,
+        modifiers: KeyModifiers::empty(),
+    })]);
+
+    assert_eq!(
+        state
+            .tree_chrome
+            .get(&crate::client::endpoint::ClientEndpointId::Local)
+            .expect("local tree chrome")
+            .space_order,
+        ["ws_2", "ws_1"]
+    );
+}
+
+#[test]
+fn right_click_on_the_sort_label_opens_the_view_toggles() {
+    let tree = ClientTreeChrome::default();
+    let mut state = tree_state(tree);
+    state.set_pane_surface(surface());
+    state.compose(106, 40).expect("composed frame");
+    let toggle = state.hits.agent_sort_toggle;
+    assert!(toggle.width > 0);
+
+    state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Right),
+        column: toggle.x,
+        row: toggle.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+
+    let Some(crate::client::shell::ClientShellOverlay::ContextMenu(menu)) = state.overlay.as_ref()
+    else {
+        panic!("right-click on the sort label should open the view menu");
+    };
+    assert_eq!(
+        menu.items()
+            .iter()
+            .map(|item| item.label)
+            .collect::<Vec<_>>(),
+        [
+            "Hide spaces",
+            "Hide tabs",
+            "Hide agents",
+            "Reveal folded spaces"
+        ]
+    );
+}
+
+#[test]
+fn revealing_folded_spaces_starts_the_section_compact() {
+    let tree = ClientTreeChrome {
+        hidden_spaces_expanded: true,
+        show_hidden_spaces: true,
+        ..ClientTreeChrome::default()
+    };
+    let mut state = tree_state(tree);
+    state.open_sidebar_view_context_menu(0, 0);
+    let mut outcome = ClientShellInput::default();
+    state.activate_context_menu_item(3, &mut outcome);
+
+    let tree = state
+        .tree_chrome
+        .get(&crate::client::endpoint::ClientEndpointId::Local)
+        .expect("local tree chrome");
+    assert!(!tree.show_hidden_spaces);
+    assert!(!tree.hidden_spaces_expanded);
 }

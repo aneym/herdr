@@ -48,6 +48,7 @@ const CLIENT_SHELL_METHODS: &[&str] = &[
     "workspace.move",
     "workspace.move_block",
     "workspace.rename",
+    "workspace.set_pinned",
     "worktree.create",
     "worktree.list",
     "worktree.open",
@@ -288,6 +289,14 @@ mod tests {
         .expect("endpoint method shape fixture");
         let mut actual = endpoint_method_shape_digests();
         // Freeze the additive method separately without rewriting the published fixture.
+        assert_eq!(
+            actual
+                .remove("workspace.set_pinned")
+                .as_deref()
+                .map(|digest| !digest.is_empty()),
+            Some(true),
+            "workspace.set_pinned must advertise a shape"
+        );
         assert_eq!(
             actual.remove("pane.link.resolve").as_deref(),
             Some("f5e4a3e01453ae7b188f127ce951c12c20e0bebcc17cc364eeb6d1a01fd5bf81")

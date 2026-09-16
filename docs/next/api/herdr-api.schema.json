@@ -4694,6 +4694,22 @@
           ],
           "type": "object"
         },
+        "WorkspaceSetPinnedParams": {
+          "description": "Pin or unpin a space. A pinned space keeps a live tab when its last one\ncloses, so its sidebar row survives.",
+          "properties": {
+            "pinned": {
+              "type": "boolean"
+            },
+            "workspace_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspace_id",
+            "pinned"
+          ],
+          "type": "object"
+        },
         "WorkspaceSetProfilesParams": {
           "properties": {
             "profiles": {
@@ -5257,6 +5273,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/WorkspaceRenameParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "workspace.set_pinned",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/WorkspaceSetPinnedParams"
             }
           },
           "required": [

@@ -113,6 +113,9 @@ pub(super) struct TreeHeader {
     /// This header has rows underneath it that a collapse would actually hide.
     /// A header with nothing to hide shows no chevron.
     pub(super) collapsible: bool,
+    /// Space headers: this space is pinned, so it stays listed even when no
+    /// agent rows remain beneath it. Always false on tab headers.
+    pub(super) pinned: bool,
     pub(super) indent: u8,
     /// This header's workspace or tab holds the focused pane.
     pub(super) active: bool,
@@ -120,6 +123,12 @@ pub(super) struct TreeHeader {
 
 pub(super) enum AgentPanelListEntry {
     Agent(AgentRow),
+    /// The collapsible section collecting spaces that were folded away. Only
+    /// emitted while the hidden reveal is on.
+    HiddenSpacesHeader {
+        count: usize,
+        collapsed: bool,
+    },
     SpaceHeader(TreeHeader),
     TabHeader(TreeHeader),
 }
@@ -183,11 +192,21 @@ pub(super) fn tree_list_entries(
     }
 
     let mut out = Vec::new();
+    // Collapsed spaces move out of their slot and collect under one collapsible
+    // section at the bottom, so folding a space away actually clears the row it
+    // occupied instead of leaving a stub mid-tree.
+    let mut hidden_out = Vec::<AgentPanelListEntry>::new();
+    let mut hidden_spaces = HashSet::<String>::new();
     for workspace_id in &workspace_order {
         let Some(workspace_rows) = by_workspace.remove(workspace_id) else {
             continue;
         };
         let space_collapsed = tree.show_spaces && tree.collapsed_spaces.contains(workspace_id);
+        let demoted = space_collapsed && tree.show_hidden_spaces;
+        if demoted {
+            hidden_spaces.insert(workspace_id.clone());
+        }
+        let out = if demoted { &mut hidden_out } else { &mut out };
         let space_indent = u8::from(tree.show_spaces);
         if tree.show_spaces {
             // A collapsed space is deliberately folded out of sight; its status
@@ -208,6 +227,7 @@ pub(super) fn tree_list_entries(
                     Vec::new()
                 },
                 collapsible: !workspace_rows.is_empty() && (tree.show_tabs || tree.show_agents),
+                pinned: tree.pinned_spaces.contains(workspace_id),
                 indent: 0,
                 // A space row separates groups; it is never the selection.
                 // Highlighting it while a tab inside it is selected reads as two
@@ -258,6 +278,7 @@ pub(super) fn tree_list_entries(
                         Vec::new()
                     },
                     collapsible: !tab_rows.is_empty() && tree.show_agents,
+                    pinned: false,
                     indent: space_indent,
                     active: !tree.show_agents
                         && tab.is_some_and(|tab| tab.focused)
@@ -283,13 +304,69 @@ pub(super) fn tree_list_entries(
         }
     }
 
-    reorder_spaces(out, &tree.space_order)
+    // Pinned spaces stay listed even when nothing runs in them, so a space keeps
+    // its header (and its new-tab plus) instead of vanishing when its last agent
+    // goes away. They follow the agent-bearing spaces, in workspace order.
+    if tree.show_spaces && !tree.pinned_spaces.is_empty() {
+        let listed = out
+            .iter()
+            .chain(hidden_out.iter())
+            .filter_map(|entry| match entry {
+                AgentPanelListEntry::SpaceHeader(header) => Some(header.workspace_id.clone()),
+                _ => None,
+            })
+            .collect::<HashSet<_>>();
+        for workspace in &snapshot.workspaces {
+            let workspace_id = &workspace.workspace_id;
+            if listed.contains(workspace_id) || !tree.pinned_spaces.contains(workspace_id) {
+                continue;
+            }
+            let collapsed = tree.collapsed_spaces.contains(workspace_id);
+            let header = AgentPanelListEntry::SpaceHeader(TreeHeader {
+                workspace_id: workspace_id.clone(),
+                tab_id: None,
+                label: workspace.label.clone(),
+                key: workspace_id.clone(),
+                collapsed,
+                child_states: Vec::new(),
+                collapsible: false,
+                pinned: true,
+                indent: 0,
+                active: false,
+            });
+            // A pinned space carries no agent rows, so collapsing it hides
+            // nothing on its own; the section is where it goes to get out of the
+            // way.
+            if collapsed && tree.show_hidden_spaces {
+                hidden_spaces.insert(workspace_id.clone());
+                hidden_out.push(header);
+            } else {
+                out.push(header);
+            }
+        }
+    }
+
+    // The manual order applies to the visible tree only; a space inside the
+    // hidden section stays inside it.
+    let mut out = reorder_spaces(out, &tree.space_order);
+
+    // One collapsible section carries every collapsed space, so the tree above
+    // it holds only what is still meant to be seen.
+    if !hidden_out.is_empty() {
+        let collapsed = !tree.hidden_spaces_expanded;
+        out.push(AgentPanelListEntry::HiddenSpacesHeader {
+            count: hidden_spaces.len(),
+            collapsed,
+        });
+        if !collapsed {
+            out.append(&mut reorder_spaces(hidden_out, &tree.space_order));
+        }
+    }
+    out
 }
 
 /// Reorder whole space blocks to follow the manual drag order. Blocks not named
-/// in `space_order` keep their relative position behind the ones that are, and
-/// anything outside a space block (the hidden section, automations) stays put at
-/// the end.
+/// in `space_order` keep their relative position behind the ones that are.
 fn reorder_spaces(
     entries: Vec<AgentPanelListEntry>,
     space_order: &[String],

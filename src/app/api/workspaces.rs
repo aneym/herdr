@@ -4,7 +4,7 @@ use crate::api::schema::{
     EventData, EventEnvelope, EventKind, ProfileSwitchParams, ResponseResult, WorkspaceCloseParams,
     WorkspaceCreateParams, WorkspaceListParams, WorkspaceMoveBlockParams, WorkspaceMoveParams,
     WorkspaceRenameParams, WorkspaceReportMetadataParams, WorkspaceSetOrchestratorParams,
-    WorkspaceSetProfilesParams, WorkspaceTarget,
+    WorkspaceSetPinnedParams, WorkspaceSetProfilesParams, WorkspaceTarget,
 };
 use crate::app::App;
 
@@ -233,6 +233,34 @@ impl App {
             },
         });
 
+        encode_success(
+            id,
+            ResponseResult::WorkspaceInfo {
+                workspace: self.workspace_info(index),
+            },
+        )
+    }
+
+    /// Pinned spaces are drawn by the client, but the pin is load-bearing on
+    /// the server: `respawn_tab_for_pinned_workspace` keeps a live tab so the
+    /// space survives its last close. The client mirrors its pin set here.
+    pub(super) fn handle_workspace_set_pinned(
+        &mut self,
+        id: String,
+        params: WorkspaceSetPinnedParams,
+    ) -> String {
+        let Some(index) = self.parse_workspace_id(&params.workspace_id) else {
+            return workspace_not_found(id, &params.workspace_id);
+        };
+        let Some(workspace_id) = self.state.workspaces.get(index).map(|ws| ws.id.clone()) else {
+            return workspace_not_found(id, &params.workspace_id);
+        };
+        if params.pinned {
+            self.state.tree_pinned_spaces.insert(workspace_id);
+        } else {
+            self.state.tree_pinned_spaces.remove(&workspace_id);
+        }
+        self.schedule_session_save();
         encode_success(
             id,
             ResponseResult::WorkspaceInfo {
@@ -1190,6 +1218,69 @@ mod tests {
                     && workspaces[2].workspace_id == moved_id
             )
         }));
+    }
+
+    #[test]
+    fn api_workspace_set_pinned_round_trips_the_pin_set() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub.clone(),
+        );
+        app.state.workspaces = vec![Workspace::test_new("one")];
+        let workspace_id = app.public_workspace_id(0);
+        let internal_id = app.state.workspaces[0].id.clone();
+
+        let response = app.handle_workspace_set_pinned(
+            "req".into(),
+            WorkspaceSetPinnedParams {
+                workspace_id: workspace_id.clone(),
+                pinned: true,
+            },
+        );
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert!(matches!(
+            success.result,
+            ResponseResult::WorkspaceInfo { .. }
+        ));
+        assert!(app.state.tree_pinned_spaces.contains(&internal_id));
+
+        app.handle_workspace_set_pinned(
+            "req".into(),
+            WorkspaceSetPinnedParams {
+                workspace_id,
+                pinned: false,
+            },
+        );
+        assert!(!app.state.tree_pinned_spaces.contains(&internal_id));
+    }
+
+    #[test]
+    fn api_workspace_set_pinned_rejects_an_unknown_workspace() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub.clone(),
+        );
+
+        let response = app.handle_workspace_set_pinned(
+            "req".into(),
+            WorkspaceSetPinnedParams {
+                workspace_id: "nope".into(),
+                pinned: true,
+            },
+        );
+
+        assert!(response.contains("workspace_not_found"));
+        assert!(app.state.tree_pinned_spaces.is_empty());
     }
 
     #[test]

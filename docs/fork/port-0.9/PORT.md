@@ -37,7 +37,7 @@ The base for every fork diff is `d79fd746` (herdr 0.8.2 merge base); fork
 | 8 | Pane focus history + `last_pane` | part of `08704fd6` | carried | `orig/src/app/actions.rs` (`record_focus_history_change`, `focus_history_target`, `focus_back`, `focus_forward`, `last_pane`), `PaneFocusHistory` in `orig/src/app/state.rs` | keybinding: `src/client/shell/input.rs` | History is recorded on every focus change through `record_pane_focus_after_navigation`. `focus_history_target` is `#[allow(dead_code)]` until a client key binds it. |
 | 9 | Mouse back/forward buttons drive focus history | `08704fd6` | needs-port | `orig/src/raw_input.rs` (`MouseNavButton`, `nav_button_from_cb`), `orig/src/app/runtime.rs` (`handle_mouse_nav_button`) | `src/client/shell/input.rs`, `src/client/shell/mouse.rs` | Buttons 8/9 are still parsed into `RawInputEvent::MouseNavButton`; both the client and the server input path now ignore it with a PORT-0.9 marker. Upstream has no equivalent. |
 | 10 | Sidebar tree (spaces/tabs/agents) + attention-aware ⌘E | `e838a372`, `ca788cd8`, `3ed0689a`, `44411943` | carried (stage 2) | `orig/src/ui/sidebar.rs` (6040 lines), `orig/src/app/actions.rs` (`cycle_agent_entry`, `agent_cycle_target`, `cycle_attention_rank`, `focus_agent_entry`, `ensure_agent_panel_entry_visible`) | `src/client/shell/sidebar.rs`, `src/client/shell/agent_sidebar.rs` | Rebuilt in `src/client/shell/tree.rs` over `ClientShellSnapshot`. The tree layer toggles and collapse sets moved to per-client chrome state (stage-2 decision 6). `Triage` now sorts the panel and `Tree` groups it; the sort control cycles all four values. |
-| 11 | Pinned spaces, hidden section | `96d05fa3`, `5d4a5203`, `b00105bd`, `c98b5ea1`, `ead187a2` | carried (data) / needs-port (rows) | `orig/src/ui/sidebar.rs`, `orig/src/app/api.rs` (`respawn_tab_for_pinned_workspace`) | `src/client/shell/sidebar.rs` | `tree_pinned_spaces`, `tree_show_hidden_spaces` and `hidden_spaces_expanded` persist; the "pinned space keeps a live tab" behaviour on `PaneDied` is carried server-side. |
+| 11 | Pinned spaces, hidden section | `96d05fa3`, `5d4a5203`, `b00105bd`, `c98b5ea1`, `ead187a2` | carried (stage 2) | `orig/src/ui/sidebar.rs`, `orig/src/app/api.rs` (`respawn_tab_for_pinned_workspace`) | `src/client/shell/sidebar.rs` | The pin toggle, the hidden section and space drag-to-reorder are client-side; the pin also mirrors to the endpoint through the new `workspace.set_pinned` method (decision 9), so `respawn_tab_for_pinned_workspace` still keeps a live tab. |
 | 12 | Tab status glyphs (`ui.show_tab_status`) | `ca788cd8` | needs-port | `orig/src/ui/tabs.rs`, `orig/src/app/tab_bar_status.rs` | `src/client/shell/tabs.rs` | `show_tab_status` config key is kept and parsed; nothing reads it yet. |
 | 13 | Space header `+` button / next-numbered tab | `f71ee286`, `51d4cf4c` | needs-port | `orig/src/ui/sidebar.rs` (`tree_header_plus_rect`, `TreeHeaderHit::NewTab`), `orig/src/app/creation.rs` (`next_new_tab_default_name`) | `src/client/shell/sidebar.rs`, `src/client/shell/mouse.rs` | The deferred tab-create API path it called is upstream's `tab.create`, which is intact. |
 | 14 | ⌘C copy bridge into mouse-reporting pane apps | `8ad4ec54`, `e7858883`, `889e012b`, `338fa73f` | superseded-by-upstream / needs-port | `orig/src/app/input/mouse.rs` (`pane_app_drag_shadow`, `pane_app_drag_copy`, `pane_app_pending_word_copy`) | `src/client/shell/mouse.rs`, `src/client/shell/word_selection.rs`, `src/client/shell/copy_mode.rs` | Upstream 0.9 ships its own double-click word selection and copy-on-select. Re-check against upstream before rebuilding: the agent-interrupt guard (`e7858883`) may still be wanted. |
@@ -153,6 +153,26 @@ means changing an upstream test, so raise it with Alex first.
    `tree::cycle_attention_rank` is a second function rather than a change to
    the first.
 
+
+9. **`workspace.set_pinned` is a new advertised endpoint method.** Pinning is
+   the one piece of tree chrome with server-side behaviour:
+   `App::respawn_tab_for_pinned_workspace` grows a replacement tab so a pinned
+   space survives its last close, and it reads `AppState.tree_pinned_spaces`.
+   With the tree drawn in the client, nothing fed that set any more. Upstream's
+   own failure message on
+   `advertised_client_shell_method_shapes_stay_at_the_v1_contract` says to
+   "add load-bearing behavior as a new advertised method", so the method is
+   added and frozen separately in that test, exactly as upstream froze
+   `pane.link.resolve`. No existing method changed shape. The generated schema
+   artifact `docs/next/api/herdr-api.schema.json` was regenerated.
+
+10. **The tree layer toggles live on the sort control's right-click.** The fork
+    turned the agent-panel sort label into a menu carrying the sort plus the
+    three layer toggles and the hidden-spaces reveal. Upstream's sort label is
+    a left-click cycle, which is the mechanism to keep, so the fork's toggles
+    moved to a right-click context menu on the same control
+    (`ClientContextMenuTarget::SidebarView`). Left-click still cycles
+    grouped/priority/triage/tree.
 
 ## Build environment
 

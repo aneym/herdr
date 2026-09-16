@@ -6,6 +6,41 @@ impl ClientContextMenuOverlay {
 
         let item = |label, action| ClientContextMenuItem { label, action };
         match &self.target {
+            ClientContextMenuTarget::SidebarView {
+                show_spaces,
+                show_tabs,
+                show_agents,
+                show_hidden,
+            } => vec![
+                item(
+                    if *show_spaces {
+                        "Hide spaces"
+                    } else {
+                        "Show spaces"
+                    },
+                    Action::ToggleTreeSpaces,
+                ),
+                item(
+                    if *show_tabs { "Hide tabs" } else { "Show tabs" },
+                    Action::ToggleTreeTabs,
+                ),
+                item(
+                    if *show_agents {
+                        "Hide agents"
+                    } else {
+                        "Show agents"
+                    },
+                    Action::ToggleTreeAgents,
+                ),
+                item(
+                    if *show_hidden {
+                        "Hide folded spaces"
+                    } else {
+                        "Reveal folded spaces"
+                    },
+                    Action::ToggleHiddenSpaces,
+                ),
+            ],
             ClientContextMenuTarget::Workspace { is_git: false, .. } => {
                 vec![item("Rename", Action::Rename), item("Close", Action::Close)]
             }
@@ -192,6 +227,9 @@ impl ClientShellState {
             return;
         };
         match menu.target {
+            ClientContextMenuTarget::SidebarView { .. } => {
+                self.activate_sidebar_view_action(action, outcome)
+            }
             ClientContextMenuTarget::Workspace { workspace_id, .. } => {
                 self.activate_workspace_context_action(workspace_id, action, outcome)
             }
@@ -215,6 +253,49 @@ impl ClientShellState {
             ),
         }
         outcome.repaint = true;
+    }
+
+    /// Open the agents-panel view control. The fork put the tree layer toggles
+    /// behind the sort label; upstream's sort label already cycles the sort, so
+    /// the toggles live on its right-click instead.
+    pub(super) fn open_sidebar_view_context_menu(&mut self, x: u16, y: u16) {
+        let tree = self
+            .tree_chrome
+            .get(&self.active_endpoint_id)
+            .unwrap_or(&self.tree_chrome_default);
+        self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
+            target: ClientContextMenuTarget::SidebarView {
+                show_spaces: tree.show_spaces,
+                show_tabs: tree.show_tabs,
+                show_agents: tree.show_agents,
+                show_hidden: tree.show_hidden_spaces,
+            },
+            x,
+            y,
+            highlighted: 0,
+        }));
+    }
+
+    fn activate_sidebar_view_action(
+        &mut self,
+        action: ClientContextMenuAction,
+        outcome: &mut ClientShellInput,
+    ) {
+        let tree = self.tree_chrome_mut();
+        match action {
+            ClientContextMenuAction::ToggleTreeSpaces => tree.show_spaces = !tree.show_spaces,
+            ClientContextMenuAction::ToggleTreeTabs => tree.show_tabs = !tree.show_tabs,
+            ClientContextMenuAction::ToggleTreeAgents => tree.show_agents = !tree.show_agents,
+            ClientContextMenuAction::ToggleHiddenSpaces => {
+                tree.show_hidden_spaces = !tree.show_hidden_spaces;
+                // Turning it off closes the section too, so switching it back on
+                // starts compact rather than resuming a stale expansion.
+                tree.hidden_spaces_expanded = false;
+            }
+            _ => return,
+        }
+        self.agent_scroll = 0;
+        self.persist_chrome_preferences(outcome);
     }
 
     fn activate_workspace_context_action(

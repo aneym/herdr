@@ -34,6 +34,7 @@ pub(crate) fn request_changes_ui(request: &Request) -> bool {
             | Method::WorkspaceSetOrchestrator(_)
             | Method::ProfileSwitch(_)
             | Method::WorkspaceRename(_)
+            | Method::WorkspaceSetPinned(_)
             | Method::WorkspaceMove(_)
             | Method::WorkspaceMoveBlock(_)
             | Method::WorkspaceReportMetadata(_)

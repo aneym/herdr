@@ -101,6 +101,7 @@ pub(super) struct ShellHitMap {
     pub(super) agent_max_scroll: usize,
     pub(super) agent_sort_toggle: Rect,
     pub(super) tree_headers: Vec<TreeHeaderHit>,
+    pub(super) tree_hidden_header: Rect,
     pub(super) sidebar_divider: Rect,
     pub(super) sidebar_section_divider: Rect,
     pub(super) sidebar_toggle: Rect,
@@ -178,6 +179,12 @@ pub(super) struct ClientWorkspacePress {
     pub(super) start_row: u16,
 }
 
+pub(super) struct ClientTreeSpacePress {
+    pub(super) workspace_id: String,
+    pub(super) start_column: u16,
+    pub(super) start_row: u16,
+}
+
 pub(super) struct ClientTabPress {
     pub(super) tab_id: String,
     pub(super) workspace_id: String,
@@ -212,6 +219,12 @@ pub(super) enum ClientChromeDrag {
         source_workspace_id: String,
         target: Option<(Option<String>, u16)>,
     },
+    /// Reordering a space header inside the unified tree. `before` is the space
+    /// to land in front of, or `None` for the end of the list.
+    TreeSpace {
+        source_workspace_id: String,
+        before: Option<String>,
+    },
     PaneSplit {
         hit: PaneSplitHit,
         tab_id: String,
@@ -232,11 +245,14 @@ pub(super) struct TreeHeaderHit {
     pub(super) rect: Rect,
     /// Empty when the header has nothing to fold away.
     pub(super) chevron: Rect,
+    /// Space headers only: the pin toggle.
+    pub(super) pin: Rect,
     pub(super) workspace_id: String,
     /// `None` on a space header.
     pub(super) tab_id: Option<String>,
     /// Collapse-set key for this header.
     pub(super) key: String,
+    pub(super) pinned: bool,
 }
 
 pub(super) struct WorkspaceHit {
@@ -521,6 +537,10 @@ pub(super) struct ClientWorktreeRemoveOverlay {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ClientContextMenuAction {
+    ToggleTreeSpaces,
+    ToggleTreeTabs,
+    ToggleTreeAgents,
+    ToggleHiddenSpaces,
     Rename,
     Close,
     NewWorktree,
@@ -540,6 +560,14 @@ pub(super) enum ClientContextMenuAction {
 
 #[derive(Debug)]
 pub(super) enum ClientContextMenuTarget {
+    /// The agents-panel view control: which tree layers show, and whether the
+    /// hidden-spaces section is revealed.
+    SidebarView {
+        show_spaces: bool,
+        show_tabs: bool,
+        show_agents: bool,
+        show_hidden: bool,
+    },
     Workspace {
         workspace_id: String,
         is_git: bool,
@@ -869,6 +897,7 @@ pub(crate) struct ClientShellState {
     pub(super) last_sidebar_divider_click: Option<std::time::Instant>,
     pub(super) chrome_drag: Option<ClientChromeDrag>,
     pub(super) workspace_press: Option<ClientWorkspacePress>,
+    pub(super) tree_space_press: Option<ClientTreeSpacePress>,
     pub(super) tab_press: Option<ClientTabPress>,
     pub(super) collapsed_groups: HashSet<String>,
     pub(super) remote_collapsed_groups: HashMap<ClientEndpointId, HashSet<String>>,
@@ -1049,6 +1078,7 @@ impl ClientShellState {
             last_sidebar_divider_click: None,
             chrome_drag: None,
             workspace_press: None,
+            tree_space_press: None,
             tab_press: None,
             collapsed_groups: preferences.collapsed_groups.into_iter().collect(),
             remote_collapsed_groups,
@@ -1243,6 +1273,7 @@ impl ClientShellState {
         self.popup_terminal_id = None;
         self.chrome_drag = None;
         self.workspace_press = None;
+        self.tree_space_press = None;
         self.tab_press = None;
         self.workspace_scroll = 0;
         self.agent_scroll = 0;
@@ -1694,6 +1725,7 @@ impl ClientShellState {
             self.reset_copy_pipeline();
             self.chrome_drag = None;
             self.workspace_press = None;
+            self.tree_space_press = None;
             self.tab_press = None;
             if self.pane_mouse_gesture.as_ref().is_some_and(|gesture| {
                 gesture.hit.popup && previous_popup.as_deref() == Some(gesture.hit.pane_id.as_str())

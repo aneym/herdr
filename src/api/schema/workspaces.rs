@@ -66,6 +66,14 @@ pub struct WorkspaceRenameParams {
     pub label: String,
 }
 
+/// Pin or unpin a space. A pinned space keeps a live tab when its last one
+/// closes, so its sidebar row survives.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct WorkspaceSetPinnedParams {
+    pub workspace_id: String,
+    pub pinned: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkspaceMoveParams {
     pub workspace_id: String,

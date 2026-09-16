@@ -1169,6 +1169,17 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
+                Some(ClientChromeDrag::TreeSpace { .. }) => {
+                    let before = self.tree_space_drop_target_at(point);
+                    if let Some(ClientChromeDrag::TreeSpace {
+                        before: current, ..
+                    }) = self.chrome_drag.as_mut()
+                    {
+                        *current = before.flatten();
+                    }
+                    outcome.repaint = true;
+                    return;
+                }
                 None => {}
             }
             if let Some(press) = self.workspace_press.as_ref() {
@@ -1187,6 +1198,23 @@ impl ClientShellState {
                             });
                             outcome.repaint = true;
                         }
+                    }
+                }
+                return;
+            }
+            if let Some(press) = self.tree_space_press.as_ref() {
+                let delta = mouse
+                    .column
+                    .abs_diff(press.start_column)
+                    .max(mouse.row.abs_diff(press.start_row));
+                if delta >= 1 {
+                    let source_workspace_id = press.workspace_id.clone();
+                    if let Some(before) = self.tree_space_drop_target_at(point) {
+                        self.chrome_drag = Some(ClientChromeDrag::TreeSpace {
+                            source_workspace_id,
+                            before,
+                        });
+                        outcome.repaint = true;
                     }
                 }
                 return;
@@ -1212,8 +1240,17 @@ impl ClientShellState {
         if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
             if let Some(drag) = self.chrome_drag.take() {
                 self.workspace_press = None;
+                self.tree_space_press = None;
                 self.tab_press = None;
                 match drag {
+                    ClientChromeDrag::TreeSpace {
+                        source_workspace_id,
+                        before,
+                    } => {
+                        self.reorder_tree_space(&source_workspace_id, before.as_deref());
+                        self.persist_chrome_preferences(outcome);
+                        outcome.repaint = true;
+                    }
                     ClientChromeDrag::Tab {
                         tab_id,
                         workspace_id,
@@ -1324,6 +1361,17 @@ impl ClientShellState {
             }
             if let Some(press) = self.workspace_press.take() {
                 self.finish_endpoint_workspace_press(press, outcome);
+                return;
+            }
+            if let Some(press) = self.tree_space_press.take() {
+                self.push_endpoint_method(
+                    crate::api::schema::Method::WorkspaceFocus(
+                        crate::api::schema::WorkspaceTarget {
+                            workspace_id: press.workspace_id,
+                        },
+                    ),
+                    outcome,
+                );
                 return;
             }
             if let Some(press) = self.tab_press.take() {
@@ -1785,6 +1833,11 @@ impl ClientShellState {
                 if !self.config.mouse_capture {
                     return;
                 }
+                if super::contains(self.hits.agent_sort_toggle, point) {
+                    self.open_sidebar_view_context_menu(mouse.column, mouse.row.saturating_add(1));
+                    outcome.repaint = true;
+                    return;
+                }
                 let workspace_id = (!self.sidebar_collapsed)
                     .then(|| self.active_endpoint_workspace_at(point))
                     .flatten();
@@ -2045,7 +2098,7 @@ impl ClientShellState {
                     self.persist_chrome_preferences(outcome);
                     return;
                 }
-                if self.handle_tree_header_click(point, outcome) {
+                if self.handle_tree_header_click(point, mouse, outcome) {
                     return;
                 }
                 let group_toggle = self.hits.workspaces.iter().find_map(|hit| {
@@ -2365,8 +2418,17 @@ impl ClientShellState {
     fn handle_tree_header_click(
         &mut self,
         point: (u16, u16),
+        mouse: crossterm::event::MouseEvent,
         outcome: &mut ClientShellInput,
     ) -> bool {
+        if super::contains(self.hits.tree_hidden_header, point) {
+            let tree = self.tree_chrome_mut();
+            tree.hidden_spaces_expanded = !tree.hidden_spaces_expanded;
+            self.agent_scroll = 0;
+            self.persist_chrome_preferences(outcome);
+            outcome.repaint = true;
+            return true;
+        }
         let Some(hit) = self
             .hits
             .tree_headers
@@ -2376,8 +2438,10 @@ impl ClientShellState {
             return false;
         };
         let chevron = super::contains(hit.chevron, point);
+        let pin = super::contains(hit.pin, point);
         let key = hit.key.clone();
         let is_space = hit.tab_id.is_none();
+        let pinned = hit.pinned;
         let workspace_id = hit.workspace_id.clone();
         let tab_id = hit.tab_id.clone();
         if chevron {
@@ -2387,7 +2451,26 @@ impl ClientShellState {
             } else {
                 super::tree::ClientTreeChrome::toggle(&mut tree.collapsed_tabs, key);
             }
+            self.agent_scroll = 0;
             self.persist_chrome_preferences(outcome);
+            outcome.repaint = true;
+            return true;
+        }
+        if pin {
+            let tree = self.tree_chrome_mut();
+            super::tree::ClientTreeChrome::toggle(&mut tree.pinned_spaces, workspace_id.clone());
+            self.persist_chrome_preferences(outcome);
+            // The pin is load-bearing on the endpoint too: it is what keeps a
+            // live tab in the space when its last one closes.
+            self.push_endpoint_method(
+                crate::api::schema::Method::WorkspaceSetPinned(
+                    crate::api::schema::WorkspaceSetPinnedParams {
+                        workspace_id,
+                        pinned: !pinned,
+                    },
+                ),
+                outcome,
+            );
             outcome.repaint = true;
             return true;
         }
@@ -2396,13 +2479,66 @@ impl ClientShellState {
                 crate::api::schema::Method::TabFocus(crate::api::schema::TabTarget { tab_id }),
                 outcome,
             ),
-            None => self.push_endpoint_method(
-                crate::api::schema::Method::WorkspaceFocus(crate::api::schema::WorkspaceTarget {
+            // A space header press arms a possible reorder drag; the focus
+            // happens on release when none started, mirroring the workspace rows.
+            None => {
+                self.tree_space_press = Some(ClientTreeSpacePress {
                     workspace_id,
-                }),
-                outcome,
-            ),
+                    start_column: mouse.column,
+                    start_row: mouse.row,
+                });
+            }
         }
         true
+    }
+
+    /// Where a space-header drag would land: `Some(Some(id))` in front of that
+    /// space, `Some(None)` at the end, `None` outside the panel.
+    fn tree_space_drop_target_at(&self, point: (u16, u16)) -> Option<Option<String>> {
+        if !super::contains(self.hits.agent_body, point) {
+            return None;
+        }
+        let mut headers = self
+            .hits
+            .tree_headers
+            .iter()
+            .filter(|hit| hit.tab_id.is_none())
+            .peekable();
+        headers.peek()?;
+        for hit in headers {
+            if point.1 < hit.rect.y.saturating_add(hit.rect.height) {
+                return Some(Some(hit.workspace_id.clone()));
+            }
+        }
+        Some(None)
+    }
+
+    /// Move one space in the tree's manual order. The order is seeded from what
+    /// is currently drawn, so the first drag records the order that was on
+    /// screen rather than reshuffling everything else.
+    fn reorder_tree_space(&mut self, source_workspace_id: &str, before: Option<&str>) {
+        if Some(source_workspace_id) == before {
+            return;
+        }
+        let drawn = self
+            .hits
+            .tree_headers
+            .iter()
+            .filter(|hit| hit.tab_id.is_none())
+            .map(|hit| hit.workspace_id.clone())
+            .collect::<Vec<_>>();
+        let tree = self.tree_chrome_mut();
+        let mut order = tree.space_order.clone();
+        for workspace_id in drawn {
+            if !order.contains(&workspace_id) {
+                order.push(workspace_id);
+            }
+        }
+        order.retain(|workspace_id| workspace_id != source_workspace_id);
+        let index = before
+            .and_then(|before| order.iter().position(|candidate| candidate == before))
+            .unwrap_or(order.len());
+        order.insert(index, source_workspace_id.to_owned());
+        tree.space_order = order;
     }
 }
