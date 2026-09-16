@@ -1,0 +1,528 @@
+--- /tmp/base.tmp	2026-09-16 17:53:32
++++ docs/fork/port-0.9/orig/src/ui.rs	2026-09-16 17:53:32
+@@ -20,6 +20,7 @@
+ mod tab_surface;
+ mod tabs;
+ mod text;
++mod usage;
+ mod widgets;
+ 
+ use self::dialogs::{
+@@ -29,7 +30,7 @@
+ use self::keybind_help::render_keybind_help_overlay;
+ use self::menus::{
+     render_context_menu, render_copy_mode_overlay, render_global_launcher_menu,
+-    render_navigate_overlay, render_prefix_overlay, render_resize_overlay,
++    render_navigate_overlay, render_prefix_overlay, render_profile_menu, render_resize_overlay,
+ };
+ use self::mobile::{
+     compute_mobile_header_hit_areas, is_mobile_width, mobile_switcher_max_scroll_for_height,
+@@ -53,7 +54,7 @@
+ };
+ use self::settings::render_settings_overlay;
+ #[cfg(test)]
+-pub(crate) use self::sidebar::workspace_drop_indicator_row;
++pub(crate) use self::sidebar::{expanded_sidebar_sections, workspace_drop_indicator_row};
+ use self::sidebar::{render_sidebar, render_sidebar_collapsed};
+ use self::status::{
+     copy_feedback_rect, render_config_diagnostic, render_copy_feedback, render_toast_notification,
+@@ -63,6 +64,7 @@
+     compute_tab_surface, render_tab_surface, resize_tab_surface, TabSurfaceLayout,
+ };
+ use self::tabs::render_tab_bar;
++use self::usage::render_usage_overlay;
+ pub(crate) use self::{
+     dialogs::{
+         confirm_close_button_rects, confirm_close_popup_rect, new_linked_worktree_button_rects,
+@@ -76,15 +78,19 @@
+         SETTINGS_POPUP_WIDTH,
+     },
+     sidebar::{
+-        agent_entry_gap, agent_entry_height_in_body, agent_panel_body_rect, agent_panel_entries,
+-        agent_panel_scroll_for_target, agent_panel_scroll_metrics, agent_panel_scrollbar_rect,
+-        agent_panel_toggle_rect, all_agent_panel_entries, collapsed_sidebar_sections,
+-        collapsed_sidebar_toggle_rect, compute_workspace_card_areas, expanded_sidebar_sections,
+-        expanded_sidebar_toggle_rect, normalized_workspace_scroll, sidebar_section_divider_rect,
++        agent_group_chevron_rect, agent_panel_body_rect, agent_panel_entries,
++        agent_panel_entries_from, agent_panel_list_entries, agent_panel_list_entries_from,
++        agent_panel_list_entry_gap, agent_panel_list_entry_height, agent_panel_scroll_for_target,
++        agent_panel_scroll_metrics, agent_panel_scrollbar_rect, agent_panel_toggle_rect,
++        agent_panel_usage_rect, all_agent_panel_entries, collapsed_sidebar_toggle_rect,
++        compute_workspace_card_areas, expanded_sidebar_toggle_rect, normalized_workspace_scroll,
++        ordered_collapsed_sidebar_sections, ordered_sidebar_sections, sidebar_section_divider_rect,
++        tree_header_chevron_rect, tree_header_pin_rect, tree_header_plus_rect,
++        tree_space_drop_slots, tree_space_key, tree_tab_key, tree_view_active,
+         workspace_drop_slots, workspace_group_chevron_rect, workspace_list_entries,
+         workspace_list_entries_expanded, workspace_list_rect, workspace_list_scroll_metrics,
+         workspace_list_scrollbar_rect, workspace_parent_group_state, AgentPanelEntry,
+-        WorkspaceListEntry,
++        AgentPanelListEntry, WorkspaceListEntry,
+     },
+ };
+ 
+@@ -94,7 +100,7 @@
+         mobile_switcher_areas, mobile_switcher_max_scroll, mobile_switcher_target_at,
+         mobile_switcher_workspace_doc_range, MobileSwitcherTarget,
+     },
+-    panes::{apply_pane_chrome, pane_inner_rect, pane_is_scrolled_back},
++    panes::{apply_pane_chrome, pane_copy_button_span, pane_inner_rect, pane_is_scrolled_back},
+     tab_surface::{tab_surface_cursor, tab_surface_hyperlinks, TabSurfaceView},
+     tabs::{compute_tab_bar_view, tab_bar_content_area},
+     widgets::{centered_popup_rect, modal_stack_areas},
+@@ -104,7 +110,15 @@
+ use crate::terminal::TerminalRuntimeRegistry;
+ 
+ const COLLAPSED_WIDTH: u16 = 4; // num + space + dot + separator
++/// Columns the main (tab bar + terminal) area keeps when an expanded sidebar
++/// width saved on a larger frame meets a smaller one.
++const MIN_MAIN_AREA_WIDTH: u16 = 40;
++const SPINNERS: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+ 
++pub(super) fn spinner_frame(tick: u32) -> &'static str {
++    SPINNERS[(tick as usize / 8) % SPINNERS.len()]
++}
++
+ /// Compute view geometry and reconcile pane sizes.
+ /// Called before render to separate mutation from drawing.
+ #[cfg_attr(not(test), allow(dead_code))]
+@@ -219,6 +233,17 @@
+     resize_panes: bool,
+     cell_size: crate::kitty_graphics::HostCellSize,
+ ) {
++    if app.popup_pane.is_some()
++        || app.mode() != Mode::Terminal
++        || app.pane_hover.is_some_and(|(pane_id, _)| {
++            app.active
++                .and_then(|ws_idx| app.workspaces.get(ws_idx))
++                .and_then(|workspace| workspace.active_tab())
++                .is_none_or(|tab| !tab.layout.pane_ids().contains(&pane_id))
++        })
++    {
++        app.pane_hover = None;
++    }
+     if is_mobile_width(area, app.mobile_width_threshold) {
+         compute_mobile_view(app, terminal_runtimes, area, resize_panes, cell_size);
+         return;
+@@ -230,8 +255,18 @@
+             crate::config::SidebarCollapsedModeConfig::Hidden => 0,
+         }
+     } else {
+-        app.sidebar_width
+-            .clamp(app.sidebar_min_width, app.sidebar_max_width)
++        // The persisted width is an absolute cell count and sidebar_max_width
++        // is user-raisable, so a width saved on a large display can exceed a
++        // smaller client's frame. Cap at render time only — the persisted
++        // value survives untouched for the larger display.
++        let configured = app
++            .sidebar_width
++            .clamp(app.sidebar_min_width, app.sidebar_max_width);
++        let cap = area
++            .width
++            .saturating_sub(MIN_MAIN_AREA_WIDTH)
++            .max(area.width / 2);
++        configured.min(cap)
+     };
+ 
+     let [sidebar_area, main_area] =
+@@ -245,8 +280,10 @@
+ 
+     if !app.sidebar_collapsed {
+         app.workspace_scroll = normalized_workspace_scroll(app, sidebar_area, app.workspace_scroll);
+-        let (_, detail_area) = expanded_sidebar_sections(sidebar_area, app.sidebar_section_split);
+-        let max_agent_scroll = agent_panel_scroll_metrics(app, detail_area).max_offset_from_bottom;
++        let (_, detail_area) = ordered_sidebar_sections(app, sidebar_area);
++        let agent_entries = agent_panel_list_entries_from(app, terminal_runtimes);
++        let max_agent_scroll =
++            agent_panel_scroll_metrics(app, &agent_entries, detail_area).max_offset_from_bottom;
+         app.agent_panel_scroll = app.agent_panel_scroll.min(max_agent_scroll);
+     } else {
+         app.workspace_scroll = app
+@@ -266,6 +303,7 @@
+         .and_then(|ws_idx| app.workspaces.get(ws_idx))
+         .map(|ws| {
+             compute_tab_bar_view(
++                app,
+                 ws,
+                 tab_bar_content_area(app, tab_bar_rect),
+                 app.tab_scroll,
+@@ -313,6 +351,7 @@
+         tab_scroll_left_hit_area: tab_bar_view.scroll_left_hit_area,
+         tab_scroll_right_hit_area: tab_bar_view.scroll_right_hit_area,
+         new_tab_hit_area: tab_bar_view.new_tab_hit_area,
++        session_badge_rect: tab_bar_view.session_badge_rect,
+         terminal_area,
+         mobile_header_rect: Rect::default(),
+         mobile_menu_hit_area: Rect::default(),
+@@ -339,7 +378,7 @@
+         (area, Rect::default())
+     };
+ 
+-    if app.mode == Mode::Navigate {
++    if app.mode() == Mode::Navigate {
+         let switcher_viewport_h = area.height.saturating_sub(header_h + 1);
+         let max_scroll = mobile_switcher_max_scroll_for_height(app, switcher_viewport_h);
+         app.mobile_switcher_scroll = app.mobile_switcher_scroll.min(max_scroll);
+@@ -360,6 +399,27 @@
+         resize_popup_pane(app, terminal_runtimes, terminal_area, cell_size);
+     }
+     let header_hits = compute_mobile_header_hit_areas(app, header_rect);
++    let tab_bar_rect = Rect::new(
++        header_rect.x,
++        header_rect.y + 1,
++        header_hits.menu.x.saturating_sub(header_rect.x),
++        u16::from(header_rect.height > 1),
++    );
++    let tab_bar_view = app
++        .active
++        .and_then(|ws_idx| app.workspaces.get(ws_idx))
++        .map(|ws| {
++            tabs::compute_mobile_tab_bar_view(
++                app,
++                ws,
++                tab_bar_rect,
++                app.tab_scroll,
++                app.tab_scroll_follow_active,
++                app.mouse_capture,
++            )
++        })
++        .unwrap_or_default();
++    app.tab_scroll = tab_bar_view.scroll;
+ 
+     let toast_hit_area = app
+         .toast
+@@ -371,11 +431,12 @@
+         layout: ViewLayout::Mobile,
+         sidebar_rect: Rect::default(),
+         workspace_card_areas: Vec::new(),
+-        tab_bar_rect: Rect::default(),
+-        tab_hit_areas: Vec::new(),
+-        tab_scroll_left_hit_area: Rect::default(),
+-        tab_scroll_right_hit_area: Rect::default(),
+-        new_tab_hit_area: Rect::default(),
++        tab_bar_rect,
++        tab_hit_areas: tab_bar_view.tab_hit_areas,
++        tab_scroll_left_hit_area: tab_bar_view.scroll_left_hit_area,
++        tab_scroll_right_hit_area: tab_bar_view.scroll_right_hit_area,
++        new_tab_hit_area: tab_bar_view.new_tab_hit_area,
++        session_badge_rect: Rect::default(),
+         terminal_area,
+         mobile_header_rect: header_rect,
+         mobile_menu_hit_area: header_hits.menu,
+@@ -428,7 +489,7 @@
+         terminal_area
+     };
+ 
+-    match app.mode {
++    match app.mode() {
+         Mode::Onboarding => render_onboarding_overlay(app, frame, frame.area()),
+         Mode::ReleaseNotes => render_release_notes_overlay(app, frame, frame.area()),
+         Mode::ProductAnnouncement => render_product_announcement_overlay(app, frame, frame.area()),
+@@ -443,7 +504,11 @@
+             render_confirm_close_overlay(app, terminal_runtimes, frame, terminal_area)
+         }
+         Mode::ContextMenu => {
+-            render_context_menu(app, frame);
++            if app.profile_menu.is_some() {
++                render_profile_menu(app, frame);
++            } else {
++                render_context_menu(app, frame);
++            }
+         }
+         Mode::Settings => render_settings_overlay(app, frame, frame.area()),
+         Mode::RenameWorkspace | Mode::RenameTab | Mode::RenamePane => {
+@@ -457,6 +522,7 @@
+         Mode::GlobalMenu => render_global_launcher_menu(app, frame),
+         Mode::KeybindHelp => render_keybind_help_overlay(app, frame),
+         Mode::Navigator => render_navigator_overlay(app, terminal_runtimes, frame),
++        Mode::Usage => render_usage_overlay(app, frame),
+         Mode::Terminal => {}
+     }
+ }
+@@ -649,7 +715,7 @@
+     #[test]
+     fn workspace_creation_dialog_renders_new_workspace_title() {
+         let mut app = crate::app::state::AppState::test_new();
+-        app.mode = Mode::RenameWorkspace;
++        app.replace_mode(Mode::RenameWorkspace);
+         app.pending_workspace_create_cwd = Some("/tmp/project".into());
+         app.name_input = "project".into();
+ 
+@@ -686,7 +752,7 @@
+         app.workspaces = vec![ws];
+         app.active = Some(0);
+         app.selected = 0;
+-        app.mode = Mode::Terminal;
++        app.replace_mode(Mode::Terminal);
+ 
+         compute_view(&mut app, Rect::new(0, 0, 80, 20));
+         let focused = app
+@@ -711,13 +777,13 @@
+         app.workspaces = vec![Workspace::test_new("one")];
+         app.active = Some(0);
+         app.selected = 0;
+-        app.mode = Mode::Terminal;
++        app.replace_mode(Mode::Terminal);
+ 
+         compute_view(&mut app, Rect::new(0, 0, 44, 20));
+ 
+         assert_eq!(app.view.layout, ViewLayout::Mobile);
+         assert_eq!(app.view.sidebar_rect, Rect::default());
+-        assert_eq!(app.view.tab_bar_rect, Rect::default());
++        assert_eq!(app.view.tab_bar_rect, Rect::new(0, 1, 34, 1));
+         assert_eq!(app.view.mobile_header_rect, Rect::new(0, 0, 44, 2));
+         assert_eq!(app.view.terminal_area, Rect::new(0, 2, 44, 18));
+         assert_eq!(app.view.mobile_menu_hit_area.height, 2);
+@@ -728,12 +794,35 @@
+     }
+ 
+     #[test]
++    fn oversized_persisted_sidebar_width_keeps_main_area_usable() {
++        let mut app = crate::app::state::AppState::test_new();
++        app.workspaces = vec![Workspace::test_new("one")];
++        app.active = Some(0);
++        app.selected = 0;
++        app.replace_mode(Mode::Terminal);
++        // A width dragged out on a large display under a raised
++        // sidebar_max_width, now meeting an iPhone-landscape-sized frame.
++        app.sidebar_max_width = u16::MAX;
++        app.sidebar_width = 200;
++
++        compute_view(&mut app, Rect::new(0, 0, 95, 22));
++
++        assert_eq!(app.view.layout, ViewLayout::Desktop);
++        assert_eq!(app.view.sidebar_rect.width, 55);
++        assert!(app.view.terminal_area.width >= 40);
++
++        // A frame that fits the persisted width keeps it untouched.
++        compute_view(&mut app, Rect::new(0, 0, 260, 40));
++        assert_eq!(app.view.sidebar_rect.width, 200);
++    }
++
++    #[test]
+     fn mobile_config_diagnostic_keeps_command_visible() {
+         let mut app = crate::app::state::AppState::test_new();
+         app.workspaces = vec![Workspace::test_new("one")];
+         app.active = Some(0);
+         app.selected = 0;
+-        app.mode = Mode::Terminal;
++        app.replace_mode(Mode::Terminal);
+         app.config_diagnostic = Some("config.toml:100:10; herdr config check".into());
+ 
+         let area = Rect::new(0, 0, 44, 20);
+@@ -752,7 +841,7 @@
+         app.workspaces = vec![Workspace::test_new("one")];
+         app.active = Some(0);
+         app.selected = 0;
+-        app.mode = Mode::Terminal;
++        app.replace_mode(Mode::Terminal);
+         app.toast_config.herdr.position = crate::config::ToastHerdrPosition::TopLeft;
+         app.toast = Some(crate::app::state::ToastNotification {
+             kind: crate::app::state::ToastKind::Finished,
+@@ -776,7 +865,7 @@
+         app.workspaces = vec![Workspace::test_new("one")];
+         app.active = Some(0);
+         app.selected = 0;
+-        app.mode = Mode::Terminal;
++        app.replace_mode(Mode::Terminal);
+         app.config_diagnostic = Some("config warning".into());
+         app.toast_config.herdr.position = crate::config::ToastHerdrPosition::TopLeft;
+         app.toast = Some(crate::app::state::ToastNotification {
+@@ -799,7 +888,7 @@
+         app.workspaces = vec![Workspace::test_new("one")];
+         app.active = Some(0);
+         app.selected = 0;
+-        app.mode = Mode::Terminal;
++        app.replace_mode(Mode::Terminal);
+ 
+         compute_view(&mut app, Rect::new(0, 0, 80, 20));
+         assert_eq!(app.view.layout, ViewLayout::Desktop);
+@@ -817,7 +906,7 @@
+         app.workspaces = vec![Workspace::test_new("one")];
+         app.active = Some(0);
+         app.selected = 0;
+-        app.mode = Mode::Prefix;
++        app.replace_mode(Mode::Prefix);
+ 
+         compute_view(&mut app, Rect::new(0, 0, 80, 20));
+         assert_eq!(app.view.tab_bar_rect, Rect::new(26, 0, 54, 1));
+@@ -847,7 +936,7 @@
+         app.workspaces = vec![Workspace::test_new("one")];
+         app.active = Some(0);
+         app.selected = 0;
+-        app.mode = Mode::Terminal;
++        app.replace_mode(Mode::Terminal);
+ 
+         compute_view(&mut app, Rect::new(0, 0, 80, 20));
+         let single_tab_terminal_area = app.view.terminal_area;
+@@ -882,7 +971,7 @@
+         app.workspaces = vec![Workspace::test_new("one")];
+         app.active = Some(0);
+         app.selected = 0;
+-        app.mode = Mode::Prefix;
++        app.replace_mode(Mode::Prefix);
+ 
+         compute_view(&mut app, Rect::new(0, 0, 80, 20));
+         assert_eq!(app.view.tab_bar_rect, Rect::default());
+@@ -921,7 +1010,7 @@
+         app.workspaces = vec![one_tab_workspace, two_tab_workspace];
+         app.active = Some(0);
+         app.selected = 0;
+-        app.mode = Mode::Terminal;
++        app.replace_mode(Mode::Terminal);
+ 
+         compute_view(&mut app, Rect::new(0, 0, 80, 20));
+ 
+@@ -947,7 +1036,7 @@
+         app.workspaces = vec![workspace];
+         app.active = Some(0);
+         app.selected = 0;
+-        app.mode = Mode::Terminal;
++        app.replace_mode(Mode::Terminal);
+ 
+         compute_view(&mut app, Rect::new(0, 0, 44, 20));
+ 
+@@ -960,12 +1049,35 @@
+     }
+ 
+     #[test]
++    fn workspace_switch_clears_stale_pane_hover_before_switching_back() {
++        let mut app = crate::app::state::AppState::test_new();
++        app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
++        app.active = Some(0);
++        app.selected = 0;
++        app.pane_borders = true;
++        app.pane_outer_borders = true;
++        app.replace_mode(Mode::Terminal);
++        let area = Rect::new(0, 0, 120, 30);
++        compute_view(&mut app, area);
++        let hovered = app.view.pane_infos[0].id;
++        app.pane_hover = Some((hovered, true));
++
++        app.switch_workspace(1);
++        compute_view(&mut app, area);
++        assert_eq!(app.pane_hover, None);
++
++        app.switch_workspace(0);
++        compute_view(&mut app, area);
++        assert_eq!(app.pane_hover, None);
++    }
++
++    #[test]
+     fn product_announcement_renders_above_config_diagnostic() {
+         let mut app = crate::app::state::AppState::test_new();
+         app.workspaces = vec![Workspace::test_new("one")];
+         app.active = Some(0);
+         app.selected = 0;
+-        app.mode = Mode::ProductAnnouncement;
++        app.replace_mode(Mode::ProductAnnouncement);
+         app.product_announcement = Some(crate::app::state::ProductAnnouncementState {
+             version: "0.6.0".into(),
+             id: "keybinding-v2".into(),
+@@ -1006,7 +1118,7 @@
+         app.workspaces = vec![Workspace::test_new("one")];
+         app.active = Some(0);
+         app.selected = 0;
+-        app.mode = Mode::Terminal;
++        app.replace_mode(Mode::Terminal);
+         app.sidebar_max_width = 30;
+         app.sidebar_width = 999;
+ 
+@@ -1021,7 +1133,7 @@
+         app.workspaces = vec![Workspace::test_new("one")];
+         app.active = Some(0);
+         app.selected = 0;
+-        app.mode = Mode::Terminal;
++        app.replace_mode(Mode::Terminal);
+         app.sidebar_min_width = 22;
+         app.sidebar_width = 5;
+ 
+@@ -1038,7 +1150,7 @@
+         app.workspaces = vec![Workspace::test_new("one")];
+         app.active = Some(0);
+         app.selected = 0;
+-        app.mode = Mode::Terminal;
++        app.replace_mode(Mode::Terminal);
+ 
+         compute_view(&mut app, Rect::new(0, 0, 80, 20));
+ 
+@@ -1059,7 +1171,7 @@
+         app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
+         app.active = Some(1);
+         app.selected = 0;
+-        app.mode = Mode::Terminal;
++        app.replace_mode(Mode::Terminal);
+ 
+         compute_view(&mut app, Rect::new(0, 0, 80, 20));
+ 
+@@ -1068,7 +1180,7 @@
+         terminal.draw(|frame| render(&app, frame)).unwrap();
+         let buffer = terminal.backend().buffer();
+ 
+-        let (ws_area, _, _) = collapsed_sidebar_sections(app.view.sidebar_rect);
++        let (ws_area, _, _) = sidebar::collapsed_sidebar_sections(app.view.sidebar_rect);
+         let active_row = ws_area.y + 1;
+         let active_style = buffer[(ws_area.x, active_row)].style();
+ 
+@@ -1091,7 +1203,7 @@
+             .clone();
+         app.terminals.get_mut(&root_terminal_id).unwrap().cwd = repo.clone();
+         app.selected = 0;
+-        app.mode = Mode::Navigate;
++        app.replace_mode(Mode::Navigate);
+ 
+         compute_view(&mut app, Rect::new(0, 0, 80, 20));
+ 
+@@ -1121,7 +1233,7 @@
+         app.workspaces = vec![ws];
+         app.active = Some(0);
+         app.selected = 0;
+-        app.mode = Mode::Terminal;
++        app.replace_mode(Mode::Terminal);
+ 
+         compute_view(&mut app, Rect::new(0, 0, 80, 20));
+ 
+@@ -1152,7 +1264,7 @@
+         app.workspaces = vec![ws];
+         app.active = Some(0);
+         app.selected = 0;
+-        app.mode = Mode::Terminal;
++        app.replace_mode(Mode::Terminal);
+ 
+         compute_view(&mut app, Rect::new(0, 0, 80, 20));
+ 
+@@ -1178,7 +1290,7 @@
+         app.workspaces = vec![ws];
+         app.active = Some(0);
+         app.selected = 0;
+-        app.mode = Mode::Terminal;
++        app.replace_mode(Mode::Terminal);
+ 
+         compute_view(&mut app, Rect::new(0, 0, 80, 20));
+ 
+@@ -1208,7 +1320,7 @@
+         app.workspaces = vec![ws];
+         app.active = Some(0);
+         app.selected = 0;
+-        app.mode = Mode::Terminal;
++        app.replace_mode(Mode::Terminal);
+         app.tab_scroll_follow_active = false;
+         app.tab_scroll = 2;
+ 
+@@ -1253,7 +1365,7 @@
+         app.workspaces = vec![ws];
+         app.active = Some(0);
+         app.selected = 0;
+-        app.mode = Mode::Terminal;
++        app.replace_mode(Mode::Terminal);
+         app.tab_scroll_follow_active = false;
+         app.tab_scroll = usize::MAX;
+ 
+@@ -1407,7 +1519,7 @@
+     #[test]
+     fn prefix_mode_renders_prefix_indicator() {
+         let mut app = crate::app::state::AppState::test_new();
+-        app.mode = Mode::Prefix;
++        app.replace_mode(Mode::Prefix);
+         app.view.terminal_area = ratatui::layout::Rect::new(0, 0, 60, 4);
+         let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 4))
+             .expect("test terminal");

@@ -1,0 +1,15 @@
+--- /tmp/base.tmp	2026-09-16 17:53:31
++++ docs/fork/port-0.9/orig/src/app/config_io.rs	2026-09-16 17:53:31
+@@ -113,6 +113,12 @@
+             crate::app::state::AgentPanelSort::Priority => {
+                 crate::config::AgentPanelSortConfig::Priority.as_str()
+             }
++            crate::app::state::AgentPanelSort::Triage => {
++                crate::config::AgentPanelSortConfig::Triage.as_str()
++            }
++            crate::app::state::AgentPanelSort::Tree => {
++                crate::config::AgentPanelSortConfig::Tree.as_str()
++            }
+         };
+         if self.update_config_file("agent panel sort", |content| {
+             crate::config::upsert_section_value(

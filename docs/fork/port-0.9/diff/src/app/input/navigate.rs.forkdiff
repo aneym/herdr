@@ -1,0 +1,1499 @@
+--- /tmp/base.tmp	2026-09-16 17:53:31
++++ docs/fork/port-0.9/orig/src/app/input/navigate.rs	2026-09-16 17:53:31
+@@ -92,7 +92,7 @@
+ 
+     fn execute_prefix_key_action(&mut self, action: NavigateAction) {
+         if action == NavigateAction::EditScrollback {
+-            let previous_mode = self.state.mode;
++            let previous_mode = self.state.mode();
+             self.cancel_copy_mode_if_active();
+             self.launch_focused_scrollback_editor();
+             finish_action_context(&mut self.state, ActionContext::Prefix, previous_mode);
+@@ -167,12 +167,35 @@
+         }
+     }
+ 
++    /// Handle a press of a physical mouse navigation (thumb) button.
++    ///
++    /// These buttons never reach pane mouse forwarding: they are decoded out of
++    /// the SGR mouse stream as a distinct raw input event and dispatched here,
++    /// so a pane app cannot see them and the pointer gesture handlers are not
++    /// involved. Returns whether the view needs a repaint.
++    pub(crate) fn handle_mouse_nav_button(
++        &mut self,
++        button: crate::raw_input::MouseNavButton,
++    ) -> bool {
++        let configured = match button {
++            crate::raw_input::MouseNavButton::Back => self.state.mouse_back_button_action,
++            crate::raw_input::MouseNavButton::Forward => self.state.mouse_forward_button_action,
++        };
++
++        let Some(action) = navigate_action_for_mouse_nav_button(configured) else {
++            return false;
++        };
++
++        self.execute_tui_navigate_action(action, ActionContext::Direct);
++        true
++    }
++
+     pub(super) fn execute_tui_navigate_action(
+         &mut self,
+         action: NavigateAction,
+         context: ActionContext,
+     ) {
+-        let previous_mode = self.state.mode;
++        let previous_mode = self.state.mode();
+         match action {
+             NavigateAction::NewWorkspace => {
+                 self.begin_tui_workspace_create("tui.key.workspace.create");
+@@ -239,13 +262,15 @@
+             NavigateAction::FocusAgent(idx) => {
+                 if let Some((ws_idx, pane_id)) = self.agent_entry_target(idx) {
+                     self.focus_pane_internal_via_api(ws_idx, pane_id);
+-                    self.state.ensure_agent_panel_entry_visible(idx);
++                    self.ensure_agent_panel_entry_visible(idx);
+                     leave_navigate_mode(&mut self.state);
+                 }
+             }
+             NavigateAction::WorkspacePicker => {
++                self.state.read_focused_attention();
++                self.state.leave_focused_attention();
+                 self.state.mobile_switcher_scroll = 0;
+-                self.state.mode = Mode::Navigate;
++                self.state.replace_mode(Mode::Navigate);
+             }
+             NavigateAction::PreviousWorkspace => {
+                 if let Some(ws_idx) = self.relative_visible_workspace(-1) {
+@@ -262,14 +287,14 @@
+             NavigateAction::PreviousAgent => {
+                 if let Some((idx, ws_idx, pane_id)) = self.relative_agent_entry(false) {
+                     self.focus_pane_internal_via_api(ws_idx, pane_id);
+-                    self.state.ensure_agent_panel_entry_visible(idx);
++                    self.ensure_agent_panel_entry_visible(idx);
+                     leave_navigate_mode(&mut self.state);
+                 }
+             }
+             NavigateAction::NextAgent => {
+                 if let Some((idx, ws_idx, pane_id)) = self.relative_agent_entry(true) {
+                     self.focus_pane_internal_via_api(ws_idx, pane_id);
+-                    self.state.ensure_agent_panel_entry_visible(idx);
++                    self.ensure_agent_panel_entry_visible(idx);
+                     leave_navigate_mode(&mut self.state);
+                 }
+             }
+@@ -371,7 +396,7 @@
+                 leave_navigate_mode(&mut self.state);
+             }
+             NavigateAction::ClosePane => {
+-                if !self.close_focused_pane_via_api_requires_confirmation() {
++                if !self.close_focused_pane_via_api_requires_confirmation(true) {
+                     leave_navigate_mode(&mut self.state);
+                 }
+             }
+@@ -381,7 +406,7 @@
+                 self.zoom_focused_pane_via_api();
+                 leave_navigate_mode(&mut self.state);
+             }
+-            NavigateAction::EnterResizeMode => self.state.mode = Mode::Resize,
++            NavigateAction::EnterResizeMode => self.state.replace_mode(Mode::Resize),
+             NavigateAction::ResizePaneLeft => {
+                 self.resize_pane_direction_via_api(NavDirection::Left);
+                 leave_navigate_mode(&mut self.state);
+@@ -414,6 +439,14 @@
+                 self.last_pane_via_api();
+                 leave_navigate_mode(&mut self.state);
+             }
++            NavigateAction::FocusBack => {
++                self.focus_history_via_api(false);
++                leave_navigate_mode(&mut self.state);
++            }
++            NavigateAction::FocusForward => {
++                self.focus_history_via_api(true);
++                leave_navigate_mode(&mut self.state);
++            }
+             NavigateAction::Help => super::modal::open_keybind_help(&mut self.state),
+             NavigateAction::Settings => super::settings::open_settings(&mut self.state),
+             NavigateAction::ReloadConfig => {
+@@ -422,7 +455,7 @@
+             }
+             NavigateAction::OpenNotificationTarget => {
+                 self.focus_toast_target_via_api();
+-                if self.state.mode == Mode::Navigate {
++                if self.state.mode() == Mode::Navigate {
+                     leave_navigate_mode(&mut self.state);
+                 }
+             }
+@@ -433,6 +466,10 @@
+             NavigateAction::OpenNavigator => {
+                 self.state.open_navigator_from(&self.terminal_runtimes)
+             }
++            NavigateAction::OpenNavigatorSearch => self
++                .state
++                .open_navigator_search_from(&self.terminal_runtimes),
++            NavigateAction::Usage => self.toggle_usage_overlay(),
+         }
+ 
+         finish_action_context(&mut self.state, context, previous_mode);
+@@ -545,10 +582,10 @@
+ 
+     fn focus_pane_direction_in_context(&mut self, direction: NavDirection, context: ActionContext) {
+         let preserve_navigate_mode =
+-            context == ActionContext::Navigate && self.state.mode == Mode::Navigate;
++            context == ActionContext::Navigate && self.state.mode() == Mode::Navigate;
+         self.focus_pane_direction_via_api(direction);
+         if preserve_navigate_mode {
+-            self.state.mode = Mode::Navigate;
++            self.state.replace_mode(Mode::Navigate);
+         }
+     }
+ 
+@@ -610,15 +647,27 @@
+         );
+     }
+ 
+-    pub(crate) fn close_focused_pane_via_api_requires_confirmation(&mut self) -> bool {
++    pub(crate) fn close_focused_pane_via_api_requires_confirmation(
++        &mut self,
++        was_focused: bool,
++    ) -> bool {
+         let Some((ws_idx, pane_id)) = self.focused_pane_target() else {
+             return false;
+         };
+-        let Some(pane_id) = self.public_pane_id(ws_idx, pane_id) else {
++        let target = self
++            .state
++            .panel_next_agent_close_target(ws_idx, pane_id, was_focused);
++        let Some(public_pane_id) = self.public_pane_id(ws_idx, pane_id) else {
+             return false;
+         };
+-        self.runtime_pane_close("tui.pane.close", pane_id);
+-        self.state.mode == Mode::ConfirmClose
++        self.runtime_pane_close("tui.pane.close", public_pane_id);
++        let requires_confirmation = self.state.mode() == Mode::ConfirmClose;
++        if requires_confirmation {
++            self.state.pending_agent_close_focus = target;
++        } else {
++            self.state.focus_panel_agent_after_close(target);
++        }
++        requires_confirmation
+     }
+ 
+     pub(crate) fn zoom_focused_pane_via_api(&mut self) {
+@@ -677,6 +726,16 @@
+         self.focus_pane_internal_via_api(ws_idx, target.pane_id);
+     }
+ 
++    pub(crate) fn focus_history_via_api(&mut self, is_forward: bool) {
++        let Some(target) = self.state.focus_history_target(is_forward) else {
++            return;
++        };
++        let Some((ws_idx, _)) = self.state.pane_focus_target_indices(&target) else {
++            return;
++        };
++        self.focus_pane_internal_via_api(ws_idx, target.pane_id);
++    }
++
+     pub(crate) fn focus_toast_target_via_api(&mut self) {
+         let Some(target) = self
+             .state
+@@ -696,7 +755,7 @@
+         };
+         self.focus_pane_internal_via_api(ws_idx, target.pane_id);
+         self.state.toast = None;
+-        self.state.mode = Mode::Terminal;
++        self.state.replace_mode(Mode::Terminal);
+     }
+ 
+     fn focused_pane_target(&self) -> Option<(usize, crate::layout::PaneId)> {
+@@ -767,34 +826,49 @@
+         Some((ws.active_tab as isize + delta).rem_euclid(ws.tabs.len() as isize) as usize)
+     }
+ 
++    fn ensure_agent_panel_entry_visible(&mut self, idx: usize) {
++        if self.state.sidebar_collapsed {
++            return;
++        }
++
++        let entries =
++            crate::ui::agent_panel_list_entries_from(&self.state, &self.terminal_runtimes);
++        let (_, detail_area) =
++            crate::ui::ordered_sidebar_sections(&self.state, self.state.view.sidebar_rect);
++        self.state.agent_panel_scroll = crate::ui::agent_panel_scroll_for_target(
++            &self.state,
++            &entries,
++            detail_area,
++            self.state.agent_panel_scroll,
++            idx,
++        );
++    }
++
+     fn agent_entry_target(&self, idx: usize) -> Option<(usize, crate::layout::PaneId)> {
+-        let entries = crate::ui::agent_panel_entries(&self.state);
++        let entries = crate::ui::agent_panel_entries_from(&self.state, &self.terminal_runtimes);
+         let target = entries.get(idx)?;
+         Some((target.ws_idx, target.pane_id))
+     }
+ 
+     fn relative_agent_entry(&self, forward: bool) -> Option<(usize, usize, crate::layout::PaneId)> {
+-        let entries = crate::ui::agent_panel_entries(&self.state);
+-        if entries.is_empty() {
+-            return None;
++        // Attention-aware selection shared with the tested cycle logic in
++        // `AppState::agent_cycle_target`. This used to step positionally,
++        // which in the stable-ordered tree view sent cmd+E to whatever row
++        // happened to sit next rather than the agent needing attention.
++        // Agents inside collapsed tree spaces drop out of the rotation; the
++        // returned index stays in the unfiltered panel list.
++        let entries = crate::ui::agent_panel_entries_from(&self.state, &self.terminal_runtimes);
++        let mut flat_indices = Vec::with_capacity(entries.len());
++        let mut candidates = Vec::with_capacity(entries.len());
++        for (idx, entry) in entries.into_iter().enumerate() {
++            if !self.state.agent_cycle_skips_workspace(entry.ws_idx) {
++                flat_indices.push(idx);
++                candidates.push(entry);
++            }
+         }
+-        let focused = self
+-            .state
+-            .active
+-            .and_then(|idx| self.state.workspaces.get(idx))
+-            .and_then(crate::workspace::Workspace::focused_pane_id);
+-        let current_idx = entries
+-            .iter()
+-            .position(|entry| Some(entry.pane_id) == focused);
+-        let next_idx = match (current_idx, forward) {
+-            (Some(idx), true) => (idx + 1) % entries.len(),
+-            (Some(0), false) => entries.len() - 1,
+-            (Some(idx), false) => idx - 1,
+-            (None, true) => 0,
+-            (None, false) => entries.len() - 1,
+-        };
+-        let target = entries.get(next_idx)?;
+-        Some((next_idx, target.ws_idx, target.pane_id))
++        let next_idx = self.state.agent_cycle_target(&candidates, forward)?;
++        let target = candidates.get(next_idx)?;
++        Some((flat_indices[next_idx], target.ws_idx, target.pane_id))
+     }
+ 
+     fn pass_through_key_to_focused_pane(&mut self, key: TerminalKey) -> bool {
+@@ -813,7 +887,7 @@
+             return false;
+         }
+ 
+-        self.state.mode = Mode::Terminal;
++        self.state.replace_mode(Mode::Terminal);
+         true
+     }
+ 
+@@ -822,7 +896,7 @@
+         binding: crate::config::CustomCommandKeybind,
+         context: ActionContext,
+     ) {
+-        let previous_mode = self.state.mode;
++        let previous_mode = self.state.mode();
+         let previous_toast = self.state.toast.clone();
+         let result = match binding.action {
+             crate::config::CustomCommandAction::Shell => self.spawn_custom_command(&binding),
+@@ -1074,7 +1148,7 @@
+             },
+         );
+         self.state.remove_alias_shadowed_by_new_pane(new_pane_id);
+-        self.state.mode = Mode::Terminal;
++        self.state.replace_mode(Mode::Terminal);
+         Ok(())
+     }
+ 
+@@ -1161,7 +1235,7 @@
+             self.state.previous_pane_focus = previous_focus_target;
+         }
+         self.state.switch_workspace_tab(ws_idx, tab_idx);
+-        self.state.mode = Mode::Terminal;
++        self.state.replace_mode(Mode::Terminal);
+         Ok((ws_idx, new_pane))
+     }
+ }
+@@ -1449,14 +1523,37 @@
+     CyclePaneNext,
+     CyclePanePrevious,
+     LastPane,
++    FocusBack,
++    FocusForward,
+     Help,
+     Settings,
+     ReloadConfig,
+     OpenNotificationTarget,
+     Detach,
+     OpenNavigator,
++    OpenNavigatorSearch,
++    Usage,
+ }
+ 
++/// Map a configured mouse navigation button action onto a navigate action.
++///
++/// `None` means the button is configured off and must be ignored.
++fn navigate_action_for_mouse_nav_button(
++    config: crate::config::MouseNavButtonActionConfig,
++) -> Option<NavigateAction> {
++    match config {
++        crate::config::MouseNavButtonActionConfig::Off => None,
++        crate::config::MouseNavButtonActionConfig::FocusBack => Some(NavigateAction::FocusBack),
++        crate::config::MouseNavButtonActionConfig::FocusForward => {
++            Some(NavigateAction::FocusForward)
++        }
++        crate::config::MouseNavButtonActionConfig::NextAgent => Some(NavigateAction::NextAgent),
++        crate::config::MouseNavButtonActionConfig::PreviousAgent => {
++            Some(NavigateAction::PreviousAgent)
++        }
++    }
++}
++
+ fn copy_mode_survives_prefix_action(action: NavigateAction) -> bool {
+     matches!(
+         action,
+@@ -1476,6 +1573,8 @@
+             | NavigateAction::CyclePaneNext
+             | NavigateAction::CyclePanePrevious
+             | NavigateAction::LastPane
++            | NavigateAction::FocusBack
++            | NavigateAction::FocusForward
+             | NavigateAction::OpenNotificationTarget
+     )
+ }
+@@ -1584,6 +1683,8 @@
+         (&kb.swap_pane_up, NavigateAction::SwapPaneUp),
+         (&kb.swap_pane_right, NavigateAction::SwapPaneRight),
+         (&kb.last_pane, NavigateAction::LastPane),
++        (&kb.focus_back, NavigateAction::FocusBack),
++        (&kb.focus_forward, NavigateAction::FocusForward),
+         (&kb.cycle_pane_next, NavigateAction::CyclePaneNext),
+         (&kb.cycle_pane_previous, NavigateAction::CyclePanePrevious),
+         (&kb.split_vertical, NavigateAction::SplitVertical),
+@@ -1603,6 +1704,8 @@
+         ),
+         (&kb.detach, NavigateAction::Detach),
+         (&kb.goto, NavigateAction::OpenNavigator),
++        (&kb.search, NavigateAction::OpenNavigatorSearch),
++        (&kb.usage, NavigateAction::Usage),
+     ] {
+         if action_matches(bindings, key, dispatch) {
+             return Some(action);
+@@ -1668,7 +1771,7 @@
+     action: NavigateAction,
+     context: ActionContext,
+ ) {
+-    let previous_mode = state.mode;
++    let previous_mode = state.mode();
+     match action {
+         NavigateAction::NewWorkspace => {
+             state.request_new_workspace = true;
+@@ -1734,8 +1837,10 @@
+             }
+         }
+         NavigateAction::WorkspacePicker => {
++            state.read_focused_attention();
++            state.leave_focused_attention();
+             state.mobile_switcher_scroll = 0;
+-            state.mode = Mode::Navigate;
++            state.replace_mode(Mode::Navigate);
+         }
+         NavigateAction::PreviousWorkspace => {
+             state.previous_workspace();
+@@ -1833,7 +1938,7 @@
+             state.toggle_zoom();
+             leave_navigate_mode(state);
+         }
+-        NavigateAction::EnterResizeMode => state.mode = Mode::Resize,
++        NavigateAction::EnterResizeMode => state.replace_mode(Mode::Resize),
+         NavigateAction::ResizePaneLeft => {
+             state.resize_pane(NavDirection::Left);
+             leave_navigate_mode(state);
+@@ -1866,6 +1971,14 @@
+             state.last_pane();
+             leave_navigate_mode(state);
+         }
++        NavigateAction::FocusBack => {
++            state.focus_back();
++            leave_navigate_mode(state);
++        }
++        NavigateAction::FocusForward => {
++            state.focus_forward();
++            leave_navigate_mode(state);
++        }
+         NavigateAction::Help => super::modal::open_keybind_help(state),
+         NavigateAction::Settings => super::settings::open_settings(state),
+         NavigateAction::ReloadConfig => {
+@@ -1874,7 +1987,7 @@
+         }
+         NavigateAction::OpenNotificationTarget => {
+             state.focus_toast_target();
+-            if state.mode == Mode::Navigate {
++            if state.mode() == Mode::Navigate {
+                 leave_navigate_mode(state);
+             }
+         }
+@@ -1883,6 +1996,8 @@
+             leave_navigate_mode(state);
+         }
+         NavigateAction::OpenNavigator => state.open_navigator_from(terminal_runtimes),
++        NavigateAction::OpenNavigatorSearch => state.open_navigator_search_from(terminal_runtimes),
++        NavigateAction::Usage => state.replace_mode(Mode::Usage),
+     }
+ 
+     finish_action_context(state, context, previous_mode);
+@@ -1954,13 +2069,13 @@
+ 
+ fn leave_navigate_mode(state: &mut AppState) {
+     if state.active.is_some() {
+-        state.mode = Mode::Terminal;
++        state.replace_mode(Mode::Terminal);
+     }
+ }
+ 
+ fn finish_action_context(state: &mut AppState, context: ActionContext, previous_mode: Mode) {
+     if matches!(context, ActionContext::Direct | ActionContext::Prefix)
+-        && state.mode == previous_mode
++        && state.mode() == previous_mode
+     {
+         leave_command_mode(state);
+     }
+@@ -1980,11 +2095,11 @@
+ 
+ fn leave_command_mode(state: &mut AppState) {
+     if state.copy_mode_pane_is_focused() {
+-        state.mode = Mode::Copy;
++        state.replace_mode(Mode::Copy);
+     } else if state.active.is_some() {
+-        state.mode = Mode::Terminal;
++        state.replace_mode(Mode::Terminal);
+     } else {
+-        state.mode = Mode::Navigate;
++        state.replace_mode(Mode::Navigate);
+     };
+ }
+ 
+@@ -2109,9 +2224,85 @@
+         app.execute_tui_navigate_action(NavigateAction::NextAgent, ActionContext::Prefix);
+ 
+         assert_eq!(app.state.active, Some(1));
++    }
++
++    #[test]
++    fn next_agent_prefers_unread_completion_over_positional_order_in_tree_view() {
++        // Regression: the runtime key path stepped positionally and never ran
++        // the attention ranking, so in tree view cmd+E landed on whatever row
++        // sat next instead of the unread completion.
++        let mut app = app_with_test_workspaces(&["first", "second", "third"]);
++        app.state.agent_panel_sort = crate::app::state::AgentPanelSort::Tree;
++        let states = [
++            crate::detect::AgentState::Working,
++            crate::detect::AgentState::Working,
++            crate::detect::AgentState::Idle,
++        ];
++        for (ws_idx, agent_state) in states.iter().enumerate() {
++            let pane_id = app.state.workspaces[ws_idx].tabs[0].root_pane;
++            let terminal_id = app.state.workspaces[ws_idx].tabs[0].panes[&pane_id]
++                .attached_terminal_id
++                .clone();
++            let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
++            terminal.detected_agent = Some(crate::detect::Agent::Claude);
++            terminal.state = *agent_state;
++            app.state.workspaces[ws_idx].tabs[0]
++                .panes
++                .get_mut(&pane_id)
++                .unwrap()
++                .seen = ws_idx != 2;
++        }
++
++        app.execute_tui_navigate_action(NavigateAction::NextAgent, ActionContext::Prefix);
++
++        assert_eq!(app.state.active, Some(2));
+     }
+ 
++    fn mark_all_workspaces_as_agents(app: &mut App) {
++        for ws_idx in 0..app.state.workspaces.len() {
++            let pane_id = app.state.workspaces[ws_idx].tabs[0].root_pane;
++            let terminal_id = app.state.workspaces[ws_idx].tabs[0].panes[&pane_id]
++                .attached_terminal_id
++                .clone();
++            app.state
++                .terminals
++                .get_mut(&terminal_id)
++                .unwrap()
++                .detected_agent = Some(crate::detect::Agent::Claude);
++        }
++    }
++
+     #[test]
++    fn next_agent_immediately_excludes_newly_renamed_automation_workspace() {
++        let mut app = app_with_test_workspaces(&["first", "other", "last"]);
++        mark_all_workspaces_as_agents(&mut app);
++        app.state.sidebar_automations.workspaces = vec!["⚡ routines".into()];
++        let workspace_id = app.public_workspace_id(1);
++        app.runtime_workspace_rename(
++            "test.workspace.rename",
++            crate::api::schema::WorkspaceRenameParams {
++                workspace_id,
++                label: "⚡ routines".into(),
++            },
++        );
++
++        app.execute_tui_navigate_action(NavigateAction::NextAgent, ActionContext::Prefix);
++
++        assert_eq!(app.state.active, Some(2));
++    }
++
++    #[test]
++    fn next_agent_immediately_uses_updated_automation_config() {
++        let mut app = app_with_test_workspaces(&["first", "⚡ routines", "last"]);
++        mark_all_workspaces_as_agents(&mut app);
++        app.state.sidebar_automations.workspaces = vec!["⚡ routines".into()];
++
++        app.execute_tui_navigate_action(NavigateAction::NextAgent, ActionContext::Prefix);
++
++        assert_eq!(app.state.active, Some(2));
++    }
++
++    #[test]
+     fn default_goto_key_opens_navigator() {
+         let mut state = state_with_workspaces(&["test"]);
+ 
+@@ -2120,7 +2311,21 @@
+             KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()),
+         );
+ 
+-        assert_eq!(state.mode, Mode::Navigator);
++        assert_eq!(state.mode(), Mode::Navigator);
++    }
++
++    #[test]
++    fn default_search_key_opens_navigator_with_search_focused() {
++        let mut state = state_with_workspaces(&["test"]);
++
++        handle_navigate_key(
++            &mut state,
++            KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty()),
++        );
++
++        assert_eq!(state.mode(), Mode::Navigator);
++        assert!(state.navigator.search_focused);
++        assert!(state.navigator.search_entry);
+     }
+ 
+     #[test]
+@@ -2133,7 +2338,7 @@
+             KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()),
+         );
+ 
+-        assert_eq!(state.mode, Mode::RenameWorkspace);
++        assert_eq!(state.mode(), Mode::RenameWorkspace);
+         assert_eq!(state.name_input, "test");
+     }
+ 
+@@ -2157,7 +2362,7 @@
+             KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()),
+         );
+ 
+-        assert_eq!(state.mode, Mode::RenameWorkspace);
++        assert_eq!(state.mode(), Mode::RenameWorkspace);
+         assert_eq!(state.name_input, "__herdr_projects__");
+         assert_eq!(state.workspaces[0].display_name(), "__herdr_original__");
+     }
+@@ -2168,7 +2373,7 @@
+         let mut terminal_runtimes = TerminalRuntimeRegistry::new();
+         state.active = Some(1);
+         state.selected = 0;
+-        state.mode = Mode::Prefix;
++        state.replace_mode(Mode::Prefix);
+ 
+         execute_navigate_action_in_context(
+             &mut state,
+@@ -2177,7 +2382,7 @@
+             ActionContext::Prefix,
+         );
+ 
+-        assert_eq!(state.mode, Mode::RenameWorkspace);
++        assert_eq!(state.mode(), Mode::RenameWorkspace);
+         assert_eq!(state.selected, 1);
+         assert_eq!(state.name_input, "issue");
+     }
+@@ -2188,7 +2393,7 @@
+         let mut terminal_runtimes = TerminalRuntimeRegistry::new();
+         state.active = Some(1);
+         state.selected = 0;
+-        state.mode = Mode::Prefix;
++        state.replace_mode(Mode::Prefix);
+         state.confirm_close = false;
+         state.workspaces[1].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+             key: "repo-key".into(),
+@@ -2208,7 +2413,7 @@
+         assert_eq!(state.request_remove_linked_worktree, None);
+         assert_eq!(state.workspaces.len(), 1);
+         assert_eq!(state.workspaces[0].display_name(), "main");
+-        assert_eq!(state.mode, Mode::Terminal);
++        assert_eq!(state.mode(), Mode::Terminal);
+     }
+ 
+     #[test]
+@@ -2222,7 +2427,7 @@
+         );
+ 
+         assert!(state.request_new_workspace);
+-        assert_eq!(state.mode, Mode::Terminal);
++        assert_eq!(state.mode(), Mode::Terminal);
+     }
+ 
+     #[tokio::test]
+@@ -2234,12 +2439,12 @@
+         app.state.new_terminal_cwd =
+             crate::config::NewTerminalCwdConfig::Path(cwd.display().to_string());
+         app.state.prompt_new_workspace_name = true;
+-        app.state.mode = Mode::Navigate;
++        app.state.replace_mode(Mode::Navigate);
+         app.state.keybinds.new_workspace = crate::config::ActionKeybinds::prefix("g");
+ 
+         app.handle_navigate_key(TerminalKey::new(KeyCode::Char('g'), KeyModifiers::empty()));
+ 
+-        assert_eq!(app.state.mode, Mode::RenameWorkspace);
++        assert_eq!(app.state.mode(), Mode::RenameWorkspace);
+         assert_eq!(app.state.name_input, suggested_name);
+         assert!(app.state.name_input_replace_on_type);
+         assert_eq!(app.state.pending_workspace_create_cwd.as_ref(), Some(&cwd));
+@@ -2253,7 +2458,7 @@
+         assert_eq!(app.state.workspaces[1].identity_cwd, cwd);
+         assert!(app.state.workspaces[1].custom_name.is_none());
+         assert!(app.state.pending_workspace_create_cwd.is_none());
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         crate::app::api::test_support::shutdown_test_runtimes(&mut app);
+         let _ = std::fs::remove_dir_all(&cwd);
+     }
+@@ -2266,7 +2471,7 @@
+         app.state.new_terminal_cwd =
+             crate::config::NewTerminalCwdConfig::Path(cwd.display().to_string());
+         app.state.prompt_new_workspace_name = true;
+-        app.state.mode = Mode::Navigate;
++        app.state.replace_mode(Mode::Navigate);
+ 
+         app.execute_tui_navigate_action(NavigateAction::NewWorkspace, ActionContext::Navigate);
+         app.state.name_input = "  logs  ".into();
+@@ -2283,21 +2488,21 @@
+     fn cancelling_new_workspace_prompt_creates_nothing() {
+         let mut app = app_with_test_workspaces(&["test"]);
+         app.state.prompt_new_workspace_name = true;
+-        app.state.mode = Mode::Navigate;
++        app.state.replace_mode(Mode::Navigate);
+ 
+         app.execute_tui_navigate_action(NavigateAction::NewWorkspace, ActionContext::Navigate);
+         app.handle_rename_key_via_api(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+ 
+         assert_eq!(app.state.workspaces.len(), 1);
+         assert!(app.state.pending_workspace_create_cwd.is_none());
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+     }
+ 
+     #[test]
+     fn custom_new_worktree_key_requests_selected_workspace() {
+         let mut state = state_with_workspaces(&["main", "scratch"]);
+         state.workspaces[1].identity_cwd = unique_temp_path("navigate-new-worktree-selected");
+-        state.mode = Mode::Navigate;
++        state.replace_mode(Mode::Navigate);
+         state.selected = 1;
+         state.active = Some(0);
+         state.keybinds.new_worktree = crate::config::ActionKeybinds::prefix("g");
+@@ -2308,7 +2513,7 @@
+         );
+ 
+         assert_eq!(state.request_new_linked_worktree, Some(1));
+-        assert_eq!(state.mode, Mode::Terminal);
++        assert_eq!(state.mode(), Mode::Terminal);
+     }
+ 
+     #[test]
+@@ -2317,7 +2522,7 @@
+         let mut state = state_with_workspaces(&["main", "issue"]);
+         mark_worktree_space_member(&mut state, 0, "repo-key");
+         mark_worktree_space_member(&mut state, 1, "repo-key");
+-        state.mode = Mode::Navigate;
++        state.replace_mode(Mode::Navigate);
+         state.selected = 1;
+         state.active = Some(0);
+ 
+@@ -2343,7 +2548,7 @@
+         let mut terminal_runtimes = TerminalRuntimeRegistry::new();
+         let mut state = state_with_workspaces(&["main", "scratch"]);
+         state.workspaces[0].identity_cwd = unique_temp_path("navigate-new-worktree-active");
+-        state.mode = Mode::Terminal;
++        state.replace_mode(Mode::Terminal);
+         state.selected = 1;
+         state.active = Some(0);
+ 
+@@ -2362,7 +2567,7 @@
+         let mut state = state_with_workspaces(&["main", "normal", "issue"]);
+         mark_worktree_space_member(&mut state, 0, "repo-key");
+         mark_worktree_space_member(&mut state, 2, "repo-key");
+-        state.mode = Mode::Navigate;
++        state.replace_mode(Mode::Navigate);
+         state.active = Some(0);
+         state.selected = 0;
+ 
+@@ -2379,7 +2584,7 @@
+         let mut state = state_with_workspaces(&["main", "normal", "issue"]);
+         mark_worktree_space_member(&mut state, 0, "repo-key");
+         mark_worktree_space_member(&mut state, 2, "repo-key");
+-        state.mode = Mode::Navigate;
++        state.replace_mode(Mode::Navigate);
+         state.active = Some(0);
+         state.selected = 0;
+ 
+@@ -2398,7 +2603,7 @@
+         let mut terminal_runtimes = TerminalRuntimeRegistry::new();
+         mark_worktree_space_member(&mut state, 0, "repo-key");
+         mark_worktree_space_member(&mut state, 2, "repo-key");
+-        state.mode = Mode::Prefix;
++        state.replace_mode(Mode::Prefix);
+         state.active = Some(0);
+         state.selected = 0;
+ 
+@@ -2425,7 +2630,7 @@
+         );
+ 
+         assert!(state.sidebar_collapsed);
+-        assert_eq!(state.mode, Mode::Terminal);
++        assert_eq!(state.mode(), Mode::Terminal);
+     }
+ 
+     #[test]
+@@ -2438,7 +2643,7 @@
+             KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()),
+         );
+ 
+-        assert_eq!(state.mode, Mode::Resize);
++        assert_eq!(state.mode(), Mode::Resize);
+     }
+ 
+     #[test]
+@@ -2452,7 +2657,7 @@
+         );
+ 
+         assert!(state.request_reload_config);
+-        assert_eq!(state.mode, Mode::Terminal);
++        assert_eq!(state.mode(), Mode::Terminal);
+     }
+ 
+     #[test]
+@@ -2460,7 +2665,7 @@
+         let mut state = state_with_workspaces(&["one", "two"]);
+         state.active = Some(0);
+         state.selected = 0;
+-        state.mode = Mode::Navigate;
++        state.replace_mode(Mode::Navigate);
+         state.keybinds.open_notification_target = crate::config::ActionKeybinds::prefix("g");
+         let target_workspace_id = state.workspaces[1].id.clone();
+         let target_pane = state.workspaces[1].tabs[0].root_pane;
+@@ -2484,7 +2689,7 @@
+         assert_eq!(state.selected, 1);
+         assert_eq!(state.workspaces[1].focused_pane_id(), Some(target_pane));
+         assert!(state.toast.is_none());
+-        assert_eq!(state.mode, Mode::Terminal);
++        assert_eq!(state.mode(), Mode::Terminal);
+     }
+ 
+     #[test]
+@@ -2498,7 +2703,7 @@
+         );
+ 
+         assert_eq!(state.selected, 1);
+-        assert_eq!(state.mode, Mode::Navigate);
++        assert_eq!(state.mode(), Mode::Navigate);
+     }
+ 
+     #[test]
+@@ -2521,7 +2726,7 @@
+         );
+ 
+         assert_eq!(state.selected, 1);
+-        assert_eq!(state.mode, Mode::Navigate);
++        assert_eq!(state.mode(), Mode::Navigate);
+     }
+ 
+     #[test]
+@@ -2551,7 +2756,7 @@
+         );
+ 
+         assert_eq!(state.workspaces[0].focused_pane_id(), Some(below));
+-        assert_eq!(state.mode, Mode::Navigate);
++        assert_eq!(state.mode(), Mode::Navigate);
+     }
+ 
+     #[test]
+@@ -2585,7 +2790,7 @@
+             KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
+         );
+         assert_eq!(state.workspaces[0].focused_pane_id(), Some(below));
+-        assert_eq!(state.mode, Mode::Navigate);
++        assert_eq!(state.mode(), Mode::Navigate);
+     }
+ 
+     #[test]
+@@ -2619,7 +2824,7 @@
+             KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL),
+         );
+         assert_eq!(state.workspaces[0].focused_pane_id(), Some(below));
+-        assert_eq!(state.mode, Mode::Navigate);
++        assert_eq!(state.mode(), Mode::Navigate);
+     }
+ 
+     #[test]
+@@ -2651,7 +2856,7 @@
+             KeyEvent::new(KeyCode::Right, KeyModifiers::empty()),
+         );
+         assert_eq!(state.workspaces[0].focused_pane_id(), Some(right));
+-        assert_eq!(state.mode, Mode::Navigate);
++        assert_eq!(state.mode(), Mode::Navigate);
+     }
+ 
+     #[test]
+@@ -2659,7 +2864,7 @@
+         let mut state = state_with_workspaces(&["a", "b", "c", "d"]);
+         state.active = Some(0);
+         state.selected = 0;
+-        state.mode = Mode::Navigate;
++        state.replace_mode(Mode::Navigate);
+         crate::ui::compute_view(&mut state, ratatui::layout::Rect::new(0, 0, 44, 8));
+         assert_eq!(state.mobile_switcher_scroll, 0);
+ 
+@@ -2669,7 +2874,7 @@
+         );
+ 
+         assert_eq!(state.selected, 1);
+-        assert_eq!(state.mobile_switcher_scroll, 1);
++        assert_eq!(state.mobile_switcher_scroll, 3);
+     }
+ 
+     #[test]
+@@ -2819,12 +3024,12 @@
+         app.state.workspaces = vec![crate::workspace::Workspace::test_new("solo")];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Navigate;
++        app.state.replace_mode(Mode::Navigate);
+ 
+         app.execute_tui_navigate_action(NavigateAction::MoveTabNext, ActionContext::Navigate);
+ 
+         assert_eq!(app.state.workspaces[0].tabs.len(), 1);
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+     }
+ 
+     #[test]
+@@ -2838,6 +3043,108 @@
+         );
+ 
+         assert_eq!(action, Some(NavigateAction::LastPane));
++    }
++
++    #[test]
++    fn mouse_nav_button_actions_map_to_navigation_actions() {
++        use crate::config::MouseNavButtonActionConfig as ButtonAction;
++
++        assert_eq!(
++            navigate_action_for_mouse_nav_button(ButtonAction::FocusBack),
++            Some(NavigateAction::FocusBack)
++        );
++        assert_eq!(
++            navigate_action_for_mouse_nav_button(ButtonAction::FocusForward),
++            Some(NavigateAction::FocusForward)
++        );
++        assert_eq!(
++            navigate_action_for_mouse_nav_button(ButtonAction::NextAgent),
++            Some(NavigateAction::NextAgent)
++        );
++        assert_eq!(
++            navigate_action_for_mouse_nav_button(ButtonAction::PreviousAgent),
++            Some(NavigateAction::PreviousAgent)
++        );
++        assert_eq!(
++            navigate_action_for_mouse_nav_button(ButtonAction::Off),
++            None
++        );
++    }
++
++    #[test]
++    fn mouse_nav_buttons_default_to_focus_history() {
++        let config = crate::config::Config::default();
++
++        assert_eq!(
++            config.ui.mouse_back_button,
++            crate::config::MouseNavButtonActionConfig::FocusBack
++        );
++        assert_eq!(
++            config.ui.mouse_forward_button,
++            crate::config::MouseNavButtonActionConfig::FocusForward
++        );
++    }
++
++    #[test]
++    fn mouse_nav_buttons_are_configurable() {
++        let config: Config = toml::from_str(
++            r#"
++[ui]
++mouse_back_button = "previous-agent"
++mouse_forward_button = "off"
++"#,
++        )
++        .unwrap();
++
++        assert_eq!(
++            config.ui.mouse_back_button,
++            crate::config::MouseNavButtonActionConfig::PreviousAgent
++        );
++        assert_eq!(
++            config.ui.mouse_forward_button,
++            crate::config::MouseNavButtonActionConfig::Off
++        );
++    }
++
++    #[test]
++    fn focus_history_shortcuts_map_to_navigation_actions() {
++        let config: Config = toml::from_str(
++            r#"
++[keys]
++focus_back = ["prefix+[", "ctrl+alt+["]
++focus_forward = "prefix+]"
++"#,
++        )
++        .unwrap();
++        let mut state = state_with_workspaces(&["test"]);
++        state.keybinds = config.keybinds();
++
++        assert_eq!(
++            action_for_key(
++                &state,
++                TerminalKey::new(KeyCode::Char('['), KeyModifiers::empty()),
++                BindingDispatch::Prefix,
++            ),
++            Some(NavigateAction::FocusBack)
++        );
++        assert_eq!(
++            terminal_direct_navigation_action(
++                &state,
++                TerminalKey::new(
++                    KeyCode::Char('['),
++                    KeyModifiers::CONTROL | KeyModifiers::ALT,
++                ),
++            ),
++            Some(NavigateAction::FocusBack)
++        );
++        assert_eq!(
++            action_for_key(
++                &state,
++                TerminalKey::new(KeyCode::Char(']'), KeyModifiers::empty()),
++                BindingDispatch::Prefix,
++            ),
++            Some(NavigateAction::FocusForward)
++        );
+     }
+ 
+     #[test]
+@@ -3006,14 +3313,14 @@
+         let config: Config =
+             toml::from_str("[keys]\nswitch_workspace = \"prefix+shift+1..9\"\n").unwrap();
+         app.state.keybinds.switch_workspace = config.keybinds().switch_workspace;
+-        app.state.mode = Mode::Prefix;
++        app.state.replace_mode(Mode::Prefix);
+ 
+         app.handle_prefix_key(TerminalKey::new(
+             KeyCode::Modifier(ModifierKeyCode::LeftShift),
+             KeyModifiers::SHIFT,
+         ));
+ 
+-        assert_eq!(app.state.mode, Mode::Prefix);
++        assert_eq!(app.state.mode(), Mode::Prefix);
+ 
+         app.handle_prefix_key(
+             TerminalKey::new(KeyCode::Char('2'), KeyModifiers::SHIFT)
+@@ -3021,7 +3328,7 @@
+         );
+ 
+         assert_eq!(app.state.active, Some(1));
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+     }
+ 
+     #[test]
+@@ -3041,6 +3348,21 @@
+     }
+ 
+     #[test]
++    fn usage_action_name_dispatches_configured_prefix_binding() {
++        let mut state = state_with_workspaces(&["one"]);
++        let config: Config = toml::from_str("[keys]\nusage = \"prefix+u\"\n").unwrap();
++        state.keybinds = config.keybinds();
++
++        let action = action_for_key(
++            &state,
++            TerminalKey::new(KeyCode::Char('u'), KeyModifiers::empty()),
++            BindingDispatch::Prefix,
++        );
++
++        assert_eq!(action, Some(NavigateAction::Usage));
++    }
++
++    #[test]
+     fn literal_symbol_binding_takes_precedence_over_shifted_indexed_alias() {
+         let mut state = state_with_workspaces(&["one", "two"]);
+         let config: Config = toml::from_str(
+@@ -3100,7 +3422,7 @@
+         app.state.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
+         app.state.active = Some(1);
+         app.state.selected = 1;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         let output_path = unique_temp_path("literal-symbol-custom-command");
+         let config: Config = toml::from_str(&format!(
+@@ -3127,7 +3449,7 @@
+ 
+         assert_eq!(wait_for_file(&output_path), "literal");
+         assert_eq!(app.state.active, Some(1));
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         let _ = std::fs::remove_file(output_path);
+     }
+ 
+@@ -3144,12 +3466,12 @@
+         app.state.workspaces = vec![Workspace::test_new("test")];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Navigate;
++        app.state.replace_mode(Mode::Navigate);
+ 
+         app.handle_navigate_key(TerminalKey::new(KeyCode::Char('n'), KeyModifiers::SHIFT));
+ 
+         assert_eq!(app.state.workspaces.len(), 2);
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+     }
+ 
+     #[tokio::test]
+@@ -3165,12 +3487,12 @@
+         app.state.workspaces = vec![Workspace::test_new("test")];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Navigate;
++        app.state.replace_mode(Mode::Navigate);
+ 
+         app.handle_navigate_key(TerminalKey::new(KeyCode::Char('N'), KeyModifiers::empty()));
+ 
+         assert_eq!(app.state.workspaces.len(), 2);
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+     }
+ 
+     #[tokio::test]
+@@ -3186,11 +3508,11 @@
+         app.state.workspaces = vec![Workspace::test_new("test")];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Navigate;
++        app.state.replace_mode(Mode::Navigate);
+ 
+         app.handle_navigate_key(TerminalKey::new(KeyCode::Char('W'), KeyModifiers::empty()));
+ 
+-        assert_eq!(app.state.mode, Mode::RenameWorkspace);
++        assert_eq!(app.state.mode(), Mode::RenameWorkspace);
+     }
+ 
+     #[tokio::test]
+@@ -3206,7 +3528,7 @@
+         app.state.workspaces = vec![Workspace::test_new("test")];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Prefix;
++        app.state.replace_mode(Mode::Prefix);
+ 
+         let mut events = parse_raw_input_bytes_sync(b"\x1b[114:82;1u");
+         assert_eq!(events.len(), 1);
+@@ -3219,7 +3541,7 @@
+         );
+         app.handle_prefix_key(key);
+ 
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+     }
+ 
+     #[tokio::test]
+@@ -3235,12 +3557,12 @@
+         app.state.workspaces = vec![Workspace::test_new("test")];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Navigate;
++        app.state.replace_mode(Mode::Navigate);
+ 
+         app.handle_navigate_key(TerminalKey::new(KeyCode::Char('R'), KeyModifiers::empty()));
+ 
+         assert!(!app.state.request_reload_config);
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+     }
+ 
+     #[tokio::test]
+@@ -3256,28 +3578,28 @@
+         app.state.workspaces = vec![Workspace::test_new("test")];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Navigate;
++        app.state.replace_mode(Mode::Navigate);
+ 
+         app.handle_navigate_key(TerminalKey::new(KeyCode::Char('P'), KeyModifiers::empty()));
+ 
+-        assert_eq!(app.state.mode, Mode::RenamePane);
++        assert_eq!(app.state.mode(), Mode::RenamePane);
+     }
+ 
+     #[test]
+     fn app_navigate_mode_workspace_down_moves_selection() {
+         let mut app = app_with_test_workspaces(&["one", "two"]);
+-        app.state.mode = Mode::Navigate;
++        app.state.replace_mode(Mode::Navigate);
+ 
+         app.handle_navigate_key(TerminalKey::new(KeyCode::Down, KeyModifiers::empty()));
+ 
+         assert_eq!(app.state.selected, 1);
+-        assert_eq!(app.state.mode, Mode::Navigate);
++        assert_eq!(app.state.mode(), Mode::Navigate);
+     }
+ 
+     #[test]
+     fn app_navigate_mode_maps_french_number_row_to_workspace() {
+         let mut app = app_with_test_workspaces(&["one", "two"]);
+-        app.state.mode = Mode::Navigate;
++        app.state.replace_mode(Mode::Navigate);
+ 
+         app.handle_navigate_key(
+             TerminalKey::new(KeyCode::Char('é'), KeyModifiers::SHIFT)
+@@ -3285,7 +3607,7 @@
+         );
+ 
+         assert_eq!(app.state.active, Some(1));
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+     }
+ 
+     #[test]
+@@ -3300,12 +3622,12 @@
+         )
+         .unwrap();
+         app.state.keybinds = config.keybinds();
+-        app.state.mode = Mode::Navigate;
++        app.state.replace_mode(Mode::Navigate);
+ 
+         app.handle_navigate_key(TerminalKey::new(KeyCode::Char('j'), KeyModifiers::empty()));
+ 
+         assert_eq!(app.state.selected, 1);
+-        assert_eq!(app.state.mode, Mode::Navigate);
++        assert_eq!(app.state.mode(), Mode::Navigate);
+     }
+ 
+     #[tokio::test]
+@@ -3321,7 +3643,7 @@
+         app.state.workspaces = vec![Workspace::test_new("test")];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         let root = app.state.workspaces[0].tabs[0].root_pane;
+         let right = app.state.workspaces[0].test_split(Direction::Horizontal);
+         app.state.workspaces[0].layout.focus_pane(right);
+@@ -3340,7 +3662,7 @@
+             .await;
+ 
+         assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(root));
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+     }
+ 
+     #[tokio::test]
+@@ -3354,13 +3676,13 @@
+             .unwrap()
+             .layout
+             .panes(ratatui::layout::Rect::new(0, 0, 80, 24));
+-        app.state.mode = Mode::Navigate;
++        app.state.replace_mode(Mode::Navigate);
+ 
+         app.handle_key(TerminalKey::new(KeyCode::Char('k'), KeyModifiers::empty()))
+             .await;
+ 
+         assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(root));
+-        assert_eq!(app.state.mode, Mode::Navigate);
++        assert_eq!(app.state.mode(), Mode::Navigate);
+     }
+ 
+     #[tokio::test]
+@@ -3376,7 +3698,7 @@
+         app.state.workspaces = vec![Workspace::test_new("test")];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         app.handle_key(TerminalKey::new(
+             app.state.prefix_code,
+@@ -3386,7 +3708,7 @@
+         app.handle_key(TerminalKey::new(KeyCode::Char('o'), KeyModifiers::empty()))
+             .await;
+ 
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+     }
+ 
+     #[tokio::test]
+@@ -3402,7 +3724,7 @@
+         app.state.workspaces = vec![Workspace::test_new("test")];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         app.handle_key(TerminalKey::new(
+             app.state.prefix_code,
+@@ -3412,7 +3734,7 @@
+         app.handle_key(TerminalKey::new(KeyCode::F(12), KeyModifiers::empty()))
+             .await;
+ 
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+     }
+ 
+     #[tokio::test]
+@@ -3428,7 +3750,7 @@
+         app.state.workspaces = vec![Workspace::test_new("test")];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         app.handle_key(TerminalKey::new(
+             app.state.prefix_code,
+@@ -3441,7 +3763,7 @@
+         )
+         .await;
+ 
+-        assert_eq!(app.state.mode, Mode::KeybindHelp);
++        assert_eq!(app.state.mode(), Mode::KeybindHelp);
+     }
+ 
+     #[test]
+@@ -3453,13 +3775,13 @@
+             &mut state,
+             KeyEvent::new(KeyCode::Char('?'), KeyModifiers::SHIFT),
+         );
+-        assert_eq!(state.mode, Mode::Navigate);
++        assert_eq!(state.mode(), Mode::Navigate);
+ 
+         handle_navigate_key(
+             &mut state,
+             KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty()),
+         );
+-        assert_eq!(state.mode, Mode::KeybindHelp);
++        assert_eq!(state.mode(), Mode::KeybindHelp);
+     }
+ 
+     #[test]
+@@ -3479,7 +3801,7 @@
+     fn empty_state_new_tab_is_no_op() {
+         let mut state = crate::app::state::AppState::test_new();
+         let mut terminal_runtimes = TerminalRuntimeRegistry::new();
+-        state.mode = Mode::Prefix;
++        state.replace_mode(Mode::Prefix);
+ 
+         execute_navigate_action_in_context(
+             &mut state,
+@@ -3488,7 +3810,7 @@
+             ActionContext::Prefix,
+         );
+ 
+-        assert_eq!(state.mode, Mode::Navigate);
++        assert_eq!(state.mode(), Mode::Navigate);
+         assert!(!state.creating_new_tab);
+         assert!(!state.request_new_tab);
+         assert!(state.workspaces.is_empty());
+@@ -3499,7 +3821,7 @@
+         let mut state = state_with_workspaces(&["main", "issue"]);
+         state.selected = 1;
+         state.active = Some(1);
+-        state.mode = Mode::Navigate;
++        state.replace_mode(Mode::Navigate);
+         state.confirm_close = false;
+         state.workspaces[1].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+             key: "repo-key".into(),
+@@ -3514,7 +3836,7 @@
+         assert_eq!(state.request_remove_linked_worktree, None);
+         assert_eq!(state.workspaces.len(), 1);
+         assert_eq!(state.workspaces[0].display_name(), "main");
+-        assert_eq!(state.mode, Mode::Terminal);
++        assert_eq!(state.mode(), Mode::Terminal);
+     }
+ 
+     #[test]
+@@ -3524,13 +3846,13 @@
+         mark_worktree_space_member(&mut app.state, 1, "repo-key");
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Navigate;
++        app.state.replace_mode(Mode::Navigate);
+         app.state.confirm_close = false;
+ 
+         app.execute_tui_navigate_action(NavigateAction::CloseWorkspace, ActionContext::Navigate);
+ 
+         assert!(app.state.workspaces.is_empty());
+-        assert_eq!(app.state.mode, Mode::Navigate);
++        assert_eq!(app.state.mode(), Mode::Navigate);
+         assert_eq!(app.event_hub.events_after(0).len(), 2);
+     }
+ 
+@@ -3541,12 +3863,12 @@
+         mark_worktree_space_member(&mut state, 1, "repo-key");
+         state.selected = 1;
+         state.active = Some(0);
+-        state.mode = Mode::Navigate;
++        state.replace_mode(Mode::Navigate);
+ 
+         execute_navigate_action(&mut state, NavigateAction::ClosePane);
+ 
+         assert_eq!(state.selected, 0);
+-        assert_eq!(state.mode, Mode::ConfirmClose);
++        assert_eq!(state.mode(), Mode::ConfirmClose);
+         assert_eq!(state.workspaces.len(), 2);
+     }
+ 
+@@ -3557,12 +3879,12 @@
+         mark_worktree_space_member(&mut app.state, 1, "repo-key");
+         app.state.active = Some(0);
+         app.state.selected = 1;
+-        app.state.mode = Mode::Navigate;
++        app.state.replace_mode(Mode::Navigate);
+ 
+         app.execute_tui_navigate_action(NavigateAction::CloseTab, ActionContext::Navigate);
+ 
+         assert_eq!(app.state.selected, 0);
+-        assert_eq!(app.state.mode, Mode::ConfirmClose);
++        assert_eq!(app.state.mode(), Mode::ConfirmClose);
+         assert_eq!(app.state.workspaces.len(), 2);
+     }
+ 
+@@ -3573,12 +3895,12 @@
+         mark_worktree_space_member(&mut app.state, 1, "repo-key");
+         app.state.active = Some(0);
+         app.state.selected = 1;
+-        app.state.mode = Mode::Navigate;
++        app.state.replace_mode(Mode::Navigate);
+ 
+         app.execute_tui_navigate_action(NavigateAction::ClosePane, ActionContext::Navigate);
+ 
+         assert_eq!(app.state.selected, 0);
+-        assert_eq!(app.state.mode, Mode::ConfirmClose);
++        assert_eq!(app.state.mode(), Mode::ConfirmClose);
+         assert_eq!(app.state.workspaces.len(), 2);
+     }
+ 
+@@ -3596,7 +3918,7 @@
+         app.state.workspaces = vec![Workspace::test_new("test")];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         let output_path = unique_temp_path("custom-command-keybind");
+         let release_path = unique_temp_path("custom-command-release");
+@@ -3620,7 +3942,7 @@
+             app.state.prefix_mods,
+         ))
+         .await;
+-        assert_eq!(app.state.mode, Mode::Prefix);
++        assert_eq!(app.state.mode(), Mode::Prefix);
+ 
+         let launch_started = std::time::Instant::now();
+         app.handle_key(TerminalKey::new(KeyCode::Char('m'), KeyModifiers::empty()))
+@@ -3637,7 +3959,7 @@
+         assert_eq!(lines[1], app.state.workspaces[0].id);
+         assert_eq!(lines[2], format!("{}:t1", app.state.workspaces[0].id));
+         assert_eq!(lines[3], format!("{}:p1", app.state.workspaces[0].id));
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+ 
+         std::fs::write(&release_path, b"release").expect("release command");
+         let reaped_by_runtime = wait_for_detached_process_reap(&mut app, pid).await;
+@@ -3690,7 +4012,7 @@
+         app.state.terminals.insert(terminal.id.clone(), terminal);
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         let output_path = unique_temp_path("custom-pane-command");
+         let command = format!("printf done > '{}'", output_path.display());
+@@ -3742,7 +4064,7 @@
+ 
+         assert_eq!(app.state.workspaces[0].tabs[0].layout.pane_count(), 1);
+         assert!(!app.state.workspaces[0].tabs[0].zoomed);
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         let _ = std::fs::remove_file(output_path);
+ 
+         let runtimes: Vec<_> = app.terminal_runtimes.drain().collect();
+@@ -3776,7 +4098,7 @@
+         app.state.workspaces = vec![workspace];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         let output_path = unique_temp_path("edit-scrollback");
+         let previous_editor = std::env::var_os("EDITOR");
+@@ -3801,7 +4123,7 @@
+ 
+         let content = wait_for_file(&output_path);
+         assert_eq!(content, "ABCDEFGHIJ\nKLMNO");
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         assert!(
+             app.state.terminals.values().any(|terminal| terminal
+                 .launch_argv
+@@ -3825,7 +4147,7 @@
+         );
+ 
+         assert!(state.workspaces[0].zoomed);
+-        assert_eq!(state.mode, Mode::Terminal);
++        assert_eq!(state.mode(), Mode::Terminal);
+     }
+ 
+     #[test]
+@@ -3852,7 +4174,7 @@
+             KeyEvent::new(KeyCode::Char('?'), KeyModifiers::SHIFT),
+         );
+ 
+-        assert_eq!(state.mode, Mode::KeybindHelp);
++        assert_eq!(state.mode(), Mode::KeybindHelp);
+     }
+ 
+     #[test]
+@@ -3861,7 +4183,7 @@
+ 
+         execute_navigate_action(&mut state, NavigateAction::NewTab);
+ 
+-        assert_eq!(state.mode, Mode::RenameTab);
++        assert_eq!(state.mode(), Mode::RenameTab);
+         assert!(state.creating_new_tab);
+         assert_eq!(state.name_input, "2");
+         assert!(state.name_input_replace_on_type);
+@@ -3876,7 +4198,7 @@
+ 
+         execute_navigate_action(&mut state, NavigateAction::NewTab);
+ 
+-        assert_eq!(state.mode, Mode::Terminal);
++        assert_eq!(state.mode(), Mode::Terminal);
+         assert!(!state.creating_new_tab);
+         assert!(state.request_new_tab);
+         assert!(state.requested_new_tab_name.is_none());

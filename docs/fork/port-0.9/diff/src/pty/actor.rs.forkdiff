@@ -1,0 +1,30 @@
+--- /tmp/base.tmp	2026-09-16 17:53:32
++++ docs/fork/port-0.9/orig/src/pty/actor.rs	2026-09-16 17:53:32
+@@ -70,6 +70,13 @@
+                 return Err(mpsc::error::SendError(bytes));
+             }
+             self.data_tx.send(bytes).await
++        }
++
++        pub(crate) async fn write_user_input_barrier(
++            &self,
++            bytes: Bytes,
++        ) -> Result<(), mpsc::error::SendError<Bytes>> {
++            self.write_user_input(bytes).await
+         }
+ 
+         pub(crate) fn try_write_user_input(
+@@ -86,6 +93,13 @@
+             self.data_tx.try_send(bytes)
+         }
+ 
++        pub(crate) fn try_write_user_input_barrier(
++            &self,
++            bytes: Bytes,
++        ) -> Result<(), mpsc::error::TrySendError<Bytes>> {
++            self.try_write_user_input(bytes)
++        }
++
+         pub(crate) fn write_terminal_response(&self, response: impl FnOnce() -> Option<Bytes>) {
+             let _order = self
+                 .response_order

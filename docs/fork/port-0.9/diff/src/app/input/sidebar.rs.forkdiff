@@ -1,0 +1,1443 @@
+--- /tmp/base.tmp	2026-09-16 17:53:31
++++ docs/fork/port-0.9/orig/src/app/input/sidebar.rs	2026-09-16 17:53:31
+@@ -4,13 +4,29 @@
+ 
+ use super::ScrollbarClickTarget;
+ 
++/// What a click on a tree-view space/tab header row landed on.
++pub(super) enum TreeHeaderHit {
++    /// The disclosure chevron: collapse or expand this group.
++    Toggle { space: bool, key: String },
++    /// The row body: focus the space, and the tab when the header names one.
++    Focus {
++        ws_idx: usize,
++        tab_idx: Option<usize>,
++    },
++    /// The space header's plus: create a new tab in that space and focus it.
++    NewTab { ws_idx: usize },
++    /// The space header's pin: toggle whether the space stays listed when no
++    /// agent rows remain beneath it.
++    PinToggle { key: String },
++}
++
+ impl AppState {
+     pub(super) fn workspace_list_rect(&self) -> Rect {
+         let sidebar = self.view.sidebar_rect;
+         if self.sidebar_collapsed || sidebar.width <= 1 || sidebar.height == 0 {
+             return Rect::default();
+         }
+-        crate::ui::workspace_list_rect(sidebar, self.sidebar_section_split)
++        crate::ui::workspace_list_rect(self, sidebar)
+     }
+ 
+     pub(super) fn agent_panel_rect(&self) -> Rect {
+@@ -18,9 +34,7 @@
+         if self.sidebar_collapsed || sidebar.width <= 1 || sidebar.height == 0 {
+             return Rect::default();
+         }
+-        let (_, detail_area) =
+-            crate::ui::expanded_sidebar_sections(sidebar, self.sidebar_section_split);
+-        detail_area
++        crate::ui::ordered_sidebar_sections(self, sidebar).1
+     }
+ 
+     pub(super) fn workspace_list_scrollbar_target_at(
+@@ -104,12 +118,13 @@
+ 
+     pub(super) fn agent_panel_scrollbar_target_at(
+         &self,
++        entries: &[crate::ui::AgentPanelListEntry],
+         col: u16,
+         row: u16,
+     ) -> Option<ScrollbarClickTarget> {
+         let area = self.agent_panel_rect();
+-        let metrics = crate::ui::agent_panel_scroll_metrics(self, area);
+-        let track = crate::ui::agent_panel_scrollbar_rect(self, area)?;
++        let metrics = crate::ui::agent_panel_scroll_metrics(self, entries, area);
++        let track = crate::ui::agent_panel_scrollbar_rect(self, entries, area)?;
+         if col < track.x
+             || col >= track.x + track.width
+             || row < track.y
+@@ -128,12 +143,13 @@
+ 
+     pub(super) fn agent_panel_offset_for_drag_row(
+         &self,
++        entries: &[crate::ui::AgentPanelListEntry],
+         row: u16,
+         grab_row_offset: u16,
+     ) -> Option<usize> {
+         let area = self.agent_panel_rect();
+-        let metrics = crate::ui::agent_panel_scroll_metrics(self, area);
+-        let track = crate::ui::agent_panel_scrollbar_rect(self, area)?;
++        let metrics = crate::ui::agent_panel_scroll_metrics(self, entries, area);
++        let track = crate::ui::agent_panel_scrollbar_rect(self, entries, area)?;
+         Some(crate::ui::scrollbar_offset_from_drag_row(
+             metrics,
+             track,
+@@ -142,17 +158,26 @@
+         ))
+     }
+ 
+-    pub(super) fn set_agent_panel_offset_from_bottom(&mut self, offset_from_bottom: usize) {
++    pub(super) fn set_agent_panel_offset_from_bottom(
++        &mut self,
++        entries: &[crate::ui::AgentPanelListEntry],
++        offset_from_bottom: usize,
++    ) {
+         let area = self.agent_panel_rect();
+-        let metrics = crate::ui::agent_panel_scroll_metrics(self, area);
++        let metrics = crate::ui::agent_panel_scroll_metrics(self, entries, area);
+         self.agent_panel_scroll = metrics
+             .max_offset_from_bottom
+             .saturating_sub(offset_from_bottom);
+     }
+ 
+-    pub(super) fn scroll_agent_panel(&mut self, delta: i16) {
++    pub(super) fn scroll_agent_panel(
++        &mut self,
++        entries: &[crate::ui::AgentPanelListEntry],
++        delta: i16,
++    ) {
+         let area = self.agent_panel_rect();
+-        let max_scroll = crate::ui::agent_panel_scroll_metrics(self, area).max_offset_from_bottom;
++        let max_scroll =
++            crate::ui::agent_panel_scroll_metrics(self, entries, area).max_offset_from_bottom;
+         if delta.is_negative() {
+             self.agent_panel_scroll = self
+                 .agent_panel_scroll
+@@ -175,8 +200,22 @@
+     }
+ 
+     pub(crate) fn sidebar_new_button_rect(&self) -> Rect {
++        if self.sidebar_new_button == crate::config::SidebarNewButtonConfig::Header {
++            let area = self.workspace_list_rect();
++            if area == Rect::default() || area.width == 0 || area.height == 0 {
++                return Rect::default();
++            }
++            let content_width = area.width.saturating_sub(1);
++            return Rect::new(
++                area.x + content_width.saturating_sub(3),
++                area.y,
++                3.min(content_width),
++                1,
++            );
++        }
++
+         let footer = self.sidebar_footer_rect();
+-        let width = 5u16.min(footer.width.max(1));
++        let width = 5u16.min(footer.width.saturating_sub(1));
+         Rect::new(footer.x, footer.y, width, footer.height)
+     }
+ 
+@@ -186,13 +225,18 @@
+         }
+ 
+         let footer = self.sidebar_footer_rect();
++        let content_width = footer.width.saturating_sub(2);
+         let width = if self.global_menu_attention_badge_visible() {
+-            8
+-        } else {
+-            6
++            7
++        } else {
++            4
+         }
+-        .min(footer.width.max(1));
+-        let x = footer.x + footer.width.saturating_sub(width);
++        .min(content_width);
++        let x = if self.sidebar_menu_position == crate::config::SidebarMenuPositionConfig::Left {
++            footer.x
++        } else {
++            footer.x + content_width.saturating_sub(width)
++        };
+         Rect::new(x, footer.y, width, footer.height)
+     }
+ 
+@@ -273,13 +317,10 @@
+     }
+ 
+     pub(super) fn on_sidebar_section_divider(&self, col: u16, row: u16) -> bool {
+-        if self.sidebar_collapsed {
++        if self.sidebar_collapsed || self.sidebar_spaces.max_visible > 0 {
+             return false;
+         }
+-        let rect = crate::ui::sidebar_section_divider_rect(
+-            self.view.sidebar_rect,
+-            self.sidebar_section_split,
+-        );
++        let rect = crate::ui::sidebar_section_divider_rect(self, self.view.sidebar_rect);
+         rect.width > 0
+             && col >= rect.x
+             && col < rect.x + rect.width
+@@ -294,7 +335,13 @@
+             return;
+         }
+         let relative_y = row.saturating_sub(sidebar.y);
+-        let ratio = (relative_y as f32) / (content_height as f32);
++        let first_section_ratio = (relative_y as f32) / (content_height as f32);
++        let ratio = match self.sidebar_section_order {
++            [crate::config::SidebarSection::Agents, crate::config::SidebarSection::Spaces] => {
++                1.0 - first_section_ratio
++            }
++            _ => first_section_ratio,
++        };
+         self.sidebar_section_split = ratio.clamp(0.1, 0.9);
+         self.mark_session_dirty();
+     }
+@@ -321,7 +368,8 @@
+             return None;
+         }
+ 
+-        let (ws_area, _, _) = crate::ui::collapsed_sidebar_sections(self.view.sidebar_rect);
++        let (ws_area, _, _) =
++            crate::ui::ordered_collapsed_sidebar_sections(self, self.view.sidebar_rect);
+         if ws_area == Rect::default() || row < ws_area.y || row >= ws_area.y + ws_area.height {
+             return None;
+         }
+@@ -338,7 +386,8 @@
+             return None;
+         }
+ 
+-        let (_, _, detail_area) = crate::ui::collapsed_sidebar_sections(self.view.sidebar_rect);
++        let (_, _, detail_area) =
++            crate::ui::ordered_collapsed_sidebar_sections(self, self.view.sidebar_rect);
+         let detail_content_area = Rect::new(
+             detail_area.x,
+             detail_area.y,
+@@ -380,6 +429,82 @@
+             .map(|(_, (target, _))| target)
+     }
+ 
++    /// Insertion target for a tree-space drag at `row`: the nearest
++    /// space-boundary slot in the agents tree.
++    pub(super) fn tree_space_drop_target_at(
++        &self,
++        entries: &[crate::ui::AgentPanelListEntry],
++        row: u16,
++    ) -> Option<crate::app::state::WorkspaceDropTarget> {
++        if self.sidebar_collapsed {
++            return None;
++        }
++        let detail_area = self.agent_panel_rect();
++        let metrics = crate::ui::agent_panel_scroll_metrics(self, entries, detail_area);
++        let body = crate::ui::agent_panel_body_rect(
++            detail_area,
++            crate::ui::should_show_scrollbar(metrics),
++        );
++        if body.height == 0 || row < body.y || row >= body.y + body.height {
++            return None;
++        }
++        let scroll = self.agent_panel_scroll.min(metrics.max_offset_from_bottom);
++        crate::ui::tree_space_drop_slots(self, entries, body, scroll)
++            .into_iter()
++            .enumerate()
++            .min_by_key(|(slot_idx, (_, slot_row))| (row.abs_diff(*slot_row), *slot_idx))
++            .map(|(_, (target, _))| target)
++    }
++
++    /// Move parameters for a completed tree-space drag. Unlike the workspace
++    /// list variant this works over the full workspace order, so revealed
++    /// hidden spaces reorder too. A worktree group still moves as one block.
++    pub(super) fn tree_space_move_params(
++        &self,
++        source_ws_idx: usize,
++        drop_target: crate::app::state::WorkspaceDropTarget,
++    ) -> Option<crate::api::schema::WorkspaceMoveBlockParams> {
++        let source = self.workspaces.get(source_ws_idx)?;
++        if source
++            .worktree_space()
++            .is_some_and(|space| space.is_linked_worktree)
++        {
++            return None;
++        }
++        let workspace_ids = match source.worktree_space() {
++            Some(source_space) => {
++                let mut ids = vec![source.id.clone()];
++                ids.extend(
++                    self.workspaces
++                        .iter()
++                        .filter(|workspace| workspace.id != source.id)
++                        .filter(|workspace| {
++                            workspace
++                                .worktree_space()
++                                .is_some_and(|space| space.key == source_space.key)
++                        })
++                        .map(|workspace| workspace.id.clone()),
++                );
++                ids
++            }
++            None => vec![source.id.clone()],
++        };
++        let before_workspace_id = match drop_target {
++            crate::app::state::WorkspaceDropTarget::Before(target_ws_idx) => {
++                let target = self.workspaces.get(target_ws_idx)?;
++                if workspace_ids.contains(&target.id) {
++                    return None;
++                }
++                Some(target.id.clone())
++            }
++            crate::app::state::WorkspaceDropTarget::End => None,
++        };
++        Some(crate::api::schema::WorkspaceMoveBlockParams {
++            workspace_ids,
++            before_workspace_id,
++        })
++    }
++
+     pub(super) fn workspace_move_block_params(
+         &self,
+         source_ws_idx: usize,
+@@ -470,28 +595,135 @@
+             return false;
+         }
+ 
+-        let (_, detail_area) = crate::ui::expanded_sidebar_sections(
+-            self.view.sidebar_rect,
+-            self.sidebar_section_split,
+-        );
++        let (_, detail_area) = crate::ui::ordered_sidebar_sections(self, self.view.sidebar_rect);
+         let rect = crate::ui::agent_panel_toggle_rect(detail_area, self.agent_panel_sort);
+         rect.width > 0
+             && col >= rect.x
+             && col < rect.x + rect.width
+             && row >= rect.y
+             && row < rect.y + rect.height
++    }
++
++    pub(super) fn on_agent_panel_usage(&self, col: u16, row: u16) -> bool {
++        if self.sidebar_collapsed {
++            return false;
++        }
++
++        let (_, detail_area) = crate::ui::ordered_sidebar_sections(self, self.view.sidebar_rect);
++        let rect = crate::ui::agent_panel_usage_rect(detail_area, self.agent_panel_sort);
++        rect.width > 0
++            && col >= rect.x
++            && col < rect.x + rect.width
++            && row >= rect.y
++            && row < rect.y + rect.height
++    }
++
++    /// True when (col, row) lands on the revealed `hidden` section header,
++    /// whose whole row toggles the section open or closed.
++    pub(super) fn on_hidden_spaces_header(
++        &self,
++        entries: &[crate::ui::AgentPanelListEntry],
++        col: u16,
++        row: u16,
++    ) -> bool {
++        if self.sidebar_collapsed
++            || !entries.iter().any(|entry| {
++                matches!(
++                    entry,
++                    crate::ui::AgentPanelListEntry::HiddenSpacesHeader { .. }
++                )
++            })
++        {
++            return false;
++        }
++
++        let detail_area = self.agent_panel_rect();
++        let metrics = crate::ui::agent_panel_scroll_metrics(self, entries, detail_area);
++        let body = crate::ui::agent_panel_body_rect(
++            detail_area,
++            crate::ui::should_show_scrollbar(metrics),
++        );
++        if col < body.x || col >= body.x + body.width || row < body.y || row >= body.y + body.height
++        {
++            return false;
++        }
++
++        let mut row_y = body.y;
++        let scroll = self.agent_panel_scroll.min(metrics.max_offset_from_bottom);
++        for (index, entry) in entries.iter().enumerate().skip(scroll) {
++            let height = crate::ui::agent_panel_list_entry_height(self, entry, body.height);
++            if matches!(
++                entry,
++                crate::ui::AgentPanelListEntry::HiddenSpacesHeader { .. }
++            ) {
++                return row >= row_y && row < row_y.saturating_add(height);
++            }
++            row_y = row_y
++                .saturating_add(height)
++                .saturating_add(crate::ui::agent_panel_list_entry_gap(self, entries, index));
++            if row_y >= body.y + body.height {
++                break;
++            }
++        }
++        false
++    }
++
++    pub(super) fn on_automations_header(
++        &self,
++        entries: &[crate::ui::AgentPanelListEntry],
++        col: u16,
++        row: u16,
++    ) -> bool {
++        if self.sidebar_collapsed
++            || !entries
++                .iter()
++                .any(|entry| matches!(entry, crate::ui::AgentPanelListEntry::AutomationsHeader))
++        {
++            return false;
++        }
++
++        let detail_area = self.agent_panel_rect();
++        let metrics = crate::ui::agent_panel_scroll_metrics(self, entries, detail_area);
++        let body = crate::ui::agent_panel_body_rect(
++            detail_area,
++            crate::ui::should_show_scrollbar(metrics),
++        );
++        if col < body.x || col >= body.x + body.width || row < body.y || row >= body.y + body.height
++        {
++            return false;
++        }
++
++        let mut row_y = body.y;
++        let scroll = self.agent_panel_scroll.min(metrics.max_offset_from_bottom);
++        for (index, entry) in entries.iter().enumerate().skip(scroll) {
++            let height = crate::ui::agent_panel_list_entry_height(self, entry, body.height);
++            if matches!(entry, crate::ui::AgentPanelListEntry::AutomationsHeader) {
++                return row == row_y;
++            }
++            let gap = if index + 1 < entries.len() {
++                self.sidebar_agents.row_gap
++            } else {
++                0
++            };
++            row_y = row_y.saturating_add(height).saturating_add(gap);
++        }
++        false
+     }
+ 
+-    pub(super) fn agent_detail_target_at(
++    /// A tree-view space/tab header row hit at (col, row): its disclosure
++    /// chevron, or the row body (which focuses the space or tab).
++    pub(super) fn tree_header_at(
+         &self,
++        entries: &[crate::ui::AgentPanelListEntry],
++        col: u16,
+         row: u16,
+-    ) -> Option<(usize, usize, crate::layout::PaneId)> {
++    ) -> Option<TreeHeaderHit> {
+         if self.sidebar_collapsed {
+             return None;
+         }
+ 
+         let detail_area = self.agent_panel_rect();
+-        let metrics = crate::ui::agent_panel_scroll_metrics(self, detail_area);
++        let metrics = crate::ui::agent_panel_scroll_metrics(self, entries, detail_area);
+         let body = crate::ui::agent_panel_body_rect(
+             detail_area,
+             crate::ui::should_show_scrollbar(metrics),
+@@ -502,19 +734,172 @@
+ 
+         let mut row_y = body.y;
+         let body_bottom = body.y + body.height;
+-        let entries = crate::ui::agent_panel_entries(self);
+         let scroll = self.agent_panel_scroll.min(metrics.max_offset_from_bottom);
+-        for (index, detail) in entries.iter().enumerate().skip(scroll) {
+-            let height = crate::ui::agent_entry_height_in_body(self, detail, body.height);
++        for (index, entry) in entries.iter().enumerate().skip(scroll) {
++            let height = crate::ui::agent_panel_list_entry_height(self, entry, body.height);
+             if row_y.saturating_add(height) > body_bottom {
+                 break;
+             }
+             if row >= row_y && row < row_y.saturating_add(height) {
+-                return Some((detail.ws_idx, detail.tab_idx, detail.pane_id));
++                let (header, is_space) = match entry {
++                    crate::ui::AgentPanelListEntry::SpaceHeader(header) => (header, true),
++                    crate::ui::AgentPanelListEntry::TabHeader(header) => (header, false),
++                    _ => return None,
++                };
++                let chevron = crate::ui::tree_header_chevron_rect(body, row_y, header.indent);
++                if chevron.width > 0
++                    && col >= chevron.x
++                    && col < chevron.x.saturating_add(chevron.width)
++                {
++                    return Some(TreeHeaderHit::Toggle {
++                        space: is_space,
++                        key: header.key.clone(),
++                    });
++                }
++                if is_space {
++                    let plus = crate::ui::tree_header_plus_rect(body, row_y);
++                    if plus.width > 0 && col >= plus.x && col < plus.x.saturating_add(plus.width) {
++                        return Some(TreeHeaderHit::NewTab {
++                            ws_idx: header.ws_idx,
++                        });
++                    }
++                    let pin = crate::ui::tree_header_pin_rect(body, row_y);
++                    if pin.width > 0 && col >= pin.x && col < pin.x.saturating_add(pin.width) {
++                        return Some(TreeHeaderHit::PinToggle {
++                            key: header.key.clone(),
++                        });
++                    }
++                }
++                return Some(TreeHeaderHit::Focus {
++                    ws_idx: header.ws_idx,
++                    tab_idx: header.tab_idx,
++                });
+             }
+             row_y = row_y
+                 .saturating_add(height)
+-                .saturating_add(crate::ui::agent_entry_gap(self, index, entries.len()))
++                .saturating_add(crate::ui::agent_panel_list_entry_gap(self, entries, index))
++                .min(body_bottom);
++        }
++        None
++    }
++
++    /// The durable agent identity whose group chevron sits at (col, row), if
++    /// any. Only owner rows with children expose a chevron.
++    pub(super) fn agent_group_toggle_at(
++        &self,
++        entries: &[crate::ui::AgentPanelListEntry],
++        col: u16,
++        row: u16,
++    ) -> Option<String> {
++        if self.sidebar_collapsed {
++            return None;
++        }
++
++        let detail_area = self.agent_panel_rect();
++        let metrics = crate::ui::agent_panel_scroll_metrics(self, entries, detail_area);
++        let body = crate::ui::agent_panel_body_rect(
++            detail_area,
++            crate::ui::should_show_scrollbar(metrics),
++        );
++        if body.height == 0 || row < body.y || row >= body.y + body.height {
++            return None;
++        }
++
++        let mut row_y = body.y;
++        let body_bottom = body.y + body.height;
++        let scroll = self.agent_panel_scroll.min(metrics.max_offset_from_bottom);
++        for (index, entry) in entries.iter().enumerate().skip(scroll) {
++            let height = crate::ui::agent_panel_list_entry_height(self, entry, body.height);
++            if row_y.saturating_add(height) > body_bottom {
++                break;
++            }
++            if row == row_y {
++                let crate::ui::AgentPanelListEntry::Agent(detail) = entry else {
++                    return None;
++                };
++                detail.tree.expanded?;
++                let rect = crate::ui::agent_group_chevron_rect(body, row_y, &detail.tree);
++                if rect.width > 0 && col >= rect.x && col < rect.x + rect.width {
++                    return detail.tree.group_key.clone();
++                }
++                return None;
++            }
++            let gap = match entry {
++                crate::ui::AgentPanelListEntry::Agent(_)
++                | crate::ui::AgentPanelListEntry::Automation(_)
++                    if index + 1 < entries.len() =>
++                {
++                    self.sidebar_agents.row_gap
++                }
++                _ => 0,
++            };
++            row_y = row_y
++                .saturating_add(height)
++                .saturating_add(gap)
++                .min(body_bottom);
++        }
++        None
++    }
++
++    /// Toggle a collapsed agent ownership group by owner identity.
++    pub(crate) fn toggle_agent_group_collapsed(&mut self, identity: String) {
++        if !self.collapsed_agent_group_keys.remove(&identity) {
++            self.collapsed_agent_group_keys.insert(identity);
++        }
++        self.mark_session_dirty();
++    }
++
++    pub(super) fn agent_detail_target_at(
++        &self,
++        entries: &[crate::ui::AgentPanelListEntry],
++        row: u16,
++    ) -> Option<(usize, usize, crate::layout::PaneId)> {
++        if self.sidebar_collapsed {
++            return None;
++        }
++
++        let detail_area = self.agent_panel_rect();
++        let metrics = crate::ui::agent_panel_scroll_metrics(self, entries, detail_area);
++        let body = crate::ui::agent_panel_body_rect(
++            detail_area,
++            crate::ui::should_show_scrollbar(metrics),
++        );
++        if body.height == 0 || row < body.y || row >= body.y + body.height {
++            return None;
++        }
++
++        let mut row_y = body.y;
++        let body_bottom = body.y + body.height;
++        let scroll = self.agent_panel_scroll.min(metrics.max_offset_from_bottom);
++        for (index, entry) in entries.iter().enumerate().skip(scroll) {
++            let height = crate::ui::agent_panel_list_entry_height(self, entry, body.height);
++            if row_y.saturating_add(height) > body_bottom {
++                break;
++            }
++            if row >= row_y && row < row_y.saturating_add(height) {
++                return match entry {
++                    crate::ui::AgentPanelListEntry::Agent(detail)
++                    | crate::ui::AgentPanelListEntry::Automation(detail) => {
++                        Some((detail.ws_idx, detail.tab_idx, detail.pane_id))
++                    }
++                    crate::ui::AgentPanelListEntry::AutomationsHeader
++                    | crate::ui::AgentPanelListEntry::HiddenSpacesHeader { .. }
++                    | crate::ui::AgentPanelListEntry::SpaceHeader(_)
++                    | crate::ui::AgentPanelListEntry::TabHeader(_) => None,
++                };
++            }
++            let gap = match entry {
++                crate::ui::AgentPanelListEntry::Agent(_)
++                | crate::ui::AgentPanelListEntry::Automation(_)
++                    if index + 1 < entries.len() =>
++                {
++                    self.sidebar_agents.row_gap
++                }
++                _ => 0,
++            };
++            row_y = row_y
++                .saturating_add(height)
++                .saturating_add(gap)
+                 .min(body_bottom);
+         }
+         None
+@@ -530,7 +915,7 @@
+ 
+     use super::super::{app_for_mouse_test, capture_snapshot, mouse, unique_temp_path};
+     use crate::{
+-        app::state::{AgentPanelSort, DragTarget, Mode},
++        app::state::{AgentPanelSort, ContextMenuKind, ContextMenuState, DragTarget, Mode},
+         config::SidebarCollapsedModeConfig,
+         detect::{Agent, AgentState},
+         workspace::Workspace,
+@@ -547,7 +932,7 @@
+             rect.y,
+         ));
+ 
+-        assert_eq!(app.state.mode, Mode::GlobalMenu);
++        assert_eq!(app.state.mode(), Mode::GlobalMenu);
+     }
+ 
+     #[test]
+@@ -583,7 +968,7 @@
+             menu.y + 2,
+         ));
+ 
+-        assert_eq!(app.state.mode, Mode::KeybindHelp);
++        assert_eq!(app.state.mode(), Mode::KeybindHelp);
+     }
+ 
+     #[test]
+@@ -603,7 +988,7 @@
+             menu.y + 1,
+         ));
+ 
+-        assert_eq!(app.state.mode, Mode::Settings);
++        assert_eq!(app.state.mode(), Mode::Settings);
+     }
+ 
+     #[test]
+@@ -624,7 +1009,7 @@
+         ));
+ 
+         assert!(app.state.request_reload_config);
+-        assert_eq!(app.state.mode, Mode::Navigate);
++        assert_eq!(app.state.mode(), Mode::Navigate);
+     }
+ 
+     #[test]
+@@ -679,7 +1064,7 @@
+ 
+         assert!(app.state.detach_requested);
+         assert!(!app.state.should_quit);
+-        assert_ne!(app.state.mode, Mode::GlobalMenu);
++        assert_ne!(app.state.mode(), Mode::GlobalMenu);
+     }
+ 
+     #[test]
+@@ -727,7 +1112,7 @@
+             .detected_agent = Some(Agent::Claude);
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2, 16));
+ 
+@@ -736,7 +1121,7 @@
+             app.state.workspaces[0].tabs[1].layout.focused(),
+             second_pane
+         );
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         let snapshot = capture_snapshot(&app.state);
+         assert_eq!(snapshot.workspaces[0].active_tab, first_tab);
+         assert_eq!(
+@@ -746,6 +1131,66 @@
+     }
+ 
+     #[test]
++    fn automation_header_toggles_dirty_state_and_expanded_row_focuses() {
++        let mut app = app_for_mouse_test();
++        let normal = Workspace::test_new("normal");
++        let normal_pane = normal.tabs[0].root_pane;
++        let mut automation = Workspace::test_new("automation-path");
++        automation.custom_name = Some("⚡ routines".into());
++        let automation_pane = automation.tabs[0].root_pane;
++        app.state.workspaces = vec![normal, automation];
++        app.state.ensure_test_terminals();
++        for terminal in app.state.terminals.values_mut() {
++            terminal.detected_agent = Some(Agent::Claude);
++        }
++        app.state.sidebar_automations.workspaces = vec!["⚡ routines".into()];
++        app.state.active = Some(0);
++        app.state.selected = 0;
++        app.state.replace_mode(Mode::Terminal);
++        let detail_area = app.state.agent_panel_rect();
++        let body = crate::ui::agent_panel_body_rect(detail_area, false);
++        let normal_height = crate::ui::agent_panel_list_entry_height(
++            &app.state,
++            &crate::ui::agent_panel_list_entries(&app.state)[0],
++            body.height,
++        );
++        let header_row = body.y + normal_height;
++
++        assert!(app.state.on_automations_header(
++            &crate::ui::agent_panel_list_entries(&app.state),
++            body.x,
++            header_row,
++        ));
++        app.handle_mouse(mouse(
++            MouseEventKind::Down(MouseButton::Left),
++            body.x,
++            header_row,
++        ));
++        assert!(app.state.automations_expanded);
++        assert!(app.state.session_dirty);
++
++        let automation_row = header_row + 1;
++        assert_eq!(
++            app.state.agent_detail_target_at(
++                &crate::ui::agent_panel_list_entries(&app.state),
++                automation_row,
++            ),
++            Some((1, 0, automation_pane))
++        );
++        app.handle_mouse(mouse(
++            MouseEventKind::Down(MouseButton::Left),
++            body.x,
++            automation_row,
++        ));
++        assert_eq!(app.state.active, Some(1));
++        assert_eq!(
++            app.state.workspaces[1].focused_pane_id(),
++            Some(automation_pane)
++        );
++        assert_ne!(normal_pane, automation_pane);
++    }
++
++    #[test]
+     fn per_agent_row_heights_preserve_card_gaps_and_trailing_mouse_targets() {
+         let mut app = app_for_mouse_test();
+         let first = Workspace::test_new("one");
+@@ -776,30 +1221,137 @@
+         );
+         app.state.sidebar_agents.row_gap = 1;
+         let detail_area = app.state.agent_panel_rect();
+-        let metrics = crate::ui::agent_panel_scroll_metrics(&app.state, detail_area);
++        let metrics = crate::ui::agent_panel_scroll_metrics(
++            &app.state,
++            &crate::ui::agent_panel_list_entries(&app.state),
++            detail_area,
++        );
+         let body = crate::ui::agent_panel_body_rect(
+             detail_area,
+             crate::ui::should_show_scrollbar(metrics),
+         );
+ 
+         assert_eq!(
+-            app.state.agent_detail_target_at(body.y),
++            app.state
++                .agent_detail_target_at(&crate::ui::agent_panel_list_entries(&app.state), body.y,),
+             Some((0, 0, first_pane))
+         );
+-        assert_eq!(app.state.agent_detail_target_at(body.y + 1), None);
+         assert_eq!(
+-            app.state.agent_detail_target_at(body.y + 3),
++            app.state.agent_detail_target_at(
++                &crate::ui::agent_panel_list_entries(&app.state),
++                body.y + 1,
++            ),
++            None
++        );
++        assert_eq!(
++            app.state.agent_detail_target_at(
++                &crate::ui::agent_panel_list_entries(&app.state),
++                body.y + 3,
++            ),
+             Some((1, 0, second_pane))
+         );
+ 
+         app.state.sidebar_agents.row_gap = 0;
+         assert_eq!(
+-            app.state.agent_detail_target_at(body.y + 1),
++            app.state.agent_detail_target_at(
++                &crate::ui::agent_panel_list_entries(&app.state),
++                body.y + 1,
++            ),
+             Some((1, 0, second_pane))
+         );
+     }
+ 
+     #[test]
++    fn agent_group_chevron_click_toggles_collapse_and_preserves_row_focus() {
++        let mut app = app_for_mouse_test();
++        let lead = Workspace::test_new("lead-space");
++        let lead_pane = lead.tabs[0].root_pane;
++        let worker = Workspace::test_new("worker-space");
++        let worker_pane = worker.tabs[0].root_pane;
++        app.state.workspaces = vec![lead, worker];
++        app.state.ensure_test_terminals();
++        app.state.active = Some(0);
++        app.state.selected = 0;
++        for (ws_idx, pane_id, name) in [(0usize, lead_pane, "lead"), (1, worker_pane, "wkr")] {
++            let terminal_id = app.state.workspaces[ws_idx].tabs[0].panes[&pane_id]
++                .attached_terminal_id
++                .clone();
++            let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
++            terminal.set_agent_name(name.into());
++            terminal.set_detected_state(Some(Agent::Pi), AgentState::Idle);
++            terminal.agent_identity = Some(format!("agent_{name}"));
++        }
++        let worker_terminal_id = app.state.workspaces[1].tabs[0].panes[&worker_pane]
++            .attached_terminal_id
++            .clone();
++        app.state
++            .terminals
++            .get_mut(&worker_terminal_id)
++            .unwrap()
++            .agent_ownership = Some(crate::agent_ownership::AgentOwnership::new(
++            crate::agent_ownership::AgentOwnerRef {
++                agent_id: "agent_lead".into(),
++                name: Some("lead".into()),
++                agent: Some("pi".into()),
++                session: None,
++            },
++        ));
++
++        let entries = crate::ui::agent_panel_list_entries(&app.state);
++        assert_eq!(entries.len(), 2, "owner and child rows expected");
++        let detail_area = app.state.agent_panel_rect();
++        let metrics = crate::ui::agent_panel_scroll_metrics(&app.state, &entries, detail_area);
++        let body = crate::ui::agent_panel_body_rect(
++            detail_area,
++            crate::ui::should_show_scrollbar(metrics),
++        );
++        let crate::ui::AgentPanelListEntry::Agent(owner_entry) = &entries[0] else {
++            panic!("expected owner agent row");
++        };
++        let chevron = crate::ui::agent_group_chevron_rect(body, body.y, &owner_entry.tree);
++        assert!(chevron.width > 0);
++
++        // A click outside the chevron cell is not a toggle.
++        assert_eq!(
++            app.state
++                .agent_group_toggle_at(&entries, chevron.x.saturating_sub(2), body.y),
++            None
++        );
++        let toggled = app
++            .state
++            .agent_group_toggle_at(&entries, chevron.x, body.y)
++            .expect("chevron click should resolve to the owner identity");
++        assert_eq!(toggled, "agent_lead");
++        app.state.toggle_agent_group_collapsed(toggled);
++        assert!(app.state.collapsed_agent_group_keys.contains("agent_lead"));
++
++        // Collapsed: the child row is gone, the owner row keeps its chevron.
++        let collapsed_entries = crate::ui::agent_panel_list_entries(&app.state);
++        assert_eq!(collapsed_entries.len(), 1);
++        let crate::ui::AgentPanelListEntry::Agent(collapsed_owner) = &collapsed_entries[0] else {
++            panic!("expected collapsed owner row");
++        };
++        assert_eq!(collapsed_owner.tree.expanded, Some(false));
++        assert_eq!(collapsed_owner.tree.hidden_children, 1);
++        let collapsed_chevron =
++            crate::ui::agent_group_chevron_rect(body, body.y, &collapsed_owner.tree);
++        let reopened = app
++            .state
++            .agent_group_toggle_at(&collapsed_entries, collapsed_chevron.x, body.y)
++            .expect("collapsed chevron should still toggle");
++        app.state.toggle_agent_group_collapsed(reopened);
++        assert!(!app.state.collapsed_agent_group_keys.contains("agent_lead"));
++        assert_eq!(crate::ui::agent_panel_list_entries(&app.state).len(), 2);
++
++        // Plain row clicks still focus panes.
++        assert_eq!(
++            app.state
++                .agent_detail_target_at(&crate::ui::agent_panel_list_entries(&app.state), body.y,),
++            Some((0, 0, lead_pane))
++        );
++    }
++
++    #[test]
+     fn agent_hit_testing_clamps_scroll_after_dynamic_filter_shrink() {
+         let mut app = app_for_mouse_test();
+         let first = Workspace::test_new("one");
+@@ -838,36 +1390,95 @@
+         let body = crate::ui::agent_panel_body_rect(detail_area, false);
+ 
+         assert_eq!(
+-            app.state.agent_detail_target_at(body.y),
++            app.state
++                .agent_detail_target_at(&crate::ui::agent_panel_list_entries(&app.state), body.y,),
+             Some((0, 0, first_pane))
+         );
+     }
+ 
++    fn open_sidebar_view_picker(app: &mut crate::app::App) -> ContextMenuState {
++        // Tree view hands the whole sidebar to the agents panel, so the header
++        // label only lines up when the rect comes from the ordered sections.
++        let (_, detail_area) =
++            crate::ui::ordered_sidebar_sections(&app.state, app.state.view.sidebar_rect);
++        let toggle = crate::ui::agent_panel_toggle_rect(detail_area, app.state.agent_panel_sort);
++        app.handle_mouse(mouse(
++            MouseEventKind::Down(MouseButton::Left),
++            toggle.x,
++            toggle.y,
++        ));
++        app.state.context_menu.take().expect("sidebar view picker")
++    }
++
++    fn picker_item_index(menu: &ContextMenuState, suffix: &str) -> usize {
++        menu.items()
++            .iter()
++            .position(|item| item.ends_with(suffix))
++            .unwrap_or_else(|| panic!("no {suffix} entry in the sidebar view picker"))
++    }
++
+     #[test]
+-    fn clicking_agent_panel_toggle_switches_sort() {
++    fn clicking_agent_panel_toggle_opens_view_picker() {
+         let mut app = app_for_mouse_test();
+         app.state.workspaces = vec![Workspace::test_new("test")];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.agent_panel_scroll = 3;
+ 
+-        let (_, detail_area) = crate::ui::expanded_sidebar_sections(
+-            app.state.view.sidebar_rect,
+-            app.state.sidebar_section_split,
+-        );
+-        let toggle = crate::ui::agent_panel_toggle_rect(detail_area, app.state.agent_panel_sort);
+-        app.handle_mouse(mouse(
+-            MouseEventKind::Down(MouseButton::Left),
+-            toggle.x,
+-            toggle.y,
++        let menu = open_sidebar_view_picker(&mut app);
++
++        // The label opens the picker; it no longer cycles sorts on its own, so
++        // neither the sort nor the scroll offset moves until an item is picked.
++        assert!(matches!(
++            menu.kind,
++            ContextMenuKind::SidebarView {
++                sort: AgentPanelSort::Spaces,
++                show_spaces: true,
++                show_tabs: true,
++                show_agents: true,
++                show_hidden: false,
++            }
+         ));
++        assert_eq!(app.state.mode(), Mode::ContextMenu);
++        assert_eq!(app.state.agent_panel_sort, AgentPanelSort::Spaces);
++        assert_eq!(app.state.agent_panel_scroll, 3);
+ 
++        let priority = picker_item_index(&menu, "priority");
++        app.apply_context_menu_action_via_api(menu, priority);
++
+         assert_eq!(app.state.agent_panel_sort, AgentPanelSort::Priority);
+         assert_eq!(app.state.agent_panel_scroll, 0);
+     }
+ 
+     #[test]
++    fn view_picker_selects_tree_then_toggles_its_layers() {
++        let mut app = app_for_mouse_test();
++        app.state.workspaces = vec![Workspace::test_new("test")];
++        app.state.active = Some(0);
++        app.state.selected = 0;
++        app.state.replace_mode(Mode::Terminal);
++
++        let menu = open_sidebar_view_picker(&mut app);
++        let tree = picker_item_index(&menu, "tree");
++        app.apply_context_menu_action_via_api(menu, tree);
++        assert_eq!(app.state.agent_panel_sort, AgentPanelSort::Tree);
++
++        // The layer toggles only exist once the tree view is the active one.
++        let menu = open_sidebar_view_picker(&mut app);
++        let spaces = picker_item_index(&menu, "spaces");
++        app.apply_context_menu_action_via_api(menu, spaces);
++        assert!(!app.state.tree_show_spaces);
++        assert!(app.state.tree_show_tabs);
++
++        let menu = open_sidebar_view_picker(&mut app);
++        let tabs = picker_item_index(&menu, "tabs");
++        app.apply_context_menu_action_via_api(menu, tabs);
++        assert!(!app.state.tree_show_spaces);
++        assert!(!app.state.tree_show_tabs);
++    }
++
++    #[test]
+     fn clicking_all_workspaces_agent_row_switches_to_correct_workspace() {
+         let mut app = app_for_mouse_test();
+         let first = Workspace::test_new("one");
+@@ -896,7 +1507,7 @@
+             .detected_agent = Some(Agent::Claude);
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         let (_, detail_area) = crate::ui::expanded_sidebar_sections(
+             app.state.view.sidebar_rect,
+@@ -956,11 +1567,15 @@
+         }
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         let detail_area = app.state.agent_panel_rect();
+         assert!(crate::ui::should_show_scrollbar(
+-            crate::ui::agent_panel_scroll_metrics(&app.state, detail_area)
++            crate::ui::agent_panel_scroll_metrics(
++                &app.state,
++                &crate::ui::agent_panel_list_entries(&app.state),
++                detail_area,
++            )
+         ));
+ 
+         app.handle_mouse(mouse(
+@@ -1017,7 +1632,7 @@
+         }
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.sidebar_agents.rows = vec![vec![crate::config::AgentSidebarToken::Agent]];
+         app.state.sidebar_agents.rows_by_agent.insert(
+             "claude".into(),
+@@ -1041,7 +1656,7 @@
+             app.state.workspaces[0].tabs[second_tab].layout.focused(),
+             second_pane
+         );
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+     }
+ 
+     #[test]
+@@ -1071,13 +1686,13 @@
+             .detected_agent = Some(Agent::Claude);
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.sidebar_collapsed = true;
+         app.state.view.sidebar_rect = Rect::new(0, 0, 4, 20);
+         app.state.view.terminal_area = Rect::new(4, 0, 80, 20);
+ 
+         let (_, _, detail_area) =
+-            crate::ui::collapsed_sidebar_sections(app.state.view.sidebar_rect);
++            crate::ui::ordered_collapsed_sidebar_sections(&app.state, app.state.view.sidebar_rect);
+         app.handle_mouse(mouse(
+             MouseEventKind::Down(MouseButton::Left),
+             detail_area.x,
+@@ -1089,7 +1704,7 @@
+             app.state.workspaces[0].tabs[1].layout.focused(),
+             second_pane
+         );
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+     }
+ 
+     #[test]
+@@ -1104,7 +1719,7 @@
+         app.state.ensure_test_terminals();
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.sidebar_collapsed = true;
+         app.state.agent_panel_sort = AgentPanelSort::Priority;
+         app.state.view.sidebar_rect = Rect::new(0, 0, 4, 20);
+@@ -1122,7 +1737,7 @@
+         set_state(&mut app, 1, second_pane, AgentState::Blocked);
+ 
+         let (_, _, detail_area) =
+-            crate::ui::collapsed_sidebar_sections(app.state.view.sidebar_rect);
++            crate::ui::ordered_collapsed_sidebar_sections(&app.state, app.state.view.sidebar_rect);
+         app.handle_mouse(mouse(
+             MouseEventKind::Down(MouseButton::Left),
+             detail_area.x,
+@@ -1226,7 +1841,7 @@
+                 });
+         }
+         app.state.active = None;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+         let parent = app.state.view.workspace_card_areas[0].rect;
+ 
+@@ -1260,7 +1875,7 @@
+                 });
+         }
+         app.state.active = None;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+         let parent = app.state.view.workspace_card_areas[0];
+         let chevron = crate::ui::workspace_group_chevron_rect(&parent);
+@@ -1304,7 +1919,7 @@
+         }
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Navigate;
++        app.state.replace_mode(Mode::Navigate);
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 30));
+         let list = app.state.workspace_list_rect();
+         assert!(!crate::ui::should_show_scrollbar(
+@@ -1894,10 +2509,8 @@
+     #[test]
+     fn dragging_sidebar_section_divider_sets_split_ratio() {
+         let mut app = app_for_mouse_test();
+-        let divider = crate::ui::sidebar_section_divider_rect(
+-            app.state.view.sidebar_rect,
+-            app.state.sidebar_section_split,
+-        );
++        let divider =
++            crate::ui::sidebar_section_divider_rect(&app.state, app.state.view.sidebar_rect);
+ 
+         app.handle_mouse(mouse(
+             MouseEventKind::Down(MouseButton::Left),
+@@ -1919,6 +2532,48 @@
+     }
+ 
+     #[test]
++    fn dragging_agents_first_section_divider_shrinks_workspace_section_downward() {
++        let mut app = app_for_mouse_test();
++        app.state.sidebar_section_order = [
++            crate::config::SidebarSection::Agents,
++            crate::config::SidebarSection::Spaces,
++        ];
++        let divider =
++            crate::ui::sidebar_section_divider_rect(&app.state, app.state.view.sidebar_rect);
++
++        app.handle_mouse(mouse(
++            MouseEventKind::Down(MouseButton::Left),
++            divider.x + 1,
++            divider.y,
++        ));
++        app.handle_mouse(mouse(
++            MouseEventKind::Drag(MouseButton::Left),
++            divider.x + 1,
++            divider.y + 4,
++        ));
++
++        assert!(app.state.sidebar_section_split < 0.5);
++        let (workspace_area, agent_area) =
++            crate::ui::ordered_sidebar_sections(&app.state, app.state.view.sidebar_rect);
++        assert!(agent_area.height > workspace_area.height);
++    }
++
++    #[test]
++    fn content_fit_spaces_disable_sidebar_section_divider_hit_test() {
++        let mut app = app_for_mouse_test();
++        let divider =
++            crate::ui::sidebar_section_divider_rect(&app.state, app.state.view.sidebar_rect);
++
++        assert!(app
++            .state
++            .on_sidebar_section_divider(divider.x + 1, divider.y));
++        app.state.sidebar_spaces.max_visible = 8;
++        assert!(!app
++            .state
++            .on_sidebar_section_divider(divider.x + 1, divider.y));
++    }
++
++    #[test]
+     fn double_clicking_sidebar_divider_resets_default_width() {
+         let mut app = app_for_mouse_test();
+         app.state.default_sidebar_width = 26;
+@@ -1933,4 +2588,265 @@
+         let snapshot = capture_snapshot(&app.state);
+         assert_eq!(snapshot.sidebar_width, Some(26));
+     }
++
++    fn tree_app_with_agent_spaces(names: &[&str]) -> super::super::App {
++        let mut app = app_for_mouse_test();
++        app.state.workspaces = names.iter().map(|name| Workspace::test_new(name)).collect();
++        app.state.ensure_test_terminals();
++        app.state.active = Some(0);
++        app.state.selected = 0;
++        app.state.agent_panel_sort = AgentPanelSort::Tree;
++        app.state.replace_mode(Mode::Terminal);
++        for ws_idx in 0..app.state.workspaces.len() {
++            let pane_id = app.state.workspaces[ws_idx].tabs[0].root_pane;
++            let terminal_id = app.state.workspaces[ws_idx].tabs[0].panes[&pane_id]
++                .attached_terminal_id
++                .clone();
++            app.state
++                .terminals
++                .get_mut(&terminal_id)
++                .expect("agent terminal")
++                .set_detected_state(Some(Agent::Pi), AgentState::Idle);
++        }
++        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 40));
++        app
++    }
++
++    /// Row of each requested space header in the rendered tree panel.
++    fn tree_space_header_rows(app: &super::super::App, wanted: &[usize]) -> Vec<u16> {
++        let entries = crate::ui::agent_panel_list_entries_from(&app.state, &app.terminal_runtimes);
++        let panel = app.state.agent_panel_rect();
++        wanted
++            .iter()
++            .map(|want| {
++                (panel.y..panel.y + panel.height)
++                    .find(|row| {
++                        matches!(
++                            app.state.tree_header_at(&entries, panel.x + 2, *row),
++                            Some(super::TreeHeaderHit::Focus {
++                                ws_idx,
++                                tab_idx: None,
++                            }) if ws_idx == *want
++                        )
++                    })
++                    .unwrap_or_else(|| panic!("no header row for space {want}"))
++            })
++            .collect()
++    }
++
++    #[test]
++    fn dragging_tree_space_header_reorders_workspaces() {
++        let mut app = tree_app_with_agent_spaces(&["a", "b", "c"]);
++        let panel = app.state.agent_panel_rect();
++        let rows = tree_space_header_rows(&app, &[2, 0]);
++        let (source_row, target_row) = (rows[0], rows[1]);
++
++        app.handle_mouse(mouse(
++            MouseEventKind::Down(MouseButton::Left),
++            panel.x + 2,
++            source_row,
++        ));
++        assert!(app.state.drag.is_none());
++        app.handle_mouse(mouse(
++            MouseEventKind::Drag(MouseButton::Left),
++            panel.x + 2,
++            target_row,
++        ));
++        assert!(matches!(
++            app.state.drag.as_ref().map(|drag| &drag.target),
++            Some(DragTarget::TreeSpaceReorder {
++                source_ws_idx: 2,
++                drop_target: Some(crate::app::state::WorkspaceDropTarget::Before(0)),
++                ..
++            })
++        ));
++        app.handle_mouse(mouse(
++            MouseEventKind::Up(MouseButton::Left),
++            panel.x + 2,
++            target_row,
++        ));
++
++        let names: Vec<_> = app
++            .state
++            .workspaces
++            .iter()
++            .map(|ws| ws.display_name())
++            .collect();
++        assert_eq!(names, vec!["c", "a", "b"]);
++        assert!(app.state.drag.is_none());
++        assert!(app.state.tree_space_presses.is_empty());
++        let snapshot = capture_snapshot(&app.state);
++        let captured_names: Vec<_> = snapshot
++            .workspaces
++            .iter()
++            .map(|ws| ws.custom_name.clone().unwrap())
++            .collect();
++        assert_eq!(captured_names, vec!["c", "a", "b"]);
++    }
++
++    #[test]
++    fn dragging_tree_space_header_to_the_end_moves_it_last() {
++        let mut app = tree_app_with_agent_spaces(&["a", "b", "c"]);
++        let panel = app.state.agent_panel_rect();
++        let rows = tree_space_header_rows(&app, &[0]);
++        let source_row = rows[0];
++        let entries = crate::ui::agent_panel_list_entries_from(&app.state, &app.terminal_runtimes);
++        // The end slot sits after the last listed row.
++        let end_row = (panel.y..panel.y + panel.height)
++            .rev()
++            .find(|row| {
++                matches!(
++                    app.state.tree_space_drop_target_at(&entries, *row),
++                    Some(crate::app::state::WorkspaceDropTarget::End)
++                )
++            })
++            .expect("end drop slot row");
++
++        app.handle_mouse(mouse(
++            MouseEventKind::Down(MouseButton::Left),
++            panel.x + 2,
++            source_row,
++        ));
++        app.handle_mouse(mouse(
++            MouseEventKind::Drag(MouseButton::Left),
++            panel.x + 2,
++            end_row,
++        ));
++        app.handle_mouse(mouse(
++            MouseEventKind::Up(MouseButton::Left),
++            panel.x + 2,
++            end_row,
++        ));
++
++        let names: Vec<_> = app
++            .state
++            .workspaces
++            .iter()
++            .map(|ws| ws.display_name())
++            .collect();
++        assert_eq!(names, vec!["b", "c", "a"]);
++    }
++
++    #[test]
++    fn clicking_tree_space_header_focuses_on_release() {
++        let mut app = tree_app_with_agent_spaces(&["a", "b"]);
++        let panel = app.state.agent_panel_rect();
++        let rows = tree_space_header_rows(&app, &[1]);
++        let header_row = rows[0];
++
++        app.handle_mouse(mouse(
++            MouseEventKind::Down(MouseButton::Left),
++            panel.x + 2,
++            header_row,
++        ));
++        // The press arms a possible drag; nothing focuses yet.
++        assert_eq!(app.state.active, Some(0));
++        assert!(app.state.drag.is_none());
++
++        app.handle_mouse(mouse(
++            MouseEventKind::Up(MouseButton::Left),
++            panel.x + 2,
++            header_row,
++        ));
++        assert_eq!(app.state.active, Some(1));
++        assert!(app.state.tree_space_presses.is_empty());
++        let order: Vec<_> = app
++            .state
++            .workspaces
++            .iter()
++            .map(|ws| ws.display_name())
++            .collect();
++        assert_eq!(order, vec!["a", "b"]);
++    }
++
++    #[test]
++    fn view_picker_toggles_hidden_spaces() {
++        let mut app = app_for_mouse_test();
++        app.state.workspaces = vec![Workspace::test_new("test")];
++        app.state.active = Some(0);
++        app.state.selected = 0;
++        app.state.agent_panel_sort = AgentPanelSort::Tree;
++        app.state.replace_mode(Mode::Terminal);
++
++        let menu = open_sidebar_view_picker(&mut app);
++        let hidden = picker_item_index(&menu, "hidden");
++        app.apply_context_menu_action_via_api(menu, hidden);
++        assert!(app.state.tree_show_hidden_spaces);
++
++        let menu = open_sidebar_view_picker(&mut app);
++        let hidden = picker_item_index(&menu, "hidden");
++        app.apply_context_menu_action_via_api(menu, hidden);
++        assert!(!app.state.tree_show_hidden_spaces);
++    }
++
++    #[test]
++    fn turning_the_reveal_off_closes_the_hidden_section() {
++        let mut app = app_for_mouse_test();
++        app.state.workspaces = vec![Workspace::test_new("test")];
++        app.state.active = Some(0);
++        app.state.selected = 0;
++        app.state.agent_panel_sort = AgentPanelSort::Tree;
++        app.state.replace_mode(Mode::Terminal);
++        app.state.tree_show_hidden_spaces = true;
++        app.state.hidden_spaces_expanded = true;
++
++        let menu = open_sidebar_view_picker(&mut app);
++        let hidden = picker_item_index(&menu, "hidden");
++        app.apply_context_menu_action_via_api(menu, hidden);
++
++        assert!(!app.state.tree_show_hidden_spaces);
++        // Re-revealing starts compact instead of resuming a stale expansion.
++        assert!(!app.state.hidden_spaces_expanded);
++    }
++
++    #[test]
++    fn clicking_the_hidden_section_header_toggles_it() {
++        let mut app = app_for_mouse_test();
++        app.state.workspaces = vec![Workspace::test_new("open"), Workspace::test_new("folded")];
++        app.state.ensure_test_terminals();
++        app.state.active = Some(0);
++        app.state.selected = 0;
++        app.state.agent_panel_sort = AgentPanelSort::Tree;
++        app.state.tree_show_hidden_spaces = true;
++        let folded_key = app.state.workspaces[1].id.clone();
++        app.state.tree_collapsed_spaces.insert(folded_key);
++        app.state.replace_mode(Mode::Terminal);
++        for ws_idx in 0..2 {
++            let pane_id = app.state.workspaces[ws_idx].tabs[0].root_pane;
++            let terminal_id = app.state.workspaces[ws_idx].tabs[0].panes[&pane_id]
++                .attached_terminal_id
++                .clone();
++            app.state
++                .terminals
++                .get_mut(&terminal_id)
++                .expect("agent terminal")
++                .set_detected_state(Some(Agent::Pi), AgentState::Idle);
++        }
++        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 40));
++
++        let entries = crate::ui::agent_panel_list_entries_from(&app.state, &app.terminal_runtimes);
++        let panel = app.state.agent_panel_rect();
++        let header_row = (panel.y..panel.y + panel.height)
++            .find(|row| {
++                app.state
++                    .on_hidden_spaces_header(&entries, panel.x + 2, *row)
++            })
++            .expect("hidden section header row");
++
++        app.handle_mouse(mouse(
++            MouseEventKind::Down(MouseButton::Left),
++            panel.x + 2,
++            header_row,
++        ));
++        assert!(app.state.hidden_spaces_expanded);
++        // The click stays on the section: it must not focus a space.
++        assert_eq!(app.state.active, Some(0));
++
++        app.handle_mouse(mouse(
++            MouseEventKind::Down(MouseButton::Left),
++            panel.x + 2,
++            header_row,
++        ));
++        assert!(!app.state.hidden_spaces_expanded);
++    }
+ }

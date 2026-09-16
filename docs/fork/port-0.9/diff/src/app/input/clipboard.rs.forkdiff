@@ -1,0 +1,75 @@
+--- /tmp/base.tmp	2026-09-16 17:53:31
++++ docs/fork/port-0.9/orig/src/app/input/clipboard.rs	2026-09-16 17:53:31
+@@ -13,18 +13,36 @@
+ }
+ 
+ impl App {
+-    pub(super) fn dispatch_pending_clipboard_write(&mut self) -> bool {
+-        let Some(content) = self.state.request_clipboard_write.take() else {
++    pub(crate) fn dispatch_pending_clipboard_write(&mut self) -> bool {
++        let Some((content, feedback)) = self.state.request_clipboard_write.take() else {
+             return false;
+         };
+         if self
+             .event_tx
+-            .try_send(crate::events::AppEvent::ClipboardWrite { content })
++            .try_send(crate::events::AppEvent::ClipboardWrite { content, feedback })
+             .is_err()
+         {
+             tracing::warn!("failed to queue clipboard write event");
+         }
+         true
++    }
++
++    /// Copy the text captured from the last left-drag that herdr forwarded to a
++    /// mouse-reporting pane app. These panes own the mouse, so herdr never builds
++    /// a visible selection of its own for them and
++    /// [`Self::try_copy_retained_selection`] cannot fire.
++    pub(super) fn copy_pane_app_drag_selection(&mut self, pane_id: crate::layout::PaneId) {
++        let text = self
++            .state
++            .pane_app_drag_copy
++            .take_if(|(copy_pane_id, _)| *copy_pane_id == pane_id)
++            .map(|(_, text)| text);
++        let Some(text) = text else {
++            self.show_clipboard_feedback("nothing selected to copy".to_string());
++            return;
++        };
++        self.state.request_clipboard_write = Some((text.into_bytes(), None));
++        self.dispatch_pending_clipboard_write();
+     }
+ 
+     pub(super) fn try_copy_retained_selection(
+@@ -92,7 +110,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.view.pane_infos = pane_infos;
+         (app, info, input_rx)
+     }
+@@ -117,7 +135,10 @@
+ 
+     fn clipboard_write_content(app: &mut App) -> Vec<u8> {
+         match app.event_rx.try_recv().expect("clipboard write event") {
+-            AppEvent::ClipboardWrite { content } => content,
++            AppEvent::ClipboardWrite {
++                content,
++                feedback: None,
++            } => content,
+             event => panic!("unexpected event: {event:?}"),
+         }
+     }
+@@ -159,7 +180,10 @@
+         assert!(app.state.selection.is_none());
+         assert!(input_rx.try_recv().is_err());
+ 
+-        app.handle_internal_event(AppEvent::ClipboardWrite { content });
++        app.handle_internal_event(AppEvent::ClipboardWrite {
++            content,
++            feedback: None,
++        });
+         assert_eq!(
+             app.state
+                 .copy_feedback

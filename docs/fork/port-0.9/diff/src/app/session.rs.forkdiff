@@ -1,0 +1,35 @@
+--- /tmp/base.tmp	2026-09-16 17:53:32
++++ docs/fork/port-0.9/orig/src/app/session.rs	2026-09-16 17:53:32
+@@ -4,8 +4,9 @@
+ 
+ enum SessionSaveJob {
+     Clear,
++    // Boxed: the captured snapshot dwarfs the empty Clear variant.
+     Save {
+-        snapshot: crate::persist::SessionSnapshot,
++        snapshot: Box<crate::persist::SessionSnapshot>,
+         history: Option<crate::persist::SessionHistorySnapshot>,
+     },
+ }
+@@ -45,15 +46,17 @@
+                 &self.state.terminals,
+                 &self.terminal_runtimes,
+                 self.state.active,
++                self.state.active_profile.clone(),
+                 self.state.selected,
+-                self.state.sidebar_width,
+-                self.state.sidebar_section_split,
+-                self.state.collapsed_space_keys.clone(),
++                self.state.snapshot_ui_prefs(),
+             );
+             let history = self.persist_pane_history.then(|| {
+                 crate::persist::capture_history(&self.state.workspaces, &self.terminal_runtimes)
+             });
+-            SessionSaveJob::Save { snapshot, history }
++            SessionSaveJob::Save {
++                snapshot: Box::new(snapshot),
++                history,
++            }
+         }
+     }
+ 

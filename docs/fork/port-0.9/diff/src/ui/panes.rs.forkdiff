@@ -1,0 +1,141 @@
+--- /tmp/base.tmp	2026-09-16 17:53:32
++++ docs/fork/port-0.9/orig/src/ui/panes.rs	2026-09-16 17:53:32
+@@ -52,6 +52,18 @@
+     } else {
+         Block::default().borders(borders).inner(area)
+     }
++}
++
++pub(crate) fn pane_copy_button_span(info: &PaneInfo) -> Option<(u16, u16, u16)> {
++    if !info.borders.contains(Borders::TOP) || info.rect.width < 8 {
++        return None;
++    }
++    let x_end = info
++        .rect
++        .x
++        .saturating_add(info.rect.width)
++        .saturating_sub(1);
++    Some((x_end.saturating_sub(3), x_end, info.rect.y))
+ }
+ 
+ fn ranges_overlap(a_start: u16, a_len: u16, b_start: u16, b_len: u16) -> bool {
+@@ -353,7 +365,7 @@
+     };
+ 
+     let multi_pane = ws.layout.pane_count() > 1;
+-    let terminal_active = app.mode == Mode::Terminal;
++    let terminal_active = app.mode() == Mode::Terminal;
+ 
+     for info in pane_infos {
+         if let Some(rt) = app.runtime_for_pane_in_workspace(terminal_runtimes, ws_idx, info.id) {
+@@ -526,8 +538,46 @@
+     }
+ 
+     render_pane_border_titles(app, ws, pane_infos, frame);
++    render_pane_copy_control(app, pane_infos, frame);
+ }
++
++fn render_pane_copy_control(app: &AppState, pane_infos: &[PaneInfo], frame: &mut Frame) {
++    if app.mode() != Mode::Terminal || app.popup_pane.is_some() {
++        return;
++    }
++    let Some((pane_id, is_button_hovered)) = app.pane_hover else {
++        return;
++    };
++    let Some((x_start, x_end, y)) = pane_infos
++        .iter()
++        .find(|info| info.id == pane_id)
++        .and_then(pane_copy_button_span)
++    else {
++        return;
++    };
+ 
++    let buf = frame.buffer_mut();
++    let area = buf.area;
++    if y < area.y
++        || y >= area.y.saturating_add(area.height)
++        || x_start >= area.x.saturating_add(area.width)
++    {
++        return;
++    }
++    let start = x_start.max(area.x);
++    let width = x_end
++        .min(area.x.saturating_add(area.width))
++        .saturating_sub(start) as usize;
++    let style = if is_button_hovered {
++        Style::default()
++            .fg(app.palette.accent)
++            .add_modifier(Modifier::BOLD)
++    } else {
++        Style::default().fg(app.palette.overlay0)
++    };
++    buf.set_stringn(start, y, " ⧉ ", width, style);
++}
++
+ fn add_split_border_cells(
+     pane_gaps: bool,
+     split_borders: &[crate::layout::SplitBorder],
+@@ -725,7 +775,7 @@
+ }
+ 
+ fn render_copy_mode_cursor(app: &AppState, frame: &mut Frame, info: &PaneInfo) {
+-    if app.mode != Mode::Copy {
++    if app.mode() != Mode::Copy {
+         return;
+     }
+     let Some(copy_mode) = app.copy_mode.as_ref() else {
+@@ -1017,6 +1067,27 @@
+             &app.view.split_borders,
+             frame,
+         );
++    }
++
++    #[test]
++    fn pane_copy_button_requires_a_wide_top_border() {
++        let mut info = PaneInfo {
++            id: PaneId::from_raw(1),
++            rect: Rect::new(10, 4, 20, 8),
++            inner_rect: Rect::default(),
++            scrollbar_rect: None,
++            borders: Borders::ALL,
++            is_focused: false,
++        };
++
++        assert_eq!(pane_copy_button_span(&info), Some((26, 29, 4)));
++
++        info.borders.remove(Borders::TOP);
++        assert_eq!(pane_copy_button_span(&info), None);
++
++        info.borders.insert(Borders::TOP);
++        info.rect.width = 7;
++        assert_eq!(pane_copy_button_span(&info), None);
+     }
+ 
+     #[test]
+@@ -1052,7 +1123,7 @@
+     #[test]
+     fn pane_border_renderer_places_adjacent_cjk_by_display_width() {
+         let mut app = AppState::test_new();
+-        app.mode = Mode::Terminal;
++        app.replace_mode(Mode::Terminal);
+         app.view.terminal_area = Rect::new(0, 0, 12, 3);
+         let ws = Workspace::test_new("test");
+         let pane_id = ws.tabs[0].root_pane;
+@@ -1208,7 +1279,7 @@
+     #[test]
+     fn global_pane_border_renderer_composes_junctions_and_focus_style() {
+         let mut app = AppState::test_new();
+-        app.mode = Mode::Terminal;
++        app.replace_mode(Mode::Terminal);
+         app.view.terminal_area = Rect::new(0, 0, 4, 4);
+         app.view.pane_infos = vec![
+             PaneInfo {
+@@ -1278,7 +1349,7 @@
+     #[test]
+     fn gapped_pane_focus_does_not_color_neighbor_border() {
+         let mut app = AppState::test_new();
+-        app.mode = Mode::Terminal;
++        app.replace_mode(Mode::Terminal);
+         app.pane_gaps = true;
+         app.view.terminal_area = Rect::new(0, 0, 4, 3);
+         app.view.pane_infos = vec![

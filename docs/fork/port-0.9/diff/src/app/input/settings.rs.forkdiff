@@ -1,0 +1,38 @@
+--- /tmp/base.tmp	2026-09-16 17:53:31
++++ docs/fork/port-0.9/orig/src/app/input/settings.rs	2026-09-16 17:53:31
+@@ -310,7 +310,7 @@
+         SettingsSection::PaneLabels => usize::from(!state.agent_border_labels_enabled()),
+         SettingsSection::Integrations => 0,
+     };
+-    state.mode = Mode::Settings;
++    state.replace_mode(Mode::Settings);
+ }
+ 
+ impl AppState {
+@@ -510,7 +510,7 @@
+             KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
+         );
+ 
+-        assert_eq!(state.mode, Mode::Terminal);
++        assert_eq!(state.mode(), Mode::Terminal);
+         assert_eq!(state.theme_name, original_theme);
+         assert_eq!(state.palette.accent, original_palette.accent);
+         assert_eq!(state.palette.panel_bg, original_palette.panel_bg);
+@@ -534,7 +534,7 @@
+             ))
+         );
+         assert_eq!(state.status_indicators, StatusIndicatorStyle::Dots);
+-        assert_eq!(state.mode, Mode::Settings);
++        assert_eq!(state.mode(), Mode::Settings);
+     }
+ 
+     #[test]
+@@ -551,7 +551,7 @@
+ 
+         assert_eq!(action, Some(SettingsAction::SaveSound(true)));
+         assert!(!state.sound.enabled);
+-        assert_eq!(state.mode, Mode::Settings);
++        assert_eq!(state.mode(), Mode::Settings);
+     }
+ 
+     #[test]

@@ -1,0 +1,29 @@
+--- /tmp/base.tmp	2026-09-16 17:53:32
++++ docs/fork/port-0.9/orig/src/ui/dialogs.rs	2026-09-16 17:53:32
+@@ -78,7 +78,7 @@
+ pub(super) fn render_rename_overlay(app: &AppState, frame: &mut Frame, area: Rect) {
+     super::dim_background(frame, area);
+ 
+-    let title = match app.mode {
++    let title = match app.mode() {
+         Mode::RenameWorkspace if app.pending_workspace_create_cwd.is_some() => "new workspace",
+         Mode::RenameWorkspace => "rename workspace",
+         Mode::RenameTab if app.creating_new_tab => "new tab",
+@@ -994,7 +994,7 @@
+ 
+     fn rename_overlay_caret_in(mode: Mode, name: &str) -> (Position, Buffer) {
+         let mut app = AppState::test_new();
+-        app.mode = mode;
++        app.replace_mode(mode);
+         app.name_input = name.into();
+ 
+         let mut terminal = Terminal::new(TestBackend::new(RENAME_AREA.width, RENAME_AREA.height))
+@@ -1123,7 +1123,7 @@
+     fn rename_overlay_caret_reaches_the_frame_the_server_sends() {
+         let input = rename_input_rect(RENAME_AREA);
+         let mut app = AppState::test_new();
+-        app.mode = Mode::RenameWorkspace;
++        app.replace_mode(Mode::RenameWorkspace);
+         app.name_input = "ab".into();
+ 
+         // The widget tests above stop at the ratatui frame. This one goes through

@@ -1,0 +1,88 @@
+--- /tmp/base.tmp	2026-09-16 17:53:32
++++ docs/fork/port-0.9/orig/src/main.rs	2026-09-16 17:53:32
+@@ -54,6 +54,7 @@
+     io::stdout().flush()
+ }
+ 
++mod agent_ownership;
+ mod agent_resume;
+ mod api;
+ mod app;
+@@ -191,6 +192,8 @@
+ # open_notification_target = "prefix+o"
+ # workspace_picker = "prefix+w"
+ # goto = "prefix+g"
++# usage = ""           # optional, unset by default; opens live agent resource usage
++# search = "prefix+f"
+ # new_workspace = "prefix+shift+n"
+ # new_worktree = "prefix+shift+g"
+ # open_worktree = ""    # optional, unset by default
+@@ -221,6 +224,9 @@
+ # cycle_pane_next = "prefix+tab"
+ # cycle_pane_previous = "prefix+shift+tab"
+ # last_pane = ""          # optional, unset by default; bind e.g. "prefix+tab" for global back-and-forth
++# Browser-style focus history back/forward; both are unset by default.
++# focus_back = ""
++# focus_forward = ""
+ # split_vertical = "prefix+v"
+ # split_horizontal = "prefix+minus"
+ # close_pane = "prefix+x"
+@@ -347,7 +353,19 @@
+ # Hide the tab row when a workspace has exactly one tab.
+ # New tabs can still be created with the configured keybinding.
+ # hide_tab_bar_when_single_tab = false
++
++# Sidebar agent state icons in tabs: "off", "attention", "active", or "all".
++# Icons use the same glyphs, overrides, and working animation as the agent sidebar.
++# "attention" shows blocked and completed agents awaiting attention.
++# "active" also shows working agents, while seen idle tabs stay quiet.
++# "all" shows every state whose resolved glyph is non-empty.
++# show_tab_status = "off"
+ 
++# When focused agent attention is marked read: "on_focus" or "on_unfocus".
++# on_unfocus keeps attention until an in-app pane, tab, workspace, sidebar, or mobile
++# navigation transition leaves it. Outer-terminal focus loss does not end the visit.
++# attention_read = "on_focus"
++
+ # Desktop tab row placement: "top" or "bottom".
+ # tab_bar_position = "top"
+ 
+@@ -373,12 +391,26 @@
+ # distinct static glyphs for blocked, working, done, idle, and unknown states.
+ # status_indicators = "dots"
+ 
++# Expanded sidebar section order. "workspaces" is accepted as an alias for "spaces".
++# [ui.sidebar]
++# section_order = ["spaces", "agents"]
++# New workspace button placement: "footer" or "header".
++# new_button = "footer"
++# Footer menu button alignment: "right" or "left".
++# menu_position = "right"
++
+ # Expanded agent rows. Built-ins are state_icon, state_text, workspace, tab, pane, agent,
+ # terminal_title, and terminal_title_stripped.
+ # Custom values reported through pane metadata use a $name token.
+ # A token occurrence may be styled with { token = "workspace", fg = "#89b4fa", bold = true, dim = false }.
+ # Omitted style fields preserve the contextual default.
+ # [ui.sidebar.agents]
++# Override seen state_icon glyphs by internal state; use <state>_unseen for unseen variants.
++# Plain keys do not affect unseen agents. Empty strings remove the token and its separators.
++# Unspecified variants keep the built-in glyph. States: idle, working, blocked, unknown.
++# state_icons = { idle = "", idle_unseen = "✓" }
++# Minimum rendered lines per agent entry. Blank lines pad entries with fewer populated rows.
++# min_row_lines = 0
+ # Blank rows between agent entries. Set to 1 to restore the previous spacing.
+ # row_gap = 0
+ # rows = [["state_icon", "workspace", "tab"], ["agent"]]
+@@ -970,6 +1002,11 @@
+     fn random_nested_message_comes_from_known_set() {
+         let message = random_nested_message();
+         assert!(NESTED_HERDR_MESSAGES.contains(&message));
++    }
++
++    #[test]
++    fn default_config_mentions_optional_usage_binding() {
++        assert!(DEFAULT_CONFIG.contains("# usage = \"\""));
+     }
+ 
+     #[test]

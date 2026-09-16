@@ -1,0 +1,105 @@
+--- /tmp/base.tmp	2026-09-16 17:53:31
++++ docs/fork/port-0.9/orig/src/app/creation.rs	2026-09-16 17:53:31
+@@ -82,7 +82,7 @@
+     }
+ 
+     pub(super) fn workspace_creation_source(&self) -> Option<usize> {
+-        if self.state.mode == Mode::Navigate
++        if self.state.mode() == Mode::Navigate
+             && self.state.workspaces.get(self.state.selected).is_some()
+         {
+             return Some(self.state.selected);
+@@ -114,13 +114,14 @@
+                 focus: true,
+                 label: None,
+                 env: Default::default(),
++                profiles: None,
+             },
+         );
+-        self.state.mode = if self.state.active.is_some() {
++        self.state.replace_mode(if self.state.active.is_some() {
+             Mode::Terminal
+         } else {
+             Mode::Navigate
+-        };
++        });
+     }
+ 
+     /// Create a workspace with a real PTY (needs event_tx).
+@@ -133,7 +134,7 @@
+         let initial_cwd = self.resolve_new_terminal_cwd(follow_cwd);
+         if let Err(e) = self.create_workspace_with_events(initial_cwd, true) {
+             error!(err = %e, "failed to create workspace");
+-            self.state.mode = Mode::Navigate;
++            self.state.replace_mode(Mode::Navigate);
+         }
+     }
+ 
+@@ -206,7 +207,7 @@
+         self.state.remove_alias_shadowed_by_new_pane(root_pane);
+         if focus {
+             self.state.switch_workspace_tab(ws_idx, idx);
+-            self.state.mode = Mode::Terminal;
++            self.state.replace_mode(Mode::Terminal);
+         }
+         let workspace_id = self.state.workspaces[ws_idx].id.clone();
+         let tab_id = self
+@@ -243,6 +244,16 @@
+         focus: bool,
+         extra_env: Vec<(String, String)>,
+     ) -> std::io::Result<usize> {
++        self.create_workspace_with_profiles(initial_cwd, focus, extra_env, None)
++    }
++
++    pub(crate) fn create_workspace_with_profiles(
++        &mut self,
++        initial_cwd: PathBuf,
++        focus: bool,
++        extra_env: Vec<(String, String)>,
++        profiles: Option<Vec<String>>,
++    ) -> std::io::Result<usize> {
+         let (rows, cols) = self.state.estimate_pane_size();
+         let (ws, terminal, runtime) = Workspace::new_with_extra_env(
+             initial_cwd,
+@@ -261,14 +272,21 @@
+         self.state.terminals.insert(terminal.id.clone(), terminal);
+         self.state.workspaces.push(ws);
+         let idx = self.state.workspaces.len() - 1;
++        self.state.workspaces[idx].profiles = profiles.unwrap_or_else(|| {
++            if self.state.active_profile != crate::workspace::DEFAULT_PROFILE {
++                vec![self.state.active_profile.clone()]
++            } else {
++                Vec::new()
++            }
++        });
+         self.state
+             .remove_alias_shadowed_by_new_pane(self.state.workspaces[idx].tabs[0].root_pane);
+         let workspace_id = self.state.workspaces[idx].id.clone();
+         let root_pane = self.state.workspaces[idx].tabs[0].root_pane.raw();
+         crate::logging::workspace_created(&workspace_id, root_pane);
+-        if focus || self.state.active.is_none() {
++        if focus || (self.state.active.is_none() && self.state.workspace_is_visible(idx)) {
+             self.state.switch_workspace(idx);
+-            self.state.mode = Mode::Terminal;
++            self.state.replace_mode(Mode::Terminal);
+         }
+         self.schedule_session_save();
+         Ok(idx)
+@@ -448,6 +466,7 @@
+             workspace_id: self.public_workspace_id(ws_idx),
+             tab_id: self.public_tab_id(ws_idx, tab_idx)?,
+             focused,
++            profiles: terminal.profiles.clone(),
+             cwd: ws.tabs[tab_idx]
+                 .cwd_for_pane(pane_id, &self.state.terminals, &self.terminal_runtimes)
+                 .map(|cwd| cwd.display().to_string()),
+@@ -502,7 +521,9 @@
+             active_tab_id: self.public_tab_id(index, ws.active_tab).unwrap_or_else(|| {
+                 crate::workspace::public_tab_id_for_number(&ws.id, ws.active_tab + 1)
+             }),
++            orchestrator_mode: ws.orchestrator_mode,
+             agent_status: pane_agent_status(agg_state, seen),
++            profiles: ws.profiles.clone(),
+             tokens: ws.metadata_tokens.values(),
+             worktree: ws
+                 .worktree_space()

@@ -1,0 +1,309 @@
+--- /tmp/base.tmp	2026-09-16 17:53:31
++++ docs/fork/port-0.9/orig/src/app/input/copy_mode.rs	2026-09-16 17:53:31
+@@ -17,7 +17,7 @@
+         }
+         self.state.update_dismissed = true;
+         if self.state.is_prefix_key(&key) {
+-            self.state.mode = Mode::Prefix;
++            self.state.replace_mode(Mode::Prefix);
+             return;
+         }
+         self.state
+@@ -72,7 +72,7 @@
+                 ..Default::default()
+             },
+         });
+-        self.mode = Mode::Copy;
++        self.replace_mode(Mode::Copy);
+     }
+ 
+     pub(crate) fn handle_copy_mode_key(
+@@ -394,11 +394,11 @@
+             self.set_pane_scroll_offset(terminal_runtimes, pane_id, offset_from_bottom);
+         }
+         self.copy_mode = None;
+-        self.mode = if self.active.is_some() {
++        self.replace_mode(if self.active.is_some() {
+             Mode::Terminal
+         } else {
+             Mode::Navigate
+-        };
++        });
+     }
+ 
+     fn begin_copy_mode_selection(&mut self, terminal_runtimes: &TerminalRuntimeRegistry) {
+@@ -766,24 +766,24 @@
+             return;
+         }
+         if !matches!(
+-            self.mode,
++            self.mode(),
+             Mode::Copy | Mode::Terminal | Mode::Navigate | Mode::Prefix
+         ) {
+             return;
+         }
+         if self.copy_mode_pane_is_focused() {
+-            self.mode = Mode::Copy;
++            self.replace_mode(Mode::Copy);
+         } else if self.active.is_some() {
+             self.clear_copy_mode_selection();
+-            self.mode = Mode::Terminal;
++            self.replace_mode(Mode::Terminal);
+         } else {
+             self.clear_copy_mode_selection();
+-            self.mode = Mode::Navigate;
++            self.replace_mode(Mode::Navigate);
+         }
+     }
+ 
+     pub(crate) fn settle_terminal_mode_after_focus(&mut self) {
+-        self.mode = Mode::Terminal;
++        self.replace_mode(Mode::Terminal);
+         self.sync_copy_mode_with_focus();
+     }
+ 
+@@ -827,12 +827,12 @@
+         {
+             self.clear_selection();
+             self.copy_mode = None;
+-            if self.mode == Mode::Copy {
+-                self.mode = if self.active.is_some() {
++            if self.mode() == Mode::Copy {
++                self.replace_mode(if self.active.is_some() {
+                     Mode::Terminal
+                 } else {
+                     Mode::Navigate
+-                };
++                });
+             }
+         }
+     }
+@@ -1033,7 +1033,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.view.pane_infos = pane_infos;
+         (app, pane_id)
+     }
+@@ -1092,7 +1092,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.view.pane_infos = pane_infos;
+         (app, first_pane, second_pane)
+     }
+@@ -1120,9 +1120,10 @@
+ 
+     fn copy_mode_clipboard_text(app: &mut App) -> String {
+         match app.event_rx.try_recv().expect("clipboard event") {
+-            AppEvent::ClipboardWrite { content } => {
+-                String::from_utf8(content).expect("utf8 clipboard")
+-            }
++            AppEvent::ClipboardWrite {
++                content,
++                feedback: None,
++            } => String::from_utf8(content).expect("utf8 clipboard"),
+             other => panic!("unexpected event: {other:?}"),
+         }
+     }
+@@ -1168,7 +1169,7 @@
+     async fn enter_copy_mode_tracks_focused_pane() {
+         let (mut app, pane_id) = app_with_copy_screen(b"alpha\nbeta\n");
+         app.state.enter_copy_mode(&app.terminal_runtimes);
+-        assert_eq!(app.state.mode, Mode::Copy);
++        assert_eq!(app.state.mode(), Mode::Copy);
+         assert_eq!(
+             app.state.copy_mode.as_ref().expect("copy mode").pane_id,
+             pane_id
+@@ -1187,7 +1188,7 @@
+ 
+         app.handle_copy_mode_key(TerminalKey::new(KeyCode::Char('b'), KeyModifiers::CONTROL));
+ 
+-        assert_eq!(app.state.mode, Mode::Copy);
++        assert_eq!(app.state.mode(), Mode::Copy);
+         assert_eq!(copy_mode_offset_from_bottom(&app, pane_id), expected_lines);
+     }
+ 
+@@ -1203,7 +1204,7 @@
+         ))
+         .await;
+ 
+-        assert_eq!(app.state.mode, Mode::Prefix);
++        assert_eq!(app.state.mode(), Mode::Prefix);
+         assert_eq!(copy_mode_offset_from_bottom(&app, pane_id), 0);
+         assert!(app.state.copy_mode.is_some());
+     }
+@@ -1222,7 +1223,7 @@
+         app.handle_key(TerminalKey::new(KeyCode::Esc, KeyModifiers::empty()))
+             .await;
+ 
+-        assert_eq!(app.state.mode, Mode::Copy);
++        assert_eq!(app.state.mode(), Mode::Copy);
+         assert_eq!(app.state.copy_mode, Some(copy_mode));
+     }
+ 
+@@ -1241,7 +1242,7 @@
+         app.handle_key(TerminalKey::new(KeyCode::Char('l'), KeyModifiers::empty()))
+             .await;
+ 
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         assert_eq!(app.state.copy_mode, Some(copy_mode.clone()));
+         assert_eq!(
+             app.state.workspaces[0].tabs[0].layout.focused(),
+@@ -1257,7 +1258,7 @@
+         app.handle_key(TerminalKey::new(KeyCode::Char('h'), KeyModifiers::empty()))
+             .await;
+ 
+-        assert_eq!(app.state.mode, Mode::Copy);
++        assert_eq!(app.state.mode(), Mode::Copy);
+         assert_eq!(app.state.copy_mode, Some(copy_mode));
+         assert_eq!(app.state.workspaces[0].tabs[0].layout.focused(), first_pane);
+     }
+@@ -1279,7 +1280,7 @@
+         app.handle_key(TerminalKey::new(KeyCode::Char('l'), KeyModifiers::empty()))
+             .await;
+ 
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         assert_eq!(
+             app.state.workspaces[0].tabs[0].layout.focused(),
+             second_pane
+@@ -1306,7 +1307,7 @@
+ 
+         assert_eq!(copy_mode_offset_from_bottom(&app, pane_id), 0);
+         assert!(app.state.copy_mode.is_none());
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+     }
+ 
+     #[tokio::test]
+@@ -1334,12 +1335,12 @@
+         .await;
+         app.handle_key(TerminalKey::new(KeyCode::Char('l'), KeyModifiers::empty()))
+             .await;
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         assert!(app.state.copy_mode.is_some());
+ 
+         assert!(!app.state.close_tab());
+ 
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         assert!(app.state.copy_mode.is_none());
+         app.state.assert_invariants_for_test();
+     }
+@@ -1356,7 +1357,7 @@
+ 
+         app.handle_copy_mode_key(TerminalKey::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
+ 
+-        assert_eq!(app.state.mode, Mode::Copy);
++        assert_eq!(app.state.mode(), Mode::Copy);
+         assert_eq!(copy_mode_offset_from_bottom(&app, pane_id), 0);
+     }
+ 
+@@ -1570,7 +1571,7 @@
+         app.handle_copy_mode_key(TerminalKey::new(KeyCode::Char('/'), KeyModifiers::empty()));
+         app.handle_copy_mode_key(TerminalKey::new(KeyCode::Char('x'), KeyModifiers::empty()));
+         app.handle_copy_mode_key(TerminalKey::new(KeyCode::Esc, KeyModifiers::empty()));
+-        assert_eq!(app.state.mode, Mode::Copy);
++        assert_eq!(app.state.mode(), Mode::Copy);
+         assert!(app
+             .state
+             .copy_mode
+@@ -1606,10 +1607,10 @@
+         assert!(search.query.is_empty());
+         assert!(search.matches.is_empty());
+         assert!(search.current.is_none());
+-        assert_eq!(app.state.mode, Mode::Copy);
++        assert_eq!(app.state.mode(), Mode::Copy);
+ 
+         app.handle_copy_mode_key(TerminalKey::new(KeyCode::Esc, KeyModifiers::empty()));
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         assert!(app.state.copy_mode.is_none());
+     }
+ 
+@@ -1622,7 +1623,7 @@
+ 
+         app.handle_copy_mode_key(TerminalKey::new(KeyCode::Esc, KeyModifiers::empty()));
+ 
+-        assert_eq!(app.state.mode, Mode::Copy);
++        assert_eq!(app.state.mode(), Mode::Copy);
+         assert!(app.state.selection.is_none());
+         assert!(app
+             .state
+@@ -1633,7 +1634,7 @@
+             .is_none());
+ 
+         app.handle_copy_mode_key(TerminalKey::new(KeyCode::Esc, KeyModifiers::empty()));
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+     }
+ 
+     #[tokio::test]
+@@ -1651,7 +1652,7 @@
+                 .map(|prompt| prompt.query.as_str()),
+             Some("needle")
+         );
+-        assert_eq!(app.state.mode, Mode::Copy);
++        assert_eq!(app.state.mode(), Mode::Copy);
+     }
+ 
+     #[tokio::test]
+@@ -1876,7 +1877,7 @@
+         app.handle_copy_mode_key(TerminalKey::new(KeyCode::Char('y'), KeyModifiers::empty()));
+ 
+         assert_eq!(copy_mode_clipboard_text(&mut app), "beta");
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+     }
+ 
+     #[tokio::test]
+@@ -2048,7 +2049,7 @@
+ 
+         app.handle_copy_mode_key(TerminalKey::new(KeyCode::Char('q'), KeyModifiers::empty()));
+ 
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         assert!(app.state.copy_mode.is_none());
+         assert_eq!(copy_mode_offset_from_bottom(&app, pane_id), 0);
+     }
+@@ -2068,7 +2069,7 @@
+ 
+         app.handle_copy_mode_key(TerminalKey::new(KeyCode::Char('q'), KeyModifiers::empty()));
+ 
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         assert!(app.state.copy_mode.is_none());
+         assert_eq!(copy_mode_offset_from_bottom(&app, pane_id), entry_offset);
+     }
+@@ -2124,10 +2125,13 @@
+         app.handle_copy_mode_key(TerminalKey::new(KeyCode::Char('y'), KeyModifiers::empty()));
+ 
+         match app.event_rx.try_recv().expect("clipboard event") {
+-            AppEvent::ClipboardWrite { content } => assert_eq!(content, b"alp"),
++            AppEvent::ClipboardWrite {
++                content,
++                feedback: None,
++            } => assert_eq!(content, b"alp"),
+             other => panic!("unexpected event: {other:?}"),
+         }
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         assert!(app.state.copy_mode.is_none());
+     }
+ 
+@@ -2147,7 +2151,7 @@
+ 
+         app.handle_copy_mode_key(TerminalKey::new(KeyCode::Char('y'), KeyModifiers::empty()));
+         assert_eq!(copy_mode_clipboard_text(&mut app), "alp");
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         assert!(app.state.copy_mode.is_none());
+     }
+ }

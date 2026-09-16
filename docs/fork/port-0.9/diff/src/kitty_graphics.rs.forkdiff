@@ -1,0 +1,38 @@
+--- /tmp/base.tmp	2026-09-16 17:53:32
++++ docs/fork/port-0.9/orig/src/kitty_graphics.rs	2026-09-16 17:53:32
+@@ -222,7 +222,7 @@
+     transaction_budget: Option<usize>,
+     cache: &mut HostGraphicsCache,
+ ) -> EncodedGraphics {
+-    let visible = app.mode == Mode::Terminal && cell_size.is_known();
++    let visible = app.mode() == Mode::Terminal && cell_size.is_known();
+     if graphics.slots.is_empty() {
+         if !visible {
+             return EncodedGraphics {
+@@ -296,7 +296,7 @@
+     surface: crate::ui::TabSurfaceView<'_>,
+     cell_size: HostCellSize,
+ ) -> bool {
+-    if app.mode != Mode::Terminal || !cell_size.is_known() {
++    if app.mode() != Mode::Terminal || !cell_size.is_known() {
+         return false;
+     }
+ 
+@@ -1311,7 +1311,7 @@
+     let info = allow_placement
+         .then(|| surface.pane_infos.iter().find(|info| info.id == key.0))
+         .flatten()
+-        .filter(|_| app.mode == Mode::Terminal && cell_size.is_known() && app.active.is_some());
++        .filter(|_| app.mode() == Mode::Terminal && cell_size.is_known() && app.active.is_some());
+     if let Some(command) = info
+         .map(|info| {
+             pane_graphics_host_placement(
+@@ -3087,7 +3087,7 @@
+         app.workspaces = vec![workspace];
+         app.active = Some(0);
+         app.selected = 0;
+-        app.mode = Mode::Terminal;
++        app.replace_mode(Mode::Terminal);
+         crate::ui::compute_view(&mut app, Rect::new(0, 0, 80, 24));
+ 
+         let source = HostSourceKey::Terminal {

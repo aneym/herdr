@@ -1,0 +1,2712 @@
+--- /tmp/base.tmp	2026-09-16 17:53:31
++++ docs/fork/port-0.9/orig/src/app/input/mouse.rs	2026-09-16 17:53:31
+@@ -5,11 +5,11 @@
+ 
+ use crate::{
+     app::state::{
+-        AgentPanelSort, AppState, ContextMenuKind, ContextMenuState, DragState, DragTarget,
+-        MenuListState, Mode, RightClickPassthroughGesture, TabPressState, ViewLayout,
++        AppState, ContextMenuKind, ContextMenuState, DragState, DragTarget, MenuListState, Mode,
++        ProfileMenuState, RightClickPassthroughGesture, TabPressState, ViewLayout,
+         WorkspacePressState,
+     },
+-    layout::{PaneInfo, SplitBorder},
++    layout::{PaneId, PaneInfo, SplitBorder},
+     selection::Selection,
+     terminal::TerminalRuntimeRegistry,
+ };
+@@ -26,6 +26,9 @@
+ };
+ 
+ pub(super) enum MouseAction {
++    SwitchProfile {
++        profile: String,
++    },
+     NewWorkspace,
+     Settings(SettingsAction),
+     FocusWorkspace {
+@@ -39,6 +42,7 @@
+         pane_id: crate::layout::PaneId,
+     },
+     FocusToastTarget,
++    ToggleUsage,
+     MoveWorkspace {
+         source_ws_idx: usize,
+         insert_idx: usize,
+@@ -61,6 +65,10 @@
+         menu: ContextMenuState,
+         idx: usize,
+     },
++    ProfileMenu {
++        menu: ProfileMenuState,
++        idx: usize,
++    },
+ }
+ 
+ enum MobileMouseResult {
+@@ -70,14 +78,76 @@
+ }
+ 
+ impl AppState {
++    fn pane_copy_button_at(&self, column: u16, row: u16) -> Option<PaneId> {
++        self.pane_frame_at(column, row)
++            .filter(|info| {
++                crate::ui::pane_copy_button_span(info).is_some_and(|(x_start, x_end, y)| {
++                    row == y && column >= x_start && column < x_end
++                })
++            })
++            .map(|info| info.id)
++    }
++
++    fn copy_pane_location_at(&mut self, column: u16, row: u16) -> bool {
++        let Some(pane_id) = self.pane_copy_button_at(column, row) else {
++            return false;
++        };
++        let Some(public_id) = self.active.and_then(|ws_idx| {
++            let workspace = self.workspaces.get(ws_idx)?;
++            let pane_number = workspace.public_pane_number(pane_id)?;
++            Some(crate::workspace::public_pane_id_for_number(
++                &workspace.id,
++                pane_number,
++            ))
++        }) else {
++            return false;
++        };
++
++        self.request_clipboard_write = Some((
++            public_id.clone().into_bytes(),
++            Some(format!("copied {public_id}")),
++        ));
++        true
++    }
++
++    fn update_pane_hover(&mut self, column: u16, row: u16) {
++        let hover = self.pane_mouse_target(column, row).map(|info| {
++            let on_button = self.pane_copy_button_at(column, row) == Some(info.id);
++            (info.id, on_button)
++        });
++        if self.pane_hover != hover {
++            self.pane_hover = hover;
++        }
++    }
++
+     pub(crate) fn handle_pane_mouse_only(
+         &mut self,
+         terminal_runtimes: &TerminalRuntimeRegistry,
++        source_id: crate::app::InputSourceId,
+         mouse: MouseEvent,
+     ) {
+-        if self.mode != Mode::Terminal {
++        if self.mode() != Mode::Terminal {
+             return;
+         }
++        match mouse.kind {
++            MouseEventKind::Down(MouseButton::Left) => {
++                self.pane_copy_presses.remove(&source_id);
++                if self.copy_pane_location_at(mouse.column, mouse.row) {
++                    self.pane_copy_presses.insert(source_id);
++                    return;
++                }
++            }
++            MouseEventKind::Drag(MouseButton::Left)
++                if self.pane_copy_presses.contains(&source_id) =>
++            {
++                return;
++            }
++            MouseEventKind::Up(MouseButton::Left) if self.pane_copy_presses.remove(&source_id) => {
++                return;
++            }
++            MouseEventKind::Moved => self.update_pane_hover(mouse.column, mouse.row),
++            _ => {}
++        }
+         let Some(info) = self.pane_at(mouse.column, mouse.row).cloned() else {
+             return;
+         };
+@@ -104,33 +174,33 @@
+         source_id: crate::app::InputSourceId,
+         mouse: MouseEvent,
+     ) -> Option<MouseAction> {
+-        if self.mode == Mode::Onboarding {
++        if self.mode() == Mode::Onboarding {
+             self.handle_onboarding_mouse(mouse);
+             return None;
+         }
+ 
+-        if self.mode == Mode::Terminal
++        if self.mode() == Mode::Terminal
+             && self.clickable_toast_at(mouse.column, mouse.row)
+             && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+         {
+             return Some(MouseAction::FocusToastTarget);
+         }
+ 
+-        if self.mode == Mode::Terminal
++        if self.mode() == Mode::Terminal
+             && self.clickable_toast_at(mouse.column, mouse.row)
+             && matches!(mouse.kind, MouseEventKind::Up(MouseButton::Left))
+         {
+             return None;
+         }
+ 
+-        if self.mode == Mode::Settings {
++        if self.mode() == Mode::Settings {
+             return self.handle_settings_mouse(mouse).map(MouseAction::Settings);
+         }
+ 
+         let launcher_enabled = self.view.layout != ViewLayout::Mobile
+             && !self.sidebar_collapsed
+             && matches!(
+-                self.mode,
++                self.mode(),
+                 Mode::Terminal
+                     | Mode::Navigate
+                     | Mode::Resize
+@@ -144,7 +214,7 @@
+             && mouse.row >= launcher.y
+             && mouse.row < launcher.y + launcher.height;
+ 
+-        if matches!(mouse.kind, MouseEventKind::Moved) && self.mode == Mode::GlobalMenu {
++        if matches!(mouse.kind, MouseEventKind::Moved) && self.mode() == Mode::GlobalMenu {
+             let actions = global_menu_actions(self);
+             let hovered = self
+                 .global_menu_item_at(mouse.column, mouse.row)
+@@ -154,7 +224,7 @@
+         }
+ 
+         if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) && launcher_hit {
+-            if self.mode == Mode::GlobalMenu {
++            if self.mode() == Mode::GlobalMenu {
+                 leave_modal(self);
+             } else {
+                 open_global_menu(self);
+@@ -162,7 +232,7 @@
+             return None;
+         }
+ 
+-        if self.mode == Mode::GlobalMenu {
++        if self.mode() == Mode::GlobalMenu {
+             if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+                 if let Some(action) = self.global_menu_item_at(mouse.column, mouse.row) {
+                     apply_global_menu_action(self, action);
+@@ -173,7 +243,7 @@
+             return None;
+         }
+ 
+-        if self.mode == Mode::KeybindHelp {
++        if self.mode() == Mode::KeybindHelp {
+             return None;
+         }
+ 
+@@ -195,7 +265,7 @@
+             return None;
+         }
+ 
+-        if self.mode == Mode::OpenExistingWorktree {
++        if self.mode() == Mode::OpenExistingWorktree {
+             match mouse.kind {
+                 MouseEventKind::ScrollUp => {
+                     if let Some(open) = &mut self.worktree_open {
+@@ -214,7 +284,7 @@
+         }
+ 
+         if matches!(
+-            self.mode,
++            self.mode(),
+             Mode::NewLinkedWorktree | Mode::OpenExistingWorktree | Mode::ConfirmRemoveWorktree
+         ) && !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+         {
+@@ -223,11 +293,19 @@
+ 
+         match mouse.kind {
+             MouseEventKind::Down(MouseButton::Left) => {
++                self.pane_copy_presses.remove(&source_id);
++                if self.mode() == Mode::Terminal
++                    && self.copy_pane_location_at(mouse.column, mouse.row)
++                {
++                    self.pane_copy_presses.insert(source_id);
++                    return None;
++                }
++
+                 self.selection = None;
+                 self.selection_autoscroll = None;
+                 self.clear_chrome_press(source_id);
+ 
+-                if self.mode == Mode::ConfirmClose {
++                if self.mode() == Mode::ConfirmClose {
+                     let popup = self.confirm_close_rect();
+                     let inner = Rect::new(
+                         popup.x + 1,
+@@ -253,7 +331,7 @@
+                     return None;
+                 }
+ 
+-                if self.mode == Mode::NewLinkedWorktree {
++                if self.mode() == Mode::NewLinkedWorktree {
+                     if let Some(inner) =
+                         crate::ui::new_linked_worktree_inner_rect(self.screen_rect())
+                     {
+@@ -286,7 +364,7 @@
+                     return None;
+                 }
+ 
+-                if self.mode == Mode::OpenExistingWorktree {
++                if self.mode() == Mode::OpenExistingWorktree {
+                     if let Some(open) = self.worktree_open.as_ref() {
+                         if let Some(inner) = crate::ui::open_existing_worktree_inner_rect(
+                             self.screen_rect(),
+@@ -349,7 +427,7 @@
+                     return None;
+                 }
+ 
+-                if self.mode == Mode::ConfirmRemoveWorktree {
++                if self.mode() == Mode::ConfirmRemoveWorktree {
+                     if let Some(popup) = crate::ui::remove_worktree_popup_rect(self.screen_rect()) {
+                         let inner = Rect::new(
+                             popup.x + 1,
+@@ -390,7 +468,7 @@
+                 }
+ 
+                 if matches!(
+-                    self.mode,
++                    self.mode(),
+                     Mode::RenameWorkspace | Mode::RenameTab | Mode::RenamePane
+                 ) {
+                     let action = self
+@@ -411,7 +489,19 @@
+                     return Some(MouseAction::RenameModal(action));
+                 }
+ 
+-                if self.mode == Mode::ContextMenu {
++                if self.mode() == Mode::ContextMenu && self.profile_menu.is_some() {
++                    let item_idx = self.profile_menu_item_at(mouse.column, mouse.row);
++                    if let Some(menu) = self.profile_menu.take() {
++                        if let Some(idx) = item_idx {
++                            return Some(MouseAction::ProfileMenu { menu, idx });
++                        } else {
++                            leave_modal(self);
++                        }
++                    }
++                    return None;
++                }
++
++                if self.mode() == Mode::ContextMenu {
+                     let item_idx = self.context_menu_item_at(mouse.column, mouse.row);
+                     if let Some(menu) = self.context_menu.take() {
+                         if let Some(idx) = item_idx {
+@@ -431,6 +521,17 @@
+                     return None;
+                 }
+ 
++                if in_sidebar && !self.sidebar_collapsed {
++                    let new_button = self.sidebar_new_button_rect();
++                    let on_new_button = mouse.row >= new_button.y
++                        && mouse.row < new_button.y + new_button.height
++                        && mouse.column >= new_button.x
++                        && mouse.column < new_button.x + new_button.width;
++                    if on_new_button {
++                        return Some(MouseAction::NewWorkspace);
++                    }
++                }
++
+                 if self.on_sidebar_section_divider(mouse.column, mouse.row) {
+                     self.drag = Some(DragState {
+                         target: DragTarget::SidebarSectionDivider,
+@@ -477,8 +578,8 @@
+                                 );
+                             }
+                         }
+-                        if self.mode != Mode::Terminal {
+-                            self.mode = Mode::Terminal;
++                        if self.mode() != Mode::Terminal {
++                            self.replace_mode(Mode::Terminal);
+                         }
+                         return None;
+                     }
+@@ -515,7 +616,7 @@
+                         open_new_tab_dialog(self);
+                     } else {
+                         self.request_new_tab = true;
+-                        self.mode = Mode::Terminal;
++                        self.replace_mode(Mode::Terminal);
+                     }
+                     return None;
+                 }
+@@ -528,28 +629,19 @@
+ 
+                     if self.sidebar_collapsed {
+                         if let Some(idx) = self.collapsed_workspace_at_row(mouse.row) {
+-                            self.mode = Mode::Terminal;
++                            self.replace_mode(Mode::Terminal);
+                             return Some(MouseAction::FocusWorkspace { ws_idx: idx });
+                         }
+ 
+                         if let Some((ws_idx, _tab_idx, pane_id)) =
+                             self.collapsed_agent_detail_target_at(mouse.row)
+                         {
+-                            self.mode = Mode::Terminal;
++                            self.replace_mode(Mode::Terminal);
+                             return Some(MouseAction::FocusPane { ws_idx, pane_id });
+                         }
+                         return None;
+                     }
+ 
+-                    let new_button = self.sidebar_new_button_rect();
+-                    let on_new_button = mouse.row >= new_button.y
+-                        && mouse.row < new_button.y + new_button.height
+-                        && mouse.column >= new_button.x
+-                        && mouse.column < new_button.x + new_button.width;
+-                    if on_new_button {
+-                        return Some(MouseAction::NewWorkspace);
+-                    }
+-
+                     if let Some(target) =
+                         self.workspace_list_scrollbar_target_at(mouse.column, mouse.row)
+                     {
+@@ -600,19 +692,118 @@
+                         return None;
+                     }
+ 
++                    let agent_entries =
++                        crate::ui::agent_panel_list_entries_from(self, terminal_runtimes);
++
++                    if self.on_agent_panel_usage(mouse.column, mouse.row) {
++                        return Some(MouseAction::ToggleUsage);
++                    }
++
+                     if self.on_agent_panel_sort_toggle(mouse.column, mouse.row) {
+-                        self.agent_panel_sort = match self.agent_panel_sort {
+-                            AgentPanelSort::Spaces => AgentPanelSort::Priority,
+-                            AgentPanelSort::Priority => AgentPanelSort::Spaces,
+-                        };
++                        self.context_menu = Some(ContextMenuState {
++                            kind: ContextMenuKind::SidebarView {
++                                sort: self.agent_panel_sort,
++                                show_spaces: self.tree_show_spaces,
++                                show_tabs: self.tree_show_tabs,
++                                show_agents: self.tree_show_agents,
++                                show_hidden: self.tree_show_hidden_spaces,
++                            },
++                            x: mouse.column,
++                            y: mouse.row.saturating_add(1),
++                            list: MenuListState::new(0),
++                        });
++                        self.replace_mode(Mode::ContextMenu);
++                        return None;
++                    }
++
++                    if let Some(hit) = self.tree_header_at(&agent_entries, mouse.column, mouse.row)
++                    {
++                        match hit {
++                            super::sidebar::TreeHeaderHit::Toggle { space, key } => {
++                                let set = if space {
++                                    &mut self.tree_collapsed_spaces
++                                } else {
++                                    &mut self.tree_collapsed_tabs
++                                };
++                                if !set.remove(&key) {
++                                    set.insert(key);
++                                }
++                                self.mark_session_dirty();
++                                return None;
++                            }
++                            super::sidebar::TreeHeaderHit::NewTab { ws_idx } => {
++                                // Deliberately never prompts for a name, even
++                                // with prompt_new_tab_name on: the space plus
++                                // just makes the next-numbered tab (Alex,
++                                // 2026-08-26).
++                                self.requested_new_tab_workspace_id =
++                                    self.workspaces.get(ws_idx).map(|ws| ws.id.clone());
++                                self.request_new_tab = true;
++                                self.replace_mode(Mode::Terminal);
++                                return None;
++                            }
++                            super::sidebar::TreeHeaderHit::PinToggle { key } => {
++                                if !self.tree_pinned_spaces.remove(&key) {
++                                    self.tree_pinned_spaces.insert(key);
++                                }
++                                self.mark_session_dirty();
++                                return None;
++                            }
++                            super::sidebar::TreeHeaderHit::Focus { ws_idx, tab_idx } => {
++                                self.replace_mode(Mode::Terminal);
++                                let Some(tab_idx) = tab_idx else {
++                                    // A space header press arms a possible
++                                    // reorder drag; the focus happens on
++                                    // release when none started (mirrors the
++                                    // workspace rows below).
++                                    self.tree_space_presses.insert(
++                                        source_id,
++                                        WorkspacePressState {
++                                            ws_idx,
++                                            start_col: mouse.column,
++                                            start_row: mouse.row,
++                                        },
++                                    );
++                                    return None;
++                                };
++                                self.switch_workspace_tab(ws_idx, tab_idx);
++                                // Focus the tab's own pane. Routing this
++                                // through FocusWorkspace re-derives the
++                                // workspace's remembered tab and can undo the
++                                // switch we just made.
++                                let pane_id = self
++                                    .workspaces
++                                    .get(ws_idx)
++                                    .and_then(|ws| ws.tabs.get(tab_idx))
++                                    .map(|tab| tab.layout.focused());
++                                return match pane_id {
++                                    Some(pane_id) => {
++                                        Some(MouseAction::FocusPane { ws_idx, pane_id })
++                                    }
++                                    None => Some(MouseAction::FocusWorkspace { ws_idx }),
++                                };
++                            }
++                        }
++                    }
++
++                    if self.on_hidden_spaces_header(&agent_entries, mouse.column, mouse.row) {
++                        self.hidden_spaces_expanded = !self.hidden_spaces_expanded;
+                         self.agent_panel_scroll = 0;
++                        return None;
++                    }
++
++                    if self.on_automations_header(&agent_entries, mouse.column, mouse.row) {
++                        self.automations_expanded = !self.automations_expanded;
++                        self.agent_panel_scroll = 0;
+                         self.mark_session_dirty();
+                         return None;
+                     }
+ 
+-                    if let Some(target) =
+-                        self.agent_panel_scrollbar_target_at(mouse.column, mouse.row)
+-                    {
++                    if let Some(target) = self.agent_panel_scrollbar_target_at(
++                        &agent_entries,
++                        mouse.column,
++                        mouse.row,
++                    ) {
+                         match target {
+                             ScrollbarClickTarget::Thumb { grab_row_offset } => {
+                                 self.drag = Some(DragState {
+@@ -620,21 +811,31 @@
+                                 });
+                             }
+                             ScrollbarClickTarget::Track { offset_from_bottom } => {
+-                                self.set_agent_panel_offset_from_bottom(offset_from_bottom);
++                                self.set_agent_panel_offset_from_bottom(
++                                    &agent_entries,
++                                    offset_from_bottom,
++                                );
+                             }
+                         }
+                         return None;
+                     }
+ 
++                    if let Some(identity) =
++                        self.agent_group_toggle_at(&agent_entries, mouse.column, mouse.row)
++                    {
++                        self.toggle_agent_group_collapsed(identity);
++                        return None;
++                    }
++
+                     if let Some((ws_idx, _tab_idx, pane_id)) =
+-                        self.agent_detail_target_at(mouse.row)
++                        self.agent_detail_target_at(&agent_entries, mouse.row)
+                     {
+-                        self.mode = Mode::Terminal;
++                        self.replace_mode(Mode::Terminal);
+                         return Some(MouseAction::FocusPane { ws_idx, pane_id });
+                     }
+                 } else if let Some(info) = self.pane_at(mouse.column, mouse.row).cloned() {
+-                    if self.mode != Mode::Terminal {
+-                        self.mode = Mode::Terminal;
++                    if self.mode() != Mode::Terminal {
++                        self.replace_mode(Mode::Terminal);
+                     }
+ 
+                     if self.forward_pane_mouse_button(terminal_runtimes, &info, mouse) {
+@@ -661,8 +862,8 @@
+                         && mouse.row < p.rect.y + p.rect.height
+                 }) {
+                     let id = info.id;
+-                    if self.mode != Mode::Terminal {
+-                        self.mode = Mode::Terminal;
++                    if self.mode() != Mode::Terminal {
++                        self.replace_mode(Mode::Terminal);
+                     }
+                     return self.mouse_pane_focus_action(id);
+                 }
+@@ -726,6 +927,32 @@
+                                 },
+                             });
+                         }
++                    } else if let Some(press) = self.tree_space_presses.get(&source_id) {
++                        let source_ws_idx = press.ws_idx;
++                        let delta_col = mouse.column.abs_diff(press.start_col);
++                        let delta_row = mouse.row.abs_diff(press.start_row);
++                        let can_reorder = self.workspaces.get(source_ws_idx).is_some_and(|ws| {
++                            ws.worktree_space()
++                                .is_none_or(|space| !space.is_linked_worktree)
++                        });
++                        if can_reorder && delta_col.max(delta_row) >= WORKSPACE_DRAG_THRESHOLD {
++                            let entries =
++                                crate::ui::agent_panel_list_entries_from(self, terminal_runtimes);
++                            // Require a real drop slot before opening the
++                            // reorder, so a drag that leaves the panel cannot
++                            // start with nowhere to land.
++                            if let Some(drop_target) =
++                                self.tree_space_drop_target_at(&entries, mouse.row)
++                            {
++                                self.drag = Some(DragState {
++                                    target: DragTarget::TreeSpaceReorder {
++                                        source_id,
++                                        source_ws_idx,
++                                        drop_target: Some(drop_target),
++                                    },
++                                });
++                            }
++                        }
+                     }
+                 }
+ 
+@@ -754,9 +981,28 @@
+                     if *drag_source_id == source_id && self.active == Some(*ws_idx) {
+                         *insert_idx = tab_drop_index;
+                     }
++                } else if matches!(
++                    &self.drag,
++                    Some(DragState {
++                        target: DragTarget::TreeSpaceReorder {
++                            source_id: drag_source_id,
++                            ..
++                        },
++                    }) if *drag_source_id == source_id
++                ) {
++                    let entries = crate::ui::agent_panel_list_entries_from(self, terminal_runtimes);
++                    let new_target = self.tree_space_drop_target_at(&entries, mouse.row);
++                    if let Some(DragState {
++                        target: DragTarget::TreeSpaceReorder { drop_target, .. },
++                    }) = &mut self.drag
++                    {
++                        *drop_target = new_target;
++                    }
+                 } else if let Some(drag) = &self.drag {
+                     match &drag.target {
+-                        DragTarget::WorkspaceReorder { .. } | DragTarget::TabReorder { .. } => {}
++                        DragTarget::WorkspaceReorder { .. }
++                        | DragTarget::TabReorder { .. }
++                        | DragTarget::TreeSpaceReorder { .. } => {}
+                         DragTarget::WorkspaceListScrollbar { grab_row_offset } => {
+                             if let Some(offset_from_bottom) =
+                                 self.workspace_list_offset_for_drag_row(mouse.row, *grab_row_offset)
+@@ -765,10 +1011,17 @@
+                             }
+                         }
+                         DragTarget::AgentPanelScrollbar { grab_row_offset } => {
+-                            if let Some(offset_from_bottom) =
+-                                self.agent_panel_offset_for_drag_row(mouse.row, *grab_row_offset)
+-                            {
+-                                self.set_agent_panel_offset_from_bottom(offset_from_bottom);
++                            let agent_entries =
++                                crate::ui::agent_panel_list_entries_from(self, terminal_runtimes);
++                            if let Some(offset_from_bottom) = self.agent_panel_offset_for_drag_row(
++                                &agent_entries,
++                                mouse.row,
++                                *grab_row_offset,
++                            ) {
++                                self.set_agent_panel_offset_from_bottom(
++                                    &agent_entries,
++                                    offset_from_bottom,
++                                );
+                             }
+                         }
+                         DragTarget::PaneSplit {
+@@ -866,8 +1119,9 @@
+ 
+                 let workspace_press = self.workspace_presses.remove(&source_id);
+                 let tab_press = self.tab_presses.remove(&source_id);
++                let tree_press = self.tree_space_presses.remove(&source_id);
+                 if foreign_chrome_drag {
+-                    return self.chrome_press_action(workspace_press, tab_press);
++                    return self.chrome_press_action(workspace_press, tab_press, tree_press);
+                 }
+ 
+                 match self.drag.take() {
+@@ -914,7 +1168,7 @@
+                             },
+                     }) => {
+                         if self.active == Some(ws_idx) {
+-                            self.mode = Mode::Terminal;
++                            self.replace_mode(Mode::Terminal);
+                             return Some(MouseAction::MoveTab {
+                                 ws_idx,
+                                 source_tab_idx,
+@@ -922,8 +1176,24 @@
+                             });
+                         }
+                     }
++                    Some(DragState {
++                        target:
++                            DragTarget::TreeSpaceReorder {
++                                source_ws_idx,
++                                drop_target: Some(drop_target),
++                                ..
++                            },
++                    }) => {
++                        if let Some(params) =
++                            self.tree_space_move_params(source_ws_idx, drop_target)
++                        {
++                            return Some(MouseAction::MoveWorkspaceBlock { params });
++                        }
++                    }
+                     Some(_) => {}
+-                    None => return self.chrome_press_action(workspace_press, tab_press),
++                    None => {
++                        return self.chrome_press_action(workspace_press, tab_press, tree_press)
++                    }
+                 }
+             }
+ 
+@@ -935,14 +1205,20 @@
+                 }
+             }
+ 
+-            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
++            MouseEventKind::ScrollUp
++            | MouseEventKind::ScrollDown
++            | MouseEventKind::ScrollLeft
++            | MouseEventKind::ScrollRight
+                 if self.mode_bar_covers_tab_row(mouse.column, mouse.row) => {}
+ 
+-            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
++            MouseEventKind::ScrollUp
++            | MouseEventKind::ScrollDown
++            | MouseEventKind::ScrollLeft
++            | MouseEventKind::ScrollRight
+                 if self.on_tab_bar(mouse.column, mouse.row) =>
+             {
+                 match mouse.kind {
+-                    MouseEventKind::ScrollUp => {
++                    MouseEventKind::ScrollUp | MouseEventKind::ScrollLeft => {
+                         if let Some(ws) = self.active.and_then(|i| self.workspaces.get(i)) {
+                             if !ws.tabs.is_empty() {
+                                 let prev = if ws.active_tab == 0 {
+@@ -954,7 +1230,7 @@
+                             }
+                         }
+                     }
+-                    MouseEventKind::ScrollDown => {
++                    MouseEventKind::ScrollDown | MouseEventKind::ScrollRight => {
+                         if let Some(ws) = self.active.and_then(|i| self.workspaces.get(i)) {
+                             if !ws.tabs.is_empty() {
+                                 let next = (ws.active_tab + 1) % ws.tabs.len();
+@@ -976,7 +1252,7 @@
+             }
+ 
+             MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight
+-                if self.mode == Mode::Terminal && !in_sidebar =>
++                if self.mode() == Mode::Terminal && !in_sidebar =>
+             {
+                 if let Some(info) = self.pane_at(mouse.column, mouse.row).cloned() {
+                     self.forward_pane_reported_wheel(terminal_runtimes, &info, mouse);
+@@ -989,10 +1265,14 @@
+                     && mouse.row >= agent_area.y
+                     && mouse.row < agent_area.y + agent_area.height;
+                 if over_agent_panel {
++                    let agent_entries =
++                        crate::ui::agent_panel_list_entries_from(self, terminal_runtimes);
+                     if crate::ui::should_show_scrollbar(crate::ui::agent_panel_scroll_metrics(
+-                        self, agent_area,
++                        self,
++                        &agent_entries,
++                        agent_area,
+                     )) {
+-                        self.scroll_agent_panel(-1);
++                        self.scroll_agent_panel(&agent_entries, -1);
+                     }
+                 } else if crate::ui::should_show_scrollbar(
+                     crate::ui::workspace_list_scroll_metrics(self, self.workspace_list_rect()),
+@@ -1008,10 +1288,14 @@
+                     && mouse.row >= agent_area.y
+                     && mouse.row < agent_area.y + agent_area.height;
+                 if over_agent_panel {
++                    let agent_entries =
++                        crate::ui::agent_panel_list_entries_from(self, terminal_runtimes);
+                     if crate::ui::should_show_scrollbar(crate::ui::agent_panel_scroll_metrics(
+-                        self, agent_area,
++                        self,
++                        &agent_entries,
++                        agent_area,
+                     )) {
+-                        self.scroll_agent_panel(1);
++                        self.scroll_agent_panel(&agent_entries, 1);
+                     }
+                 } else if crate::ui::should_show_scrollbar(
+                     crate::ui::workspace_list_scroll_metrics(self, self.workspace_list_rect()),
+@@ -1022,27 +1306,49 @@
+                 }
+             }
+ 
+-            MouseEventKind::Moved if self.mode == Mode::ContextMenu => {
++            MouseEventKind::Moved
++                if self.mode() == Mode::ContextMenu && self.profile_menu.is_some() =>
++            {
++                let hovered = self.profile_menu_item_at(mouse.column, mouse.row);
++                if let Some(menu) = &mut self.profile_menu {
++                    menu.list.hover(hovered);
++                }
++            }
++
++            MouseEventKind::Moved if self.mode() == Mode::ContextMenu => {
+                 let hovered = self.context_menu_item_at(mouse.column, mouse.row);
+                 if let Some(menu) = &mut self.context_menu {
+                     menu.list.hover(hovered);
+                 }
+             }
+ 
+-            MouseEventKind::Moved if self.mode == Mode::Terminal && !in_sidebar => {
+-                if let Some(info) = self.pane_at(mouse.column, mouse.row).cloned() {
+-                    let _ = self.forward_pane_mouse_motion(terminal_runtimes, &info, mouse);
++            MouseEventKind::Moved if self.mode() == Mode::Terminal => {
++                if in_sidebar {
++                    self.pane_hover = None;
++                } else {
++                    self.update_pane_hover(mouse.column, mouse.row);
+                 }
++                if !in_sidebar {
++                    if let Some(info) = self.pane_at(mouse.column, mouse.row).cloned() {
++                        let _ = self.forward_pane_mouse_motion(terminal_runtimes, &info, mouse);
++                    }
++                }
+             }
+ 
+             MouseEventKind::Down(MouseButton::Right) if in_sidebar && !self.sidebar_collapsed => {
+                 self.clear_chrome_press(source_id);
+-                if self
+-                    .workspace_list_scrollbar_target_at(mouse.column, mouse.row)
+-                    .is_some()
++
++                let new_button = self.sidebar_new_button_rect();
++                if rect_contains(new_button, mouse.column, mouse.row)
++                    || self.on_sidebar_divider(mouse.column, mouse.row)
++                    || self.on_sidebar_section_divider(mouse.column, mouse.row)
++                    || self
++                        .workspace_list_scrollbar_target_at(mouse.column, mouse.row)
++                        .is_some()
+                 {
+                     return None;
+                 }
++
+                 if let Some(idx) = self.workspace_at_row(mouse.row) {
+                     self.selected = idx;
+                     let kind = self
+@@ -1070,21 +1376,65 @@
+                             show_git_menu.then_some(ContextMenuKind::GitWorkspace {
+                                 ws_idx: idx,
+                                 is_linked_worktree,
++                                orchestrator_mode: ws.orchestrator_mode,
+                                 has_worktree_children: group_state.is_some(),
+                                 collapsed: group_state
+                                     .as_ref()
+                                     .is_some_and(|(_, collapsed)| *collapsed),
+                             })
+                         })
+-                        .unwrap_or(ContextMenuKind::Workspace { ws_idx: idx });
++                        .unwrap_or(ContextMenuKind::Workspace {
++                            ws_idx: idx,
++                            orchestrator_mode: self
++                                .workspaces
++                                .get(idx)
++                                .is_some_and(|ws| ws.orchestrator_mode),
++                        });
+                     self.context_menu = Some(ContextMenuState {
+                         kind,
+                         x: mouse.column,
+                         y: mouse.row,
+                         list: MenuListState::new(0),
+                     });
+-                    self.mode = Mode::ContextMenu;
++                    self.replace_mode(Mode::ContextMenu);
++                    return None;
+                 }
++
++                let agent_entries =
++                    crate::ui::agent_panel_list_entries_from(self, terminal_runtimes);
++                let agent_body = crate::ui::agent_panel_body_rect(
++                    self.agent_panel_rect(),
++                    crate::ui::should_show_scrollbar(crate::ui::agent_panel_scroll_metrics(
++                        self,
++                        &agent_entries,
++                        self.agent_panel_rect(),
++                    )),
++                );
++                if self
++                    .agent_panel_scrollbar_target_at(&agent_entries, mouse.column, mouse.row)
++                    .is_some()
++                    || self.on_agent_panel_sort_toggle(mouse.column, mouse.row)
++                    || self.on_agent_panel_usage(mouse.column, mouse.row)
++                    || self.on_automations_header(&agent_entries, mouse.column, mouse.row)
++                    || self
++                        .agent_group_toggle_at(&agent_entries, mouse.column, mouse.row)
++                        .is_some()
++                    || !rect_contains(agent_body, mouse.column, mouse.row)
++                {
++                    return None;
++                }
++
++                if let Some((ws_idx, _tab_idx, pane_id)) =
++                    self.agent_detail_target_at(&agent_entries, mouse.row)
++                {
++                    self.context_menu = Some(ContextMenuState {
++                        kind: ContextMenuKind::AgentPane { ws_idx, pane_id },
++                        x: mouse.column,
++                        y: mouse.row,
++                        list: MenuListState::new(0),
++                    });
++                    self.replace_mode(Mode::ContextMenu);
++                }
+             }
+ 
+             MouseEventKind::Down(MouseButton::Right)
+@@ -1100,7 +1450,7 @@
+                         y: mouse.row,
+                         list: MenuListState::new(0),
+                     });
+-                    self.mode = Mode::ContextMenu;
++                    self.replace_mode(Mode::ContextMenu);
+                 }
+             }
+ 
+@@ -1140,7 +1490,7 @@
+                         y: mouse.row,
+                         list: MenuListState::new(0),
+                     });
+-                    self.mode = Mode::ContextMenu;
++                    self.replace_mode(Mode::ContextMenu);
+                 }
+             }
+ 
+@@ -1151,7 +1501,7 @@
+     }
+ 
+     fn handle_mobile_mouse(&mut self, mouse: MouseEvent) -> MobileMouseResult {
+-        if self.mode == Mode::Navigate {
++        if self.mode() == Mode::Navigate {
+             match mouse.kind {
+                 MouseEventKind::ScrollUp => {
+                     self.scroll_mobile_switcher_at(mouse.column, mouse.row, -1);
+@@ -1168,13 +1518,15 @@
+             return MobileMouseResult::Ignored;
+         }
+ 
+-        if self.mode != Mode::Navigate {
+-            if !matches!(self.mode, Mode::Terminal | Mode::Resize) {
++        if self.mode() != Mode::Navigate {
++            if !matches!(self.mode(), Mode::Terminal | Mode::Resize) {
+                 return MobileMouseResult::Ignored;
+             }
+             if rect_contains(self.view.mobile_menu_hit_area, mouse.column, mouse.row) {
++                self.read_focused_attention();
++                self.leave_focused_attention();
+                 self.mobile_switcher_scroll = 0;
+-                self.mode = Mode::Navigate;
++                self.replace_mode(Mode::Navigate);
+                 return MobileMouseResult::Consumed;
+             }
+             return MobileMouseResult::Ignored;
+@@ -1182,16 +1534,23 @@
+ 
+         let areas = crate::ui::mobile_switcher_areas(self);
+         if rect_contains(areas.close, mouse.column, mouse.row) {
+-            self.mode = Mode::Terminal;
++            self.replace_mode(Mode::Terminal);
+             return MobileMouseResult::Consumed;
+         }
+ 
+         match crate::ui::mobile_switcher_target_at(self, mouse.column, mouse.row) {
++            Some(crate::ui::MobileSwitcherTarget::Profile(profile_idx)) => {
++                let Some(profile) = self.profile_roster().get(profile_idx).cloned() else {
++                    return MobileMouseResult::Consumed;
++                };
++                self.replace_mode(Mode::Terminal);
++                return MobileMouseResult::Action(MouseAction::SwitchProfile { profile });
++            }
+             Some(crate::ui::MobileSwitcherTarget::NewWorkspace) => {
+                 return MobileMouseResult::Action(MouseAction::NewWorkspace);
+             }
+             Some(crate::ui::MobileSwitcherTarget::Workspace(ws_idx)) => {
+-                self.mode = Mode::Terminal;
++                self.replace_mode(Mode::Terminal);
+                 return MobileMouseResult::Action(MouseAction::FocusWorkspace { ws_idx });
+             }
+             Some(crate::ui::MobileSwitcherTarget::NewTab) => {
+@@ -1199,11 +1558,11 @@
+                     open_new_tab_dialog(self);
+                 } else {
+                     self.request_new_tab = true;
+-                    self.mode = Mode::Terminal;
++                    self.replace_mode(Mode::Terminal);
+                 }
+             }
+             Some(crate::ui::MobileSwitcherTarget::Tab(tab_idx)) => {
+-                self.mode = Mode::Terminal;
++                self.replace_mode(Mode::Terminal);
+                 return MobileMouseResult::Action(MouseAction::FocusTab { tab_idx });
+             }
+             Some(crate::ui::MobileSwitcherTarget::Agent {
+@@ -1211,7 +1570,7 @@
+                 tab_idx: _,
+                 pane_id,
+             }) => {
+-                self.mode = Mode::Terminal;
++                self.replace_mode(Mode::Terminal);
+                 return MobileMouseResult::Action(MouseAction::FocusPane { ws_idx, pane_id });
+             }
+             Some(crate::ui::MobileSwitcherTarget::Menu(action_idx)) => {
+@@ -1256,11 +1615,49 @@
+             .unwrap_or(0);
+         let menu_w = (max_item_w + 4).max(14).min(screen.width.max(1));
+         let menu_h = (menu.items().len() as u16 + 2).min(screen.height.max(1));
++        let x = menu.x.min(screen.x + screen.width.saturating_sub(menu_w));
++        let y = menu.y.min(screen.y + screen.height.saturating_sub(menu_h));
++        Some(Rect::new(x, y, menu_w, menu_h))
++    }
++
++    pub(crate) fn profile_menu_rect(&self) -> Option<Rect> {
++        let menu = self.profile_menu.as_ref()?;
++        let screen = self.screen_rect();
++        let max_item_w = menu
++            .entries
++            .iter()
++            .map(|entry| entry.label.len() as u16 + 2)
++            .max()
++            .unwrap_or(0);
++        let menu_w = (max_item_w + 4).max(14).min(screen.width.max(1));
++        let menu_h = (menu.entries.len() as u16 + 2).min(screen.height.max(1));
+         let x = menu.x.min(screen.x + screen.width.saturating_sub(menu_w));
+         let y = menu.y.min(screen.y + screen.height.saturating_sub(menu_h));
+         Some(Rect::new(x, y, menu_w, menu_h))
+     }
+ 
++    fn profile_menu_item_at(&self, col: u16, row: u16) -> Option<usize> {
++        let menu_rect = self.profile_menu_rect()?;
++        let inner_x = menu_rect.x + 1;
++        let inner_y = menu_rect.y + 1;
++        let inner_w = menu_rect.width.saturating_sub(2);
++        let inner_h = menu_rect.height.saturating_sub(2);
++        let item_count = self
++            .profile_menu
++            .as_ref()
++            .map(|menu| menu.entries.len() as u16)
++            .unwrap_or(0);
++        if col >= inner_x
++            && col < inner_x + inner_w
++            && row >= inner_y
++            && row < inner_y + inner_h.min(item_count)
++        {
++            Some((row - inner_y) as usize)
++        } else {
++            None
++        }
++    }
++
+     pub(crate) fn confirm_close_rect(&self) -> Rect {
+         crate::ui::confirm_close_popup_rect(self.view.terminal_area).unwrap_or_default()
+     }
+@@ -1305,7 +1702,7 @@
+     fn mode_bar_covers_tab_row(&self, col: u16, row: u16) -> bool {
+         self.tab_bar_position == crate::config::TabBarPositionConfig::Bottom
+             && matches!(
+-                self.mode,
++                self.mode(),
+                 Mode::Navigate | Mode::Prefix | Mode::Copy | Mode::Resize
+             )
+             && self.on_tab_bar(col, row)
+@@ -1460,7 +1857,9 @@
+     }
+ 
+     fn chrome_press_pending(&self, source_id: crate::app::InputSourceId) -> bool {
+-        self.tab_presses.contains_key(&source_id) || self.workspace_presses.contains_key(&source_id)
++        self.tab_presses.contains_key(&source_id)
++            || self.workspace_presses.contains_key(&source_id)
++            || self.tree_space_presses.contains_key(&source_id)
+     }
+ 
+     fn chrome_drag_owned_by_other(&self, source_id: crate::app::InputSourceId) -> bool {
+@@ -1473,6 +1872,9 @@
+                 } | DragTarget::TabReorder {
+                     source_id: drag_source_id,
+                     ..
++                } | DragTarget::TreeSpaceReorder {
++                    source_id: drag_source_id,
++                    ..
+                 } if drag_source_id != source_id
+             )
+         })
+@@ -1482,16 +1884,17 @@
+         &mut self,
+         workspace_press: Option<WorkspacePressState>,
+         tab_press: Option<TabPressState>,
++        tree_press: Option<WorkspacePressState>,
+     ) -> Option<MouseAction> {
+-        if let Some(press) = workspace_press {
+-            self.mode = Mode::Terminal;
++        if let Some(press) = workspace_press.or(tree_press) {
++            self.replace_mode(Mode::Terminal);
+             return Some(MouseAction::FocusWorkspace {
+                 ws_idx: press.ws_idx,
+             });
+         }
+         if let Some(press) = tab_press {
+             if self.active == Some(press.ws_idx) {
+-                self.mode = Mode::Terminal;
++                self.replace_mode(Mode::Terminal);
+                 return Some(MouseAction::FocusTab {
+                     tab_idx: press.tab_idx,
+                 });
+@@ -1508,6 +1911,9 @@
+                     source_id: drag_source_id,
+                     ..
+                 } | DragTarget::TabReorder {
++                    source_id: drag_source_id,
++                    ..
++                } | DragTarget::TreeSpaceReorder {
+                     source_id: drag_source_id,
+                     ..
+                 } if drag_source_id == source_id
+@@ -1521,6 +1927,7 @@
+     fn clear_chrome_press(&mut self, source_id: crate::app::InputSourceId) {
+         self.tab_presses.remove(&source_id);
+         self.workspace_presses.remove(&source_id);
++        self.tree_space_presses.remove(&source_id);
+     }
+ 
+     fn mouse_pane_focus_action(&self, pane_id: crate::layout::PaneId) -> Option<MouseAction> {
+@@ -1645,7 +2052,7 @@
+             }
+         }
+ 
+-        if self.mode != Mode::Terminal
++        if self.mode() != Mode::Terminal
+             || in_sidebar
+             || !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Right))
+         {
+@@ -1775,7 +2182,7 @@
+     }
+ 
+     pub(super) fn forward_pane_mouse_button(
+-        &self,
++        &mut self,
+         terminal_runtimes: &TerminalRuntimeRegistry,
+         info: &PaneInfo,
+         mouse: MouseEvent,
+@@ -1796,12 +2203,89 @@
+         rt.scroll_reset();
+         if let Err(err) = rt.try_send_bytes(Bytes::from(bytes)) {
+             warn!(pane = info.id.raw(), err = %err, kind = ?mouse.kind, "failed to forward mouse button event");
++        }
++        match mouse.kind {
++            MouseEventKind::Down(MouseButton::Left) => {
++                self.begin_pane_app_drag_shadow(terminal_runtimes, info, mouse);
++            }
++            MouseEventKind::Drag(MouseButton::Left) => {
++                self.extend_pane_app_drag_shadow(terminal_runtimes, info, mouse);
++            }
++            MouseEventKind::Up(MouseButton::Left) => {
++                self.capture_pane_app_drag_shadow(terminal_runtimes, ws_idx, info);
++            }
++            _ => {}
+         }
+         true
++    }
++
++    /// Start tracking a shadow selection for a left-drag that is being forwarded
++    /// to a mouse-reporting pane app. Herdr clears its own visible selection for
++    /// these panes, so this is the only record of what the drag covered.
++    fn begin_pane_app_drag_shadow(
++        &mut self,
++        terminal_runtimes: &TerminalRuntimeRegistry,
++        info: &PaneInfo,
++        mouse: MouseEvent,
++    ) {
++        let metrics = self.pane_scroll_metrics(terminal_runtimes, info.id);
++        self.pane_app_drag_shadow = Some(crate::selection::Selection::anchor(
++            info.id,
++            mouse.row.saturating_sub(info.inner_rect.y),
++            mouse.column.saturating_sub(info.inner_rect.x),
++            metrics,
++        ));
++        // A double- or triple-click detected just before this press stashed the
++        // clicked word/line; install it as the capture instead of discarding it.
++        self.pane_app_drag_copy = self
++            .pane_app_pending_word_copy
++            .take()
++            .filter(|(pane_id, _)| *pane_id == info.id);
++    }
++
++    pub(super) fn extend_pane_app_drag_shadow(
++        &mut self,
++        terminal_runtimes: &TerminalRuntimeRegistry,
++        info: &PaneInfo,
++        mouse: MouseEvent,
++    ) {
++        if !self
++            .pane_app_drag_shadow
++            .as_ref()
++            .is_some_and(|selection| selection.pane_id == info.id)
++        {
++            return;
++        }
++        let metrics = self.pane_scroll_metrics(terminal_runtimes, info.id);
++        if let Some(selection) = self.pane_app_drag_shadow.as_mut() {
++            selection.drag(mouse.column, mouse.row, info.inner_rect, metrics);
++        }
+     }
+ 
++    /// Read the dragged text out of the grid at button release. Capturing here
++    /// rather than at copy time means the text stays correct no matter how much
++    /// the pane app redraws afterwards.
++    fn capture_pane_app_drag_shadow(
++        &mut self,
++        terminal_runtimes: &TerminalRuntimeRegistry,
++        ws_idx: usize,
++        info: &PaneInfo,
++    ) {
++        let Some(mut selection) = self.pane_app_drag_shadow.take() else {
++            return;
++        };
++        if selection.pane_id != info.id || !selection.finish() {
++            return;
++        }
++        self.pane_app_drag_copy = self
++            .runtime_for_pane_in_workspace(terminal_runtimes, ws_idx, info.id)
++            .and_then(|rt| rt.extract_selection(&selection))
++            .filter(|text| !text.is_empty())
++            .map(|text| (info.id, text));
++    }
++
+     pub(super) fn forward_pane_mouse_motion(
+-        &self,
++        &mut self,
+         terminal_runtimes: &TerminalRuntimeRegistry,
+         info: &PaneInfo,
+         mouse: MouseEvent,
+@@ -1822,6 +2306,7 @@
+         if let Err(err) = rt.try_send_bytes(Bytes::from(bytes)) {
+             warn!(pane = info.id.raw(), err = %err, kind = ?mouse.kind, "failed to forward mouse motion event");
+         }
++        self.extend_pane_app_drag_shadow(terminal_runtimes, info, mouse);
+         true
+     }
+ 
+@@ -2002,12 +2487,291 @@
+     use super::*;
+     use crate::app::input::modal::handle_context_menu_key;
+     use crate::{
+-        app::state::{ContextMenuKind, ContextMenuState, MenuListState, Mode, ViewLayout},
++        app::{
++            state::{ContextMenuKind, ContextMenuState, MenuListState, Mode, ViewLayout},
++            App,
++        },
+         detect::{Agent, AgentState},
+         workspace::Workspace,
+     };
++
++    fn app_with_bordered_panes() -> App {
++        let mut app = app_for_mouse_test();
++        let mut workspace = Workspace::test_new("test");
++        workspace.test_split(Direction::Horizontal);
++        app.state.workspaces = vec![workspace];
++        app.state.active = Some(0);
++        app.state.selected = 0;
++        app.state.pane_borders = true;
++        app.state.pane_outer_borders = true;
++        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 30));
++        app
++    }
++
++    #[test]
++    fn pane_motion_tracks_copy_control_hover_and_clears_outside_panes() {
++        let mut app = app_with_bordered_panes();
++        let info = app.state.view.pane_infos[0].clone();
++        let (x_start, _, y) = crate::ui::pane_copy_button_span(&info).unwrap();
++
++        app.state.handle_mouse(
++            &mut app.terminal_runtimes,
++            0,
++            mouse(MouseEventKind::Moved, info.inner_rect.x, info.inner_rect.y),
++        );
++        assert_eq!(app.state.pane_hover, Some((info.id, false)));
++
++        app.state.handle_mouse(
++            &mut app.terminal_runtimes,
++            0,
++            mouse(MouseEventKind::Moved, x_start, y),
++        );
++        assert_eq!(app.state.pane_hover, Some((info.id, true)));
++
++        app.state.handle_mouse(
++            &mut app.terminal_runtimes,
++            0,
++            mouse(MouseEventKind::Moved, 0, 0),
++        );
++        assert_eq!(app.state.pane_hover, None);
++    }
++
++    #[test]
++    fn pane_copy_control_click_copies_public_id_without_changing_focus() {
++        let mut app = app_with_bordered_panes();
++        let initial_focus = app.state.workspaces[0].focused_pane_id();
++        let other = app
++            .state
++            .view
++            .pane_infos
++            .iter()
++            .find(|info| Some(info.id) != initial_focus)
++            .cloned()
++            .unwrap();
++        let (x_start, x_end, y) = crate::ui::pane_copy_button_span(&other).unwrap();
++        let pane_number = app.state.workspaces[0]
++            .public_pane_number(other.id)
++            .unwrap();
++        let public_id =
++            crate::workspace::public_pane_id_for_number(&app.state.workspaces[0].id, pane_number);
++
++        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x_start, y));
++
++        assert_eq!(app.state.workspaces[0].focused_pane_id(), initial_focus);
++        assert!(app.state.drag.is_none());
++        assert!(matches!(
++            app.event_rx.try_recv(),
++            Ok(crate::events::AppEvent::ClipboardWrite { content, feedback })
++                if content == public_id.as_bytes()
++                    && feedback.as_deref() == Some(format!("copied {public_id}").as_str())
++        ));
++
++        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x_end, y));
++        assert!(app.event_rx.try_recv().is_err());
++    }
++
++    #[tokio::test]
++    async fn captured_copy_control_consumes_drag_and_up_then_allows_fresh_click() {
++        let mut app = app_with_bordered_panes();
++        let target = app.state.view.pane_infos[0].clone();
++        let (x_start, _, y) = crate::ui::pane_copy_button_span(&target).unwrap();
++        let (runtime, mut input_rx) =
++            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
++                target.inner_rect.width,
++                target.inner_rect.height,
++                0,
++                b"\x1b[?1002h\x1b[?1006h",
++                4,
++            );
++        app.state.insert_test_runtime(target.id, runtime);
++
++        app.handle_mouse_from_input_source(
++            41,
++            mouse(MouseEventKind::Down(MouseButton::Left), x_start, y),
++        );
++        app.handle_mouse_from_input_source(
++            41,
++            mouse(
++                MouseEventKind::Drag(MouseButton::Left),
++                target.inner_rect.x,
++                target.inner_rect.y,
++            ),
++        );
++        app.handle_mouse_from_input_source(
++            41,
++            mouse(
++                MouseEventKind::Up(MouseButton::Left),
++                target.inner_rect.x,
++                target.inner_rect.y,
++            ),
++        );
+ 
++        assert!(input_rx.try_recv().is_err());
++        assert!(!app.state.pane_copy_presses.contains(&41));
++
++        app.handle_mouse_from_input_source(
++            41,
++            mouse(
++                MouseEventKind::Down(MouseButton::Left),
++                target.inner_rect.x,
++                target.inner_rect.y,
++            ),
++        );
++        assert!(input_rx.try_recv().is_ok());
++    }
++
+     #[test]
++    fn usage_control_click_requests_overlay_toggle() {
++        let mut app = app_for_mouse_test();
++        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 30));
++        let (_, detail_area) =
++            crate::ui::ordered_sidebar_sections(&app.state, app.state.view.sidebar_rect);
++        let usage = crate::ui::agent_panel_usage_rect(detail_area, app.state.agent_panel_sort);
++        assert!(usage.width > 0);
++
++        let action = app.state.handle_mouse(
++            &mut app.terminal_runtimes,
++            0,
++            mouse(MouseEventKind::Down(MouseButton::Left), usage.x, usage.y),
++        );
++
++        assert!(matches!(action, Some(MouseAction::ToggleUsage)));
++    }
++
++    #[test]
++    fn agent_row_right_click_opens_agent_pane_menu() {
++        let mut app = app_for_mouse_test();
++        let workspace = Workspace::test_new("agent-space");
++        let pane_id = workspace.tabs[0].root_pane;
++        app.state.workspaces = vec![workspace];
++        app.state.ensure_test_terminals();
++        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
++            .attached_terminal_id
++            .clone();
++        app.state
++            .terminals
++            .get_mut(&terminal_id)
++            .unwrap()
++            .set_detected_state(Some(Agent::Pi), AgentState::Idle);
++        let entries = crate::ui::agent_panel_list_entries_from(&app.state, &app.terminal_runtimes);
++        let body = crate::ui::agent_panel_body_rect(app.state.agent_panel_rect(), false);
++        assert_eq!(
++            app.state.agent_detail_target_at(&entries, body.y),
++            Some((0, 0, pane_id))
++        );
++
++        app.handle_mouse(mouse(
++            MouseEventKind::Down(MouseButton::Right),
++            body.x,
++            body.y,
++        ));
++
++        assert!(matches!(
++            app.state.context_menu.as_ref().map(|menu| &menu.kind),
++            Some(ContextMenuKind::AgentPane {
++                ws_idx: 0,
++                pane_id: menu_pane_id,
++            }) if *menu_pane_id == pane_id
++        ));
++        assert_eq!(app.state.mode(), Mode::ContextMenu);
++    }
++
++    #[test]
++    fn agent_panel_scrollbar_right_click_does_not_open_agent_menu() {
++        let mut app = app_for_mouse_test();
++        let mut workspace = Workspace::test_new("agents");
++        for _ in 0..7 {
++            workspace.test_split(Direction::Horizontal);
++        }
++        app.state.workspaces = vec![workspace];
++        app.state.ensure_test_terminals();
++        for terminal in app.state.terminals.values_mut() {
++            terminal.set_detected_state(Some(Agent::Pi), AgentState::Idle);
++        }
++        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 20));
++        let entries = crate::ui::agent_panel_list_entries_from(&app.state, &app.terminal_runtimes);
++        let scrollbar = crate::ui::agent_panel_scrollbar_rect(
++            &app.state,
++            &entries,
++            app.state.agent_panel_rect(),
++        )
++        .expect("agent panel scrollbar");
++        assert!(app
++            .state
++            .agent_detail_target_at(&entries, scrollbar.y)
++            .is_some());
++        let initial_mode = app.state.mode();
++
++        app.handle_mouse(mouse(
++            MouseEventKind::Down(MouseButton::Right),
++            scrollbar.x,
++            scrollbar.y,
++        ));
++
++        assert!(app.state.context_menu.is_none());
++        assert_eq!(app.state.mode(), initial_mode);
++    }
++
++    #[test]
++    fn sidebar_section_divider_right_click_does_not_open_context_menu() {
++        let mut app = app_for_mouse_test();
++        let workspace = Workspace::test_new("agent-space");
++        let pane_id = workspace.tabs[0].root_pane;
++        app.state.workspaces = vec![workspace];
++        app.state.ensure_test_terminals();
++        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
++            .attached_terminal_id
++            .clone();
++        app.state
++            .terminals
++            .get_mut(&terminal_id)
++            .expect("agent terminal")
++            .set_detected_state(Some(Agent::Pi), AgentState::Idle);
++        app.state.sidebar_section_order = [
++            crate::config::SidebarSection::Agents,
++            crate::config::SidebarSection::Spaces,
++        ];
++        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 20));
++        let divider =
++            crate::ui::sidebar_section_divider_rect(&app.state, app.state.view.sidebar_rect);
++        assert!(app.state.on_sidebar_section_divider(divider.x, divider.y));
++        let initial_mode = app.state.mode();
++
++        app.handle_mouse(mouse(
++            MouseEventKind::Down(MouseButton::Right),
++            divider.x,
++            divider.y,
++        ));
++
++        assert!(app.state.context_menu.is_none());
++        assert_eq!(app.state.mode(), initial_mode);
++    }
++
++    #[test]
++    fn workspace_row_right_click_still_opens_workspace_menu() {
++        let mut app = app_for_mouse_test();
++        app.state.workspaces = vec![Workspace::test_new("space")];
++        app.state.active = Some(0);
++        app.state.selected = 0;
++        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 20));
++        let workspace = app.state.view.workspace_card_areas[0].rect;
++
++        app.handle_mouse(mouse(
++            MouseEventKind::Down(MouseButton::Right),
++            workspace.x,
++            workspace.y,
++        ));
++        assert!(matches!(
++            app.state.context_menu.as_ref().map(|menu| &menu.kind),
++            Some(ContextMenuKind::Workspace {
++                ws_idx: 0,
++                orchestrator_mode: false
++            })
++        ));
++        assert_eq!(app.state.mode(), Mode::ContextMenu);
++    }
++
++    #[test]
+     fn tab_click_survives_stray_drag_report_off_the_tab_bar() {
+         let mut app = app_for_mouse_test();
+         let mut ws = Workspace::test_new("test");
+@@ -2456,7 +3220,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.view.pane_infos = pane_infos;
+         app.state.mouse_scroll_lines = 7;
+ 
+@@ -2494,7 +3258,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.view.pane_infos = pane_infos;
+         assert!(
+             app.state.mouse_capture,
+@@ -2554,7 +3318,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.view.pane_infos = pane_infos;
+ 
+         let input = format!(
+@@ -2583,7 +3347,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+ 
+         let passthrough_info = app.state.pane_info_by_id(passthrough_pane).unwrap().clone();
+@@ -2612,7 +3376,7 @@
+         let row = passthrough_info.inner_rect.y + 3;
+         app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), col, row));
+ 
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         assert!(app.state.context_menu.is_none());
+         assert_eq!(
+             passthrough_input.try_recv().unwrap(),
+@@ -2641,7 +3405,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+         let info = app.state.pane_info_by_id(pane_id).unwrap().clone();
+         app.state.insert_test_runtime(
+@@ -2659,7 +3423,7 @@
+             info.inner_rect.y + 3,
+         ));
+ 
+-        assert_eq!(app.state.mode, Mode::ContextMenu);
++        assert_eq!(app.state.mode(), Mode::ContextMenu);
+         assert!(app.state.context_menu.is_some());
+     }
+ 
+@@ -2683,7 +3447,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.view.pane_infos = pane_infos;
+         app.state.right_click_passthrough_modifiers = Some(KeyModifiers::CONTROL);
+ 
+@@ -2702,7 +3466,7 @@
+             ..mouse(MouseEventKind::Up(MouseButton::Right), 0, 0)
+         });
+ 
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         assert!(app.state.context_menu.is_none());
+         assert!(app.state.right_click_passthrough.is_none());
+         assert_eq!(
+@@ -2779,11 +3543,12 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.view.pane_infos = pane_infos;
+ 
+         app.state.handle_pane_mouse_only(
+             &app.terminal_runtimes,
++            0,
+             mouse(
+                 MouseEventKind::Moved,
+                 info.inner_rect.x + 2,
+@@ -2798,7 +3563,109 @@
+         assert!(input_rx.try_recv().is_err());
+     }
+ 
++    #[test]
++    fn pane_mouse_only_tracks_hover_and_consumes_copy_control_click() {
++        let mut app = app_with_bordered_panes();
++        let initial_focus = app.state.workspaces[0].focused_pane_id();
++        let target = app
++            .state
++            .view
++            .pane_infos
++            .iter()
++            .find(|info| Some(info.id) != initial_focus)
++            .cloned()
++            .unwrap();
++        let (x_start, _, y) = crate::ui::pane_copy_button_span(&target).unwrap();
++        let pane_number = app.state.workspaces[0]
++            .public_pane_number(target.id)
++            .unwrap();
++        let public_id =
++            crate::workspace::public_pane_id_for_number(&app.state.workspaces[0].id, pane_number);
++
++        app.state.handle_pane_mouse_only(
++            &app.terminal_runtimes,
++            0,
++            mouse(MouseEventKind::Moved, x_start, y),
++        );
++        assert_eq!(app.state.pane_hover, Some((target.id, true)));
++
++        app.state.handle_pane_mouse_only(
++            &app.terminal_runtimes,
++            0,
++            mouse(MouseEventKind::Down(MouseButton::Left), x_start, y),
++        );
++
++        assert_eq!(app.state.workspaces[0].focused_pane_id(), initial_focus);
++        let (content, feedback) = app
++            .state
++            .request_clipboard_write
++            .as_ref()
++            .expect("pending clipboard write");
++        assert_eq!(content, public_id.as_bytes());
++        assert_eq!(
++            feedback.as_deref(),
++            Some(format!("copied {public_id}").as_str())
++        );
++        assert!(app.state.drag.is_none());
++    }
++
+     #[tokio::test]
++    async fn pane_mouse_only_copy_control_consumes_drag_and_up_then_allows_fresh_click() {
++        let mut app = app_with_bordered_panes();
++        let target = app.state.view.pane_infos[0].clone();
++        let (x_start, _, y) = crate::ui::pane_copy_button_span(&target).unwrap();
++        let (runtime, mut input_rx) =
++            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
++                target.inner_rect.width,
++                target.inner_rect.height,
++                0,
++                b"\x1b[?1002h\x1b[?1006h",
++                4,
++            );
++        app.state.insert_test_runtime(target.id, runtime);
++        app.state.pane_hover = Some((target.id, true));
++
++        app.state.handle_pane_mouse_only(
++            &app.terminal_runtimes,
++            41,
++            mouse(MouseEventKind::Down(MouseButton::Left), x_start, y),
++        );
++        app.state.handle_pane_mouse_only(
++            &app.terminal_runtimes,
++            41,
++            mouse(
++                MouseEventKind::Drag(MouseButton::Left),
++                target.inner_rect.x,
++                target.inner_rect.y,
++            ),
++        );
++        assert_eq!(app.state.pane_hover, Some((target.id, true)));
++        app.state.handle_pane_mouse_only(
++            &app.terminal_runtimes,
++            41,
++            mouse(
++                MouseEventKind::Up(MouseButton::Left),
++                target.inner_rect.x,
++                target.inner_rect.y,
++            ),
++        );
++
++        assert!(input_rx.try_recv().is_err());
++        assert!(!app.state.pane_copy_presses.contains(&41));
++
++        app.state.handle_pane_mouse_only(
++            &app.terminal_runtimes,
++            41,
++            mouse(
++                MouseEventKind::Down(MouseButton::Left),
++                target.inner_rect.x,
++                target.inner_rect.y,
++            ),
++        );
++        assert!(input_rx.try_recv().is_ok());
++    }
++
++    #[tokio::test]
+     async fn pane_mouse_motion_uses_computed_inner_rect_offsets() {
+         let mut app = app_for_mouse_test();
+         let mut ws = Workspace::test_new("test");
+@@ -2816,7 +3683,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+         let info = app.state.view.pane_infos[0].clone();
+         assert!(info.inner_rect.x > 0, "sidebar offset should be present");
+@@ -2824,6 +3691,7 @@
+ 
+         app.state.handle_pane_mouse_only(
+             &app.terminal_runtimes,
++            0,
+             mouse(
+                 MouseEventKind::Moved,
+                 info.inner_rect.x + 2,
+@@ -2856,7 +3724,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.host_cell_size = crate::kitty_graphics::HostCellSize {
+             width_px: 10,
+             height_px: 20,
+@@ -2900,7 +3768,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.mouse_capture = false;
+         app.state.host_cell_size = crate::kitty_graphics::HostCellSize {
+             width_px: 10,
+@@ -2972,7 +3840,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Navigate;
++        app.state.replace_mode(Mode::Navigate);
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+         let info = app.state.view.pane_infos[0].clone();
+ 
+@@ -3005,7 +3873,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.view.pane_infos = pane_infos;
+         app.state.right_click_passthrough_modifiers = None;
+ 
+@@ -3018,7 +3886,7 @@
+             )
+         });
+ 
+-        assert_eq!(app.state.mode, Mode::ContextMenu);
++        assert_eq!(app.state.mode(), Mode::ContextMenu);
+         assert!(app.state.context_menu.is_some());
+         assert!(app.state.right_click_passthrough.is_none());
+         assert!(input_rx.try_recv().is_err());
+@@ -3034,7 +3902,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 100, 20));
+         let target_info = app
+             .state
+@@ -3084,7 +3952,7 @@
+         );
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 100, 20));
+ 
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(source));
+         assert_eq!(
+             app.state
+@@ -3174,7 +4042,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.view.pane_infos = pane_infos;
+ 
+         app.state.right_click_passthrough_modifiers = Some(KeyModifiers::CONTROL);
+@@ -3186,7 +4054,7 @@
+             ..mouse(MouseEventKind::Down(MouseButton::Right), col, row)
+         });
+ 
+-        assert_eq!(app.state.mode, Mode::ContextMenu);
++        assert_eq!(app.state.mode(), Mode::ContextMenu);
+         assert!(app.state.context_menu.is_some());
+         assert!(app.state.right_click_passthrough.is_none());
+         assert!(input_rx.try_recv().is_err());
+@@ -3201,7 +4069,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.right_click_passthrough_modifiers = Some(KeyModifiers::CONTROL);
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+ 
+@@ -3241,7 +4109,7 @@
+             )
+         });
+ 
+-        assert_eq!(app.state.mode, Mode::ContextMenu);
++        assert_eq!(app.state.mode(), Mode::ContextMenu);
+         assert!(app.state.context_menu.is_some());
+         assert!(app.state.right_click_passthrough.is_none());
+         assert!(input_rx.try_recv().is_err());
+@@ -3280,12 +4148,15 @@
+     fn hovering_context_menu_updates_highlight() {
+         let mut app = app_for_mouse_test();
+         app.state.context_menu = Some(ContextMenuState {
+-            kind: ContextMenuKind::Workspace { ws_idx: 0 },
++            kind: ContextMenuKind::Workspace {
++                ws_idx: 0,
++                orchestrator_mode: false,
++            },
+             x: 2,
+             y: 2,
+             list: MenuListState::new(0),
+         });
+-        app.state.mode = Mode::ContextMenu;
++        app.state.replace_mode(Mode::ContextMenu);
+ 
+         let menu = app.state.context_menu_rect().unwrap();
+         app.handle_mouse(mouse(MouseEventKind::Moved, menu.x + 2, menu.y + 2));
+@@ -3342,7 +4213,7 @@
+         assert_eq!(app.state.active, Some(1));
+         assert_eq!(app.state.workspaces[1].focused_pane_id(), Some(target_pane));
+         assert!(app.state.toast.is_none());
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+ 
+         app.state.last_pane();
+ 
+@@ -3374,7 +4245,7 @@
+                 pane_id: target_pane,
+             }),
+         });
+-        app.state.mode = Mode::Settings;
++        app.state.replace_mode(Mode::Settings);
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+ 
+         let hit = app.state.view.toast_hit_area;
+@@ -3412,7 +4283,7 @@
+         ));
+ 
+         assert_eq!(app.state.workspaces.len(), 1);
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+     }
+ 
+     #[test]
+@@ -3421,7 +4292,7 @@
+         app.state.workspaces = vec![Workspace::test_new("old")];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::RenameWorkspace;
++        app.state.replace_mode(Mode::RenameWorkspace);
+         app.state.name_input = "new".into();
+ 
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 24));
+@@ -3443,7 +4314,7 @@
+     #[test]
+     fn clicking_open_worktree_row_selects_and_requests_open() {
+         let mut app = app_for_mouse_test();
+-        app.state.mode = Mode::OpenExistingWorktree;
++        app.state.replace_mode(Mode::OpenExistingWorktree);
+         app.state.worktree_open = Some(sample_worktree_open_state());
+         let inner =
+             crate::ui::open_existing_worktree_inner_rect(app.state.screen_rect(), 2).unwrap();
+@@ -3461,7 +4332,7 @@
+     #[test]
+     fn clicking_open_worktree_buttons_requests_open_or_cancels() {
+         let mut app = app_for_mouse_test();
+-        app.state.mode = Mode::OpenExistingWorktree;
++        app.state.replace_mode(Mode::OpenExistingWorktree);
+         app.state.worktree_open = Some(sample_worktree_open_state());
+         let inner =
+             crate::ui::open_existing_worktree_inner_rect(app.state.screen_rect(), 2).unwrap();
+@@ -3477,7 +4348,7 @@
+         assert!(app.state.request_submit_worktree_open);
+ 
+         let mut app = app_for_mouse_test();
+-        app.state.mode = Mode::OpenExistingWorktree;
++        app.state.replace_mode(Mode::OpenExistingWorktree);
+         app.state.worktree_open = Some(sample_worktree_open_state());
+         let inner =
+             crate::ui::open_existing_worktree_inner_rect(app.state.screen_rect(), 2).unwrap();
+@@ -3490,13 +4361,13 @@
+         ));
+ 
+         assert!(app.state.worktree_open.is_none());
+-        assert_eq!(app.state.mode, Mode::Navigate);
++        assert_eq!(app.state.mode(), Mode::Navigate);
+     }
+ 
+     #[test]
+     fn scrolling_open_worktree_picker_moves_selection() {
+         let mut app = app_for_mouse_test();
+-        app.state.mode = Mode::OpenExistingWorktree;
++        app.state.replace_mode(Mode::OpenExistingWorktree);
+         app.state.worktree_open = Some(sample_worktree_open_state());
+ 
+         app.handle_mouse(mouse(MouseEventKind::ScrollDown, 1, 1));
+@@ -3509,7 +4380,7 @@
+     #[test]
+     fn clicking_remove_worktree_buttons_requests_remove_or_cancels() {
+         let mut app = app_for_mouse_test();
+-        app.state.mode = Mode::ConfirmRemoveWorktree;
++        app.state.replace_mode(Mode::ConfirmRemoveWorktree);
+         app.state.worktree_remove = Some(crate::app::state::WorktreeRemoveState {
+             workspace_id: "issue".into(),
+             repo_root: "/repo/herdr".into(),
+@@ -3537,7 +4408,7 @@
+         assert!(app.state.request_submit_worktree_remove);
+ 
+         let mut app = app_for_mouse_test();
+-        app.state.mode = Mode::ConfirmRemoveWorktree;
++        app.state.replace_mode(Mode::ConfirmRemoveWorktree);
+         app.state.worktree_remove = Some(crate::app::state::WorktreeRemoveState {
+             workspace_id: "issue".into(),
+             repo_root: "/repo/herdr".into(),
+@@ -3562,7 +4433,7 @@
+         ));
+ 
+         assert!(app.state.worktree_remove.is_none());
+-        assert_eq!(app.state.mode, Mode::Navigate);
++        assert_eq!(app.state.mode(), Mode::Navigate);
+     }
+ 
+     #[test]
+@@ -3571,21 +4442,30 @@
+         app.state.workspaces = vec![Workspace::test_new("a"), Workspace::test_new("b")];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+-        app.state.context_menu = Some(ContextMenuState {
+-            kind: ContextMenuKind::Workspace { ws_idx: 1 },
++        let mut menu = ContextMenuState {
++            kind: ContextMenuKind::Workspace {
++                ws_idx: 1,
++                orchestrator_mode: false,
++            },
+             x: 2,
+             y: 2,
+-            list: MenuListState::new(1),
+-        });
+-        app.state.mode = Mode::ContextMenu;
++            list: MenuListState::new(0),
++        };
++        menu.list.highlighted = menu
++            .items()
++            .iter()
++            .position(|item| *item == "Close")
++            .expect("close item");
++        app.state.context_menu = Some(menu);
++        app.state.replace_mode(Mode::ContextMenu);
+         handle_context_menu_key(
+             &mut app.state,
+             &mut app.terminal_runtimes,
+             KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+         );
+-        assert_eq!(app.state.mode, Mode::ConfirmClose);
++        assert_eq!(app.state.mode(), Mode::ConfirmClose);
+         assert_eq!(app.state.selected, 1);
+ 
+         let popup = app.state.confirm_close_rect();
+@@ -3613,19 +4493,28 @@
+         app.state.active = Some(0);
+         app.state.selected = 0;
+         app.state.confirm_close = false;
+-        app.state.context_menu = Some(ContextMenuState {
+-            kind: ContextMenuKind::Workspace { ws_idx: 1 },
++        let menu = ContextMenuState {
++            kind: ContextMenuKind::Workspace {
++                ws_idx: 1,
++                orchestrator_mode: false,
++            },
+             x: 2,
+             y: 2,
+-            list: MenuListState::new(1),
+-        });
+-        app.state.mode = Mode::ContextMenu;
++            list: MenuListState::new(0),
++        };
++        let close_idx = menu
++            .items()
++            .iter()
++            .position(|item| *item == "Close")
++            .expect("close item");
++        app.state.context_menu = Some(menu);
++        app.state.replace_mode(Mode::ContextMenu);
+ 
+         let menu = app.state.context_menu_rect().unwrap();
+         app.handle_mouse(mouse(
+             MouseEventKind::Down(MouseButton::Left),
+             menu.x + 2,
+-            menu.y + 2,
++            menu.y + 1 + close_idx as u16,
+         ));
+ 
+         assert_eq!(app.state.workspaces.len(), 1);
+@@ -3673,7 +4562,7 @@
+             y: 2,
+             list: MenuListState::new(1),
+         });
+-        app.state.mode = Mode::ContextMenu;
++        app.state.replace_mode(Mode::ContextMenu);
+ 
+         handle_context_menu_key(
+             &mut app.state,
+@@ -3681,7 +4570,7 @@
+             KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+         );
+ 
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         assert_eq!(app.state.workspaces[0].tabs[0].layout.pane_count(), 2);
+         assert_eq!(app.terminal_runtimes.len(), runtime_count + 1);
+ 
+@@ -4091,7 +4980,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+         let tab_bar = app.state.view.tab_bar_rect;
+@@ -4121,7 +5010,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Prefix;
++        app.state.replace_mode(Mode::Prefix);
+         app.state.tab_bar_position = crate::config::TabBarPositionConfig::Bottom;
+ 
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+@@ -4178,7 +5067,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+         let second_tab = app.state.view.tab_hit_areas[1];
+@@ -4198,7 +5087,7 @@
+                 tab_idx: 1
+             }
+         );
+-        assert_eq!(app.state.mode, Mode::ContextMenu);
++        assert_eq!(app.state.mode(), Mode::ContextMenu);
+     }
+ 
+     #[test]
+@@ -4209,7 +5098,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+         let second_tab = app.state.view.tab_hit_areas[1];
+@@ -4233,7 +5122,7 @@
+         assert_eq!(app.state.workspaces[0].tabs.len(), 1);
+         assert_eq!(app.state.workspaces[0].display_name(), "one");
+         assert!(app.state.context_menu.is_none());
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         assert!(app
+             .event_hub
+             .events_after(0)
+@@ -4251,7 +5140,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+         let first_info = app
+@@ -4287,7 +5176,7 @@
+ 
+         assert_eq!(app.state.workspaces[0].tabs[0].layout.pane_count(), 1);
+         assert!(app.state.context_menu.is_none());
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         assert!(app.event_hub.events_after(0).iter().any(|(_, event)| {
+             matches!(event.event, crate::api::schema::EventKind::PaneClosed)
+         }));
+@@ -4304,7 +5193,7 @@
+         app.state.workspaces = vec![parent, child];
+         app.state.active = Some(0);
+         app.state.selected = 1;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+         let pane_info = app
+@@ -4339,7 +5228,7 @@
+         ));
+ 
+         assert_eq!(app.state.selected, 0);
+-        assert_eq!(app.state.mode, Mode::ConfirmClose);
++        assert_eq!(app.state.mode(), Mode::ConfirmClose);
+         assert_eq!(app.state.workspaces.len(), 2);
+         assert!(app.state.context_menu.is_none());
+     }
+@@ -4354,7 +5243,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 65, 20));
+         assert!(app.state.view.tab_scroll_right_hit_area.width > 0);
+@@ -4371,8 +5260,44 @@
+             MouseEventKind::ScrollDown,
+             tab_bar.x + tab_bar.width.saturating_sub(2),
+             tab_bar.y,
++        ));
++        assert_eq!(app.state.workspaces[0].active_tab, 2);
++    }
++
++    #[test]
++    fn mobile_header_tabs_handle_taps_and_both_wheel_axes() {
++        let mut app = app_for_mouse_test();
++        let mut ws = Workspace::test_new("one");
++        ws.test_add_tab(Some("two"));
++        ws.test_add_tab(Some("three"));
++        app.state.workspaces = vec![ws];
++        app.state.active = Some(0);
++        app.state.selected = 0;
++        app.state.replace_mode(Mode::Terminal);
++
++        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 44, 20));
++        let second_tab = app.state.view.tab_hit_areas[1];
++        app.handle_mouse(mouse(
++            MouseEventKind::Down(MouseButton::Left),
++            second_tab.x + 1,
++            second_tab.y,
+         ));
++        app.handle_mouse(mouse(
++            MouseEventKind::Up(MouseButton::Left),
++            second_tab.x + 1,
++            second_tab.y,
++        ));
++        assert_eq!(app.state.workspaces[0].active_tab, 1);
++
++        let tab_bar = app.state.view.tab_bar_rect;
++        app.handle_mouse(mouse(MouseEventKind::ScrollRight, tab_bar.x + 1, tab_bar.y));
+         assert_eq!(app.state.workspaces[0].active_tab, 2);
++        app.handle_mouse(mouse(MouseEventKind::ScrollLeft, tab_bar.x + 1, tab_bar.y));
++        assert_eq!(app.state.workspaces[0].active_tab, 1);
++        app.handle_mouse(mouse(MouseEventKind::ScrollDown, tab_bar.x + 1, tab_bar.y));
++        assert_eq!(app.state.workspaces[0].active_tab, 2);
++        app.handle_mouse(mouse(MouseEventKind::ScrollUp, tab_bar.x + 1, tab_bar.y));
++        assert_eq!(app.state.workspaces[0].active_tab, 1);
+     }
+ 
+     #[test]
+@@ -4383,7 +5308,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+         let terminal = app.state.view.terminal_area;
+@@ -4403,7 +5328,7 @@
+         app.state.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 44, 20));
+         assert_eq!(app.state.view.layout, ViewLayout::Mobile);
+@@ -4415,20 +5340,68 @@
+             switch.y + 1,
+         ));
+ 
+-        assert_eq!(app.state.mode, Mode::Navigate);
++        assert_eq!(app.state.mode(), Mode::Navigate);
+ 
+         let viewport = crate::ui::mobile_switcher_areas(&app.state).viewport;
+         app.handle_mouse(mouse(
+             MouseEventKind::Down(MouseButton::Left),
+             viewport.x + 2,
+-            viewport.y + 4,
++            viewport.y + 6,
+         ));
+ 
+         assert_eq!(app.state.active, Some(1));
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
++    }
++
++    #[test]
++    fn mobile_profile_row_switches_profile_and_visible_workspace() {
++        let mut app = app_for_mouse_test();
++        let default_workspace = Workspace::test_new("default");
++        let mut work_workspace = Workspace::test_new("work");
++        work_workspace.profiles = vec!["work".to_string()];
++        app.state.workspaces = vec![default_workspace, work_workspace];
++        app.state.active = Some(0);
++        app.state.selected = 0;
++        app.state.replace_mode(Mode::Navigate);
++
++        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 44, 20));
++        let viewport = crate::ui::mobile_switcher_areas(&app.state).viewport;
++        app.handle_mouse(mouse(
++            MouseEventKind::Down(MouseButton::Left),
++            viewport.x + 2,
++            viewport.y + 2,
++        ));
++
++        assert_eq!(app.state.active_profile, "work");
++        assert_eq!(app.state.active, Some(1));
++        assert_eq!(app.state.selected, 1);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+     }
+ 
+     #[test]
++    fn mobile_active_profile_row_only_closes_switcher() {
++        let mut app = app_for_mouse_test();
++        app.state.workspaces = vec![Workspace::test_new("default")];
++        app.state.active = Some(0);
++        app.state.selected = 0;
++        app.state.replace_mode(Mode::Navigate);
++        app.state.session_dirty = false;
++
++        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 44, 20));
++        let viewport = crate::ui::mobile_switcher_areas(&app.state).viewport;
++        app.handle_mouse(mouse(
++            MouseEventKind::Down(MouseButton::Left),
++            viewport.x + 2,
++            viewport.y + 1,
++        ));
++
++        assert_eq!(app.state.active_profile, crate::workspace::DEFAULT_PROFILE);
++        assert_eq!(app.state.active, Some(0));
++        assert!(!app.state.session_dirty);
++        assert_eq!(app.state.mode(), Mode::Terminal);
++    }
++
++    #[test]
+     fn mobile_workspace_panel_scroll_reaches_extra_workspaces() {
+         let mut app = app_for_mouse_test();
+         app.state.workspaces = (0..12)
+@@ -4436,7 +5409,7 @@
+             .collect();
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 44, 20));
+         let switch = app.state.view.mobile_menu_hit_area;
+@@ -4445,7 +5418,7 @@
+             switch.x + 1,
+             switch.y + 1,
+         ));
+-        assert_eq!(app.state.mode, Mode::Navigate);
++        assert_eq!(app.state.mode(), Mode::Navigate);
+ 
+         let viewport = crate::ui::mobile_switcher_areas(&app.state).viewport;
+         app.handle_mouse(mouse(
+@@ -4459,11 +5432,11 @@
+         app.handle_mouse(mouse(
+             MouseEventKind::Down(MouseButton::Left),
+             viewport.x + 2,
+-            viewport.y + 2,
++            viewport.y + 4,
+         ));
+ 
+         assert_eq!(app.state.active, Some(1));
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+     }
+ 
+     #[test]
+@@ -4476,7 +5449,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 44, 12));
+         let switch = app.state.view.mobile_menu_hit_area;
+@@ -4502,7 +5475,7 @@
+         app.handle_mouse(mouse(
+             MouseEventKind::Down(MouseButton::Left),
+             viewport.x + 2,
+-            viewport.y + 4,
++            viewport.y + 6,
+         ));
+         assert_eq!(app.state.workspaces[0].active_tab, 2);
+     }
+@@ -4513,7 +5486,7 @@
+         app.state.workspaces = vec![Workspace::test_new("one")];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.prompt_new_workspace_name = true;
+ 
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 44, 20));
+@@ -4527,22 +5500,119 @@
+         app.handle_mouse(mouse(
+             MouseEventKind::Down(MouseButton::Left),
+             viewport.x + 2,
+-            viewport.y + 1,
++            viewport.y + 3,
+         ));
+ 
+-        assert_eq!(app.state.mode, Mode::RenameWorkspace);
++        assert_eq!(app.state.mode(), Mode::RenameWorkspace);
+         assert!(app.state.pending_workspace_create_cwd.is_some());
+         assert!(app.state.name_input_replace_on_type);
+         assert_eq!(app.state.workspaces.len(), 1);
++    }
++
++    #[test]
++    fn agents_first_header_new_workspace_button_emits_action() {
++        let mut app = app_for_mouse_test();
++        app.state.workspaces = vec![Workspace::test_new("one")];
++        app.state.sidebar_new_button = crate::config::SidebarNewButtonConfig::Header;
++        app.state.sidebar_section_order = [
++            crate::config::SidebarSection::Agents,
++            crate::config::SidebarSection::Spaces,
++        ];
++        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 40));
++        let new_workspace = app.state.sidebar_new_button_rect();
++
++        let action = app.state.handle_mouse(
++            &mut app.terminal_runtimes,
++            0,
++            mouse(
++                MouseEventKind::Down(MouseButton::Left),
++                new_workspace.x + 1,
++                new_workspace.y,
++            ),
++        );
++
++        assert!(matches!(action, Some(MouseAction::NewWorkspace)));
++        assert!(app.state.drag.is_none());
++    }
++
++    #[test]
++    fn content_fit_agents_first_header_new_workspace_button_wins_over_divider() {
++        let mut app = app_for_mouse_test();
++        app.state.workspaces = vec![Workspace::test_new("one")];
++        app.state.sidebar_new_button = crate::config::SidebarNewButtonConfig::Header;
++        app.state.sidebar_spaces.max_visible = 8;
++        app.state.sidebar_section_order = [
++            crate::config::SidebarSection::Agents,
++            crate::config::SidebarSection::Spaces,
++        ];
++        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 40));
++        let new_workspace = app.state.sidebar_new_button_rect();
++
++        let action = app.state.handle_mouse(
++            &mut app.terminal_runtimes,
++            0,
++            mouse(
++                MouseEventKind::Down(MouseButton::Left),
++                new_workspace.x + 1,
++                new_workspace.y,
++            ),
++        );
++
++        assert!(matches!(action, Some(MouseAction::NewWorkspace)));
++        assert!(app.state.drag.is_none());
+     }
+ 
+     #[test]
++    fn content_fit_config_keeps_collapsed_clicks_aligned_with_rendered_sections() {
++        let mut app = app_for_mouse_test();
++        let first = Workspace::test_new("first");
++        let second = Workspace::test_new("second");
++        let agent_pane = second.tabs[0].root_pane;
++        app.state.workspaces = vec![first, second];
++        app.state.ensure_test_terminals();
++        let terminal_id = app.state.workspaces[1].tabs[0].panes[&agent_pane]
++            .attached_terminal_id
++            .clone();
++        app.state
++            .terminals
++            .get_mut(&terminal_id)
++            .expect("agent terminal")
++            .detected_agent = Some(Agent::Claude);
++        app.state.active = Some(0);
++        app.state.selected = 0;
++        app.state.sidebar_collapsed = true;
++        app.state.sidebar_spaces.max_visible = 8;
++        app.state.sidebar_section_order = [
++            crate::config::SidebarSection::Agents,
++            crate::config::SidebarSection::Spaces,
++        ];
++        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 40));
++        let (spaces, _, agents) =
++            crate::ui::ordered_collapsed_sidebar_sections(&app.state, app.state.view.sidebar_rect);
++
++        app.handle_mouse(mouse(
++            MouseEventKind::Down(MouseButton::Left),
++            agents.x,
++            agents.y,
++        ));
++        assert_eq!(app.state.active, Some(1));
++        assert_eq!(app.state.workspaces[1].focused_pane_id(), Some(agent_pane));
++
++        app.handle_mouse(mouse(
++            MouseEventKind::Down(MouseButton::Left),
++            spaces.x,
++            spaces.y,
++        ));
++        assert_eq!(app.state.active, Some(0));
++    }
++
++    #[test]
+     fn desktop_new_workspace_opens_prompt_when_enabled() {
+         let mut app = app_for_mouse_test();
+         app.state.workspaces = vec![Workspace::test_new("one")];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.prompt_new_workspace_name = true;
+ 
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 40));
+@@ -4553,7 +5623,7 @@
+             new_workspace.y,
+         ));
+ 
+-        assert_eq!(app.state.mode, Mode::RenameWorkspace);
++        assert_eq!(app.state.mode(), Mode::RenameWorkspace);
+         assert!(app.state.pending_workspace_create_cwd.is_some());
+         assert!(app.state.name_input_replace_on_type);
+         assert_eq!(app.state.workspaces.len(), 1);
+@@ -4566,7 +5636,7 @@
+         app.state.ensure_test_terminals();
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 40));
+         let new_workspace = app.state.sidebar_new_button_rect();
+@@ -4577,7 +5647,7 @@
+         ));
+ 
+         assert_eq!(app.state.workspaces.len(), 2);
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         assert!(app.state.pending_workspace_create_cwd.is_none());
+         crate::app::api::test_support::shutdown_test_runtimes(&mut app);
+     }
+@@ -4590,7 +5660,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 44, 20));
+         let switch = app.state.view.mobile_menu_hit_area;
+@@ -4603,10 +5673,10 @@
+         app.handle_mouse(mouse(
+             MouseEventKind::Down(MouseButton::Left),
+             viewport.x + 2,
+-            viewport.y + 5,
++            viewport.y + 7,
+         ));
+ 
+-        assert_eq!(app.state.mode, Mode::RenameTab);
++        assert_eq!(app.state.mode(), Mode::RenameTab);
+         assert!(app.state.creating_new_tab);
+     }
+ 
+@@ -4618,7 +5688,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.prompt_new_tab_name = false;
+ 
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 44, 20));
+@@ -4633,9 +5703,9 @@
+         app.handle_mouse(mouse(
+             MouseEventKind::Down(MouseButton::Left),
+             viewport.x + 2,
+-            viewport.y + 5,
++            viewport.y + 7,
+         ));
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         assert!(!app.state.creating_new_tab);
+         assert!(app.state.request_new_tab);
+         assert!(app.state.requested_new_tab_name.is_none());
+@@ -4647,7 +5717,7 @@
+         app.state.workspaces = vec![Workspace::test_new("one")];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.prompt_new_tab_name = false;
+ 
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 40));
+@@ -4658,19 +5728,121 @@
+             new_tab_area.y,
+         ));
+ 
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         assert!(!app.state.creating_new_tab);
+         assert!(app.state.request_new_tab);
+         assert!(app.state.requested_new_tab_name.is_none());
+     }
+ 
++    /// Two spaces with one detected agent each, tree view on, and the plus
++    /// hit location on the second space's header row.
++    fn tree_app_with_plus_on_second_space() -> (App, u16, u16) {
++        let mut app = app_for_mouse_test();
++        app.state.workspaces = vec![Workspace::test_new("alpha"), Workspace::test_new("beta")];
++        app.state.ensure_test_terminals();
++        app.state.active = Some(0);
++        app.state.selected = 0;
++        app.state.agent_panel_sort = crate::app::state::AgentPanelSort::Tree;
++        for ws_idx in 0..2 {
++            let pane_id = app.state.workspaces[ws_idx].tabs[0].root_pane;
++            let terminal_id = app.state.workspaces[ws_idx].tabs[0].panes[&pane_id]
++                .attached_terminal_id
++                .clone();
++            app.state
++                .terminals
++                .get_mut(&terminal_id)
++                .expect("agent terminal")
++                .set_detected_state(Some(Agent::Pi), AgentState::Idle);
++        }
++        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 40));
++
++        let entries = crate::ui::agent_panel_list_entries_from(&app.state, &app.terminal_runtimes);
++        let panel = app.state.agent_panel_rect();
++        let mut plus_at = None;
++        for row in panel.y..panel.y + panel.height {
++            for col in panel.x..panel.x + panel.width {
++                if let Some(super::super::sidebar::TreeHeaderHit::NewTab { ws_idx }) =
++                    app.state.tree_header_at(&entries, col, row)
++                {
++                    if ws_idx == 1 {
++                        plus_at = Some((col, row));
++                    }
++                }
++            }
++        }
++        let (col, row) = plus_at.expect("second space header exposes a plus hit");
++        (app, col, row)
++    }
++
+     #[test]
++    fn tree_space_header_plus_requests_new_tab_in_that_space() {
++        let (mut app, col, row) = tree_app_with_plus_on_second_space();
++        app.state.prompt_new_tab_name = false;
++        let beta_id = app.state.workspaces[1].id.clone();
++
++        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
++
++        assert_eq!(app.state.mode(), Mode::Terminal);
++        assert!(app.state.request_new_tab);
++        assert_eq!(
++            app.state.requested_new_tab_workspace_id.as_deref(),
++            Some(beta_id.as_str())
++        );
++    }
++
++    #[test]
++    fn tree_space_header_pin_click_toggles_pinned_space() {
++        let (mut app, _, _) = tree_app_with_plus_on_second_space();
++        let entries = crate::ui::agent_panel_list_entries_from(&app.state, &app.terminal_runtimes);
++        let panel = app.state.agent_panel_rect();
++        let beta_id = app.state.workspaces[1].id.clone();
++        let mut pin_at = None;
++        for row in panel.y..panel.y + panel.height {
++            for col in panel.x..panel.x + panel.width {
++                if let Some(super::super::sidebar::TreeHeaderHit::PinToggle { key }) =
++                    app.state.tree_header_at(&entries, col, row)
++                {
++                    if key == beta_id {
++                        pin_at = Some((col, row));
++                    }
++                }
++            }
++        }
++        let (col, row) = pin_at.expect("second space header exposes a pin hit");
++
++        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
++        assert!(app.state.tree_pinned_spaces.contains(&beta_id));
++        assert!(app.state.session_dirty);
++
++        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
++        assert!(!app.state.tree_pinned_spaces.contains(&beta_id));
++    }
++
++    #[test]
++    fn tree_space_header_plus_skips_name_prompt_even_when_enabled() {
++        let (mut app, col, row) = tree_app_with_plus_on_second_space();
++        app.state.prompt_new_tab_name = true;
++        let beta_id = app.state.workspaces[1].id.clone();
++
++        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
++
++        assert_eq!(app.state.mode(), Mode::Terminal);
++        assert!(!app.state.creating_new_tab);
++        assert!(app.state.request_new_tab);
++        assert!(app.state.requested_new_tab_name.is_none());
++        assert_eq!(
++            app.state.requested_new_tab_workspace_id.as_deref(),
++            Some(beta_id.as_str())
++        );
++    }
++
++    #[test]
+     fn mobile_switcher_swallows_non_left_mouse_events() {
+         let mut app = app_for_mouse_test();
+         app.state.workspaces = vec![Workspace::test_new("one")];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 44, 20));
+         let switch = app.state.view.mobile_menu_hit_area;
+@@ -4679,7 +5851,7 @@
+             switch.x + 1,
+             switch.y + 1,
+         ));
+-        assert_eq!(app.state.mode, Mode::Navigate);
++        assert_eq!(app.state.mode(), Mode::Navigate);
+ 
+         let viewport = crate::ui::mobile_switcher_areas(&app.state).viewport;
+         app.handle_mouse(mouse(
+@@ -4688,7 +5860,7 @@
+             viewport.y + 2,
+         ));
+ 
+-        assert_eq!(app.state.mode, Mode::Navigate);
++        assert_eq!(app.state.mode(), Mode::Navigate);
+         assert!(app.state.context_menu.is_none());
+     }
+ 
+@@ -4698,7 +5870,7 @@
+         app.state.workspaces = vec![Workspace::test_new("one")];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::RenameTab;
++        app.state.replace_mode(Mode::RenameTab);
+         app.state.creating_new_tab = true;
+         app.state.name_input = "new tab".into();
+ 
+@@ -4710,7 +5882,7 @@
+             switch.y + 1,
+         ));
+ 
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         assert!(!app.state.creating_new_tab);
+         assert!(!app.state.request_new_tab);
+     }
+@@ -4721,7 +5893,7 @@
+         app.state.workspaces = vec![Workspace::test_new("one")];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 44, 20));
+         let switch = app.state.view.mobile_menu_hit_area;
+@@ -4730,7 +5902,7 @@
+             switch.x + 1,
+             switch.y + 1,
+         ));
+-        assert_eq!(app.state.mode, Mode::Navigate);
++        assert_eq!(app.state.mode(), Mode::Navigate);
+ 
+         let close = crate::ui::mobile_switcher_areas(&app.state).close;
+         app.handle_mouse(mouse(
+@@ -4739,7 +5911,7 @@
+             close.y,
+         ));
+ 
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+     }
+ 
+     #[test]

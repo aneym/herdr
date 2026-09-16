@@ -1,0 +1,214 @@
+--- /tmp/base.tmp	2026-09-16 17:53:31
++++ docs/fork/port-0.9/orig/src/app/api.rs	2026-09-16 17:53:31
+@@ -122,12 +122,14 @@
+             return Vec::new();
+         }
+ 
+-        if let AppEvent::ClipboardWrite { content } = ev {
++        if let AppEvent::ClipboardWrite { content, feedback } = ev {
+             #[cfg(not(test))]
+             crate::selection::write_osc52_bytes(&content);
+             #[cfg(test)]
+             let _ = content;
+-            self.show_clipboard_feedback();
++            self.show_clipboard_feedback(
++                feedback.unwrap_or_else(|| "copied to clipboard".to_string()),
++            );
+             return Vec::new();
+         }
+ 
+@@ -306,6 +308,18 @@
+                 None
+             };
+         let terminal_cwd_reported = matches!(ev, AppEvent::TerminalCwdReported { .. });
++        if let AppEvent::PaneDied { pane_id } = &ev {
++            // A pinned space keeps a live tab: grow a fresh shell tab before
++            // the died pane's removal takes the whole workspace with it.
++            if let Some((ws_idx, _)) = self.find_pane(*pane_id) {
++                if self
++                    .state
++                    .close_pane_would_close_workspace(ws_idx, *pane_id)
++                {
++                    self.respawn_tab_for_pinned_workspace(ws_idx);
++                }
++            }
++        }
+         let previous_toast = self.state.toast.clone();
+         let pane_updates = self.state.handle_app_event(ev);
+         if let Some(agents) = manifest_update_agents {
+@@ -464,15 +478,13 @@
+         }
+     }
+ 
+-    pub(crate) fn show_clipboard_feedback(&mut self) {
++    pub(crate) fn show_clipboard_feedback(&mut self, message: String) {
+         if !self.state.toast_config.clipboard.enabled {
+             self.state.copy_feedback = None;
+             self.copy_feedback_deadline = None;
+             return;
+         }
+-        self.state.copy_feedback = Some(crate::app::state::CopyFeedback {
+-            message: "copied to clipboard".to_string(),
+-        });
++        self.state.copy_feedback = Some(crate::app::state::CopyFeedback { message });
+         self.copy_feedback_deadline = Some(Instant::now() + super::COPY_FEEDBACK_DURATION);
+     }
+ 
+@@ -511,7 +523,7 @@
+         tab.zoomed = overlay.previous_zoomed;
+ 
+         if was_overlay_active && self.state.active == Some(overlay.ws_idx) {
+-            self.state.mode = Mode::Terminal;
++            self.state.replace_mode(Mode::Terminal);
+         }
+     }
+ 
+@@ -1010,7 +1022,15 @@
+                 );
+             }
+             Method::SessionSnapshot(_) => return self.handle_session_snapshot(request.id),
+-            Method::WorkspaceList(_) => return self.handle_workspace_list(request.id),
++            Method::WorkspaceList(params) => return self.handle_workspace_list(request.id, params),
++            Method::WorkspaceSetProfiles(params) => {
++                return self.handle_workspace_set_profiles(request.id, params)
++            }
++            Method::WorkspaceSetOrchestrator(params) => {
++                return self.handle_workspace_set_orchestrator(request.id, params)
++            }
++            Method::ProfileSwitch(params) => return self.handle_profile_switch(request.id, params),
++            Method::ProfileList(_) => return self.handle_profile_list(request.id),
+             Method::WorkspaceGet(target) => return self.handle_workspace_get(request.id, target),
+             Method::WorkspaceCreate(params) => {
+                 return self.handle_workspace_create(request.id, params);
+@@ -1059,6 +1079,7 @@
+             Method::TabMove(params) => return self.handle_tab_move(request.id, params),
+             Method::TabClose(target) => return self.handle_tab_close(request.id, target),
+             Method::AgentList(_) => return self.handle_agent_list(request.id),
++            Method::AgentUsage(_) => return self.handle_agent_usage(request.id),
+             Method::AgentGet(target) => return self.handle_agent_get(request.id, target),
+             Method::AgentFocus(target) => return self.handle_agent_focus(request.id, target),
+             Method::AgentRename(params) => return self.handle_agent_rename(request.id, params),
+@@ -1067,6 +1088,12 @@
+                 return self.handle_agent_view_clear(request.id, params)
+             }
+             Method::AgentStart(params) => return self.handle_agent_start(request.id, params),
++            Method::AgentOwnerSet(params) => {
++                return self.handle_agent_owner_set(request.id, params)
++            }
++            Method::AgentOwnerClear(target) => {
++                return self.handle_agent_owner_clear(request.id, target)
++            }
+             Method::AgentPrompt(params) => return self.handle_agent_prompt(request.id, params),
+             Method::AgentWait(_) => {
+                 return responses::encode_error(
+@@ -1104,6 +1131,9 @@
+             Method::PaneGet(target) => return self.handle_pane_get(request.id, target),
+             Method::PaneFocus(target) => return self.handle_pane_focus(request.id, target),
+             Method::PaneInputSet(params) => return self.handle_pane_input_set(request.id, params),
++            Method::PaneSetProfiles(params) => {
++                return self.handle_pane_set_profiles(request.id, params)
++            }
+             Method::PaneRename(params) => return self.handle_pane_rename(request.id, params),
+             Method::PaneRead(params) => return self.handle_pane_read(request.id, params),
+             Method::PaneGraphicsSet(params) => {
+@@ -1391,6 +1421,55 @@
+         assert!(status.success(), "git init failed for {}", path.display());
+     }
+ 
++    #[tokio::test]
++    async fn pane_died_in_pinned_workspace_respawns_tab_instead_of_closing() {
++        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
++        let mut app = App::new(
++            &crate::config::Config::default(),
++            true,
++            None,
++            api_rx,
++            crate::api::EventHub::default(),
++        );
++        app.state.workspaces = vec![crate::workspace::Workspace::test_new("pinned")];
++        app.state.ensure_test_terminals();
++        app.state.active = Some(0);
++        app.state.selected = 0;
++        let workspace_id = app.state.workspaces[0].id.clone();
++        app.state.tree_pinned_spaces.insert(workspace_id.clone());
++        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
++
++        app.handle_internal_event(AppEvent::PaneDied { pane_id });
++
++        assert_eq!(app.state.workspaces.len(), 1);
++        assert_eq!(app.state.workspaces[0].id, workspace_id);
++        assert_eq!(app.state.workspaces[0].tabs.len(), 1);
++        assert_ne!(app.state.workspaces[0].tabs[0].root_pane, pane_id);
++        assert!(app.state.tree_pinned_spaces.contains(&workspace_id));
++        super::test_support::shutdown_test_runtimes(&mut app);
++    }
++
++    #[test]
++    fn pane_died_in_unpinned_workspace_still_closes_it() {
++        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
++        let mut app = App::new(
++            &crate::config::Config::default(),
++            true,
++            None,
++            api_rx,
++            crate::api::EventHub::default(),
++        );
++        app.state.workspaces = vec![crate::workspace::Workspace::test_new("plain")];
++        app.state.ensure_test_terminals();
++        app.state.active = Some(0);
++        app.state.selected = 0;
++        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
++
++        app.handle_internal_event(AppEvent::PaneDied { pane_id });
++
++        assert!(app.state.workspaces.is_empty());
++    }
++
+     fn app_with_overlay(
+         workspace: crate::workspace::Workspace,
+         overlay_pane: crate::layout::PaneId,
+@@ -1408,7 +1487,7 @@
+         app.state.workspaces = vec![workspace];
+         app.state.ensure_test_terminals();
+         app.state.active = Some(0);
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.overlay_panes.insert(
+             overlay_pane,
+             OverlayPaneState {
+@@ -1738,7 +1817,7 @@
+         app.state.terminals.get_mut(&terminal_id).unwrap().cwd = stale_cwd;
+         app.state.active = None;
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
+         app.state.toast_config.delay_seconds = 0;
+ 
+@@ -1831,7 +1910,7 @@
+         app.state.terminals.get_mut(&terminal_id).unwrap().cwd = stale_cwd;
+         app.state.active = None;
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
+         app.state.toast_config.delay_seconds = 1;
+ 
+@@ -2064,7 +2143,7 @@
+         app.state.workspaces = vec![workspace];
+         app.state.ensure_test_terminals();
+         app.state.active = Some(0);
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         let tab_id = app.public_tab_id(0, 0).unwrap();
+         app.overlay_panes.insert(
+             overlay_pane,
+@@ -2262,7 +2341,7 @@
+         app.state.terminals.get_mut(&terminal_id).unwrap().cwd = "/__herdr_projects__".into();
+         app.state.active = None;
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.toast_config.delivery = crate::config::ToastDelivery::Terminal;
+ 
+         app.handle_internal_event(AppEvent::StateChanged {

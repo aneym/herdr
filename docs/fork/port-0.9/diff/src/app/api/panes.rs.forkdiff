@@ -1,0 +1,383 @@
+--- /tmp/base.tmp	2026-09-16 17:53:31
++++ docs/fork/port-0.9/orig/src/app/api/panes.rs	2026-09-16 17:53:31
+@@ -10,9 +10,9 @@
+     PaneProcessInfoProcess, PaneReadParams, PaneReadResult, PaneReleaseAgentParams,
+     PaneRenameParams, PaneReportAgentParams, PaneReportAgentSessionParams,
+     PaneReportMetadataParams, PaneResizeParams, PaneResizeReason, PaneResizeResult,
+-    PaneSendInputParams, PaneSendKeysParams, PaneSendTextParams, PaneSplitParams, PaneSwapParams,
+-    PaneSwapReason, PaneSwapResult, PaneTarget, PaneZoomMode, PaneZoomParams, PaneZoomReason,
+-    PaneZoomResult, ResponseResult,
++    PaneSendInputParams, PaneSendKeysParams, PaneSendTextParams, PaneSetProfilesParams,
++    PaneSplitParams, PaneSwapParams, PaneSwapReason, PaneSwapResult, PaneTarget, PaneZoomMode,
++    PaneZoomParams, PaneZoomReason, PaneZoomResult, ResponseResult,
+ };
+ use crate::app::actions::{PaneZoomCommand, PaneZoomNoopReason};
+ use crate::app::App;
+@@ -165,6 +165,29 @@
+         encode_success(id, ResponseResult::PaneInfo { pane })
+     }
+ 
++    pub(super) fn handle_pane_set_profiles(
++        &mut self,
++        id: String,
++        params: PaneSetProfilesParams,
++    ) -> String {
++        let Some((ws_idx, pane_id)) = self.parse_pane_id(&params.pane_id) else {
++            return pane_not_found(id, &params.pane_id);
++        };
++        match self
++            .state
++            .set_pane_profiles(ws_idx, pane_id, params.profiles)
++        {
++            Ok(true) => {}
++            Ok(false) => return pane_not_found(id, &params.pane_id),
++            Err(message) => return encode_error(id, "invalid_profile", message),
++        }
++        self.schedule_session_save();
++        let Some(pane) = self.pane_info(ws_idx, pane_id) else {
++            return pane_not_found(id, &params.pane_id);
++        };
++        encode_success(id, ResponseResult::PaneInfo { pane })
++    }
++
+     pub(super) fn handle_pane_focus(&mut self, id: String, target: PaneTarget) -> String {
+         let Some((ws_idx, pane_id)) = self.parse_pane_id(&target.pane_id) else {
+             return pane_not_found(id, &target.pane_id);
+@@ -174,7 +197,7 @@
+         };
+ 
+         self.state.focus_pane_in_workspace(ws_idx, pane_id);
+-        self.state.mark_active_tab_seen();
++        self.state.read_focused_attention();
+         self.state.settle_terminal_mode_after_focus();
+ 
+         let Some(pane) = self.pane_info(ws_idx, pane_id) else {
+@@ -659,6 +682,7 @@
+             previous_tab_label: self.state.workspaces[source_ws_idx].tabs[source_tab_idx]
+                 .custom_name
+                 .clone(),
++            previous_profiles: self.state.workspaces[source_ws_idx].profiles.clone(),
+             previous_worktree_space: self.state.workspaces[source_ws_idx].worktree_space.clone(),
+             identity_cwd: self.state.workspaces[source_ws_idx].identity_cwd.clone(),
+         };
+@@ -861,6 +885,7 @@
+                 } else if self.state.selected > source_ws_idx {
+                     self.state.selected -= 1;
+                 }
++                self.state.settle_active_workspace_visibility();
+             }
+         }
+ 
+@@ -928,7 +953,7 @@
+                     .map(|terminal| terminal.cwd.clone())
+                     .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| "/".into()));
+                 let moved_pane_id = moved.pane_id;
+-                let workspace = crate::workspace::Workspace::from_existing_pane(
++                let mut workspace = crate::workspace::Workspace::from_existing_pane(
+                     label,
+                     tab_label,
+                     identity_cwd,
+@@ -937,6 +962,9 @@
+                     self.render_notify.clone(),
+                     self.render_dirty.clone(),
+                 );
++                if self.state.active_profile != crate::workspace::DEFAULT_PROFILE {
++                    workspace.profiles = vec![self.state.active_profile.clone()];
++                }
+                 self.state.workspaces.push(workspace);
+                 let target_ws_idx = self.state.workspaces.len() - 1;
+                 created_workspace = true;
+@@ -945,7 +973,8 @@
+             }
+         };
+ 
+-        if focus || self.state.active.is_none() {
++        if focus || (self.state.active.is_none() && self.state.workspace_is_visible(target_ws_idx))
++        {
+             self.state
+                 .switch_workspace_tab(target_ws_idx, target_tab_idx);
+             self.state
+@@ -1067,6 +1096,7 @@
+                 self.render_dirty.clone(),
+             );
+             workspace.id = context.previous_workspace_id;
++            workspace.profiles = context.previous_profiles;
+             workspace.worktree_space = context.previous_worktree_space;
+             let insert_idx = context.source_ws_idx.min(self.state.workspaces.len());
+             if let Some(active) = self.state.active {
+@@ -1567,6 +1597,11 @@
+                 "confirmation_required",
+                 "closing this pane would close a worktree group",
+             ));
++        }
++        if self.state.close_pane_would_close_workspace(ws_idx, pane_id) {
++            // A pinned space keeps a live tab instead of closing with its
++            // last pane.
++            self.respawn_tab_for_pinned_workspace(ws_idx);
+         }
+         let workspace_snapshot = self.workspace_info(ws_idx);
+         let terminal_id = self.state.terminal_id_for_pane(ws_idx, pane_id);
+@@ -1825,6 +1860,7 @@
+     previous_workspace_id: String,
+     previous_workspace_label: Option<String>,
+     previous_tab_label: Option<String>,
++    previous_profiles: Vec<String>,
+     previous_worktree_space: Option<crate::workspace::WorktreeSpaceMembership>,
+     identity_cwd: std::path::PathBuf,
+ }
+@@ -1922,6 +1958,84 @@
+         let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+         let public_pane_id = app.public_pane_id(0, pane_id).unwrap();
+         (app, public_pane_id)
++    }
++
++    fn set_test_pane_profiles(app: &mut App, pane_id: String, profiles: &[&str]) {
++        let response = app.handle_pane_set_profiles(
++            "req".into(),
++            PaneSetProfilesParams {
++                pane_id,
++                profiles: profiles.iter().map(|profile| (*profile).into()).collect(),
++            },
++        );
++        let response: SuccessResponse = serde_json::from_str(&response).unwrap();
++        assert!(matches!(response.result, ResponseResult::PaneInfo { .. }));
++    }
++
++    #[test]
++    fn pane_profiles_make_untagged_workspace_visible_in_personal_and_work() {
++        let (mut app, public_pane_id) = app_with_test_workspace();
++        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
++        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
++            .attached_terminal_id
++            .clone();
++        app.state
++            .terminals
++            .get_mut(&terminal_id)
++            .unwrap()
++            .detected_agent = Some(Agent::Claude);
++
++        set_test_pane_profiles(&mut app, public_pane_id, &["work"]);
++
++        assert_eq!(app.state.workspaces[0].profiles, ["personal", "work"]);
++        assert_eq!(app.state.terminals[&terminal_id].profiles, ["work"]);
++        app.state.active_profile = "work".into();
++        assert!(app.state.workspace_is_visible(0));
++        assert_eq!(crate::ui::agent_panel_entries(&app.state).len(), 1);
++        app.state.active_profile = "personal".into();
++        assert!(app.state.workspace_is_visible(0));
++    }
++
++    #[test]
++    fn pane_profiles_append_only_missing_workspace_profiles() {
++        let (mut app, public_pane_id) = app_with_test_workspace();
++        app.state.workspaces[0].profiles = vec!["work".into()];
++
++        set_test_pane_profiles(&mut app, public_pane_id, &["work", "tasks"]);
++
++        assert_eq!(app.state.workspaces[0].profiles, ["work", "tasks"]);
++    }
++
++    #[test]
++    fn existing_pane_profile_leaves_workspace_profiles_exactly_unchanged() {
++        let (mut app, public_pane_id) = app_with_test_workspace();
++        app.state.workspaces[0].profiles = vec!["tasks".into(), "work".into()];
++        let before = app.state.workspaces[0].profiles.clone();
++
++        set_test_pane_profiles(&mut app, public_pane_id, &["work"]);
++
++        assert_eq!(app.state.workspaces[0].profiles, before);
++    }
++
++    #[test]
++    fn personal_pane_profile_is_appended_to_work_workspace() {
++        let (mut app, public_pane_id) = app_with_test_workspace();
++        app.state.workspaces[0].profiles = vec!["work".into()];
++
++        set_test_pane_profiles(&mut app, public_pane_id, &["personal"]);
++
++        assert_eq!(app.state.workspaces[0].profiles, ["work", "personal"]);
++    }
++
++    #[test]
++    fn clearing_pane_profiles_leaves_workspace_profiles_unchanged() {
++        let (mut app, public_pane_id) = app_with_test_workspace();
++        app.state.workspaces[0].profiles = vec!["work".into(), "tasks".into()];
++        let before = app.state.workspaces[0].profiles.clone();
++
++        set_test_pane_profiles(&mut app, public_pane_id, &[]);
++
++        assert_eq!(app.state.workspaces[0].profiles, before);
+     }
+ 
+     #[test]
+@@ -2307,6 +2421,32 @@
+         assert_eq!(success.id, "req");
+         assert_eq!(app.state.request_remove_linked_worktree, None);
+         assert!(app.state.workspaces.is_empty());
++    }
++
++    #[tokio::test]
++    async fn api_pane_close_last_pane_of_pinned_workspace_respawns_tab() {
++        let (mut app, public_pane_id) = app_with_test_workspace();
++        app.state.active = Some(0);
++        app.state.selected = 0;
++        let workspace_id = app.state.workspaces[0].id.clone();
++        app.state.tree_pinned_spaces.insert(workspace_id.clone());
++        let old_tab_id = app.public_tab_id(0, 0).unwrap();
++
++        let response = app.handle_pane_close(
++            "req".into(),
++            PaneTarget {
++                pane_id: public_pane_id,
++            },
++        );
++
++        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
++        assert_eq!(success.id, "req");
++        assert_eq!(app.state.workspaces.len(), 1);
++        assert_eq!(app.state.workspaces[0].id, workspace_id);
++        assert_eq!(app.state.workspaces[0].tabs.len(), 1);
++        assert_ne!(app.public_tab_id(0, 0).unwrap(), old_tab_id);
++        assert!(app.state.tree_pinned_spaces.contains(&workspace_id));
++        super::super::test_support::shutdown_test_runtimes(&mut app);
+     }
+ 
+     #[test]
+@@ -2676,7 +2816,7 @@
+             panic!("expected pane move response");
+         };
+         assert!(move_result.changed);
+-        assert_eq!(app.state.mode, Mode::Copy);
++        assert_eq!(app.state.mode(), Mode::Copy);
+         assert_eq!(app.state.copy_mode.expect("copy mode").pane_id, source);
+         assert_eq!(app.state.workspaces[0].tabs[0].layout.focused(), source);
+     }
+@@ -2701,7 +2841,7 @@
+         app.state.workspaces.push(Workspace::test_new("other"));
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         let source_public = app.public_pane_id(0, source).unwrap();
+         let target = app.state.workspaces[1].tabs[0].root_pane;
+         let target_tab_id = app.public_tab_id(1, 0).unwrap();
+@@ -3082,6 +3222,69 @@
+     }
+ 
+     #[test]
++    fn pane_move_new_workspace_inherits_active_profile_and_settles_visibility() {
++        let mut app = app_with_linked_worktree();
++        app.state.active_profile = "work".into();
++        app.state.workspaces[0].profiles = vec!["work".into()];
++        app.state.active = Some(0);
++        let source = app.state.workspaces[0].tabs[0].root_pane;
++        seed_terminal_states(&mut app);
++        let source_public = app.public_pane_id(0, source).unwrap();
++
++        let response = app.handle_pane_move(
++            "req".into(),
++            PaneMoveParams {
++                pane_id: source_public,
++                destination: PaneMoveDestination::NewWorkspace {
++                    label: Some("moved".into()),
++                    tab_label: None,
++                },
++                focus: false,
++            },
++        );
++
++        let _: SuccessResponse = serde_json::from_str(&response).unwrap();
++        assert_eq!(app.state.workspaces.len(), 1);
++        assert_eq!(app.state.workspaces[0].profiles, vec!["work"]);
++        assert_eq!(app.state.active, Some(0));
++        assert!(app.state.workspace_is_visible(0));
++    }
++
++    #[test]
++    fn pane_move_removing_active_source_settles_to_visible_workspace() {
++        let mut app = app_with_linked_worktree();
++        app.state.active_profile = "work".into();
++        app.state.workspaces[0].profiles = vec!["work".into()];
++        let mut hidden_target = crate::workspace::Workspace::test_new("personal");
++        hidden_target.profiles = vec!["personal".into()];
++        let hidden_tab_id = hidden_target.id.clone();
++        app.state.workspaces.push(hidden_target);
++        seed_terminal_states(&mut app);
++        let source = app.state.workspaces[0].tabs[0].root_pane;
++        let source_public = app.public_pane_id(0, source).unwrap();
++        let target_tab = app.public_tab_id(1, 0).unwrap();
++        assert!(target_tab.starts_with(&hidden_tab_id));
++
++        let response = app.handle_pane_move(
++            "req".into(),
++            PaneMoveParams {
++                pane_id: source_public,
++                destination: PaneMoveDestination::Tab {
++                    tab_id: target_tab,
++                    target_pane_id: None,
++                    split: SplitDirection::Right,
++                    ratio: None,
++                },
++                focus: false,
++            },
++        );
++
++        let _: SuccessResponse = serde_json::from_str(&response).unwrap();
++        assert_eq!(app.state.active, None);
++        assert_eq!(app.state.active_profile, "work");
++    }
++
++    #[test]
+     fn api_pane_move_same_tab_returns_same_tab_noop() {
+         let mut app = app_with_linked_worktree();
+         let source = app.state.workspaces[0].tabs[0].root_pane;
+@@ -3196,12 +3399,14 @@
+             .terminal_id(source)
+             .unwrap()
+             .clone();
++        app.state.workspaces[0].profiles = vec!["work".into(), "personal".into()];
+         let previous_workspace_id = app.public_workspace_id(0);
+         let context = PaneMoveRecoveryContext {
+             source_ws_idx: 0,
+             previous_workspace_id: previous_workspace_id.clone(),
+             previous_workspace_label: app.state.workspaces[0].custom_name.clone(),
+             previous_tab_label: app.state.workspaces[0].tabs[0].custom_name.clone(),
++            previous_profiles: app.state.workspaces[0].profiles.clone(),
+             previous_worktree_space: app.state.workspaces[0].worktree_space.clone(),
+             identity_cwd: app.state.workspaces[0].identity_cwd.clone(),
+         };
+@@ -3216,6 +3421,7 @@
+ 
+         assert_eq!(app.state.workspaces.len(), 1);
+         assert_eq!(app.state.workspaces[0].id, previous_workspace_id);
++        assert_eq!(app.state.workspaces[0].profiles, vec!["work", "personal"]);
+         assert_eq!(
+             app.state.workspaces[0].tabs[0].terminal_id(source),
+             Some(&source_terminal)
+@@ -3365,7 +3571,7 @@
+         app.state.workspaces[1].tabs[0].layout.focus_pane(target);
+         app.state.active = Some(1);
+         app.state.selected = 1;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.copy_mode = Some(crate::app::state::CopyModeState {
+             pane_id: source,
+             cursor_row: 0,
+@@ -3390,7 +3596,7 @@
+         };
+         assert!(zoom.focus_changed);
+         assert_eq!(app.state.active, Some(0));
+-        assert_eq!(app.state.mode, Mode::Copy);
++        assert_eq!(app.state.mode(), Mode::Copy);
+         assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(source));
+         assert_eq!(app.state.workspaces[1].focused_pane_id(), Some(target));
+     }
+@@ -3739,7 +3945,7 @@
+         assert_eq!(app.state.active, Some(1));
+         assert_eq!(app.state.workspaces[1].active_tab, target_tab_idx);
+         assert_eq!(app.state.workspaces[1].focused_pane_id(), Some(target_pane));
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+     }
+ 
+     #[test]

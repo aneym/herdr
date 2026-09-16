@@ -15,6 +15,9 @@ __pycache__/
 !/docs/preview/**
 !/docs/versions/
 !/docs/versions/**
+# Fork-only: the 0.9 port ledger and the pre-merge sources it points at.
+!/docs/fork/
+!/docs/fork/**
 /.local/
 /backlog
 

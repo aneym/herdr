@@ -1,0 +1,625 @@
+--- /tmp/base.tmp	2026-09-16 17:53:32
++++ docs/fork/port-0.9/orig/src/app/input/terminal.rs	2026-09-16 17:53:32
+@@ -121,7 +121,7 @@
+         }
+ 
+         if self.state.is_prefix_key(&key) {
+-            self.state.mode = Mode::Prefix;
++            self.state.replace_mode(Mode::Prefix);
+             return None;
+         }
+ 
+@@ -139,6 +139,16 @@
+         let ws = self.state.workspaces.get(ws_idx)?;
+         let pane_id = ws.focused_pane_id()?;
+         let terminal_id = ws.terminal_id(pane_id)?.clone();
++        // Cmd+C over a mouse-reporting pane app copies the text herdr captured when
++        // the forwarded drag was released. Herdr writes the clipboard itself and
++        // never rewrites the chord to ctrl+c, so a copy can no longer interrupt the
++        // pane's process. Plain ctrl+c still reaches the pane untouched.
++        if matches!(key.code, KeyCode::Char('c' | 'C'))
++            && key.modifiers == crossterm::event::KeyModifiers::SUPER
++        {
++            self.copy_pane_app_drag_selection(pane_id);
++            return None;
++        }
+         let rt =
+             self.state
+                 .runtime_for_pane_in_workspace(&self.terminal_runtimes, ws_idx, pane_id)?;
+@@ -253,7 +263,7 @@
+         };
+         rt.scroll_reset();
+         let bytes = rt.encode_terminal_key(key.clone());
+-        self.state.mode = Mode::Terminal;
++        self.state.replace_mode(Mode::Terminal);
+         if bytes.is_empty() {
+             PreparedPopupInput::Consumed
+         } else {
+@@ -266,14 +276,14 @@
+ 
+     pub(crate) fn host_keyboard_report_all_requested(&self) -> bool {
+         if self.state.popup_pane.is_none()
+-            && matches!(self.state.mode, Mode::Prefix | Mode::Navigate)
++            && matches!(self.state.mode(), Mode::Prefix | Mode::Navigate)
+         {
+             return true;
+         }
+ 
+         let runtime = if self.state.popup_pane.is_some() {
+             self.popup_runtime()
+-        } else if self.state.mode == Mode::Terminal {
++        } else if self.state.mode() == Mode::Terminal {
+             self.state.active.and_then(|ws_idx| {
+                 self.state
+                     .focused_runtime_in_workspace(&self.terminal_runtimes, ws_idx)
+@@ -441,7 +451,7 @@
+         app.state.terminals.insert(terminal.id.clone(), terminal);
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app
+     }
+ 
+@@ -470,11 +480,75 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.view.pane_infos = pane_infos;
+         (app, info)
++    }
++
++    fn app_with_mouse_reporting_runtime() -> (
++        App,
++        crate::layout::PaneInfo,
++        tokio::sync::mpsc::Receiver<Bytes>,
++    ) {
++        app_with_mouse_reporting_runtime_text(b"")
++    }
++
++    /// Mouse-reporting pane seeded with `text` on the first screen row, so a
++    /// forwarded drag has something for the shadow selection to extract.
++    fn app_with_mouse_reporting_runtime_text(
++        text: &[u8],
++    ) -> (
++        App,
++        crate::layout::PaneInfo,
++        tokio::sync::mpsc::Receiver<Bytes>,
++    ) {
++        let mut app = app_for_mouse_test();
++        let mut ws = Workspace::test_new("test");
++        let pane_id = ws.tabs[0].root_pane;
++        let terminal_id = ws.terminal_id(pane_id).expect("pane terminal").clone();
++        let pane_infos = ws.tabs[0].layout.panes(Rect::new(26, 2, 80, 18));
++        let info = pane_infos[0].clone();
++        let (runtime, input_rx) =
++            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
++                info.inner_rect.width,
++                info.inner_rect.height,
++                0,
++                &[b"\x1b[?1002h\x1b[?1006h".as_slice(), text].concat(),
++                8,
++            );
++        ws.insert_test_runtime(pane_id, runtime);
++        let mut terminal = crate::terminal::TerminalState::new(
++            terminal_id.clone(),
++            std::env::current_dir().unwrap_or_default(),
++        );
++        terminal.set_detected_state(
++            Some(crate::detect::Agent::Claude),
++            crate::detect::AgentState::Idle,
++        );
++        app.state.terminals.insert(terminal_id, terminal);
++        app.state.workspaces = vec![ws];
++        app.state.active = Some(0);
++        app.state.selected = 0;
++        app.state.replace_mode(Mode::Terminal);
++        app.state.view.pane_infos = pane_infos;
++        (app, info, input_rx)
+     }
+ 
++    fn set_focused_agent_state(
++        app: &mut App,
++        agent: crate::detect::Agent,
++        state: crate::detect::AgentState,
++    ) {
++        let workspace = &app.state.workspaces[0];
++        let pane_id = workspace.focused_pane_id().expect("focused pane");
++        let terminal_id = workspace.terminal_id(pane_id).expect("pane terminal");
++        app.state
++            .terminals
++            .get_mut(terminal_id)
++            .expect("terminal state")
++            .set_detected_state(Some(agent), state);
++    }
++
+     fn double_click(app: &mut App, col: u16, row: u16) {
+         app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+         app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), col, row));
+@@ -497,7 +571,10 @@
+ 
+     fn clipboard_write_content(app: &mut App) -> Vec<u8> {
+         match app.event_rx.try_recv().expect("clipboard write event") {
+-            AppEvent::ClipboardWrite { content } => content,
++            AppEvent::ClipboardWrite {
++                content,
++                feedback: None,
++            } => content,
+             event => panic!("unexpected event: {event:?}"),
+         }
+     }
+@@ -570,7 +647,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.view.pane_infos = pane_infos;
+ 
+         let start_metrics = app
+@@ -636,7 +713,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.view.pane_infos = pane_infos;
+ 
+         let row = info.inner_rect.y;
+@@ -1306,9 +1383,272 @@
+             .expect("highlight clear deadline");
+         assert!(app.handle_scheduled_tasks(deadline + std::time::Duration::from_millis(1), false));
+         assert!(app.state.selection.is_none());
++    }
++
++    /// Drag-select over a mouse-reporting pane, then Cmd+C.
++    fn drag_select_forwarded(
++        app: &mut App,
++        info: &crate::layout::PaneInfo,
++        cols: std::ops::Range<u16>,
++    ) {
++        let row = info.inner_rect.y;
++        let start = info.inner_rect.x + cols.start;
++        let end = info.inner_rect.x + cols.end;
++        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), start, row));
++        app.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), end, row));
++        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), end, row));
+     }
+ 
++    fn super_c(app: &mut App) {
++        app.handle_terminal_key_headless(TerminalKey::new(KeyCode::Char('c'), KeyModifiers::SUPER));
++    }
++
++    fn drained_clipboard_text(app: &mut App) -> Option<String> {
++        match app.event_rx.try_recv().ok()? {
++            crate::events::AppEvent::ClipboardWrite { content, .. } => {
++                Some(String::from_utf8_lossy(&content).into_owned())
++            }
++            event => panic!("unexpected event: {event:?}"),
++        }
++    }
++
+     #[tokio::test]
++    async fn pane_app_drag_super_c_copies_captured_text() {
++        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime_text(b"alpha beta");
++        drag_select_forwarded(&mut app, &info, 0..4);
++        for _ in 0..3 {
++            input_rx.try_recv().expect("forwarded mouse event");
++        }
++
++        super_c(&mut app);
++
++        assert_eq!(drained_clipboard_text(&mut app).as_deref(), Some("alpha"));
++        // The chord is never rewritten to ctrl+c, so the pane app sees nothing.
++        assert!(input_rx.try_recv().is_err());
++        assert!(app.state.pane_app_drag_copy.is_none());
++
++        super_c(&mut app);
++        assert!(drained_clipboard_text(&mut app).is_none());
++    }
++
++    #[tokio::test]
++    async fn pane_app_drag_capture_survives_intervening_keys() {
++        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime_text(b"alpha beta");
++        drag_select_forwarded(&mut app, &info, 0..4);
++        for _ in 0..3 {
++            input_rx.try_recv().expect("forwarded mouse event");
++        }
++
++        app.handle_terminal_key_headless(TerminalKey::new(
++            KeyCode::Char('x'),
++            KeyModifiers::empty(),
++        ));
++        assert_eq!(input_rx.try_recv().expect("unrelated key").as_ref(), b"x");
++
++        super_c(&mut app);
++        assert_eq!(drained_clipboard_text(&mut app).as_deref(), Some("alpha"));
++    }
++
++    #[tokio::test]
++    async fn pane_app_drag_capture_copies_while_agent_is_working() {
++        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime_text(b"alpha beta");
++        set_focused_agent_state(
++            &mut app,
++            crate::detect::Agent::Claude,
++            crate::detect::AgentState::Working,
++        );
++        drag_select_forwarded(&mut app, &info, 0..4);
++        for _ in 0..3 {
++            input_rx.try_recv().expect("forwarded mouse event");
++        }
++
++        super_c(&mut app);
++
++        assert_eq!(drained_clipboard_text(&mut app).as_deref(), Some("alpha"));
++        // Critically: no ctrl+c reaches a mid-turn agent.
++        assert!(input_rx.try_recv().is_err());
++    }
++
++    #[tokio::test]
++    async fn pane_app_drag_capture_copies_for_any_agent() {
++        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime_text(b"alpha beta");
++        set_focused_agent_state(
++            &mut app,
++            crate::detect::Agent::Codex,
++            crate::detect::AgentState::Idle,
++        );
++        drag_select_forwarded(&mut app, &info, 0..4);
++        for _ in 0..3 {
++            input_rx.try_recv().expect("forwarded mouse event");
++        }
++
++        super_c(&mut app);
++
++        assert_eq!(drained_clipboard_text(&mut app).as_deref(), Some("alpha"));
++        assert!(input_rx.try_recv().is_err());
++    }
++
++    #[tokio::test]
++    async fn super_c_without_pane_app_drag_reports_nothing_to_copy() {
++        let (mut app, _info, mut input_rx) = app_with_mouse_reporting_runtime();
++
++        super_c(&mut app);
++
++        assert!(input_rx.try_recv().is_err());
++        assert!(drained_clipboard_text(&mut app).is_none());
++        assert_eq!(
++            app.state
++                .copy_feedback
++                .as_ref()
++                .map(|feedback| feedback.message.as_str()),
++            Some("nothing selected to copy")
++        );
++    }
++
++    #[tokio::test]
++    async fn pane_app_click_does_not_capture_a_selection() {
++        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime_text(b"alpha beta");
++        let col = info.inner_rect.x + 2;
++        let row = info.inner_rect.y;
++
++        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
++        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), col, row));
++        input_rx.try_recv().expect("forwarded mouse down");
++        input_rx.try_recv().expect("forwarded mouse up");
++
++        super_c(&mut app);
++
++        assert!(input_rx.try_recv().is_err());
++        assert!(drained_clipboard_text(&mut app).is_none());
++    }
++
++    /// Double-click over a mouse-reporting pane, forwarding every event.
++    fn double_click_forwarded(app: &mut App, info: &crate::layout::PaneInfo, col: u16) {
++        let row = info.inner_rect.y;
++        let col = info.inner_rect.x + col;
++        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
++        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), col, row));
++        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
++        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), col, row));
++    }
++
++    #[tokio::test]
++    async fn pane_app_double_click_super_c_copies_word() {
++        let (mut app, info, mut input_rx) =
++            app_with_mouse_reporting_runtime_text(b"alpha beta-gamma");
++        double_click_forwarded(&mut app, &info, 8);
++        while input_rx.try_recv().is_ok() {}
++
++        super_c(&mut app);
++
++        assert_eq!(
++            drained_clipboard_text(&mut app).as_deref(),
++            Some("beta-gamma")
++        );
++        // The chord never reaches the pane app.
++        assert!(input_rx.try_recv().is_err());
++        // Herdr renders no selection of its own; the pane app draws the highlight.
++        assert!(app.state.selection.is_none());
++    }
++
++    #[tokio::test]
++    async fn pane_app_click_after_double_click_discards_word_capture() {
++        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime_text(b"alpha beta");
++        double_click_forwarded(&mut app, &info, 2);
++        assert!(app.state.pane_app_drag_copy.is_some());
++
++        let row = info.inner_rect.y;
++        let col = info.inner_rect.x + 7;
++        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
++        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), col, row));
++        while input_rx.try_recv().is_ok() {}
++
++        super_c(&mut app);
++        assert!(drained_clipboard_text(&mut app).is_none());
++    }
++
++    /// Triple-click over a mouse-reporting pane, forwarding every event.
++    fn triple_click_forwarded(app: &mut App, info: &crate::layout::PaneInfo, col: u16) {
++        double_click_forwarded(app, info, col);
++        let row = info.inner_rect.y;
++        let col = info.inner_rect.x + col;
++        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
++        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), col, row));
++    }
++
++    #[tokio::test]
++    async fn pane_app_triple_click_super_c_copies_line() {
++        let (mut app, info, mut input_rx) =
++            app_with_mouse_reporting_runtime_text(b"alpha beta-gamma");
++        triple_click_forwarded(&mut app, &info, 2);
++        while input_rx.try_recv().is_ok() {}
++
++        super_c(&mut app);
++
++        assert_eq!(
++            drained_clipboard_text(&mut app).as_deref(),
++            Some("alpha beta-gamma")
++        );
++        // The chord never reaches the pane app.
++        assert!(input_rx.try_recv().is_err());
++        // Herdr renders no selection of its own; the pane app draws the highlight.
++        assert!(app.state.selection.is_none());
++    }
++
++    #[tokio::test]
++    async fn triple_click_selects_and_copies_line() {
++        let (mut app, info) = app_with_screen_bytes(b"alpha beta gamma");
++        let col = info.inner_rect.x + 2;
++        let row = info.inner_rect.y;
++
++        double_click(&mut app, col, row);
++        assert_eq!(clipboard_write_content(&mut app), b"alpha");
++
++        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), col, row));
++        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
++
++        assert_eq!(clipboard_write_content(&mut app), b"alpha beta gamma");
++        assert_visible_selection(&app);
++    }
++
++    #[tokio::test]
++    async fn fourth_rapid_click_starts_a_new_streak() {
++        let (mut app, info) = app_with_screen_bytes(b"alpha beta");
++        let col = info.inner_rect.x + 2;
++        let row = info.inner_rect.y;
++
++        double_click(&mut app, col, row);
++        assert_eq!(clipboard_write_content(&mut app), b"alpha");
++        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), col, row));
++        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
++        assert_eq!(clipboard_write_content(&mut app), b"alpha beta");
++
++        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), col, row));
++        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
++
++        assert!(app.event_rx.try_recv().is_err());
++    }
++
++    #[tokio::test]
++    async fn new_pane_app_drag_discards_the_previous_capture() {
++        let (mut app, info, mut input_rx) = app_with_mouse_reporting_runtime_text(b"alpha beta");
++        drag_select_forwarded(&mut app, &info, 0..4);
++        assert!(app.state.pane_app_drag_copy.is_some());
++
++        let row = info.inner_rect.y;
++        app.handle_mouse(mouse(
++            MouseEventKind::Down(MouseButton::Left),
++            info.inner_rect.x,
++            row,
++        ));
++        assert!(app.state.pane_app_drag_copy.is_none());
++        while input_rx.try_recv().is_ok() {}
++
++        super_c(&mut app);
++        assert!(drained_clipboard_text(&mut app).is_none());
++    }
++
++    #[tokio::test]
+     async fn copy_on_select_disabled_still_forwards_mouse_reporting_gestures() {
+         let mut app = app_for_mouse_test();
+         let mut ws = Workspace::test_new("test");
+@@ -1327,7 +1667,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.view.pane_infos = pane_infos;
+         app.state.copy_on_select = false;
+ 
+@@ -1383,7 +1723,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.view.pane_infos = pane_infos;
+ 
+         let start_metrics = app
+@@ -1434,7 +1774,7 @@
+         app.state.workspaces = vec![Workspace::test_new("test")];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
+         app.state.view.pane_infos = app.state.workspaces[0]
+             .active_tab()
+@@ -1448,7 +1788,7 @@
+             .await;
+ 
+         assert_ne!(app.state.workspaces[0].layout.focused(), focused_before);
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+     }
+ 
+     #[cfg(unix)]
+@@ -1476,7 +1816,7 @@
+         app.state.workspaces = vec![workspace];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         let output_path = unique_temp_path("direct-edit-scrollback");
+         let previous_editor = std::env::var_os("EDITOR");
+@@ -1500,7 +1840,7 @@
+         let content = wait_for_file(&output_path);
+         assert!(content.contains("alpha"));
+         assert!(content.contains("beta"));
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+ 
+         let _ = std::fs::remove_file(output_path);
+     }
+@@ -1519,7 +1859,7 @@
+         app.state.workspaces = vec![Workspace::test_new("test")];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         let output_path = unique_temp_path("direct-custom-command");
+         let command = format!("printf direct > '{}'", output_path.display());
+@@ -1540,7 +1880,7 @@
+         .await;
+ 
+         assert_eq!(wait_for_file(&output_path), "direct");
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         let _ = std::fs::remove_file(output_path);
+     }
+ 
+@@ -1567,7 +1907,7 @@
+ 
+         assert_eq!(app.state.workspaces[0].tabs[0].layout.pane_count(), 2);
+         assert!(app.state.workspaces[0].tabs[0].zoomed);
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+ 
+         shutdown_test_runtimes(&mut app);
+     }
+@@ -1600,16 +1940,15 @@
+             .agent_detection_enabled_for_test());
+         assert_eq!(app.state.workspaces[0].tabs[0].layout.pane_count(), 1);
+         assert!(!app.state.workspaces[0].tabs[0].zoomed);
+-        assert_eq!(app.state.mode, Mode::Terminal);
++        assert_eq!(app.state.mode(), Mode::Terminal);
+         let snapshot = crate::persist::capture(
+             &app.state.workspaces,
+             &app.state.terminals,
+             &app.terminal_runtimes,
+             app.state.active,
++            app.state.active_profile.clone(),
+             app.state.selected,
+-            app.state.sidebar_width,
+-            app.state.sidebar_section_split,
+-            app.state.collapsed_space_keys.clone(),
++            app.state.snapshot_ui_prefs(),
+         );
+         assert_eq!(snapshot.workspaces[0].tabs[0].panes.len(), 1);
+         assert!(matches!(
+@@ -1683,7 +2022,7 @@
+             .scroll_metrics()
+             .is_some_and(|metrics| metrics.offset_from_bottom > 0));
+         app.install_test_popup_runtime(runtime);
+-        app.state.mode = Mode::Settings;
++        app.state.replace_mode(Mode::Settings);
+ 
+         app.handle_terminal_key_headless(TerminalKey::new(KeyCode::Esc, KeyModifiers::empty()));
+ 
+@@ -1706,7 +2045,7 @@
+             .try_send_bytes(Bytes::from_static(b"queued"))
+             .unwrap();
+         app.install_test_popup_runtime(runtime);
+-        app.state.mode = Mode::Settings;
++        app.state.replace_mode(Mode::Settings);
+ 
+         let mut send = Box::pin(
+             app.handle_terminal_key(TerminalKey::new(KeyCode::Char('x'), KeyModifiers::empty())),
+@@ -1738,7 +2077,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.view.pane_infos = pane_infos;
+ 
+         let key = crate::input::parse_terminal_key_sequence("\x1b\x7f").unwrap();
+@@ -1769,7 +2108,7 @@
+         app.state.workspaces = vec![workspace];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.view.pane_infos = pane_infos;
+         (app, pane_id, pane_info)
+     }
+@@ -1902,7 +2241,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.view.pane_infos = pane_infos;
+ 
+         let page_up = physical_page_up(1);
+@@ -1947,7 +2286,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+ 
+         let (popup_runtime, _popup_rx) =
+             crate::terminal::TerminalRuntime::test_with_channel(40, 12);
+@@ -2076,7 +2415,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.view.pane_infos = pane_infos;
+ 
+         let start_metrics = app
+@@ -2119,7 +2458,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.view.pane_infos = pane_infos;
+ 
+         let start_metrics = app
+@@ -2164,7 +2503,7 @@
+         app.state.workspaces = vec![ws];
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = Mode::Terminal;
++        app.state.replace_mode(Mode::Terminal);
+         app.state.view.pane_infos = pane_infos;
+ 
+         app.handle_terminal_key_headless(TerminalKey::new(KeyCode::PageUp, KeyModifiers::empty()));

@@ -1,0 +1,303 @@
+--- /tmp/base.tmp	2026-09-16 17:53:32
++++ docs/fork/port-0.9/orig/src/config/model.rs	2026-09-16 17:53:32
+@@ -99,6 +99,8 @@
+     #[serde(alias = "workspaces")]
+     Spaces,
+     Priority,
++    Triage,
++    Tree,
+ }
+ 
+ impl AgentPanelSortConfig {
+@@ -106,10 +108,30 @@
+         match self {
+             Self::Spaces => "spaces",
+             Self::Priority => "priority",
++            Self::Triage => "triage",
++            Self::Tree => "tree",
+         }
+     }
+ }
+ 
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
++#[serde(rename_all = "snake_case")]
++pub enum AgentCloseFocusConfig {
++    #[default]
++    Stock,
++    PanelNext,
++}
++
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
++#[serde(rename_all = "lowercase")]
++pub enum ShowTabStatusConfig {
++    #[default]
++    Off,
++    Attention,
++    Active,
++    All,
++}
++
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+ #[serde(rename_all = "lowercase")]
+ enum LegacyAgentPanelScopeConfig {
+@@ -118,6 +140,14 @@
+ }
+ 
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
++#[serde(rename_all = "snake_case")]
++pub enum AttentionReadConfig {
++    #[default]
++    OnFocus,
++    OnUnfocus,
++}
++
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+ #[serde(rename_all = "lowercase")]
+ pub enum StatusIndicatorStyle {
+     #[default]
+@@ -141,6 +171,23 @@
+     Auto,
+     Native,
+     Drawn,
++}
++
++/// Action bound to one of the mouse navigation buttons (the physical thumb
++/// buttons, reported as extended mouse buttons 8 and 9).
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
++#[serde(rename_all = "kebab-case")]
++pub enum MouseNavButtonActionConfig {
++    /// Ignore the button.
++    Off,
++    /// Navigate backward through pane focus history.
++    FocusBack,
++    /// Navigate forward through pane focus history.
++    FocusForward,
++    /// Focus the next agent in the agent panel.
++    NextAgent,
++    /// Focus the previous agent in the agent panel.
++    PreviousAgent,
+ }
+ 
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+@@ -360,6 +407,10 @@
+     pub workspace_picker: BindingConfig,
+     /// Open the session navigator. Default: "prefix+g"
+     pub goto: BindingConfig,
++    /// Open live pane resource usage. Unset by default.
++    pub usage: BindingConfig,
++    /// Open the session navigator with search focused. Default: "prefix+f"
++    pub search: BindingConfig,
+     /// Move workspace selection up in navigate mode. Default: "up".
+     pub navigate_workspace_up: BindingConfig,
+     /// Move workspace selection down in navigate mode. Default: "down".
+@@ -436,6 +487,10 @@
+     pub cycle_pane_previous: BindingConfig,
+     /// Focus the last focused pane across workspaces and tabs. Unset by default.
+     pub last_pane: BindingConfig,
++    /// Navigate backward through pane focus history. Unset by default.
++    pub focus_back: BindingConfig,
++    /// Navigate forward through pane focus history. Unset by default.
++    pub focus_forward: BindingConfig,
+     /// Split pane vertically (side by side). Default: "prefix+v"
+     pub split_vertical: BindingConfig,
+     /// Split pane horizontally (stacked). Default: "prefix+minus"
+@@ -492,6 +547,10 @@
+     #[serde(skip_serializing_if = "Option::is_none")]
+     goto: Option<BindingConfig>,
+     #[serde(skip_serializing_if = "Option::is_none")]
++    usage: Option<BindingConfig>,
++    #[serde(skip_serializing_if = "Option::is_none")]
++    search: Option<BindingConfig>,
++    #[serde(skip_serializing_if = "Option::is_none")]
+     navigate_workspace_up: Option<BindingConfig>,
+     #[serde(skip_serializing_if = "Option::is_none")]
+     navigate_workspace_down: Option<BindingConfig>,
+@@ -567,6 +626,10 @@
+     cycle_pane_previous: Option<BindingConfig>,
+     #[serde(skip_serializing_if = "Option::is_none")]
+     last_pane: Option<BindingConfig>,
++    #[serde(skip_serializing_if = "Option::is_none")]
++    focus_back: Option<BindingConfig>,
++    #[serde(skip_serializing_if = "Option::is_none")]
++    focus_forward: Option<BindingConfig>,
+     #[serde(skip_serializing_if = "Option::is_none")]
+     split_vertical: Option<BindingConfig>,
+     #[serde(skip_serializing_if = "Option::is_none")]
+@@ -621,6 +684,8 @@
+         apply_field!(close_workspace);
+         apply_field!(workspace_picker);
+         apply_field!(goto);
++        apply_field!(usage);
++        apply_field!(search);
+         apply_field!(navigate_workspace_up);
+         apply_field!(navigate_workspace_down);
+         apply_field!(navigate_pane_left);
+@@ -659,6 +724,8 @@
+         apply_field!(cycle_pane_next);
+         apply_field!(cycle_pane_previous);
+         apply_field!(last_pane);
++        apply_field!(focus_back);
++        apply_field!(focus_forward);
+         apply_field!(split_vertical);
+         apply_field!(split_horizontal);
+         apply_field!(close_pane);
+@@ -725,6 +792,8 @@
+         copy_effective_action_field!(close_workspace, keybinds.close_workspace);
+         copy_effective_action_field!(workspace_picker, keybinds.workspace_picker);
+         copy_effective_action_field!(goto, keybinds.goto);
++        copy_effective_action_field!(usage, keybinds.usage);
++        copy_effective_action_field!(search, keybinds.search);
+         copy_effective_action_field!(navigate_workspace_up, keybinds.navigate.workspace_up);
+         copy_effective_action_field!(navigate_workspace_down, keybinds.navigate.workspace_down);
+         copy_effective_action_field!(navigate_pane_left, keybinds.navigate.pane_left);
+@@ -763,6 +832,8 @@
+         copy_effective_action_field!(cycle_pane_next, keybinds.cycle_pane_next);
+         copy_effective_action_field!(cycle_pane_previous, keybinds.cycle_pane_previous);
+         copy_effective_action_field!(last_pane, keybinds.last_pane);
++        copy_effective_action_field!(focus_back, keybinds.focus_back);
++        copy_effective_action_field!(focus_forward, keybinds.focus_forward);
+         copy_effective_action_field!(split_vertical, keybinds.split_vertical);
+         copy_effective_action_field!(split_horizontal, keybinds.split_horizontal);
+         copy_effective_action_field!(close_pane, keybinds.close_pane);
+@@ -867,6 +938,10 @@
+     pub host_cursor: HostCursorModeConfig,
+     /// Modifier that lets right-click gestures pass through to pane apps. Empty disables it.
+     pub right_click_passthrough_modifier: RightClickPassthroughModifierConfig,
++    /// Action for the mouse back button (thumb button, extended button 8). Default: "focus-back".
++    pub mouse_back_button: MouseNavButtonActionConfig,
++    /// Action for the mouse forward button (thumb button, extended button 9). Default: "focus-forward".
++    pub mouse_forward_button: MouseNavButtonActionConfig,
+     /// Force a full host-terminal redraw when the outer terminal regains focus. Default: true.
+     pub redraw_on_focus_gained: bool,
+     /// Lines to scroll per mouse wheel notch. Default: 3.
+@@ -889,6 +964,10 @@
+     pub show_agent_labels_on_pane_borders: bool,
+     /// Hide the tab row when the workspace has one tab. Default: false.
+     pub hide_tab_bar_when_single_tab: bool,
++    /// Show sidebar agent state icons in tabs. Default: off.
++    pub show_tab_status: ShowTabStatusConfig,
++    /// When focused agent attention is marked read. Default: on_focus.
++    pub attention_read: AttentionReadConfig,
+     /// Desktop tab row placement. Default: top.
+     pub tab_bar_position: TabBarPositionConfig,
+     /// Ordered entries shown at the right edge of the desktop tab row. Empty by default.
+@@ -900,6 +979,8 @@
+     pub window_title: String,
+     /// Agent sidebar ordering. Saved values are "spaces" or "priority". Default: "spaces".
+     pub agent_panel_sort: AgentPanelSortConfig,
++    /// Focus behavior after closing an agent pane. Default: "stock".
++    pub agent_close_focus: AgentCloseFocusConfig,
+     /// Retired setting that Herdr wrote before the workspace filter was removed.
+     #[serde(rename = "agent_panel_scope")]
+     _legacy_agent_panel_scope: Option<LegacyAgentPanelScopeConfig>,
+@@ -1035,6 +1116,8 @@
+             close_workspace: BindingConfig::one("prefix+shift+d"),
+             workspace_picker: BindingConfig::one("prefix+w"),
+             goto: BindingConfig::one("prefix+g"),
++            usage: BindingConfig::empty(),
++            search: BindingConfig::one("prefix+f"),
+             navigate_workspace_up: BindingConfig::one("up"),
+             navigate_workspace_down: BindingConfig::one("down"),
+             navigate_pane_left: BindingConfig::one("h"),
+@@ -1073,6 +1156,8 @@
+             cycle_pane_next: BindingConfig::one("prefix+tab"),
+             cycle_pane_previous: BindingConfig::one("prefix+shift+tab"),
+             last_pane: BindingConfig::empty(),
++            focus_back: BindingConfig::empty(),
++            focus_forward: BindingConfig::empty(),
+             split_vertical: BindingConfig::one("prefix+v"),
+             split_horizontal: BindingConfig::one("prefix+minus"),
+             close_pane: BindingConfig::one("prefix+x"),
+@@ -1111,6 +1196,8 @@
+             copy_on_select: true,
+             host_cursor: HostCursorModeConfig::Auto,
+             right_click_passthrough_modifier: RightClickPassthroughModifierConfig::default(),
++            mouse_back_button: MouseNavButtonActionConfig::FocusBack,
++            mouse_forward_button: MouseNavButtonActionConfig::FocusForward,
+             redraw_on_focus_gained: true,
+             mouse_scroll_lines: None,
+             confirm_close: true,
+@@ -1122,11 +1209,14 @@
+             pane_gaps: true,
+             show_agent_labels_on_pane_borders: false,
+             hide_tab_bar_when_single_tab: false,
++            show_tab_status: ShowTabStatusConfig::Off,
++            attention_read: AttentionReadConfig::OnFocus,
+             tab_bar_position: TabBarPositionConfig::Top,
+             tab_bar_right: Vec::new(),
+             tab_bar_right_separator: " ".into(),
+             window_title: super::window_title::default_window_title(),
+             agent_panel_sort: AgentPanelSortConfig::Spaces,
++            agent_close_focus: AgentCloseFocusConfig::Stock,
+             _legacy_agent_panel_scope: None,
+             status_indicators: StatusIndicatorStyle::Dots,
+             sidebar: SidebarConfig::default(),
+@@ -1360,6 +1450,13 @@
+ 
+         let toml = r#"
+ [ui]
++agent_panel_sort = "triage"
++"#;
++        let config: Config = toml::from_str(toml).unwrap();
++        assert_eq!(config.ui.agent_panel_sort, AgentPanelSortConfig::Triage);
++
++        let toml = r#"
++[ui]
+ agent_panel_sort = "workspaces"
+ "#;
+         let config: Config = toml::from_str(toml).unwrap();
+@@ -1371,6 +1468,24 @@
+ "#;
+         let config: Config = toml::from_str(toml).unwrap();
+         assert_eq!(config.ui.agent_panel_sort, AgentPanelSortConfig::Spaces);
++    }
++
++    #[test]
++    fn agent_close_focus_config_parses_and_defaults() {
++        assert_eq!(
++            Config::default().ui.agent_close_focus,
++            AgentCloseFocusConfig::Stock
++        );
++
++        let toml = r#"
++[ui]
++agent_close_focus = "panel_next"
++"#;
++        let config: Config = toml::from_str(toml).unwrap();
++        assert_eq!(
++            config.ui.agent_close_focus,
++            AgentCloseFocusConfig::PanelNext
++        );
+     }
+ 
+     #[test]
+@@ -1399,6 +1514,11 @@
+         assert!(default_config.ui.pane_gaps);
+         assert!(!default_config.ui.show_agent_labels_on_pane_borders);
+         assert!(!default_config.ui.hide_tab_bar_when_single_tab);
++        assert_eq!(default_config.ui.show_tab_status, ShowTabStatusConfig::Off);
++        assert_eq!(
++            default_config.ui.attention_read,
++            AttentionReadConfig::OnFocus
++        );
+         assert_eq!(
+             default_config.ui.tab_bar_position,
+             TabBarPositionConfig::Top
+@@ -1414,6 +1534,8 @@
+ pane_gaps = true
+ show_agent_labels_on_pane_borders = true
+ hide_tab_bar_when_single_tab = true
++show_tab_status = "active"
++attention_read = "on_unfocus"
+ tab_bar_position = "bottom"
+ tab_bar_right = [
+   { type = "zoom" },
+@@ -1431,6 +1553,8 @@
+         assert!(config.ui.pane_gaps);
+         assert!(config.ui.show_agent_labels_on_pane_borders);
+         assert!(config.ui.hide_tab_bar_when_single_tab);
++        assert_eq!(config.ui.show_tab_status, ShowTabStatusConfig::Active);
++        assert_eq!(config.ui.attention_read, AttentionReadConfig::OnUnfocus);
+         assert_eq!(config.ui.tab_bar_position, TabBarPositionConfig::Bottom);
+         assert_eq!(config.ui.tab_bar_right.len(), 5);
+         assert!(matches!(

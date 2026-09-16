@@ -1,0 +1,57 @@
+--- /tmp/base.tmp	2026-09-16 17:53:30
++++ docs/fork/port-0.9/orig/src/api/schema.rs	2026-09-16 17:53:30
+@@ -55,6 +55,8 @@
+     ServerAgentManifests(EmptyParams),
+     #[serde(rename = "server.reload_agent_manifests")]
+     ServerReloadAgentManifests(EmptyParams),
++    #[serde(rename = "clipboard.image.write")]
++    ClipboardImageWrite(ClipboardImageWriteParams),
+     #[serde(rename = "notification.show")]
+     NotificationShow(NotificationShowParams),
+     #[serde(rename = "client.window_title.set")]
+@@ -66,7 +68,15 @@
+     #[serde(rename = "workspace.create")]
+     WorkspaceCreate(WorkspaceCreateParams),
+     #[serde(rename = "workspace.list")]
+-    WorkspaceList(EmptyParams),
++    WorkspaceList(WorkspaceListParams),
++    #[serde(rename = "workspace.set_profiles")]
++    WorkspaceSetProfiles(WorkspaceSetProfilesParams),
++    #[serde(rename = "workspace.set_orchestrator")]
++    WorkspaceSetOrchestrator(WorkspaceSetOrchestratorParams),
++    #[serde(rename = "profile.switch")]
++    ProfileSwitch(ProfileSwitchParams),
++    #[serde(rename = "profile.list")]
++    ProfileList(EmptyParams),
+     #[serde(rename = "workspace.get")]
+     WorkspaceGet(WorkspaceTarget),
+     #[serde(rename = "workspace.focus")]
+@@ -105,6 +115,8 @@
+     TabClose(TabTarget),
+     #[serde(rename = "agent.list")]
+     AgentList(EmptyParams),
++    #[serde(rename = "agent.usage")]
++    AgentUsage(EmptyParams),
+     #[serde(rename = "agent.get")]
+     AgentGet(AgentTarget),
+     #[serde(rename = "agent.read")]
+@@ -123,6 +135,10 @@
+     AgentFocus(AgentTarget),
+     #[serde(rename = "agent.start")]
+     AgentStart(AgentStartParams),
++    #[serde(rename = "agent.owner.set")]
++    AgentOwnerSet(AgentOwnerSetParams),
++    #[serde(rename = "agent.owner.clear")]
++    AgentOwnerClear(AgentTarget),
+     #[serde(rename = "agent.prompt")]
+     AgentPrompt(AgentPromptParams),
+     #[serde(rename = "agent.wait")]
+@@ -163,6 +179,8 @@
+     PaneFocus(PaneTarget),
+     #[serde(rename = "pane.input.set")]
+     PaneInputSet(PaneInputSetParams),
++    #[serde(rename = "pane.set_profiles")]
++    PaneSetProfiles(PaneSetProfilesParams),
+     #[serde(rename = "pane.rename")]
+     PaneRename(PaneRenameParams),
+     #[serde(rename = "pane.send_text")]

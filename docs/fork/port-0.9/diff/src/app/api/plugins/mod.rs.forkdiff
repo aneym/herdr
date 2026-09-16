@@ -1,0 +1,105 @@
+--- /tmp/base.tmp	2026-09-16 17:53:31
++++ docs/fork/port-0.9/orig/src/app/api/plugins/mod.rs	2026-09-16 17:53:31
+@@ -392,7 +392,8 @@
+                 "width and height are only supported when placement is popup",
+             );
+         }
+-        if placement == PluginPanePlacement::Popup && self.state.mode != crate::app::Mode::Terminal
++        if placement == PluginPanePlacement::Popup
++            && self.state.mode() != crate::app::Mode::Terminal
+         {
+             return encode_error(
+                 id,
+@@ -1426,12 +1427,12 @@
+             })
+         };
+ 
+-        app.state.mode = crate::app::Mode::Settings;
++        app.state.replace_mode(crate::app::Mode::Settings);
+         app.state.settings.original_theme = Some("settings-theme".into());
+         let settings_response = open_popup(&mut app, "settings-popup");
+         let settings_error: serde_json::Value = serde_json::from_str(&settings_response).unwrap();
+         assert_eq!(settings_error["error"]["code"], "ui_busy");
+-        assert_eq!(app.state.mode, crate::app::Mode::Settings);
++        assert_eq!(app.state.mode(), crate::app::Mode::Settings);
+         assert_eq!(
+             app.state.settings.original_theme.as_deref(),
+             Some("settings-theme")
+@@ -1446,12 +1447,12 @@
+             selection: None,
+             search: crate::app::state::CopyModeSearchState::default(),
+         };
+-        app.state.mode = crate::app::Mode::Copy;
++        app.state.replace_mode(crate::app::Mode::Copy);
+         app.state.copy_mode = Some(copy_mode.clone());
+         let copy_response = open_popup(&mut app, "copy-popup");
+         let copy_error: serde_json::Value = serde_json::from_str(&copy_response).unwrap();
+         assert_eq!(copy_error["error"]["code"], "ui_busy");
+-        assert_eq!(app.state.mode, crate::app::Mode::Copy);
++        assert_eq!(app.state.mode(), crate::app::Mode::Copy);
+         assert_eq!(app.state.copy_mode, Some(copy_mode));
+         assert!(app.state.popup_pane.is_none());
+ 
+@@ -1470,7 +1471,7 @@
+         app.state.ensure_test_terminals();
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = crate::app::Mode::Terminal;
++        app.state.replace_mode(crate::app::Mode::Terminal);
+         app.state.kitty_graphics_enabled = true;
+         app.state.host_cell_size = crate::kitty_graphics::HostCellSize {
+             width_px: 11,
+@@ -1585,7 +1586,7 @@
+         app.state.ensure_test_terminals();
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = crate::app::Mode::Terminal;
++        app.state.replace_mode(crate::app::Mode::Terminal);
+         let root = unique_temp_path("plugin-pane-path-env");
+         let capture = root.join("capture.txt");
+         write_manifest_content(
+@@ -1690,7 +1691,7 @@
+         app.state.ensure_test_terminals();
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = crate::app::Mode::Terminal;
++        app.state.replace_mode(crate::app::Mode::Terminal);
+ 
+         let root = unique_temp_path("plugin-pane-tab-events");
+         write_manifest_content(
+@@ -1773,7 +1774,7 @@
+         app.state.ensure_test_terminals();
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = crate::app::Mode::Terminal;
++        app.state.replace_mode(crate::app::Mode::Terminal);
+ 
+         let root = unique_temp_path("plugin-pane-split-layout-event");
+         write_manifest_content(
+@@ -1852,7 +1853,7 @@
+         app.state.ensure_test_terminals();
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = crate::app::Mode::Terminal;
++        app.state.replace_mode(crate::app::Mode::Terminal);
+ 
+         let root = unique_temp_path("plugin-pane-overlay-layout-event");
+         write_manifest_content(
+@@ -1931,7 +1932,7 @@
+         app.state.ensure_test_terminals();
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = crate::app::Mode::Terminal;
++        app.state.replace_mode(crate::app::Mode::Terminal);
+         let root_pane = app.state.workspaces[0].tabs[0].root_pane;
+         let root_public = app.public_pane_id(0, root_pane).unwrap();
+ 
+@@ -2428,7 +2429,7 @@
+         app.state.ensure_test_terminals();
+         app.state.active = Some(0);
+         app.state.selected = 0;
+-        app.state.mode = crate::app::Mode::Terminal;
++        app.state.replace_mode(crate::app::Mode::Terminal);
+         app.terminal_runtimes.insert(
+             terminal_id,
+             crate::terminal::TerminalRuntime::test_with_screen_bytes(80, 24, b"hello plugin\n"),

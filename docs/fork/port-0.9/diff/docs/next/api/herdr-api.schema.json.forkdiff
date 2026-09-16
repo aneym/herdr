@@ -1,0 +1,673 @@
+--- /tmp/base.tmp	2026-09-16 17:53:30
++++ docs/fork/port-0.9/orig/docs/next/api/herdr-api.schema.json	2026-09-16 17:53:30
+@@ -808,6 +808,12 @@
+             "pane_id": {
+               "type": "string"
+             },
++            "profiles": {
++              "items": {
++                "type": "string"
++              },
++              "type": "array"
++            },
+             "revision": {
+               "format": "uint64",
+               "minimum": 0,
+@@ -1087,10 +1093,20 @@
+               "minimum": 0,
+               "type": "integer"
+             },
++            "orchestrator_mode": {
++              "default": false,
++              "type": "boolean"
++            },
+             "pane_count": {
+               "format": "uint",
+               "minimum": 0,
+               "type": "integer"
++            },
++            "profiles": {
++              "items": {
++                "type": "string"
++              },
++              "type": "array"
+             },
+             "tab_count": {
+               "format": "uint",
+@@ -1222,6 +1238,22 @@
+     },
+     "request": {
+       "$defs": {
++        "AgentOwnerSetParams": {
++          "properties": {
++            "owner": {
++              "description": "Agent target (name or pane id) that becomes the current owner.",
++              "type": "string"
++            },
++            "target": {
++              "type": "string"
++            }
++          },
++          "required": [
++            "target",
++            "owner"
++          ],
++          "type": "object"
++        },
+         "AgentPromptParams": {
+           "properties": {
+             "target": {
+@@ -1340,11 +1372,25 @@
+               },
+               "type": "array"
+             },
++            "caller_pane_id": {
++              "description": "Pane the request was issued from. When that pane hosts a live agent,\nthe started agent is recorded as owned by it.",
++              "type": [
++                "string",
++                "null"
++              ]
++            },
+             "kind": {
+               "type": "string"
+             },
+             "name": {
+               "type": "string"
++            },
++            "owner": {
++              "description": "Explicit owner agent target for the started agent. Takes precedence\nover `caller_pane_id`.",
++              "type": [
++                "string",
++                "null"
++              ]
+             },
+             "pane_id": {
+               "type": "string"
+@@ -1697,6 +1743,23 @@
+           },
+           "required": [
+             "title"
++          ],
++          "type": "object"
++        },
++        "ClipboardImageWriteParams": {
++          "properties": {
++            "data_base64": {
++              "description": "Standard base64-encoded image bytes.",
++              "type": "string"
++            },
++            "extension": {
++              "description": "Recognized image filename extension, without a leading dot.",
++              "type": "string"
++            }
++          },
++          "required": [
++            "extension",
++            "data_base64"
+           ],
+           "type": "object"
+         },
+@@ -3061,6 +3124,24 @@
+           "required": [
+             "pane_id",
+             "text"
++          ],
++          "type": "object"
++        },
++        "PaneSetProfilesParams": {
++          "properties": {
++            "pane_id": {
++              "type": "string"
++            },
++            "profiles": {
++              "items": {
++                "type": "string"
++              },
++              "type": "array"
++            }
++          },
++          "required": [
++            "pane_id",
++            "profiles"
+           ],
+           "type": "object"
+         },
+@@ -3630,6 +3711,17 @@
+               "type": "string"
+             }
+           ]
++        },
++        "ProfileSwitchParams": {
++          "properties": {
++            "profile": {
++              "type": "string"
++            }
++          },
++          "required": [
++            "profile"
++          ],
++          "type": "object"
+         },
+         "ReadFormat": {
+           "enum": [
+@@ -4182,10 +4274,28 @@
+                 "string",
+                 "null"
+               ]
++            },
++            "profiles": {
++              "items": {
++                "type": "string"
++              },
++              "type": [
++                "array",
++                "null"
++              ]
+             }
+           },
+           "type": "object"
+         },
++        "WorkspaceListParams": {
++          "properties": {
++            "visible_only": {
++              "default": false,
++              "type": "boolean"
++            }
++          },
++          "type": "object"
++        },
+         "WorkspaceMoveBlockParams": {
+           "properties": {
+             "before_workspace_id": {
+@@ -4284,6 +4394,39 @@
+           ],
+           "type": "object"
+         },
++        "WorkspaceSetOrchestratorParams": {
++          "properties": {
++            "enabled": {
++              "type": "boolean"
++            },
++            "workspace_id": {
++              "type": "string"
++            }
++          },
++          "required": [
++            "workspace_id",
++            "enabled"
++          ],
++          "type": "object"
++        },
++        "WorkspaceSetProfilesParams": {
++          "properties": {
++            "profiles": {
++              "items": {
++                "type": "string"
++              },
++              "type": "array"
++            },
++            "workspace_id": {
++              "type": "string"
++            }
++          },
++          "required": [
++            "workspace_id",
++            "profiles"
++          ],
++          "type": "object"
++        },
+         "WorkspaceTarget": {
+           "properties": {
+             "workspace_id": {
+@@ -4540,6 +4683,22 @@
+         {
+           "properties": {
+             "method": {
++              "const": "clipboard.image.write",
++              "type": "string"
++            },
++            "params": {
++              "$ref": "#/schemas/request/$defs/ClipboardImageWriteParams"
++            }
++          },
++          "required": [
++            "method",
++            "params"
++          ],
++          "type": "object"
++        },
++        {
++          "properties": {
++            "method": {
+               "const": "notification.show",
+               "type": "string"
+             },
+@@ -4621,6 +4780,70 @@
+           "properties": {
+             "method": {
+               "const": "workspace.list",
++              "type": "string"
++            },
++            "params": {
++              "$ref": "#/schemas/request/$defs/WorkspaceListParams"
++            }
++          },
++          "required": [
++            "method",
++            "params"
++          ],
++          "type": "object"
++        },
++        {
++          "properties": {
++            "method": {
++              "const": "workspace.set_profiles",
++              "type": "string"
++            },
++            "params": {
++              "$ref": "#/schemas/request/$defs/WorkspaceSetProfilesParams"
++            }
++          },
++          "required": [
++            "method",
++            "params"
++          ],
++          "type": "object"
++        },
++        {
++          "properties": {
++            "method": {
++              "const": "workspace.set_orchestrator",
++              "type": "string"
++            },
++            "params": {
++              "$ref": "#/schemas/request/$defs/WorkspaceSetOrchestratorParams"
++            }
++          },
++          "required": [
++            "method",
++            "params"
++          ],
++          "type": "object"
++        },
++        {
++          "properties": {
++            "method": {
++              "const": "profile.switch",
++              "type": "string"
++            },
++            "params": {
++              "$ref": "#/schemas/request/$defs/ProfileSwitchParams"
++            }
++          },
++          "required": [
++            "method",
++            "params"
++          ],
++          "type": "object"
++        },
++        {
++          "properties": {
++            "method": {
++              "const": "profile.list",
+               "type": "string"
+             },
+             "params": {
+@@ -4940,6 +5163,22 @@
+         {
+           "properties": {
+             "method": {
++              "const": "agent.usage",
++              "type": "string"
++            },
++            "params": {
++              "$ref": "#/schemas/request/$defs/EmptyParams"
++            }
++          },
++          "required": [
++            "method",
++            "params"
++          ],
++          "type": "object"
++        },
++        {
++          "properties": {
++            "method": {
+               "const": "agent.get",
+               "type": "string"
+             },
+@@ -5073,6 +5312,38 @@
+             },
+             "params": {
+               "$ref": "#/schemas/request/$defs/AgentStartParams"
++            }
++          },
++          "required": [
++            "method",
++            "params"
++          ],
++          "type": "object"
++        },
++        {
++          "properties": {
++            "method": {
++              "const": "agent.owner.set",
++              "type": "string"
++            },
++            "params": {
++              "$ref": "#/schemas/request/$defs/AgentOwnerSetParams"
++            }
++          },
++          "required": [
++            "method",
++            "params"
++          ],
++          "type": "object"
++        },
++        {
++          "properties": {
++            "method": {
++              "const": "agent.owner.clear",
++              "type": "string"
++            },
++            "params": {
++              "$ref": "#/schemas/request/$defs/AgentTarget"
+             }
+           },
+           "required": [
+@@ -5404,6 +5675,22 @@
+         {
+           "properties": {
+             "method": {
++              "const": "pane.set_profiles",
++              "type": "string"
++            },
++            "params": {
++              "$ref": "#/schemas/request/$defs/PaneSetProfilesParams"
++            }
++          },
++          "required": [
++            "method",
++            "params"
++          ],
++          "type": "object"
++        },
++        {
++          "properties": {
++            "method": {
+               "const": "pane.rename",
+               "type": "string"
+             },
+@@ -6127,6 +6414,13 @@
+         "AgentInfo": {
+           "properties": {
+             "agent": {
++              "type": [
++                "string",
++                "null"
++              ]
++            },
++            "agent_id": {
++              "description": "Durable identity of this agent occupancy (never a pane id).",
+               "type": [
+                 "string",
+                 "null"
+@@ -6178,6 +6472,17 @@
+                 "null"
+               ]
+             },
++            "ownership": {
++              "anyOf": [
++                {
++                  "$ref": "#/schemas/success_response/$defs/AgentOwnershipInfo"
++                },
++                {
++                  "type": "null"
++                }
++              ],
++              "description": "Durable ownership: immutable origin plus transferable current owner."
++            },
+             "pane_id": {
+               "type": "string"
+             },
+@@ -6308,6 +6613,69 @@
+             "source",
+             "source_kind",
+             "local_override_shadowing_remote"
++          ],
++          "type": "object"
++        },
++        "AgentOwnerInfo": {
++          "properties": {
++            "agent": {
++              "type": [
++                "string",
++                "null"
++              ]
++            },
++            "agent_id": {
++              "description": "Durable agent identity of the owner (never a pane id).",
++              "type": "string"
++            },
++            "name": {
++              "type": [
++                "string",
++                "null"
++              ]
++            },
++            "pane_id": {
++              "description": "Pane currently hosting the resolved owner, when it resolves.",
++              "type": [
++                "string",
++                "null"
++              ]
++            },
++            "resolved": {
++              "description": "Whether the owner reference resolves to a live agent.",
++              "type": "boolean"
++            }
++          },
++          "required": [
++            "agent_id",
++            "resolved"
++          ],
++          "type": "object"
++        },
++        "AgentOwnershipInfo": {
++          "properties": {
++            "current": {
++              "anyOf": [
++                {
++                  "$ref": "#/schemas/success_response/$defs/AgentOwnerInfo"
++                },
++                {
++                  "type": "null"
++                }
++              ],
++              "description": "The owner the agent currently belongs to; absent after a release."
++            },
++            "origin": {
++              "$ref": "#/schemas/success_response/$defs/AgentOwnerInfo",
++              "description": "The first recorded owner. Immutable for the life of the record."
++            },
++            "orphaned": {
++              "description": "True when the current owner reference no longer resolves.",
++              "type": "boolean"
++            }
++          },
++          "required": [
++            "origin"
+           ],
+           "type": "object"
+         },
+@@ -6351,6 +6719,54 @@
+           ],
+           "type": "string"
+         },
++        "AgentUsageInfo": {
++          "properties": {
++            "agent": {
++              "type": [
++                "string",
++                "null"
++              ]
++            },
++            "cpu_percent": {
++              "format": "double",
++              "type": "number"
++            },
++            "mem_bytes": {
++              "format": "uint64",
++              "minimum": 0,
++              "type": "integer"
++            },
++            "pane_id": {
++              "type": "string"
++            },
++            "process_count": {
++              "format": "uint32",
++              "minimum": 0,
++              "type": "integer"
++            },
++            "tab_id": {
++              "type": "string"
++            },
++            "title": {
++              "type": [
++                "string",
++                "null"
++              ]
++            },
++            "workspace_id": {
++              "type": "string"
++            }
++          },
++          "required": [
++            "pane_id",
++            "workspace_id",
++            "tab_id",
++            "cpu_percent",
++            "mem_bytes",
++            "process_count"
++          ],
++          "type": "object"
++        },
+         "ClientWindowTitleReason": {
+           "enum": [
+             "set",
+@@ -7455,6 +7871,12 @@
+             },
+             "pane_id": {
+               "type": "string"
++            },
++            "profiles": {
++              "items": {
++                "type": "string"
++              },
++              "type": "array"
+             },
+             "revision": {
+               "format": "uint64",
+@@ -8742,6 +9164,29 @@
+               "required": [
+                 "type",
+                 "workspaces"
++              ],
++              "type": "object"
++            },
++            {
++              "properties": {
++                "active": {
++                  "type": "string"
++                },
++                "profiles": {
++                  "items": {
++                    "type": "string"
++                  },
++                  "type": "array"
++                },
++                "type": {
++                  "const": "profile_list",
++                  "type": "string"
++                }
++              },
++              "required": [
++                "type",
++                "active",
++                "profiles"
+               ],
+               "type": "object"
+             },
+@@ -8978,6 +9423,25 @@
+               "required": [
+                 "type",
+                 "agents"
++              ],
++              "type": "object"
++            },
++            {
++              "properties": {
++                "type": {
++                  "const": "agent_usage",
++                  "type": "string"
++                },
++                "usage": {
++                  "items": {
++                    "$ref": "#/schemas/success_response/$defs/AgentUsageInfo"
++                  },
++                  "type": "array"
++                }
++              },
++              "required": [
++                "type",
++                "usage"
+               ],
+               "type": "object"
+             },
+@@ -9798,7 +10262,23 @@
+             },
+             {
+               "properties": {
++                "paste_text": {
++                  "type": "string"
++                },
+                 "type": {
++                  "const": "clipboard_image_written",
++                  "type": "string"
++                }
++              },
++              "required": [
++                "type",
++                "paste_text"
++              ],
++              "type": "object"
++            },
++            {
++              "properties": {
++                "type": {
+                   "const": "ok",
+                   "type": "string"
+                 }
+@@ -9959,12 +10439,22 @@
+               "format": "uint",
+               "minimum": 0,
+               "type": "integer"
++            },
++            "orchestrator_mode": {
++              "default": false,
++              "type": "boolean"
+             },
+             "pane_count": {
+               "format": "uint",
+               "minimum": 0,
+               "type": "integer"
+             },
++            "profiles": {
++              "items": {
++                "type": "string"
++              },
++              "type": "array"
++            },
+             "tab_count": {
+               "format": "uint",
+               "minimum": 0,

@@ -1,0 +1,29 @@
+--- /tmp/base.tmp	2026-09-16 17:53:32
++++ docs/fork/port-0.9/orig/src/server/render_stream.rs	2026-09-16 17:53:32
+@@ -416,7 +416,7 @@
+     app_state: &AppState,
+     terminal_runtimes: &TerminalRuntimeRegistry,
+ ) -> bool {
+-    if app_state.mode != Mode::Terminal {
++    if app_state.mode() != Mode::Terminal {
+         return false;
+     }
+ 
+@@ -444,7 +444,7 @@
+     app_state: &AppState,
+     terminal_runtimes: &TerminalRuntimeRegistry,
+ ) -> bool {
+-    if app_state.mode != Mode::Terminal {
++    if app_state.mode() != Mode::Terminal {
+         return false;
+     }
+ 
+@@ -548,7 +548,7 @@
+ 
+     fn app_with(workspaces: Vec<Workspace>) -> AppState {
+         let mut app = AppState::test_new();
+-        app.mode = Mode::Terminal;
++        app.replace_mode(Mode::Terminal);
+         app.pane_scrollbars = true;
+         app.workspaces = workspaces;
+         app.active = Some(0);

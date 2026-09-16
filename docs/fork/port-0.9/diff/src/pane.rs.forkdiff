@@ -1,0 +1,194 @@
+--- /tmp/base.tmp	2026-09-16 17:53:32
++++ docs/fork/port-0.9/orig/src/pane.rs	2026-09-16 17:53:32
+@@ -55,6 +55,8 @@
+ const RELEASE_REACQUIRE_SUPPRESSION: std::time::Duration = std::time::Duration::from_secs(1);
+ const PANE_TERM: &str = "xterm-256color";
+ const PANE_COLORTERM: &str = "truecolor";
++const PANE_TERM_PROGRAM: &str = "ghostty";
++const PANE_TERM_PROGRAM_VERSION: &str = "1.3.1";
+ 
+ #[cfg(test)]
+ thread_local! {
+@@ -78,6 +80,10 @@
+     // when the remote side lacks matching terminfo entries.
+     cmd.env("TERM", PANE_TERM);
+     cmd.env("COLORTERM", PANE_COLORTERM);
++    // The pane VT is libghostty-vt; kitty-protocol apps gate CSI-u support on
++    // terminal identity rather than capability queries.
++    cmd.env("TERM_PROGRAM", PANE_TERM_PROGRAM);
++    cmd.env("TERM_PROGRAM_VERSION", PANE_TERM_PROGRAM_VERSION);
+     cmd.env_remove("WT_SESSION");
+ }
+ 
+@@ -372,6 +378,19 @@
+     }
+ 
+     ForegroundShellAgentAction::ObserveProbe
++}
++
++/// Whether an observed foreground-agent change must drop the retained OSC
++/// title/progress evidence. Evidence must not leak from one agent process to
++/// its replacement, so any change away from a known agent (Some -> Some, a
++/// same-agent replacement, or an exit to None) clears. First acquisition
++/// (None -> Some) keeps it: the bytes seen so far were emitted by the very
++/// process being identified. Clearing there raced the probe against agents
++/// that set their title once at startup (Claude), wiping the title seconds
++/// after it arrived and leaving the osc_title rules without evidence until
++/// the agent's next title change.
++fn agent_change_clears_osc_evidence(previous_agent: Option<Agent>) -> bool {
++    previous_agent.is_some()
+ }
+ 
+ fn apply_foreground_shell_agent_action(
+@@ -831,9 +850,12 @@
+                     if agent_changed {
+                         pending_idle.clear();
+                         last_screen_scan_detection_content_seq = None;
+-                        // A new foreground agent must not inherit OSC
+-                        // title/progress evidence from the previous process.
+-                        terminal.clear_agent_osc_state();
++                        // A replacement agent must not inherit OSC evidence
++                        // from the previous process; a first acquisition keeps
++                        // the evidence its own process already emitted.
++                        if agent_change_clears_osc_evidence(previous_agent) {
++                            terminal.clear_agent_osc_state();
++                        }
+                         if let Some(agent) = agent {
+                             agent_startup_grace_until = Some(now + AGENT_STARTUP_GRACE_WINDOW);
+                             state = AgentState::Unknown;
+@@ -1176,6 +1198,28 @@
+     fn try_send_bytes(&self, bytes: Bytes) -> Result<(), mpsc::error::TrySendError<Bytes>> {
+         match self {
+             PaneRuntimeIo::Actor(actor) => actor.try_write_user_input(bytes),
++            #[cfg(test)]
++            PaneRuntimeIo::TestChannel { sender, .. } => sender.try_send(bytes),
++        }
++    }
++
++    async fn send_bytes_with_barrier(
++        &self,
++        bytes: Bytes,
++    ) -> Result<(), mpsc::error::SendError<Bytes>> {
++        match self {
++            PaneRuntimeIo::Actor(actor) => actor.write_user_input_barrier(bytes).await,
++            #[cfg(test)]
++            PaneRuntimeIo::TestChannel { sender, .. } => sender.send(bytes).await,
++        }
++    }
++
++    fn try_send_bytes_with_barrier(
++        &self,
++        bytes: Bytes,
++    ) -> Result<(), mpsc::error::TrySendError<Bytes>> {
++        match self {
++            PaneRuntimeIo::Actor(actor) => actor.try_write_user_input_barrier(bytes),
+             #[cfg(test)]
+             PaneRuntimeIo::TestChannel { sender, .. } => sender.try_send(bytes),
+         }
+@@ -1958,7 +2002,10 @@
+                     publish_reported_cwd(pane_id, cwd, &reported_cwd, &read_events);
+                 }
+                 for content in result.clipboard_writes {
+-                    if let Err(err) = read_events.try_send(AppEvent::ClipboardWrite { content }) {
++                    if let Err(err) = read_events.try_send(AppEvent::ClipboardWrite {
++                        content,
++                        feedback: None,
++                    }) {
+                         warn!(
+                             pane = pane_id.raw(),
+                             err = %err,
+@@ -2129,7 +2176,10 @@
+                     publish_reported_cwd(pane_id, cwd, &reported_cwd, &events);
+                 }
+                 for content in result.clipboard_writes {
+-                    if let Err(err) = events.try_send(AppEvent::ClipboardWrite { content }) {
++                    if let Err(err) = events.try_send(AppEvent::ClipboardWrite {
++                        content,
++                        feedback: None,
++                    }) {
+                         warn!(
+                             pane = pane_id.raw(),
+                             err = %err,
+@@ -2363,9 +2413,13 @@
+                                 {
+                                     pending_idle.clear();
+                                     last_screen_scan_detection_content_seq = None;
+-                                    // A new foreground agent must not inherit OSC
+-                                    // title/progress evidence from the previous process.
+-                                    terminal.clear_agent_osc_state();
++                                    // A replacement agent must not inherit OSC
++                                    // evidence from the previous process; a first
++                                    // acquisition keeps the evidence its own
++                                    // process already emitted.
++                                    if agent_change_clears_osc_evidence(previous_agent) {
++                                        terminal.clear_agent_osc_state();
++                                    }
+                                     if let Some(agent) = agent {
+                                         agent_startup_grace_until =
+                                             Some(now + AGENT_STARTUP_GRACE_WINDOW);
+@@ -2847,11 +2901,14 @@
+     }
+ 
+     pub async fn send_paste(&self, text: String) -> Result<(), mpsc::error::SendError<Bytes>> {
+-        self.send_bytes(self.paste_payload(text)).await
++        self.io
++            .send_bytes_with_barrier(self.paste_payload(text))
++            .await
+     }
+ 
+     pub fn try_send_paste(&self, text: String) -> Result<(), mpsc::error::TrySendError<Bytes>> {
+-        self.try_send_bytes(self.paste_payload(text))
++        self.io
++            .try_send_bytes_with_barrier(self.paste_payload(text))
+     }
+ 
+     fn paste_payload(&self, text: String) -> Bytes {
+@@ -3531,18 +3588,26 @@
+     #[cfg(unix)]
+     #[test]
+     fn pane_terminal_identity_overrides_outer_terminal_env() {
+-        let output = capture_shell_output("printf '%s\\n%s\\n' \"$TERM\" \"$COLORTERM\"", &[]);
+-        assert_eq!(output, "xterm-256color\ntruecolor\n");
++        let output = capture_shell_output(
++            "printf '%s\\n%s\\n%s\\n%s\\n' \"$TERM\" \"$COLORTERM\" \"$TERM_PROGRAM\" \"$TERM_PROGRAM_VERSION\"",
++            &[],
++        );
++        assert_eq!(output, "xterm-256color\ntruecolor\nghostty\n1.3.1\n");
+     }
+ 
+     #[cfg(unix)]
+     #[test]
+     fn pane_terminal_identity_allows_explicit_override() {
+         let output = capture_shell_output(
+-            "printf '%s\\n%s\\n' \"$TERM\" \"$COLORTERM\"",
+-            &[("TERM", "vt100"), ("COLORTERM", "24bit")],
++            "printf '%s\\n%s\\n%s\\n%s\\n' \"$TERM\" \"$COLORTERM\" \"$TERM_PROGRAM\" \"$TERM_PROGRAM_VERSION\"",
++            &[
++                ("TERM", "vt100"),
++                ("COLORTERM", "24bit"),
++                ("TERM_PROGRAM", "override"),
++                ("TERM_PROGRAM_VERSION", "2.0"),
++            ],
+         );
+-        assert_eq!(output, "vt100\n24bit\n");
++        assert_eq!(output, "vt100\n24bit\noverride\n2.0\n");
+     }
+ 
+     #[cfg(unix)]
+@@ -3730,6 +3795,16 @@
+             foreground_shell_agent_action(Some(Agent::Claude), None, false, false),
+             ForegroundShellAgentAction::ObserveProbe
+         );
++    }
++
++    #[test]
++    fn first_agent_acquisition_keeps_osc_evidence_replacement_clears_it() {
++        // None -> Some is the startup race: the title already on the wire came
++        // from the process being identified, so it must survive.
++        assert!(!agent_change_clears_osc_evidence(None));
++        // Any change away from a known agent clears — replacement processes
++        // and agent switches must not inherit the previous process's titles.
++        assert!(agent_change_clears_osc_evidence(Some(Agent::Claude)));
+     }
+ 
+     #[test]

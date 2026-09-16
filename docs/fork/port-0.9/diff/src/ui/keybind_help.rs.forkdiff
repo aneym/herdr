@@ -1,0 +1,19 @@
+--- /tmp/base.tmp	2026-09-16 17:53:32
++++ docs/fork/port-0.9/orig/src/ui/keybind_help.rs	2026-09-16 17:53:32
+@@ -112,6 +112,7 @@
+     let workspace_tab = vec![
+         help_entry(keybind_label(&kb.workspace_picker), "workspace navigation"),
+         help_entry(keybind_label(&kb.goto), "session navigator"),
++        help_entry(keybind_label(&kb.search), "search sessions"),
+         help_entry(keybind_label(&kb.new_workspace), "new workspace"),
+         help_entry(keybind_label(&kb.new_worktree), "new worktree"),
+         help_entry(keybind_label(&kb.open_worktree), "open worktree"),
+@@ -162,6 +163,8 @@
+             "cycle pane previous",
+         ),
+         help_entry(keybind_label(&kb.last_pane), "last pane"),
++        help_entry(keybind_label(&kb.focus_back), "focus back"),
++        help_entry(keybind_label(&kb.focus_forward), "focus forward"),
+     ];
+     groups.push(("panes", panes));
+ 
