@@ -234,6 +234,8 @@ pub(super) fn snapshot(
         tab_bar_right,
         tab_bar_right_separator: app.state.tab_bar_right_separator.clone(),
         agent_view_label,
+        session_name: app.state.session_name.clone(),
+        active_profile: app.state.active_profile.clone(),
         agent_order,
         workspaces,
         tabs,

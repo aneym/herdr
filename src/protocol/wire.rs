@@ -948,6 +948,12 @@ pub struct ClientShellSnapshot {
     pub tab_bar_right: Vec<ClientShellTabStatusSegment>,
     pub tab_bar_right_separator: String,
     pub agent_view_label: Option<String>,
+    /// Session name behind the tab-bar badge. Absent on pre-0.9.1 endpoints.
+    #[serde(default)]
+    pub session_name: Option<String>,
+    /// Active workspace profile, shown by the badge when the session is unnamed.
+    #[serde(default)]
+    pub active_profile: String,
     pub agent_order: Vec<String>,
     pub workspaces: Vec<ClientShellWorkspace>,
     pub tabs: Vec<ClientShellTab>,
@@ -2704,6 +2710,8 @@ mod tests {
             }],
             tab_bar_right_separator: " · ".into(),
             agent_view_label: None,
+            session_name: None,
+            active_profile: "default".into(),
             agent_order: Vec::new(),
             workspaces: vec![ClientShellWorkspace {
                 workspace_id: "w1".into(),

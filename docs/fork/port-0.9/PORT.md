@@ -48,7 +48,7 @@ The base for every fork diff is `d79fd746` (herdr 0.8.2 merge base); fork
 | 19 | Keep close-pane focus in tab when siblings remain | `0d5a3d76` | carried | `orig/src/app/actions.rs` (`close_pane`) | server-side, unchanged | Verified by upstream's own close-pane tests. |
 | 20 | `ui.agent_close_focus = "panel_next"` | part of `e838a372` | needs-port | `orig/src/app/actions.rs` (`panel_next_agent_close_target`, `focus_panel_agent_after_close`) | `src/client/shell/agent_sidebar.rs` | Config key kept and parsed; the behaviour needs the client's panel order, so `close_pane` now does nothing extra with a PORT-0.9 marker. Four fork tests were dropped with it. |
 | 21 | Content-fit spaces sidebar + automations section | `a045b2b4`, `4b175bef`, `1f0c5ba9`, `4cbdb86e`, `2f6d58ba` | carried (stage 2) | `orig/src/ui/sidebar.rs` | `src/client/shell/sidebar.rs` | `ordered_sidebar_sections` in the client honours `section_order`, `spaces.max_visible` and the tree view; `new_button` and `menu_position` move the footer controls; the automations section reads `ui.sidebar.automations.workspaces`. The multi-machine sidebar keeps upstream's plain ratio split (decision 7). |
-| 22 | Session badge through handoff and overflow | `c73263bf` | needs-port | `orig/src/ui/sidebar.rs` (`session_badge_rect`) | `src/client/shell/sidebar.rs` | `AppState.session_name` is carried, so the badge only needs rendering. |
+| 22 | Session badge through handoff and overflow | `c73263bf` | carried (stage 2) | `orig/src/ui/tabs.rs` (`session_badge_rect`, `session_badge_text`) | `src/client/shell/tabs.rs` | `session_name` and `active_profile` were added to `ClientShellSnapshot` behind `#[serde(default)]`; the badge sits left of upstream's `tab_bar_right` status segments and is suppressed on the default session and profile (decision 11). |
 | 23 | Mobile layout (glyphs, profiles, tabs in the header) | `7c9cb2da`, `49dfcf9f`, `301a6567`, `bacbdfa2` | needs-port | `orig/src/ui/mobile.rs`, `orig/src/app/input/mobile` paths | `src/client/shell/mobile.rs` (1127 lines, upstream's own mobile layer) | Upstream has its own mobile shell; port the fork's profile row and header tabs onto it rather than replacing it. |
 | 24 | Navigator / ⌘K search palette + fuzzy scorer | pre-`d79fd746` plus `e838a372` refinements | needs-port | `src/app/fuzzy.rs` (fork-only, kept, `#![allow(dead_code)]`), `orig/src/app/actions.rs` (`open_navigator_from`, `navigator_rows_from`, `score_navigator_row`, `accept_navigator_selection_from`) | `src/client/shell/overlays.rs`, `src/client/shell/overlay_input.rs` | `Mode::Navigator`, `NavigatorState`, `NavigatorRow` and 19 navigator tests were dropped with the overlay. The scorer is untouched and ready. |
 | 25 | Settings overlay, global menu, keybind help | pre-`d79fd746` | superseded-by-upstream | `orig/src/ui/keybind_help.rs`, `orig/src/ui/menus.rs`, `orig/src/app/input/settings.rs` | `src/client/shell/settings_overlay.rs`, `src/client/shell/global_menu.rs` | Upstream ships all three in the client shell. The fork's badge helpers (`global_menu_item_has_badge`, `settings_section_has_badge`) have upstream equivalents in `src/client/shell/global_menu.rs`. |
@@ -173,6 +173,21 @@ means changing an upstream test, so raise it with Alex first.
     moved to a right-click context menu on the same control
     (`ClientContextMenuTarget::SidebarView`). Left-click still cycles
     grouped/priority/triage/tree.
+
+11. **No badge for a default session on the default profile.** The fork always
+    drew the session badge, so a stock setup read `default` and lost 8 columns
+    of tab strip. Two upstream tab-bar tests
+    (`focused_last_overflow_tab_shows_its_full_label` and
+    `tab_bar_renders_endpoint_status_ellipses_and_clamps_to_useful_scroll`)
+    measure that strip. Rather than change them, the badge is suppressed when
+    it would only say `default`: a named session or a non-default profile still
+    shows, which is every case the badge was for.
+
+12. **The session badge rides in `ClientShellSnapshot`, not the preferences
+    file.** Unlike the tree chrome, the session name and active profile are
+    facts about the endpoint, not per-client chrome. Both fields are
+    `#[serde(default)]`, so `tests/fixtures/endpoint-snapshot-v1.json` still
+    decodes and a pre-0.9.1 endpoint simply yields no badge.
 
 ## Build environment
 

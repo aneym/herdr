@@ -1,6 +1,8 @@
 use super::*;
 
 const TAB_SCROLL_BUTTON_WIDTH: u16 = 3;
+const SESSION_BADGE_MAX_WIDTH: usize = 16;
+const SESSION_BADGE_GAP: u16 = 1;
 const MIN_TAB_STRIP_WIDTH: u16 =
     MIN_TAB_WIDTH + NEW_TAB_WIDTH + TAB_SCROLL_BUTTON_WIDTH.saturating_mul(2);
 
@@ -28,8 +30,8 @@ pub(crate) fn render_tab_bar(
             display_width(&label).saturating_add(4).max(MIN_TAB_WIDTH)
         })
         .collect::<Vec<_>>();
-    let content = tab_bar_content_area(snapshot, area);
     let mouse_chrome = config.mouse_capture;
+    let content = tab_bar_content_area(snapshot, area, mouse_chrome);
     let new_tab_width = if mouse_chrome { NEW_TAB_WIDTH } else { 0 };
     let desired_total = desired_widths
         .iter()
@@ -220,7 +222,73 @@ pub(crate) fn render_tab_bar(
             );
         }
     }
+    let badge = session_badge_rect(snapshot, status_free_area(snapshot, area), mouse_chrome);
+    if badge.width > 0 {
+        put_text(
+            buffer,
+            badge.x,
+            badge.y,
+            badge.width,
+            &session_badge_text(snapshot),
+            Style::default().fg(palette.overlay0).bg(palette.panel_bg),
+        );
+    }
+    hits.session_badge = badge;
     render_tab_bar_status(buffer, area, snapshot, palette);
+}
+
+/// The badge names the session, falling back to the active workspace profile
+/// when the session is unnamed. A default session on the default profile has
+/// nothing to say, so it gets no badge and the tab strip keeps its full width
+/// (PORT.md decision 11).
+pub(in crate::client::shell) fn session_badge_text(snapshot: &ClientShellSnapshot) -> String {
+    let text = snapshot
+        .session_name
+        .as_deref()
+        .filter(|name| *name != "default")
+        .unwrap_or(&snapshot.active_profile);
+    if text == "default" {
+        return String::new();
+    }
+    crate::ui::truncate_end(text, SESSION_BADGE_MAX_WIDTH)
+}
+
+/// Right-aligned badge rect, or an empty rect when the strip is too narrow to
+/// give it room without squeezing the tabs. Sits left of the tab-bar status
+/// segments so the two never overlap.
+pub(in crate::client::shell) fn session_badge_rect(
+    snapshot: &ClientShellSnapshot,
+    area: Rect,
+    mouse_chrome: bool,
+) -> Rect {
+    let area = status_free_area(snapshot, area);
+    let text = session_badge_text(snapshot);
+    if text.is_empty() {
+        return Rect::default();
+    }
+    let badge_width = display_width(&text);
+    let reserved = badge_width.saturating_add(SESSION_BADGE_GAP);
+    let tab_controls = if mouse_chrome { NEW_TAB_WIDTH } else { 0 };
+    let minimum_content = MIN_TAB_WIDTH.saturating_add(tab_controls);
+    if area.width < reserved.saturating_add(minimum_content) {
+        return Rect::default();
+    }
+    Rect::new(
+        area.right().saturating_sub(badge_width),
+        area.y,
+        badge_width,
+        1,
+    )
+}
+
+fn status_free_area(snapshot: &ClientShellSnapshot, area: Rect) -> Rect {
+    let reserved = tab_bar_status_area(snapshot, area)
+        .map(|status| status.width.saturating_add(1))
+        .unwrap_or(0);
+    Rect {
+        width: area.width.saturating_sub(reserved),
+        ..area
+    }
 }
 
 pub(crate) fn tab_bar_status_width(snapshot: &ClientShellSnapshot) -> u16 {
@@ -244,10 +312,14 @@ fn tab_bar_status_area(snapshot: &ClientShellSnapshot, area: Rect) -> Option<Rec
         .then(|| Rect::new(area.right().saturating_sub(width), area.y, width, 1))
 }
 
-fn tab_bar_content_area(snapshot: &ClientShellSnapshot, area: Rect) -> Rect {
-    let reserved = tab_bar_status_area(snapshot, area)
-        .map(|status| status.width.saturating_add(1))
-        .unwrap_or(0);
+fn tab_bar_content_area(snapshot: &ClientShellSnapshot, area: Rect, mouse_chrome: bool) -> Rect {
+    let area = status_free_area(snapshot, area);
+    let badge = session_badge_rect(snapshot, area, mouse_chrome);
+    let reserved = if badge.width > 0 {
+        badge.width.saturating_add(SESSION_BADGE_GAP)
+    } else {
+        0
+    };
     Rect {
         width: area.width.saturating_sub(reserved),
         ..area

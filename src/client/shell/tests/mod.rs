@@ -26,6 +26,8 @@ pub(super) fn snapshot() -> ClientShellSnapshot {
         tab_bar_right: Vec::new(),
         tab_bar_right_separator: " ".into(),
         agent_view_label: None,
+        session_name: None,
+        active_profile: "default".into(),
         agent_order: Vec::new(),
         workspaces: vec![ClientShellWorkspace {
             workspace_id: "ws_1".into(),
@@ -259,4 +261,5 @@ mod mobile;
 mod mouse_selection;
 mod popup_focus_projection;
 mod startup_overlays;
+mod tab_bar;
 mod tree;

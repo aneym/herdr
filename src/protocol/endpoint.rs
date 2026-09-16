@@ -217,6 +217,8 @@ mod tests {
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: String::new(),
             agent_view_label: None,
+            session_name: None,
+            active_profile: "default".into(),
             agent_order: Vec::new(),
             workspaces: Vec::new(),
             tabs: Vec::new(),

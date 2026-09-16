@@ -112,6 +112,7 @@ pub(super) struct ShellHitMap {
     pub(super) sidebar_toggle: Rect,
     pub(super) new_workspace: Rect,
     pub(super) new_tab: Rect,
+    pub(super) session_badge: Rect,
     pub(super) tab_scroll_left: Rect,
     pub(super) tab_scroll_right: Rect,
     pub(super) mobile_switch: Rect,
