@@ -13,11 +13,6 @@ pub(crate) struct PopupGeometry {
 }
 
 impl App {
-    pub(crate) fn popup_runtime(&self) -> Option<&TerminalRuntime> {
-        let terminal_id = &self.state.popup_pane.as_ref()?.terminal_id;
-        self.terminal_runtimes.get(terminal_id)
-    }
-
     pub(crate) fn close_popup_pane(&mut self) -> bool {
         let Some(popup) = self.state.popup_pane.take() else {
             return false;
@@ -27,25 +22,13 @@ impl App {
             .remove(&popup.terminal_id);
         self.state.terminals.remove(&popup.terminal_id);
         self.shutdown_terminal_runtime(popup.terminal_id);
-        self.state.replace_mode(if self.state.active.is_some() {
+        self.state.mode = if self.state.active.is_some() {
             Mode::Terminal
         } else {
             Mode::Navigate
-        });
+        };
         self.render_dirty.request_generic();
         self.render_notify.notify_one();
-        true
-    }
-
-    pub(crate) fn try_route_paste_to_popup(&mut self, text: &str) -> bool {
-        if self.state.popup_pane.is_none() {
-            return false;
-        }
-        let Some(runtime) = self.popup_runtime() else {
-            self.close_popup_pane();
-            return true;
-        };
-        let _ = runtime.try_send_paste(text.to_owned());
         true
     }
 
@@ -182,7 +165,7 @@ impl App {
             width: geometry.width,
             height: geometry.height,
         });
-        self.state.replace_mode(Mode::Terminal);
+        self.state.mode = Mode::Terminal;
         Ok(())
     }
 }
@@ -218,7 +201,7 @@ mod tests {
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut app = App::new(
             &crate::config::Config::default(),
-            true,
+            crate::app::AppPolicy::TEST,
             None,
             api_rx,
             crate::api::EventHub::default(),
@@ -243,11 +226,11 @@ mod tests {
     #[test]
     fn close_popup_uses_terminal_mode_with_active_workspace() {
         let mut app = app_with_popup();
-        app.state.replace_mode(Mode::Navigate);
+        app.state.mode = Mode::Navigate;
 
         assert!(app.close_popup_pane());
 
-        assert_eq!(app.state.mode(), Mode::Terminal);
+        assert_eq!(app.state.mode, Mode::Terminal);
     }
 
     #[test]
@@ -255,11 +238,11 @@ mod tests {
         let mut app = app_with_popup();
         app.state.workspaces.clear();
         app.state.active = None;
-        app.state.replace_mode(Mode::Navigate);
+        app.state.mode = Mode::Navigate;
 
         assert!(app.close_popup_pane());
 
-        assert_eq!(app.state.mode(), Mode::Navigate);
+        assert_eq!(app.state.mode, Mode::Navigate);
     }
 
     #[test]

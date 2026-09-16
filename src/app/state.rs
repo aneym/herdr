@@ -1,13 +1,10 @@
-use crate::config::{
-    Keybinds, NewTerminalCwdConfig, SoundConfig, TabBarPositionConfig, ToastConfig, ToastDelivery,
-};
+use crate::config::{Keybinds, NewTerminalCwdConfig, SoundConfig, ToastConfig};
 use crossterm::event::{KeyCode, KeyModifiers};
-use ratatui::layout::{Direction, Rect};
+use ratatui::layout::Rect;
 use ratatui::style::Color;
 
 use crate::detect::AgentState;
-use crate::layout::{PaneId, PaneInfo, SplitBorder};
-use crate::selection::Selection;
+use crate::layout::{PaneId, PaneInfo};
 
 pub(crate) type InstalledPluginRegistry =
     std::collections::HashMap<String, crate::api::schema::InstalledPluginInfo>;
@@ -25,36 +22,6 @@ pub(crate) struct PopupPaneState {
     pub height: Option<crate::popup_size::PopupSize>,
 }
 
-// ---------------------------------------------------------------------------
-// Selection autoscroll types
-// ---------------------------------------------------------------------------
-
-/// Direction of automatic scrolling during text selection drag.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SelectionAutoscrollDirection {
-    Up,
-    Down,
-}
-
-/// State for automatic scrolling during text selection drag.
-///
-/// When the cursor hovers in the 1-row hot zone at the top or bottom edge
-/// of a pane (or outside the pane), this struct captures the direction and
-/// last known mouse position so a recurring 30ms tick can continue scrolling
-/// and extending the selection even when the mouse is not moving.
-#[derive(Clone, Debug)]
-pub(crate) struct SelectionAutoscroll {
-    pub direction: SelectionAutoscrollDirection,
-    pub last_mouse_screen_col: u16,
-    pub last_mouse_screen_row: u16,
-    pub inner_rect: Rect,
-}
-
-#[derive(Clone)]
-pub(crate) struct RightClickPassthroughGesture {
-    pub pane_info: PaneInfo,
-    pub modifiers: KeyModifiers,
-}
 use crate::terminal_theme::{HostAppearance, TerminalTheme};
 use crate::workspace::Workspace;
 
@@ -65,7 +32,6 @@ use crate::workspace::Workspace;
 /// All colors used by the UI. Derived from a base accent color for now,
 /// but structured so a full theme system can replace it later.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // all fields defined for theming — some used later
 pub struct Palette {
     /// Primary accent (highlight, active borders).
     pub accent: Color,
@@ -709,376 +675,16 @@ impl Palette {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WorkspaceCardArea {
-    pub ws_idx: usize,
-    pub rect: Rect,
-    pub indented: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorktreeCreateState {
-    pub source_workspace_id: String,
-    pub source_checkout_path: std::path::PathBuf,
-    pub source_existing_membership: Option<crate::workspace::WorktreeSpaceMembership>,
-    pub source_repo_root: std::path::PathBuf,
-    pub repo_key: String,
-    pub repo_name: String,
-    pub branch: String,
-    pub checkout_path: std::path::PathBuf,
-    pub error: Option<String>,
-    pub creating: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorktreeRemoveState {
-    pub workspace_id: String,
-    pub repo_root: std::path::PathBuf,
-    pub path: std::path::PathBuf,
-    pub error: Option<String>,
-    pub removing: bool,
-    pub force_confirmation: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorktreeOpenEntry {
-    pub path: std::path::PathBuf,
-    pub branch: Option<String>,
-    pub is_linked_worktree: bool,
-    pub already_open_ws_idx: Option<usize>,
-}
-
-impl WorktreeOpenEntry {
-    pub(crate) fn display_name(&self) -> String {
-        self.branch.clone().unwrap_or_else(|| {
-            self.path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .map(str::to_owned)
-                .unwrap_or_else(|| self.path.display().to_string())
-        })
-    }
-
-    pub(crate) fn status_label(&self) -> &'static str {
-        if self.already_open_ws_idx.is_some() {
-            "open"
-        } else if self.branch.is_some() {
-            ""
-        } else if self.is_linked_worktree {
-            "detached"
-        } else {
-            "root"
-        }
-    }
-
-    fn search_text(&self) -> String {
-        format!(
-            "{} {} {} {}",
-            self.display_name(),
-            self.path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or_default(),
-            self.path.display(),
-            self.status_label()
-        )
-        .to_lowercase()
-    }
-
-    fn matches_query(&self, query: &str) -> bool {
-        text_matches_query(query, &self.search_text())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorktreeOpenState {
-    pub source_workspace_id: String,
-    pub source_existing_membership: Option<crate::workspace::WorktreeSpaceMembership>,
-    pub source_checkout_path: std::path::PathBuf,
-    pub source_repo_root: std::path::PathBuf,
-    pub repo_key: String,
-    pub repo_name: String,
-    pub entries: Vec<WorktreeOpenEntry>,
-    pub selected: usize,
-    pub query: String,
-    pub search_focused: bool,
-    pub error: Option<String>,
-}
-
-impl WorktreeOpenState {
-    pub(crate) fn filtered_indices(&self) -> Vec<usize> {
-        let query = self.query.trim();
-        self.entries
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, entry)| {
-                (query.is_empty() || entry.matches_query(query)).then_some(idx)
-            })
-            .collect()
-    }
-
-    pub(crate) fn selected_entry_index(&self) -> Option<usize> {
-        let indices = self.filtered_indices();
-        if indices.contains(&self.selected) {
-            Some(self.selected)
-        } else {
-            indices.first().copied()
-        }
-    }
-
-    pub(crate) fn normalize_selection(&mut self) {
-        if let Some(selected) = self.selected_entry_index() {
-            self.selected = selected;
-        }
-    }
-
-    pub(crate) fn select_previous_filtered(&mut self) {
-        let indices = self.filtered_indices();
-        let Some(current) = self.selected_entry_index() else {
-            return;
-        };
-        let pos = indices.iter().position(|idx| *idx == current).unwrap_or(0);
-        self.selected = indices[pos.saturating_sub(1)];
-    }
-
-    pub(crate) fn select_next_filtered(&mut self) {
-        let indices = self.filtered_indices();
-        let Some(current) = self.selected_entry_index() else {
-            return;
-        };
-        let pos = indices.iter().position(|idx| *idx == current).unwrap_or(0);
-        self.selected = indices[(pos + 1).min(indices.len().saturating_sub(1))];
-    }
-}
-
-pub(crate) fn text_matches_query(query: &str, text: &str) -> bool {
-    let haystack = text.to_lowercase();
-    query
-        .to_lowercase()
-        .split_whitespace()
-        .all(|needle| haystack.contains(needle))
-}
-
-/// Computed view geometry — derived from AppState + terminal size.
-/// Updated before each render, consumed by render and mouse handling.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ViewLayout {
-    Desktop,
-    Mobile,
-}
-
+/// Geometry for the server-rendered active-tab pane surface.
 pub struct ViewState {
-    pub layout: ViewLayout,
-    pub sidebar_rect: Rect,
-    pub workspace_card_areas: Vec<WorkspaceCardArea>,
-    pub tab_bar_rect: Rect,
-    pub tab_hit_areas: Vec<Rect>,
-    pub tab_scroll_left_hit_area: Rect,
-    pub tab_scroll_right_hit_area: Rect,
-    pub new_tab_hit_area: Rect,
-    pub session_badge_rect: Rect,
     pub terminal_area: Rect,
-    pub mobile_header_rect: Rect,
-    pub mobile_menu_hit_area: Rect,
-    pub toast_hit_area: Rect,
     pub pane_infos: Vec<PaneInfo>,
-    pub split_borders: Vec<SplitBorder>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
-    Onboarding,
-    ReleaseNotes,
-    ProductAnnouncement,
     Navigate,
-    Prefix,
-    Copy,
     Terminal,
-    RenameWorkspace,
-    RenameTab,
-    RenamePane,
-    NewLinkedWorktree,
-    OpenExistingWorktree,
-    ConfirmRemoveWorktree,
-    Resize,
-    ConfirmClose,
-    ContextMenu,
-    Settings,
-    GlobalMenu,
-    KeybindHelp,
-    Navigator,
-    Usage,
-}
-
-impl Mode {
-    pub(crate) fn mouse_motion_changes_view(self) -> bool {
-        matches!(self, Self::GlobalMenu | Self::ContextMenu | Self::Navigator)
-    }
-
-    /// Whether keys in this mode are commands/navigation (an ASCII input source is wanted) rather
-    /// than free text. This is an explicit **allowlist** of the prefix command/navigation realm:
-    /// any mode NOT listed defaults to leaving the user's IME alone (the safe default), so adding a
-    /// new text-entry or overlay mode can never silently force ASCII. Used by
-    /// `sync_prefix_input_source` (gated by `switch_ascii_input_source_in_prefix`) so multi-level
-    /// prefix commands keep ASCII until they return to the terminal.
-    ///
-    /// Known limitation: the search boxes in `Navigator` and `KeybindHelp` are also held on ASCII,
-    /// since this `Mode`-level predicate can't see `search_focused` (non-ASCII filtering there
-    /// would need a runtime check).
-    pub(crate) fn wants_ascii_input(self) -> bool {
-        matches!(
-            self,
-            Mode::Prefix
-                | Mode::Navigate
-                | Mode::Navigator
-                | Mode::Copy
-                | Mode::Resize
-                | Mode::ConfirmClose
-                | Mode::ConfirmRemoveWorktree
-                | Mode::ContextMenu
-                | Mode::GlobalMenu
-                | Mode::KeybindHelp
-        )
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum NavigatorTarget {
-    Workspace {
-        ws_idx: usize,
-    },
-    Tab {
-        ws_idx: usize,
-        tab_idx: usize,
-    },
-    Pane {
-        ws_idx: usize,
-        tab_idx: usize,
-        pane_id: PaneId,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct NavigatorRow {
-    pub target: NavigatorTarget,
-    pub depth: u8,
-    pub label: String,
-    pub meta: String,
-    pub status: AgentState,
-    pub seen: bool,
-    pub is_current: bool,
-    pub is_workspace: bool,
-    pub is_tab: bool,
-    pub expanded: bool,
-    pub search_text: String,
-    pub label_match_positions: Vec<usize>,
-    pub ranked: bool,
-    /// Whether this row itself matched the active query/state filter, as
-    /// opposed to being included as ancestor context or cascaded subtree of a
-    /// matching workspace or tab. Always true when no filter is active.
-    pub matched: bool,
-}
-
-/// One rendered line in the navigator body. Spacer lines separate workspace
-/// groups visually and are not selectable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NavigatorDisplayLine {
-    Spacer,
-    Row(usize),
-}
-
-pub(crate) fn navigator_display_lines(rows: &[NavigatorRow]) -> Vec<NavigatorDisplayLine> {
-    let ranked = rows.first().is_some_and(|row| row.ranked);
-    let mut lines = Vec::with_capacity(rows.len().saturating_mul(2));
-    for (idx, row) in rows.iter().enumerate() {
-        if !ranked && row.is_workspace && !lines.is_empty() {
-            lines.push(NavigatorDisplayLine::Spacer);
-        }
-        lines.push(NavigatorDisplayLine::Row(idx));
-    }
-    lines
-}
-
-pub(crate) fn navigator_display_index_of_row(
-    lines: &[NavigatorDisplayLine],
-    row_idx: usize,
-) -> Option<usize> {
-    lines
-        .iter()
-        .position(|line| *line == NavigatorDisplayLine::Row(row_idx))
-}
-
-pub(crate) fn navigator_first_row_at_or_after(
-    lines: &[NavigatorDisplayLine],
-    line_idx: usize,
-) -> Option<usize> {
-    lines.get(line_idx..)?.iter().find_map(|line| match line {
-        NavigatorDisplayLine::Row(idx) => Some(*idx),
-        NavigatorDisplayLine::Spacer => None,
-    })
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NavigatorStateFilter {
-    Blocked,
-    Working,
-    Idle,
-    Done,
-}
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct NavigatorState {
-    pub query: String,
-    pub selected: usize,
-    pub scroll: usize,
-    pub search_focused: bool,
-    pub search_entry: bool,
-    pub state_filter: Option<NavigatorStateFilter>,
-    pub expanded_workspaces: std::collections::HashSet<String>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct UsageState {
-    pub rows: Vec<crate::api::schema::AgentUsageInfo>,
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CopyModeState {
-    pub pane_id: PaneId,
-    pub cursor_row: u16,
-    pub cursor_col: u16,
-    pub entry_offset_from_bottom: usize,
-    pub selection: Option<CopyModeSelection>,
-    pub search: CopyModeSearchState,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CopyModeSelection {
-    Character,
-    Linewise { anchor_row: u32 },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CopyModeSearchDirection {
-    Forward,
-    Backward,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CopyModeSearchPrompt {
-    pub direction: CopyModeSearchDirection,
-    pub query: String,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct CopyModeSearchState {
-    pub prompt: Option<CopyModeSearchPrompt>,
-    pub query: String,
-    pub direction: Option<CopyModeSearchDirection>,
-    pub matches: Vec<crate::pane::TerminalTextMatch>,
-    pub current: Option<usize>,
-    pub geometry: Option<(u16, u16)>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -1091,98 +697,6 @@ pub enum AgentPanelSort {
     Tree,
 }
 
-// ---------------------------------------------------------------------------
-// Settings UI state
-// ---------------------------------------------------------------------------
-
-/// Which section of the settings panel is focused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SettingsSection {
-    Theme,
-    Indicators,
-    Sound,
-    Toast,
-    PaneLabels,
-    Integrations,
-}
-
-impl SettingsSection {
-    pub const ALL: &[Self] = &[
-        Self::Theme,
-        Self::Indicators,
-        Self::Sound,
-        Self::Toast,
-        Self::PaneLabels,
-        Self::Integrations,
-    ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Theme => "theme",
-            Self::Indicators => "indicators",
-            Self::Sound => "sound",
-            Self::Toast => "toasts",
-            Self::PaneLabels => "pane labels",
-            Self::Integrations => "integrations",
-        }
-    }
-}
-
-/// All built-in theme names in display order.
-pub const THEME_NAMES: &[&str] = crate::config::THEME_NAMES;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MenuListState {
-    pub highlighted: usize,
-}
-
-impl MenuListState {
-    pub fn new(highlighted: usize) -> Self {
-        Self { highlighted }
-    }
-
-    pub fn move_prev(&mut self) {
-        self.highlighted = self.highlighted.saturating_sub(1);
-    }
-
-    pub fn move_next(&mut self, item_count: usize) {
-        if item_count > 0 {
-            self.highlighted = (self.highlighted + 1).min(item_count - 1);
-        }
-    }
-
-    pub fn hover(&mut self, idx: Option<usize>) {
-        if let Some(idx) = idx {
-            self.highlighted = idx;
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SelectionListState {
-    pub selected: usize,
-}
-
-impl SelectionListState {
-    pub fn new(selected: usize) -> Self {
-        Self { selected }
-    }
-
-    pub fn move_prev(&mut self) {
-        self.selected = self.selected.saturating_sub(1);
-    }
-
-    pub fn move_next(&mut self, item_count: usize) {
-        if item_count > 0 {
-            self.selected = (self.selected + 1).min(item_count - 1);
-        }
-    }
-
-    pub fn select(&mut self, idx: usize) {
-        self.selected = idx;
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct ThemeRuntimeConfig {
     pub manual_name: String,
@@ -1191,414 +705,6 @@ pub struct ThemeRuntimeConfig {
     pub auto_switch: bool,
     pub custom: Option<crate::config::CustomThemeColors>,
     pub legacy_accent: Option<String>,
-}
-
-pub struct SettingsState {
-    /// Which section tab is active.
-    pub section: SettingsSection,
-    /// Selected item index within the current section.
-    pub list: SelectionListState,
-    /// The palette before opening settings (for cancel/restore).
-    pub original_palette: Option<Palette>,
-    /// The theme name before opening settings.
-    pub original_theme: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum WorkspaceDropTarget {
-    Before(usize),
-    End,
-}
-
-pub(crate) enum DragTarget {
-    WorkspaceReorder {
-        source_id: crate::app::InputSourceId,
-        source_ws_idx: usize,
-        drop_target: Option<WorkspaceDropTarget>,
-    },
-    /// Reorder a space by dragging its header row in the agents tree. Reuses
-    /// the workspace drop-target semantics; only the slot rows differ.
-    TreeSpaceReorder {
-        source_id: crate::app::InputSourceId,
-        source_ws_idx: usize,
-        drop_target: Option<WorkspaceDropTarget>,
-    },
-    TabReorder {
-        source_id: crate::app::InputSourceId,
-        ws_idx: usize,
-        source_tab_idx: usize,
-        insert_idx: Option<usize>,
-    },
-    WorkspaceListScrollbar {
-        grab_row_offset: u16,
-    },
-    AgentPanelScrollbar {
-        grab_row_offset: u16,
-    },
-    PaneSplit {
-        path: Vec<bool>,
-        direction: Direction,
-        area: Rect,
-        grab_offset: u16,
-    },
-    PaneScrollbar {
-        pane_id: crate::layout::PaneId,
-        grab_row_offset: u16,
-    },
-    ReleaseNotesScrollbar {
-        grab_row_offset: u16,
-    },
-    ProductAnnouncementScrollbar {
-        grab_row_offset: u16,
-    },
-    KeybindHelpScrollbar {
-        grab_row_offset: u16,
-    },
-    SidebarDivider,
-    SidebarSectionDivider,
-}
-
-/// Active mouse drag on a split border or sidebar divider.
-pub(crate) struct DragState {
-    pub target: DragTarget,
-}
-
-pub(crate) struct WorkspacePressState {
-    pub ws_idx: usize,
-    pub start_col: u16,
-    pub start_row: u16,
-}
-
-pub(crate) struct TabPressState {
-    pub ws_idx: usize,
-    pub tab_idx: usize,
-    pub start_col: u16,
-    pub start_row: u16,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ContextMenuKind {
-    AgentPane {
-        ws_idx: usize,
-        pane_id: PaneId,
-    },
-    Workspace {
-        ws_idx: usize,
-        orchestrator_mode: bool,
-    },
-    GitWorkspace {
-        ws_idx: usize,
-        is_linked_worktree: bool,
-        orchestrator_mode: bool,
-        has_worktree_children: bool,
-        collapsed: bool,
-    },
-    Tab {
-        ws_idx: usize,
-        tab_idx: usize,
-    },
-    Pane {
-        ws_idx: usize,
-        tab_idx: usize,
-        pane_id: PaneId,
-        source_pane_id: Option<PaneId>,
-        has_manual_label: bool,
-        right_click_passthrough: bool,
-    },
-    /// Sidebar view picker: which agent list view, plus the tree layer toggles.
-    SidebarView {
-        sort: AgentPanelSort,
-        show_spaces: bool,
-        show_tabs: bool,
-        show_agents: bool,
-        show_hidden: bool,
-    },
-}
-
-/// Right-click context menu state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProfileMenuTarget {
-    Workspace { ws_idx: usize },
-    Pane { ws_idx: usize, pane_id: PaneId },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProfileMenuMode {
-    Send,
-    Share,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProfileMenuEntry {
-    pub profile: Option<String>,
-    pub label: String,
-    pub is_current: bool,
-}
-
-pub struct ProfileMenuState {
-    pub target: ProfileMenuTarget,
-    pub mode: ProfileMenuMode,
-    pub x: u16,
-    pub y: u16,
-    pub list: MenuListState,
-    pub entries: Vec<ProfileMenuEntry>,
-}
-
-pub struct ContextMenuState {
-    pub kind: ContextMenuKind,
-    pub x: u16,
-    pub y: u16,
-    pub list: MenuListState,
-}
-
-impl ContextMenuState {
-    pub fn items(&self) -> Vec<&'static str> {
-        match self.kind {
-            ContextMenuKind::Workspace {
-                orchestrator_mode, ..
-            } => vec![
-                "Rename",
-                "Send to profile...",
-                "Share with profiles...",
-                if orchestrator_mode {
-                    "Disable orchestrator mode"
-                } else {
-                    "Enable orchestrator mode"
-                },
-                "Close",
-            ],
-            ContextMenuKind::AgentPane { .. } => vec![
-                "Focus",
-                "Rename",
-                "Send to profile...",
-                "Share with profiles...",
-                "Close",
-            ],
-            ContextMenuKind::GitWorkspace {
-                is_linked_worktree: false,
-                orchestrator_mode,
-                has_worktree_children: false,
-                ..
-            } => vec![
-                "Rename",
-                "Send to profile...",
-                "Share with profiles...",
-                if orchestrator_mode {
-                    "Disable orchestrator mode"
-                } else {
-                    "Enable orchestrator mode"
-                },
-                "Close",
-                "New worktree",
-                "Open worktree...",
-            ],
-            ContextMenuKind::GitWorkspace {
-                is_linked_worktree: true,
-                orchestrator_mode,
-                ..
-            } => vec![
-                "Rename",
-                "Send to profile...",
-                "Share with profiles...",
-                if orchestrator_mode {
-                    "Disable orchestrator mode"
-                } else {
-                    "Enable orchestrator mode"
-                },
-                "Close",
-                "Delete worktree checkout...",
-            ],
-            ContextMenuKind::GitWorkspace {
-                is_linked_worktree: false,
-                orchestrator_mode,
-                has_worktree_children: true,
-                collapsed,
-                ..
-            } => vec![
-                "Rename",
-                "Send to profile...",
-                "Share with profiles...",
-                if orchestrator_mode {
-                    "Disable orchestrator mode"
-                } else {
-                    "Enable orchestrator mode"
-                },
-                "Close group",
-                "New worktree",
-                "Open worktree...",
-                if collapsed { "Expand" } else { "Collapse" },
-            ],
-            ContextMenuKind::Tab { .. } => vec!["New tab", "Rename", "Close"],
-            ContextMenuKind::Pane {
-                source_pane_id,
-                has_manual_label,
-                right_click_passthrough,
-                ..
-            } => {
-                let mut items = vec!["Rename pane"];
-                if has_manual_label {
-                    items.push("Clear pane name");
-                }
-                if source_pane_id.is_some() {
-                    items.push("Swap with focused pane");
-                }
-                items.extend(["Split right", "Split down", "Zoom"]);
-                items.push(if right_click_passthrough {
-                    "Use Herdr right-click menu"
-                } else {
-                    "Send right-clicks to pane"
-                });
-                items.extend(["Send to profile...", "Share with profiles...", "Close pane"]);
-                items
-            }
-            ContextMenuKind::SidebarView {
-                sort,
-                show_spaces,
-                show_tabs,
-                show_agents,
-                show_hidden,
-            } => {
-                let mark = |active: bool, on: &'static str, off: &'static str| {
-                    if active {
-                        on
-                    } else {
-                        off
-                    }
-                };
-                let mut items = vec![
-                    mark(sort == AgentPanelSort::Tree, "● tree", "  tree"),
-                    mark(sort == AgentPanelSort::Spaces, "● grouped", "  grouped"),
-                    mark(sort == AgentPanelSort::Priority, "● priority", "  priority"),
-                    mark(sort == AgentPanelSort::Triage, "● triage", "  triage"),
-                ];
-                if sort == AgentPanelSort::Tree {
-                    items.push("──────────");
-                    items.push(mark(show_spaces, "✓ spaces", "  spaces"));
-                    items.push(mark(show_tabs, "✓ tabs", "  tabs"));
-                    items.push(mark(show_agents, "✓ agents", "  agents"));
-                    items.push(mark(show_hidden, "✓ hidden", "  hidden"));
-                }
-                items
-            }
-        }
-    }
-}
-
-impl AppState {
-    pub(crate) fn profile_roster(&self) -> Vec<String> {
-        let mut profiles = vec![crate::workspace::DEFAULT_PROFILE.to_string()];
-        for workspace in &self.workspaces {
-            for profile in &workspace.profiles {
-                if !profiles.contains(profile) {
-                    profiles.push(profile.clone());
-                }
-            }
-        }
-        for workspace in &self.workspaces {
-            for pane_id in workspace.tabs.iter().flat_map(|tab| tab.layout.pane_ids()) {
-                let Some(terminal) = workspace
-                    .pane_state(pane_id)
-                    .and_then(|pane| self.terminals.get(&pane.attached_terminal_id))
-                else {
-                    continue;
-                };
-                for profile in &terminal.profiles {
-                    if !profiles.contains(profile) {
-                        profiles.push(profile.clone());
-                    }
-                }
-            }
-        }
-        profiles
-    }
-
-    pub(crate) fn profile_menu_entries(
-        &self,
-        target: ProfileMenuTarget,
-        mode: ProfileMenuMode,
-    ) -> Vec<ProfileMenuEntry> {
-        let default_membership = [crate::workspace::DEFAULT_PROFILE.to_string()];
-        let (membership, is_following_space) = match target {
-            ProfileMenuTarget::Workspace { ws_idx } => (
-                self.workspaces
-                    .get(ws_idx)
-                    .map(|workspace| workspace.profiles.as_slice())
-                    .unwrap_or_default(),
-                false,
-            ),
-            ProfileMenuTarget::Pane { ws_idx, pane_id } => {
-                let workspace = self.workspaces.get(ws_idx);
-                let own_profiles = workspace
-                    .and_then(|workspace| workspace.pane_state(pane_id))
-                    .and_then(|pane| self.terminals.get(&pane.attached_terminal_id))
-                    .map(|terminal| terminal.profiles.as_slice())
-                    .unwrap_or_default();
-                let membership = if own_profiles.is_empty() {
-                    workspace
-                        .map(|workspace| workspace.profiles.as_slice())
-                        .filter(|profiles| !profiles.is_empty())
-                        .unwrap_or(&default_membership)
-                } else {
-                    own_profiles
-                };
-                (membership, own_profiles.is_empty())
-            }
-        };
-        let mut entries = Vec::new();
-        if matches!(target, ProfileMenuTarget::Pane { .. }) {
-            entries.push(ProfileMenuEntry {
-                profile: None,
-                label: "Follow space".to_string(),
-                is_current: is_following_space,
-            });
-        }
-        entries.extend(self.profile_roster().into_iter().map(|profile| {
-            let is_current = match mode {
-                ProfileMenuMode::Send => membership.len() == 1 && membership[0] == profile,
-                ProfileMenuMode::Share => membership.contains(&profile),
-            };
-            ProfileMenuEntry {
-                label: profile.clone(),
-                profile: Some(profile),
-                is_current,
-            }
-        }));
-        entries
-    }
-
-    pub(crate) fn open_profile_menu(
-        &mut self,
-        target: ProfileMenuTarget,
-        mode: ProfileMenuMode,
-        x: u16,
-        y: u16,
-    ) {
-        let entries = self.profile_menu_entries(target, mode);
-        self.context_menu = None;
-        self.profile_menu = Some(ProfileMenuState {
-            target,
-            mode,
-            x,
-            y,
-            list: MenuListState::new(0),
-            entries,
-        });
-        self.replace_mode(Mode::ContextMenu);
-    }
-
-    pub(crate) fn refresh_profile_menu_entries(&mut self) {
-        let Some(menu) = self.profile_menu.as_ref() else {
-            return;
-        };
-        let target = menu.target;
-        let mode = menu.mode;
-        let highlighted = menu.list.highlighted;
-        let entries = self.profile_menu_entries(target, mode);
-        if let Some(menu) = self.profile_menu.as_mut() {
-            menu.entries = entries;
-            menu.list.highlighted = highlighted.min(menu.entries.len().saturating_sub(1));
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1651,6 +757,7 @@ pub struct CopyFeedback {
     pub message: String,
 }
 
+#[derive(Debug)]
 pub struct ReleaseNotesState {
     pub version: String,
     pub body: String,
@@ -1658,6 +765,7 @@ pub struct ReleaseNotesState {
     pub preview: bool,
 }
 
+#[derive(Debug)]
 pub struct ProductAnnouncementState {
     pub version: String,
     pub id: String,
@@ -1665,20 +773,6 @@ pub struct ProductAnnouncementState {
     pub body: String,
     pub scroll: u16,
     pub preview: bool,
-}
-
-#[derive(Default)]
-pub struct KeybindHelpState {
-    pub scroll: u16,
-    pub query: String,
-    pub search_focused: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SidebarWidthSource {
-    ConfigDefault,
-    Persisted,
-    Manual,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1698,17 +792,6 @@ pub(crate) struct PaneFocusHistory {
 pub(crate) struct DeferredAttentionRead {
     pub target: PaneFocusTarget,
     pub state_change_seq: u64,
-}
-
-#[derive(Debug)]
-struct AppModeState {
-    mode: Mode,
-}
-
-impl AppModeState {
-    fn new(mode: Mode) -> Self {
-        Self { mode }
-    }
 }
 
 /// All application state — pure data, no channels or async runtime.
@@ -1734,87 +817,17 @@ pub struct AppState {
     pub(crate) pane_focus_history: PaneFocusHistory,
     pub(crate) deferred_attention_read: Option<DeferredAttentionRead>,
     pub selected: usize,
-    mode_state: AppModeState,
-    /// Stable workspace identity captured when the close confirmation opens.
-    pub(crate) confirm_close_workspace_id: Option<String>,
+    pub mode: Mode,
     pub should_quit: bool,
-    /// In monolithic --no-session mode, detach exits the app because there is no server to detach from.
-    pub detach_exits: bool,
-    /// Set when the current client should detach from the persistent session.
-    /// The server's event loop checks this and handles client detach.
-    pub detach_requested: bool,
-    pub request_new_workspace: bool,
-    pub request_new_tab: bool,
-    pub request_new_linked_worktree: Option<usize>,
-    pub request_open_existing_worktree: Option<usize>,
-    pub request_new_workspace_cwd: Option<std::path::PathBuf>,
-    pub request_remove_linked_worktree: Option<usize>,
-    pub request_submit_worktree_create: bool,
-    pub request_submit_worktree_open: bool,
-    pub request_submit_worktree_remove: bool,
-    pub request_reload_config: bool,
     /// Set when the headless server should ask attached clients to reload
     /// their client-local sound config from disk.
     pub request_client_config_reload: bool,
-    /// Set when UI interaction requested a clipboard write that must be
-    /// handled by the outer App/event loop instead of directly from AppState.
-    pub request_clipboard_write: Option<(Vec<u8>, Option<String>)>,
-    pub creating_new_tab: bool,
-    pub requested_new_tab_name: Option<String>,
-    /// Workspace the pending new-tab request targets; `None` means the
-    /// active workspace.
-    pub requested_new_tab_workspace_id: Option<String>,
-    pub pending_workspace_create_cwd: Option<std::path::PathBuf>,
-    pub rename_pane_target: Option<PaneId>,
-    pub worktree_create: Option<WorktreeCreateState>,
-    pub worktree_open: Option<WorktreeOpenState>,
-    pub worktree_remove: Option<WorktreeRemoveState>,
     pub worktree_directory: std::path::PathBuf,
-    pub collapsed_space_keys: std::collections::HashSet<String>,
-    pub automations_expanded: bool,
-    pub collapsed_agent_group_keys: std::collections::HashSet<String>,
-    pub request_complete_onboarding: bool,
-    pub name_input: String,
-    pub name_input_replace_on_type: bool,
-    pub release_notes: Option<ReleaseNotesState>,
+    /// Latest endpoint-owned release notes, cached outside render paths.
+    pub latest_release_notes: Option<crate::release_notes::ReleaseNotes>,
     pub product_announcement: Option<ProductAnnouncementState>,
-    pub keybind_help: KeybindHelpState,
-    pub navigator: NavigatorState,
-    pub usage: UsageState,
-    pub copy_mode: Option<CopyModeState>,
-    pub workspace_scroll: usize,
-    pub agent_panel_scroll: usize,
-    pub tab_scroll: usize,
-    pub tab_scroll_follow_active: bool,
-    pub mobile_switcher_scroll: usize,
-    // View geometry (computed before render, consumed by render + mouse)
+    // Geometry of the most recently computed server pane surface.
     pub view: ViewState,
-    pub(crate) drag: Option<DragState>,
-    pub(crate) workspace_presses:
-        std::collections::HashMap<crate::app::InputSourceId, WorkspacePressState>,
-    pub(crate) tab_presses: std::collections::HashMap<crate::app::InputSourceId, TabPressState>,
-    /// Pending press on a tree space header row: click focuses on release,
-    /// a drag past the threshold reorders the space instead.
-    pub(crate) tree_space_presses:
-        std::collections::HashMap<crate::app::InputSourceId, WorkspacePressState>,
-    pub selection: Option<Selection>,
-    /// Hovered pane ID and whether the copy button itself is hovered.
-    pub(crate) pane_hover: Option<(PaneId, bool)>,
-    pub(crate) pane_copy_presses: std::collections::HashSet<crate::app::InputSourceId>,
-    /// In-flight shadow selection tracked while a left-drag is forwarded to a
-    /// mouse-reporting pane app. Never rendered; the pane app draws its own
-    /// highlight. Used only to capture the dragged text at button release.
-    pub(crate) pane_app_drag_shadow: Option<crate::selection::Selection>,
-    /// Text captured from the last completed forwarded drag, kept until the
-    /// next drag starts or a copy shortcut consumes it.
-    pub(crate) pane_app_drag_copy: Option<(PaneId, String)>,
-    /// Word or line stashed by a double- or triple-click over a mouse-reporting
-    /// pane app, waiting for the forwarded press to install it as
-    /// `pane_app_drag_copy`.
-    pub(crate) pane_app_pending_word_copy: Option<(PaneId, String)>,
-    pub selection_autoscroll: Option<SelectionAutoscroll>,
-    pub context_menu: Option<ContextMenuState>,
-    pub profile_menu: Option<ProfileMenuState>,
     // Notifications
     pub update_available: Option<String>,
     pub update_install_command: String,
@@ -1823,7 +836,6 @@ pub struct AppState {
     pub config_diagnostic: Option<String>,
     pub toast: Option<ToastNotification>,
     pub pending_agent_notifications: std::collections::HashMap<PaneId, PendingAgentNotification>,
-    pub copy_feedback: Option<CopyFeedback>,
     /// Last reported focus state for the outer terminal hosting herdr.
     /// None means unsupported or not yet reported, which preserves active-pane suppression.
     pub outer_terminal_focus: Option<bool>,
@@ -1832,17 +844,6 @@ pub struct AppState {
     pub prefix_mods: KeyModifiers,
     /// Virtual terminal size (columns, rows) used when no client is attached.
     pub(crate) headless_size: (u16, u16),
-    pub default_sidebar_width: u16,
-    pub sidebar_width: u16,
-    pub sidebar_min_width: u16,
-    pub sidebar_max_width: u16,
-    pub mobile_width_threshold: u16,
-    pub sidebar_width_source: SidebarWidthSource,
-    pub sidebar_width_auto: bool,
-    pub sidebar_collapsed: bool,
-    pub sidebar_collapsed_mode: crate::config::SidebarCollapsedModeConfig,
-    /// Ratio of sidebar height allocated to the workspaces section.
-    pub sidebar_section_split: f32,
     pub agent_panel_sort: AgentPanelSort,
     pub agent_close_focus: crate::config::AgentCloseFocusConfig,
     pub pending_agent_close_focus: Option<(usize, crate::layout::PaneId)>,
@@ -1857,6 +858,17 @@ pub struct AppState {
     pub sidebar_spaces: crate::config::SpacesSidebarConfig,
     /// TEMPORARY diagnostic: tint each sidebar row's container block.
     pub sidebar_debug_bounds: bool,
+    /// Persisted sidebar chrome width. The 0.9 client shell owns sidebar layout;
+    /// the server keeps the value so session snapshots round-trip.
+    pub sidebar_width: u16,
+    /// Persisted split between the sidebar's two sections.
+    pub sidebar_section_split: f32,
+    /// Collapsed space groups in the grouped sidebar view, keyed by workspace id.
+    pub collapsed_space_keys: std::collections::HashSet<String>,
+    /// The automations section is expanded.
+    pub automations_expanded: bool,
+    /// Collapsed agent-ownership groups, keyed by owner agent key.
+    pub collapsed_agent_group_keys: std::collections::HashSet<String>,
     /// Tree view: render space header rows.
     pub tree_show_spaces: bool,
     /// Tree view: render tab header rows.
@@ -1886,13 +898,13 @@ pub struct AppState {
     pub mouse_back_button_action: crate::config::MouseNavButtonActionConfig,
     /// Action for the physical mouse forward button (extended button 9).
     pub mouse_forward_button_action: crate::config::MouseNavButtonActionConfig,
-    pub right_click_passthrough: Option<RightClickPassthroughGesture>,
+    // PORT-0.9: right-click passthrough gesture tracking is client-shell input
+    // state now (src/client/shell/mouse.rs); the server keeps only the config.
+    // (docs/fork/port-0.9/PORT.md)
     pub redraw_on_focus_gained: bool,
     pub mouse_scroll_lines: usize,
     pub confirm_close: bool,
-    pub prompt_new_tab_name: bool,
-    pub prompt_new_workspace_name: bool,
-    pub pane_borders: bool,
+    pub pane_borders: crate::config::PaneBordersConfig,
     pub pane_outer_borders: bool,
     pub pane_scrollbars: bool,
     pub pane_gaps: bool,
@@ -1900,10 +912,9 @@ pub struct AppState {
     pub hide_tab_bar_when_single_tab: bool,
     pub show_tab_status: crate::config::ShowTabStatusConfig,
     pub attention_read: crate::config::AttentionReadConfig,
-    pub tab_bar_position: TabBarPositionConfig,
+    pub tab_bar_position: crate::config::TabBarPositionConfig,
     pub tab_bar_right: Vec<TabBarStatusSegment>,
     pub tab_bar_right_separator: String,
-    pub pane_history_persistence: bool,
     /// Expose the focused pane's cursor anchor to the outer terminal even when
     /// the pane requested `?25l`. See `[experimental] reveal_hidden_cursor_for_cjk_ime`.
     pub reveal_hidden_cursor_for_cjk_ime: bool,
@@ -1913,20 +924,12 @@ pub struct AppState {
     pub cjk_ime_agents: Vec<crate::detect::Agent>,
     /// DECSCUSR shape parameter (1–6) for the IME anchor cursor.
     pub cjk_ime_cursor_shape: u8,
-    /// While prefix mode is active, switch the macOS host input source to an
-    /// ASCII-capable layout so prefix commands register as ASCII even when a
-    /// CJK IME is active. macOS only; a no-op elsewhere. See
-    /// `[experimental] switch_ascii_input_source_in_prefix`.
-    pub switch_ascii_input_source_in_prefix: bool,
     pub kitty_graphics_enabled: bool,
     pub default_shell: String,
     pub shell_mode: crate::config::ShellModeConfig,
     pub new_terminal_cwd: NewTerminalCwdConfig,
     pub pane_scrollback_limit_bytes: usize,
-    #[allow(dead_code)] // kept for backward compat; palette.accent is the source of truth
-    pub accent: Color,
     pub sound: SoundConfig,
-    pub local_sound_playback: bool,
     pub toast_config: ToastConfig,
     pub keybinds: Keybinds,
     pub animation_tick: u32,
@@ -1940,16 +943,11 @@ pub struct AppState {
     pub host_terminal_appearance: Option<HostAppearance>,
     /// True when the foreground host explicitly reported appearance via Mode 2031.
     pub host_terminal_appearance_explicit: bool,
-    /// Settings panel state.
-    pub settings: SettingsState,
-    /// Cached integration recommendations for onboarding/settings UI.
+    /// Cached integration recommendations and detection manifest summaries.
     pub integration_recommendations: Vec<crate::integration::IntegrationRecommendation>,
-    /// Cached detection manifest source/version summaries for runtime/API status.
     pub agent_manifest_summaries: Vec<crate::detect::manifest::AgentManifestSummary>,
     /// Cached remote detection manifest update diagnostics for runtime/API status.
     pub agent_manifest_update_status: crate::detect::manifest_update::ManifestUpdateStatus,
-    /// Result messages from the latest integration install action.
-    pub integration_install_messages: Vec<String>,
     /// Installed or linked plugins known to this running Herdr instance.
     pub(crate) installed_plugins: InstalledPluginRegistry,
     /// Pane ids opened through the plugin pane API.
@@ -1960,14 +958,10 @@ pub struct AppState {
     pub(crate) plugin_command_logs: Vec<crate::api::schema::PluginCommandLogInfo>,
     pub(crate) next_plugin_command_log_id: u64,
     pub(crate) plugin_commands_in_flight: usize,
-    /// Highlight state for the bottom-right global launcher menu.
-    pub global_menu: MenuListState,
     /// Resolved host terminal default colors for theming embedded panes.
     pub host_terminal_theme: TerminalTheme,
     /// Last known foreground host terminal cell size in pixels.
     pub(crate) host_cell_size: crate::kitty_graphics::HostCellSize,
-    /// Exact pixel provenance only while one confirmed SGR report is dispatched.
-    pub(crate) host_mouse_pixels: Option<crate::input::mouse::HostPixels>,
     /// Set when a persisted session snapshot would change.
     pub session_dirty: bool,
     /// Terminal runtimes that should be shut down by the app/runtime layer
@@ -1976,20 +970,6 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn mode(&self) -> Mode {
-        self.mode_state.mode
-    }
-
-    pub fn replace_mode(&mut self, mode: Mode) {
-        if self.mode_state.mode == Mode::ConfirmClose && mode != Mode::ConfirmClose {
-            self.pending_agent_close_focus = None;
-        }
-        if mode != Mode::Terminal {
-            self.pane_hover = None;
-        }
-        self.mode_state.mode = mode;
-    }
-
     pub(crate) fn mark_session_dirty(&mut self) {
         self.session_dirty = true;
     }
@@ -2011,6 +991,33 @@ impl AppState {
             tree_show_hidden_spaces: self.tree_show_hidden_spaces,
             hidden_spaces_expanded: self.hidden_spaces_expanded,
         }
+    }
+
+    pub(crate) fn profile_roster(&self) -> Vec<String> {
+        let mut profiles = vec![crate::workspace::DEFAULT_PROFILE.to_string()];
+        for workspace in &self.workspaces {
+            for profile in &workspace.profiles {
+                if !profiles.contains(profile) {
+                    profiles.push(profile.clone());
+                }
+            }
+        }
+        for workspace in &self.workspaces {
+            for pane_id in workspace.tabs.iter().flat_map(|tab| tab.layout.pane_ids()) {
+                let Some(terminal) = workspace
+                    .pane_state(pane_id)
+                    .and_then(|pane| self.terminals.get(&pane.attached_terminal_id))
+                else {
+                    continue;
+                };
+                for profile in &terminal.profiles {
+                    if !profiles.contains(profile) {
+                        profiles.push(profile.clone());
+                    }
+                }
+            }
+        }
+        profiles
     }
 
     pub(crate) fn set_pane_profiles(
@@ -2090,10 +1097,6 @@ impl AppState {
             return false;
         }
         self.active_profile = profile;
-        self.workspace_scroll = 0;
-        self.agent_panel_scroll = 0;
-        self.mobile_switcher_scroll = 0;
-        self.navigator.selected = 0;
         self.mark_session_dirty();
         true
     }
@@ -2109,12 +1112,6 @@ impl AppState {
             .or_else(|| (0..self.workspaces.len()).find(|idx| self.workspace_is_visible(*idx)));
         self.active = next_active;
         self.selected = next_active.unwrap_or(0);
-        self.workspace_scroll = 0;
-        self.agent_panel_scroll = 0;
-        self.mobile_switcher_scroll = 0;
-        self.navigator.selected = 0;
-        self.tab_scroll = 0;
-        self.tab_scroll_follow_active = true;
         self.mark_session_dirty();
     }
 
@@ -2135,18 +1132,6 @@ impl AppState {
         self.pane_id_aliases.remove(&pane_id.raw());
     }
 
-    pub fn sound_enabled(&self) -> bool {
-        self.sound.enabled
-    }
-
-    pub fn toast_delivery(&self) -> ToastDelivery {
-        self.toast_config.delivery
-    }
-
-    pub fn agent_border_labels_enabled(&self) -> bool {
-        self.show_agent_labels_on_pane_borders
-    }
-
     pub(crate) fn pane_exposes_host_cursor(
         &self,
         _ws_idx: usize,
@@ -2155,29 +1140,22 @@ impl AppState {
         true
     }
 
-    pub(crate) fn integration_updates_available(&self) -> bool {
-        self.integration_recommendations
-            .iter()
-            .any(|item| item.state == crate::integration::IntegrationStatusKind::Outdated)
-    }
-
     pub(crate) fn refresh_agent_manifest_summaries(&mut self) {
         self.agent_manifest_summaries = crate::detect::manifest::manifest_summaries();
     }
 
-    pub(crate) fn global_menu_attention_badge_visible(&self) -> bool {
-        self.update_available.is_some() || self.integration_updates_available()
+    pub(crate) fn integration_updates_available(&self) -> bool {
+        self.integration_recommendations
+            .iter()
+            .any(|recommendation| {
+                recommendation.state == crate::integration::IntegrationStatusKind::Outdated
+                    && recommendation.needs_install()
+            })
     }
 
-    pub(crate) fn global_menu_item_has_badge(&self, item: &str) -> bool {
-        (item == "update ready" && self.update_available.is_some())
-            || (item == "settings" && self.integration_updates_available())
-    }
-
-    pub(crate) fn settings_section_has_badge(&self, section: SettingsSection) -> bool {
-        section == SettingsSection::Integrations && self.integration_updates_available()
-    }
-
+    // PORT-0.9: consumed by the fork's local render loop; the 0.9 server drives
+    // pane surfaces from the client shell. (docs/fork/port-0.9/PORT.md)
+    #[allow(dead_code)]
     pub(crate) fn app_surface_pane_ids(&self) -> std::collections::HashSet<PaneId> {
         let mut pane_ids = std::collections::HashSet::new();
         if let Some(popup) = &self.popup_pane {
@@ -2198,26 +1176,10 @@ impl AppState {
         pane_ids
     }
 
-    pub(crate) fn focused_pane_requests_mouse_capture_from(
-        &self,
-        terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
-    ) -> bool {
-        self.mode() == Mode::Terminal
-            && self
-                .active
-                .and_then(|idx| self.focused_runtime_in_workspace(terminal_runtimes, idx))
-                .is_some_and(crate::terminal::TerminalRuntime::mouse_reporting_enabled)
-    }
+    // PORT-0.9: host mouse capture is decided by the client shell in 0.9
+    // (src/client/shell/mouse.rs, src/client/mod.rs). (docs/fork/port-0.9/PORT.md)
 
-    pub(crate) fn should_capture_host_mouse_from(
-        &self,
-        terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
-    ) -> bool {
-        self.mouse_capture
-            || self.popup_pane.is_some()
-            || self.focused_pane_requests_mouse_capture_from(terminal_runtimes)
-    }
-
+    #[allow(dead_code)]
     pub fn is_prefix_key(&self, key: &crate::input::TerminalKey) -> bool {
         crate::config::terminal_key_matches_combo(key, (self.prefix_code, self.prefix_mods))
     }
@@ -2256,34 +1218,26 @@ impl AppState {
         terminal_runtimes.get(terminal_id)
     }
 
-    #[cfg(test)]
-    pub(crate) fn runtime_for_pane<'a>(
-        &'a self,
-        terminal_runtimes: &'a crate::terminal::TerminalRuntimeRegistry,
-        pane_id: crate::layout::PaneId,
-    ) -> Option<&'a crate::terminal::TerminalRuntime> {
-        self.workspaces.iter().find_map(|ws| {
-            #[cfg(test)]
-            if let Some(runtime) = ws.test_runtimes.get(&pane_id) {
-                return Some(runtime);
-            }
-            #[cfg(test)]
-            if let Some(runtime) = ws.tabs.iter().find_map(|tab| tab.runtimes.get(&pane_id)) {
-                return Some(runtime);
-            }
-            let terminal_id = ws.terminal_id(pane_id)?;
-            terminal_runtimes.get(terminal_id)
-        })
-    }
-
-    pub(crate) fn focused_runtime_in_workspace<'a>(
-        &'a self,
-        terminal_runtimes: &'a crate::terminal::TerminalRuntimeRegistry,
+    pub(crate) fn pane_visible_on_active_surface(
+        &self,
         ws_idx: usize,
-    ) -> Option<&'a crate::terminal::TerminalRuntime> {
-        let ws = self.workspaces.get(ws_idx)?;
-        let pane_id = ws.focused_pane_id()?;
-        self.runtime_for_pane_in_workspace(terminal_runtimes, ws_idx, pane_id)
+        pane_id: crate::layout::PaneId,
+    ) -> bool {
+        if self.active != Some(ws_idx) {
+            return false;
+        }
+        let Some(tab) = self
+            .workspaces
+            .get(ws_idx)
+            .and_then(|workspace| workspace.active_tab())
+        else {
+            return false;
+        };
+        if tab.zoomed {
+            tab.layout.focused() == pane_id
+        } else {
+            tab.layout.pane_ids().contains(&pane_id)
+        }
     }
 
     pub fn is_active_pane(
@@ -2339,87 +1293,16 @@ impl AppState {
             pane_focus_history: PaneFocusHistory::default(),
             deferred_attention_read: None,
             selected: 0,
-            mode_state: AppModeState::new(mode),
-            confirm_close_workspace_id: None,
+            mode,
             should_quit: false,
-            detach_exits: false,
-            detach_requested: false,
-            request_new_workspace: false,
-            request_new_tab: false,
-            request_new_linked_worktree: None,
-            request_open_existing_worktree: None,
-            request_new_workspace_cwd: None,
-            request_remove_linked_worktree: None,
-            request_submit_worktree_create: false,
-            request_submit_worktree_open: false,
-            request_submit_worktree_remove: false,
-            request_reload_config: false,
             request_client_config_reload: false,
-            request_clipboard_write: None,
-            creating_new_tab: false,
-            requested_new_tab_name: None,
-            requested_new_tab_workspace_id: None,
-            pending_workspace_create_cwd: None,
-            rename_pane_target: None,
-            worktree_create: None,
-            worktree_open: None,
-            worktree_remove: None,
             worktree_directory: std::path::PathBuf::from("/tmp/herdr-worktrees"),
-            collapsed_space_keys: std::collections::HashSet::new(),
-            automations_expanded: false,
-            collapsed_agent_group_keys: std::collections::HashSet::new(),
-            tree_show_spaces: true,
-            tree_show_tabs: true,
-            tree_show_agents: true,
-            tree_collapsed_spaces: std::collections::HashSet::new(),
-            tree_collapsed_tabs: std::collections::HashSet::new(),
-            tree_pinned_spaces: std::collections::HashSet::new(),
-            tree_show_hidden_spaces: false,
-            hidden_spaces_expanded: false,
-            request_complete_onboarding: false,
-            name_input: String::new(),
-            name_input_replace_on_type: false,
-            release_notes: None,
+            latest_release_notes: None,
             product_announcement: None,
-            keybind_help: KeybindHelpState::default(),
-            navigator: NavigatorState::default(),
-            usage: UsageState::default(),
-            copy_mode: None,
-            workspace_scroll: 0,
-            agent_panel_scroll: 0,
-            tab_scroll: 0,
-            tab_scroll_follow_active: true,
-            mobile_switcher_scroll: 0,
             view: ViewState {
-                layout: ViewLayout::Desktop,
-                sidebar_rect: Rect::default(),
-                workspace_card_areas: Vec::new(),
-                tab_bar_rect: Rect::default(),
-                tab_hit_areas: Vec::new(),
-                tab_scroll_left_hit_area: Rect::default(),
-                tab_scroll_right_hit_area: Rect::default(),
-                new_tab_hit_area: Rect::default(),
-                session_badge_rect: Rect::default(),
                 terminal_area: Rect::default(),
-                mobile_header_rect: Rect::default(),
-                mobile_menu_hit_area: Rect::default(),
-                toast_hit_area: Rect::default(),
                 pane_infos: Vec::new(),
-                split_borders: Vec::new(),
             },
-            drag: None,
-            workspace_presses: std::collections::HashMap::new(),
-            tab_presses: std::collections::HashMap::new(),
-            tree_space_presses: std::collections::HashMap::new(),
-            selection: None,
-            pane_hover: None,
-            pane_copy_presses: std::collections::HashSet::new(),
-            pane_app_drag_shadow: None,
-            pane_app_drag_copy: None,
-            pane_app_pending_word_copy: None,
-            selection_autoscroll: None,
-            context_menu: None,
-            profile_menu: None,
             update_available: None,
             update_install_command: "herdr update".into(),
             latest_release_notes_available: false,
@@ -2427,7 +1310,6 @@ impl AppState {
             config_diagnostic: None,
             toast: None,
             pending_agent_notifications: std::collections::HashMap::new(),
-            copy_feedback: None,
             outer_terminal_focus: None,
             prefix_code: KeyCode::Char('b'),
             prefix_mods: KeyModifiers::CONTROL,
@@ -2435,16 +1317,6 @@ impl AppState {
                 crate::config::DEFAULT_HEADLESS_COLS,
                 crate::config::DEFAULT_HEADLESS_ROWS,
             ),
-            default_sidebar_width: 26,
-            sidebar_width: 26,
-            sidebar_min_width: 18,
-            sidebar_max_width: 36,
-            mobile_width_threshold: crate::config::DEFAULT_MOBILE_WIDTH_THRESHOLD,
-            sidebar_width_source: SidebarWidthSource::ConfigDefault,
-            sidebar_width_auto: false,
-            sidebar_collapsed: false,
-            sidebar_collapsed_mode: crate::config::SidebarCollapsedModeConfig::Compact,
-            sidebar_section_split: 0.5,
             agent_panel_sort: AgentPanelSort::Spaces,
             agent_close_focus: crate::config::AgentCloseFocusConfig::Stock,
             pending_agent_close_focus: None,
@@ -2460,19 +1332,29 @@ impl AppState {
             sidebar_automations: crate::config::AutomationsSidebarConfig::default(),
             sidebar_spaces: crate::config::SpacesSidebarConfig::default(),
             sidebar_debug_bounds: false,
+            sidebar_width: 0,
+            sidebar_section_split: 0.5,
+            collapsed_space_keys: std::collections::HashSet::new(),
+            automations_expanded: false,
+            collapsed_agent_group_keys: std::collections::HashSet::new(),
+            tree_show_spaces: true,
+            tree_show_tabs: true,
+            tree_show_agents: true,
+            tree_collapsed_spaces: std::collections::HashSet::new(),
+            tree_collapsed_tabs: std::collections::HashSet::new(),
+            tree_pinned_spaces: std::collections::HashSet::new(),
+            tree_show_hidden_spaces: false,
+            hidden_spaces_expanded: false,
             next_agent_state_change_seq: 0,
             mouse_capture: true,
             copy_on_select: true,
             right_click_passthrough_modifiers: None,
             mouse_back_button_action: crate::config::MouseNavButtonActionConfig::FocusBack,
             mouse_forward_button_action: crate::config::MouseNavButtonActionConfig::FocusForward,
-            right_click_passthrough: None,
             redraw_on_focus_gained: true,
             mouse_scroll_lines: crate::config::DEFAULT_MOUSE_SCROLL_LINES,
             confirm_close: true,
-            prompt_new_tab_name: true,
-            prompt_new_workspace_name: false,
-            pane_borders: true,
+            pane_borders: crate::config::PaneBordersConfig::Auto,
             pane_outer_borders: true,
             pane_scrollbars: true,
             pane_gaps: false,
@@ -2480,26 +1362,22 @@ impl AppState {
             hide_tab_bar_when_single_tab: false,
             show_tab_status: crate::config::ShowTabStatusConfig::Off,
             attention_read: crate::config::AttentionReadConfig::OnFocus,
-            tab_bar_position: TabBarPositionConfig::Top,
+            tab_bar_position: crate::config::TabBarPositionConfig::Top,
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: " ".into(),
-            pane_history_persistence: false,
             reveal_hidden_cursor_for_cjk_ime: false,
             cjk_ime_agent_filter_configured: false,
             cjk_ime_agents: Vec::new(),
             cjk_ime_cursor_shape: 2, // steady_block
-            switch_ascii_input_source_in_prefix: false,
             kitty_graphics_enabled: false,
             default_shell: String::new(),
             shell_mode: crate::config::ShellModeConfig::Auto,
             new_terminal_cwd: NewTerminalCwdConfig::Follow,
             pane_scrollback_limit_bytes: crate::config::DEFAULT_SCROLLBACK_LIMIT_BYTES,
-            accent: Color::Cyan,
             sound: SoundConfig {
                 enabled: false,
                 ..SoundConfig::default()
             },
-            local_sound_playback: false,
             toast_config: ToastConfig::default(),
             keybinds: Keybinds::default(),
             animation_tick: 0,
@@ -2515,27 +1393,18 @@ impl AppState {
             },
             host_terminal_appearance: None,
             host_terminal_appearance_explicit: false,
-            settings: SettingsState {
-                section: SettingsSection::Theme,
-                list: SelectionListState::new(0),
-                original_palette: None,
-                original_theme: None,
-            },
             integration_recommendations: Vec::new(),
             agent_manifest_summaries: Vec::new(),
             agent_manifest_update_status:
                 crate::detect::manifest_update::ManifestUpdateStatus::default(),
-            integration_install_messages: Vec::new(),
             installed_plugins: std::collections::HashMap::new(),
             plugin_panes: std::collections::HashMap::new(),
             popup_pane: None,
             plugin_command_logs: Vec::new(),
             next_plugin_command_log_id: 1,
             plugin_commands_in_flight: 0,
-            global_menu: MenuListState::new(0),
             host_terminal_theme: TerminalTheme::default(),
             host_cell_size: crate::kitty_graphics::HostCellSize::default(),
-            host_mouse_pixels: None,
             session_dirty: false,
             terminal_runtime_shutdowns: Vec::new(),
         }
@@ -2663,10 +1532,6 @@ impl AppState {
     }
 
     pub fn assert_invariants_for_test(&self) {
-        assert!(
-            self.mode() == Mode::ConfirmClose || self.pending_agent_close_focus.is_none(),
-            "pending agent close focus must only exist while close confirmation is active"
-        );
         if self.workspaces.is_empty() {
             assert!(
                 self.active.is_none(),
@@ -2701,64 +1566,12 @@ impl AppState {
                 self.pending_agent_notifications.is_empty(),
                 "empty app state must not keep pending agent notifications"
             );
-            assert!(
-                self.copy_mode.is_none(),
-                "empty app state must not keep copy mode"
-            );
-            assert!(
-                self.rename_pane_target.is_none(),
-                "empty app state must not keep rename pane target"
-            );
-            assert!(
-                self.selection.is_none(),
-                "empty app state must not keep text selection"
-            );
-            assert!(
-                self.selection_autoscroll.is_none(),
-                "empty app state must not keep selection autoscroll"
-            );
             if let Some(toast) = &self.toast {
                 assert!(
                     toast.target.is_none(),
                     "empty app state must not keep pane-targeted toast"
                 );
             }
-            assert!(
-                self.right_click_passthrough.is_none(),
-                "empty app state must not keep right-click passthrough gesture"
-            );
-            assert!(
-                self.drag.is_none(),
-                "empty app state must not keep drag state"
-            );
-            assert!(
-                self.workspace_presses.is_empty(),
-                "empty app state must not keep workspace press state"
-            );
-            assert!(
-                self.tab_presses.is_empty(),
-                "empty app state must not keep tab press state"
-            );
-            assert!(
-                self.tree_space_presses.is_empty(),
-                "empty app state must not keep tree space press state"
-            );
-            assert!(
-                self.pane_copy_presses.is_empty(),
-                "empty app state must not keep pane copy press state"
-            );
-            assert!(
-                self.pane_hover.is_none(),
-                "empty app state must not keep pane hover state"
-            );
-            assert!(
-                self.context_menu.is_none(),
-                "empty app state must not keep context menu"
-            );
-            assert!(
-                self.host_mouse_pixels.is_none(),
-                "empty app state must not keep host mouse pixel provenance"
-            );
             return;
         }
 
@@ -2842,25 +1655,6 @@ impl AppState {
                 workspace_id
             );
         };
-        let assert_workspace_index = |ws_idx: usize, context: &str| {
-            assert!(
-                ws_idx < self.workspaces.len(),
-                "{context} references workspace index {} out of bounds for {} workspaces",
-                ws_idx,
-                self.workspaces.len()
-            );
-        };
-        let assert_tab_index = |ws_idx: usize, tab_idx: usize, context: &str| {
-            assert_workspace_index(ws_idx, context);
-            assert!(
-                tab_idx < self.workspaces[ws_idx].tabs.len(),
-                "{context} references tab index {} out of bounds for workspace {} with {} tabs",
-                tab_idx,
-                ws_idx,
-                self.workspaces[ws_idx].tabs.len()
-            );
-        };
-
         for (&raw, &pane_id) in &self.pane_id_aliases {
             assert_live_pane(pane_id, &format!("raw pane alias {raw}"));
         }
@@ -2908,117 +1702,6 @@ impl AppState {
         }
         for &pane_id in self.plugin_panes.keys() {
             assert_live_pane(pane_id, "plugin pane record");
-        }
-        if let Some(copy_mode) = &self.copy_mode {
-            assert_live_pane(copy_mode.pane_id, "copy mode");
-        }
-        if let Some(pane_id) = self.rename_pane_target {
-            assert_live_pane(pane_id, "rename pane target");
-        }
-        if let Some(selection) = &self.selection {
-            assert_live_pane(selection.pane_id, "text selection");
-        } else {
-            assert!(
-                self.selection_autoscroll.is_none(),
-                "selection autoscroll must not remain without an active text selection"
-            );
-        }
-        if let Some(gesture) = &self.right_click_passthrough {
-            assert_live_pane(gesture.pane_info.id, "right-click passthrough gesture");
-        }
-        if let Some(drag) = &self.drag {
-            match &drag.target {
-                DragTarget::WorkspaceReorder {
-                    source_ws_idx,
-                    drop_target,
-                    ..
-                } => {
-                    assert_workspace_index(*source_ws_idx, "workspace drag source");
-                    if let Some(WorkspaceDropTarget::Before(ws_idx)) = drop_target {
-                        assert_workspace_index(*ws_idx, "workspace drag target");
-                    }
-                }
-                DragTarget::TabReorder {
-                    ws_idx,
-                    source_tab_idx,
-                    insert_idx,
-                    ..
-                } => {
-                    assert_tab_index(*ws_idx, *source_tab_idx, "tab drag source");
-                    if let Some(insert_idx) = insert_idx {
-                        assert!(
-                            *insert_idx <= self.workspaces[*ws_idx].tabs.len(),
-                            "tab drag insert index {} out of bounds for workspace {} with {} tabs",
-                            insert_idx,
-                            ws_idx,
-                            self.workspaces[*ws_idx].tabs.len()
-                        );
-                    }
-                }
-                DragTarget::PaneScrollbar { pane_id, .. } => {
-                    assert_live_pane(*pane_id, "pane scrollbar drag")
-                }
-                _ => {}
-            }
-        }
-        for press in self.workspace_presses.values() {
-            assert_workspace_index(press.ws_idx, "workspace press");
-        }
-        for press in self.tab_presses.values() {
-            assert_tab_index(press.ws_idx, press.tab_idx, "tab press");
-        }
-        for source_id in &self.pane_copy_presses {
-            assert!(
-                !self.workspace_presses.contains_key(source_id)
-                    && !self.tab_presses.contains_key(source_id),
-                "pane copy press source {source_id} must not also own a chrome press"
-            );
-        }
-        if let Some((pane_id, _)) = self.pane_hover {
-            assert_live_pane(pane_id, "pane hover");
-        }
-        if let Some(menu) = &self.context_menu {
-            match menu.kind {
-                ContextMenuKind::Workspace { ws_idx, .. }
-                | ContextMenuKind::GitWorkspace { ws_idx, .. } => {
-                    assert_workspace_index(ws_idx, "context menu workspace")
-                }
-                ContextMenuKind::Tab { ws_idx, tab_idx } => {
-                    assert_tab_index(ws_idx, tab_idx, "context menu tab")
-                }
-                ContextMenuKind::AgentPane { ws_idx, pane_id } => {
-                    assert_workspace_index(ws_idx, "agent context menu workspace");
-                    assert!(
-                        self.workspaces[ws_idx].pane_state(pane_id).is_some(),
-                        "agent context menu references pane {:?} outside workspace {}",
-                        pane_id,
-                        ws_idx
-                    );
-                }
-                // Purely a view picker; carries no workspace/pane identity.
-                ContextMenuKind::SidebarView { .. } => {}
-                ContextMenuKind::Pane {
-                    ws_idx,
-                    tab_idx,
-                    pane_id,
-                    source_pane_id,
-                    ..
-                } => {
-                    assert_tab_index(ws_idx, tab_idx, "context menu pane tab");
-                    assert!(
-                        self.workspaces[ws_idx].tabs[tab_idx]
-                            .panes
-                            .contains_key(&pane_id),
-                        "context menu pane references pane {:?} outside workspace {} tab {}",
-                        pane_id,
-                        ws_idx,
-                        tab_idx
-                    );
-                    if let Some(source_pane_id) = source_pane_id {
-                        assert_live_pane(source_pane_id, "context menu source pane");
-                    }
-                }
-            }
         }
     }
 
@@ -3113,33 +1796,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "pane hover references missing pane")]
-    fn invariants_reject_hover_for_missing_pane() {
-        let mut state = AppState::test_with_adversarial_identity_state();
-        state.pane_hover = Some((PaneId::alloc(), true));
-
-        state.assert_invariants_for_test();
-    }
-
-    #[test]
-    #[should_panic(expected = "must not also own a chrome press")]
-    fn invariants_reject_copy_and_chrome_press_for_same_input_source() {
-        let mut state = AppState::test_with_adversarial_identity_state();
-        state.pane_copy_presses.insert(41);
-        state.tab_presses.insert(
-            41,
-            TabPressState {
-                ws_idx: 0,
-                tab_idx: 0,
-                start_col: 0,
-                start_row: 0,
-            },
-        );
-
-        state.assert_invariants_for_test();
-    }
-
-    #[test]
     fn adversarial_identity_state_remains_valid_with_profile_membership() {
         let mut state = AppState::test_with_adversarial_identity_state();
         state.workspaces[0].profiles = vec!["work".into()];
@@ -3192,83 +1848,6 @@ mod tests {
         state.assert_invariants_for_test();
     }
 
-    fn navigator_row_for_display(is_workspace: bool) -> NavigatorRow {
-        NavigatorRow {
-            target: NavigatorTarget::Workspace { ws_idx: 0 },
-            depth: if is_workspace { 0 } else { 1 },
-            label: String::new(),
-            meta: String::new(),
-            status: crate::detect::AgentState::Idle,
-            seen: true,
-            is_current: false,
-            is_workspace,
-            is_tab: false,
-            expanded: true,
-            search_text: String::new(),
-            label_match_positions: Vec::new(),
-            ranked: false,
-            matched: true,
-        }
-    }
-
-    #[test]
-    fn navigator_display_lines_separate_workspace_groups() {
-        let rows = vec![
-            navigator_row_for_display(true),
-            navigator_row_for_display(false),
-            navigator_row_for_display(true),
-            navigator_row_for_display(false),
-        ];
-        assert_eq!(
-            navigator_display_lines(&rows),
-            vec![
-                NavigatorDisplayLine::Row(0),
-                NavigatorDisplayLine::Row(1),
-                NavigatorDisplayLine::Spacer,
-                NavigatorDisplayLine::Row(2),
-                NavigatorDisplayLine::Row(3),
-            ]
-        );
-    }
-
-    #[test]
-    fn navigator_display_lines_have_no_leading_spacer() {
-        let rows = vec![
-            navigator_row_for_display(true),
-            navigator_row_for_display(false),
-        ];
-        assert_eq!(
-            navigator_display_lines(&rows),
-            vec![NavigatorDisplayLine::Row(0), NavigatorDisplayLine::Row(1)]
-        );
-        assert!(navigator_display_lines(&[]).is_empty());
-    }
-
-    #[test]
-    fn navigator_display_index_maps_row_to_line() {
-        let rows = vec![
-            navigator_row_for_display(true),
-            navigator_row_for_display(false),
-            navigator_row_for_display(true),
-        ];
-        let lines = navigator_display_lines(&rows);
-        assert_eq!(navigator_display_index_of_row(&lines, 2), Some(3));
-        assert_eq!(navigator_display_index_of_row(&lines, 9), None);
-    }
-
-    #[test]
-    fn navigator_first_row_skips_spacer_lines() {
-        let rows = vec![
-            navigator_row_for_display(true),
-            navigator_row_for_display(false),
-            navigator_row_for_display(true),
-        ];
-        let lines = navigator_display_lines(&rows);
-        // Line 2 is the spacer before the second workspace.
-        assert_eq!(navigator_first_row_at_or_after(&lines, 2), Some(2));
-        assert_eq!(navigator_first_row_at_or_after(&lines, 4), None);
-    }
-
     fn rgb_luminance(color: Color) -> f64 {
         let Color::Rgb(r, g, b) = color else {
             panic!("expected RGB color, got {color:?}");
@@ -3295,7 +1874,7 @@ mod tests {
 
     #[test]
     fn built_in_theme_names_resolve() {
-        for name in THEME_NAMES {
+        for name in crate::config::THEME_NAMES {
             assert!(
                 Palette::from_name(name).is_some(),
                 "theme should resolve: {name}"
@@ -3305,7 +1884,7 @@ mod tests {
 
     #[test]
     fn built_in_active_rows_remain_visible_with_matching_terminal_backgrounds() {
-        for name in THEME_NAMES
+        for name in crate::config::THEME_NAMES
             .iter()
             .copied()
             .filter(|name| *name != "terminal")
@@ -3327,7 +1906,7 @@ mod tests {
 
     #[test]
     fn built_in_selection_rows_stay_distinct_from_background_and_active_rows() {
-        for name in THEME_NAMES
+        for name in crate::config::THEME_NAMES
             .iter()
             .copied()
             .filter(|name| *name != "terminal")
@@ -3353,7 +1932,7 @@ mod tests {
 
     #[test]
     fn built_in_themes_leave_sidebar_background_unset() {
-        for name in THEME_NAMES {
+        for name in crate::config::THEME_NAMES {
             let palette = Palette::from_name(name).unwrap();
             assert_eq!(
                 palette.sidebar_bg,
@@ -3413,180 +1992,5 @@ mod tests {
             KeyCode::Char('b'),
             KeyModifiers::SHIFT,
         ));
-    }
-
-    #[test]
-    fn profile_actions_are_present_on_workspace_agent_and_pane_menus() {
-        let workspace = ContextMenuState {
-            kind: ContextMenuKind::Workspace {
-                ws_idx: 0,
-                orchestrator_mode: false,
-            },
-            x: 0,
-            y: 0,
-            list: MenuListState::new(0),
-        };
-        assert_eq!(
-            workspace.items(),
-            [
-                "Rename",
-                "Send to profile...",
-                "Share with profiles...",
-                "Enable orchestrator mode",
-                "Close"
-            ]
-        );
-
-        let pane_id = crate::layout::PaneId::from_raw(1);
-        let agent = ContextMenuState {
-            kind: ContextMenuKind::AgentPane { ws_idx: 0, pane_id },
-            x: 0,
-            y: 0,
-            list: MenuListState::new(0),
-        };
-        assert_eq!(
-            agent.items(),
-            [
-                "Focus",
-                "Rename",
-                "Send to profile...",
-                "Share with profiles...",
-                "Close"
-            ]
-        );
-
-        let pane = ContextMenuState {
-            kind: ContextMenuKind::Pane {
-                ws_idx: 0,
-                tab_idx: 0,
-                pane_id,
-                source_pane_id: None,
-                has_manual_label: false,
-                right_click_passthrough: false,
-            },
-            x: 0,
-            y: 0,
-            list: MenuListState::new(0),
-        };
-        assert!(pane.items().ends_with(&[
-            "Send to profile...",
-            "Share with profiles...",
-            "Close pane"
-        ]));
-    }
-
-    #[test]
-    fn workspace_context_menu_orchestrator_item_tracks_mode() {
-        let enabled = ContextMenuState {
-            kind: ContextMenuKind::Workspace {
-                ws_idx: 0,
-                orchestrator_mode: true,
-            },
-            x: 0,
-            y: 0,
-            list: MenuListState::new(0),
-        };
-        assert!(enabled.items().contains(&"Disable orchestrator mode"));
-
-        let git = ContextMenuState {
-            kind: ContextMenuKind::GitWorkspace {
-                ws_idx: 0,
-                is_linked_worktree: false,
-                orchestrator_mode: true,
-                has_worktree_children: true,
-                collapsed: false,
-            },
-            x: 0,
-            y: 0,
-            list: MenuListState::new(0),
-        };
-        assert!(git.items().contains(&"Disable orchestrator mode"));
-    }
-
-    #[test]
-    fn linked_worktree_context_menu_keeps_safe_close_and_explicit_remove() {
-        let menu = ContextMenuState {
-            kind: ContextMenuKind::GitWorkspace {
-                ws_idx: 0,
-                is_linked_worktree: true,
-                orchestrator_mode: false,
-                has_worktree_children: false,
-                collapsed: false,
-            },
-            x: 0,
-            y: 0,
-            list: MenuListState::new(0),
-        };
-
-        assert_eq!(
-            menu.items(),
-            &[
-                "Rename",
-                "Send to profile...",
-                "Share with profiles...",
-                "Enable orchestrator mode",
-                "Close",
-                "Delete worktree checkout..."
-            ]
-        );
-    }
-
-    #[test]
-    fn git_workspace_context_menu_keeps_remove_for_managed_worktrees_only() {
-        let menu = ContextMenuState {
-            kind: ContextMenuKind::GitWorkspace {
-                ws_idx: 0,
-                is_linked_worktree: false,
-                orchestrator_mode: false,
-                has_worktree_children: false,
-                collapsed: false,
-            },
-            x: 0,
-            y: 0,
-            list: MenuListState::new(0),
-        };
-
-        assert_eq!(
-            menu.items(),
-            &[
-                "Rename",
-                "Send to profile...",
-                "Share with profiles...",
-                "Enable orchestrator mode",
-                "Close",
-                "New worktree",
-                "Open worktree..."
-            ]
-        );
-    }
-
-    #[test]
-    fn parent_worktree_context_menu_uses_repo_actions() {
-        let menu = ContextMenuState {
-            kind: ContextMenuKind::GitWorkspace {
-                ws_idx: 0,
-                is_linked_worktree: false,
-                orchestrator_mode: false,
-                has_worktree_children: true,
-                collapsed: false,
-            },
-            x: 0,
-            y: 0,
-            list: MenuListState::new(0),
-        };
-
-        assert_eq!(
-            menu.items(),
-            &[
-                "Rename",
-                "Send to profile...",
-                "Share with profiles...",
-                "Enable orchestrator mode",
-                "Close group",
-                "New worktree",
-                "Open worktree...",
-                "Collapse"
-            ]
-        );
     }
 }

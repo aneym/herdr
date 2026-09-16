@@ -33,26 +33,9 @@ impl UsageSampler {
 }
 
 impl super::App {
-    pub(crate) fn toggle_usage_overlay(&mut self) {
-        if self.state.mode() == super::state::Mode::Usage {
-            self.state.replace_mode(super::state::Mode::Terminal);
-            self.next_usage_refresh = None;
-            return;
-        }
-        self.state.replace_mode(super::state::Mode::Usage);
-        self.refresh_usage_overlay();
-    }
-
-    pub(crate) fn refresh_usage_overlay(&mut self) {
-        match self.collect_agent_usage() {
-            Ok(rows) => {
-                self.state.usage.rows = rows;
-                self.state.usage.error = None;
-            }
-            Err(err) => self.state.usage.error = Some(format!("failed to sample usage: {err}")),
-        }
-        self.next_usage_refresh = Some(Instant::now() + USAGE_CACHE_TTL);
-    }
+    // PORT-0.9: the usage overlay itself is client-shell UI and is not ported
+    // yet; `agent.usage` over the API still serves the same rows.
+    // (docs/fork/port-0.9/PORT.md)
 
     pub(crate) fn collect_agent_usage(&mut self) -> std::io::Result<Vec<AgentUsageInfo>> {
         let mut panes = Vec::new();
@@ -80,8 +63,7 @@ impl super::App {
             .into_iter()
             .map(|(pane, root_pid)| {
                 let process = root_pid
-                    .and_then(|pid| self.usage_sampler.usage_by_root.get(&pid))
-                    .copied()
+                    .and_then(|pid| self.usage_sampler.usage_by_root.get(&pid).copied())
                     .unwrap_or_default();
                 AgentUsageInfo {
                     pane_id: pane.pane_id,

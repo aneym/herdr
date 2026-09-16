@@ -148,7 +148,7 @@ impl App {
             self.state.switch_workspace_tab(ws_idx, tab_idx);
             self.state
                 .record_pane_focus_change(previous_focus, ws_idx, new_pane.pane_id);
-            self.state.replace_mode(crate::app::Mode::Terminal);
+            self.state.mode = crate::app::Mode::Terminal;
         }
         if placement == PluginPanePlacement::Zoomed {
             if let Some(tab) = self
@@ -215,7 +215,7 @@ impl App {
         let pane_id = ws.tabs[tab_idx].root_pane;
         if params.focus {
             self.state.switch_workspace_tab(ws_idx, tab_idx);
-            self.state.replace_mode(crate::app::Mode::Terminal);
+            self.state.mode = crate::app::Mode::Terminal;
         }
         let new_pane = crate::workspace::NewPane {
             pane_id,
@@ -260,7 +260,7 @@ impl App {
             entrypoint.to_string(),
         ));
         env.push(("HERDR_PLUGIN_CONTEXT_JSON".to_string(), context_json));
-        if let Ok(current_exe) = std::env::current_exe() {
+        if let Ok(current_exe) = crate::platform::launch_executable() {
             env.push((
                 "HERDR_BIN_PATH".to_string(),
                 current_exe.display().to_string(),

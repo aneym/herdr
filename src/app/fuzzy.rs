@@ -1,3 +1,10 @@
+//! Fuzzy scoring for the fork's search palette / navigator.
+//!
+// PORT-0.9: the navigator overlay that consumed this moved into the client
+// shell (src/client/shell/overlays.rs); the scorer is kept for that port.
+// (docs/fork/port-0.9/PORT.md)
+#![allow(dead_code)]
+
 const SCORE_MATCH: i32 = 16;
 const BONUS_BOUNDARY: i32 = 8;
 const BONUS_CAMEL: i32 = 7;
