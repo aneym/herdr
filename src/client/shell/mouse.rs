@@ -1970,12 +1970,12 @@ impl ClientShellState {
                             crate::config::AgentPanelSortConfig::Priority
                         }
                         crate::config::AgentPanelSortConfig::Priority => {
-                            crate::config::AgentPanelSortConfig::Spaces
+                            crate::config::AgentPanelSortConfig::Triage
                         }
-                        // PORT-0.9: triage and tree views are not ported to the
-                        // client shell yet. (docs/fork/port-0.9/PORT.md)
-                        crate::config::AgentPanelSortConfig::Triage
-                        | crate::config::AgentPanelSortConfig::Tree => {
+                        crate::config::AgentPanelSortConfig::Triage => {
+                            crate::config::AgentPanelSortConfig::Tree
+                        }
+                        crate::config::AgentPanelSortConfig::Tree => {
                             crate::config::AgentPanelSortConfig::Spaces
                         }
                     };
@@ -2043,6 +2043,9 @@ impl ClientShellState {
                     outcome.repaint = true;
                     outcome.resize = true;
                     self.persist_chrome_preferences(outcome);
+                    return;
+                }
+                if self.handle_tree_header_click(point, outcome) {
                     return;
                 }
                 let group_toggle = self.hits.workspaces.iter().find_map(|hit| {
@@ -2355,5 +2358,51 @@ impl ClientShellState {
             },
             outcome,
         );
+    }
+
+    /// Clicks on a space or tab header row in the unified tree view. Returns
+    /// true when the click was consumed here.
+    fn handle_tree_header_click(
+        &mut self,
+        point: (u16, u16),
+        outcome: &mut ClientShellInput,
+    ) -> bool {
+        let Some(hit) = self
+            .hits
+            .tree_headers
+            .iter()
+            .find(|hit| super::contains(hit.rect, point))
+        else {
+            return false;
+        };
+        let chevron = super::contains(hit.chevron, point);
+        let key = hit.key.clone();
+        let is_space = hit.tab_id.is_none();
+        let workspace_id = hit.workspace_id.clone();
+        let tab_id = hit.tab_id.clone();
+        if chevron {
+            let tree = self.tree_chrome_mut();
+            if is_space {
+                super::tree::ClientTreeChrome::toggle(&mut tree.collapsed_spaces, key);
+            } else {
+                super::tree::ClientTreeChrome::toggle(&mut tree.collapsed_tabs, key);
+            }
+            self.persist_chrome_preferences(outcome);
+            outcome.repaint = true;
+            return true;
+        }
+        match tab_id {
+            Some(tab_id) => self.push_endpoint_method(
+                crate::api::schema::Method::TabFocus(crate::api::schema::TabTarget { tab_id }),
+                outcome,
+            ),
+            None => self.push_endpoint_method(
+                crate::api::schema::Method::WorkspaceFocus(crate::api::schema::WorkspaceTarget {
+                    workspace_id,
+                }),
+                outcome,
+            ),
+        }
+        true
     }
 }

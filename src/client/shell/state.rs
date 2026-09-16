@@ -100,6 +100,7 @@ pub(super) struct ShellHitMap {
     pub(super) agent_scroll_metrics: Option<crate::pane::ScrollMetrics>,
     pub(super) agent_max_scroll: usize,
     pub(super) agent_sort_toggle: Rect,
+    pub(super) tree_headers: Vec<TreeHeaderHit>,
     pub(super) sidebar_divider: Rect,
     pub(super) sidebar_section_divider: Rect,
     pub(super) sidebar_toggle: Rect,
@@ -224,6 +225,18 @@ pub(super) enum ClientChromeDrag {
         last_sent_offset: Option<usize>,
         last_sent_at: Option<std::time::Instant>,
     },
+}
+
+/// Hit regions on one space or tab header row in the unified tree view.
+pub(super) struct TreeHeaderHit {
+    pub(super) rect: Rect,
+    /// Empty when the header has nothing to fold away.
+    pub(super) chevron: Rect,
+    pub(super) workspace_id: String,
+    /// `None` on a space header.
+    pub(super) tab_id: Option<String>,
+    /// Collapse-set key for this header.
+    pub(super) key: String,
 }
 
 pub(super) struct WorkspaceHit {
@@ -859,6 +872,10 @@ pub(crate) struct ClientShellState {
     pub(super) tab_press: Option<ClientTabPress>,
     pub(super) collapsed_groups: HashSet<String>,
     pub(super) remote_collapsed_groups: HashMap<ClientEndpointId, HashSet<String>>,
+    pub(super) tree_chrome: HashMap<ClientEndpointId, super::tree::ClientTreeChrome>,
+    /// Borrowed whenever the active endpoint has no stored tree chrome yet, so
+    /// the renderer always has a `&ClientTreeChrome` to read.
+    pub(super) tree_chrome_default: super::tree::ClientTreeChrome,
     pub(super) workspace_scroll: usize,
     pub(super) agent_scroll: usize,
     pub(super) tab_scroll: usize,
@@ -995,6 +1012,20 @@ impl ClientShellState {
                 .or_default()
                 .extend(saved.collapsed_groups);
         }
+        let mut tree_chrome = HashMap::<ClientEndpointId, super::tree::ClientTreeChrome>::new();
+        tree_chrome.insert(
+            ClientEndpointId::Local,
+            super::tree::ClientTreeChrome::from_preferences(preferences.tree),
+        );
+        for saved in preferences.remote_tree {
+            let Ok(profile_id) = crate::client::endpoint::ProfileId::parse(saved.profile_id) else {
+                continue;
+            };
+            tree_chrome.insert(
+                ClientEndpointId::Ssh(profile_id),
+                super::tree::ClientTreeChrome::from_preferences(saved.tree),
+            );
+        }
         Self {
             config,
             snapshot: None,
@@ -1021,6 +1052,8 @@ impl ClientShellState {
             tab_press: None,
             collapsed_groups: preferences.collapsed_groups.into_iter().collect(),
             remote_collapsed_groups,
+            tree_chrome,
+            tree_chrome_default: super::tree::ClientTreeChrome::default(),
             workspace_scroll: 0,
             agent_scroll: 0,
             tab_scroll: 0,
@@ -1141,6 +1174,12 @@ impl ClientShellState {
         if !groups.remove(&key) {
             groups.insert(key);
         }
+    }
+
+    pub(super) fn tree_chrome_mut(&mut self) -> &mut super::tree::ClientTreeChrome {
+        self.tree_chrome
+            .entry(self.active_endpoint_id.clone())
+            .or_default()
     }
 
     pub(super) fn navigation_workspace_entries(

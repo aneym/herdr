@@ -53,6 +53,10 @@ impl ClientShellState {
             active_endpoint_id: &self.active_endpoint_id,
             collapsed_endpoints: &self.collapsed_endpoints,
             collapsed_groups: &self.collapsed_groups,
+            tree: self
+                .tree_chrome
+                .get(&self.active_endpoint_id)
+                .unwrap_or(&self.tree_chrome_default),
             remote_collapsed_groups: &self.remote_collapsed_groups,
             workspace_scroll: &mut self.workspace_scroll,
             agent_scroll: &mut self.agent_scroll,
@@ -188,6 +192,10 @@ impl ClientShellState {
                 active_endpoint_id: &self.active_endpoint_id,
                 collapsed_endpoints: &self.collapsed_endpoints,
                 collapsed_groups: &self.collapsed_groups,
+                tree: self
+                    .tree_chrome
+                    .get(&self.active_endpoint_id)
+                    .unwrap_or(&self.tree_chrome_default),
                 remote_collapsed_groups: &self.remote_collapsed_groups,
                 workspace_scroll: &mut self.workspace_scroll,
                 agent_scroll: &mut self.agent_scroll,

@@ -12,9 +12,32 @@ use super::*;
 
 pub(super) struct AgentRow {
     pub(super) pane_id: String,
+    pub(super) workspace_id: String,
+    pub(super) tab_id: String,
     pub(super) status: crate::api::schema::AgentStatus,
     pub(super) focused: bool,
     pub(super) rows: Vec<Vec<crate::ui::ResolvedToken>>,
+    /// Extra leading columns applied by the tree view, on top of the row's own
+    /// one-column (first line) / three-column (continuation) indent.
+    pub(super) indent: u8,
+}
+
+impl AgentRow {
+    /// Drop the tokens a tree header already names, so an agent row under a
+    /// space or tab header does not repeat its container's label.
+    pub(super) fn strip_tokens(&mut self, drop_workspace: bool, drop_tab: bool) {
+        if !drop_workspace && !drop_tab {
+            return;
+        }
+        for row in &mut self.rows {
+            row.retain(|token| match &token.kind {
+                crate::ui::ResolvedTokenKind::Workspace(_) => !drop_workspace,
+                crate::ui::ResolvedTokenKind::Tab(_) => !drop_tab,
+                _ => true,
+            });
+        }
+        self.rows.retain(|row| !row.is_empty());
+    }
 }
 
 pub(super) fn ordered_agent_pane_ids(
@@ -35,13 +58,28 @@ pub(super) fn ordered_agent_pane_ids(
             .collect();
     }
     let mut agents = snapshot.agents.iter().collect::<Vec<_>>();
-    if sort == crate::config::AgentPanelSortConfig::Priority {
-        agents.sort_by_key(|agent| {
-            (
-                std::cmp::Reverse(status_priority(agent.agent_status)),
-                std::cmp::Reverse(agent.state_change_seq),
-            )
-        });
+    match sort {
+        crate::config::AgentPanelSortConfig::Priority => {
+            agents.sort_by_key(|agent| {
+                (
+                    std::cmp::Reverse(status_priority(agent.agent_status)),
+                    std::cmp::Reverse(agent.state_change_seq),
+                )
+            });
+        }
+        // Triage puts the most demanding agent first and, within a tier, the one
+        // that has been waiting longest.
+        crate::config::AgentPanelSortConfig::Triage => {
+            agents.sort_by_key(|agent| {
+                (
+                    std::cmp::Reverse(super::tree::cycle_attention_rank(agent.agent_status)),
+                    agent.state_change_seq,
+                )
+            });
+        }
+        // The tree groups this order; it does not resort it.
+        crate::config::AgentPanelSortConfig::Spaces | crate::config::AgentPanelSortConfig::Tree => {
+        }
     }
     agents
         .into_iter()
@@ -54,6 +92,7 @@ pub(super) fn render_agent_panel(
     area: Rect,
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
+    tree: &super::tree::ClientTreeChrome,
     agent_scroll: &mut usize,
     hits: &mut ShellHitMap,
 ) {
@@ -68,10 +107,17 @@ pub(super) fn render_agent_panel(
     }
 
     let rows = agent_rows(snapshot, config, None);
+    let entries = if super::tree::tree_view_active(config) && snapshot.agent_view_label.is_none() {
+        super::tree::tree_list_entries(snapshot, tree, rows)
+    } else {
+        rows.into_iter()
+            .map(super::tree::AgentPanelListEntry::Agent)
+            .collect()
+    };
     render_agent_list(
         buffer,
         area,
-        &rows,
+        &entries,
         snapshot
             .agent_view_label
             .as_ref()
@@ -79,12 +125,149 @@ pub(super) fn render_agent_panel(
         config,
         agent_scroll,
         hits,
-        |row| row.rows.len(),
-        |buffer, rect, row, hits| {
+        super::tree::AgentPanelListEntry::line_count,
+        |buffer, rect, entry, hits| render_panel_list_entry(buffer, rect, entry, config, hits),
+    );
+}
+
+/// Right-most two cells of a header row: the disclosure chevron.
+pub(super) fn tree_header_chevron_rect(rect: Rect) -> Rect {
+    let width = 2u16.min(rect.width);
+    if width == 0 {
+        return Rect::default();
+    }
+    Rect::new(rect.right().saturating_sub(width), rect.y, width, 1)
+}
+
+fn render_panel_list_entry(
+    buffer: &mut Buffer,
+    rect: Rect,
+    entry: &super::tree::AgentPanelListEntry,
+    config: &ClientShellConfig,
+    hits: &mut ShellHitMap,
+) {
+    use super::tree::AgentPanelListEntry;
+    match entry {
+        AgentPanelListEntry::Agent(row) => {
             hits.agents.push((rect, row.pane_id.clone()));
             render_agent_row(buffer, rect, row, config);
-        },
+        }
+        AgentPanelListEntry::SpaceHeader(header) => {
+            render_tree_header(buffer, rect, header, true, config, hits);
+        }
+        AgentPanelListEntry::TabHeader(header) => {
+            render_tree_header(buffer, rect, header, false, config, hits);
+        }
+    }
+}
+
+fn render_tree_header(
+    buffer: &mut Buffer,
+    rect: Rect,
+    header: &super::tree::TreeHeader,
+    is_space: bool,
+    config: &ClientShellConfig,
+    hits: &mut ShellHitMap,
+) {
+    let palette = &config.palette;
+    // The tab is the unit that gets scanned, so it carries the strongest
+    // weight. The space reads as the container above it, and agent titles below
+    // stay lighter than both.
+    let label_style = if is_space {
+        Style::default()
+            .fg(palette.overlay0)
+            .add_modifier(Modifier::BOLD)
+    } else if header.active {
+        Style::default()
+            .fg(palette.text)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+            .fg(palette.subtext0)
+            .add_modifier(Modifier::BOLD)
+    };
+    if header.active {
+        buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
+    }
+    let prefix = 1 + u16::from(header.indent);
+    // Space headers reserve extra cells for the pin and new-tab plus.
+    let trailing_width = if is_space { 10 } else { 6 };
+    put_text(
+        buffer,
+        rect.x.saturating_add(prefix),
+        rect.y,
+        rect.width
+            .saturating_sub(prefix)
+            .saturating_sub(trailing_width),
+        &header.label,
+        label_style,
     );
+
+    let mut trailing = Vec::<(String, Style)>::new();
+    if !header.child_states.is_empty() {
+        // One dot per agent this header stands in for, so a collapsed tab still
+        // reports every agent's state rather than a count. Past the cap the dots
+        // would crowd the label, so the rest collapse into a trailing count.
+        const MAX_DOTS: usize = 6;
+        let shown = header.child_states.len().min(MAX_DOTS);
+        for status in header.child_states.iter().take(shown) {
+            trailing.push((
+                status_icon(*status, config.status_indicators).to_owned(),
+                Style::default().fg(status_color(*status, palette)),
+            ));
+        }
+        if header.child_states.len() > shown {
+            trailing.push((
+                format!("+{}", header.child_states.len() - shown),
+                Style::default().fg(palette.overlay0),
+            ));
+        }
+        trailing.push((" ".to_owned(), Style::default()));
+    }
+    let chevron = |collapsed: bool| {
+        (
+            if collapsed { "\u{25b8} " } else { "\u{25be} " }.to_owned(),
+            Style::default().fg(palette.overlay0),
+        )
+    };
+    if is_space {
+        // The pin and new-tab controls live in these reserved slots; they are
+        // drawn blank until those features land so the trailing strip keeps a
+        // fixed geometry.
+        trailing.push(("    ".to_owned(), Style::default()));
+        trailing.push(if header.collapsible {
+            chevron(header.collapsed)
+        } else {
+            ("  ".to_owned(), Style::default())
+        });
+    } else if header.collapsible {
+        trailing.push(chevron(header.collapsed));
+    } else if !trailing.is_empty() {
+        trailing.push((" ".to_owned(), Style::default()));
+    }
+    let total = trailing
+        .iter()
+        .map(|(text, _)| display_width(text))
+        .sum::<usize>()
+        .min(rect.width as usize) as u16;
+    let mut x = rect.right().saturating_sub(total);
+    for (text, style) in &trailing {
+        let width = (display_width(text) as u16).min(rect.right().saturating_sub(x));
+        put_text(buffer, x, rect.y, width, text, *style);
+        x = x.saturating_add(width);
+    }
+
+    hits.tree_headers.push(TreeHeaderHit {
+        rect,
+        chevron: if header.collapsible {
+            tree_header_chevron_rect(rect)
+        } else {
+            Rect::default()
+        },
+        workspace_id: header.workspace_id.clone(),
+        tab_id: header.tab_id.clone(),
+        key: header.key.clone(),
+    });
 }
 
 pub(super) fn render_agent_panel_header(
@@ -121,8 +304,6 @@ pub(super) fn render_agent_panel_header(
     let sort_label = agent_view_label.unwrap_or(match config.agent_panel_sort {
         crate::config::AgentPanelSortConfig::Spaces => "grouped",
         crate::config::AgentPanelSortConfig::Priority => "priority",
-        // PORT-0.9: the fork's triage and tree views are not ported to the
-        // client shell yet. (docs/fork/port-0.9/PORT.md)
         crate::config::AgentPanelSortConfig::Triage => "triage",
         crate::config::AgentPanelSortConfig::Tree => "tree",
     });
@@ -316,9 +497,12 @@ pub(super) fn agent_row(
     );
     Some(AgentRow {
         pane_id: agent.pane_id.clone(),
+        workspace_id: agent.workspace_id.clone(),
+        tab_id: agent.tab_id.clone(),
         status: agent.agent_status,
         focused: agent.focused,
         rows,
+        indent: 0,
     })
 }
 
@@ -358,7 +542,7 @@ pub(super) fn render_agent_row(
         row.rows.clone()
     };
     for (index, tokens) in rows.iter().take(rect.height as usize).enumerate() {
-        let indent = if index == 0 { 1 } else { 3 };
+        let indent = usize::from(row.indent) + if index == 0 { 1 } else { 3 };
         let mut spans = vec![ratatui::text::Span::raw(" ".repeat(indent))];
         spans.extend(crate::ui::resolved_token_spans(
             tokens,

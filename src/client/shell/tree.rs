@@ -1,0 +1,519 @@
+//! The unified space → tab → agent sidebar tree.
+//!
+//! The fork drew this tree server-side from `AppState`; 0.9 renders the whole
+//! shell in the client, so the grouping is rebuilt here over
+//! [`ClientShellSnapshot`] and the per-client chrome state in
+//! [`ClientTreeChrome`]. The shape, the collapse semantics and the hidden
+//! section all match `docs/fork/port-0.9/orig/src/ui/sidebar.rs`.
+
+use super::agent_sidebar::AgentRow;
+use super::*;
+
+/// Per-endpoint tree chrome. Defaults show every layer with nothing folded.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct ClientTreeChrome {
+    pub(super) show_spaces: bool,
+    pub(super) show_tabs: bool,
+    pub(super) show_agents: bool,
+    pub(super) collapsed_spaces: HashSet<String>,
+    pub(super) collapsed_tabs: HashSet<String>,
+    pub(super) pinned_spaces: HashSet<String>,
+    pub(super) show_hidden_spaces: bool,
+    pub(super) hidden_spaces_expanded: bool,
+    pub(super) automations_expanded: bool,
+    pub(super) collapsed_agent_groups: HashSet<String>,
+    /// Workspace ids in the order the tree lists their spaces. Ids missing from
+    /// this list keep their snapshot order behind the ones named here.
+    pub(super) space_order: Vec<String>,
+}
+
+impl Default for ClientTreeChrome {
+    fn default() -> Self {
+        Self {
+            show_spaces: true,
+            show_tabs: true,
+            show_agents: true,
+            collapsed_spaces: HashSet::new(),
+            collapsed_tabs: HashSet::new(),
+            pinned_spaces: HashSet::new(),
+            show_hidden_spaces: false,
+            hidden_spaces_expanded: false,
+            automations_expanded: false,
+            collapsed_agent_groups: HashSet::new(),
+            space_order: Vec::new(),
+        }
+    }
+}
+
+fn sorted(values: &HashSet<String>) -> Vec<String> {
+    let mut values = values.iter().cloned().collect::<Vec<_>>();
+    values.sort();
+    values
+}
+
+impl ClientTreeChrome {
+    pub(super) fn from_preferences(saved: preferences::ClientTreeChromePreferences) -> Self {
+        Self {
+            show_spaces: saved.show_spaces,
+            show_tabs: saved.show_tabs,
+            show_agents: saved.show_agents,
+            collapsed_spaces: saved.collapsed_spaces.into_iter().collect(),
+            collapsed_tabs: saved.collapsed_tabs.into_iter().collect(),
+            pinned_spaces: saved.pinned_spaces.into_iter().collect(),
+            show_hidden_spaces: saved.show_hidden_spaces,
+            hidden_spaces_expanded: saved.hidden_spaces_expanded,
+            automations_expanded: saved.automations_expanded,
+            collapsed_agent_groups: saved.collapsed_agent_groups.into_iter().collect(),
+            space_order: saved.space_order,
+        }
+    }
+
+    pub(super) fn to_preferences(&self) -> preferences::ClientTreeChromePreferences {
+        preferences::ClientTreeChromePreferences {
+            show_spaces: self.show_spaces,
+            show_tabs: self.show_tabs,
+            show_agents: self.show_agents,
+            collapsed_spaces: sorted(&self.collapsed_spaces),
+            collapsed_tabs: sorted(&self.collapsed_tabs),
+            pinned_spaces: sorted(&self.pinned_spaces),
+            show_hidden_spaces: self.show_hidden_spaces,
+            hidden_spaces_expanded: self.hidden_spaces_expanded,
+            automations_expanded: self.automations_expanded,
+            collapsed_agent_groups: sorted(&self.collapsed_agent_groups),
+            space_order: self.space_order.clone(),
+        }
+    }
+
+    pub(super) fn toggle(set: &mut HashSet<String>, key: String) {
+        if !set.remove(&key) {
+            set.insert(key);
+        }
+    }
+}
+
+/// Collapse-set key for a tab. Tab ids are per-boot, so the key is built from
+/// the workspace id and the stable tab number the fork persisted.
+pub(super) fn tab_key(workspace_id: &str, number: usize) -> String {
+    format!("{workspace_id}#{number}")
+}
+
+/// A space or tab grouping row in the unified tree view.
+#[derive(Clone, Debug)]
+pub(super) struct TreeHeader {
+    pub(super) workspace_id: String,
+    /// `None` on a space header; the tab this header stands for otherwise.
+    pub(super) tab_id: Option<String>,
+    pub(super) label: String,
+    /// Collapse-set key: workspace id, or `<workspace-id>#<tab-number>`.
+    pub(super) key: String,
+    pub(super) collapsed: bool,
+    /// One status per agent this header stands in for, in panel order, so the
+    /// header can show a dot per agent instead of a bare count.
+    pub(super) child_states: Vec<crate::api::schema::AgentStatus>,
+    /// This header has rows underneath it that a collapse would actually hide.
+    /// A header with nothing to hide shows no chevron.
+    pub(super) collapsible: bool,
+    pub(super) indent: u8,
+    /// This header's workspace or tab holds the focused pane.
+    pub(super) active: bool,
+}
+
+pub(super) enum AgentPanelListEntry {
+    Agent(AgentRow),
+    SpaceHeader(TreeHeader),
+    TabHeader(TreeHeader),
+}
+
+impl AgentPanelListEntry {
+    pub(super) fn line_count(&self) -> usize {
+        match self {
+            Self::Agent(row) => row.rows.len().max(1),
+            _ => 1,
+        }
+    }
+}
+
+pub(super) fn tree_view_active(config: &ClientShellConfig) -> bool {
+    config.agent_panel_sort == crate::config::AgentPanelSortConfig::Tree
+}
+
+/// Cmd+E / tree roll-up ordering. Higher wins. Blocked agents are waiting on
+/// Alex, so they come first. An unread completion is the next thing worth
+/// reading. A read completion is still visitable. A working agent has nothing
+/// to read yet, so it ranks last among live states.
+///
+/// This is deliberately *not* [`super::status_priority`]: that one ranks a
+/// working agent above an idle one for the space roll-up badge, where recency
+/// of activity is what matters.
+pub(super) fn cycle_attention_rank(status: crate::api::schema::AgentStatus) -> u8 {
+    use crate::api::schema::AgentStatus;
+    match status {
+        AgentStatus::Blocked => 4,
+        AgentStatus::Done => 3,
+        AgentStatus::Idle => 2,
+        AgentStatus::Working => 1,
+        AgentStatus::Unknown => 0,
+    }
+}
+
+/// Highest-attention status among a run of agent rows.
+fn rollup_state(rows: &[AgentRow]) -> Vec<crate::api::schema::AgentStatus> {
+    rows.iter().map(|row| row.status).collect()
+}
+
+/// Group agent rows into space → tab → agent rows, preserving the incoming
+/// order so nothing reshuffles on its own. Layer visibility and collapse state
+/// come from the three tree layer toggles and the two collapse sets.
+pub(super) fn tree_list_entries(
+    snapshot: &ClientShellSnapshot,
+    tree: &ClientTreeChrome,
+    rows: Vec<AgentRow>,
+) -> Vec<AgentPanelListEntry> {
+    let mut workspace_order = Vec::<String>::new();
+    let mut by_workspace = HashMap::<String, Vec<AgentRow>>::new();
+    for row in rows {
+        let workspace_id = row.workspace_id.clone();
+        by_workspace
+            .entry(workspace_id.clone())
+            .or_insert_with(|| {
+                workspace_order.push(workspace_id);
+                Vec::new()
+            })
+            .push(row);
+    }
+
+    let mut out = Vec::new();
+    for workspace_id in &workspace_order {
+        let Some(workspace_rows) = by_workspace.remove(workspace_id) else {
+            continue;
+        };
+        let space_collapsed = tree.show_spaces && tree.collapsed_spaces.contains(workspace_id);
+        let space_indent = u8::from(tree.show_spaces);
+        if tree.show_spaces {
+            // A collapsed space is deliberately folded out of sight; its status
+            // dots would keep pulling attention to it, so they hide with the
+            // rows. Dots on an expanded header still stand in for agents hidden
+            // by the layer toggles.
+            let layers_hidden = !tree.show_tabs && !tree.show_agents;
+            let show_dots = !space_collapsed && layers_hidden;
+            out.push(AgentPanelListEntry::SpaceHeader(TreeHeader {
+                workspace_id: workspace_id.clone(),
+                tab_id: None,
+                label: workspace_label(snapshot, workspace_id),
+                key: workspace_id.clone(),
+                collapsed: space_collapsed,
+                child_states: if show_dots {
+                    rollup_state(&workspace_rows)
+                } else {
+                    Vec::new()
+                },
+                collapsible: !workspace_rows.is_empty() && (tree.show_tabs || tree.show_agents),
+                indent: 0,
+                // A space row separates groups; it is never the selection.
+                // Highlighting it while a tab inside it is selected reads as two
+                // things being active at once.
+                active: false,
+            }));
+            if space_collapsed {
+                continue;
+            }
+        }
+
+        let mut tab_order = Vec::<String>::new();
+        let mut by_tab = HashMap::<String, Vec<AgentRow>>::new();
+        for row in workspace_rows {
+            let tab_id = row.tab_id.clone();
+            by_tab
+                .entry(tab_id.clone())
+                .or_insert_with(|| {
+                    tab_order.push(tab_id);
+                    Vec::new()
+                })
+                .push(row);
+        }
+
+        for tab_id in &tab_order {
+            let Some(mut tab_rows) = by_tab.remove(tab_id) else {
+                continue;
+            };
+            let mut agent_indent = space_indent;
+            if tree.show_tabs {
+                let tab = snapshot.tabs.iter().find(|tab| &tab.tab_id == tab_id);
+                let key = tab
+                    .map(|tab| tab_key(workspace_id, tab.number))
+                    .unwrap_or_else(|| tab_key(workspace_id, 0));
+                let collapsed = tree.collapsed_tabs.contains(&key);
+                let show_dots = collapsed || !tree.show_agents;
+                out.push(AgentPanelListEntry::TabHeader(TreeHeader {
+                    workspace_id: workspace_id.clone(),
+                    tab_id: Some(tab_id.clone()),
+                    label: tab
+                        .map(|tab| tab.label.clone())
+                        .unwrap_or_else(|| tab_id.clone()),
+                    key,
+                    collapsed,
+                    child_states: if show_dots {
+                        rollup_state(&tab_rows)
+                    } else {
+                        Vec::new()
+                    },
+                    collapsible: !tab_rows.is_empty() && tree.show_agents,
+                    indent: space_indent,
+                    active: !tree.show_agents
+                        && tab.is_some_and(|tab| tab.focused)
+                        && snapshot.focused_workspace_id.as_deref() == Some(workspace_id.as_str()),
+                }));
+                if collapsed {
+                    continue;
+                }
+                agent_indent = agent_indent.saturating_add(1);
+            }
+
+            if !tree.show_agents {
+                continue;
+            }
+
+            for row in &mut tab_rows {
+                row.indent = agent_indent;
+                // The headers already name the space and tab; drop the duplicate
+                // labels from the row tokens.
+                row.strip_tokens(tree.show_spaces, tree.show_tabs);
+            }
+            out.extend(tab_rows.into_iter().map(AgentPanelListEntry::Agent));
+        }
+    }
+
+    reorder_spaces(out, &tree.space_order)
+}
+
+/// Reorder whole space blocks to follow the manual drag order. Blocks not named
+/// in `space_order` keep their relative position behind the ones that are, and
+/// anything outside a space block (the hidden section, automations) stays put at
+/// the end.
+fn reorder_spaces(
+    entries: Vec<AgentPanelListEntry>,
+    space_order: &[String],
+) -> Vec<AgentPanelListEntry> {
+    if space_order.is_empty() {
+        return entries;
+    }
+    let mut blocks = Vec::<(Option<String>, Vec<AgentPanelListEntry>)>::new();
+    for entry in entries {
+        match &entry {
+            AgentPanelListEntry::SpaceHeader(header) => {
+                blocks.push((Some(header.workspace_id.clone()), vec![entry]));
+            }
+            _ => match blocks.last_mut() {
+                Some((_, block)) => block.push(entry),
+                None => blocks.push((None, vec![entry])),
+            },
+        }
+    }
+    let rank = |workspace_id: &Option<String>| {
+        workspace_id
+            .as_ref()
+            .and_then(|id| space_order.iter().position(|saved| saved == id))
+            .unwrap_or(usize::MAX)
+    };
+    let mut ordered = blocks.into_iter().enumerate().collect::<Vec<_>>();
+    ordered.sort_by_key(|(index, (workspace_id, _))| (rank(workspace_id), *index));
+    ordered
+        .into_iter()
+        .flat_map(|(_, (_, block))| block)
+        .collect()
+}
+
+fn workspace_label(snapshot: &ClientShellSnapshot, workspace_id: &str) -> String {
+    snapshot
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.workspace_id == workspace_id)
+        .map(|workspace| workspace.label.clone())
+        .unwrap_or_else(|| workspace_id.to_owned())
+}
+
+/// One entry in the flat ⌘E rotation, in agent-panel order.
+pub(super) struct AgentCycleEntry {
+    pub(super) pane_id: String,
+    pub(super) workspace_id: String,
+    pub(super) tab_id: String,
+    pub(super) status: crate::api::schema::AgentStatus,
+}
+
+impl ClientShellState {
+    /// The agent panel's flat order, minus anything the tree has folded away.
+    /// What was folded should not catch ⌘E, so its agents leave the attention
+    /// rotation until the space reopens.
+    pub(super) fn agent_cycle_candidates(
+        &self,
+        snapshot: &ClientShellSnapshot,
+    ) -> Vec<AgentCycleEntry> {
+        let tree = self
+            .tree_chrome
+            .get(&self.active_endpoint_id)
+            .unwrap_or(&self.tree_chrome_default);
+        let skips_space = |workspace_id: &str| {
+            tree_view_active(&self.config)
+                && tree.show_spaces
+                && tree.collapsed_spaces.contains(workspace_id)
+        };
+        super::agent_sidebar::ordered_agent_pane_ids(snapshot, self.config.agent_panel_sort)
+            .into_iter()
+            .filter_map(|pane_id| {
+                let agent = snapshot
+                    .agents
+                    .iter()
+                    .find(|agent| agent.pane_id == pane_id)?;
+                (!skips_space(&agent.workspace_id)).then(|| AgentCycleEntry {
+                    pane_id,
+                    workspace_id: agent.workspace_id.clone(),
+                    tab_id: agent.tab_id.clone(),
+                    status: agent.agent_status,
+                })
+            })
+            .collect()
+    }
+
+    /// ⌘E target selection over the flat panel entries. Returns the index to
+    /// focus.
+    pub(super) fn agent_cycle_target(
+        &self,
+        snapshot: &ClientShellSnapshot,
+        entries: &[AgentCycleEntry],
+        forward: bool,
+    ) -> Option<usize> {
+        if entries.is_empty() {
+            return None;
+        }
+        let tree = self
+            .tree_chrome
+            .get(&self.active_endpoint_id)
+            .unwrap_or(&self.tree_chrome_default);
+        let focused = snapshot.focused_pane_id.as_deref();
+        let current_idx =
+            focused.and_then(|pane_id| entries.iter().position(|entry| entry.pane_id == pane_id));
+        // Priority and triage already sort the panel by attention, so their
+        // positional order IS the attention order. Spaces and tree hold a
+        // deliberately stable order, so the key must rank for itself there.
+        let panel_is_attention_sorted = matches!(
+            self.config.agent_panel_sort,
+            crate::config::AgentPanelSortConfig::Priority
+                | crate::config::AgentPanelSortConfig::Triage
+        );
+        // Recomputed on every press: the ranking is read fresh from current
+        // agent state, so a completion landing between presses is picked up.
+        let ranked = |idx: usize| {
+            if panel_is_attention_sorted {
+                0
+            } else {
+                cycle_attention_rank(entries[idx].status)
+            }
+        };
+        // With tab headers visible the tab is the unit being navigated, so a
+        // press moves to the next TAB rather than the next agent inside the
+        // current one. A tab ranks by its most demanding agent, and focus lands
+        // on that agent.
+        if tree_view_active(&self.config) && tree.show_tabs {
+            let current_tab = current_idx
+                .map(|idx| (&entries[idx].workspace_id, &entries[idx].tab_id))
+                .map(|(workspace_id, tab_id)| (workspace_id.clone(), tab_id.clone()));
+            let mut tab_order = Vec::<(String, String)>::new();
+            for entry in entries {
+                let key = (entry.workspace_id.clone(), entry.tab_id.clone());
+                if !tab_order.contains(&key) {
+                    tab_order.push(key);
+                }
+            }
+            if tab_order.len() > 1 {
+                let here = current_tab
+                    .as_ref()
+                    .and_then(|key| tab_order.iter().position(|candidate| candidate == key));
+                let order = rotation(tab_order.len(), here, forward);
+                let tab_rank = |index: usize| {
+                    let key = &tab_order[index];
+                    entries
+                        .iter()
+                        .filter(|entry| (&entry.workspace_id, &entry.tab_id) == (&key.0, &key.1))
+                        .map(|entry| cycle_attention_rank(entry.status))
+                        .max()
+                        .unwrap_or(0)
+                };
+                let best = order
+                    .iter()
+                    .map(|index| tab_rank(*index))
+                    .max()
+                    .unwrap_or(0);
+                if let Some(target) = order.into_iter().find(|index| tab_rank(*index) == best) {
+                    let key = &tab_order[target];
+                    // Inside the chosen tab, land on its most demanding agent.
+                    if let Some(idx) = entries
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, entry)| {
+                            (&entry.workspace_id, &entry.tab_id) == (&key.0, &key.1)
+                        })
+                        .max_by_key(|(_, entry)| cycle_attention_rank(entry.status))
+                        .map(|(idx, _)| idx)
+                    {
+                        return Some(idx);
+                    }
+                }
+            }
+        }
+
+        // Candidates exclude whatever is focused now. Ranking the current agent
+        // alongside the rest is what made the key look dead: when the focused
+        // agent was the only one at the top rank, the search wrapped straight
+        // back onto it.
+        let order = rotation(entries.len(), current_idx, forward);
+        if order.is_empty() {
+            return None;
+        }
+        // Walk from the neighbour outward and take the first candidate at the
+        // highest rank present. Walking in that order, rather than from index
+        // zero, makes repeated presses visit every peer at a rank before coming
+        // back around.
+        let best = order.iter().map(|index| ranked(*index)).max().unwrap_or(0);
+        let fallback = order[0];
+        Some(
+            order
+                .into_iter()
+                .find(|index| ranked(*index) == best)
+                .unwrap_or(fallback),
+        )
+    }
+}
+
+/// Indices to visit, starting at the neighbour of `current` and skipping
+/// `current` itself.
+fn rotation(len: usize, current: Option<usize>, forward: bool) -> Vec<usize> {
+    if len == 0 {
+        return Vec::new();
+    }
+    let step = |index: usize| {
+        if forward {
+            (index + 1) % len
+        } else {
+            (index + len - 1) % len
+        }
+    };
+    let start = match current {
+        Some(index) => step(index),
+        None => {
+            if forward {
+                0
+            } else {
+                len - 1
+            }
+        }
+    };
+    let mut order = Vec::with_capacity(len);
+    let mut index = start;
+    for _ in 0..len {
+        if Some(index) != current {
+            order.push(index);
+        }
+        index = step(index);
+    }
+    order
+}

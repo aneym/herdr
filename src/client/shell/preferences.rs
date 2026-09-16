@@ -14,6 +14,62 @@ pub(super) struct ClientRemoteCollapsedGroups {
     pub(super) collapsed_groups: Vec<String>,
 }
 
+/// Per-endpoint tree chrome: which layers the unified sidebar tree shows, what
+/// is folded away, and which spaces are pinned. The fork kept these on the
+/// server's `AppState`; 0.9 renders the tree in the client, so they live with
+/// the rest of the per-client chrome state.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(default)]
+pub(super) struct ClientTreeChromePreferences {
+    pub(super) show_spaces: bool,
+    pub(super) show_tabs: bool,
+    pub(super) show_agents: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(super) collapsed_spaces: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(super) collapsed_tabs: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(super) pinned_spaces: Vec<String>,
+    pub(super) show_hidden_spaces: bool,
+    pub(super) hidden_spaces_expanded: bool,
+    pub(super) automations_expanded: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(super) collapsed_agent_groups: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(super) space_order: Vec<String>,
+}
+
+impl Default for ClientTreeChromePreferences {
+    fn default() -> Self {
+        Self {
+            show_spaces: true,
+            show_tabs: true,
+            show_agents: true,
+            collapsed_spaces: Vec::new(),
+            collapsed_tabs: Vec::new(),
+            pinned_spaces: Vec::new(),
+            show_hidden_spaces: false,
+            hidden_spaces_expanded: false,
+            automations_expanded: false,
+            collapsed_agent_groups: Vec::new(),
+            space_order: Vec::new(),
+        }
+    }
+}
+
+impl ClientTreeChromePreferences {
+    pub(super) fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(super) struct ClientRemoteTreeChrome {
+    pub(super) profile_id: String,
+    #[serde(default)]
+    pub(super) tree: ClientTreeChromePreferences,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub(super) struct ClientChromePreferences {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -28,6 +84,13 @@ pub(super) struct ClientChromePreferences {
     pub(super) collapsed_groups: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) remote_collapsed_groups: Vec<ClientRemoteCollapsedGroups>,
+    #[serde(
+        default,
+        skip_serializing_if = "ClientTreeChromePreferences::is_default"
+    )]
+    pub(super) tree: ClientTreeChromePreferences,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) remote_tree: Vec<ClientRemoteTreeChrome>,
 }
 
 pub(super) fn path_for_local_endpoint(socket_path: &Path) -> PathBuf {

@@ -859,26 +859,10 @@ impl ClientShellState {
                 }))
             }
             KeybindAction::PreviousAgent | KeybindAction::NextAgent => {
-                let agents = super::agent_sidebar::ordered_agent_pane_ids(
-                    snapshot,
-                    self.config.agent_panel_sort,
-                );
-                if agents.is_empty() {
-                    return None;
-                }
-                let current = agents.iter().position(|pane_id| {
-                    Some(pane_id.as_str()) == snapshot.focused_pane_id.as_deref()
-                });
-                let next = match (current, action) {
-                    (Some(current), KeybindAction::PreviousAgent) => {
-                        (current + agents.len() - 1) % agents.len()
-                    }
-                    (Some(current), KeybindAction::NextAgent) => (current + 1) % agents.len(),
-                    (None, KeybindAction::PreviousAgent) => agents.len() - 1,
-                    (None, KeybindAction::NextAgent) => 0,
-                    _ => unreachable!("relative agent action"),
-                };
-                let pane_id = agents[next].clone();
+                let candidates = self.agent_cycle_candidates(snapshot);
+                let forward = action == KeybindAction::NextAgent;
+                let next = self.agent_cycle_target(snapshot, &candidates, forward)?;
+                let pane_id = candidates[next].pane_id.clone();
                 if !self
                     .hits
                     .agents

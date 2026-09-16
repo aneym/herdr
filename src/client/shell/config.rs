@@ -48,6 +48,21 @@ impl ClientShellState {
             })
             .collect::<Vec<_>>();
         remote_collapsed_groups.sort_by(|left, right| left.profile_id.cmp(&right.profile_id));
+        let mut remote_tree = self
+            .tree_chrome
+            .iter()
+            .filter_map(|(endpoint_id, tree)| {
+                let ClientEndpointId::Ssh(profile_id) = endpoint_id else {
+                    return None;
+                };
+                let tree = tree.to_preferences();
+                (!tree.is_default()).then(|| preferences::ClientRemoteTreeChrome {
+                    profile_id: profile_id.to_string(),
+                    tree,
+                })
+            })
+            .collect::<Vec<_>>();
+        remote_tree.sort_by(|left, right| left.profile_id.cmp(&right.profile_id));
         let preferences = preferences::ClientChromePreferences {
             sidebar_width: self.sidebar_width_manual.then_some(self.sidebar_width),
             sidebar_section_split: self
@@ -61,6 +76,12 @@ impl ClientShellState {
                 .then_some(self.config.agent_panel_sort),
             collapsed_groups,
             remote_collapsed_groups,
+            tree: self
+                .tree_chrome
+                .get(&ClientEndpointId::Local)
+                .map(super::tree::ClientTreeChrome::to_preferences)
+                .unwrap_or_default(),
+            remote_tree,
         };
         if let Err(error) = preferences::store(path, preferences) {
             self.set_endpoint_error(error);

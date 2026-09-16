@@ -36,7 +36,7 @@ The base for every fork diff is `d79fd746` (herdr 0.8.2 merge base); fork
 | 7 | Deferred attention-read (`ui.attention_read`) | part of `e838a372`, `3ed0689a` | carried (data) / needs-port (unfocus half) | `orig/src/app/actions.rs` (`update_attention_read_for_focus_change`, `mark_deferred_attention_read`, `pane_attention_generation`, `read_focused_attention`, `leave_focused_attention`) | client focus changes: `src/client/shell/input.rs`, `src/client/shell/actions.rs` | `leave_focused_attention` is `#[allow(dead_code)]` until the client calls it on unfocus. |
 | 8 | Pane focus history + `last_pane` | part of `08704fd6` | carried | `orig/src/app/actions.rs` (`record_focus_history_change`, `focus_history_target`, `focus_back`, `focus_forward`, `last_pane`), `PaneFocusHistory` in `orig/src/app/state.rs` | keybinding: `src/client/shell/input.rs` | History is recorded on every focus change through `record_pane_focus_after_navigation`. `focus_history_target` is `#[allow(dead_code)]` until a client key binds it. |
 | 9 | Mouse back/forward buttons drive focus history | `08704fd6` | needs-port | `orig/src/raw_input.rs` (`MouseNavButton`, `nav_button_from_cb`), `orig/src/app/runtime.rs` (`handle_mouse_nav_button`) | `src/client/shell/input.rs`, `src/client/shell/mouse.rs` | Buttons 8/9 are still parsed into `RawInputEvent::MouseNavButton`; both the client and the server input path now ignore it with a PORT-0.9 marker. Upstream has no equivalent. |
-| 10 | Sidebar tree (spaces/tabs/agents) + attention-aware ⌘E | `e838a372`, `ca788cd8`, `3ed0689a`, `44411943` | needs-port | `orig/src/ui/sidebar.rs` (6040 lines), `orig/src/app/actions.rs` (`cycle_agent_entry`, `agent_cycle_target`, `cycle_attention_rank`, `focus_agent_entry`, `ensure_agent_panel_entry_visible`) | `src/client/shell/sidebar.rs`, `src/client/shell/agent_sidebar.rs` | The tree preference fields (`tree_show_spaces/tabs/agents`, `tree_collapsed_spaces`, `tree_collapsed_tabs`) are kept on `AppState` and in the session snapshot. `AgentPanelSortConfig::{Triage,Tree}` are kept as config values; the client shell falls back to `Spaces` for both with a PORT-0.9 marker. |
+| 10 | Sidebar tree (spaces/tabs/agents) + attention-aware ⌘E | `e838a372`, `ca788cd8`, `3ed0689a`, `44411943` | carried (stage 2) | `orig/src/ui/sidebar.rs` (6040 lines), `orig/src/app/actions.rs` (`cycle_agent_entry`, `agent_cycle_target`, `cycle_attention_rank`, `focus_agent_entry`, `ensure_agent_panel_entry_visible`) | `src/client/shell/sidebar.rs`, `src/client/shell/agent_sidebar.rs` | Rebuilt in `src/client/shell/tree.rs` over `ClientShellSnapshot`. The tree layer toggles and collapse sets moved to per-client chrome state (stage-2 decision 6). `Triage` now sorts the panel and `Tree` groups it; the sort control cycles all four values. |
 | 11 | Pinned spaces, hidden section | `96d05fa3`, `5d4a5203`, `b00105bd`, `c98b5ea1`, `ead187a2` | carried (data) / needs-port (rows) | `orig/src/ui/sidebar.rs`, `orig/src/app/api.rs` (`respawn_tab_for_pinned_workspace`) | `src/client/shell/sidebar.rs` | `tree_pinned_spaces`, `tree_show_hidden_spaces` and `hidden_spaces_expanded` persist; the "pinned space keeps a live tab" behaviour on `PaneDied` is carried server-side. |
 | 12 | Tab status glyphs (`ui.show_tab_status`) | `ca788cd8` | needs-port | `orig/src/ui/tabs.rs`, `orig/src/app/tab_bar_status.rs` | `src/client/shell/tabs.rs` | `show_tab_status` config key is kept and parsed; nothing reads it yet. |
 | 13 | Space header `+` button / next-numbered tab | `f71ee286`, `51d4cf4c` | needs-port | `orig/src/ui/sidebar.rs` (`tree_header_plus_rect`, `TreeHeaderHit::NewTab`), `orig/src/app/creation.rs` (`next_new_tab_default_name`) | `src/client/shell/sidebar.rs`, `src/client/shell/mouse.rs` | The deferred tab-create API path it called is upstream's `tab.create`, which is intact. |
@@ -89,9 +89,10 @@ tests were never touched.
 `src/app/api/panes.rs: api_pane_zoom_explicit_background_pane_updates_focus_history`
 was kept: it covers focus history (feature 8), which is carried.
 
-## Decisions taken in stage 1
+## Decisions
 
-These were forced by upstream gates. Each one is reversible, but changing it
+Items 1-5 were taken in stage 1; 6 onwards in stage 2. These were forced by
+upstream gates. Each one is reversible, but changing it
 means changing an upstream test, so raise it with Alex first.
 
 1. **`AppState.mode` is public again.** The fork's private mode holder behind
@@ -122,6 +123,36 @@ means changing an upstream test, so raise it with Alex first.
    drive both steps. Ownership still clears exactly when the agent leaves.
 5. **`ui.agent_close_focus = "panel_next"` is inert.** It needs the sidebar
    panel order, which the client owns. The config key still parses.
+   *(Superseded in stage 2 by item 9.)*
+
+6. **Tree chrome state moved to the per-client preferences file.** The fork
+   kept `tree_show_*`, `tree_collapsed_*`, `tree_pinned_spaces`,
+   `tree_show_hidden_spaces`, `hidden_spaces_expanded`, `automations_expanded`
+   and `collapsed_agent_group_keys` on the server's `AppState`, because the
+   server drew the sidebar. 0.9 draws it in the client, and the client only
+   ever sees `ClientShellSnapshot`, whose shape upstream freezes. Rather than
+   widen the wire contract for chrome state, these live beside upstream's own
+   `collapsed_groups` in `state_dir()/client-shell/local-*.json`
+   (`ClientTreeChromePreferences`), per endpoint, exactly as upstream keeps
+   sidebar width and the worktree-group collapse set. The server-side fields
+   still exist and still round-trip through `session.json`; they are simply no
+   longer what the sidebar reads.
+
+7. **The tree renders for the single-machine sidebar only.** With more than
+   one machine connected, upstream's aggregated agent panel
+   (`src/client/shell/endpoint_agents.rs`) owns the detail section and groups
+   by machine. Layering a per-machine space/tab tree inside a cross-machine
+   list would give two competing groupings in one panel, so the tree applies
+   to the local-only sidebar. `prefix+w`, collapsed machine groups and the
+   `machine` sidebar token are untouched.
+
+8. **`ordered_agent_pane_ids` gained a real `Triage` arm, and ⌘E ranks
+   separately from the space badge.** `status_priority` (used for the space
+   roll-up) ranks `Working` above `Idle`; the fork's ⌘E and triage ordering
+   ranks a read completion above a working agent. Both are wanted, so
+   `tree::cycle_attention_rank` is a second function rather than a change to
+   the first.
+
 
 ## Build environment
 
