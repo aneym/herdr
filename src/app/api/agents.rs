@@ -879,7 +879,13 @@ mod tests {
             false,
             true,
         );
-        terminal.set_detected_state_with_visible_blocker(None, AgentState::Unknown, false, false, true);
+        terminal.set_detected_state_with_visible_blocker(
+            None,
+            AgentState::Unknown,
+            false,
+            false,
+            true,
+        );
     }
 
     #[tokio::test]
