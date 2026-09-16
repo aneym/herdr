@@ -360,21 +360,12 @@ pub(crate) fn client_palette_for_appearance(
     resolve_effective_theme(runtime, Some(appearance)).0
 }
 
-fn default_ui_prefs(config: &crate::config::Config) -> crate::persist::UiPrefs {
-    crate::persist::UiPrefs {
-        sidebar_width: config.ui.sidebar_width,
-        ..crate::persist::UiPrefs::default()
-    }
+fn default_ui_prefs() -> crate::persist::UiPrefs {
+    crate::persist::UiPrefs::default()
 }
 
-fn restored_ui_prefs(
-    snapshot: &crate::persist::SessionSnapshot,
-    config: &crate::config::Config,
-) -> crate::persist::UiPrefs {
+fn restored_ui_prefs(snapshot: &crate::persist::SessionSnapshot) -> crate::persist::UiPrefs {
     crate::persist::UiPrefs {
-        sidebar_width: snapshot.sidebar_width.unwrap_or(config.ui.sidebar_width),
-        sidebar_section_split: snapshot.sidebar_section_split.unwrap_or(0.5),
-        collapsed_space_keys: snapshot.collapsed_space_keys.clone(),
         automations_expanded: snapshot.automations_expanded,
         collapsed_agent_group_keys: snapshot.collapsed_agent_group_keys.clone(),
         tree_show_spaces: snapshot.tree_show_spaces,
@@ -415,8 +406,8 @@ impl App {
             .unwrap_or_else(|| crate::workspace::DEFAULT_PROFILE.to_string());
         let ui_prefs = snapshot
             .as_ref()
-            .map(|snap| restored_ui_prefs(snap, config))
-            .unwrap_or_else(|| default_ui_prefs(config));
+            .map(restored_ui_prefs)
+            .unwrap_or_else(default_ui_prefs);
         let (workspaces, active, selected) = if let Some(snap) = snapshot {
             let history = config
                 .experimental
@@ -576,9 +567,6 @@ impl App {
         // (src/client/shell/config.rs, preferences.rs). The server keeps the
         // persisted values so session snapshots round-trip.
         // (docs/fork/port-0.9/PORT.md)
-        state.sidebar_width = ui_prefs.sidebar_width;
-        state.sidebar_section_split = ui_prefs.sidebar_section_split;
-        state.collapsed_space_keys = ui_prefs.collapsed_space_keys.clone();
         state.automations_expanded = ui_prefs.automations_expanded;
         state.collapsed_agent_group_keys = ui_prefs.collapsed_agent_group_keys.clone();
         state.tree_show_spaces = ui_prefs.tree_show_spaces;
@@ -609,7 +597,6 @@ impl App {
         state.attention_read = config.ui.attention_read;
         state.tab_bar_position = config.ui.tab_bar_position;
         state.animation_tick = 0;
-        state.palette.accent = crate::config::parse_color(&config.ui.accent);
         state.settle_active_workspace_visibility();
 
         state.terminals = restored_terminals;
@@ -958,7 +945,6 @@ impl App {
                 self.state.sidebar_automations = config.ui.sidebar.automations.clone();
                 self.state.sidebar_spaces = config.ui.sidebar.spaces.clone();
                 self.state.sidebar_debug_bounds = config.ui.sidebar.debug_bounds;
-                self.state.palette.accent = crate::config::parse_color(&config.ui.accent);
                 if self.state.sound != config.ui.sound {
                     self.state.request_client_config_reload = true;
                 }
@@ -1124,10 +1110,7 @@ mod tests {
             None,
             crate::workspace::DEFAULT_PROFILE.to_string(),
             0,
-            crate::persist::UiPrefs {
-                sidebar_width: 26,
-                ..Default::default()
-            },
+            crate::persist::UiPrefs::default(),
         );
         let mut imports = std::collections::HashMap::new();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();

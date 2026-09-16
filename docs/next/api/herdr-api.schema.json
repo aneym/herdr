@@ -1758,6 +1758,23 @@
           ],
           "type": "object"
         },
+        "ClipboardImageWriteParams": {
+          "properties": {
+            "data_base64": {
+              "description": "Standard base64-encoded image bytes.",
+              "type": "string"
+            },
+            "extension": {
+              "description": "Recognized image filename extension, without a leading dot.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "extension",
+            "data_base64"
+          ],
+          "type": "object"
+        },
         "CommandInvokeParams": {
           "properties": {
             "command_id": {
@@ -3971,6 +3988,17 @@
           ],
           "type": "object"
         },
+        "ProfileSwitchParams": {
+          "properties": {
+            "profile": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "profile"
+          ],
+          "type": "object"
+        },
         "ReadFormat": {
           "enum": [
             "text",
@@ -4540,6 +4568,15 @@
                 "string",
                 "null"
               ]
+            }
+          },
+          "type": "object"
+        },
+        "WorkspaceListParams": {
+          "properties": {
+            "visible_only": {
+              "default": false,
+              "type": "boolean"
             }
           },
           "type": "object"
@@ -6068,6 +6105,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/PaneInputSetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "pane.set_profiles",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PaneSetProfilesParams"
             }
           },
           "required": [
@@ -10953,6 +11006,22 @@
               "type": "object"
             },
             {
+              "properties": {
+                "paste_text": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "clipboard_image_written",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "paste_text"
+              ],
+              "type": "object"
+            },
+            {
               "description": "Acknowledgement for the client-shell surface interest lease. This method is new on the\nendpoint protocol, so its revision-bearing result can establish an activation floor.",
               "properties": {
                 "active": {
@@ -10972,22 +11041,6 @@
                 "type",
                 "active",
                 "projection_revision"
-              ],
-              "type": "object"
-            },
-            {
-              "properties": {
-                "paste_text": {
-                  "type": "string"
-                },
-                "type": {
-                  "const": "clipboard_image_written",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "paste_text"
               ],
               "type": "object"
             },

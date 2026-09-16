@@ -858,13 +858,6 @@ pub struct AppState {
     pub sidebar_spaces: crate::config::SpacesSidebarConfig,
     /// TEMPORARY diagnostic: tint each sidebar row's container block.
     pub sidebar_debug_bounds: bool,
-    /// Persisted sidebar chrome width. The 0.9 client shell owns sidebar layout;
-    /// the server keeps the value so session snapshots round-trip.
-    pub sidebar_width: u16,
-    /// Persisted split between the sidebar's two sections.
-    pub sidebar_section_split: f32,
-    /// Collapsed space groups in the grouped sidebar view, keyed by workspace id.
-    pub collapsed_space_keys: std::collections::HashSet<String>,
     /// The automations section is expanded.
     pub automations_expanded: bool,
     /// Collapsed agent-ownership groups, keyed by owner agent key.
@@ -977,9 +970,6 @@ impl AppState {
     /// The UI preferences a session snapshot carries, cloned for `capture`.
     pub(crate) fn snapshot_ui_prefs(&self) -> crate::persist::UiPrefs {
         crate::persist::UiPrefs {
-            sidebar_width: self.sidebar_width,
-            sidebar_section_split: self.sidebar_section_split,
-            collapsed_space_keys: self.collapsed_space_keys.clone(),
             automations_expanded: self.automations_expanded,
             collapsed_agent_group_keys: self.collapsed_agent_group_keys.clone(),
             tree_show_spaces: self.tree_show_spaces,
@@ -1332,9 +1322,6 @@ impl AppState {
             sidebar_automations: crate::config::AutomationsSidebarConfig::default(),
             sidebar_spaces: crate::config::SpacesSidebarConfig::default(),
             sidebar_debug_bounds: false,
-            sidebar_width: 0,
-            sidebar_section_split: 0.5,
-            collapsed_space_keys: std::collections::HashSet::new(),
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),
             tree_show_spaces: true,

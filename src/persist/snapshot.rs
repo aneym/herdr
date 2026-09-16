@@ -455,9 +455,6 @@ fn first_pane_id_in_layout(layout: &LayoutSnapshot) -> Option<u32> {
 /// `capture` stops growing a positional argument per preference (this retires
 /// the 16-positional-args debt from the tree-view work).
 pub struct UiPrefs {
-    pub sidebar_width: u16,
-    pub sidebar_section_split: f32,
-    pub collapsed_space_keys: std::collections::HashSet<String>,
     pub automations_expanded: bool,
     pub collapsed_agent_group_keys: std::collections::HashSet<String>,
     pub tree_show_spaces: bool,
@@ -473,9 +470,6 @@ pub struct UiPrefs {
 impl Default for UiPrefs {
     fn default() -> Self {
         Self {
-            sidebar_width: 0,
-            sidebar_section_split: 0.5,
-            collapsed_space_keys: Default::default(),
             automations_expanded: false,
             collapsed_agent_group_keys: Default::default(),
             tree_show_spaces: true,
@@ -512,9 +506,11 @@ pub fn capture(
         active,
         active_profile,
         selected,
-        sidebar_width: Some(ui.sidebar_width),
-        sidebar_section_split: Some(ui.sidebar_section_split),
-        collapsed_space_keys: ui.collapsed_space_keys,
+        // Upstream 0.9 moved sidebar chrome to per-client preferences
+        // (src/client/shell/preferences.rs); the server stops writing them.
+        sidebar_width: None,
+        sidebar_section_split: None,
+        collapsed_space_keys: std::collections::HashSet::new(),
         automations_expanded: ui.automations_expanded,
         collapsed_agent_group_keys: ui.collapsed_agent_group_keys,
         tree_show_spaces: ui.tree_show_spaces,

@@ -440,19 +440,38 @@ impl AppState {
             return false;
         }
 
-        self.switch_workspace_tab(ws_idx, tab_idx);
-        if let Some(tab) = self
-            .workspaces
-            .get_mut(ws_idx)
-            .and_then(|ws| ws.tabs.get_mut(tab_idx))
-        {
-            tab.layout.focus_pane(pane_id);
-            self.read_focused_attention();
-            self.previous_pane_focus = previous;
-            self.mark_session_dirty();
-            return true;
+        // Inlined rather than routed through `switch_workspace_tab`: that helper
+        // records focus history for the intermediate tab switch, which would
+        // double-count this move.
+        self.reveal_workspace(ws_idx);
+        let workspace_changed = self.active != Some(ws_idx);
+        self.active = Some(ws_idx);
+        self.selected = ws_idx;
+        let workspace_id = self.workspaces[ws_idx].id.clone();
+        if workspace_changed {
+            crate::logging::workspace_focused(&workspace_id);
         }
-        false
+        let is_focused = self.workspaces.get_mut(ws_idx).is_some_and(|ws| {
+            // `select_tab`, not `switch_tab`: marking every pane in the tab seen
+            // is what `ui.attention_read` exists to defer.
+            ws.select_tab(tab_idx);
+            let tab_id =
+                public_tab_id_for_index(ws, tab_idx).unwrap_or_else(|| workspace_id.clone());
+            crate::logging::tab_focused(&workspace_id, &tab_id);
+            ws.tabs.get_mut(tab_idx).is_some_and(|tab| {
+                tab.layout.focus_pane(pane_id);
+                true
+            })
+        });
+        if !is_focused {
+            return false;
+        }
+        self.update_attention_read_for_focus_change(previous.as_ref(), Some(&target));
+        self.read_focused_attention();
+        self.record_focus_history_change(previous.as_ref(), &target);
+        self.previous_pane_focus = previous;
+        self.mark_session_dirty();
+        true
     }
 }
 

@@ -126,11 +126,13 @@ id = "live_prompt_box"
 state = "idle"
 priority = 950
 region = "prompt_box_body"
-# NOT visible_idle. Claude keeps the prompt box on screen during a turn, so a
-# transient redraw that drops the working marker still matches this rule. With
-# visible_idle the Working-to-Idle confirmation delay is bypassed and Herdr
-# publishes a false completion immediately, measured at ~44 flips per minute.
-# Letting the delay apply absorbs the redraw.
+# PORT-0.9: the fork dropped `visible_idle` here because bypassing the
+# Working-to-Idle confirmation delay published false completions (~44 flips per
+# minute). Upstream 0.9.1 restored it and gates on it in
+# `detect::manifest::tests::claude_idle_prompt_with_background_shell_is_idle`,
+# so the fork tweak now belongs in ~/.config/herdr/agent-detection/claude.toml
+# or upstream. (docs/fork/port-0.9/PORT.md)
+visible_idle = true
 line_regex = ['^\s*❯']
 not = [
   { contains = ["enter to select"] },

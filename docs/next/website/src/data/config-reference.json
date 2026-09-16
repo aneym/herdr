@@ -959,6 +959,32 @@
           "description": "Lines to scroll per mouse wheel notch."
         },
         {
+          "key": "ui.mouse_back_button",
+          "type": "enum",
+          "default": "\"focus-back\"",
+          "description": "Action for the physical mouse back button (extended button 8).",
+          "values": [
+            "off",
+            "focus-back",
+            "focus-forward",
+            "next-agent",
+            "previous-agent"
+          ]
+        },
+        {
+          "key": "ui.mouse_forward_button",
+          "type": "enum",
+          "default": "\"focus-forward\"",
+          "description": "Action for the physical mouse forward button (extended button 9).",
+          "values": [
+            "off",
+            "focus-back",
+            "focus-forward",
+            "next-agent",
+            "previous-agent"
+          ]
+        },
+        {
           "key": "ui.confirm_close",
           "type": "boolean",
           "default": "true",
@@ -1078,11 +1104,12 @@
           "key": "ui.agent_panel_sort",
           "type": "enum",
           "default": "\"spaces\"",
-          "description": "Agent sidebar ordering. Saved values are \"spaces\", \"priority\", or \"triage\"; \"workspaces\" is accepted as an alias for \"spaces\".",
+          "description": "Agent sidebar ordering. Saved values are \"spaces\", \"priority\", \"triage\", or \"tree\"; \"workspaces\" is accepted as an alias for \"spaces\".",
           "values": [
             "spaces",
             "priority",
-            "triage"
+            "triage",
+            "tree"
           ]
         },
         {
@@ -1130,6 +1157,12 @@
             "left",
             "right"
           ]
+        },
+        {
+          "key": "ui.sidebar.debug_bounds",
+          "type": "boolean",
+          "default": "false",
+          "description": "Diagnostic: tint each sidebar row's container block."
         },
         {
           "key": "ui.sidebar.agents.state_icons",

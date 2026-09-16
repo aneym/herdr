@@ -2290,7 +2290,19 @@ mod tests {
         assert_eq!(terminal.agent_identity.as_deref(), Some(identity.as_str()));
         assert!(terminal.agent_ownership.is_some());
 
-        // Process exit ends the occupancy and its ownership record.
+        // Upstream 0.9 no longer frees the pane on the exit observation alone:
+        // it records the exit, then frees once no agent is detected any more.
+        terminal.set_detected_state_with_visible_blocker(
+            Some(Agent::Pi),
+            AgentState::Unknown,
+            false,
+            false,
+            true,
+        );
+        assert_eq!(terminal.agent_identity.as_deref(), Some(identity.as_str()));
+        assert!(terminal.agent_ownership.is_some());
+
+        // The agent actually leaving ends the occupancy and its ownership record.
         terminal.set_detected_state_with_visible_blocker(
             None,
             AgentState::Unknown,

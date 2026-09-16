@@ -17,7 +17,16 @@ pub struct WorkspaceCreateParams {
     pub label: Option<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub env: HashMap<String, String>,
+    /// Fork-only: profile tags for the new workspace.
+    ///
+    /// Held out of the generated schema so the frozen v1 endpoint contract for
+    /// `workspace.create` keeps its published shape (see
+    /// `server::client_commands::advertised_client_shell_method_shapes_stay_at_the_v1_contract`).
+    /// The field still serializes over the local socket API.
+    /// PORT-0.9: decide in stage 2 whether to advertise it as a new method.
+    /// (docs/fork/port-0.9/PORT.md)
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(skip)]
     pub profiles: Option<Vec<String>>,
 }
 

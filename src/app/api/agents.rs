@@ -869,11 +869,17 @@ mod tests {
         let terminal_id = app.state.workspaces[target_ws].tabs[0].panes[&pane_id]
             .attached_terminal_id
             .clone();
-        app.state
-            .terminals
-            .get_mut(&terminal_id)
-            .unwrap()
-            .set_detected_state_with_visible_blocker(None, AgentState::Unknown, false, false, true);
+        let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+        // Upstream 0.9 frees the pane on the first no-agent observation *after* a
+        // recorded exit, so drive both steps here.
+        terminal.set_detected_state_with_visible_blocker(
+            terminal.effective_known_agent(),
+            AgentState::Unknown,
+            false,
+            false,
+            true,
+        );
+        terminal.set_detected_state_with_visible_blocker(None, AgentState::Unknown, false, false, true);
     }
 
     #[tokio::test]
