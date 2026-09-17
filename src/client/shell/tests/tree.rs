@@ -925,3 +925,64 @@ fn left_menu_position_moves_the_launcher_to_the_footer_start() {
 
     assert_eq!(state.hits.global_launcher.x, 0);
 }
+
+#[test]
+fn space_header_plus_creates_the_next_tab_without_prompting() {
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    // Even with the name prompt on, the space plus makes the next tab directly.
+    config.prompt_new_tab_name = true;
+    let mut state = ClientShellState::new(config);
+    state.set_snapshot(Box::new(tree_snapshot()));
+    state.set_pane_surface(surface());
+    state.compose(106, 40).expect("composed frame");
+
+    let header = state
+        .hits
+        .tree_headers
+        .iter()
+        .find(|hit| hit.key == "ws_2" && hit.tab_id.is_none())
+        .expect("space header hit");
+    let plus = header.plus;
+    assert!(plus.width > 0);
+    assert!(plus.right() <= header.chevron.x || header.chevron.width == 0);
+    assert!(plus.x >= header.pin.right());
+
+    let outcome = state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: plus.x,
+        row: plus.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+
+    assert!(state.overlay.is_none(), "the plus must not open a prompt");
+    assert!(matches!(
+        &outcome.actions[..],
+        [ClientShellAction::Endpoint { request, .. }]
+            if matches!(
+                &request.method,
+                crate::api::schema::Method::TabCreate(params)
+                    if params.workspace_id.as_deref() == Some("ws_2")
+                        && params.label.is_none()
+                        && params.focus
+            )
+    ));
+}
+
+#[test]
+fn tab_headers_carry_no_pin_or_plus() {
+    let tree = ClientTreeChrome::default();
+    let mut state = tree_state(tree);
+    state.set_pane_surface(surface());
+    state.compose(106, 40).expect("composed frame");
+
+    let header = state
+        .hits
+        .tree_headers
+        .iter()
+        .find(|hit| hit.tab_id.is_some())
+        .expect("tab header hit");
+
+    assert_eq!(header.plus, Rect::default());
+    assert_eq!(header.pin, Rect::default());
+}

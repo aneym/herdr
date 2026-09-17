@@ -2446,6 +2446,7 @@ impl ClientShellState {
             return false;
         };
         let chevron = super::contains(hit.chevron, point);
+        let plus = super::contains(hit.plus, point);
         let pin = super::contains(hit.pin, point);
         let key = hit.key.clone();
         let is_space = hit.tab_id.is_none();
@@ -2462,6 +2463,22 @@ impl ClientShellState {
             self.agent_scroll = 0;
             self.persist_chrome_preferences(outcome);
             outcome.repaint = true;
+            return true;
+        }
+        if plus {
+            // Deliberately never prompts for a name, even with
+            // `prompt_new_tab_name` on: the space plus just makes the next
+            // numbered tab.
+            self.push_endpoint_method(
+                crate::api::schema::Method::TabCreate(crate::api::schema::TabCreateParams {
+                    workspace_id: Some(workspace_id),
+                    cwd: None,
+                    focus: true,
+                    label: None,
+                    env: Default::default(),
+                }),
+                outcome,
+            );
             return true;
         }
         if pin {

@@ -251,6 +251,8 @@ pub(super) struct TreeHeaderHit {
     pub(super) rect: Rect,
     /// Empty when the header has nothing to fold away.
     pub(super) chevron: Rect,
+    /// Space headers only: the new-tab plus.
+    pub(super) plus: Rect,
     /// Space headers only: the pin toggle.
     pub(super) pin: Rect,
     pub(super) workspace_id: String,

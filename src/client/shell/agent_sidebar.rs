@@ -142,6 +142,16 @@ pub(super) fn tree_header_chevron_rect(rect: Rect) -> Rect {
     Rect::new(rect.right().saturating_sub(width), rect.y, width, 1)
 }
 
+/// New-tab plus on a space header: the cell pair left of the chevron slot. The
+/// chevron slot is reserved whether or not a chevron is drawn, so this rect
+/// never moves.
+pub(super) fn tree_header_plus_rect(rect: Rect) -> Rect {
+    if rect.width < 4 {
+        return Rect::default();
+    }
+    Rect::new(rect.right().saturating_sub(4), rect.y, 2, 1)
+}
+
 /// Pin toggle on a space header: the cell pair two slots left of the chevron,
 /// leaving the slot between them for the new-tab plus.
 pub(super) fn tree_header_pin_rect(rect: Rect) -> Rect {
@@ -294,9 +304,9 @@ fn render_tree_header(
                 Style::default().fg(palette.overlay0)
             },
         ));
-        // The new-tab control lands in the next reserved slot; it is drawn blank
-        // until that feature lands so the trailing strip keeps a fixed geometry.
-        trailing.push(("  ".to_owned(), Style::default()));
+        // New-tab plus, one cell pair left of the chevron slot so its hit region
+        // stays fixed whether or not this header draws a chevron.
+        trailing.push(("+ ".to_owned(), Style::default().fg(palette.overlay0)));
         trailing.push(if header.collapsible {
             chevron(header.collapsed)
         } else {
@@ -323,6 +333,11 @@ fn render_tree_header(
         rect,
         chevron: if header.collapsible {
             tree_header_chevron_rect(rect)
+        } else {
+            Rect::default()
+        },
+        plus: if is_space {
+            tree_header_plus_rect(rect)
         } else {
             Rect::default()
         },
