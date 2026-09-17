@@ -218,7 +218,17 @@ impl ClientShellConfig {
     }
 
     pub(crate) fn with_local_endpoint(self, socket_path: &std::path::Path) -> Self {
-        self.with_preferences_path(preferences::path_for_local_endpoint(socket_path))
+        let path = preferences::path_for_local_endpoint(socket_path);
+        let migrate = !path.exists();
+        let mut config = self.with_preferences_path(path);
+        if migrate {
+            // First run against this socket: carry the chrome state 0.8 kept in
+            // the local session file over to the per-client file that owns it
+            // now, so an existing install does not lose its sidebar.
+            config.preferences =
+                preferences::migrated_from_session(config.preferences, crate::persist::load());
+        }
+        config
     }
 
     pub(super) fn with_preferences_path(mut self, path: std::path::PathBuf) -> Self {

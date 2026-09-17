@@ -93,6 +93,49 @@ pub(super) struct ClientChromePreferences {
     pub(super) remote_tree: Vec<ClientRemoteTreeChrome>,
 }
 
+/// Seed a fresh preferences file from the chrome state the 0.8 session file
+/// carried. 0.9 keeps sidebar width, the section split and the collapsed groups
+/// per client, and the fork's tree state moved with them; a session file written
+/// before the move still holds the values worth keeping.
+pub(super) fn migrated_from_session(
+    mut preferences: ClientChromePreferences,
+    session: Option<crate::persist::SessionSnapshot>,
+) -> ClientChromePreferences {
+    let Some(session) = session else {
+        return preferences;
+    };
+    preferences.sidebar_width = preferences.sidebar_width.or(session.sidebar_width);
+    preferences.sidebar_section_split = preferences
+        .sidebar_section_split
+        .or(session.sidebar_section_split);
+    if preferences.collapsed_groups.is_empty() {
+        let mut collapsed = session.collapsed_space_keys.into_iter().collect::<Vec<_>>();
+        collapsed.sort();
+        preferences.collapsed_groups = collapsed;
+    }
+    if preferences.tree.is_default() {
+        let sorted = |values: std::collections::HashSet<String>| {
+            let mut values = values.into_iter().collect::<Vec<_>>();
+            values.sort();
+            values
+        };
+        preferences.tree = ClientTreeChromePreferences {
+            show_spaces: session.tree_show_spaces,
+            show_tabs: session.tree_show_tabs,
+            show_agents: session.tree_show_agents,
+            collapsed_spaces: sorted(session.tree_collapsed_spaces),
+            collapsed_tabs: sorted(session.tree_collapsed_tabs),
+            pinned_spaces: sorted(session.tree_pinned_spaces),
+            show_hidden_spaces: session.tree_show_hidden_spaces,
+            hidden_spaces_expanded: session.hidden_spaces_expanded,
+            automations_expanded: session.automations_expanded,
+            collapsed_agent_groups: sorted(session.collapsed_agent_group_keys),
+            space_order: Vec::new(),
+        };
+    }
+    preferences
+}
+
 pub(super) fn path_for_local_endpoint(socket_path: &Path) -> PathBuf {
     let mut hash = 0xcbf29ce484222325u64;
     for byte in socket_path.to_string_lossy().as_bytes() {
@@ -143,6 +186,65 @@ mod tests {
         let second = path_for_local_endpoint(Path::new("/run/herdr/two.sock"));
         assert_eq!(first, again);
         assert_ne!(first, second);
+    }
+
+    fn legacy_session(json: &str) -> crate::persist::SessionSnapshot {
+        serde_json::from_str(json).expect("legacy session snapshot")
+    }
+
+    #[test]
+    fn a_fresh_preferences_file_inherits_the_legacy_session_chrome() {
+        let session = legacy_session(
+            r#"{
+                "version": 1,
+                "workspaces": [],
+                "active": null,
+                "selected": 0,
+                "sidebar_width": 31,
+                "sidebar_section_split": 0.4,
+                "collapsed_space_keys": ["/repo", "/other"],
+                "tree_show_tabs": false,
+                "tree_pinned_spaces": ["ws_7"],
+                "automations_expanded": true
+            }"#,
+        );
+
+        let migrated = migrated_from_session(ClientChromePreferences::default(), Some(session));
+
+        assert_eq!(migrated.sidebar_width, Some(31));
+        assert_eq!(migrated.sidebar_section_split, Some(0.4));
+        assert_eq!(migrated.collapsed_groups, ["/other", "/repo"]);
+        assert!(!migrated.tree.show_tabs);
+        assert!(migrated.tree.show_spaces);
+        assert_eq!(migrated.tree.pinned_spaces, ["ws_7"]);
+        assert!(migrated.tree.automations_expanded);
+    }
+
+    #[test]
+    fn existing_preferences_win_over_the_legacy_session() {
+        let session = legacy_session(
+            r#"{
+                "version": 1,
+                "workspaces": [],
+                "active": null,
+                "selected": 0,
+                "sidebar_width": 31,
+                "collapsed_space_keys": ["/repo"],
+                "tree_show_tabs": false
+            }"#,
+        );
+        let existing = ClientChromePreferences {
+            sidebar_width: Some(22),
+            collapsed_groups: vec!["/kept".into()],
+            ..ClientChromePreferences::default()
+        };
+
+        let migrated = migrated_from_session(existing, Some(session));
+
+        assert_eq!(migrated.sidebar_width, Some(22));
+        assert_eq!(migrated.collapsed_groups, ["/kept"]);
+        // The tree block was still at its defaults, so it takes the session's.
+        assert!(!migrated.tree.show_tabs);
     }
 
     #[test]

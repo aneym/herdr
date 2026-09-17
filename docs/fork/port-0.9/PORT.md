@@ -54,7 +54,7 @@ The base for every fork diff is `d79fd746` (herdr 0.8.2 merge base); fork
 | 25 | Settings overlay, global menu, keybind help | pre-`d79fd746` | superseded-by-upstream | `orig/src/ui/keybind_help.rs`, `orig/src/ui/menus.rs`, `orig/src/app/input/settings.rs` | `src/client/shell/settings_overlay.rs`, `src/client/shell/global_menu.rs` | Upstream ships all three in the client shell. The fork's badge helpers (`global_menu_item_has_badge`, `settings_section_has_badge`) have upstream equivalents in `src/client/shell/global_menu.rs`. |
 | 26 | Prefix ASCII input-source switching | pre-`d79fd746` | superseded-by-upstream | `orig/src/app/api.rs` (`sync_prefix_input_source`), `AppEvent::PrefixInputSource` | `src/platform/mod.rs` (`PrefixInputSource` trait), `src/client/mod.rs`, `src/client/shell_runtime.rs` | Upstream drives the host TIS switch from the client, which is where it belongs now. The fork's event variant was dropped. |
 | 27 | Fork config keys | many | carried | `src/config/model.rs`, `src/config/sidebar.rs` | — | `agent_close_focus`, `attention_read`, `show_tab_status`, `status_indicators`, `hide_tab_bar_when_single_tab`, `tab_bar_position`, `mouse_back_button`, `mouse_forward_button`, `copy_on_select`, `mouse_capture`, `redraw_on_focus_gained`, `mouse_scroll_lines`, `sidebar.section_order`, `sidebar.new_button`, `sidebar.menu_position`, `sidebar.automations`, `sidebar.debug_bounds`, `accent`, `agent_panel_sort = triage\|tree` all still parse. Several are inert until their UI is ported. |
-| 28 | Session snapshot UI preferences | many | carried (fork keys) / dropped (upstream's three) | `src/persist/snapshot.rs` (`UiPrefs`, `capture`), `src/app/state.rs` (`snapshot_ui_prefs`) | `src/client/shell/preferences.rs` (upstream's per-client `ClientChromePreferences`) | `automations_expanded`, `collapsed_agent_group_keys` and every `tree_*` key still round-trip through `session.json`. `sidebar_width`, `sidebar_section_split` and `collapsed_space_keys` are now written as `None`/empty: upstream's `persist::snapshot::tests::capture_contract_omits_legacy_server_chrome_state` freezes that, and 0.9 keeps chrome width per client in `state_dir()/client-shell/local-*.json`. Stage 2 should read those three from the client preferences file. |
+| 28 | Session snapshot UI preferences | many | carried (stage 2) | `src/persist/snapshot.rs` (`UiPrefs`, `capture`), `src/app/state.rs` (`snapshot_ui_prefs`) | `src/client/shell/preferences.rs` (upstream's per-client `ClientChromePreferences`) | Upstream already reads `sidebar_width`, `sidebar_section_split` and its `collapsed_groups` (the fork's `collapsed_space_keys`) from `state_dir()/client-shell/local-*.json`; stage 2 moved the tree chrome into the same file (decision 6) and added a one-time seed so an existing install keeps its sidebar (decision 14). |
 | 29 | `pane move` | uncommitted WIP in the main checkout (`src/app/runtime_mutations.rs`) | superseded-by-upstream | not in this tree | `src/api/schema/panes.rs` (`PaneMoveParams`, `PaneMoveDestination`), `src/app/api/panes.rs` (`handle_pane_move`), `src/server/headless/tests/pane_move.rs` | Upstream 0.9.1 ships `pane move` (#4153) with its own API, destinations and tests. **The main checkout's `runtime_mutations.rs` pane-move WIP is superseded; do not port it.** That file no longer exists on `port-0.9` — upstream deleted it in the client-shell refactor. |
 | 30 | Server-side sidebar/tab-bar geometry and host mouse capture | pre-`d79fd746` | dropped | `orig/src/app/state.rs` (`ViewState` hit areas, `DragState`, `WorkspacePressState`, `TabPressState`, `app_surface_pane_ids`, `should_capture_host_mouse_from`) | `src/client/shell/config.rs` (`layout`), `src/client/shell/mouse.rs` | The server no longer draws chrome, so hit rects and press tracking have no meaning there. `app_surface_pane_ids` and `is_prefix_key` are kept `#[allow(dead_code)]` for the port. |
 
@@ -202,6 +202,16 @@ means changing an upstream test, so raise it with Alex first.
     the collapse set needs within a boot, but it does mean a collapsed group
     reopens after a pane move. Publishing `agent_identity` would fix that and
     is the next step if it matters.
+
+14. **A fresh client preferences file is seeded from the legacy session file.**
+    Upstream reads chrome state per client, and stage 1 stopped the server
+    writing `sidebar_width`, `sidebar_section_split` and `collapsed_space_keys`
+    into `session.json`. On its own that loses an existing install's sidebar
+    width and collapsed groups the first time it runs 0.9. When a local
+    endpoint has no preferences file yet,
+    `preferences::migrated_from_session` seeds it from the session snapshot,
+    including the fork's tree keys. Anything already in the preferences file
+    wins.
 
 ## Build environment
 
