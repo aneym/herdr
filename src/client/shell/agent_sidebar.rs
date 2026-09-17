@@ -20,6 +20,12 @@ pub(super) struct AgentRow {
     /// Extra leading columns applied by the tree view, on top of the row's own
     /// one-column (first line) / three-column (continuation) indent.
     pub(super) indent: u8,
+    /// Pane hosting this agent's resolved current owner.
+    pub(super) owner_pane_id: Option<String>,
+    /// The recorded current owner no longer resolves to a live agent.
+    pub(super) orphaned: bool,
+    /// Placement inside its ownership or orchestrator group.
+    pub(super) group: super::tree::AgentGroupRender,
 }
 
 impl AgentRow {
@@ -108,6 +114,7 @@ pub(super) fn render_agent_panel(
 
     let rows = agent_rows(snapshot, config, None);
     let (rows, automations) = super::tree::partition_automations(snapshot, config, rows);
+    let rows = super::tree::arrange_agent_hierarchy(snapshot, tree, rows);
     let mut entries =
         if super::tree::tree_view_active(config) && snapshot.agent_view_label.is_none() {
             super::tree::tree_list_entries(snapshot, tree, rows)
@@ -172,6 +179,10 @@ fn render_panel_list_entry(
     match entry {
         AgentPanelListEntry::Agent(row) | AgentPanelListEntry::Automation(row) => {
             hits.agents.push((rect, row.pane_id.clone()));
+            if let Some(key) = row.group.group_key.clone() {
+                hits.agent_groups
+                    .push((agent_group_chevron_rect(rect, row), key));
+            }
             render_agent_row(buffer, rect, row, config);
         }
         AgentPanelListEntry::AutomationsHeader(summary) => {
@@ -586,7 +597,41 @@ pub(super) fn agent_row(
         focused: agent.focused,
         rows,
         indent: 0,
+        owner_pane_id: agent.owner_pane_id.clone(),
+        orphaned: agent.orphaned,
+        group: super::tree::AgentGroupRender::default(),
     })
+}
+
+/// Right-aligned chevron (and collapsed-group summary) hit region on a group
+/// owner's first row.
+pub(super) fn agent_group_chevron_rect(rect: Rect, row: &AgentRow) -> Rect {
+    let width = (agent_group_trailing_width(row) as u16).min(rect.width);
+    if width == 0 {
+        return Rect::default();
+    }
+    Rect::new(rect.right().saturating_sub(width), rect.y, width, 1)
+}
+
+fn agent_group_trailing_width(row: &AgentRow) -> usize {
+    let count_width = row
+        .group
+        .group_count
+        .map(|count| format!("[{count}] ").len())
+        .unwrap_or(0);
+    count_width
+        + match row.group.expanded {
+            None => 0,
+            Some(true) => 2,
+            Some(false) => {
+                // "+N " summary plus the chevron cell.
+                2 + if row.group.hidden_children > 0 {
+                    format!("+{} ", row.group.hidden_children).len()
+                } else {
+                    0
+                }
+            }
+        }
 }
 
 pub(super) fn render_agent_row(
@@ -624,9 +669,50 @@ pub(super) fn render_agent_row(
     } else {
         row.rows.clone()
     };
+    let depth = usize::from(row.group.depth);
+    let group_trailing = agent_group_trailing_width(row);
     for (index, tokens) in rows.iter().take(rect.height as usize).enumerate() {
-        let indent = usize::from(row.indent) + if index == 0 { 1 } else { 3 };
-        let mut spans = vec![ratatui::text::Span::raw(" ".repeat(indent))];
+        let mut spans = vec![ratatui::text::Span::raw(
+            " ".repeat(1 + usize::from(row.indent)),
+        )];
+        let mut prefix = 1 + usize::from(row.indent);
+        if depth > 0 {
+            if depth > 1 {
+                spans.push(ratatui::text::Span::raw("   ".repeat(depth - 1)));
+                prefix += 3 * (depth - 1);
+            }
+            let guide = if index == 0 {
+                if row.group.last_in_group {
+                    "\u{2514}\u{2500} "
+                } else {
+                    "\u{251c}\u{2500} "
+                }
+            } else if row.group.last_in_group {
+                "   "
+            } else {
+                "\u{2502}  "
+            };
+            spans.push(ratatui::text::Span::styled(
+                guide,
+                Style::default().fg(palette.overlay0),
+            ));
+            prefix += 3;
+        } else if index != 0 {
+            spans.push(ratatui::text::Span::raw("  "));
+            prefix += 2;
+        }
+        if index == 0 && row.orphaned {
+            // The recorded owner is gone; say so rather than silently
+            // flattening the row into the roots.
+            spans.push(ratatui::text::Span::styled(
+                "\u{25cc} ",
+                Style::default()
+                    .fg(palette.mauve)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            prefix += 2;
+        }
+        let trailing = if index == 0 { group_trailing } else { 0 };
         spans.extend(crate::ui::resolved_token_spans(
             tokens,
             icon,
@@ -635,12 +721,41 @@ pub(super) fn render_agent_row(
             secondary,
             secondary,
             palette,
-            rect.width.saturating_sub(indent as u16) as usize,
+            (rect.width as usize).saturating_sub(prefix + trailing),
         ));
         Paragraph::new(Line::from(spans)).style(row_style).render(
             Rect::new(rect.x, rect.y + index as u16, rect.width, 1),
             buffer,
         );
+    }
+
+    if row.group.expanded.is_none() && row.group.group_count.is_none() {
+        return;
+    }
+    let mut trailing = Vec::<(String, Style)>::new();
+    if let Some(count) = row.group.group_count {
+        trailing.push((format!("[{count}] "), Style::default().fg(palette.overlay0)));
+    }
+    if let Some(expanded) = row.group.expanded {
+        if !expanded && row.group.hidden_children > 0 {
+            trailing.push((
+                format!("+{} ", row.group.hidden_children),
+                Style::default()
+                    .fg(status_color(row.status, palette))
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+        trailing.push((
+            if expanded { "\u{25be}" } else { "\u{25b8}" }.to_owned(),
+            Style::default().fg(palette.accent),
+        ));
+    }
+    let chevron = agent_group_chevron_rect(rect, row);
+    let mut x = chevron.x;
+    for (text, style) in &trailing {
+        let width = (display_width(text) as u16).min(chevron.right().saturating_sub(x));
+        put_text(buffer, x, chevron.y, width, text, *style);
+        x = x.saturating_add(width);
     }
 }
 

@@ -29,7 +29,7 @@ The base for every fork diff is `d79fd746` (herdr 0.8.2 merge base); fork
 |---|---------|--------------|--------|---------------------------|---------------------------|-------|
 | 1 | Workspace profiles: data model, visibility, API, persistence | `1911a8ac`, `4b146c03`, `8d50ec38`, `fafa3a70`, `f9872d5c` | carried | `orig/src/app/state.rs` (`profile_roster`, `set_pane_profiles`, `workspace_is_visible`, `switch_profile`, `reveal_workspace`, `settle_active_workspace_visibility`), `orig/src/api/schema/workspaces.rs` | server-side, unchanged | `active_profile` is in `SessionSnapshot` and in `AppState`; `workspace.list --visible-only`, `workspace.set_profiles`, `pane.set_profiles` all live. |
 | 2 | Profile send/share context menus | `2777d8b9` | needs-port | `orig/src/app/state.rs` (`ProfileMenuState`, `ProfileMenuTarget`, `ProfileMenuMode`, `profile_menu_entries`, `open_profile_menu`, `refresh_profile_menu_entries`), `orig/src/app/input/mouse.rs` | `src/client/shell/context_menu.rs`, `src/client/shell/mouse.rs` | `profile_roster()` is restored on `AppState` as the data source; only the menu state and rendering were dropped. |
-| 3 | Durable agent ownership + orchestrator groups | `61669bf9`, `b1b03f47`, `66237c06` | carried (data/API) / needs-port (rows) | `src/agent_ownership.rs` (fork-only, untouched by the merge), `orig/src/app/api/agents.rs` (`handle_agent_owner_set`, `handle_agent_owner_clear`) | rows: `src/client/shell/agent_sidebar.rs`, `src/client/shell/sidebar.rs` | `agent owner set/clear`, `agent_group` persistence and `TerminalState.agent_ownership` all carried. The collapsible group chevron is sidebar rendering. |
+| 3 | Durable agent ownership + orchestrator groups | `61669bf9`, `b1b03f47`, `66237c06` | carried (stage 2) | `src/agent_ownership.rs` (fork-only, untouched by the merge), `orig/src/app/api/agents.rs` (`handle_agent_owner_set`, `handle_agent_owner_clear`) | rows: `src/client/shell/agent_sidebar.rs`, `src/client/shell/sidebar.rs` | The resolved owner pane, the orphan flag, `orchestrator_mode` and the workspace tab count now ride in `ClientShellSnapshot` behind `#[serde(default)]`; `tree::arrange_agent_hierarchy` rebuilds the nesting client-side, with tree guides, an orphan marker, the `[N]` orchestrator count and a right-aligned group chevron. |
 | 4 | Agent usage sampling | `75f812fd` | carried (API) / needs-port (overlay) | `orig/src/app/usage.rs` (`UsageSampler`, `collect_agent_usage`, `toggle_usage_overlay`, `refresh_usage_overlay`), `orig/src/ui/...` | overlay: `src/client/shell/overlays.rs`, `src/client/shell/overlay_input.rs` | `agent.usage` over the socket still returns the same rows. `Mode::Usage`, `UsageState` and the refresh timer were dropped. |
 | 5 | Clipboard image ingestion API | `0184adf4`, `3c99c37b` | carried | `orig/src/api/server.rs` (`handle_clipboard_image_write`), `src/server/clipboard_image.rs` | server-side, unchanged | `ResponseResult::ClipboardImageWritten` kept alongside upstream's new `ClientShellSurfaceSet`. |
 | 6 | Terminal-title persistence | `e55ad431` | carried | `orig/src/persist/snapshot.rs` | server-side, unchanged | Snapshot still records terminal titles, so sidebar thread titles survive restart once the sidebar is ported. |
@@ -188,6 +188,19 @@ means changing an upstream test, so raise it with Alex first.
     facts about the endpoint, not per-client chrome. Both fields are
     `#[serde(default)]`, so `tests/fixtures/endpoint-snapshot-v1.json` still
     decodes and a pre-0.9.1 endpoint simply yields no badge.
+
+13. **Ownership edges reach the client through the snapshot, resolved.** The
+    client cannot resolve an `AgentOwnerRef` (it has no terminal registry), so
+    the endpoint resolves the current owner to a public pane id and publishes
+    that plus an `orphaned` flag on `ClientShellAgent`, and
+    `orchestrator_mode`/`tab_count` on `ClientShellWorkspace`. All four are
+    `#[serde(default)]`, so the frozen v1 snapshot fixture still decodes. The
+    collapse keys are the owner's pane id, or `orch:<workspace-id>` for an
+    orchestrator group; the fork used the durable agent identity, which is not
+    on the wire. A pane id is stable for the life of the group, which is all
+    the collapse set needs within a boot, but it does mean a collapsed group
+    reopens after a pane move. Publishing `agent_identity` would fix that and
+    is the next step if it matters.
 
 ## Build environment
 

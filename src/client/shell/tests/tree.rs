@@ -40,6 +40,8 @@ fn agent(
         state_labels: Vec::new(),
         tokens: Vec::new(),
         focused: false,
+        owner_pane_id: None,
+        orphaned: false,
     }
 }
 
@@ -60,6 +62,8 @@ fn tree_snapshot() -> ClientShellSnapshot {
         worktree: None,
         focused: false,
         agent_status: AgentStatus::Idle,
+        orchestrator_mode: false,
+        tab_count: 1,
     });
     snapshot.workspaces[0].label = "alpha".into();
     snapshot.workspaces[0].custom_label = true;

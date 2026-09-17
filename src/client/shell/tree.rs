@@ -504,6 +504,216 @@ fn workspace_label(snapshot: &ClientShellSnapshot, workspace_id: &str) -> String
         .unwrap_or_else(|| workspace_id.to_owned())
 }
 
+/// Presentation-only hierarchy data for one agent panel row.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct AgentGroupRender {
+    /// Nesting depth under the group owner.
+    pub(super) depth: u8,
+    /// `Some(expanded)` when this agent owns children that a collapse hides.
+    pub(super) expanded: Option<bool>,
+    /// Descendants hidden by a collapsed group.
+    pub(super) hidden_children: usize,
+    /// This row is the last child within its parent group.
+    pub(super) last_in_group: bool,
+    /// Always-visible open-tab count for an orchestrator-mode group owner.
+    pub(super) group_count: Option<usize>,
+    /// Collapse key for this owner row: its own pane id, or
+    /// `orch:<workspace-id>` for an orchestrator group.
+    pub(super) group_key: Option<String>,
+}
+
+/// Reorder agent rows so each agent's children sit directly beneath it,
+/// depth-first, dropping descendants of collapsed groups and recording the
+/// hidden-descendant count on the collapsed owner row. Roots keep their
+/// incoming order; siblings keep their relative order. Cycle-safe: any row
+/// unreachable from a root is appended at the end as a root.
+pub(super) fn arrange_agent_hierarchy(
+    snapshot: &ClientShellSnapshot,
+    tree: &ClientTreeChrome,
+    rows: Vec<AgentRow>,
+) -> Vec<AgentRow> {
+    let orchestrator_count = |row: &AgentRow| -> Option<usize> {
+        // Only the first tab's agent leads an orchestrator group.
+        let workspace = snapshot
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.workspace_id == row.workspace_id)
+            .filter(|workspace| workspace.orchestrator_mode)?;
+        let first_tab = snapshot
+            .tabs
+            .iter()
+            .find(|tab| tab.workspace_id == row.workspace_id)?;
+        (first_tab.tab_id == row.tab_id).then(|| workspace.tab_count.saturating_sub(1))
+    };
+    if rows.len() < 2 {
+        let mut rows = rows;
+        if let Some(row) = rows.first_mut() {
+            row.group.group_count = orchestrator_count(row);
+        }
+        return rows;
+    }
+
+    let index_by_pane = rows
+        .iter()
+        .enumerate()
+        .map(|(index, row)| (row.pane_id.clone(), index))
+        .collect::<HashMap<_, _>>();
+    let mut children = vec![Vec::<usize>::new(); rows.len()];
+    let mut has_parent = vec![false; rows.len()];
+    for (index, row) in rows.iter().enumerate() {
+        let Some(owner) = row
+            .owner_pane_id
+            .as_ref()
+            .and_then(|pane_id| index_by_pane.get(pane_id).copied())
+            .filter(|owner| *owner != index)
+        else {
+            continue;
+        };
+        children[owner].push(index);
+        has_parent[index] = true;
+    }
+
+    // Orchestrator-mode workspaces: the first tab's agent adopts the
+    // workspace's other top-level agents, so the whole workspace herds as one
+    // collapsible group. Ownership edges win, so an owned agent stays under its
+    // owner.
+    let mut orchestrator_by_workspace = HashMap::<&str, usize>::new();
+    let mut group_counts = vec![None; rows.len()];
+    for (index, row) in rows.iter().enumerate() {
+        if let Some(count) = orchestrator_count(row) {
+            orchestrator_by_workspace
+                .entry(row.workspace_id.as_str())
+                .or_insert(index);
+            group_counts[index] = Some(count);
+        }
+    }
+    for index in 0..rows.len() {
+        if has_parent[index] {
+            continue;
+        }
+        let Some(&owner) = orchestrator_by_workspace.get(rows[index].workspace_id.as_str()) else {
+            continue;
+        };
+        if owner == index {
+            continue;
+        }
+        children[owner].push(index);
+        has_parent[index] = true;
+    }
+
+    let mut pending = rows.into_iter().map(Some).collect::<Vec<_>>();
+    let mut visited = vec![false; pending.len()];
+    let mut arranged = Vec::with_capacity(pending.len());
+    for index in 0..pending.len() {
+        if visited[index] || has_parent[index] {
+            continue;
+        }
+        push_subtree(
+            index,
+            0,
+            false,
+            tree,
+            &mut pending,
+            &children,
+            &group_counts,
+            &mut visited,
+            &mut arranged,
+        );
+    }
+    // Defensive: anything unreachable from a root (a stale or cyclic owner
+    // edge) is still listed, as a root.
+    for index in 0..pending.len() {
+        push_subtree(
+            index,
+            0,
+            false,
+            tree,
+            &mut pending,
+            &children,
+            &group_counts,
+            &mut visited,
+            &mut arranged,
+        );
+    }
+    arranged
+}
+
+fn hidden_descendants(index: usize, children: &[Vec<usize>], visited: &mut [bool]) -> usize {
+    let mut count = 0;
+    for &child in &children[index] {
+        if visited[child] {
+            continue;
+        }
+        visited[child] = true;
+        count += 1;
+        count += hidden_descendants(child, children, visited);
+    }
+    count
+}
+
+#[allow(clippy::too_many_arguments)] // mirrors the fork's captured recursion context
+fn push_subtree(
+    index: usize,
+    depth: u8,
+    last_in_group: bool,
+    tree: &ClientTreeChrome,
+    pending: &mut [Option<AgentRow>],
+    children: &[Vec<usize>],
+    group_counts: &[Option<usize>],
+    visited: &mut [bool],
+    arranged: &mut Vec<AgentRow>,
+) {
+    if visited[index] {
+        return;
+    }
+    visited[index] = true;
+    let Some(mut row) = pending[index].take() else {
+        return;
+    };
+    row.group.depth = depth;
+    row.group.last_in_group = last_in_group;
+    row.group.group_count = group_counts[index];
+    let child_indexes = children[index]
+        .iter()
+        .copied()
+        .filter(|child| !visited[*child])
+        .collect::<Vec<_>>();
+    if child_indexes.is_empty() {
+        arranged.push(row);
+        return;
+    }
+    let group_key = if group_counts[index].is_some() {
+        Some(format!("orch:{}", row.workspace_id))
+    } else {
+        Some(row.pane_id.clone())
+    };
+    let expanded = group_key
+        .as_ref()
+        .is_none_or(|key| !tree.collapsed_agent_groups.contains(key));
+    row.group.expanded = Some(expanded);
+    row.group.group_key = group_key;
+    if !expanded {
+        row.group.hidden_children = hidden_descendants(index, children, visited);
+        arranged.push(row);
+        return;
+    }
+    arranged.push(row);
+    let last = child_indexes.len().saturating_sub(1);
+    for (position, child) in child_indexes.into_iter().enumerate() {
+        push_subtree(
+            child,
+            depth.saturating_add(1),
+            position == last,
+            tree,
+            pending,
+            children,
+            group_counts,
+            visited,
+            arranged,
+        );
+    }
+}
+
 /// One entry in the flat ⌘E rotation, in agent-panel order.
 pub(super) struct AgentCycleEntry {
     pub(super) pane_id: String,

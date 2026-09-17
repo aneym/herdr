@@ -137,6 +137,8 @@ mod tests {
             state_labels: Vec::new(),
             tokens: Vec::new(),
             focused: true,
+            owner_pane_id: None,
+            orphaned: false,
         }
     }
 

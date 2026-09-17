@@ -42,6 +42,8 @@ pub(super) fn snapshot() -> ClientShellSnapshot {
             worktree: None,
             focused: true,
             agent_status: AgentStatus::Idle,
+            orchestrator_mode: false,
+            tab_count: 1,
         }],
         tabs: vec![ClientShellTab {
             tab_id: "tab_1".into(),
@@ -247,6 +249,7 @@ fn surface_with_popup() -> PaneSurfaceFrame {
     surface
 }
 
+mod agent_groups;
 mod agents_worktrees_notifications;
 mod chrome_context;
 mod copy;

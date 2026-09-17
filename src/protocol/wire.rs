@@ -1041,6 +1041,12 @@ pub struct ClientShellWorkspace {
     pub git_ahead_behind: Option<(usize, usize)>,
     pub tokens: Vec<(String, String)>,
     pub worktree: Option<ClientShellWorktree>,
+    /// Orchestrator mode herds this workspace's agents under its first tab.
+    #[serde(default)]
+    pub orchestrator_mode: bool,
+    /// Tabs open in this workspace, for the orchestrator group count.
+    #[serde(default)]
+    pub tab_count: usize,
     pub focused: bool,
     #[serde(deserialize_with = "deserialize_client_shell_agent_status")]
     pub agent_status: crate::api::schema::AgentStatus,
@@ -1095,6 +1101,13 @@ pub struct ClientShellAgent {
     pub state_labels: Vec<(String, String)>,
     pub tokens: Vec<(String, String)>,
     pub focused: bool,
+    /// Pane hosting this agent's resolved current owner. Absent for a root
+    /// agent, and for an owner that no longer resolves.
+    #[serde(default)]
+    pub owner_pane_id: Option<String>,
+    /// The recorded current owner no longer resolves to a live agent.
+    #[serde(default)]
+    pub orphaned: bool,
 }
 
 /// Origin-relative geometry for one pane in a rendered pane surface.
@@ -2724,6 +2737,8 @@ mod tests {
                 git_ahead_behind: None,
                 tokens: Vec::new(),
                 worktree: None,
+                orchestrator_mode: false,
+                tab_count: 1,
                 focused: true,
                 agent_status: crate::api::schema::AgentStatus::Idle,
             }],

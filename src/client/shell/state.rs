@@ -104,6 +104,8 @@ pub(super) struct ShellHitMap {
     pub(super) agent_scroll_metrics: Option<crate::pane::ScrollMetrics>,
     pub(super) agent_max_scroll: usize,
     pub(super) agent_sort_toggle: Rect,
+    /// Disclosure regions for collapsible ownership / orchestrator groups.
+    pub(super) agent_groups: Vec<(Rect, String)>,
     pub(super) tree_headers: Vec<TreeHeaderHit>,
     pub(super) tree_hidden_header: Rect,
     pub(super) automations_header: Rect,

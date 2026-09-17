@@ -71,6 +71,8 @@ pub(super) fn snapshot(
                         label: worktree.repo_name,
                         is_linked_worktree: worktree.is_linked_worktree,
                     }),
+                orchestrator_mode: state.orchestrator_mode,
+                tab_count: state.tabs.len(),
                 agent_status: workspace.agent_status,
             }
         })
@@ -131,6 +133,24 @@ pub(super) fn snapshot(
         .map(|agent| {
             let pane_id = agent.pane_id;
             let focused = focused_pane_id.as_deref() == Some(pane_id.as_str());
+            let ownership = app
+                .parse_pane_id(&pane_id)
+                .and_then(|(workspace_index, pane)| {
+                    let terminal_id = app
+                        .state
+                        .workspaces
+                        .get(workspace_index)?
+                        .pane_state(pane)?
+                        .attached_terminal_id
+                        .clone();
+                    app.state.terminals.get(&terminal_id)
+                })
+                .and_then(|terminal| terminal.agent_ownership.as_ref());
+            let current_owner = ownership.and_then(|ownership| ownership.current.as_ref());
+            let owner_pane_id = current_owner
+                .and_then(|owner| app.state.resolve_agent_owner(owner))
+                .and_then(|(workspace_index, pane)| app.public_pane_id(workspace_index, pane));
+            let orphaned = current_owner.is_some() && owner_pane_id.is_none();
             let mut state_labels = agent.state_labels.into_iter().collect::<Vec<_>>();
             state_labels.sort_by(|left, right| left.0.cmp(&right.0));
             let mut tokens = agent.tokens.into_iter().collect::<Vec<_>>();
@@ -150,6 +170,8 @@ pub(super) fn snapshot(
                 state_labels,
                 tokens,
                 focused,
+                owner_pane_id: owner_pane_id.clone(),
+                orphaned,
             }
         })
         .collect();
