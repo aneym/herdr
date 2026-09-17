@@ -468,8 +468,9 @@ impl AgentsSidebarConfig {
             .unwrap_or(&self.rows)
     }
 
-    // PORT-0.9: the sidebar row renderer that reads these glyphs is client-shell
-    // code now (src/client/shell/sidebar.rs). (docs/fork/port-0.9/PORT.md)
+    /// The client shell resolves these overrides from `AgentStatus` directly
+    /// (`client::shell::resolved_status_icon`); this server-side accessor keeps
+    /// the `(state, seen)` shape the config file documents.
     #[allow(dead_code)]
     pub(crate) fn state_icon(&self, state: crate::detect::AgentState, seen: bool) -> Option<&str> {
         let state = match (state, seen) {

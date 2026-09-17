@@ -196,6 +196,30 @@ fn status_icon(
     }
 }
 
+/// The glyph for a status, honouring `ui.sidebar.agents.state_icons` when it
+/// names one. The fork read these overrides in its own sidebar renderer; the
+/// client shell is where that renderer lives now.
+fn resolved_status_icon(
+    status: crate::api::schema::AgentStatus,
+    config: &ClientShellConfig,
+) -> &str {
+    use crate::api::schema::AgentStatus;
+    let key = match status {
+        AgentStatus::Blocked => "blocked",
+        AgentStatus::Working => "working",
+        // A completion nobody has read yet is the fork's `idle_unseen`.
+        AgentStatus::Done => "idle_unseen",
+        AgentStatus::Idle => "idle",
+        AgentStatus::Unknown => "unknown",
+    };
+    config
+        .agents
+        .state_icons
+        .get(key)
+        .map(String::as_str)
+        .unwrap_or_else(|| status_icon(status, config.status_indicators))
+}
+
 fn status_dot(status: crate::api::schema::AgentStatus) -> &'static str {
     status_icon(status, crate::config::StatusIndicatorStyle::Dots)
 }

@@ -134,3 +134,135 @@ fn overflowing_tabs_never_overwrite_the_badge() {
         .chain([state.hits.new_tab, state.hits.tab_scroll_right])
         .all(|rect| rect.width == 0 || rect.right() <= badge.x));
 }
+
+fn tab_status_snapshot() -> ClientShellSnapshot {
+    let mut snapshot = snapshot();
+    snapshot.panes.push(ClientShellPane {
+        pane_id: "pane_2".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "tab_1".into(),
+        label: None,
+        cwd: None,
+        foreground_cwd: None,
+        focused: false,
+        right_click_passthrough: false,
+    });
+    snapshot.agents.push(ClientShellAgent {
+        pane_id: "pane_1".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "tab_1".into(),
+        name: Some("one".into()),
+        display_agent: Some("one".into()),
+        agent: None,
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Blocked,
+        state_change_seq: 1,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: true,
+        owner_pane_id: None,
+        orphaned: false,
+    });
+    snapshot.tabs[0].agent_status = AgentStatus::Blocked;
+    snapshot.tabs[0].label = "a wide tab label".into();
+    snapshot.tabs[0].custom_label = true;
+    snapshot
+}
+
+fn glyphs_for(mode: crate::config::ShowTabStatusConfig) -> Vec<String> {
+    let mut config = Config::default();
+    config.ui.show_tab_status = mode;
+    let config = ClientShellConfig::from_config(&config);
+    let snapshot = tab_status_snapshot();
+    crate::client::shell::render::tab_status_glyphs(&snapshot, &snapshot.tabs[0], &config)
+        .into_iter()
+        .map(|(glyph, _)| glyph.to_owned())
+        .collect()
+}
+
+#[test]
+fn tab_status_modes_gate_on_the_tabs_highest_attention_pane() {
+    use crate::config::ShowTabStatusConfig;
+
+    assert!(glyphs_for(ShowTabStatusConfig::Off).is_empty());
+    // One glyph per pane: the blocked agent and the plain shell beside it.
+    assert_eq!(glyphs_for(ShowTabStatusConfig::Attention).len(), 2);
+    assert_eq!(glyphs_for(ShowTabStatusConfig::Active).len(), 2);
+    assert_eq!(glyphs_for(ShowTabStatusConfig::All).len(), 2);
+}
+
+#[test]
+fn an_idle_tab_shows_status_only_in_all_mode() {
+    use crate::config::ShowTabStatusConfig;
+
+    for mode in [
+        ShowTabStatusConfig::Off,
+        ShowTabStatusConfig::Attention,
+        ShowTabStatusConfig::Active,
+        ShowTabStatusConfig::All,
+    ] {
+        let mut config = Config::default();
+        config.ui.show_tab_status = mode;
+        let config = ClientShellConfig::from_config(&config);
+        let mut snapshot = tab_status_snapshot();
+        snapshot.tabs[0].agent_status = AgentStatus::Idle;
+        snapshot.agents[0].agent_status = AgentStatus::Idle;
+
+        let glyphs =
+            crate::client::shell::render::tab_status_glyphs(&snapshot, &snapshot.tabs[0], &config);
+
+        assert_eq!(
+            glyphs.is_empty(),
+            mode != ShowTabStatusConfig::All,
+            "mode {mode:?}"
+        );
+    }
+}
+
+#[test]
+fn configured_state_icons_replace_the_default_glyphs() {
+    let mut config = Config::default();
+    config.ui.show_tab_status = crate::config::ShowTabStatusConfig::All;
+    config.ui.sidebar.agents =
+        toml::from_str("state_icons = { blocked = \"!!\", unknown = \"\" }").unwrap();
+    let config = ClientShellConfig::from_config(&config);
+    let snapshot = tab_status_snapshot();
+
+    let glyphs =
+        crate::client::shell::render::tab_status_glyphs(&snapshot, &snapshot.tabs[0], &config)
+            .into_iter()
+            .map(|(glyph, _)| glyph.to_owned())
+            .collect::<Vec<_>>();
+
+    // The blocked pane takes the override; the empty glyph drops the shell pane.
+    assert_eq!(glyphs, ["!!"]);
+}
+
+#[test]
+fn tab_status_glyphs_widen_the_tab_and_render_after_its_label() {
+    let mut config = Config::default();
+    config.ui.show_tab_status = crate::config::ShowTabStatusConfig::All;
+    let mut with_status = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let mut without = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    for state in [&mut with_status, &mut without] {
+        state.set_snapshot(Box::new(tab_status_snapshot()));
+        state.set_pane_surface(surface());
+    }
+    let frame = with_status.compose(106, 20).expect("composed frame");
+    without.compose(106, 20).expect("composed frame");
+
+    let wide = with_status.hits.tabs[0].0;
+    assert!(wide.width > without.hits.tabs[0].0.width);
+    let rows = frame_rows(&frame);
+    let tab_text = rows[wide.y as usize]
+        .chars()
+        .skip(wide.x as usize)
+        .take(wide.width as usize)
+        .collect::<String>();
+    assert!(
+        tab_text.trim_end().ends_with("●·"),
+        "tab text: {tab_text:?}"
+    );
+}

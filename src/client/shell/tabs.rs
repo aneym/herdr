@@ -23,11 +23,19 @@ pub(crate) fn render_tab_bar(
         .iter()
         .filter(|tab| Some(tab.workspace_id.as_str()) == snapshot.focused_workspace_id.as_deref())
         .collect::<Vec<_>>();
+    let status_glyphs = tabs
+        .iter()
+        .map(|tab| tab_status_glyphs(snapshot, tab, config))
+        .collect::<Vec<_>>();
     let desired_widths = tabs
         .iter()
-        .map(|tab| {
+        .zip(&status_glyphs)
+        .map(|(tab, glyphs)| {
             let label = tab_label(tab);
-            display_width(&label).saturating_add(4).max(MIN_TAB_WIDTH)
+            display_width(&label)
+                .saturating_add(4)
+                .saturating_add(tab_status_width(glyphs))
+                .max(MIN_TAB_WIDTH)
         })
         .collect::<Vec<_>>();
     let mouse_chrome = config.mouse_capture;
@@ -116,7 +124,12 @@ pub(crate) fn render_tab_bar(
         } else {
             Style::default().fg(palette.overlay0).bg(palette.surface0)
         };
-        let padding = width.saturating_sub(display_width(&name));
+        let glyphs = &status_glyphs[index];
+        let status_width = tab_status_width(glyphs).min(width);
+        // Pad by terminal columns, not chars, so wide glyphs stay centred.
+        let padding = width
+            .saturating_sub(status_width)
+            .saturating_sub(display_width(&name));
         let left = padding / 2;
         let text = format!(
             "{empty:left$}{name}{empty:right_padding$}",
@@ -125,6 +138,22 @@ pub(crate) fn render_tab_bar(
             right_padding = padding.saturating_sub(left) as usize,
         );
         put_text(buffer, rect.x, rect.y, rect.width, &text, style);
+        if status_width > 0 {
+            let mut glyph_x = rect.right().saturating_sub(status_width);
+            for (glyph, glyph_style) in glyphs {
+                let glyph_width = display_width(glyph).min(rect.right().saturating_sub(glyph_x));
+                put_text(
+                    buffer,
+                    glyph_x,
+                    rect.y,
+                    glyph_width,
+                    glyph,
+                    style.patch(*glyph_style),
+                );
+                glyph_x = glyph_x.saturating_add(glyph_width);
+            }
+            put_text(buffer, glyph_x, rect.y, 1, " ", style);
+        }
         hits.tabs.push((rect, tab.tab_id.clone()));
         first_visible.get_or_insert(index);
         last_visible = Some(index);
@@ -241,6 +270,67 @@ pub(crate) fn render_tab_bar(
 /// when the session is unnamed. A default session on the default profile has
 /// nothing to say, so it gets no badge and the tab strip keeps its full width
 /// (PORT.md decision 11).
+/// One glyph per pane in the tab, in snapshot order. Visibility is gated on the
+/// tab's highest-attention pane so the `ui.show_tab_status` modes keep their
+/// meaning; once shown, every pane reports its own state.
+pub(in crate::client::shell) fn tab_status_glyphs<'a>(
+    snapshot: &ClientShellSnapshot,
+    tab: &ClientShellTab,
+    config: &'a ClientShellConfig,
+) -> Vec<(&'a str, Style)> {
+    // The glyphs borrow the config's configured overrides, so the lifetimes
+    // here are load-bearing.
+    use crate::api::schema::AgentStatus;
+    use crate::config::ShowTabStatusConfig;
+
+    let show = match config.show_tab_status {
+        ShowTabStatusConfig::Off => false,
+        ShowTabStatusConfig::Attention => {
+            matches!(tab.agent_status, AgentStatus::Blocked | AgentStatus::Done)
+        }
+        ShowTabStatusConfig::Active => matches!(
+            tab.agent_status,
+            AgentStatus::Blocked | AgentStatus::Done | AgentStatus::Working
+        ),
+        ShowTabStatusConfig::All => true,
+    };
+    if !show {
+        return Vec::new();
+    }
+    snapshot
+        .panes
+        .iter()
+        .filter(|pane| pane.tab_id == tab.tab_id)
+        .map(|pane| {
+            snapshot
+                .agents
+                .iter()
+                .find(|agent| agent.pane_id == pane.pane_id)
+                .map(|agent| agent.agent_status)
+                .unwrap_or(AgentStatus::Unknown)
+        })
+        .map(|status| {
+            (
+                resolved_status_icon(status, config),
+                Style::default().fg(status_color(status, &config.palette)),
+            )
+        })
+        .filter(|(glyph, _)| !glyph.is_empty())
+        .collect()
+}
+
+fn tab_status_width(glyphs: &[(&str, Style)]) -> u16 {
+    if glyphs.is_empty() {
+        return 0;
+    }
+    glyphs
+        .iter()
+        .fold(0u16, |width, (glyph, _)| {
+            width.saturating_add(display_width(glyph))
+        })
+        .saturating_add(1)
+}
+
 pub(in crate::client::shell) fn session_badge_text(snapshot: &ClientShellSnapshot) -> String {
     let text = snapshot
         .session_name

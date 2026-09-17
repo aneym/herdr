@@ -82,7 +82,7 @@ pub(crate) fn render_collapsed_sidebar(
             rect.x.saturating_add(2),
             rect.y,
             rect.width.saturating_sub(2),
-            status_icon(status, config.status_indicators),
+            resolved_status_icon(status, config),
             Style::default().fg(status_color(status, palette)),
         );
         hits.workspaces.push(WorkspaceHit {
@@ -149,7 +149,7 @@ pub(crate) fn render_collapsed_sidebar(
             rect.x.saturating_add(2),
             rect.y,
             rect.width.saturating_sub(2),
-            status_icon(agent.agent_status, config.status_indicators),
+            resolved_status_icon(agent.agent_status, config),
             Style::default().fg(status_color(agent.agent_status, palette)),
         );
         hits.agents.push((rect, pane_id));
@@ -331,17 +331,7 @@ pub(crate) fn render_sidebar(
             buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
         }
         render_workspace_rows(
-            buffer,
-            rect,
-            workspace,
-            status,
-            config.status_indicators,
-            entry,
-            rows,
-            true,
-            selected,
-            dragged,
-            palette,
+            buffer, rect, workspace, status, config, entry, rows, true, selected, dragged, palette,
         );
         let group_toggle = render_parent_group_toggle(
             buffer,
@@ -843,7 +833,7 @@ pub(in crate::client::shell) fn render_workspace_rows(
     area: Rect,
     workspace: &ClientShellWorkspace,
     status: crate::api::schema::AgentStatus,
-    indicators: crate::config::StatusIndicatorStyle,
+    config: &ClientShellConfig,
     entry: &WorkspaceEntry,
     rows: Vec<Vec<crate::ui::ResolvedToken>>,
     endpoint_active: bool,
@@ -902,7 +892,7 @@ pub(in crate::client::shell) fn render_workspace_rows(
         let spans = crate::ui::resolved_token_spans(
             row,
             (
-                status_icon(status, indicators),
+                resolved_status_icon(status, config),
                 Style::default().fg(status_color(status, palette)),
             ),
             Style::default().fg(status_color(status, palette)),

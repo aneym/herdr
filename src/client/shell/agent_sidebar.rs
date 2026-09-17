@@ -285,7 +285,7 @@ fn render_tree_header(
         let shown = header.child_states.len().min(MAX_DOTS);
         for status in header.child_states.iter().take(shown) {
             trailing.push((
-                status_icon(*status, config.status_indicators).to_owned(),
+                resolved_status_icon(*status, config).to_owned(),
                 Style::default().fg(status_color(*status, palette)),
             ));
         }
@@ -658,7 +658,7 @@ pub(super) fn render_agent_row(
     let status_style = Style::default().fg(status_color(row.status, palette));
     let secondary = Style::default().fg(palette.overlay0);
     let icon = (
-        status_icon(row.status, config.status_indicators),
+        resolved_status_icon(row.status, config),
         Style::default().fg(status_color(row.status, palette)),
     );
     let rows = if row.rows.is_empty() {

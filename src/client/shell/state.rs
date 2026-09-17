@@ -29,6 +29,7 @@ pub(crate) struct ClientShellConfig {
     pub(super) menu_position: crate::config::SidebarMenuPositionConfig,
     pub(super) agent_panel_sort: crate::config::AgentPanelSortConfig,
     pub(super) agent_close_focus: crate::config::AgentCloseFocusConfig,
+    pub(super) show_tab_status: crate::config::ShowTabStatusConfig,
     pub(super) status_indicators: crate::config::StatusIndicatorStyle,
     pub(super) sound_enabled: bool,
     pub(super) toast_delivery: crate::config::ToastDelivery,
@@ -1459,6 +1460,8 @@ impl ClientShellState {
                             || left.workspace_id != right.workspace_id
                             || left.label != right.label
                             || left.zoomed != right.zoomed
+                            // Per-pane status glyphs change a tab's width.
+                            || left.agent_status != right.agent_status
                     })
                 || render::tab_bar_status_width(current) != render::tab_bar_status_width(&snapshot)
         });
