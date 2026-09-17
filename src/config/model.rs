@@ -105,8 +105,9 @@ pub enum AgentPanelSortConfig {
 }
 
 impl AgentPanelSortConfig {
-    // PORT-0.9: read by the fork's sidebar header renderer, now client-shell
-    // code (src/client/shell/agent_sidebar.rs). (docs/fork/port-0.9/PORT.md)
+    /// The client shell renders its own sort labels
+    /// (`client::shell::agent_sidebar::render_agent_panel_header`), so nothing
+    /// in the binary reads this; it stays for the config surface.
     #[allow(dead_code)]
     pub fn as_str(self) -> &'static str {
         match self {

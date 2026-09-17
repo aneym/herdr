@@ -213,6 +213,29 @@ means changing an upstream test, so raise it with Alex first.
     including the fork's tree keys. Anything already in the preferences file
     wins.
 
+## Gates
+
+`cargo check --all-targets`, `cargo clippy --all-targets -- -D warnings`,
+`cargo fmt --check` and `cargo build --release` are all clean, and the release
+binary reports `herdr 0.9.1`.
+
+The nextest exclusion is one test:
+
+```
+cargo nextest run -E 'not test(pane_info_and_subscriptions_expose_done_agent_status)'
+```
+
+`herdr::api_ping pane_info_and_subscriptions_expose_done_agent_status` spawns a
+real `herdr` over a PTY and waits on its socket with a wall-clock timeout. It
+fails the same way (`timed out waiting for json line`, ~14.4s) on the stage-1
+baseline `b19b7dc4` with no stage-2 changes in the tree, so it is an
+environment failure on this host, not a regression. Everything else passes:
+3640 run, 3640 passed, 7 skipped.
+
+The Python contract suites `scripts.test_ui_hot_path_architecture` and
+`scripts.test_config_reference_check` pass, and
+`scripts/config_reference_check.py` reports nothing, on Homebrew python3.
+
 ## Build environment
 
 0.9.1 requires **Zig 0.16.0**; this machine had 0.15.2. A standalone toolchain
