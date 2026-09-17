@@ -243,3 +243,129 @@ fn clicking_a_group_chevron_collapses_that_group() {
         .collapsed_agent_groups
         .contains("owner"));
 }
+
+fn close_focus_state(focus: crate::config::AgentCloseFocusConfig) -> ClientShellState {
+    let mut config = Config::default();
+    config.ui.agent_close_focus = focus;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let mut snapshot = owned_snapshot();
+    snapshot
+        .agents
+        .retain(|agent| agent.owner_pane_id.is_none());
+    snapshot
+        .panes
+        .retain(|pane| pane.pane_id == "owner" || pane.pane_id == "root");
+    // One pane per tab, so closing either takes its whole tab.
+    snapshot.tabs.push(ClientShellTab {
+        tab_id: "tab_2".into(),
+        workspace_id: "ws_1".into(),
+        number: 2,
+        label: "two".into(),
+        custom_label: true,
+        zoomed: false,
+        focused: false,
+        agent_status: AgentStatus::Idle,
+    });
+    for item in &mut snapshot.panes {
+        if item.pane_id == "root" {
+            item.tab_id = "tab_2".into();
+        }
+    }
+    for agent in &mut snapshot.agents {
+        if agent.pane_id == "root" {
+            agent.tab_id = "tab_2".into();
+        }
+    }
+    snapshot.focused_pane_id = Some("owner".into());
+    state.set_snapshot(Box::new(snapshot));
+    state
+}
+
+fn close_focus_requests(state: &mut ClientShellState) -> Vec<crate::api::schema::Method> {
+    let mut outcome = ClientShellInput::default();
+    state.push_endpoint_method(
+        crate::api::schema::Method::PaneClose(crate::api::schema::PaneTarget {
+            pane_id: "owner".into(),
+        }),
+        &mut outcome,
+    );
+    outcome
+        .actions
+        .into_iter()
+        .filter_map(|action| match action {
+            ClientShellAction::Endpoint { request, .. } => Some(request.method),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn panel_next_focuses_the_next_agent_after_a_whole_tab_close() {
+    let mut state = close_focus_state(crate::config::AgentCloseFocusConfig::PanelNext);
+
+    let methods = close_focus_requests(&mut state);
+
+    assert!(matches!(
+        &methods[..],
+        [
+            crate::api::schema::Method::PaneClose(closed),
+            crate::api::schema::Method::PaneFocus(next),
+        ] if closed.pane_id == "owner" && next.pane_id == "root"
+    ));
+}
+
+#[test]
+fn stock_close_focus_sends_only_the_close() {
+    let mut state = close_focus_state(crate::config::AgentCloseFocusConfig::Stock);
+
+    let methods = close_focus_requests(&mut state);
+
+    assert_eq!(methods.len(), 1);
+}
+
+#[test]
+fn panel_next_stays_spatial_when_the_tab_keeps_siblings() {
+    let mut state = close_focus_state(crate::config::AgentCloseFocusConfig::PanelNext);
+    let mut snapshot = state.snapshot.as_deref().cloned().expect("snapshot");
+    snapshot.panes.push(ClientShellPane {
+        pane_id: "sibling".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "tab_1".into(),
+        label: None,
+        cwd: None,
+        foreground_cwd: None,
+        focused: false,
+        right_click_passthrough: false,
+    });
+    state.set_snapshot(Box::new(snapshot));
+
+    let methods = close_focus_requests(&mut state);
+
+    assert_eq!(methods.len(), 1);
+}
+
+#[test]
+fn panel_next_ignores_a_close_of_an_unfocused_pane() {
+    let mut state = close_focus_state(crate::config::AgentCloseFocusConfig::PanelNext);
+    let mut outcome = ClientShellInput::default();
+    state.push_endpoint_method(
+        crate::api::schema::Method::PaneClose(crate::api::schema::PaneTarget {
+            pane_id: "root".into(),
+        }),
+        &mut outcome,
+    );
+
+    assert_eq!(outcome.actions.len(), 1);
+}
+
+#[test]
+fn panel_next_does_nothing_with_a_single_agent() {
+    let mut state = close_focus_state(crate::config::AgentCloseFocusConfig::PanelNext);
+    let mut snapshot = state.snapshot.as_deref().cloned().expect("snapshot");
+    snapshot.agents.retain(|agent| agent.pane_id == "owner");
+    state.set_snapshot(Box::new(snapshot));
+
+    let methods = close_focus_requests(&mut state);
+
+    assert_eq!(methods.len(), 1);
+}

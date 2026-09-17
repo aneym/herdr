@@ -1272,9 +1272,9 @@ impl AppState {
         }
 
         self.mark_session_dirty();
-        // PORT-0.9: `agent_close_focus = "panel_next"` picked the next agent from
-        // the sidebar panel order, which the client shell owns in 0.9.
-        // (docs/fork/port-0.9/PORT.md)
+        // `agent_close_focus = "panel_next"` is decided by the client shell,
+        // which owns the sidebar panel order; it queues the follow-up focus
+        // behind this close.
         let terminal_ids = active
             .and_then(|i| {
                 self.workspaces

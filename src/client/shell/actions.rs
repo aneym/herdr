@@ -299,7 +299,62 @@ impl ClientShellState {
         method: crate::api::schema::Method,
         outcome: &mut ClientShellInput,
     ) {
+        let panel_next = self.panel_next_close_target(&method);
         self.push_endpoint_method_with_kind(method, PendingEndpointKind::Generic, outcome);
+        // The follow-up focus is queued behind the close on the same ordered
+        // endpoint connection, so it lands once the close has taken effect.
+        if let Some(pane_id) = panel_next {
+            self.push_endpoint_method_with_kind(
+                crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget { pane_id }),
+                PendingEndpointKind::Generic,
+                outcome,
+            );
+        }
+    }
+
+    /// `ui.agent_close_focus = "panel_next"`: the agent to focus after this
+    /// close, when the close takes the focused agent's whole tab away.
+    ///
+    /// A close that leaves pane siblings behind stays spatial; panel-next only
+    /// applies when the tab goes with it.
+    fn panel_next_close_target(&self, method: &crate::api::schema::Method) -> Option<String> {
+        use crate::api::schema::Method;
+
+        if self.config.agent_close_focus != crate::config::AgentCloseFocusConfig::PanelNext {
+            return None;
+        }
+        let snapshot = self.snapshot.as_deref()?;
+        let focused_pane = snapshot.focused_pane_id.as_deref()?;
+        let takes_the_tab = match method {
+            Method::PaneClose(target) if target.pane_id == focused_pane => snapshot
+                .panes
+                .iter()
+                .find(|pane| pane.pane_id == target.pane_id)
+                .is_some_and(|closed| {
+                    snapshot
+                        .panes
+                        .iter()
+                        .filter(|pane| pane.tab_id == closed.tab_id)
+                        .count()
+                        <= 1
+                }),
+            Method::TabClose(target) => snapshot
+                .panes
+                .iter()
+                .find(|pane| pane.pane_id == focused_pane)
+                .is_some_and(|focused| focused.tab_id == target.tab_id),
+            _ => false,
+        };
+        if !takes_the_tab {
+            return None;
+        }
+        let agents =
+            super::agent_sidebar::ordered_agent_pane_ids(snapshot, self.config.agent_panel_sort);
+        if agents.len() < 2 {
+            return None;
+        }
+        let closed = agents.iter().position(|pane_id| pane_id == focused_pane)?;
+        Some(agents[(closed + 1) % agents.len()].clone())
     }
 
     pub(super) fn push_endpoint_notice(

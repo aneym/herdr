@@ -28,6 +28,7 @@ pub(crate) struct ClientShellConfig {
     pub(super) new_button: crate::config::SidebarNewButtonConfig,
     pub(super) menu_position: crate::config::SidebarMenuPositionConfig,
     pub(super) agent_panel_sort: crate::config::AgentPanelSortConfig,
+    pub(super) agent_close_focus: crate::config::AgentCloseFocusConfig,
     pub(super) status_indicators: crate::config::StatusIndicatorStyle,
     pub(super) sound_enabled: bool,
     pub(super) toast_delivery: crate::config::ToastDelivery,
