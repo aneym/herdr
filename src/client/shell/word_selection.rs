@@ -15,9 +15,39 @@ pub(super) struct ClientWordSelection {
     pending_row: Option<u32>,
     pub(super) dragged: bool,
     pub(super) released: bool,
+    mouse_reporting: bool,
 }
 
 impl ClientShellState {
+    pub(super) fn select_line(
+        &mut self,
+        hit: &PaneHit,
+        viewport_row: u16,
+        outcome: &mut ClientShellInput,
+    ) {
+        let absolute_row = crate::selection::absolute_row_for_viewport(viewport_row, hit.scroll);
+        let mut selection = crate::selection::Selection::line_range(
+            hit.pane_id.clone(),
+            absolute_row,
+            absolute_row,
+            hit.inner_rect.width.saturating_sub(1),
+        );
+        if !selection.finish() {
+            return;
+        }
+        self.selection = Some(selection);
+        self.word_selection_gesture = None;
+        if hit.mouse_reporting {
+            self.pane_app_selection = Some(hit.pane_id.clone());
+        }
+        if self.config.copy_on_select {
+            self.request_selection_copy(outcome, false);
+            self.selection_highlight_clear_deadline =
+                Some(std::time::Instant::now() + std::time::Duration::from_millis(500));
+        }
+        outcome.repaint = true;
+    }
+
     pub(super) fn request_word_selection(
         &mut self,
         hit: &PaneHit,
@@ -49,6 +79,7 @@ impl ClientShellState {
             pending_row: None,
             dragged: false,
             released: false,
+            mouse_reporting: hit.mouse_reporting,
         });
         self.request_word_selection_row(row, outcome);
     }
@@ -140,6 +171,9 @@ impl ClientShellState {
             start,
             end,
         ));
+        if gesture.mouse_reporting {
+            self.pane_app_selection = Some(gesture.pane_id.clone());
+        }
         if gesture.released {
             let dragged = gesture.dragged;
             if let Some(selection) = self.selection.as_mut() {

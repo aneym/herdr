@@ -10,6 +10,10 @@ fn is_retained_selection_copy_key(key: &crate::input::TerminalKey) -> bool {
         && matches!(key.modifiers, KeyModifiers::CONTROL | KeyModifiers::SUPER)
 }
 
+fn is_pane_app_selection_copy_key(key: &crate::input::TerminalKey) -> bool {
+    matches!(key.code, KeyCode::Char('c' | 'C')) && key.modifiers == KeyModifiers::SUPER
+}
+
 pub(super) fn is_modal_paste_shortcut_for_platform(
     key: &crate::input::TerminalKey,
     macos: bool,
@@ -138,6 +142,7 @@ impl ClientShellState {
         self.word_selection_gesture = None;
         if self.copy_or_terminal_mode() != ClientShellMode::Copy && self.selection.take().is_some()
         {
+            self.pane_app_selection = None;
             self.stop_selection_autoscroll();
             self.selection_highlight_clear_deadline = None;
             outcome.repaint = true;
@@ -570,7 +575,11 @@ impl ClientShellState {
         if self.mode != ClientShellMode::Copy
             && self.copy_or_terminal_mode() != ClientShellMode::Copy
             && !self.config.copy_on_select
-            && is_retained_selection_copy_key(key)
+            && if self.pane_app_selection.is_some() {
+                is_pane_app_selection_copy_key(key)
+            } else {
+                is_retained_selection_copy_key(key)
+            }
             && self
                 .selection
                 .as_ref()
@@ -578,6 +587,7 @@ impl ClientShellState {
         {
             self.request_selection_copy(outcome, true);
             self.selection = None;
+            self.pane_app_selection = None;
             self.stop_selection_autoscroll();
             self.selection_highlight_clear_deadline = None;
             outcome.repaint = true;
@@ -587,6 +597,7 @@ impl ClientShellState {
             && self.copy_or_terminal_mode() != ClientShellMode::Copy
             && self.selection.take().is_some()
         {
+            self.pane_app_selection = None;
             self.stop_selection_autoscroll();
             self.selection_highlight_clear_deadline = None;
             outcome.repaint = true;
