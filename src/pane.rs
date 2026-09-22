@@ -4673,7 +4673,13 @@ mod tests {
             "printf '%s\\n%s\\n%s\\n%s\\n' \"$TERM\" \"$COLORTERM\" \"$TERM_PROGRAM\" \"$TERM_PROGRAM_VERSION\"",
             &[],
         );
-        assert_eq!(output, "xterm-256color\ntruecolor\nghostty\n1.3.1\n");
+        assert_eq!(
+            output,
+            format!(
+                "xterm-256color\ntruecolor\nherdr\n{}\n",
+                crate::build_info::version()
+            )
+        );
     }
 
     #[cfg(unix)]

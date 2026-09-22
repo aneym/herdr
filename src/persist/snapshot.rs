@@ -539,13 +539,16 @@ fn capture_workspace(
         .iter()
         .map(|tab| capture_tab(tab, terminals, terminal_runtimes))
         .collect();
+    let identity_cwd = tabs
+        .first()
+        .and_then(|tab| tab.root_pane.and_then(|id| tab.panes.get(&id)))
+        .map(|pane| pane.cwd.clone())
+        .unwrap_or_else(|| ws.identity_cwd.clone());
     WorkspaceSnapshot {
         id: Some(ws.id.clone()),
         custom_name: ws.custom_name.clone(),
         profiles: ws.profiles.clone(),
-        identity_cwd: ws
-            .resolved_identity_cwd_from(terminals, terminal_runtimes)
-            .unwrap_or_else(|| ws.identity_cwd.clone()),
+        identity_cwd,
         worktree_space: ws.worktree_space.clone(),
         public_pane_numbers: ws
             .public_pane_numbers

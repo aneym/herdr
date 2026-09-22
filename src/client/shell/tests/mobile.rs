@@ -1,6 +1,72 @@
 use super::*;
 
 #[test]
+fn fork_mobile_header_keeps_active_tab_visible_without_hiding_fitting_tabs() {
+    let config = ClientShellConfig::from_config(&Config::default());
+    let mut snapshot = snapshot();
+    snapshot.tabs[0].label = "first".into();
+    snapshot.tabs[0].focused = false;
+    let mut active = snapshot.tabs[0].clone();
+    active.tab_id = "tab_2".into();
+    active.label = "active".into();
+    active.focused = true;
+    snapshot.tabs.push(active);
+    snapshot.focused_tab_id = Some("tab_2".into());
+    for (width, expected) in [(44, 2), (16, 1)] {
+        let mut buffer = Buffer::empty(Rect::new(0, 0, width, 2));
+        let mut hits = ShellHitMap::default();
+        super::super::mobile::render_mobile_header(
+            &mut buffer,
+            Rect::new(0, 0, width, 2),
+            &snapshot,
+            &config,
+            &ClientEndpointId::Local,
+            &mut hits,
+        );
+        let tabs: Vec<_> = hits
+            .mobile_targets
+            .iter()
+            .filter_map(|(_, target)| match target {
+                ClientMobileTarget::Tab { tab_id, .. } => Some(tab_id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(tabs.contains(&"tab_2"));
+        assert_eq!(tabs.len(), expected);
+    }
+}
+
+#[test]
+fn fork_mobile_switcher_uses_saved_profile_roster_and_routes_selection() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.mobile_profiles.insert(
+        ClientEndpointId::Local,
+        vec!["default".into(), "review".into()],
+    );
+    state.mode = ClientShellMode::Navigate;
+    state.compose(44, 40).unwrap();
+    let rect = state
+        .hits
+        .mobile_targets
+        .iter()
+        .find_map(|(rect, target)| {
+            matches!(target, ClientMobileTarget::Profile(profile) if profile == "review")
+                .then_some(*rect)
+        })
+        .expect("saved profile is actionable");
+    let outcome = state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: rect.x,
+        row: rect.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert!(outcome.actions.iter().any(|action| matches!(action, ClientShellAction::Endpoint { request, .. }
+        if matches!(&request.method, crate::api::schema::Method::ProfileSwitch(params) if params.profile == "review"))));
+}
+
+#[test]
 fn navigate_update_status_uses_released_desktop_and_mobile_placement() {
     let mut config = ClientShellConfig::from_config(&Config::default());
     config.tab_bar_position = crate::config::TabBarPositionConfig::Bottom;
@@ -237,7 +303,9 @@ fn mobile_header_and_switcher_render_released_sections_and_stable_targets() {
     let opened = state.handle_raw_events(vec![click(state.hits.mobile_switch)]);
     assert!(opened.repaint);
     assert_eq!(state.mode, ClientShellMode::Navigate);
-    let switcher = state.compose(44, 20).expect("mobile switcher");
+    let switcher = state
+        .compose(44, 24)
+        .expect("mobile switcher with profiles");
     let switcher_text = switcher
         .cells
         .chunks(switcher.width as usize)
@@ -256,6 +324,7 @@ fn mobile_header_and_switcher_render_released_sections_and_stable_targets() {
         "switch",
         "close",
         "agents",
+        "profiles",
         "spaces",
         "+ new workspace",
         "tabs",

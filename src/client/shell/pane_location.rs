@@ -6,101 +6,6 @@ fn button_rect(hit: &PaneHit) -> Option<Rect> {
         .then(|| Rect::new(hit.rect.right().saturating_sub(4), hit.rect.y, 3, 1))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn state() -> ClientShellState {
-        let mut state = ClientShellState::new(ClientShellConfig::from_config(
-            &crate::config::Config::default(),
-        ));
-        state.set_snapshot(Box::new(super::super::tests::snapshot()));
-        state.hits.panes.push(PaneHit {
-            rect: Rect::new(0, 0, 20, 8),
-            inner_rect: Rect::new(1, 1, 18, 6),
-            scrollbar_rect: None,
-            scroll: None,
-            pane_id: "pane_1".into(),
-            popup: false,
-            mouse_reporting: true,
-            sgr_pixel_mouse: false,
-            pixel_width: 0,
-            pixel_height: 0,
-        });
-        state
-    }
-
-    fn mouse(kind: MouseEventKind, column: u16, row: u16) -> crossterm::event::MouseEvent {
-        crossterm::event::MouseEvent {
-            kind,
-            column,
-            row,
-            modifiers: crossterm::event::KeyModifiers::empty(),
-        }
-    }
-
-    #[test]
-    fn pane_location_copies_public_id_and_consumes_the_full_gesture() {
-        let mut state = state();
-        let mut outcome = ClientShellInput::default();
-        state.handle_mouse(
-            mouse(MouseEventKind::Down(MouseButton::Left), 17, 0),
-            &mut outcome,
-        );
-        state.handle_mouse(
-            mouse(MouseEventKind::Drag(MouseButton::Left), 17, 0),
-            &mut outcome,
-        );
-        state.handle_mouse(
-            mouse(MouseEventKind::Up(MouseButton::Left), 17, 0),
-            &mut outcome,
-        );
-        assert!(
-            matches!(&outcome.actions[..], [ClientShellAction::ClipboardWrite(bytes)] if bytes == b"pane_1")
-        );
-        assert!(
-            outcome.requests.is_empty(),
-            "copy gesture must not reach the pane app"
-        );
-        assert!(state.pane_location_pressed.is_none());
-    }
-
-    #[test]
-    fn pane_location_release_outside_or_after_pane_closes_cancels_copy() {
-        let mut state = state();
-        for closed in [false, true] {
-            let mut outcome = ClientShellInput::default();
-            assert!(state.handle_pane_location_mouse(
-                mouse(MouseEventKind::Down(MouseButton::Left), 17, 0),
-                &mut outcome
-            ));
-            if closed {
-                state.snapshot.as_deref_mut().unwrap().panes.clear();
-            }
-            let x = if closed { 17 } else { 1 };
-            assert!(state.handle_pane_location_mouse(
-                mouse(MouseEventKind::Up(MouseButton::Left), x, 0),
-                &mut outcome
-            ));
-            assert!(outcome.actions.is_empty());
-        }
-    }
-
-    #[test]
-    fn pane_location_renders_only_on_hovered_bordered_pane() {
-        let mut state = state();
-        let mut outcome = ClientShellInput::default();
-        state.handle_pane_location_mouse(mouse(MouseEventKind::Moved, 5, 3), &mut outcome);
-        let buffer = Buffer::empty(Rect::new(0, 0, 20, 8));
-        let mut frame = FrameData::from_ratatui_buffer_with_hyperlinks(&buffer, None, &[]);
-        let mut occlusion = crate::kitty_graphics::surface::Occlusion::default();
-        state.render_pane_location(&mut frame, &mut occlusion);
-        assert_eq!(frame.cells[17].symbol, "⧉");
-        state.hits.panes[0].inner_rect.y = 0;
-        assert!(button_rect(&state.hits.panes[0]).is_none());
-    }
-}
-
 impl ClientShellState {
     pub(super) fn handle_pane_location_mouse(
         &mut self,
@@ -196,5 +101,100 @@ impl ClientShellState {
             }
         }
         occlusion.cover(rect);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state() -> ClientShellState {
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(
+            &crate::config::Config::default(),
+        ));
+        state.set_snapshot(Box::new(super::super::tests::snapshot()));
+        state.hits.panes.push(PaneHit {
+            rect: Rect::new(0, 0, 20, 8),
+            inner_rect: Rect::new(1, 1, 18, 6),
+            scrollbar_rect: None,
+            scroll: None,
+            pane_id: "pane_1".into(),
+            popup: false,
+            mouse_reporting: true,
+            sgr_pixel_mouse: false,
+            pixel_width: 0,
+            pixel_height: 0,
+        });
+        state
+    }
+
+    fn mouse(kind: MouseEventKind, column: u16, row: u16) -> crossterm::event::MouseEvent {
+        crossterm::event::MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        }
+    }
+
+    #[test]
+    fn pane_location_copies_public_id_and_consumes_the_full_gesture() {
+        let mut state = state();
+        let mut outcome = ClientShellInput::default();
+        state.handle_mouse(
+            mouse(MouseEventKind::Down(MouseButton::Left), 17, 0),
+            &mut outcome,
+        );
+        state.handle_mouse(
+            mouse(MouseEventKind::Drag(MouseButton::Left), 17, 0),
+            &mut outcome,
+        );
+        state.handle_mouse(
+            mouse(MouseEventKind::Up(MouseButton::Left), 17, 0),
+            &mut outcome,
+        );
+        assert!(
+            matches!(&outcome.actions[..], [ClientShellAction::ClipboardWrite(bytes)] if bytes == b"pane_1")
+        );
+        assert!(
+            outcome.requests.is_empty(),
+            "copy gesture must not reach the pane app"
+        );
+        assert!(state.pane_location_pressed.is_none());
+    }
+
+    #[test]
+    fn pane_location_release_outside_or_after_pane_closes_cancels_copy() {
+        let mut state = state();
+        for closed in [false, true] {
+            let mut outcome = ClientShellInput::default();
+            assert!(state.handle_pane_location_mouse(
+                mouse(MouseEventKind::Down(MouseButton::Left), 17, 0),
+                &mut outcome
+            ));
+            if closed {
+                state.snapshot.as_deref_mut().unwrap().panes.clear();
+            }
+            let x = if closed { 17 } else { 1 };
+            assert!(state.handle_pane_location_mouse(
+                mouse(MouseEventKind::Up(MouseButton::Left), x, 0),
+                &mut outcome
+            ));
+            assert!(outcome.actions.is_empty());
+        }
+    }
+
+    #[test]
+    fn pane_location_renders_only_on_hovered_bordered_pane() {
+        let mut state = state();
+        let mut outcome = ClientShellInput::default();
+        state.handle_pane_location_mouse(mouse(MouseEventKind::Moved, 5, 3), &mut outcome);
+        let buffer = Buffer::empty(Rect::new(0, 0, 20, 8));
+        let mut frame = FrameData::from_ratatui_buffer_with_hyperlinks(&buffer, None, &[]);
+        let mut occlusion = crate::kitty_graphics::surface::Occlusion::default();
+        state.render_pane_location(&mut frame, &mut occlusion);
+        assert_eq!(frame.cells[17].symbol, "⧉");
+        state.hits.panes[0].inner_rect.y = 0;
+        assert!(button_rect(&state.hits.panes[0]).is_none());
     }
 }

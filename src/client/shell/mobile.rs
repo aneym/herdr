@@ -100,11 +100,23 @@ fn render_header_tabs(
         .iter()
         .filter(|tab| tab.workspace_id == workspace_id)
         .collect::<Vec<_>>();
-    let active = tabs.iter().position(|tab| tab.focused).unwrap_or(0);
-    // Begin with the active tab on narrow headers; earlier tabs are deliberately
-    // elided rather than pushing the active choice off screen.
+    let active = tabs
+        .iter()
+        .position(|tab| Some(tab.tab_id.as_str()) == snapshot.focused_tab_id.as_deref())
+        .unwrap_or(0);
+    let mut start = 0;
+    let mut prefix_width: u16 = tabs
+        .iter()
+        .take(active + 1)
+        .map(|tab| display_width(&tab.label).saturating_add(2))
+        .fold(0, u16::saturating_add);
+    while start < active && prefix_width > area.width {
+        prefix_width =
+            prefix_width.saturating_sub(display_width(&tabs[start].label).saturating_add(2));
+        start += 1;
+    }
     let mut x = area.x;
-    for tab in tabs.into_iter().skip(active) {
+    for tab in tabs.into_iter().skip(start) {
         let label = format!(" {} ", tab.label);
         let width = display_width(&label).min(area.right().saturating_sub(x));
         if width == 0 {
@@ -138,6 +150,14 @@ fn render_header_tabs(
             },
         ));
         x = x.saturating_add(width);
+    }
+    if x < area.right() {
+        render_agent_summary(
+            buffer,
+            Rect::new(x, y, area.right() - x, 1),
+            snapshot,
+            config,
+        );
     }
 }
 
@@ -442,6 +462,8 @@ pub(super) fn render_mobile_switcher(
     Clear.render(area, buffer);
     buffer.set_style(area, Style::default().bg(palette.panel_bg));
     hits.mobile_switch = Rect::default();
+    hits.mobile_close = Rect::default();
+    hits.mobile_targets.clear();
     if area.height <= 2 {
         *scroll = 0;
         put_text(

@@ -325,7 +325,11 @@ fn context_menus_capture_stable_targets_and_route_actions() {
         .iter()
         .any(|item| item.action == ClientContextMenuAction::NewWorktree));
     state.compose(106, 20).expect("workspace context menu");
-    let rename = state.hits.context_menu_rows[0].0;
+    let rename_index = workspace_items
+        .iter()
+        .position(|item| item.action == ClientContextMenuAction::Rename)
+        .expect("rename item");
+    let rename = state.hits.context_menu_rows[rename_index].0;
     state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
         column: rename.x + 1,

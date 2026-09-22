@@ -9,22 +9,35 @@ visibility handling in this architecture. The shared checkout still carries
 an unrelated uncommitted `runtime_mutations.rs` edit and is not an upgrade
 workspace.
 
-The historical stage-1/stage-2 ledger below records the recovered port, not
-a claim that every feature has been restored. Current completed restoration:
+The stage-1/stage-2 ledger below is historical. Its `needs-port` entries
+are superseded by this integration map; they do not describe the current tree.
 
-- `b0c2018b`: fuzzy navigator matching plus deferred client attention and the
-  fork Claude idle-confirmation/background-shell guards.
-- `45576551`: flush deferred attention against the latest endpoint cache
-  before applying navigation; clear saved generations on reconnect.
-- Focused validation: 76 endpoint tests, five on-unfocus tests, fuzzy
-  navigator regression, multi-viewer focus regression, and Claude manifest
-  guard test passed.
+| Restored fork behavior | Implementation / acceptance |
+| --- | --- |
+| Focus back/forward, mouse thumb buttons, last pane | Per-endpoint history in `src/client/shell/state.rs` and `actions.rs`; failed navigation rollback and reconnect invalidation |
+| Explicit-focus sidebar visibility | Response-correlated reveal of the focused workspace/tab, including split panes and same-active focus; passive snapshots retain collapsed groups |
+| Deferred attention-read | `b0c2018b`, `45576551`: latest endpoint cache, displayed completion generation, multiple viewers, navigation and outer-window unfocus |
+| Profile send/share and follow-space | Context menus preserve existing membership; async loading can be cancelled |
+| Usage overlay | Key and left-click entry, two-second async refresh, stale-response/in-flight guards |
+| Mobile profiles and header tabs | Full saved roster from API; active tab remains visible, fitting earlier tabs remain, switcher clears covered hit targets |
+| Pane-app copy and triple-click | Shadow selection and API selection reads for Command-C; no synthetic interrupt; triple-click selects a line |
+| Hover copy-location | `src/client/shell/pane_location.rs`: public pane ID, release-inside confirmation and closed-pane cancellation |
+| Fuzzy navigator | Existing fork scorer wired into the client palette |
+| Claude detection guards | Bundled and distributed manifests retain idle confirmation and background-shell detection |
 
-The upstream checkpoint compiled and started 3709 tests. The PTY descriptor
-check passed in isolation with inherited Herdr socket overrides unset;
-`pane_info_and_subscriptions_expose_done_agent_status` still times out.
-This is not a green full-suite claim. Navigation/copy and profile/usage/mobile
-restoration remain under implementation and acceptance.
+Combined local verification: 3,732 nextest tests passed, seven skipped
+(including the explicitly excluded `pane_info_and_subscriptions_expose_done_agent_status`).
+That API test repeatedly times out, including on the upstream-merge checkpoint;
+the full unfiltered suite is not green. The final integration restored upstream's
+live cwd persistence after a merge regression and corrected stale terminal-identity
+and menu-position assertions. Maintenance, architecture, integration-asset and docs
+contracts passed. Windows lint cannot run without the local Windows SDK configuration.
+
+Live proof applies to the deployed 0.8 sidebar patch: `of` and its tab are visible,
+all 21 pane IDs and 11 tracked agent sessions survived handoff. The merged 0.9
+client has local regression coverage, not a live-upgrade or hosted-CI claim.
+The shared checkout's unrelated pane-move patch remains untouched; upstream's
+replacement implementation is in this integration worktree.
 
 ## Historical port record
 
