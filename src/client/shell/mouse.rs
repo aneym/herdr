@@ -1853,6 +1853,10 @@ impl ClientShellState {
                 if !self.config.mouse_capture {
                     return;
                 }
+                if super::contains(self.hits.agent_usage, point) {
+                    self.toggle_usage_overlay(outcome);
+                    return;
+                }
                 if super::contains(self.hits.agent_sort_toggle, point) {
                     self.open_sidebar_view_context_menu(mouse.column, mouse.row.saturating_add(1));
                     outcome.repaint = true;

@@ -66,6 +66,7 @@ pub(crate) enum KeybindAction {
     LastPane,
     Help,
     Settings,
+    Usage,
     ReloadConfig,
     OpenNotificationTarget,
     Detach,
@@ -98,6 +99,7 @@ pub(crate) fn resolve_non_indexed_action(
     for (bindings, action) in [
         (&keybinds.help, KeybindAction::Help),
         (&keybinds.settings, KeybindAction::Settings),
+        (&keybinds.usage, KeybindAction::Usage),
         (&keybinds.workspace_picker, KeybindAction::WorkspacePicker),
         (&keybinds.new_workspace, KeybindAction::NewWorkspace),
         (&keybinds.new_worktree, KeybindAction::NewWorktree),

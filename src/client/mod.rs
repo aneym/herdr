@@ -2132,6 +2132,9 @@ async fn run_client_loop(
                             outcome.actions.extend(actions);
                         }
                         let (effects, notification_repaint) = shell.tick_notifications(now);
+                        let usage = shell.tick_usage_overlay(now);
+                        outcome.repaint |= usage.repaint;
+                        outcome.actions.extend(usage.actions);
                         outcome.repaint |= notification_repaint
                             | shell.tick_copy_feedback(now)
                             | shell.tick_workspace_highlight(now)
