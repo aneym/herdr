@@ -236,10 +236,37 @@ impl ClientShellState {
                     }
                 }
                 RawInputEvent::Mouse(mouse) => self.handle_mouse(mouse, &mut outcome),
-                // PORT-0.9: the fork bound mouse buttons 8/9 to focus history;
-                // the client shell binding is not ported yet.
-                // (docs/fork/port-0.9/PORT.md)
-                RawInputEvent::MouseNavButton { .. } => {}
+                RawInputEvent::MouseNavButton { button, pressed } => {
+                    if pressed {
+                        let configured = match button {
+                            crate::raw_input::MouseNavButton::Back => self.config.mouse_back_button,
+                            crate::raw_input::MouseNavButton::Forward => {
+                                self.config.mouse_forward_button
+                            }
+                        };
+                        let action = match configured {
+                            crate::config::MouseNavButtonActionConfig::Off => None,
+                            crate::config::MouseNavButtonActionConfig::FocusBack => {
+                                Some(crate::input::KeybindAction::FocusBack)
+                            }
+                            crate::config::MouseNavButtonActionConfig::FocusForward => {
+                                Some(crate::input::KeybindAction::FocusForward)
+                            }
+                            crate::config::MouseNavButtonActionConfig::NextAgent => {
+                                Some(crate::input::KeybindAction::NextAgent)
+                            }
+                            crate::config::MouseNavButtonActionConfig::PreviousAgent => {
+                                Some(crate::input::KeybindAction::PreviousAgent)
+                            }
+                        };
+                        if let Some(action) = action {
+                            self.record_binding(
+                                crate::input::KeybindMatch::Action(action),
+                                &mut outcome,
+                            );
+                        }
+                    }
+                }
                 RawInputEvent::OuterFocusGained => {
                     self.outer_focused = Some(true);
                     outcome.query_host_appearance = true;
