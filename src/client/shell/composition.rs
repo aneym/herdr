@@ -600,6 +600,10 @@ impl ClientShellState {
                 snapshot,
                 &self.endpoints,
                 &self.active_endpoint_id,
+                self.mobile_profiles
+                    .get(&self.active_endpoint_id)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]),
                 &self.config,
                 self.navigate_workspace_id
                     .as_ref()

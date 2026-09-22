@@ -463,7 +463,7 @@ impl ClientShellState {
         outcome.repaint = true;
     }
 
-    fn activate_profile_context_action(
+    pub(super) fn activate_profile_context_action(
         &mut self,
         pane_id: Option<String>,
         workspace_id: String,

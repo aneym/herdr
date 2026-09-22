@@ -785,6 +785,9 @@ pub(super) enum PendingEndpointKind {
     ProfilePaneMembership {
         generation: u64,
     },
+    MobileProfileList {
+        endpoint_id: ClientEndpointId,
+    },
     AgentUsage {
         generation: u64,
         serial: u64,
@@ -1086,6 +1089,7 @@ pub(crate) struct ClientShellState {
     pub(super) usage_in_flight_serial: Option<u64>,
     pub(super) next_profile_menu_generation: u64,
     pub(super) profile_menu_load: Option<ClientProfileMenuLoad>,
+    pub(super) mobile_profiles: HashMap<ClientEndpointId, Vec<String>>,
 }
 
 pub(super) fn product_announcement_state(
@@ -1277,6 +1281,7 @@ impl ClientShellState {
             usage_in_flight_serial: None,
             next_profile_menu_generation: 0,
             profile_menu_load: None,
+            mobile_profiles: HashMap::new(),
         }
     }
 
