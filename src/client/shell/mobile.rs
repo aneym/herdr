@@ -95,12 +95,16 @@ fn render_header_tabs(
             .set_symbol(" ")
             .set_style(Style::default().bg(config.palette.panel_bg));
     }
-    let mut x = area.x;
-    for tab in snapshot
+    let tabs = snapshot
         .tabs
         .iter()
         .filter(|tab| tab.workspace_id == workspace_id)
-    {
+        .collect::<Vec<_>>();
+    let active = tabs.iter().position(|tab| tab.focused).unwrap_or(0);
+    // Begin with the active tab on narrow headers; earlier tabs are deliberately
+    // elided rather than pushing the active choice off screen.
+    let mut x = area.x;
+    for tab in tabs.into_iter().skip(active) {
         let label = format!(" {} ", tab.label);
         let width = display_width(&label).min(area.right().saturating_sub(x));
         if width == 0 {
@@ -424,6 +428,7 @@ pub(super) fn render_mobile_switcher(
     snapshot: &ClientShellSnapshot,
     endpoints: &[ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
+    profiles: &[String],
     config: &ClientShellConfig,
     selected_workspace_id: Option<&WorkspaceNavigationTarget>,
     scroll: &mut usize,
@@ -498,6 +503,7 @@ pub(super) fn render_mobile_switcher(
         snapshot,
         endpoints,
         active_endpoint_id,
+        profiles,
         config,
         selected_workspace_id,
         viewport.width.saturating_sub(1),
@@ -634,6 +640,7 @@ fn mobile_items(
     snapshot: &ClientShellSnapshot,
     endpoints: &[ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
+    profiles: &[String],
     config: &ClientShellConfig,
     selected_workspace_id: Option<&WorkspaceNavigationTarget>,
     content_width: u16,
@@ -806,7 +813,10 @@ fn mobile_items(
     }
 
     items.push(MobileItem::section("profiles", palette));
-    let mut profiles = vec![crate::workspace::DEFAULT_PROFILE.to_string()];
+    let mut profiles = profiles.to_vec();
+    if profiles.is_empty() {
+        profiles.push(crate::workspace::DEFAULT_PROFILE.to_string());
+    }
     if !snapshot.active_profile.is_empty() && !profiles.contains(&snapshot.active_profile) {
         profiles.push(snapshot.active_profile.clone());
     }
@@ -1072,6 +1082,16 @@ impl ClientShellState {
                 self.pending_workspace_highlight = None;
                 self.mode = ClientShellMode::Navigate;
                 self.navigate_workspace_id = self.focused_navigation_target();
+                if !self.mobile_profiles.contains_key(&self.active_endpoint_id) {
+                    let endpoint_id = self.active_endpoint_id.clone();
+                    self.push_endpoint_method_with_kind(
+                        crate::api::schema::Method::ProfileList(
+                            crate::api::schema::EmptyParams::default(),
+                        ),
+                        PendingEndpointKind::MobileProfileList { endpoint_id },
+                        outcome,
+                    );
+                }
                 outcome.repaint = true;
                 return true;
             }

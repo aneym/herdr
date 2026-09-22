@@ -977,6 +977,14 @@ impl ClientShellState {
                 }
                 return (true, Vec::new());
             }
+            PendingEndpointKind::MobileProfileList { endpoint_id } => {
+                if let Ok(crate::api::schema::ResponseResult::ProfileList { profiles, .. }) = result
+                {
+                    self.mobile_profiles.insert(endpoint_id, profiles);
+                    return (true, Vec::new());
+                }
+                return (false, Vec::new());
+            }
             kind @ (PendingEndpointKind::IntegrationList
             | PendingEndpointKind::IntegrationInstall) => {
                 return self.handle_settings_endpoint_result(kind, result);

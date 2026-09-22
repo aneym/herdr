@@ -543,6 +543,7 @@ impl ClientShellState {
                 | PendingEndpointKind::ProfileList { .. }
                 | PendingEndpointKind::ProfileWorkspaceMembership { .. }
                 | PendingEndpointKind::ProfilePaneMembership { .. }
+                | PendingEndpointKind::MobileProfileList { .. }
                 | PendingEndpointKind::AgentUsage { .. },
                 Err(_),
             ) => true,
