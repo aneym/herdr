@@ -1,5 +1,113 @@
 use super::*;
 
+fn pane_mouse(kind: MouseEventKind, pane: &PaneHit, col: u16) -> RawInputEvent {
+    RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind,
+        column: pane.inner_rect.x + col,
+        row: pane.inner_rect.y,
+        modifiers: KeyModifiers::empty(),
+    })
+}
+
+fn endpoint_request(outcome: ClientShellInput) -> crate::api::schema::Request {
+    outcome
+        .actions
+        .into_iter()
+        .find_map(|action| match action {
+            ClientShellAction::Endpoint { request, .. } => Some(*request),
+            _ => None,
+        })
+        .expect("endpoint request")
+}
+
+#[test]
+fn triple_click_selects_and_copies_the_line() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.compose(106, 20).expect("composed frame");
+    let pane = state.hits.panes[0].clone();
+    let mut third = ClientShellInput::default();
+    for index in 0..3 {
+        let down = state.handle_raw_events(vec![pane_mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            &pane,
+            1,
+        )]);
+        if index == 2 {
+            third = down;
+        }
+        state.handle_raw_events(vec![pane_mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            &pane,
+            1,
+        )]);
+    }
+    let request = endpoint_request(third);
+    assert!(matches!(
+        request.method,
+        crate::api::schema::Method::PaneSelectionRead(ref params)
+            if params.anchor.row == params.cursor.row && params.anchor.col == 0 && params.cursor.col == 3
+    ));
+    let (_, actions) = state.handle_endpoint_result(
+        "boot-1",
+        &request.id,
+        Ok(crate::api::schema::ResponseResult::PaneSelection {
+            pane_id: "pane_1".into(),
+            text: "LIVE".into(),
+        }),
+    );
+    assert!(matches!(
+        &actions[..],
+        [ClientShellAction::ClipboardWrite(bytes)] if bytes == b"LIVE"
+    ));
+}
+
+#[test]
+fn mouse_reporting_drag_cmd_c_copies_shadow_without_sending_interrupt() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.config.copy_on_select = false;
+    state.set_snapshot(Box::new(snapshot()));
+    let mut pane_surface = surface();
+    pane_surface.panes[0].mouse_reporting = true;
+    state.set_pane_surface(pane_surface);
+    state.compose(106, 20).expect("composed frame");
+    let pane = state.hits.panes[0].clone();
+    for event in [
+        pane_mouse(MouseEventKind::Down(MouseButton::Left), &pane, 0),
+        pane_mouse(MouseEventKind::Drag(MouseButton::Left), &pane, 2),
+        pane_mouse(MouseEventKind::Up(MouseButton::Left), &pane, 2),
+    ] {
+        state.handle_raw_events(vec![event]);
+    }
+
+    let cmd_c = state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+        KeyCode::Char('c'),
+        KeyModifiers::SUPER,
+    ))]);
+    assert!(!cmd_c.requests.iter().any(|request| matches!(
+        request,
+        ClientMessage::ClientShellPaneInput { events, .. }
+            if events.iter().any(|event| matches!(event, ClientPaneInputEvent::Key { .. }))
+    )));
+    let request = endpoint_request(cmd_c);
+    assert!(matches!(
+        request.method,
+        crate::api::schema::Method::PaneSelectionRead(_)
+    ));
+
+    // Plain Ctrl-C retains its terminal meaning after the shadow was consumed.
+    let ctrl_c = state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+        KeyCode::Char('c'),
+        KeyModifiers::CONTROL,
+    ))]);
+    assert!(ctrl_c.requests.iter().any(|request| matches!(
+        request,
+        ClientMessage::ClientShellPaneInput { events, .. }
+            if events.iter().any(|event| matches!(event, ClientPaneInputEvent::Key { .. }))
+    )));
+}
+
 #[test]
 fn pasted_help_and_copy_queries_normalize_single_line_text() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));

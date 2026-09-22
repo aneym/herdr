@@ -824,6 +824,7 @@ pub(super) struct ClientPaneClick {
     pub(super) viewport_row: u16,
     pub(super) col: u16,
     pub(super) at: std::time::Instant,
+    pub(super) count: u8,
 }
 
 impl ClientPaneClick {
@@ -978,6 +979,9 @@ pub(crate) struct ClientShellState {
     pub(super) url_click_consumes_until_up: bool,
     pub(super) replaying_url_click: bool,
     pub(super) selection: Option<crate::selection::Selection<String>>,
+    /// A selection shadow for a pane application that owns mouse reporting.
+    /// Exact Cmd-C may copy it, while Ctrl-C continues to reach the pane.
+    pub(super) pane_app_selection: Option<String>,
     pub(super) last_pane_click: Option<ClientPaneClick>,
     pub(super) selection_autoscroll: Option<ClientSelectionAutoscroll>,
     pub(super) selection_autoscroll_deadline: Option<std::time::Instant>,
@@ -1161,6 +1165,7 @@ impl ClientShellState {
             url_click_consumes_until_up: false,
             replaying_url_click: false,
             selection: None,
+            pane_app_selection: None,
             last_pane_click: None,
             selection_autoscroll: None,
             selection_autoscroll_deadline: None,
@@ -1500,6 +1505,7 @@ impl ClientShellState {
         self.url_click_consumes_until_up = false;
         self.replaying_url_click = false;
         self.selection = None;
+        self.pane_app_selection = None;
         self.last_pane_click = None;
         self.selection_autoscroll = None;
         self.selection_autoscroll_deadline = None;
@@ -1684,6 +1690,7 @@ impl ClientShellState {
         };
         if selection_focus_lost {
             self.selection = None;
+            self.pane_app_selection = None;
             self.selection_autoscroll = None;
             self.selection_autoscroll_deadline = None;
             self.selection_highlight_clear_deadline = None;

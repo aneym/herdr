@@ -686,7 +686,7 @@ impl ClientShellState {
                                 pending
                                     .expected_pane_id
                                     .as_ref()
-                                    .map_or(false, |expected| focused.as_ref() == Some(expected))
+                                    .is_some_and(|expected| focused.as_ref() == Some(expected))
                             });
                     if reveal_now {
                         self.pending_focus_reveals.remove(request_id);
