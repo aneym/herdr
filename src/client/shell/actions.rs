@@ -172,6 +172,24 @@ impl ClientShellState {
                     }
                     return;
                 }
+                if matches!(
+                    action,
+                    crate::input::KeybindAction::FocusBack
+                        | crate::input::KeybindAction::FocusForward
+                ) {
+                    if let Some(method) = self.endpoint_method_for_action(action) {
+                        if !self.push_endpoint_method_with_kind(
+                            method,
+                            PendingEndpointKind::Focus {
+                                history_navigation: true,
+                            },
+                            outcome,
+                        ) {
+                            self.cancel_focus_history_navigation();
+                        }
+                    }
+                    return;
+                }
                 if self.handle_endpoint_navigation(action, outcome) {
                     return;
                 }
@@ -449,6 +467,16 @@ impl ClientShellState {
         let Some(snapshot) = self.snapshot.as_deref() else {
             return false;
         };
+        let expected_pane_id = match &method {
+            crate::api::schema::Method::PaneFocus(target) => Some(target.pane_id.clone()),
+            crate::api::schema::Method::TabFocus(target) => snapshot
+                .panes
+                .iter()
+                .find(|pane| pane.tab_id == target.tab_id)
+                .map(|pane| pane.pane_id.clone()),
+            _ => None,
+        };
+        let baseline_pane_id = snapshot.focused_pane_id.clone();
         let confirmation_workspace_id = match &method {
             crate::api::schema::Method::TabClose(target) => snapshot
                 .tabs
@@ -465,6 +493,13 @@ impl ClientShellState {
         let request_id = self.next_request_id;
         self.next_request_id = self.next_request_id.saturating_add(1);
         let request_id = format!("client-shell:{request_id}");
+        let kind = if changes_focus && matches!(kind, PendingEndpointKind::Generic) {
+            PendingEndpointKind::Focus {
+                history_navigation: false,
+            }
+        } else {
+            kind
+        };
         self.pending_requests.insert(
             request_id.clone(),
             PendingEndpointRequest {
@@ -474,6 +509,16 @@ impl ClientShellState {
                 kind,
             },
         );
+        if changes_focus {
+            self.pending_focus_reveals.insert(
+                request_id.clone(),
+                ClientPendingFocusReveal {
+                    expected_pane_id,
+                    baseline_pane_id,
+                    confirmed: false,
+                },
+            );
+        }
         outcome.actions.push(ClientShellAction::Endpoint {
             endpoint_id: self.active_endpoint_id.clone(),
             boot_id: snapshot.boot_id.clone(),
@@ -575,6 +620,15 @@ impl ClientShellState {
             self.endpoint_notice_seen.remove(&timeout_key);
         }
         if let Err(error) = &result {
+            self.pending_focus_reveals.remove(request_id);
+            if matches!(
+                pending.kind,
+                PendingEndpointKind::Focus {
+                    history_navigation: true
+                }
+            ) {
+                self.cancel_focus_history_navigation();
+            }
             if self
                 .pending_workspace_highlight
                 .as_ref()
@@ -618,6 +672,35 @@ impl ClientShellState {
         }
         match pending.kind {
             PendingEndpointKind::Generic => {}
+            PendingEndpointKind::Focus { .. } => {
+                if result.is_ok() {
+                    let focused = self
+                        .snapshot
+                        .as_deref()
+                        .and_then(|snapshot| snapshot.focused_pane_id.clone());
+                    let reveal_now =
+                        self.pending_focus_reveals
+                            .get_mut(request_id)
+                            .is_some_and(|pending| {
+                                pending.confirmed = true;
+                                pending
+                                    .expected_pane_id
+                                    .as_ref()
+                                    .map_or(false, |expected| focused.as_ref() == Some(expected))
+                            });
+                    if reveal_now {
+                        self.pending_focus_reveals.remove(request_id);
+                        if focused
+                            .as_deref()
+                            .is_some_and(|pane_id| self.reveal_tree_ancestors_for_pane(pane_id))
+                        {
+                            self.agent_scroll = 0;
+                            self.persist_chrome_preferences(&mut ClientShellInput::default());
+                            return (true, Vec::new());
+                        }
+                    }
+                }
+            }
             PendingEndpointKind::PaneLinkResolve { .. } => unreachable!("handled above"),
             PendingEndpointKind::ProductAnnouncementDismiss { version, id } => {
                 return match result {
@@ -913,6 +996,14 @@ impl ClientShellState {
             TabCreateParams, TabMoveParams, TabTarget, WorkspaceTarget,
         };
         use crate::input::KeybindAction;
+
+        if matches!(
+            action,
+            KeybindAction::FocusBack | KeybindAction::FocusForward
+        ) {
+            let pane_id = self.focus_history_target(action == KeybindAction::FocusForward)?;
+            return Some(Method::PaneFocus(PaneTarget { pane_id }));
+        }
 
         let snapshot = self.snapshot.as_deref()?;
         let focused_workspace = snapshot.focused_workspace_id.clone()?;

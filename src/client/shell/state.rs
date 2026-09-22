@@ -49,6 +49,8 @@ pub(crate) struct ClientShellConfig {
     pub(super) prompt_new_workspace_name: bool,
     pub(super) confirm_close: bool,
     pub(super) mouse_capture: bool,
+    pub(super) mouse_back_button: crate::config::MouseNavButtonActionConfig,
+    pub(super) mouse_forward_button: crate::config::MouseNavButtonActionConfig,
     pub(super) mouse_scroll_lines: usize,
     pub(super) right_click_passthrough_modifiers: Option<crossterm::event::KeyModifiers>,
     pub(super) redraw_on_focus_gained: bool,
@@ -670,6 +672,9 @@ impl ClientShellOverlay {
 #[derive(Debug)]
 pub(super) enum PendingEndpointKind {
     Generic,
+    Focus {
+        history_navigation: bool,
+    },
     ProductAnnouncementDismiss {
         version: String,
         id: String,
@@ -732,6 +737,13 @@ pub(super) struct PendingEndpointRequest {
     pub(super) method_name: String,
     pub(super) confirmation_workspace_id: Option<String>,
     pub(super) kind: PendingEndpointKind,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct ClientPendingFocusReveal {
+    pub(super) expected_pane_id: Option<String>,
+    pub(super) baseline_pane_id: Option<String>,
+    pub(super) confirmed: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -822,6 +834,16 @@ impl ClientPaneClick {
             && self.viewport_row.abs_diff(next.viewport_row) <= 1
             && self.col.abs_diff(next.col) <= 1
     }
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct ClientPaneFocusHistory {
+    pub(super) boot_id: String,
+    pub(super) current: Option<String>,
+    pub(super) back: Vec<String>,
+    pub(super) forward: Vec<String>,
+    pub(super) pending_navigation: Option<String>,
+    pub(super) pending_forward: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -950,6 +972,8 @@ pub(crate) struct ClientShellState {
     pub(super) reveal_navigation_workspace: bool,
     pub(super) overlay: Option<ClientShellOverlay>,
     pub(super) previous_pane_id: Option<String>,
+    pub(super) pane_focus_history: HashMap<ClientEndpointId, ClientPaneFocusHistory>,
+    pub(super) pending_focus_reveals: HashMap<String, ClientPendingFocusReveal>,
     pub(super) pane_mouse_gesture: Option<ClientPaneMouseGesture>,
     pub(super) link_hover: Option<super::link_hover::LinkHover>,
     pub(super) url_click_consumes_until_up: bool,
@@ -1131,6 +1155,8 @@ impl ClientShellState {
             reveal_navigation_workspace: false,
             overlay,
             previous_pane_id: None,
+            pane_focus_history: HashMap::new(),
+            pending_focus_reveals: HashMap::new(),
             pane_mouse_gesture: None,
             link_hover: None,
             url_click_consumes_until_up: false,
@@ -1273,6 +1299,144 @@ impl ClientShellState {
         }
     }
 
+    pub(super) fn reveal_tree_ancestors_for_pane(&mut self, pane_id: &str) -> bool {
+        if !super::tree::tree_view_active(&self.config) {
+            return false;
+        }
+        let Some(snapshot) = self.snapshot.as_deref() else {
+            return false;
+        };
+        let Some(pane) = snapshot.panes.iter().find(|pane| pane.pane_id == pane_id) else {
+            return false;
+        };
+        let workspace_id = pane.workspace_id.clone();
+        let tab_key = snapshot
+            .tabs
+            .iter()
+            .find(|tab| tab.tab_id == pane.tab_id)
+            .map(|tab| super::tree::tab_key(&workspace_id, tab.number));
+        let mut group_keys = Vec::new();
+        let mut visited = HashSet::new();
+        let mut current = snapshot
+            .agents
+            .iter()
+            .find(|agent| agent.pane_id == pane_id);
+        while let Some(agent) = current {
+            if !visited.insert(agent.pane_id.clone()) {
+                break;
+            }
+            if let Some(owner) = agent.owner_pane_id.as_ref() {
+                group_keys.push(owner.clone());
+                current = snapshot
+                    .agents
+                    .iter()
+                    .find(|candidate| &candidate.pane_id == owner);
+            } else {
+                break;
+            }
+        }
+        if snapshot
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.workspace_id == workspace_id)
+            .is_some_and(|workspace| workspace.orchestrator_mode)
+        {
+            group_keys.push(format!("orch:{workspace_id}"));
+        }
+
+        let tree = self.tree_chrome_mut();
+        let mut changed = tree.collapsed_spaces.remove(&workspace_id);
+        if let Some(key) = tab_key {
+            changed |= tree.collapsed_tabs.remove(&key);
+        }
+        for key in group_keys {
+            changed |= tree.collapsed_agent_groups.remove(&key);
+        }
+        changed
+    }
+
+    pub(super) fn record_focus_history_snapshot(&mut self, snapshot: &ClientShellSnapshot) {
+        let valid = |pane_id: &String| snapshot.panes.iter().any(|pane| &pane.pane_id == pane_id);
+        let history = self
+            .pane_focus_history
+            .entry(self.active_endpoint_id.clone())
+            .or_default();
+        if history.boot_id != snapshot.boot_id {
+            *history = ClientPaneFocusHistory {
+                boot_id: snapshot.boot_id.clone(),
+                current: snapshot.focused_pane_id.clone(),
+                ..ClientPaneFocusHistory::default()
+            };
+            return;
+        }
+        if history.current != snapshot.focused_pane_id {
+            let navigated = history.pending_navigation.take() == snapshot.focused_pane_id;
+            if !navigated {
+                history.forward.clear();
+                if let Some(previous) = history.current.as_ref().filter(|pane_id| valid(pane_id)) {
+                    if history.back.last() != Some(previous) {
+                        history.back.push(previous.clone());
+                        if history.back.len() > 64 {
+                            history.back.remove(0);
+                        }
+                    }
+                }
+            }
+            history.current = snapshot.focused_pane_id.clone();
+        }
+    }
+
+    pub(super) fn focus_history_target(&mut self, forward: bool) -> Option<String> {
+        let snapshot = self.snapshot.as_deref()?;
+        let current = snapshot.focused_pane_id.as_ref()?;
+        let valid = |pane_id: &String| snapshot.panes.iter().any(|pane| &pane.pane_id == pane_id);
+        let history = self.pane_focus_history.get_mut(&self.active_endpoint_id)?;
+        loop {
+            let target = if forward {
+                history.forward.pop()
+            } else {
+                history.back.pop()
+            }?;
+            if &target == current || !valid(&target) {
+                continue;
+            }
+            let destination = if forward {
+                &mut history.back
+            } else {
+                &mut history.forward
+            };
+            if destination.last() != Some(current) {
+                destination.push(current.clone());
+            }
+            history.pending_navigation = Some(target.clone());
+            history.pending_forward = forward;
+            return Some(target);
+        }
+    }
+
+    pub(super) fn cancel_focus_history_navigation(&mut self) {
+        let Some(history) = self.pane_focus_history.get_mut(&self.active_endpoint_id) else {
+            return;
+        };
+        let Some(target) = history.pending_navigation.take() else {
+            return;
+        };
+        let source = if history.pending_forward {
+            &mut history.forward
+        } else {
+            &mut history.back
+        };
+        source.push(target);
+        let destination = if history.pending_forward {
+            &mut history.back
+        } else {
+            &mut history.forward
+        };
+        if destination.last() == history.current.as_ref() {
+            destination.pop();
+        }
+    }
+
     pub(super) fn layout(&self, cols: u16, rows: u16) -> ClientShellLayout {
         self.config.layout(
             cols,
@@ -1331,6 +1495,7 @@ impl ClientShellState {
             .startup_onboarding
             .then_some(ClientShellOverlay::Onboarding);
         self.previous_pane_id = None;
+        self.pending_focus_reveals.clear();
         self.pane_mouse_gesture = None;
         self.link_hover = None;
         self.url_click_consumes_until_up = false;
@@ -1449,6 +1614,7 @@ impl ClientShellState {
         {
             self.previous_pane_id = Some(previous.clone());
         }
+        self.record_focus_history_snapshot(&snapshot);
         if snapshot_keybindings_changed {
             if let Err(err) = self.config.apply_snapshot_keybindings(
                 snapshot.server_keybindings_toml.as_deref(),
@@ -1644,6 +1810,33 @@ impl ClientShellState {
             }
         }
         self.snapshot = Some(snapshot);
+        let focused = self
+            .snapshot
+            .as_deref()
+            .and_then(|snapshot| snapshot.focused_pane_id.clone());
+        let completed_reveals = self
+            .pending_focus_reveals
+            .iter()
+            .filter_map(|(request_id, pending)| {
+                let matched = pending.confirmed
+                    && pending.expected_pane_id.as_ref().map_or_else(
+                        || focused.is_some() && focused != pending.baseline_pane_id,
+                        |expected| focused.as_ref() == Some(expected),
+                    );
+                matched.then(|| request_id.clone())
+            })
+            .collect::<Vec<_>>();
+        if !completed_reveals.is_empty() {
+            for request_id in completed_reveals {
+                self.pending_focus_reveals.remove(&request_id);
+            }
+            if focused
+                .as_deref()
+                .is_some_and(|pane_id| self.reveal_tree_ancestors_for_pane(pane_id))
+            {
+                self.agent_scroll = 0;
+            }
+        }
         self.reconcile_pending_workspace_highlight();
         let pending_surface = self.pending_pane_surface.take();
         if let Some(surface) = pending_surface {
