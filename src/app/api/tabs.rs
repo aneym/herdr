@@ -593,6 +593,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tab_create_reveals_a_collapsed_tree_only_when_focused() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        app.state.default_shell = exiting_test_command().into();
+        app.state.shell_mode = ShellModeConfig::NonLogin;
+        app.state.workspaces = vec![Workspace::test_new("tabs")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.agent_panel_sort = crate::app::state::AgentPanelSort::Tree;
+        let space_key = app.state.workspaces[0].id.clone();
+        app.state.tree_collapsed_spaces.insert(space_key.clone());
+
+        let response = app.handle_tab_create(
+            "unfocused".into(),
+            TabCreateParams {
+                workspace_id: None,
+                cwd: None,
+                focus: false,
+                label: None,
+                env: Default::default(),
+            },
+        );
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert!(matches!(success.result, ResponseResult::TabCreated { .. }));
+        assert!(app.state.tree_collapsed_spaces.contains(&space_key));
+
+        let response = app.handle_tab_create(
+            "focused".into(),
+            TabCreateParams {
+                workspace_id: None,
+                cwd: None,
+                focus: true,
+                label: None,
+                env: Default::default(),
+            },
+        );
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert!(matches!(success.result, ResponseResult::TabCreated { .. }));
+        assert!(!app.state.tree_collapsed_spaces.contains(&space_key));
+        shutdown_test_runtimes(&mut app);
+    }
+
+    #[tokio::test]
     async fn tab_create_follows_cached_focused_pane_cwd_without_runtime() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();

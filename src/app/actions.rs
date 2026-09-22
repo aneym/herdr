@@ -431,16 +431,37 @@ impl AppState {
         }
     }
 
+    /// An explicit focus target must remain reachable in the tree sidebar.
+    /// This changes only the groups enclosing that target; passive updates and
+    /// rendering preserve collapse choices.
+    fn reveal_tree_focus_target(&mut self, ws_idx: usize, tab_idx: usize) {
+        if !crate::ui::tree_view_active(self) {
+            return;
+        }
+
+        let mut changed = false;
+        if let Some(key) = crate::ui::tree_space_key(self, ws_idx) {
+            changed |= self.tree_collapsed_spaces.remove(&key);
+        }
+        if let Some(key) = crate::ui::tree_tab_key(self, ws_idx, tab_idx) {
+            changed |= self.tree_collapsed_tabs.remove(&key);
+        }
+        if changed {
+            self.mark_session_dirty();
+        }
+    }
+
     pub(crate) fn focus_pane_in_workspace(&mut self, ws_idx: usize, pane_id: PaneId) -> bool {
-        let Some(ws) = self.workspaces.get(ws_idx) else {
+        let Some((tab_idx, workspace_id)) = self.workspaces.get(ws_idx).and_then(|ws| {
+            ws.find_tab_index_for_pane(pane_id)
+                .map(|tab_idx| (tab_idx, ws.id.clone()))
+        }) else {
             return false;
         };
-        let Some(tab_idx) = ws.find_tab_index_for_pane(pane_id) else {
-            return false;
-        };
+        self.reveal_tree_focus_target(ws_idx, tab_idx);
         let previous = self.current_pane_focus_target();
         let target = PaneFocusTarget {
-            workspace_id: ws.id.clone(),
+            workspace_id,
             pane_id,
         };
         if previous.as_ref() == Some(&target) {
@@ -1458,6 +1479,8 @@ impl AppState {
 
     pub fn switch_workspace(&mut self, idx: usize) {
         if idx < self.workspaces.len() {
+            let active_tab = self.workspaces[idx].active_tab;
+            self.reveal_tree_focus_target(idx, active_tab);
             self.reveal_workspace(idx);
             let previous_focus = self.current_pane_focus_target();
             self.active = Some(idx);
@@ -1496,6 +1519,7 @@ impl AppState {
             return false;
         }
 
+        self.reveal_tree_focus_target(ws_idx, tab_idx);
         self.reveal_workspace(ws_idx);
         let previous_focus = self.current_pane_focus_target();
         let workspace_changed = self.active != Some(ws_idx);
@@ -2127,21 +2151,7 @@ impl AppState {
         let tab_idx = target.tab_idx;
         let pane_id = target.pane_id;
 
-        if crate::ui::tree_view_active(self) {
-            // The target has no row while an enclosing group is collapsed, so
-            // expand its space and tab first. Only a real change dirties the
-            // session; Cmd+E runs often.
-            let mut expanded = false;
-            if let Some(key) = crate::ui::tree_space_key(self, ws_idx) {
-                expanded |= self.tree_collapsed_spaces.remove(&key);
-            }
-            if let Some(key) = crate::ui::tree_tab_key(self, ws_idx, tab_idx) {
-                expanded |= self.tree_collapsed_tabs.remove(&key);
-            }
-            if expanded {
-                self.mark_session_dirty();
-            }
-        }
+        self.reveal_tree_focus_target(ws_idx, tab_idx);
 
         let entries = crate::ui::agent_panel_list_entries(self);
         let Some(list_idx) = entries.iter().position(|entry| match entry {
@@ -5536,6 +5546,63 @@ mod tests {
         state.switch_workspace(2);
         assert_eq!(state.active, Some(2));
         assert_eq!(state.selected, 2);
+    }
+
+    #[test]
+    fn focusing_a_pane_reveals_only_its_tree_space_and_tab() {
+        let mut state = app_with_workspaces(&["one", "two", "three"]);
+        state.agent_panel_sort = crate::app::state::AgentPanelSort::Tree;
+        let target_tab = state.workspaces[1].test_add_tab(Some("logs"));
+        let target_pane = state.workspaces[1].tabs[target_tab].root_pane;
+        let target_space = state.workspaces[1].id.clone();
+        let other_space = state.workspaces[2].id.clone();
+        let target_tab_key = crate::ui::tree_tab_key(&state, 1, target_tab).unwrap();
+
+        state.tree_collapsed_spaces.insert(target_space.clone());
+        state.tree_collapsed_spaces.insert(other_space.clone());
+        state.tree_collapsed_tabs.insert(target_tab_key.clone());
+
+        assert!(state.focus_pane_in_workspace(1, target_pane));
+
+        assert!(!state.tree_collapsed_spaces.contains(&target_space));
+        assert!(!state.tree_collapsed_tabs.contains(&target_tab_key));
+        assert!(state.tree_collapsed_spaces.contains(&other_space));
+        assert_eq!(state.active, Some(1));
+        assert_eq!(state.workspaces[1].active_tab, target_tab);
+    }
+
+    #[test]
+    fn focusing_the_active_pane_reveals_its_collapsed_tree_group() {
+        let mut state = app_with_workspaces(&["one"]);
+        state.agent_panel_sort = crate::app::state::AgentPanelSort::Tree;
+        let pane_id = state.workspaces[0].tabs[0].root_pane;
+        let space_key = state.workspaces[0].id.clone();
+        let tab_key = crate::ui::tree_tab_key(&state, 0, 0).unwrap();
+        state.tree_collapsed_spaces.insert(space_key.clone());
+        state.tree_collapsed_tabs.insert(tab_key.clone());
+
+        assert!(!state.focus_pane_in_workspace(0, pane_id));
+
+        assert!(!state.tree_collapsed_spaces.contains(&space_key));
+        assert!(!state.tree_collapsed_tabs.contains(&tab_key));
+    }
+
+    #[test]
+    fn switching_workspace_reveals_its_active_tab_only() {
+        let mut state = app_with_workspaces(&["one", "two", "three"]);
+        state.agent_panel_sort = crate::app::state::AgentPanelSort::Tree;
+        let target_space = state.workspaces[1].id.clone();
+        let other_space = state.workspaces[2].id.clone();
+        let target_tab_key = crate::ui::tree_tab_key(&state, 1, 0).unwrap();
+        state.tree_collapsed_spaces.insert(target_space.clone());
+        state.tree_collapsed_spaces.insert(other_space.clone());
+        state.tree_collapsed_tabs.insert(target_tab_key.clone());
+
+        state.switch_workspace(1);
+
+        assert!(!state.tree_collapsed_spaces.contains(&target_space));
+        assert!(!state.tree_collapsed_tabs.contains(&target_tab_key));
+        assert!(state.tree_collapsed_spaces.contains(&other_space));
     }
 
     #[test]
