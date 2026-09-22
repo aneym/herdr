@@ -26,6 +26,7 @@ mod mouse;
 mod notification_policy;
 mod notifications;
 mod overlay_input;
+mod pane_location;
 mod preferences;
 mod render;
 mod scroll;

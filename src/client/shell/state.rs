@@ -1031,6 +1031,8 @@ pub(crate) struct ClientShellState {
     pub(super) reveal_navigation_workspace: bool,
     pub(super) overlay: Option<ClientShellOverlay>,
     pub(super) previous_pane_id: Option<String>,
+    pub(super) pane_location_hover: Option<String>,
+    pub(super) pane_location_pressed: Option<String>,
     pub(super) pane_focus_history: HashMap<ClientEndpointId, ClientPaneFocusHistory>,
     pub(super) pending_focus_reveals: HashMap<String, ClientPendingFocusReveal>,
     pub(super) pane_mouse_gesture: Option<ClientPaneMouseGesture>,
@@ -1220,6 +1222,8 @@ impl ClientShellState {
             reveal_navigation_workspace: false,
             overlay,
             previous_pane_id: None,
+            pane_location_hover: None,
+            pane_location_pressed: None,
             pane_focus_history: HashMap::new(),
             pending_focus_reveals: HashMap::new(),
             pane_mouse_gesture: None,
@@ -1567,6 +1571,8 @@ impl ClientShellState {
             .startup_onboarding
             .then_some(ClientShellOverlay::Onboarding);
         self.previous_pane_id = None;
+        self.pane_location_hover = None;
+        self.pane_location_pressed = None;
         self.pending_focus_reveals.clear();
         self.pane_mouse_gesture = None;
         self.link_hover = None;
