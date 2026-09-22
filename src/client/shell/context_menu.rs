@@ -4,7 +4,10 @@ impl ClientContextMenuOverlay {
     pub(super) fn items(&self) -> Vec<ClientContextMenuItem> {
         use ClientContextMenuAction as Action;
 
-        let item = |label, action| ClientContextMenuItem { label, action };
+        let item = |label: &str, action| ClientContextMenuItem {
+            label: label.into(),
+            action,
+        };
         match &self.target {
             ClientContextMenuTarget::SidebarView {
                 show_spaces,
@@ -42,13 +45,20 @@ impl ClientContextMenuOverlay {
                 ),
             ],
             ClientContextMenuTarget::Workspace { is_git: false, .. } => {
-                vec![item("Rename", Action::Rename), item("Close", Action::Close)]
+                vec![
+                    item("Send to profile", Action::SendToProfile),
+                    item("Share profiles", Action::ShareProfiles),
+                    item("Rename", Action::Rename),
+                    item("Close", Action::Close),
+                ]
             }
             ClientContextMenuTarget::Workspace {
                 is_linked_worktree: false,
                 has_worktree_children: false,
                 ..
             } => vec![
+                item("Send to profile", Action::SendToProfile),
+                item("Share profiles", Action::ShareProfiles),
                 item("Rename", Action::Rename),
                 item("Close", Action::Close),
                 item("New worktree", Action::NewWorktree),
@@ -58,6 +68,8 @@ impl ClientContextMenuOverlay {
                 is_linked_worktree: true,
                 ..
             } => vec![
+                item("Send to profile", Action::SendToProfile),
+                item("Share profiles", Action::ShareProfiles),
                 item("Rename", Action::Rename),
                 item("Close", Action::Close),
                 item("Delete worktree checkout...", Action::RemoveWorktree),
@@ -67,6 +79,8 @@ impl ClientContextMenuOverlay {
                 collapsed,
                 ..
             } => vec![
+                item("Send to profile", Action::SendToProfile),
+                item("Share profiles", Action::ShareProfiles),
                 item("Rename", Action::Rename),
                 item("Close group", Action::Close),
                 item("New worktree", Action::NewWorktree),
@@ -88,6 +102,8 @@ impl ClientContextMenuOverlay {
                 ..
             } => {
                 let mut items = vec![item("Rename pane", Action::RenamePane)];
+                items.push(item("Send to profile", Action::SendToProfile));
+                items.push(item("Share profiles", Action::ShareProfiles));
                 if *has_manual_label {
                     items.push(item("Clear pane name", Action::ClearPaneName));
                 }
@@ -110,11 +126,138 @@ impl ClientContextMenuOverlay {
                 ]);
                 items
             }
+            ClientContextMenuTarget::Profile { entries, .. } => entries
+                .iter()
+                .enumerate()
+                .map(|(index, entry)| ClientContextMenuItem {
+                    label: entry.label.clone(),
+                    action: Action::ProfileSelect(index),
+                })
+                .collect(),
         }
     }
 }
 
 impl ClientShellState {
+    pub(super) fn receive_profile_menu_roster(&mut self, generation: u64, roster: Vec<String>) {
+        let Some(load) = self
+            .profile_menu_load
+            .as_mut()
+            .filter(|load| load.generation == generation)
+        else {
+            return;
+        };
+        load.roster = Some(roster);
+        self.finish_profile_menu_load(generation);
+    }
+
+    pub(super) fn receive_profile_menu_workspace_membership(
+        &mut self,
+        generation: u64,
+        membership: Vec<String>,
+    ) {
+        let Some(load) = self
+            .profile_menu_load
+            .as_mut()
+            .filter(|load| load.generation == generation)
+        else {
+            return;
+        };
+        load.workspace_membership = Some(membership);
+        self.finish_profile_menu_load(generation);
+    }
+
+    pub(super) fn receive_profile_menu_pane_membership(
+        &mut self,
+        generation: u64,
+        membership: Vec<String>,
+    ) {
+        let Some(load) = self
+            .profile_menu_load
+            .as_mut()
+            .filter(|load| load.generation == generation)
+        else {
+            return;
+        };
+        load.pane_membership = Some(membership);
+        self.finish_profile_menu_load(generation);
+    }
+
+    pub(super) fn fail_profile_menu_load(&mut self, generation: u64, message: String) {
+        if self
+            .profile_menu_load
+            .as_ref()
+            .is_some_and(|load| load.generation == generation)
+        {
+            self.profile_menu_load = None;
+            self.set_endpoint_error(message);
+        }
+    }
+
+    fn finish_profile_menu_load(&mut self, generation: u64) {
+        let Some(load) = self
+            .profile_menu_load
+            .as_ref()
+            .filter(|load| load.generation == generation)
+        else {
+            return;
+        };
+        if !matches!(self.overlay, Some(ClientShellOverlay::ProfileLoading { generation: visible }) if visible == generation)
+        {
+            return;
+        }
+        let Some(roster) = load.roster.as_ref() else {
+            return;
+        };
+        let Some(workspace_membership) = load.workspace_membership.as_ref() else {
+            return;
+        };
+        if load.pane_id.is_some() && load.pane_membership.is_none() {
+            return;
+        }
+        let membership = load
+            .pane_membership
+            .as_ref()
+            .filter(|profiles| !profiles.is_empty())
+            .unwrap_or(workspace_membership);
+        let mut entries = Vec::new();
+        if load.pane_id.is_some() {
+            entries.push(ClientProfileMenuEntry {
+                profile: None,
+                label: "Follow space".into(),
+                selected: load.pane_membership.as_ref().is_some_and(Vec::is_empty),
+            });
+        }
+        entries.extend(
+            roster
+                .iter()
+                .cloned()
+                .map(|profile| ClientProfileMenuEntry {
+                    selected: if load.share {
+                        membership.contains(&profile)
+                    } else {
+                        membership.len() == 1 && membership[0] == profile
+                    },
+                    label: profile.clone(),
+                    profile: Some(profile),
+                }),
+        );
+        let Some(load) = self.profile_menu_load.take() else {
+            return;
+        };
+        self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
+            target: ClientContextMenuTarget::Profile {
+                pane_id: load.pane_id,
+                workspace_id: load.workspace_id,
+                share: load.share,
+                entries,
+            },
+            x: load.x,
+            y: load.y,
+            highlighted: 0,
+        }));
+    }
+
     pub(super) fn open_workspace_context_menu(&mut self, workspace_id: String, x: u16, y: u16) {
         let Some(snapshot) = self.snapshot.as_deref() else {
             return;
@@ -156,6 +299,56 @@ impl ClientShellState {
             y,
             highlighted: 0,
         }));
+    }
+
+    pub(super) fn open_profile_context_menu(
+        &mut self,
+        workspace_id: String,
+        pane_id: Option<String>,
+        share: bool,
+        x: u16,
+        y: u16,
+        outcome: &mut ClientShellInput,
+    ) {
+        self.next_profile_menu_generation = self.next_profile_menu_generation.wrapping_add(1);
+        let generation = self.next_profile_menu_generation;
+        self.profile_menu_load = Some(ClientProfileMenuLoad {
+            generation,
+            workspace_id: workspace_id.clone(),
+            pane_id: pane_id.clone(),
+            share,
+            x,
+            y,
+            roster: None,
+            workspace_membership: None,
+            pane_membership: None,
+        });
+        self.overlay = Some(ClientShellOverlay::ProfileLoading { generation });
+        let roster_ok = self.push_endpoint_method_with_kind(
+            crate::api::schema::Method::ProfileList(crate::api::schema::EmptyParams::default()),
+            PendingEndpointKind::ProfileList { generation },
+            outcome,
+        );
+        let workspace_ok = self.push_endpoint_method_with_kind(
+            crate::api::schema::Method::WorkspaceGet(crate::api::schema::WorkspaceTarget {
+                workspace_id: workspace_id.clone(),
+            }),
+            PendingEndpointKind::ProfileWorkspaceMembership { generation },
+            outcome,
+        );
+        let pane_ok = if let Some(pane_id) = pane_id {
+            self.push_endpoint_method_with_kind(
+                crate::api::schema::Method::PaneGet(crate::api::schema::PaneTarget { pane_id }),
+                PendingEndpointKind::ProfilePaneMembership { generation },
+                outcome,
+            )
+        } else {
+            true
+        };
+        if !roster_ok || !workspace_ok || !pane_ok {
+            self.profile_menu_load = None;
+            self.set_endpoint_error("unable to load profiles for this item");
+        }
     }
 
     pub(super) fn open_tab_context_menu(&mut self, tab_id: String, x: u16, y: u16) {
@@ -226,12 +419,13 @@ impl ClientShellState {
             outcome.repaint = true;
             return;
         };
+        let menu_position = (menu.x, menu.y);
         match menu.target {
             ClientContextMenuTarget::SidebarView { .. } => {
                 self.activate_sidebar_view_action(action, outcome)
             }
             ClientContextMenuTarget::Workspace { workspace_id, .. } => {
-                self.activate_workspace_context_action(workspace_id, action, outcome)
+                self.activate_workspace_context_action(workspace_id, action, menu_position, outcome)
             }
             ClientContextMenuTarget::Tab {
                 tab_id,
@@ -249,10 +443,100 @@ impl ClientShellState {
                 source_pane_id,
                 right_click_passthrough,
                 action,
+                menu_position,
+                outcome,
+            ),
+            ClientContextMenuTarget::Profile {
+                pane_id,
+                workspace_id,
+                share,
+                entries,
+            } => self.activate_profile_context_action(
+                pane_id,
+                workspace_id,
+                share,
+                entries,
+                action,
                 outcome,
             ),
         }
         outcome.repaint = true;
+    }
+
+    fn activate_profile_context_action(
+        &mut self,
+        pane_id: Option<String>,
+        workspace_id: String,
+        share: bool,
+        entries: Vec<ClientProfileMenuEntry>,
+        action: ClientContextMenuAction,
+        outcome: &mut ClientShellInput,
+    ) {
+        let ClientContextMenuAction::ProfileSelect(index) = action else {
+            return;
+        };
+        let Some(entry) = entries.get(index) else {
+            return;
+        };
+        let profile = entry.profile.as_ref();
+        if let Some(pane_id) = pane_id {
+            let selected = if profile.is_none() {
+                Vec::new()
+            } else if share {
+                let mut values = entries
+                    .iter()
+                    .filter_map(|entry| entry.selected.then(|| entry.profile.clone()).flatten())
+                    .collect::<Vec<_>>();
+                let profile = profile.expect("non-follow entry");
+                if values.contains(profile) {
+                    values.retain(|value| value != profile);
+                } else {
+                    values.push(profile.clone());
+                }
+                values
+            } else {
+                vec![profile.expect("non-follow entry").clone()]
+            };
+            self.push_endpoint_method(
+                crate::api::schema::Method::PaneSetProfiles(
+                    crate::api::schema::PaneSetProfilesParams {
+                        pane_id,
+                        profiles: selected,
+                    },
+                ),
+                outcome,
+            );
+        } else {
+            let selected = if share {
+                let mut values = entries
+                    .iter()
+                    .filter_map(|entry| entry.selected.then(|| entry.profile.clone()).flatten())
+                    .collect::<Vec<_>>();
+                let Some(profile) = profile else {
+                    return;
+                };
+                if values.contains(profile) {
+                    values.retain(|value| value != profile);
+                } else {
+                    values.push(profile.clone());
+                }
+                values
+            } else {
+                let Some(profile) = profile else {
+                    return;
+                };
+                vec![profile.clone()]
+            };
+            self.push_endpoint_method(
+                crate::api::schema::Method::WorkspaceSetProfiles(
+                    crate::api::schema::WorkspaceSetProfilesParams {
+                        workspace_id,
+                        profiles: selected,
+                    },
+                ),
+                outcome,
+            );
+        }
     }
 
     /// Open the agents-panel view control. The fork put the tree layer toggles
@@ -302,11 +586,22 @@ impl ClientShellState {
         &mut self,
         workspace_id: String,
         action: ClientContextMenuAction,
+        menu_position: (u16, u16),
         outcome: &mut ClientShellInput,
     ) {
         use crate::input::KeybindAction;
 
         match action {
+            ClientContextMenuAction::SendToProfile | ClientContextMenuAction::ShareProfiles => {
+                self.open_profile_context_menu(
+                    workspace_id,
+                    None,
+                    action == ClientContextMenuAction::ShareProfiles,
+                    menu_position.0,
+                    menu_position.1,
+                    outcome,
+                );
+            }
             ClientContextMenuAction::Rename => {
                 let label = self
                     .snapshot
@@ -452,6 +747,7 @@ impl ClientShellState {
         source_pane_id: Option<String>,
         right_click_passthrough: bool,
         action: ClientContextMenuAction,
+        menu_position: (u16, u16),
         outcome: &mut ClientShellInput,
     ) {
         use crate::api::schema::{
@@ -460,6 +756,16 @@ impl ClientShellState {
         };
 
         match action {
+            ClientContextMenuAction::SendToProfile | ClientContextMenuAction::ShareProfiles => {
+                self.open_profile_context_menu(
+                    workspace_id,
+                    Some(pane_id),
+                    action == ClientContextMenuAction::ShareProfiles,
+                    menu_position.0,
+                    menu_position.1,
+                    outcome,
+                );
+            }
             ClientContextMenuAction::RenamePane => {
                 let label = self.snapshot.as_deref().and_then(|snapshot| {
                     snapshot

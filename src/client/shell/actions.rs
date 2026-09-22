@@ -1,6 +1,43 @@
 use super::*;
 
 impl ClientShellState {
+    pub(super) fn toggle_usage_overlay(&mut self, outcome: &mut ClientShellInput) {
+        if matches!(self.overlay, Some(ClientShellOverlay::Usage(_))) {
+            self.overlay = None;
+            self.usage_refresh_deadline = None;
+            self.usage_in_flight_serial = None;
+            self.next_usage_generation = self.next_usage_generation.wrapping_add(1);
+            outcome.repaint = true;
+            return;
+        }
+        self.next_usage_generation = self.next_usage_generation.wrapping_add(1);
+        let generation = self.next_usage_generation;
+        self.usage_request_serial = self.usage_request_serial.wrapping_add(1);
+        self.usage_in_flight_serial = None;
+        self.overlay = Some(ClientShellOverlay::Usage(ClientUsageOverlay {
+            rows: Vec::new(),
+            error: None,
+            generation,
+        }));
+        self.usage_refresh_deadline = Some(std::time::Instant::now());
+        let dispatched = self.push_endpoint_method_with_kind(
+            crate::api::schema::Method::AgentUsage(crate::api::schema::EmptyParams::default()),
+            PendingEndpointKind::AgentUsage {
+                generation,
+                serial: self.usage_request_serial,
+            },
+            outcome,
+        );
+        if dispatched {
+            self.usage_in_flight_serial = Some(self.usage_request_serial);
+        } else if let Some(ClientShellOverlay::Usage(usage)) = self.overlay.as_mut() {
+            usage.error = Some("usage unavailable; retrying".into());
+        }
+        self.usage_refresh_deadline =
+            Some(std::time::Instant::now() + std::time::Duration::from_secs(2));
+        outcome.repaint = true;
+    }
+
     pub(super) fn record_binding(
         &mut self,
         binding: crate::input::KeybindMatch,
@@ -60,6 +97,10 @@ impl ClientShellState {
                 if action == crate::input::KeybindAction::Settings {
                     self.open_settings_overlay();
                     outcome.repaint = true;
+                    return;
+                }
+                if action == crate::input::KeybindAction::Usage {
+                    self.toggle_usage_overlay(outcome);
                     return;
                 }
                 if action == crate::input::KeybindAction::OpenNotificationTarget {
@@ -958,6 +999,66 @@ impl ClientShellState {
                     Err(_) => true,
                 };
                 return (repaint, Vec::new());
+            }
+            PendingEndpointKind::AgentUsage { generation, serial } => {
+                if self.usage_in_flight_serial == Some(serial) {
+                    self.usage_in_flight_serial = None;
+                }
+                let Some(ClientShellOverlay::Usage(usage)) = self.overlay.as_mut() else {
+                    return (false, Vec::new());
+                };
+                if usage.generation != generation || serial != self.usage_request_serial {
+                    return (false, Vec::new());
+                }
+                match result {
+                    Ok(crate::api::schema::ResponseResult::AgentUsage { usage: rows }) => {
+                        usage.rows = rows;
+                        usage.error = None;
+                    }
+                    Ok(_) => {
+                        usage.error = Some("endpoint returned an unexpected usage result".into())
+                    }
+                    Err(error) => usage.error = Some(error.message),
+                }
+                return (true, Vec::new());
+            }
+            PendingEndpointKind::ProfileList { generation } => {
+                match result {
+                    Ok(crate::api::schema::ResponseResult::ProfileList { profiles, .. }) => {
+                        self.receive_profile_menu_roster(generation, profiles);
+                    }
+                    Ok(_) => self.fail_profile_menu_load(
+                        generation,
+                        "endpoint returned an unexpected profile list result".into(),
+                    ),
+                    Err(error) => self.fail_profile_menu_load(generation, error.message),
+                }
+                return (true, Vec::new());
+            }
+            PendingEndpointKind::ProfileWorkspaceMembership { generation } => {
+                match result {
+                    Ok(crate::api::schema::ResponseResult::WorkspaceInfo { workspace }) => self
+                        .receive_profile_menu_workspace_membership(generation, workspace.profiles),
+                    Ok(_) => self.fail_profile_menu_load(
+                        generation,
+                        "endpoint returned an unexpected workspace result".into(),
+                    ),
+                    Err(error) => self.fail_profile_menu_load(generation, error.message),
+                }
+                return (true, Vec::new());
+            }
+            PendingEndpointKind::ProfilePaneMembership { generation } => {
+                match result {
+                    Ok(crate::api::schema::ResponseResult::PaneInfo { pane }) => {
+                        self.receive_profile_menu_pane_membership(generation, pane.profiles)
+                    }
+                    Ok(_) => self.fail_profile_menu_load(
+                        generation,
+                        "endpoint returned an unexpected pane result".into(),
+                    ),
+                    Err(error) => self.fail_profile_menu_load(generation, error.message),
+                }
+                return (true, Vec::new());
             }
             kind @ (PendingEndpointKind::IntegrationList
             | PendingEndpointKind::IntegrationInstall) => {

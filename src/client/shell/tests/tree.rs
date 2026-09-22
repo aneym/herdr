@@ -722,7 +722,7 @@ fn right_click_on_the_sort_label_opens_the_view_toggles() {
     assert_eq!(
         menu.items()
             .iter()
-            .map(|item| item.label)
+            .map(|item| item.label.as_str())
             .collect::<Vec<_>>(),
         [
             "Hide spaces",

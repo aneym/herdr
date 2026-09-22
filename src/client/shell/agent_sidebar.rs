@@ -408,6 +408,28 @@ pub(super) fn render_agent_panel_header(
         sort_width,
         1,
     );
+    let usage_width = 6u16.min(sort_rect.x.saturating_sub(area.x));
+    let usage_rect = Rect::new(
+        sort_rect.x.saturating_sub(usage_width),
+        area.y + 1,
+        usage_width,
+        1,
+    );
+    hits.agent_usage = if config.mouse_capture {
+        usage_rect
+    } else {
+        Rect::default()
+    };
+    put_text(
+        buffer,
+        usage_rect.x,
+        usage_rect.y,
+        usage_rect.width,
+        " usage",
+        Style::default()
+            .fg(config.palette.accent)
+            .add_modifier(Modifier::BOLD),
+    );
     hits.agent_sort_toggle = if config.mouse_capture && agent_view_label.is_none() {
         sort_rect
     } else {

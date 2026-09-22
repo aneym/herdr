@@ -1,6 +1,18 @@
 use super::*;
 
 impl ClientShellState {
+    fn dismiss_profile_loading(&mut self, outcome: &mut ClientShellInput) -> bool {
+        if matches!(
+            self.overlay,
+            Some(ClientShellOverlay::ProfileLoading { .. })
+        ) {
+            self.overlay = None;
+            self.profile_menu_load = None;
+            outcome.repaint = true;
+            return true;
+        }
+        false
+    }
     pub(super) fn dismiss_product_announcement(&mut self, outcome: &mut ClientShellInput) {
         let announcement = match self.overlay.take() {
             Some(ClientShellOverlay::ProductAnnouncement(announcement)) => announcement,
@@ -477,12 +489,24 @@ impl ClientShellState {
     ) {
         use crossterm::event::KeyModifiers;
 
+        if key.code == KeyCode::Esc && self.dismiss_profile_loading(outcome) {
+            return;
+        }
+
         if matches!(self.overlay, Some(ClientShellOverlay::Onboarding)) {
             if matches!(
                 key.code,
                 KeyCode::Enter | KeyCode::Right | KeyCode::Char('l')
             ) {
                 self.complete_onboarding(outcome);
+            }
+            return;
+        }
+
+        if matches!(self.overlay, Some(ClientShellOverlay::Usage(_))) {
+            if key.code == KeyCode::Esc {
+                self.overlay = None;
+                outcome.repaint = true;
             }
             return;
         }

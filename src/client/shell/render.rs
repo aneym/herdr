@@ -268,6 +268,7 @@ pub(super) fn render_shell(
             layout.mobile_header,
             snapshot,
             config,
+            state.active_endpoint_id,
             &mut hits,
         );
     }

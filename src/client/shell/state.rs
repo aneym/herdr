@@ -73,6 +73,7 @@ pub(super) struct ClientShellLayout {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ClientMobileTarget {
     Machine(ClientEndpointId),
+    Profile(String),
     NewWorkspace,
     Workspace {
         endpoint_id: ClientEndpointId,
@@ -109,6 +110,7 @@ pub(super) struct ShellHitMap {
     pub(super) agent_scroll_metrics: Option<crate::pane::ScrollMetrics>,
     pub(super) agent_max_scroll: usize,
     pub(super) agent_sort_toggle: Rect,
+    pub(super) agent_usage: Rect,
     /// Disclosure regions for collapsible ownership / orchestrator groups.
     pub(super) agent_groups: Vec<(Rect, String)>,
     pub(super) tree_headers: Vec<TreeHeaderHit>,
@@ -335,6 +337,8 @@ pub(super) enum ClientShellOverlayKind {
     ContextMenu,
     GlobalMenu,
     Settings,
+    Usage,
+    ProfileLoading,
 }
 
 #[derive(Debug)]
@@ -573,6 +577,9 @@ pub(super) enum ClientContextMenuAction {
     Zoom,
     ToggleRightClickPassthrough,
     ClosePane,
+    SendToProfile,
+    ShareProfiles,
+    ProfileSelect(usize),
 }
 
 #[derive(Debug)]
@@ -603,6 +610,34 @@ pub(super) enum ClientContextMenuTarget {
         has_manual_label: bool,
         right_click_passthrough: bool,
     },
+    Profile {
+        pane_id: Option<String>,
+        workspace_id: String,
+        share: bool,
+        entries: Vec<ClientProfileMenuEntry>,
+    },
+}
+
+/// A profile choice is typed so the pane-only "Follow space" choice cannot
+/// collide with a profile called "Follow space".
+#[derive(Debug, Clone)]
+pub(super) struct ClientProfileMenuEntry {
+    pub(super) profile: Option<String>,
+    pub(super) label: String,
+    pub(super) selected: bool,
+}
+
+#[derive(Debug)]
+pub(super) struct ClientProfileMenuLoad {
+    pub(super) generation: u64,
+    pub(super) workspace_id: String,
+    pub(super) pane_id: Option<String>,
+    pub(super) share: bool,
+    pub(super) x: u16,
+    pub(super) y: u16,
+    pub(super) roster: Option<Vec<String>>,
+    pub(super) workspace_membership: Option<Vec<String>>,
+    pub(super) pane_membership: Option<Vec<String>>,
 }
 
 #[derive(Debug)]
@@ -614,7 +649,7 @@ pub(super) struct ClientContextMenuOverlay {
 }
 
 pub(super) struct ClientContextMenuItem {
-    pub(super) label: &'static str,
+    pub(super) label: String,
     pub(super) action: ClientContextMenuAction,
 }
 
@@ -647,6 +682,15 @@ pub(super) enum ClientShellOverlay {
     ContextMenu(ClientContextMenuOverlay),
     GlobalMenu(ClientGlobalMenuOverlay),
     Settings(ClientSettingsOverlay),
+    Usage(ClientUsageOverlay),
+    ProfileLoading { generation: u64 },
+}
+
+#[derive(Debug)]
+pub(super) struct ClientUsageOverlay {
+    pub(super) rows: Vec<crate::api::schema::AgentUsageInfo>,
+    pub(super) error: Option<String>,
+    pub(super) generation: u64,
 }
 
 impl ClientShellOverlay {
@@ -665,6 +709,8 @@ impl ClientShellOverlay {
             Self::ContextMenu(_) => ClientShellOverlayKind::ContextMenu,
             Self::GlobalMenu(_) => ClientShellOverlayKind::GlobalMenu,
             Self::Settings(_) => ClientShellOverlayKind::Settings,
+            Self::Usage(_) => ClientShellOverlayKind::Usage,
+            Self::ProfileLoading { .. } => ClientShellOverlayKind::ProfileLoading,
         }
     }
 }
@@ -729,6 +775,19 @@ pub(super) enum PendingEndpointKind {
         repeat: bool,
         generation: u64,
         session_generation: u64,
+    },
+    ProfileList {
+        generation: u64,
+    },
+    ProfileWorkspaceMembership {
+        generation: u64,
+    },
+    ProfilePaneMembership {
+        generation: u64,
+    },
+    AgentUsage {
+        generation: u64,
+        serial: u64,
     },
 }
 
@@ -1019,6 +1078,12 @@ pub(crate) struct ClientShellState {
     pub(super) endpoint_error: Option<String>,
     pub(super) endpoint_error_deadline: Option<std::time::Instant>,
     pub(super) dismissed_product_announcement: Option<(String, String)>,
+    pub(super) usage_refresh_deadline: Option<std::time::Instant>,
+    pub(super) next_usage_generation: u64,
+    pub(super) usage_request_serial: u64,
+    pub(super) usage_in_flight_serial: Option<u64>,
+    pub(super) next_profile_menu_generation: u64,
+    pub(super) profile_menu_load: Option<ClientProfileMenuLoad>,
 }
 
 pub(super) fn product_announcement_state(
@@ -1202,6 +1267,12 @@ impl ClientShellState {
             endpoint_error: None,
             endpoint_error_deadline: None,
             dismissed_product_announcement: None,
+            usage_refresh_deadline: None,
+            next_usage_generation: 0,
+            usage_request_serial: 0,
+            usage_in_flight_serial: None,
+            next_profile_menu_generation: 0,
+            profile_menu_load: None,
         }
     }
 
@@ -1478,6 +1549,7 @@ impl ClientShellState {
         self.last_composed_at = None;
         self.selection_repaint_deadline = None;
         self.pending_requests.clear();
+        self.profile_menu_load = None;
         self.pane_scroll_in_flight.clear();
         self.pane_scroll_queued.clear();
         self.pane_scroll_targets.clear();
@@ -2130,11 +2202,47 @@ impl ClientShellState {
         false
     }
 
+    pub(crate) fn tick_usage_overlay(&mut self, now: std::time::Instant) -> ClientShellInput {
+        let mut outcome = ClientShellInput::default();
+        if !matches!(self.overlay, Some(ClientShellOverlay::Usage(_))) {
+            self.usage_refresh_deadline = None;
+            self.usage_in_flight_serial = None;
+            return outcome;
+        }
+        if self
+            .usage_refresh_deadline
+            .is_none_or(|deadline| now >= deadline)
+        {
+            let generation = match self.overlay.as_ref() {
+                Some(ClientShellOverlay::Usage(usage)) => usage.generation,
+                _ => return outcome,
+            };
+            if self.usage_in_flight_serial.is_some() {
+                self.usage_refresh_deadline = Some(now + std::time::Duration::from_secs(2));
+                return outcome;
+            }
+            self.usage_request_serial = self.usage_request_serial.wrapping_add(1);
+            let serial = self.usage_request_serial;
+            if self.push_endpoint_method_with_kind(
+                crate::api::schema::Method::AgentUsage(crate::api::schema::EmptyParams::default()),
+                PendingEndpointKind::AgentUsage { generation, serial },
+                &mut outcome,
+            ) {
+                self.usage_in_flight_serial = Some(serial);
+            } else if let Some(ClientShellOverlay::Usage(usage)) = self.overlay.as_mut() {
+                usage.error = Some("usage unavailable; retrying".into());
+            }
+            self.usage_refresh_deadline = Some(now + std::time::Duration::from_secs(2));
+        }
+        outcome
+    }
+
     pub(crate) fn timer_delay(&self, now: std::time::Instant) -> std::time::Duration {
         let default = std::time::Duration::from_millis(100);
         self.selection_autoscroll_deadline
             .into_iter()
             .chain(self.selection_repaint_deadline)
+            .chain(self.usage_refresh_deadline)
             .min()
             .map(|deadline| deadline.saturating_duration_since(now).min(default))
             .unwrap_or(default)

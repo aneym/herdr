@@ -540,7 +540,11 @@ impl ClientShellState {
                 | PendingEndpointKind::PaneLinkActivate { .. }
                 | PendingEndpointKind::PaneLinkResolve { .. }
                 | PendingEndpointKind::CopyMotion { .. }
-                | PendingEndpointKind::CopySearch { .. },
+                | PendingEndpointKind::CopySearch { .. }
+                | PendingEndpointKind::ProfileList { .. }
+                | PendingEndpointKind::ProfileWorkspaceMembership { .. }
+                | PendingEndpointKind::ProfilePaneMembership { .. }
+                | PendingEndpointKind::AgentUsage { .. },
                 Err(_),
             ) => true,
         }

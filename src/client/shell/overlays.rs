@@ -70,6 +70,8 @@ pub(crate) fn render_client_overlay(
         ClientShellOverlay::Settings(v) => {
             settings_overlay::render_settings_overlay(b, v, s.integration_updates_available, p)
         }
+        ClientShellOverlay::Usage(v) => render_usage_overlay(b, v, p),
+        ClientShellOverlay::ProfileLoading { .. } => render_profile_loading_overlay(b, p),
         ClientShellOverlay::WorktreeCreate(v) => {
             worktree_overlays::render_worktree_create_overlay(b, v, p)
         }
@@ -80,6 +82,109 @@ pub(crate) fn render_client_overlay(
             worktree_overlays::render_worktree_remove_overlay(b, v, p)
         }
         ClientShellOverlay::ContextMenu(_) | ClientShellOverlay::GlobalMenu(_) => None,
+    }
+}
+
+fn render_profile_loading_overlay(b: &mut Buffer, p: &Palette) -> Option<OverlayRender> {
+    let rect = crate::ui::centered_popup_rect(b.area, 36, 3)?;
+    let inner = panel(b, rect, p.accent, p.panel_bg)?;
+    put_text(
+        b,
+        inner.x,
+        inner.y,
+        inner.width,
+        " loading profiles · esc cancel",
+        Style::default().fg(p.text),
+    );
+    Some(OverlayRender {
+        area: rect,
+        ..OverlayRender::default()
+    })
+}
+
+fn render_usage_overlay(
+    b: &mut Buffer,
+    usage: &ClientUsageOverlay,
+    p: &Palette,
+) -> Option<OverlayRender> {
+    let height = (usage.rows.len() as u16).clamp(1, 16).saturating_add(4);
+    let rect = crate::ui::centered_popup_rect(b.area, 88, height)?;
+    let inner = panel(b, rect, p.accent, p.panel_bg)?;
+    put_text(
+        b,
+        inner.x,
+        inner.y,
+        inner.width,
+        " agent usage · live · esc close",
+        Style::default().fg(p.text).add_modifier(Modifier::BOLD),
+    );
+    put_text(
+        b,
+        inner.x,
+        inner.y + 1,
+        inner.width,
+        "   CPU       MEM  PROC  AGENT        THREAD                    SPACE›TAB",
+        Style::default().fg(p.overlay0),
+    );
+    if let Some(error) = usage.error.as_deref() {
+        put_text(
+            b,
+            inner.x,
+            inner.y + 2,
+            inner.width,
+            error,
+            Style::default().fg(p.red),
+        );
+    } else if usage.rows.is_empty() {
+        put_text(
+            b,
+            inner.x,
+            inner.y + 2,
+            inner.width,
+            " no panes",
+            Style::default().fg(p.overlay0),
+        );
+    } else {
+        for (index, row) in usage.rows.iter().take(16).enumerate() {
+            let text = format!(
+                " {:>5.1}% {:>9}  {:>4}  {:<12} {:<25} {}›{}",
+                row.cpu_percent,
+                format_memory(row.mem_bytes),
+                row.process_count,
+                row.agent.as_deref().unwrap_or("shell"),
+                row.title.as_deref().unwrap_or("untitled"),
+                row.workspace_id,
+                row.tab_id
+            );
+            put_text(
+                b,
+                inner.x,
+                inner.y + 2 + index as u16,
+                inner.width,
+                &text,
+                Style::default().fg(p.text),
+            );
+        }
+    }
+    Some(OverlayRender {
+        area: rect,
+        ..OverlayRender::default()
+    })
+}
+
+fn format_memory(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+    const GIB: f64 = MIB * 1024.0;
+    let value = bytes as f64;
+    if value >= GIB {
+        format!("{:.1} GiB", value / GIB)
+    } else if value >= MIB {
+        format!("{:.1} MiB", value / MIB)
+    } else if value >= KIB {
+        format!("{:.1} KiB", value / KIB)
+    } else {
+        format!("{bytes} B")
     }
 }
 
@@ -171,7 +276,7 @@ pub(crate) fn render_context_menu(
     let screen = buffer.area;
     let max_item_width = items
         .iter()
-        .map(|item| display_width(item.label))
+        .map(|item| display_width(&item.label))
         .max()
         .unwrap_or(0);
     let width = max_item_width
@@ -208,7 +313,7 @@ pub(crate) fn render_context_menu(
             Style::default().fg(palette.text).bg(palette.panel_bg)
         };
         buffer.set_style(row, style);
-        put_text(buffer, row.x, row.y, row.width, item.label, style);
+        put_text(buffer, row.x, row.y, row.width, &item.label, style);
         rows.push((row, index));
     }
     Some(OverlayRender {

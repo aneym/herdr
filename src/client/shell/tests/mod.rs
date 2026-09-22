@@ -266,6 +266,7 @@ mod mobile;
 mod mouse_selection;
 mod navigation_history;
 mod popup_focus_projection;
+mod profile_usage;
 mod startup_overlays;
 mod tab_bar;
 mod tree;
