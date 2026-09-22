@@ -280,7 +280,7 @@ pub(super) fn navigator_rows(
     active_endpoint_id: &ClientEndpointId,
     navigator: &ClientNavigatorOverlay,
 ) -> Vec<ClientNavigatorRow> {
-    let query = navigator.query.trim().to_lowercase();
+    let query = navigator.query.trim().to_string();
     let filter = |status| match navigator.filter {
         Some(ClientNavigatorFilter::Blocked) => status == crate::api::schema::AgentStatus::Blocked,
         Some(ClientNavigatorFilter::Working) => status == crate::api::schema::AgentStatus::Working,
@@ -288,7 +288,9 @@ pub(super) fn navigator_rows(
         Some(ClientNavigatorFilter::Done) => status == crate::api::schema::AgentStatus::Done,
         None => true,
     };
-    let text = |value: &str| query.is_empty() || value.to_lowercase().contains(&query);
+    let text = |value: &str| {
+        query.is_empty() || crate::app::fuzzy::fuzzy_match_words(&query, value).is_some()
+    };
     let filtering = navigator.filter.is_some() || !query.is_empty();
     let federated = endpoints.len() > 1;
     let depth_offset = u8::from(federated);
@@ -380,39 +382,61 @@ pub(super) fn navigator_rows(
                             .as_deref()
                             .or(pane.cwd.as_deref())
                             .unwrap_or_default();
-                        if filter(status)
-                            && (tab_matches
-                                || text(&label)
-                                || text(meta)
-                                || pane.cwd.as_deref().is_some_and(text)
-                                || agent_kind.is_some_and(text)
-                                || title.is_some_and(text)
-                                || agent
-                                    .and_then(|agent| agent.display_agent.as_deref())
-                                    .is_some_and(text)
-                                || text(&pane.pane_id))
-                        {
-                            children.push(ClientNavigatorRow {
-                                depth: 1 + depth_offset,
+                        // Search the same endpoint-qualified context rendered by
+                        // the navigator. This keeps fragmented terms useful while
+                        // leaving status filtering and parent-context inclusion
+                        // unchanged.
+                        let score = if query.is_empty() {
+                            None
+                        } else {
+                            let search_text = format!(
+                                "{} {} {} {} {} {} {} {} {} {}",
+                                endpoint.label,
+                                workspace.label,
+                                workspace.branch.as_deref().unwrap_or_default(),
+                                tab.label,
                                 label,
-                                meta: meta.to_owned(),
-                                detail: format!(
-                                    "{} / {} / {}",
-                                    workspace.label, tab.label, pane.pane_id
-                                ),
-                                agent: agent_kind.map(str::to_owned),
-                                status: Some(status),
-                                stale,
-                                current: endpoint.endpoint_id == *active_endpoint_id
-                                    && snapshot.focused_pane_id.as_deref() == Some(&pane.pane_id),
-                                target: ClientNavigatorTarget::Pane {
-                                    endpoint_id: endpoint.endpoint_id.clone(),
-                                    pane_id: pane.pane_id.clone(),
+                                meta,
+                                pane.cwd.as_deref().unwrap_or_default(),
+                                pane.pane_id,
+                                agent_kind.unwrap_or_default(),
+                                title.unwrap_or_default(),
+                            );
+                            crate::app::fuzzy::fuzzy_match_words(&query, &search_text)
+                                .map(|matched| matched.score)
+                        };
+                        if filter(status) && (tab_matches || score.is_some()) {
+                            children.push((
+                                score,
+                                ClientNavigatorRow {
+                                    depth: 1 + depth_offset,
+                                    label,
+                                    meta: meta.to_owned(),
+                                    detail: format!(
+                                        "{} / {} / {}",
+                                        workspace.label, tab.label, pane.pane_id
+                                    ),
+                                    agent: agent_kind.map(str::to_owned),
+                                    status: Some(status),
+                                    stale,
+                                    current: endpoint.endpoint_id == *active_endpoint_id
+                                        && snapshot.focused_pane_id.as_deref()
+                                            == Some(&pane.pane_id),
+                                    target: ClientNavigatorTarget::Pane {
+                                        endpoint_id: endpoint.endpoint_id.clone(),
+                                        pane_id: pane.pane_id.clone(),
+                                    },
                                 },
-                            });
+                            ));
                         }
                     }
                 }
+                if !query.is_empty() {
+                    // Stable sorting preserves upstream order for equal scores,
+                    // while direct fuzzy matches rise above inherited context.
+                    children.sort_by_key(|(score, _)| std::cmp::Reverse(score.unwrap_or(i32::MIN)));
+                }
+                let children = children.into_iter().map(|(_, row)| row).collect::<Vec<_>>();
                 if !filtering
                     || !children.is_empty()
                     || (navigator.filter.is_none() && !query.is_empty() && workspace_matches)

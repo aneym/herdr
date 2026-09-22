@@ -2383,7 +2383,27 @@ impl HeadlessServer {
                     true
                 } else {
                     if self.foreground_client_id == Some(client_id) {
-                        self.app.state.outer_terminal_focus = Some(false);
+                        // A second viewer of this tab may have focused after this
+                        // client. Keep the server projection attached to that
+                        // latest focused viewer instead of clearing focus (and
+                        // prematurely consuming its deferred attention state).
+                        let replacement = self
+                            .clients
+                            .iter()
+                            .filter(|(&other_id, client)| {
+                                other_id != client_id
+                                    && client.is_active_shell_client()
+                                    && client.outer_terminal_focus == Some(true)
+                                    && self.shell_tab_id_for_client(other_id) == tab_id
+                            })
+                            .max_by_key(|(_, client)| client.last_activity)
+                            .map(|(&other_id, _)| other_id);
+                        if let Some(replacement) = replacement {
+                            self.promote_client_to_foreground(replacement);
+                        } else {
+                            self.app.state.outer_terminal_focus = Some(false);
+                            self.app.state.leave_focused_attention();
+                        }
                     }
                     if !another_focused_viewer {
                         if let Some(target) = self.shell_focus_target(client_id) {

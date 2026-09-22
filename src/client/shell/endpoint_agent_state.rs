@@ -7,6 +7,10 @@ use crate::protocol::{ClientShellAgent, ClientShellSnapshot, PaneSurfaceFrame};
 pub(super) struct EndpointAgentPresentation {
     boot_id: Option<String>,
     acknowledged: HashMap<String, u64>,
+    /// The exact agent generations the client displayed while focused. With
+    /// `attention_read = "on_unfocus"`, only these become seen when focus
+    /// leaves; later background updates remain unread.
+    deferred_acknowledged: Option<(String, HashMap<String, u64>)>,
     completed: HashMap<String, u64>,
     working: HashSet<String>,
     pending_completions: Option<(
@@ -16,6 +20,32 @@ pub(super) struct EndpointAgentPresentation {
 }
 
 impl EndpointAgentPresentation {
+    pub(super) fn acknowledge_deferred(&mut self, snapshot: &mut ClientShellSnapshot) -> bool {
+        let Some((boot_id, deferred)) = self.deferred_acknowledged.take() else {
+            return false;
+        };
+        if boot_id != snapshot.boot_id {
+            return false;
+        }
+        let mut changed = false;
+        for agent in &snapshot.agents {
+            if deferred.get(&agent.pane_id) == Some(&agent.state_change_seq) {
+                let acknowledged = self.acknowledged.entry(agent.pane_id.clone()).or_default();
+                if *acknowledged < agent.state_change_seq {
+                    *acknowledged = agent.state_change_seq;
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            for agent in &mut snapshot.agents {
+                agent.agent_status = self.projected_status(agent);
+            }
+            project_aggregate_status(snapshot);
+        }
+        changed
+    }
+
     pub(super) fn receive_completions(
         &mut self,
         generation: Option<u64>,
@@ -48,6 +78,7 @@ impl EndpointAgentPresentation {
         if self.boot_id.as_deref() != Some(snapshot.boot_id.as_str()) {
             self.boot_id = Some(snapshot.boot_id.clone());
             self.acknowledged.clear();
+            self.deferred_acknowledged = None;
             self.completed.clear();
             self.working.clear();
             self.acknowledged.extend(
@@ -120,7 +151,35 @@ impl EndpointAgentPresentation {
         snapshot: &mut ClientShellSnapshot,
         surface: &PaneSurfaceFrame,
         outer_focused: Option<bool>,
+        attention_read: crate::config::AttentionReadConfig,
     ) -> bool {
+        if attention_read == crate::config::AttentionReadConfig::OnUnfocus {
+            if outer_focused != Some(false) {
+                if self.boot_id.as_deref() != Some(surface.boot_id.as_str())
+                    || snapshot.boot_id != surface.boot_id
+                    || snapshot.revision != surface.projection_revision
+                {
+                    return false;
+                }
+                self.deferred_acknowledged = Some((
+                    snapshot.boot_id.clone(),
+                    surface
+                        .panes
+                        .iter()
+                        .filter_map(|pane| {
+                            snapshot
+                                .agents
+                                .iter()
+                                .find(|agent| agent.pane_id == pane.pane_id)
+                                .map(|agent| (agent.pane_id.clone(), agent.state_change_seq))
+                        })
+                        .collect(),
+                ));
+                return false;
+            }
+            return self.acknowledge_deferred(snapshot);
+        }
+
         if outer_focused == Some(false)
             || self.boot_id.as_deref() != Some(surface.boot_id.as_str())
             || snapshot.boot_id != surface.boot_id
@@ -432,7 +491,12 @@ mod tests {
         let mut completed = snapshot(AgentStatus::Idle, 5, 2);
         presentation.project_snapshot(&mut completed);
 
-        assert!(presentation.acknowledge_surface(&mut completed, &surface(2), Some(true)));
+        assert!(presentation.acknowledge_surface(
+            &mut completed,
+            &surface(2),
+            Some(true),
+            crate::config::AttentionReadConfig::OnFocus,
+        ));
         assert_eq!(completed.agents[0].agent_status, AgentStatus::Idle);
     }
 
@@ -452,7 +516,8 @@ mod tests {
         assert!(viewing_client.acknowledge_surface(
             &mut completed_for_viewer,
             &surface(2),
-            Some(true)
+            Some(true),
+            crate::config::AttentionReadConfig::OnFocus,
         ));
 
         assert_eq!(
@@ -473,8 +538,89 @@ mod tests {
         let mut completed = snapshot(AgentStatus::Idle, 5, 2);
         presentation.project_snapshot(&mut completed);
 
-        assert!(!presentation.acknowledge_surface(&mut completed, &surface(1), Some(true)));
-        assert!(!presentation.acknowledge_surface(&mut completed, &surface(2), Some(false)));
+        assert!(!presentation.acknowledge_surface(
+            &mut completed,
+            &surface(1),
+            Some(true),
+            crate::config::AttentionReadConfig::OnFocus,
+        ));
+        assert!(!presentation.acknowledge_surface(
+            &mut completed,
+            &surface(2),
+            Some(false),
+            crate::config::AttentionReadConfig::OnFocus,
+        ));
         assert_eq!(completed.agents[0].agent_status, AgentStatus::Done);
+    }
+
+    #[test]
+    fn on_unfocus_acknowledges_only_after_focus_leaves() {
+        let mut presentation = EndpointAgentPresentation::default();
+        let mut initial = snapshot(AgentStatus::Working, 4, 1);
+        presentation.project_snapshot(&mut initial);
+        let mut completed = snapshot(AgentStatus::Idle, 5, 2);
+        presentation.project_snapshot(&mut completed);
+
+        assert!(!presentation.acknowledge_surface(
+            &mut completed,
+            &surface(2),
+            Some(true),
+            crate::config::AttentionReadConfig::OnUnfocus,
+        ));
+        assert_eq!(completed.agents[0].agent_status, AgentStatus::Done);
+        assert!(presentation.acknowledge_surface(
+            &mut completed,
+            &surface(2),
+            Some(false),
+            crate::config::AttentionReadConfig::OnUnfocus,
+        ));
+        assert_eq!(completed.agents[0].agent_status, AgentStatus::Idle);
+    }
+
+    #[test]
+    fn on_unfocus_keeps_completion_received_after_focus_lost_unread() {
+        let mut presentation = EndpointAgentPresentation::default();
+        let mut initial = snapshot(AgentStatus::Working, 4, 1);
+        presentation.project_snapshot(&mut initial);
+        let mut focused = snapshot(AgentStatus::Idle, 5, 2);
+        presentation.project_snapshot(&mut focused);
+        assert!(!presentation.acknowledge_surface(
+            &mut focused,
+            &surface(2),
+            Some(true),
+            crate::config::AttentionReadConfig::OnUnfocus,
+        ));
+
+        let mut newer_working = snapshot(AgentStatus::Working, 6, 3);
+        presentation.project_snapshot(&mut newer_working);
+        let mut newer_completed = snapshot(AgentStatus::Idle, 7, 4);
+        presentation.project_snapshot(&mut newer_completed);
+        assert_eq!(newer_completed.agents[0].agent_status, AgentStatus::Done);
+
+        assert!(!presentation.acknowledge_surface(
+            &mut newer_completed,
+            &surface(2),
+            Some(false),
+            crate::config::AttentionReadConfig::OnUnfocus,
+        ));
+        assert_eq!(newer_completed.agents[0].agent_status, AgentStatus::Done);
+    }
+
+    #[test]
+    fn on_unfocus_flushes_displayed_generation_before_pane_navigation() {
+        let mut presentation = EndpointAgentPresentation::default();
+        let mut initial = snapshot(AgentStatus::Working, 4, 1);
+        presentation.project_snapshot(&mut initial);
+        let mut completed = snapshot(AgentStatus::Idle, 5, 2);
+        presentation.project_snapshot(&mut completed);
+        assert!(!presentation.acknowledge_surface(
+            &mut completed,
+            &surface(2),
+            Some(true),
+            crate::config::AttentionReadConfig::OnUnfocus,
+        ));
+
+        assert!(presentation.acknowledge_deferred(&mut completed));
+        assert_eq!(completed.agents[0].agent_status, AgentStatus::Idle);
     }
 }

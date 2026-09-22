@@ -29,6 +29,7 @@ pub(crate) struct ClientShellConfig {
     pub(super) menu_position: crate::config::SidebarMenuPositionConfig,
     pub(super) agent_panel_sort: crate::config::AgentPanelSortConfig,
     pub(super) agent_close_focus: crate::config::AgentCloseFocusConfig,
+    pub(super) attention_read: crate::config::AttentionReadConfig,
     pub(super) show_tab_status: crate::config::ShowTabStatusConfig,
     pub(super) status_indicators: crate::config::StatusIndicatorStyle,
     pub(super) sound_enabled: bool,

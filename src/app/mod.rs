@@ -15,7 +15,7 @@ mod api_helpers;
 pub(crate) use api_helpers::limit_snapshot_lines;
 mod creation;
 mod custom_commands;
-mod fuzzy;
+pub(crate) mod fuzzy;
 mod git_refresh;
 mod ids;
 pub(crate) mod pane_graphics;

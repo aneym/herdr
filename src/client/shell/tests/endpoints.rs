@@ -2111,6 +2111,59 @@ fn navigator_uses_machine_parents_only_for_federated_clients() {
 }
 
 #[test]
+fn navigator_fuzzy_search_ranks_fragmented_endpoint_qualified_panes() {
+    let (mut state, remote_id) = state_with_remote();
+    let mut remote = state
+        .endpoints
+        .iter()
+        .find(|endpoint| endpoint.endpoint_id == remote_id)
+        .and_then(|endpoint| endpoint.snapshot.clone())
+        .expect("remote snapshot");
+    remote.agents = vec![
+        ClientShellAgent {
+            pane_id: "pane_1".into(),
+            name: Some("code review".into()),
+            ..agent("code review", AgentStatus::Working, 1)
+        },
+        ClientShellAgent {
+            pane_id: "pane_2".into(),
+            name: Some("component revision".into()),
+            ..agent("component revision", AgentStatus::Working, 1)
+        },
+    ];
+    remote.panes.push(ClientShellPane {
+        pane_id: "pane_2".into(),
+        focused: false,
+        ..remote.panes[0].clone()
+    });
+    state.set_endpoint_snapshot(&remote_id, remote);
+    state.open_navigator_overlay();
+    let ClientShellOverlay::Navigator(navigator) = state.overlay.as_mut().expect("navigator")
+    else {
+        panic!("expected navigator");
+    };
+    navigator.query = "revi".into();
+
+    let rows =
+        render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator);
+    let panes = rows
+        .iter()
+        .filter_map(|row| match &row.target {
+            ClientNavigatorTarget::Pane {
+                endpoint_id,
+                pane_id,
+            } => Some((endpoint_id, pane_id.as_str())),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        panes,
+        vec![(&remote_id, "pane_1"), (&remote_id, "pane_2")],
+        "fragmented query remains endpoint-qualified despite duplicate local pane ids"
+    );
+}
+
+#[test]
 fn navigator_keeps_saved_machine_visible_before_metadata_arrives() {
     let (mut state, endpoint_id) = state_with_remote();
     let endpoint = state

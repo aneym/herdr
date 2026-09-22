@@ -222,6 +222,7 @@ impl ClientShellState {
         let switching_endpoint = endpoint_id != &self.active_endpoint_id;
         let agent_scroll = self.agent_scroll;
         if switching_endpoint {
+            self.flush_active_deferred_attention();
             self.active_endpoint_id = endpoint_id.clone();
             self.pane_surface = None;
             self.pending_pane_surface = None;
@@ -564,7 +565,14 @@ impl ClientShellState {
         self.endpoints[index]
             .agent_presentation
             .project_snapshot_for_generation(&mut snapshot, generation);
-        let presented_surface = if acknowledge_surface && endpoint_id == &self.active_endpoint_id {
+        // A retained surface is presentation evidence only for the exact endpoint
+        // connection generation that produced it. A reconnect can reuse boot and
+        // revision values, so accepting an older generation here would make the
+        // new snapshot look seen before this client has actually displayed it.
+        let presented_surface = if acknowledge_surface
+            && endpoint_id == &self.active_endpoint_id
+            && self.pane_surface_generation == generation
+        {
             self.pane_surface.as_ref()
         } else {
             None
@@ -572,7 +580,12 @@ impl ClientShellState {
         if let Some(surface) = presented_surface {
             self.endpoints[index]
                 .agent_presentation
-                .acknowledge_surface(&mut snapshot, surface, self.outer_focused);
+                .acknowledge_surface(
+                    &mut snapshot,
+                    surface,
+                    self.outer_focused,
+                    self.config.attention_read,
+                );
         }
         let previous = self.endpoints[index].snapshot.as_deref();
         let mut next_recency = self
@@ -648,19 +661,45 @@ impl ClientShellState {
         else {
             return false;
         };
+        if self.pane_surface_generation != self.endpoints[index].snapshot_generation {
+            return false;
+        }
         let changed = {
             let endpoint = &mut self.endpoints[index];
             let Some(snapshot) = endpoint.snapshot.as_deref_mut() else {
                 return false;
             };
-            endpoint
-                .agent_presentation
-                .acknowledge_surface(snapshot, surface, self.outer_focused)
+            endpoint.agent_presentation.acknowledge_surface(
+                snapshot,
+                surface,
+                self.outer_focused,
+                self.config.attention_read,
+            )
         };
         if changed {
             self.snapshot = self.endpoints[index].snapshot.clone();
         }
         changed
+    }
+
+    /// Navigating away from a pane/tab/endpoint is the client-shell equivalent
+    /// of leaving focus for deferred attention. Flush only the generations that
+    /// were actually presented before the projection changes.
+    fn flush_active_deferred_attention(&mut self) -> bool {
+        if self.config.attention_read != crate::config::AttentionReadConfig::OnUnfocus {
+            return false;
+        }
+        let Some(snapshot) = self.snapshot.as_deref_mut() else {
+            return false;
+        };
+        let Some(endpoint) = self
+            .endpoints
+            .iter_mut()
+            .find(|endpoint| endpoint.endpoint_id == self.active_endpoint_id)
+        else {
+            return false;
+        };
+        endpoint.agent_presentation.acknowledge_deferred(snapshot)
     }
 
     #[cfg(test)]
@@ -698,6 +737,14 @@ impl ClientShellState {
             return;
         };
         if endpoint_id == &self.active_endpoint_id {
+            let focus_changed = self.snapshot.as_deref().is_some_and(|current| {
+                current.focused_workspace_id != snapshot.focused_workspace_id
+                    || current.focused_tab_id != snapshot.focused_tab_id
+                    || current.focused_pane_id != snapshot.focused_pane_id
+            });
+            if focus_changed {
+                self.flush_active_deferred_attention();
+            }
             self.apply_active_snapshot(snapshot, generation);
         }
     }

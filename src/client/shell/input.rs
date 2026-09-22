@@ -254,6 +254,9 @@ impl ClientShellState {
                 RawInputEvent::OuterFocusLost => {
                     outcome.repaint |= self.clear_link_hover();
                     self.outer_focused = Some(false);
+                    if let Some(surface) = self.pane_surface.clone() {
+                        outcome.repaint |= self.acknowledge_active_surface_agents(&surface);
+                    }
                     self.release_input_leases(&mut outcome);
                     outcome
                         .requests

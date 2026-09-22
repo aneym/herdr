@@ -1,5 +1,24 @@
 use super::*;
 
+#[test]
+fn fork_claude_prompt_keeps_working_to_idle_confirmation() {
+    for source in [
+        include_str!("../manifests/claude.toml"),
+        include_str!("../../../distribution/agent-detection/claude.toml"),
+    ] {
+        let manifest = parse_manifest(source).unwrap();
+        let prompt = manifest
+            .rules
+            .iter()
+            .find(|rule| rule.id == "live_prompt_box")
+            .unwrap();
+        assert!(
+            !prompt.visible_idle,
+            "a persistent prompt is not completion evidence"
+        );
+    }
+}
+
 // Codex is only a registry key here; behavior tests supply synthetic rules.
 fn remote_manifest(version: &str, state: &str, contains: &str) -> String {
     format!(

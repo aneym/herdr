@@ -5673,15 +5673,17 @@ fn client_shell_focus_promotes_and_reaches_reporting_pane() {
             "second viewer duplicated focus gain"
         );
         assert!(server.handle_server_event(ServerEvent::ClientShellFocus {
-            client_id: 1,
+            client_id: 2,
             focused: false,
         }));
+        assert_eq!(server.foreground_client_id, Some(1));
+        assert_eq!(server.app.state.outer_terminal_focus, Some(true));
         assert!(
             input_rx.try_recv().is_err(),
-            "remaining viewer lost tab focus"
+            "last focused viewer kept tab focus"
         );
         assert!(server.handle_server_event(ServerEvent::ClientShellFocus {
-            client_id: 2,
+            client_id: 1,
             focused: false,
         }));
         assert_eq!(server.app.state.outer_terminal_focus, Some(false));
