@@ -6,6 +6,7 @@ use crate::protocol::{ClientShellAgent, ClientShellSnapshot, PaneSurfaceFrame};
 #[derive(Clone, Debug, Default)]
 pub(super) struct EndpointAgentPresentation {
     boot_id: Option<String>,
+    generation: Option<u64>,
     acknowledged: HashMap<String, u64>,
     /// The exact agent generations the client displayed while focused. With
     /// `attention_read = "on_unfocus"`, only these become seen when focus
@@ -75,10 +76,10 @@ impl EndpointAgentPresentation {
         snapshot: &mut ClientShellSnapshot,
         generation: Option<u64>,
     ) {
+        let generation_changed = self.generation != generation;
         if self.boot_id.as_deref() != Some(snapshot.boot_id.as_str()) {
             self.boot_id = Some(snapshot.boot_id.clone());
             self.acknowledged.clear();
-            self.deferred_acknowledged = None;
             self.completed.clear();
             self.working.clear();
             self.acknowledged.extend(
@@ -88,6 +89,12 @@ impl EndpointAgentPresentation {
                     .map(|agent| (agent.pane_id.clone(), agent.state_change_seq)),
             );
         }
+        if generation_changed {
+            // Connection generations can restart revisions under the same boot.
+            // A frame from the old connection is never evidence for the new one.
+            self.deferred_acknowledged = None;
+        }
+        self.generation = generation;
         let pane_ids: HashSet<&str> = snapshot
             .agents
             .iter()

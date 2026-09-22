@@ -689,14 +689,14 @@ impl ClientShellState {
         if self.config.attention_read != crate::config::AttentionReadConfig::OnUnfocus {
             return false;
         }
-        let Some(snapshot) = self.snapshot.as_deref_mut() else {
-            return false;
-        };
         let Some(endpoint) = self
             .endpoints
             .iter_mut()
             .find(|endpoint| endpoint.endpoint_id == self.active_endpoint_id)
         else {
+            return false;
+        };
+        let Some(snapshot) = endpoint.snapshot.as_deref_mut() else {
             return false;
         };
         endpoint.agent_presentation.acknowledge_deferred(snapshot)
@@ -723,28 +723,35 @@ impl ClientShellState {
     }
 
     fn apply_cached_endpoint_snapshot(&mut self, endpoint_id: &ClientEndpointId) {
-        let Some((snapshot, generation)) = self
+        let Some((generation, focus_changed)) = self
             .endpoints
             .iter()
             .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
             .and_then(|endpoint| {
-                endpoint
-                    .snapshot
-                    .clone()
-                    .map(|snapshot| (snapshot, endpoint.snapshot_generation))
+                endpoint.snapshot.as_deref().map(|snapshot| {
+                    let focus_changed = self.snapshot.as_deref().is_some_and(|current| {
+                        current.focused_workspace_id != snapshot.focused_workspace_id
+                            || current.focused_tab_id != snapshot.focused_tab_id
+                            || current.focused_pane_id != snapshot.focused_pane_id
+                    });
+                    (endpoint.snapshot_generation, focus_changed)
+                })
             })
         else {
             return;
         };
         if endpoint_id == &self.active_endpoint_id {
-            let focus_changed = self.snapshot.as_deref().is_some_and(|current| {
-                current.focused_workspace_id != snapshot.focused_workspace_id
-                    || current.focused_tab_id != snapshot.focused_tab_id
-                    || current.focused_pane_id != snapshot.focused_pane_id
-            });
             if focus_changed {
                 self.flush_active_deferred_attention();
             }
+            let Some(snapshot) = self
+                .endpoints
+                .iter()
+                .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+                .and_then(|endpoint| endpoint.snapshot.clone())
+            else {
+                return;
+            };
             self.apply_active_snapshot(snapshot, generation);
         }
     }

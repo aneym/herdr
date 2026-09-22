@@ -1891,6 +1891,69 @@ fn reconnect_same_endpoint_accepts_new_generation_surface_revision() {
 }
 
 #[test]
+fn on_unfocus_navigation_acknowledges_only_the_displayed_completion_generation() {
+    let mut config = Config::default();
+    config.ui.attention_read = crate::config::AttentionReadConfig::OnUnfocus;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+
+    let mut working = snapshot();
+    working.agents = vec![agent("worker", AgentStatus::Working, 1)];
+    state.set_endpoint_snapshot(&ClientEndpointId::Local, Box::new(working));
+
+    let mut completed = state.snapshot.as_deref().unwrap().clone();
+    completed.revision = 2;
+    completed.agents[0].agent_status = AgentStatus::Idle;
+    completed.agents[0].state_change_seq = 2;
+    state.set_endpoint_snapshot(&ClientEndpointId::Local, Box::new(completed));
+    let mut presented = surface();
+    presented.projection_revision = 2;
+    state.set_pane_surface(presented);
+    assert_eq!(
+        state.snapshot.as_deref().unwrap().agents[0].agent_status,
+        AgentStatus::Done
+    );
+
+    let mut navigation = state.snapshot.as_deref().unwrap().clone();
+    navigation.revision = 3;
+    navigation.focused_pane_id = Some("pane_2".into());
+    state.set_endpoint_snapshot(&ClientEndpointId::Local, Box::new(navigation));
+    assert_eq!(
+        state.snapshot.as_deref().unwrap().agents[0].agent_status,
+        AgentStatus::Idle,
+        "changing panes immediately consumes the completion displayed while focused"
+    );
+
+    let mut working_again = state.snapshot.as_deref().unwrap().clone();
+    working_again.revision = 4;
+    working_again.agents[0].agent_status = AgentStatus::Working;
+    working_again.agents[0].state_change_seq = 3;
+    working_again.focused_pane_id = Some("pane_1".into());
+    state.set_endpoint_snapshot(&ClientEndpointId::Local, Box::new(working_again));
+    let mut presented_working = surface();
+    presented_working.projection_revision = 4;
+    state.set_pane_surface(presented_working);
+    let mut completed_again = state.snapshot.as_deref().unwrap().clone();
+    completed_again.revision = 5;
+    completed_again.agents[0].agent_status = AgentStatus::Idle;
+    completed_again.agents[0].state_change_seq = 4;
+    state.set_endpoint_snapshot(&ClientEndpointId::Local, Box::new(completed_again));
+    assert_eq!(
+        state.snapshot.as_deref().unwrap().agents[0].agent_status,
+        AgentStatus::Done
+    );
+
+    let mut newer_navigation = state.snapshot.as_deref().unwrap().clone();
+    newer_navigation.revision = 6;
+    newer_navigation.focused_pane_id = Some("pane_2".into());
+    state.set_endpoint_snapshot(&ClientEndpointId::Local, Box::new(newer_navigation));
+    assert_eq!(
+        state.snapshot.as_deref().unwrap().agents[0].agent_status,
+        AgentStatus::Done,
+        "a completion that arrived after the displayed generation remains unread"
+    );
+}
+
+#[test]
 fn reconnect_snapshot_waits_for_coherent_activation_before_replacing_projection() {
     let (mut state, endpoint_id) = state_with_remote();
     assert!(state.activate_endpoint_projection(&endpoint_id));
