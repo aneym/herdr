@@ -510,11 +510,14 @@ impl ClientShellState {
         };
         let expected_pane_id = match &method {
             crate::api::schema::Method::PaneFocus(target) => Some(target.pane_id.clone()),
-            crate::api::schema::Method::TabFocus(target) => snapshot
-                .panes
-                .iter()
-                .find(|pane| pane.tab_id == target.tab_id)
-                .map(|pane| pane.pane_id.clone()),
+            _ => None,
+        };
+        let expected_tab_id = match &method {
+            crate::api::schema::Method::TabFocus(target) => Some(target.tab_id.clone()),
+            _ => None,
+        };
+        let expected_workspace_id = match &method {
+            crate::api::schema::Method::WorkspaceFocus(target) => Some(target.workspace_id.clone()),
             _ => None,
         };
         let baseline_pane_id = snapshot.focused_pane_id.clone();
@@ -555,6 +558,8 @@ impl ClientShellState {
                 request_id.clone(),
                 ClientPendingFocusReveal {
                     expected_pane_id,
+                    expected_tab_id,
+                    expected_workspace_id,
                     baseline_pane_id,
                     confirmed: false,
                 },
@@ -724,10 +729,25 @@ impl ClientShellState {
                             .get_mut(request_id)
                             .is_some_and(|pending| {
                                 pending.confirmed = true;
-                                pending
-                                    .expected_pane_id
-                                    .as_ref()
-                                    .map_or(false, |expected| focused.as_ref() == Some(expected))
+                                match &result {
+                                    Ok(crate::api::schema::ResponseResult::WorkspaceCreated {
+                                        root_pane,
+                                        ..
+                                    })
+                                    | Ok(crate::api::schema::ResponseResult::TabCreated {
+                                        root_pane,
+                                        ..
+                                    }) => {
+                                        pending.expected_pane_id = Some(root_pane.pane_id.clone());
+                                    }
+                                    Ok(crate::api::schema::ResponseResult::PaneInfo { pane }) => {
+                                        pending.expected_pane_id = Some(pane.pane_id.clone());
+                                    }
+                                    _ => {}
+                                }
+                                self.snapshot
+                                    .as_deref()
+                                    .is_some_and(|snapshot| pending.matches_snapshot(snapshot))
                             });
                     if reveal_now {
                         self.pending_focus_reveals.remove(request_id);

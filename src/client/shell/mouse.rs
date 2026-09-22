@@ -1960,6 +1960,10 @@ impl ClientShellState {
                 }
             }
             MouseEventKind::Down(MouseButton::Left) => {
+                if self.config.mouse_capture && super::contains(self.hits.agent_usage, point) {
+                    self.toggle_usage_overlay(outcome);
+                    return;
+                }
                 if self.selection.take().is_some() {
                     outcome.repaint = true;
                 }

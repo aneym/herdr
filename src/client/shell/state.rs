@@ -804,8 +804,26 @@ pub(super) struct PendingEndpointRequest {
 #[derive(Clone, Debug)]
 pub(super) struct ClientPendingFocusReveal {
     pub(super) expected_pane_id: Option<String>,
+    pub(super) expected_tab_id: Option<String>,
+    pub(super) expected_workspace_id: Option<String>,
     pub(super) baseline_pane_id: Option<String>,
     pub(super) confirmed: bool,
+}
+
+impl ClientPendingFocusReveal {
+    pub(super) fn matches_snapshot(&self, snapshot: &ClientShellSnapshot) -> bool {
+        self.confirmed
+            && if let Some(pane) = &self.expected_pane_id {
+                snapshot.focused_pane_id.as_ref() == Some(pane)
+            } else if let Some(tab) = &self.expected_tab_id {
+                snapshot.focused_tab_id.as_ref() == Some(tab)
+            } else if let Some(workspace) = &self.expected_workspace_id {
+                snapshot.focused_workspace_id.as_ref() == Some(workspace)
+            } else {
+                snapshot.focused_pane_id.is_some()
+                    && snapshot.focused_pane_id != self.baseline_pane_id
+            }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1901,11 +1919,10 @@ impl ClientShellState {
             .pending_focus_reveals
             .iter()
             .filter_map(|(request_id, pending)| {
-                let matched = pending.confirmed
-                    && pending.expected_pane_id.as_ref().map_or_else(
-                        || focused.is_some() && focused != pending.baseline_pane_id,
-                        |expected| focused.as_ref() == Some(expected),
-                    );
+                let matched = self
+                    .snapshot
+                    .as_deref()
+                    .is_some_and(|snapshot| pending.matches_snapshot(snapshot));
                 matched.then(|| request_id.clone())
             })
             .collect::<Vec<_>>();
@@ -1918,6 +1935,7 @@ impl ClientShellState {
                 .is_some_and(|pane_id| self.reveal_tree_ancestors_for_pane(pane_id))
             {
                 self.agent_scroll = 0;
+                self.persist_chrome_preferences(&mut ClientShellInput::default());
             }
         }
         self.reconcile_pending_workspace_highlight();

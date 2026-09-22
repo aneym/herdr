@@ -183,3 +183,68 @@ fn malformed_owner_cycle_does_not_block_explicit_reveal() {
     assert!(state.reveal_tree_ancestors_for_pane("pane_1"));
     assert!(state.tree_chrome_mut().collapsed_agent_groups.is_empty());
 }
+
+#[test]
+fn workspace_and_tab_focus_reveal_an_already_active_split_pane() {
+    for method in [
+        crate::api::schema::Method::WorkspaceFocus(crate::api::schema::WorkspaceTarget {
+            workspace_id: "ws_1".into(),
+        }),
+        crate::api::schema::Method::TabFocus(crate::api::schema::TabTarget {
+            tab_id: "tab_1".into(),
+        }),
+    ] {
+        let mut config = Config::default();
+        config.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+        state.set_snapshot(Box::new(two_pane_snapshot("pane_2", 1)));
+        state
+            .tree_chrome_mut()
+            .collapsed_spaces
+            .insert("ws_1".into());
+        state
+            .tree_chrome_mut()
+            .collapsed_tabs
+            .insert("ws_1#1".into());
+        let mut outcome = ClientShellInput::default();
+        state.push_endpoint_method(method, &mut outcome);
+        let request_id = endpoint_requests(outcome).remove(0).0;
+        state.handle_endpoint_result(
+            "boot-1",
+            &request_id,
+            Ok(crate::api::schema::ResponseResult::Ok {}),
+        );
+        assert!(!state.tree_chrome_mut().collapsed_spaces.contains("ws_1"));
+        assert!(!state.tree_chrome_mut().collapsed_tabs.contains("ws_1#1"));
+        assert!(state.pending_focus_reveals.is_empty());
+    }
+}
+
+#[test]
+fn explicit_reveal_waits_for_matching_target_after_success() {
+    let mut config = Config::default();
+    config.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(two_pane_snapshot("pane_1", 1)));
+    state
+        .tree_chrome_mut()
+        .collapsed_spaces
+        .insert("ws_1".into());
+    let mut outcome = ClientShellInput::default();
+    state.push_endpoint_method(
+        crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget {
+            pane_id: "pane_2".into(),
+        }),
+        &mut outcome,
+    );
+    let request_id = endpoint_requests(outcome).remove(0).0;
+    state.handle_endpoint_result(
+        "boot-1",
+        &request_id,
+        Ok(crate::api::schema::ResponseResult::Ok {}),
+    );
+    state.set_snapshot(Box::new(two_pane_snapshot("pane_1", 2)));
+    assert!(state.tree_chrome_mut().collapsed_spaces.contains("ws_1"));
+    state.set_snapshot(Box::new(two_pane_snapshot("pane_2", 3)));
+    assert!(!state.tree_chrome_mut().collapsed_spaces.contains("ws_1"));
+}

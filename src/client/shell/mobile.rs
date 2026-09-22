@@ -1082,7 +1082,7 @@ impl ClientShellState {
                 self.pending_workspace_highlight = None;
                 self.mode = ClientShellMode::Navigate;
                 self.navigate_workspace_id = self.focused_navigation_target();
-                if !self.mobile_profiles.contains_key(&self.active_endpoint_id) {
+                {
                     let endpoint_id = self.active_endpoint_id.clone();
                     self.push_endpoint_method_with_kind(
                         crate::api::schema::Method::ProfileList(

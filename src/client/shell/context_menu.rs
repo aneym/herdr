@@ -487,7 +487,9 @@ impl ClientShellState {
                     .iter()
                     .filter_map(|entry| entry.selected.then(|| entry.profile.clone()).flatten())
                     .collect::<Vec<_>>();
-                let profile = profile.expect("non-follow entry");
+                let Some(profile) = profile else {
+                    return;
+                };
                 if values.contains(profile) {
                     values.retain(|value| value != profile);
                 } else {
@@ -495,7 +497,10 @@ impl ClientShellState {
                 }
                 values
             } else {
-                vec![profile.expect("non-follow entry").clone()]
+                match profile {
+                    Some(profile) => vec![profile.clone()],
+                    None => return,
+                }
             };
             self.push_endpoint_method(
                 crate::api::schema::Method::PaneSetProfiles(
