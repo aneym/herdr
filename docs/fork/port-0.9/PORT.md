@@ -1,5 +1,33 @@
 # Fork feature ledger for the 0.9.1 port
 
+## September 21 integration status
+
+Latest upstream integrated: `8ac95427` via merge `7958b975`. The old 0.8
+sidebar repair `981e5b00` is deployed separately and joined into the port
+ancestry by `0cfe7017`; its server-side chrome code is replaced by client-side
+visibility handling in this architecture. The shared checkout still carries
+an unrelated uncommitted `runtime_mutations.rs` edit and is not an upgrade
+workspace.
+
+The historical stage-1/stage-2 ledger below records the recovered port, not
+a claim that every feature has been restored. Current completed restoration:
+
+- `b0c2018b`: fuzzy navigator matching plus deferred client attention and the
+  fork Claude idle-confirmation/background-shell guards.
+- `45576551`: flush deferred attention against the latest endpoint cache
+  before applying navigation; clear saved generations on reconnect.
+- Focused validation: 76 endpoint tests, five on-unfocus tests, fuzzy
+  navigator regression, multi-viewer focus regression, and Claude manifest
+  guard test passed.
+
+The upstream checkpoint compiled and started 3709 tests. The PTY descriptor
+check passed in isolation with inherited Herdr socket overrides unset;
+`pane_info_and_subscriptions_expose_done_agent_status` still times out.
+This is not a green full-suite claim. Navigation/copy and profile/usage/mobile
+restoration remain under implementation and acceptance.
+
+## Historical port record
+
 Upstream `207be3c7 refactor: render the shell in the client (#3487)` (0.9.0)
 moved the whole interaction and render layer out of the server
 (`src/app/input/`, `src/ui/`) into `src/client/shell/`. Stage 1 of this port
