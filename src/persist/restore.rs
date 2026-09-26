@@ -2085,7 +2085,15 @@ mod tests {
             );
             assert_eq!(terminal.state, state_before_handoff);
             let runtimes = crate::terminal::TerminalRuntimeRegistry::from(runtimes);
-            let snapshot = crate::persist::capture(&workspaces, &terminals, &runtimes, Some(0), 0);
+            let snapshot = crate::persist::capture(
+                &workspaces,
+                &terminals,
+                &runtimes,
+                Some(0),
+                String::new(),
+                0,
+                crate::persist::UiPrefs::default(),
+            );
             let pane_id = workspaces[0].tabs[0].panes.keys().next().copied().unwrap();
             let runtime = runtimes.values().next().unwrap();
             runtime
