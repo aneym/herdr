@@ -1,5 +1,32 @@
 # Fork feature ledger for the 0.9.1 port
 
+## September 26 upstream catch-up
+
+Latest upstream integrated: `c34dd6b2` (herdrdev/herdr master; 27 upstream commits
+the fork lacked) via merge `ea4c8002` on branch `feat/upstream-catchup-fleet`, parents
+`c2a53283` (fork `main`) and `c34dd6b2`. Upstream brings `machine status` and
+machine reconnect, native kitty rendering, staggered restored agent startups,
+hook agent status across live handoff, independent navigator search terms and
+Windows input fixes.
+
+| Change | Resolution |
+| --- | --- |
+| `c411883e` (breaking) replaces the custom `pane.graphics.*` API with native kitty rendering | `api/server.rs` keeps the fork's `ClipboardImageWrite` arm and drops the removed `PaneGraphicsStream` arm and its tests. Any fork client code or plugin that calls `pane.graphics.*` breaks. |
+| `b7781a67` (#4535) matches navigator search terms independently | `aggregate_navigation.rs` keeps the fork's fuzzy scorer. Upstream's new test failed against it (`alphagamma` matched "alpha beta gamma" across the space). `1499afe3` limits each term's match to one whitespace-delimited word in `fuzzy_match_words`; ranking inside a word is unchanged. A single term no longer matches initials across spaces (`cr` for "code review"). |
+| `90b0e40a` (#4493) adds a restore test that calls `persist::capture` with stock arguments | `e1bd4ab2` passes the fork's active profile and `UiPrefs`. |
+| Agent group placement (ledger row 31, decision 15) | Merged from `feat/agent-group-0.9` (`2a54d82c`, `1bdb2a25`) with no conflicts. |
+| `herdr-fleet` CLI | Merged from `feat/herdr-fleet-cli` (`51d6f85a`): `contrib/fleet/herdr-fleet` and its README. Script only; no server change. |
+
+Verification on the merged head: `cargo clippy --all-targets -- -D warnings`
+clean; `cargo nextest run --no-fail-fast` ran 3836 tests, 3835 passed, 8
+skipped, one failure: `api_ping pane_info_and_subscriptions_expose_done_agent_status`
+("timed out waiting for json line"). That test also fails 3 of 3 runs at
+`c2a53283`, so it is not from this merge. Release build `herdr 0.9.1` passed and
+ran an isolated lab server: agent group hands-on, under and collapse round-trip,
+and `herdr-fleet ls`, `get`, `attention` and `run` (exit status passes through)
+work against it. Not deployed: Studio still runs 0.8.2, and the cutover is gated
+on Alex.
+
 ## September 21 integration status
 
 Latest upstream integrated: `8ac95427` via merge `7958b975`. The old 0.8
