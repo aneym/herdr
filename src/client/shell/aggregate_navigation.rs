@@ -385,7 +385,8 @@ pub(super) fn navigator_rows(
                         // Search the same endpoint-qualified context rendered by
                         // the navigator. This keeps fragmented terms useful while
                         // leaving status filtering and parent-context inclusion
-                        // unchanged.
+                        // unchanged. Each query term matches on its own and
+                        // never across a space, so no term spans two fields.
                         let score = if query.is_empty() {
                             None
                         } else {
