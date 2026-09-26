@@ -1,0 +1,674 @@
+#!/usr/bin/env python3
+"""herdr-fleet: drive agents on every herdr machine from one CLI.
+
+Every machine runs its own herdr server. Pane ids belong to one server
+(`w1:p1` exists everywhere), so this tool always names a pane as
+`<machine>/<pane>`. `local` (or $HERDR_FLEET_LOCAL) is the caller's own
+server; every other name is a saved machine (`herdr machine list`), reached
+with `herdr --machine <label> ...` over OpenSSH.
+
+Commands:
+  hosts [--json]                                   every machine: reachable, version, protocol, agents by status
+  ls [--machine M] [--agents] [--status S]... [--json]
+                                                   panes on all machines, machine-qualified ids;
+                                                   --agents (or any --status) keeps agent panes only
+  get <m>/<pane>                                   the agent in a pane, or the pane if it has none
+  read <m>/<pane> [--lines N] [--source S]
+  prompt <m>/<pane> <text> [--wait] [--until S]... [--timeout MS]
+  wait <m>/<pane> [--until S]... [--timeout MS]
+  run <m>/<pane> <command> [--timeout MS] [--no-wait]
+                                                   run a shell command in a pane's shell and print
+                                                   its output; exits with the command's status
+  keys <m>/<pane> <key>...                         press keys in a pane (enter, esc, down, ctrl+c, ...)
+  spawn <m> --kind K [--cwd DIR] [--label L] [--prompt TEXT] [--timeout MS] [-- agent-args...]
+  attention [--status S]... [--json] [--file-unblock]
+                                                   blocked (default) agents across machines;
+                                                   --file-unblock files one unblock ask per new one
+  whoami                                           this pane as <machine>/<pane>
+
+Environment:
+  HERDR_BIN            herdr binary (default: herdr on PATH)
+  HERDR_FLEET_LOCAL    name for the caller's own server (default: local)
+  HERDR_FLEET_TIMEOUT  per-machine request timeout in seconds (default: 30)
+  UNBLOCK_BIN          unblock CLI for --file-unblock (default: unblock)
+  HERDR_FLEET_STATE_DIR  where --file-unblock remembers what it filed
+                       (default: $XDG_STATE_HOME/herdr-fleet or ~/.local/state/herdr-fleet)
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import secrets
+import shlex
+import subprocess
+import sys
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+STATUSES = ("idle", "working", "blocked", "done", "unknown")
+
+
+class FleetError(Exception):
+    pass
+
+
+def herdr_bin() -> str:
+    return os.environ.get("HERDR_BIN", "herdr")
+
+
+def local_name() -> str:
+    return os.environ.get("HERDR_FLEET_LOCAL", "local")
+
+
+def request_timeout() -> float:
+    return float(os.environ.get("HERDR_FLEET_TIMEOUT", "30"))
+
+
+def herdr(machine: str | None, *args: str, timeout: float | None = None) -> str:
+    """Run one herdr command against a machine (None = the caller's server)."""
+    command = [herdr_bin()]
+    if machine is not None:
+        command += ["--machine", machine]
+    command += list(args)
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout if timeout is not None else request_timeout(),
+            stdin=subprocess.DEVNULL,
+        )
+    except subprocess.TimeoutExpired as err:
+        raise FleetError(f"timed out after {err.timeout:.0f}s: {' '.join(args)}") from err
+    except FileNotFoundError as err:
+        raise FleetError(f"herdr binary not found: {command[0]}") from err
+    if result.returncode != 0:
+        raise FleetError(error_text(result))
+    return result.stdout
+
+
+def error_text(result: subprocess.CompletedProcess) -> str:
+    """One line from a failed herdr call; API envelopes become `code: message`."""
+    for stream in (result.stdout, result.stderr):
+        try:
+            value = json.loads(stream)
+        except ValueError:
+            continue
+        error = value.get("error") if isinstance(value, dict) else None
+        if isinstance(error, dict):
+            return f"{error.get('code', 'error')}: {error.get('message', '')}".rstrip(": ")
+    detail = (result.stderr.strip() or result.stdout.strip()).splitlines()
+    return detail[-1] if detail else f"herdr exited {result.returncode}"
+
+
+def herdr_json(machine: str | None, *args: str, timeout: float | None = None):
+    out = herdr(machine, *args, timeout=timeout)
+    try:
+        value = json.loads(out)
+    except json.JSONDecodeError as err:
+        raise FleetError(f"non-JSON reply to {' '.join(args)}: {out[:200]!r}") from err
+    if isinstance(value, dict) and "result" in value:
+        return value["result"]
+    return value
+
+
+def machine_arg(name: str) -> str | None:
+    return None if name == local_name() else name
+
+
+def saved_machines() -> list[dict]:
+    """Enabled saved machines from the local client catalog."""
+    try:
+        rows = herdr_json(None, "machine", "list", "--json")
+    except FleetError:
+        return []
+    return [row for row in rows if row.get("enabled", True)]
+
+
+def all_machines(only: str | None = None) -> list[str]:
+    names = [local_name()] + [row["label"] for row in saved_machines()]
+    if only is not None:
+        if only not in names:
+            raise FleetError(f"unknown machine {only!r}; known: {', '.join(names)}")
+        return [only]
+    return names
+
+
+def split_target(target: str) -> tuple[str, str]:
+    machine, sep, pane = target.partition("/")
+    if not sep or not machine or not pane:
+        raise FleetError(f"target must be <machine>/<pane>, got {target!r}")
+    return machine, pane
+
+
+def list_agents(machine: str) -> list[dict]:
+    result = herdr_json(machine_arg(machine), "agent", "list")
+    agents = result.get("agents", []) if isinstance(result, dict) else result
+    rows = []
+    for agent in agents:
+        row = dict(agent)
+        row["machine"] = machine
+        row["id"] = f"{machine}/{agent['pane_id']}"
+        row["status"] = agent.get("agent_status", "unknown")
+        rows.append(row)
+    return rows
+
+
+def fan_out(machines: list[str], fn):
+    """Run fn(machine) on every machine in parallel; errors become {machine, error}."""
+
+    def one(machine):
+        try:
+            return machine, fn(machine), None
+        except FleetError as err:
+            return machine, None, str(err)
+
+    with ThreadPoolExecutor(max_workers=max(1, len(machines))) as pool:
+        return list(pool.map(one, machines))
+
+
+# ---- commands ---------------------------------------------------------------
+
+
+def parse_flags(args: list[str], flags: dict[str, bool]) -> tuple[dict, list[str]]:
+    """flags maps --name to True when it takes a value; repeated value flags collect."""
+    values: dict = {}
+    rest: list[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--":
+            rest += args[i:]
+            break
+        if arg in flags:
+            if flags[arg]:
+                if i + 1 >= len(args):
+                    raise FleetError(f"missing value for {arg}")
+                values.setdefault(arg, []).append(args[i + 1])
+                i += 2
+            else:
+                values[arg] = True
+                i += 1
+        else:
+            rest.append(arg)
+            i += 1
+    return values, rest
+
+
+def emit(value, as_json: bool, text_lines) -> None:
+    if as_json:
+        print(json.dumps(value, indent=2))
+    else:
+        for line in text_lines(value):
+            print(line)
+
+
+def cmd_hosts(args: list[str]) -> int:
+    flags, rest = parse_flags(args, {"--json": False})
+    if rest:
+        raise FleetError("usage: herdr-fleet hosts [--json]")
+
+    def probe(machine):
+        server = herdr_json(machine_arg(machine), "status", "server", "--json")
+        agents = list_agents(machine)
+        counts = {status: 0 for status in STATUSES}
+        for agent in agents:
+            counts[agent["status"]] = counts.get(agent["status"], 0) + 1
+        return {
+            "version": server.get("version"),
+            "protocol": server.get("protocol"),
+            "running": server.get("running", True),
+            "agents": len(agents),
+            "by_status": counts,
+        }
+
+    rows = []
+    for machine, info, error in fan_out(all_machines(), probe):
+        row = {"machine": machine, "reachable": error is None}
+        if error is None:
+            row.update(info)
+        else:
+            row["error"] = error
+        rows.append(row)
+
+    def text(rows):
+        for row in rows:
+            if row["reachable"]:
+                counts = " ".join(f"{k}={v}" for k, v in row["by_status"].items() if v)
+                yield (
+                    f"{row['machine']}\tup\therdr {row['version']} (protocol {row['protocol']})"
+                    f"\t{row['agents']} agents\t{counts}"
+                )
+            else:
+                yield f"{row['machine']}\tDOWN\t{row['error']}"
+
+    emit(rows, "--json" in flags, text)
+    return 0 if all(row["reachable"] for row in rows) else 1
+
+
+def agent_line(agent: dict) -> str:
+    name = agent.get("name") or agent.get("display_agent") or agent.get("agent") or "-"
+    title = agent.get("terminal_title_stripped") or agent.get("title") or ""
+    return f"{agent['id']}\t{agent['status']}\t{name}\t{title}".rstrip()
+
+
+def pane_line(row: dict) -> str:
+    if row.get("agent_status_known"):
+        return agent_line(row)
+    cwd = row.get("foreground_cwd") or row.get("cwd") or ""
+    return f"{row['id']}\t-\tshell\t{cwd}".rstrip()
+
+
+def list_panes(machine: str) -> list[dict]:
+    """Every pane on a machine; agent panes carry their agent fields."""
+    target = machine_arg(machine)
+    result = herdr_json(target, "pane", "list")
+    panes = result.get("panes", []) if isinstance(result, dict) else result
+    agents = {agent["pane_id"]: agent for agent in list_agents(machine)}
+    rows = []
+    for pane in panes:
+        row = dict(pane)
+        agent = agents.get(pane["pane_id"])
+        if agent is not None:
+            row.update(agent)
+            row["agent_status_known"] = True
+        else:
+            row["machine"] = machine
+            row["id"] = f"{machine}/{pane['pane_id']}"
+            row["status"] = None
+            row["agent_status_known"] = False
+        rows.append(row)
+    return rows
+
+
+def cmd_ls(args: list[str]) -> int:
+    flags, rest = parse_flags(
+        args, {"--json": False, "--machine": True, "--status": True, "--agents": False}
+    )
+    if rest:
+        raise FleetError(
+            "usage: herdr-fleet ls [--machine M] [--agents] [--status S]... [--json]"
+        )
+    only = flags.get("--machine", [None])[-1]
+    statuses = set(flags.get("--status", []))
+    unknown = statuses - set(STATUSES)
+    if unknown:
+        raise FleetError(f"unknown status {sorted(unknown)}; use {'|'.join(STATUSES)}")
+    agents_only = "--agents" in flags or bool(statuses)
+    rows, errors = [], []
+    for machine, found, error in fan_out(
+        all_machines(only), list_agents if agents_only else list_panes
+    ):
+        if error is not None:
+            errors.append({"machine": machine, "error": error})
+            continue
+        rows += [r for r in found if not statuses or r["status"] in statuses]
+    if "--json" in flags:
+        print(json.dumps(rows + errors, indent=2))
+    else:
+        for row in rows:
+            print(agent_line(row) if agents_only else pane_line(row))
+        for error in errors:
+            print(f"{error['machine']}\tDOWN\t{error['error']}", file=sys.stderr)
+    return 1 if errors else 0
+
+
+def passthrough(machine: str, args: list[str]) -> int:
+    """Run a herdr command on a machine, streaming its output unchanged."""
+    command = [herdr_bin()]
+    target = machine_arg(machine)
+    if target is not None:
+        command += ["--machine", target]
+    return subprocess.call(command + args)
+
+
+def cmd_get(args: list[str]) -> int:
+    if len(args) != 1:
+        raise FleetError("usage: herdr-fleet get <machine>/<pane>")
+    machine, pane = split_target(args[0])
+    target = machine_arg(machine)
+    try:
+        result = herdr_json(target, "agent", "get", pane)
+        kind = "agent"
+    except FleetError as err:
+        if "agent_not_found" not in str(err):
+            raise
+        result = herdr_json(target, "pane", "get", pane)
+        kind = "pane"
+    body = result.get(kind, result) if isinstance(result, dict) else result
+    row = dict(body) if isinstance(body, dict) else {"value": body}
+    row.update({"id": f"{machine}/{pane}", "machine": machine, "kind": kind})
+    print(json.dumps(row, indent=2))
+    return 0
+
+
+def cmd_read(args: list[str]) -> int:
+    if not args:
+        raise FleetError("usage: herdr-fleet read <machine>/<pane> [--lines N] [--source S]")
+    machine, pane = split_target(args[0])
+    return passthrough(machine, ["pane", "read", pane, *args[1:]])
+
+
+def cmd_prompt(args: list[str]) -> int:
+    if len(args) < 2:
+        raise FleetError(
+            "usage: herdr-fleet prompt <machine>/<pane> <text> [--wait] [--until S]... [--timeout MS]"
+        )
+    machine, pane = split_target(args[0])
+    return passthrough(machine, ["agent", "prompt", pane, *args[1:]])
+
+
+def cmd_wait(args: list[str]) -> int:
+    if not args:
+        raise FleetError("usage: herdr-fleet wait <machine>/<pane> [--until S]... [--timeout MS]")
+    machine, pane = split_target(args[0])
+    return passthrough(machine, ["agent", "wait", pane, *args[1:]])
+
+
+def cmd_run(args: list[str]) -> int:
+    flags, rest = parse_flags(args, {"--timeout": True, "--no-wait": False})
+    if len(rest) != 2:
+        raise FleetError(
+            "usage: herdr-fleet run <machine>/<pane> <command> [--timeout MS] [--no-wait]"
+        )
+    machine, pane = split_target(rest[0])
+    command = rest[1]
+    target = machine_arg(machine)
+    if "--no-wait" in flags:
+        herdr(target, "pane", "run", pane, command)
+        return 0
+    timeout_ms = int(flags.get("--timeout", ["60000"])[-1])
+    nonce = secrets.token_hex(6)
+    # The markers are assembled by printf at run time, so the echoed command
+    # line never contains them; eval keeps comments and & inside the command.
+    wrapped = (
+        f"printf '__fleet_%s_%s\\n' begin {nonce}; eval {shlex.quote(command)}; "
+        f"printf '__fleet_%s_%s_%s\\n' end {nonce} \"$?\""
+    )
+    herdr(target, "pane", "run", pane, wrapped)
+    end = re.compile(rf"__fleet_end_{nonce}_(\d+)")
+    try:
+        herdr(
+            target,
+            "pane", "wait-output", pane,
+            "--regex", end.pattern,
+            "--source", "recent-unwrapped",
+            "--timeout", str(timeout_ms),
+            timeout=timeout_ms / 1000 + request_timeout(),
+        )
+    except FleetError as err:
+        if not str(err).startswith("timeout"):
+            raise
+        print(
+            f"herdr-fleet: {machine}/{pane} still running after {timeout_ms}ms; "
+            f"see it with: herdr-fleet read {machine}/{pane}",
+            file=sys.stderr,
+        )
+        return 124
+    screen = herdr(
+        target, "pane", "read", pane, "--source", "recent-unwrapped", "--lines", "2000"
+    ).splitlines()
+    begin = f"__fleet_begin_{nonce}"
+    start = max((i for i, line in enumerate(screen) if line.strip() == begin), default=None)
+    stop = None
+    for i in range(len(screen) - 1, -1, -1):
+        match = end.search(screen[i])
+        if match:
+            stop, status, tail = i, int(match.group(1)), screen[i][: match.start()]
+            break
+    if stop is None:
+        raise FleetError(f"end marker not found in {machine}/{pane} after the command finished")
+    if start is None or start > stop:
+        print(
+            f"herdr-fleet: output start scrolled out of {machine}/{pane}; showing what remains",
+            file=sys.stderr,
+        )
+        start = -1
+    lines = screen[start + 1 : stop] + ([tail] if tail else [])
+    for line in lines:
+        print(line)
+    return status
+
+
+def cmd_keys(args: list[str]) -> int:
+    if len(args) < 2:
+        raise FleetError("usage: herdr-fleet keys <machine>/<pane> <key>...")
+    machine, pane = split_target(args[0])
+    herdr(machine_arg(machine), "pane", "send-keys", pane, *args[1:])
+    return 0
+
+
+def cmd_spawn(args: list[str]) -> int:
+    flags, rest = parse_flags(
+        args,
+        {"--kind": True, "--cwd": True, "--label": True, "--prompt": True, "--timeout": True},
+    )
+    agent_args = []
+    if "--" in rest:
+        cut = rest.index("--")
+        rest, agent_args = rest[:cut], rest[cut:]
+    if len(rest) != 1 or "--kind" not in flags:
+        raise FleetError(
+            "usage: herdr-fleet spawn <machine> --kind K [--cwd DIR] [--label L] "
+            "[--prompt TEXT] [--timeout MS] [-- agent-args...]"
+        )
+    machine = rest[0]
+    if machine not in all_machines():
+        raise FleetError(f"unknown machine {machine!r}")
+    target = machine_arg(machine)
+    kind = flags["--kind"][-1]
+    label = flags.get("--label", [kind])[-1]
+    create = ["workspace", "create", "--label", label, "--no-focus"]
+    if "--cwd" in flags:
+        create += ["--cwd", flags["--cwd"][-1]]
+    created = herdr_json(target, *create)
+    pane = find_pane_id(created)
+    start = ["agent", "start", label, "--kind", kind, "--pane", pane]
+    if "--timeout" in flags:
+        start += ["--timeout", flags["--timeout"][-1]]
+    fleet_id = f"{machine}/{pane}"
+    try:
+        herdr(target, *(start + agent_args), timeout=max(request_timeout(), 330))
+    except FleetError as err:
+        raise FleetError(
+            f"{fleet_id}: {err} (the pane stays open; see it with: herdr-fleet read {fleet_id})"
+        ) from err
+    if "--prompt" in flags:
+        herdr(target, "agent", "prompt", pane, flags["--prompt"][-1])
+    print(json.dumps({"id": fleet_id, "machine": machine, "pane_id": pane, "name": label}))
+    return 0
+
+
+def find_pane_id(created) -> str:
+    """Pull the root pane id out of a workspace/tab create reply."""
+    if isinstance(created, dict):
+        for key in ("root_pane", "pane"):
+            value = created.get(key)
+            if isinstance(value, dict) and value.get("pane_id"):
+                return value["pane_id"]
+        if created.get("pane_id"):
+            return created["pane_id"]
+        for value in created.values():
+            if isinstance(value, (dict, list)):
+                try:
+                    return find_pane_id(value)
+                except FleetError:
+                    pass
+    if isinstance(created, list):
+        for value in created:
+            try:
+                return find_pane_id(value)
+            except FleetError:
+                pass
+    raise FleetError(f"no pane id in create reply: {json.dumps(created)[:200]}")
+
+
+def state_dir() -> Path:
+    if os.environ.get("HERDR_FLEET_STATE_DIR"):
+        return Path(os.environ["HERDR_FLEET_STATE_DIR"])
+    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+    return Path(base) / "herdr-fleet"
+
+
+def unblock_ask(agent: dict, tail: str = "") -> dict:
+    """A v2 `question` ask: the agent is waiting on a person and the fleet has no view."""
+    title = agent.get("terminal_title_stripped") or agent.get("title") or ""
+    who = agent.get("name") or agent.get("display_agent") or agent.get("agent") or "agent"
+    why = (
+        f"Agent {agent['id']} ({who}) is {agent['status']}"
+        + (f": {title}" if title else "")
+        + ". Your answer is not typed in for you: reply with "
+        + f'herdr-fleet prompt {agent["id"]} "<answer>".'
+    )
+    if tail:
+        why += "\n\nLast lines of the pane:\n" + tail
+    return {
+        "kind": "file",
+        "purpose": "question",
+        "project": "herdr-fleet",
+        "title": f"{who} on {agent['machine']} is waiting"[:90],
+        "summary": f"{who} is {agent['status']} on {agent['machine']}"[:140],
+        "why": why[:1200],
+        "ttl_seconds": 86400,
+        "steps": [
+            f"Read the pane: herdr-fleet read {agent['id']} --lines 40",
+            f'Reply: herdr-fleet prompt {agent["id"]} "<your answer>"',
+        ],
+        "fields": [
+            {
+                "name": "reply",
+                "type": "text",
+                "label": f"What should {who} do next?",
+                "multiline": True,
+            }
+        ],
+    }
+
+
+def pane_tail(agent: dict, lines: int = 12) -> str:
+    try:
+        text = herdr(machine_arg(agent["machine"]), "pane", "read", agent["pane_id"],
+                     "--lines", str(lines))
+    except FleetError:
+        return ""
+    kept = [line.rstrip() for line in text.splitlines() if line.strip()]
+    return "\n".join(kept[-lines:])[-700:]
+
+
+def cmd_attention(args: list[str]) -> int:
+    flags, rest = parse_flags(
+        args, {"--json": False, "--status": True, "--file-unblock": False}
+    )
+    if rest:
+        raise FleetError(
+            "usage: herdr-fleet attention [--status S]... [--json] [--file-unblock]"
+        )
+    statuses = set(flags.get("--status", ["blocked"]))
+    waiting, errors = [], []
+    for machine, rows, error in fan_out(all_machines(), list_agents):
+        if error is not None:
+            errors.append({"machine": machine, "error": error})
+            continue
+        for agent in rows:
+            if agent["status"] in statuses:
+                agent["unblock_ask"] = unblock_ask(agent)
+                waiting.append(agent)
+    filed = []
+    if "--file-unblock" in flags:
+        filed = file_unblock(waiting)
+    if "--json" in flags:
+        print(json.dumps({"attention": waiting, "errors": errors, "filed": filed}, indent=2))
+    else:
+        for agent in waiting:
+            print(agent_line(agent))
+        for ticket in filed:
+            print(f"filed {ticket['ticket']} for {ticket['id']}")
+        for error in errors:
+            print(f"{error['machine']}\tDOWN\t{error['error']}", file=sys.stderr)
+    return 1 if errors else 0
+
+
+def file_unblock(waiting: list[dict]) -> list[dict]:
+    """File one unblock ask per agent state; the same waiting state is never filed twice."""
+    path = state_dir() / "filed.json"
+    try:
+        seen = json.loads(path.read_text())
+    except (OSError, ValueError):
+        seen = {}
+    filed = []
+    for agent in waiting:
+        key = f"{agent['id']}#{agent.get('agent_id') or ''}#{agent.get('state_change_seq', 0)}"
+        if key in seen:
+            continue
+        # Origin names herdr-fleet and no pane: the waiting pane lives on another
+        # server, and unblock would otherwise tie the ask to the caller's own pane.
+        ask = unblock_ask(agent, pane_tail(agent))
+        body = {"ask": ask, "origin": {"agent": "herdr-fleet"}}
+        result = subprocess.run(
+            [os.environ.get("UNBLOCK_BIN", "unblock"), "file", "-", "--json"],
+            input=json.dumps(body),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr.strip() or result.stdout.strip() or "no output")[:300]
+            raise FleetError(
+                f"unblock file failed for {agent['id']} (exit {result.returncode}): {detail}"
+            )
+        try:
+            reply = json.loads(result.stdout)
+            ticket = reply.get("ticket") or reply.get("id") or result.stdout.strip()
+        except ValueError:
+            ticket = result.stdout.strip()
+        seen[key] = ticket
+        filed.append({"id": agent["id"], "ticket": ticket})
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(seen, indent=2))
+    return filed
+
+
+def cmd_whoami(args: list[str]) -> int:
+    if args:
+        raise FleetError("usage: herdr-fleet whoami")
+    pane = os.environ.get("HERDR_PANE_ID")
+    if not pane:
+        raise FleetError("not inside a herdr pane (HERDR_PANE_ID is unset)")
+    print(f"{local_name()}/{pane}")
+    return 0
+
+
+COMMANDS = {
+    "hosts": cmd_hosts,
+    "ls": cmd_ls,
+    "get": cmd_get,
+    "read": cmd_read,
+    "prompt": cmd_prompt,
+    "wait": cmd_wait,
+    "run": cmd_run,
+    "keys": cmd_keys,
+    "spawn": cmd_spawn,
+    "attention": cmd_attention,
+    "whoami": cmd_whoami,
+}
+
+
+def main(argv: list[str]) -> int:
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return 0 if argv else 2
+    command = COMMANDS.get(argv[0])
+    if command is None:
+        print(f"unknown command {argv[0]!r}\n\n{__doc__.strip()}", file=sys.stderr)
+        return 2
+    try:
+        return command(argv[1:])
+    except FleetError as err:
+        print(f"herdr-fleet: {err}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
