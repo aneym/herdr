@@ -98,6 +98,7 @@ The base for every fork diff is `d79fd746` (herdr 0.8.2 merge base); fork
 | 28 | Session snapshot UI preferences | many | carried (stage 2) | `src/persist/snapshot.rs` (`UiPrefs`, `capture`), `src/app/state.rs` (`snapshot_ui_prefs`) | `src/client/shell/preferences.rs` (upstream's per-client `ClientChromePreferences`) | Upstream already reads `sidebar_width`, `sidebar_section_split` and its `collapsed_groups` (the fork's `collapsed_space_keys`) from `state_dir()/client-shell/local-*.json`; stage 2 moved the tree chrome into the same file (decision 6) and added a one-time seed so an existing install keeps its sidebar (decision 14). |
 | 29 | `pane move` | uncommitted WIP in the main checkout (`src/app/runtime_mutations.rs`) | superseded-by-upstream | not in this tree | `src/api/schema/panes.rs` (`PaneMoveParams`, `PaneMoveDestination`), `src/app/api/panes.rs` (`handle_pane_move`), `src/server/headless/tests/pane_move.rs` | Upstream 0.9.1 ships `pane move` (#4153) with its own API, destinations and tests. **The main checkout's `runtime_mutations.rs` pane-move WIP is superseded; do not port it.** That file no longer exists on `port-0.9` — upstream deleted it in the client-shell refactor. |
 | 30 | Server-side sidebar/tab-bar geometry and host mouse capture | pre-`d79fd746` | dropped | `orig/src/app/state.rs` (`ViewState` hit areas, `DragState`, `WorkspacePressState`, `TabPressState`, `app_surface_pane_ids`, `should_capture_host_mouse_from`) | `src/client/shell/config.rs` (`layout`), `src/client/shell/mouse.rs` | The server no longer draws chrome, so hit rects and press tracking have no meaning there. `app_surface_pane_ids` and `is_prefix_key` are kept `#[allow(dead_code)]` for the port. |
+| 31 | Agent group placement: hands-on pin, explicit `under` parent, endpoint-held collapse | `b1d13113`, `e2b6d241`, `3aa309cc`, `5a3b26ae` (from `feat/sidebar-hierarchy`) | carried (0.9 port, `feat/agent-group-0.9`) | `src/agent_ownership.rs` (`AgentGroupPlacement`), `src/app/agents.rs` (`set_agent_group_target`, `set_agent_group_collapsed_target`, `agent_group_info`), `src/app/state.rs` (`agent_group_key`, `agent_group_collapsed`, `agent_group_would_cycle`) | server: `src/api/schema/agents.rs` (`AgentGroupSetParams`, `AgentGroupCollapseParams`, `AgentGroupInfo`), `src/server/client_shell.rs`, `src/cli/agent.rs`; client: `src/client/shell/tree.rs` (`agent_group_ancestors`, `toggle_agent_group`), `agent_sidebar.rs`, `context_menu.rs` | Placement lives on the terminal and persists in `session.json`; `agent.group.set` and `agent.group.collapse` are new advertised methods, frozen in `src/server/client_commands.rs` like `workspace.set_pinned` (decision 9). `agent list/get` carry `group`. CLI: `herdr agent group hands-on\|pin\|under\|auto\|clear\|collapse\|expand`. `ClientShellAgent.group {hands_on, parent_pane_id, collapsed}` is `#[serde(default)]`. The tree keeps a hands-on agent at the root, lets an explicit parent win over the owner, and folds on the endpoint (decision 15). Not ported: Rename/Close agent-row menu items beyond the pane items already reused; the multi-machine panel tree (decision 7); a tab or workspace focus into a server fold does not open it (only a `pane.focus` does). |
 
 ## Tests moved out
 
@@ -179,6 +180,8 @@ means changing an upstream test, so raise it with Alex first.
    sidebar width and the worktree-group collapse set. The server-side fields
    still exist and still round-trip through `session.json`; they are simply no
    longer what the sidebar reads.
+   *(Revised by decision 15: agent-group collapse is read from the endpoint
+   again; `collapsed_agent_groups` here is only the fallback.)*
 
 7. **The tree renders for the single-machine sidebar only.** With more than
    one machine connected, upstream's aggregated agent panel
@@ -243,6 +246,8 @@ means changing an upstream test, so raise it with Alex first.
     the collapse set needs within a boot, but it does mean a collapsed group
     reopens after a pane move. Publishing `agent_identity` would fix that and
     is the next step if it matters.
+    *(Revised by decision 15: the endpoint now holds the fold keyed by the
+    durable identity; the pane-id key applies only to the local fallback.)*
 
 14. **A fresh client preferences file is seeded from the legacy session file.**
     Upstream reads chrome state per client, and stage 1 stopped the server
@@ -253,6 +258,24 @@ means changing an upstream test, so raise it with Alex first.
     `preferences::migrated_from_session` seeds it from the session snapshot,
     including the fork's tree keys. Anything already in the preferences file
     wins.
+
+15. **The endpoint owns agent-group collapse.** Revises decisions 6 and 13 for
+    agent groups only. The sidebar chevron, the `toggle_agent_group` key and
+    `herdr agent group collapse|expand` all call `agent.group.collapse`, which
+    records the fold in the server's `collapsed_agent_group_keys` (persisted in
+    `session.json`) and publishes it as `ClientShellAgent.group.collapsed`.
+    The server key is the owner's durable agent identity, or `orch:<workspace-id>`
+    for an orchestrator group (`AppState::agent_group_key`), so a server fold no
+    longer depends on the owner's pane id. Every client, and the CLI, sees the
+    same fold. The per-client `collapsed_agent_groups` set from decision 6 stays
+    as a fallback, keyed by pane id as in decision 13: a client folds locally
+    only when the endpoint does not advertise `agent.group.collapse` (a stock or
+    older server). Opening a group clears both the local key and, when the
+    server holds it, the server fold. A `pane.focus` into a server-held fold
+    queues an `agent.group.collapse {collapsed: false}` behind the focus on the
+    same connection, the way the local reveal opens a local fold. Hands-on and
+    `under` placement are endpoint state from the start; they never had a
+    client-side form.
 
 ## Gates
 
