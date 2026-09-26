@@ -112,7 +112,7 @@ pub(super) struct ShellHitMap {
     pub(super) agent_sort_toggle: Rect,
     pub(super) agent_usage: Rect,
     /// Disclosure regions for collapsible ownership / orchestrator groups.
-    pub(super) agent_groups: Vec<(Rect, String)>,
+    pub(super) agent_groups: Vec<AgentGroupHit>,
     pub(super) tree_headers: Vec<TreeHeaderHit>,
     pub(super) tree_hidden_header: Rect,
     pub(super) automations_header: Rect,
@@ -260,6 +260,20 @@ pub(super) enum ClientChromeDrag {
     },
 }
 
+/// The chevron (and folded `+N` summary) of one agent group, on the owner's
+/// row or on a tree header standing in for it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct AgentGroupHit {
+    pub(super) rect: Rect,
+    /// Local collapse-set key: the owner pane id, or `orch:<workspace-id>`.
+    pub(super) key: String,
+    /// The group owner's pane, which `agent.group.collapse` targets.
+    pub(super) owner_pane_id: String,
+    pub(super) expanded: bool,
+    /// The server holds the fold, so only the endpoint can open it.
+    pub(super) server_collapsed: bool,
+}
+
 /// Hit regions on one space or tab header row in the unified tree view.
 pub(super) struct TreeHeaderHit {
     pub(super) rect: Rect,
@@ -269,6 +283,10 @@ pub(super) struct TreeHeaderHit {
     pub(super) plus: Rect,
     /// Space headers only: the pin toggle.
     pub(super) pin: Rect,
+    /// The agent-group control on a header standing in for a group owner
+    /// whose rows the layer toggles hide. Only set when the header has nothing
+    /// of its own to fold.
+    pub(super) group: Option<AgentGroupHit>,
     pub(super) workspace_id: String,
     /// `None` on a space header.
     pub(super) tab_id: Option<String>,
@@ -580,6 +598,12 @@ pub(super) enum ClientContextMenuAction {
     SendToProfile,
     ShareProfiles,
     ProfileSelect(usize),
+    FocusAgent,
+    ToggleHandsOn,
+    NestUnder,
+    ClearNesting,
+    ToggleAgentGroup,
+    NestUnderSelect(usize),
 }
 
 #[derive(Debug)]
@@ -616,6 +640,31 @@ pub(super) enum ClientContextMenuTarget {
         share: bool,
         entries: Vec<ClientProfileMenuEntry>,
     },
+    /// An agent row in the agents panel: focus, sidebar placement, its group.
+    Agent {
+        pane_id: String,
+        workspace_id: String,
+        /// Pinned hands-on (top-level) placement is set on this agent.
+        hands_on: bool,
+        /// An explicit `under` parent is set on this agent.
+        nested: bool,
+        /// The group this agent owns, when it owns one.
+        group: Option<AgentGroupHit>,
+    },
+    /// The "Nest under..." picker: automatic placement, or another agent in
+    /// the same space as the sidebar parent.
+    AgentNestUnder {
+        pane_id: String,
+        entries: Vec<ClientNestUnderEntry>,
+    },
+}
+
+/// One choice in the "Nest under..." picker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ClientNestUnderEntry {
+    /// `None` means automatic placement.
+    pub(super) parent_pane_id: Option<String>,
+    pub(super) label: String,
 }
 
 /// A profile choice is typed so the pane-only "Follow space" choice cannot
@@ -1420,34 +1469,10 @@ impl ClientShellState {
             .iter()
             .find(|tab| tab.tab_id == pane.tab_id)
             .map(|tab| super::tree::tab_key(&workspace_id, tab.number));
-        let mut group_keys = Vec::new();
-        let mut visited = HashSet::new();
-        let mut current = snapshot
-            .agents
-            .iter()
-            .find(|agent| agent.pane_id == pane_id);
-        while let Some(agent) = current {
-            if !visited.insert(agent.pane_id.clone()) {
-                break;
-            }
-            if let Some(owner) = agent.owner_pane_id.as_ref() {
-                group_keys.push(owner.clone());
-                current = snapshot
-                    .agents
-                    .iter()
-                    .find(|candidate| &candidate.pane_id == owner);
-            } else {
-                break;
-            }
-        }
-        if snapshot
-            .workspaces
-            .iter()
-            .find(|workspace| workspace.workspace_id == workspace_id)
-            .is_some_and(|workspace| workspace.orchestrator_mode)
-        {
-            group_keys.push(format!("orch:{workspace_id}"));
-        }
+        let group_keys = super::tree::agent_group_ancestors(snapshot, pane_id)
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect::<Vec<_>>();
 
         let tree = self.tree_chrome_mut();
         let mut changed = tree.collapsed_spaces.remove(&workspace_id);

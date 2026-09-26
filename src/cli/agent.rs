@@ -1,10 +1,10 @@
 use std::time::{Duration, Instant};
 
 use crate::api::schema::{
-    AgentOwnerSetParams, AgentPromptParams, AgentPromptWaitOptions, AgentReadParams,
-    AgentRenameParams, AgentSendKeysParams, AgentStartParams, AgentTarget, AgentWaitParams,
-    EmptyParams, ErrorBody, ErrorResponse, Method, PaneProcessInfoParams, PaneTarget, ReadFormat,
-    ReadSource, Request,
+    AgentGroupCollapseParams, AgentGroupPlacementKind, AgentGroupSetParams, AgentOwnerSetParams,
+    AgentPromptParams, AgentPromptWaitOptions, AgentReadParams, AgentRenameParams,
+    AgentSendKeysParams, AgentStartParams, AgentTarget, AgentWaitParams, EmptyParams, ErrorBody,
+    ErrorResponse, Method, PaneProcessInfoParams, PaneTarget, ReadFormat, ReadSource, Request,
 };
 
 const AGENT_START_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -29,6 +29,7 @@ pub(super) fn run_agent_command(args: &[String]) -> std::io::Result<i32> {
         "attach" => agent_attach(&args[1..]),
         "start" => agent_start(&args[1..]),
         "owner" => agent_owner(&args[1..]),
+        "group" => agent_group(&args[1..]),
         "explain" => agent_explain(&args[1..]),
         "help" | "--help" | "-h" => {
             print_agent_help();
@@ -1015,6 +1016,79 @@ fn agent_owner(args: &[String]) -> std::io::Result<i32> {
     }
 }
 
+fn agent_group(args: &[String]) -> std::io::Result<i32> {
+    match parse_agent_group(args) {
+        Ok((id, method)) => super::print_response(&super::send_request(&Request {
+            id: id.into(),
+            method,
+        })?),
+        Err(code) => Ok(code),
+    }
+}
+
+/// Parse `herdr agent group <verb> ...` into the request it sends. Usage
+/// errors print here and come back as the exit code.
+fn parse_agent_group(args: &[String]) -> Result<(&'static str, Method), i32> {
+    const USAGE: &str = "usage: herdr agent group hands-on <target>\n       herdr agent group under <target> <parent>\n       herdr agent group auto <target>\n       herdr agent group collapse <target>\n       herdr agent group expand <target>";
+    let Some(subcommand) = args.first().map(|arg| arg.as_str()) else {
+        eprintln!("{USAGE}");
+        return Err(2);
+    };
+    let one_target = |name: &str| -> Result<String, i32> {
+        match (args.get(1), args.get(2)) {
+            (Some(target), None) => Ok(target.clone()),
+            _ => {
+                eprintln!("usage: herdr agent group {name} <target>");
+                Err(2)
+            }
+        }
+    };
+    let set = |target: String, placement, parent| {
+        Ok((
+            "cli:agent:group:set",
+            Method::AgentGroupSet(AgentGroupSetParams {
+                target,
+                placement,
+                parent,
+            }),
+        ))
+    };
+    match subcommand {
+        "hands-on" | "pin" => set(
+            one_target("hands-on")?,
+            AgentGroupPlacementKind::HandsOn,
+            None,
+        ),
+        "auto" | "clear" => set(one_target("auto")?, AgentGroupPlacementKind::Auto, None),
+        "under" => {
+            let (Some(target), Some(parent), None) = (args.get(1), args.get(2), args.get(3)) else {
+                eprintln!("usage: herdr agent group under <target> <parent>");
+                return Err(2);
+            };
+            set(
+                target.clone(),
+                AgentGroupPlacementKind::Under,
+                Some(parent.clone()),
+            )
+        }
+        "collapse" | "expand" => Ok((
+            "cli:agent:group:collapse",
+            Method::AgentGroupCollapse(AgentGroupCollapseParams {
+                target: one_target(subcommand)?,
+                collapsed: subcommand == "collapse",
+            }),
+        )),
+        "help" | "--help" | "-h" => {
+            eprintln!("{USAGE}");
+            Err(0)
+        }
+        _ => {
+            eprintln!("{USAGE}");
+            Err(2)
+        }
+    }
+}
+
 fn print_agent_help() {
     eprintln!("herdr agent commands:");
     eprintln!("  herdr agent list");
@@ -1032,6 +1106,8 @@ fn print_agent_help() {
     );
     eprintln!("  herdr agent owner set <target> <owner>");
     eprintln!("  herdr agent owner clear <target>");
+    eprintln!("  herdr agent group hands-on|auto|collapse|expand <target>");
+    eprintln!("  herdr agent group under <target> <parent>");
     eprintln!("  herdr agent explain <target> [--json|--format text|json] [--verbose]");
     eprintln!(
         "  herdr agent explain --file PATH --agent LABEL [--json|--format text|json] [--verbose]"
@@ -1045,4 +1121,62 @@ fn parse_timeout(value: &str) -> Result<u64, i32> {
         eprintln!("{err}");
         2
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Result<(&'static str, Method), i32> {
+        parse_agent_group(&args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn agent_group_verbs_parse_into_their_requests() {
+        let set = |target: &str, placement, parent: Option<&str>| {
+            Method::AgentGroupSet(AgentGroupSetParams {
+                target: target.into(),
+                placement,
+                parent: parent.map(str::to_owned),
+            })
+        };
+        let collapse = |collapsed| {
+            Method::AgentGroupCollapse(AgentGroupCollapseParams {
+                target: "lead".into(),
+                collapsed,
+            })
+        };
+        for (args, expected) in [
+            (
+                &["hands-on", "worker"][..],
+                set("worker", AgentGroupPlacementKind::HandsOn, None),
+            ),
+            (
+                &["pin", "worker"],
+                set("worker", AgentGroupPlacementKind::HandsOn, None),
+            ),
+            (
+                &["under", "worker", "lead"],
+                set("worker", AgentGroupPlacementKind::Under, Some("lead")),
+            ),
+            (
+                &["auto", "worker"],
+                set("worker", AgentGroupPlacementKind::Auto, None),
+            ),
+            (
+                &["clear", "worker"],
+                set("worker", AgentGroupPlacementKind::Auto, None),
+            ),
+            (&["collapse", "lead"], collapse(true)),
+            (&["expand", "lead"], collapse(false)),
+        ] {
+            assert_eq!(
+                parse(args).map(|(_, method)| method),
+                Ok(expected),
+                "{args:?}"
+            );
+        }
+        assert_eq!(parse(&["under", "worker"]).map(|_| ()), Err(2));
+        assert_eq!(parse(&["help"]).map(|_| ()), Err(0));
+    }
 }

@@ -1116,6 +1116,12 @@ impl App {
             Method::AgentOwnerClear(target) => {
                 return self.handle_agent_owner_clear(request.id, target)
             }
+            Method::AgentGroupSet(params) => {
+                return self.handle_agent_group_set(request.id, params)
+            }
+            Method::AgentGroupCollapse(params) => {
+                return self.handle_agent_group_collapse(request.id, params)
+            }
             Method::AgentPrompt(_) => {
                 return responses::encode_error(
                     request.id,

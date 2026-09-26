@@ -73,6 +73,10 @@ pub(crate) enum KeybindAction {
     OpenNotificationTarget,
     Detach,
     OpenNavigator,
+    /// Collapse or expand the sidebar group the focused agent owns or sits in.
+    ToggleAgentGroup,
+    /// Pin or unpin the focused agent as hands-on (top-level in the sidebar).
+    ToggleHandsOn,
 }
 
 pub(crate) fn resolve_direct_binding(
@@ -160,6 +164,11 @@ pub(crate) fn resolve_non_indexed_action(
         ),
         (&keybinds.detach, KeybindAction::Detach),
         (&keybinds.goto, KeybindAction::OpenNavigator),
+        (
+            &keybinds.toggle_agent_group,
+            KeybindAction::ToggleAgentGroup,
+        ),
+        (&keybinds.toggle_hands_on, KeybindAction::ToggleHandsOn),
     ] {
         if action_matches(bindings, key, dispatch) {
             return Some(action);

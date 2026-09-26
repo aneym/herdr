@@ -1888,6 +1888,17 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
+                let agent_pane_id = self
+                    .hits
+                    .agents
+                    .iter()
+                    .find(|(rect, _)| super::contains(*rect, point))
+                    .map(|(_, pane_id)| pane_id.clone());
+                if let Some(pane_id) = agent_pane_id {
+                    self.open_agent_context_menu(pane_id, mouse.column, mouse.row);
+                    outcome.repaint = true;
+                    return;
+                }
                 let workspace_id = (!self.sidebar_collapsed)
                     .then(|| self.active_endpoint_workspace_at(point))
                     .flatten();
@@ -2213,13 +2224,10 @@ impl ClientShellState {
                     .hits
                     .agent_groups
                     .iter()
-                    .find(|(rect, _)| super::contains(*rect, point))
-                    .map(|(_, key)| key.clone());
-                if let Some(key) = agent_group {
-                    let tree = self.tree_chrome_mut();
-                    super::tree::ClientTreeChrome::toggle(&mut tree.collapsed_agent_groups, key);
-                    self.persist_chrome_preferences(outcome);
-                    outcome.repaint = true;
+                    .find(|hit| super::contains(hit.rect, point))
+                    .cloned();
+                if let Some(hit) = agent_group {
+                    self.toggle_agent_group(&hit, outcome);
                     return;
                 }
                 if self.handle_endpoint_agent_click(point, outcome) {
@@ -2546,6 +2554,15 @@ impl ClientShellState {
         else {
             return false;
         };
+        if let Some(group) = hit
+            .group
+            .as_ref()
+            .filter(|group| super::contains(group.rect, point))
+            .cloned()
+        {
+            self.toggle_agent_group(&group, outcome);
+            return true;
+        }
         let chevron = super::contains(hit.chevron, point);
         let plus = super::contains(hit.plus, point);
         let pin = super::contains(hit.pin, point);

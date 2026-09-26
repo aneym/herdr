@@ -119,6 +119,62 @@ pub(super) struct TreeHeader {
     pub(super) indent: u8,
     /// This header's workspace or tab holds the focused pane.
     pub(super) active: bool,
+    /// When the agents layer is hidden the header stands in for its agent
+    /// rows; if one of them owns a group this carries that group's state, so
+    /// the header can show the group chevron and `+N` instead of leaving the
+    /// group with no control at all.
+    pub(super) group: Option<TreeHeaderGroup>,
+}
+
+/// An agent group surfaced on the header that stands in for its owner.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct TreeHeaderGroup {
+    /// Local collapse-set key of the group.
+    pub(super) key: String,
+    pub(super) owner_pane_id: String,
+    pub(super) expanded: bool,
+    pub(super) server_collapsed: bool,
+    /// Descendants hidden by the folded group.
+    pub(super) hidden_children: usize,
+    /// Most demanding status among them; colors the `+N`.
+    pub(super) hidden_status: Option<crate::api::schema::AgentStatus>,
+}
+
+impl TreeHeaderGroup {
+    /// Width of the summary drawn before the chevron: `+N ` while folded,
+    /// nothing while open.
+    pub(super) fn summary_width(&self) -> usize {
+        if self.expanded || self.hidden_children == 0 {
+            return 0;
+        }
+        format!("+{} ", self.hidden_children).len()
+    }
+}
+
+impl TreeHeader {
+    /// The header's chevron slot belongs to an agent group only when the
+    /// header has nothing of its own to fold, so the two never compete for
+    /// the same cell.
+    pub(super) fn group_chevron(&self) -> Option<&TreeHeaderGroup> {
+        self.group.as_ref().filter(|_| !self.collapsible)
+    }
+}
+
+/// The group a header should surface for the rows it stands in for: the first
+/// row that owns a group.
+fn tree_header_group(rows: &[AgentRow]) -> Option<TreeHeaderGroup> {
+    rows.iter().find_map(|row| {
+        let expanded = row.group.expanded?;
+        let key = row.group.group_key.clone()?;
+        Some(TreeHeaderGroup {
+            key,
+            owner_pane_id: row.pane_id.clone(),
+            expanded,
+            server_collapsed: row.group.server_collapsed,
+            hidden_children: row.group.hidden_children,
+            hidden_status: row.group.hidden_status,
+        })
+    })
 }
 
 pub(super) enum AgentPanelListEntry {
@@ -328,6 +384,12 @@ pub(super) fn tree_list_entries(
                 // Highlighting it while a tab inside it is selected reads as two
                 // things being active at once.
                 active: false,
+                // Stands in for its agents whenever the layers that would show
+                // them are off, collapsed or not: a collapsed space with nothing
+                // beneath it still needs the group control.
+                group: layers_hidden
+                    .then(|| tree_header_group(&workspace_rows))
+                    .flatten(),
             }));
             if space_collapsed {
                 continue;
@@ -378,6 +440,13 @@ pub(super) fn tree_list_entries(
                     active: !tree.show_agents
                         && tab.is_some_and(|tab| tab.focused)
                         && snapshot.focused_workspace_id.as_deref() == Some(workspace_id.as_str()),
+                    // A tab whose agent rows are hidden stands in for them, even
+                    // when the tab itself was collapsed earlier: that collapse
+                    // hides nothing now, and a stale key must not swallow the
+                    // only control the group has.
+                    group: (!tree.show_agents)
+                        .then(|| tree_header_group(&tab_rows))
+                        .flatten(),
                 }));
                 if collapsed {
                     continue;
@@ -428,6 +497,7 @@ pub(super) fn tree_list_entries(
                 pinned: true,
                 indent: 0,
                 active: false,
+                group: None,
             });
             // A pinned space carries no agent rows, so collapsing it hides
             // nothing on its own; the section is where it goes to get out of the
@@ -520,6 +590,13 @@ pub(super) struct AgentGroupRender {
     /// Collapse key for this owner row: its own pane id, or
     /// `orch:<workspace-id>` for an orchestrator group.
     pub(super) group_key: Option<String>,
+    /// The server has this group folded (`agent.group.collapse`). A server
+    /// fold is shared by every client and the CLI, so the chevron clears it
+    /// through the endpoint rather than the local set.
+    pub(super) server_collapsed: bool,
+    /// Most demanding status among the descendants a fold hides; colors the
+    /// `+N` summary so blocked or unread work still shows through.
+    pub(super) hidden_status: Option<crate::api::schema::AgentStatus>,
 }
 
 /// Reorder agent rows so each agent's children sit directly beneath it,
@@ -560,23 +637,34 @@ pub(super) fn arrange_agent_hierarchy(
         .collect::<HashMap<_, _>>();
     let mut children = vec![Vec::<usize>::new(); rows.len()];
     let mut has_parent = vec![false; rows.len()];
+    // Parent selection, in priority order: a hands-on pin makes the row a root
+    // no matter what; an explicit `under` parent that resolves wins over
+    // ownership; otherwise the current owner. An explicit parent that does not
+    // resolve was flagged orphaned by the server and falls through to the
+    // owner edge so the row never disappears.
     for (index, row) in rows.iter().enumerate() {
-        let Some(owner) = row
-            .owner_pane_id
+        if row.placement.hands_on {
+            continue;
+        }
+        let lookup = |pane_id: &String| index_by_pane.get(pane_id).copied();
+        let Some(parent) = row
+            .placement
+            .parent_pane_id
             .as_ref()
-            .and_then(|pane_id| index_by_pane.get(pane_id).copied())
-            .filter(|owner| *owner != index)
+            .and_then(lookup)
+            .or_else(|| row.owner_pane_id.as_ref().and_then(lookup))
+            .filter(|parent| *parent != index)
         else {
             continue;
         };
-        children[owner].push(index);
+        children[parent].push(index);
         has_parent[index] = true;
     }
 
     // Orchestrator-mode workspaces: the first tab's agent adopts the
     // workspace's other top-level agents, so the whole workspace herds as one
-    // collapsible group. Ownership edges win, so an owned agent stays under its
-    // owner.
+    // collapsible group. Ownership and explicit edges win, so a parented agent
+    // stays under its parent, and a hands-on agent is never adopted.
     let mut orchestrator_by_workspace = HashMap::<&str, usize>::new();
     let mut group_counts = vec![None; rows.len()];
     for (index, row) in rows.iter().enumerate() {
@@ -588,7 +676,7 @@ pub(super) fn arrange_agent_hierarchy(
         }
     }
     for index in 0..rows.len() {
-        if has_parent[index] {
+        if has_parent[index] || rows[index].placement.hands_on {
             continue;
         }
         let Some(&owner) = orchestrator_by_workspace.get(rows[index].workspace_id.as_str()) else {
@@ -638,7 +726,15 @@ pub(super) fn arrange_agent_hierarchy(
     arranged
 }
 
-fn hidden_descendants(index: usize, children: &[Vec<usize>], visited: &mut [bool]) -> usize {
+/// Count the descendants a fold hides and pick the most demanding status
+/// among them, marking each one visited so it is not listed elsewhere.
+fn hidden_descendants(
+    index: usize,
+    pending: &[Option<AgentRow>],
+    children: &[Vec<usize>],
+    visited: &mut [bool],
+    status: &mut Option<crate::api::schema::AgentStatus>,
+) -> usize {
     let mut count = 0;
     for &child in &children[index] {
         if visited[child] {
@@ -646,7 +742,14 @@ fn hidden_descendants(index: usize, children: &[Vec<usize>], visited: &mut [bool
         }
         visited[child] = true;
         count += 1;
-        count += hidden_descendants(child, children, visited);
+        if let Some(row) = pending[child].as_ref() {
+            if status.is_none_or(|current| {
+                cycle_attention_rank(row.status) > cycle_attention_rank(current)
+            }) {
+                *status = Some(row.status);
+            }
+        }
+        count += hidden_descendants(child, pending, children, visited, status);
     }
     count
 }
@@ -687,13 +790,20 @@ fn push_subtree(
     } else {
         Some(row.pane_id.clone())
     };
-    let expanded = group_key
-        .as_ref()
-        .is_none_or(|key| !tree.collapsed_agent_groups.contains(key));
+    // Folded when this client folded it locally or the server holds the fold
+    // (`herdr agent group collapse`, or another client's chevron).
+    let expanded = !row.placement.collapsed
+        && group_key
+            .as_ref()
+            .is_none_or(|key| !tree.collapsed_agent_groups.contains(key));
     row.group.expanded = Some(expanded);
     row.group.group_key = group_key;
+    row.group.server_collapsed = row.placement.collapsed;
     if !expanded {
-        row.group.hidden_children = hidden_descendants(index, children, visited);
+        let mut status = None;
+        row.group.hidden_children =
+            hidden_descendants(index, pending, children, visited, &mut status);
+        row.group.hidden_status = status;
         arranged.push(row);
         return;
     }
@@ -714,6 +824,133 @@ fn push_subtree(
     }
 }
 
+/// The agent groups that hold `pane_id` in the tree, nearest first, walked by
+/// the same parent rule as [`arrange_agent_hierarchy`]: a hands-on pin stops
+/// the walk, an explicit parent wins over the owner. The last entry is the
+/// orchestrator row when the walk ends on an unpinned root of an
+/// orchestrator-mode workspace. Each entry is (local collapse key, owner).
+pub(super) fn agent_group_ancestors<'a>(
+    snapshot: &'a ClientShellSnapshot,
+    pane_id: &str,
+) -> Vec<(String, &'a crate::protocol::ClientShellAgent)> {
+    let find = |pane_id: &str| {
+        snapshot
+            .agents
+            .iter()
+            .find(|agent| agent.pane_id == pane_id)
+    };
+    let mut ancestors = Vec::new();
+    let mut visited = HashSet::new();
+    let Some(mut current) = find(pane_id) else {
+        return ancestors;
+    };
+    loop {
+        if !visited.insert(current.pane_id.clone()) || current.group.hands_on {
+            return ancestors;
+        }
+        let parent = current
+            .group
+            .parent_pane_id
+            .as_deref()
+            .and_then(find)
+            .or_else(|| current.owner_pane_id.as_deref().and_then(find));
+        match parent {
+            Some(parent) => {
+                ancestors.push((parent.pane_id.clone(), parent));
+                current = parent;
+            }
+            None => break,
+        }
+    }
+    // An unpinned root: an orchestrator workspace's first-tab agent adopts it.
+    let orchestrator = snapshot
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.workspace_id == current.workspace_id)
+        .filter(|workspace| workspace.orchestrator_mode)
+        .and_then(|workspace| {
+            let first_tab = snapshot
+                .tabs
+                .iter()
+                .find(|tab| tab.workspace_id == workspace.workspace_id)?;
+            snapshot
+                .agents
+                .iter()
+                .find(|agent| agent.tab_id == first_tab.tab_id)
+        });
+    if let Some(orchestrator) = orchestrator.filter(|agent| agent.pane_id != current.pane_id) {
+        ancestors.push((format!("orch:{}", current.workspace_id), orchestrator));
+    }
+    ancestors
+}
+
+/// Candidate sidebar parents for the agent in `pane_id`: "Automatic" first,
+/// then every other agent in the same space in panel order. A descendant can
+/// never be the parent, so it is left out rather than offered as a choice the
+/// endpoint would reject.
+pub(super) fn nest_under_entries(
+    snapshot: &ClientShellSnapshot,
+    sort: crate::config::AgentPanelSortConfig,
+    pane_id: &str,
+) -> Vec<ClientNestUnderEntry> {
+    let Some(agent) = snapshot
+        .agents
+        .iter()
+        .find(|agent| agent.pane_id == pane_id)
+    else {
+        return Vec::new();
+    };
+    let current = agent.group.parent_pane_id.as_deref();
+    let mark = |label: String, is_current: bool| {
+        if is_current {
+            format!("{label} \u{2713}")
+        } else {
+            label
+        }
+    };
+    let mut entries = vec![ClientNestUnderEntry {
+        parent_pane_id: None,
+        label: mark(
+            "Automatic".into(),
+            current.is_none() && !agent.group.hands_on,
+        ),
+    }];
+    for candidate_id in super::agent_sidebar::ordered_agent_pane_ids(snapshot, sort) {
+        let Some(candidate) = snapshot
+            .agents
+            .iter()
+            .find(|candidate| candidate.pane_id == candidate_id)
+        else {
+            continue;
+        };
+        if candidate.pane_id == pane_id || candidate.workspace_id != agent.workspace_id {
+            continue;
+        }
+        let descends = agent_group_ancestors(snapshot, &candidate.pane_id)
+            .iter()
+            .any(|(_, ancestor)| ancestor.pane_id == pane_id);
+        if descends {
+            continue;
+        }
+        let name = candidate
+            .display_agent
+            .as_deref()
+            .or(candidate.name.as_deref())
+            .or(candidate.title.as_deref())
+            .or(candidate.agent.as_deref())
+            .filter(|name| !name.is_empty() && *name != candidate.pane_id);
+        let label = match name {
+            Some(name) => format!("{name}  {}", candidate.pane_id),
+            None => candidate.pane_id.clone(),
+        };
+        entries.push(ClientNestUnderEntry {
+            parent_pane_id: Some(candidate.pane_id.clone()),
+            label: mark(label, current == Some(candidate.pane_id.as_str())),
+        });
+    }
+    entries
+}
+
 /// One entry in the flat ⌘E rotation, in agent-panel order.
 pub(super) struct AgentCycleEntry {
     pub(super) pane_id: String,
@@ -723,6 +960,74 @@ pub(super) struct AgentCycleEntry {
 }
 
 impl ClientShellState {
+    /// Fold or open one agent group from its chevron.
+    ///
+    /// The endpoint holds the fold when it can (`agent.group.collapse`), so
+    /// the chevron, `herdr agent group collapse` and every other client agree.
+    /// A fold this client made on its own (before the endpoint knew the
+    /// method, or against an endpoint that still does not) stays in the local
+    /// set, and opening the group clears both.
+    pub(super) fn toggle_agent_group(
+        &mut self,
+        hit: &AgentGroupHit,
+        outcome: &mut ClientShellInput,
+    ) {
+        let method = |collapsed: bool| {
+            crate::api::schema::Method::AgentGroupCollapse(
+                crate::api::schema::AgentGroupCollapseParams {
+                    target: hit.owner_pane_id.clone(),
+                    collapsed,
+                },
+            )
+        };
+        let endpoint_folds = self.supports_endpoint_method(&method(true));
+        if hit.expanded {
+            if endpoint_folds {
+                self.push_endpoint_method(method(true), outcome);
+            } else {
+                let tree = self.tree_chrome_mut();
+                tree.collapsed_agent_groups.insert(hit.key.clone());
+                self.persist_chrome_preferences(outcome);
+            }
+        } else {
+            let tree = self.tree_chrome_mut();
+            if tree.collapsed_agent_groups.remove(&hit.key) {
+                self.persist_chrome_preferences(outcome);
+            }
+            if hit.server_collapsed && endpoint_folds {
+                self.push_endpoint_method(method(false), outcome);
+            }
+        }
+        outcome.repaint = true;
+    }
+
+    /// The group the `toggle_agent_group` key acts on for `pane_id`: the group
+    /// this agent owns when it owns one, otherwise the nearest group holding
+    /// it. Derived from the snapshot, so a row hidden inside a fold can still
+    /// reopen it from the keyboard.
+    pub(super) fn agent_group_for_pane(&self, pane_id: &str) -> Option<AgentGroupHit> {
+        let snapshot = self.snapshot.as_deref()?;
+        let tree = self
+            .tree_chrome
+            .get(&self.active_endpoint_id)
+            .unwrap_or(&self.tree_chrome_default);
+        let own = snapshot.agents.iter().find_map(|agent| {
+            agent_group_ancestors(snapshot, &agent.pane_id)
+                .into_iter()
+                .next()
+                .filter(|(_, owner)| owner.pane_id == pane_id)
+        });
+        let (key, owner) =
+            own.or_else(|| agent_group_ancestors(snapshot, pane_id).into_iter().next())?;
+        Some(AgentGroupHit {
+            rect: Rect::default(),
+            expanded: !owner.group.collapsed && !tree.collapsed_agent_groups.contains(&key),
+            key,
+            owner_pane_id: owner.pane_id.clone(),
+            server_collapsed: owner.group.collapsed,
+        })
+    }
+
     /// The agent panel's flat order, minus anything the tree has folded away.
     /// What was folded should not catch ⌘E, so its agents leave the attention
     /// rotation until the space reopens.
