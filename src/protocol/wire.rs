@@ -1105,9 +1105,32 @@ pub struct ClientShellAgent {
     /// agent, and for an owner that no longer resolves.
     #[serde(default)]
     pub owner_pane_id: Option<String>,
-    /// The recorded current owner no longer resolves to a live agent.
+    /// The recorded current owner, or the explicit sidebar parent, no longer
+    /// resolves to a live agent.
     #[serde(default)]
     pub orphaned: bool,
+    /// Explicit sidebar placement (`agent group`) and the endpoint-side
+    /// collapse state of the group this agent owns.
+    #[serde(default)]
+    pub group: ClientShellAgentGroup,
+}
+
+/// Sidebar placement published for one agent. Presentation only: ownership
+/// is untouched. Every field defaults, so a pre-placement endpoint decodes as
+/// automatic placement with nothing collapsed.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientShellAgentGroup {
+    /// Pinned hands-on: always a top-level row, never folded into a group.
+    #[serde(default)]
+    pub hands_on: bool,
+    /// Pane hosting the explicit `under` parent, when it resolves. Wins over
+    /// `owner_pane_id` for nesting.
+    #[serde(default)]
+    pub parent_pane_id: Option<String>,
+    /// The endpoint records the group this agent owns as collapsed
+    /// (`agent group collapse` or a client chevron).
+    #[serde(default)]
+    pub collapsed: bool,
 }
 
 /// Origin-relative geometry for one pane in a rendered pane surface.

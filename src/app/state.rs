@@ -1481,6 +1481,88 @@ impl AppState {
         }
         false
     }
+
+    /// Terminal hosting this pane's agent, when the pane hosts one.
+    fn agent_terminal(
+        &self,
+        ws_idx: usize,
+        pane_id: crate::layout::PaneId,
+    ) -> Option<&crate::terminal::TerminalState> {
+        self.workspaces
+            .get(ws_idx)
+            .and_then(|workspace| workspace.pane_state(pane_id))
+            .and_then(|pane| self.terminals.get(&pane.attached_terminal_id))
+            .filter(|terminal| terminal.is_agent_terminal())
+    }
+
+    /// The sidebar parent this agent would sit under after explicit
+    /// placement is applied: an explicit `Under` parent wins, hands-on has no
+    /// parent, otherwise the current owner. Orchestrator adoption is not part
+    /// of this chain because it never nests deeper than one level.
+    fn effective_agent_group_parent(
+        &self,
+        terminal: &crate::terminal::TerminalState,
+    ) -> Option<crate::agent_ownership::AgentOwnerRef> {
+        use crate::agent_ownership::AgentGroupPlacement;
+        match terminal.agent_group.as_ref() {
+            Some(AgentGroupPlacement::HandsOn) => None,
+            Some(AgentGroupPlacement::Under(parent)) => Some(parent.clone()),
+            None => terminal
+                .agent_ownership
+                .as_ref()
+                .and_then(|ownership| ownership.current.clone()),
+        }
+    }
+
+    /// Whether nesting `child_identity` beneath `parent_identity` in the
+    /// sidebar would create a cycle through explicit placements and
+    /// ownership edges.
+    pub fn agent_group_would_cycle(&self, child_identity: &str, parent_identity: &str) -> bool {
+        if child_identity == parent_identity {
+            return true;
+        }
+        let mut visited = std::collections::HashSet::new();
+        let mut cursor = parent_identity.to_string();
+        while visited.insert(cursor.clone()) {
+            let Some((ws_idx, pane_id)) = self.agent_pane_by_identity(&cursor) else {
+                return false;
+            };
+            let Some(next) = self
+                .agent_terminal(ws_idx, pane_id)
+                .and_then(|terminal| self.effective_agent_group_parent(terminal))
+            else {
+                return false;
+            };
+            if next.agent_id == child_identity {
+                return true;
+            }
+            cursor = next.agent_id;
+        }
+        false
+    }
+
+    /// Collapse key of the sidebar group this agent owns: the synthetic
+    /// `orch:<workspace-id>` key for an orchestrator workspace's first-tab
+    /// agent, otherwise the agent's durable identity. Shared by the
+    /// `agent.group.collapse` API and the client-shell snapshot so the CLI and
+    /// the sidebar chevron agree.
+    pub fn agent_group_key(&self, ws_idx: usize, pane_id: crate::layout::PaneId) -> Option<String> {
+        let workspace = self.workspaces.get(ws_idx)?;
+        let tab_idx = workspace
+            .tabs
+            .iter()
+            .position(|tab| tab.panes.contains_key(&pane_id))?;
+        if tab_idx == 0 && workspace.orchestrator_mode {
+            return Some(format!("orch:{}", workspace.id));
+        }
+        self.agent_terminal(ws_idx, pane_id)?.agent_identity.clone()
+    }
+
+    /// Whether the sidebar group this agent owns is collapsed on the endpoint.
+    pub fn agent_group_collapsed(&self, ws_idx: usize, pane_id: crate::layout::PaneId) -> bool {
+        self.agent_group_key(ws_idx, pane_id)
+            .is_some_and(|key| self.collapsed_agent_group_keys.contains(&key))
+    }
 }
 
 #[cfg(test)]

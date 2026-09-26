@@ -13,6 +13,8 @@ pub(crate) const MAX_ENDPOINT_REQUEST_ID_BYTES: usize = 128;
 const ENDPOINT_RESPONSE_CHUNK_BYTES: usize = 512 * 1024;
 
 const CLIENT_SHELL_METHODS: &[&str] = &[
+    "agent.group.collapse",
+    "agent.group.set",
     "client_shell.surface.set",
     "command.invoke",
     "integration.install",
@@ -301,6 +303,15 @@ mod tests {
                 .map(|digest| !digest.is_empty()),
             Some(true),
             "workspace.set_pinned must advertise a shape"
+        );
+        // Fork: sidebar agent placement (docs/fork/port-0.9/PORT.md, ledger 31).
+        assert_eq!(
+            actual.remove("agent.group.set").as_deref(),
+            Some("aca9370a5347ce2dcfba71406c8a390f28e8bd10bba933fc03dd0c238282f593")
+        );
+        assert_eq!(
+            actual.remove("agent.group.collapse").as_deref(),
+            Some("88727f924ed40baaba298a76296aa4aab15922471e7898b0b22bb9ab8bb25547")
         );
         assert_eq!(
             actual.remove("pane.link.resolve").as_deref(),

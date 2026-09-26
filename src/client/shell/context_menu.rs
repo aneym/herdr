@@ -134,6 +134,53 @@ impl ClientContextMenuOverlay {
                     action: Action::ProfileSelect(index),
                 })
                 .collect(),
+            ClientContextMenuTarget::Agent {
+                hands_on,
+                nested,
+                group,
+                ..
+            } => {
+                let mut items = vec![
+                    item("Focus", Action::FocusAgent),
+                    item("Rename pane", Action::RenamePane),
+                    item(
+                        if *hands_on {
+                            "Unpin hands-on"
+                        } else {
+                            "Pin hands-on"
+                        },
+                        Action::ToggleHandsOn,
+                    ),
+                    item("Nest under...", Action::NestUnder),
+                ];
+                if *nested {
+                    items.push(item("Clear nesting", Action::ClearNesting));
+                }
+                if let Some(group) = group {
+                    items.push(item(
+                        if group.expanded {
+                            "Collapse group"
+                        } else {
+                            "Expand group"
+                        },
+                        Action::ToggleAgentGroup,
+                    ));
+                }
+                items.extend([
+                    item("Send to profile", Action::SendToProfile),
+                    item("Share profiles", Action::ShareProfiles),
+                    item("Close pane", Action::ClosePane),
+                ]);
+                items
+            }
+            ClientContextMenuTarget::AgentNestUnder { entries, .. } => entries
+                .iter()
+                .enumerate()
+                .map(|(index, entry)| ClientContextMenuItem {
+                    label: entry.label.clone(),
+                    action: Action::NestUnderSelect(index),
+                })
+                .collect(),
         }
     }
 }
@@ -459,8 +506,154 @@ impl ClientShellState {
                 action,
                 outcome,
             ),
+            ClientContextMenuTarget::Agent {
+                pane_id,
+                workspace_id,
+                hands_on,
+                group,
+                ..
+            } => self.activate_agent_context_action(
+                pane_id,
+                workspace_id,
+                hands_on,
+                group,
+                action,
+                menu_position,
+                outcome,
+            ),
+            ClientContextMenuTarget::AgentNestUnder { pane_id, entries } => {
+                if let ClientContextMenuAction::NestUnderSelect(index) = action {
+                    if let Some(entry) = entries.get(index) {
+                        self.set_agent_group_placement(
+                            pane_id,
+                            entry.parent_pane_id.clone(),
+                            false,
+                            outcome,
+                        );
+                    }
+                }
+            }
         }
         outcome.repaint = true;
+    }
+
+    /// Open the agent-row menu for the agent in `pane_id`, reading its
+    /// placement and group from the snapshot and the last rendered panel.
+    pub(super) fn open_agent_context_menu(&mut self, pane_id: String, x: u16, y: u16) {
+        let Some(agent) = self.snapshot.as_deref().and_then(|snapshot| {
+            snapshot
+                .agents
+                .iter()
+                .find(|agent| agent.pane_id == pane_id)
+        }) else {
+            return;
+        };
+        let workspace_id = agent.workspace_id.clone();
+        let hands_on = agent.group.hands_on;
+        let nested = agent.group.parent_pane_id.is_some();
+        let group = self
+            .hits
+            .agent_groups
+            .iter()
+            .find(|hit| hit.owner_pane_id == pane_id)
+            .cloned();
+        self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
+            target: ClientContextMenuTarget::Agent {
+                pane_id,
+                workspace_id,
+                hands_on,
+                nested,
+                group,
+            },
+            x,
+            y,
+            highlighted: 0,
+        }));
+    }
+
+    #[allow(clippy::too_many_arguments)] // mirrors activate_pane_context_action
+    fn activate_agent_context_action(
+        &mut self,
+        pane_id: String,
+        workspace_id: String,
+        hands_on: bool,
+        group: Option<AgentGroupHit>,
+        action: ClientContextMenuAction,
+        menu_position: (u16, u16),
+        outcome: &mut ClientShellInput,
+    ) {
+        match action {
+            ClientContextMenuAction::FocusAgent => self.push_endpoint_method(
+                crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget { pane_id }),
+                outcome,
+            ),
+            ClientContextMenuAction::ToggleHandsOn => {
+                self.set_agent_group_placement(pane_id, None, !hands_on, outcome);
+            }
+            ClientContextMenuAction::ClearNesting => {
+                self.set_agent_group_placement(pane_id, None, false, outcome);
+            }
+            ClientContextMenuAction::NestUnder => {
+                let Some(snapshot) = self.snapshot.as_deref() else {
+                    return;
+                };
+                let entries = super::tree::nest_under_entries(
+                    snapshot,
+                    self.config.agent_panel_sort,
+                    &pane_id,
+                );
+                self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
+                    target: ClientContextMenuTarget::AgentNestUnder { pane_id, entries },
+                    x: menu_position.0,
+                    y: menu_position.1,
+                    highlighted: 0,
+                }));
+            }
+            ClientContextMenuAction::ToggleAgentGroup => {
+                if let Some(group) = group {
+                    self.toggle_agent_group(&group, outcome);
+                }
+            }
+            ClientContextMenuAction::RenamePane
+            | ClientContextMenuAction::SendToProfile
+            | ClientContextMenuAction::ShareProfiles
+            | ClientContextMenuAction::ClosePane => self.activate_pane_context_action(
+                pane_id,
+                workspace_id,
+                None,
+                false,
+                action,
+                menu_position,
+                outcome,
+            ),
+            _ => {}
+        }
+    }
+
+    /// Send one `agent.group.set`: hands-on, under `parent`, or automatic.
+    pub(super) fn set_agent_group_placement(
+        &mut self,
+        pane_id: String,
+        parent_pane_id: Option<String>,
+        hands_on: bool,
+        outcome: &mut ClientShellInput,
+    ) {
+        use crate::api::schema::AgentGroupPlacementKind as Kind;
+        let placement = if hands_on {
+            Kind::HandsOn
+        } else if parent_pane_id.is_some() {
+            Kind::Under
+        } else {
+            Kind::Auto
+        };
+        self.push_endpoint_method(
+            crate::api::schema::Method::AgentGroupSet(crate::api::schema::AgentGroupSetParams {
+                target: pane_id,
+                placement,
+                parent: parent_pane_id,
+            }),
+            outcome,
+        );
     }
 
     pub(super) fn activate_profile_context_action(

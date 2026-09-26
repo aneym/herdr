@@ -42,6 +42,7 @@ fn agent(
         focused: false,
         owner_pane_id: None,
         orphaned: false,
+        group: Default::default(),
     }
 }
 

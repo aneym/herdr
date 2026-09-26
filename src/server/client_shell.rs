@@ -156,24 +156,43 @@ pub(super) fn snapshot_with_completions(
         .map(|agent| {
             let pane_id = agent.pane_id;
             let focused = focused_pane_id.as_deref() == Some(pane_id.as_str());
-            let ownership = app
-                .parse_pane_id(&pane_id)
-                .and_then(|(workspace_index, pane)| {
-                    let terminal_id = app
-                        .state
-                        .workspaces
-                        .get(workspace_index)?
-                        .pane_state(pane)?
-                        .attached_terminal_id
-                        .clone();
-                    app.state.terminals.get(&terminal_id)
-                })
-                .and_then(|terminal| terminal.agent_ownership.as_ref());
+            let location = app.parse_pane_id(&pane_id);
+            let terminal = location.and_then(|(workspace_index, pane)| {
+                let terminal_id = app
+                    .state
+                    .workspaces
+                    .get(workspace_index)?
+                    .pane_state(pane)?
+                    .attached_terminal_id
+                    .clone();
+                app.state.terminals.get(&terminal_id)
+            });
+            let ownership = terminal.and_then(|terminal| terminal.agent_ownership.as_ref());
             let current_owner = ownership.and_then(|ownership| ownership.current.as_ref());
             let owner_pane_id = current_owner
                 .and_then(|owner| app.state.resolve_agent_owner(owner))
                 .and_then(|(workspace_index, pane)| app.public_pane_id(workspace_index, pane));
-            let orphaned = current_owner.is_some() && owner_pane_id.is_none();
+            let mut orphaned = current_owner.is_some() && owner_pane_id.is_none();
+            let mut group = protocol::ClientShellAgentGroup {
+                collapsed: location.is_some_and(|(workspace_index, pane)| {
+                    app.state.agent_group_collapsed(workspace_index, pane)
+                }),
+                ..Default::default()
+            };
+            match terminal.and_then(|terminal| terminal.agent_group.as_ref()) {
+                Some(crate::agent_ownership::AgentGroupPlacement::HandsOn) => {
+                    group.hands_on = true;
+                }
+                Some(crate::agent_ownership::AgentGroupPlacement::Under(parent)) => {
+                    group.parent_pane_id = app.state.resolve_agent_owner(parent).and_then(
+                        |(workspace_index, pane)| app.public_pane_id(workspace_index, pane),
+                    );
+                    // A vanished explicit parent is as visible a loss as a
+                    // vanished owner: same marker.
+                    orphaned |= group.parent_pane_id.is_none();
+                }
+                None => {}
+            }
             let mut state_labels = agent.state_labels.into_iter().collect::<Vec<_>>();
             state_labels.sort_by(|left, right| left.0.cmp(&right.0));
             let mut tokens = agent.tokens.into_iter().collect::<Vec<_>>();
@@ -195,6 +214,7 @@ pub(super) fn snapshot_with_completions(
                 focused,
                 owner_pane_id: owner_pane_id.clone(),
                 orphaned,
+                group,
             }
         })
         .collect();
@@ -687,6 +707,83 @@ mod tests {
             )),
             Some(("0.8.3", "### Changed\n- Client shell", true))
         );
+    }
+
+    #[test]
+    fn snapshot_publishes_agent_group_placement_and_the_server_fold() {
+        use crate::agent_ownership::{AgentGroupPlacement, AgentOwnerRef};
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = crate::app::App::new(
+            &crate::config::Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        let names = ["lead", "worker", "pinned", "stray"];
+        app.state.workspaces = names
+            .iter()
+            .map(|name| crate::workspace::Workspace::test_new(name))
+            .collect();
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        let terminal_id = |app: &crate::app::App, ws_idx: usize| {
+            let tab = &app.state.workspaces[ws_idx].tabs[0];
+            tab.panes[&tab.root_pane].attached_terminal_id.clone()
+        };
+        for (ws_idx, name) in names.iter().enumerate() {
+            let id = terminal_id(&app, ws_idx);
+            let terminal = app.state.terminals.get_mut(&id).unwrap();
+            terminal.set_agent_name((*name).to_string());
+            terminal.set_detected_state(
+                Some(crate::detect::Agent::Pi),
+                crate::detect::AgentState::Idle,
+            );
+        }
+        let lead_id = terminal_id(&app, 0);
+        let lead_identity = app
+            .state
+            .terminals
+            .get_mut(&lead_id)
+            .unwrap()
+            .ensure_agent_identity()
+            .expect("lead identity");
+        let parent = |agent_id: &str| AgentOwnerRef {
+            agent_id: agent_id.into(),
+            name: None,
+            agent: None,
+            session: None,
+        };
+        let worker_id = terminal_id(&app, 1);
+        app.state.terminals.get_mut(&worker_id).unwrap().agent_group =
+            Some(AgentGroupPlacement::Under(parent(&lead_identity)));
+        let pinned_id = terminal_id(&app, 2);
+        app.state.terminals.get_mut(&pinned_id).unwrap().agent_group =
+            Some(AgentGroupPlacement::HandsOn);
+        let stray_id = terminal_id(&app, 3);
+        app.state.terminals.get_mut(&stray_id).unwrap().agent_group =
+            Some(AgentGroupPlacement::Under(parent("agent_gone")));
+        app.state.collapsed_agent_group_keys.insert(lead_identity);
+
+        let snapshot = snapshot(&app, "boot", 1, None, None);
+        let group = |name: &str| {
+            let agent = snapshot
+                .agents
+                .iter()
+                .find(|agent| agent.name.as_deref() == Some(name))
+                .expect("agent in snapshot");
+            (agent.group.clone(), agent.orphaned, agent.pane_id.clone())
+        };
+
+        let (lead, _, lead_pane) = group("lead");
+        assert!(lead.collapsed);
+        let (worker, worker_orphaned, _) = group("worker");
+        assert_eq!(worker.parent_pane_id.as_deref(), Some(lead_pane.as_str()));
+        assert!(!worker_orphaned && !worker.collapsed);
+        assert!(group("pinned").0.hands_on);
+        let (stray, stray_orphaned, _) = group("stray");
+        assert_eq!(stray.parent_pane_id, None);
+        assert!(stray_orphaned);
     }
 
     #[test]
