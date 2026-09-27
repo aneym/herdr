@@ -59,9 +59,9 @@ SECRET_PATTERNS = [
     (re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"), "[redacted]"),
     (re.compile(r"(?<![A-Za-z0-9])(?:sk-(?:ant-|proj-)?|gh[pousr]_|github_pat_|(?:xox[abcdeprs]|xapp)-)[A-Za-z0-9_-]+"), "[redacted]"),
     (re.compile(r"(?<![A-Za-z0-9])(?:AKIA|ASIA)[0-9A-Z]{16}(?![A-Za-z0-9])"), "[redacted]"),
-    # Other issuers' prefixed tokens (GitLab, npm, PyPI, Hugging Face, Stripe, Shopify,
+    # Other issuers' prefixed tokens (every GitLab gl<kind>- token, npm, PyPI, Hugging Face, Stripe, Shopify,
     # DigitalOcean, Linear, Figma, Atlassian, Tailscale, SendGrid, Google, Doppler, xAI).
-    (re.compile(r"(?<![A-Za-z0-9])(?:glpat-|glptt-|gldt-|glrt-|GR1348941|npm_|pypi-|hf_|[rsp]k_(?:live|test)_|"
+    (re.compile(r"(?<![A-Za-z0-9])(?:gl[a-z]{2,6}-|GR1348941|npm_|pypi-|hf_|[rsp]k_(?:live|test)_|"
                 r"whsec_|shp(?:at|ss|ca|pa)_|do[opr]_v1_|lin_(?:api|oauth)_|figd_|ATATT|tskey-|"
                 r"SG\.|AIza|ya29\.|dp\.(?:st|ct|sa|scrt)\.|xai-)[A-Za-z0-9_.=-]{8,}"), "[redacted]"),
     (re.compile(r'''(?P<prefix>["']?[\w.-]*(?:key|token|secret|password|passwd|pwd|credential|auth|cookie|session)[\w.-]*["']?\s*[:=]\s*)(?P<quote>["'])(?P<value>[^\r\n]*?)(?P=quote)''', re.I), None),
