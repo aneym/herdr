@@ -57,8 +57,8 @@ SECRET_PATTERNS = [
     (re.compile(r"\bAuthorization\s*:\s*[^\r\n]+", re.I), "Authorization: [redacted]"),
     (re.compile(r"\bBearer\s+[^\s\"']+", re.I), "Bearer [redacted]"),
     (re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"), "[redacted]"),
-    (re.compile(r"\b(?:sk-(?:ant-|proj-)?|gh[pous]_|github_pat_|xox[abposr]-)[A-Za-z0-9_-]+"), "[redacted]"),
-    (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "[redacted]"),
+    (re.compile(r"\b(?:sk-(?:ant-|proj-)?|gh[pousr]_|github_pat_|(?:xox[abcdeprs]|xapp)-)[A-Za-z0-9_-]+"), "[redacted]"),
+    (re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"), "[redacted]"),
     (re.compile(r'''(?P<prefix>["']?[\w.-]*(?:key|token|secret|password|passwd|pwd|credential|auth|cookie|session)[\w.-]*["']?\s*[:=]\s*)(?P<quote>["'])(?P<value>[^\r\n]*?)(?P=quote)''', re.I), None),
     (re.compile(r'''(?P<prefix>\b[\w.-]*(?:key|token|secret|password|passwd|pwd|credential|auth|cookie|session)[\w.-]*\s*[:=]\s*)(?P<value>[^\s,;"']+)''', re.I), None),
     # Preserve ordinary SHA-1 git hashes (40 hex digits), but not longer or mixed tokens.
@@ -540,27 +540,32 @@ def state_dir() -> Path:
 
 def unblock_ask(agent: dict, tail: str = "") -> dict:
     """A v2 `question` ask: the agent is waiting on a person and the fleet has no view."""
-    title = agent.get("terminal_title_stripped") or agent.get("title") or ""
-    who = agent.get("name") or agent.get("display_agent") or agent.get("agent") or "agent"
+    # Treat all pane and agent metadata as untrusted, including identifiers used
+    # in instructions. Redact before truncating any ask field or pane tail.
+    title = redact(str(agent.get("terminal_title_stripped") or agent.get("title") or ""))
+    who = redact(str(agent.get("name") or agent.get("display_agent") or agent.get("agent") or "agent"))
+    agent_id = redact(str(agent["id"]))
+    machine = redact(str(agent["machine"]))
+    status = redact(str(agent["status"]))
     why = (
-        f"Agent {agent['id']} ({who}) is {agent['status']}"
+        f"Agent {agent_id} ({who}) is {status}"
         + (f": {title}" if title else "")
         + ". Your answer is not typed in for you: reply with "
-        + f'herdr-fleet prompt {agent["id"]} "<answer>".'
+        + f'herdr-fleet prompt {agent_id} "<answer>".'
     )
     if tail:
-        why += "\n\nLast lines of the pane:\n" + tail
+        why += "\n\nLast lines of the pane:\n" + redact(tail)
     return {
         "kind": "file",
         "purpose": "question",
         "project": "herdr-fleet",
-        "title": f"{who} on {agent['machine']} is waiting"[:90],
-        "summary": f"{who} is {agent['status']} on {agent['machine']}"[:140],
+        "title": f"{who} on {machine} is waiting"[:90],
+        "summary": f"{who} is {status} on {machine}"[:140],
         "why": why[:1200],
         "ttl_seconds": 86400,
         "steps": [
-            f"Read the pane: herdr-fleet read {agent['id']} --lines 40",
-            f'Reply: herdr-fleet prompt {agent["id"]} "<your answer>"',
+            f"Read the pane: herdr-fleet read {agent_id} --lines 40",
+            f'Reply: herdr-fleet prompt {agent_id} "<your answer>"',
         ],
         "fields": [
             {
@@ -654,9 +659,11 @@ def file_unblock(waiting: list[dict]) -> list[dict]:
                 )
             try:
                 reply = json.loads(result.stdout)
-                ticket = reply.get("ticket") or reply.get("id") or result.stdout.strip()
             except ValueError:
-                ticket = result.stdout.strip()
+                reply = None
+            ticket = (reply.get("ticket") or reply.get("id")) if isinstance(reply, dict) else None
+            if not isinstance(ticket, str) or not ticket:
+                ticket = "unknown"
             seen[key] = ticket
             filed.append({"id": agent["id"], "ticket": ticket})
             temporary = None
