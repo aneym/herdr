@@ -538,19 +538,29 @@ def state_dir() -> Path:
     return Path(base) / "herdr-fleet"
 
 
-SAFE_IDENT = re.compile(r"[A-Za-z0-9._:@/-]{1,128}")
+SAFE_IDENT = re.compile(r"[A-Za-z0-9._:@-]{1,128}")
+PANE_ID = re.compile(r"w[A-Za-z0-9]{1,16}:p[A-Za-z0-9]{1,16}")
 
 
 def safe_ident(value) -> str:
-    """An id or machine label as-is when it is a plain identifier. Known token shapes
-    are still redacted; the generic long-string rule (the last pattern) is skipped,
-    because a long host label is not a secret."""
+    """A machine label as-is when it is a plain identifier. Known token shapes are
+    redacted, and so is any run of 32+ characters between separators (an opaque
+    token). A long label made of ordinary words survives, where the generic
+    long-string rule in redact() would swallow the whole label."""
     text = str(value)
     if not SAFE_IDENT.fullmatch(text):
         return "[invalid-id]"
     if any(pattern.search(text) for pattern, _ in SECRET_PATTERNS[:-1]):
         return "[redacted]"
+    if any(len(part) >= 32 for part in re.split(r"[._:@-]", text)):
+        return "[redacted]"
     return text
+
+
+def fleet_ref(agent: dict) -> str:
+    """The <machine>/<pane> target for the reply command, built from checked parts."""
+    pane = str(agent.get("pane_id") or "")
+    return f"{safe_ident(agent['machine'])}/{pane if PANE_ID.fullmatch(pane) else '[invalid-id]'}"
 
 
 def unblock_ask(agent: dict, tail: str = "") -> dict:
@@ -561,7 +571,7 @@ def unblock_ask(agent: dict, tail: str = "") -> dict:
     # "[redacted]" and break the command.
     title = redact(str(agent.get("terminal_title_stripped") or agent.get("title") or ""))
     who = redact(str(agent.get("name") or agent.get("display_agent") or agent.get("agent") or "agent"))
-    agent_id = safe_ident(agent["id"])
+    agent_id = fleet_ref(agent)
     machine = safe_ident(agent["machine"])
     status = redact(str(agent["status"]))
     why = (
