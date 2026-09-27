@@ -62,7 +62,8 @@ SECRET_PATTERNS = [
     (re.compile(r'''(?P<prefix>["']?[\w.-]*(?:key|token|secret|password|passwd|pwd|credential|auth|cookie|session)[\w.-]*["']?\s*[:=]\s*)(?P<quote>["'])(?P<value>[^\r\n]*?)(?P=quote)''', re.I), None),
     (re.compile(r'''(?P<prefix>\b[\w.-]*(?:key|token|secret|password|passwd|pwd|credential|auth|cookie|session)[\w.-]*\s*[:=]\s*)(?P<value>[^\s,;"']+)''', re.I), None),
     # Preserve ordinary SHA-1 git hashes (40 hex digits), but not longer or mixed tokens.
-    (re.compile(r"(?<![A-Za-z0-9+/_=-])(?![0-9a-fA-F]{32,40}(?![A-Za-z0-9+/_=-]))(?=[A-Za-z0-9+/_=-]*[A-Za-z])(?=[A-Za-z0-9+/_=-]*[0-9])[A-Za-z0-9+/_=-]{32,}(?![A-Za-z0-9+/_=-])"), "[redacted]"),
+    # A 32+ character run with a letter in it is treated as a token even with no digit.
+    (re.compile(r"(?<![A-Za-z0-9+/_=-])(?![0-9a-fA-F]{32,40}(?![A-Za-z0-9+/_=-]))(?=[A-Za-z0-9+/_=-]*[A-Za-z])[A-Za-z0-9+/_=-]{32,}(?![A-Za-z0-9+/_=-])"), "[redacted]"),
 ]
 
 
@@ -550,9 +551,13 @@ def safe_ident(value) -> str:
     text = str(value)
     if not SAFE_IDENT.fullmatch(text):
         return "[invalid-id]"
-    if any(pattern.search(text) for pattern, _ in SECRET_PATTERNS[:-1]):
-        return "[redacted]"
-    if any(len(part) >= 32 for part in re.split(r"[._:@-]", text)):
+    # Check each separator-delimited part on its own too: "_" is a word character, so
+    # a token after "host_" has no word boundary in the whole label.
+    parts = re.split(r"[._:@-]", text)
+    for candidate in [text, " ".join(parts), *parts]:
+        if any(pattern.search(candidate) for pattern, _ in SECRET_PATTERNS[:-1]):
+            return "[redacted]"
+    if any(len(part) >= 32 for part in parts):
         return "[redacted]"
     return text
 
