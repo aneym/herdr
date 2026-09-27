@@ -538,14 +538,31 @@ def state_dir() -> Path:
     return Path(base) / "herdr-fleet"
 
 
+SAFE_IDENT = re.compile(r"[A-Za-z0-9._:@/-]{1,128}")
+
+
+def safe_ident(value) -> str:
+    """An id or machine label as-is when it is a plain identifier. Known token shapes
+    are still redacted; the generic long-string rule (the last pattern) is skipped,
+    because a long host label is not a secret."""
+    text = str(value)
+    if not SAFE_IDENT.fullmatch(text):
+        return "[invalid-id]"
+    if any(pattern.search(text) for pattern, _ in SECRET_PATTERNS[:-1]):
+        return "[redacted]"
+    return text
+
+
 def unblock_ask(agent: dict, tail: str = "") -> dict:
     """A v2 `question` ask: the agent is waiting on a person and the fleet has no view."""
-    # Treat all pane and agent metadata as untrusted, including identifiers used
-    # in instructions. Redact before truncating any ask field or pane tail.
+    # Pane text and agent metadata are untrusted: redact them. The agent id and
+    # machine label go into a command the person runs, so they are checked against
+    # an identifier charset instead; redaction could turn a long label into
+    # "[redacted]" and break the command.
     title = redact(str(agent.get("terminal_title_stripped") or agent.get("title") or ""))
     who = redact(str(agent.get("name") or agent.get("display_agent") or agent.get("agent") or "agent"))
-    agent_id = redact(str(agent["id"]))
-    machine = redact(str(agent["machine"]))
+    agent_id = safe_ident(agent["id"])
+    machine = safe_ident(agent["machine"])
     status = redact(str(agent["status"]))
     why = (
         f"Agent {agent_id} ({who}) is {status}"
