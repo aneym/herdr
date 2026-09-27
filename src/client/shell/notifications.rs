@@ -308,6 +308,7 @@ mod tests {
             focused: true,
             owner_pane_id: None,
             orphaned: false,
+            group: Default::default(),
         });
         state.set_snapshot(Box::new(snapshot));
 
@@ -356,6 +357,7 @@ mod tests {
             focused: false,
             owner_pane_id: None,
             orphaned: false,
+            group: Default::default(),
         });
         state.set_snapshot(Box::new(snapshot.clone()));
         let now = std::time::Instant::now();

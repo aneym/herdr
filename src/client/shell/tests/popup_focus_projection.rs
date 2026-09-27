@@ -954,6 +954,7 @@ fn sidebar_scrollbars_use_proportional_shared_geometry_and_drag() {
             focused: false,
             owner_pane_id: None,
             orphaned: false,
+            group: Default::default(),
         });
     }
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));

@@ -22,8 +22,12 @@ pub(super) struct AgentRow {
     pub(super) indent: u8,
     /// Pane hosting this agent's resolved current owner.
     pub(super) owner_pane_id: Option<String>,
-    /// The recorded current owner no longer resolves to a live agent.
+    /// The recorded current owner, or the explicit sidebar parent, no longer
+    /// resolves to a live agent.
     pub(super) orphaned: bool,
+    /// Explicit sidebar placement published by the server: the hands-on pin,
+    /// the explicit parent and the server-held group fold.
+    pub(super) placement: crate::protocol::ClientShellAgentGroup,
     /// Placement inside its ownership or orchestrator group.
     pub(super) group: super::tree::AgentGroupRender,
 }
@@ -149,6 +153,39 @@ pub(super) fn tree_header_chevron_rect(rect: Rect) -> Rect {
     Rect::new(rect.right().saturating_sub(width), rect.y, width, 1)
 }
 
+/// Hit region of the agent-group control on a header that carries one. On a
+/// tab header it spans the `+N` summary and the chevron; on a space header the
+/// pin and plus sit between them, so only the chevron slot toggles.
+fn tree_header_group_rect(
+    rect: Rect,
+    group: &super::tree::TreeHeaderGroup,
+    is_space: bool,
+) -> Rect {
+    let width = if is_space {
+        2
+    } else {
+        2 + group.summary_width() as u16
+    }
+    .min(rect.width);
+    if width == 0 {
+        return Rect::default();
+    }
+    Rect::new(rect.right().saturating_sub(width), rect.y, width, 1)
+}
+
+/// The folded `+N` summary takes the color of the most demanding agent it
+/// hides, so blocked or finished work still shows through the fold.
+fn hidden_summary_style(
+    status: Option<crate::api::schema::AgentStatus>,
+    config: &ClientShellConfig,
+) -> Style {
+    Style::default()
+        .fg(status.map_or(config.palette.overlay0, |status| {
+            status_color(status, &config.palette)
+        }))
+        .add_modifier(Modifier::BOLD)
+}
+
 /// New-tab plus on a space header: the cell pair left of the chevron slot. The
 /// chevron slot is reserved whether or not a chevron is drawn, so this rect
 /// never moves.
@@ -179,9 +216,14 @@ fn render_panel_list_entry(
     match entry {
         AgentPanelListEntry::Agent(row) | AgentPanelListEntry::Automation(row) => {
             hits.agents.push((rect, row.pane_id.clone()));
-            if let Some(key) = row.group.group_key.clone() {
-                hits.agent_groups
-                    .push((agent_group_chevron_rect(rect, row), key));
+            if let (Some(key), Some(expanded)) = (row.group.group_key.clone(), row.group.expanded) {
+                hits.agent_groups.push(AgentGroupHit {
+                    rect: agent_group_chevron_rect(rect, row),
+                    key,
+                    owner_pane_id: row.pane_id.clone(),
+                    expanded,
+                    server_collapsed: row.group.server_collapsed,
+                });
             }
             render_agent_row(buffer, rect, row, config);
         }
@@ -263,8 +305,13 @@ fn render_tree_header(
         buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
     }
     let prefix = 1 + u16::from(header.indent);
+    // A header standing in for a group owner takes that group's chevron (and
+    // its folded `+N`), since with agent rows hidden it is the only place the
+    // group can be opened from.
+    let group = header.group_chevron();
     // Space headers reserve extra cells for the pin and new-tab plus.
-    let trailing_width = if is_space { 10 } else { 6 };
+    let trailing_width = if is_space { 10 } else { 6 }
+        + group.map(|group| group.summary_width() as u16).unwrap_or(0);
     put_text(
         buffer,
         rect.x.saturating_add(prefix),
@@ -303,6 +350,23 @@ fn render_tree_header(
             Style::default().fg(palette.overlay0),
         )
     };
+    if let Some(group) = group.filter(|group| group.summary_width() > 0) {
+        trailing.push((
+            format!("+{} ", group.hidden_children),
+            hidden_summary_style(group.hidden_status, config),
+        ));
+    }
+    let group_chevron = group.map(|group| {
+        (
+            if group.expanded {
+                "\u{25be} "
+            } else {
+                "\u{25b8} "
+            }
+            .to_owned(),
+            Style::default().fg(palette.accent),
+        )
+    });
     if is_space {
         // Pin toggle, one cell pair left of the plus, so the trailing strip
         // reads [pin][+][chevron]. A pinned space keeps its header row even when
@@ -320,11 +384,15 @@ fn render_tree_header(
         trailing.push(("+ ".to_owned(), Style::default().fg(palette.overlay0)));
         trailing.push(if header.collapsible {
             chevron(header.collapsed)
+        } else if let Some(group_chevron) = group_chevron {
+            group_chevron
         } else {
             ("  ".to_owned(), Style::default())
         });
     } else if header.collapsible {
         trailing.push(chevron(header.collapsed));
+    } else if let Some(group_chevron) = group_chevron {
+        trailing.push(group_chevron);
     } else if !trailing.is_empty() {
         trailing.push((" ".to_owned(), Style::default()));
     }
@@ -357,6 +425,13 @@ fn render_tree_header(
         } else {
             Rect::default()
         },
+        group: group.map(|group| AgentGroupHit {
+            rect: tree_header_group_rect(rect, group, is_space),
+            key: group.key.clone(),
+            owner_pane_id: group.owner_pane_id.clone(),
+            expanded: group.expanded,
+            server_collapsed: group.server_collapsed,
+        }),
         workspace_id: header.workspace_id.clone(),
         tab_id: header.tab_id.clone(),
         key: header.key.clone(),
@@ -621,6 +696,7 @@ pub(super) fn agent_row(
         indent: 0,
         owner_pane_id: agent.owner_pane_id.clone(),
         orphaned: agent.orphaned,
+        placement: agent.group.clone(),
         group: super::tree::AgentGroupRender::default(),
     })
 }
@@ -723,6 +799,17 @@ pub(super) fn render_agent_row(
             spans.push(ratatui::text::Span::raw("  "));
             prefix += 2;
         }
+        if index == 0 && row.placement.hands_on {
+            // Same pin glyph as a pinned space: this row stays put, outside
+            // every group.
+            spans.push(ratatui::text::Span::styled(
+                "\u{26b2} ",
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            prefix += 2;
+        }
         if index == 0 && row.orphaned {
             // The recorded owner is gone; say so rather than silently
             // flattening the row into the roots.
@@ -762,9 +849,7 @@ pub(super) fn render_agent_row(
         if !expanded && row.group.hidden_children > 0 {
             trailing.push((
                 format!("+{} ", row.group.hidden_children),
-                Style::default()
-                    .fg(status_color(row.status, palette))
-                    .add_modifier(Modifier::BOLD),
+                hidden_summary_style(row.group.hidden_status.or(Some(row.status)), config),
             ));
         }
         trailing.push((

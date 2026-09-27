@@ -172,6 +172,7 @@ fn malformed_owner_cycle_does_not_block_explicit_reveal() {
             focused: pane_id == "pane_1",
             owner_pane_id: Some(owner.into()),
             orphaned: false,
+            group: Default::default(),
         });
     }
     state.set_snapshot(Box::new(snapshot));

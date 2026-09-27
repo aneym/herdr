@@ -329,12 +329,15 @@ pub struct SessionConfig {
     /// Resume supported AI-agent panes into their native conversation sessions
     /// when restoring a Herdr session. Default: true.
     pub resume_agents_on_restore: bool,
+    /// Milliseconds between automatic agent restores. Zero disables spacing.
+    pub startup_per_agent_delay_ms: u32,
 }
 
 impl Default for SessionConfig {
     fn default() -> Self {
         Self {
             resume_agents_on_restore: true,
+            startup_per_agent_delay_ms: 100,
         }
     }
 }
@@ -416,6 +419,10 @@ pub struct KeysConfig {
     pub goto: BindingConfig,
     /// Open live pane resource usage. Unset by default.
     pub usage: BindingConfig,
+    /// Collapse or expand the sidebar agent group the focused agent owns or sits in. Unset by default.
+    pub toggle_agent_group: BindingConfig,
+    /// Pin or unpin the focused agent as hands-on, keeping it top-level in the sidebar. Unset by default.
+    pub toggle_hands_on: BindingConfig,
     /// Open the session navigator with search focused. Default: "prefix+f"
     pub search: BindingConfig,
     /// Move workspace selection up in navigate mode. Default: "up".
@@ -556,6 +563,10 @@ pub(crate) struct KeysConfigOverlay {
     goto: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     usage: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    toggle_agent_group: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    toggle_hands_on: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     search: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -700,6 +711,8 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(workspace_picker);
         apply_field!(goto);
         apply_field!(usage);
+        apply_field!(toggle_agent_group);
+        apply_field!(toggle_hands_on);
         apply_field!(search);
         apply_field!(navigate_workspace_up);
         apply_field!(navigate_workspace_down);
@@ -809,6 +822,8 @@ impl KeysConfig {
         copy_effective_action_field!(workspace_picker, keybinds.workspace_picker);
         copy_effective_action_field!(goto, keybinds.goto);
         copy_effective_action_field!(usage, keybinds.usage);
+        copy_effective_action_field!(toggle_agent_group, keybinds.toggle_agent_group);
+        copy_effective_action_field!(toggle_hands_on, keybinds.toggle_hands_on);
         copy_effective_action_field!(search, keybinds.search);
         copy_effective_action_field!(navigate_workspace_up, keybinds.navigate.workspace_up);
         copy_effective_action_field!(navigate_workspace_down, keybinds.navigate.workspace_down);
@@ -1192,6 +1207,8 @@ impl Default for KeysConfig {
             workspace_picker: BindingConfig::one("prefix+w"),
             goto: BindingConfig::one("prefix+g"),
             usage: BindingConfig::empty(),
+            toggle_agent_group: BindingConfig::empty(),
+            toggle_hands_on: BindingConfig::empty(),
             search: BindingConfig::one("prefix+f"),
             navigate_workspace_up: BindingConfig::one("up"),
             navigate_workspace_down: BindingConfig::one("down"),
@@ -1501,13 +1518,16 @@ new_cwd = "~/Projects"
     fn resume_agents_on_restore_defaults_on_and_parses() {
         let default_config = Config::default();
         assert!(default_config.session.resume_agents_on_restore);
+        assert_eq!(default_config.session.startup_per_agent_delay_ms, 100);
 
         let toml = r#"
 [session]
 resume_agents_on_restore = false
+startup_per_agent_delay_ms = 0
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert!(!config.session.resume_agents_on_restore);
+        assert_eq!(config.session.startup_per_agent_delay_ms, 0);
     }
 
     #[test]

@@ -539,6 +539,9 @@ fn restore_tab(
         let saved_agent_ownership = saved_pane
             .and_then(|p| p.agent_ownership.as_ref())
             .map(|ownership| ownership.to_ownership());
+        let saved_agent_group = saved_pane
+            .and_then(|p| p.agent_group.as_ref())
+            .and_then(|group| group.to_placement());
         let saved_terminal_title = saved_pane.and_then(|p| p.terminal_title.clone());
         let saved_history =
             old_id.and_then(|old_id| history.and_then(|history| history.panes.get(old_id)));
@@ -571,6 +574,10 @@ fn restore_tab(
             .unwrap_or_default();
         let imported_runtime = old_pane_id.and_then(|old_id| imported_panes.remove(&old_id));
         let was_imported = imported_runtime.is_some();
+        #[cfg(unix)]
+        let handoff_agent_state = imported_runtime
+            .as_ref()
+            .and_then(|imported| imported.state.agent_state.clone());
         let pending_native_agent_restore = if was_imported {
             None
         } else {
@@ -588,6 +595,7 @@ fn restore_tab(
             }
             terminal.agent_identity = saved_agent_identity.clone();
             terminal.agent_ownership = saved_agent_ownership.clone();
+            terminal.agent_group = saved_agent_group.clone();
             terminal.profiles = saved_profiles.clone();
             // Seed the last known title so sidebar thread titles survive the
             // restart; the live pane's next title emission overwrites it.
@@ -694,6 +702,7 @@ fn restore_tab(
                     // so its durable identity and ownership carry over.
                     terminal.agent_identity = saved_agent_identity.clone();
                     terminal.agent_ownership = saved_agent_ownership.clone();
+                    terminal.agent_group = saved_agent_group.clone();
                 }
                 terminal.profiles = saved_profiles.clone();
                 // Seed the last known title so sidebar thread titles survive
@@ -718,6 +727,10 @@ fn restore_tab(
                         false,
                         std::time::Instant::now(),
                     );
+                }
+                #[cfg(unix)]
+                if let Some(agent_state) = handoff_agent_state {
+                    terminal.restore_handoff_agent_state(agent_state);
                 }
                 panes.insert(*id, PaneState::new(terminal_id.clone()));
                 terminal_runtimes.insert(terminal_id, runtime);
@@ -1363,6 +1376,7 @@ mod tests {
                             launch_argv: None,
                             agent_identity: None,
                             agent_ownership: None,
+                            agent_group: None,
                             profiles: Vec::new(),
                         },
                     )]),
@@ -1485,6 +1499,7 @@ mod tests {
                             profiles: Vec::new(),
                             agent_identity: Some("agent_worker".into()),
                             agent_ownership: Some(ownership.clone()),
+                            agent_group: None,
                         },
                     )]),
                     zoomed: false,
@@ -1586,6 +1601,7 @@ mod tests {
                                     current: None,
                                 },
                             ),
+                            agent_group: None,
                         },
                     )]),
                     zoomed: false,
@@ -1675,6 +1691,7 @@ mod tests {
                                 launch_argv: None,
                                 agent_identity: None,
                                 agent_ownership: None,
+                                agent_group: None,
                                 profiles: Vec::new(),
                             },
                         ),
@@ -1690,6 +1707,7 @@ mod tests {
                                 launch_argv: None,
                                 agent_identity: None,
                                 agent_ownership: None,
+                                agent_group: None,
                                 profiles: Vec::new(),
                             },
                         ),
@@ -1759,6 +1777,7 @@ mod tests {
                     launch_argv: None,
                     agent_identity: None,
                     agent_ownership: None,
+                    agent_group: None,
                     profiles: Vec::new(),
                 },
             )
@@ -1778,6 +1797,7 @@ mod tests {
             launch_argv: None,
             agent_identity: None,
             agent_ownership: None,
+            agent_group: None,
             profiles: Vec::new(),
         };
         let snapshot = SessionSnapshot {
@@ -1949,6 +1969,7 @@ mod tests {
                             launch_argv: None,
                             agent_identity: None,
                             agent_ownership: None,
+                            agent_group: None,
                             profiles: Vec::new(),
                         },
                     )]),
@@ -2032,6 +2053,116 @@ mod tests {
             handoff_runtimes.is_empty(),
             "handoff restore should not replace pending native agent resume with a shell runtime"
         );
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn live_handoff_preserves_hook_status_until_next_report() {
+        for state_before_handoff in [AgentState::Working, AgentState::Blocked] {
+            let (snapshot, _) = snapshot_with_saved_pane_history();
+            let (events, _events_rx) = mpsc::channel(32);
+            let (workspaces, mut terminals, runtimes) = restore(
+                &snapshot,
+                None,
+                24,
+                80,
+                4096,
+                test_restore_shell(),
+                crate::config::ShellModeConfig::NonLogin,
+                false,
+                events.clone(),
+                Arc::new(Notify::new()),
+                Arc::new(RenderSignal::new()),
+            );
+            let terminal = terminals.values_mut().next().unwrap();
+            terminal
+                .set_detected_agent_process_at(crate::detect::Agent::Pi, std::time::Instant::now());
+            terminal.set_persisted_agent_session(crate::agent_resume::PersistedAgentSession {
+                source: "herdr:pi".into(),
+                agent: "pi".into(),
+                session_ref: crate::agent_resume::AgentSessionRef::path(
+                    "/var/tmp/handoff-test.jsonl",
+                )
+                .unwrap(),
+            });
+            terminal.set_hook_authority_with_session_ref(
+                "herdr:pi".into(),
+                "pi".into(),
+                state_before_handoff,
+                None,
+                Some(
+                    crate::agent_resume::AgentSessionRef::path("/var/tmp/handoff-test.jsonl")
+                        .unwrap(),
+                ),
+                Some(1),
+            );
+            assert_eq!(terminal.state, state_before_handoff);
+            let runtimes = crate::terminal::TerminalRuntimeRegistry::from(runtimes);
+            let snapshot = crate::persist::capture(
+                &workspaces,
+                &terminals,
+                &runtimes,
+                Some(0),
+                String::new(),
+                0,
+                crate::persist::UiPrefs::default(),
+            );
+            let pane_id = workspaces[0].tabs[0].panes.keys().next().copied().unwrap();
+            let runtime = runtimes.values().next().unwrap();
+            runtime
+                .pause_handoff_reader(std::time::Duration::from_secs(2))
+                .unwrap();
+            let mut state = runtime.handoff_runtime_state(pane_id.raw());
+            state.agent_state = terminals.values().next().unwrap().handoff_agent_state();
+            let state = serde_json::from_value(serde_json::to_value(state).unwrap()).unwrap();
+            let mut imports = HashMap::from([(
+                pane_id.raw(),
+                crate::handoff_runtime::ImportedHandoffRuntime {
+                    master_fd: runtime.duplicate_handoff_fd().unwrap(),
+                    state,
+                },
+            )]);
+            let (_, mut restored_terminals, restored_runtimes) = restore_handoff(
+                &snapshot,
+                4096,
+                test_restore_shell(),
+                crate::config::ShellModeConfig::NonLogin,
+                &mut imports,
+                events,
+                Arc::new(Notify::new()),
+                Arc::new(RenderSignal::new()),
+            )
+            .unwrap();
+            drop(restored_runtimes);
+            drop(runtimes);
+            let terminal = restored_terminals.values_mut().next().unwrap();
+            assert_eq!(terminal.state, state_before_handoff);
+            terminal.set_detected_state(Some(crate::detect::Agent::Pi), AgentState::Idle);
+            assert_eq!(
+                terminal.state, state_before_handoff,
+                "screen fallback must not erase the transferred hook status"
+            );
+            terminal.set_hook_authority_with_session_ref(
+                "herdr:pi".into(),
+                "pi".into(),
+                AgentState::Idle,
+                None,
+                Some(
+                    crate::agent_resume::AgentSessionRef::path("/var/tmp/handoff-test.jsonl")
+                        .unwrap(),
+                ),
+                Some(2),
+            );
+            assert_eq!(
+                terminal.state,
+                AgentState::Idle,
+                "the next hook report must take effect immediately"
+            );
+            assert_eq!(
+                terminal.finish_agent_process_acquisition(),
+                state_before_handoff == AgentState::Blocked
+            );
+        }
     }
 
     #[tokio::test]
@@ -2169,6 +2300,7 @@ mod tests {
                 profiles: Vec::new(),
                 agent_identity: None,
                 agent_ownership: None,
+                agent_group: None,
             },
         );
         let mut history = SessionHistorySnapshot {

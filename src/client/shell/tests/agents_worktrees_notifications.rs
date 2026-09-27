@@ -366,6 +366,7 @@ fn pane_cycle_last_and_agent_actions_resolve_to_stable_pane_ids() {
             focused: true,
             owner_pane_id: None,
             orphaned: false,
+            group: Default::default(),
         },
         ClientShellAgent {
             pane_id: "pane_2".into(),
@@ -384,6 +385,7 @@ fn pane_cycle_last_and_agent_actions_resolve_to_stable_pane_ids() {
             focused: false,
             owner_pane_id: None,
             orphaned: false,
+            group: Default::default(),
         },
     ];
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
@@ -460,6 +462,7 @@ fn agent_sidebar_honors_priority_symbols_tokens_and_stable_hits() {
             focused: true,
             owner_pane_id: None,
             orphaned: false,
+            group: Default::default(),
         },
         ClientShellAgent {
             pane_id: "pane_2".into(),
@@ -478,6 +481,7 @@ fn agent_sidebar_honors_priority_symbols_tokens_and_stable_hits() {
             focused: false,
             owner_pane_id: None,
             orphaned: false,
+            group: Default::default(),
         },
     ];
     let mut config = Config::default();
@@ -603,6 +607,7 @@ fn muted_agent_sidebar_rows_do_not_stack_terminal_faint() {
         focused: true,
         owner_pane_id: None,
         orphaned: false,
+        group: Default::default(),
     }];
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(projected));
@@ -672,6 +677,7 @@ fn active_agent_view_controls_sidebar_order_and_focus_indices() {
             focused: true,
             owner_pane_id: None,
             orphaned: false,
+            group: Default::default(),
         },
         ClientShellAgent {
             pane_id: "pane_2".into(),
@@ -690,6 +696,7 @@ fn active_agent_view_controls_sidebar_order_and_focus_indices() {
             focused: false,
             owner_pane_id: None,
             orphaned: false,
+            group: Default::default(),
         },
         ClientShellAgent {
             pane_id: "pane_3".into(),
@@ -708,6 +715,7 @@ fn active_agent_view_controls_sidebar_order_and_focus_indices() {
             focused: false,
             owner_pane_id: None,
             orphaned: false,
+            group: Default::default(),
         },
     ];
     projected.agent_view_label = Some("review".into());
@@ -784,6 +792,7 @@ fn agent_sort_toggle_is_client_local_and_persists_per_endpoint() {
         focused: true,
         owner_pane_id: None,
         orphaned: false,
+        group: Default::default(),
     });
     let config =
         ClientShellConfig::from_config(&Config::default()).with_preferences_path(path.clone());
@@ -1351,6 +1360,7 @@ fn semantic_notifications_use_client_policy_and_stable_navigation_targets() {
         focused: false,
         owner_pane_id: None,
         orphaned: false,
+        group: Default::default(),
     });
     state.set_snapshot(Box::new(projected));
     state.set_pane_surface(surface());

@@ -61,6 +61,41 @@ impl AgentOwnership {
     }
 }
 
+/// Explicit sidebar placement for one agent occupancy.
+///
+/// Placement is presentation grouping, not ownership: it never changes who
+/// an agent reports to or what it may do. Unset (`None` on the terminal)
+/// means automatic placement, which follows the ownership record and the
+/// workspace's orchestrator mode. An explicit placement always wins over
+/// automatic nesting.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentGroupPlacement {
+    /// Hands-on: always a top-level row, never folded into an owner or
+    /// orchestrator group, so it stays visible and reachable.
+    HandsOn,
+    /// Nested beneath this agent in the sidebar regardless of ownership.
+    /// When the parent no longer resolves the row falls back to automatic
+    /// placement and carries the orphan marker.
+    Under(AgentOwnerRef),
+}
+
+impl AgentGroupPlacement {
+    /// Stable wire/persistence name for the placement kind.
+    pub fn kind_name(&self) -> &'static str {
+        match self {
+            Self::HandsOn => "hands_on",
+            Self::Under(_) => "under",
+        }
+    }
+
+    pub fn parent(&self) -> Option<&AgentOwnerRef> {
+        match self {
+            Self::HandsOn => None,
+            Self::Under(parent) => Some(parent),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

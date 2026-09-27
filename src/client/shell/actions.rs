@@ -103,6 +103,28 @@ impl ClientShellState {
                     self.toggle_usage_overlay(outcome);
                     return;
                 }
+                if matches!(
+                    action,
+                    crate::input::KeybindAction::ToggleAgentGroup
+                        | crate::input::KeybindAction::ToggleHandsOn
+                ) {
+                    let Some(focused) = self.snapshot.as_deref().and_then(|snapshot| {
+                        let pane_id = snapshot.focused_pane_id.as_deref()?;
+                        snapshot
+                            .agents
+                            .iter()
+                            .find(|agent| agent.pane_id == pane_id)
+                            .map(|agent| (agent.pane_id.clone(), agent.group.hands_on))
+                    }) else {
+                        return;
+                    };
+                    if action == crate::input::KeybindAction::ToggleHandsOn {
+                        self.set_agent_group_placement(focused.0, None, !focused.1, outcome);
+                    } else if let Some(group) = self.agent_group_for_pane(&focused.0) {
+                        self.toggle_agent_group(&group, outcome);
+                    }
+                    return;
+                }
                 if action == crate::input::KeybindAction::OpenNotificationTarget {
                     self.focus_visible_notification(outcome);
                     return;
@@ -553,6 +575,19 @@ impl ClientShellState {
                 kind,
             },
         );
+        // A pane focus into a group the endpoint holds folded opens that fold
+        // too, queued behind the focus on the same connection, the way the
+        // local reveal opens a fold this client made.
+        let server_folds = match &method {
+            crate::api::schema::Method::PaneFocus(target) => {
+                super::tree::agent_group_ancestors(snapshot, &target.pane_id)
+                    .into_iter()
+                    .filter(|(_, owner)| owner.group.collapsed)
+                    .map(|(_, owner)| owner.pane_id.clone())
+                    .collect::<Vec<_>>()
+            }
+            _ => Vec::new(),
+        };
         if changes_focus {
             self.pending_focus_reveals.insert(
                 request_id.clone(),
@@ -573,6 +608,17 @@ impl ClientShellState {
                 method,
             }),
         });
+        for owner_pane_id in server_folds {
+            let open = crate::api::schema::Method::AgentGroupCollapse(
+                crate::api::schema::AgentGroupCollapseParams {
+                    target: owner_pane_id,
+                    collapsed: false,
+                },
+            );
+            if self.supports_endpoint_method(&open) {
+                self.push_endpoint_method_with_kind(open, PendingEndpointKind::Generic, outcome);
+            }
+        }
         true
     }
 

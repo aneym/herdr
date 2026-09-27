@@ -164,6 +164,7 @@ fn tab_status_snapshot() -> ClientShellSnapshot {
         focused: true,
         owner_pane_id: None,
         orphaned: false,
+        group: Default::default(),
     });
     snapshot.tabs[0].agent_status = AgentStatus::Blocked;
     snapshot.tabs[0].label = "a wide tab label".into();
