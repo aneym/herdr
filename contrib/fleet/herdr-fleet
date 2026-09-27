@@ -51,6 +51,30 @@ from pathlib import Path
 
 STATUSES = ("idle", "working", "blocked", "done", "unknown")
 
+# Redact before trimming the pane: trimming can cut a PEM block or token in half.
+SECRET_PATTERNS = [
+    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|\Z)", re.S), "[redacted]"),
+    (re.compile(r"\bAuthorization\s*:\s*[^\r\n]+", re.I), "Authorization: [redacted]"),
+    (re.compile(r"\bBearer\s+[^\s\"']+", re.I), "Bearer [redacted]"),
+    (re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"), "[redacted]"),
+    (re.compile(r"\b(?:sk-(?:ant-|proj-)?|gh[pous]_|github_pat_|xox[abposr]-)[A-Za-z0-9_-]+"), "[redacted]"),
+    (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "[redacted]"),
+    (re.compile(r'''(?P<prefix>["']?[\w.-]*(?:key|token|secret|password|passwd|pwd|credential|auth|cookie|session)[\w.-]*["']?\s*[:=]\s*)(?P<quote>["'])(?P<value>[^\r\n]*?)(?P=quote)''', re.I), None),
+    (re.compile(r'''(?P<prefix>\b[\w.-]*(?:key|token|secret|password|passwd|pwd|credential|auth|cookie|session)[\w.-]*\s*[:=]\s*)(?P<value>[^\s,;"']+)''', re.I), None),
+    # Preserve ordinary SHA-1 git hashes (40 hex digits), but not longer or mixed tokens.
+    (re.compile(r"(?<![A-Za-z0-9+/_=-])(?![0-9a-fA-F]{32,40}(?![A-Za-z0-9+/_=-]))(?=[A-Za-z0-9+/_=-]*[A-Za-z])(?=[A-Za-z0-9+/_=-]*[0-9])[A-Za-z0-9+/_=-]{32,}(?![A-Za-z0-9+/_=-])"), "[redacted]"),
+]
+
+
+def redact(text: str) -> str:
+    """Remove likely credentials from untrusted terminal output."""
+    for pattern, replacement in SECRET_PATTERNS:
+        if replacement is None:
+            text = pattern.sub(lambda match: match.group("prefix") + match.groupdict().get("quote", "") + "[redacted]" + match.groupdict().get("quote", ""), text)
+        else:
+            text = pattern.sub(replacement, text)
+    return text
+
 
 class FleetError(Exception):
     pass
@@ -555,7 +579,7 @@ def pane_tail(agent: dict, lines: int = 12) -> str:
                      "--lines", str(lines))
     except FleetError:
         return ""
-    kept = [line.rstrip() for line in text.splitlines() if line.strip()]
+    kept = [line.rstrip() for line in redact(text).splitlines() if line.strip()]
     return "\n".join(kept[-lines:])[-700:]
 
 
@@ -601,8 +625,12 @@ def file_unblock(waiting: list[dict]) -> list[dict]:
         fcntl.flock(lock, fcntl.LOCK_EX)
         try:
             seen = json.loads(path.read_text())
-        except (OSError, ValueError):
+        except FileNotFoundError:
             seen = {}
+        except (OSError, json.JSONDecodeError) as err:
+            raise FleetError(f"cannot read {path}; inspect or remove it: {err}") from err
+        if not isinstance(seen, dict):
+            raise FleetError(f"invalid state in {path}; inspect or remove it (expected a JSON object)")
         filed = []
         for agent in waiting:
             key = f"{agent['id']}#{agent.get('agent_id') or ''}#{agent.get('state_change_seq', 0)}"
