@@ -85,6 +85,34 @@ fn press(state: &mut ClientShellState, code: KeyCode, modifiers: KeyModifiers) -
 }
 
 #[test]
+fn search_palette_escape_clears_then_closes_and_goto_returns_to_rows() {
+    let mut state = shell(6);
+    state.handle_input_bytes(b"ab");
+    state.handle_input_bytes(b"\x1b");
+    let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_ref() else {
+        panic!("goto should stay open after clearing its query");
+    };
+    assert!(navigator.query.is_empty() && navigator.search_focused);
+    state.handle_input_bytes(b"\x1b");
+    let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_ref() else {
+        panic!("goto should return to row selection");
+    };
+    assert!(!navigator.search_focused);
+    state.handle_input_bytes(b"\x1b");
+    assert!(state.overlay.is_none());
+
+    state.open_navigator_search_overlay();
+    state.handle_input_bytes(b"ab");
+    state.handle_input_bytes(b"\x1b");
+    let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_ref() else {
+        panic!("palette should stay open after clearing its query");
+    };
+    assert!(navigator.query.is_empty() && navigator.search_focused);
+    state.handle_input_bytes(b"\x1b");
+    assert!(state.overlay.is_none());
+}
+
+#[test]
 fn all_ten_fields_route_shared_text_editing() {
     for field in 0..10 {
         let mut state = shell(field);

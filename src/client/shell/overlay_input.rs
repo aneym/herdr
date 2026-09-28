@@ -203,9 +203,18 @@ impl ClientShellState {
     }
 
     pub(super) fn open_navigator_overlay(&mut self) {
+        self.open_navigator_overlay_with_mode(false);
+    }
+
+    pub(super) fn open_navigator_search_overlay(&mut self) {
+        self.open_navigator_overlay_with_mode(true);
+    }
+
+    fn open_navigator_overlay_with_mode(&mut self, search_entry: bool) {
         let mut navigator = ClientNavigatorOverlay {
             query: TextEditor::default(),
-            search_focused: false,
+            search_focused: search_entry,
+            search_entry,
             selected: None,
             scroll: 0,
             filter: None,
@@ -662,12 +671,17 @@ impl ClientShellState {
                 }))
             );
             if code == KeyCode::Esc {
-                if search_focused {
-                    if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
+                if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
+                    if search_focused && !navigator.query.is_empty() {
+                        navigator.query.clear();
+                        navigator.filter = None;
+                        navigator.selected = None;
+                        navigator.scroll = 0;
+                    } else if search_focused && !navigator.search_entry {
                         navigator.search_focused = false;
+                    } else {
+                        self.overlay = None;
                     }
-                } else {
-                    self.overlay = None;
                 }
                 outcome.repaint = true;
                 return;
