@@ -371,6 +371,43 @@ fn agent_cycle_skips_agents_inside_a_collapsed_space() {
 }
 
 #[test]
+fn agent_cycle_skips_owned_workflow_tabs_even_when_the_workflow_needs_attention() {
+    for expanded in [false, true] {
+        let mut tree = ClientTreeChrome::default();
+        if expanded {
+            tree.collapsed_agent_groups.insert("pane_1".into());
+        }
+        let mut state = tree_state(tree);
+        let mut snapshot = tree_snapshot();
+        // The blocked workflow has its own tab, but belongs beneath lane A.
+        snapshot.agents[1].owner_pane_id = Some("pane_1".into());
+        state.set_snapshot(Box::new(snapshot));
+        let snapshot = state.snapshot.as_deref().expect("snapshot");
+
+        let panes = state
+            .agent_cycle_candidates(snapshot)
+            .into_iter()
+            .map(|entry| entry.pane_id)
+            .collect::<Vec<_>>();
+        assert_eq!(panes, ["pane_1", "pane_3"]);
+
+        let mut next = ClientShellInput::default();
+        state.record_binding(
+            crate::input::KeybindMatch::Action(crate::input::KeybindAction::NextAgent),
+            &mut next,
+        );
+        assert!(matches!(
+            &next.actions[..],
+            [ClientShellAction::Endpoint { request, .. }]
+                if matches!(
+                    &request.method,
+                    crate::api::schema::Method::PaneFocus(target) if target.pane_id == "pane_3"
+                )
+        ));
+    }
+}
+
+#[test]
 fn agent_cycle_prefers_the_most_demanding_peer_over_the_next_in_order() {
     // Spaces order keeps a stable list, so the key has to rank for itself:
     // blocked outranks an unread completion, which outranks a working agent.

@@ -1108,9 +1108,31 @@ impl ClientShellState {
                 && tree.show_spaces
                 && tree.collapsed_spaces.contains(workspace_id)
         };
+        // With tab headers shown, a nested workflow's tab is not a cycling
+        // destination, even when the group is expanded or needs attention.
+        // Use the same arranged hierarchy as the panel so folded children and
+        // depth > 0 rows are both excluded without changing the flat order.
+        let top_level = (tree_view_active(&self.config)
+            && tree.show_tabs
+            && snapshot.agent_view_label.is_none())
+        .then(|| {
+            let rows = super::agent_sidebar::agent_rows(snapshot, &self.config, None);
+            let (rows, _) = partition_automations(snapshot, &self.config, rows);
+            arrange_agent_hierarchy_with(snapshot, tree, rows, false)
+                .into_iter()
+                .filter(|row| row.group.depth == 0)
+                .map(|row| row.pane_id)
+                .collect::<HashSet<_>>()
+        });
         super::agent_sidebar::ordered_agent_pane_ids(snapshot, self.config.agent_panel_sort)
             .into_iter()
             .filter_map(|pane_id| {
+                if top_level
+                    .as_ref()
+                    .is_some_and(|visible| !visible.contains(&pane_id))
+                {
+                    return None;
+                }
                 let agent = snapshot
                     .agents
                     .iter()
