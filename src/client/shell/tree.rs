@@ -36,7 +36,7 @@ impl Default for ClientTreeChrome {
             collapsed_spaces: HashSet::new(),
             collapsed_tabs: HashSet::new(),
             pinned_spaces: HashSet::new(),
-            show_hidden_spaces: false,
+            show_hidden_spaces: true,
             hidden_spaces_expanded: false,
             automations_expanded: false,
             collapsed_agent_groups: HashSet::new(),
