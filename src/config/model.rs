@@ -1085,6 +1085,8 @@ pub struct UiConfig {
     pub toast: ToastConfig,
     /// Play sounds when agents change state in background workspaces.
     pub sound: SoundConfig,
+    /// Factory overlay: tab grouping, host badges and the detail panel. Off by default.
+    pub factory: super::FactoryUiConfig,
 }
 
 /// Cursor shape (DECSCUSR) used for the forced IME anchor.
@@ -1316,6 +1318,7 @@ impl Default for UiConfig {
             accent: "cyan".into(),
             toast: ToastConfig::default(),
             sound: SoundConfig::default(),
+            factory: super::FactoryUiConfig::default(),
         }
     }
 }
