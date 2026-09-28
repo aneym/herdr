@@ -2181,6 +2181,79 @@ fn local_direct_graphics_accept_server_ids_across_endpoint_switches_and_restarts
 }
 
 #[test]
+fn compact_palette_shows_profile_context_and_activates_foreign_pane() {
+    let (mut state, remote_id) = state_with_remote();
+    let mut remote = snapshot();
+    remote.active_profile = "work".into();
+    remote.workspaces[0].label = "overseas".into();
+    remote.agents.push(agent(
+        "builder",
+        crate::api::schema::AgentStatus::Working,
+        1,
+    ));
+    remote.agents[0].title = Some("Live build title".into());
+    state.set_endpoint_snapshot(&remote_id, Box::new(remote));
+    state.open_navigator_search_overlay();
+    let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_ref() else {
+        panic!("search palette");
+    };
+    assert!(navigator.search_focused && navigator.search_entry);
+    let rows =
+        render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator);
+    assert!(rows
+        .iter()
+        .all(|row| !matches!(row.target, ClientNavigatorTarget::Machine { .. })));
+    let workspace = rows
+        .iter()
+        .find(|row| {
+            matches!(&row.target,
+                ClientNavigatorTarget::Workspace { endpoint_id, .. } if endpoint_id == &remote_id
+            )
+        })
+        .expect("foreign workspace");
+    assert!(workspace.meta.contains("work"));
+    let pane = rows
+        .iter()
+        .find(|row| {
+            matches!(&row.target,
+                ClientNavigatorTarget::Pane { endpoint_id, .. } if endpoint_id == &remote_id
+            )
+        })
+        .expect("foreign pane");
+    assert_eq!(pane.label, "Live build title");
+    assert!(pane.meta.contains("work"));
+    let mut rendered = state.compose(106, 30).expect("palette");
+    assert_eq!(state.hits.navigator_popup.width, 76);
+    for (rect, _) in &state.hits.navigator_rows {
+        let row = rendered.cells[rect.y as usize * rendered.width as usize + rect.x as usize..]
+            .iter()
+            .take(rect.width as usize)
+            .map(|cell| cell.symbol.as_str())
+            .collect::<String>();
+        assert!(!row.contains("├─") && !row.contains("└─"), "{row}");
+    }
+    let outcome = state.handle_input_bytes(b"overseas");
+    assert!(outcome.actions.is_empty());
+    let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() else {
+        panic!("search palette");
+    };
+    navigator.selected = Some(ClientNavigatorTarget::Pane {
+        endpoint_id: remote_id.clone(),
+        pane_id: "pane_1".into(),
+    });
+    rendered = state.compose(106, 30).expect("filtered palette");
+    assert!(rendered
+        .cursor
+        .as_ref()
+        .is_some_and(|cursor| cursor.visible));
+    let accepted = state.handle_input_bytes(b"\r");
+    assert!(accepted.actions.iter().any(|action| matches!(action,
+        ClientShellAction::ActivateEndpoint { endpoint_id, target: Some(ClientEndpointFocusTarget::Pane(pane_id)) }
+        if endpoint_id == &remote_id && pane_id == "pane_1"
+    )));
+}
+
+#[test]
 fn navigator_uses_machine_parents_only_for_federated_clients() {
     let (mut state, _) = state_with_remote();
     state.open_navigator_overlay();

@@ -297,7 +297,12 @@ pub(super) fn navigator_rows(
     };
     let filtering = navigator.filter.is_some() || !query.is_empty();
     let federated = endpoints.len() > 1;
-    let depth_offset = u8::from(federated);
+    let depth_offset = u8::from(federated && !navigator.search_entry);
+    let active_profile = endpoints
+        .iter()
+        .find(|endpoint| endpoint.endpoint_id == *active_endpoint_id)
+        .and_then(|endpoint| endpoint.snapshot.as_deref())
+        .map(|snapshot| snapshot.active_profile.as_str());
     let mut rows = Vec::new();
 
     for endpoint in endpoints {
@@ -341,13 +346,15 @@ pub(super) fn navigator_rows(
                     .map(Vec::as_slice)
                     .unwrap_or_default();
                 let multiple_tabs = workspace_tabs.len() > 1;
+                let mut workspace_pane_number = 0;
                 for tab in workspace_tabs {
                     let tab_matches = workspace_matches || text(&tab.label);
                     let tab_panes = panes_by_tab
                         .get(tab.tab_id.as_str())
                         .map(Vec::as_slice)
                         .unwrap_or_default();
-                    for (index, pane) in tab_panes.iter().enumerate() {
+                    for pane in tab_panes {
+                        workspace_pane_number += 1;
                         let agent = agents.get(pane.pane_id.as_str()).copied();
                         let status = agent
                             .map_or(crate::api::schema::AgentStatus::Unknown, |agent| {
@@ -368,28 +375,45 @@ pub(super) fn navigator_rows(
                         });
                         let tab_name = (tab.custom_label || tab.label.parse::<usize>().is_err())
                             .then_some(tab.label.as_str());
-                        let label = if tab_panes.len() == 1 {
-                            match name.or(tab_name).or(title) {
-                                Some(label) => label.to_owned(),
-                                None if multiple_tabs => {
-                                    format!("{} · {}", agent_kind.unwrap_or("terminal"), tab.label)
-                                }
-                                None => workspace.label.clone(),
+                        // Keep live titles primary. For an unnamed pane, use a
+                        // workspace-wide fallback number so different tabs do not
+                        // produce identical goto rows.
+                        let label = title
+                            .or(name)
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| format!("pane {workspace_pane_number}"));
+                        let tab_context = tab_name
+                            .filter(|tab_name| *tab_name != label.as_str())
+                            .or_else(|| multiple_tabs.then_some(tab.label.as_str()));
+                        // Goto hides row metadata for panes with a status, so
+                        // show the tab beside the title instead of losing it.
+                        let label = if !navigator.search_entry && multiple_tabs {
+                            match tab_context {
+                                Some(tab_name) => format!("{label} · {tab_name}"),
+                                None => label,
                             }
                         } else {
-                            let pane_name = name.or(title).or(agent_kind).unwrap_or("terminal");
-                            match tab_name {
-                                Some(tab_name) if tab_name != pane_name => {
-                                    format!("{tab_name} · {pane_name} · {}", index + 1)
-                                }
-                                _ => format!("{pane_name} · {}", index + 1),
-                            }
+                            label
                         };
-                        let meta = pane
+                        let cwd = pane
                             .foreground_cwd
                             .as_deref()
                             .or(pane.cwd.as_deref())
                             .unwrap_or_default();
+                        let profile = (!snapshot.active_profile.is_empty()
+                            && active_profile != Some(snapshot.active_profile.as_str()))
+                        .then_some(snapshot.active_profile.as_str());
+                        let mut meta = if navigator.search_entry {
+                            tab_context.unwrap_or_default().to_owned()
+                        } else {
+                            cwd.to_owned()
+                        };
+                        if let Some(profile) = profile {
+                            if !meta.is_empty() {
+                                meta.push_str(" · ");
+                            }
+                            meta.push_str(profile);
+                        }
                         // Search the same endpoint-qualified context rendered by
                         // the navigator. This keeps fragmented terms useful while
                         // leaving status filtering and parent-context inclusion
@@ -409,7 +433,7 @@ pub(super) fn navigator_rows(
                                 pane.cwd.as_deref().unwrap_or_default(),
                                 pane.pane_id,
                                 agent_kind.unwrap_or_default(),
-                                title.unwrap_or_default(),
+                                name.unwrap_or_default(),
                             );
                             crate::app::fuzzy::fuzzy_match_words(&query, &search_text)
                                 .map(|matched| matched.score)
@@ -450,10 +474,28 @@ pub(super) fn navigator_rows(
                     || !children.is_empty()
                     || (navigator.filter.is_none() && !query.is_empty() && workspace_matches)
                 {
+                    let pane_count = workspace_tabs
+                        .iter()
+                        .map(|tab| panes_by_tab.get(tab.tab_id.as_str()).map_or(0, Vec::len))
+                        .sum::<usize>();
+                    let workspace_profile = (!snapshot.active_profile.is_empty()
+                        && active_profile != Some(snapshot.active_profile.as_str()))
+                    .then_some(snapshot.active_profile.as_str());
+                    let mut workspace_meta = workspace.branch.clone().unwrap_or_default();
+                    if let Some(profile) = workspace_profile {
+                        if !workspace_meta.is_empty() {
+                            workspace_meta.push_str(" · ");
+                        }
+                        workspace_meta.push_str(profile);
+                    }
                     endpoint_rows.push(ClientNavigatorRow {
                         depth: depth_offset,
-                        label: workspace.label.clone(),
-                        meta: workspace.branch.clone().unwrap_or_default(),
+                        label: if navigator.search_entry {
+                            format!("{} ({pane_count})", workspace.label)
+                        } else {
+                            workspace.label.clone()
+                        },
+                        meta: workspace_meta,
                         detail: workspace.new_workspace_cwd.clone(),
                         agent: None,
                         status: None,
@@ -469,7 +511,7 @@ pub(super) fn navigator_rows(
             }
         }
         if !filtering || endpoint_query_matches || !endpoint_rows.is_empty() {
-            if federated {
+            if federated && !navigator.search_entry {
                 rows.push(ClientNavigatorRow {
                     depth: 0,
                     label: endpoint.label.to_owned(),

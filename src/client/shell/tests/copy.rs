@@ -1250,8 +1250,8 @@ fn navigator_renders_every_terminal_in_workspace_sections() {
     }
     for (row, label) in visible.iter().zip([
         "client-shell",
-        "editor · agent · 1",
-        "editor · shell · 2",
+        "agent",
+        "shell",
         "notes",
         "logs",
         "second",
@@ -1272,7 +1272,7 @@ fn navigator_renders_every_terminal_in_workspace_sections() {
     });
     let visible = visible_rows(&mut state, 11);
     assert_eq!(visible.len(), 2);
-    assert!(visible.iter().any(|row| row.contains("editor · shell · 2")));
+    assert!(visible.iter().any(|row| row.contains("shell")));
     assert!(visible[0].starts_with(" ├─ "));
     assert!(visible[1].starts_with(" ├─ "));
 
@@ -1285,7 +1285,7 @@ fn navigator_renders_every_terminal_in_workspace_sections() {
     let visible = visible_rows(&mut state, 30);
     assert_eq!(visible.len(), 2);
     assert!(visible[1].starts_with(" └─ "));
-    assert!(visible.iter().any(|row| row.contains("editor · shell · 2")));
+    assert!(visible.iter().any(|row| row.contains("shell")));
     assert!(visible.iter().all(|row| !row.contains("second")));
 }
 
@@ -1374,6 +1374,8 @@ fn navigator_searches_ancestor_context_and_keeps_split_agents_individually_actio
         ("client-shell", None, vec!["pane_1", "pane_2"]),
         ("main", None, vec!["pane_1", "pane_2"]),
         ("claude", None, vec!["pane_2"]),
+        ("writer", None, vec!["pane_1"]),
+        ("reviewer", None, vec!["pane_2"]),
         ("checking navigation", None, vec!["pane_2"]),
         ("/repo/subproject", None, vec!["pane_2"]),
         (
@@ -1432,8 +1434,8 @@ fn navigator_searches_ancestor_context_and_keeps_split_agents_individually_actio
         .collect::<Vec<_>>();
     assert_eq!(pane_rows.len(), 2);
     for ((rect, _), (name, kind, status)) in pane_rows.iter().zip([
-        ("writer", "pi", "working"),
-        ("reviewer", "claude", "blocked"),
+        ("implementing navigation", "pi", "working"),
+        ("checking navigation", "claude", "blocked"),
     ]) {
         cell_symbol_position(&frame, *rect, name);
         cell_symbol_position(&frame, *rect, kind);
@@ -1482,7 +1484,24 @@ fn navigator_distinguishes_unnamed_terminals_on_numbered_tabs() {
         .filter(|row| matches!(row.target, ClientNavigatorTarget::Pane { .. }))
         .map(|row| row.label.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(labels, ["terminal · 1", "terminal · 2", "logs"]);
+    assert_eq!(labels, ["pane 1 · 1", "pane 2 · 2", "pane 3 · logs"]);
+    let frame = state.compose(106, 30).expect("goto frame");
+    let rendered = state
+        .hits
+        .navigator_rows
+        .iter()
+        .filter(|(_, target)| matches!(target, ClientNavigatorTarget::Pane { .. }))
+        .map(|(rect, _)| {
+            frame.cells[rect.y as usize * frame.width as usize + rect.x as usize..]
+                .iter()
+                .take(rect.width as usize)
+                .map(|cell| cell.symbol.as_str())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
+    for (row, label) in rendered.iter().zip(labels) {
+        assert!(row.contains(label), "goto row {row:?} should show {label:?}");
+    }
 }
 
 #[test]
@@ -1945,7 +1964,7 @@ fn navigator_owns_search_mouse_selection_and_stable_target_focus() {
         .join("\n");
     assert!(navigator_text.contains("client-shell"));
     assert!(navigator_text.contains("terminal"));
-    assert!(!navigator_text.contains("pane 1"));
+    assert!(navigator_text.contains("pane 1"));
 
     let search = state.hits.navigator_search;
     let focus_search =

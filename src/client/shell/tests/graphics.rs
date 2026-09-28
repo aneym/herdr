@@ -270,6 +270,7 @@ fn every_dialog_and_menu_occludes_its_panel_not_the_whole_screen() {
         ClientShellOverlay::Navigator(ClientNavigatorOverlay {
             query: TextEditor::default(),
             search_focused: false,
+            search_entry: false,
             selected: None,
             scroll: 0,
             filter: None,
