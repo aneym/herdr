@@ -25,6 +25,8 @@ pub(super) struct ClientTreeChrome {
     /// Workspace ids in the order the tree lists their spaces. Ids missing from
     /// this list keep their snapshot order behind the ones named here.
     pub(super) space_order: Vec<String>,
+    pub(super) factory_expanded_lanes: HashSet<String>,
+    pub(super) factory_background_expanded: HashSet<String>,
 }
 
 impl Default for ClientTreeChrome {
@@ -41,6 +43,8 @@ impl Default for ClientTreeChrome {
             automations_expanded: false,
             collapsed_agent_groups: HashSet::new(),
             space_order: Vec::new(),
+            factory_expanded_lanes: HashSet::new(),
+            factory_background_expanded: HashSet::new(),
         }
     }
 }
@@ -65,6 +69,8 @@ impl ClientTreeChrome {
             automations_expanded: saved.automations_expanded,
             collapsed_agent_groups: saved.collapsed_agent_groups.into_iter().collect(),
             space_order: saved.space_order,
+            factory_expanded_lanes: saved.factory_expanded_lanes.into_iter().collect(),
+            factory_background_expanded: saved.factory_background_expanded.into_iter().collect(),
         }
     }
 
@@ -81,6 +87,8 @@ impl ClientTreeChrome {
             automations_expanded: self.automations_expanded,
             collapsed_agent_groups: sorted(&self.collapsed_agent_groups),
             space_order: self.space_order.clone(),
+            factory_expanded_lanes: sorted(&self.factory_expanded_lanes),
+            factory_background_expanded: sorted(&self.factory_background_expanded),
         }
     }
 
@@ -124,6 +132,8 @@ pub(super) struct TreeHeader {
     /// the header can show the group chevron and `+N` instead of leaving the
     /// group with no control at all.
     pub(super) group: Option<TreeHeaderGroup>,
+    /// Only overlay-tagged space headers carry a summary and attention dot.
+    pub(super) space_attention: Option<(crate::factory_overlay::Attention, String)>,
 }
 
 /// An agent group surfaced on the header that stands in for its owner.
@@ -191,6 +201,30 @@ pub(super) enum AgentPanelListEntry {
     },
     SpaceHeader(TreeHeader),
     TabHeader(TreeHeader),
+    FactorySection {
+        label: &'static str,
+        right: String,
+        indent: u8,
+    },
+    FactoryTab(FactoryTabRow),
+    FactoryBackground {
+        workspace_id: String,
+        count: usize,
+        collapsed: bool,
+        indent: u8,
+    },
+}
+
+/// A tagged tab stands in for its agents, while still following the tab-header hit path.
+pub(super) struct FactoryTabRow {
+    pub(super) header: TreeHeader,
+    pub(super) status: crate::api::schema::AgentStatus,
+    pub(super) badge: Option<String>,
+    pub(super) phase: Option<String>,
+    pub(super) summary: Option<String>,
+    pub(super) attention: crate::factory_overlay::Attention,
+    pub(super) idle: bool,
+    pub(super) background: bool,
 }
 
 impl AgentPanelListEntry {
@@ -324,10 +358,20 @@ fn rollup_state(rows: &[AgentRow]) -> Vec<crate::api::schema::AgentStatus> {
 /// Group agent rows into space → tab → agent rows, preserving the incoming
 /// order so nothing reshuffles on its own. Layer visibility and collapse state
 /// come from the three tree layer toggles and the two collapse sets.
+#[allow(dead_code)] // The stock tree test and fork callers retain this compatibility entry point.
 pub(super) fn tree_list_entries(
     snapshot: &ClientShellSnapshot,
     tree: &ClientTreeChrome,
     rows: Vec<AgentRow>,
+) -> Vec<AgentPanelListEntry> {
+    tree_list_entries_with_overlay(snapshot, tree, rows, None)
+}
+
+pub(super) fn tree_list_entries_with_overlay(
+    snapshot: &ClientShellSnapshot,
+    tree: &ClientTreeChrome,
+    rows: Vec<AgentRow>,
+    overlay: Option<&crate::factory_overlay::FactoryOverlay>,
 ) -> Vec<AgentPanelListEntry> {
     let mut workspace_order = Vec::<String>::new();
     let mut by_workspace = HashMap::<String, Vec<AgentRow>>::new();
@@ -342,6 +386,33 @@ pub(super) fn tree_list_entries(
             .push(row);
     }
 
+    if let Some(overlay) = overlay {
+        // Insert agentless tagged spaces without reordering existing spaces.
+        for (index, workspace) in snapshot.workspaces.iter().enumerate() {
+            let id = &workspace.workspace_id;
+            if workspace_order.contains(id)
+                || !overlay.space_is_tagged(
+                    snapshot
+                        .tabs
+                        .iter()
+                        .filter(|tab| &tab.workspace_id == id)
+                        .map(|tab| tab.tab_id.as_str()),
+                )
+            {
+                continue;
+            }
+            let before = snapshot.workspaces[index + 1..]
+                .iter()
+                .filter_map(|next| {
+                    workspace_order
+                        .iter()
+                        .position(|present| present == &next.workspace_id)
+                })
+                .next()
+                .unwrap_or(workspace_order.len());
+            workspace_order.insert(before, id.clone());
+        }
+    }
     let mut out = Vec::new();
     // Collapsed spaces move out of their slot and collect under one collapsible
     // section at the bottom, so folding a space away actually clears the row it
@@ -349,9 +420,16 @@ pub(super) fn tree_list_entries(
     let mut hidden_out = Vec::<AgentPanelListEntry>::new();
     let mut hidden_spaces = HashSet::<String>::new();
     for workspace_id in &workspace_order {
-        let Some(workspace_rows) = by_workspace.remove(workspace_id) else {
-            continue;
-        };
+        let workspace_rows = by_workspace.remove(workspace_id).unwrap_or_default();
+        let tagged = overlay.filter(|overlay| {
+            overlay.space_is_tagged(
+                snapshot
+                    .tabs
+                    .iter()
+                    .filter(|tab| &tab.workspace_id == workspace_id)
+                    .map(|tab| tab.tab_id.as_str()),
+            )
+        });
         let space_collapsed = tree.show_spaces && tree.collapsed_spaces.contains(workspace_id);
         let demoted = space_collapsed && tree.show_hidden_spaces;
         if demoted {
@@ -377,7 +455,8 @@ pub(super) fn tree_list_entries(
                 } else {
                     Vec::new()
                 },
-                collapsible: !workspace_rows.is_empty() && (tree.show_tabs || tree.show_agents),
+                collapsible: (!workspace_rows.is_empty() || tagged.is_some())
+                    && (tree.show_tabs || tree.show_agents),
                 pinned: tree.pinned_spaces.contains(workspace_id),
                 indent: 0,
                 // A space row separates groups; it is never the selection.
@@ -390,10 +469,27 @@ pub(super) fn tree_list_entries(
                 group: layers_hidden
                     .then(|| tree_header_group(&workspace_rows))
                     .flatten(),
+                space_attention: overlay
+                    .and_then(|overlay| overlay.space(workspace_id))
+                    .filter(|tag| tag.attention != crate::factory_overlay::Attention::None)
+                    .map(|tag| (tag.attention, tag.summary.clone().unwrap_or_default())),
             }));
             if space_collapsed {
                 continue;
             }
+        }
+
+        if let Some(overlay) = tagged {
+            append_factory_space(
+                out,
+                snapshot,
+                tree,
+                workspace_id,
+                &workspace_rows,
+                overlay,
+                space_indent,
+            );
+            continue;
         }
 
         let mut tab_order = Vec::<String>::new();
@@ -447,6 +543,7 @@ pub(super) fn tree_list_entries(
                     group: (!tree.show_agents)
                         .then(|| tree_header_group(&tab_rows))
                         .flatten(),
+                    space_attention: None,
                 }));
                 if collapsed {
                     continue;
@@ -498,6 +595,10 @@ pub(super) fn tree_list_entries(
                 indent: 0,
                 active: false,
                 group: None,
+                space_attention: overlay
+                    .and_then(|overlay| overlay.space(workspace_id))
+                    .filter(|tag| tag.attention != crate::factory_overlay::Attention::None)
+                    .map(|tag| (tag.attention, tag.summary.clone().unwrap_or_default())),
             });
             // A pinned space carries no agent rows, so collapsing it hides
             // nothing on its own; the section is where it goes to get out of the
@@ -528,6 +629,308 @@ pub(super) fn tree_list_entries(
         }
     }
     out
+}
+
+/// Group a tagged space in tab order. Only unknown/untagged tabs keep agent rows.
+fn append_factory_space(
+    out: &mut Vec<AgentPanelListEntry>,
+    snapshot: &ClientShellSnapshot,
+    tree: &ClientTreeChrome,
+    workspace_id: &str,
+    rows: &[AgentRow],
+    overlay: &crate::factory_overlay::FactoryOverlay,
+    indent: u8,
+) {
+    use crate::factory_overlay::TabKind;
+    let tabs = snapshot
+        .tabs
+        .iter()
+        .filter(|tab| tab.workspace_id == workspace_id)
+        .collect::<Vec<_>>();
+    let kind = |tab: &crate::protocol::ClientShellTab| {
+        overlay
+            .tab(&tab.tab_id)
+            .map_or(TabKind::Unknown, |tag| tag.kind)
+    };
+    let foreground = |tab: &&crate::protocol::ClientShellTab| {
+        overlay
+            .tab(&tab.tab_id)
+            .is_none_or(|tag| !tag.done && tag.kind != TabKind::Advisor)
+    };
+    let orchestrators = tabs
+        .iter()
+        .copied()
+        .filter(|tab| foreground(tab) && kind(tab) == TabKind::Orchestrator)
+        .collect::<Vec<_>>();
+    let lanes = tabs
+        .iter()
+        .copied()
+        .filter(|tab| foreground(tab) && kind(tab) == TabKind::Lane)
+        .collect::<Vec<_>>();
+    let workflows = tabs
+        .iter()
+        .copied()
+        .filter(|tab| foreground(tab) && kind(tab) == TabKind::Workflow)
+        .collect::<Vec<_>>();
+    let first_orchestrator = orchestrators.first().map(|tab| tab.tab_id.as_str());
+    let lane_ids = lanes
+        .iter()
+        .map(|tab| tab.tab_id.as_str())
+        .collect::<HashSet<_>>();
+    let parent_for = |tab: &crate::protocol::ClientShellTab| -> Option<&str> {
+        let parent = overlay.tab(&tab.tab_id)?.parent.as_deref();
+        if parent.is_some_and(|id| lane_ids.contains(id)) {
+            parent
+        } else {
+            first_orchestrator
+        }
+    };
+    if !orchestrators.is_empty() {
+        out.push(AgentPanelListEntry::FactorySection {
+            label: "ORCHESTRATOR",
+            right: orchestrators
+                .first()
+                .and_then(|tab| overlay.tab(&tab.tab_id))
+                .and_then(|tag| tag.summary.clone())
+                .unwrap_or_default(),
+            indent,
+        });
+        for orchestrator in &orchestrators {
+            out.push(factory_row(
+                snapshot,
+                rows,
+                overlay,
+                orchestrator,
+                indent,
+                false,
+                false,
+            ));
+            if first_orchestrator == Some(orchestrator.tab_id.as_str()) {
+                for workflow in &workflows {
+                    if parent_for(workflow) == Some(orchestrator.tab_id.as_str()) {
+                        out.push(factory_row(
+                            snapshot,
+                            rows,
+                            overlay,
+                            workflow,
+                            indent.saturating_add(1),
+                            false,
+                            false,
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    let root_workflows = if first_orchestrator.is_none() {
+        workflows
+            .iter()
+            .copied()
+            .filter(|workflow| parent_for(workflow).is_none())
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    if !lanes.is_empty() || !root_workflows.is_empty() {
+        out.push(AgentPanelListEntry::FactorySection {
+            label: "LANES",
+            right: format!("{} open", lanes.len()),
+            indent,
+        });
+        for lane in &lanes {
+            let children = workflows
+                .iter()
+                .copied()
+                .filter(|workflow| parent_for(workflow) == Some(lane.tab_id.as_str()))
+                .collect::<Vec<_>>();
+            let forced = children.iter().any(|workflow| {
+                overlay
+                    .tab(&workflow.tab_id)
+                    .is_some_and(|tag| tag.attention == crate::factory_overlay::Attention::Act)
+            });
+            let focused = snapshot.focused_workspace_id.as_deref() == Some(workspace_id)
+                && (snapshot.focused_tab_id.as_deref() == Some(lane.tab_id.as_str())
+                    || children.iter().any(|tab| {
+                        snapshot.focused_tab_id.as_deref() == Some(tab.tab_id.as_str())
+                    }));
+            let expanded = tree.factory_expanded_lanes.contains(&lane.tab_id) || forced || focused;
+            out.push(factory_row(
+                snapshot,
+                rows,
+                overlay,
+                lane,
+                indent,
+                !expanded && !children.is_empty(),
+                !children.is_empty(),
+            ));
+            if expanded {
+                for child in children {
+                    out.push(factory_row(
+                        snapshot,
+                        rows,
+                        overlay,
+                        child,
+                        indent.saturating_add(1),
+                        false,
+                        false,
+                    ));
+                }
+            }
+        }
+        for workflow in root_workflows {
+            out.push(factory_row(
+                snapshot, rows, overlay, workflow, indent, false, false,
+            ));
+        }
+    }
+    let ordinary = tabs
+        .iter()
+        .copied()
+        .filter(|tab| foreground(tab) && kind(tab) == TabKind::Unknown)
+        .collect::<Vec<_>>();
+    if !ordinary.is_empty() {
+        out.push(AgentPanelListEntry::FactorySection {
+            label: "TABS",
+            right: String::new(),
+            indent,
+        });
+        for tab in ordinary {
+            append_ordinary_tab(out, snapshot, tree, rows, tab, workspace_id, indent);
+        }
+    }
+    let background = tabs
+        .iter()
+        .copied()
+        .filter(|tab| {
+            overlay
+                .tab(&tab.tab_id)
+                .is_some_and(|tag| tag.done || tag.kind == TabKind::Advisor)
+        })
+        .collect::<Vec<_>>();
+    if !background.is_empty() {
+        let collapsed = !tree.factory_background_expanded.contains(workspace_id);
+        out.push(AgentPanelListEntry::FactoryBackground {
+            workspace_id: workspace_id.to_owned(),
+            count: background.len(),
+            collapsed,
+            indent,
+        });
+        if !collapsed {
+            for tab in background {
+                out.push(factory_row(
+                    snapshot,
+                    rows,
+                    overlay,
+                    tab,
+                    indent.saturating_add(1),
+                    false,
+                    false,
+                ));
+            }
+        }
+    }
+}
+
+fn factory_row(
+    snapshot: &ClientShellSnapshot,
+    rows: &[AgentRow],
+    overlay: &crate::factory_overlay::FactoryOverlay,
+    tab: &crate::protocol::ClientShellTab,
+    indent: u8,
+    collapsed: bool,
+    collapsible: bool,
+) -> AgentPanelListEntry {
+    let tag = overlay.tab(&tab.tab_id);
+    let child_states = rows
+        .iter()
+        .filter(|row| row.tab_id == tab.tab_id)
+        .map(|row| row.status)
+        .collect::<Vec<_>>();
+    let status = child_states
+        .iter()
+        .copied()
+        .max_by_key(|status| status_priority(*status))
+        .unwrap_or(tab.agent_status);
+    let background =
+        tag.is_some_and(|tag| tag.done || tag.kind == crate::factory_overlay::TabKind::Advisor);
+    AgentPanelListEntry::FactoryTab(FactoryTabRow {
+        header: TreeHeader {
+            workspace_id: tab.workspace_id.clone(),
+            tab_id: Some(tab.tab_id.clone()),
+            label: tag
+                .and_then(|tag| tag.name.clone())
+                .unwrap_or_else(|| tab.label.clone()),
+            key: tab.tab_id.clone(),
+            collapsed,
+            child_states: Vec::new(),
+            collapsible,
+            pinned: false,
+            indent,
+            active: snapshot.focused_workspace_id.as_deref() == Some(tab.workspace_id.as_str())
+                && tab.focused,
+            group: None,
+            space_attention: None,
+        },
+        status,
+        badge: tag.and_then(|tag| tag.badge.clone()),
+        phase: tag.and_then(|tag| tag.phase.clone()),
+        summary: (collapsed)
+            .then(|| tag.and_then(|tag| tag.summary.clone()))
+            .flatten(),
+        attention: tag.map_or(crate::factory_overlay::Attention::None, |tag| tag.attention),
+        idle: tag.is_some_and(|tag| tag.idle),
+        background,
+    })
+}
+
+fn append_ordinary_tab(
+    out: &mut Vec<AgentPanelListEntry>,
+    snapshot: &ClientShellSnapshot,
+    tree: &ClientTreeChrome,
+    rows: &[AgentRow],
+    tab: &crate::protocol::ClientShellTab,
+    workspace_id: &str,
+    indent: u8,
+) {
+    let mut tab_rows = rows
+        .iter()
+        .filter(|row| row.tab_id == tab.tab_id)
+        .cloned()
+        .collect::<Vec<_>>();
+    let key = tab_key(workspace_id, tab.number);
+    let collapsed = tree.collapsed_tabs.contains(&key);
+    if tree.show_tabs {
+        out.push(AgentPanelListEntry::TabHeader(TreeHeader {
+            workspace_id: workspace_id.to_owned(),
+            tab_id: Some(tab.tab_id.clone()),
+            label: tab.label.clone(),
+            key,
+            collapsed,
+            child_states: if collapsed || !tree.show_agents {
+                rollup_state(&tab_rows)
+            } else {
+                Vec::new()
+            },
+            collapsible: !tab_rows.is_empty() && tree.show_agents,
+            pinned: false,
+            indent,
+            active: !tree.show_agents
+                && tab.focused
+                && snapshot.focused_workspace_id.as_deref() == Some(workspace_id),
+            group: (!tree.show_agents)
+                .then(|| tree_header_group(&tab_rows))
+                .flatten(),
+            space_attention: None,
+        }));
+    }
+    if !tree.show_agents || (tree.show_tabs && collapsed) {
+        return;
+    }
+    for row in &mut tab_rows {
+        row.indent = indent.saturating_add(u8::from(tree.show_tabs));
+        row.strip_tokens(tree.show_spaces, tree.show_tabs);
+    }
+    out.extend(tab_rows.into_iter().map(AgentPanelListEntry::Agent));
 }
 
 /// Reorder whole space blocks to follow the manual drag order. Blocks not named

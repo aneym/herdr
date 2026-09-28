@@ -257,6 +257,7 @@ mod close_tab;
 mod copy;
 mod endpoint_requests;
 mod endpoints;
+mod factory_sidebar;
 mod graphics;
 #[path = "input.rs"]
 mod input_domain;

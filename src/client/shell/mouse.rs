@@ -1410,11 +1410,12 @@ impl ClientShellState {
                 self.push_endpoint_method(
                     crate::api::schema::Method::WorkspaceFocus(
                         crate::api::schema::WorkspaceTarget {
-                            workspace_id: press.workspace_id,
+                            workspace_id: press.workspace_id.clone(),
                         },
                     ),
                     outcome,
                 );
+                self.focus_factory_space_target(&press.workspace_id, outcome);
                 return;
             }
             if let Some(press) = self.tab_press.take() {
@@ -2571,9 +2572,16 @@ impl ClientShellState {
         let pinned = hit.pinned;
         let workspace_id = hit.workspace_id.clone();
         let tab_id = hit.tab_id.clone();
-        if chevron {
+        if chevron || key.starts_with("factory-background:") {
             let tree = self.tree_chrome_mut();
-            if is_space {
+            if let Some(workspace_id) = key.strip_prefix("factory-background:") {
+                super::tree::ClientTreeChrome::toggle(
+                    &mut tree.factory_background_expanded,
+                    workspace_id.to_owned(),
+                );
+            } else if !is_space && key == tab_id.as_deref().unwrap_or_default() {
+                super::tree::ClientTreeChrome::toggle(&mut tree.factory_expanded_lanes, key);
+            } else if is_space {
                 super::tree::ClientTreeChrome::toggle(&mut tree.collapsed_spaces, key);
             } else {
                 super::tree::ClientTreeChrome::toggle(&mut tree.collapsed_tabs, key);

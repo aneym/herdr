@@ -1,0 +1,286 @@
+use super::*;
+use crate::client::shell::tree::{
+    tree_list_entries_with_overlay, AgentPanelListEntry, ClientTreeChrome,
+};
+use crate::factory_overlay::{Attention, FactoryOverlay, SpaceTag, TabKind, TabTag};
+
+fn fixture() -> (ClientShellSnapshot, FactoryOverlay) {
+    let mut snapshot = snapshot();
+    snapshot.tabs.clear();
+    snapshot.agents.clear();
+    snapshot.panes.clear();
+    snapshot.focused_tab_id = Some("other".into());
+    for (index, label) in [
+        "orch", "lane-a", "wf-a", "wf-b", "lane-b", "orphan", "advisor", "done", "plain-a",
+        "plain-b",
+    ]
+    .iter()
+    .enumerate()
+    {
+        snapshot.tabs.push(ClientShellTab {
+            tab_id: label.to_string(),
+            workspace_id: "ws_1".into(),
+            number: index + 1,
+            label: label.to_string(),
+            custom_label: true,
+            zoomed: false,
+            focused: false,
+            agent_status: AgentStatus::Working,
+        });
+    }
+    snapshot.agents.push(ClientShellAgent {
+        pane_id: "plain-pane".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "plain-a".into(),
+        name: Some("plain agent".into()),
+        display_agent: Some("plain agent".into()),
+        agent: None,
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Idle,
+        state_change_seq: 1,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: false,
+        owner_pane_id: None,
+        orphaned: false,
+        group: Default::default(),
+    });
+    let mut overlay = FactoryOverlay::default();
+    for (id, kind, parent) in [
+        ("orch", TabKind::Orchestrator, None),
+        ("lane-a", TabKind::Lane, None),
+        ("wf-a", TabKind::Workflow, Some("lane-a")),
+        ("wf-b", TabKind::Workflow, Some("lane-a")),
+        ("lane-b", TabKind::Lane, None),
+        ("orphan", TabKind::Workflow, Some("missing")),
+        ("advisor", TabKind::Advisor, None),
+        ("done", TabKind::Workflow, None),
+    ] {
+        overlay.tabs.insert(
+            id.into(),
+            TabTag {
+                kind,
+                parent: parent.map(str::to_string),
+                ..TabTag::default()
+            },
+        );
+    }
+    overlay.tabs.get_mut("orch").unwrap().summary = Some("inbox 3".into());
+    overlay.tabs.get_mut("lane-a").unwrap().summary = Some("2 wf".into());
+    overlay.tabs.get_mut("lane-b").unwrap().idle = true;
+    overlay.tabs.get_mut("wf-a").unwrap().badge = Some("PC".into());
+    overlay.tabs.get_mut("wf-a").unwrap().phase = Some("review 3/5".into());
+    overlay.tabs.get_mut("done").unwrap().done = true;
+    (snapshot, overlay)
+}
+
+fn entries(
+    snapshot: &ClientShellSnapshot,
+    overlay: Option<&FactoryOverlay>,
+    tree: &ClientTreeChrome,
+) -> Vec<AgentPanelListEntry> {
+    let config = ClientShellConfig::from_config(&Config::default());
+    let rows = crate::client::shell::agent_sidebar::agent_rows(snapshot, &config, None);
+    tree_list_entries_with_overlay(snapshot, tree, rows, overlay)
+}
+
+fn labels(entries: &[AgentPanelListEntry]) -> Vec<String> {
+    entries
+        .iter()
+        .map(|entry| match entry {
+            AgentPanelListEntry::SpaceHeader(row) => format!("space:{}", row.label),
+            AgentPanelListEntry::FactorySection { label, .. } => format!("section:{label}"),
+            AgentPanelListEntry::FactoryTab(row) => {
+                format!("tag:{}:{}", row.header.label, row.header.indent)
+            }
+            AgentPanelListEntry::FactoryBackground { count, .. } => format!("background:{count}"),
+            AgentPanelListEntry::TabHeader(row) => format!("tab:{}", row.label),
+            AgentPanelListEntry::Agent(row) => format!("agent:{}", row.pane_id),
+            _ => "other".into(),
+        })
+        .collect()
+}
+
+#[test]
+fn off_and_other_space_keep_the_stock_tree() {
+    let (mut snapshot, overlay) = fixture();
+    let tree = ClientTreeChrome::default();
+    assert_eq!(
+        labels(&entries(&snapshot, None, &tree)),
+        labels(&entries(&snapshot, Some(&FactoryOverlay::default()), &tree))
+    );
+    let other_tab = ClientShellTab {
+        tab_id: "other-tab".into(),
+        workspace_id: "ws_2".into(),
+        number: 1,
+        label: "other".into(),
+        custom_label: true,
+        zoomed: false,
+        focused: false,
+        agent_status: AgentStatus::Idle,
+    };
+    snapshot.tabs.push(other_tab);
+    snapshot.workspaces.push(ClientShellWorkspace {
+        workspace_id: "ws_2".into(),
+        active_tab_id: "other-tab".into(),
+        new_workspace_cwd: "".into(),
+        number: 2,
+        label: "untagged space".into(),
+        custom_label: true,
+        branch: None,
+        git_ahead_behind: None,
+        tokens: Vec::new(),
+        worktree: None,
+        focused: false,
+        agent_status: AgentStatus::Idle,
+        orchestrator_mode: false,
+        tab_count: 1,
+    });
+    snapshot.agents.push(ClientShellAgent {
+        pane_id: "other-pane".into(),
+        workspace_id: "ws_2".into(),
+        tab_id: "other-tab".into(),
+        name: Some("agent".into()),
+        display_agent: Some("agent".into()),
+        agent: None,
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Idle,
+        state_change_seq: 1,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: false,
+        owner_pane_id: None,
+        orphaned: false,
+        group: Default::default(),
+    });
+    let ordinary = labels(&entries(&snapshot, None, &tree));
+    let tagged = labels(&entries(&snapshot, Some(&overlay), &tree));
+    assert_eq!(&ordinary[ordinary.len() - 3..], &tagged[tagged.len() - 3..]);
+}
+
+#[test]
+fn groups_tabs_and_expands_lanes_for_attention_or_focus() {
+    let (mut snapshot, mut overlay) = fixture();
+    let mut tree = ClientTreeChrome::default();
+    let group = labels(&entries(&snapshot, Some(&overlay), &tree));
+    assert_eq!(
+        group,
+        [
+            "space:client-shell",
+            "section:ORCHESTRATOR",
+            "tag:orch:1",
+            "tag:orphan:2",
+            "section:LANES",
+            "tag:lane-a:1",
+            "tag:lane-b:1",
+            "section:TABS",
+            "tab:plain-a",
+            "agent:plain-pane",
+            "tab:plain-b",
+            "background:2"
+        ]
+    );
+    let rows = entries(&snapshot, Some(&overlay), &tree);
+    let lane = rows
+        .iter()
+        .find_map(|entry| match entry {
+            AgentPanelListEntry::FactoryTab(row) if row.header.label == "lane-a" => Some(row),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(lane.summary.as_deref(), Some("2 wf"));
+    assert!(lane.header.collapsed);
+    overlay.tabs.get_mut("wf-b").unwrap().attention = Attention::Act;
+    let group = labels(&entries(&snapshot, Some(&overlay), &tree));
+    assert_eq!(
+        &group[5..9],
+        ["tag:lane-a:1", "tag:wf-a:2", "tag:wf-b:2", "tag:lane-b:1"]
+    );
+    overlay.tabs.get_mut("wf-b").unwrap().attention = Attention::None;
+    snapshot.focused_tab_id = Some("wf-a".into());
+    assert!(labels(&entries(&snapshot, Some(&overlay), &tree)).contains(&"tag:wf-a:2".into()));
+    snapshot.focused_tab_id = Some("other".into());
+    tree.factory_expanded_lanes.insert("lane-a".into());
+    tree.factory_background_expanded.insert("ws_1".into());
+    let encoded = serde_json::to_string(&tree.to_preferences()).unwrap();
+    let decoded = serde_json::from_str(&encoded).unwrap();
+    let restored = ClientTreeChrome::from_preferences(decoded);
+    let group = labels(&entries(&snapshot, Some(&overlay), &restored));
+    assert!(group.contains(&"tag:wf-a:2".into()));
+    assert!(group.contains(&"tag:advisor:2".into()));
+    assert!(group.contains(&"tag:done:2".into()));
+}
+
+#[test]
+fn frame_shows_workflow_badge_section_and_space_attention() {
+    let (snapshot, mut overlay) = fixture();
+    overlay.spaces.insert(
+        "ws_1".into(),
+        SpaceTag {
+            attention: Attention::Act,
+            target_tab: Some("wf-a".into()),
+            summary: Some("needs you".into()),
+        },
+    );
+    let mut tree = ClientTreeChrome::default();
+    tree.factory_expanded_lanes.insert("lane-a".into());
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    let mut buffer = Buffer::empty(Rect::new(0, 0, 60, 35));
+    let mut hits = ShellHitMap::default();
+    let mut scroll = 0;
+    crate::client::shell::agent_sidebar::render_agent_panel_with_overlay(
+        &mut buffer,
+        Rect::new(0, 0, 60, 35),
+        &snapshot,
+        &config,
+        &tree,
+        Some(&overlay),
+        &mut scroll,
+        &mut hits,
+    );
+    let frame = FrameData::from_ratatui_buffer_with_hyperlinks(&buffer, None, &[]);
+    let rows = frame_rows(&frame);
+    assert!(rows.iter().any(|row| row.contains("LANES")));
+    assert!(rows
+        .iter()
+        .any(|row| row.contains("needs you") && row.contains('●')));
+    let workflow = rows.iter().find(|row| row.contains("wf-a")).unwrap();
+    assert!(workflow.contains("review 3/5"));
+    assert!(workflow.trim_end().ends_with("PC"));
+    assert!(hits
+        .tree_headers
+        .iter()
+        .any(|hit| hit.tab_id.as_deref() == Some("wf-a")));
+}
+
+#[test]
+fn actionable_space_jump_focuses_its_tagged_tab_after_workspace() {
+    let (snapshot, mut overlay) = fixture();
+    overlay.spaces.insert(
+        "ws_1".into(),
+        SpaceTag {
+            attention: Attention::Act,
+            target_tab: Some("wf-a".into()),
+            summary: None,
+        },
+    );
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    config.factory.enabled = true;
+    let mut state = ClientShellState::new(config);
+    state.set_snapshot(Box::new(snapshot));
+    state.factory_overlay = Some(std::sync::Arc::new(overlay));
+    let mut outcome = ClientShellInput::default();
+    state.focus_factory_space_target("ws_1", &mut outcome);
+    assert!(
+        matches!(&outcome.actions[..], [ClientShellAction::Endpoint { request, .. }]
+        if matches!(&request.method, crate::api::schema::Method::TabFocus(target) if target.tab_id == "wf-a"))
+    );
+    let mut outcome = ClientShellInput::default();
+    state.focus_factory_space_target("ws_2", &mut outcome);
+    assert!(outcome.actions.is_empty());
+}

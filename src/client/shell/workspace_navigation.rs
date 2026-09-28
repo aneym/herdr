@@ -23,6 +23,34 @@ impl WorkspaceNavigationTarget {
 }
 
 impl ClientShellState {
+    /// After a space jump, bring forward an actionable tagged tab in that space.
+    pub(super) fn focus_factory_space_target(
+        &mut self,
+        workspace_id: &str,
+        outcome: &mut ClientShellInput,
+    ) {
+        let Some(tab_id) = self
+            .factory_overlay()
+            .and_then(|overlay| overlay.space(workspace_id))
+            .filter(|tag| tag.attention == crate::factory_overlay::Attention::Act)
+            .and_then(|tag| tag.target_tab.as_deref())
+            .filter(|tab_id| {
+                self.snapshot.as_deref().is_some_and(|snapshot| {
+                    snapshot
+                        .tabs
+                        .iter()
+                        .any(|tab| tab.workspace_id == workspace_id && tab.tab_id == *tab_id)
+                })
+            })
+            .map(str::to_owned)
+        else {
+            return;
+        };
+        self.push_endpoint_method(
+            crate::api::schema::Method::TabFocus(crate::api::schema::TabTarget { tab_id }),
+            outcome,
+        );
+    }
     pub(crate) fn tick_workspace_highlight(&mut self, now: std::time::Instant) -> bool {
         if self
             .pending_workspace_highlight
@@ -188,12 +216,15 @@ impl ClientShellState {
                 outcome.actions.get(action_index)
             {
                 self.pending_workspace_highlight = Some(PendingWorkspaceHighlight {
-                    target,
+                    target: target.clone(),
                     request_id: request.id.clone(),
                     // A later focus can be coalesced with this one before a snapshot is sent.
                     expires_at: std::time::Instant::now() + std::time::Duration::from_secs(1),
                 });
                 self.reconcile_pending_workspace_highlight();
+            }
+            if target.endpoint_id == self.active_endpoint_id {
+                self.focus_factory_space_target(&target.workspace_id, outcome);
             }
             self.mode = ClientShellMode::Terminal;
             self.navigate_workspace_id = None;
