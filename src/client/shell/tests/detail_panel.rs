@@ -499,9 +499,9 @@ fn blank_panel_click_keeps_a_selection_so_enter_acts() {
             x >= rect.x && x < rect.right() && y >= rect.y && y < rect.bottom()
         })
     };
-    // Pick the lowest cell in the panel that no row or action covers.
+    // Pick the lowest interior cell (inside the border) that no row or action covers.
     let x = panel.x + 3;
-    let blank = (panel.y..panel.bottom())
+    let blank = (panel.y + 1..panel.bottom() - 1)
         .rev()
         .find(|&row| !covered(&state, x, row))
         .expect("a blank panel cell");

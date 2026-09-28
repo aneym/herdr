@@ -152,12 +152,15 @@ impl OverlayServerHarness {
             next_client_id: 1,
             tick_rx: std::sync::mpsc::channel().1,
         };
-        let (_, rx) = harness.connect_client();
+        let (_, rx) = harness.connect_client(protocol::endpoint::ENDPOINT_SNAPSHOT_KIND);
         harness.tick_rx = rx;
         harness
     }
 
-    fn connect_client(&mut self) -> (Vec<ServerMessage>, std::sync::mpsc::Receiver<Vec<u8>>) {
+    fn connect_client(
+        &mut self,
+        last_kind: &str,
+    ) -> (Vec<ServerMessage>, std::sync::mpsc::Receiver<Vec<u8>>) {
         let (writer, control_rx, render_rx) = test_client_writer();
         // Keep the render lane open for the life of the test.
         std::mem::forget(render_rx);
@@ -178,15 +181,31 @@ impl OverlayServerHarness {
             surface_active: true,
             writer,
         }));
-        let messages = Self::drain(&control_rx);
+        let messages = Self::drain_through(&control_rx, last_kind);
         (messages, control_rx)
     }
 
-    fn drain(rx: &std::sync::mpsc::Receiver<Vec<u8>>) -> Vec<ServerMessage> {
-        // The writer drains its queue on its own thread, so wait briefly for stragglers.
-        std::iter::from_fn(|| rx.recv_timeout(Duration::from_millis(150)).ok())
-            .map(read_server_message)
-            .collect()
+    /// Blocks until the control message of `last_kind` arrives, and returns everything up to
+    /// and including it. The writer thread delivers asynchronously, so the wait is on the
+    /// message itself; the deadline is only a hang guard and a missing message fails the
+    /// caller's assertion, never passes it.
+    fn drain_through(
+        rx: &std::sync::mpsc::Receiver<Vec<u8>>,
+        last_kind: &str,
+    ) -> Vec<ServerMessage> {
+        let mut messages = Vec::new();
+        while let Ok(bytes) = rx.recv_timeout(Duration::from_secs(5)) {
+            let message = read_server_message(bytes);
+            let done = matches!(
+                &message,
+                ServerMessage::EndpointControl { kind, .. } if kind == last_kind
+            );
+            messages.push(message);
+            if done {
+                break;
+            }
+        }
+        messages
     }
 
     pub(crate) fn boot_id(&self) -> String {
@@ -198,12 +217,12 @@ impl OverlayServerHarness {
         self.server.next_factory_overlay_poll = None;
         self.server
             .handle_scheduled_tasks_headless(Instant::now(), false);
-        Self::drain(&self.tick_rx)
+        Self::drain_through(&self.tick_rx, protocol::endpoint::FACTORY_OVERLAY_KIND)
     }
 
     /// Connects a fresh client shell and returns what it received on attach.
     pub(crate) fn connect(&mut self) -> Vec<ServerMessage> {
-        self.connect_client().0
+        self.connect_client(protocol::endpoint::FACTORY_OVERLAY_KIND).0
     }
 }
 
