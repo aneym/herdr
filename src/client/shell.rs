@@ -202,9 +202,27 @@ fn status_icon(
 /// The glyph for a status, honouring `ui.sidebar.agents.state_icons` when it
 /// names one. The fork read these overrides in its own sidebar renderer; the
 /// client shell is where that renderer lives now.
+/// Status glyph for a workspace (aggregate status): always drawn, so a workspace
+/// whose agents all finished keeps its normal glyph when the finished dot is off.
+fn workspace_status_icon(
+    status: crate::api::schema::AgentStatus,
+    config: &ClientShellConfig,
+) -> &str {
+    status_glyph(status, config, true)
+}
+
+/// Status glyph for an agent or tab row; the unread-finished dot may be hidden.
 fn resolved_status_icon(
     status: crate::api::schema::AgentStatus,
     config: &ClientShellConfig,
+) -> &str {
+    status_glyph(status, config, false)
+}
+
+fn status_glyph(
+    status: crate::api::schema::AgentStatus,
+    config: &ClientShellConfig,
+    always_show_done: bool,
 ) -> &str {
     use crate::api::schema::AgentStatus;
     let key = match status {
@@ -220,7 +238,7 @@ fn resolved_status_icon(
     }
     // The unread-finished marker is off by default (`[ui] show_finished_dot`): the
     // cell stays blank so row layout does not shift.
-    if status == AgentStatus::Done && !config.show_finished_dot {
+    if status == AgentStatus::Done && !config.show_finished_dot && !always_show_done {
         return " ";
     }
     status_icon(status, config.status_indicators)

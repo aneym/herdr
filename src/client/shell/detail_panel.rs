@@ -361,6 +361,38 @@ impl ClientShellState {
         );
     }
 
+    /// Gives the panel the keyboard without dropping its selection; a panel with
+    /// targets but no selection starts on the first one so Enter acts.
+    pub(super) fn focus_detail_panel_keep_selection(&mut self) {
+        let doc = self
+            .factory_overlay()
+            .zip(self.snapshot.as_deref())
+            .zip(self.detail_panel.as_ref())
+            .map(|((overlay, snapshot), panel)| {
+                let doc = panel_for(overlay, &panel.key, snapshot);
+                target_count(&doc, panel)
+            });
+        if let Some(panel) = self.detail_panel.as_mut() {
+            panel.focused = true;
+            if panel.selected.is_none() && doc.is_some_and(|count| count > 0) {
+                panel.selected = Some(0);
+            }
+        }
+    }
+
+    fn focus_detail_tab(&mut self, tab_id: &str, outcome: &mut ClientShellInput) {
+        self.push_endpoint_method(
+            crate::api::schema::Method::TabFocus(crate::api::schema::TabTarget {
+                tab_id: tab_id.to_owned(),
+            }),
+            outcome,
+        );
+        self.detail_panel = None;
+        self.invalidate_pane_surface();
+        outcome.resize = true;
+        outcome.repaint = true;
+    }
+
     pub(super) fn focus_detail_target(&mut self, target: &str, outcome: &mut ClientShellInput) {
         let method = if target.contains(":p") {
             crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget {
@@ -485,6 +517,14 @@ impl ClientShellState {
                     .map(str::to_owned);
                 if let Some(target) = target {
                     self.focus_detail_target(&target, outcome);
+                } else if let Some(tab_id) = self
+                    .detail_panel
+                    .as_ref()
+                    .and_then(|panel| panel.key.strip_prefix("tab:"))
+                    .map(str::to_owned)
+                {
+                    // No row selected in a tab's panel: Enter focuses that tab.
+                    self.focus_detail_tab(&tab_id, outcome);
                 }
             }
             _ => {}

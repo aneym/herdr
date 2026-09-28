@@ -1557,3 +1557,34 @@ fn finished_agent_sidebar_row_draws_the_dot_when_enabled() {
     let text = finished_agent_sidebar_text(true);
     assert!(text.contains("● pi one"), "frame: {text}");
 }
+
+fn finished_workspace_sidebar_text(show_finished_dot: bool) -> String {
+    let mut projected = snapshot();
+    projected.panes[0].focused = false;
+    projected.agents.clear();
+    projected.workspaces[0].agent_status = AgentStatus::Done;
+    let mut config = Config::default();
+    config.ui.show_finished_dot = show_finished_dot;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    let frame = state.compose(106, 30).expect("workspace sidebar frame");
+    frame
+        .cells
+        .chunks(frame.width as usize)
+        .map(|row| {
+            row.iter()
+                .map(|cell| cell.symbol.as_str())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn finished_workspace_keeps_its_status_glyph_when_the_dot_is_hidden() {
+    let hidden = finished_workspace_sidebar_text(false);
+    let shown = finished_workspace_sidebar_text(true);
+    assert!(hidden.contains('●'), "frame: {hidden}");
+    assert_eq!(hidden, shown);
+}

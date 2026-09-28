@@ -483,3 +483,46 @@ fn lane_fold_persists_when_the_lane_row_takes_focus() {
     assert!(group.contains(&"tag:lane-a:1".into()));
     assert!(!group.contains(&"tag:wf-a:2".into()));
 }
+
+fn composed_sidebar_text(config: Config, overlay: FactoryOverlay) -> String {
+    let (snapshot, _) = fixture();
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(snapshot));
+    state.factory_overlay = Some(std::sync::Arc::new(overlay));
+    state.set_pane_surface(surface());
+    let frame = state.compose(120, 50).expect("sidebar frame");
+    frame
+        .cells
+        .chunks(frame.width as usize)
+        .map(|row| row.iter().map(|cell| cell.symbol.as_str()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn enabling_factory_groups_the_default_spaces_sort() {
+    let (_, overlay) = fixture();
+    let mut config = Config::default();
+    assert_eq!(
+        config.ui.agent_panel_sort,
+        crate::config::AgentPanelSortConfig::Spaces
+    );
+    config.ui.factory.enabled = true;
+    let text = composed_sidebar_text(config, overlay);
+    for heading in ["ORCHESTRATOR", "LANES"] {
+        assert!(text.contains(heading), "missing {heading}: {text}");
+    }
+    assert!(text.contains("background"), "frame: {text}");
+}
+
+#[test]
+fn factory_disabled_through_config_draws_no_grouping_even_with_an_overlay() {
+    let (_, overlay) = fixture();
+    // The tree sort would draw the grouping if the enabled gate were removed.
+    let mut config = Config::default();
+    config.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    config.ui.factory.enabled = false;
+    let text = composed_sidebar_text(config, overlay);
+    assert!(!text.contains("ORCHESTRATOR"), "frame: {text}");
+    assert!(!text.contains("LANES"), "frame: {text}");
+}

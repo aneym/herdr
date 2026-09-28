@@ -444,12 +444,12 @@ impl ClientShellConfig {
             sidebar_width.clamp(min, max)
         }
         .min(cols.saturating_sub(1));
-        // Fixed width: only shrinks when fewer than 10 columns would be left
-        // for the panes, and disappears when it cannot keep a usable 24.
+        // Fixed width: never shrinks; the panel is hidden when the terminal cannot
+        // fit the sidebar, the full panel and at least 10 columns for the panes.
         let available = cols.saturating_sub(sidebar_width.saturating_add(10));
         let panel_width = if panel_open {
-            let width = self.factory.panel_width.min(available);
-            if width >= 24 {
+            let width = self.factory.panel_width;
+            if width > 0 && width <= available {
                 width
             } else {
                 0

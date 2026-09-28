@@ -673,9 +673,7 @@ impl ClientShellState {
                 match mouse.kind {
                     MouseEventKind::Down(MouseButton::Left) => {
                         self.detail_panel_press = Some(point);
-                        if let Some(panel) = self.detail_panel.as_mut() {
-                            panel.focused = true;
-                        }
+                        self.focus_detail_panel_keep_selection();
                         outcome.repaint = true;
                     }
                     MouseEventKind::Up(MouseButton::Left) => {
@@ -1504,6 +1502,11 @@ impl ClientShellState {
                         false,
                         outcome,
                     );
+                    // A click that opened the panel hands it the keyboard, so Enter
+                    // focuses the clicked tab.
+                    if let Some(panel) = self.detail_panel.as_mut() {
+                        panel.focused = true;
+                    }
                 }
                 return;
             }

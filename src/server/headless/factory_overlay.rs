@@ -16,15 +16,15 @@ struct FileStamp {
 }
 
 #[derive(Default)]
-pub(super) struct FactoryOverlayPoller {
+pub(crate) struct FactoryOverlayPoller {
     last_seen: Option<FileStamp>,
-    pub(super) revision: u64,
-    pub(super) current: Option<Arc<FactoryOverlay>>,
+    pub(crate) revision: u64,
+    pub(crate) current: Option<Arc<FactoryOverlay>>,
     logged_errors: HashSet<String>,
 }
 
 impl FactoryOverlayPoller {
-    pub(super) fn poll(&mut self, path: Option<&Path>) -> Option<Option<Arc<FactoryOverlay>>> {
+    pub(crate) fn poll(&mut self, path: Option<&Path>) -> Option<Option<Arc<FactoryOverlay>>> {
         let path = path?;
         let metadata = match fs::metadata(path) {
             Ok(metadata) => metadata,

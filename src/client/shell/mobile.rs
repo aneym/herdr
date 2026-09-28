@@ -195,7 +195,7 @@ fn render_header_status(
         area.x,
         area.y,
         name_width.min(3),
-        &format!(" {} ", resolved_status_icon(workspace.agent_status, config)),
+        &format!(" {} ", workspace_status_icon(workspace.agent_status, config)),
         Style::default()
             .fg(status_color(workspace.agent_status, palette))
             .bg(palette.panel_bg),
@@ -377,15 +377,9 @@ fn render_agent_summary(
         }
         let symbol = match (config.status_indicators, status) {
             (crate::config::StatusIndicatorStyle::Dots, AgentStatus::Blocked) => Some("◉"),
-            (_, AgentStatus::Done)
-                if !config.show_finished_dot
-                    && !config.agents.state_icons.contains_key("idle_unseen") =>
-            {
-                None
-            }
             (crate::config::StatusIndicatorStyle::Dots, AgentStatus::Done) => Some("●"),
             (crate::config::StatusIndicatorStyle::Dots, _) => None,
-            _ => Some(resolved_status_icon(status, config)),
+            _ => Some(workspace_status_icon(status, config)),
         };
         let text = symbol.map_or_else(
             || format!("{count} {label}"),
@@ -964,7 +958,7 @@ fn mobile_items(
                                 .add_modifier(dim),
                         ),
                         Span::styled(
-                            resolved_status_icon(workspace.agent_status, config).to_owned(),
+                            workspace_status_icon(workspace.agent_status, config).to_owned(),
                             Style::default().fg(status).bg(background).add_modifier(dim),
                         ),
                         Span::styled(" ", Style::default().bg(background)),

@@ -177,7 +177,7 @@ pub(super) fn render_collapsed(
                 rect.x.saturating_add(number_width),
                 rect.y,
                 rect.width.saturating_sub(number_width),
-                resolved_status_icon(workspace.agent_status, config),
+                workspace_status_icon(workspace.agent_status, config),
                 Style::default()
                     .fg(if stale {
                         palette.overlay0

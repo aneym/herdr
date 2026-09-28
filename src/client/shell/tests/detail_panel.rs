@@ -347,3 +347,154 @@ fn panel_width_is_fixed_at_88_columns() {
         layout.detail_panel.x + layout.detail_panel.width
     );
 }
+
+fn tagged_row_hit() -> TreeHeaderHit {
+    TreeHeaderHit {
+        rect: Rect::new(2, 4, 12, 1),
+        chevron: Rect::default(),
+        plus: Rect::default(),
+        pin: Rect::default(),
+        group: None,
+        workspace_id: "ws_1".into(),
+        tab_id: Some("tab_1".into()),
+        key: "ws_1#1".into(),
+        pinned: false,
+    }
+}
+
+fn focused_tab_ids(input: &ClientShellInput) -> Vec<String> {
+    input
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            ClientShellAction::Endpoint { request, .. } => match &request.method {
+                crate::api::schema::Method::TabFocus(target) => Some(target.tab_id.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn overlay_file_reaches_the_panel_through_the_server_poll_and_client_control() {
+    let dir = std::env::temp_dir().join(format!(
+        "herdr-overlay-panel-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("overlay.json");
+    let document = {
+        let overlay = ready().factory_overlay.take().unwrap();
+        serde_json::to_string(overlay.as_ref()).unwrap()
+    };
+    std::fs::write(&path, document).unwrap();
+
+    let mut config = Config::default();
+    config.ui.factory.enabled = true;
+    config.ui.factory.overlay_file = path.to_string_lossy().into_owned();
+    let overlay_path = config.ui.factory.overlay_path();
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let active = state.active_endpoint_id.clone();
+    state.set_endpoint_snapshot_for_generation(&active, 1, Box::new(snapshot()));
+    assert!(state.factory_overlay.is_none());
+    state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+        KeyCode::Char('o'),
+        KeyModifiers::ALT,
+    ))]);
+    assert!(state.detail_panel.is_none(), "no overlay yet, Alt-O passes through");
+
+    // Server side: the poller reads the configured file and builds the control message.
+    let mut poller = crate::server::headless::factory_overlay::FactoryOverlayPoller::default();
+    assert!(poller.poll(overlay_path.as_deref()).is_some());
+    let crate::protocol::ServerMessage::EndpointControl { kind, data } =
+        crate::protocol::endpoint::factory_overlay_message(
+            "boot-1",
+            poller.revision,
+            poller.current.as_deref(),
+        )
+        .unwrap()
+    else {
+        panic!("expected control message");
+    };
+    // Client side: decode and apply exactly as the attach loop does.
+    let crate::client::endpoint::EndpointControlMessage::FactoryOverlay(decoded) =
+        crate::client::endpoint::decode_endpoint_control(&kind, &data).unwrap()
+    else {
+        panic!("expected factory overlay control");
+    };
+    assert!(state.set_endpoint_factory_overlay_for_generation(&active, 1, decoded));
+    assert!(state.factory_overlay.is_some());
+
+    // Alt-O (default binding) opens the panel with the file's contents.
+    state.set_pane_surface(surface());
+    state.set_endpoint_status(&active, ClientEndpointStatus::Online);
+    let open = key(&mut state, KeyCode::Char('o'), KeyModifiers::ALT);
+    assert!(open.resize);
+    assert_eq!(state.detail_panel.as_ref().unwrap().key, "overview");
+    let rows = frame_rows(&state.compose(110, 30).expect("composed shell"));
+    assert!(rows.iter().any(|line| line.contains("Factory overview")));
+    assert!(rows.iter().any(|line| line.contains("open orchestrator")));
+
+    // A changed file is picked up on the next poll.
+    let mut changed: FactoryOverlay =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    changed.panels.get_mut("overview").unwrap().title = "Renamed overview".into();
+    std::fs::write(&path, serde_json::to_string(&changed).unwrap()).unwrap();
+    assert!(poller.poll(overlay_path.as_deref()).is_some());
+    assert_eq!(
+        poller.current.as_deref().unwrap().panels["overview"].title,
+        "Renamed overview"
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn enter_after_tagged_row_click_focuses_that_tab() {
+    let mut state = ready();
+    state.last_composed_size = Some((100, 30));
+    state.hits.tree_headers.push(tagged_row_hit());
+    let opened = click(&mut state, 4, 4);
+    assert!(opened.requests.is_empty());
+    assert_eq!(state.detail_panel.as_ref().unwrap().key, "tab:tab_1");
+    let enter = key(&mut state, KeyCode::Enter, KeyModifiers::NONE);
+    assert_eq!(focused_tab_ids(&enter), ["tab_1"]);
+    assert!(state.detail_panel.is_none());
+}
+
+#[test]
+fn blank_panel_click_keeps_a_selection_so_enter_acts() {
+    let mut state = ready();
+    state.last_composed_size = Some((110, 30));
+    key(&mut state, KeyCode::Char('o'), KeyModifiers::ALT);
+    assert_eq!(state.detail_panel.as_ref().unwrap().selected, None);
+    let panel = state.layout(110, 30).detail_panel;
+    click(&mut state, panel.x + 3, panel.bottom() - 2);
+    let opened = state.detail_panel.as_ref().unwrap();
+    assert!(opened.focused && opened.selected.is_some());
+    let enter = key(&mut state, KeyCode::Enter, KeyModifiers::NONE);
+    assert!(enter
+        .actions
+        .iter()
+        .any(|action| format!("{action:?}").contains("PaneFocus")));
+}
+
+#[test]
+fn panel_keeps_its_configured_width_and_hides_when_it_cannot_fit() {
+    let mut state = ready();
+    state.toggle_factory_overview(&mut ClientShellInput::default());
+    let sidebar = state.layout(80, 30).sidebar.width;
+    let wide_enough = sidebar + state.config.factory.panel_width + 10;
+    let fit = state.layout(wide_enough, 30);
+    assert_eq!(fit.detail_panel.width, 46);
+    assert!(fit.pane_surface.width >= 10);
+    let tight = state.layout(wide_enough - 1, 30);
+    assert_eq!(tight.detail_panel.width, 0);
+    assert_eq!(tight.pane_surface.width, wide_enough - 1 - sidebar);
+    let narrow = state.layout(80, 30);
+    assert_ne!(narrow.detail_panel.width, 44);
+}

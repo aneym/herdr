@@ -350,8 +350,10 @@ pub(super) fn append_automations(
     }
 }
 
+/// The tree view draws the overlay grouping, so `[ui.factory] enabled` turns it on
+/// without touching the configured sort.
 pub(super) fn tree_view_active(config: &ClientShellConfig) -> bool {
-    config.agent_panel_sort == crate::config::AgentPanelSortConfig::Tree
+    config.factory.enabled || config.agent_panel_sort == crate::config::AgentPanelSortConfig::Tree
 }
 
 /// Cmd+E / tree roll-up ordering. Higher wins. Blocked agents are waiting on
