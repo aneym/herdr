@@ -2419,3 +2419,32 @@ fn copy_mode_repeat_during_projection_gap_stays_active() {
         );
     }
 }
+
+#[test]
+fn cmd_c_without_mouse_reporting_drag_shows_nothing_selected_to_copy() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    let mut pane_surface = surface();
+    pane_surface.panes[0].mouse_reporting = true;
+    state.set_pane_surface(pane_surface);
+    let result = state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+        KeyCode::Char('c'),
+        KeyModifiers::SUPER,
+    ))]);
+    assert!(result.repaint);
+    assert!(result.actions.is_empty());
+    assert!(
+        !result
+            .requests
+            .iter()
+            .any(|request| matches!(request, ClientMessage::ClientShellPaneInput { .. }))
+    );
+    assert_eq!(
+        state
+            .copy_feedback
+            .as_ref()
+            .map(|toast| toast.message.as_str()),
+        Some("nothing selected to copy")
+    );
+    assert!(state.copy_feedback_deadline.is_some());
+}
