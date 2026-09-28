@@ -48,7 +48,7 @@ fn agent(
 
 /// Two spaces; the first has two tabs with one agent each, the second one tab
 /// with one agent.
-fn tree_snapshot() -> ClientShellSnapshot {
+pub(super) fn tree_snapshot() -> ClientShellSnapshot {
     let mut snapshot = snapshot();
     snapshot.workspaces.push(ClientShellWorkspace {
         workspace_id: "ws_2".into(),
