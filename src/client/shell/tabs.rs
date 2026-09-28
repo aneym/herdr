@@ -309,6 +309,12 @@ pub(in crate::client::shell) fn tab_status_glyphs<'a>(
                 .map(|agent| agent.agent_status)
                 .unwrap_or(AgentStatus::Unknown)
         })
+        .filter(|status| {
+            // A hidden unread-finished marker takes no tab-row width at all.
+            *status != AgentStatus::Done
+                || config.show_finished_dot
+                || config.agents.state_icons.contains_key("idle_unseen")
+        })
         .map(|status| {
             (
                 resolved_status_icon(status, config),

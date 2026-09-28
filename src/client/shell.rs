@@ -215,12 +215,15 @@ fn resolved_status_icon(
         AgentStatus::Idle => "idle",
         AgentStatus::Unknown => "unknown",
     };
-    config
-        .agents
-        .state_icons
-        .get(key)
-        .map(String::as_str)
-        .unwrap_or_else(|| status_icon(status, config.status_indicators))
+    if let Some(icon) = config.agents.state_icons.get(key) {
+        return icon.as_str();
+    }
+    // The unread-finished marker is off by default (`[ui] show_finished_dot`): the
+    // cell stays blank so row layout does not shift.
+    if status == AgentStatus::Done && !config.show_finished_dot {
+        return " ";
+    }
+    status_icon(status, config.status_indicators)
 }
 
 fn status_dot(status: crate::api::schema::AgentStatus) -> &'static str {

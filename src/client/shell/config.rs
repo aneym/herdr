@@ -154,6 +154,7 @@ impl ClientShellConfig {
             attention_read: config.ui.attention_read,
             show_tab_status: config.ui.show_tab_status,
             status_indicators: config.ui.status_indicators,
+            show_finished_dot: config.ui.show_finished_dot,
             sound_enabled: config.ui.sound.enabled,
             toast_delivery: config.ui.toast.delivery,
             toast_delay_seconds: config.ui.toast.delay_seconds,
@@ -376,6 +377,7 @@ impl ClientShellConfig {
                 self.attention_read = ui.attention_read;
                 self.show_tab_status = ui.show_tab_status;
                 self.status_indicators = ui.status_indicators;
+                self.show_finished_dot = ui.show_finished_dot;
                 self.sound_enabled = ui.sound.enabled;
                 self.toast_delivery = ui.toast.delivery;
                 self.toast_delay_seconds = ui.toast.delay_seconds;

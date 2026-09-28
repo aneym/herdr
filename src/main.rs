@@ -356,6 +356,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # distinct static glyphs for blocked, working, done, idle, and unknown states.
 # status_indicators = "dots"
 
+# Draw the marker for an agent that finished and has not been read yet. Off by default;
+# other status glyphs are unaffected.
+# show_finished_dot = false
+
 # Expanded sidebar section order. "workspaces" is accepted as an alias for "spaces".
 # [ui.sidebar]
 # section_order = ["spaces", "agents"]

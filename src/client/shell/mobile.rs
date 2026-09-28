@@ -377,6 +377,12 @@ fn render_agent_summary(
         }
         let symbol = match (config.status_indicators, status) {
             (crate::config::StatusIndicatorStyle::Dots, AgentStatus::Blocked) => Some("◉"),
+            (_, AgentStatus::Done)
+                if !config.show_finished_dot
+                    && !config.agents.state_icons.contains_key("idle_unseen") =>
+            {
+                None
+            }
             (crate::config::StatusIndicatorStyle::Dots, AgentStatus::Done) => Some("●"),
             (crate::config::StatusIndicatorStyle::Dots, _) => None,
             _ => Some(resolved_status_icon(status, config)),
