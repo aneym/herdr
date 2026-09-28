@@ -635,17 +635,7 @@ pub(super) struct AgentGroupRender {
 /// hidden-descendant count on the collapsed owner row. Roots keep their
 /// incoming order; siblings keep their relative order. Cycle-safe: any row
 /// unreachable from a root is appended at the end as a root.
-pub(super) fn arrange_agent_hierarchy(
-    snapshot: &ClientShellSnapshot,
-    tree: &ClientTreeChrome,
-    rows: Vec<AgentRow>,
-) -> Vec<AgentRow> {
-    arrange_agent_hierarchy_with(snapshot, tree, rows, true)
-}
-
-/// [`arrange_agent_hierarchy`] with orchestrator adoption optional. The tree
-/// with tabs shown already lists every lane under its own tab, so adopting them
-/// under the first tab's agent would only let one chevron fold them all away.
+/// With tabs shown, orchestrator adoption is disabled: each lane keeps its tab.
 pub(super) fn arrange_agent_hierarchy_with(
     snapshot: &ClientShellSnapshot,
     tree: &ClientTreeChrome,
@@ -873,7 +863,7 @@ fn push_subtree(
 }
 
 /// The agent groups that hold `pane_id` in the tree, nearest first, walked by
-/// the same parent rule as [`arrange_agent_hierarchy`]: a hands-on pin stops
+/// the same parent rule as [`arrange_agent_hierarchy_with`]: a hands-on pin stops
 /// the walk, an explicit parent wins over the owner. The last entry is the
 /// orchestrator row when the walk ends on an unpinned root of an
 /// orchestrator-mode workspace. Each entry is (local collapse key, owner).
