@@ -26,6 +26,7 @@ mod detect;
 mod events;
 mod ghostty;
 mod handoff_runtime;
+mod inject_log;
 mod input;
 mod integration;
 mod ipc;

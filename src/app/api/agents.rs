@@ -276,6 +276,9 @@ impl App {
                 submit_deadline,
             )
             .map_err(|err| encode_error(id.clone(), "agent_prompt_failed", err.to_string()))?;
+        if let Some(public_id) = self.public_pane_id(resolved.ws_idx, resolved.pane_id) {
+            crate::inject_log::record(&public_id, "agent.prompt", &params.text);
+        }
         Ok((id, agent, completion))
     }
 
