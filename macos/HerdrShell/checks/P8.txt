@@ -1,0 +1,15 @@
+HerdrShell P8 check  2026-09-28T20:27:15Z
+lab session 'shellspike-p8', pane under test w1:p2 (plain zsh)
+app: {"pids": [46932], "fifo_ready_s": 0.6}
+[PASS] pane attached and rendered by a Ghostty surface
+[PASS] after seq 1 500 the visible screen ends at 500 and line 1 is off screen
+[PASS] wheel up shows line 1 (herdr pane read --source visible) -- after 3 wheel events; top of screen ['tmp % seq 1 500', '1', '2']
+[PASS] plain drag is left to the program (no native selection, mouse captured for herdr) -- selection=None captured=True
+[PASS] shift+drag selects text in the surface -- selection='alpha brav'
+[PASS] Cmd+C puts the selected text on the pasteboard -- pasteboard='alpha brav'
+[PASS] Cmd+C sent nothing into the pane (prompt line still empty) -- last line 'tmp %'
+[PASS] vim (mouse=a) cursor follows clicks -- click col 2 row 6 -> 7,3 ok; click col 1 row 20 -> 21,2 ok; click col 0 row 2 -> 3,1 ok
+pasteboard restored
+lab down: stop: 0
+
+RESULT: PASS
