@@ -148,6 +148,23 @@ impl ClientShellState {
                 &self.config.palette,
             );
         }
+        if let (Some(overlay), Some(panel), Some(snapshot)) = (
+            self.factory_overlay
+                .as_deref()
+                .filter(|_| self.config.factory.enabled),
+            self.detail_panel.as_mut(),
+            self.snapshot.as_deref(),
+        ) {
+            detail_panel::render_panel(
+                &mut buffer,
+                layout.detail_panel,
+                overlay,
+                snapshot,
+                panel,
+                &self.config.palette,
+                &mut self.hits,
+            );
+        }
         FrameData::from_ratatui_buffer_with_hyperlinks(&buffer, None, &[])
     }
 
@@ -243,6 +260,22 @@ impl ClientShellState {
                 workspace_drop_indicator_row,
             },
         );
+        if let (Some(overlay), Some(panel)) = (
+            self.factory_overlay
+                .as_deref()
+                .filter(|_| self.config.factory.enabled),
+            self.detail_panel.as_mut(),
+        ) {
+            detail_panel::render_panel(
+                &mut buffer,
+                layout.detail_panel,
+                overlay,
+                snapshot,
+                panel,
+                &self.config.palette,
+                &mut self.hits,
+            );
+        }
         self.hits.panes = surface
             .panes
             .iter()

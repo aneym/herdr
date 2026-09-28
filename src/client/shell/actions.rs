@@ -47,6 +47,11 @@ impl ClientShellState {
             crate::input::KeybindMatch::Action(crate::input::KeybindAction::Detach) => {
                 outcome.detach = true;
             }
+            crate::input::KeybindMatch::Action(
+                crate::input::KeybindAction::ToggleFactoryOverview,
+            ) => {
+                self.toggle_factory_overview(outcome);
+            }
             crate::input::KeybindMatch::Action(crate::input::KeybindAction::ToggleSidebar) => {
                 self.sidebar_collapsed = !self.sidebar_collapsed;
                 self.sidebar_collapsed_manual = true;

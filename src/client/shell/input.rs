@@ -177,6 +177,14 @@ impl ClientShellState {
             match event {
                 RawInputEvent::Key(key) => self.handle_key(key, &mut outcome),
                 RawInputEvent::Text(text) => {
+                    if self
+                        .detail_panel
+                        .as_ref()
+                        .is_some_and(|panel| panel.focused)
+                        && self.factory_overlay().is_some()
+                    {
+                        continue;
+                    }
                     let text = text.into_string();
                     if matches!(
                         self.overlay,
@@ -211,6 +219,14 @@ impl ClientShellState {
                     }
                 }
                 RawInputEvent::Paste(text) => {
+                    if self
+                        .detail_panel
+                        .as_ref()
+                        .is_some_and(|panel| panel.focused)
+                        && self.factory_overlay().is_some()
+                    {
+                        continue;
+                    }
                     if matches!(
                         self.overlay,
                         Some(
@@ -544,6 +560,9 @@ impl ClientShellState {
         key: &crate::input::TerminalKey,
         outcome: &mut ClientShellInput,
     ) -> Option<ClientInputTarget> {
+        if self.handle_detail_key(key, outcome) {
+            return None;
+        }
         if self.handle_modal_paste_shortcut_with(key, outcome, crate::platform::read_clipboard_text)
         {
             return None;
