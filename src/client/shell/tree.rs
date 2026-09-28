@@ -251,6 +251,7 @@ pub(super) struct FactoryTabRow {
     pub(super) status: crate::api::schema::AgentStatus,
     pub(super) badge: Option<String>,
     pub(super) phase: Option<String>,
+    pub(super) started: Option<i64>,
     pub(super) summary: Option<String>,
     pub(super) attention: crate::factory_overlay::Attention,
     pub(super) idle: bool,
@@ -264,6 +265,8 @@ impl AgentPanelListEntry {
     pub(super) fn line_count(&self) -> usize {
         match self {
             Self::Agent(row) | Self::Automation(row) => row.rows.len().max(1),
+            Self::FactoryTab(row) if row.workflow && !row.done
+                && (row.phase.as_ref().is_some_and(|phase| !phase.trim().is_empty()) || row.started.is_some()) => 2,
             _ => 1,
         }
     }
@@ -839,15 +842,7 @@ fn append_factory_space(
                 .copied()
                 .filter(|workflow| parent_for(workflow) == Some(lane.tab_id.as_str()))
                 .collect::<Vec<_>>();
-            let (running, done) = all_workflows.iter().filter(|workflow| {
-                parent_for(workflow) == Some(lane.tab_id.as_str())
-            }).fold((0, 0), |(running, done), workflow| {
-                if overlay.tab(&workflow.tab_id).is_some_and(|tag| tag.done) {
-                    (running, done + 1)
-                } else {
-                    (running + 1, done)
-                }
-            });
+            let running = children.len();
             let attention = all_workflows.iter().filter(|workflow| {
                 parent_for(workflow) == Some(lane.tab_id.as_str())
             }).filter_map(|workflow| overlay.tab(&workflow.tab_id))
@@ -869,9 +864,7 @@ fn append_factory_space(
             );
             if let AgentPanelListEntry::FactoryTab(row) = &mut lane_row {
                 row.summary = Some(if running > 0 {
-                    if done > 0 { format!("{running} · {done} done") } else { running.to_string() }
-                } else if done > 0 {
-                    format!("{done} done")
+                    running.to_string()
                 } else if row.idle {
                     "idle".to_owned()
                 } else {
@@ -994,6 +987,7 @@ fn factory_row(
         status,
         badge: tag.and_then(|tag| tag.badge.clone()),
         phase: tag.and_then(|tag| tag.phase.clone()),
+        started: tag.and_then(|tag| tag.started),
         summary: tag.and_then(|tag| tag.summary.clone()),
         attention: tag.map_or(crate::factory_overlay::Attention::None, |tag| tag.attention),
         idle: tag.is_some_and(|tag| tag.idle),

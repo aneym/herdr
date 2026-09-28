@@ -486,3 +486,51 @@ fn panel_keeps_its_configured_width_and_hides_when_it_cannot_fit() {
     let narrow = state.layout(80, 30);
     assert_ne!(narrow.detail_panel.width, 44);
 }
+
+#[test]
+fn overview_task_counts_follow_live_workflows_including_orchestrator() {
+    let mut state = ready();
+    let mut snapshot = snapshot();
+    snapshot.tabs = [
+        ("orch", "rails orchestrator"),
+        ("lane", "issues"),
+        ("running", "review"),
+        ("done", "completed"),
+        ("orch-child", "child"),
+    ].into_iter().enumerate().map(|(index, (id, label))| ClientShellTab {
+        tab_id: id.into(), workspace_id: "ws_1".into(), number: index + 1,
+        label: label.into(), custom_label: true, zoomed: false, focused: false,
+        agent_status: AgentStatus::Working,
+    }).collect();
+    snapshot.panes = [
+        ("running-pane", "running"), ("done-pane", "done"), ("orch-pane", "orch-child"),
+    ].into_iter().map(|(pane_id, tab_id)| ClientShellPane {
+        pane_id: pane_id.into(), workspace_id: "ws_1".into(), tab_id: tab_id.into(),
+        label: None, cwd: None, foreground_cwd: None, focused: false, right_click_passthrough: false,
+    }).collect();
+    state.set_snapshot(Box::new(snapshot));
+    let mut overlay = FactoryOverlay::default();
+    overlay.tabs.insert("orch".into(), TabTag { kind: TabKind::Orchestrator, ..Default::default() });
+    overlay.tabs.insert("lane".into(), TabTag { kind: TabKind::Lane, ..Default::default() });
+    overlay.tabs.insert("running".into(), TabTag { kind: TabKind::Workflow, parent: Some("lane".into()), attention: crate::factory_overlay::Attention::Act, ..Default::default() });
+    overlay.tabs.insert("done".into(), TabTag { kind: TabKind::Workflow, parent: Some("lane".into()), done: true, attention: crate::factory_overlay::Attention::Act, ..Default::default() });
+    overlay.tabs.insert("orch-child".into(), TabTag { kind: TabKind::Workflow, parent: Some("orch".into()), ..Default::default() });
+    let space = &state.snapshot.as_ref().unwrap().workspaces[0].label;
+    overlay.panels.insert("overview".into(), Panel {
+        title: "Factory overview".into(),
+        sections: vec![
+            PanelSection { title: format!("{space} · issues"), right: Some("2 tasks · 2 wants you".into()),
+                rows: vec![
+                    PanelRow { text: "live".into(), target: Some("running-pane".into()), ..Default::default() },
+                    PanelRow { text: "finished".into(), target: Some("done-pane".into()), ..Default::default() },
+                ] },
+            PanelSection { title: format!("{space} · rails orchestrator"), right: Some("0 tasks".into()),
+                rows: vec![PanelRow { text: "no tasks".into(), style: RowStyle::Dim, ..Default::default() }] },
+        ], ..Default::default()
+    });
+    let panel = super::super::detail_panel::panel_for(&overlay, "overview", state.snapshot.as_ref().unwrap());
+    assert_eq!(panel.sections[0].right.as_deref(), Some("1 task · 1 wants you"));
+    assert_eq!(panel.sections[0].rows.iter().map(|row| row.text.as_str()).collect::<Vec<_>>(), ["live"]);
+    assert_eq!(panel.sections[1].right.as_deref(), Some("1 task"));
+    assert!(panel.sections[1].rows.is_empty());
+}

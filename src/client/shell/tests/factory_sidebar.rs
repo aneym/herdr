@@ -265,8 +265,10 @@ fn frame_shows_workflow_badge_section_and_space_attention() {
         .iter()
         .any(|row| row.contains("needs you") && row.contains('●')));
     let workflow = rows.iter().find(|row| row.contains("wf-a")).unwrap();
-    assert!(workflow.contains("review 3/5"));
+    assert!(!workflow.contains("review 3/5"));
     assert!(workflow.trim_end().ends_with("PC"));
+    let progress = rows.iter().find(|row| row.contains("review 3/5")).unwrap();
+    assert!(!progress.contains("PC"));
     assert!(hits
         .tree_headers
         .iter()
@@ -617,7 +619,7 @@ fn workflow_siblings_and_lane_metadata_remain_readable_at_25_columns() {
     }
     let collapsed = rendered_factory_rows(&snapshot, &overlay).0;
     let collapsed_lane = collapsed.iter().find(|row| row.contains("issues")).unwrap();
-    assert!(collapsed_lane.contains("7 · 1 done"), "{collapsed_lane:?}");
+    assert!(collapsed_lane.trim_end().ends_with("7") && !collapsed_lane.contains("done"), "{collapsed_lane:?}");
     let idle = collapsed.iter().find(|row| row.contains("conversation")).unwrap_or_else(|| panic!("{collapsed:?}"));
     assert!(idle.contains('○') && idle.trim_end().ends_with("idle"), "{idle:?}");
     let mut tree = ClientTreeChrome::default();
@@ -672,6 +674,7 @@ fn compact_factory_rows_and_click_targets_work_at_25_columns_with_gap_one() {
     let workflow = rows.iter().position(|row| row.contains("issues 3")).unwrap();
     assert_eq!(orch, section + 1, "{rows:?}");
     assert_eq!(workflow, lane + 1, "{rows:?}");
+    assert!(rows[workflow + 1].contains("review 3/5"), "{rows:?}");
     assert!(rows[workflow].contains("issues 3") && rows[workflow].trim_end().ends_with("Studio"));
     assert!(!rows[1].contains("usage") && !rows[1].contains("tree"));
     let lane_hit = hits.tree_headers.iter().find(|hit| hit.tab_id.as_deref() == Some("lane-a")).unwrap();
@@ -743,7 +746,7 @@ fn live_children_count_done_without_rendering_done_rows_and_color_collapsed_lane
     overlay.tabs.get_mut("wf-b").unwrap().attention = Attention::Act;
     let (collapsed, _, buffer) = rendered_factory_rows(&snapshot, &overlay);
     let lane_y = collapsed.iter().position(|row| row.contains("lane-a")).unwrap() as u16;
-    assert!(collapsed[lane_y as usize].contains("2 · 3 done"));
+    assert!(collapsed[lane_y as usize].trim_end().ends_with("2") && !collapsed[lane_y as usize].contains("done"));
     assert!(!collapsed.iter().any(|row| row.contains('✓') || row.contains("finished-")));
     assert!(!collapsed.iter().any(|row| row.contains("wf-b")));
     let glyph_x = collapsed[lane_y as usize].chars().position(|ch| ch == '●').unwrap() as u16;
@@ -752,14 +755,14 @@ fn live_children_count_done_without_rendering_done_rows_and_color_collapsed_lane
     let mut tree = ClientTreeChrome::default();
     tree.factory_expanded_lanes.insert("lane-a".into());
     let (expanded, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
-    assert!(expanded.iter().find(|row| row.contains("lane-a")).unwrap().contains("2 · 3 done"));
+    assert!(expanded.iter().find(|row| row.contains("lane-a")).unwrap().trim_end().ends_with("2"));
     assert!(!expanded.iter().any(|row| row.contains('✓')));
     overlay.tabs.get_mut("wf-a").unwrap().done = true;
     overlay.tabs.get_mut("wf-b").unwrap().done = true;
     // Use exactly three done children, all still in the live snapshot.
     snapshot.tabs.retain(|tab| !matches!(tab.tab_id.as_str(), "finished-1" | "finished-2"));
     let (all_done, _, _) = rendered_factory_rows(&snapshot, &overlay);
-    assert!(all_done.iter().find(|row| row.contains("lane-a")).unwrap().contains("3 done"));
+    assert!(!all_done.iter().find(|row| row.contains("lane-a")).unwrap().contains("done"));
 }
 
 #[test]
@@ -783,7 +786,7 @@ fn tagged_space_keeps_full_name_when_count_and_controls_compete_at_25_columns() 
         &mut buffer, area, &snapshot, &config, &ClientTreeChrome::default(),
         Some(&overlay), &mut scroll, &mut ShellHitMap::default(),
     );
-    let wide = (0..area.width).map(|x| buffer[(x, 3)].symbol()).collect::<String>();
+    let wide = (0..area.width).map(|x| buffer[(x, 2)].symbol()).collect::<String>();
     assert!(wide.contains("agent-rails") && wide.contains('⚲') && wide.contains('+') && wide.contains("● 13"), "{wide:?}");
 }
 
@@ -871,4 +874,63 @@ fn factory_disabled_through_config_draws_no_grouping_even_with_an_overlay() {
     let text = composed_sidebar_text(config, overlay);
     assert!(!text.contains("ORCHESTRATOR"), "frame: {text}");
     assert!(!text.contains("LANES"), "frame: {text}");
+}
+
+#[test]
+fn factory_done_only_lanes_keep_names_and_blank_right_slots_at_25_columns() {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "lane-a" | "lane-b" | "wf-a" | "wf-b" | "done"));
+    for id in ["wf-a", "wf-b", "done"] {
+        let tag = overlay.tabs.get_mut(id).unwrap();
+        tag.parent = Some("lane-a".into());
+        tag.done = true;
+    }
+    overlay.tabs.get_mut("lane-a").unwrap().name = Some("always-on infra".into());
+    overlay.tabs.get_mut("lane-a").unwrap().summary = Some("3 done".into());
+    overlay.tabs.get_mut("lane-b").unwrap().name = Some("local dev loop".into());
+    overlay.tabs.get_mut("lane-b").unwrap().devloop = true;
+    overlay.tabs.get_mut("lane-b").unwrap().idle = false;
+    let (rows, _, _) = rendered_factory_rows(&snapshot, &overlay);
+    let lane = rows.iter().find(|row| row.contains("always-on infra")).unwrap();
+    assert!(lane.contains("● always-on infra") && !lane.contains("done"), "{lane:?}");
+    assert!(rows.iter().any(|row| row.contains("● local dev loop ⟳")), "{rows:?}");
+    assert!(!rows.iter().any(|row| row.contains("wf-a") || row.contains("wf-b") || row.contains("✓")));
+}
+
+#[test]
+fn factory_progress_age_row_click_focuses_workflow_at_25_columns() {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "lane-a" | "wf-a" | "done"));
+    snapshot.agents.clear();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    overlay.tabs.get_mut("wf-a").unwrap().phase = Some("Verify 3/5".into());
+    overlay.tabs.get_mut("wf-a").unwrap().started = Some((now - 22 * 60) as i64);
+    overlay.tabs.get_mut("done").unwrap().phase = Some("Verify 2/5".into());
+    overlay.tabs.get_mut("done").unwrap().started = Some((now - 90 * 60) as i64);
+    let mut tree = ClientTreeChrome::default();
+    tree.factory_expanded_lanes.insert("lane-a".into());
+    let (rows, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+    let workflow = rows.iter().position(|row| row.contains("◐ wf-a")).unwrap();
+    assert!(rows[workflow + 1].contains("verify 3/5 · 22m"), "{rows:?}");
+    assert!(!rows.iter().any(|row| row.contains("Verify 2/5") || row.contains("90m") || row.contains("done")));
+    let hit_rect = hits.tree_headers.iter().find(|hit| hit.tab_id.as_deref() == Some("wf-a")).unwrap().rect;
+    assert_eq!(hit_rect.y, workflow as u16);
+    assert_eq!(hit_rect.height, 2);
+    let mut state = factory_state(snapshot, overlay);
+    state.hits = hits;
+    state.last_composed_size = Some((120, 60));
+    let x = hit_rect.x + 10;
+    factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), x, hit_rect.y + 1);
+    let focus = factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), x, hit_rect.y + 1);
+    assert_eq!(focused_tab(&focus), ["wf-a"]);
+}
+
+#[test]
+fn factory_header_immediately_precedes_space_and_count_has_chevron_gap() {
+    let (snapshot, mut overlay) = fixture();
+    overlay.spaces.insert("ws_1".into(), SpaceTag { attention: Attention::Act, target_tab: None, summary: Some("14".into()) });
+    let (rows, _, _) = rendered_factory_rows(&snapshot, &overlay);
+    assert!(rows[1].contains("agents"));
+    assert!(rows[2].contains("client-shell"), "{rows:?}");
+    assert!(rows[2].contains("● 14 ▾"), "{:?}", rows[2]);
 }

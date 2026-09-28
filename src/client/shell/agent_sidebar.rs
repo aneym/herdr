@@ -168,6 +168,7 @@ pub(super) fn render_agent_panel_with_overlay(
         agent_scroll,
         hits,
         super::tree::AgentPanelListEntry::line_count,
+        entries.first().is_some_and(is_factory_entry),
         |index| if overlay.is_some() && (is_factory_entry(&entries[index])
             || entries.get(index + 1).is_some_and(is_factory_entry)) { 0 }
             else { config.agents.row_gap },
@@ -437,24 +438,10 @@ fn render_factory_tab(
     put_text(buffer, icon_x, rect.y, 1.min(rect.right().saturating_sub(icon_x)), icon, icon_style);
     let name_x = icon_x.saturating_add(2);
     let available = rect.right().saturating_sub(name_x);
-    let phase = row.phase.as_deref().unwrap_or("");
-    let phase = phase.split_whitespace().next().map_or(String::new(), |first| {
-        let fraction = phase.split_whitespace().find(|word| word.contains('/'));
-        fraction.map_or_else(|| first.to_owned(), |part| format!("{first} {part}"))
-    });
     let metadata = if let Some(badge) = row.badge.as_deref() {
-        // Preserve the full badge, then the name; add the secondary phase only
-        // when both still fit without truncation.
-        if !phase.is_empty()
-            && display_width(&header.label) + display_width(&phase) + display_width(badge) + 2
-                <= available as usize
-        {
-            format!("{phase} {badge}")
-        } else {
-            badge.to_owned()
-        }
+        badge.to_owned()
     } else {
-        row.summary.as_deref().or(row.phase.as_deref())
+        row.summary.as_deref()
             .filter(|value| !value.is_empty())
             .unwrap_or(if row.idle { "idle" } else { "" })
             .to_owned()
@@ -484,10 +471,6 @@ fn render_factory_tab(
         let right_x = rect.right().saturating_sub(right_width);
         if let Some(badge) = row.badge.as_deref() {
             let badge_width = display_width(badge) as u16;
-            if right_label != badge {
-                put_text(buffer, right_x, rect.y, right_width.saturating_sub(badge_width),
-                    &format!("{phase} "), Style::default().fg(palette.overlay0).add_modifier(Modifier::DIM));
-            }
             put_text(buffer, rect.right().saturating_sub(badge_width), rect.y, badge_width,
                 badge, Style::default().fg(color));
         } else {
@@ -495,8 +478,22 @@ fn render_factory_tab(
                 Style::default().fg(palette.overlay0).add_modifier(Modifier::DIM));
         }
     }
-    // A phase is secondary to a complete badge/summary and the readable name.
-    // It is intentionally omitted when those fields consume the available width.
+    if rect.height > 1 && row.workflow && !row.done {
+        let phase = row.phase.as_deref().unwrap_or("").trim().to_lowercase();
+        let age = row.started.map(|started| {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+            workflow_age(now.saturating_sub(started.max(0) as u64))
+        });
+        let progress = match age {
+            Some(age) if !phase.is_empty() => format!("{phase} · {age}"),
+            Some(age) => age,
+            None => phase,
+        };
+        let x = name_x.saturating_add(1);
+        put_text(buffer, x, rect.y + 1, rect.right().saturating_sub(x), &progress,
+            Style::default().fg(palette.overlay0).add_modifier(Modifier::DIM));
+    }
     hits.tree_headers.push(TreeHeaderHit {
         rect,
         chevron: if header.collapsible { chevron } else { Rect::default() },
@@ -508,6 +505,13 @@ fn render_factory_tab(
         key: header.key.clone(),
         pinned: false,
     });
+}
+
+fn workflow_age(seconds: u64) -> String {
+    let minutes = seconds / 60;
+    if minutes == 0 { "<1m".to_owned() }
+    else if minutes < 60 { format!("{minutes}m") }
+    else { format!("{}h{:02}", minutes / 60, minutes % 60) }
 }
 
 fn render_tree_header(
@@ -666,7 +670,7 @@ fn render_tree_header(
             };
             let x = rect
                 .right()
-                .saturating_sub(2 + display_width(summary) as u16 + if compact_space { 2 } else { 10 });
+                .saturating_sub(2 + display_width(summary) as u16 + if compact_space { 3 } else { 10 });
             put_text(buffer, x, rect.y, 2, "● ", Style::default().fg(color));
             put_text(
                 buffer,
@@ -678,6 +682,10 @@ fn render_tree_header(
                     .fg(palette.overlay0)
                     .add_modifier(Modifier::DIM),
             );
+            if compact_space && header.collapsible {
+                put_text(buffer, x.saturating_add(2 + display_width(summary) as u16), rect.y, 1,
+                    " ", Style::default());
+            }
         }
     }
     hits.tree_headers.push(TreeHeaderHit {
@@ -820,7 +828,7 @@ pub(super) fn render_agent_list<T>(
     render_row: impl FnMut(&mut Buffer, Rect, &T, &mut ShellHitMap),
 ) {
     render_agent_list_with_gaps(buffer, area, rows, empty_message, config, agent_scroll,
-        hits, row_lines, |_| config.agents.row_gap, render_row);
+        hits, row_lines, false, |_| config.agents.row_gap, render_row);
 }
 
 fn render_agent_list_with_gaps<T>(
@@ -832,14 +840,16 @@ fn render_agent_list_with_gaps<T>(
     agent_scroll: &mut usize,
     hits: &mut ShellHitMap,
     row_lines: impl Fn(&T) -> usize,
+    compact_header: bool,
     row_gap: impl Fn(usize) -> u16,
     mut render_row: impl FnMut(&mut Buffer, Rect, &T, &mut ShellHitMap),
 ) {
+    let header_height = if compact_header { 2 } else { 3 };
     let body = Rect::new(
         area.x,
-        area.y.saturating_add(3),
+        area.y.saturating_add(header_height),
         area.width,
-        area.height.saturating_sub(3),
+        area.height.saturating_sub(header_height),
     );
     hits.agent_body = body;
     if body.is_empty() || rows.is_empty() {

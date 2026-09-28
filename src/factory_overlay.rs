@@ -91,6 +91,8 @@ pub struct TabTag {
     pub badge: Option<String>,
     /// Short phase text, e.g. "review 3/5" or "fix 1".
     pub phase: Option<String>,
+    /// Start of this workflow, in Unix epoch seconds.
+    pub started: Option<i64>,
     /// Summary shown when the row is collapsed, e.g. "2 wf" or "inbox 3".
     pub summary: Option<String>,
     pub attention: Attention,

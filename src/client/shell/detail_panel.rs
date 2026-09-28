@@ -74,12 +74,12 @@ fn detail_line<'a>(row: &'a PanelRow, palette: &Palette, index: &mut usize) -> D
     }
 }
 
-fn panel_for(
+pub(super) fn panel_for(
     overlay: &factory_overlay::FactoryOverlay,
     key: &str,
     snapshot: &ClientShellSnapshot,
 ) -> Panel {
-    overlay.panel(key).cloned().unwrap_or_else(|| {
+    let mut panel = overlay.panel(key).cloned().unwrap_or_else(|| {
         let label = key
             .strip_prefix("tab:")
             .and_then(|id| snapshot.tabs.iter().find(|tab| tab.tab_id == id))
@@ -97,7 +97,47 @@ fn panel_for(
             }],
             ..Default::default()
         }
-    })
+    });
+    if key == factory_overlay::OVERVIEW_PANEL_KEY {
+        use crate::factory_overlay::{Attention, TabKind};
+        for section in &mut panel.sections {
+            let owner = snapshot.tabs.iter().find(|tab| {
+                let Some(tag) = overlay.tab(&tab.tab_id) else { return false; };
+                if !matches!(tag.kind, TabKind::Orchestrator | TabKind::Lane) { return false; }
+                let space = snapshot.workspaces.iter().find(|space| space.workspace_id == tab.workspace_id);
+                let title = format!("{} · {}", space.map_or("", |space| space.label.as_str()),
+                    tag.name.as_deref().unwrap_or(&tab.label));
+                section.title == title
+            });
+            let Some(owner) = owner else { continue; };
+            let active = snapshot.tabs.iter().filter_map(|tab| {
+                let tag = overlay.tab(&tab.tab_id)?;
+                (tag.kind == TabKind::Workflow && !tag.done && tag.parent.as_deref() == Some(&owner.tab_id))
+                    .then_some((tab, tag))
+            }).collect::<Vec<_>>();
+            let wants = active.iter().filter(|(_, tag)| tag.attention == Attention::Act).count();
+            section.right = Some(format!("{} task{}{}", active.len(),
+                if active.len() == 1 { "" } else { "s" },
+                if wants == 0 { String::new() } else { format!(" · {wants} wants you") }));
+            section.rows.retain(|row| {
+                let tab_id = row.target.as_deref().and_then(|target| {
+                    snapshot.panes.iter().find(|pane| pane.pane_id == target).map(|pane| pane.tab_id.as_str())
+                        .or_else(|| snapshot.agents.iter().find(|agent| agent.pane_id == target).map(|agent| agent.tab_id.as_str()))
+                        .or_else(|| snapshot.tabs.iter().find(|tab| tab.tab_id == target).map(|tab| tab.tab_id.as_str()))
+                });
+                !tab_id.and_then(|id| overlay.tab(id)).is_some_and(|tag| tag.kind == TabKind::Workflow && tag.done)
+            });
+            if active.is_empty() {
+                section.rows.retain(|row| row.target.is_none() && row.text != "no tasks");
+                if section.rows.is_empty() {
+                    section.rows.push(PanelRow { text: "no tasks".into(), style: RowStyle::Dim, ..Default::default() });
+                }
+            } else {
+                section.rows.retain(|row| row.text != "no tasks");
+            }
+        }
+    }
+    panel
 }
 
 fn target_count(panel: &Panel, state: &DetailPanelState) -> usize {
