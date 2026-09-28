@@ -406,6 +406,7 @@ fn render_agent_summary(
         let color = if shown == 0 {
             match status {
                 AgentStatus::Done => config.palette.blue,
+                AgentStatus::Working => config.palette.yellow,
                 _ => status_color(status, &config.palette),
             }
         } else {

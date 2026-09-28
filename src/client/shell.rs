@@ -254,10 +254,10 @@ fn status_color(
 ) -> ratatui::style::Color {
     use crate::api::schema::AgentStatus;
     match status {
-        AgentStatus::Working => palette.yellow,
+        AgentStatus::Working => palette.peach,
         AgentStatus::Blocked => palette.red,
-        AgentStatus::Done => palette.teal,
-        AgentStatus::Idle => palette.green,
+        AgentStatus::Done => palette.green,
+        AgentStatus::Idle => palette.overlay0,
         AgentStatus::Unknown => palette.overlay0,
     }
 }

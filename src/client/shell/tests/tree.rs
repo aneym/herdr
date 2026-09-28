@@ -890,6 +890,38 @@ fn content_fit_spaces_hug_their_rows_and_leave_the_rest_to_agents() {
 }
 
 #[test]
+fn agent_titles_use_tab_label_ink_in_dark_and_light_themes() {
+    let mut config = Config::default();
+    config.ui.sidebar.agents.rows = vec![vec![
+        crate::config::AgentSidebarToken::TerminalTitleStripped,
+    ]];
+    let mut snapshot = tree_snapshot();
+    snapshot.agents[1].terminal_title_stripped = Some("UNFOCUSED_TITLE".into());
+    for appearance in [
+        crate::terminal_theme::HostAppearance::Dark,
+        crate::terminal_theme::HostAppearance::Light,
+    ] {
+        let mut shell_config = ClientShellConfig::from_config(&config);
+        shell_config.palette =
+            crate::app::client_palette_for_appearance(&shell_config.theme_runtime, appearance);
+        let expected = crate::protocol::color_to_u32(shell_config.palette.subtext0);
+        let muted = crate::protocol::color_to_u32(shell_config.palette.overlay0);
+        assert_ne!(expected, muted);
+        let mut state = ClientShellState::new(shell_config);
+        state.set_snapshot(Box::new(snapshot.clone()));
+        state.set_pane_surface(surface());
+        let frame = state.compose(106, 40).expect("agent title frame");
+        let (x, y) = cell_symbol_position(
+            &frame,
+            Rect::new(0, 0, frame.width, frame.height),
+            "UNFOCUSED_TITLE",
+        );
+        let cell = &frame.cells[usize::from(y) * usize::from(frame.width) + usize::from(x)];
+        assert_eq!(cell.fg, expected, "appearance: {appearance:?}");
+    }
+}
+
+#[test]
 fn agents_first_section_order_puts_the_spaces_list_at_the_bottom() {
     let mut config = Config::default();
     config.ui.sidebar.section_order = [

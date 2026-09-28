@@ -2616,6 +2616,69 @@ fn workspace_drag_rejects_foreign_endpoint_slots() {
 }
 
 #[test]
+fn collapsed_sidebar_orders_agents_before_spaces_for_local_and_remote_views() {
+    let mut config = Config::default();
+    config.ui.sidebar.section_order = [
+        crate::config::SidebarSection::Agents,
+        crate::config::SidebarSection::Spaces,
+    ];
+    config
+        .ui
+        .sidebar
+        .agents
+        .state_icons
+        .insert("working".into(), "W".into());
+    for aggregate in [false, true] {
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+        let mut local = snapshot();
+        local.agents = vec![agent("active agent", AgentStatus::Working, 1)];
+        if aggregate {
+            let profile = remote_profile();
+            let remote_id = ClientEndpointId::Ssh(profile.id.clone());
+            state.set_endpoint_catalog(&[profile]);
+            state.set_endpoint_status(&remote_id, ClientEndpointStatus::Online);
+            let mut remote = snapshot();
+            remote.boot_id = "remote-boot".into();
+            state.set_endpoint_snapshot(&remote_id, Box::new(remote));
+        }
+        state.set_snapshot(Box::new(local));
+        state.set_pane_surface(surface());
+        state.sidebar_collapsed = true;
+        let frame = state.compose(100, 28).expect("collapsed frame");
+        let workspace_y = state
+            .hits
+            .workspaces
+            .iter()
+            .find(|hit| hit.endpoint_id.is_local())
+            .expect("local workspace")
+            .rect
+            .y;
+        let agent_y = if aggregate {
+            state
+                .hits
+                .endpoint_agents
+                .iter()
+                .find(|(_, endpoint, _)| endpoint.is_local())
+                .expect("local agent")
+                .0
+                .y
+        } else {
+            state.hits.agents.first().expect("agent").0.y
+        };
+        let (x, y) = cell_symbol_position(&frame, Rect::new(0, agent_y, 5, 1), "W");
+        assert_eq!(y, agent_y);
+        assert_eq!(
+            frame.cells[usize::from(y) * usize::from(frame.width) + usize::from(x)].symbol,
+            "W"
+        );
+        assert!(
+            agent_y < workspace_y,
+            "aggregate={aggregate}: agents should render above spaces"
+        );
+    }
+}
+
+#[test]
 fn collapsed_aggregate_workspace_status_uses_its_status_color() {
     use crate::api::schema::AgentStatus;
 
