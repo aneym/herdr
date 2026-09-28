@@ -95,8 +95,10 @@ fn apply_pane_terminal_env(cmd: &mut CommandBuilder) {
     // when the remote side lacks matching terminfo entries.
     cmd.env("TERM", PANE_TERM);
     cmd.env("COLORTERM", PANE_COLORTERM);
-    cmd.env("TERM_PROGRAM", "herdr");
-    cmd.env("TERM_PROGRAM_VERSION", crate::build_info::version());
+    // The pane VT is libghostty-vt; Claude Code enables kitty key handling
+    // only when it recognizes the terminal identity.
+    cmd.env("TERM_PROGRAM", "ghostty");
+    cmd.env("TERM_PROGRAM_VERSION", "1.3.1");
     // Host handles refer to the outer terminal, never to this pane.
     for key in [
         "ITERM_SESSION_ID",
@@ -3972,10 +3974,10 @@ mod tests {
         for key in keys {
             assert!(cmd.get_env(key).is_none(), "{key} must not leak into panes");
         }
-        assert_eq!(cmd.get_env("TERM_PROGRAM"), Some(OsStr::new("herdr")));
+        assert_eq!(cmd.get_env("TERM_PROGRAM"), Some(OsStr::new("ghostty")));
         assert_eq!(
             cmd.get_env("TERM_PROGRAM_VERSION"),
-            Some(OsStr::new(&crate::build_info::version()))
+            Some(OsStr::new("1.3.1"))
         );
     }
 
@@ -4735,13 +4737,7 @@ mod tests {
             "printf '%s\\n%s\\n%s\\n%s\\n' \"$TERM\" \"$COLORTERM\" \"$TERM_PROGRAM\" \"$TERM_PROGRAM_VERSION\"",
             &[],
         );
-        assert_eq!(
-            output,
-            format!(
-                "xterm-256color\ntruecolor\nherdr\n{}\n",
-                crate::build_info::version()
-            )
-        );
+        assert_eq!(output, "xterm-256color\ntruecolor\nghostty\n1.3.1\n");
     }
 
     #[cfg(unix)]

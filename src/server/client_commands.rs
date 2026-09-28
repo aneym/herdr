@@ -15,6 +15,7 @@ const ENDPOINT_RESPONSE_CHUNK_BYTES: usize = 512 * 1024;
 const CLIENT_SHELL_METHODS: &[&str] = &[
     "agent.group.collapse",
     "agent.group.set",
+    "agent.usage",
     "client_shell.surface.set",
     "command.invoke",
     "integration.install",
@@ -317,6 +318,7 @@ mod tests {
             actual.remove("pane.link.resolve").as_deref(),
             Some("f5e4a3e01453ae7b188f127ce951c12c20e0bebcc17cc364eeb6d1a01fd5bf81")
         );
+        assert!(actual.remove("agent.usage").is_some(), "agent usage must advertise a shape");
 
         assert_eq!(
             actual, expected,
@@ -367,6 +369,9 @@ mod tests {
 
     #[test]
     fn client_shell_lane_excludes_api_front_door_and_lifecycle_methods() {
+        assert!(supports_client_shell_method(&Method::AgentUsage(
+            crate::api::schema::EmptyParams::default(),
+        )));
         assert!(supports_client_shell_method(
             &Method::ClientShellSurfaceSet(crate::api::schema::ClientShellSurfaceSetParams {
                 active: false,

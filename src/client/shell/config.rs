@@ -435,7 +435,10 @@ impl ClientShellConfig {
                 self.sidebar_max_width,
             )
             .unwrap_or((18, 36));
-            sidebar_width.clamp(min, max)
+            // Keep a usable pane when a width saved on a larger display is
+            // rendered on a smaller client; do not alter the saved width.
+            let cap = cols.saturating_sub(40).max(cols / 2);
+            sidebar_width.clamp(min, max).min(cap)
         }
         .min(cols.saturating_sub(1));
         let main = Rect::new(sidebar_width, 0, cols.saturating_sub(sidebar_width), rows);
@@ -498,6 +501,19 @@ mod tests {
     use crossterm::event::{KeyCode, KeyModifiers};
 
     use super::*;
+
+    #[test]
+    fn oversized_sidebar_is_capped_only_while_rendering_on_a_small_client() {
+        let mut config = Config::default();
+        config.ui.sidebar_max_width = u16::MAX;
+        let shell = ClientShellConfig::from_config(&config);
+        let small = shell.layout(95, 22, false, 1, 200);
+        assert_eq!(small.sidebar.width, 55);
+        assert!(small.pane_surface.width >= 40);
+        let large = shell.layout(260, 40, false, 1, 200);
+        assert_eq!(large.sidebar.width, 200);
+        assert_eq!(shell.sidebar_width, config.ui.sidebar_width);
+    }
 
     #[test]
     fn live_reload_applies_client_owned_sections() {
