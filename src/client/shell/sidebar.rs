@@ -217,12 +217,13 @@ pub(crate) fn render_sidebar(
         // Spaces live inside the agents tree, so the spaces strip keeps only the
         // footer controls.
         render_sidebar_footer(buffer, workspace_area, snapshot, config, hits);
-        super::render_agent_panel(
+        super::render::render_agent_panel_with_overlay(
             buffer,
             detail_area,
             snapshot,
             config,
             state.tree,
+            state.factory_overlay,
             state.agent_scroll,
             hits,
         );
@@ -402,12 +403,13 @@ pub(crate) fn render_sidebar(
 
     render_sidebar_footer(buffer, workspace_area, snapshot, config, hits);
 
-    super::render_agent_panel(
+    super::render::render_agent_panel_with_overlay(
         buffer,
         detail_area,
         snapshot,
         config,
         state.tree,
+        state.factory_overlay,
         state.agent_scroll,
         hits,
     );

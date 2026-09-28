@@ -68,7 +68,7 @@ fn fixture() -> (ClientShellSnapshot, FactoryOverlay) {
         );
     }
     overlay.tabs.get_mut("orch").unwrap().summary = Some("inbox 3".into());
-    overlay.tabs.get_mut("lane-a").unwrap().summary = Some("2 wf".into());
+    overlay.tabs.get_mut("lane-a").unwrap().summary = Some("pending".into());
     overlay.tabs.get_mut("lane-b").unwrap().idle = true;
     overlay.tabs.get_mut("wf-a").unwrap().badge = Some("PC".into());
     overlay.tabs.get_mut("wf-a").unwrap().phase = Some("review 3/5".into());
@@ -159,7 +159,15 @@ fn off_and_other_space_keep_the_stock_tree() {
     });
     let ordinary = labels(&entries(&snapshot, None, &tree));
     let tagged = labels(&entries(&snapshot, Some(&overlay), &tree));
-    assert_eq!(&ordinary[ordinary.len() - 3..], &tagged[tagged.len() - 3..]);
+    // The untagged space and everything under it draw exactly as without an overlay.
+    let from = |rows: &[String]| {
+        let start = rows
+            .iter()
+            .position(|row| row == "space:untagged space")
+            .unwrap();
+        rows[start..].to_vec()
+    };
+    assert_eq!(from(&ordinary), from(&tagged));
 }
 
 #[test]
@@ -177,11 +185,11 @@ fn groups_tabs_and_expands_lanes_for_attention_or_focus() {
             "section:LANES",
             "tag:lane-a:1",
             "tag:lane-b:1",
+            "background:2",
             "section:TABS",
             "tab:plain-a",
             "agent:plain-pane",
-            "tab:plain-b",
-            "background:2"
+            "tab:plain-b"
         ]
     );
     let rows = entries(&snapshot, Some(&overlay), &tree);
@@ -283,4 +291,195 @@ fn actionable_space_jump_focuses_its_tagged_tab_after_workspace() {
     let mut outcome = ClientShellInput::default();
     state.focus_factory_space_target("ws_2", &mut outcome);
     assert!(outcome.actions.is_empty());
+}
+
+fn factory_state(snapshot: ClientShellSnapshot, overlay: FactoryOverlay) -> ClientShellState {
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    config.factory.enabled = true;
+    let mut state = ClientShellState::new(config);
+    state.set_snapshot(Box::new(snapshot));
+    state.factory_overlay = Some(std::sync::Arc::new(overlay));
+    state
+}
+
+fn press_cycle(
+    state: &mut ClientShellState,
+    action: crate::input::KeybindAction,
+) -> Option<String> {
+    let mut outcome = ClientShellInput::default();
+    state.record_binding(crate::input::KeybindMatch::Action(action), &mut outcome);
+    match &outcome.actions[..] {
+        [ClientShellAction::Endpoint { request, .. }] => match &request.method {
+            crate::api::schema::Method::TabFocus(target) => Some(target.tab_id.clone()),
+            other => Some(format!("other:{other:?}")),
+        },
+        _ => None,
+    }
+}
+
+#[test]
+fn space_row_takes_the_worst_attention_of_its_tabs() {
+    let (snapshot, mut overlay) = fixture();
+    let tree = ClientTreeChrome::default();
+    let space_dot = |overlay: &FactoryOverlay| {
+        entries(&snapshot, Some(overlay), &tree)
+            .into_iter()
+            .find_map(|entry| match entry {
+                AgentPanelListEntry::SpaceHeader(row) => Some(row.space_attention),
+                _ => None,
+            })
+            .unwrap()
+    };
+    assert_eq!(space_dot(&overlay), None);
+    overlay.tabs.get_mut("wf-a").unwrap().attention = Attention::Warn;
+    assert_eq!(space_dot(&overlay).map(|dot| dot.0), Some(Attention::Warn));
+    overlay.tabs.get_mut("lane-b").unwrap().attention = Attention::Act;
+    assert_eq!(space_dot(&overlay).map(|dot| dot.0), Some(Attention::Act));
+    // A space tag below the rolled-up tab attention never lowers it.
+    overlay.spaces.insert(
+        "ws_1".into(),
+        SpaceTag {
+            attention: Attention::Warn,
+            target_tab: None,
+            summary: Some("1".into()),
+        },
+    );
+    assert_eq!(space_dot(&overlay), Some((Attention::Act, "1".to_string())));
+}
+
+#[test]
+fn idle_lane_and_background_rows_draw_dimmed() {
+    let (snapshot, overlay) = fixture();
+    let mut tree = ClientTreeChrome::default();
+    tree.factory_background_expanded.insert("ws_1".into());
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    let area = Rect::new(0, 0, 60, 35);
+    let mut buffer = Buffer::empty(area);
+    let mut scroll = 0;
+    crate::client::shell::agent_sidebar::render_agent_panel_with_overlay(
+        &mut buffer,
+        area,
+        &snapshot,
+        &config,
+        &tree,
+        Some(&overlay),
+        &mut scroll,
+        &mut ShellHitMap::default(),
+    );
+    let dimmed = |label: &str| {
+        (0..area.height).any(|y| {
+            let text = (0..area.width)
+                .map(|x| buffer[(x, y)].symbol().to_string())
+                .collect::<String>();
+            text.contains(label)
+                && (0..area.width).any(|x| {
+                    buffer[(x, y)].symbol() == &label[..1]
+                        && buffer[(x, y)].modifier.contains(Modifier::DIM)
+                })
+        })
+    };
+    assert!(dimmed("lane-b"), "idle lane is dimmed");
+    assert!(dimmed("advisor"), "background rows are dimmed");
+    assert!(!dimmed("lane-a"), "a live lane is not dimmed");
+}
+
+#[test]
+fn cmd_e_cycles_only_rows_that_want_the_user() {
+    use crate::input::KeybindAction::{NextAgent, PreviousAgent};
+    let (snapshot, mut overlay) = fixture();
+    overlay.tabs.get_mut("wf-a").unwrap().attention = Attention::Warn;
+    overlay.tabs.get_mut("wf-b").unwrap().attention = Attention::Act;
+    // Background tabs never catch the key, even when they ask.
+    overlay.tabs.get_mut("advisor").unwrap().attention = Attention::Act;
+    let mut state = factory_state(snapshot.clone(), overlay.clone());
+    // Most urgent first from an unrelated focus.
+    assert_eq!(press_cycle(&mut state, NextAgent).as_deref(), Some("wf-b"));
+    assert_eq!(
+        press_cycle(&mut state, PreviousAgent).as_deref(),
+        Some("wf-b")
+    );
+
+    // From the act row, the remaining asking row is next; plain tabs never are.
+    let mut focused = snapshot.clone();
+    focused.focused_tab_id = Some("wf-b".into());
+    let mut state = factory_state(focused, overlay.clone());
+    assert_eq!(press_cycle(&mut state, NextAgent).as_deref(), Some("wf-a"));
+
+    // Off: the stock rotation runs and never focuses a tab by id.
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    config.factory.enabled = false;
+    let mut state = ClientShellState::new(config);
+    state.set_snapshot(Box::new(snapshot.clone()));
+    state.factory_overlay = Some(std::sync::Arc::new(overlay.clone()));
+    assert!(!matches!(
+        press_cycle(&mut state, NextAgent).as_deref(),
+        Some("wf-a" | "wf-b")
+    ));
+
+    // On, but nothing wants the user: today's behavior.
+    let mut calm = overlay;
+    for tag in calm.tabs.values_mut() {
+        tag.attention = Attention::None;
+    }
+    let mut state = factory_state(snapshot, calm);
+    assert!(state
+        .factory_attention_tabs(state.snapshot.as_deref().unwrap())
+        .is_empty());
+    assert!(!matches!(
+        press_cycle(&mut state, NextAgent).as_deref(),
+        Some("wf-a" | "wf-b")
+    ));
+}
+
+#[test]
+fn collapse_survives_focus_landing_on_a_tagged_space() {
+    let (mut snapshot, overlay) = fixture();
+    snapshot.panes.push(crate::protocol::ClientShellPane {
+        pane_id: "wf-pane".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "wf-a".into(),
+        label: None,
+        cwd: None,
+        foreground_cwd: None,
+        focused: true,
+        right_click_passthrough: false,
+    });
+    snapshot.focused_pane_id = Some("wf-pane".into());
+    snapshot.focused_tab_id = Some("wf-a".into());
+    let mut state = factory_state(snapshot.clone(), overlay);
+    state.config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    state
+        .tree_chrome_mut()
+        .collapsed_spaces
+        .insert("ws_1".into());
+    state
+        .tree_chrome_mut()
+        .collapsed_tabs
+        .insert("ws_1#1".into());
+    assert!(!state.reveal_tree_ancestors_for_pane("wf-pane"));
+    assert!(state.tree_chrome_mut().collapsed_spaces.contains("ws_1"));
+    assert!(state.tree_chrome_mut().collapsed_tabs.contains("ws_1#1"));
+
+    // Overlay off: the stock reveal still opens the folds.
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    let mut stock = ClientShellState::new(config);
+    stock.set_snapshot(Box::new(snapshot));
+    stock
+        .tree_chrome_mut()
+        .collapsed_spaces
+        .insert("ws_1".into());
+    assert!(stock.reveal_tree_ancestors_for_pane("wf-pane"));
+    assert!(!stock.tree_chrome_mut().collapsed_spaces.contains("ws_1"));
+}
+
+#[test]
+fn lane_fold_persists_when_the_lane_row_takes_focus() {
+    let (mut snapshot, overlay) = fixture();
+    let tree = ClientTreeChrome::default();
+    snapshot.focused_tab_id = Some("lane-a".into());
+    let group = labels(&entries(&snapshot, Some(&overlay), &tree));
+    assert!(group.contains(&"tag:lane-a:1".into()));
+    assert!(!group.contains(&"tag:wf-a:2".into()));
 }

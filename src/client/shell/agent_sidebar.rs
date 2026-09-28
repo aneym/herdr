@@ -98,29 +98,8 @@ pub(super) fn ordered_agent_pane_ids(
         .collect()
 }
 
-pub(super) fn render_agent_panel(
-    buffer: &mut Buffer,
-    area: Rect,
-    snapshot: &ClientShellSnapshot,
-    config: &ClientShellConfig,
-    tree: &super::tree::ClientTreeChrome,
-    agent_scroll: &mut usize,
-    hits: &mut ShellHitMap,
-) {
-    render_agent_panel_with_overlay(
-        buffer,
-        area,
-        snapshot,
-        config,
-        tree,
-        None,
-        agent_scroll,
-        hits,
-    );
-}
-
-/// Sidebar entry point when the shell supplies a factory document.
-#[allow(dead_code)] // Wired by the factory shell composition piece.
+/// Sidebar entry point; `overlay` is the factory document when `[ui.factory]` is on.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn render_agent_panel_with_overlay(
     buffer: &mut Buffer,
     area: Rect,

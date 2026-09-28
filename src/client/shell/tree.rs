@@ -468,10 +468,9 @@ pub(super) fn tree_list_entries_with_overlay(
                 group: layers_hidden
                     .then(|| tree_header_group(&workspace_rows))
                     .flatten(),
-                space_attention: overlay
-                    .and_then(|overlay| overlay.space(workspace_id))
-                    .filter(|tag| tag.attention != crate::factory_overlay::Attention::None)
-                    .map(|tag| (tag.attention, tag.summary.clone().unwrap_or_default())),
+                space_attention: overlay.and_then(|overlay| {
+                    space_attention(snapshot, overlay, workspace_id)
+                }),
             }));
             if space_collapsed {
                 continue;
@@ -626,10 +625,9 @@ pub(super) fn tree_list_entries_with_overlay(
                 indent: 0,
                 active: false,
                 group: None,
-                space_attention: overlay
-                    .and_then(|overlay| overlay.space(workspace_id))
-                    .filter(|tag| tag.attention != crate::factory_overlay::Attention::None)
-                    .map(|tag| (tag.attention, tag.summary.clone().unwrap_or_default())),
+                space_attention: overlay.and_then(|overlay| {
+                    space_attention(snapshot, overlay, workspace_id)
+                }),
             });
             // A pinned space carries no agent rows, so collapsing it hides
             // nothing on its own; the section is where it goes to get out of the
@@ -660,6 +658,34 @@ pub(super) fn tree_list_entries_with_overlay(
         }
     }
     out
+}
+
+/// The dot a space row shows: the worst of the space's own tag and the attention of
+/// its tagged tabs, so a writer that only tags tabs still lights the space row.
+/// The summary comes from the space tag. Untagged spaces return `None`.
+fn space_attention(
+    snapshot: &ClientShellSnapshot,
+    overlay: &crate::factory_overlay::FactoryOverlay,
+    workspace_id: &str,
+) -> Option<(crate::factory_overlay::Attention, String)> {
+    let tag = overlay.space(workspace_id);
+    let rolled = snapshot
+        .tabs
+        .iter()
+        .filter(|tab| tab.workspace_id == workspace_id)
+        .filter_map(|tab| overlay.tab(&tab.tab_id))
+        .map(|tag| tag.attention)
+        .max_by_key(|attention| attention.rank());
+    let worst = [tag.map(|tag| tag.attention), rolled]
+        .into_iter()
+        .flatten()
+        .max_by_key(|attention| attention.rank())?;
+    (worst != crate::factory_overlay::Attention::None).then(|| {
+        (
+            worst,
+            tag.and_then(|tag| tag.summary.clone()).unwrap_or_default(),
+        )
+    })
 }
 
 /// Group a tagged space in tab order. Only unknown/untagged tabs keep agent rows.
@@ -779,13 +805,14 @@ fn append_factory_space(
                     .tab(&workflow.tab_id)
                     .is_some_and(|tag| tag.attention == crate::factory_overlay::Attention::Act)
             });
+            // Focus opens a lane only to keep a focused child visible. Focusing the
+            // lane row itself never unfolds it, so a fold survives focus moves.
             let focused = snapshot.focused_workspace_id.as_deref() == Some(workspace_id)
-                && (snapshot.focused_tab_id.as_deref() == Some(lane.tab_id.as_str())
-                    || children.iter().any(|tab| {
-                        snapshot.focused_tab_id.as_deref() == Some(tab.tab_id.as_str())
-                    }));
+                && children
+                    .iter()
+                    .any(|tab| snapshot.focused_tab_id.as_deref() == Some(tab.tab_id.as_str()));
             let expanded = tree.factory_expanded_lanes.contains(&lane.tab_id) || forced || focused;
-            out.push(factory_row(
+            let mut lane_row = factory_row(
                 snapshot,
                 rows,
                 overlay,
@@ -793,7 +820,13 @@ fn append_factory_space(
                 indent,
                 !expanded && !children.is_empty(),
                 !children.is_empty(),
-            ));
+            );
+            if let AgentPanelListEntry::FactoryTab(row) = &mut lane_row {
+                if row.header.collapsed {
+                    row.summary = Some(format!("{} wf", children.len()));
+                }
+            }
+            out.push(lane_row);
             if expanded {
                 for child in children {
                     out.push(factory_row(
@@ -812,21 +845,6 @@ fn append_factory_space(
             out.push(factory_row(
                 snapshot, rows, overlay, workflow, indent, false, false,
             ));
-        }
-    }
-    let ordinary = tabs
-        .iter()
-        .copied()
-        .filter(|tab| foreground(tab) && kind(tab) == TabKind::Unknown)
-        .collect::<Vec<_>>();
-    if !ordinary.is_empty() {
-        out.push(AgentPanelListEntry::FactorySection {
-            label: "TABS",
-            right: String::new(),
-            indent,
-        });
-        for tab in ordinary {
-            append_ordinary_tab(out, snapshot, tree, rows, tab, workspace_id, indent);
         }
     }
     let background = tabs
@@ -858,6 +876,21 @@ fn append_factory_space(
                     false,
                 ));
             }
+        }
+    }
+    let ordinary = tabs
+        .iter()
+        .copied()
+        .filter(|tab| foreground(tab) && kind(tab) == TabKind::Unknown)
+        .collect::<Vec<_>>();
+    if !ordinary.is_empty() {
+        out.push(AgentPanelListEntry::FactorySection {
+            label: "TABS",
+            right: String::new(),
+            indent,
+        });
+        for tab in ordinary {
+            append_ordinary_tab(out, snapshot, tree, rows, tab, workspace_id, indent);
         }
     }
 }
@@ -1657,6 +1690,92 @@ impl ClientShellState {
                 .find(|index| ranked(*index) == best)
                 .unwrap_or(fallback),
         )
+    }
+}
+
+impl ClientShellState {
+    /// Tab ids that want the user, in sidebar order: tagged tabs with attention
+    /// `warn` or `act`, plus the target tab of a space that carries attention.
+    /// Background (advisor and done) tabs and tabs inside a folded space are
+    /// skipped. Empty when the overlay is off.
+    pub(super) fn factory_attention_tabs(
+        &self,
+        snapshot: &ClientShellSnapshot,
+    ) -> Vec<(String, crate::factory_overlay::Attention)> {
+        use crate::factory_overlay::{Attention, TabKind};
+        let Some(overlay) = self.factory_overlay() else {
+            return Vec::new();
+        };
+        let tree = self
+            .tree_chrome
+            .get(&self.active_endpoint_id)
+            .unwrap_or(&self.tree_chrome_default);
+        let mut found = Vec::<(String, Attention)>::new();
+        for workspace in &snapshot.workspaces {
+            let id = &workspace.workspace_id;
+            if tree_view_active(&self.config)
+                && tree.show_spaces
+                && tree.collapsed_spaces.contains(id)
+            {
+                continue;
+            }
+            let space_target = overlay
+                .space(id)
+                .filter(|tag| tag.attention != Attention::None)
+                .and_then(|tag| tag.target_tab.as_deref().map(|tab| (tab, tag.attention)));
+            for tab in snapshot.tabs.iter().filter(|tab| &tab.workspace_id == id) {
+                let tag = overlay.tab(&tab.tab_id);
+                if tag.is_some_and(|tag| tag.done || tag.kind == TabKind::Advisor) {
+                    continue;
+                }
+                let own = tag.map_or(Attention::None, |tag| tag.attention);
+                let from_space = space_target
+                    .filter(|(target, _)| *target == tab.tab_id)
+                    .map_or(Attention::None, |(_, attention)| attention);
+                let attention = if own.rank() >= from_space.rank() {
+                    own
+                } else {
+                    from_space
+                };
+                if attention != Attention::None {
+                    found.push((tab.tab_id.clone(), attention));
+                }
+            }
+        }
+        found
+    }
+
+    /// ⌘E while the overlay is on and something wants the user: the next such tab,
+    /// most urgent first, walking from the focused tab outward. `None` means the
+    /// stock rotation applies.
+    pub(super) fn factory_attention_cycle_target(
+        &self,
+        snapshot: &ClientShellSnapshot,
+        forward: bool,
+    ) -> Option<String> {
+        let wanted = self.factory_attention_tabs(snapshot);
+        if wanted.is_empty() {
+            return None;
+        }
+        let current = snapshot.focused_tab_id.as_deref().and_then(|focused| {
+            wanted
+                .iter()
+                .position(|(tab_id, _)| tab_id == focused)
+        });
+        let order = rotation(wanted.len(), current, forward);
+        if order.is_empty() {
+            // The focused tab is the only one asking; stay put.
+            return current.map(|index| wanted[index].0.clone());
+        }
+        let best = order
+            .iter()
+            .map(|index| wanted[*index].1.rank())
+            .max()
+            .unwrap_or(0);
+        order
+            .into_iter()
+            .find(|index| wanted[*index].1.rank() == best)
+            .map(|index| wanted[index].0.clone())
     }
 }
 
