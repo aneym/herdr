@@ -115,9 +115,14 @@ fn agent_header_separates_usage_and_view_controls_with_clicks_on_first_cells() {
         modifiers: KeyModifiers::empty(),
     })]);
     assert!(view_click.actions.is_empty());
+    // 48233de8: a click on the sort label opens the view picker; sort is unchanged.
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::ContextMenu(_))
+    ));
     assert_eq!(
         state.config.agent_panel_sort,
-        crate::config::AgentPanelSortConfig::Spaces
+        crate::config::AgentPanelSortConfig::Tree
     );
 }
 

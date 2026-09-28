@@ -1375,7 +1375,9 @@ fn navigator_searches_ancestor_context_and_keeps_split_agents_individually_actio
         ("main", None, vec!["pane_1", "pane_2"]),
         ("claude", None, vec!["pane_2"]),
         ("writer", None, vec!["pane_1"]),
-        ("reviewer", None, vec!["pane_2"]),
+        // 48233de8 lets a term span words and fields (0.8.2), so pane_1's
+        // shared "review" context plus "writer" also matches, ranked second.
+        ("reviewer", None, vec!["pane_2", "pane_1"]),
         ("checking navigation", None, vec!["pane_2"]),
         ("/repo/subproject", None, vec!["pane_2"]),
         (
