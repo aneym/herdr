@@ -376,8 +376,8 @@ fn focused_tab_ids(input: &ClientShellInput) -> Vec<String> {
         .collect()
 }
 
-#[test]
-fn overlay_file_reaches_the_panel_through_the_server_poll_and_client_control() {
+#[tokio::test]
+async fn overlay_file_reaches_the_panel_through_the_server_poll_and_client_control() {
     let dir = std::env::temp_dir().join(format!(
         "herdr-overlay-panel-{}-{}",
         std::process::id(),
@@ -397,7 +397,6 @@ fn overlay_file_reaches_the_panel_through_the_server_poll_and_client_control() {
     let mut config = Config::default();
     config.ui.factory.enabled = true;
     config.ui.factory.overlay_file = path.to_string_lossy().into_owned();
-    let overlay_path = config.ui.factory.overlay_path();
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
     let active = state.active_endpoint_id.clone();
     state.set_endpoint_snapshot_for_generation(&active, 1, Box::new(snapshot()));
@@ -408,26 +407,44 @@ fn overlay_file_reaches_the_panel_through_the_server_poll_and_client_control() {
     ))]);
     assert!(state.detail_panel.is_none(), "no overlay yet, Alt-O passes through");
 
-    // Server side: the poller reads the configured file and builds the control message.
-    let mut poller = crate::server::headless::factory_overlay::FactoryOverlayPoller::default();
-    assert!(poller.poll(overlay_path.as_deref()).is_some());
-    let crate::protocol::ServerMessage::EndpointControl { kind, data } =
-        crate::protocol::endpoint::factory_overlay_message(
-            "boot-1",
-            poller.revision,
-            poller.current.as_deref(),
-        )
-        .unwrap()
-    else {
-        panic!("expected control message");
+    // Server side: the real headless loop. A poll tick reaches the attached client shell
+    // through send_to_client_shells, and a client connecting later is seeded through
+    // send_to_client.
+    let mut server =
+        crate::server::headless::tests::OverlayServerHarness::new(&path.to_string_lossy());
+    // The endpoint snapshot carries the server's boot id, as it does after a real attach.
+    let mut seeded = snapshot();
+    seeded.boot_id = server.boot_id();
+    state.set_endpoint_snapshot_for_generation(&active, 1, Box::new(seeded));
+    let overlay_messages = |messages: Vec<crate::protocol::ServerMessage>| {
+        messages
+            .into_iter()
+            .filter_map(|message| match message {
+                crate::protocol::ServerMessage::EndpointControl { kind, data }
+                    if kind == crate::protocol::endpoint::FACTORY_OVERLAY_KIND =>
+                {
+                    Some((kind, data))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
     };
+    let ticked = overlay_messages(server.poll_tick());
+    assert_eq!(ticked.len(), 1, "poll tick must deliver the overlay to the client shell");
+    let connected = overlay_messages(server.connect());
+    assert_eq!(connected.len(), 1, "a connecting client must be seeded with the overlay");
     // Client side: decode and apply exactly as the attach loop does.
-    let crate::client::endpoint::EndpointControlMessage::FactoryOverlay(decoded) =
-        crate::client::endpoint::decode_endpoint_control(&kind, &data).unwrap()
-    else {
-        panic!("expected factory overlay control");
+    let apply = |state: &mut ClientShellState, (kind, data): &(String, String)| {
+        let crate::client::endpoint::EndpointControlMessage::FactoryOverlay(decoded) =
+            crate::client::endpoint::decode_endpoint_control(kind, data).unwrap()
+        else {
+            panic!("expected factory overlay control");
+        };
+        state.set_endpoint_factory_overlay_for_generation(&active, 1, decoded)
     };
-    assert!(state.set_endpoint_factory_overlay_for_generation(&active, 1, decoded));
+    // Both paths carry the same document and revision.
+    assert_eq!(connected, ticked);
+    assert!(apply(&mut state, &ticked[0]));
     assert!(state.factory_overlay.is_some());
 
     // Alt-O (default binding) opens the panel with the file's contents.
@@ -445,9 +462,11 @@ fn overlay_file_reaches_the_panel_through_the_server_poll_and_client_control() {
         serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     changed.panels.get_mut("overview").unwrap().title = "Renamed overview".into();
     std::fs::write(&path, serde_json::to_string(&changed).unwrap()).unwrap();
-    assert!(poller.poll(overlay_path.as_deref()).is_some());
+    let updated = overlay_messages(server.poll_tick());
+    assert_eq!(updated.len(), 1);
+    assert!(apply(&mut state, &updated[0]));
     assert_eq!(
-        poller.current.as_deref().unwrap().panels["overview"].title,
+        state.factory_overlay.as_ref().unwrap().panels["overview"].title,
         "Renamed overview"
     );
     std::fs::remove_dir_all(&dir).unwrap();
@@ -469,11 +488,24 @@ fn enter_after_tagged_row_click_focuses_that_tab() {
 #[test]
 fn blank_panel_click_keeps_a_selection_so_enter_acts() {
     let mut state = ready();
-    state.last_composed_size = Some((110, 30));
     key(&mut state, KeyCode::Char('o'), KeyModifiers::ALT);
     assert_eq!(state.detail_panel.as_ref().unwrap().selected, None);
+    // Compose first so the hit map holds the rendered rows and action.
+    state.compose(110, 30).expect("composed shell");
     let panel = state.layout(110, 30).detail_panel;
-    click(&mut state, panel.x + 3, panel.bottom() - 2);
+    assert!(!state.hits.detail_rows.is_empty());
+    let covered = |state: &ClientShellState, x: u16, y: u16| {
+        state.hits.detail_rows.iter().any(|(rect, _)| {
+            x >= rect.x && x < rect.right() && y >= rect.y && y < rect.bottom()
+        })
+    };
+    // Pick the lowest cell in the panel that no row or action covers.
+    let x = panel.x + 3;
+    let blank = (panel.y..panel.bottom())
+        .rev()
+        .find(|&row| !covered(&state, x, row))
+        .expect("a blank panel cell");
+    click(&mut state, x, blank);
     let opened = state.detail_panel.as_ref().unwrap();
     assert!(opened.focused && opened.selected.is_some());
     let enter = key(&mut state, KeyCode::Enter, KeyModifiers::NONE);
