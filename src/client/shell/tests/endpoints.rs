@@ -37,6 +37,7 @@ fn agent(
         state_labels: Vec::new(),
         tokens: Vec::new(),
         focused: true,
+        visible_in_profile: true,
         owner_pane_id: None,
         orphaned: false,
         group: Default::default(),
@@ -839,6 +840,7 @@ fn expanded_machine_sidebar_reveals_newly_focused_workspace() {
     let template = initial.workspaces[0].clone();
     initial.workspaces = (1..=12)
         .map(|number| ClientShellWorkspace {
+            visible_in_profile: true,
             workspace_id: format!("ws_{number}"),
             number,
             label: format!("space-{number}"),
@@ -1110,8 +1112,12 @@ fn aggregate_agents_use_configured_rows_machine_token_and_status_colors() {
     })]);
     assert_eq!(
         state.config.agent_panel_sort,
-        crate::config::AgentPanelSortConfig::Priority
+        crate::config::AgentPanelSortConfig::Spaces
     );
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::ContextMenu(_))
+    ));
     assert!(click.actions.is_empty());
 
     let buffer = frame
@@ -2222,6 +2228,79 @@ fn local_direct_graphics_accept_server_ids_across_endpoint_switches_and_restarts
 }
 
 #[test]
+fn compact_palette_shows_profile_context_and_activates_foreign_pane() {
+    let (mut state, remote_id) = state_with_remote();
+    let mut remote = snapshot();
+    remote.active_profile = "work".into();
+    remote.workspaces[0].label = "overseas".into();
+    remote.agents.push(agent(
+        "builder",
+        crate::api::schema::AgentStatus::Working,
+        1,
+    ));
+    remote.agents[0].title = Some("Live build title".into());
+    state.set_endpoint_snapshot(&remote_id, Box::new(remote));
+    state.open_navigator_search_overlay();
+    let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_ref() else {
+        panic!("search palette");
+    };
+    assert!(navigator.search_focused && navigator.search_entry);
+    let rows =
+        render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator);
+    assert!(rows
+        .iter()
+        .all(|row| !matches!(row.target, ClientNavigatorTarget::Machine { .. })));
+    let workspace = rows
+        .iter()
+        .find(|row| {
+            matches!(&row.target,
+                ClientNavigatorTarget::Workspace { endpoint_id, .. } if endpoint_id == &remote_id
+            )
+        })
+        .expect("foreign workspace");
+    assert!(workspace.meta.contains("work"));
+    let pane = rows
+        .iter()
+        .find(|row| {
+            matches!(&row.target,
+                ClientNavigatorTarget::Pane { endpoint_id, .. } if endpoint_id == &remote_id
+            )
+        })
+        .expect("foreign pane");
+    assert_eq!(pane.label, "Live build title");
+    assert!(pane.meta.contains("work"));
+    let mut rendered = state.compose(106, 30).expect("palette");
+    assert_eq!(state.hits.navigator_popup.width, 76);
+    for (rect, _) in &state.hits.navigator_rows {
+        let row = rendered.cells[rect.y as usize * rendered.width as usize + rect.x as usize..]
+            .iter()
+            .take(rect.width as usize)
+            .map(|cell| cell.symbol.as_str())
+            .collect::<String>();
+        assert!(!row.contains("├─") && !row.contains("└─"), "{row}");
+    }
+    let outcome = state.handle_input_bytes(b"overseas");
+    assert!(outcome.actions.is_empty());
+    let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() else {
+        panic!("search palette");
+    };
+    navigator.selected = Some(ClientNavigatorTarget::Pane {
+        endpoint_id: remote_id.clone(),
+        pane_id: "pane_1".into(),
+    });
+    rendered = state.compose(106, 30).expect("filtered palette");
+    assert!(rendered
+        .cursor
+        .as_ref()
+        .is_some_and(|cursor| cursor.visible));
+    let accepted = state.handle_input_bytes(b"\r");
+    assert!(accepted.actions.iter().any(|action| matches!(action,
+        ClientShellAction::ActivateEndpoint { endpoint_id, target: Some(ClientEndpointFocusTarget::Pane(pane_id)) }
+        if endpoint_id == &remote_id && pane_id == "pane_1"
+    )));
+}
+
+#[test]
 fn navigator_uses_machine_parents_only_for_federated_clients() {
     let (mut state, _) = state_with_remote();
     state.open_navigator_overlay();
@@ -2701,6 +2780,69 @@ fn workspace_drag_rejects_foreign_endpoint_slots() {
     state.handle_raw_events(vec![mouse(MouseEventKind::Drag(MouseButton::Left), remote)]);
 
     assert!(state.chrome_drag.is_none());
+}
+
+#[test]
+fn collapsed_sidebar_orders_agents_before_spaces_for_local_and_remote_views() {
+    let mut config = Config::default();
+    config.ui.sidebar.section_order = [
+        crate::config::SidebarSection::Agents,
+        crate::config::SidebarSection::Spaces,
+    ];
+    config
+        .ui
+        .sidebar
+        .agents
+        .state_icons
+        .insert("working".into(), "W".into());
+    for aggregate in [false, true] {
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+        let mut local = snapshot();
+        local.agents = vec![agent("active agent", AgentStatus::Working, 1)];
+        if aggregate {
+            let profile = remote_profile();
+            let remote_id = ClientEndpointId::Ssh(profile.id.clone());
+            state.set_endpoint_catalog(&[profile]);
+            state.set_endpoint_status(&remote_id, ClientEndpointStatus::Online);
+            let mut remote = snapshot();
+            remote.boot_id = "remote-boot".into();
+            state.set_endpoint_snapshot(&remote_id, Box::new(remote));
+        }
+        state.set_snapshot(Box::new(local));
+        state.set_pane_surface(surface());
+        state.sidebar_collapsed = true;
+        let frame = state.compose(100, 28).expect("collapsed frame");
+        let workspace_y = state
+            .hits
+            .workspaces
+            .iter()
+            .find(|hit| hit.endpoint_id.is_local())
+            .expect("local workspace")
+            .rect
+            .y;
+        let agent_y = if aggregate {
+            state
+                .hits
+                .endpoint_agents
+                .iter()
+                .find(|(_, endpoint, _)| endpoint.is_local())
+                .expect("local agent")
+                .0
+                .y
+        } else {
+            state.hits.agents.first().expect("agent").0.y
+        };
+        let (x, y) = cell_symbol_position(&frame, Rect::new(0, agent_y, 5, 1), "W");
+        assert_eq!(y, agent_y);
+        assert_eq!(
+            frame.cells[usize::from(y) * usize::from(frame.width) + usize::from(x)].symbol,
+            "W"
+        );
+        assert!(
+            agent_y < workspace_y,
+            "aggregate={aggregate}: agents should render above spaces"
+        );
+    }
 }
 
 #[test]

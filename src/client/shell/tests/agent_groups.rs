@@ -50,6 +50,7 @@ fn owned_snapshot() -> ClientShellSnapshot {
             state_labels: Vec::new(),
             tokens: Vec::new(),
             focused: pane == "owner",
+            visible_in_profile: true,
             owner_pane_id: owner.map(str::to_owned),
             orphaned: false,
             group: Default::default(),
@@ -588,8 +589,8 @@ fn right_clicking_an_agent_row_pins_it_hands_on_through_the_endpoint() {
     })]);
     let labels = menu_labels(&state);
     assert_eq!(
-        labels[..4],
-        ["Focus", "Rename pane", "Pin hands-on", "Nest under..."]
+        labels[..7],
+        ["Focus", "Rename", "Send to profile...", "Share with profiles...", "Close", "Pin hands-on", "Nest under..."]
     );
     let pin = labels
         .iter()
@@ -837,4 +838,37 @@ fn panel_next_does_nothing_with_a_single_agent() {
     let methods = close_focus_requests(&mut state);
 
     assert_eq!(methods.len(), 1);
+}
+
+#[test]
+fn agent_row_menu_keeps_082_actions_in_order_and_targets_its_pane() {
+    let mut state = composed(owned_snapshot());
+    state.open_agent_context_menu("child_a".into(), 0, 0);
+    let labels = menu_labels(&state);
+    assert_eq!(
+        &labels[..5],
+        [
+            "Focus",
+            "Rename",
+            "Send to profile...",
+            "Share with profiles...",
+            "Close",
+        ]
+    );
+
+    let mut outcome = ClientShellInput::default();
+    state.activate_context_menu_item(1, &mut outcome);
+    assert!(
+        matches!(state.overlay, Some(ClientShellOverlay::Rename(ClientRenameOverlay {
+        target: ClientRenameTarget::Pane { ref pane_id }, ..
+    })) if pane_id == "child_a")
+    );
+
+    state.open_agent_context_menu("child_a".into(), 0, 0);
+    state.activate_context_menu_item(4, &mut outcome);
+    assert!(outcome.actions.iter().any(|action| matches!(action,
+        ClientShellAction::Endpoint { request, .. }
+            if matches!(&request.method, crate::api::schema::Method::PaneClose(target)
+                if target.pane_id == "child_a")
+    )));
 }

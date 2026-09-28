@@ -434,6 +434,7 @@ pub(super) struct ClientNavigatorRow {
 pub(super) struct ClientNavigatorOverlay {
     pub(super) query: TextEditor,
     pub(super) search_focused: bool,
+    pub(super) search_entry: bool,
     pub(super) selected: Option<ClientNavigatorTarget>,
     pub(super) scroll: usize,
     pub(super) filter: Option<ClientNavigatorFilter>,
@@ -580,6 +581,8 @@ pub(super) struct ClientWorktreeRemoveOverlay {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ClientContextMenuAction {
+    SetAgentSort(crate::config::AgentPanelSortConfig),
+    MenuSeparator,
     ToggleTreeSpaces,
     ToggleTreeTabs,
     ToggleTreeAgents,
@@ -590,6 +593,7 @@ pub(super) enum ClientContextMenuAction {
     OpenWorktree,
     RemoveWorktree,
     ToggleGroup,
+    ToggleOrchestrator,
     NewTab,
     RenamePane,
     ClearPaneName,
@@ -612,9 +616,9 @@ pub(super) enum ClientContextMenuAction {
 
 #[derive(Debug)]
 pub(super) enum ClientContextMenuTarget {
-    /// The agents-panel view control: which tree layers show, and whether the
-    /// hidden-spaces section is revealed.
+    /// The agents-panel view picker: sort, tree layers, and hidden spaces.
     SidebarView {
+        sort: crate::config::AgentPanelSortConfig,
         show_spaces: bool,
         show_tabs: bool,
         show_agents: bool,
@@ -622,6 +626,7 @@ pub(super) enum ClientContextMenuTarget {
     },
     Workspace {
         workspace_id: String,
+        orchestrator_mode: bool,
         is_git: bool,
         is_linked_worktree: bool,
         has_worktree_children: bool,
@@ -2268,11 +2273,19 @@ impl ClientShellState {
     }
 
     pub(crate) fn show_copy_feedback(&mut self, now: std::time::Instant) -> bool {
+        self.show_clipboard_feedback("copied to clipboard", now)
+    }
+
+    pub(crate) fn show_clipboard_feedback(
+        &mut self,
+        message: &str,
+        now: std::time::Instant,
+    ) -> bool {
         if !self.config.clipboard_toast_enabled {
             return false;
         }
         self.copy_feedback = Some(crate::app::state::CopyFeedback {
-            message: "copied to clipboard".to_owned(),
+            message: message.to_owned(),
         });
         self.copy_feedback_deadline = Some(now + std::time::Duration::from_secs(2));
         true

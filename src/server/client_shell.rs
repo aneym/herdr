@@ -74,6 +74,7 @@ pub(super) fn snapshot_with_completions(
                         (tab_workspace_index == workspace_index).then_some(tab_index)
                     });
             protocol::ClientShellWorkspace {
+                visible_in_profile: app.state.workspace_is_visible(workspace_index),
                 focused: focused_workspace_id.as_deref() == Some(workspace_id.as_str()),
                 workspace_id,
                 active_tab_id,
@@ -167,6 +168,14 @@ pub(super) fn snapshot_with_completions(
                     .clone();
                 app.state.terminals.get(&terminal_id)
             });
+            let visible_in_profile = location.is_some_and(|(workspace_index, _)| {
+                terminal
+                    .filter(|terminal| !terminal.profiles.is_empty())
+                    .map_or_else(
+                        || app.state.workspace_is_visible(workspace_index),
+                        |terminal| terminal.profiles.contains(&app.state.active_profile),
+                    )
+            });
             let ownership = terminal.and_then(|terminal| terminal.agent_ownership.as_ref());
             let current_owner = ownership.and_then(|ownership| ownership.current.as_ref());
             let owner_pane_id = current_owner
@@ -212,6 +221,7 @@ pub(super) fn snapshot_with_completions(
                 state_labels,
                 tokens,
                 focused,
+                visible_in_profile,
                 owner_pane_id: owner_pane_id.clone(),
                 orphaned,
                 group,
@@ -672,6 +682,88 @@ fn split_hit_rect(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snapshot_preserves_hidden_workspaces_and_recomputes_visibility_on_profile_switch() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = crate::app::App::new(
+            &crate::config::Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = vec![
+            crate::workspace::Workspace::test_new("personal"),
+            crate::workspace::Workspace::test_new("work"),
+        ];
+        app.state.workspaces[1].profiles = vec!["work".into()];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+
+        let personal = snapshot(&app, "boot", 1, None, None);
+        assert_eq!(personal.workspaces.len(), 2);
+        assert!(personal.workspaces[0].visible_in_profile);
+        assert!(!personal.workspaces[1].visible_in_profile);
+
+        app.state.switch_profile("work".into());
+        let work = snapshot(&app, "boot", 2, None, None);
+        assert_eq!(work.workspaces.len(), 2);
+        assert!(!work.workspaces[0].visible_in_profile);
+        assert!(work.workspaces[1].visible_in_profile);
+    }
+
+    #[test]
+    fn pane_profile_tags_override_workspace_visibility_in_both_directions() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = crate::app::App::new(
+            &crate::config::Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = vec![
+            crate::workspace::Workspace::test_new("personal"),
+            crate::workspace::Workspace::test_new("work"),
+        ];
+        app.state.workspaces[1].profiles = vec!["work".into()];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        let terminal_ids = app
+            .state
+            .workspaces
+            .iter()
+            .map(|workspace| {
+                let tab = &workspace.tabs[0];
+                tab.panes[&tab.root_pane].attached_terminal_id.clone()
+            })
+            .collect::<Vec<_>>();
+        for (index, id) in terminal_ids.iter().enumerate() {
+            let terminal = app.state.terminals.get_mut(id).unwrap();
+            terminal.set_agent_name(format!("agent-{index}"));
+            terminal.set_detected_state(
+                Some(crate::detect::Agent::Pi),
+                crate::detect::AgentState::Idle,
+            );
+        }
+        // A tagged pane in a personal space stays out of personal; an
+        // untagged pane in a work space still inherits its workspace.
+        app.state
+            .terminals
+            .get_mut(&terminal_ids[0])
+            .unwrap()
+            .profiles = vec!["work".into()];
+        let personal = snapshot(&app, "boot", 1, None, None);
+        assert_eq!(personal.agents.len(), 2);
+        assert!(personal.workspaces[0].visible_in_profile);
+        assert!(!personal.agents.iter().any(|agent| agent.visible_in_profile));
+
+        app.state.switch_profile("work".into());
+        let work = snapshot(&app, "boot", 2, None, None);
+        assert!(!work.workspaces[0].visible_in_profile);
+        assert!(work.agents.iter().all(|agent| agent.visible_in_profile));
+    }
 
     #[test]
     fn snapshot_projects_cached_release_and_update_facts() {

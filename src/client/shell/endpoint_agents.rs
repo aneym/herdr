@@ -162,6 +162,7 @@ fn agent_rows(
         config.agent_panel_sort,
     )
     .into_iter()
+    .filter(|row| row.agent.visible_in_profile)
     .filter_map(|row| {
         let key = (row.endpoint.endpoint_id.clone(), row.agent.pane_id.clone());
         let mut agent = rendered_rows.remove(&key)?;

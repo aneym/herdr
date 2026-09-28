@@ -44,6 +44,18 @@ pub(in crate::client::shell) fn collapsed_sidebar_sections(
     )
 }
 
+pub(in crate::client::shell) fn ordered_collapsed_sidebar_sections(
+    area: Rect,
+    config: &ClientShellConfig,
+) -> (Rect, Option<u16>, Rect) {
+    let (first, divider_y, second) = collapsed_sidebar_sections(area);
+    if config.section_order[0] == crate::config::SidebarSection::Agents {
+        (second, divider_y, first)
+    } else {
+        (first, divider_y, second)
+    }
+}
+
 pub(crate) fn render_collapsed_sidebar(
     buffer: &mut Buffer,
     area: Rect,
@@ -56,10 +68,11 @@ pub(crate) fn render_collapsed_sidebar(
     let selection_background = workspace_selection_background(palette);
     let active_background = workspace_active_background(palette, selected_workspace_id.is_some());
     render_sidebar_background(buffer, area, palette);
-    let (workspace_area, divider_y, detail_area) = collapsed_sidebar_sections(area);
+    let (workspace_area, divider_y, detail_area) = ordered_collapsed_sidebar_sections(area, config);
     for (index, workspace) in snapshot
         .workspaces
         .iter()
+        .filter(|workspace| workspace.visible_in_profile)
         .take(workspace_area.height as usize)
         .enumerate()
     {
@@ -665,6 +678,9 @@ pub(crate) fn workspace_entries(
 ) -> Vec<WorkspaceEntry> {
     let mut members = HashMap::<&str, Vec<usize>>::new();
     for (index, workspace) in snapshot.workspaces.iter().enumerate() {
+        if !workspace.visible_in_profile {
+            continue;
+        }
         if let Some(worktree) = &workspace.worktree {
             members.entry(&worktree.key).or_default().push(index);
         }
@@ -685,6 +701,9 @@ pub(crate) fn workspace_entries(
     let mut emitted = HashSet::<&str>::new();
     let mut entries = Vec::new();
     for (index, workspace) in snapshot.workspaces.iter().enumerate() {
+        if !workspace.visible_in_profile {
+            continue;
+        }
         let Some(worktree) = workspace
             .worktree
             .as_ref()

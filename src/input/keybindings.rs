@@ -74,6 +74,7 @@ pub(crate) enum KeybindAction {
     OpenNotificationTarget,
     Detach,
     OpenNavigator,
+    OpenNavigatorSearch,
     /// Collapse or expand the sidebar group the focused agent owns or sits in.
     ToggleAgentGroup,
     /// Pin or unpin the focused agent as hands-on (top-level in the sidebar).
@@ -169,6 +170,7 @@ pub(crate) fn resolve_non_indexed_action(
         ),
         (&keybinds.detach, KeybindAction::Detach),
         (&keybinds.goto, KeybindAction::OpenNavigator),
+        (&keybinds.search, KeybindAction::OpenNavigatorSearch),
         (
             &keybinds.toggle_agent_group,
             KeybindAction::ToggleAgentGroup,
@@ -312,6 +314,31 @@ mod tests {
             ),
             Some(KeybindMatch::Action(KeybindAction::SwapPaneUp))
         ));
+    }
+
+    #[test]
+    fn search_chords_resolve_to_the_compact_palette() {
+        let config: crate::config::Config =
+            toml::from_str("[keys]\nsearch = [\"prefix+f\", \"ctrl+alt+f\"]").unwrap();
+        let keybinds = config.keybinds();
+        for (key, resolve) in [
+            (
+                TerminalKey::new(KeyCode::Char('f'), KeyModifiers::empty()),
+                KeybindDispatch::Prefix,
+            ),
+            (
+                TerminalKey::new(
+                    KeyCode::Char('f'),
+                    KeyModifiers::CONTROL | KeyModifiers::ALT,
+                ),
+                KeybindDispatch::Direct,
+            ),
+        ] {
+            assert!(matches!(
+                resolve_exact_binding(&keybinds, &key, resolve),
+                Some(KeybindMatch::Action(KeybindAction::OpenNavigatorSearch))
+            ));
+        }
     }
 
     #[test]

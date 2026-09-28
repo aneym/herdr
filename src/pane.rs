@@ -95,8 +95,10 @@ fn apply_pane_terminal_env(cmd: &mut CommandBuilder) {
     // when the remote side lacks matching terminfo entries.
     cmd.env("TERM", PANE_TERM);
     cmd.env("COLORTERM", PANE_COLORTERM);
-    cmd.env("TERM_PROGRAM", "herdr");
-    cmd.env("TERM_PROGRAM_VERSION", crate::build_info::version());
+    // The pane VT is libghostty-vt; Claude Code enables kitty key handling
+    // only when it recognizes the terminal identity.
+    cmd.env("TERM_PROGRAM", "ghostty");
+    cmd.env("TERM_PROGRAM_VERSION", "1.3.1");
     // Host handles refer to the outer terminal, never to this pane.
     for key in [
         "ITERM_SESSION_ID",
@@ -2133,13 +2135,12 @@ impl PaneRuntime {
     }
 
     #[cfg(unix)]
-    pub fn handoff_history_ansi(&self) -> Option<String> {
+    pub fn handoff_history_ansi(&self, max_bytes: usize) -> Option<String> {
         if self.terminal.alternate_screen_active() {
             return None;
         }
-        self.snapshot_history().map(|history| {
-            truncate_handoff_history(history, crate::server::handoff::MAX_REPLAY_BYTES_PER_PANE)
-        })
+        self.snapshot_history()
+            .map(|history| truncate_handoff_history(history, max_bytes))
     }
 
     pub fn apply_host_terminal_theme(&self, theme: crate::terminal_theme::TerminalTheme) {
@@ -3972,10 +3973,10 @@ mod tests {
         for key in keys {
             assert!(cmd.get_env(key).is_none(), "{key} must not leak into panes");
         }
-        assert_eq!(cmd.get_env("TERM_PROGRAM"), Some(OsStr::new("herdr")));
+        assert_eq!(cmd.get_env("TERM_PROGRAM"), Some(OsStr::new("ghostty")));
         assert_eq!(
             cmd.get_env("TERM_PROGRAM_VERSION"),
-            Some(OsStr::new(&crate::build_info::version()))
+            Some(OsStr::new("1.3.1"))
         );
     }
 
@@ -4735,13 +4736,7 @@ mod tests {
             "printf '%s\\n%s\\n%s\\n%s\\n' \"$TERM\" \"$COLORTERM\" \"$TERM_PROGRAM\" \"$TERM_PROGRAM_VERSION\"",
             &[],
         );
-        assert_eq!(
-            output,
-            format!(
-                "xterm-256color\ntruecolor\nherdr\n{}\n",
-                crate::build_info::version()
-            )
-        );
+        assert_eq!(output, "xterm-256color\ntruecolor\nghostty\n1.3.1\n");
     }
 
     #[cfg(unix)]
@@ -4765,9 +4760,37 @@ mod tests {
         let runtime =
             PaneRuntime::test_with_scrollback_bytes(40, 5, 4096, b"handoff-primary-history\r\n");
 
-        let history = runtime.handoff_history_ansi().unwrap();
+        let history = runtime
+            .handoff_history_ansi(crate::server::handoff::MAX_REPLAY_BYTES_PER_PANE)
+            .unwrap();
 
         assert!(history.contains("handoff-primary-history"));
+    }
+
+    // REG-4: the wheel had nothing to scroll after a live update, because the
+    // handoff replayed only 8 KiB (about one screen) of a long colored history.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn handoff_replays_enough_history_to_scroll_after_a_live_update() {
+        let mut output = Vec::new();
+        for line in 0..2000 {
+            output.extend_from_slice(
+                format!("\x1b[38;5;{}mline {line}\x1b[0m colored output\r\n", line % 256)
+                    .as_bytes(),
+            );
+        }
+        let before = PaneRuntime::test_with_scrollback_bytes(80, 24, 10_000_000, &output);
+        let history = before
+            .handoff_history_ansi(crate::server::handoff::MAX_REPLAY_BYTES_PER_PANE)
+            .unwrap();
+        let after =
+            PaneRuntime::test_with_scrollback_bytes(80, 24, 10_000_000, history.as_bytes());
+
+        let scrollable = after.scroll_metrics().unwrap().max_offset_from_bottom;
+        assert!(
+            scrollable >= 1900,
+            "only {scrollable} of ~1977 scrollback lines survived the handoff"
+        );
     }
 
     #[cfg(unix)]
@@ -4780,7 +4803,9 @@ mod tests {
             b"primary\r\n\x1b[?1049halt-screen",
         );
 
-        assert!(runtime.handoff_history_ansi().is_none());
+        assert!(runtime
+            .handoff_history_ansi(crate::server::handoff::MAX_REPLAY_BYTES_PER_PANE)
+            .is_none());
     }
 
     #[cfg(unix)]

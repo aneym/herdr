@@ -15,6 +15,7 @@ const ENDPOINT_RESPONSE_CHUNK_BYTES: usize = 512 * 1024;
 const CLIENT_SHELL_METHODS: &[&str] = &[
     "agent.group.collapse",
     "agent.group.set",
+    "agent.usage",
     "client_shell.surface.set",
     "command.invoke",
     "integration.install",
@@ -38,6 +39,8 @@ const CLIENT_SHELL_METHODS: &[&str] = &[
     "pane.swap",
     "pane.zoom",
     "product_announcement.dismiss",
+    "profile.list",
+    "profile.switch",
     "release_notes.dismiss",
     "server.reload_config",
     "tab.close",
@@ -304,6 +307,11 @@ mod tests {
             Some(true),
             "workspace.set_pinned must advertise a shape"
         );
+        // Profile methods are newly advertised on the client shell lane. Their
+        // shapes are not part of the original endpoint v1 fixture.
+        for method in ["profile.list", "profile.switch"] {
+            assert!(actual.remove(method).is_some(), "{method} must advertise a shape");
+        }
         // Fork: sidebar agent placement (docs/fork/port-0.9/PORT.md, ledger 31).
         assert_eq!(
             actual.remove("agent.group.set").as_deref(),
@@ -317,6 +325,7 @@ mod tests {
             actual.remove("pane.link.resolve").as_deref(),
             Some("f5e4a3e01453ae7b188f127ce951c12c20e0bebcc17cc364eeb6d1a01fd5bf81")
         );
+        assert!(actual.remove("agent.usage").is_some(), "agent usage must advertise a shape");
 
         assert_eq!(
             actual, expected,
@@ -367,6 +376,9 @@ mod tests {
 
     #[test]
     fn client_shell_lane_excludes_api_front_door_and_lifecycle_methods() {
+        assert!(supports_client_shell_method(&Method::AgentUsage(
+            crate::api::schema::EmptyParams::default(),
+        )));
         assert!(supports_client_shell_method(
             &Method::ClientShellSurfaceSet(crate::api::schema::ClientShellSurfaceSetParams {
                 active: false,

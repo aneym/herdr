@@ -37,6 +37,31 @@ fn fork_mobile_header_keeps_active_tab_visible_without_hiding_fitting_tabs() {
 }
 
 #[test]
+fn mobile_header_shows_profile_when_it_fits_and_preserves_workspace_when_narrow() {
+    let config = ClientShellConfig::from_config(&Config::default());
+    let mut snapshot = snapshot();
+    snapshot.active_profile = "work".into();
+    snapshot.workspaces[0].label = "base".into();
+    for (width, profile_visible) in [(44, true), (24, false)] {
+        let mut buffer = Buffer::empty(Rect::new(0, 0, width, 2));
+        super::super::mobile::render_mobile_header(
+            &mut buffer,
+            Rect::new(0, 0, width, 2),
+            &snapshot,
+            &config,
+            &ClientEndpointId::Local,
+            &mut ShellHitMap::default(),
+        );
+        let row = (0..width)
+            .map(|x| buffer[(x, 0)].symbol())
+            .collect::<String>();
+        assert!(row.contains("base"), "{row}");
+        assert_eq!(row.contains(" · work"), profile_visible, "{row}");
+        assert!(!row.contains("tab 1"), "{row}");
+    }
+}
+
+#[test]
 fn fork_mobile_switcher_uses_saved_profile_roster_and_routes_selection() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
@@ -45,6 +70,12 @@ fn fork_mobile_switcher_uses_saved_profile_roster_and_routes_selection() {
         ClientEndpointId::Local,
         vec!["default".into(), "review".into()],
     );
+    state.set_endpoint_methods(Some(
+        crate::server::client_commands::supported_client_shell_method_names()
+            .iter()
+            .map(|method| (*method).to_owned())
+            .collect(),
+    ));
     state.mode = ClientShellMode::Navigate;
     state.compose(44, 40).unwrap();
     let rect = state
@@ -64,6 +95,104 @@ fn fork_mobile_switcher_uses_saved_profile_roster_and_routes_selection() {
     })]);
     assert!(outcome.actions.iter().any(|action| matches!(action, ClientShellAction::Endpoint { request, .. }
         if matches!(&request.method, crate::api::schema::Method::ProfileSwitch(params) if params.profile == "review"))));
+    assert!(state.visible_endpoint_notice.as_ref().is_none_or(|notice| notice.title != "Action unavailable"));
+}
+
+#[test]
+fn mobile_switcher_leads_with_live_agent_title_and_moves_workspace_to_detail() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut projected = snapshot();
+    projected.workspaces[0].label = "homebase".into();
+    projected.agents.push(ClientShellAgent {
+        pane_id: "pane_1".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "tab_1".into(),
+        name: Some("claude".into()),
+        display_agent: Some("claude".into()),
+        agent: Some("claude".into()),
+        title: None,
+        terminal_title: Some("OA OSC TITLE".into()),
+        terminal_title_stripped: Some("OA OSC TITLE".into()),
+        agent_status: AgentStatus::Working,
+        state_change_seq: 1,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: true,
+        owner_pane_id: None,
+        orphaned: false,
+        group: Default::default(),
+        visible_in_profile: true,
+    });
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    state.mode = ClientShellMode::Navigate;
+    let frame = state.compose(44, 30).expect("mobile switcher");
+    let rows = frame_rows(&frame);
+    let row = rows.iter().position(|row| row.contains("OA OSC TITLE")).expect("live title row");
+    assert!(!rows[row].contains("homebase"), "{:?}", rows[row]);
+    assert!(rows[row + 1].contains("homebase"), "{:?}", rows[row + 1]);
+    assert!(rows[row + 1].contains("working"), "{:?}", rows[row + 1]);
+    let title_cell = &frame.cells[row * frame.width as usize + rows[row].find("OA OSC TITLE").unwrap()];
+    assert_ne!(title_cell.modifier & ratatui::style::Modifier::BOLD.bits(), 0);
+}
+
+#[test]
+fn mobile_switcher_tab_rows_show_per_pane_glyphs_only_when_enabled() {
+    use crate::config::ShowTabStatusConfig;
+    let mut projected = snapshot();
+    projected.tabs[0].agent_status = AgentStatus::Blocked;
+    projected.tabs[0].label = "review".into();
+    projected.tabs[0].custom_label = true;
+    projected.panes.push(ClientShellPane {
+        pane_id: "pane_2".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "tab_1".into(),
+        label: None,
+        cwd: None,
+        foreground_cwd: None,
+        focused: false,
+        right_click_passthrough: false,
+    });
+    projected.agents.push(ClientShellAgent {
+        pane_id: "pane_1".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "tab_1".into(),
+        name: Some("claude".into()),
+        display_agent: Some("claude".into()),
+        agent: Some("claude".into()),
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Blocked,
+        state_change_seq: 1,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: false,
+        owner_pane_id: None,
+        orphaned: false,
+        group: Default::default(),
+        visible_in_profile: true,
+    });
+    for (mode, expected_glyphs) in [(ShowTabStatusConfig::Attention, true), (ShowTabStatusConfig::Off, false)] {
+        let mut config = Config::default();
+        config.ui.show_tab_status = mode;
+        config.ui.sidebar.agents.state_icons.insert("blocked".into(), "■".into());
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+        state.set_snapshot(Box::new(projected.clone()));
+        state.set_pane_surface(surface());
+        state.mode = ClientShellMode::Navigate;
+        let frame = state.compose(44, 40).expect("mobile tabs section");
+        let tab = state.hits.mobile_targets.iter().find_map(|(rect, target)| {
+            matches!(target, ClientMobileTarget::Tab { tab_id, .. } if tab_id == "tab_1")
+                .then_some(*rect)
+        }).expect("switcher tab row");
+        let text = frame.cells[tab.y as usize * frame.width as usize..(tab.y as usize + 1) * frame.width as usize]
+            .iter().map(|cell| cell.symbol.as_str()).collect::<String>();
+        assert_eq!(text.contains("■"), expected_glyphs, "{text}");
+        if expected_glyphs {
+            assert!(text.contains("·"), "plain second pane glyph: {text}");
+        }
+    }
 }
 
 #[test]
@@ -269,11 +398,14 @@ fn mobile_header_and_switcher_render_released_sections_and_stable_targets() {
         state_labels: vec![("blocked".into(), "waiting".into())],
         tokens: Vec::new(),
         focused: true,
+        visible_in_profile: true,
         owner_pane_id: None,
         orphaned: false,
         group: Default::default(),
     });
     projected.workspaces[0].agent_status = AgentStatus::Blocked;
+    let mut working = projected.clone();
+    working.agents[0].agent_status = AgentStatus::Working;
     state.set_snapshot(Box::new(projected));
     let mut projected_surface = surface();
     for cell in &mut projected_surface.frame.cells {
@@ -288,10 +420,28 @@ fn mobile_header_and_switcher_render_released_sections_and_stable_targets() {
         .map(|cell| cell.symbol.as_str())
         .collect::<String>();
     assert!(header_text.contains("client-shell"));
-    assert!(header_text.contains("tab 1"));
+    assert!(header_text.contains(" · default"));
     assert!(header_text.contains("blocked"));
     assert!(header_text.contains("switch"));
     assert_eq!(state.hits.mobile_switch, Rect::new(34, 0, 10, 2));
+
+    let mut working_header = Buffer::empty(Rect::new(0, 0, 44, 2));
+    super::super::mobile::render_mobile_header(
+        &mut working_header,
+        Rect::new(0, 0, 44, 2),
+        &working,
+        &state.config,
+        &ClientEndpointId::Local,
+        &mut ShellHitMap::default(),
+    );
+    assert!(working_header
+        .content
+        .chunks(44)
+        .nth(1)
+        .unwrap()
+        .windows(7)
+        .any(|segment| segment.iter().map(|cell| cell.symbol()).collect::<String>() == "working"
+            && segment.iter().all(|cell| cell.fg == state.config.palette.yellow)));
 
     let click = |rect: Rect| {
         RawInputEvent::Mouse(crossterm::event::MouseEvent {
@@ -432,6 +582,7 @@ fn mobile_background_workspace_uses_its_own_active_tab_status() {
         agent_status: AgentStatus::Idle,
     });
     projected.workspaces.push(ClientShellWorkspace {
+        visible_in_profile: true,
         workspace_id: "ws_2".into(),
         active_tab_id: "tab_3".into(),
         new_workspace_cwd: "/feature".into(),
@@ -633,6 +784,7 @@ fn mobile_previous_workspace_action_wraps_across_expanded_entries() {
     let mut projected = snapshot();
     for index in 2..=3 {
         projected.workspaces.push(ClientShellWorkspace {
+            visible_in_profile: true,
             workspace_id: format!("ws_{index}"),
             active_tab_id: format!("tab_{index}"),
             new_workspace_cwd: "/tmp".into(),
@@ -675,6 +827,7 @@ fn mobile_switcher_scroll_close_and_width_transition_clear_mobile_hits() {
     let mut projected = snapshot();
     for index in 2..=8 {
         projected.workspaces.push(ClientShellWorkspace {
+            visible_in_profile: true,
             workspace_id: format!("ws_{index}"),
             active_tab_id: format!("tab_{index}"),
             new_workspace_cwd: "/tmp".into(),

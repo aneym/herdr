@@ -64,6 +64,107 @@ fn triple_click_selects_and_copies_the_line() {
 }
 
 #[test]
+fn mouse_reporting_double_click_cmd_c_copies_word_without_forwarding_key() {
+    for reply_before_release in [false, true] {
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+        state.config.copy_on_select = false;
+        state.set_snapshot(Box::new(snapshot()));
+        let mut pane_surface = surface();
+        pane_surface.panes[0].mouse_reporting = true;
+        pane_surface.panes[0].rect.width = 19;
+        pane_surface.panes[0].inner_rect = pane_surface.panes[0].rect;
+        state.set_pane_surface(pane_surface);
+        state.compose(106, 20).expect("composed frame");
+        let pane = state.hits.panes[0].clone();
+
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ] {
+            state.handle_raw_events(vec![pane_mouse(kind, &pane, 8)]);
+        }
+        let second = state.handle_raw_events(vec![pane_mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            &pane,
+            8,
+        )]);
+        let word_request = endpoint_request(second);
+        assert!(matches!(
+            word_request.method,
+            crate::api::schema::Method::PaneSelectionRead(_)
+        ));
+        if !reply_before_release {
+            state.handle_raw_events(vec![pane_mouse(
+                MouseEventKind::Up(MouseButton::Left),
+                &pane,
+                8,
+            )]);
+        }
+        let (repaint, actions) = state.handle_endpoint_result(
+            "boot-1",
+            &word_request.id,
+            Ok(crate::api::schema::ResponseResult::PaneSelection {
+                pane_id: "pane_1".into(),
+                text: "alpha bravo charlie".into(),
+            }),
+        );
+        assert!(repaint);
+        assert!(actions.is_empty());
+        if reply_before_release {
+            state.handle_raw_events(vec![pane_mouse(
+                MouseEventKind::Up(MouseButton::Left),
+                &pane,
+                8,
+            )]);
+        }
+        assert!(state
+            .selection
+            .as_ref()
+            .is_some_and(crate::selection::Selection::is_finalized));
+        assert_eq!(state.pane_app_selection.as_deref(), Some("pane_1"));
+        let highlighted = state.compose(106, 20).expect("word highlight");
+        let cell_index = usize::from(pane.inner_rect.y) * 106 + usize::from(pane.inner_rect.x + 8);
+        let selected_bg = highlighted.cells[cell_index].bg;
+        let retained = state.selection.take();
+        let plain = state.compose(106, 20).expect("plain word");
+        assert_ne!(selected_bg, plain.cells[cell_index].bg);
+        state.selection = retained;
+
+        let copy = state.handle_raw_events(vec![RawInputEvent::Key(
+            crate::input::TerminalKey::new(KeyCode::Char('c'), KeyModifiers::SUPER),
+        )]);
+        assert!(!copy.requests.iter().any(|request| matches!(
+            request,
+            ClientMessage::ClientShellPaneInput { events, .. }
+                if events.iter().any(|event| matches!(event, ClientPaneInputEvent::Key { .. }))
+        )));
+        let copy_request = endpoint_request(copy);
+        assert!(
+            matches!(&copy_request.method, crate::api::schema::Method::PaneSelectionRead(params)
+            if params.anchor.col == 6 && params.cursor.col == 10)
+        );
+        let (_, clipboard) = state.handle_endpoint_result(
+            "boot-1",
+            &copy_request.id,
+            Ok(crate::api::schema::ResponseResult::PaneSelection {
+                pane_id: "pane_1".into(),
+                text: "bravo".into(),
+            }),
+        );
+        assert!(
+            matches!(&clipboard[..], [ClientShellAction::ClipboardWrite(bytes)] if bytes == b"bravo")
+        );
+        assert_eq!(
+            state
+                .copy_feedback
+                .as_ref()
+                .map(|toast| toast.message.as_str()),
+            Some("copied to clipboard")
+        );
+    }
+}
+
+#[test]
 fn mouse_reporting_drag_cmd_c_copies_shadow_without_sending_interrupt() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.config.copy_on_select = false;
@@ -1149,8 +1250,8 @@ fn navigator_renders_every_terminal_in_workspace_sections() {
     }
     for (row, label) in visible.iter().zip([
         "client-shell",
-        "editor · agent · 1",
-        "editor · shell · 2",
+        "agent",
+        "shell",
         "notes",
         "logs",
         "second",
@@ -1171,7 +1272,7 @@ fn navigator_renders_every_terminal_in_workspace_sections() {
     });
     let visible = visible_rows(&mut state, 11);
     assert_eq!(visible.len(), 2);
-    assert!(visible.iter().any(|row| row.contains("editor · shell · 2")));
+    assert!(visible.iter().any(|row| row.contains("shell")));
     assert!(visible[0].starts_with(" ├─ "));
     assert!(visible[1].starts_with(" ├─ "));
 
@@ -1184,14 +1285,14 @@ fn navigator_renders_every_terminal_in_workspace_sections() {
     let visible = visible_rows(&mut state, 30);
     assert_eq!(visible.len(), 2);
     assert!(visible[1].starts_with(" └─ "));
-    assert!(visible.iter().any(|row| row.contains("editor · shell · 2")));
+    assert!(visible.iter().any(|row| row.contains("shell")));
     assert!(visible.iter().all(|row| !row.contains("second")));
 }
 
 #[test]
 fn navigator_search_matches_non_adjacent_words_without_losing_the_pane_target() {
     let mut projected = snapshot();
-    projected.panes[0].label = Some("alpha beta gamma".into());
+    projected.panes[0].label = Some("alpha beta gamma code review".into());
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(projected));
     state.set_pane_surface(surface());
@@ -1205,7 +1306,8 @@ fn navigator_search_matches_non_adjacent_words_without_losing_the_pane_target() 
         ("gamma alpha", true),
         ("beta gamma", true),
         ("alpha missing", false),
-        ("alphagamma", false),
+        ("cr", true),
+        ("alphagamma", true),
     ] {
         navigator.query = query.into();
         navigator.selected = None;
@@ -1220,6 +1322,30 @@ fn navigator_search_matches_non_adjacent_words_without_losing_the_pane_target() 
                 pane_id: "pane_1".into(),
             }),
             "query={query:?}"
+        );
+    }
+}
+
+#[test]
+fn navigator_does_not_stitch_tab_and_pane_fields_into_a_single_term() {
+    let mut projected = snapshot();
+    projected.tabs[0].label = "review".into();
+    projected.tabs[0].custom_label = true;
+    projected.panes[0].label = Some("writer".into());
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.open_navigator_overlay();
+    let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() else {
+        panic!("navigator");
+    };
+    navigator.query = "reviewer".into();
+    for search_entry in [false, true] {
+        navigator.search_entry = search_entry;
+        let rows =
+            render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator);
+        assert!(
+            !rows.iter().any(|row| matches!(row.target, ClientNavigatorTarget::Pane { .. })),
+            "search_entry={search_entry}"
         );
     }
 }
@@ -1249,6 +1375,7 @@ fn navigator_searches_ancestor_context_and_keeps_split_agents_individually_actio
         state_labels: Vec::new(),
         tokens: Vec::new(),
         focused: true,
+        visible_in_profile: true,
         owner_pane_id: None,
         orphaned: false,
         group: Default::default(),
@@ -1271,6 +1398,9 @@ fn navigator_searches_ancestor_context_and_keeps_split_agents_individually_actio
         ("client-shell", None, vec!["pane_1", "pane_2"]),
         ("main", None, vec!["pane_1", "pane_2"]),
         ("claude", None, vec!["pane_2"]),
+        ("writer", None, vec!["pane_1"]),
+        // A term may span words inside a field, not the tab and agent fields.
+        ("reviewer", None, vec!["pane_2"]),
         ("checking navigation", None, vec!["pane_2"]),
         ("/repo/subproject", None, vec!["pane_2"]),
         (
@@ -1329,8 +1459,8 @@ fn navigator_searches_ancestor_context_and_keeps_split_agents_individually_actio
         .collect::<Vec<_>>();
     assert_eq!(pane_rows.len(), 2);
     for ((rect, _), (name, kind, status)) in pane_rows.iter().zip([
-        ("writer", "pi", "working"),
-        ("reviewer", "claude", "blocked"),
+        ("implementing navigation", "pi", "working"),
+        ("checking navigation", "claude", "blocked"),
     ]) {
         cell_symbol_position(&frame, *rect, name);
         cell_symbol_position(&frame, *rect, kind);
@@ -1379,7 +1509,24 @@ fn navigator_distinguishes_unnamed_terminals_on_numbered_tabs() {
         .filter(|row| matches!(row.target, ClientNavigatorTarget::Pane { .. }))
         .map(|row| row.label.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(labels, ["terminal · 1", "terminal · 2", "logs"]);
+    assert_eq!(labels, ["pane 1 · 1", "pane 2 · 2", "pane 3 · logs"]);
+    let frame = state.compose(106, 30).expect("goto frame");
+    let rendered = state
+        .hits
+        .navigator_rows
+        .iter()
+        .filter(|(_, target)| matches!(target, ClientNavigatorTarget::Pane { .. }))
+        .map(|(rect, _)| {
+            frame.cells[rect.y as usize * frame.width as usize + rect.x as usize..]
+                .iter()
+                .take(rect.width as usize)
+                .map(|cell| cell.symbol.as_str())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
+    for (row, label) in rendered.iter().zip(labels) {
+        assert!(row.contains(label), "goto row {row:?} should show {label:?}");
+    }
 }
 
 #[test]
@@ -1842,7 +1989,7 @@ fn navigator_owns_search_mouse_selection_and_stable_target_focus() {
         .join("\n");
     assert!(navigator_text.contains("client-shell"));
     assert!(navigator_text.contains("terminal"));
-    assert!(!navigator_text.contains("pane 1"));
+    assert!(navigator_text.contains("pane 1"));
 
     let search = state.hits.navigator_search;
     let focus_search =
@@ -2418,4 +2565,31 @@ fn copy_mode_repeat_during_projection_gap_stays_active() {
             Some(19)
         );
     }
+}
+
+#[test]
+fn cmd_c_without_mouse_reporting_drag_shows_nothing_selected_to_copy() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    let mut pane_surface = surface();
+    pane_surface.panes[0].mouse_reporting = true;
+    state.set_pane_surface(pane_surface);
+    let result = state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+        KeyCode::Char('c'),
+        KeyModifiers::SUPER,
+    ))]);
+    assert!(result.repaint);
+    assert!(result.actions.is_empty());
+    assert!(!result
+        .requests
+        .iter()
+        .any(|request| matches!(request, ClientMessage::ClientShellPaneInput { .. })));
+    assert_eq!(
+        state
+            .copy_feedback
+            .as_ref()
+            .map(|toast| toast.message.as_str()),
+        Some("nothing selected to copy")
+    );
+    assert!(state.copy_feedback_deadline.is_some());
 }

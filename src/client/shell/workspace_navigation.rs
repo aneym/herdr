@@ -141,6 +141,7 @@ impl ClientShellState {
                     .workspaces
                     .iter()
                     .enumerate()
+                    .filter(|(_, workspace)| workspace.visible_in_profile)
                     .map(|(index, _)| WorkspaceEntry {
                         index,
                         indented: false,

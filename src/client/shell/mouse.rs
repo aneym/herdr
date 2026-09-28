@@ -946,6 +946,12 @@ impl ClientShellState {
                             outcome.repaint = true;
                         }
                     } else if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
+                        // A word lookup may still be pending when the pane app receives
+                        // the second release. Finalize it here so its reply retains a
+                        // completed word rather than a still-held selection.
+                        if self.word_selection_gesture.is_some() {
+                            self.finish_word_selection(outcome);
+                        }
                         let copied = self
                             .selection
                             .as_mut()
@@ -2178,24 +2184,7 @@ impl ClientShellState {
                     return;
                 }
                 if super::contains(self.hits.agent_sort_toggle, point) {
-                    let sort = match self.config.agent_panel_sort {
-                        crate::config::AgentPanelSortConfig::Spaces => {
-                            crate::config::AgentPanelSortConfig::Priority
-                        }
-                        crate::config::AgentPanelSortConfig::Priority => {
-                            crate::config::AgentPanelSortConfig::Triage
-                        }
-                        crate::config::AgentPanelSortConfig::Triage => {
-                            crate::config::AgentPanelSortConfig::Tree
-                        }
-                        crate::config::AgentPanelSortConfig::Tree => {
-                            crate::config::AgentPanelSortConfig::Spaces
-                        }
-                    };
-                    self.config.agent_panel_sort = sort;
-                    self.agent_panel_sort_manual = true;
-                    self.agent_scroll = 0;
-                    self.persist_chrome_preferences(outcome);
+                    self.open_sidebar_view_context_menu(mouse.column, mouse.row.saturating_add(1));
                     outcome.repaint = true;
                     return;
                 }

@@ -311,6 +311,7 @@ mod tests {
         )))
         .unwrap();
         assert_eq!(snapshot.boot_id, "boot-v1");
+        assert!(snapshot.workspaces[0].visible_in_profile);
         assert_eq!(
             snapshot.workspaces[0].agent_status,
             crate::api::schema::AgentStatus::Unknown

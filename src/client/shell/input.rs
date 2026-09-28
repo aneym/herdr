@@ -615,6 +615,25 @@ impl ClientShellState {
             outcome.repaint = true;
             return None;
         }
+        // Mouse-reporting pane apps receive the drag themselves. As in 0.8.2,
+        // Cmd-C with no retained drag belongs to the clipboard UI, not the pane.
+        if self.mode == ClientShellMode::Terminal
+            && self.pane_app_selection.is_none()
+            && self.selection.is_none()
+            && is_pane_app_selection_copy_key(key)
+            && self.focused_pane_id().is_some_and(|pane_id| {
+                self.pane_surface.as_ref().is_some_and(|surface| {
+                    surface
+                        .panes
+                        .iter()
+                        .any(|pane| pane.pane_id == pane_id && pane.mouse_reporting)
+                })
+            })
+        {
+            outcome.repaint |=
+                self.show_clipboard_feedback("nothing selected to copy", std::time::Instant::now());
+            return None;
+        }
         if self.mode != ClientShellMode::Copy
             && self.copy_or_terminal_mode() != ClientShellMode::Copy
             && self.selection.take().is_some()

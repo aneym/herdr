@@ -40,6 +40,7 @@ fn agent(
         state_labels: Vec::new(),
         tokens: Vec::new(),
         focused: false,
+        visible_in_profile: true,
         owner_pane_id: None,
         orphaned: false,
         group: Default::default(),
@@ -51,6 +52,7 @@ fn agent(
 pub(super) fn tree_snapshot() -> ClientShellSnapshot {
     let mut snapshot = snapshot();
     snapshot.workspaces.push(ClientShellWorkspace {
+        visible_in_profile: true,
         workspace_id: "ws_2".into(),
         active_tab_id: "tab_3".into(),
         new_workspace_cwd: "/other".into(),
@@ -769,7 +771,7 @@ fn dragging_a_space_header_records_the_new_order() {
 }
 
 #[test]
-fn right_click_on_the_sort_label_opens_the_view_toggles() {
+fn left_click_on_the_sort_label_opens_the_view_picker() {
     let tree = ClientTreeChrome::default();
     let mut state = tree_state(tree);
     state.set_pane_surface(surface());
@@ -778,7 +780,7 @@ fn right_click_on_the_sort_label_opens_the_view_toggles() {
     assert!(toggle.width > 0);
 
     state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
-        kind: MouseEventKind::Down(MouseButton::Right),
+        kind: MouseEventKind::Down(MouseButton::Left),
         column: toggle.x,
         row: toggle.y,
         modifiers: KeyModifiers::empty(),
@@ -786,7 +788,7 @@ fn right_click_on_the_sort_label_opens_the_view_toggles() {
 
     let Some(crate::client::shell::ClientShellOverlay::ContextMenu(menu)) = state.overlay.as_ref()
     else {
-        panic!("right-click on the sort label should open the view menu");
+        panic!("left-click on the sort label should open the view menu");
     };
     assert_eq!(
         menu.items()
@@ -794,11 +796,35 @@ fn right_click_on_the_sort_label_opens_the_view_toggles() {
             .map(|item| item.label.as_str())
             .collect::<Vec<_>>(),
         [
-            "Hide spaces",
-            "Hide tabs",
-            "Hide agents",
-            "Hide folded spaces"
+            "● tree",
+            "  grouped",
+            "  priority",
+            "  triage",
+            "──────────",
+            "✓ spaces",
+            "✓ tabs",
+            "✓ agents",
+            "✓ hidden"
         ]
+    );
+    assert_eq!(
+        state.config.agent_panel_sort,
+        crate::config::AgentPanelSortConfig::Tree
+    );
+
+    let mut outcome = ClientShellInput::default();
+    state.activate_context_menu_item(2, &mut outcome);
+    state.open_sidebar_view_context_menu(toggle.x, toggle.y);
+    let Some(crate::client::shell::ClientShellOverlay::ContextMenu(menu)) = state.overlay.as_ref()
+    else {
+        panic!("priority view picker did not open");
+    };
+    assert_eq!(
+        menu.items()
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect::<Vec<_>>(),
+        ["  tree", "  grouped", "● priority", "  triage"]
     );
 }
 
@@ -811,8 +837,17 @@ fn revealing_folded_spaces_starts_the_section_compact() {
     };
     let mut state = tree_state(tree);
     state.open_sidebar_view_context_menu(0, 0);
+    let Some(crate::client::shell::ClientShellOverlay::ContextMenu(menu)) = state.overlay.as_ref()
+    else {
+        panic!("view picker did not open");
+    };
+    let hidden = menu
+        .items()
+        .iter()
+        .position(|item| item.label == "✓ hidden")
+        .expect("hidden spaces toggle");
     let mut outcome = ClientShellInput::default();
-    state.activate_context_menu_item(3, &mut outcome);
+    state.activate_context_menu_item(hidden, &mut outcome);
 
     let tree = state
         .tree_chrome
@@ -951,6 +986,38 @@ fn content_fit_spaces_hug_their_rows_and_leave_the_rest_to_agents() {
     assert_eq!(fitted.hits.workspaces.len(), 1);
     // A content-fit sidebar has no draggable split.
     assert_eq!(fitted.hits.sidebar_section_divider, Rect::default());
+}
+
+#[test]
+fn agent_titles_use_tab_label_ink_in_dark_and_light_themes() {
+    let mut config = Config::default();
+    config.ui.sidebar.agents.rows = vec![vec![
+        crate::config::AgentSidebarToken::TerminalTitleStripped,
+    ]];
+    let mut snapshot = tree_snapshot();
+    snapshot.agents[1].terminal_title_stripped = Some("UNFOCUSED_TITLE".into());
+    for appearance in [
+        crate::terminal_theme::HostAppearance::Dark,
+        crate::terminal_theme::HostAppearance::Light,
+    ] {
+        let mut shell_config = ClientShellConfig::from_config(&config);
+        shell_config.palette =
+            crate::app::client_palette_for_appearance(&shell_config.theme_runtime, appearance);
+        let expected = crate::protocol::color_to_u32(shell_config.palette.subtext0);
+        let muted = crate::protocol::color_to_u32(shell_config.palette.overlay0);
+        assert_ne!(expected, muted);
+        let mut state = ClientShellState::new(shell_config);
+        state.set_snapshot(Box::new(snapshot.clone()));
+        state.set_pane_surface(surface());
+        let frame = state.compose(106, 40).expect("agent title frame");
+        let (x, y) = cell_symbol_position(
+            &frame,
+            Rect::new(0, 0, frame.width, frame.height),
+            "UNFOCUSED_TITLE",
+        );
+        let cell = &frame.cells[usize::from(y) * usize::from(frame.width) + usize::from(x)];
+        assert_eq!(cell.fg, expected, "appearance: {appearance:?}");
+    }
 }
 
 #[test]

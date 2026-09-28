@@ -89,7 +89,7 @@ fn focused_last_overflow_tab_shows_its_full_label() {
             .expect("reporter's overflowing strip");
         assert_eq!(
             state.hits.new_tab.right() - state.hits.tab_scroll_left.x,
-            107
+            107 - state.hits.session_badge.width - 1
         );
         let rect = state
             .hits
@@ -526,4 +526,40 @@ fn close_confirmation_error_becomes_client_owned_overlay_and_stable_group_close(
         crate::api::schema::Method::WorkspaceClose(params)
             if params.workspace_id == "ws_1" && params.close_group
     ));
+}
+
+#[test]
+fn workspace_menu_toggles_orchestrator_mode_through_endpoint() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    for (current, label, expected) in [
+        (false, "Enable orchestrator mode", true),
+        (true, "Disable orchestrator mode", false),
+    ] {
+        let mut updated = state.snapshot.as_deref().unwrap().clone();
+        updated.workspaces[0].orchestrator_mode = current;
+        state.set_snapshot(Box::new(updated));
+        state.open_workspace_context_menu("ws_1".into(), 0, 0);
+        let Some(ClientShellOverlay::ContextMenu(menu)) = state.overlay.as_ref() else {
+            panic!("workspace context menu");
+        };
+        let labels: Vec<_> = menu.items().into_iter().map(|item| item.label).collect();
+        assert_eq!(
+            &labels[..5],
+            [
+                "Rename",
+                "Send to profile",
+                "Share profiles",
+                label,
+                "Close"
+            ]
+        );
+        let mut outcome = ClientShellInput::default();
+        state.activate_context_menu_item(3, &mut outcome);
+        assert!(outcome.actions.iter().any(|action| matches!(action,
+            ClientShellAction::Endpoint { request, .. }
+                if matches!(&request.method, crate::api::schema::Method::WorkspaceSetOrchestrator(params)
+                    if params.workspace_id == "ws_1" && params.enabled == expected)
+        )));
+    }
 }

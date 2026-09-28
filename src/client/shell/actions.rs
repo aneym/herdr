@@ -85,8 +85,16 @@ impl ClientShellState {
                     self.begin_worktree_action(action, outcome);
                     return;
                 }
-                if action == crate::input::KeybindAction::OpenNavigator {
-                    self.open_navigator_overlay();
+                if matches!(
+                    action,
+                    crate::input::KeybindAction::OpenNavigator
+                        | crate::input::KeybindAction::OpenNavigatorSearch
+                ) {
+                    if action == crate::input::KeybindAction::OpenNavigatorSearch {
+                        self.open_navigator_search_overlay();
+                    } else {
+                        self.open_navigator_overlay();
+                    }
                     outcome.repaint = true;
                     return;
                 }

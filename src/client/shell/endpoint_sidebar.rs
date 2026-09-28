@@ -21,7 +21,8 @@ pub(super) fn render_collapsed(
 ) {
     let palette = &config.palette;
     super::render::render_sidebar_background(buffer, area, palette);
-    let (workspace_area, divider_y, detail_area) = super::sidebar::collapsed_sidebar_sections(area);
+    let (workspace_area, divider_y, detail_area) =
+        super::sidebar::ordered_collapsed_sidebar_sections(area, config);
     let mut total_rows = 0usize;
     let mut selected_row = None;
     let reveal = std::mem::take(state.reveal_navigation_workspace);
@@ -39,11 +40,16 @@ pub(super) fn render_collapsed(
                     selected_row = snapshot
                         .workspaces
                         .iter()
+                        .filter(|workspace| workspace.visible_in_profile)
                         .position(|workspace| workspace.workspace_id == target.workspace_id)
                         .map(|index| total_rows + index);
                 }
             }
-            total_rows += snapshot.workspaces.len();
+            total_rows += snapshot
+                .workspaces
+                .iter()
+                .filter(|workspace| workspace.visible_in_profile)
+                .count();
         }
     }
     let height = usize::from(workspace_area.height);
@@ -121,7 +127,11 @@ pub(super) fn render_collapsed(
         let Some(snapshot) = endpoint.snapshot.as_deref() else {
             continue;
         };
-        for workspace in &snapshot.workspaces {
+        for workspace in snapshot
+            .workspaces
+            .iter()
+            .filter(|workspace| workspace.visible_in_profile)
+        {
             if skip > 0 {
                 skip -= 1;
                 continue;

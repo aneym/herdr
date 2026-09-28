@@ -12,10 +12,9 @@ pub(super) use super::aggregate_navigation::navigator_rows as client_navigator_r
 pub(super) use overlays::{render_client_overlay, render_context_menu, render_global_menu};
 pub(super) use sidebar::{render_collapsed_sidebar, render_sidebar, workspace_entries};
 pub(super) use tabs::{render_tab_bar, tab_bar_status_width};
+pub(in crate::client::shell) use tabs::tab_status_glyphs;
 #[cfg(test)]
-pub(in crate::client::shell) use tabs::{
-    session_badge_rect, session_badge_text, tab_status_glyphs,
-};
+pub(in crate::client::shell) use tabs::{session_badge_rect, session_badge_text};
 
 pub(in crate::client::shell) fn render_sidebar_background(
     buffer: &mut Buffer,

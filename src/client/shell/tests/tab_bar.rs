@@ -18,9 +18,8 @@ fn badge_names_the_session_or_falls_back_to_the_active_profile() {
         (Some("work"), "personal", "work"),
         (Some("default"), "personal", "personal"),
         (None, "personal", "personal"),
-        // Nothing to say: no badge, and the tab strip keeps its full width.
-        (Some("default"), "default", ""),
-        (None, "default", ""),
+        (Some("default"), "default", "default"),
+        (None, "default", "default"),
     ] {
         assert_eq!(
             session_badge_text(&badge_snapshot(session_name, active_profile)),
@@ -69,12 +68,23 @@ fn badge_is_hidden_when_the_tab_bar_is_too_narrow() {
 }
 
 #[test]
-fn a_default_session_on_the_default_profile_shows_no_badge() {
+fn a_default_session_on_the_default_profile_shows_the_profile_badge() {
     let snapshot = badge_snapshot(None, "default");
 
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot));
+    state.set_pane_surface(surface());
+    let frame = state.compose(80, 20).expect("composed frame");
+    let badge = state.hits.session_badge;
+    assert_eq!(badge.width, 7);
+    let rows = frame_rows(&frame);
     assert_eq!(
-        session_badge_rect(&snapshot, Rect::new(0, 0, 80, 1), true),
-        Rect::default()
+        rows[badge.y as usize]
+            .chars()
+            .skip(badge.x as usize)
+            .take(7)
+            .collect::<String>(),
+        "default"
     );
 }
 
@@ -162,6 +172,7 @@ fn tab_status_snapshot() -> ClientShellSnapshot {
         state_labels: Vec::new(),
         tokens: Vec::new(),
         focused: true,
+        visible_in_profile: true,
         owner_pane_id: None,
         orphaned: false,
         group: Default::default(),
@@ -219,6 +230,70 @@ fn an_idle_tab_shows_status_only_in_all_mode() {
             mode != ShowTabStatusConfig::All,
             "mode {mode:?}"
         );
+    }
+}
+
+#[test]
+fn completion_and_working_status_ink_matches_sidebar_and_tab_bar() {
+    let mut config = Config::default();
+    config.ui.show_tab_status = crate::config::ShowTabStatusConfig::All;
+    config.ui.attention_read = crate::config::AttentionReadConfig::OnUnfocus;
+    config.ui.sidebar.agents.rows = vec![vec![crate::config::AgentSidebarToken::StateIcon]];
+    config
+        .ui
+        .sidebar
+        .agents
+        .state_icons
+        .insert("working".into(), "W".into());
+    config
+        .ui
+        .sidebar
+        .agents
+        .state_icons
+        .insert("idle_unseen".into(), "D".into());
+    config
+        .ui
+        .sidebar
+        .agents
+        .state_icons
+        .insert("idle".into(), "R".into());
+    let shell_config = ClientShellConfig::from_config(&config);
+    for (status, glyph, expected) in [
+        (AgentStatus::Working, "W", shell_config.palette.peach),
+        (AgentStatus::Done, "D", shell_config.palette.green),
+        (AgentStatus::Idle, "R", shell_config.palette.overlay0),
+    ] {
+        config.ui.attention_read = if status == AgentStatus::Idle {
+            crate::config::AttentionReadConfig::OnFocus
+        } else {
+            crate::config::AttentionReadConfig::OnUnfocus
+        };
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+        let mut projected = tab_status_snapshot();
+        projected.agents[0].agent_status = AgentStatus::Working;
+        projected.tabs[0].agent_status = AgentStatus::Working;
+        state.set_snapshot(Box::new(projected.clone()));
+        state.set_pane_surface(surface());
+        projected.revision += 1;
+        projected.agents[0].agent_status = status;
+        projected.agents[0].state_change_seq += 1;
+        projected.tabs[0].agent_status = status;
+        state.set_snapshot(Box::new(projected));
+        let mut pane_surface = surface();
+        pane_surface.projection_revision += 1;
+        state.set_pane_surface(pane_surface);
+        let frame = state.compose(106, 30).expect("status frame");
+        let tab = state.hits.tabs[0].0;
+        let agent = state.hits.agents[0].0;
+        for area in [tab, agent] {
+            let (x, y) = cell_symbol_position(&frame, area, glyph);
+            let cell = &frame.cells[usize::from(y) * usize::from(frame.width) + usize::from(x)];
+            assert_eq!(
+                cell.fg,
+                crate::protocol::color_to_u32(expected),
+                "status {status:?} in {area:?}"
+            );
+        }
     }
 }
 

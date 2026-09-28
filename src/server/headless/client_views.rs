@@ -51,6 +51,79 @@ pub(super) fn forward_proxied_api_response(
 }
 
 impl HeadlessServer {
+    /// Reveal server-held groups above a focused pane, using the same resolved
+    /// ownership/placement projected to the sidebar (including orchestrators).
+    fn reveal_focused_agent_group(&mut self, client_id: Option<u64>) -> bool {
+        let location = client_id
+            .and_then(|id| self.clients.get(&id))
+            .and_then(|client| client.shell_location.as_ref());
+        let snapshot = crate::server::client_shell::snapshot_with_completions(
+            &self.app, "", 0, None, location,
+        )
+        .0;
+        let Some(mut current) = snapshot
+            .focused_pane_id
+            .as_deref()
+            .and_then(|id| snapshot.agents.iter().find(|agent| agent.pane_id == id))
+        else {
+            return false;
+        };
+        let mut visited = HashSet::new();
+        let mut changed = false;
+        loop {
+            if !visited.insert(current.pane_id.clone()) || current.group.hands_on {
+                break;
+            }
+            let find = |id: &str| snapshot.agents.iter().find(|agent| agent.pane_id == id);
+            let parent = current
+                .group
+                .parent_pane_id
+                .as_deref()
+                .and_then(find)
+                .or_else(|| current.owner_pane_id.as_deref().and_then(find));
+            if let Some(parent) = parent {
+                if let Some((ws_idx, pane_id)) = self.app.parse_pane_id(&parent.pane_id) {
+                    if let Some(key) = self.app.state.agent_group_key(ws_idx, pane_id) {
+                        changed |= self.app.state.collapsed_agent_group_keys.remove(&key);
+                    }
+                }
+                current = parent;
+                continue;
+            }
+            if let Some(workspace) = snapshot
+                .workspaces
+                .iter()
+                .find(|ws| ws.workspace_id == current.workspace_id && ws.orchestrator_mode)
+            {
+                if let Some(owner) = snapshot
+                    .tabs
+                    .iter()
+                    .find(|tab| tab.workspace_id == workspace.workspace_id)
+                    .and_then(|tab| {
+                        snapshot
+                            .agents
+                            .iter()
+                            .find(|agent| agent.tab_id == tab.tab_id)
+                    })
+                {
+                    if owner.pane_id != current.pane_id {
+                        changed |= self
+                            .app
+                            .state
+                            .collapsed_agent_group_keys
+                            .remove(&format!("orch:{}", workspace.workspace_id));
+                    }
+                }
+            }
+            break;
+        }
+        if changed {
+            self.app.state.mark_session_dirty();
+            self.app.sync_session_save_schedule();
+        }
+        changed
+    }
+
     pub(super) fn default_shell_target(&self) -> Option<crate::ui::TabSurfaceTarget> {
         let workspace_index = self.app.state.active?;
         let workspace = self.app.state.workspaces.get(workspace_index)?;
@@ -893,6 +966,11 @@ impl HeadlessServer {
         let public_focus_succeeded = explicit_focus_succeeded
             || (create_focus_requested && target_changed)
             || pane_move_focus_succeeded;
+        let revealed = if public_focus_succeeded {
+            self.reveal_focused_agent_group(None)
+        } else {
+            false
+        };
         if public_focus_succeeded {
             self.focus_all_shell_clients_on_default_target();
         }
@@ -905,7 +983,7 @@ impl HeadlessServer {
         }
         let geometry_changed =
             method_claims_geometry && self.reapply_controlled_shell_tab_geometry(false);
-        changed | geometry_changed
+        changed | geometry_changed | revealed
     }
 
     pub(super) fn handle_client_shell_api_request(
@@ -925,6 +1003,11 @@ impl HeadlessServer {
         let popup_owner = self.shell_tab_id_for_client(client_id);
         let changed = self.handle_api_request_with_shutdown_check_inner(msg, false, true);
         self.focus_shell_client_on_default_target(client_id);
+        let revealed = if navigation_changed {
+            self.reveal_focused_agent_group(Some(client_id))
+        } else {
+            false
+        };
         if !popup_before && self.app.state.popup_pane.is_some() {
             self.popup_owner_tab_id = popup_owner;
         }
@@ -957,6 +1040,6 @@ impl HeadlessServer {
                 self.claim_shell_tab_geometry(client_id, false)
                     || self.resize_shell_tab_if_controller(client_id, false)
             };
-        changed | navigation_changed | geometry_changed
+        changed | navigation_changed | geometry_changed | revealed
     }
 }

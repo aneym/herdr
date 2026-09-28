@@ -10,78 +10,139 @@ impl ClientContextMenuOverlay {
         };
         match &self.target {
             ClientContextMenuTarget::SidebarView {
+                sort,
                 show_spaces,
                 show_tabs,
                 show_agents,
                 show_hidden,
-            } => vec![
-                item(
-                    if *show_spaces {
-                        "Hide spaces"
-                    } else {
-                        "Show spaces"
-                    },
-                    Action::ToggleTreeSpaces,
-                ),
-                item(
-                    if *show_tabs { "Hide tabs" } else { "Show tabs" },
-                    Action::ToggleTreeTabs,
-                ),
-                item(
-                    if *show_agents {
-                        "Hide agents"
-                    } else {
-                        "Show agents"
-                    },
-                    Action::ToggleTreeAgents,
-                ),
-                item(
-                    if *show_hidden {
-                        "Hide folded spaces"
-                    } else {
-                        "Reveal folded spaces"
-                    },
-                    Action::ToggleHiddenSpaces,
-                ),
-            ],
-            ClientContextMenuTarget::Workspace { is_git: false, .. } => {
+            } => {
+                use crate::config::AgentPanelSortConfig as Sort;
+                let mut items = [
+                    (Sort::Tree, "tree"),
+                    (Sort::Spaces, "grouped"),
+                    (Sort::Priority, "priority"),
+                    (Sort::Triage, "triage"),
+                ]
+                .into_iter()
+                .map(|(choice, label)| {
+                    item(
+                        &format!("{} {label}", if *sort == choice { "●" } else { " " }),
+                        Action::SetAgentSort(choice),
+                    )
+                })
+                .collect::<Vec<_>>();
+                if *sort == Sort::Tree {
+                    items.extend([
+                        item("──────────", Action::MenuSeparator),
+                        item(
+                            if *show_spaces {
+                                "✓ spaces"
+                            } else {
+                                "  spaces"
+                            },
+                            Action::ToggleTreeSpaces,
+                        ),
+                        item(
+                            if *show_tabs { "✓ tabs" } else { "  tabs" },
+                            Action::ToggleTreeTabs,
+                        ),
+                        item(
+                            if *show_agents {
+                                "✓ agents"
+                            } else {
+                                "  agents"
+                            },
+                            Action::ToggleTreeAgents,
+                        ),
+                        item(
+                            if *show_hidden {
+                                "✓ hidden"
+                            } else {
+                                "  hidden"
+                            },
+                            Action::ToggleHiddenSpaces,
+                        ),
+                    ]);
+                }
+                items
+            }
+            ClientContextMenuTarget::Workspace {
+                is_git: false,
+                orchestrator_mode,
+                ..
+            } => {
                 vec![
+                    item("Rename", Action::Rename),
                     item("Send to profile", Action::SendToProfile),
                     item("Share profiles", Action::ShareProfiles),
-                    item("Rename", Action::Rename),
+                    item(
+                        if *orchestrator_mode {
+                            "Disable orchestrator mode"
+                        } else {
+                            "Enable orchestrator mode"
+                        },
+                        Action::ToggleOrchestrator,
+                    ),
                     item("Close", Action::Close),
                 ]
             }
             ClientContextMenuTarget::Workspace {
                 is_linked_worktree: false,
                 has_worktree_children: false,
+                orchestrator_mode,
                 ..
             } => vec![
+                item("Rename", Action::Rename),
                 item("Send to profile", Action::SendToProfile),
                 item("Share profiles", Action::ShareProfiles),
-                item("Rename", Action::Rename),
+                item(
+                    if *orchestrator_mode {
+                        "Disable orchestrator mode"
+                    } else {
+                        "Enable orchestrator mode"
+                    },
+                    Action::ToggleOrchestrator,
+                ),
                 item("Close", Action::Close),
                 item("New worktree", Action::NewWorktree),
                 item("Open worktree...", Action::OpenWorktree),
             ],
             ClientContextMenuTarget::Workspace {
                 is_linked_worktree: true,
+                orchestrator_mode,
                 ..
             } => vec![
+                item("Rename", Action::Rename),
                 item("Send to profile", Action::SendToProfile),
                 item("Share profiles", Action::ShareProfiles),
-                item("Rename", Action::Rename),
+                item(
+                    if *orchestrator_mode {
+                        "Disable orchestrator mode"
+                    } else {
+                        "Enable orchestrator mode"
+                    },
+                    Action::ToggleOrchestrator,
+                ),
                 item("Close", Action::Close),
                 item("Delete worktree checkout...", Action::RemoveWorktree),
             ],
             ClientContextMenuTarget::Workspace {
                 has_worktree_children: true,
                 collapsed,
+                orchestrator_mode,
                 ..
             } => vec![
+                item("Rename", Action::Rename),
                 item("Send to profile", Action::SendToProfile),
                 item("Share profiles", Action::ShareProfiles),
-                item("Rename", Action::Rename),
+                item(
+                    if *orchestrator_mode {
+                        "Disable orchestrator mode"
+                    } else {
+                        "Enable orchestrator mode"
+                    },
+                    Action::ToggleOrchestrator,
+                ),
                 item("Close group", Action::Close),
                 item("New worktree", Action::NewWorktree),
                 item("Open worktree...", Action::OpenWorktree),
@@ -142,7 +203,10 @@ impl ClientContextMenuOverlay {
             } => {
                 let mut items = vec![
                     item("Focus", Action::FocusAgent),
-                    item("Rename pane", Action::RenamePane),
+                    item("Rename", Action::RenamePane),
+                    item("Send to profile...", Action::SendToProfile),
+                    item("Share with profiles...", Action::ShareProfiles),
+                    item("Close", Action::ClosePane),
                     item(
                         if *hands_on {
                             "Unpin hands-on"
@@ -166,11 +230,6 @@ impl ClientContextMenuOverlay {
                         Action::ToggleAgentGroup,
                     ));
                 }
-                items.extend([
-                    item("Send to profile", Action::SendToProfile),
-                    item("Share profiles", Action::ShareProfiles),
-                    item("Close pane", Action::ClosePane),
-                ]);
                 items
             }
             ClientContextMenuTarget::AgentNestUnder { entries, .. } => entries
@@ -337,6 +396,7 @@ impl ClientShellState {
         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
             target: ClientContextMenuTarget::Workspace {
                 workspace_id,
+                orchestrator_mode: workspace.orchestrator_mode,
                 is_git: worktree.is_some() || workspace.branch.is_some(),
                 is_linked_worktree: worktree.is_some_and(|worktree| worktree.is_linked_worktree),
                 has_worktree_children,
@@ -737,9 +797,7 @@ impl ClientShellState {
         }
     }
 
-    /// Open the agents-panel view control. The fork put the tree layer toggles
-    /// behind the sort label; upstream's sort label already cycles the sort, so
-    /// the toggles live on its right-click instead.
+    /// Open the agents-panel view picker from the sort label.
     pub(super) fn open_sidebar_view_context_menu(&mut self, x: u16, y: u16) {
         let tree = self
             .tree_chrome
@@ -747,6 +805,7 @@ impl ClientShellState {
             .unwrap_or(&self.tree_chrome_default);
         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
             target: ClientContextMenuTarget::SidebarView {
+                sort: self.config.agent_panel_sort,
                 show_spaces: tree.show_spaces,
                 show_tabs: tree.show_tabs,
                 show_agents: tree.show_agents,
@@ -763,6 +822,13 @@ impl ClientShellState {
         action: ClientContextMenuAction,
         outcome: &mut ClientShellInput,
     ) {
+        if let ClientContextMenuAction::SetAgentSort(sort) = action {
+            self.config.agent_panel_sort = sort;
+            self.agent_panel_sort_manual = true;
+            self.agent_scroll = 0;
+            self.persist_chrome_preferences(outcome);
+            return;
+        }
         let tree = self.tree_chrome_mut();
         match action {
             ClientContextMenuAction::ToggleTreeSpaces => tree.show_spaces = !tree.show_spaces,
@@ -818,6 +884,30 @@ impl ClientShellState {
                         target: ClientRenameTarget::Workspace { workspace_id },
                     }));
                 }
+            }
+            ClientContextMenuAction::ToggleOrchestrator => {
+                let Some(enabled) = self
+                    .snapshot
+                    .as_deref()
+                    .and_then(|snapshot| {
+                        snapshot
+                            .workspaces
+                            .iter()
+                            .find(|workspace| workspace.workspace_id == workspace_id)
+                    })
+                    .map(|workspace| !workspace.orchestrator_mode)
+                else {
+                    return;
+                };
+                self.push_endpoint_method(
+                    crate::api::schema::Method::WorkspaceSetOrchestrator(
+                        crate::api::schema::WorkspaceSetOrchestratorParams {
+                            workspace_id,
+                            enabled,
+                        },
+                    ),
+                    outcome,
+                );
             }
             ClientContextMenuAction::Close => {
                 if self.config.confirm_close {

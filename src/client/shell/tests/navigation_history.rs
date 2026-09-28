@@ -246,6 +246,7 @@ fn malformed_owner_cycle_does_not_block_explicit_reveal() {
             state_labels: Vec::new(),
             tokens: Vec::new(),
             focused: pane_id == "pane_1",
+            visible_in_profile: true,
             owner_pane_id: Some(owner.into()),
             orphaned: false,
             group: Default::default(),
