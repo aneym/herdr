@@ -27,8 +27,17 @@ const OWNED_ACK_TIMEOUT: Duration = Duration::from_millis(500);
 // batch stays well below both limits and the number of panes stays unbounded.
 #[cfg(unix)]
 const FDS_PER_MESSAGE: usize = 64;
+// Scrollback replayed into each handed-off pane. 8 KiB (the upstream value)
+// kept about one screen, so after a live update the wheel had nothing to
+// scroll in a pane with long output (REG-4, 2026-09-28).
 #[cfg(unix)]
-pub(crate) const MAX_REPLAY_BYTES_PER_PANE: usize = 8 * 1024;
+pub(crate) const MAX_REPLAY_BYTES_PER_PANE: usize = 256 * 1024;
+// Keeps the manifest line well under the 16 MiB cap an older importer enforces,
+// JSON escaping of ANSI included, so a rollback handoff still validates.
+#[cfg(unix)]
+pub(crate) const MAX_REPLAY_BYTES_TOTAL: usize = 4 * 1024 * 1024;
+#[cfg(unix)]
+const MAX_MANIFEST_LINE_BYTES: usize = 16 * 1024 * 1024;
 #[cfg(unix)]
 pub(crate) const COMMIT_TIMEOUT: Duration = READY_TIMEOUT;
 
@@ -162,8 +171,11 @@ pub(crate) fn accept_and_validate_on(
         ));
     }
 
-    serde_json::to_writer(&mut stream, manifest).map_err(io::Error::other)?;
-    stream.write_all(b"\n")?;
+    // One buffered write: serializing straight into the socket costs a syscall
+    // per JSON token, which adds up once panes carry real scrollback.
+    let mut line = serde_json::to_vec(manifest).map_err(io::Error::other)?;
+    line.push(b'\n');
+    stream.write_all(&line)?;
     stream.flush()?;
 
     stream.set_read_timeout(Some(READY_TIMEOUT))?;
@@ -232,9 +244,9 @@ pub(crate) fn receive(socket_path: &Path, token: &str) -> io::Result<ReceivedHan
     stream.write_all(b"\n")?;
     stream.flush()?;
 
-    let manifest_line = read_line_unbuffered(&mut stream)?;
+    let manifest_line = read_manifest_line(&mut stream)?;
     let manifest: HandoffManifest =
-        serde_json::from_str(&manifest_line).map_err(io::Error::other)?;
+        serde_json::from_slice(&manifest_line).map_err(io::Error::other)?;
     if manifest.version != HANDOFF_VERSION {
         return Err(io::Error::other(format!(
             "unsupported handoff version {}",
@@ -351,6 +363,83 @@ fn accept_with_timeout(
     }
 }
 
+/// Hands out the total scrollback budget pane by pane. Each pane gets at most
+/// MAX_REPLAY_BYTES_PER_PANE; once MAX_REPLAY_BYTES_TOTAL is spent, later panes
+/// get none, so the manifest stays under the cap however many panes there are.
+#[cfg(unix)]
+pub(crate) struct ReplayBudget {
+    left: usize,
+}
+
+#[cfg(unix)]
+impl ReplayBudget {
+    pub(crate) fn new() -> Self {
+        Self {
+            left: MAX_REPLAY_BYTES_TOTAL,
+        }
+    }
+
+    /// Runs `capture` with this pane's allowance and charges what it returns.
+    /// A capture longer than its allowance is dropped rather than overspent.
+    pub(crate) fn take(
+        &mut self,
+        capture: impl FnOnce(usize) -> Option<String>,
+    ) -> Option<String> {
+        let allowance = MAX_REPLAY_BYTES_PER_PANE.min(self.left);
+        if allowance == 0 {
+            return None;
+        }
+        let history = capture(allowance).filter(|history| history.len() <= allowance)?;
+        self.left -= history.len();
+        Some(history)
+    }
+}
+
+/// Reads the manifest line in chunks. The exporter sends nothing after the
+/// newline until it reads `validated`, so a chunk never carries later bytes.
+#[cfg(unix)]
+fn read_manifest_line(stream: &mut impl Read) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    let mut chunk = vec![0u8; 64 * 1024];
+    loop {
+        let read = match stream.read(&mut chunk) {
+            Ok(read) => read,
+            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+            Err(err) => return Err(err),
+        };
+        if read == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "handoff stream closed while reading manifest",
+            ));
+        }
+        let chunk = &chunk[..read];
+        if let Some(newline) = chunk.iter().position(|&byte| byte == b'\n') {
+            if bytes.len() + newline > MAX_MANIFEST_LINE_BYTES {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "handoff line exceeded maximum size",
+                ));
+            }
+            if newline + 1 != chunk.len() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "handoff exporter sent data after the manifest",
+                ));
+            }
+            bytes.extend_from_slice(&chunk[..newline]);
+            return Ok(bytes);
+        }
+        bytes.extend_from_slice(chunk);
+        if bytes.len() > MAX_MANIFEST_LINE_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "handoff line exceeded maximum size",
+            ));
+        }
+    }
+}
+
 #[cfg(unix)]
 fn read_line_unbuffered(stream: &mut UnixStream) -> io::Result<String> {
     let mut bytes = Vec::new();
@@ -368,7 +457,7 @@ fn read_line_unbuffered(stream: &mut UnixStream) -> io::Result<String> {
             return String::from_utf8(bytes)
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err));
         }
-        if bytes.len() > 16 * 1024 * 1024 {
+        if bytes.len() > MAX_MANIFEST_LINE_BYTES {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "handoff line exceeded maximum size",
@@ -584,5 +673,36 @@ mod tests {
             serde_json::from_value(value).expect("an older manifest should still load");
 
         assert!(older.api_window_title.is_none());
+    }
+
+    #[test]
+    fn replay_scrollback_stays_within_the_total_cap_for_many_panes() {
+        let mut budget = ReplayBudget::new();
+        let mut total = 0;
+        let mut carried = 0;
+        for _ in 0..40 {
+            if let Some(history) = budget.take(|allowance| Some("x".repeat(allowance))) {
+                total += history.len();
+                carried += 1;
+            }
+        }
+
+        assert_eq!(total, MAX_REPLAY_BYTES_TOTAL);
+        assert_eq!(carried, MAX_REPLAY_BYTES_TOTAL / MAX_REPLAY_BYTES_PER_PANE);
+    }
+
+    #[test]
+    fn a_manifest_line_over_the_size_cap_is_rejected_even_with_its_newline() {
+        let line = |len: usize| {
+            let mut bytes = vec![b'x'; len];
+            bytes.push(b'\n');
+            io::Cursor::new(bytes)
+        };
+
+        let at_cap = read_manifest_line(&mut line(MAX_MANIFEST_LINE_BYTES)).expect("at cap");
+        assert_eq!(at_cap.len(), MAX_MANIFEST_LINE_BYTES);
+        let over = read_manifest_line(&mut line(MAX_MANIFEST_LINE_BYTES + 1))
+            .expect_err("one byte over the cap");
+        assert_eq!(over.kind(), io::ErrorKind::InvalidData);
     }
 }
