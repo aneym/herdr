@@ -2041,6 +2041,47 @@ fn on_unfocus_navigation_acknowledges_only_the_displayed_completion_generation()
 }
 
 #[test]
+fn on_unfocus_navigation_preserves_read_mark_when_next_surface_arrives_first() {
+    let mut config = Config::default();
+    config.ui.attention_read = crate::config::AttentionReadConfig::OnUnfocus;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+
+    let mut working = snapshot();
+    working.agents = vec![agent("worker", AgentStatus::Working, 1)];
+    let mut second_pane = working.panes[0].clone();
+    second_pane.pane_id = "pane_2".into();
+    second_pane.focused = false;
+    working.panes.push(second_pane);
+    state.set_endpoint_snapshot(&ClientEndpointId::Local, Box::new(working));
+    let mut completed = state.snapshot.as_deref().unwrap().clone();
+    completed.revision = 2;
+    completed.agents = vec![agent("worker", AgentStatus::Idle, 2)];
+    state.set_endpoint_snapshot(&ClientEndpointId::Local, Box::new(completed));
+    let mut presented = surface();
+    presented.projection_revision = 2;
+    state.set_pane_surface(presented);
+    assert_eq!(state.snapshot.as_ref().unwrap().tabs[0].agent_status, AgentStatus::Done);
+
+    // A newer surface for another pane may precede its focus snapshot. The old
+    // chat was already displayed; this frame must not erase its pending mark.
+    let mut next_surface = surface();
+    next_surface.projection_revision = 2;
+    next_surface.surface_revision = 2;
+    next_surface.panes[0].pane_id = "pane_2".into();
+    state.set_pane_surface(next_surface);
+    assert_eq!(state.pane_surface.as_ref().unwrap().panes[0].pane_id, "pane_2");
+    assert_eq!(state.snapshot.as_ref().unwrap().tabs[0].agent_status, AgentStatus::Done);
+    let mut navigated = state.snapshot.as_deref().unwrap().clone();
+    navigated.revision = 3;
+    navigated.focused_pane_id = Some("pane_2".into());
+    navigated.agents = vec![agent("worker", AgentStatus::Idle, 2)];
+    state.set_endpoint_snapshot(&ClientEndpointId::Local, Box::new(navigated));
+
+    assert_eq!(state.snapshot.as_ref().unwrap().agents[0].agent_status, AgentStatus::Idle);
+    assert_eq!(state.snapshot.as_ref().unwrap().tabs[0].agent_status, AgentStatus::Idle);
+}
+
+#[test]
 fn reconnect_snapshot_waits_for_coherent_activation_before_replacing_projection() {
     let (mut state, endpoint_id) = state_with_remote();
     assert!(state.activate_endpoint_projection(&endpoint_id));

@@ -154,6 +154,9 @@ fn panel_entries(state: &ClientShellState, tree: &ClientTreeChrome) -> Vec<Agent
     let rows = crate::client::shell::agent_sidebar::agent_rows(snapshot, &state.config, None);
     let (rows, automations) =
         crate::client::shell::tree::partition_automations(snapshot, &state.config, rows);
+    let rows = crate::client::shell::tree::arrange_agent_hierarchy_with(
+        snapshot, tree, rows, !tree.show_tabs,
+    );
     let mut entries = if crate::client::shell::tree::tree_view_active(&state.config) {
         tree_list_entries(snapshot, tree, rows)
     } else {
@@ -173,25 +176,44 @@ fn tree_nests_spaces_then_tabs_then_agents_in_workspace_order() {
         [
             "space:alpha",
             "tab:one",
-            "agent:pane_1",
             "tab:two",
-            "agent:pane_2",
             "space:beta",
             "tab:three",
-            "agent:pane_3",
+        ]
+    );
+    // The merged header retains each chat's status in place of a duplicate row.
+    // set_snapshot marks the non-focused workspace's done state as viewed (idle).
+    let snapshot = state.snapshot.as_deref().expect("snapshot");
+    let rows = crate::client::shell::agent_sidebar::agent_rows(snapshot, &state.config, None);
+    let rows = crate::client::shell::tree::arrange_agent_hierarchy_with(
+        snapshot, &tree, rows, false,
+    );
+    let headers = tree_list_entries(snapshot, &tree, rows)
+        .into_iter()
+        .filter_map(|entry| match entry {
+            AgentPanelListEntry::TabHeader(header) => Some((header.label, header.child_states)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        headers,
+        [
+            ("one".to_owned(), vec![AgentStatus::Working]),
+            ("two".to_owned(), vec![AgentStatus::Blocked]),
+            ("three".to_owned(), vec![AgentStatus::Idle]),
         ]
     );
 }
 
 #[test]
-fn collapsed_space_hides_its_agents_and_keeps_its_header() {
+fn collapsed_space_moves_to_the_hidden_section_and_hides_its_agents() {
     let mut tree = ClientTreeChrome::default();
     tree.collapsed_spaces.insert("ws_1".into());
     let state = tree_state(tree.clone());
 
     assert_eq!(
         shape(&state, &tree),
-        ["space:alpha", "space:beta", "tab:three", "agent:pane_3"]
+        ["space:beta", "tab:three", "hidden:1:closed"]
     );
 }
 
@@ -199,18 +221,22 @@ fn collapsed_space_hides_its_agents_and_keeps_its_header() {
 fn collapsed_tab_hides_only_that_tabs_agents() {
     let mut tree = ClientTreeChrome::default();
     tree.collapsed_tabs.insert("ws_1#1".into());
-    let state = tree_state(tree.clone());
+    let mut state = tree_state(tree.clone());
+    let mut snapshot = tree_snapshot();
+    snapshot.agents.push(agent("pane_4", "ws_1", "tab_1", AgentStatus::Idle, 4));
+    state.set_snapshot(Box::new(snapshot));
 
+    let mut open = tree.clone();
+    open.collapsed_tabs.clear();
+    assert!(shape(&state, &open).contains(&"agent:pane_4".to_owned()));
     assert_eq!(
         shape(&state, &tree),
         [
             "space:alpha",
             "tab:one",
             "tab:two",
-            "agent:pane_2",
             "space:beta",
             "tab:three",
-            "agent:pane_3",
         ]
     );
 }
@@ -260,11 +286,8 @@ fn tree_layer_toggles_drop_their_header_rows() {
         shape(&state, &tree),
         [
             "tab:one",
-            "agent:pane_1",
             "tab:two",
-            "agent:pane_2",
             "tab:three",
-            "agent:pane_3",
         ]
     );
 }
@@ -305,14 +328,20 @@ fn hiding_all_tree_layers_yields_an_empty_list() {
 #[test]
 fn tree_rows_drop_the_labels_their_headers_already_carry() {
     let tree = ClientTreeChrome::default();
-    let state = tree_state(tree.clone());
+    let mut state = tree_state(tree.clone());
+    let mut snapshot = tree_snapshot();
+    snapshot.agents.push(agent("pane_4", "ws_1", "tab_1", AgentStatus::Idle, 4));
+    state.set_snapshot(Box::new(snapshot));
     let snapshot = state.snapshot.as_deref().expect("snapshot");
     let rows = crate::client::shell::agent_sidebar::agent_rows(snapshot, &state.config, None);
 
+    let rows = crate::client::shell::tree::arrange_agent_hierarchy_with(
+        snapshot, &tree, rows, false,
+    );
     let row = tree_list_entries(snapshot, &tree, rows)
         .into_iter()
         .find_map(|entry| match entry {
-            AgentPanelListEntry::Agent(row) if row.pane_id == "pane_1" => Some(row),
+            AgentPanelListEntry::Agent(row) if row.pane_id == "pane_4" => Some(row),
             _ => None,
         })
         .expect("agent row");
@@ -321,7 +350,7 @@ fn tree_rows_drop_the_labels_their_headers_already_carry() {
         token.kind,
         crate::ui::ResolvedTokenKind::Workspace(_) | crate::ui::ResolvedTokenKind::Tab(_)
     )));
-    // Two layers of headers above it, so the row indents twice.
+    // Two layers of headers above the peer row, so it indents twice.
     assert_eq!(row.indent, 2);
 }
 
@@ -339,6 +368,43 @@ fn agent_cycle_skips_agents_inside_a_collapsed_space() {
         .collect::<Vec<_>>();
 
     assert_eq!(panes, ["pane_1", "pane_2"]);
+}
+
+#[test]
+fn agent_cycle_skips_owned_workflow_tabs_even_when_the_workflow_needs_attention() {
+    for expanded in [false, true] {
+        let mut tree = ClientTreeChrome::default();
+        if expanded {
+            tree.collapsed_agent_groups.insert("pane_1".into());
+        }
+        let mut state = tree_state(tree);
+        let mut snapshot = tree_snapshot();
+        // The blocked workflow has its own tab, but belongs beneath lane A.
+        snapshot.agents[1].owner_pane_id = Some("pane_1".into());
+        state.set_snapshot(Box::new(snapshot));
+        let snapshot = state.snapshot.as_deref().expect("snapshot");
+
+        let panes = state
+            .agent_cycle_candidates(snapshot)
+            .into_iter()
+            .map(|entry| entry.pane_id)
+            .collect::<Vec<_>>();
+        assert_eq!(panes, ["pane_1", "pane_3"]);
+
+        let mut next = ClientShellInput::default();
+        state.record_binding(
+            crate::input::KeybindMatch::Action(crate::input::KeybindAction::NextAgent),
+            &mut next,
+        );
+        assert!(matches!(
+            &next.actions[..],
+            [ClientShellAction::Endpoint { request, .. }]
+                if matches!(
+                    &request.method,
+                    crate::api::schema::Method::PaneFocus(target) if target.pane_id == "pane_3"
+                )
+        ));
+    }
 }
 
 #[test]
@@ -476,9 +542,7 @@ fn pinned_space_keeps_its_header_without_any_agents() {
         [
             "space:alpha",
             "tab:one",
-            "agent:pane_1",
             "tab:two",
-            "agent:pane_2",
             "space:beta",
         ]
     );
@@ -506,7 +570,7 @@ fn collapsed_spaces_move_into_the_hidden_section() {
 
     assert_eq!(
         shape(&state, &tree),
-        ["space:beta", "tab:three", "agent:pane_3", "hidden:1:closed"]
+        ["space:beta", "tab:three", "hidden:1:closed"]
     );
 }
 
@@ -525,7 +589,6 @@ fn expanding_the_hidden_section_lists_the_folded_spaces() {
         [
             "space:beta",
             "tab:three",
-            "agent:pane_3",
             "hidden:1:open",
             "space:alpha",
         ]
@@ -534,13 +597,17 @@ fn expanding_the_hidden_section_lists_the_folded_spaces() {
 
 #[test]
 fn no_hidden_section_without_the_reveal() {
-    let mut tree = ClientTreeChrome::default();
+    let mut tree = ClientTreeChrome {
+        show_hidden_spaces: false,
+        ..ClientTreeChrome::default()
+    };
     tree.collapsed_spaces.insert("ws_1".into());
     let state = tree_state(tree.clone());
 
     assert!(!shape(&state, &tree)
         .iter()
         .any(|row| row.starts_with("hidden:")));
+    assert!(shape(&state, &tree).contains(&"space:alpha".to_owned()));
 }
 
 #[test]
@@ -561,6 +628,7 @@ fn collapsed_space_header_hides_its_status_dots() {
     let mut tree = ClientTreeChrome {
         show_tabs: false,
         show_agents: false,
+        hidden_spaces_expanded: true,
         ..ClientTreeChrome::default()
     };
     tree.collapsed_spaces.insert("ws_1".into());
@@ -584,8 +652,8 @@ fn collapsed_space_header_hides_its_status_dots() {
     assert_eq!(
         headers,
         [
-            ("alpha".to_owned(), Vec::new()),
             ("beta".to_owned(), vec![beta_status]),
+            ("alpha".to_owned(), Vec::new()),
         ]
     );
 }
@@ -603,12 +671,9 @@ fn space_order_moves_whole_space_blocks() {
         [
             "space:beta",
             "tab:three",
-            "agent:pane_3",
             "space:alpha",
             "tab:one",
-            "agent:pane_1",
             "tab:two",
-            "agent:pane_2",
         ]
     );
 }
@@ -729,7 +794,7 @@ fn right_click_on_the_sort_label_opens_the_view_toggles() {
             "Hide spaces",
             "Hide tabs",
             "Hide agents",
-            "Reveal folded spaces"
+            "Hide folded spaces"
         ]
     );
 }
@@ -773,9 +838,7 @@ fn automation_entries_are_partitioned_and_expand_after_the_header() {
         [
             "space:alpha",
             "tab:one",
-            "agent:pane_1",
             "tab:two",
-            "agent:pane_2",
             "automations:1",
         ]
     );
@@ -786,9 +849,7 @@ fn automation_entries_are_partitioned_and_expand_after_the_header() {
         [
             "space:alpha",
             "tab:one",
-            "agent:pane_1",
             "tab:two",
-            "agent:pane_2",
             "automations:1",
             "automation:pane_3",
         ]

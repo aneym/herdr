@@ -2,7 +2,7 @@
 //! `docs/fork/port-0.9/orig/src/ui/sidebar.rs` (`arrange_agent_hierarchy`).
 
 use super::*;
-use crate::client::shell::tree::{arrange_agent_hierarchy, ClientTreeChrome};
+use crate::client::shell::tree::{arrange_agent_hierarchy_with, ClientTreeChrome};
 
 fn owned_snapshot() -> ClientShellSnapshot {
     let mut snapshot = snapshot();
@@ -61,7 +61,7 @@ fn owned_snapshot() -> ClientShellSnapshot {
 fn arranged(snapshot: &ClientShellSnapshot, tree: &ClientTreeChrome) -> Vec<(String, u8, bool)> {
     let config = ClientShellConfig::from_config(&Config::default());
     let rows = crate::client::shell::agent_sidebar::agent_rows(snapshot, &config, None);
-    arrange_agent_hierarchy(snapshot, tree, rows)
+    arrange_agent_hierarchy_with(snapshot, tree, rows, true)
         .into_iter()
         .map(|row| (row.pane_id, row.group.depth, row.group.last_in_group))
         .collect()
@@ -92,7 +92,7 @@ fn collapsed_group_hides_its_descendants_and_counts_them() {
 
     let config = ClientShellConfig::from_config(&Config::default());
     let rows = crate::client::shell::agent_sidebar::agent_rows(&snapshot, &config, None);
-    let arranged = arrange_agent_hierarchy(&snapshot, &tree, rows);
+    let arranged = arrange_agent_hierarchy_with(&snapshot, &tree, rows, true);
 
     assert_eq!(
         arranged
@@ -117,7 +117,7 @@ fn an_owner_with_no_children_gets_no_chevron() {
     let config = ClientShellConfig::from_config(&Config::default());
     let rows = crate::client::shell::agent_sidebar::agent_rows(&snapshot, &config, None);
 
-    let arranged = arrange_agent_hierarchy(&snapshot, &tree, rows);
+    let arranged = arrange_agent_hierarchy_with(&snapshot, &tree, rows, true);
 
     assert!(arranged.iter().all(|row| row.group.expanded.is_none()));
 }
@@ -156,7 +156,7 @@ fn an_unresolved_owner_marks_the_row_orphaned() {
     let config = ClientShellConfig::from_config(&Config::default());
     let rows = crate::client::shell::agent_sidebar::agent_rows(&snapshot, &config, None);
 
-    let arranged = arrange_agent_hierarchy(&snapshot, &tree, rows);
+    let arranged = arrange_agent_hierarchy_with(&snapshot, &tree, rows, true);
     let orphan = arranged
         .iter()
         .find(|row| row.pane_id == "child_a")
@@ -176,7 +176,7 @@ fn orchestrator_mode_groups_the_workspace_under_its_first_tab() {
     let config = ClientShellConfig::from_config(&Config::default());
     let rows = crate::client::shell::agent_sidebar::agent_rows(&snapshot, &config, None);
 
-    let arranged = arrange_agent_hierarchy(&snapshot, &tree, rows);
+    let arranged = arrange_agent_hierarchy_with(&snapshot, &tree, rows, true);
 
     assert_eq!(
         arranged
@@ -426,7 +426,7 @@ fn a_server_fold_hides_the_group_and_colors_plus_n_by_the_most_demanding_child()
     let config = ClientShellConfig::from_config(&Config::default());
     let rows = crate::client::shell::agent_sidebar::agent_rows(&snapshot, &config, None);
 
-    let arranged = arrange_agent_hierarchy(&snapshot, &ClientTreeChrome::default(), rows);
+    let arranged = arrange_agent_hierarchy_with(&snapshot, &ClientTreeChrome::default(), rows, true);
 
     assert_eq!(
         arranged
@@ -497,7 +497,10 @@ fn a_tab_header_carries_the_group_chevron_when_agent_rows_are_hidden() {
         .expect("tab header group control");
     assert_eq!(group.owner_pane_id, "owner");
     assert!(!group.expanded);
-    assert!(state_text(&mut state).contains("+3 \u{25b8}"));
+    let text = state_text(&mut state);
+    assert!(text.contains('\u{25b8}'));
+    assert!(!text.contains("+3 "));
+    assert_eq!(group.rect.width, 2);
 
     let outcome = click(&mut state, group.rect);
 
