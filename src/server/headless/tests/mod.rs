@@ -134,6 +134,104 @@ fn test_headless_server_with_event_hub(event_hub: api::EventHub) -> HeadlessServ
     }
 }
 
+/// Drives the real server delivery paths for the factory overlay, for tests outside this module.
+pub(crate) struct OverlayServerHarness {
+    server: HeadlessServer,
+    next_client_id: u64,
+    tick_rx: std::sync::mpsc::Receiver<Vec<u8>>,
+}
+
+impl OverlayServerHarness {
+    /// A server polling `overlay_file`, with one client shell already attached.
+    pub(crate) fn new(overlay_file: &str) -> Self {
+        let mut server = test_headless_server();
+        server.app.factory_ui.enabled = true;
+        server.app.factory_ui.overlay_file = overlay_file.into();
+        let mut harness = Self {
+            server,
+            next_client_id: 1,
+            tick_rx: std::sync::mpsc::channel().1,
+        };
+        let (_, rx) = harness.connect_client(protocol::endpoint::ENDPOINT_SNAPSHOT_KIND);
+        harness.tick_rx = rx;
+        harness
+    }
+
+    fn connect_client(
+        &mut self,
+        last_kind: &str,
+    ) -> (Vec<ServerMessage>, std::sync::mpsc::Receiver<Vec<u8>>) {
+        let (writer, control_rx, render_rx) = test_client_writer();
+        // Keep the render lane open for the life of the test.
+        std::mem::forget(render_rx);
+        let client_id = self.next_client_id;
+        self.next_client_id += 1;
+        assert!(self.server.handle_server_event(ServerEvent::ClientShellConnected {
+            surface_reuse: false,
+            surface_delta: false,
+            client_id,
+            surface_cols: 80,
+            surface_rows: 23,
+            cell_width_px: 0,
+            cell_height_px: 0,
+            pixel_mouse: false,
+            direct_graphics: false,
+            endpoint_keybindings: false,
+            mouse_capture: false,
+            surface_active: true,
+            writer,
+        }));
+        let messages = Self::drain_through(&control_rx, last_kind);
+        (messages, control_rx)
+    }
+
+    /// Blocks until the control message of `last_kind` arrives, and returns everything up to
+    /// and including it. The writer thread delivers asynchronously, so the wait is on the
+    /// message itself; the deadline is only a hang guard and a missing message fails the
+    /// caller's assertion, never passes it.
+    fn drain_through(
+        rx: &std::sync::mpsc::Receiver<Vec<u8>>,
+        last_kind: &str,
+    ) -> Vec<ServerMessage> {
+        let mut messages = Vec::new();
+        while let Ok(bytes) = rx.recv_timeout(Duration::from_secs(5)) {
+            let message = read_server_message(bytes);
+            let done = matches!(
+                &message,
+                ServerMessage::EndpointControl { kind, .. } if kind == last_kind
+            );
+            messages.push(message);
+            if done {
+                break;
+            }
+        }
+        messages
+    }
+
+    pub(crate) fn boot_id(&self) -> String {
+        self.server.client_shell_boot_id.clone()
+    }
+
+    /// Runs one scheduled poll tick and returns what the attached client received.
+    pub(crate) fn poll_tick(&mut self) -> Vec<ServerMessage> {
+        self.server.next_factory_overlay_poll = None;
+        self.server
+            .handle_scheduled_tasks_headless(Instant::now(), false);
+        Self::drain_through(&self.tick_rx, protocol::endpoint::FACTORY_OVERLAY_KIND)
+    }
+
+    /// Connects a fresh client shell and returns what it received on attach.
+    pub(crate) fn connect(&mut self) -> Vec<ServerMessage> {
+        self.connect_client(protocol::endpoint::FACTORY_OVERLAY_KIND).0
+    }
+}
+
+impl Drop for OverlayServerHarness {
+    fn drop(&mut self) {
+        shutdown_test_runtimes(&mut self.server);
+    }
+}
+
 fn shutdown_test_runtimes(server: &mut HeadlessServer) {
     for (_, runtime) in server.app.terminal_runtimes.drain() {
         runtime.shutdown();
