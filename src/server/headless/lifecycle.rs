@@ -80,6 +80,7 @@ impl HeadlessServer {
         );
 
         let mut handoff_entries = Vec::new();
+        let mut replay_budget = crate::server::handoff::ReplayBudget::new();
         for (terminal_id, runtime) in self.app.terminal_runtimes.iter() {
             let Some(pane_id) = pane_by_terminal.get(terminal_id).copied() else {
                 continue;
@@ -91,15 +92,12 @@ impl HeadlessServer {
                 .terminals
                 .get(terminal_id)
                 .and_then(|terminal| terminal.handoff_agent_state());
-            let has_agent_session = self
-                .app
-                .state
-                .terminals
-                .get(terminal_id)
-                .is_some_and(|terminal| terminal.persisted_agent_session.is_some());
-            if !has_agent_session {
-                handoff_runtime.initial_history_ansi = runtime.handoff_history_ansi();
-            }
+            // Agent panes carry their scrollback too: the agent process keeps
+            // running through a live handoff, so nothing reprints it, and an
+            // agent pane used to come back with none to scroll (REG-4).
+            // Alternate-screen apps (Claude fullscreen) redraw and carry none.
+            handoff_runtime.initial_history_ansi =
+                replay_budget.take(|allowance| runtime.handoff_history_ansi(allowance));
             handoff_entries.push((terminal_id.clone(), handoff_runtime));
         }
 
