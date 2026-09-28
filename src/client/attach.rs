@@ -20,6 +20,9 @@ pub(super) struct AttachEscapeState;
 #[cfg(unix)]
 pub(super) struct AttachEscapeState {
     pending_prefix: Option<Vec<u8>>,
+    /// When set, Ctrl+B is not an escape prefix: every key goes to the pane and
+    /// the caller detaches by ending the process (native hosts own detach).
+    no_escape: bool,
 }
 
 #[derive(Debug)]
@@ -54,6 +57,14 @@ pub(super) enum AttachSemanticAction {
 
 impl AttachEscapeState {
     #[cfg(unix)]
+    pub(super) fn without_escape() -> Self {
+        Self {
+            pending_prefix: None,
+            no_escape: true,
+        }
+    }
+
+    #[cfg(unix)]
     pub(super) fn filter_input(
         &mut self,
         data: Vec<u8>,
@@ -61,6 +72,18 @@ impl AttachEscapeState {
         mouse_scroll_lines: usize,
     ) -> AttachInputAction {
         const PREFIX: u8 = 0x02; // Ctrl+B
+
+        if self.no_escape {
+            return if data.is_empty() {
+                AttachInputAction::None
+            } else if let Some(action) =
+                attach_scroll_action(&data, viewport_rows, mouse_scroll_lines)
+            {
+                AttachInputAction::Semantic(action)
+            } else {
+                AttachInputAction::Forward(data)
+            };
+        }
 
         if crate::raw_input::is_complete_text_bracketed_paste(&data) {
             return if let Some(prefix) = self.pending_prefix.take() {
@@ -298,6 +321,21 @@ pub(super) fn write_attach_semantic_action(
 mod tests {
     use super::*;
     use crate::protocol::{AttachScrollDirection, AttachScrollSource};
+
+    #[cfg(unix)]
+    #[test]
+    fn attach_without_escape_forwards_prefix_and_q() {
+        let mut escape = AttachEscapeState::without_escape();
+        assert!(matches!(
+            escape.filter_input(vec![0x02], 24, 3),
+            AttachInputAction::Forward(bytes) if bytes == vec![0x02]
+        ));
+        assert!(matches!(
+            escape.filter_input(b"q".to_vec(), 24, 3),
+            AttachInputAction::Forward(bytes) if bytes == b"q".to_vec()
+        ));
+        assert!(escape.take_pending_prefix().is_none());
+    }
 
     #[cfg(unix)]
     #[test]
