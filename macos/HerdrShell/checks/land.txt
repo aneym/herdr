@@ -1,0 +1,257 @@
+HerdrShell land check  2026-09-28T21:55:41Z
+branch feat/native-shell, commits 9ee7ce1a..0be79e54 (P2 P3 P4 P7 P8 P9 P12)
+app: .build/release/HerdrShell built from the worktree (swift build -c release up to date; P7 rebuilds its own copy)
+The worktree also holds the uncommitted P5 P6 P10 P11 files; the app does not compile without them.
+lab: SHELL_LAB=shellspike-l (P7 forces shellspike-p7); keys posted to the app pid only; live session untouched
+per-check rc:
+  P2 rc=0 start=2026-09-28T21:52:38Z end=2026-09-28T21:52:46Z
+  P3 rc=0 start=2026-09-28T21:52:46Z end=2026-09-28T21:53:05Z
+  P4 rc=0 start=2026-09-28T21:53:05Z end=2026-09-28T21:53:11Z
+  P7 rc=0 start=2026-09-28T21:53:11Z end=2026-09-28T21:54:00Z
+  P8 rc=0 start=2026-09-28T21:54:00Z end=2026-09-28T21:54:12Z
+  P9 rc=0 start=2026-09-28T21:54:12Z end=2026-09-28T21:54:28Z
+  P12 rc=0 start=2026-09-28T21:54:28Z end=2026-09-28T21:54:41Z
+
+===== P2 (scripts/scenario.py) =====
+HerdrShell scenario  2026-09-28T21:52:38Z
+lab session 'shellspike-l' up + seeded in 1.04s
+herdr: herdr 0.9.1 (lab binary; needs --no-escape, spike branch spike/pane-attach until P1)
+host load average: 486 on 16 cores (timings below are under this load)
+lab tabs: {"w1:t1": "rails orchestrator", "w1:t2": "shell spike", "w1:t3": "recruiter", "w1:t4": "wf recruiter-2320", "w1:t5": "wf embed wave-a"}
+scenario panes (plain zsh): pane1=w1:p2 pane2=w1:p3
+app start: {"pids": [47975], "fifo_ready_s": 1.24}
+timing: surfaces created 0.50s after app start; first Ghostty-rendered text w1:p2 0.35s, w1:p3 0.30s after surface creation
+[PASS] both panes attached and rendered by Ghostty surfaces -- prompt visible in both surfaces 1.50s after launch
+surfaces: w1:p2 term_65c9215b96d342 61x45, w1:p3 term_65c9215b9bd3e3 61x45
+window: key=False app_active=False post_event_access=True
+[PASS] sidebar lists every lab tab from live herdr state -- sidebar=['rails orchestrator', 'recruiter', 'shell spike', 'wf embed wave-a', 'wf recruiter-2320']
+sidebar sections:
+  ORCHESTRATOR rails orchestrator     working  Studio folded wf: ['wf embed wave-a @PC blocked']
+  LANES        shell spike            unknown  Studio folded wf: []
+  LANES        recruiter              idle     Studio folded wf: ['wf recruiter-2320 @PC working']
+[PASS] folded workflow group under its owning lane
+[PASS] sidebar follows a live herdr change (tab rename) -- visible after 0.35s (1 s poll)
+[PASS] pane 1 has keyboard focus on mount -- focused=w1:p2
+[PASS] typed 'echo spike-ok-swift' + Return reached pane 1 (herdr pane read) -- output line seen 0.077s after the last key
+herdr pane read w1:p2 --source recent:
+  | tmp % echo spike-ok-swift
+  | spike-ok-swift
+  | tmp %
+[PASS] cmd+] (app chord) moved focus pane1 -> pane2 -- focused=w1:p3
+[PASS] cmd+] did not leak into either pane
+[PASS] ctrl+b reached pane 2 (cat -v printed ^B) -- 0.043s
+[PASS] ctrl+c reached pane 2 (cat interrupted, prompt back) -- 0.045s
+[PASS] option+backspace reached pane 2 (zsh deleted the word 'def') -- 0.056s
+herdr pane read w1:p3 --source recent:
+  | tmp % cat -v
+  | ^B
+  | ^B
+  | ^C
+  | tmp % echo abc
+  | abc
+  | tmp %
+key delivery log (last 6): ['  via postToPid', 'd via postToPid', 'e via postToPid', 'f via postToPid', 'opt+backspace via postToPid', 'return via postToPid']
+sidebar poll: herdr api snapshot 2.9 ms
+app rss_kb/%cpu: 126480   2.2
+screencapture -l 17157 failed (could not create image from window): no Screen Recording grant for this shell; used the app's own window capture instead
+screenshot: in-app CGWindowListCreateImage(own window) -> P2.png exists=True
+[PASS] attach clients exit with the app -- left=[]
+lab down: stop: 0
+
+RESULT: PASS
+
+===== P3 (scripts/check_p3.py) =====
+P3 check: live state by subscription  2026-09-28T21:52:46Z
+lab session 'shellspike-l' up; host load 466 on 16 cores
+lab tabs: ['rails orchestrator', 'shell spike', 'recruiter', 'wf recruiter-2320', 'wf embed wave-a']
+app start: {"pids": [49815], "fifo_ready_s": 0.67}
+[PASS] sidebar filled from the first snapshot -- 5 rows
+rename -> model latencies (ms): 15, 107, 102, 168, 38
+[PASS] tab rename in the model within 200 ms (every one of 5) -- median 102 ms, worst 168 ms
+[PASS] sidebar row shows the last rename
+[PASS] agent status change reaches the sidebar -- visible 0.18s after the report command returned
+[PASS] host token change reaches the sidebar -- visible 0.17s after the report command returned
+[PASS] new tab appears in the sidebar
+[PASS] closed tab leaves the sidebar
+[PASS] no snapshot request while nothing changes (4 s idle) -- 0 requests logged by the app
+[PASS] no `herdr api snapshot` child process of the app while idle -- app pid 49815; 0 sightings in 4 s
+lab server stopped
+[PASS] sidebar reconnects and resubscribes after the lab server restarts -- new snapshot applied 0.00s after the server came back
+[PASS] rename after the restart still arrives by event -- 86 ms
+
+app.log p3 lines (last 12):
+  [herdr-shell] p3: snapshot #23 fetched in 1.1 ms, event->apply 3.2 ms
+  [herdr-shell] p3: applied epoch=1790632384.542 tabs=rails orchestrator|shell spike|recruiter|wf recruiter-2320|wf embed wave-a
+  [herdr-shell] p3: snapshot #24 fetched in 25.6 ms, event->apply 25.8 ms
+  [herdr-shell] p3: applied epoch=1790632384.663 tabs=rails orchestrator|shell spike|recruiter|wf recruiter-2320|wf embed wave-a
+  [herdr-shell] p3: snapshot #25 fetched in 3.1 ms, event->apply 30.8 ms
+  [herdr-shell] p3: applied epoch=1790632384.676 tabs=rails orchestrator|shell spike|recruiter|wf recruiter-2320|wf embed wave-a
+  [herdr-shell] p3: snapshot #26 fetched in 1.5 ms, event->apply 15.7 ms
+  [herdr-shell] p3: applied epoch=1790632384.682 tabs=rails orchestrator|shell spike|recruiter|wf recruiter-2320|wf embed wave-a
+  [herdr-shell] p3: snapshot #27 fetched in 0.5 ms, event->apply 0.7 ms
+  [herdr-shell] p3: applied epoch=1790632384.739 tabs=rails orchestrator|shell spike|recruiter|wf recruiter-2320|wf embed wave-a
+  [herdr-shell] p3: snapshot #28 fetched in 0.8 ms, event->apply 0.9 ms
+  [herdr-shell] p3: applied epoch=1790632384.846 tabs=rails orchestrator|shell spike|after restart|wf recruiter-2320|wf embed wave-a
+
+RESULT: PASS
+
+===== P4 (scripts/check_p4.py) =====
+HerdrShell P4 check  2026-09-28T21:53:06Z
+app start: {"pids": [55294], "fifo_ready_s": 0.9}
+[PASS] untagged `wf recruiter-2320` (owner set, host token PC) folds under lane 'recruiter' with badge PC -- children=[('wf recruiter-2320', 'PC')]
+[PASS] token-tagged workflow 'embed run 7' (kind=workflow, host=forge-1) folds under lane 'embeddings' with badge forge-1 -- children=[('embed run 7', 'forge-1')]
+[PASS] untagged `wf embed wave-a` folds under the orchestrator, badge PC -- children=[('wf embed wave-a', 'PC')]
+[PASS] tagged workflow with no owner sits in WORKFLOWS with badge forge-1 -- row=('nightly sweep', 'forge-1')
+[PASS] kind=lane token beats a 'wf ' label
+[PASS] unknown kind value falls back to label rules (lane)
+[PASS] hosts row counts follow host tokens -- hosts={'PC': 2, 'Studio': 6, 'forge-1': 2}
+sidebar sections:
+  ORCHESTRATOR rails orchestrator     kind=orchestrator Studio   folded: [('wf embed wave-a', 'PC')]
+  LANES        shell spike            kind=lane         Studio   folded: []
+  LANES        recruiter              kind=lane         Studio   folded: [('wf recruiter-2320', 'PC')]
+  LANES        embeddings             kind=lane         Studio   folded: [('embed run 7', 'forge-1')]
+  LANES        wf misnamed            kind=lane         Studio   folded: []
+  LANES        odd kind               kind=lane         Studio   folded: []
+  WORKFLOWS    nightly sweep          kind=workflow     forge-1  folded: []
+lab down: stop: 0
+
+RESULT: PASS
+
+===== P7 (scripts/check_p7.py) =====
+HerdrShell P7 check  2026-09-28T21:53:11Z
+host load average: 416 on 16 cores
+swift build: ok
+lab session shellspike-p7; panes w1:p2 (terminal term_65c92196f5b302), w1:p3 (terminal term_65c92197265353)
+app (own build) pid [63616]
+[PASS] both panes attached and showing a prompt
+
+== 1. kill of one attach process
+[PASS] typed marker reached pane 1
+[PASS] pane 1 has keyboard focus before the kill -- focused=w1:p2
+[PASS] one attach process per pane -- p1=[63931] p2=[63929]
+[PASS] pane 1 is back with its screen (marker visible in the new surface) within 1 s of the kill -- 0.563s
+   app-side: respawns=1 exit seen -> first screen 0.536s state=running
+[PASS] app counted one respawn, state running
+[PASS] keyboard focus stayed on pane 1 -- focused=w1:p2
+[PASS] a new attach process serves pane 1; pane 2's attach is the same process -- p1 [63931]->[64107], p2 [63929]->[63929]
+[PASS] typing reaches pane 1 after the respawn -- 0.122s
+
+== 1b. kill while the pane displays the words a takeover uses
+[PASS] pane 1 displays 'taken over' as ordinary output
+[PASS] killed attach with 'taken over' on screen is respawned, not marked held -- state=running respawns=2 (was 1)
+[PASS] a new attach process serves pane 1 -- [64107]->[64320]
+[PASS] typing reaches pane 1 after the poisoned-viewport respawn -- 0.172s
+
+== 2. --takeover from a CLI client
+[PASS] app shows pane 1 as held after the CLI takeover
+   notice: Held by another herdr client (pid 64944: herdr terminal attach --takeover). Typing is paused here.
+   holder: another herdr client (pid 64944: herdr terminal attach --takeover)
+[PASS] notice names the holding client (pid of the CLI attach) -- cli pid 64944
+[PASS] keyboard focus is not on the ended surface
+[PASS] typing in the app does not reach the held pane --  echo |  P7-poison-done | herdr: terminal attach taken over | terminal already has an attached client | P7-poison-done | tmp % echo P7-after-poison | P7-after-poison | tmp % | 
+[PASS] the CLI holder can type into the pane (the app did not steal it back) -- 0.062s
+[PASS] CLI holder still attached while the app is held
+[PASS] Take back re-attaches the pane with its screen -- 0.17s
+[PASS] the CLI client was shut down by the takeback
+[PASS] notice is gone after taking back
+[PASS] keyboard focus is on pane 1 again -- focused=w1:p2
+[PASS] typing reaches pane 1 after taking back -- 0.053s
+
+== 3. hidden-tab policy (measured)
+policy=keep : hidden_policy=keep attach processes=6 (panes in snapshot 6) app rss=143 MB
+[PASS] keep: panes of tabs not on screen stay attached -- 6 of 6
+[PASS] keep: the hidden pane 1 attach process is still alive
+policy=detach: attach processes=1 app rss=119 MB (released in 0.4s)
+[PASS] detach: only the visible tab's pane keeps an attach -- 1 attach processes
+[PASS] detach: hidden pane 1 has no attach process
+[PASS] detach: showing the tab again reattaches both panes with their screens -- 0.16s
+[PASS] detach: typing reaches the pane after the reattach
+[PASS] detach: flipping away and straight back reattaches both panes (never shown as held) -- 1.68s; respawns p1=0
+measured: keep = 6 attach clients, 143 MB; detach = 1 attach clients, 119 MB (this lab: 6 panes, one tab on screen). Default stays keep.
+[PASS] no attach clients left after the app quits -- left=[]
+lab down: stop: 0
+
+RESULT: PASS
+
+===== P8 (scripts/check_p8.py) =====
+HerdrShell P8 check  2026-09-28T21:54:00Z
+lab session 'shellspike-l', pane under test w1:p2 (plain zsh)
+app: {"pids": [67731], "fifo_ready_s": 1.08}
+[PASS] pane attached and rendered by a Ghostty surface
+[PASS] after seq 1 500 the visible screen ends at 500 and line 1 is off screen
+[PASS] wheel up shows line 1 (herdr pane read --source visible) -- after 3 wheel events; top of screen ['tmp % seq 1 500', '1', '2']
+[PASS] plain drag is left to the program (no native selection, mouse captured for herdr) -- selection=None captured=True
+[PASS] shift+drag selects text in the surface -- selection='alpha brav'
+[PASS] Cmd+C puts the selected text on the pasteboard -- pasteboard='alpha brav'
+[PASS] Cmd+C sent nothing into the pane (prompt line still empty) -- last line 'tmp %'
+[PASS] vim (mouse=a) cursor follows clicks -- click col 2 row 6 -> 7,3 ok; click col 1 row 20 -> 21,2 ok; click col 0 row 2 -> 3,1 ok
+pasteboard restored
+lab down: stop: 0
+
+RESULT: PASS
+
+===== P9 (scripts/check_p9.py) =====
+HerdrShell P9 check  2026-09-28T21:54:12Z
+herdr: herdr 0.9.1 (lab binary)
+host load average: 402 on 16 cores
+tab w1:t2: pane1=w1:p2 pane2=w1:p3; herdr layout area 120x40
+app start: {"pids": [71416], "fifo_ready_s": 1.5}
+[PASS] both panes attached and rendered, one divider handle over the split
+before: herdr widths 60|60, ratio 0.500; surface grids 61|61 cols; host width 1099 pt
+[PASS] app layout equals herdr layout before the drag
+[PASS] drag right finished
+after drag +200 pt (0.94s): herdr widths 82|38, ratio 0.682 (expected about 0.682)
+[PASS] herdr layout rect changed for pane 1 (wider) -- 60 -> 82
+[PASS] herdr layout rect changed for pane 2 (narrower, moved right) -- w 60 -> 38, x 60 -> 82
+[PASS] split ratio matches the distance dragged -- 0.682 vs 0.682
+surface grids after: 85x45 | 38x45 (before 61|61 cols)
+[PASS] both surfaces report the new grid size (pane 1 wider, pane 2 narrower, proportional to herdr's rects)
+[PASS] app layout equals herdr layout after the drag (rebuilt from herdr)
+resize requests sent: 10
+[PASS] pane 1's shell sees the new width (stty size == surface grid) -- stty cols 85
+[PASS] drag left finished
+[PASS] dragging back restores the ratio -- 0.500 vs 0.500
+[PASS] app layout equals herdr layout after dragging back
+[PASS] drag far past the edge finishes (clamped, no request loop)
+[PASS] ratio clamped at herdr's 0.9 limit -- 0.900
+[PASS] drag back from the clamp
+[PASS] ratio clamped at herdr's 0.1 limit -- 0.100
+[PASS] split right (herdr API) added a pane: 3 surfaces rendered, 2 dividers, app layout == herdr layout -- 0.47s
+[PASS] the new pane took keyboard focus -- focused=w1:p7 new=w1:p7 (split target was w1:p2)
+[PASS] split down (herdr API) added a fourth pane and a horizontal divider -- 0.42s
+[PASS] horizontal divider drag finished
+horizontal divider: heights 20|20 -> 25|15, ratio 0.500 -> 0.622
+[PASS] horizontal drag changed both panes' herdr rects (top taller, bottom shorter)
+[PASS] app layout equals herdr layout after the horizontal drag
+[PASS] top and bottom surfaces report new grid rows -- w1:p7 28 rows, w1:p8 16 rows
+[PASS] drags sent no mouse bytes into the panes -- []
+[PASS] new tab (herdr API): tab exists in herdr, app selected it, its surface rendered a prompt -- 0.41s, w1:t6 w1:p9 126x45
+screenshot: in-app capture -> P9.png exists=True
+[PASS] attach clients exit with the app -- left=[]
+lab down: stop: 0
+
+RESULT: PASS
+
+===== P12 (scripts/check_p12.py) =====
+HerdrShell P12 check  2026-09-28T21:54:28Z
+expected tabs per host from herdr snapshot tokens: {"PC": 3, "Studio": 3, "forge-1": 2}
+[PASS] lab has host=PC and host=forge-1 tabs -- expected={'Studio': 3, 'PC': 3, 'forge-1': 2}
+app start (default provider): {"pids": [76124], "fifo_ready_s": 1.19}
+hosts row (default): PC 3 tabs; Studio 3 tabs; forge-1 2 tabs
+[PASS] default provider is herdr-only -- provider=herdr-only
+[PASS] hosts row tab counts match host tokens (PC and forge-1) -- row={'PC': 3, 'Studio': 3, 'forge-1': 2} expected={'Studio': 3, 'PC': 3, 'forge-1': 2}
+[PASS] no slot or session numbers without a provider
+app start (stub provider /var/folders/58/j110bjyx10j199g9pmv7zzhc0000gn/T/p12-apl2dmok/hosts.json): {"pids": [76527], "fifo_ready_s": 1.07}
+hosts row (stub): PC 3 tabs · slots 1/4 · 1 session; Studio 3 tabs; forge-1 2 tabs · slots 3/8 · 5 sessions; box-9 0 tabs · slots 0/6 · 0 sessions
+[PASS] stub provider active
+[PASS] stub slot numbers appear for forge-1 (3/8, 5 sessions) and PC (1/4, 1 session) -- forge-1='forge-1 2 tabs · slots 3/8 · 5 sessions' PC='PC 3 tabs · slots 1/4 · 1 session'
+[PASS] rendered text carries the slots
+[PASS] tab counts still follow host tokens under the stub -- row={'PC': 3, 'Studio': 3, 'forge-1': 2, 'box-9': 0}
+[PASS] a host only the provider knows shows with 0 tabs and its slots -- box-9='box-9 0 tabs · slots 0/6 · 0 sessions'
+[PASS] Studio (no stub entry) shows tab count only -- Studio='Studio 3 tabs'
+[PASS] editing the stub while the app runs updates the row (forge-1 7/8, 9 sessions; PC and box-9 stats gone) -- forge-1='forge-1 2 tabs · slots 7/8 · 9 sessions'
+lab down: stop: 0
+
+RESULT: PASS
+
+LAND RESULT: PASS (7 of 7)
