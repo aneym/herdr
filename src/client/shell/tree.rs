@@ -398,8 +398,20 @@ pub(super) fn tree_list_entries(
 
         let mut tab_order = Vec::<String>::new();
         let mut by_tab = HashMap::<String, Vec<AgentRow>>::new();
+        // An owned agent sits under its owner's tab, not its own: a workflow a
+        // lane spawned in a separate tab nests under the lane instead of opening
+        // a tab header of its own. Rows arrive depth-first, so the tab each
+        // depth resolved to is the parent's tab for the next depth. Children of
+        // an orchestrator group are adopted, not owned, and keep their own tab.
+        let mut tab_at_depth = Vec::<(String, bool)>::new();
         for row in workspace_rows {
-            let tab_id = row.tab_id.clone();
+            let depth = usize::from(row.group.depth);
+            tab_at_depth.truncate(depth);
+            let tab_id = match depth.checked_sub(1).and_then(|d| tab_at_depth.get(d)) {
+                Some((parent_tab, false)) => parent_tab.clone(),
+                _ => row.tab_id.clone(),
+            };
+            tab_at_depth.push((tab_id.clone(), row.group.group_count.is_some()));
             by_tab
                 .entry(tab_id.clone())
                 .or_insert_with(|| {
