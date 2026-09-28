@@ -76,6 +76,52 @@ fn profile_share_retains_other_selected_memberships() {
 }
 
 #[test]
+fn agent_header_separates_usage_and_view_controls_with_clicks_on_first_cells() {
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    config.mouse_capture = true;
+    config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    let mut state = ClientShellState::new(config);
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    let frame = state.compose(106, 30).expect("agent sidebar frame");
+    let buffer = frame.to_ratatui_buffer().expect("agent sidebar buffer");
+    let usage = state.hits.agent_usage;
+    let view = state.hits.agent_sort_toggle;
+    let row: String = (usage.x..view.right())
+        .map(|x| buffer.cell((x, usage.y)).expect("header cell").symbol())
+        .collect();
+    assert!(!row.contains("usagetree"), "{row}");
+    assert!(row.contains("usage tree"), "{row}");
+    assert_eq!(buffer.cell((usage.x, usage.y)).unwrap().symbol(), "u");
+    assert_eq!(buffer.cell((view.x, view.y)).unwrap().symbol(), "t");
+
+    let usage_click = state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: usage.x,
+        row: usage.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert!(matches!(state.overlay, Some(ClientShellOverlay::Usage(_))));
+    assert!(usage_click.actions.iter().any(|action| matches!(action,
+        ClientShellAction::Endpoint { request, .. }
+            if matches!(request.method, crate::api::schema::Method::AgentUsage(_))
+    )));
+
+    state.toggle_usage_overlay(&mut ClientShellInput::default());
+    let view_click = state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: view.x,
+        row: view.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert!(view_click.actions.is_empty());
+    assert_eq!(
+        state.config.agent_panel_sort,
+        crate::config::AgentPanelSortConfig::Spaces
+    );
+}
+
+#[test]
 fn usage_sidebar_left_click_and_refresh_apply_without_timer_spin() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));

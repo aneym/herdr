@@ -493,9 +493,11 @@ pub(super) fn render_agent_panel_header(
         sort_width,
         1,
     );
-    let usage_width = 6u16.min(sort_rect.x.saturating_sub(area.x));
+    let available = sort_rect.x.saturating_sub(area.x);
+    let gap = available.min(1);
+    let usage_width = 5u16.min(available.saturating_sub(gap));
     let usage_rect = Rect::new(
-        sort_rect.x.saturating_sub(usage_width),
+        sort_rect.x.saturating_sub(usage_width + gap),
         area.y + 1,
         usage_width,
         1,
@@ -510,7 +512,7 @@ pub(super) fn render_agent_panel_header(
         usage_rect.x,
         usage_rect.y,
         usage_rect.width,
-        " usage",
+        "usage",
         Style::default()
             .fg(config.palette.accent)
             .add_modifier(Modifier::BOLD),
