@@ -387,29 +387,46 @@ fn render_factory_tab(
             if header.collapsed { "▸ " } else { "▾ " }, Style::default().fg(palette.accent));
     }
     let icon_x = start.saturating_add(2);
-    let icon = if row.idle { "○" } else { "●" };
+    let icon = if row.workflow {
+        if row.done { "✓" } else { "◐" }
+    } else if row.idle { "○" } else { "●" };
     let color = match row.attention {
         crate::factory_overlay::Attention::Act => palette.red,
         crate::factory_overlay::Attention::Warn => palette.peach,
         crate::factory_overlay::Attention::None if row.idle || matches!(row.status, crate::api::schema::AgentStatus::Unknown | crate::api::schema::AgentStatus::Idle | crate::api::schema::AgentStatus::Done) => palette.overlay0,
         crate::factory_overlay::Attention::None => status_color(row.status, palette),
     };
-    put_text(buffer, icon_x, rect.y, 1.min(rect.right().saturating_sub(icon_x)), icon, Style::default().fg(color));
+    let icon_style = if row.done && row.attention == crate::factory_overlay::Attention::None {
+        Style::default().fg(palette.overlay0).add_modifier(Modifier::DIM)
+    } else {
+        Style::default().fg(color)
+    };
+    put_text(buffer, icon_x, rect.y, 1.min(rect.right().saturating_sub(icon_x)), icon, icon_style);
     let name_x = icon_x.saturating_add(2);
+    let available = rect.right().saturating_sub(name_x);
+    let phase = row.phase.as_deref().unwrap_or("");
+    let phase = phase.split_whitespace().next().map_or(String::new(), |first| {
+        let fraction = phase.split_whitespace().find(|word| word.contains('/'));
+        fraction.map_or_else(|| first.to_owned(), |part| format!("{first} {part}"))
+    });
     let metadata = if let Some(badge) = row.badge.as_deref() {
-        // The host badge wins over phase on narrow sidebar rows.
-        let phase = row.phase.as_deref().unwrap_or("");
-        let space = rect.right().saturating_sub(name_x);
-        if !phase.is_empty() && display_width(phase) + display_width(badge) + 4 <= space as usize {
-            format!("{phase}  {badge}")
+        // Preserve the full badge, then the name; add the secondary phase only
+        // when both still fit without truncation.
+        if !phase.is_empty()
+            && display_width(&header.label) + display_width(&phase) + display_width(badge) + 2
+                <= available as usize
+        {
+            format!("{phase} {badge}")
         } else {
             badge.to_owned()
         }
     } else {
-        row.summary.as_deref().or(row.phase.as_deref()).unwrap_or("").to_owned()
+        row.summary.as_deref().or(row.phase.as_deref())
+            .filter(|value| !value.is_empty())
+            .unwrap_or(if row.idle { "idle" } else { "" })
+            .to_owned()
     };
     let right_label = metadata.as_str();
-    let available = rect.right().saturating_sub(name_x);
     let right_width = (display_width(right_label) as u16).min(available.saturating_sub(1));
     let label_room = available.saturating_sub(right_width + u16::from(right_width > 0));
     let marker_width = if row.devloop && label_room >= 2 { 2 } else { 0 };
@@ -427,8 +444,19 @@ fn render_factory_tab(
         put_text(buffer, name_x + display_width(&name) as u16, rect.y, marker_width, " ⟳", style);
     }
     if right_width > 0 {
-        let right_style = Style::default().fg(if row.badge.is_some() { color } else { palette.overlay0 });
-        put_text(buffer, rect.right().saturating_sub(right_width), rect.y, right_width, right_label, right_style);
+        let right_x = rect.right().saturating_sub(right_width);
+        if let Some(badge) = row.badge.as_deref() {
+            let badge_width = display_width(badge) as u16;
+            if right_label != badge {
+                put_text(buffer, right_x, rect.y, right_width.saturating_sub(badge_width),
+                    &format!("{phase} "), Style::default().fg(palette.overlay0).add_modifier(Modifier::DIM));
+            }
+            put_text(buffer, rect.right().saturating_sub(badge_width), rect.y, badge_width,
+                badge, Style::default().fg(color));
+        } else {
+            put_text(buffer, right_x, rect.y, right_width, right_label,
+                Style::default().fg(palette.overlay0).add_modifier(Modifier::DIM));
+        }
     }
     // A phase is secondary to a complete badge/summary and the readable name.
     // It is intentionally omitted when those fields consume the available width.

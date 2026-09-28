@@ -255,6 +255,8 @@ pub(super) struct FactoryTabRow {
     pub(super) idle: bool,
     pub(super) devloop: bool,
     pub(super) background: bool,
+    pub(super) workflow: bool,
+    pub(super) done: bool,
 }
 
 impl AgentPanelListEntry {
@@ -445,6 +447,20 @@ pub(super) fn tree_list_entries_with_overlay(
             workspace_order.insert(before, id.clone());
         }
     }
+    let host_space = overlay.and_then(|overlay| {
+        let tagged = workspace_order.iter().filter(|id| {
+            (!tree.show_spaces || !tree.collapsed_spaces.contains(*id))
+                && overlay.space_is_tagged(
+                    snapshot.tabs.iter().filter(|tab| &tab.workspace_id == *id)
+                        .map(|tab| tab.tab_id.as_str()),
+                )
+        }).collect::<Vec<_>>();
+        tagged.iter().find(|id| snapshot.tabs.iter().any(|tab| {
+            &tab.workspace_id == **id && overlay.tab(&tab.tab_id).is_some_and(|tag| {
+                matches!(tag.kind, crate::factory_overlay::TabKind::Orchestrator | crate::factory_overlay::TabKind::Workflow)
+            })
+        })).or_else(|| tagged.first()).map(|id| (*id).clone())
+    });
     let mut out = Vec::new();
     // Collapsed spaces move out of their slot and collect under one collapsible
     // section at the bottom, so folding a space away actually clears the row it
@@ -519,6 +535,7 @@ pub(super) fn tree_list_entries_with_overlay(
                 &workspace_rows,
                 overlay,
                 space_indent,
+                host_space.as_deref() == Some(workspace_id.as_str()),
             );
             continue;
         }
@@ -733,6 +750,7 @@ fn append_factory_space(
     rows: &[AgentRow],
     overlay: &crate::factory_overlay::FactoryOverlay,
     indent: u8,
+    show_hosts: bool,
 ) {
     use crate::factory_overlay::TabKind;
     let tabs = snapshot
@@ -763,7 +781,8 @@ fn append_factory_space(
     let workflows = tabs
         .iter()
         .copied()
-        .filter(|tab| foreground(tab) && kind(tab) == TabKind::Workflow)
+        .filter(|tab| kind(tab) == TabKind::Workflow && (foreground(tab) || overlay.tab(&tab.tab_id)
+            .and_then(|tag| tag.parent.as_deref()).is_some_and(|parent| lanes.iter().any(|lane| lane.tab_id == parent))))
         .collect::<Vec<_>>();
     let first_orchestrator = orchestrators.first().map(|tab| tab.tab_id.as_str());
     let lane_ids = lanes
@@ -844,7 +863,7 @@ fn append_factory_space(
                     .iter()
                     .any(|tab| snapshot.focused_tab_id.as_deref() == Some(tab.tab_id.as_str()));
             let expanded = tree.factory_expanded_lanes.contains(&lane.tab_id) || forced || focused;
-            let mut lane_row = factory_row(
+            out.push(factory_row(
                 snapshot,
                 rows,
                 overlay,
@@ -852,16 +871,11 @@ fn append_factory_space(
                 indent,
                 !expanded && !children.is_empty(),
                 !children.is_empty(),
-            );
-            if let AgentPanelListEntry::FactoryTab(row) = &mut lane_row {
-                if row.header.collapsed {
-                    row.summary = Some(format!("{} wf", children.len()));
-                }
-            }
-            out.push(lane_row);
+            ));
             if expanded {
+                let siblings = children.len() > 1;
                 for child in children {
-                    out.push(factory_row(
+                    let mut child_row = factory_row(
                         snapshot,
                         rows,
                         overlay,
@@ -869,7 +883,23 @@ fn append_factory_space(
                         indent.saturating_add(1),
                         false,
                         false,
-                    ));
+                    );
+                    if siblings {
+                        if let AgentPanelListEntry::FactoryTab(row) = &mut child_row {
+                            if let Some(short) = row.header.label.strip_prefix("wf ")
+                                .and_then(|name| name.split_once(' '))
+                                .map(|(_, rest)| rest)
+                                .filter(|rest| !rest.is_empty())
+                            {
+                                row.header.label = if short.chars().all(|c| c.is_ascii_digit()) {
+                                    format!("#{short}")
+                                } else {
+                                    short.to_owned()
+                                };
+                            }
+                        }
+                    }
+                    out.push(child_row);
                 }
             }
         }
@@ -885,7 +915,8 @@ fn append_factory_space(
         .filter(|tab| {
             overlay
                 .tab(&tab.tab_id)
-                .is_some_and(|tag| tag.done || tag.kind == TabKind::Advisor)
+                .is_some_and(|tag| (tag.done && (tag.kind != TabKind::Workflow || !tag.parent.as_deref()
+                    .is_some_and(|parent| lane_ids.contains(parent)))) || tag.kind == TabKind::Advisor)
         })
         .collect::<Vec<_>>();
     if !background.is_empty() {
@@ -910,7 +941,7 @@ fn append_factory_space(
             }
         }
     }
-    if !overlay.hosts.is_empty() {
+    if show_hosts && !overlay.hosts.is_empty() {
         out.push(AgentPanelListEntry::FactorySection {
             label: "HOSTS",
             right: String::new(),
@@ -985,15 +1016,13 @@ fn factory_row(
         status,
         badge: tag.and_then(|tag| tag.badge.clone()),
         phase: tag.and_then(|tag| tag.phase.clone()),
-        summary: tag.and_then(|tag| {
-            (collapsed || matches!(tag.kind, crate::factory_overlay::TabKind::Orchestrator | crate::factory_overlay::TabKind::Lane))
-                .then(|| tag.summary.clone())
-                .flatten()
-        }),
+        summary: tag.and_then(|tag| tag.summary.clone()),
         attention: tag.map_or(crate::factory_overlay::Attention::None, |tag| tag.attention),
         idle: tag.is_some_and(|tag| tag.idle),
         devloop: tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Lane && tag.devloop),
         background,
+        workflow: tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Workflow),
+        done: tag.is_some_and(|tag| tag.done),
     })
 }
 

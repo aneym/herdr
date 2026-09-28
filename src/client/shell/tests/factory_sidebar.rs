@@ -204,7 +204,7 @@ fn groups_tabs_and_expands_lanes_for_attention_or_focus() {
             _ => None,
         })
         .unwrap();
-    assert_eq!(lane.summary.as_deref(), Some("2 wf"));
+    assert_eq!(lane.summary.as_deref(), Some("pending"));
     assert!(lane.header.collapsed);
     overlay.tabs.get_mut("wf-b").unwrap().attention = Attention::Act;
     let group = labels(&entries(&snapshot, Some(&overlay), &tree));
@@ -504,14 +504,18 @@ fn composed_sidebar_text(config: Config, overlay: FactoryOverlay) -> String {
 }
 
 fn rendered_factory_rows(snapshot: &ClientShellSnapshot, overlay: &FactoryOverlay) -> (Vec<String>, ShellHitMap, Buffer) {
-    let area = Rect::new(0, 0, 25, 40);
+    rendered_factory_rows_with_tree(snapshot, overlay, &ClientTreeChrome::default())
+}
+
+fn rendered_factory_rows_with_tree(snapshot: &ClientShellSnapshot, overlay: &FactoryOverlay, tree: &ClientTreeChrome) -> (Vec<String>, ShellHitMap, Buffer) {
+    let area = Rect::new(0, 0, 25, 60);
     let mut buffer = Buffer::empty(area);
     let mut config = ClientShellConfig::from_config(&Config::default());
     config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
     let mut hits = ShellHitMap::default();
     let mut scroll = 0;
     crate::client::shell::agent_sidebar::render_agent_panel_with_overlay(
-        &mut buffer, area, snapshot, &config, &ClientTreeChrome::default(),
+        &mut buffer, area, snapshot, &config, tree,
         Some(overlay), &mut scroll, &mut hits,
     );
     let rows = (0..area.height)
@@ -528,6 +532,7 @@ fn factory_rows_fit_chevron_glyph_summary_devloop_and_hosts_at_25_columns() {
     let long_name = "abcdefghijklmnopqrst";
     overlay.tabs.get_mut("lane-a").unwrap().name = Some(long_name.into());
     overlay.tabs.get_mut("lane-a").unwrap().devloop = true;
+    overlay.tabs.get_mut("lane-a").unwrap().summary = Some("2 wf".into());
     overlay.tabs.get_mut("lane-b").unwrap().idle = false;
     overlay.tabs.get_mut("lane-b").unwrap().name = Some("no status".into());
     snapshot.tabs.iter_mut().find(|tab| tab.tab_id == "lane-b").unwrap().agent_status = AgentStatus::Unknown;
@@ -552,6 +557,79 @@ fn factory_rows_fit_chevron_glyph_summary_devloop_and_hosts_at_25_columns() {
     assert!(hits.tree_headers.iter().all(|hit| !((hosts_y + 1)..=(hosts_y + 3)).contains(&(hit.rect.y as usize))));
     let (without, _, _) = rendered_factory_rows(&snapshot, &fixture().1);
     assert!(!without.iter().any(|row| row.contains("HOSTS")));
+}
+
+#[test]
+fn tagged_spaces_show_hosts_only_under_the_first_orchestrator_or_workflow() {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.workspaces.push(ClientShellWorkspace {
+        workspace_id: "ws_2".into(), active_tab_id: "other-lane".into(),
+        new_workspace_cwd: String::new(), number: 2, label: "poker".into(),
+        custom_label: true, branch: None, git_ahead_behind: None, tokens: Vec::new(),
+        worktree: None, focused: false, agent_status: AgentStatus::Idle,
+        orchestrator_mode: false, tab_count: 1, visible_in_profile: true,
+    });
+    snapshot.tabs.push(ClientShellTab {
+        tab_id: "other-lane".into(), workspace_id: "ws_2".into(), number: 1,
+        label: "poker coach".into(), custom_label: true, zoomed: false,
+        focused: false, agent_status: AgentStatus::Working,
+    });
+    overlay.tabs.insert("other-lane".into(), TabTag { kind: TabKind::Lane, ..TabTag::default() });
+    overlay.hosts.push(HostRow { name: "Studio".into(), summary: None, attention: Attention::None });
+    let (rows, _, _) = rendered_factory_rows(&snapshot, &overlay);
+    assert_eq!(rows.iter().filter(|row| row.contains("HOSTS")).count(), 1, "{rows:?}");
+    let hosts = rows.iter().position(|row| row.contains("HOSTS")).unwrap();
+    let poker = rows.iter().position(|row| row.contains("poker")).unwrap();
+    assert!(hosts < poker, "{rows:?}");
+    // If only the lane space is tagged, that space receives the hosts instead.
+    overlay.tabs.retain(|id, _| id == "other-lane");
+    let (rows, _, _) = rendered_factory_rows(&snapshot, &overlay);
+    assert_eq!(rows.iter().filter(|row| row.contains("HOSTS")).count(), 1, "{rows:?}");
+    assert!(rows.iter().position(|row| row.contains("HOSTS")).unwrap()
+        > rows.iter().position(|row| row.contains("poker")).unwrap());
+}
+
+#[test]
+fn workflow_siblings_and_lane_metadata_remain_readable_at_25_columns() {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "lane-a" | "lane-b"));
+    overlay.tabs.get_mut("lane-a").unwrap().name = Some("issues".into());
+    overlay.tabs.get_mut("lane-a").unwrap().summary = Some("8 wf".into());
+    overlay.tabs.get_mut("lane-b").unwrap().name = Some("conversation evals".into());
+    for n in 1..=8 {
+        let id = format!("wf-{n}");
+        snapshot.tabs.push(ClientShellTab {
+            tab_id: id.clone(), workspace_id: "ws_1".into(), number: n + 2,
+            label: format!("wf issues {n}"), custom_label: true, zoomed: false,
+            focused: false, agent_status: AgentStatus::Working,
+        });
+        overlay.tabs.insert(id, TabTag {
+            kind: TabKind::Workflow, parent: Some("lane-a".into()),
+            badge: Some("Studio".into()), phase: Some("Verify 6/7".into()),
+            done: n == 8, ..TabTag::default()
+        });
+    }
+    let collapsed = rendered_factory_rows(&snapshot, &overlay).0;
+    let collapsed_lane = collapsed.iter().find(|row| row.contains("issues")).unwrap();
+    assert!(collapsed_lane.contains("8 wf"), "{collapsed_lane:?}");
+    let idle = collapsed.iter().find(|row| row.contains("conversation")).unwrap_or_else(|| panic!("{collapsed:?}"));
+    assert!(idle.contains('○') && idle.trim_end().ends_with("idle"), "{idle:?}");
+    let mut tree = ClientTreeChrome::default();
+    tree.factory_expanded_lanes.insert("lane-a".into());
+    let (expanded, _, buffer) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+    let expanded_lane = expanded.iter().find(|row| row.contains("issues")).unwrap();
+    assert!(expanded_lane.contains("8 wf"), "{expanded_lane:?}");
+    for n in 1..=8 {
+        let row = expanded.iter().find(|row| row.contains(&format!("#{n}")))
+            .unwrap_or_else(|| panic!("missing #{n}: {expanded:?}"));
+        assert!(row.trim_end().ends_with("Studio"), "{row:?}");
+        assert!(row.contains(if n == 8 { '✓' } else { '◐' }), "{row:?}");
+        if n == 8 {
+            let y = expanded.iter().position(|candidate| candidate == row).unwrap() as u16;
+            let x = row.find('✓').unwrap() as u16;
+            assert!(buffer[(x, y)].modifier.contains(Modifier::DIM));
+        }
+    }
 }
 
 #[test]
