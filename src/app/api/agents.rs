@@ -968,6 +968,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn agent_start_inject_log_hashes_caller_args_individually() {
+        let _guard = crate::inject_log::tests::TEST_ENV_LOCK.lock().unwrap();
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "target/inject-log-tests/agent-start-{}",
+            std::process::id()
+        ));
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+        std::fs::create_dir_all(&dir).unwrap();
+        let previous = std::env::var_os("HERDR_INJECT_LOG_DIR");
+        std::env::set_var("HERDR_INJECT_LOG_DIR", &dir);
+        let mut app = app_with_named_agents(&[]);
+        app.state.workspaces = vec![Workspace::test_new("shell-space")];
+        app.state.ensure_test_terminals();
+        let pane = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane]
+            .attached_terminal_id
+            .clone();
+        let (runtime, _rx) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
+        app.terminal_runtimes.insert(terminal_id, runtime);
+        let pane_id = app.public_pane_id(0, pane).unwrap();
+        let response = app.handle_agent_start(
+            "start".into(),
+            AgentStartParams {
+                name: "worker".into(),
+                kind: "pi".into(),
+                pane_id: pane_id.clone(),
+                args: vec!["--foo".into(), "fix the bug".into()],
+                timeout_ms: Some(4_000),
+                owner: None,
+                caller_pane_id: None,
+            },
+        );
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["result"]["type"], "agent_started");
+        let today = time::OffsetDateTime::now_utc().date();
+        let data = std::fs::read_to_string(dir.join(format!("{today}.jsonl"))).unwrap();
+        let records: Vec<serde_json::Value> = data
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        use sha2::Digest;
+        let expected = format!("{:x}", sha2::Sha256::digest(b"fix the bug"));
+        assert!(records.iter().any(|row| row["pane_id"] == pane_id
+            && row["method"] == "agent.start"
+            && row["sha256"] == expected));
+        assert!(records.iter().any(|row| row["pane_id"] == pane_id
+            && row["method"] == "agent.start"
+            && row["sha256"]
+                == "4245bd643b6c259cb60b2703a6aaabeaf28ebbf77b0ec8f165a0f0d51c37defc"));
+        assert!(!data.contains("fix the bug"));
+        if let Some(previous) = previous {
+            std::env::set_var("HERDR_INJECT_LOG_DIR", previous);
+        } else {
+            std::env::remove_var("HERDR_INJECT_LOG_DIR");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
     async fn agent_start_without_agent_caller_stays_root_and_bad_owner_errors() {
         let mut app = app_with_named_agents(&[]);
         app.state.workspaces = vec![

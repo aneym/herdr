@@ -13,10 +13,21 @@ static LAST_PRUNED_DAY: Mutex<Option<(std::path::PathBuf, time::Date)>> = Mutex:
 pub fn record(pane_id: &str, method: &str, text: &str) {
     let dir = std::env::var_os("HERDR_INJECT_LOG_DIR")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| crate::session::data_dir().join("inject-log"));
+        .unwrap_or_else(default_dir);
     if let Err(err) = write_record(&dir, pane_id, method, text) {
         // Do not include text, pane ids, paths, or OS error details in diagnostic logs.
         tracing::warn!(error_kind = ?err.kind(), "could not record pane injection");
+    }
+}
+
+fn default_dir() -> std::path::PathBuf {
+    #[cfg(test)]
+    {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/inject-log-tests/default")
+    }
+    #[cfg(not(test))]
+    {
+        crate::session::data_dir().join("inject-log")
     }
 }
 
@@ -51,14 +62,17 @@ fn write_record(dir: &Path, pane_id: &str, method: &str, text: &str) -> io::Resu
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW);
+        options
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
     let mut file = options.open(path)?;
+    if !file.metadata()?.file_type().is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "injection log is not a regular file",
+        ));
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -79,8 +93,9 @@ fn write_record(dir: &Path, pane_id: &str, method: &str, text: &str) -> io::Resu
         .as_ref()
         .is_none_or(|(previous_dir, previous_day)| previous_dir != dir || *previous_day != date)
     {
-        prune(dir, date)?;
+        let result = prune(dir, date);
         *last = Some((dir.to_path_buf(), date));
+        result?;
     }
     Ok(())
 }

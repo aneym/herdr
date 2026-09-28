@@ -228,6 +228,15 @@ impl App {
         if let Some(session) = persisted_agent_session {
             terminal.set_managed_agent_launch_session(session);
         }
+        // Hash each caller argument as supplied, not the shell-quoted command line.
+        // An initial prompt argument then matches the same text sent as a later prompt.
+        if let Some(public_id) = self.public_pane_id(ws_idx, pane_id) {
+            for arg in argv.iter().skip(1) {
+                if !arg.is_empty() {
+                    crate::inject_log::record(&public_id, "agent.start", arg);
+                }
+            }
+        }
         self.state.mark_session_dirty();
         self.schedule_session_save();
 
