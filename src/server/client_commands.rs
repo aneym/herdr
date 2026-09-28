@@ -38,6 +38,8 @@ const CLIENT_SHELL_METHODS: &[&str] = &[
     "pane.swap",
     "pane.zoom",
     "product_announcement.dismiss",
+    "profile.list",
+    "profile.switch",
     "release_notes.dismiss",
     "server.reload_config",
     "tab.close",
@@ -304,6 +306,11 @@ mod tests {
             Some(true),
             "workspace.set_pinned must advertise a shape"
         );
+        // Profile methods are newly advertised on the client shell lane. Their
+        // shapes are not part of the original endpoint v1 fixture.
+        for method in ["profile.list", "profile.switch"] {
+            assert!(actual.remove(method).is_some(), "{method} must advertise a shape");
+        }
         // Fork: sidebar agent placement (docs/fork/port-0.9/PORT.md, ledger 31).
         assert_eq!(
             actual.remove("agent.group.set").as_deref(),
