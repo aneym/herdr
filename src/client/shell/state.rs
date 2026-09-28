@@ -576,6 +576,8 @@ pub(super) struct ClientWorktreeRemoveOverlay {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ClientContextMenuAction {
+    SetAgentSort(crate::config::AgentPanelSortConfig),
+    MenuSeparator,
     ToggleTreeSpaces,
     ToggleTreeTabs,
     ToggleTreeAgents,
@@ -609,9 +611,9 @@ pub(super) enum ClientContextMenuAction {
 
 #[derive(Debug)]
 pub(super) enum ClientContextMenuTarget {
-    /// The agents-panel view control: which tree layers show, and whether the
-    /// hidden-spaces section is revealed.
+    /// The agents-panel view picker: sort, tree layers, and hidden spaces.
     SidebarView {
+        sort: crate::config::AgentPanelSortConfig,
         show_spaces: bool,
         show_tabs: bool,
         show_agents: bool,

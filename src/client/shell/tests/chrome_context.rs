@@ -89,7 +89,7 @@ fn focused_last_overflow_tab_shows_its_full_label() {
             .expect("reporter's overflowing strip");
         assert_eq!(
             state.hits.new_tab.right() - state.hits.tab_scroll_left.x,
-            107
+            107 - state.hits.session_badge.width - 1
         );
         let rect = state
             .hits

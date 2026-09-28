@@ -1037,7 +1037,10 @@ impl ClientShellState {
                 tree.collapsed_agent_groups.insert(hit.key.clone());
             }
             self.persist_chrome_preferences(outcome);
-            if !hit.expanded && hit.server_collapsed && self.supports_endpoint_method(&method(false)) {
+            if !hit.expanded
+                && hit.server_collapsed
+                && self.supports_endpoint_method(&method(false))
+            {
                 self.push_endpoint_method(method(false), outcome);
             }
             outcome.repaint = true;

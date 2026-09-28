@@ -1292,7 +1292,7 @@ fn navigator_renders_every_terminal_in_workspace_sections() {
 #[test]
 fn navigator_search_matches_non_adjacent_words_without_losing_the_pane_target() {
     let mut projected = snapshot();
-    projected.panes[0].label = Some("alpha beta gamma".into());
+    projected.panes[0].label = Some("alpha beta gamma code review".into());
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(projected));
     state.set_pane_surface(surface());
@@ -1306,7 +1306,8 @@ fn navigator_search_matches_non_adjacent_words_without_losing_the_pane_target() 
         ("gamma alpha", true),
         ("beta gamma", true),
         ("alpha missing", false),
-        ("alphagamma", false),
+        ("cr", true),
+        ("alphagamma", true),
     ] {
         navigator.query = query.into();
         navigator.selected = None;

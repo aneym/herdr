@@ -19,32 +19,13 @@ pub(crate) struct FuzzyMatch {
 }
 
 pub(crate) fn fuzzy_match(needle: &str, haystack: &str) -> Option<FuzzyMatch> {
-    fuzzy_match_bounded(needle, haystack, false)
-}
+    // Matches may cross word boundaries, including when used by the navigator.
 
-/// Scores `needle` as a subsequence of `haystack`. With `within_word`, every
-/// matched character must sit in the same whitespace-delimited haystack word,
-/// so a term never bridges a space; scores of the matches it keeps are
-/// unchanged.
-fn fuzzy_match_bounded(needle: &str, haystack: &str, within_word: bool) -> Option<FuzzyMatch> {
     let needle_chars = needle.chars().collect::<Vec<_>>();
     let haystack_chars = haystack.chars().collect::<Vec<_>>();
     if needle_chars.is_empty() || haystack_chars.is_empty() {
         return None;
     }
-    // Earliest haystack index a match ending at each index may start from.
-    let mut word_start = 0;
-    let span_start = haystack_chars
-        .iter()
-        .enumerate()
-        .map(|(idx, ch)| {
-            if within_word && ch.is_whitespace() {
-                word_start = idx + 1;
-            }
-            word_start
-        })
-        .collect::<Vec<_>>();
-
     let mut previous = vec![None::<FuzzyMatch>; haystack_chars.len()];
     for (needle_idx, needle_char) in needle_chars.iter().copied().enumerate() {
         let mut current = vec![None; haystack_chars.len()];
@@ -67,12 +48,10 @@ fn fuzzy_match_bounded(needle: &str, haystack: &str, within_word: bool) -> Optio
                 continue;
             }
 
-            let lower = span_start[haystack_idx].min(haystack_idx);
-            for (offset, prior_match) in previous[lower..haystack_idx].iter().enumerate() {
+            for (previous_idx, prior_match) in previous[..haystack_idx].iter().enumerate() {
                 let Some(prior_match) = prior_match else {
                     continue;
                 };
-                let previous_idx = lower + offset;
                 let gap = haystack_idx - previous_idx - 1;
                 let transition = if gap == 0 {
                     BONUS_CONSECUTIVE
@@ -100,14 +79,13 @@ fn fuzzy_match_bounded(needle: &str, haystack: &str, within_word: bool) -> Optio
 }
 
 /// Matches each whitespace-separated query term independently (AND), in any
-/// order. A term matches fuzzily inside one haystack word but never across a
-/// space, so "alphagamma" does not match "alpha beta gamma" (upstream #4535).
+/// order. Each term can match across word boundaries.
 pub(crate) fn fuzzy_match_words(query: &str, haystack: &str) -> Option<FuzzyMatch> {
     let mut words = query.split_whitespace();
     let first = words.next()?;
-    let mut matched = fuzzy_match_bounded(first, haystack, true)?;
+    let mut matched = fuzzy_match(first, haystack)?;
     for word in words {
-        let word_match = fuzzy_match_bounded(word, haystack, true)?;
+        let word_match = fuzzy_match(word, haystack)?;
         matched.score += word_match.score;
         matched.positions.extend(word_match.positions);
     }

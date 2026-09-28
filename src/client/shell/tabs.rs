@@ -337,9 +337,6 @@ pub(in crate::client::shell) fn session_badge_text(snapshot: &ClientShellSnapsho
         .as_deref()
         .filter(|name| *name != "default")
         .unwrap_or(&snapshot.active_profile);
-    if text == "default" {
-        return String::new();
-    }
     crate::ui::truncate_end(text, SESSION_BADGE_MAX_WIDTH)
 }
 
