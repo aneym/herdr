@@ -1,0 +1,20 @@
+HerdrShell P4 check  2026-09-28T20:19:00Z
+app start: {"pids": [38151], "fifo_ready_s": 1.05}
+[PASS] untagged `wf recruiter-2320` (owner set, host token PC) folds under lane 'recruiter' with badge PC -- children=[('wf recruiter-2320', 'PC')]
+[PASS] token-tagged workflow 'embed run 7' (kind=workflow, host=forge-1) folds under lane 'embeddings' with badge forge-1 -- children=[('embed run 7', 'forge-1')]
+[PASS] untagged `wf embed wave-a` folds under the orchestrator, badge PC -- children=[('wf embed wave-a', 'PC')]
+[PASS] tagged workflow with no owner sits in WORKFLOWS with badge forge-1 -- row=('nightly sweep', 'forge-1')
+[PASS] kind=lane token beats a 'wf ' label
+[PASS] unknown kind value falls back to label rules (lane)
+[PASS] hosts row counts follow host tokens -- hosts={'PC': 2, 'Studio': 6, 'forge-1': 2}
+sidebar sections:
+  ORCHESTRATOR rails orchestrator     kind=orchestrator Studio   folded: [('wf embed wave-a', 'PC')]
+  LANES        shell spike            kind=lane         Studio   folded: []
+  LANES        recruiter              kind=lane         Studio   folded: [('wf recruiter-2320', 'PC')]
+  LANES        embeddings             kind=lane         Studio   folded: [('embed run 7', 'forge-1')]
+  LANES        wf misnamed            kind=lane         Studio   folded: []
+  LANES        odd kind               kind=lane         Studio   folded: []
+  WORKFLOWS    nightly sweep          kind=workflow     forge-1  folded: []
+lab down: stop: 0
+
+RESULT: PASS
