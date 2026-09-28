@@ -9,6 +9,7 @@ pub(crate) struct DecodedAgentViewProjection {
 pub(crate) enum EndpointControlMessage {
     HealthPong,
     AgentViewProjection(DecodedAgentViewProjection),
+    FactoryOverlay(crate::protocol::endpoint::EndpointFactoryOverlay),
     AgentCompletions(crate::protocol::endpoint::EndpointAgentCompletions),
     Snapshot(Box<crate::protocol::ClientShellSnapshot>),
     Ignored,
@@ -24,6 +25,11 @@ pub(crate) fn decode_endpoint_control(
     if kind == crate::protocol::endpoint::AGENT_COMPLETIONS_KIND {
         return Ok(serde_json::from_str(data)
             .map(EndpointControlMessage::AgentCompletions)
+            .unwrap_or(EndpointControlMessage::Ignored));
+    }
+    if kind == crate::protocol::endpoint::FACTORY_OVERLAY_KIND {
+        return Ok(serde_json::from_str(data)
+            .map(EndpointControlMessage::FactoryOverlay)
             .unwrap_or(EndpointControlMessage::Ignored));
     }
     if kind == crate::protocol::endpoint::AGENT_VIEW_PROJECTION_KIND {

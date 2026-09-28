@@ -18,9 +18,11 @@ use serde::{Deserialize, Serialize};
 pub const FACTORY_OVERLAY_VERSION: u32 = 1;
 
 /// Panel key for the factory overview (opened with `toggle_factory_overview`).
+#[allow(dead_code)]
 pub const OVERVIEW_PANEL_KEY: &str = "overview";
 
 /// Panel key for a tab's detail panel.
+#[allow(dead_code)]
 pub fn tab_panel_key(tab_id: &str) -> String {
     format!("tab:{tab_id}")
 }
@@ -65,6 +67,7 @@ pub enum Attention {
 
 impl Attention {
     /// Higher wants the user more; use to pick the worst of several.
+    #[allow(dead_code)]
     pub fn rank(self) -> u8 {
         match self {
             Self::None => 0,
@@ -180,20 +183,24 @@ pub fn parse(bytes: &[u8]) -> Result<FactoryOverlay, OverlayParseError> {
 }
 
 impl FactoryOverlay {
+    #[allow(dead_code)]
     pub fn tab(&self, tab_id: &str) -> Option<&TabTag> {
         self.tabs.get(tab_id)
     }
 
+    #[allow(dead_code)]
     pub fn space(&self, workspace_id: &str) -> Option<&SpaceTag> {
         self.spaces.get(workspace_id)
     }
 
+    #[allow(dead_code)]
     pub fn panel(&self, key: &str) -> Option<&Panel> {
         self.panels.get(key)
     }
 
     /// True when any tab of `tab_ids` carries a known kind. Spaces without tagged tabs
     /// draw exactly as they do with the overlay off.
+    #[allow(dead_code)]
     pub fn space_is_tagged<'a>(&self, mut tab_ids: impl Iterator<Item = &'a str>) -> bool {
         tab_ids.any(|tab_id| {
             self.tabs

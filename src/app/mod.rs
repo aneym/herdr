@@ -104,6 +104,7 @@ impl AppPolicy {
 
 pub struct App {
     pub state: AppState,
+    pub(crate) factory_ui: crate::config::FactoryUiConfig,
     pub(crate) pixel_mouse_available: bool,
     pub(crate) terminal_runtimes: crate::terminal::TerminalRuntimeRegistry,
     pub event_tx: mpsc::Sender<AppEvent>,
@@ -638,6 +639,7 @@ impl App {
             custom_commands::EndpointCommandRegistry::new(&state.keybinds.custom_commands);
 
         let mut app = Self {
+            factory_ui: config.ui.factory.clone(),
             usage_sampler: usage::UsageSampler::default(),
             config_diagnostic_deadline: None,
             toast_deadline: None,
@@ -910,6 +912,7 @@ impl App {
                     &config.ui.window_title,
                 ));
 
+                self.factory_ui = config.ui.factory.clone();
                 self.loaded_host_cursor = config.ui.host_cursor;
                 self.state.mouse_scroll_lines = config.ui.mouse_scroll_lines();
                 self.state.right_click_passthrough_modifiers =
