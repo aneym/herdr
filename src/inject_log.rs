@@ -15,18 +15,36 @@ pub fn record(pane_id: &str, method: &str, text: &str) {
 }
 
 pub fn record_keys(pane_id: &str, method: &str, keys: &[String]) {
+    let text = text_from_keys(keys);
+    record_inner(pane_id, method, &text, true);
+}
+
+fn text_from_keys(keys: &[String]) -> String {
+    use crossterm::event::{KeyCode, KeyModifiers};
+
     let mut text = String::new();
     for key in keys {
-        let trimmed = key.trim();
-        match trimmed.to_ascii_lowercase().as_str() {
-            "enter" | "return" => text.push('\n'),
-            "tab" => text.push('\t'),
-            "space" => text.push(' '),
-            _ if trimmed.chars().count() == 1 => text.push_str(trimmed),
+        let Some(event) = crate::app::api_helpers::parse_api_key(key) else {
+            continue;
+        };
+        let modifiers = event.modifiers;
+        if !modifiers.is_empty() && modifiers != KeyModifiers::SHIFT {
+            continue;
+        }
+        match event.code {
+            KeyCode::Char(ch) => {
+                if modifiers == KeyModifiers::SHIFT && ch.is_alphabetic() {
+                    text.extend(ch.to_uppercase());
+                } else {
+                    text.push(ch);
+                }
+            }
+            KeyCode::Enter if modifiers.is_empty() => text.push('\n'),
+            KeyCode::Tab if modifiers.is_empty() => text.push('\t'),
             _ => {}
         }
     }
-    record_inner(pane_id, method, &text, true);
+    text
 }
 
 fn record_inner(pane_id: &str, method: &str, text: &str, allow_empty: bool) {
@@ -241,6 +259,68 @@ pub(crate) mod tests {
         prune(&dir, today).unwrap();
         assert!(!old.exists());
         assert!(recent.exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn parsed_printable_keys_match_sent_text() {
+        let keys = ["shift+h", "i", "comma"];
+        let text = text_from_keys(&keys.map(str::to_string));
+        assert_eq!(text, "Hi,");
+        let dir = test_dir();
+        write_record(&dir, "w1:p2", "pane.send_text", "Hi,").unwrap();
+        write_record_inner(&dir, "w1:p2", "pane.send_keys", &text, true).unwrap();
+        let path = dir.join(format!("{}.jsonl", OffsetDateTime::now_utc().date()));
+        let contents = fs::read_to_string(path).unwrap();
+        let rows: Vec<serde_json::Value> = contents
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["sha256"], rows[1]["sha256"]);
+        assert_eq!(
+            rows[1]["sha256"],
+            "bc50944723f014607ad612b6983944a7b9b77661663491a3991121c3d2885144"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn named_punctuation_follows_api_parser() {
+        let cases = [
+            ("comma", ','),
+            ("period", '.'),
+            ("minus", '-'),
+            ("slash", '/'),
+            ("backslash", '\\'),
+            ("quote", '\''),
+            ("double_quote", '"'),
+            ("semicolon", ';'),
+            ("colon", ':'),
+            ("percent", '%'),
+            ("ampersand", '&'),
+            ("backtick", '`'),
+            ("plus", '+'),
+        ];
+        for (key, expected) in cases {
+            assert_eq!(
+                text_from_keys(&[key.to_string()]),
+                expected.to_string(),
+                "{key}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_log_directory_is_rejected() {
+        let dir = test_dir();
+        let real = dir.join("real");
+        fs::create_dir(&real).unwrap();
+        let link = dir.join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(write_record(&link, "w1:p2", "pane.send_text", "hello").is_err());
+        assert!(fs::read_dir(&real).unwrap().next().is_none());
         fs::remove_dir_all(dir).unwrap();
     }
 
