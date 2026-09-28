@@ -743,6 +743,7 @@ pub(super) fn arrange_agent_hierarchy_with(
             index,
             0,
             false,
+            !adopt,
             tree,
             &mut pending,
             &children,
@@ -758,6 +759,7 @@ pub(super) fn arrange_agent_hierarchy_with(
             index,
             0,
             false,
+            !adopt,
             tree,
             &mut pending,
             &children,
@@ -802,6 +804,7 @@ fn push_subtree(
     index: usize,
     depth: u8,
     last_in_group: bool,
+    default_collapsed: bool,
     tree: &ClientTreeChrome,
     pending: &mut [Option<AgentRow>],
     children: &[Vec<usize>],
@@ -835,10 +838,11 @@ fn push_subtree(
     };
     // Folded when this client folded it locally or the server holds the fold
     // (`herdr agent group collapse`, or another client's chevron).
-    let expanded = !row.placement.collapsed
-        && group_key
-            .as_ref()
-            .is_none_or(|key| !tree.collapsed_agent_groups.contains(key));
+    // With groups folded by default, the set lists the groups opened by hand.
+    let listed = group_key
+        .as_ref()
+        .is_some_and(|key| tree.collapsed_agent_groups.contains(key));
+    let expanded = !row.placement.collapsed && (listed == default_collapsed);
     row.group.expanded = Some(expanded);
     row.group.group_key = group_key;
     row.group.server_collapsed = row.placement.collapsed;
@@ -857,6 +861,7 @@ fn push_subtree(
             child,
             depth.saturating_add(1),
             position == last,
+            default_collapsed,
             tree,
             pending,
             children,
@@ -1010,6 +1015,16 @@ impl ClientShellState {
     /// A fold this client made on its own (before the endpoint knew the
     /// method, or against an endpoint that still does not) stays in the local
     /// set, and opening the group clears both.
+    /// The tree with tabs shown folds every agent group until it is opened
+    /// by hand (Alex, 2026-09-28: lanes' workflows collapsed by default).
+    pub(super) fn groups_fold_by_default(&self) -> bool {
+        let tree = self
+            .tree_chrome
+            .get(&self.active_endpoint_id)
+            .unwrap_or(&self.tree_chrome_default);
+        tree_view_active(&self.config) && tree.show_tabs
+    }
+
     pub(super) fn toggle_agent_group(
         &mut self,
         hit: &AgentGroupHit,
@@ -1023,6 +1038,21 @@ impl ClientShellState {
                 },
             )
         };
+        if self.groups_fold_by_default() {
+            // Folded by default: the local set lists the groups opened by hand.
+            let tree = self.tree_chrome_mut();
+            if hit.expanded {
+                tree.collapsed_agent_groups.remove(&hit.key);
+            } else {
+                tree.collapsed_agent_groups.insert(hit.key.clone());
+            }
+            self.persist_chrome_preferences(outcome);
+            if !hit.expanded && hit.server_collapsed && self.supports_endpoint_method(&method(false)) {
+                self.push_endpoint_method(method(false), outcome);
+            }
+            outcome.repaint = true;
+            return;
+        }
         let endpoint_folds = self.supports_endpoint_method(&method(true));
         if hit.expanded {
             if endpoint_folds {
@@ -1064,7 +1094,8 @@ impl ClientShellState {
             own.or_else(|| agent_group_ancestors(snapshot, pane_id).into_iter().next())?;
         Some(AgentGroupHit {
             rect: Rect::default(),
-            expanded: !owner.group.collapsed && !tree.collapsed_agent_groups.contains(&key),
+            expanded: !owner.group.collapsed
+                && (tree.collapsed_agent_groups.contains(&key) == self.groups_fold_by_default()),
             key,
             owner_pane_id: owner.pane_id.clone(),
             server_collapsed: owner.group.collapsed,

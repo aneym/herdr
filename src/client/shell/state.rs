@@ -1474,13 +1474,18 @@ impl ClientShellState {
             .map(|(key, _)| key)
             .collect::<Vec<_>>();
 
+        let fold_by_default = self.groups_fold_by_default();
         let tree = self.tree_chrome_mut();
         let mut changed = tree.collapsed_spaces.remove(&workspace_id);
         if let Some(key) = tab_key {
             changed |= tree.collapsed_tabs.remove(&key);
         }
         for key in group_keys {
-            changed |= tree.collapsed_agent_groups.remove(&key);
+            changed |= if fold_by_default {
+                tree.collapsed_agent_groups.insert(key)
+            } else {
+                tree.collapsed_agent_groups.remove(&key)
+            };
         }
         changed
     }
