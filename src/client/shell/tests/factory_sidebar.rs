@@ -46,6 +46,7 @@ fn fixture() -> (ClientShellSnapshot, FactoryOverlay) {
         owner_pane_id: None,
         orphaned: false,
         group: Default::default(),
+        visible_in_profile: true,
     });
     let mut overlay = FactoryOverlay::default();
     for (id, kind, parent) in [
@@ -137,6 +138,7 @@ fn off_and_other_space_keep_the_stock_tree() {
         agent_status: AgentStatus::Idle,
         orchestrator_mode: false,
         tab_count: 1,
+        visible_in_profile: true,
     });
     snapshot.agents.push(ClientShellAgent {
         pane_id: "other-pane".into(),
@@ -156,6 +158,7 @@ fn off_and_other_space_keep_the_stock_tree() {
         owner_pane_id: None,
         orphaned: false,
         group: Default::default(),
+        visible_in_profile: true,
     });
     let ordinary = labels(&entries(&snapshot, None, &tree));
     let tagged = labels(&entries(&snapshot, Some(&overlay), &tree));

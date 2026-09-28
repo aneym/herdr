@@ -529,10 +529,10 @@ mod tests {
         let mut config = Config::default();
         config.ui.sidebar_max_width = u16::MAX;
         let shell = ClientShellConfig::from_config(&config);
-        let small = shell.layout(95, 22, false, 1, 200);
+        let small = shell.layout(95, 22, false, 1, 200, false);
         assert_eq!(small.sidebar.width, 55);
         assert!(small.pane_surface.width >= 40);
-        let large = shell.layout(260, 40, false, 1, 200);
+        let large = shell.layout(260, 40, false, 1, 200, false);
         assert_eq!(large.sidebar.width, 200);
         assert_eq!(shell.sidebar_width, config.ui.sidebar_width);
     }

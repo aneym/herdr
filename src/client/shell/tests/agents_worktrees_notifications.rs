@@ -1614,6 +1614,7 @@ fn finished_agent_sidebar_text(show_finished_dot: bool) -> String {
         owner_pane_id: None,
         orphaned: false,
         group: Default::default(),
+        visible_in_profile: true,
     }];
     let mut config = Config::default();
     config.ui.show_finished_dot = show_finished_dot;
