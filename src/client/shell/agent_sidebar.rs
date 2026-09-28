@@ -883,7 +883,7 @@ pub(super) fn render_agent_row(
             status_style,
             name_style,
             secondary,
-            secondary,
+            name_style,
             palette,
             (rect.width as usize).saturating_sub(prefix + trailing),
         ));

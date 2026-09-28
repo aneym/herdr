@@ -402,6 +402,8 @@ fn mobile_header_and_switcher_render_released_sections_and_stable_targets() {
         group: Default::default(),
     });
     projected.workspaces[0].agent_status = AgentStatus::Blocked;
+    let mut working = projected.clone();
+    working.agents[0].agent_status = AgentStatus::Working;
     state.set_snapshot(Box::new(projected));
     let mut projected_surface = surface();
     for cell in &mut projected_surface.frame.cells {
@@ -420,6 +422,24 @@ fn mobile_header_and_switcher_render_released_sections_and_stable_targets() {
     assert!(header_text.contains("blocked"));
     assert!(header_text.contains("switch"));
     assert_eq!(state.hits.mobile_switch, Rect::new(34, 0, 10, 2));
+
+    let mut working_header = Buffer::empty(Rect::new(0, 0, 44, 2));
+    super::super::mobile::render_mobile_header(
+        &mut working_header,
+        Rect::new(0, 0, 44, 2),
+        &working,
+        &state.config,
+        &ClientEndpointId::Local,
+        &mut ShellHitMap::default(),
+    );
+    assert!(working_header
+        .content
+        .chunks(44)
+        .nth(1)
+        .unwrap()
+        .windows(7)
+        .any(|segment| segment.iter().map(|cell| cell.symbol()).collect::<String>() == "working"
+            && segment.iter().all(|cell| cell.fg == state.config.palette.yellow)));
 
     let click = |rect: Rect| {
         RawInputEvent::Mouse(crossterm::event::MouseEvent {
