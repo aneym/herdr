@@ -1076,6 +1076,9 @@ pub struct UiConfig {
     _legacy_agent_panel_scope: Option<LegacyAgentPanelScopeConfig>,
     /// Agent status indicator style. Saved values are "dots" or "symbols". Default: "dots".
     pub status_indicators: StatusIndicatorStyle,
+    /// Draw the marker for an agent that finished and has not been read yet. Default: false.
+    /// An explicit `[ui.sidebar.agents.state_icons] idle_unseen` still draws.
+    pub show_finished_dot: bool,
     /// Expanded sidebar row composition.
     pub sidebar: SidebarConfig,
     /// Accent color for highlights, borders, and navigation UI.
@@ -1314,6 +1317,7 @@ impl Default for UiConfig {
             agent_close_focus: AgentCloseFocusConfig::Stock,
             _legacy_agent_panel_scope: None,
             status_indicators: StatusIndicatorStyle::Dots,
+            show_finished_dot: false,
             sidebar: SidebarConfig::default(),
             accent: "cyan".into(),
             toast: ToastConfig::default(),
@@ -1639,6 +1643,7 @@ status_indicators = "symbols"
         assert!(!default_config.ui.show_agent_labels_on_pane_borders);
         assert!(!default_config.ui.hide_tab_bar_when_single_tab);
         assert_eq!(default_config.ui.show_tab_status, ShowTabStatusConfig::Off);
+        assert!(!default_config.ui.show_finished_dot);
         assert_eq!(
             default_config.ui.attention_read,
             AttentionReadConfig::OnFocus
@@ -1659,6 +1664,7 @@ pane_gaps = true
 show_agent_labels_on_pane_borders = true
 hide_tab_bar_when_single_tab = true
 show_tab_status = "active"
+show_finished_dot = true
 attention_read = "on_unfocus"
 tab_bar_position = "bottom"
 tab_bar_right = [
@@ -1678,6 +1684,7 @@ tab_bar_right_separator = " · "
         assert!(config.ui.show_agent_labels_on_pane_borders);
         assert!(config.ui.hide_tab_bar_when_single_tab);
         assert_eq!(config.ui.show_tab_status, ShowTabStatusConfig::Active);
+        assert!(config.ui.show_finished_dot);
         assert_eq!(config.ui.attention_read, AttentionReadConfig::OnUnfocus);
         assert_eq!(config.ui.tab_bar_position, TabBarPositionConfig::Bottom);
         assert_eq!(config.ui.tab_bar_right.len(), 5);

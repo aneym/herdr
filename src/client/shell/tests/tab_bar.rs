@@ -267,3 +267,101 @@ fn tab_status_glyphs_widen_the_tab_and_render_after_its_label() {
         "tab text: {tab_text:?}"
     );
 }
+
+fn done_tab_glyphs(show_finished_dot: Option<bool>, state_icons: Option<&str>) -> Vec<String> {
+    let mut config = Config::default();
+    config.ui.show_tab_status = crate::config::ShowTabStatusConfig::All;
+    if let Some(show) = show_finished_dot {
+        config.ui.show_finished_dot = show;
+    }
+    if let Some(icons) = state_icons {
+        config.ui.sidebar.agents = toml::from_str(icons).unwrap();
+    }
+    let config = ClientShellConfig::from_config(&config);
+    let mut snapshot = tab_status_snapshot();
+    snapshot.tabs[0].agent_status = AgentStatus::Done;
+    snapshot.agents[0].agent_status = AgentStatus::Done;
+    crate::client::shell::render::tab_status_glyphs(&snapshot, &snapshot.tabs[0], &config)
+        .into_iter()
+        .map(|(glyph, _)| glyph.to_owned())
+        .collect()
+}
+
+#[test]
+fn finished_marker_is_hidden_from_tab_rows_by_default() {
+    // Only the plain shell pane's glyph remains; the finished agent draws nothing.
+    assert_eq!(done_tab_glyphs(None, None), ["·"]);
+    assert_eq!(done_tab_glyphs(Some(false), None), ["·"]);
+}
+
+#[test]
+fn finished_marker_draws_in_tab_rows_when_enabled() {
+    assert_eq!(done_tab_glyphs(Some(true), None), ["●", "·"]);
+}
+
+#[test]
+fn explicit_idle_unseen_icon_still_draws_with_the_finished_dot_off() {
+    assert_eq!(
+        done_tab_glyphs(Some(false), Some("state_icons = { idle_unseen = \"✓\" }")),
+        ["✓", "·"]
+    );
+}
+
+#[test]
+fn hiding_the_finished_marker_keeps_the_other_status_glyphs() {
+    use crate::api::schema::AgentStatus;
+    use crate::config::StatusIndicatorStyle;
+
+    // Expected glyphs are literals, not `status_icon`, so a changed glyph fails here.
+    let cases = [
+        (
+            StatusIndicatorStyle::Dots,
+            [
+                (AgentStatus::Blocked, "●"),
+                (AgentStatus::Working, "●"),
+                (AgentStatus::Idle, "○"),
+                (AgentStatus::Unknown, "·"),
+            ],
+            "●",
+        ),
+        (
+            StatusIndicatorStyle::Symbols,
+            [
+                (AgentStatus::Blocked, "×"),
+                (AgentStatus::Working, "◐"),
+                (AgentStatus::Idle, "○"),
+                (AgentStatus::Unknown, "·"),
+            ],
+            "✓",
+        ),
+    ];
+    for (style, others, done_glyph) in cases {
+        let mut hidden = Config::default();
+        hidden.ui.status_indicators = style;
+        let hidden = ClientShellConfig::from_config(&hidden);
+        assert!(!hidden.show_finished_dot);
+        assert_eq!(
+            crate::client::shell::resolved_status_icon(AgentStatus::Done, &hidden).trim(),
+            "",
+            "{style:?} Done hidden"
+        );
+        let mut shown = Config::default();
+        shown.ui.status_indicators = style;
+        shown.ui.show_finished_dot = true;
+        let shown = ClientShellConfig::from_config(&shown);
+        assert_eq!(
+            crate::client::shell::resolved_status_icon(AgentStatus::Done, &shown),
+            done_glyph,
+            "{style:?} Done shown"
+        );
+        for (status, glyph) in others {
+            for config in [&hidden, &shown] {
+                assert_eq!(
+                    crate::client::shell::resolved_status_icon(status, config),
+                    glyph,
+                    "{style:?} {status:?}"
+                );
+            }
+        }
+    }
+}

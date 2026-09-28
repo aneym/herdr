@@ -33,6 +33,7 @@ pub(crate) struct ClientShellConfig {
     pub(super) attention_read: crate::config::AttentionReadConfig,
     pub(super) show_tab_status: crate::config::ShowTabStatusConfig,
     pub(super) status_indicators: crate::config::StatusIndicatorStyle,
+    pub(super) show_finished_dot: bool,
     pub(super) sound_enabled: bool,
     pub(super) toast_delivery: crate::config::ToastDelivery,
     pub(super) toast_delay_seconds: u64,
