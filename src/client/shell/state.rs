@@ -1091,6 +1091,7 @@ pub(crate) struct ClientShellState {
     /// Latest factory overlay document from the focused endpoint (fork, 2026-09-28).
     pub(super) factory_overlay: Option<std::sync::Arc<crate::factory_overlay::FactoryOverlay>>,
     /// Open detail panel beside the sidebar, if any.
+    #[allow(dead_code)]
     pub(super) detail_panel: Option<DetailPanelState>,
     pub(super) tab_press: Option<ClientTabPress>,
     pub(super) collapsed_groups: HashSet<String>,
@@ -2347,6 +2348,7 @@ impl ClientShellState {
 
 impl ClientShellState {
     /// The factory overlay document, only when `[ui.factory] enabled` is on.
+    #[allow(dead_code)]
     pub(super) fn factory_overlay(&self) -> Option<&crate::factory_overlay::FactoryOverlay> {
         if !self.config.factory.enabled {
             return None;

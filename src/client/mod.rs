@@ -2017,6 +2017,18 @@ async fn run_client_loop(
                                 }
                                 continue;
                             }
+                            Ok(endpoint::EndpointControlMessage::FactoryOverlay(projection)) => {
+                                if state.shell.as_mut().is_some_and(|shell| {
+                                    shell.set_endpoint_factory_overlay_for_generation(
+                                        &endpoint_id,
+                                        generation,
+                                        projection,
+                                    )
+                                }) {
+                                    state.request_repaint();
+                                }
+                                continue;
+                            }
                             Ok(endpoint::EndpointControlMessage::AgentCompletions(projection)) => {
                                 if let Some(shell) = state.shell.as_mut() {
                                     shell.set_endpoint_agent_completions(

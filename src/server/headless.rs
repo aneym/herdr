@@ -75,6 +75,7 @@ use crate::server::terminal_attach::paste_payload_for_runtime;
 mod bootstrap;
 mod client_views;
 mod endpoint_requests;
+mod factory_overlay;
 mod lifecycle;
 mod native_graphics;
 mod notifications;
@@ -201,6 +202,8 @@ pub struct HeadlessServer {
     popup_owner_tab_id: Option<String>,
     /// Process-local identity used to reject shell replacements from an earlier server boot.
     client_shell_boot_id: String,
+    factory_overlay_poller: factory_overlay::FactoryOverlayPoller,
+    next_factory_overlay_poll: Option<Instant>,
     /// Outer window title last pushed, paired with the client that received it.
     /// Keying on the client means a newly attached terminal is written to even
     /// when the title itself has not changed, without every code path that
@@ -350,6 +353,8 @@ impl HeadlessServer {
                     .unwrap_or_default()
                     .as_nanos()
             ),
+            factory_overlay_poller: Default::default(),
+            next_factory_overlay_poll: None,
             sent_window_title: None,
             api_window_title: None,
             server_keybindings,
@@ -583,6 +588,11 @@ impl HeadlessServer {
                 )
                 .map(|deadline| deadline.min(now + CLIENT_ACCEPT_POLL_INTERVAL))
                 .or(Some(now + CLIENT_ACCEPT_POLL_INTERVAL));
+            let next_deadline = self
+                .next_factory_overlay_poll
+                .filter(|_| self.app.factory_ui.enabled)
+                .map(|pending| next_deadline.map_or(pending, |current| current.min(pending)))
+                .or(next_deadline);
             let next_deadline = self
                 .pending_alt_screen_reads
                 .iter()
@@ -1960,6 +1970,20 @@ impl HeadlessServer {
                 }
                 self.send_to_client(client_id, completion_message);
                 self.send_to_client(client_id, snapshot_message);
+                if self.factory_overlay_poller.revision > 0 {
+                    match crate::protocol::endpoint::factory_overlay_message(
+                        &self.client_shell_boot_id,
+                        self.factory_overlay_poller.revision,
+                        self.factory_overlay_poller.current.as_deref(),
+                    ) {
+                        Ok(message) => {
+                            self.send_to_client(client_id, message);
+                        }
+                        Err(err) => {
+                            warn!(client_id, err = %err, "failed to encode factory overlay")
+                        }
+                    }
+                }
                 if surface_active {
                     self.foreground_client_id = Some(client_id);
                 }
@@ -3201,6 +3225,29 @@ impl HeadlessServer {
     /// Similar to the former App scheduler but without terminal resize polling.
     fn handle_scheduled_tasks_headless(&mut self, now: Instant, geometry_dirty: bool) -> bool {
         let mut changed = false;
+
+        if !self.app.factory_ui.enabled {
+            // Drop any stale deadline so a disabled overlay never wakes the loop.
+            self.next_factory_overlay_poll = None;
+        } else if self
+            .next_factory_overlay_poll
+            .is_none_or(|deadline| now >= deadline)
+        {
+            self.next_factory_overlay_poll = Some(now + Duration::from_secs(2));
+            let path = self.app.factory_ui.overlay_path();
+            if self.factory_overlay_poller.poll(path.as_deref()).is_some() {
+                match crate::protocol::endpoint::factory_overlay_message(
+                    &self.client_shell_boot_id,
+                    self.factory_overlay_poller.revision,
+                    self.factory_overlay_poller.current.as_deref(),
+                ) {
+                    Ok(message) => {
+                        self.send_to_client_shells(message);
+                    }
+                    Err(err) => warn!(err = %err, "failed to encode factory overlay"),
+                }
+            }
+        }
 
         // PORT-0.9: sidebar spinner animation is client-shell chrome in 0.9.
         // (docs/fork/port-0.9/PORT.md)

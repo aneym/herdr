@@ -9,6 +9,14 @@ pub(crate) struct ClientEndpointAgentViewProjection {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct ClientEndpointFactoryOverlay {
+    generation: Option<u64>,
+    boot_id: String,
+    revision: u64,
+    overlay: Option<std::sync::Arc<crate::factory_overlay::FactoryOverlay>>,
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct ClientShellEndpoint {
     pub(crate) endpoint_id: ClientEndpointId,
     pub(crate) label: String,
@@ -21,6 +29,7 @@ pub(crate) struct ClientShellEndpoint {
     pub(crate) agent_view_projection: Option<ClientEndpointAgentViewProjection>,
     pending_agent_view_projection: Option<ClientEndpointAgentViewProjection>,
     pub(crate) agent_view_projection_supported: bool,
+    pub(crate) factory_overlay: Option<ClientEndpointFactoryOverlay>,
     pub(crate) methods: Option<HashSet<String>>,
 }
 
@@ -82,6 +91,7 @@ impl ClientShellState {
                     .and_then(|endpoint| endpoint.pending_agent_view_projection.clone()),
                 agent_view_projection_supported: previous
                     .is_some_and(|endpoint| endpoint.agent_view_projection_supported),
+                factory_overlay: previous.and_then(|endpoint| endpoint.factory_overlay.clone()),
                 methods: previous.and_then(|endpoint| endpoint.methods.clone()),
             });
         }
@@ -97,6 +107,7 @@ impl ClientShellState {
                 .any(|endpoint| &endpoint.endpoint_id == endpoint_id)
         });
         self.endpoints = next;
+        self.sync_active_factory_overlay();
     }
 
     pub(crate) fn select_unavailable_local(&mut self) {
@@ -104,6 +115,7 @@ impl ClientShellState {
         self.active_endpoint_id = ClientEndpointId::Local;
         self.mode = ClientShellMode::Terminal;
         self.snapshot = None;
+        self.sync_active_factory_overlay();
         self.graphics.set_scope("local:unavailable");
         self.reconcile_input_source();
     }
@@ -128,6 +140,10 @@ impl ClientShellState {
             endpoint.agent_view_projection = None;
             endpoint.pending_agent_view_projection = None;
             endpoint.agent_view_projection_supported = false;
+            endpoint.factory_overlay = None;
+        }
+        if endpoint_id == &self.active_endpoint_id {
+            self.factory_overlay = None;
         }
     }
 
@@ -236,6 +252,7 @@ impl ClientShellState {
             self.pending_pane_surface = None;
         }
         self.apply_active_snapshot(snapshot, generation);
+        self.sync_active_factory_overlay();
         if switching_endpoint {
             // The aggregate agent list belongs to the client, not one endpoint.
             self.agent_scroll = agent_scroll;
@@ -438,6 +455,66 @@ impl ClientShellState {
         *slot = Some(next);
     }
 
+    pub(crate) fn set_endpoint_factory_overlay_for_generation(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
+        generation: u64,
+        message: crate::protocol::endpoint::EndpointFactoryOverlay,
+    ) -> bool {
+        let Some(endpoint) = self
+            .endpoints
+            .iter_mut()
+            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+        else {
+            return false;
+        };
+        if endpoint.snapshot_generation != Some(generation)
+            || endpoint
+                .snapshot
+                .as_deref()
+                .is_none_or(|snapshot| snapshot.boot_id != message.boot_id)
+        {
+            return false;
+        }
+        if endpoint.factory_overlay.as_ref().is_some_and(|current| {
+            current.generation == Some(generation)
+                && current.boot_id == message.boot_id
+                && current.revision >= message.revision
+        }) {
+            return false;
+        }
+        endpoint.factory_overlay = Some(ClientEndpointFactoryOverlay {
+            generation: Some(generation),
+            boot_id: message.boot_id,
+            revision: message.revision,
+            overlay: message.overlay.map(std::sync::Arc::new),
+        });
+        if endpoint_id == &self.active_endpoint_id {
+            return self.sync_active_factory_overlay();
+        }
+        false
+    }
+
+    fn sync_active_factory_overlay(&mut self) -> bool {
+        let overlay = self
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.endpoint_id == self.active_endpoint_id)
+            .and_then(|endpoint| {
+                let snapshot = endpoint.snapshot.as_deref()?;
+                let projection = endpoint.factory_overlay.as_ref()?;
+                (projection.generation == endpoint.snapshot_generation
+                    && projection.boot_id == snapshot.boot_id)
+                    .then(|| projection.overlay.clone())
+                    .flatten()
+            });
+        if self.factory_overlay.as_deref() == overlay.as_deref() {
+            return false;
+        }
+        self.factory_overlay = overlay;
+        true
+    }
+
     pub(crate) fn endpoint_agent_view(
         endpoint: &ClientShellEndpoint,
     ) -> Option<&Result<Option<crate::api::schema::AgentViewSetParams>, ()>> {
@@ -630,6 +707,19 @@ impl ClientShellState {
         endpoint.agent_recency = recency;
         endpoint.snapshot_generation = generation;
         endpoint.snapshot = Some(snapshot);
+        if endpoint.factory_overlay.as_ref().is_some_and(|projection| {
+            projection.generation != generation
+                || endpoint
+                    .snapshot
+                    .as_deref()
+                    .is_some_and(|snapshot| projection.boot_id != snapshot.boot_id)
+        }) {
+            endpoint.factory_overlay = None;
+        }
+        if endpoint_id == &self.active_endpoint_id {
+            self.sync_active_factory_overlay();
+        }
+        let endpoint = &mut self.endpoints[index];
         let pending_matches =
             endpoint
                 .pending_agent_view_projection
@@ -790,6 +880,7 @@ pub(super) fn local_endpoint() -> ClientShellEndpoint {
         agent_view_projection: None,
         pending_agent_view_projection: None,
         agent_view_projection_supported: false,
+        factory_overlay: None,
         methods: None,
     }
 }

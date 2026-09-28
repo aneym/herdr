@@ -77,6 +77,53 @@ fn state_with_remote() -> (ClientShellState, ClientEndpointId) {
 }
 
 #[test]
+fn factory_overlay_control_updates_active_endpoint_and_ignores_stale_revisions() {
+    let (mut state, remote) = state_with_remote();
+    let overlay =
+        crate::factory_overlay::parse(br#"{"version":1,"tabs":{"remote-tab":{"kind":"lane"}}}"#)
+            .unwrap();
+    let crate::protocol::ServerMessage::EndpointControl { kind, data } =
+        crate::protocol::endpoint::factory_overlay_message("remote-boot", 2, Some(&overlay))
+            .unwrap()
+    else {
+        panic!("expected factory overlay control");
+    };
+    let crate::client::endpoint::EndpointControlMessage::FactoryOverlay(decoded) =
+        crate::client::endpoint::decode_endpoint_control(&kind, &data).unwrap()
+    else {
+        panic!("expected decoded factory overlay");
+    };
+    assert!(!state.set_endpoint_factory_overlay_for_generation(&remote, 4, decoded.clone()));
+    // The remote snapshot in this fixture has no connection generation; install one to
+    // exercise the same generation boundary as a live endpoint.
+    let mut remote_snapshot = snapshot();
+    remote_snapshot.boot_id = "remote-boot".into();
+    state.set_endpoint_snapshot_for_generation(&remote, 4, Box::new(remote_snapshot));
+    assert!(state.activate_endpoint_projection(&remote));
+    assert!(state.set_endpoint_factory_overlay_for_generation(&remote, 4, decoded));
+    assert_eq!(state.factory_overlay.as_deref(), Some(&overlay));
+
+    let stale = crate::protocol::endpoint::EndpointFactoryOverlay {
+        boot_id: "remote-boot".into(),
+        revision: 1,
+        overlay: None,
+    };
+    assert!(!state.set_endpoint_factory_overlay_for_generation(&remote, 4, stale));
+    assert_eq!(state.factory_overlay.as_deref(), Some(&overlay));
+    assert!(state.activate_endpoint_projection(&ClientEndpointId::Local));
+    assert!(state.factory_overlay.is_none());
+    assert!(state.activate_endpoint_projection(&remote));
+    assert_eq!(state.factory_overlay.as_deref(), Some(&overlay));
+    let clear = crate::protocol::endpoint::EndpointFactoryOverlay {
+        boot_id: "remote-boot".into(),
+        revision: 3,
+        overlay: None,
+    };
+    assert!(state.set_endpoint_factory_overlay_for_generation(&remote, 4, clear));
+    assert!(state.factory_overlay.is_none());
+}
+
+#[test]
 fn machine_diagnostic_badge_reopens_notice_without_collapsing_machine() {
     let (mut state, id) = state_with_remote();
     state.set_endpoint_status(&id, ClientEndpointStatus::Attention);

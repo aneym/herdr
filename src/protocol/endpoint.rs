@@ -29,6 +29,8 @@ pub const HEALTH_PING_KIND: &str = "endpoint.health.ping.v1";
 pub const HEALTH_PONG_KIND: &str = "endpoint.health.pong.v1";
 pub const AGENT_VIEW_PROJECTION_CAPABILITY: &str = "agent_view_projection";
 pub const AGENT_VIEW_PROJECTION_KIND: &str = "endpoint.agent-view.v1";
+pub const FACTORY_OVERLAY_CAPABILITY: &str = "factory_overlay";
+pub const FACTORY_OVERLAY_KIND: &str = "endpoint.factory-overlay.v1";
 pub const AGENT_COMPLETIONS_CAPABILITY: &str = "agent_completions";
 pub const AGENT_COMPLETIONS_KIND: &str = "endpoint.agent-completions.v1";
 
@@ -88,6 +90,14 @@ pub struct EndpointAgentViewProjection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EndpointFactoryOverlay {
+    pub boot_id: String,
+    pub revision: u64,
+    #[serde(default)]
+    pub overlay: Option<crate::factory_overlay::FactoryOverlay>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EndpointServerWelcome {
     pub generation: u32,
     pub server_version: String,
@@ -135,6 +145,21 @@ pub fn agent_view_projection_message(
     })
 }
 
+pub fn factory_overlay_message(
+    boot_id: &str,
+    revision: u64,
+    overlay: Option<&crate::factory_overlay::FactoryOverlay>,
+) -> serde_json::Result<ServerMessage> {
+    Ok(ServerMessage::EndpointControl {
+        kind: FACTORY_OVERLAY_KIND.into(),
+        data: serde_json::to_string(&EndpointFactoryOverlay {
+            boot_id: boot_id.to_owned(),
+            revision,
+            overlay: overlay.cloned(),
+        })?,
+    })
+}
+
 impl EndpointClientHello {
     pub fn supports_required_codecs(&self) -> bool {
         self.snapshot_codecs
@@ -169,6 +194,7 @@ impl EndpointServerWelcome {
                 PRESENTATION_EFFECTS_FENCE_CAPABILITY.into(),
                 HEALTH_CHECK_CAPABILITY.into(),
                 AGENT_VIEW_PROJECTION_CAPABILITY.into(),
+                FACTORY_OVERLAY_CAPABILITY.into(),
                 AGENT_COMPLETIONS_CAPABILITY.into(),
             ],
             error: None,
@@ -331,6 +357,28 @@ mod tests {
     }
 
     #[test]
+    fn factory_overlay_control_round_trips_and_defaults_missing_overlay() {
+        let overlay =
+            crate::factory_overlay::parse(br#"{"version":1,"tabs":{"tab":{"kind":"lane"}}}"#)
+                .unwrap();
+        for document in [Some(&overlay), None] {
+            let ServerMessage::EndpointControl { kind, data } =
+                factory_overlay_message("boot", 8, document).unwrap()
+            else {
+                panic!("factory overlay should use endpoint control");
+            };
+            assert_eq!(kind, FACTORY_OVERLAY_KIND);
+            let decoded: EndpointFactoryOverlay = serde_json::from_str(&data).unwrap();
+            assert_eq!(decoded.boot_id, "boot");
+            assert_eq!(decoded.revision, 8);
+            assert_eq!(decoded.overlay.as_ref(), document);
+        }
+        let legacy: EndpointFactoryOverlay =
+            serde_json::from_str(r#"{"boot_id":"old","revision":2}"#).unwrap();
+        assert_eq!(legacy.overlay, None);
+    }
+
+    #[test]
     fn snapshot_json_tolerates_future_fields_and_command_actions() {
         let mut snapshot = match snapshot_message(&snapshot()).unwrap() {
             ServerMessage::EndpointControl { data, .. } => {
@@ -378,6 +426,7 @@ mod tests {
                 PRESENTATION_EFFECTS_FENCE_CAPABILITY.to_string(),
                 HEALTH_CHECK_CAPABILITY.to_string(),
                 AGENT_VIEW_PROJECTION_CAPABILITY.to_string(),
+                FACTORY_OVERLAY_CAPABILITY.to_string(),
                 AGENT_COMPLETIONS_CAPABILITY.to_string(),
             ]
         );
