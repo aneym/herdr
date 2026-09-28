@@ -69,6 +69,7 @@ pub(super) struct ClientShellLayout {
     pub tab_bar: Rect,
     pub mobile_header: Rect,
     pub pane_surface: Rect,
+    pub detail_panel: Rect,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,6 +102,7 @@ pub(super) struct ShellHitMap {
     pub(super) workspace_scroll_metrics: Option<crate::pane::ScrollMetrics>,
     pub(super) workspace_max_scroll: usize,
     pub(super) tabs: Vec<(Rect, String)>,
+    pub(super) detail_rows: Vec<(Rect, String)>,
     pub(super) panes: Vec<PaneHit>,
     pub(super) popup: Option<PaneHit>,
     pub(super) pane_splits: Vec<PaneSplitHit>,
@@ -1062,6 +1064,7 @@ pub(super) struct DetailPanelState {
     pub(super) focused: bool,
     /// Scroll offset in rows.
     pub(super) scroll: u16,
+    pub(super) exceptions_only: bool,
 }
 
 pub(crate) struct ClientShellState {
@@ -1093,7 +1096,9 @@ pub(crate) struct ClientShellState {
     /// Open detail panel beside the sidebar, if any.
     #[allow(dead_code)] // Read by the detail panel piece.
     pub(super) detail_panel: Option<DetailPanelState>,
+    pub(super) detail_panel_press: Option<(u16, u16)>,
     pub(super) tab_press: Option<ClientTabPress>,
+    pub(super) tree_tab_press: Option<ClientTabPress>,
     pub(super) collapsed_groups: HashSet<String>,
     pub(super) remote_collapsed_groups: HashMap<ClientEndpointId, HashSet<String>>,
     pub(super) tree_chrome: HashMap<ClientEndpointId, super::tree::ClientTreeChrome>,
@@ -1293,7 +1298,9 @@ impl ClientShellState {
             tree_space_press: None,
             factory_overlay: None,
             detail_panel: None,
+            detail_panel_press: None,
             tab_press: None,
+            tree_tab_press: None,
             collapsed_groups: preferences.collapsed_groups.into_iter().collect(),
             remote_collapsed_groups,
             tree_chrome,
@@ -1625,6 +1632,7 @@ impl ClientShellState {
             self.sidebar_collapsed,
             self.focused_tab_count(),
             self.sidebar_width,
+            self.detail_panel.is_some() && self.factory_overlay().is_some(),
         )
     }
 
@@ -1646,6 +1654,7 @@ impl ClientShellState {
         self.workspace_press = None;
         self.tree_space_press = None;
         self.tab_press = None;
+        self.tree_tab_press = None;
         self.workspace_scroll = 0;
         self.agent_scroll = 0;
         self.tab_scroll = 0;

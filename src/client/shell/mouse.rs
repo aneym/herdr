@@ -657,6 +657,74 @@ impl ClientShellState {
         }
         self.update_link_hover(mouse, outcome);
         let point = (mouse.column, mouse.row);
+        if self.detail_panel.is_some() && self.factory_overlay().is_none() {
+            self.detail_panel = None;
+            self.detail_panel_press = None;
+            self.invalidate_pane_surface();
+            outcome.resize = true;
+            outcome.repaint = true;
+        }
+        if self.detail_panel.is_some() && self.factory_overlay().is_some() {
+            let area = self
+                .last_composed_size
+                .map(|(cols, rows)| self.layout(cols, rows).detail_panel)
+                .unwrap_or_default();
+            if super::contains(area, point) {
+                match mouse.kind {
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        self.detail_panel_press = Some(point);
+                        if let Some(panel) = self.detail_panel.as_mut() {
+                            panel.focused = true;
+                        }
+                        outcome.repaint = true;
+                    }
+                    MouseEventKind::Up(MouseButton::Left) => {
+                        if self.detail_panel_press.take() == Some(point) {
+                            if let Some(target) = self
+                                .hits
+                                .detail_rows
+                                .iter()
+                                .find(|(rect, _)| super::contains(*rect, point))
+                                .map(|(_, target)| target.clone())
+                            {
+                                self.focus_detail_target(&target, outcome);
+                            }
+                        }
+                    }
+                    MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                        if let Some(panel) = self.detail_panel.as_mut() {
+                            panel.selected = None;
+                            panel.scroll = if mouse.kind == MouseEventKind::ScrollUp {
+                                panel.scroll.saturating_sub(
+                                    self.config.mouse_scroll_lines.min(u16::MAX as usize) as u16,
+                                )
+                            } else {
+                                panel.scroll.saturating_add(
+                                    self.config.mouse_scroll_lines.min(u16::MAX as usize) as u16,
+                                )
+                            };
+                            outcome.repaint = true;
+                        }
+                    }
+                    MouseEventKind::Drag(MouseButton::Left) => {
+                        self.detail_panel_press = None;
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+                self.detail_panel_press = None;
+                if self.last_composed_size.is_some_and(|(cols, rows)| {
+                    super::contains(self.layout(cols, rows).pane_surface, point)
+                }) {
+                    if let Some(panel) = self.detail_panel.as_mut() {
+                        panel.focused = false;
+                    }
+                    outcome.repaint = true;
+                }
+            }
+        }
         if self.mode == ClientShellMode::Navigate
             && self.workspace_preview_action_blocked()
             && self.overlay.is_none()
@@ -1261,6 +1329,16 @@ impl ClientShellState {
                 }
                 return;
             }
+            if self.tree_tab_press.is_some() {
+                if self
+                    .tree_tab_press
+                    .as_ref()
+                    .is_some_and(|press| point != (press.start_column, press.start_row))
+                {
+                    self.tree_tab_press = None;
+                }
+                return;
+            }
             if let Some(press) = self.tab_press.as_ref() {
                 let delta = mouse
                     .column
@@ -1284,6 +1362,7 @@ impl ClientShellState {
                 self.workspace_press = None;
                 self.tree_space_press = None;
                 self.tab_press = None;
+                self.tree_tab_press = None;
                 match drag {
                     ClientChromeDrag::TreeSpace {
                         source_workspace_id,
@@ -1416,6 +1495,16 @@ impl ClientShellState {
                     outcome,
                 );
                 self.focus_factory_space_target(&press.workspace_id, outcome);
+                return;
+            }
+            if let Some(press) = self.tree_tab_press.take() {
+                if point == (press.start_column, press.start_row) {
+                    self.change_detail_panel(
+                        crate::factory_overlay::tab_panel_key(&press.tab_id),
+                        false,
+                        outcome,
+                    );
+                }
                 return;
             }
             if let Some(press) = self.tab_press.take() {
@@ -2009,6 +2098,7 @@ impl ClientShellState {
                 let previous_pane_click = self.last_pane_click.take();
                 self.workspace_press = None;
                 self.tab_press = None;
+                self.tree_tab_press = None;
                 self.chrome_drag = None;
                 if super::contains(self.hits.sidebar_divider, point)
                     && !super::contains(self.hits.sidebar_toggle, point)
@@ -2626,10 +2716,27 @@ impl ClientShellState {
             return true;
         }
         match tab_id {
-            Some(tab_id) => self.push_endpoint_method(
-                crate::api::schema::Method::TabFocus(crate::api::schema::TabTarget { tab_id }),
-                outcome,
-            ),
+            Some(tab_id) => {
+                let tagged = self
+                    .factory_overlay()
+                    .and_then(|overlay| overlay.tab(&tab_id))
+                    .is_some_and(|tag| tag.kind != crate::factory_overlay::TabKind::Unknown);
+                if tagged {
+                    self.tree_tab_press = Some(ClientTabPress {
+                        tab_id,
+                        workspace_id,
+                        start_column: mouse.column,
+                        start_row: mouse.row,
+                    });
+                } else {
+                    self.push_endpoint_method(
+                        crate::api::schema::Method::TabFocus(crate::api::schema::TabTarget {
+                            tab_id,
+                        }),
+                        outcome,
+                    );
+                }
+            }
             // A space header press arms a possible reorder drag; the focus
             // happens on release when none started, mirroring the workspace rows.
             None => {
