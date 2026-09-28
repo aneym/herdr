@@ -527,8 +527,10 @@ fn agent_focus(args: &[String]) -> std::io::Result<i32> {
 }
 
 fn agent_attach(args: &[String]) -> std::io::Result<i32> {
-    let (target, takeover) =
-        match super::parse_attach_target(args, "usage: herdr agent attach <target> [--takeover]") {
+    let (target, takeover, no_escape) = match super::parse_attach_target(
+        args,
+        "usage: herdr agent attach <target> [--takeover] [--no-escape]",
+    ) {
             Ok(parsed) => parsed,
             Err(code) => return Ok(code),
         };
@@ -542,7 +544,7 @@ fn agent_attach(args: &[String]) -> std::io::Result<i32> {
         eprintln!("agent attach failed: response did not include terminal_id");
         return Ok(1);
     };
-    crate::client::run_terminal_attach(terminal_id.to_owned(), takeover)?;
+    crate::client::run_terminal_attach(terminal_id.to_owned(), takeover, no_escape)?;
     Ok(0)
 }
 

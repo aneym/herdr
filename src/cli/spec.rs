@@ -398,7 +398,8 @@ fn agent_command() -> Command {
                 .about("Attach directly to an agent terminal")
                 .override_usage("herdr agent attach <TARGET> [OPTIONS]")
                 .arg(required("target", "TARGET"))
-                .arg(flag("takeover")),
+                .arg(flag("takeover"))
+                .arg(flag("no-escape")),
         )
         .subcommand(
             Command::new("start")
@@ -767,7 +768,8 @@ fn terminal_command() -> Command {
             Command::new("attach")
                 .about("Attach directly to a terminal stream")
                 .arg(required("terminal_id", "TERMINAL_ID"))
-                .arg(flag("takeover")),
+                .arg(flag("takeover"))
+                .arg(flag("no-escape")),
         )
         .subcommand(
             Command::new("session")

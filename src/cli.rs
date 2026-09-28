@@ -533,14 +533,14 @@ fn session_delete(args: &[String]) -> std::io::Result<i32> {
 }
 
 fn terminal_attach(args: &[String]) -> std::io::Result<i32> {
-    let (terminal_id, takeover) = match parse_attach_target(
+    let (terminal_id, takeover, no_escape) = match parse_attach_target(
         args,
-        "usage: herdr terminal attach <terminal_id> [--takeover]",
+        "usage: herdr terminal attach <terminal_id> [--takeover] [--no-escape]",
     ) {
         Ok(parsed) => parsed,
         Err(code) => return Ok(code),
     };
-    crate::client::run_terminal_attach(terminal_id, takeover)?;
+    crate::client::run_terminal_attach(terminal_id, takeover, no_escape)?;
     Ok(0)
 }
 
@@ -720,15 +720,20 @@ fn terminal_title(args: &[String]) -> std::io::Result<i32> {
     }
 }
 
-pub(super) fn parse_attach_target(args: &[String], usage: &str) -> Result<(String, bool), i32> {
+pub(super) fn parse_attach_target(
+    args: &[String],
+    usage: &str,
+) -> Result<(String, bool, bool), i32> {
     let Some(target) = args.first() else {
         eprintln!("{usage}");
         return Err(2);
     };
     let mut takeover = false;
+    let mut no_escape = false;
     for arg in &args[1..] {
         match arg.as_str() {
             "--takeover" => takeover = true,
+            "--no-escape" => no_escape = true,
             "help" | "--help" | "-h" => {
                 eprintln!("{usage}");
                 return Err(0);
@@ -739,7 +744,7 @@ pub(super) fn parse_attach_target(args: &[String], usage: &str) -> Result<(Strin
             }
         }
     }
-    Ok((target.clone(), takeover))
+    Ok((target.clone(), takeover, no_escape))
 }
 
 pub(super) fn print_response(response: &serde_json::Value) -> std::io::Result<i32> {
