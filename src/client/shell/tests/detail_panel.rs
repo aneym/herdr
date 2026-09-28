@@ -122,7 +122,15 @@ fn detail_panel_renders_sections_actions_alignment_and_truncation() {
 fn overview_key_esc_filter_and_enter_target() {
     let mut state = ready();
     let open = key(&mut state, KeyCode::Char('o'), KeyModifiers::ALT);
-    assert!(open.resize && state.detail_panel.as_ref().unwrap().focused);
+    assert!(open.resize && !state.detail_panel.as_ref().unwrap().focused);
+    // Clicking a non-row spot inside the panel gives it keyboard focus.
+    state.last_composed_size = Some((110, 30));
+    let panel = state.layout(110, 30).detail_panel;
+    click(&mut state, panel.x + 3, 2);
+    assert!(state.detail_panel.is_some());
+    assert!(state.detail_panel.as_ref().unwrap().focused);
+    key(&mut state, KeyCode::Down, KeyModifiers::NONE);
+    key(&mut state, KeyCode::Up, KeyModifiers::NONE);
     assert_eq!(state.detail_panel.as_ref().unwrap().selected, Some(0));
     let filtered = key(&mut state, KeyCode::Char('e'), KeyModifiers::NONE);
     assert!(filtered.requests.is_empty());
@@ -146,9 +154,47 @@ fn overview_key_esc_filter_and_enter_target() {
         &mut ClientShellInput::default(),
     );
     assert!(!state.detail_panel.as_ref().unwrap().focused);
-    let esc = key(&mut state, KeyCode::Esc, KeyModifiers::NONE);
-    assert!(!esc.requests.is_empty());
+    // Unfocused: the pane keeps every key except Esc, which closes the panel.
+    let other = key(&mut state, KeyCode::Char('x'), KeyModifiers::NONE);
+    assert!(!other.requests.is_empty());
     assert!(state.detail_panel.is_some());
+    let esc = key(&mut state, KeyCode::Esc, KeyModifiers::NONE);
+    assert!(esc.requests.is_empty() && esc.resize);
+    assert!(state.detail_panel.is_none());
+}
+
+#[test]
+fn alt_o_defaults_on_with_overlay_and_passes_through_when_off() {
+    let mut state = ready();
+    state.config.keybinds.keybinds.toggle_factory_overview = Default::default();
+    key(&mut state, KeyCode::Char('o'), KeyModifiers::ALT);
+    assert_eq!(state.detail_panel.as_ref().unwrap().key, "overview");
+    key(&mut state, KeyCode::Char('o'), KeyModifiers::ALT);
+    assert!(state.detail_panel.is_none());
+
+    state.config.factory.enabled = false;
+    let passed = key(&mut state, KeyCode::Char('o'), KeyModifiers::ALT);
+    assert!(state.detail_panel.is_none());
+    assert!(!passed.requests.is_empty());
+}
+
+#[test]
+fn missing_panel_shows_title_and_no_details_yet() {
+    let mut state = ready();
+    state.set_pane_surface(surface());
+    state.change_detail_panel(
+        crate::factory_overlay::tab_panel_key("tab_1"),
+        false,
+        &mut ClientShellInput::default(),
+    );
+    let rows = frame_rows(&state.compose(110, 30).expect("composed shell"));
+    assert!(rows.iter().any(|line| line.contains("no details yet")));
+    assert!(rows.iter().any(|line| line.contains("esc")));
+    state.detail_panel = None;
+    state.change_detail_panel("tab:gone".into(), false, &mut ClientShellInput::default());
+    let rows = frame_rows(&state.compose(110, 30).expect("composed shell"));
+    assert!(rows.iter().any(|line| line.contains("Factory overview")));
+    assert!(rows.iter().any(|line| line.contains("no details yet")));
 }
 
 #[test]
@@ -211,7 +257,9 @@ fn detail_panel_click_focus_scroll_and_pane_click() {
     state.set_pane_surface(surface());
     state.change_detail_panel("overview".into(), false, &mut ClientShellInput::default());
     let frame = state.compose(110, 30).expect("composed shell");
-    assert!(frame_rows(&frame).iter().any(|line| line.contains("Factory overview")));
+    assert!(frame_rows(&frame)
+        .iter()
+        .any(|line| line.contains("Factory overview")));
     let panel = state.layout(110, 30).detail_panel;
     let point = (panel.x + 2, panel.y + 2);
     let focus = click(&mut state, point.0, point.1);
@@ -219,20 +267,27 @@ fn detail_panel_click_focus_scroll_and_pane_click() {
     assert!(state.detail_panel.as_ref().unwrap().focused);
     let pane = state.layout(110, 30).pane_surface;
     state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
-        kind: MouseEventKind::Down(MouseButton::Left), column: pane.x + 1,
-        row: pane.y + 1, modifiers: KeyModifiers::NONE,
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: pane.x + 1,
+        row: pane.y + 1,
+        modifiers: KeyModifiers::NONE,
     })]);
     assert!(!state.detail_panel.as_ref().unwrap().focused);
     let before = state.detail_panel.as_ref().unwrap().scroll;
     state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
-        kind: MouseEventKind::ScrollDown, column: point.0,
-        row: point.1, modifiers: KeyModifiers::NONE,
+        kind: MouseEventKind::ScrollDown,
+        column: point.0,
+        row: point.1,
+        modifiers: KeyModifiers::NONE,
     })]);
     assert!(state.detail_panel.as_ref().unwrap().scroll > before);
     state.compose(110, 30).expect("repaint");
     let target = state.hits.detail_rows[0].0;
     let selected = click(&mut state, target.x + 1, target.y);
-    assert!(selected.actions.iter().any(|action| format!("{action:?}").contains("PaneFocus")));
+    assert!(selected
+        .actions
+        .iter()
+        .any(|action| format!("{action:?}").contains("PaneFocus")));
     assert!(state.detail_panel.is_none());
 }
 
@@ -255,4 +310,40 @@ fn overview_key_is_opt_in() {
             crate::input::KeybindAction::ToggleFactoryOverview
         ))
     ));
+}
+
+#[test]
+fn alt_o_leaves_typing_with_the_live_pane() {
+    let mut state = ready();
+    key(&mut state, KeyCode::Char('o'), KeyModifiers::ALT);
+    assert!(!state.detail_panel.as_ref().unwrap().focused);
+    let typed = key(&mut state, KeyCode::Char('x'), KeyModifiers::NONE);
+    assert!(!typed.requests.is_empty());
+    let text = state.handle_raw_events(vec![RawInputEvent::Text(crate::input::TextCommit::new("x"))]);
+    assert!(!text.requests.is_empty());
+    assert!(state.detail_panel.is_some());
+}
+
+#[test]
+fn alt_o_fallback_does_not_override_another_binding() {
+    let mut state = ready();
+    state.config.keybinds.keybinds.toggle_factory_overview = Default::default();
+    state.config.keybinds.keybinds.detach =
+        crate::config::ActionKeybinds::from_labels(&["alt+o".to_owned()]).expect("binding");
+    let outcome = key(&mut state, KeyCode::Char('o'), KeyModifiers::ALT);
+    assert!(outcome.detach);
+    assert!(state.detail_panel.is_none());
+}
+
+#[test]
+fn panel_width_is_fixed_at_88_columns() {
+    let mut state = ready();
+    state.toggle_factory_overview(&mut ClientShellInput::default());
+    let layout = state.layout(88, 30);
+    assert_eq!(layout.detail_panel.width, state.config.factory.panel_width);
+    assert_eq!(layout.detail_panel.width, 46);
+    assert_eq!(
+        layout.pane_surface.x,
+        layout.detail_panel.x + layout.detail_panel.width
+    );
 }

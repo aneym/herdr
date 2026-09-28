@@ -442,7 +442,9 @@ impl ClientShellConfig {
             sidebar_width.clamp(min, max)
         }
         .min(cols.saturating_sub(1));
-        let available = cols.saturating_sub(sidebar_width.saturating_add(20));
+        // Fixed width: only shrinks when fewer than 10 columns would be left
+        // for the panes, and disappears when it cannot keep a usable 24.
+        let available = cols.saturating_sub(sidebar_width.saturating_add(10));
         let panel_width = if panel_open {
             let width = self.factory.panel_width.min(available);
             if width >= 24 {

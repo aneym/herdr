@@ -352,9 +352,11 @@ impl ClientShellState {
     }
 
     pub(super) fn toggle_factory_overview(&mut self, outcome: &mut ClientShellInput) {
+        // Opens unfocused: the current pane keeps the keyboard (only Esc closes
+        // the panel). A click inside the panel is what gives it focus.
         self.change_detail_panel(
             factory_overlay::OVERVIEW_PANEL_KEY.to_owned(),
-            true,
+            false,
             outcome,
         );
     }
@@ -383,6 +385,24 @@ impl ClientShellState {
         key: &crate::input::TerminalKey,
         outcome: &mut ClientShellInput,
     ) -> bool {
+        // Alt-O is the default overview key while the overlay is on, nothing is
+        // bound to the action and no other action already owns the key.
+        if self.overlay.is_none()
+            && self.factory_overlay().is_some()
+            && self
+                .config
+                .keybinds
+                .keybinds
+                .toggle_factory_overview
+                .bindings
+                .is_empty()
+            && key.code == KeyCode::Char('o')
+            && key.modifiers == KeyModifiers::ALT
+            && crate::input::resolve_direct_binding(&self.config.keybinds.keybinds, key).is_none()
+        {
+            self.toggle_factory_overview(outcome);
+            return true;
+        }
         if self.detail_panel.is_none() {
             return false;
         }
@@ -391,13 +411,6 @@ impl ClientShellState {
             self.invalidate_pane_surface();
             outcome.resize = true;
             outcome.repaint = true;
-            return false;
-        }
-        if !self
-            .detail_panel
-            .as_ref()
-            .is_some_and(|panel| panel.focused)
-        {
             return false;
         }
         if matches!(
@@ -409,12 +422,21 @@ impl ClientShellState {
             self.toggle_factory_overview(outcome);
             return true;
         }
-        if key.code == KeyCode::Esc {
+        // Esc closes the panel whether or not it holds keyboard focus; every
+        // other key stays with the live pane until the panel is focused.
+        if key.code == KeyCode::Esc && key.modifiers == KeyModifiers::NONE {
             self.detail_panel = None;
             self.invalidate_pane_surface();
             outcome.resize = true;
             outcome.repaint = true;
             return true;
+        }
+        if !self
+            .detail_panel
+            .as_ref()
+            .is_some_and(|panel| panel.focused)
+        {
+            return false;
         }
         let doc =
             self.factory_overlay()

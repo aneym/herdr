@@ -715,9 +715,9 @@ impl ClientShellState {
             }
             if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
                 self.detail_panel_press = None;
-                if self.last_composed_size.is_some_and(|(cols, rows)|
-                    super::contains(self.layout(cols, rows).pane_surface, point))
-                {
+                if self.last_composed_size.is_some_and(|(cols, rows)| {
+                    super::contains(self.layout(cols, rows).pane_surface, point)
+                }) {
                     if let Some(panel) = self.detail_panel.as_mut() {
                         panel.focused = false;
                     }
