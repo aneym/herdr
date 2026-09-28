@@ -1091,7 +1091,7 @@ pub(crate) struct ClientShellState {
     /// Latest factory overlay document from the focused endpoint (fork, 2026-09-28).
     pub(super) factory_overlay: Option<std::sync::Arc<crate::factory_overlay::FactoryOverlay>>,
     /// Open detail panel beside the sidebar, if any.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Read by the detail panel piece.
     pub(super) detail_panel: Option<DetailPanelState>,
     pub(super) tab_press: Option<ClientTabPress>,
     pub(super) collapsed_groups: HashSet<String>,
@@ -1495,6 +1495,18 @@ impl ClientShellState {
             .into_iter()
             .map(|(key, _)| key)
             .collect::<Vec<_>>();
+        // A space the factory overlay tags keeps its folds when focus lands on it:
+        // its space and tab headers stay visible, so nothing needs revealing and a
+        // collapse must survive focus moves.
+        let keep_folds = self.factory_overlay().is_some_and(|overlay| {
+            overlay.space_is_tagged(
+                snapshot
+                    .tabs
+                    .iter()
+                    .filter(|tab| tab.workspace_id == workspace_id)
+                    .map(|tab| tab.tab_id.as_str()),
+            )
+        });
         let tree = self
             .tree_chrome
             .get(&self.active_endpoint_id)
@@ -1507,8 +1519,9 @@ impl ClientShellState {
             && !super::tree::pane_is_tab_header(snapshot, tree, &self.config, pane_id);
         let fold_by_default = self.groups_fold_by_default();
         let tree = self.tree_chrome_mut();
-        let mut changed = tree.show_spaces && tree.collapsed_spaces.remove(&workspace_id);
-        if tab_hides_pane {
+        let mut changed =
+            !keep_folds && tree.show_spaces && tree.collapsed_spaces.remove(&workspace_id);
+        if !keep_folds && tab_hides_pane {
             if let Some(key) = tab_key {
                 changed |= tree.collapsed_tabs.remove(&key);
             }

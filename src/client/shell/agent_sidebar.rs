@@ -10,6 +10,7 @@ use ratatui::{
 
 use super::*;
 
+#[derive(Clone)]
 pub(super) struct AgentRow {
     pub(super) pane_id: String,
     pub(super) workspace_id: String,
@@ -97,12 +98,15 @@ pub(super) fn ordered_agent_pane_ids(
         .collect()
 }
 
-pub(super) fn render_agent_panel(
+/// Sidebar entry point; `overlay` is the factory document when `[ui.factory]` is on.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn render_agent_panel_with_overlay(
     buffer: &mut Buffer,
     area: Rect,
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     tree: &super::tree::ClientTreeChrome,
+    overlay: Option<&crate::factory_overlay::FactoryOverlay>,
     agent_scroll: &mut usize,
     hits: &mut ShellHitMap,
 ) {
@@ -115,7 +119,6 @@ pub(super) fn render_agent_panel(
     ) {
         return;
     }
-
     let rows = agent_rows(snapshot, config, None);
     let (rows, automations) = super::tree::partition_automations(snapshot, config, rows);
     let tree_tabs = super::tree::tree_view_active(config)
@@ -124,7 +127,7 @@ pub(super) fn render_agent_panel(
     let rows = super::tree::arrange_agent_hierarchy_with(snapshot, tree, rows, !tree_tabs);
     let mut entries =
         if super::tree::tree_view_active(config) && snapshot.agent_view_label.is_none() {
-            super::tree::tree_list_entries(snapshot, tree, rows)
+            super::tree::tree_list_entries_with_overlay(snapshot, tree, rows, overlay)
         } else {
             rows.into_iter()
                 .map(super::tree::AgentPanelListEntry::Agent)
@@ -247,6 +250,71 @@ fn render_panel_list_entry(
             );
             hits.automations_header = rect;
         }
+        AgentPanelListEntry::FactorySection {
+            label,
+            right,
+            indent,
+        } => {
+            let style = Style::default()
+                .fg(config.palette.subtext0)
+                .add_modifier(Modifier::DIM);
+            put_text(
+                buffer,
+                rect.x.saturating_add(1 + u16::from(*indent)),
+                rect.y,
+                rect.width.saturating_sub(1 + u16::from(*indent)),
+                label,
+                style,
+            );
+            let width = (display_width(right) as u16).min(rect.width);
+            put_text(
+                buffer,
+                rect.right().saturating_sub(width),
+                rect.y,
+                width,
+                right,
+                style,
+            );
+        }
+        AgentPanelListEntry::FactoryTab(row) => render_factory_tab(buffer, rect, row, config, hits),
+        AgentPanelListEntry::FactoryBackground {
+            workspace_id,
+            count,
+            collapsed,
+            indent,
+        } => {
+            let style = Style::default()
+                .fg(config.palette.overlay0)
+                .add_modifier(Modifier::DIM);
+            put_text(
+                buffer,
+                rect.x.saturating_add(1 + u16::from(*indent)),
+                rect.y,
+                rect.width.saturating_sub(1 + u16::from(*indent)),
+                &format!("background {count}"),
+                style,
+            );
+            let chevron = tree_header_chevron_rect(rect);
+            put_text(
+                buffer,
+                chevron.x,
+                rect.y,
+                chevron.width,
+                if *collapsed { "▸ " } else { "▾ " },
+                style,
+            );
+            hits.tree_headers.push(TreeHeaderHit {
+                rect,
+                chevron,
+                plus: Rect::default(),
+                pin: Rect::default(),
+                group: None,
+                workspace_id: workspace_id.clone(),
+                tab_id: None,
+                key: format!("factory-background:{workspace_id}"),
+                pinned: false,
+            });
+        }
         AgentPanelListEntry::SpaceHeader(header) => {
             render_tree_header(buffer, rect, header, true, config, hits);
         }
@@ -277,6 +345,136 @@ fn render_panel_list_entry(
             hits.tree_hidden_header = rect;
         }
     }
+}
+
+fn render_factory_tab(
+    buffer: &mut Buffer,
+    rect: Rect,
+    row: &super::tree::FactoryTabRow,
+    config: &ClientShellConfig,
+    hits: &mut ShellHitMap,
+) {
+    let palette = &config.palette;
+    let header = &row.header;
+    if header.active {
+        buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
+    }
+    let mut right = rect.right();
+    if header.collapsible {
+        let slot = tree_header_chevron_rect(rect);
+        put_text(
+            buffer,
+            slot.x,
+            rect.y,
+            slot.width,
+            if header.collapsed { "▸ " } else { "▾ " },
+            Style::default().fg(palette.accent),
+        );
+        right = slot.x;
+    }
+    // Place the non-negotiable badge at the edge; phase yields space before it.
+    if let Some(badge) = row.badge.as_deref() {
+        let width = (display_width(badge) as u16).min(right.saturating_sub(rect.x));
+        right = right.saturating_sub(width);
+        let color = match row.attention {
+            crate::factory_overlay::Attention::Act => palette.red,
+            crate::factory_overlay::Attention::Warn => palette.peach,
+            crate::factory_overlay::Attention::None => palette.subtext0,
+        };
+        put_text(
+            buffer,
+            right,
+            rect.y,
+            width,
+            badge,
+            Style::default().fg(color),
+        );
+        if right > rect.x {
+            right -= 1;
+        }
+    }
+    let start = rect.x.saturating_add(1 + u16::from(header.indent));
+    let icon = resolved_status_icon(row.status, config);
+    let icon_width = display_width(icon) as u16;
+    put_text(
+        buffer,
+        start,
+        rect.y,
+        icon_width.min(rect.right().saturating_sub(start)),
+        icon,
+        Style::default().fg(status_color(row.status, palette)),
+    );
+    let name_x = start.saturating_add(icon_width + 1);
+    let name = header.label.as_str();
+    let name_width = display_width(name) as u16;
+    let summary = row.summary.as_deref().unwrap_or("");
+    let phase = row.phase.as_deref().unwrap_or("");
+    let dim = Style::default()
+        .fg(palette.overlay0)
+        .add_modifier(Modifier::DIM);
+    let available = right.saturating_sub(name_x);
+    // Leave at least one cell for the name. On narrow rows the phase yields
+    // first, then the summary; the badge already occupies its fixed edge.
+    let desired_metadata = (display_width(summary) + display_width(phase)) as u16
+        + u16::from(!summary.is_empty())
+        + u16::from(!phase.is_empty());
+    let name_limit = available
+        .saturating_sub(desired_metadata)
+        .max(u16::from(available > 0));
+    let metadata_room = available.saturating_sub(name_limit);
+    let summary_width = (display_width(summary) as u16)
+        .min(metadata_room.saturating_sub(u16::from(!summary.is_empty())));
+    let phase_width = (display_width(phase) as u16).min(metadata_room.saturating_sub(
+        summary_width + u16::from(!summary.is_empty()) + u16::from(!phase.is_empty()),
+    ));
+    let metadata_width =
+        summary_width + phase_width + u16::from(summary_width > 0) + u16::from(phase_width > 0);
+    let style = if row.idle || row.background {
+        Style::default()
+            .fg(palette.overlay0)
+            .add_modifier(Modifier::DIM)
+    } else if header.active {
+        Style::default()
+            .fg(palette.text)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+            .fg(palette.subtext0)
+            .add_modifier(Modifier::BOLD)
+    };
+    put_text(
+        buffer,
+        name_x,
+        rect.y,
+        name_width.min(name_limit),
+        name,
+        style,
+    );
+    let mut trailing_x = right.saturating_sub(metadata_width);
+    if summary_width > 0 {
+        trailing_x += 1;
+        put_text(buffer, trailing_x, rect.y, summary_width, summary, dim);
+        trailing_x += summary_width;
+    }
+    if phase_width > 0 {
+        trailing_x += 1;
+        put_text(buffer, trailing_x, rect.y, phase_width, phase, dim);
+    }
+    hits.tree_headers.push(TreeHeaderHit {
+        rect,
+        chevron: if header.collapsible {
+            tree_header_chevron_rect(rect)
+        } else {
+            Rect::default()
+        },
+        plus: Rect::default(),
+        pin: Rect::default(),
+        group: None,
+        workspace_id: header.workspace_id.clone(),
+        tab_id: header.tab_id.clone(),
+        key: header.key.clone(),
+        pinned: false,
+    });
 }
 
 fn render_tree_header(
@@ -315,7 +513,11 @@ fn render_tree_header(
     let group = header.group_chevron();
     // Space headers reserve extra cells for the pin and new-tab plus.
     let trailing_width = if is_space { 10 } else { 6 }
-        + group.map(|group| group.summary_width() as u16).unwrap_or(0);
+        + group.map(|group| group.summary_width() as u16).unwrap_or(0)
+        + header
+            .space_attention
+            .as_ref()
+            .map_or(0, |(_, summary)| 2 + display_width(summary) as u16);
     put_text(
         buffer,
         rect.x.saturating_add(prefix),
@@ -418,6 +620,29 @@ fn render_tree_header(
         x = x.saturating_add(width);
     }
 
+    if is_space {
+        if let Some((attention, summary)) = &header.space_attention {
+            let color = match attention {
+                crate::factory_overlay::Attention::Act => palette.red,
+                crate::factory_overlay::Attention::Warn => palette.peach,
+                crate::factory_overlay::Attention::None => palette.overlay0,
+            };
+            let x = rect
+                .right()
+                .saturating_sub(10 + display_width(summary) as u16);
+            put_text(buffer, x, rect.y, 2, "● ", Style::default().fg(color));
+            put_text(
+                buffer,
+                x.saturating_add(2),
+                rect.y,
+                display_width(summary) as u16,
+                summary,
+                Style::default()
+                    .fg(palette.overlay0)
+                    .add_modifier(Modifier::DIM),
+            );
+        }
+    }
     hits.tree_headers.push(TreeHeaderHit {
         rect,
         chevron: if header.collapsible {

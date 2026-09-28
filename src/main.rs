@@ -24,6 +24,8 @@ mod config;
 mod copy_mode;
 mod detect;
 mod events;
+// Parse, panel and path helpers are read by the server poll and detail panel pieces.
+#[allow(dead_code)]
 mod factory_overlay;
 mod ghostty;
 mod handoff_runtime;

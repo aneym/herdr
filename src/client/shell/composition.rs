@@ -54,7 +54,14 @@ impl ClientShellState {
                 && self.endpoint_status(&self.active_endpoint_id)
                     == Some(ClientEndpointStatus::Online)
         });
+        let factory_overlay = self
+            .config
+            .factory
+            .enabled
+            .then_some(self.factory_overlay.as_deref())
+            .flatten();
         let mut render_state = render::ShellRenderState {
+            factory_overlay,
             machine_diagnostics: &self.machine_diagnostics,
             endpoints: &self.endpoints,
             active_endpoint_id: &self.active_endpoint_id,
@@ -215,6 +222,12 @@ impl ClientShellState {
             snapshot,
             &self.config,
             render::ShellRenderState {
+                factory_overlay: self
+                    .config
+                    .factory
+                    .enabled
+                    .then_some(self.factory_overlay.as_deref())
+                    .flatten(),
                 machine_diagnostics: &self.machine_diagnostics,
                 endpoints: &self.endpoints,
                 active_endpoint_id: &self.active_endpoint_id,

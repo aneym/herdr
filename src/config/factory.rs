@@ -27,6 +27,7 @@ impl Default for FactoryUiConfig {
 
 impl FactoryUiConfig {
     /// The overlay file path with a leading `~/` expanded, or None when polling is off.
+    #[allow(dead_code)] // Read by the server poll piece.
     pub fn overlay_path(&self) -> Option<std::path::PathBuf> {
         let raw = self.overlay_file.trim();
         if raw.is_empty() {
