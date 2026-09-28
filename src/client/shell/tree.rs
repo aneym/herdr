@@ -144,10 +144,9 @@ impl TreeHeaderGroup {
     /// Width of the summary drawn before the chevron: `+N ` while folded,
     /// nothing while open.
     pub(super) fn summary_width(&self) -> usize {
-        if self.expanded || self.hidden_children == 0 {
-            return 0;
-        }
-        format!("+{} ", self.hidden_children).len()
+        // No `+N` on a folded header (Alex, 2026-09-28: too loud at the top
+        // level). The chevron takes the hidden rows' colour instead.
+        0
     }
 }
 
@@ -401,17 +400,18 @@ pub(super) fn tree_list_entries(
         // An owned agent sits under its owner's tab, not its own: a workflow a
         // lane spawned in a separate tab nests under the lane instead of opening
         // a tab header of its own. Rows arrive depth-first, so the tab each
-        // depth resolved to is the parent's tab for the next depth. Children of
-        // an orchestrator group are adopted, not owned, and keep their own tab.
-        let mut tab_at_depth = Vec::<(String, bool)>::new();
+        // depth resolved to is the parent's tab for the next depth. The tree
+        // with tabs shown arranges without orchestrator adoption, so every
+        // parent edge here is a real owner or an explicit `under`.
+        let mut tab_at_depth = Vec::<String>::new();
         for row in workspace_rows {
             let depth = usize::from(row.group.depth);
             tab_at_depth.truncate(depth);
             let tab_id = match depth.checked_sub(1).and_then(|d| tab_at_depth.get(d)) {
-                Some((parent_tab, false)) => parent_tab.clone(),
-                _ => row.tab_id.clone(),
+                Some(parent_tab) => parent_tab.clone(),
+                None => row.tab_id.clone(),
             };
-            tab_at_depth.push((tab_id.clone(), row.group.group_count.is_some()));
+            tab_at_depth.push(tab_id.clone());
             by_tab
                 .entry(tab_id.clone())
                 .or_insert_with(|| {
@@ -486,6 +486,9 @@ pub(super) fn tree_list_entries(
             for row in &mut tab_rows {
                 row.indent = agent_indent;
                 if let Some((_, lead_depth)) = &lead {
+                    // Under a header that stands for the chat, the chat's
+                    // children hang off the header's own column.
+                    row.indent = space_indent;
                     row.group.depth = row.group.depth.saturating_sub(*lead_depth);
                 }
                 // The headers already name the space and tab; drop the duplicate
