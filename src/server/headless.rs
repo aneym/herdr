@@ -590,6 +590,7 @@ impl HeadlessServer {
                 .or(Some(now + CLIENT_ACCEPT_POLL_INTERVAL));
             let next_deadline = self
                 .next_factory_overlay_poll
+                .filter(|_| self.app.factory_ui.enabled)
                 .map(|pending| next_deadline.map_or(pending, |current| current.min(pending)))
                 .or(next_deadline);
             let next_deadline = self
@@ -3225,7 +3226,10 @@ impl HeadlessServer {
     fn handle_scheduled_tasks_headless(&mut self, now: Instant, geometry_dirty: bool) -> bool {
         let mut changed = false;
 
-        if self
+        if !self.app.factory_ui.enabled {
+            // Drop any stale deadline so a disabled overlay never wakes the loop.
+            self.next_factory_overlay_poll = None;
+        } else if self
             .next_factory_overlay_poll
             .is_none_or(|deadline| now >= deadline)
         {

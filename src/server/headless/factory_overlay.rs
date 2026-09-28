@@ -29,6 +29,7 @@ impl FactoryOverlayPoller {
         let metadata = match fs::metadata(path) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                self.log_error(format!("{}: {error}", path.display()));
                 self.last_seen = None;
                 return self.publish(None, false);
             }
@@ -133,5 +134,22 @@ mod tests {
         assert_eq!(poller.revision, 3);
         assert!(poller.poll(Some(&path)).is_none());
         fs::remove_dir(&dir).unwrap();
+    }
+
+    #[test]
+    fn factory_overlay_poller_records_missing_file_once() {
+        let path = std::env::temp_dir().join(format!(
+            "herdr-factory-missing-{}-{}.json",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut poller = FactoryOverlayPoller::default();
+        assert!(poller.poll(Some(&path)).is_none());
+        assert!(poller.poll(Some(&path)).is_none());
+        assert_eq!(poller.logged_errors.len(), 1);
+        assert_eq!(poller.revision, 0);
     }
 }
