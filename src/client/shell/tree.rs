@@ -230,6 +230,12 @@ pub(super) enum AgentPanelListEntry {
         indent: u8,
     },
     FactoryTab(FactoryTabRow),
+    FactoryHost {
+        name: String,
+        summary: Option<String>,
+        attention: crate::factory_overlay::Attention,
+        indent: u8,
+    },
     FactoryBackground {
         workspace_id: String,
         count: usize,
@@ -247,6 +253,7 @@ pub(super) struct FactoryTabRow {
     pub(super) summary: Option<String>,
     pub(super) attention: crate::factory_overlay::Attention,
     pub(super) idle: bool,
+    pub(super) devloop: bool,
     pub(super) background: bool,
 }
 
@@ -774,11 +781,7 @@ fn append_factory_space(
     if !orchestrators.is_empty() {
         out.push(AgentPanelListEntry::FactorySection {
             label: "ORCHESTRATOR",
-            right: orchestrators
-                .first()
-                .and_then(|tab| overlay.tab(&tab.tab_id))
-                .and_then(|tag| tag.summary.clone())
-                .unwrap_or_default(),
+            right: String::new(),
             indent,
         });
         for orchestrator in &orchestrators {
@@ -907,6 +910,21 @@ fn append_factory_space(
             }
         }
     }
+    if !overlay.hosts.is_empty() {
+        out.push(AgentPanelListEntry::FactorySection {
+            label: "HOSTS",
+            right: String::new(),
+            indent,
+        });
+        for host in &overlay.hosts {
+            out.push(AgentPanelListEntry::FactoryHost {
+                name: host.name.clone(),
+                summary: host.summary.clone(),
+                attention: host.attention,
+                indent,
+            });
+        }
+    }
     let ordinary = tabs
         .iter()
         .copied()
@@ -967,11 +985,14 @@ fn factory_row(
         status,
         badge: tag.and_then(|tag| tag.badge.clone()),
         phase: tag.and_then(|tag| tag.phase.clone()),
-        summary: (collapsed)
-            .then(|| tag.and_then(|tag| tag.summary.clone()))
-            .flatten(),
+        summary: tag.and_then(|tag| {
+            (collapsed || matches!(tag.kind, crate::factory_overlay::TabKind::Orchestrator | crate::factory_overlay::TabKind::Lane))
+                .then(|| tag.summary.clone())
+                .flatten()
+        }),
         attention: tag.map_or(crate::factory_overlay::Attention::None, |tag| tag.attention),
         idle: tag.is_some_and(|tag| tag.idle),
+        devloop: tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Lane && tag.devloop),
         background,
     })
 }

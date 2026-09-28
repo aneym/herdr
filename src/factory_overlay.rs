@@ -35,6 +35,8 @@ pub struct FactoryOverlay {
     pub generated_at: Option<String>,
     /// Keyed by herdr tab id, e.g. "w5H:t9E".
     pub tabs: BTreeMap<String, TabTag>,
+    /// Host rows in the factory sidebar footer.
+    pub hosts: Vec<HostRow>,
     /// Keyed by herdr workspace id, e.g. "w5H".
     pub spaces: BTreeMap<String, SpaceTag>,
     /// Keyed by panel key: "overview" or "tab:<tab id>".
@@ -94,8 +96,18 @@ pub struct TabTag {
     pub attention: Attention,
     /// An idle lane draws dimmed and stays in place.
     pub idle: bool,
+    /// Mark a lane running the local development loop.
+    pub devloop: bool,
     /// A finished tab moves to the background group.
     pub done: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HostRow {
+    pub name: String,
+    pub summary: Option<String>,
+    pub attention: Attention,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -218,7 +230,11 @@ mod tests {
     fn parses_a_minimal_document() {
         let overlay = parse(br#"{"version":1}"#).unwrap();
         assert!(overlay.tabs.is_empty());
+        assert!(overlay.hosts.is_empty());
         assert!(overlay.panels.is_empty());
+        let legacy = parse(br#"{"version":1,"tabs":{"lane":{"kind":"lane"}}}"#).unwrap();
+        assert!(!legacy.tabs["lane"].devloop);
+        assert!(legacy.hosts.is_empty());
     }
 
     #[test]
@@ -265,6 +281,17 @@ mod tests {
         assert!(overlay.space_is_tagged(["w5H:t9", "w5H:t2"].into_iter()));
         assert!(!overlay.space_is_tagged(["w5H:t4", "w5H:t9"].into_iter()));
         assert_eq!(tab_panel_key("w5H:t2"), "tab:w5H:t2");
+    }
+
+    #[test]
+    fn hosts_and_devloop_round_trip() {
+        let json = br#"{"version":1,"tabs":{"lane":{"kind":"lane","devloop":true}},"hosts":[{"name":"PC","summary":"3/28 live","attention":"warn"}]}"#;
+        let parsed = parse(json).unwrap();
+        assert!(parsed.tabs["lane"].devloop);
+        assert_eq!(parsed.hosts[0].summary.as_deref(), Some("3/28 live"));
+        assert_eq!(parsed.hosts[0].attention, Attention::Warn);
+        let encoded = serde_json::to_vec(&parsed).unwrap();
+        assert_eq!(parse(&encoded).unwrap(), parsed);
     }
 
     #[test]

@@ -2,7 +2,7 @@ use super::*;
 use crate::client::shell::tree::{
     tree_list_entries_with_overlay, AgentPanelListEntry, ClientTreeChrome,
 };
-use crate::factory_overlay::{Attention, FactoryOverlay, SpaceTag, TabKind, TabTag};
+use crate::factory_overlay::{Attention, FactoryOverlay, HostRow, SpaceTag, TabKind, TabTag};
 
 fn fixture() -> (ClientShellSnapshot, FactoryOverlay) {
     let mut snapshot = snapshot();
@@ -97,6 +97,7 @@ fn labels(entries: &[AgentPanelListEntry]) -> Vec<String> {
                 format!("tag:{}:{}", row.header.label, row.header.indent)
             }
             AgentPanelListEntry::FactoryBackground { count, .. } => format!("background:{count}"),
+            AgentPanelListEntry::FactoryHost { name, .. } => format!("host:{name}"),
             AgentPanelListEntry::TabHeader(row) => format!("tab:{}", row.label),
             AgentPanelListEntry::Agent(row) => format!("agent:{}", row.pane_id),
             _ => "other".into(),
@@ -500,6 +501,57 @@ fn composed_sidebar_text(config: Config, overlay: FactoryOverlay) -> String {
         .map(|row| row.iter().map(|cell| cell.symbol.as_str()).collect::<String>())
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn rendered_factory_rows(snapshot: &ClientShellSnapshot, overlay: &FactoryOverlay) -> (Vec<String>, ShellHitMap, Buffer) {
+    let area = Rect::new(0, 0, 25, 40);
+    let mut buffer = Buffer::empty(area);
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    let mut hits = ShellHitMap::default();
+    let mut scroll = 0;
+    crate::client::shell::agent_sidebar::render_agent_panel_with_overlay(
+        &mut buffer, area, snapshot, &config, &ClientTreeChrome::default(),
+        Some(overlay), &mut scroll, &mut hits,
+    );
+    let rows = (0..area.height)
+        .map(|y| (0..area.width).map(|x| buffer[(x, y)].symbol().to_owned()).collect())
+        .collect();
+    (rows, hits, buffer)
+}
+
+#[test]
+fn factory_rows_fit_chevron_glyph_summary_devloop_and_hosts_at_25_columns() {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| !matches!(tab.tab_id.as_str(), "orphan" | "advisor" | "done" | "plain-a" | "plain-b"));
+    snapshot.agents.clear();
+    let long_name = "abcdefghijklmnopqrst";
+    overlay.tabs.get_mut("lane-a").unwrap().name = Some(long_name.into());
+    overlay.tabs.get_mut("lane-a").unwrap().devloop = true;
+    overlay.tabs.get_mut("lane-b").unwrap().idle = false;
+    overlay.tabs.get_mut("lane-b").unwrap().name = Some("no status".into());
+    snapshot.tabs.iter_mut().find(|tab| tab.tab_id == "lane-b").unwrap().agent_status = AgentStatus::Unknown;
+    overlay.hosts = vec![
+        HostRow { name: "Studio".into(), summary: Some("load 48/16".into()), attention: Attention::Warn },
+        HostRow { name: "PC".into(), summary: Some("3/28 live".into()), attention: Attention::None },
+        HostRow { name: "extraordinarily-long-host".into(), summary: Some("0/4".into()), attention: Attention::None },
+    ];
+    let (rows, hits, buffer) = rendered_factory_rows(&snapshot, &overlay);
+    let lane = rows.iter().find(|row| row.contains("2 wf")).unwrap_or_else(|| panic!("{rows:?}"));
+    assert!(lane.contains("▸ ● abcdefghijk… ⟳"), "{lane:?}");
+    assert!(lane.trim_end().ends_with("2 wf"), "{lane:?}");
+    assert!(rows.iter().any(|row| row.contains("● no status")), "{rows:?}");
+    assert!(rows.iter().any(|row| row.contains("ORCHESTRATOR")));
+    assert!(rows.iter().any(|row| row.contains("● orch") && row.trim_end().ends_with("inbox 3")), "{rows:?}");
+    let hosts_y = rows.iter().position(|row| row.contains("HOSTS")).unwrap();
+    assert!(rows[hosts_y + 1].contains("Studio") && rows[hosts_y + 1].trim_end().ends_with("load 48/16"));
+    assert!(rows[hosts_y + 2].contains("PC") && rows[hosts_y + 2].trim_end().ends_with("3/28 live"));
+    assert!(rows[hosts_y + 3].contains('…') && rows[hosts_y + 3].trim_end().ends_with("0/4"));
+    let warn_x = rows[hosts_y + 1].find("load").unwrap() as u16;
+    assert_eq!(buffer[(warn_x, (hosts_y + 1) as u16)].fg, ClientShellConfig::from_config(&Config::default()).palette.peach);
+    assert!(hits.tree_headers.iter().all(|hit| !((hosts_y + 1)..=(hosts_y + 3)).contains(&(hit.rect.y as usize))));
+    let (without, _, _) = rendered_factory_rows(&snapshot, &fixture().1);
+    assert!(!without.iter().any(|row| row.contains("HOSTS")));
 }
 
 #[test]

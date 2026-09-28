@@ -290,6 +290,25 @@ fn render_panel_list_entry(
             );
         }
         AgentPanelListEntry::FactoryTab(row) => render_factory_tab(buffer, rect, row, config, hits),
+        AgentPanelListEntry::FactoryHost {
+            name,
+            summary,
+            attention,
+            indent,
+        } => {
+            let start = rect.x.saturating_add(1 + u16::from(*indent));
+            let right = summary.as_deref().unwrap_or("");
+            let right_width = (display_width(right) as u16).min(rect.right().saturating_sub(start));
+            let name_width = rect.right().saturating_sub(start + right_width + u16::from(right_width > 0));
+            let name = crate::ui::truncate_end(name, name_width as usize);
+            put_text(buffer, start, rect.y, name_width, &name, Style::default().fg(config.palette.subtext0));
+            let color = match attention {
+                crate::factory_overlay::Attention::Act => config.palette.red,
+                crate::factory_overlay::Attention::Warn => config.palette.peach,
+                crate::factory_overlay::Attention::None => config.palette.subtext0,
+            };
+            put_text(buffer, rect.right().saturating_sub(right_width), rect.y, right_width, right, Style::default().fg(color));
+        }
         AgentPanelListEntry::FactoryBackground {
             workspace_id,
             count,
@@ -299,23 +318,12 @@ fn render_panel_list_entry(
             let style = Style::default()
                 .fg(config.palette.overlay0)
                 .add_modifier(Modifier::DIM);
-            put_text(
-                buffer,
-                rect.x.saturating_add(1 + u16::from(*indent)),
-                rect.y,
-                rect.width.saturating_sub(1 + u16::from(*indent)),
-                &format!("background {count}"),
-                style,
-            );
-            let chevron = tree_header_chevron_rect(rect);
-            put_text(
-                buffer,
-                chevron.x,
-                rect.y,
-                chevron.width,
-                if *collapsed { "▸ " } else { "▾ " },
-                style,
-            );
+            let start = rect.x.saturating_add(1 + u16::from(*indent));
+            let chevron = Rect::new(start, rect.y, 2.min(rect.right().saturating_sub(start)), 1);
+            put_text(buffer, chevron.x, rect.y, chevron.width, if *collapsed { "▸ " } else { "▾ " }, style);
+            let label_x = start.saturating_add(2);
+            let label = crate::ui::truncate_end(&format!("background {count}"), rect.right().saturating_sub(label_x) as usize);
+            put_text(buffer, label_x, rect.y, rect.right().saturating_sub(label_x), &label, style);
             hits.tree_headers.push(TreeHeaderHit {
                 rect,
                 chevron,
@@ -372,114 +380,61 @@ fn render_factory_tab(
     if header.active {
         buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
     }
-    let mut right = rect.right();
-    if header.collapsible {
-        let slot = tree_header_chevron_rect(rect);
-        put_text(
-            buffer,
-            slot.x,
-            rect.y,
-            slot.width,
-            if header.collapsed { "▸ " } else { "▾ " },
-            Style::default().fg(palette.accent),
-        );
-        right = slot.x;
-    }
-    // Place the non-negotiable badge at the edge; phase yields space before it.
-    if let Some(badge) = row.badge.as_deref() {
-        let width = (display_width(badge) as u16).min(right.saturating_sub(rect.x));
-        right = right.saturating_sub(width);
-        let color = match row.attention {
-            crate::factory_overlay::Attention::Act => palette.red,
-            crate::factory_overlay::Attention::Warn => palette.peach,
-            crate::factory_overlay::Attention::None => palette.subtext0,
-        };
-        put_text(
-            buffer,
-            right,
-            rect.y,
-            width,
-            badge,
-            Style::default().fg(color),
-        );
-        if right > rect.x {
-            right -= 1;
-        }
-    }
     let start = rect.x.saturating_add(1 + u16::from(header.indent));
-    let icon = resolved_status_icon(row.status, config);
-    let icon_width = display_width(icon) as u16;
-    put_text(
-        buffer,
-        start,
-        rect.y,
-        icon_width.min(rect.right().saturating_sub(start)),
-        icon,
-        Style::default().fg(status_color(row.status, palette)),
-    );
-    let name_x = start.saturating_add(icon_width + 1);
-    let name = header.label.as_str();
-    let name_width = display_width(name) as u16;
-    let summary = row.summary.as_deref().unwrap_or("");
-    let phase = row.phase.as_deref().unwrap_or("");
-    let dim = Style::default()
-        .fg(palette.overlay0)
-        .add_modifier(Modifier::DIM);
-    let available = right.saturating_sub(name_x);
-    // Leave at least one cell for the name. On narrow rows the phase yields
-    // first, then the summary; the badge already occupies its fixed edge.
-    let desired_metadata = (display_width(summary) + display_width(phase)) as u16
-        + u16::from(!summary.is_empty())
-        + u16::from(!phase.is_empty());
-    let name_limit = available
-        .saturating_sub(desired_metadata)
-        .max(u16::from(available > 0));
-    let metadata_room = available.saturating_sub(name_limit);
-    let summary_width = (display_width(summary) as u16)
-        .min(metadata_room.saturating_sub(u16::from(!summary.is_empty())));
-    let phase_width = (display_width(phase) as u16).min(metadata_room.saturating_sub(
-        summary_width + u16::from(!summary.is_empty()) + u16::from(!phase.is_empty()),
-    ));
-    let metadata_width =
-        summary_width + phase_width + u16::from(summary_width > 0) + u16::from(phase_width > 0);
-    let style = if row.idle || row.background {
-        Style::default()
-            .fg(palette.overlay0)
-            .add_modifier(Modifier::DIM)
-    } else if header.active {
-        Style::default()
-            .fg(palette.text)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default()
-            .fg(palette.subtext0)
-            .add_modifier(Modifier::BOLD)
+    let chevron = Rect::new(start, rect.y, 2.min(rect.right().saturating_sub(start)), 1);
+    if header.collapsible {
+        put_text(buffer, chevron.x, rect.y, chevron.width,
+            if header.collapsed { "▸ " } else { "▾ " }, Style::default().fg(palette.accent));
+    }
+    let icon_x = start.saturating_add(2);
+    let icon = if row.idle { "○" } else { "●" };
+    let color = match row.attention {
+        crate::factory_overlay::Attention::Act => palette.red,
+        crate::factory_overlay::Attention::Warn => palette.peach,
+        crate::factory_overlay::Attention::None if row.idle || matches!(row.status, crate::api::schema::AgentStatus::Unknown | crate::api::schema::AgentStatus::Idle | crate::api::schema::AgentStatus::Done) => palette.overlay0,
+        crate::factory_overlay::Attention::None => status_color(row.status, palette),
     };
-    put_text(
-        buffer,
-        name_x,
-        rect.y,
-        name_width.min(name_limit),
-        name,
-        style,
-    );
-    let mut trailing_x = right.saturating_sub(metadata_width);
-    if summary_width > 0 {
-        trailing_x += 1;
-        put_text(buffer, trailing_x, rect.y, summary_width, summary, dim);
-        trailing_x += summary_width;
+    put_text(buffer, icon_x, rect.y, 1.min(rect.right().saturating_sub(icon_x)), icon, Style::default().fg(color));
+    let name_x = icon_x.saturating_add(2);
+    let metadata = if let Some(badge) = row.badge.as_deref() {
+        // The host badge wins over phase on narrow sidebar rows.
+        let phase = row.phase.as_deref().unwrap_or("");
+        let space = rect.right().saturating_sub(name_x);
+        if !phase.is_empty() && display_width(phase) + display_width(badge) + 4 <= space as usize {
+            format!("{phase}  {badge}")
+        } else {
+            badge.to_owned()
+        }
+    } else {
+        row.summary.as_deref().or(row.phase.as_deref()).unwrap_or("").to_owned()
+    };
+    let right_label = metadata.as_str();
+    let available = rect.right().saturating_sub(name_x);
+    let right_width = (display_width(right_label) as u16).min(available.saturating_sub(1));
+    let label_room = available.saturating_sub(right_width + u16::from(right_width > 0));
+    let marker_width = if row.devloop && label_room >= 2 { 2 } else { 0 };
+    let name_width = label_room.saturating_sub(marker_width);
+    let name = crate::ui::truncate_end(&header.label, name_width as usize);
+    let style = if row.idle || row.background {
+        Style::default().fg(palette.overlay0).add_modifier(Modifier::DIM)
+    } else if header.active {
+        Style::default().fg(palette.text).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(palette.subtext0).add_modifier(Modifier::BOLD)
+    };
+    put_text(buffer, name_x, rect.y, name_width, &name, style);
+    if marker_width > 0 {
+        put_text(buffer, name_x + display_width(&name) as u16, rect.y, marker_width, " ⟳", style);
     }
-    if phase_width > 0 {
-        trailing_x += 1;
-        put_text(buffer, trailing_x, rect.y, phase_width, phase, dim);
+    if right_width > 0 {
+        let right_style = Style::default().fg(if row.badge.is_some() { color } else { palette.overlay0 });
+        put_text(buffer, rect.right().saturating_sub(right_width), rect.y, right_width, right_label, right_style);
     }
+    // A phase is secondary to a complete badge/summary and the readable name.
+    // It is intentionally omitted when those fields consume the available width.
     hits.tree_headers.push(TreeHeaderHit {
         rect,
-        chevron: if header.collapsible {
-            tree_header_chevron_rect(rect)
-        } else {
-            Rect::default()
-        },
+        chevron: if header.collapsible { chevron } else { Rect::default() },
         plus: Rect::default(),
         pin: Rect::default(),
         group: None,
