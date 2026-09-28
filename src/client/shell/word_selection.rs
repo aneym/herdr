@@ -171,13 +171,16 @@ impl ClientShellState {
             start,
             end,
         ));
-        if gesture.mouse_reporting {
-            self.pane_app_selection = Some(gesture.pane_id.clone());
-        }
         if gesture.released {
             let dragged = gesture.dragged;
             if let Some(selection) = self.selection.as_mut() {
                 selection.finish();
+            }
+            // Retain a completed word as the pane-app copy capture, just like
+            // triple-click retains the completed line. A held press is only a
+            // preview and must not replace the copy target until release.
+            if gesture.mouse_reporting {
+                self.pane_app_selection = Some(gesture.pane_id.clone());
             }
             self.word_selection_gesture = None;
             if self.config.copy_on_select {

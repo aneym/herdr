@@ -64,6 +64,107 @@ fn triple_click_selects_and_copies_the_line() {
 }
 
 #[test]
+fn mouse_reporting_double_click_cmd_c_copies_word_without_forwarding_key() {
+    for reply_before_release in [false, true] {
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+        state.config.copy_on_select = false;
+        state.set_snapshot(Box::new(snapshot()));
+        let mut pane_surface = surface();
+        pane_surface.panes[0].mouse_reporting = true;
+        pane_surface.panes[0].rect.width = 19;
+        pane_surface.panes[0].inner_rect = pane_surface.panes[0].rect;
+        state.set_pane_surface(pane_surface);
+        state.compose(106, 20).expect("composed frame");
+        let pane = state.hits.panes[0].clone();
+
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ] {
+            state.handle_raw_events(vec![pane_mouse(kind, &pane, 8)]);
+        }
+        let second = state.handle_raw_events(vec![pane_mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            &pane,
+            8,
+        )]);
+        let word_request = endpoint_request(second);
+        assert!(matches!(
+            word_request.method,
+            crate::api::schema::Method::PaneSelectionRead(_)
+        ));
+        if !reply_before_release {
+            state.handle_raw_events(vec![pane_mouse(
+                MouseEventKind::Up(MouseButton::Left),
+                &pane,
+                8,
+            )]);
+        }
+        let (repaint, actions) = state.handle_endpoint_result(
+            "boot-1",
+            &word_request.id,
+            Ok(crate::api::schema::ResponseResult::PaneSelection {
+                pane_id: "pane_1".into(),
+                text: "alpha bravo charlie".into(),
+            }),
+        );
+        assert!(repaint);
+        assert!(actions.is_empty());
+        if reply_before_release {
+            state.handle_raw_events(vec![pane_mouse(
+                MouseEventKind::Up(MouseButton::Left),
+                &pane,
+                8,
+            )]);
+        }
+        assert!(state
+            .selection
+            .as_ref()
+            .is_some_and(crate::selection::Selection::is_finalized));
+        assert_eq!(state.pane_app_selection.as_deref(), Some("pane_1"));
+        let highlighted = state.compose(106, 20).expect("word highlight");
+        let cell_index = usize::from(pane.inner_rect.y) * 106 + usize::from(pane.inner_rect.x + 8);
+        let selected_bg = highlighted.cells[cell_index].bg;
+        let retained = state.selection.take();
+        let plain = state.compose(106, 20).expect("plain word");
+        assert_ne!(selected_bg, plain.cells[cell_index].bg);
+        state.selection = retained;
+
+        let copy = state.handle_raw_events(vec![RawInputEvent::Key(
+            crate::input::TerminalKey::new(KeyCode::Char('c'), KeyModifiers::SUPER),
+        )]);
+        assert!(!copy.requests.iter().any(|request| matches!(
+            request,
+            ClientMessage::ClientShellPaneInput { events, .. }
+                if events.iter().any(|event| matches!(event, ClientPaneInputEvent::Key { .. }))
+        )));
+        let copy_request = endpoint_request(copy);
+        assert!(
+            matches!(&copy_request.method, crate::api::schema::Method::PaneSelectionRead(params)
+            if params.anchor.col == 6 && params.cursor.col == 10)
+        );
+        let (_, clipboard) = state.handle_endpoint_result(
+            "boot-1",
+            &copy_request.id,
+            Ok(crate::api::schema::ResponseResult::PaneSelection {
+                pane_id: "pane_1".into(),
+                text: "bravo".into(),
+            }),
+        );
+        assert!(
+            matches!(&clipboard[..], [ClientShellAction::ClipboardWrite(bytes)] if bytes == b"bravo")
+        );
+        assert_eq!(
+            state
+                .copy_feedback
+                .as_ref()
+                .map(|toast| toast.message.as_str()),
+            Some("copied to clipboard")
+        );
+    }
+}
+
+#[test]
 fn mouse_reporting_drag_cmd_c_copies_shadow_without_sending_interrupt() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.config.copy_on_select = false;
@@ -2433,12 +2534,10 @@ fn cmd_c_without_mouse_reporting_drag_shows_nothing_selected_to_copy() {
     ))]);
     assert!(result.repaint);
     assert!(result.actions.is_empty());
-    assert!(
-        !result
-            .requests
-            .iter()
-            .any(|request| matches!(request, ClientMessage::ClientShellPaneInput { .. }))
-    );
+    assert!(!result
+        .requests
+        .iter()
+        .any(|request| matches!(request, ClientMessage::ClientShellPaneInput { .. })));
     assert_eq!(
         state
             .copy_feedback

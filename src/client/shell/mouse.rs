@@ -880,6 +880,12 @@ impl ClientShellState {
                             outcome.repaint = true;
                         }
                     } else if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
+                        // A word lookup may still be pending when the pane app receives
+                        // the second release. Finalize it here so its reply retains a
+                        // completed word rather than a still-held selection.
+                        if self.word_selection_gesture.is_some() {
+                            self.finish_word_selection(outcome);
+                        }
                         let copied = self
                             .selection
                             .as_mut()
