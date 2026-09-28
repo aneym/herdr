@@ -118,7 +118,10 @@ pub(super) fn render_agent_panel(
 
     let rows = agent_rows(snapshot, config, None);
     let (rows, automations) = super::tree::partition_automations(snapshot, config, rows);
-    let rows = super::tree::arrange_agent_hierarchy(snapshot, tree, rows);
+    let tree_tabs = super::tree::tree_view_active(config)
+        && snapshot.agent_view_label.is_none()
+        && tree.show_tabs;
+    let rows = super::tree::arrange_agent_hierarchy_with(snapshot, tree, rows, !tree_tabs);
     let mut entries =
         if super::tree::tree_view_active(config) && snapshot.agent_view_label.is_none() {
             super::tree::tree_list_entries(snapshot, tree, rows)
