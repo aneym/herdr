@@ -1327,6 +1327,30 @@ fn navigator_search_matches_non_adjacent_words_without_losing_the_pane_target() 
 }
 
 #[test]
+fn navigator_does_not_stitch_tab_and_pane_fields_into_a_single_term() {
+    let mut projected = snapshot();
+    projected.tabs[0].label = "review".into();
+    projected.tabs[0].custom_label = true;
+    projected.panes[0].label = Some("writer".into());
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.open_navigator_overlay();
+    let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() else {
+        panic!("navigator");
+    };
+    navigator.query = "reviewer".into();
+    for search_entry in [false, true] {
+        navigator.search_entry = search_entry;
+        let rows =
+            render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator);
+        assert!(
+            !rows.iter().any(|row| matches!(row.target, ClientNavigatorTarget::Pane { .. })),
+            "search_entry={search_entry}"
+        );
+    }
+}
+
+#[test]
 fn navigator_searches_ancestor_context_and_keeps_split_agents_individually_actionable() {
     let mut projected = snapshot();
     projected.tabs[0].label = "review".into();
@@ -1375,9 +1399,8 @@ fn navigator_searches_ancestor_context_and_keeps_split_agents_individually_actio
         ("main", None, vec!["pane_1", "pane_2"]),
         ("claude", None, vec!["pane_2"]),
         ("writer", None, vec!["pane_1"]),
-        // 48233de8 lets a term span words and fields (0.8.2), so pane_1's
-        // shared "review" context plus "writer" also matches, ranked second.
-        ("reviewer", None, vec!["pane_2", "pane_1"]),
+        // A term may span words inside a field, not the tab and agent fields.
+        ("reviewer", None, vec!["pane_2"]),
         ("checking navigation", None, vec!["pane_2"]),
         ("/repo/subproject", None, vec!["pane_2"]),
         (

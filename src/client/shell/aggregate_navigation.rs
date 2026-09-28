@@ -295,6 +295,18 @@ pub(super) fn navigator_rows(
     let text = |value: &str| {
         query.is_empty() || crate::app::fuzzy::fuzzy_match_words(&query, value).is_some()
     };
+    // Terms can match different fields, but a single term must fit inside one
+    // field. In particular, "reviewer" must not span tab "review" + name "writer".
+    let field_score = |fields: &[&str]| {
+        query.split_whitespace().try_fold(0, |score, term| {
+            fields
+                .iter()
+                .filter_map(|field| crate::app::fuzzy::fuzzy_match(term, field))
+                .map(|matched| matched.score)
+                .max()
+                .map(|best| score + best)
+        })
+    };
     let filtering = navigator.filter.is_some() || !query.is_empty();
     let federated = endpoints.len() > 1;
     let depth_offset = u8::from(federated && !navigator.search_entry);
@@ -378,22 +390,22 @@ pub(super) fn navigator_rows(
                         // Keep live titles primary. For an unnamed pane, use a
                         // workspace-wide fallback number so different tabs do not
                         // produce identical goto rows.
-                        let label = title
+                        let pane_label = title
                             .or(name)
                             .map(str::to_owned)
                             .unwrap_or_else(|| format!("pane {workspace_pane_number}"));
                         let tab_context = tab_name
-                            .filter(|tab_name| *tab_name != label.as_str())
+                            .filter(|tab_name| *tab_name != pane_label.as_str())
                             .or_else(|| multiple_tabs.then_some(tab.label.as_str()));
                         // Goto hides row metadata for panes with a status, so
                         // show the tab beside the title instead of losing it.
                         let label = if !navigator.search_entry && multiple_tabs {
                             match tab_context {
-                                Some(tab_name) => format!("{label} · {tab_name}"),
-                                None => label,
+                                Some(tab_name) => format!("{pane_label} · {tab_name}"),
+                                None => pane_label.clone(),
                             }
                         } else {
-                            label
+                            pane_label.clone()
                         };
                         let cwd = pane
                             .foreground_cwd
@@ -414,29 +426,26 @@ pub(super) fn navigator_rows(
                             }
                             meta.push_str(profile);
                         }
-                        // Search the same endpoint-qualified context rendered by
-                        // the navigator. This keeps fragmented terms useful while
-                        // leaving status filtering and parent-context inclusion
-                        // unchanged. Each query term matches on its own and
-                        // may span spaces or fields, as in the 0.8.2 navigator.
+                        // Match terms independently across the searchable context.
+                        // Fuzzy matching may cross words within a field ("cr" in
+                        // "code review"), but must not stitch separate fields into
+                        // one word ("review" tab + "writer" name != "reviewer").
                         let score = if query.is_empty() {
                             None
                         } else {
-                            let search_text = format!(
-                                "{} {} {} {} {} {} {} {} {} {}",
-                                endpoint.label,
-                                workspace.label,
+                            field_score(&[
+                                &endpoint.label,
+                                &workspace.label,
                                 workspace.branch.as_deref().unwrap_or_default(),
-                                tab.label,
-                                label,
-                                meta,
+                                &tab.label,
+                                &pane_label,
+                                cwd,
+                                profile.unwrap_or_default(),
                                 pane.cwd.as_deref().unwrap_or_default(),
-                                pane.pane_id,
+                                &pane.pane_id,
                                 agent_kind.unwrap_or_default(),
                                 name.unwrap_or_default(),
-                            );
-                            crate::app::fuzzy::fuzzy_match_words(&query, &search_text)
-                                .map(|matched| matched.score)
+                            ])
                         };
                         if filter(status) && (tab_matches || score.is_some()) {
                             children.push((
