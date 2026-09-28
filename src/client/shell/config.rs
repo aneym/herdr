@@ -145,6 +145,7 @@ impl ClientShellConfig {
             spaces: config.ui.sidebar.spaces.clone(),
             agents: config.ui.sidebar.agents.clone(),
             automations: config.ui.sidebar.automations.clone(),
+            factory: config.ui.factory.clone(),
             section_order: config.ui.sidebar.section_order,
             new_button: config.ui.sidebar.new_button,
             menu_position: config.ui.sidebar.menu_position,
@@ -366,6 +367,7 @@ impl ClientShellConfig {
                 self.spaces = ui.sidebar.spaces.clone();
                 self.agents = ui.sidebar.agents.clone();
                 self.automations = ui.sidebar.automations.clone();
+                self.factory = ui.factory.clone();
                 self.section_order = ui.sidebar.section_order;
                 self.new_button = ui.sidebar.new_button;
                 self.menu_position = ui.sidebar.menu_position;

@@ -24,6 +24,7 @@ pub(crate) struct ClientShellConfig {
     pub(super) spaces: SpacesSidebarConfig,
     pub(super) agents: crate::config::AgentsSidebarConfig,
     pub(super) automations: crate::config::AutomationsSidebarConfig,
+    pub(super) factory: crate::config::FactoryUiConfig,
     pub(super) section_order: [crate::config::SidebarSection; 2],
     pub(super) new_button: crate::config::SidebarNewButtonConfig,
     pub(super) menu_position: crate::config::SidebarMenuPositionConfig,
@@ -1049,6 +1050,20 @@ pub(super) struct ClientCopyModeState {
     pub(super) copy_after_search: bool,
 }
 
+/// The detail panel beside the sidebar (fork, 2026-09-28). Non-modal: the focused pane keeps
+/// keyboard input unless `focused` is set by a click inside the panel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct DetailPanelState {
+    /// Panel key in the overlay document: "overview" or "tab:<tab id>".
+    pub(super) key: String,
+    /// Selected row index among the panel's targetable rows, when navigating it.
+    pub(super) selected: Option<usize>,
+    /// True after a click inside the panel; keys then go to the panel until Esc.
+    pub(super) focused: bool,
+    /// Scroll offset in rows.
+    pub(super) scroll: u16,
+}
+
 pub(crate) struct ClientShellState {
     pub(super) machine_diagnostics: super::machine_diagnostics::MachineDiagnostics,
     pub(super) config: ClientShellConfig,
@@ -1073,6 +1088,10 @@ pub(crate) struct ClientShellState {
     pub(super) chrome_drag: Option<ClientChromeDrag>,
     pub(super) workspace_press: Option<ClientWorkspacePress>,
     pub(super) tree_space_press: Option<ClientTreeSpacePress>,
+    /// Latest factory overlay document from the focused endpoint (fork, 2026-09-28).
+    pub(super) factory_overlay: Option<std::sync::Arc<crate::factory_overlay::FactoryOverlay>>,
+    /// Open detail panel beside the sidebar, if any.
+    pub(super) detail_panel: Option<DetailPanelState>,
     pub(super) tab_press: Option<ClientTabPress>,
     pub(super) collapsed_groups: HashSet<String>,
     pub(super) remote_collapsed_groups: HashMap<ClientEndpointId, HashSet<String>>,
@@ -1271,6 +1290,8 @@ impl ClientShellState {
             chrome_drag: None,
             workspace_press: None,
             tree_space_press: None,
+            factory_overlay: None,
+            detail_panel: None,
             tab_press: None,
             collapsed_groups: preferences.collapsed_groups.into_iter().collect(),
             remote_collapsed_groups,
@@ -2316,5 +2337,15 @@ impl ClientShellState {
         self.pending_pane_surface = None;
         self.hits = ShellHitMap::default();
         self.host_mouse_pixels = None;
+    }
+}
+
+impl ClientShellState {
+    /// The factory overlay document, only when `[ui.factory] enabled` is on.
+    pub(super) fn factory_overlay(&self) -> Option<&crate::factory_overlay::FactoryOverlay> {
+        if !self.config.factory.enabled {
+            return None;
+        }
+        self.factory_overlay.as_deref()
     }
 }
