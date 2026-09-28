@@ -435,6 +435,11 @@ impl App {
         if let Err(err) = runtime.try_send_bytes(Bytes::from(bytes)) {
             return encode_error(id, "agent_send_keys_failed", err.to_string());
         }
+        if !params.keys.is_empty() {
+            if let Some(public_id) = self.public_pane_id(resolved.ws_idx, resolved.pane_id) {
+                crate::inject_log::record_keys(&public_id, "agent.send_keys", &params.keys);
+            }
+        }
 
         encode_success(id, ResponseResult::Ok {})
     }
@@ -788,6 +793,60 @@ mod tests {
         assert!(matches!(success.result, ResponseResult::Ok {}));
         assert_eq!(rx.try_recv().unwrap(), Bytes::from_static(b"\x1b[A\r"));
         assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn inject_log_agent_send_keys_hashes_literal_text() {
+        let _guard = crate::inject_log::tests::TEST_ENV_LOCK.lock().unwrap();
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "target/inject-log-tests/agent-keys-{}",
+            std::process::id()
+        ));
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+        std::fs::create_dir_all(&dir).unwrap();
+        let previous = std::env::var_os("HERDR_INJECT_LOG_DIR");
+        std::env::set_var("HERDR_INJECT_LOG_DIR", &dir);
+        let mut app = app_with_agent();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.set_agent_name("reviewer".into());
+        terminal.set_detected_state(Some(Agent::Pi), AgentState::Idle);
+        let (runtime, _rx) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
+        app.state.insert_test_runtime(pane_id, runtime);
+        let public_id = app.public_pane_id(0, pane_id).unwrap();
+        let result = app.handle_agent_send_keys(
+            "keys".into(),
+            AgentSendKeysParams {
+                target: "reviewer".into(),
+                keys: vec!["h", "e", "l", "l", "o"]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect(),
+            },
+        );
+        let success: SuccessResponse = serde_json::from_str(&result).unwrap();
+        assert_eq!(success.result, ResponseResult::Ok {});
+        let today = time::OffsetDateTime::now_utc().date();
+        let data = std::fs::read_to_string(dir.join(format!("{today}.jsonl"))).unwrap();
+        let rows: Vec<serde_json::Value> = data
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert!(rows.iter().any(|row| row["pane_id"] == public_id
+            && row["method"] == "agent.send_keys"
+            && row["sha256"]
+                == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"));
+        if let Some(previous) = previous {
+            std::env::set_var("HERDR_INJECT_LOG_DIR", previous);
+        } else {
+            std::env::remove_var("HERDR_INJECT_LOG_DIR");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[tokio::test]

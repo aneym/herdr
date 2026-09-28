@@ -1890,6 +1890,9 @@ impl App {
         }
         if let Some(public_id) = self.public_pane_id(ws_idx, pane_id) {
             crate::inject_log::record(&public_id, "pane.send_input", &params.text);
+            if !params.keys.is_empty() {
+                crate::inject_log::record_keys(&public_id, "pane.send_input.keys", &params.keys);
+            }
         }
 
         encode_success(id, ResponseResult::Ok {})
@@ -1990,6 +1993,11 @@ impl App {
         for bytes in encoded_keys {
             if let Err(err) = runtime.try_send_bytes(Bytes::from(bytes)) {
                 return encode_error(id, "pane_send_failed", err.to_string());
+            }
+        }
+        if !params.keys.is_empty() {
+            if let Some(public_id) = self.public_pane_id(ws_idx, pane_id) {
+                crate::inject_log::record_keys(&public_id, "pane.send_keys", &params.keys);
             }
         }
 
@@ -2937,6 +2945,9 @@ mod tests {
         let dir = std::env::current_dir()
             .unwrap()
             .join("target/inject-log-api-test");
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
         std::fs::create_dir_all(&dir).unwrap();
         let previous = std::env::var_os("HERDR_INJECT_LOG_DIR");
         std::env::set_var("HERDR_INJECT_LOG_DIR", &dir);
@@ -2967,6 +2978,83 @@ mod tests {
         } else {
             std::env::remove_var("HERDR_INJECT_LOG_DIR");
         }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn inject_log_pane_key_paths_record_text_and_control_keys() {
+        let _guard = crate::inject_log::tests::TEST_ENV_LOCK.lock().unwrap();
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "target/inject-log-tests/pane-keys-{}",
+            std::process::id()
+        ));
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+        std::fs::create_dir_all(&dir).unwrap();
+        let previous = std::env::var_os("HERDR_INJECT_LOG_DIR");
+        std::env::set_var("HERDR_INJECT_LOG_DIR", &dir);
+        let keys = vec!["h", "e", "l", "l", "o"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        let (mut app, pane_id, mut rx) = app_with_send_key_runtime(8);
+        let success = app.handle_pane_send_keys(
+            "keys".into(),
+            PaneSendKeysParams {
+                pane_id: pane_id.clone(),
+                keys,
+            },
+        );
+        let result: SuccessResponse = serde_json::from_str(&success).unwrap();
+        assert_eq!(result.result, ResponseResult::Ok {});
+        for _ in 0..5 {
+            assert!(rx.try_recv().is_ok());
+        }
+        let success = app.handle_pane_send_input(
+            "input".into(),
+            PaneSendInputParams {
+                pane_id: pane_id.clone(),
+                text: String::new(),
+                keys: vec!["h", "e", "l", "l", "o"]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect(),
+            },
+        );
+        let result: SuccessResponse = serde_json::from_str(&success).unwrap();
+        assert_eq!(result.result, ResponseResult::Ok {});
+        let success = app.handle_pane_send_keys(
+            "control".into(),
+            PaneSendKeysParams {
+                pane_id: pane_id.clone(),
+                keys: vec!["up".into()],
+            },
+        );
+        let result: SuccessResponse = serde_json::from_str(&success).unwrap();
+        assert_eq!(result.result, ResponseResult::Ok {});
+        let today = time::OffsetDateTime::now_utc().date();
+        let contents = std::fs::read_to_string(dir.join(format!("{today}.jsonl"))).unwrap();
+        let records: Vec<serde_json::Value> = contents
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let hash = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+        for method in ["pane.send_keys", "pane.send_input.keys"] {
+            assert!(records.iter().any(|row| row["pane_id"] == pane_id
+                && row["method"] == method
+                && row["sha256"] == hash));
+        }
+        assert!(records.iter().any(|row| row["method"] == "pane.send_keys"
+            && row["len"] == 0
+            && row["sha256"]
+                == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"));
+        if let Some(previous) = previous {
+            std::env::set_var("HERDR_INJECT_LOG_DIR", previous);
+        } else {
+            std::env::remove_var("HERDR_INJECT_LOG_DIR");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[tokio::test]

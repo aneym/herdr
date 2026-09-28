@@ -11,10 +11,29 @@ use time::{format_description, OffsetDateTime};
 static LAST_PRUNED_DAY: Mutex<Option<(std::path::PathBuf, time::Date)>> = Mutex::new(None);
 
 pub fn record(pane_id: &str, method: &str, text: &str) {
+    record_inner(pane_id, method, text, false);
+}
+
+pub fn record_keys(pane_id: &str, method: &str, keys: &[String]) {
+    let mut text = String::new();
+    for key in keys {
+        let trimmed = key.trim();
+        match trimmed.to_ascii_lowercase().as_str() {
+            "enter" | "return" => text.push('\n'),
+            "tab" => text.push('\t'),
+            "space" => text.push(' '),
+            _ if trimmed.chars().count() == 1 => text.push_str(trimmed),
+            _ => {}
+        }
+    }
+    record_inner(pane_id, method, &text, true);
+}
+
+fn record_inner(pane_id: &str, method: &str, text: &str, allow_empty: bool) {
     let dir = std::env::var_os("HERDR_INJECT_LOG_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(default_dir);
-    if let Err(err) = write_record(&dir, pane_id, method, text) {
+    if let Err(err) = write_record_inner(&dir, pane_id, method, text, allow_empty) {
         // Do not include text, pane ids, paths, or OS error details in diagnostic logs.
         tracing::warn!(error_kind = ?err.kind(), "could not record pane injection");
     }
@@ -31,9 +50,20 @@ fn default_dir() -> std::path::PathBuf {
     }
 }
 
+#[cfg(test)]
 fn write_record(dir: &Path, pane_id: &str, method: &str, text: &str) -> io::Result<()> {
+    write_record_inner(dir, pane_id, method, text, false)
+}
+
+fn write_record_inner(
+    dir: &Path,
+    pane_id: &str,
+    method: &str,
+    text: &str,
+    allow_empty: bool,
+) -> io::Result<()> {
     let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if normalized.is_empty() {
+    if normalized.is_empty() && !allow_empty {
         return Ok(());
     }
     let now = OffsetDateTime::now_utc();
@@ -106,6 +136,12 @@ fn create_private_dir(dir: &Path) -> io::Result<()> {
         use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
         let mut builder = fs::DirBuilder::new();
         builder.recursive(true).mode(0o700).create(dir)?;
+        if !fs::symlink_metadata(dir)?.file_type().is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "injection log directory is not a real directory",
+            ));
+        }
         fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
     }
     #[cfg(not(unix))]
