@@ -1473,12 +1473,23 @@ impl ClientShellState {
             .into_iter()
             .map(|(key, _)| key)
             .collect::<Vec<_>>();
-
+        let tree = self
+            .tree_chrome
+            .get(&self.active_endpoint_id)
+            .unwrap_or(&self.tree_chrome_default);
+        // A tab led by its own chat promotes that pane to the tab header.
+        // Only hidden rows require unfolding; the header is already visible.
+        let tab_hides_pane = tree.show_tabs
+            && tree.show_agents
+            && tab_key.as_ref().is_some_and(|key| tree.collapsed_tabs.contains(key))
+            && !super::tree::pane_is_tab_header(snapshot, tree, &self.config, pane_id);
         let fold_by_default = self.groups_fold_by_default();
         let tree = self.tree_chrome_mut();
-        let mut changed = tree.collapsed_spaces.remove(&workspace_id);
-        if let Some(key) = tab_key {
-            changed |= tree.collapsed_tabs.remove(&key);
+        let mut changed = tree.show_spaces && tree.collapsed_spaces.remove(&workspace_id);
+        if tab_hides_pane {
+            if let Some(key) = tab_key {
+                changed |= tree.collapsed_tabs.remove(&key);
+            }
         }
         for key in group_keys {
             changed |= if fold_by_default {

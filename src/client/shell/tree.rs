@@ -91,6 +91,30 @@ impl ClientTreeChrome {
     }
 }
 
+/// Whether a pane is represented by its tab header instead of a child row.
+/// The sidebar promotes a tab's sole top-level agent to the header, even
+/// when that agent owns workflow tabs or its group is currently folded.
+pub(super) fn pane_is_tab_header(
+    snapshot: &ClientShellSnapshot,
+    tree: &ClientTreeChrome,
+    config: &ClientShellConfig,
+    pane_id: &str,
+) -> bool {
+    if !tree.show_tabs || !tree.show_agents {
+        return false;
+    }
+    let Some(pane) = snapshot.panes.iter().find(|pane| pane.pane_id == pane_id) else {
+        return false;
+    };
+    let rows = super::agent_sidebar::agent_rows(snapshot, config, None);
+    let (rows, _) = partition_automations(snapshot, config, rows);
+    let arranged = arrange_agent_hierarchy_with(snapshot, tree, rows, false);
+    let mut roots = arranged.iter().filter(|row| {
+        row.workspace_id == pane.workspace_id && row.tab_id == pane.tab_id && row.group.depth == 0
+    });
+    roots.next().is_some_and(|row| row.pane_id == pane_id) && roots.next().is_none()
+}
+
 /// Collapse-set key for a tab. Tab ids are per-boot, so the key is built from
 /// the workspace id and the stable tab number the fork persisted.
 pub(super) fn tab_key(workspace_id: &str, number: usize) -> String {
