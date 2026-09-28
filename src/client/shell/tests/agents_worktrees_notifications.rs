@@ -100,6 +100,7 @@ fn grouped_worktrees_render_parent_branch_and_indented_child() {
         is_linked_worktree: false,
     });
     snapshot.workspaces.push(ClientShellWorkspace {
+        visible_in_profile: true,
         workspace_id: "ws_2".into(),
         active_tab_id: "tab_ws2".into(),
         new_workspace_cwd: "/repo/feature".into(),
@@ -364,6 +365,7 @@ fn pane_cycle_last_and_agent_actions_resolve_to_stable_pane_ids() {
             state_labels: Vec::new(),
             tokens: Vec::new(),
             focused: true,
+            visible_in_profile: true,
             owner_pane_id: None,
             orphaned: false,
             group: Default::default(),
@@ -383,6 +385,7 @@ fn pane_cycle_last_and_agent_actions_resolve_to_stable_pane_ids() {
             state_labels: Vec::new(),
             tokens: Vec::new(),
             focused: false,
+            visible_in_profile: true,
             owner_pane_id: None,
             orphaned: false,
             group: Default::default(),
@@ -460,6 +463,7 @@ fn agent_sidebar_honors_priority_symbols_tokens_and_stable_hits() {
             state_labels: Vec::new(),
             tokens: vec![("summary".into(), "review complete".into())],
             focused: true,
+            visible_in_profile: true,
             owner_pane_id: None,
             orphaned: false,
             group: Default::default(),
@@ -479,6 +483,7 @@ fn agent_sidebar_honors_priority_symbols_tokens_and_stable_hits() {
             state_labels: vec![("blocked".into(), "needs input".into())],
             tokens: vec![("summary".into(), "waiting for Can".into())],
             focused: false,
+            visible_in_profile: true,
             owner_pane_id: None,
             orphaned: false,
             group: Default::default(),
@@ -605,6 +610,7 @@ fn muted_agent_sidebar_rows_do_not_stack_terminal_faint() {
         state_labels: Vec::new(),
         tokens: Vec::new(),
         focused: true,
+        visible_in_profile: true,
         owner_pane_id: None,
         orphaned: false,
         group: Default::default(),
@@ -675,6 +681,7 @@ fn active_agent_view_controls_sidebar_order_and_focus_indices() {
             state_labels: Vec::new(),
             tokens: Vec::new(),
             focused: true,
+            visible_in_profile: true,
             owner_pane_id: None,
             orphaned: false,
             group: Default::default(),
@@ -694,6 +701,7 @@ fn active_agent_view_controls_sidebar_order_and_focus_indices() {
             state_labels: Vec::new(),
             tokens: Vec::new(),
             focused: false,
+            visible_in_profile: true,
             owner_pane_id: None,
             orphaned: false,
             group: Default::default(),
@@ -713,6 +721,7 @@ fn active_agent_view_controls_sidebar_order_and_focus_indices() {
             state_labels: Vec::new(),
             tokens: Vec::new(),
             focused: false,
+            visible_in_profile: true,
             owner_pane_id: None,
             orphaned: false,
             group: Default::default(),
@@ -790,6 +799,7 @@ fn agent_sort_toggle_is_client_local_and_persists_per_endpoint() {
         state_labels: Vec::new(),
         tokens: Vec::new(),
         focused: true,
+        visible_in_profile: true,
         owner_pane_id: None,
         orphaned: false,
         group: Default::default(),
@@ -1337,6 +1347,81 @@ fn worktree_remove_escalates_recoverable_failure_to_force_confirmation() {
 }
 
 #[test]
+fn finished_agent_outside_profile_still_validates_and_notifies() {
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    config.toast_delivery = crate::config::ToastDelivery::Herdr;
+    config.toast_delay_seconds = 0;
+    let mut state = ClientShellState::new(config);
+    let mut projected = snapshot();
+    let mut other = projected.workspaces[0].clone();
+    other.workspace_id = "ws_work".into();
+    other.label = "work".into();
+    other.focused = false;
+    other.visible_in_profile = false;
+    projected.workspaces.push(other);
+    projected.agents.push(ClientShellAgent {
+        pane_id: "pane_work".into(),
+        workspace_id: "ws_work".into(),
+        tab_id: "tab_work".into(),
+        name: Some("worker".into()),
+        display_agent: None,
+        agent: None,
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Done,
+        state_change_seq: 1,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: false,
+        visible_in_profile: true,
+        owner_pane_id: None,
+        orphaned: false,
+        group: Default::default(),
+    });
+    projected.agents[0].agent_status = AgentStatus::Working;
+    state.set_snapshot(Box::new(projected.clone()));
+    projected.revision += 1;
+    projected.agents[0].agent_status = AgentStatus::Idle;
+    projected.agents[0].state_change_seq += 1;
+    state.set_snapshot(Box::new(projected));
+    assert_eq!(
+        state.snapshot.as_ref().unwrap().agents[0].agent_status,
+        AgentStatus::Done
+    );
+    let (effects, repaint) = state.receive_notification(
+        &ClientEndpointId::Local,
+        SemanticNotification {
+            kind: SemanticNotificationKind::Finished,
+            title: "worker finished".into(),
+            body: None,
+            sound: Some(SemanticNotificationSound::Done),
+            agent: Some("worker".into()),
+            workspace_id: Some("ws_work".into()),
+            tab_id: Some("tab_work".into()),
+            pane_id: Some("pane_work".into()),
+            position: None,
+        },
+        std::time::Instant::now(),
+    );
+    assert!(repaint);
+    assert!(matches!(
+        effects.as_slice(),
+        [ClientShellNotificationEffect::Sound {
+            sound: crate::sound::Sound::Done,
+            ..
+        }]
+    ));
+    assert_eq!(
+        state
+            .visible_notification
+            .as_ref()
+            .and_then(|visible| visible.event.pane_id.as_deref()),
+        Some("pane_work")
+    );
+}
+
+#[test]
 fn semantic_notifications_use_client_policy_and_stable_navigation_targets() {
     let mut config = ClientShellConfig::from_config(&Config::default());
     config.toast_delivery = crate::config::ToastDelivery::Herdr;
@@ -1358,6 +1443,7 @@ fn semantic_notifications_use_client_policy_and_stable_navigation_targets() {
         state_labels: Vec::new(),
         tokens: Vec::new(),
         focused: false,
+        visible_in_profile: true,
         owner_pane_id: None,
         orphaned: false,
         group: Default::default(),

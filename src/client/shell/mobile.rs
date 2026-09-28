@@ -702,6 +702,10 @@ fn mobile_items(
         active_endpoint_id,
         config.agent_panel_sort,
     );
+    let agents = agents
+        .into_iter()
+        .filter(|row| row.agent.visible_in_profile)
+        .collect::<Vec<_>>();
     let agent_view_label = snapshot.agent_view_label.as_deref();
     if !agents.is_empty() || agent_view_label.is_some() {
         let title = agent_view_label

@@ -39,11 +39,16 @@ pub(super) fn render_collapsed(
                     selected_row = snapshot
                         .workspaces
                         .iter()
+                        .filter(|workspace| workspace.visible_in_profile)
                         .position(|workspace| workspace.workspace_id == target.workspace_id)
                         .map(|index| total_rows + index);
                 }
             }
-            total_rows += snapshot.workspaces.len();
+            total_rows += snapshot
+                .workspaces
+                .iter()
+                .filter(|workspace| workspace.visible_in_profile)
+                .count();
         }
     }
     let height = usize::from(workspace_area.height);
@@ -121,7 +126,11 @@ pub(super) fn render_collapsed(
         let Some(snapshot) = endpoint.snapshot.as_deref() else {
             continue;
         };
-        for workspace in &snapshot.workspaces {
+        for workspace in snapshot
+            .workspaces
+            .iter()
+            .filter(|workspace| workspace.visible_in_profile)
+        {
             if skip > 0 {
                 skip -= 1;
                 continue;

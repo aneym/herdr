@@ -162,6 +162,7 @@ fn tab_status_snapshot() -> ClientShellSnapshot {
         state_labels: Vec::new(),
         tokens: Vec::new(),
         focused: true,
+        visible_in_profile: true,
         owner_pane_id: None,
         orphaned: false,
         group: Default::default(),

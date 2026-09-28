@@ -30,6 +30,7 @@ pub(super) fn snapshot() -> ClientShellSnapshot {
         active_profile: "default".into(),
         agent_order: Vec::new(),
         workspaces: vec![ClientShellWorkspace {
+            visible_in_profile: true,
             workspace_id: "ws_1".into(),
             active_tab_id: "tab_1".into(),
             new_workspace_cwd: "/repo".into(),

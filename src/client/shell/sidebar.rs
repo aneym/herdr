@@ -60,6 +60,7 @@ pub(crate) fn render_collapsed_sidebar(
     for (index, workspace) in snapshot
         .workspaces
         .iter()
+        .filter(|workspace| workspace.visible_in_profile)
         .take(workspace_area.height as usize)
         .enumerate()
     {
@@ -663,6 +664,9 @@ pub(crate) fn workspace_entries(
 ) -> Vec<WorkspaceEntry> {
     let mut members = HashMap::<&str, Vec<usize>>::new();
     for (index, workspace) in snapshot.workspaces.iter().enumerate() {
+        if !workspace.visible_in_profile {
+            continue;
+        }
         if let Some(worktree) = &workspace.worktree {
             members.entry(&worktree.key).or_default().push(index);
         }
@@ -683,6 +687,9 @@ pub(crate) fn workspace_entries(
     let mut emitted = HashSet::<&str>::new();
     let mut entries = Vec::new();
     for (index, workspace) in snapshot.workspaces.iter().enumerate() {
+        if !workspace.visible_in_profile {
+            continue;
+        }
         let Some(worktree) = workspace
             .worktree
             .as_ref()

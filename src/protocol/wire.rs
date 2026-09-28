@@ -1029,8 +1029,15 @@ pub struct ClientShellTabStatusSegment {
     pub accent: bool,
 }
 
+fn default_visible_in_profile() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientShellWorkspace {
+    /// Sidebar visibility in the endpoint's active profile; older peers expose all spaces.
+    #[serde(default = "default_visible_in_profile")]
+    pub visible_in_profile: bool,
     pub workspace_id: String,
     pub active_tab_id: String,
     pub new_workspace_cwd: String,
@@ -1101,6 +1108,9 @@ pub struct ClientShellAgent {
     pub state_labels: Vec<(String, String)>,
     pub tokens: Vec<(String, String)>,
     pub focused: bool,
+    /// Sidebar visibility in the endpoint's active profile; older peers expose all agents.
+    #[serde(default = "default_visible_in_profile")]
+    pub visible_in_profile: bool,
     /// Pane hosting this agent's resolved current owner. Absent for a root
     /// agent, and for an owner that no longer resolves.
     #[serde(default)]
@@ -2875,6 +2885,7 @@ mod tests {
             active_profile: "default".into(),
             agent_order: Vec::new(),
             workspaces: vec![ClientShellWorkspace {
+                visible_in_profile: true,
                 workspace_id: "w1".into(),
                 active_tab_id: "w1:t1".into(),
                 new_workspace_cwd: "/tmp".into(),
