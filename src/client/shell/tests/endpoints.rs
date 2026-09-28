@@ -37,6 +37,7 @@ fn agent(
         state_labels: Vec::new(),
         tokens: Vec::new(),
         focused: true,
+        visible_in_profile: true,
         owner_pane_id: None,
         orphaned: false,
         group: Default::default(),
@@ -792,6 +793,7 @@ fn expanded_machine_sidebar_reveals_newly_focused_workspace() {
     let template = initial.workspaces[0].clone();
     initial.workspaces = (1..=12)
         .map(|number| ClientShellWorkspace {
+            visible_in_profile: true,
             workspace_id: format!("ws_{number}"),
             number,
             label: format!("space-{number}"),

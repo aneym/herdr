@@ -54,6 +54,15 @@ pub(super) fn ordered_agent_pane_ids(
     snapshot: &ClientShellSnapshot,
     sort: crate::config::AgentPanelSortConfig,
 ) -> Vec<String> {
+    ordered_agent_pane_ids_with_visibility(snapshot, sort, false)
+}
+
+pub(super) fn ordered_agent_pane_ids_with_visibility(
+    snapshot: &ClientShellSnapshot,
+    sort: crate::config::AgentPanelSortConfig,
+    all_profiles: bool,
+) -> Vec<String> {
+    let visible = |agent: &crate::protocol::ClientShellAgent| all_profiles || agent.visible_in_profile;
     if snapshot.agent_view_label.is_some() {
         return snapshot
             .agent_order
@@ -62,12 +71,16 @@ pub(super) fn ordered_agent_pane_ids(
                 snapshot
                     .agents
                     .iter()
-                    .any(|agent| agent.pane_id == pane_id.as_str())
+                    .any(|agent| agent.pane_id == pane_id.as_str() && visible(agent))
             })
             .cloned()
             .collect();
     }
-    let mut agents = snapshot.agents.iter().collect::<Vec<_>>();
+    let mut agents = snapshot
+        .agents
+        .iter()
+        .filter(|agent| visible(agent))
+        .collect::<Vec<_>>();
     match sort {
         crate::config::AgentPanelSortConfig::Priority => {
             agents.sort_by_key(|agent| {

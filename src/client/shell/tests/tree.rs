@@ -40,6 +40,7 @@ fn agent(
         state_labels: Vec::new(),
         tokens: Vec::new(),
         focused: false,
+        visible_in_profile: true,
         owner_pane_id: None,
         orphaned: false,
         group: Default::default(),
@@ -51,6 +52,7 @@ fn agent(
 fn tree_snapshot() -> ClientShellSnapshot {
     let mut snapshot = snapshot();
     snapshot.workspaces.push(ClientShellWorkspace {
+        visible_in_profile: true,
         workspace_id: "ws_2".into(),
         active_tab_id: "tab_3".into(),
         new_workspace_cwd: "/other".into(),

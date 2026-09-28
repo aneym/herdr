@@ -513,7 +513,10 @@ pub(super) fn tree_list_entries(
             .collect::<HashSet<_>>();
         for workspace in &snapshot.workspaces {
             let workspace_id = &workspace.workspace_id;
-            if listed.contains(workspace_id) || !tree.pinned_spaces.contains(workspace_id) {
+            if !workspace.visible_in_profile
+                || listed.contains(workspace_id)
+                || !tree.pinned_spaces.contains(workspace_id)
+            {
                 continue;
             }
             let collapsed = tree.collapsed_spaces.contains(workspace_id);

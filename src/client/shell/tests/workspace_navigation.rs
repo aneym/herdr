@@ -1,5 +1,148 @@
 use super::*;
 
+#[test]
+fn profile_visibility_scopes_sidebar_agent_list_digit_and_goto() {
+    let mut projected = workspaces(2);
+    projected.workspaces[1].label = "work-only".into();
+    projected.workspaces[1].visible_in_profile = false;
+    let agent = ClientShellAgent {
+        pane_id: "pane_work".into(),
+        workspace_id: "ws_2".into(),
+        tab_id: "tab_2".into(),
+        name: Some("work-agent".into()),
+        display_agent: None,
+        agent: None,
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Done,
+        state_change_seq: 1,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: false,
+        visible_in_profile: true,
+        owner_pane_id: None,
+        orphaned: false,
+        group: Default::default(),
+    };
+    projected.agents.push(ClientShellAgent {
+        visible_in_profile: false,
+        ..agent
+    });
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected.clone()));
+    state.set_pane_surface(surface());
+    state.compose(106, 30).expect("profile sidebar");
+    assert!(state
+        .hits
+        .workspaces
+        .iter()
+        .all(|hit| hit.workspace_id != "ws_2"));
+    assert!(!state
+        .navigation_workspace_entries(&projected)
+        .iter()
+        .any(|entry| entry.index == 1));
+    assert!(super::super::agent_sidebar::ordered_agent_pane_ids(
+        &projected,
+        state.config.agent_panel_sort,
+    )
+    .is_empty());
+    let mut digit = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::SwitchWorkspace(1)),
+        &mut digit,
+    );
+    assert!(digit.actions.iter().all(|action| !matches!(action, ClientShellAction::Endpoint { request, .. } if matches!(&request.method, crate::api::schema::Method::WorkspaceFocus(_)))));
+    state.open_navigator_overlay();
+    let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_ref() else {
+        panic!("goto overlay");
+    };
+    let rows =
+        render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator);
+    assert!(rows.iter().all(|row| !matches!(&row.target, ClientNavigatorTarget::Workspace { workspace_id, .. } if workspace_id == "ws_2")));
+    let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() else {
+        panic!("goto overlay");
+    };
+    navigator.query = "work-only".into();
+    let rows =
+        render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator);
+    assert!(rows.iter().any(|row| matches!(&row.target, ClientNavigatorTarget::Workspace { workspace_id, .. } if workspace_id == "ws_2")));
+    navigator.query.clear();
+
+    let mut work = projected;
+    work.active_profile = "work".into();
+    work.workspaces[0].visible_in_profile = false;
+    work.workspaces[1].visible_in_profile = true;
+    work.agents[0].visible_in_profile = true;
+    state.set_snapshot(Box::new(work.clone()));
+    state.compose(106, 30).expect("switched profile sidebar");
+    assert!(state
+        .hits
+        .workspaces
+        .iter()
+        .any(|hit| hit.workspace_id == "ws_2"));
+    assert_eq!(state.navigation_workspace_entries(&work).len(), 1);
+    assert_eq!(
+        super::super::agent_sidebar::ordered_agent_pane_ids(&work, state.config.agent_panel_sort),
+        ["pane_work"]
+    );
+    let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_ref() else {
+        panic!("goto overlay");
+    };
+    let rows =
+        render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator);
+    assert!(rows.iter().any(|row| matches!(&row.target, ClientNavigatorTarget::Workspace { workspace_id, .. } if workspace_id == "ws_2")));
+}
+
+#[test]
+fn pane_visibility_overrides_workspace_in_agent_rows_and_navigation() {
+    let mut projected = workspaces(2);
+    projected.workspaces[1].visible_in_profile = false;
+    projected.agents = [
+        ClientShellAgent {
+            workspace_id: "ws_1".into(),
+            pane_id: "pane_personal".into(),
+            visible_in_profile: false,
+            ..super::agent("personal", AgentStatus::Idle, 1)
+        },
+        ClientShellAgent {
+            workspace_id: "ws_2".into(),
+            pane_id: "pane_work".into(),
+            visible_in_profile: true,
+            ..super::agent("work", AgentStatus::Idle, 1)
+        },
+    ]
+    .into();
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected.clone()));
+    state.compose(106, 30).expect("agent sidebar");
+    assert_eq!(
+        super::super::agent_sidebar::ordered_agent_pane_ids(
+            &projected,
+            state.config.agent_panel_sort
+        ),
+        ["pane_work"]
+    );
+    assert!(state.hits.agents.iter().any(|(_, pane)| pane == "pane_work"));
+    assert!(state
+        .hits
+        .agents
+        .iter()
+        .all(|(_, pane)| pane != "pane_personal"));
+    let targets = super::super::aggregate_navigation::online_agent_targets(
+        &state.endpoints,
+        &state.active_endpoint_id,
+        state.config.agent_panel_sort,
+    );
+    assert_eq!(
+        targets
+            .iter()
+            .map(|target| target.pane_id.as_str())
+            .collect::<Vec<_>>(),
+        ["pane_work"]
+    );
+}
+
 fn workspaces(count: usize) -> ClientShellSnapshot {
     let mut projected = snapshot();
     projected.workspaces = (1..=count)
