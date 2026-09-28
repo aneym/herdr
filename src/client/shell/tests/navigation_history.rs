@@ -176,13 +176,11 @@ fn malformed_owner_cycle_does_not_block_explicit_reveal() {
         });
     }
     state.set_snapshot(Box::new(snapshot));
-    state
-        .tree_chrome_mut()
-        .collapsed_agent_groups
-        .extend(["pane_1".into(), "pane_2".into()]);
-
     assert!(state.reveal_tree_ancestors_for_pane("pane_1"));
-    assert!(state.tree_chrome_mut().collapsed_agent_groups.is_empty());
+    assert_eq!(
+        state.tree_chrome_mut().collapsed_agent_groups,
+        ["pane_1".to_owned(), "pane_2".to_owned()].into_iter().collect()
+    );
 }
 
 #[test]
