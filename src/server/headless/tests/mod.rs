@@ -2108,6 +2108,99 @@ async fn client_local_navigation_does_not_emit_global_focus_transitions() {
     shutdown_test_runtimes(&mut server);
 }
 
+#[test]
+fn focusing_a_tab_or_workspace_reveals_its_agent_group() {
+    use crate::agent_ownership::{AgentGroupPlacement, AgentOwnerRef};
+    use api::schema::{Method, TabTarget, WorkspaceTarget};
+
+    let mut server = test_headless_server();
+    let owner = crate::workspace::Workspace::test_new("owner");
+    let mut child = crate::workspace::Workspace::test_new("child");
+    let other_tab = child.test_add_tab(Some("other"));
+    server.app.state.workspaces = vec![owner, child];
+    server.app.state.ensure_test_terminals();
+    server.app.state.active = Some(0);
+    server.app.state.selected = 0;
+    for (ws_idx, tab_idx, name) in [(0, 0, "owner"), (1, 0, "child"), (1, other_tab, "other")] {
+        let pane = &server.app.state.workspaces[ws_idx].tabs[tab_idx];
+        let terminal_id = pane.panes[&pane.root_pane].attached_terminal_id.clone();
+        server
+            .app
+            .state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_agent_name(name.into());
+    }
+    let owner_pane = server.app.state.workspaces[0].tabs[0].root_pane;
+    let owner_terminal_id = server.app.state.workspaces[0].tabs[0].panes[&owner_pane]
+        .attached_terminal_id
+        .clone();
+    let owner_identity = server
+        .app
+        .state
+        .terminals
+        .get_mut(&owner_terminal_id)
+        .unwrap()
+        .ensure_agent_identity()
+        .unwrap();
+    let parent = AgentOwnerRef {
+        agent_id: owner_identity.clone(),
+        name: None,
+        agent: None,
+        session: None,
+    };
+    for tab_idx in [0, other_tab] {
+        let tab = &server.app.state.workspaces[1].tabs[tab_idx];
+        let terminal_id = tab.panes[&tab.root_pane].attached_terminal_id.clone();
+        server
+            .app
+            .state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .agent_group = Some(AgentGroupPlacement::Under(parent.clone()));
+    }
+    let child_workspace = server.app.public_workspace_id(1);
+    let other_tab_id = server.app.public_tab_id(1, other_tab).unwrap();
+    let (control, _) = connect_test_shell(&mut server, 51, 100, 30);
+    let _ = client_shell_snapshot(&control);
+
+    for method in [
+        Method::WorkspaceFocus(WorkspaceTarget {
+            workspace_id: child_workspace,
+        }),
+        Method::TabFocus(TabTarget {
+            tab_id: other_tab_id,
+        }),
+    ] {
+        server
+            .app
+            .state
+            .collapsed_agent_group_keys
+            .insert(owner_identity.clone());
+        let (respond_to, response_rx) = std::sync::mpsc::channel();
+        server.handle_client_shell_api_request(
+            51,
+            api::ApiRequestMessage {
+                request: api::schema::Request {
+                    id: "focus-folded-agent".into(),
+                    method,
+                },
+                respond_to,
+                response_write_complete: None,
+            },
+        );
+        assert!(response_rx.recv().unwrap().contains("\"result\""));
+        assert!(!server
+            .app
+            .state
+            .collapsed_agent_group_keys
+            .contains(&owner_identity));
+    }
+    shutdown_test_runtimes(&mut server);
+}
+
 #[tokio::test]
 async fn client_local_navigation_emits_pane_focused_only_when_that_client_moves() {
     use api::schema::{EventData, Method, PaneTarget, TabTarget};

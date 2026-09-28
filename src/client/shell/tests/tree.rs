@@ -701,7 +701,7 @@ fn dragging_a_space_header_records_the_new_order() {
 }
 
 #[test]
-fn right_click_on_the_sort_label_opens_the_view_toggles() {
+fn left_click_on_the_sort_label_opens_the_view_picker() {
     let tree = ClientTreeChrome::default();
     let mut state = tree_state(tree);
     state.set_pane_surface(surface());
@@ -710,7 +710,7 @@ fn right_click_on_the_sort_label_opens_the_view_toggles() {
     assert!(toggle.width > 0);
 
     state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
-        kind: MouseEventKind::Down(MouseButton::Right),
+        kind: MouseEventKind::Down(MouseButton::Left),
         column: toggle.x,
         row: toggle.y,
         modifiers: KeyModifiers::empty(),
@@ -718,7 +718,7 @@ fn right_click_on_the_sort_label_opens_the_view_toggles() {
 
     let Some(crate::client::shell::ClientShellOverlay::ContextMenu(menu)) = state.overlay.as_ref()
     else {
-        panic!("right-click on the sort label should open the view menu");
+        panic!("left-click on the sort label should open the view menu");
     };
     assert_eq!(
         menu.items()
@@ -726,11 +726,35 @@ fn right_click_on_the_sort_label_opens_the_view_toggles() {
             .map(|item| item.label.as_str())
             .collect::<Vec<_>>(),
         [
-            "Hide spaces",
-            "Hide tabs",
-            "Hide agents",
-            "Reveal folded spaces"
+            "● tree",
+            "  grouped",
+            "  priority",
+            "  triage",
+            "──────────",
+            "✓ spaces",
+            "✓ tabs",
+            "✓ agents",
+            "  hidden"
         ]
+    );
+    assert_eq!(
+        state.config.agent_panel_sort,
+        crate::config::AgentPanelSortConfig::Tree
+    );
+
+    let mut outcome = ClientShellInput::default();
+    state.activate_context_menu_item(2, &mut outcome);
+    state.open_sidebar_view_context_menu(toggle.x, toggle.y);
+    let Some(crate::client::shell::ClientShellOverlay::ContextMenu(menu)) = state.overlay.as_ref()
+    else {
+        panic!("priority view picker did not open");
+    };
+    assert_eq!(
+        menu.items()
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect::<Vec<_>>(),
+        ["  tree", "  grouped", "● priority", "  triage"]
     );
 }
 
@@ -743,8 +767,17 @@ fn revealing_folded_spaces_starts_the_section_compact() {
     };
     let mut state = tree_state(tree);
     state.open_sidebar_view_context_menu(0, 0);
+    let Some(crate::client::shell::ClientShellOverlay::ContextMenu(menu)) = state.overlay.as_ref()
+    else {
+        panic!("view picker did not open");
+    };
+    let hidden = menu
+        .items()
+        .iter()
+        .position(|item| item.label == "✓ hidden")
+        .expect("hidden spaces toggle");
     let mut outcome = ClientShellInput::default();
-    state.activate_context_menu_item(3, &mut outcome);
+    state.activate_context_menu_item(hidden, &mut outcome);
 
     let tree = state
         .tree_chrome

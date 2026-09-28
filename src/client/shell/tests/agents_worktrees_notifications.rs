@@ -765,7 +765,7 @@ fn active_agent_view_controls_sidebar_order_and_focus_indices() {
 }
 
 #[test]
-fn agent_sort_toggle_is_client_local_and_persists_per_endpoint() {
+fn agent_sort_picker_is_client_local_and_persists_per_endpoint() {
     let path = std::env::temp_dir().join(format!(
         "herdr-shell-agent-sort-{}-{}.json",
         std::process::id(),
@@ -809,11 +809,23 @@ fn agent_sort_toggle_is_client_local_and_persists_per_endpoint() {
         modifiers: KeyModifiers::empty(),
     })]);
 
+    assert!(click.actions.is_empty());
+    let Some(ClientShellOverlay::ContextMenu(menu)) = state.overlay.as_ref() else {
+        panic!("view picker did not open");
+    };
+    let priority = menu
+        .items()
+        .iter()
+        .position(|item| item.label == "  priority")
+        .expect("priority sort option");
+    let mut selected = ClientShellInput::default();
+    state.activate_context_menu_item(priority, &mut selected);
     assert_eq!(
         state.config.agent_panel_sort,
         crate::config::AgentPanelSortConfig::Priority
     );
-    assert!(click.actions.is_empty());
+    assert!(state.agent_panel_sort_manual);
+    assert!(selected.actions.is_empty());
     let reloaded_config =
         ClientShellConfig::from_config(&Config::default()).with_preferences_path(path.clone());
     let reloaded = ClientShellState::new(reloaded_config);

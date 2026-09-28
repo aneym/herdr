@@ -635,6 +635,7 @@ pub(super) struct AgentGroupRender {
 /// hidden-descendant count on the collapsed owner row. Roots keep their
 /// incoming order; siblings keep their relative order. Cycle-safe: any row
 /// unreachable from a root is appended at the end as a root.
+#[cfg(test)]
 pub(super) fn arrange_agent_hierarchy(
     snapshot: &ClientShellSnapshot,
     tree: &ClientTreeChrome,
@@ -1047,7 +1048,10 @@ impl ClientShellState {
                 tree.collapsed_agent_groups.insert(hit.key.clone());
             }
             self.persist_chrome_preferences(outcome);
-            if !hit.expanded && hit.server_collapsed && self.supports_endpoint_method(&method(false)) {
+            if !hit.expanded
+                && hit.server_collapsed
+                && self.supports_endpoint_method(&method(false))
+            {
                 self.push_endpoint_method(method(false), outcome);
             }
             outcome.repaint = true;

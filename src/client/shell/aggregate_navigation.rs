@@ -386,7 +386,7 @@ pub(super) fn navigator_rows(
                         // the navigator. This keeps fragmented terms useful while
                         // leaving status filtering and parent-context inclusion
                         // unchanged. Each query term matches on its own and
-                        // never across a space, so no term spans two fields.
+                        // may span spaces or fields, as in the 0.8.2 navigator.
                         let score = if query.is_empty() {
                             None
                         } else {

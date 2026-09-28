@@ -18,9 +18,8 @@ fn badge_names_the_session_or_falls_back_to_the_active_profile() {
         (Some("work"), "personal", "work"),
         (Some("default"), "personal", "personal"),
         (None, "personal", "personal"),
-        // Nothing to say: no badge, and the tab strip keeps its full width.
-        (Some("default"), "default", ""),
-        (None, "default", ""),
+        (Some("default"), "default", "default"),
+        (None, "default", "default"),
     ] {
         assert_eq!(
             session_badge_text(&badge_snapshot(session_name, active_profile)),
@@ -69,12 +68,23 @@ fn badge_is_hidden_when_the_tab_bar_is_too_narrow() {
 }
 
 #[test]
-fn a_default_session_on_the_default_profile_shows_no_badge() {
+fn a_default_session_on_the_default_profile_shows_the_profile_badge() {
     let snapshot = badge_snapshot(None, "default");
 
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot));
+    state.set_pane_surface(surface());
+    let frame = state.compose(80, 20).expect("composed frame");
+    let badge = state.hits.session_badge;
+    assert_eq!(badge.width, 7);
+    let rows = frame_rows(&frame);
     assert_eq!(
-        session_badge_rect(&snapshot, Rect::new(0, 0, 80, 1), true),
-        Rect::default()
+        rows[badge.y as usize]
+            .chars()
+            .skip(badge.x as usize)
+            .take(7)
+            .collect::<String>(),
+        "default"
     );
 }
 

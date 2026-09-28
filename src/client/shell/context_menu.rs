@@ -10,40 +10,62 @@ impl ClientContextMenuOverlay {
         };
         match &self.target {
             ClientContextMenuTarget::SidebarView {
+                sort,
                 show_spaces,
                 show_tabs,
                 show_agents,
                 show_hidden,
-            } => vec![
-                item(
-                    if *show_spaces {
-                        "Hide spaces"
-                    } else {
-                        "Show spaces"
-                    },
-                    Action::ToggleTreeSpaces,
-                ),
-                item(
-                    if *show_tabs { "Hide tabs" } else { "Show tabs" },
-                    Action::ToggleTreeTabs,
-                ),
-                item(
-                    if *show_agents {
-                        "Hide agents"
-                    } else {
-                        "Show agents"
-                    },
-                    Action::ToggleTreeAgents,
-                ),
-                item(
-                    if *show_hidden {
-                        "Hide folded spaces"
-                    } else {
-                        "Reveal folded spaces"
-                    },
-                    Action::ToggleHiddenSpaces,
-                ),
-            ],
+            } => {
+                use crate::config::AgentPanelSortConfig as Sort;
+                let mut items = [
+                    (Sort::Tree, "tree"),
+                    (Sort::Spaces, "grouped"),
+                    (Sort::Priority, "priority"),
+                    (Sort::Triage, "triage"),
+                ]
+                .into_iter()
+                .map(|(choice, label)| {
+                    item(
+                        &format!("{} {label}", if *sort == choice { "●" } else { " " }),
+                        Action::SetAgentSort(choice),
+                    )
+                })
+                .collect::<Vec<_>>();
+                if *sort == Sort::Tree {
+                    items.extend([
+                        item("──────────", Action::MenuSeparator),
+                        item(
+                            if *show_spaces {
+                                "✓ spaces"
+                            } else {
+                                "  spaces"
+                            },
+                            Action::ToggleTreeSpaces,
+                        ),
+                        item(
+                            if *show_tabs { "✓ tabs" } else { "  tabs" },
+                            Action::ToggleTreeTabs,
+                        ),
+                        item(
+                            if *show_agents {
+                                "✓ agents"
+                            } else {
+                                "  agents"
+                            },
+                            Action::ToggleTreeAgents,
+                        ),
+                        item(
+                            if *show_hidden {
+                                "✓ hidden"
+                            } else {
+                                "  hidden"
+                            },
+                            Action::ToggleHiddenSpaces,
+                        ),
+                    ]);
+                }
+                items
+            }
             ClientContextMenuTarget::Workspace { is_git: false, .. } => {
                 vec![
                     item("Send to profile", Action::SendToProfile),
@@ -737,9 +759,7 @@ impl ClientShellState {
         }
     }
 
-    /// Open the agents-panel view control. The fork put the tree layer toggles
-    /// behind the sort label; upstream's sort label already cycles the sort, so
-    /// the toggles live on its right-click instead.
+    /// Open the agents-panel view picker from the sort label.
     pub(super) fn open_sidebar_view_context_menu(&mut self, x: u16, y: u16) {
         let tree = self
             .tree_chrome
@@ -747,6 +767,7 @@ impl ClientShellState {
             .unwrap_or(&self.tree_chrome_default);
         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
             target: ClientContextMenuTarget::SidebarView {
+                sort: self.config.agent_panel_sort,
                 show_spaces: tree.show_spaces,
                 show_tabs: tree.show_tabs,
                 show_agents: tree.show_agents,
@@ -763,6 +784,13 @@ impl ClientShellState {
         action: ClientContextMenuAction,
         outcome: &mut ClientShellInput,
     ) {
+        if let ClientContextMenuAction::SetAgentSort(sort) = action {
+            self.config.agent_panel_sort = sort;
+            self.agent_panel_sort_manual = true;
+            self.agent_scroll = 0;
+            self.persist_chrome_preferences(outcome);
+            return;
+        }
         let tree = self.tree_chrome_mut();
         match action {
             ClientContextMenuAction::ToggleTreeSpaces => tree.show_spaces = !tree.show_spaces,
