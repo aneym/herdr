@@ -52,7 +52,7 @@ impl Default for ClientTreeChromePreferences {
             collapsed_spaces: Vec::new(),
             collapsed_tabs: Vec::new(),
             pinned_spaces: Vec::new(),
-            show_hidden_spaces: false,
+            show_hidden_spaces: true,
             hidden_spaces_expanded: false,
             automations_expanded: false,
             collapsed_agent_groups: Vec::new(),

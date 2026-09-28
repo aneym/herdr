@@ -168,20 +168,24 @@ impl EndpointAgentPresentation {
                 {
                     return false;
                 }
-                self.deferred_acknowledged = Some((
-                    snapshot.boot_id.clone(),
-                    surface
-                        .panes
+                if self
+                    .deferred_acknowledged
+                    .as_ref()
+                    .is_none_or(|(boot_id, _)| boot_id != &snapshot.boot_id)
+                {
+                    self.deferred_acknowledged = Some((snapshot.boot_id.clone(), HashMap::new()));
+                }
+                let deferred = &mut self.deferred_acknowledged.as_mut().unwrap().1;
+                // A surface for the next pane can arrive before the focus
+                // snapshot. Preserve the generation already shown in the old
+                // pane until navigation has a chance to flush it.
+                deferred.extend(surface.panes.iter().filter_map(|pane| {
+                    snapshot
+                        .agents
                         .iter()
-                        .filter_map(|pane| {
-                            snapshot
-                                .agents
-                                .iter()
-                                .find(|agent| agent.pane_id == pane.pane_id)
-                                .map(|agent| (agent.pane_id.clone(), agent.state_change_seq))
-                        })
-                        .collect(),
-                ));
+                        .find(|agent| agent.pane_id == pane.pane_id)
+                        .map(|agent| (agent.pane_id.clone(), agent.state_change_seq))
+                }));
                 return false;
             }
             return self.acknowledge_deferred(snapshot);

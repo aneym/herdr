@@ -38,7 +38,7 @@ impl Default for ClientTreeChrome {
             collapsed_spaces: HashSet::new(),
             collapsed_tabs: HashSet::new(),
             pinned_spaces: HashSet::new(),
-            show_hidden_spaces: false,
+            show_hidden_spaces: true,
             hidden_spaces_expanded: false,
             automations_expanded: false,
             collapsed_agent_groups: HashSet::new(),
@@ -154,10 +154,9 @@ impl TreeHeaderGroup {
     /// Width of the summary drawn before the chevron: `+N ` while folded,
     /// nothing while open.
     pub(super) fn summary_width(&self) -> usize {
-        if self.expanded || self.hidden_children == 0 {
-            return 0;
-        }
-        format!("+{} ", self.hidden_children).len()
+        // No `+N` on a folded header (Alex, 2026-09-28: too loud at the top
+        // level). The chevron takes the hidden rows' colour instead.
+        0
     }
 }
 
@@ -494,8 +493,21 @@ pub(super) fn tree_list_entries_with_overlay(
 
         let mut tab_order = Vec::<String>::new();
         let mut by_tab = HashMap::<String, Vec<AgentRow>>::new();
+        // An owned agent sits under its owner's tab, not its own: a workflow a
+        // lane spawned in a separate tab nests under the lane instead of opening
+        // a tab header of its own. Rows arrive depth-first, so the tab each
+        // depth resolved to is the parent's tab for the next depth. The tree
+        // with tabs shown arranges without orchestrator adoption, so every
+        // parent edge here is a real owner or an explicit `under`.
+        let mut tab_at_depth = Vec::<String>::new();
         for row in workspace_rows {
-            let tab_id = row.tab_id.clone();
+            let depth = usize::from(row.group.depth);
+            tab_at_depth.truncate(depth);
+            let tab_id = match depth.checked_sub(1).and_then(|d| tab_at_depth.get(d)) {
+                Some(parent_tab) => parent_tab.clone(),
+                None => row.tab_id.clone(),
+            };
+            tab_at_depth.push(tab_id.clone());
             by_tab
                 .entry(tab_id.clone())
                 .or_insert_with(|| {
@@ -510,13 +522,23 @@ pub(super) fn tree_list_entries_with_overlay(
                 continue;
             };
             let mut agent_indent = space_indent;
+            // A tab led by one agent (a lane chat, with whatever it spawned
+            // beneath it) is that chat: the header row stands for the agent,
+            // carrying its state dot and its group chevron, and the agent's
+            // own row is dropped so the chat is not listed twice.
+            let lead_depth = tab_rows
+                .first()
+                .map(|row| row.group.depth)
+                .filter(|_| tree.show_tabs && tree.show_agents)
+                .filter(|depth| tab_rows[1..].iter().all(|row| row.group.depth > *depth));
+            let lead = lead_depth.map(|depth| (tab_rows.remove(0), depth));
             if tree.show_tabs {
                 let tab = snapshot.tabs.iter().find(|tab| &tab.tab_id == tab_id);
                 let key = tab
                     .map(|tab| tab_key(workspace_id, tab.number))
                     .unwrap_or_else(|| tab_key(workspace_id, 0));
-                let collapsed = tree.collapsed_tabs.contains(&key);
-                let show_dots = collapsed || !tree.show_agents;
+                let collapsed = lead.is_none() && tree.collapsed_tabs.contains(&key);
+                let show_dots = collapsed || !tree.show_agents || lead.is_some();
                 out.push(AgentPanelListEntry::TabHeader(TreeHeader {
                     workspace_id: workspace_id.clone(),
                     tab_id: Some(tab_id.clone()),
@@ -525,24 +547,27 @@ pub(super) fn tree_list_entries_with_overlay(
                         .unwrap_or_else(|| tab_id.clone()),
                     key,
                     collapsed,
-                    child_states: if show_dots {
-                        rollup_state(&tab_rows)
-                    } else {
-                        Vec::new()
+                    child_states: match &lead {
+                        Some((row, _)) => vec![row.status],
+                        None if show_dots => rollup_state(&tab_rows),
+                        None => Vec::new(),
                     },
-                    collapsible: !tab_rows.is_empty() && tree.show_agents,
+                    collapsible: lead.is_none() && !tab_rows.is_empty() && tree.show_agents,
                     pinned: false,
                     indent: space_indent,
-                    active: !tree.show_agents
+                    active: (!tree.show_agents || lead.is_some())
                         && tab.is_some_and(|tab| tab.focused)
                         && snapshot.focused_workspace_id.as_deref() == Some(workspace_id.as_str()),
                     // A tab whose agent rows are hidden stands in for them, even
                     // when the tab itself was collapsed earlier: that collapse
                     // hides nothing now, and a stale key must not swallow the
                     // only control the group has.
-                    group: (!tree.show_agents)
-                        .then(|| tree_header_group(&tab_rows))
-                        .flatten(),
+                    group: match &lead {
+                        Some((row, _)) => tree_header_group(std::slice::from_ref(row)),
+                        None => (!tree.show_agents)
+                            .then(|| tree_header_group(&tab_rows))
+                            .flatten(),
+                    },
                     space_attention: None,
                 }));
                 if collapsed {
@@ -557,6 +582,12 @@ pub(super) fn tree_list_entries_with_overlay(
 
             for row in &mut tab_rows {
                 row.indent = agent_indent;
+                if let Some((_, lead_depth)) = &lead {
+                    // Under a header that stands for the chat, the chat's
+                    // children hang off the header's own column.
+                    row.indent = space_indent;
+                    row.group.depth = row.group.depth.saturating_sub(*lead_depth);
+                }
                 // The headers already name the space and tab; drop the duplicate
                 // labels from the row tokens.
                 row.strip_tokens(tree.show_spaces, tree.show_tabs);
@@ -1007,10 +1038,12 @@ pub(super) struct AgentGroupRender {
 /// hidden-descendant count on the collapsed owner row. Roots keep their
 /// incoming order; siblings keep their relative order. Cycle-safe: any row
 /// unreachable from a root is appended at the end as a root.
-pub(super) fn arrange_agent_hierarchy(
+/// With tabs shown, orchestrator adoption is disabled: each lane keeps its tab.
+pub(super) fn arrange_agent_hierarchy_with(
     snapshot: &ClientShellSnapshot,
     tree: &ClientTreeChrome,
     rows: Vec<AgentRow>,
+    adopt: bool,
 ) -> Vec<AgentRow> {
     let orchestrator_count = |row: &AgentRow| -> Option<usize> {
         // Only the first tab's agent leads an orchestrator group.
@@ -1079,7 +1112,7 @@ pub(super) fn arrange_agent_hierarchy(
         }
     }
     for index in 0..rows.len() {
-        if has_parent[index] || rows[index].placement.hands_on {
+        if !adopt || has_parent[index] || rows[index].placement.hands_on {
             continue;
         }
         let Some(&owner) = orchestrator_by_workspace.get(rows[index].workspace_id.as_str()) else {
@@ -1103,6 +1136,7 @@ pub(super) fn arrange_agent_hierarchy(
             index,
             0,
             false,
+            !adopt,
             tree,
             &mut pending,
             &children,
@@ -1118,6 +1152,7 @@ pub(super) fn arrange_agent_hierarchy(
             index,
             0,
             false,
+            !adopt,
             tree,
             &mut pending,
             &children,
@@ -1162,6 +1197,7 @@ fn push_subtree(
     index: usize,
     depth: u8,
     last_in_group: bool,
+    default_collapsed: bool,
     tree: &ClientTreeChrome,
     pending: &mut [Option<AgentRow>],
     children: &[Vec<usize>],
@@ -1195,10 +1231,11 @@ fn push_subtree(
     };
     // Folded when this client folded it locally or the server holds the fold
     // (`herdr agent group collapse`, or another client's chevron).
-    let expanded = !row.placement.collapsed
-        && group_key
-            .as_ref()
-            .is_none_or(|key| !tree.collapsed_agent_groups.contains(key));
+    // With groups folded by default, the set lists the groups opened by hand.
+    let listed = group_key
+        .as_ref()
+        .is_some_and(|key| tree.collapsed_agent_groups.contains(key));
+    let expanded = !row.placement.collapsed && (listed == default_collapsed);
     row.group.expanded = Some(expanded);
     row.group.group_key = group_key;
     row.group.server_collapsed = row.placement.collapsed;
@@ -1217,6 +1254,7 @@ fn push_subtree(
             child,
             depth.saturating_add(1),
             position == last,
+            default_collapsed,
             tree,
             pending,
             children,
@@ -1228,7 +1266,7 @@ fn push_subtree(
 }
 
 /// The agent groups that hold `pane_id` in the tree, nearest first, walked by
-/// the same parent rule as [`arrange_agent_hierarchy`]: a hands-on pin stops
+/// the same parent rule as [`arrange_agent_hierarchy_with`]: a hands-on pin stops
 /// the walk, an explicit parent wins over the owner. The last entry is the
 /// orchestrator row when the walk ends on an unpinned root of an
 /// orchestrator-mode workspace. Each entry is (local collapse key, owner).
@@ -1370,6 +1408,16 @@ impl ClientShellState {
     /// A fold this client made on its own (before the endpoint knew the
     /// method, or against an endpoint that still does not) stays in the local
     /// set, and opening the group clears both.
+    /// The tree with tabs shown folds every agent group until it is opened
+    /// by hand (Alex, 2026-09-28: lanes' workflows collapsed by default).
+    pub(super) fn groups_fold_by_default(&self) -> bool {
+        let tree = self
+            .tree_chrome
+            .get(&self.active_endpoint_id)
+            .unwrap_or(&self.tree_chrome_default);
+        tree_view_active(&self.config) && tree.show_tabs
+    }
+
     pub(super) fn toggle_agent_group(
         &mut self,
         hit: &AgentGroupHit,
@@ -1383,6 +1431,21 @@ impl ClientShellState {
                 },
             )
         };
+        if self.groups_fold_by_default() {
+            // Folded by default: the local set lists the groups opened by hand.
+            let tree = self.tree_chrome_mut();
+            if hit.expanded {
+                tree.collapsed_agent_groups.remove(&hit.key);
+            } else {
+                tree.collapsed_agent_groups.insert(hit.key.clone());
+            }
+            self.persist_chrome_preferences(outcome);
+            if !hit.expanded && hit.server_collapsed && self.supports_endpoint_method(&method(false)) {
+                self.push_endpoint_method(method(false), outcome);
+            }
+            outcome.repaint = true;
+            return;
+        }
         let endpoint_folds = self.supports_endpoint_method(&method(true));
         if hit.expanded {
             if endpoint_folds {
@@ -1424,7 +1487,8 @@ impl ClientShellState {
             own.or_else(|| agent_group_ancestors(snapshot, pane_id).into_iter().next())?;
         Some(AgentGroupHit {
             rect: Rect::default(),
-            expanded: !owner.group.collapsed && !tree.collapsed_agent_groups.contains(&key),
+            expanded: !owner.group.collapsed
+                && (tree.collapsed_agent_groups.contains(&key) == self.groups_fold_by_default()),
             key,
             owner_pane_id: owner.pane_id.clone(),
             server_collapsed: owner.group.collapsed,
@@ -1447,9 +1511,31 @@ impl ClientShellState {
                 && tree.show_spaces
                 && tree.collapsed_spaces.contains(workspace_id)
         };
+        // With tab headers shown, a nested workflow's tab is not a cycling
+        // destination, even when the group is expanded or needs attention.
+        // Use the same arranged hierarchy as the panel so folded children and
+        // depth > 0 rows are both excluded without changing the flat order.
+        let top_level = (tree_view_active(&self.config)
+            && tree.show_tabs
+            && snapshot.agent_view_label.is_none())
+        .then(|| {
+            let rows = super::agent_sidebar::agent_rows(snapshot, &self.config, None);
+            let (rows, _) = partition_automations(snapshot, &self.config, rows);
+            arrange_agent_hierarchy_with(snapshot, tree, rows, false)
+                .into_iter()
+                .filter(|row| row.group.depth == 0)
+                .map(|row| row.pane_id)
+                .collect::<HashSet<_>>()
+        });
         super::agent_sidebar::ordered_agent_pane_ids(snapshot, self.config.agent_panel_sort)
             .into_iter()
             .filter_map(|pane_id| {
+                if top_level
+                    .as_ref()
+                    .is_some_and(|visible| !visible.contains(&pane_id))
+                {
+                    return None;
+                }
                 let agent = snapshot
                     .agents
                     .iter()

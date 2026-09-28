@@ -142,7 +142,10 @@ pub(super) fn render_agent_panel_with_overlay(
     }
     let rows = agent_rows(snapshot, config, None);
     let (rows, automations) = super::tree::partition_automations(snapshot, config, rows);
-    let rows = super::tree::arrange_agent_hierarchy(snapshot, tree, rows);
+    let tree_tabs = super::tree::tree_view_active(config)
+        && snapshot.agent_view_label.is_none()
+        && tree.show_tabs;
+    let rows = super::tree::arrange_agent_hierarchy_with(snapshot, tree, rows, !tree_tabs);
     let mut entries =
         if super::tree::tree_view_active(config) && snapshot.agent_view_label.is_none() {
             super::tree::tree_list_entries_with_overlay(snapshot, tree, rows, overlay)
@@ -522,6 +525,7 @@ fn render_tree_header(
     };
     if header.active {
         buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
+        paint_half_pads(buffer, rect, palette.active_row_bg, config.agents.row_gap);
     }
     let prefix = 1 + u16::from(header.indent);
     // A header standing in for a group owner takes that group's chevron (and
@@ -587,7 +591,13 @@ fn render_tree_header(
                 "\u{25b8} "
             }
             .to_owned(),
-            Style::default().fg(palette.accent),
+            if group.expanded {
+                Style::default().fg(palette.overlay0)
+            } else {
+                Style::default().fg(group
+                    .hidden_status
+                    .map_or(palette.overlay0, |status| status_color(status, palette)))
+            },
         )
     });
     if is_space {
@@ -978,6 +988,33 @@ fn agent_group_trailing_width(row: &AgentRow) -> usize {
         }
 }
 
+/// Half a cell of selection colour above and below a lit row, drawn in the gap
+/// rows with half-block glyphs, so the highlight reads as padded rather than a
+/// thin strip (0.8.2 fork parity: `paint_half_pad`). Only when rows are gapped,
+/// so the glyphs never land on a neighbouring row's text.
+fn paint_half_pads(buffer: &mut Buffer, rect: Rect, bg: ratatui::style::Color, row_gap: u16) {
+    if row_gap == 0 || rect.width == 0 {
+        return;
+    }
+    let area = buffer.area;
+    let glyph_row = |buffer: &mut Buffer, y: u16, glyph: &str| {
+        for x in rect.x..rect.right().min(area.right()) {
+            if let Some(cell) = buffer.cell_mut((x, y)) {
+                if cell.symbol().trim().is_empty() {
+                    cell.set_symbol(glyph);
+                    cell.set_fg(bg);
+                }
+            }
+        }
+    };
+    if rect.y > area.y {
+        glyph_row(buffer, rect.y - 1, "\u{2584}");
+    }
+    if rect.bottom() < area.bottom() {
+        glyph_row(buffer, rect.bottom(), "\u{2580}");
+    }
+}
+
 pub(super) fn render_agent_row(
     buffer: &mut Buffer,
     rect: Rect,
@@ -985,6 +1022,9 @@ pub(super) fn render_agent_row(
     config: &ClientShellConfig,
 ) {
     let palette = &config.palette;
+    if row.focused {
+        paint_half_pads(buffer, rect, palette.active_row_bg, config.agents.row_gap);
+    }
     let row_style = if row.focused {
         Style::default().bg(palette.active_row_bg)
     } else {
