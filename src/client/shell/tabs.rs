@@ -11,6 +11,7 @@ pub(crate) fn render_tab_bar(
     area: Rect,
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
+    overlay: Option<&crate::factory_overlay::FactoryOverlay>,
     tab_scroll: &mut usize,
     reveal_focused_tab: &mut bool,
     tab_drag_insert_index: Option<usize>,
@@ -23,11 +24,17 @@ pub(crate) fn render_tab_bar(
         .iter()
         .filter(|tab| Some(tab.workspace_id.as_str()) == snapshot.focused_workspace_id.as_deref())
         .collect::<Vec<_>>();
-    let status_glyphs = tabs
+    // The strip is navigation chrome, not the workflow list. Preserve snapshot
+    // tab ids in hits (and snapshot indices for drag targets) after filtering.
+    let visible_tabs = tabs.iter().copied().filter(|tab| {
+        overlay.and_then(|overlay| overlay.tab(&tab.tab_id))
+            .is_none_or(|tag| tag.kind != crate::factory_overlay::TabKind::Workflow)
+    }).collect::<Vec<_>>();
+    let status_glyphs = visible_tabs
         .iter()
         .map(|tab| tab_status_glyphs(snapshot, tab, config))
         .collect::<Vec<_>>();
-    let desired_widths = tabs
+    let desired_widths = visible_tabs
         .iter()
         .zip(&status_glyphs)
         .map(|(tab, glyphs)| {
@@ -45,7 +52,7 @@ pub(crate) fn render_tab_bar(
         .iter()
         .copied()
         .fold(0_u16, u16::saturating_add)
-        .saturating_add(tabs.len().saturating_sub(1).min(u16::MAX as usize) as u16)
+        .saturating_add(visible_tabs.len().saturating_sub(1).min(u16::MAX as usize) as u16)
         .saturating_add(new_tab_width);
     let overflow =
         desired_total > content.width && (!mouse_chrome || content.width >= MIN_TAB_STRIP_WIDTH);
@@ -61,7 +68,7 @@ pub(crate) fn render_tab_bar(
     if !overflow {
         *tab_scroll = 0;
     } else if *reveal_focused_tab {
-        if let Some(focused) = tabs.iter().position(|tab| tab.focused) {
+        if let Some(focused) = visible_tabs.iter().position(|tab| tab.focused) {
             *tab_scroll = centered_tab_scroll(focused, &desired_widths, available).min(max_scroll);
         }
     } else {
@@ -101,7 +108,7 @@ pub(crate) fn render_tab_bar(
 
     let mut first_visible = None;
     let mut last_visible = None;
-    for (index, tab) in tabs.iter().enumerate().skip(*tab_scroll) {
+    for (index, tab) in visible_tabs.iter().enumerate().skip(*tab_scroll) {
         let name = tab_label(tab);
         let desired = desired_widths[index];
         let remaining = tab_right.saturating_sub(x);
@@ -223,7 +230,7 @@ pub(crate) fn render_tab_bar(
             Style::default().fg(palette.overlay0),
         );
     }
-    if last_visible.is_some_and(|index| index + 1 < tabs.len()) {
+    if last_visible.is_some_and(|index| index + 1 < visible_tabs.len()) {
         let ellipsis_x = if hits.tab_scroll_right.width > 0 {
             hits.tab_scroll_right.x.saturating_sub(1)
         } else {

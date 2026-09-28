@@ -1333,12 +1333,8 @@ impl ClientShellState {
                 }
                 return;
             }
-            if self.tree_tab_press.is_some() {
-                if self
-                    .tree_tab_press
-                    .as_ref()
-                    .is_some_and(|press| point != (press.start_column, press.start_row))
-                {
+            if let Some(press) = self.tree_tab_press.as_ref() {
+                if mouse.row != press.start_row {
                     self.tree_tab_press = None;
                 }
                 return;
@@ -1502,16 +1498,17 @@ impl ClientShellState {
                 return;
             }
             if let Some(press) = self.tree_tab_press.take() {
-                if point == (press.start_column, press.start_row) {
-                    self.change_detail_panel(
-                        crate::factory_overlay::tab_panel_key(&press.tab_id),
-                        false,
-                        outcome,
-                    );
-                    // A click that opened the panel hands it the keyboard, so Enter
-                    // focuses the clicked tab.
-                    if let Some(panel) = self.detail_panel.as_mut() {
-                        panel.focused = true;
+                if mouse.row == press.start_row {
+                    if mouse.modifiers.contains(crossterm::event::KeyModifiers::ALT) {
+                        self.change_detail_panel(
+                            crate::factory_overlay::tab_panel_key(&press.tab_id), false, outcome,
+                        );
+                    } else {
+                        self.push_endpoint_method(
+                            crate::api::schema::Method::TabFocus(crate::api::schema::TabTarget {
+                                tab_id: press.tab_id,
+                            }), outcome,
+                        );
                     }
                 }
                 return;
@@ -2227,6 +2224,9 @@ impl ClientShellState {
                                     .tabs
                                     .iter()
                                     .filter(|tab| tab.workspace_id == id)
+                                    .filter(|tab| self.factory_overlay()
+                                        .and_then(|overlay| overlay.tab(&tab.tab_id))
+                                        .is_none_or(|tag| tag.kind != crate::factory_overlay::TabKind::Workflow))
                                     .count()
                             })
                         })

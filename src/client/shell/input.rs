@@ -957,6 +957,9 @@ impl ClientShellState {
                         .tabs
                         .iter()
                         .filter(|tab| tab.workspace_id == workspace_id)
+                        .filter(|tab| self.factory_overlay()
+                            .and_then(|overlay| overlay.tab(&tab.tab_id))
+                            .is_none_or(|tag| tag.kind != crate::factory_overlay::TabKind::Workflow))
                         .nth(*index)
                 })
                 .is_some(),

@@ -123,12 +123,13 @@ pub(super) fn render_agent_panel_with_overlay(
     agent_scroll: &mut usize,
     hits: &mut ShellHitMap,
 ) {
-    if !render_agent_panel_header(
-        buffer,
-        area,
-        snapshot.agent_view_label.as_deref(),
-        config,
-        hits,
+    if !render_agent_panel_header_with_factory(
+        buffer, area, snapshot.agent_view_label.as_deref(), config, hits,
+        overlay.is_some_and(|overlay| snapshot.workspaces.iter().any(|space| {
+            overlay.space_is_tagged(snapshot.tabs.iter()
+                .filter(|tab| tab.workspace_id == space.workspace_id)
+                .map(|tab| tab.tab_id.as_str()))
+        })),
     ) {
         return;
     }
@@ -147,9 +148,17 @@ pub(super) fn render_agent_panel_with_overlay(
                 .collect()
         };
     super::tree::append_automations(&mut entries, tree, automations);
-    render_agent_list(
+    // Hosts are a fixed footer, not part of the scrolling spaces list.
+    let hosts = overlay.filter(|overlay| snapshot.workspaces.iter().any(|space| {
+        overlay.space_is_tagged(snapshot.tabs.iter()
+            .filter(|tab| tab.workspace_id == space.workspace_id)
+            .map(|tab| tab.tab_id.as_str()))
+    })).map(|overlay| overlay.hosts.as_slice()).unwrap_or(&[]);
+    let footer_height = if hosts.is_empty() { 0 } else { (hosts.len() + 1).min(area.height.saturating_sub(3) as usize) as u16 };
+    let list_area = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(footer_height));
+    render_agent_list_with_gaps(
         buffer,
-        area,
+        list_area,
         &entries,
         snapshot
             .agent_view_label
@@ -159,8 +168,32 @@ pub(super) fn render_agent_panel_with_overlay(
         agent_scroll,
         hits,
         super::tree::AgentPanelListEntry::line_count,
+        |index| if overlay.is_some() && (is_factory_entry(&entries[index])
+            || entries.get(index + 1).is_some_and(is_factory_entry)) { 0 }
+            else { config.agents.row_gap },
         |buffer, rect, entry, hits| render_panel_list_entry(buffer, rect, entry, config, hits),
     );
+    if footer_height > 0 {
+        let y = area.bottom() - footer_height;
+        render_panel_list_entry(buffer, Rect::new(area.x, y, area.width, 1),
+            &super::tree::AgentPanelListEntry::FactorySection {
+                label: "HOSTS", right: String::new(), indent: 0,
+            }, config, hits);
+        for (index, host) in hosts.iter().take(footer_height.saturating_sub(1) as usize).enumerate() {
+            render_panel_list_entry(buffer, Rect::new(area.x, y + 1 + index as u16, area.width, 1),
+                &super::tree::AgentPanelListEntry::FactoryHost {
+                    name: host.name.clone(), summary: host.summary.clone(),
+                    attention: host.attention, indent: 0,
+                }, config, hits);
+        }
+    }
+}
+
+fn is_factory_entry(entry: &super::tree::AgentPanelListEntry) -> bool {
+    use super::tree::AgentPanelListEntry as Entry;
+    matches!(entry, Entry::FactorySection { .. } | Entry::FactoryTab(_)
+        | Entry::FactoryBackground { .. } | Entry::FactoryHost { .. })
+        || matches!(entry, Entry::SpaceHeader(row) if row.factory_space)
 }
 
 /// Right-most two cells of a header row: the disclosure chevron.
@@ -320,7 +353,7 @@ fn render_panel_list_entry(
                 .add_modifier(Modifier::DIM);
             let start = rect.x.saturating_add(1 + u16::from(*indent));
             let chevron = Rect::new(start, rect.y, 2.min(rect.right().saturating_sub(start)), 1);
-            put_text(buffer, chevron.x, rect.y, chevron.width, if *collapsed { "▸ " } else { "▾ " }, style);
+            put_text(buffer, chevron.x, rect.y, 2.min(chevron.width), if *collapsed { "▸ " } else { "▾ " }, style);
             let label_x = start.saturating_add(2);
             let label = crate::ui::truncate_end(&format!("background {count}"), rect.right().saturating_sub(label_x) as usize);
             put_text(buffer, label_x, rect.y, rect.right().saturating_sub(label_x), &label, style);
@@ -383,7 +416,7 @@ fn render_factory_tab(
     let start = rect.x.saturating_add(1 + u16::from(header.indent));
     let chevron = Rect::new(start, rect.y, 2.min(rect.right().saturating_sub(start)), 1);
     if header.collapsible {
-        put_text(buffer, chevron.x, rect.y, chevron.width,
+        put_text(buffer, chevron.x, rect.y, 2.min(chevron.width),
             if header.collapsed { "▸ " } else { "▾ " }, Style::default().fg(palette.accent));
     }
     let icon_x = start.saturating_add(2);
@@ -426,6 +459,10 @@ fn render_factory_tab(
             .unwrap_or(if row.idle { "idle" } else { "" })
             .to_owned()
     };
+    let metadata = if !row.workflow && !row.background && !row.idle && row.summary.is_some()
+        && row.badge.is_none() && available > 0 && display_width(&header.label) + display_width(&metadata) + 1 > available as usize {
+        metadata.split(" · ").next().unwrap_or("").to_owned()
+    } else { metadata };
     let right_label = metadata.as_str();
     let right_width = (display_width(right_label) as u16).min(available.saturating_sub(1));
     let label_room = available.saturating_sub(right_width + u16::from(right_width > 0));
@@ -500,20 +537,24 @@ fn render_tree_header(
     };
     if header.active {
         buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
-        paint_half_pads(buffer, rect, palette.active_row_bg, config.agents.row_gap);
+        paint_half_pads(buffer, rect, palette.active_row_bg,
+            if is_space && header.factory_space { 0 } else { config.agents.row_gap });
     }
     let prefix = 1 + u16::from(header.indent);
+    // Keep space controls unless the name and attention count need their room.
+    let summary_width = header.space_attention.as_ref().map_or(0, |(_, summary)| 2 + display_width(summary) as u16);
+    let compact_space = is_space && header.factory_space
+        && prefix + display_width(&header.label) as u16 + 10 + summary_width > rect.width;
     // A header standing in for a group owner takes that group's chevron (and
     // its folded `+N`), since with agent rows hidden it is the only place the
     // group can be opened from.
     let group = header.group_chevron();
     // Space headers reserve extra cells for the pin and new-tab plus.
-    let trailing_width = if is_space { 10 } else { 6 }
+    let summary_fits = !compact_space ||
+        (prefix + display_width(&header.label) as u16 + 2 + summary_width <= rect.width);
+    let trailing_width = (if compact_space { 2 } else if is_space { 10 } else { 6 })
         + group.map(|group| group.summary_width() as u16).unwrap_or(0)
-        + header
-            .space_attention
-            .as_ref()
-            .map_or(0, |(_, summary)| 2 + display_width(summary) as u16);
+        + if summary_fits { summary_width } else { 0 };
     put_text(
         buffer,
         rect.x.saturating_add(prefix),
@@ -575,7 +616,7 @@ fn render_tree_header(
             },
         )
     });
-    if is_space {
+    if is_space && !compact_space {
         // Pin toggle, one cell pair left of the plus, so the trailing strip
         // reads [pin][+][chevron]. A pinned space keeps its header row even when
         // no agents remain beneath it.
@@ -617,7 +658,7 @@ fn render_tree_header(
     }
 
     if is_space {
-        if let Some((attention, summary)) = &header.space_attention {
+        if let Some((attention, summary)) = header.space_attention.as_ref().filter(|_| summary_fits) {
             let color = match attention {
                 crate::factory_overlay::Attention::Act => palette.red,
                 crate::factory_overlay::Attention::Warn => palette.peach,
@@ -625,7 +666,7 @@ fn render_tree_header(
             };
             let x = rect
                 .right()
-                .saturating_sub(10 + display_width(summary) as u16);
+                .saturating_sub(2 + display_width(summary) as u16 + if compact_space { 2 } else { 10 });
             put_text(buffer, x, rect.y, 2, "● ", Style::default().fg(color));
             put_text(
                 buffer,
@@ -646,12 +687,12 @@ fn render_tree_header(
         } else {
             Rect::default()
         },
-        plus: if is_space {
+        plus: if is_space && !compact_space {
             tree_header_plus_rect(rect)
         } else {
             Rect::default()
         },
-        pin: if is_space {
+        pin: if is_space && !compact_space {
             tree_header_pin_rect(rect)
         } else {
             Rect::default()
@@ -676,6 +717,17 @@ pub(super) fn render_agent_panel_header(
     agent_view_label: Option<&str>,
     config: &ClientShellConfig,
     hits: &mut ShellHitMap,
+) -> bool {
+    render_agent_panel_header_with_factory(buffer, area, agent_view_label, config, hits, false)
+}
+
+fn render_agent_panel_header_with_factory(
+    buffer: &mut Buffer,
+    area: Rect,
+    agent_view_label: Option<&str>,
+    config: &ClientShellConfig,
+    hits: &mut ShellHitMap,
+    factory: bool,
 ) -> bool {
     if area.height == 0 {
         return false;
@@ -707,6 +759,7 @@ pub(super) fn render_agent_panel_header(
         crate::config::AgentPanelSortConfig::Triage => "triage",
         crate::config::AgentPanelSortConfig::Tree => "tree",
     });
+    let sort_label = if factory { "" } else { sort_label };
     let sort_width = display_width(sort_label).min(area.width as usize) as u16;
     let sort_rect = Rect::new(
         area.right().saturating_sub(sort_width),
@@ -723,7 +776,7 @@ pub(super) fn render_agent_panel_header(
         usage_width,
         1,
     );
-    hits.agent_usage = if config.mouse_capture {
+    hits.agent_usage = if config.mouse_capture && !factory {
         usage_rect
     } else {
         Rect::default()
@@ -733,12 +786,12 @@ pub(super) fn render_agent_panel_header(
         usage_rect.x,
         usage_rect.y,
         usage_rect.width,
-        "usage",
+        if factory { "" } else { "usage" },
         Style::default()
             .fg(config.palette.accent)
             .add_modifier(Modifier::BOLD),
     );
-    hits.agent_sort_toggle = if config.mouse_capture && agent_view_label.is_none() {
+    hits.agent_sort_toggle = if config.mouse_capture && !factory && agent_view_label.is_none() {
         sort_rect
     } else {
         Rect::default()
@@ -761,6 +814,16 @@ pub(super) fn render_agent_panel_header(
 }
 
 pub(super) fn render_agent_list<T>(
+    buffer: &mut Buffer, area: Rect, rows: &[T], empty_message: Option<&str>,
+    config: &ClientShellConfig, agent_scroll: &mut usize, hits: &mut ShellHitMap,
+    row_lines: impl Fn(&T) -> usize,
+    render_row: impl FnMut(&mut Buffer, Rect, &T, &mut ShellHitMap),
+) {
+    render_agent_list_with_gaps(buffer, area, rows, empty_message, config, agent_scroll,
+        hits, row_lines, |_| config.agents.row_gap, render_row);
+}
+
+fn render_agent_list_with_gaps<T>(
     buffer: &mut Buffer,
     area: Rect,
     rows: &[T],
@@ -769,6 +832,7 @@ pub(super) fn render_agent_list<T>(
     agent_scroll: &mut usize,
     hits: &mut ShellHitMap,
     row_lines: impl Fn(&T) -> usize,
+    row_gap: impl Fn(usize) -> u16,
     mut render_row: impl FnMut(&mut Buffer, Rect, &T, &mut ShellHitMap),
 ) {
     let body = Rect::new(
@@ -804,7 +868,7 @@ pub(super) fn render_agent_list<T>(
         .enumerate()
         .map(|(index, _)| {
             if index + 1 < rows.len() {
-                config.agents.row_gap
+                row_gap(index)
             } else {
                 0
             }
@@ -827,13 +891,20 @@ pub(super) fn render_agent_list<T>(
         }
         let rect = Rect::new(body.x, y, content_width, height);
         render_row(buffer, rect, row, hits);
+        let gap = gaps[index];
+        // A spacer belongs to the row above, including for mouse hit testing.
+        if gap > 0 {
+            let bottom = y.saturating_add(height);
+            let extension = gap.min(body.bottom().saturating_sub(bottom));
+            if extension > 0 {
+                let extended = Rect::new(rect.x, rect.y, rect.width, height + extension);
+                if let Some((hit, _)) = hits.agents.iter_mut().find(|(hit, _)| *hit == rect) { *hit = extended; }
+                if let Some(hit) = hits.tree_headers.iter_mut().find(|hit| hit.rect == rect) { hit.rect = extended; }
+            }
+        }
         y = y
             .saturating_add(height)
-            .saturating_add(if index + 1 < rows.len() {
-                config.agents.row_gap
-            } else {
-                0
-            });
+            .saturating_add(gap);
     }
 
     if show_scrollbar {

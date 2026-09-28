@@ -1280,6 +1280,9 @@ impl ClientShellState {
                     .tabs
                     .iter()
                     .filter(|tab| tab.workspace_id == focused_workspace)
+                    .filter(|tab| self.factory_overlay()
+                        .and_then(|overlay| overlay.tab(&tab.tab_id))
+                        .is_none_or(|tag| tag.kind != crate::factory_overlay::TabKind::Workflow))
                     .collect::<Vec<_>>();
                 Some(Method::TabFocus(TabTarget {
                     tab_id: tabs.get(index)?.tab_id.clone(),

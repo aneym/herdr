@@ -198,57 +198,16 @@ fn missing_panel_shows_title_and_no_details_yet() {
 }
 
 #[test]
-fn tagged_tab_click_toggles_panel_without_focusing_tab() {
+fn tagged_tab_click_focuses_without_opening_panel() {
     let mut state = ready();
     state.last_composed_size = Some((100, 30));
-    state.hits.tree_headers.push(TreeHeaderHit {
-        rect: Rect::new(2, 4, 12, 1),
-        chevron: Rect::default(),
-        plus: Rect::default(),
-        pin: Rect::default(),
-        group: None,
-        workspace_id: "ws_1".into(),
-        tab_id: Some("tab_1".into()),
-        key: "ws_1#1".into(),
-        pinned: false,
-    });
-    let first = click(&mut state, 4, 4);
-    assert!(first.requests.is_empty());
-    assert_eq!(state.detail_panel.as_ref().unwrap().key, "tab:tab_1");
-    state.hits.tree_headers.push(TreeHeaderHit {
-        rect: Rect::new(2, 4, 12, 1),
-        chevron: Rect::default(),
-        plus: Rect::default(),
-        pin: Rect::default(),
-        group: None,
-        workspace_id: "ws_1".into(),
-        tab_id: Some("tab_1".into()),
-        key: "ws_1#1".into(),
-        pinned: false,
-    });
-    let second = click(&mut state, 4, 4);
-    assert!(second.requests.is_empty());
+    state.hits.tree_headers.push(tagged_row_hit());
+    let focused = click(&mut state, 4, 4);
+    assert_eq!(focused_tab_ids(&focused), ["tab_1"]);
     assert!(state.detail_panel.is_none());
-    state.factory_overlay = Some(Arc::new(FactoryOverlay {
-        version: 1,
-        ..Default::default()
-    }));
-    state.hits.tree_headers.push(TreeHeaderHit {
-        rect: Rect::new(2, 4, 12, 1),
-        chevron: Rect::default(),
-        plus: Rect::default(),
-        pin: Rect::default(),
-        group: None,
-        workspace_id: "ws_1".into(),
-        tab_id: Some("tab_1".into()),
-        key: "ws_1#1".into(),
-        pinned: false,
-    });
-    let untagged = click(&mut state, 4, 4);
-    assert!(untagged
-        .actions
-        .iter()
-        .any(|action| format!("{action:?}").contains("TabFocus")));
+    // The keyboard shortcut remains the path to the overview.
+    key(&mut state, KeyCode::Char('o'), KeyModifiers::ALT);
+    assert!(state.detail_panel.is_some());
 }
 
 #[test]
@@ -473,15 +432,12 @@ async fn overlay_file_reaches_the_panel_through_the_server_poll_and_client_contr
 }
 
 #[test]
-fn enter_after_tagged_row_click_focuses_that_tab() {
+fn tagged_row_click_does_not_steal_the_panel_shortcut() {
     let mut state = ready();
     state.last_composed_size = Some((100, 30));
     state.hits.tree_headers.push(tagged_row_hit());
-    let opened = click(&mut state, 4, 4);
-    assert!(opened.requests.is_empty());
-    assert_eq!(state.detail_panel.as_ref().unwrap().key, "tab:tab_1");
-    let enter = key(&mut state, KeyCode::Enter, KeyModifiers::NONE);
-    assert_eq!(focused_tab_ids(&enter), ["tab_1"]);
+    let focused = click(&mut state, 4, 4);
+    assert_eq!(focused_tab_ids(&focused), ["tab_1"]);
     assert!(state.detail_panel.is_none());
 }
 

@@ -322,6 +322,7 @@ pub(super) fn render_shell(
             layout.tab_bar,
             snapshot,
             config,
+            state.factory_overlay,
             state.tab_scroll,
             state.reveal_focused_tab,
             state.tab_drag_insert_index,

@@ -175,7 +175,7 @@ fn off_and_other_space_keep_the_stock_tree() {
 }
 
 #[test]
-fn groups_tabs_and_expands_lanes_for_attention_or_focus() {
+fn groups_tabs_and_expands_lanes_only_for_focus_or_toggle() {
     let (mut snapshot, mut overlay) = fixture();
     let mut tree = ClientTreeChrome::default();
     let group = labels(&entries(&snapshot, Some(&overlay), &tree));
@@ -189,7 +189,7 @@ fn groups_tabs_and_expands_lanes_for_attention_or_focus() {
             "section:LANES",
             "tag:lane-a:1",
             "tag:lane-b:1",
-            "background:2",
+            "background:1",
             "section:TABS",
             "tab:plain-a",
             "agent:plain-pane",
@@ -204,14 +204,17 @@ fn groups_tabs_and_expands_lanes_for_attention_or_focus() {
             _ => None,
         })
         .unwrap();
-    assert_eq!(lane.summary.as_deref(), Some("pending"));
+    assert_eq!(lane.summary.as_deref(), Some("2"));
     assert!(lane.header.collapsed);
     overlay.tabs.get_mut("wf-b").unwrap().attention = Attention::Act;
     let group = labels(&entries(&snapshot, Some(&overlay), &tree));
-    assert_eq!(
-        &group[5..9],
-        ["tag:lane-a:1", "tag:wf-a:2", "tag:wf-b:2", "tag:lane-b:1"]
-    );
+    assert!(!group.contains(&"tag:wf-a:2".to_owned()));
+    let lane = entries(&snapshot, Some(&overlay), &tree).into_iter()
+        .find_map(|entry| match entry {
+            AgentPanelListEntry::FactoryTab(row) if row.header.label == "lane-a" => Some(row),
+            _ => None,
+        }).unwrap();
+    assert_eq!(lane.attention, Attention::Act);
     overlay.tabs.get_mut("wf-b").unwrap().attention = Attention::None;
     snapshot.focused_tab_id = Some("wf-a".into());
     assert!(labels(&entries(&snapshot, Some(&overlay), &tree)).contains(&"tag:wf-a:2".into()));
@@ -224,7 +227,7 @@ fn groups_tabs_and_expands_lanes_for_attention_or_focus() {
     let group = labels(&entries(&snapshot, Some(&overlay), &restored));
     assert!(group.contains(&"tag:wf-a:2".into()));
     assert!(group.contains(&"tag:advisor:2".into()));
-    assert!(group.contains(&"tag:done:2".into()));
+    assert!(!group.contains(&"tag:done:2".into()));
 }
 
 #[test]
@@ -512,6 +515,8 @@ fn rendered_factory_rows_with_tree(snapshot: &ClientShellSnapshot, overlay: &Fac
     let mut buffer = Buffer::empty(area);
     let mut config = ClientShellConfig::from_config(&Config::default());
     config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    config.agents.row_gap = 1;
+    config.factory.enabled = true;
     let mut hits = ShellHitMap::default();
     let mut scroll = 0;
     crate::client::shell::agent_sidebar::render_agent_panel_with_overlay(
@@ -532,7 +537,7 @@ fn factory_rows_fit_chevron_glyph_summary_devloop_and_hosts_at_25_columns() {
     let long_name = "abcdefghijklmnopqrst";
     overlay.tabs.get_mut("lane-a").unwrap().name = Some(long_name.into());
     overlay.tabs.get_mut("lane-a").unwrap().devloop = true;
-    overlay.tabs.get_mut("lane-a").unwrap().summary = Some("2 wf".into());
+    overlay.tabs.get_mut("lane-a").unwrap().summary = Some("stale 99 wf".into());
     overlay.tabs.get_mut("lane-b").unwrap().idle = false;
     overlay.tabs.get_mut("lane-b").unwrap().name = Some("no status".into());
     snapshot.tabs.iter_mut().find(|tab| tab.tab_id == "lane-b").unwrap().agent_status = AgentStatus::Unknown;
@@ -542,9 +547,9 @@ fn factory_rows_fit_chevron_glyph_summary_devloop_and_hosts_at_25_columns() {
         HostRow { name: "extraordinarily-long-host".into(), summary: Some("0/4".into()), attention: Attention::None },
     ];
     let (rows, hits, buffer) = rendered_factory_rows(&snapshot, &overlay);
-    let lane = rows.iter().find(|row| row.contains("2 wf")).unwrap_or_else(|| panic!("{rows:?}"));
-    assert!(lane.contains("▸ ● abcdefghijk… ⟳"), "{lane:?}");
-    assert!(lane.trim_end().ends_with("2 wf"), "{lane:?}");
+    let lane = rows.iter().find(|row| row.contains(long_name.chars().take(6).collect::<String>().as_str())).unwrap_or_else(|| panic!("{rows:?}"));
+    assert!(lane.contains("▸ ●") && lane.contains("⟳"), "{lane:?}");
+    assert!(lane.trim_end().ends_with('2'), "{lane:?}");
     assert!(rows.iter().any(|row| row.contains("● no status")), "{rows:?}");
     assert!(rows.iter().any(|row| row.contains("ORCHESTRATOR")));
     assert!(rows.iter().any(|row| row.contains("● orch") && row.trim_end().ends_with("inbox 3")), "{rows:?}");
@@ -560,7 +565,7 @@ fn factory_rows_fit_chevron_glyph_summary_devloop_and_hosts_at_25_columns() {
 }
 
 #[test]
-fn tagged_spaces_show_hosts_only_under_the_first_orchestrator_or_workflow() {
+fn tagged_spaces_show_one_hosts_footer_after_all_spaces() {
     let (mut snapshot, mut overlay) = fixture();
     snapshot.workspaces.push(ClientShellWorkspace {
         workspace_id: "ws_2".into(), active_tab_id: "other-lane".into(),
@@ -580,7 +585,8 @@ fn tagged_spaces_show_hosts_only_under_the_first_orchestrator_or_workflow() {
     assert_eq!(rows.iter().filter(|row| row.contains("HOSTS")).count(), 1, "{rows:?}");
     let hosts = rows.iter().position(|row| row.contains("HOSTS")).unwrap();
     let poker = rows.iter().position(|row| row.contains("poker")).unwrap();
-    assert!(hosts < poker, "{rows:?}");
+    assert!(hosts > poker, "{rows:?}");
+    assert_eq!(hosts + 2, rows.len(), "footer should end immediately above the menu: {rows:?}");
     // If only the lane space is tagged, that space receives the hosts instead.
     overlay.tabs.retain(|id, _| id == "other-lane");
     let (rows, _, _) = rendered_factory_rows(&snapshot, &overlay);
@@ -594,7 +600,7 @@ fn workflow_siblings_and_lane_metadata_remain_readable_at_25_columns() {
     let (mut snapshot, mut overlay) = fixture();
     snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "lane-a" | "lane-b"));
     overlay.tabs.get_mut("lane-a").unwrap().name = Some("issues".into());
-    overlay.tabs.get_mut("lane-a").unwrap().summary = Some("8 wf".into());
+    overlay.tabs.get_mut("lane-a").unwrap().summary = Some("stale count".into());
     overlay.tabs.get_mut("lane-b").unwrap().name = Some("conversation evals".into());
     for n in 1..=8 {
         let id = format!("wf-{n}");
@@ -611,25 +617,232 @@ fn workflow_siblings_and_lane_metadata_remain_readable_at_25_columns() {
     }
     let collapsed = rendered_factory_rows(&snapshot, &overlay).0;
     let collapsed_lane = collapsed.iter().find(|row| row.contains("issues")).unwrap();
-    assert!(collapsed_lane.contains("8 wf"), "{collapsed_lane:?}");
+    assert!(collapsed_lane.contains("7 · 1 done"), "{collapsed_lane:?}");
     let idle = collapsed.iter().find(|row| row.contains("conversation")).unwrap_or_else(|| panic!("{collapsed:?}"));
     assert!(idle.contains('○') && idle.trim_end().ends_with("idle"), "{idle:?}");
     let mut tree = ClientTreeChrome::default();
     tree.factory_expanded_lanes.insert("lane-a".into());
     let (expanded, _, buffer) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
     let expanded_lane = expanded.iter().find(|row| row.contains("issues")).unwrap();
-    assert!(expanded_lane.contains("8 wf"), "{expanded_lane:?}");
-    for n in 1..=8 {
-        let row = expanded.iter().find(|row| row.contains(&format!("#{n}")))
-            .unwrap_or_else(|| panic!("missing #{n}: {expanded:?}"));
-        assert!(row.trim_end().ends_with("Studio"), "{row:?}");
-        assert!(row.contains(if n == 8 { '✓' } else { '◐' }), "{row:?}");
-        if n == 8 {
-            let y = expanded.iter().position(|candidate| candidate == row).unwrap() as u16;
-            let x = row.find('✓').unwrap() as u16;
-            assert!(buffer[(x, y)].modifier.contains(Modifier::DIM));
-        }
+    assert_eq!(expanded_lane.replace('▾', "▸"), *collapsed_lane);
+    for n in 1..=7 {
+        let row = expanded.iter().find(|row| row.contains(&format!("issues {n}")))
+            .unwrap_or_else(|| panic!("missing issues {n}: {expanded:?}"));
+        assert!(row.trim_end().ends_with("Studio") && row.contains('◐'), "{row:?}");
     }
+    assert!(!expanded.iter().any(|row| row.contains('✓')));
+    let _ = buffer;
+}
+
+fn factory_click(state: &mut ClientShellState, kind: MouseEventKind, x: u16, y: u16) -> ClientShellInput {
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind, column: x, row: y, modifiers: KeyModifiers::NONE,
+    })])
+}
+
+fn focused_tab(input: &ClientShellInput) -> Vec<String> {
+    input.actions.iter().filter_map(|action| match action {
+        ClientShellAction::Endpoint { request, .. } => match &request.method {
+            crate::api::schema::Method::TabFocus(target) => Some(target.tab_id.clone()),
+            _ => None,
+        },
+        _ => None,
+    }).collect()
+}
+
+#[test]
+fn compact_factory_rows_and_click_targets_work_at_25_columns_with_gap_one() {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "orch" | "lane-a" | "wf-a"));
+    snapshot.agents.clear();
+    overlay.tabs.get_mut("wf-a").unwrap().name = Some("wf issues 3".into());
+    overlay.tabs.get_mut("wf-a").unwrap().badge = Some("Studio".into());
+    let mut state = factory_state(snapshot.clone(), overlay.clone());
+    state.config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    state.config.agents.row_gap = 1;
+    state.config.factory.enabled = true;
+    let tree = state.tree_chrome_mut();
+    tree.factory_expanded_lanes.insert("lane-a".into());
+    let (rows, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, tree);
+    let section = rows.iter().position(|row| row.contains("ORCHESTRATOR")).unwrap();
+    let space = rows.iter().position(|row| row.contains("client-shell")).unwrap();
+    assert_eq!(section, space + 1, "{rows:?}");
+    let orch = rows.iter().position(|row| row.contains("● orch")).unwrap();
+    let lane = rows.iter().position(|row| row.contains("● lane-a")).unwrap();
+    let workflow = rows.iter().position(|row| row.contains("issues 3")).unwrap();
+    assert_eq!(orch, section + 1, "{rows:?}");
+    assert_eq!(workflow, lane + 1, "{rows:?}");
+    assert!(rows[workflow].contains("issues 3") && rows[workflow].trim_end().ends_with("Studio"));
+    assert!(!rows[1].contains("usage") && !rows[1].contains("tree"));
+    let lane_hit = hits.tree_headers.iter().find(|hit| hit.tab_id.as_deref() == Some("lane-a")).unwrap();
+    let workflow_hit = hits.tree_headers.iter().find(|hit| hit.tab_id.as_deref() == Some("wf-a")).unwrap();
+    let lane_point = (lane_hit.rect.x + 9, lane_hit.rect.y);
+    let wf_point = (workflow_hit.rect.x + 9, workflow_hit.rect.y);
+    assert_eq!(lane_hit.chevron.width, 2);
+    let chevron = (lane_hit.chevron.x + 1, lane_hit.chevron.y);
+    let glyph = (lane_hit.chevron.x + 2, lane_hit.chevron.y);
+    state.hits = hits;
+    state.last_composed_size = Some((120, 60));
+    factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), lane_point.0, lane_point.1);
+    let focus = factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), lane_point.0 + 1, lane_point.1);
+    assert_eq!(focused_tab(&focus), ["lane-a"]);
+    assert!(state.detail_panel.is_none());
+    factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), wf_point.0, wf_point.1);
+    let focus = factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), wf_point.0, wf_point.1);
+    assert_eq!(focused_tab(&focus), ["wf-a"]);
+    assert!(state.detail_panel.is_none());
+    factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), chevron.0, chevron.1);
+    let toggle = factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), chevron.0, chevron.1);
+    assert!(focused_tab(&toggle).is_empty());
+    assert!(!state.tree_chrome_mut().factory_expanded_lanes.contains("lane-a"));
+
+    factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), glyph.0, glyph.1);
+    let glyph_focus = factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), glyph.0, glyph.1);
+    assert_eq!(focused_tab(&glyph_focus), ["lane-a"]);
+    assert!(!state.tree_chrome_mut().factory_expanded_lanes.contains("lane-a"));
+
+    factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), lane_point.0, lane_point.1);
+    let drift = factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), lane_point.0 + 10, lane_point.1);
+    assert_eq!(focused_tab(&drift), ["lane-a"]);
+    factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), lane_point.0, lane_point.1);
+    let adjacent = factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), lane_point.0, lane_point.1 + 1);
+    assert!(focused_tab(&adjacent).is_empty());
+    assert!(state.detail_panel.is_none());
+
+    let alt = |kind, x, y| RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind, column: x, row: y, modifiers: KeyModifiers::ALT,
+    });
+    let detail = state.handle_raw_events(vec![
+        alt(MouseEventKind::Down(MouseButton::Left), lane_point.0, lane_point.1),
+        alt(MouseEventKind::Up(MouseButton::Left), lane_point.0, lane_point.1),
+    ]);
+    assert!(focused_tab(&detail).is_empty());
+    let panel = state.detail_panel.as_ref().expect("Alt click opens detail");
+    assert_eq!(panel.key, "tab:lane-a");
+    assert!(!panel.focused, "keyboard focus remains outside the detail panel");
+}
+
+#[test]
+fn live_children_count_done_without_rendering_done_rows_and_color_collapsed_lane() {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "orch" | "lane-a" | "wf-a" | "wf-b"));
+    snapshot.agents.clear();
+    for n in 0..3 {
+        let id = format!("finished-{n}");
+        snapshot.tabs.push(ClientShellTab {
+            tab_id: id.clone(), workspace_id: "ws_1".into(), number: n + 11,
+            label: format!("wf finished {n}"), custom_label: true, zoomed: false,
+            focused: false, agent_status: AgentStatus::Done,
+        });
+        overlay.tabs.insert(id, TabTag {
+            kind: TabKind::Workflow, parent: Some("lane-a".into()), done: true,
+            ..TabTag::default()
+        });
+    }
+    overlay.tabs.get_mut("lane-a").unwrap().summary = Some("stale 99".into());
+    overlay.tabs.get_mut("wf-b").unwrap().attention = Attention::Act;
+    let (collapsed, _, buffer) = rendered_factory_rows(&snapshot, &overlay);
+    let lane_y = collapsed.iter().position(|row| row.contains("lane-a")).unwrap() as u16;
+    assert!(collapsed[lane_y as usize].contains("2 · 3 done"));
+    assert!(!collapsed.iter().any(|row| row.contains('✓') || row.contains("finished-")));
+    assert!(!collapsed.iter().any(|row| row.contains("wf-b")));
+    let glyph_x = collapsed[lane_y as usize].chars().position(|ch| ch == '●').unwrap() as u16;
+    let palette = ClientShellConfig::from_config(&Config::default()).palette;
+    assert_eq!(buffer[(glyph_x, lane_y)].fg, palette.red);
+    let mut tree = ClientTreeChrome::default();
+    tree.factory_expanded_lanes.insert("lane-a".into());
+    let (expanded, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+    assert!(expanded.iter().find(|row| row.contains("lane-a")).unwrap().contains("2 · 3 done"));
+    assert!(!expanded.iter().any(|row| row.contains('✓')));
+    overlay.tabs.get_mut("wf-a").unwrap().done = true;
+    overlay.tabs.get_mut("wf-b").unwrap().done = true;
+    // Use exactly three done children, all still in the live snapshot.
+    snapshot.tabs.retain(|tab| !matches!(tab.tab_id.as_str(), "finished-1" | "finished-2"));
+    let (all_done, _, _) = rendered_factory_rows(&snapshot, &overlay);
+    assert!(all_done.iter().find(|row| row.contains("lane-a")).unwrap().contains("3 done"));
+}
+
+#[test]
+fn tagged_space_keeps_full_name_when_count_and_controls_compete_at_25_columns() {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.workspaces[0].label = "agent-rails".into();
+    overlay.spaces.insert("ws_1".into(), SpaceTag {
+        attention: Attention::Act, target_tab: None, summary: Some("13".into()),
+    });
+    let (rows, _, _) = rendered_factory_rows(&snapshot, &overlay);
+    let header = rows.iter().find(|row| row.contains("agent-rails")).unwrap();
+    assert!(header.contains("agent-rails") && !header.contains('⚲') && !header.contains('+'), "{header:?}");
+    assert!(header.contains("● 13"), "{header:?}");
+
+    let area = Rect::new(0, 0, 40, 20);
+    let mut buffer = Buffer::empty(area);
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    let mut scroll = 0;
+    crate::client::shell::agent_sidebar::render_agent_panel_with_overlay(
+        &mut buffer, area, &snapshot, &config, &ClientTreeChrome::default(),
+        Some(&overlay), &mut scroll, &mut ShellHitMap::default(),
+    );
+    let wide = (0..area.width).map(|x| buffer[(x, 3)].symbol()).collect::<String>();
+    assert!(wide.contains("agent-rails") && wide.contains('⚲') && wide.contains('+') && wide.contains("● 13"), "{wide:?}");
+}
+
+#[test]
+fn non_factory_spacer_belongs_to_its_previous_clickable_row() {
+    let (snapshot, _) = fixture();
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    config.agents.row_gap = 1;
+    let area = Rect::new(0, 0, 25, 35);
+    let mut buffer = Buffer::empty(area);
+    let mut hits = ShellHitMap::default();
+    let mut scroll = 0;
+    crate::client::shell::agent_sidebar::render_agent_panel_with_overlay(
+        &mut buffer, area, &snapshot, &config, &ClientTreeChrome::default(),
+        None, &mut scroll, &mut hits,
+    );
+    let space = hits.tree_headers.iter().find(|hit| hit.tab_id.is_none() && hit.key == "ws_1").unwrap();
+    assert_eq!(space.rect.height, 2);
+    let gap_y = space.rect.y + 1;
+    assert_eq!(buffer[(0, gap_y)].symbol(), " ");
+}
+
+#[test]
+fn factory_tab_strip_omits_workflows_but_preserves_other_tabs_and_click_targets() {
+    let (mut snapshot, overlay) = fixture();
+    snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "orch" | "wf-a" | "plain-a"));
+    let mut state = factory_state(snapshot.clone(), overlay.clone());
+    state.set_pane_surface(surface());
+    let frame = state.compose(120, 40).expect("composed factory strip");
+    let strip = frame_rows(&frame)[0].clone();
+    let visible = state.hits.tabs.iter().map(|(_, id)| id.as_str()).collect::<Vec<_>>();
+    assert_eq!(visible, ["orch", "plain-a"]);
+    assert!(strip.contains("orch") && strip.contains("plain-a"), "{strip:?}");
+    assert!(!strip.contains("wf-a"), "{strip:?}");
+    let shortcut = |state: &mut ClientShellState, index| {
+        let mut outcome = ClientShellInput::default();
+        state.record_binding(crate::input::KeybindMatch::Action(
+            crate::input::KeybindAction::SwitchTab(index)), &mut outcome);
+        focused_tab(&outcome)
+    };
+    assert_eq!(shortcut(&mut state, 1), ["plain-a"]);
+    assert!(shortcut(&mut state, 2).is_empty());
+    let target = state.hits.tabs.iter().find(|(_, id)| id == "plain-a").unwrap().0;
+    let x = target.x + 1;
+    let y = target.y;
+    factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), x, y);
+    let focus = factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), x, y);
+    assert_eq!(focused_tab(&focus), ["plain-a"]);
+
+    // Off: the identical snapshot shows workflow tabs in their original order.
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    config.factory.enabled = false;
+    let mut off = ClientShellState::new(config);
+    off.set_snapshot(Box::new(snapshot));
+    off.factory_overlay = Some(std::sync::Arc::new(overlay));
+    off.set_pane_surface(surface());
+    off.compose(120, 40).expect("composed ordinary strip");
+    assert!(off.hits.tabs.iter().any(|(_, id)| id == "wf-a"));
 }
 
 #[test]
