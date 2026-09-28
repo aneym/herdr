@@ -187,38 +187,55 @@ fn render_header_status(
         );
         return;
     };
-    let tab_status = compact_tab_status(snapshot, workspace);
-    let tab_width = display_width(&tab_status).saturating_add(1).min(area.width);
-    let name_width = area.width.saturating_sub(tab_width);
-    put_text(
+    let icon = resolved_status_icon(workspace.agent_status, config);
+    let prefix = if icon.is_empty() {
+        " ".to_owned()
+    } else {
+        format!(" {icon} ")
+    };
+    let profile = format!(" · {}", snapshot.active_profile);
+    let show_profile = display_width(&prefix)
+        .saturating_add(display_width(&workspace.label))
+        .saturating_add(display_width(&profile))
+        <= area.width;
+    let name_width = area
+        .width
+        .saturating_sub(display_width(&prefix))
+        .saturating_sub(if show_profile { display_width(&profile) } else { 0 });
+    let mut x = put_segment(
         buffer,
         area.x,
         area.y,
-        name_width.min(3),
-        &format!(" {} ", resolved_status_icon(workspace.agent_status, config)),
+        area.right(),
+        &prefix,
         Style::default()
             .fg(status_color(workspace.agent_status, palette))
             .bg(palette.panel_bg),
     );
-    put_text(
+    x = put_segment(
         buffer,
-        area.x.saturating_add(3),
+        x,
         area.y,
-        name_width.saturating_sub(3),
-        &crate::ui::truncate_end(&workspace.label, usize::from(name_width.saturating_sub(4))),
+        area.right(),
+        &crate::ui::truncate_end(&workspace.label, usize::from(name_width)),
         Style::default()
             .fg(palette.text)
             .bg(palette.panel_bg)
             .add_modifier(Modifier::BOLD),
     );
-    put_text(
-        buffer,
-        area.right().saturating_sub(tab_width).saturating_add(1),
-        area.y,
-        tab_width.saturating_sub(1),
-        &tab_status,
-        Style::default().fg(palette.overlay1).bg(palette.panel_bg),
-    );
+    if show_profile {
+        put_segment(
+            buffer,
+            x,
+            area.y,
+            area.right(),
+            &profile,
+            Style::default()
+                .fg(palette.overlay1)
+                .bg(palette.panel_bg)
+                .add_modifier(Modifier::DIM),
+        );
+    }
     if area.height > 1 {
         render_agent_summary(
             buffer,
@@ -747,7 +764,14 @@ fn mobile_items(
             let primary = workspace
                 .map(|workspace| workspace.label.as_str())
                 .unwrap_or(agent_label);
+            let thread_title = agent
+                .terminal_title_stripped
+                .as_deref()
+                .filter(|title| !title.trim().is_empty());
             let mut detail = Vec::new();
+            if thread_title.is_some() {
+                detail.push(format!("{} · {primary}", endpoint.label));
+            }
             let workspace_tab_count = endpoint
                 .snapshot
                 .tabs
@@ -809,7 +833,9 @@ fn mobile_items(
                         Span::styled(" ", Style::default().bg(background)),
                         Span::styled(
                             crate::ui::truncate_end(
-                                &format!("{} · {primary}", endpoint.label),
+                                &thread_title
+                                    .map(str::to_owned)
+                                    .unwrap_or_else(|| format!("{} · {primary}", endpoint.label)),
                                 usize::from(content_width.saturating_sub(5)),
                             ),
                             Style::default()
@@ -1027,18 +1053,29 @@ fn mobile_items(
             } else {
                 format!("tab {}", tab.label)
             };
-            let label = format!(
-                "  {}",
-                crate::ui::truncate_end(&label, usize::from(content_width.saturating_sub(3)),)
-            );
+            let glyphs = super::render::tab_status_glyphs(snapshot, tab, config);
+            let glyph_width = glyphs.iter().fold(0u16, |width, (glyph, _)| {
+                width.saturating_add(display_width(glyph).saturating_add(1))
+            });
+            let mut spans = vec![Span::styled(
+                format!(
+                    "  {}",
+                    crate::ui::truncate_end(
+                        &label,
+                        usize::from(content_width.saturating_sub(3).saturating_sub(glyph_width)),
+                    )
+                ),
+                Style::default()
+                    .fg(palette.text)
+                    .bg(background)
+                    .add_modifier(Modifier::BOLD),
+            )];
+            for (glyph, style) in glyphs {
+                spans.push(Span::styled(" ", Style::default().bg(background)));
+                spans.push(Span::styled(glyph.to_owned(), style.bg(background)));
+            }
             items.push(MobileItem {
-                lines: vec![Line::from(Span::styled(
-                    label,
-                    Style::default()
-                        .fg(palette.text)
-                        .bg(background)
-                        .add_modifier(Modifier::BOLD),
-                ))],
+                lines: vec![Line::from(spans)],
                 background,
                 target: Some(ClientMobileTarget::Tab {
                     endpoint_id: active_endpoint_id.clone(),
