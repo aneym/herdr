@@ -121,6 +121,7 @@ fn mobile_switcher_leads_with_live_agent_title_and_moves_workspace_to_detail() {
         owner_pane_id: None,
         orphaned: false,
         group: Default::default(),
+        visible_in_profile: true,
     });
     state.set_snapshot(Box::new(projected));
     state.set_pane_surface(surface());
@@ -170,6 +171,7 @@ fn mobile_switcher_tab_rows_show_per_pane_glyphs_only_when_enabled() {
         owner_pane_id: None,
         orphaned: false,
         group: Default::default(),
+        visible_in_profile: true,
     });
     for (mode, expected_glyphs) in [(ShowTabStatusConfig::Attention, true), (ShowTabStatusConfig::Off, false)] {
         let mut config = Config::default();
