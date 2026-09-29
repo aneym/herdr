@@ -2184,11 +2184,21 @@ impl ClientShellState {
             previous.inner_rect.width != next.inner_rect.width
                 || previous.inner_rect.height != next.inner_rect.height
                 || previous.alternate_screen_active != next.alternate_screen_active
-                // Ordinary selections are live buffer ranges. Only word gestures
-                // cache content-dependent boundaries that output can invalidate.
-                || (self.word_selection_gesture.is_some()
-                    && previous.content_revision != next.content_revision)
         });
+        if !selection_invalidated {
+            if let Some(gesture) = self.word_selection_gesture.as_mut() {
+                if let (Some(previous), Some(next)) = (
+                    self.pane_surface.as_ref().and_then(|surface| {
+                        surface.panes.iter().find(|pane| pane.pane_id == gesture.pane_id)
+                    }),
+                    surface.panes.iter().find(|pane| pane.pane_id == gesture.pane_id),
+                ) {
+                    if previous.content_revision != next.content_revision {
+                        gesture.cached_row = None;
+                    }
+                }
+            }
+        }
         if selection_invalidated {
             self.word_selection_gesture = None;
             self.selection = None;

@@ -165,6 +165,91 @@ fn mouse_reporting_double_click_cmd_c_copies_word_without_forwarding_key() {
 }
 
 #[test]
+fn mouse_reporting_double_click_copies_word_after_output_before_row_reply() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.config.copy_on_select = false;
+    state.set_snapshot(Box::new(snapshot()));
+    let mut pane_surface = surface();
+    pane_surface.panes[0].mouse_reporting = true;
+    pane_surface.panes[0].rect.width = 19;
+    pane_surface.panes[0].inner_rect = pane_surface.panes[0].rect;
+    state.set_pane_surface(pane_surface);
+    state.compose(106, 20).expect("composed frame");
+    let pane = state.hits.panes[0].clone();
+
+    for kind in [MouseEventKind::Down(MouseButton::Left), MouseEventKind::Up(MouseButton::Left)] {
+        state.handle_raw_events(vec![pane_mouse(kind, &pane, 8)]);
+    }
+    let second = state.handle_raw_events(vec![pane_mouse(MouseEventKind::Down(MouseButton::Left), &pane, 8)]);
+    let word_request = endpoint_request(second);
+    assert!(matches!(
+        &word_request.method,
+        crate::api::schema::Method::PaneSelectionRead(params)
+            if params.content_revision.is_none()
+    ));
+    state.handle_raw_events(vec![pane_mouse(MouseEventKind::Up(MouseButton::Left), &pane, 8)]);
+    let mut updated = state.pane_surface.as_ref().unwrap().clone();
+    updated.surface_revision += 1;
+    updated.panes[0].content_revision += 1;
+    updated.frame.cells[0].symbol = "X".into();
+    state.set_pane_surface(updated);
+    state.handle_endpoint_result(
+        "boot-1",
+        &word_request.id,
+        Ok(crate::api::schema::ResponseResult::PaneSelection {
+            pane_id: "pane_1".into(),
+            text: "alpha bravo charlie".into(),
+        }),
+    );
+    let copy = state.handle_raw_events(vec![RawInputEvent::Key(
+        crate::input::TerminalKey::new(KeyCode::Char('c'), KeyModifiers::SUPER),
+    )]);
+    assert!(copy.actions.iter().any(|action| matches!(
+        action,
+        ClientShellAction::Endpoint { request, .. }
+            if matches!(&request.method, crate::api::schema::Method::PaneSelectionRead(params)
+                if params.anchor.col == 6 && params.cursor.col == 10)
+    )));
+    assert_ne!(
+        state.copy_feedback.as_ref().map(|toast| toast.message.as_str()),
+        Some("nothing selected to copy")
+    );
+}
+
+#[test]
+fn stale_word_row_reply_retries_once_without_revision() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.config.copy_on_select = false;
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.compose(106, 20).expect("composed frame");
+    let pane = state.hits.panes[0].clone();
+    for kind in [MouseEventKind::Down(MouseButton::Left), MouseEventKind::Up(MouseButton::Left)] {
+        state.handle_raw_events(vec![pane_mouse(kind, &pane, 1)]);
+    }
+    let second = state.handle_raw_events(vec![pane_mouse(MouseEventKind::Down(MouseButton::Left), &pane, 1)]);
+    let first = endpoint_request(second);
+    state.handle_raw_events(vec![pane_mouse(MouseEventKind::Up(MouseButton::Left), &pane, 1)]);
+    let (_, actions) = state.handle_endpoint_result(
+        "boot-1", &first.id,
+        Err(ClientShellEndpointError { code: Some("stale_content".into()), message: "stale".into() }),
+    );
+    let [ClientShellAction::Endpoint { request: retry, .. }] = &actions[..] else {
+        panic!("retry word lookup");
+    };
+    assert!(matches!(&retry.method, crate::api::schema::Method::PaneSelectionRead(params)
+        if params.content_revision.is_none()));
+    let (_, actions) = state.handle_endpoint_result(
+        "boot-1", &retry.id,
+        Ok(crate::api::schema::ResponseResult::PaneSelection {
+            pane_id: "pane_1".into(), text: "LIVE".into(),
+        }),
+    );
+    assert!(actions.is_empty());
+    assert!(state.selection.as_ref().is_some_and(crate::selection::Selection::is_finalized));
+}
+
+#[test]
 fn mouse_reporting_click_then_wheel_reaches_the_pane_app() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
