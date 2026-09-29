@@ -55,6 +55,26 @@ pub enum TabKind {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TabMode {
+    #[default]
+    Active,
+    Parked,
+    Auto,
+}
+
+impl<'de> Deserialize<'de> for TabMode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "parked" => Self::Parked,
+            "auto" => Self::Auto,
+            _ => Self::Active,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Attention {
@@ -83,6 +103,7 @@ impl Attention {
 #[serde(default)]
 pub struct TabTag {
     pub kind: TabKind,
+    pub mode: TabMode,
     /// Tab id this tab nests under (a workflow under its lane or the orchestrator).
     pub parent: Option<String>,
     /// Plain-words display name; falls back to the tab label.
@@ -250,6 +271,10 @@ mod tests {
         let legacy = parse(br#"{"version":1,"tabs":{"lane":{"kind":"lane"}}}"#).unwrap();
         assert!(!legacy.tabs["lane"].devloop);
         assert!(legacy.tabs["lane"].runs.is_empty());
+        assert_eq!(legacy.tabs["lane"].mode, TabMode::Active);
+        let modes = parse(br#"{"version":1,"tabs":{"p":{"mode":"parked"},"x":{"mode":"weird"}}}"#).unwrap();
+        assert_eq!(modes.tabs["p"].mode, TabMode::Parked);
+        assert_eq!(modes.tabs["x"].mode, TabMode::Active);
         assert!(legacy.hosts.is_empty());
     }
 

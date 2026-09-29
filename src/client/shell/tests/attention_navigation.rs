@@ -1,6 +1,6 @@
 use super::*;
 use crate::client::shell::tree::ClientTreeChrome;
-use crate::factory_overlay::{Attention, FactoryOverlay, TabKind, TabTag};
+use crate::factory_overlay::{Attention, FactoryOverlay, TabKind, TabMode, TabTag};
 use crate::input::KeybindAction;
 
 fn attention_state(statuses: &[AgentStatus]) -> ClientShellState {
@@ -217,6 +217,40 @@ fn next_attention_skips_focused_ask_tab_without_an_agent() {
     projected.focused_tab_id = Some("tab_3".into());
     projected.focused_pane_id = Some("pane_3".into());
     assert_eq!(state.next_attention_target(&projected), Some((None, "tab_1".into())));
+}
+
+#[test]
+fn parked_and_auto_lanes_are_anchors_except_blocked_auto_panes() {
+    let mut state = attention_state(&[
+        AgentStatus::Working, AgentStatus::Done, AgentStatus::Done,
+        AgentStatus::Done, AgentStatus::Done, AgentStatus::Blocked,
+        AgentStatus::Done,
+    ]);
+    let mut overlay = FactoryOverlay::default();
+    for (id, mode) in [("tab_1", TabMode::Parked), ("tab_3", TabMode::Auto)] {
+        overlay.tabs.insert(id.into(), TabTag { kind: TabKind::Lane, mode, ..Default::default() });
+    }
+    for (id, parent) in [("tab_2", "tab_1"), ("tab_4", "tab_3")] {
+        overlay.tabs.insert(id.into(), TabTag {
+            kind: TabKind::Workflow, parent: Some(parent.into()), attention: Attention::Act,
+            ..Default::default()
+        });
+    }
+    overlay.tabs.insert("tab_5".into(), TabTag { kind: TabKind::Lane, mode: TabMode::Parked, done: true, ..Default::default() });
+    overlay.tabs.insert("tab_6".into(), TabTag { kind: TabKind::Lane, ..Default::default() });
+    state.factory_overlay = Some(std::sync::Arc::new(overlay));
+    // With no eligible blocked pane, neither parked nor auto Done panes may win.
+    assert_eq!(focused_pane(&mut state, KeybindAction::NextAttention).as_deref(), Some("pane_6"));
+    let mut overlay = (*state.factory_overlay.as_ref().unwrap()).as_ref().clone();
+    overlay.tabs.get_mut("tab_5").unwrap().mode = TabMode::Auto;
+    overlay.tabs.get_mut("tab_5").unwrap().done = false;
+    state.factory_overlay = Some(std::sync::Arc::new(overlay));
+    assert_eq!(focused_pane(&mut state, KeybindAction::NextAttention).as_deref(), Some("pane_5"));
+    assert_eq!(focused_pane(&mut state, KeybindAction::NextAttention).as_deref(), Some("pane_6"));
+    let mut overlay = (*state.factory_overlay.as_ref().unwrap()).as_ref().clone();
+    overlay.tabs.get_mut("tab_6").unwrap().mode = TabMode::Parked;
+    state.factory_overlay = Some(std::sync::Arc::new(overlay));
+    assert_eq!(focused_pane(&mut state, KeybindAction::NextAttention).as_deref(), Some("pane_5"));
 }
 
 #[test]

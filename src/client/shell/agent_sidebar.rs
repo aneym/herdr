@@ -169,11 +169,21 @@ pub(super) fn render_agent_panel_with_overlay(
         hits,
         super::tree::AgentPanelListEntry::line_count,
         entries.first().is_some_and(is_factory_entry),
-        |index| if overlay.is_some() && (matches!(entries[index],
-                super::tree::AgentPanelListEntry::FactorySection { .. })
-            || matches!(&entries[index],
-                super::tree::AgentPanelListEntry::SpaceHeader(header) if header.factory_space)) { 0 }
-            else { config.agents.row_gap },
+        |index| {
+            use super::tree::{AgentPanelListEntry as Entry, FactoryGroupKind};
+            if overlay.is_some() && matches!(&entries[index + 1],
+                Entry::SpaceHeader(header) if header.factory_space)
+                || overlay.is_some() && matches!(&entries[index + 1],
+                    Entry::FactoryBackground { kind: FactoryGroupKind::Background, .. }) {
+                return config.agents.row_gap.max(1);
+            }
+            if overlay.is_some() && (matches!(entries[index], Entry::FactorySection { .. })
+                || matches!(&entries[index], Entry::SpaceHeader(header) if header.factory_space)) {
+                0
+            } else {
+                config.agents.row_gap
+            }
+        },
         |buffer, rect, entry, hits| render_panel_list_entry(buffer, rect, entry, config, hits),
         |entry| match entry {
             super::tree::AgentPanelListEntry::FactoryTab(row) => (row.header.active, row.header.active),
@@ -347,33 +357,8 @@ fn render_panel_list_entry(
             };
             put_text(buffer, rect.right().saturating_sub(right_width), rect.y, right_width, right, Style::default().fg(color));
         }
-        AgentPanelListEntry::FactoryBackground {
-            workspace_id,
-            count,
-            collapsed,
-            indent,
-        } => {
-            let style = Style::default()
-                .fg(config.palette.overlay0)
-                .add_modifier(Modifier::DIM);
-            let start = rect.x.saturating_add(1 + u16::from(*indent));
-            let chevron = Rect::new(start, rect.y, 2.min(rect.right().saturating_sub(start)), 1);
-            put_text(buffer, chevron.x, rect.y, 2.min(chevron.width), if *collapsed { "▸ " } else { "▾ " }, style);
-            let label_x = start.saturating_add(2);
-            let label = crate::ui::truncate_end(&format!("background {count}"), rect.right().saturating_sub(label_x) as usize);
-            put_text(buffer, label_x, rect.y, rect.right().saturating_sub(label_x), &label, style);
-            hits.tree_headers.push(TreeHeaderHit {
-                rect,
-                chevron,
-                plus: Rect::default(),
-                pin: Rect::default(),
-                group: None,
-                workspace_id: workspace_id.clone(),
-                tab_id: None,
-                key: format!("factory-background:{workspace_id}"),
-                pinned: false,
-                collapsed: *collapsed,
-            });
+        AgentPanelListEntry::FactoryBackground { kind, workspace_id, count, collapsed, indent, alert, working } => {
+            render_factory_group(buffer, rect, config, hits, workspace_id, kind.label(), *count, *collapsed, *indent, *alert, *working);
         }
         AgentPanelListEntry::SpaceHeader(header) => {
             render_tree_header(buffer, rect, header, true, config, hits);
@@ -405,6 +390,37 @@ fn render_panel_list_entry(
             hits.tree_hidden_header = rect;
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_factory_group(
+    buffer: &mut Buffer, rect: Rect, config: &ClientShellConfig, hits: &mut ShellHitMap,
+    workspace_id: &str, label: &str, count: usize, collapsed: bool, indent: u8,
+    alert: bool, working: bool,
+) {
+    let style = Style::default().fg(config.palette.overlay0).add_modifier(Modifier::DIM);
+    let start = rect.x.saturating_add(1 + u16::from(indent));
+    let chevron = Rect::new(start, rect.y, 2.min(rect.right().saturating_sub(start)), 1);
+    put_text(buffer, chevron.x, rect.y, 2.min(chevron.width), if collapsed { "▸ " } else { "▾ " }, style);
+    let label_x = start.saturating_add(2);
+    let right_edge = rect.right().saturating_sub(u16::from(alert));
+    let marker = if working { " ●" } else { "" };
+    let text = crate::ui::truncate_end(&format!("{label} {count}{marker}"), right_edge.saturating_sub(label_x) as usize);
+    put_text(buffer, label_x, rect.y, right_edge.saturating_sub(label_x), &text, style);
+    if working && text.ends_with('●') {
+        let dot_x = label_x + display_width(&text).saturating_sub(1) as u16;
+        put_text(buffer, dot_x, rect.y, 1, "●", Style::default().fg(config.palette.peach));
+    }
+    if alert {
+        put_text(buffer, rect.right().saturating_sub(1), rect.y, 1, "!", Style::default().fg(config.palette.red));
+    }
+    hits.tree_headers.push(TreeHeaderHit {
+        rect, chevron, plus: Rect::default(), pin: Rect::default(), group: None,
+        workspace_id: workspace_id.to_owned(), tab_id: None,
+        key: if label == "background" { format!("factory-background:{workspace_id}") }
+            else { format!("factory-background:{label}:{workspace_id}") },
+        pinned: false, collapsed,
+    });
 }
 
 fn render_factory_tab(

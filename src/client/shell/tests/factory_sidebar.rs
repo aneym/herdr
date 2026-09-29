@@ -1,6 +1,6 @@
 use super::*;
 use crate::client::shell::tree::ClientTreeChrome;
-use crate::factory_overlay::{Attention, FactoryOverlay, HostRow, RunTag, SpaceTag, TabKind, TabTag};
+use crate::factory_overlay::{Attention, FactoryOverlay, HostRow, RunTag, SpaceTag, TabKind, TabMode, TabTag};
 
 fn fixture() -> (ClientShellSnapshot, FactoryOverlay) {
     let mut snapshot = snapshot();
@@ -339,6 +339,26 @@ fn factory_compact_frame_w25() {
 }
 
 #[test]
+fn compact_factory_spaces_have_one_boundary_row_without_section_gaps() {
+    let (snapshot, overlay) = lab_fixture();
+    let (rows, hits, _) = rendered_factory_rows_with_gap(
+        &snapshot, &overlay, &ClientTreeChrome::default(), 25, 0,
+    );
+    let header = |key: &str| hits.tree_headers.iter().find(|hit| hit.key == key).unwrap().rect.y as usize;
+    let first = header("ws_1");
+    let orchestrator = rows.iter().position(|row| row.contains("ORCHESTRATOR")).unwrap();
+    let lanes = rows.iter().position(|row| row.contains("LANES")).unwrap();
+    let background = header("factory-background:ws_1");
+    let second = header("ws_2");
+    assert_eq!(orchestrator, first + 1, "no gap after space header");
+    assert!(rows[lanes - 1].contains("orchestrator"), "no gap between sections");
+    assert!(rows[background - 1].trim().is_empty(), "gap before background");
+    assert!(rows[background - 2].contains("plain-b"), "one gap before background");
+    assert!(rows[second - 1].trim().is_empty(), "gap between spaces");
+    assert_eq!(second, background + 2, "exactly one gap between spaces");
+}
+
+#[test]
 fn factory_click_table() {
     let (snapshot, overlay) = lab_fixture();
     let mut tree = ClientTreeChrome::default();
@@ -632,6 +652,51 @@ fn registered_runs_count_and_expand_under_parent() {
         assert!(expanded[run.rect.y as usize].contains(&format!("◐ {name}")));
         assert!(expanded[run.rect.y as usize + 1].contains(phase));
     }
+}
+
+#[test]
+fn parked_and_automated_lanes_fold_separately_and_keep_asks_visible() {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "lane-a" | "lane-b" | "advisor"));
+    let mut parked = snapshot.tabs.iter().find(|tab| tab.tab_id == "lane-b").unwrap().clone();
+    parked.tab_id = "parked-lane".into();
+    parked.label = "noah sdr".into();
+    parked.agent_status = AgentStatus::Blocked;
+    snapshot.tabs.push(parked);
+    overlay.tabs.insert("parked-lane".into(), TabTag {
+        kind: TabKind::Lane, mode: TabMode::Parked, attention: Attention::Act, ..Default::default()
+    });
+    overlay.tabs.get_mut("lane-b").unwrap().mode = TabMode::Auto;
+    snapshot.tabs.iter_mut().find(|tab| tab.tab_id == "lane-b").unwrap().agent_status = AgentStatus::Working;
+    let (rows, hits, buffer) = rendered_factory_rows(&snapshot, &overlay);
+    let auto = hits.tree_headers.iter().find(|hit| hit.key == "factory-background:automations:ws_1").unwrap();
+    let parked = hits.tree_headers.iter().find(|hit| hit.key == "factory-background:parked:ws_1").unwrap();
+    let lane = hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap();
+    assert!(lane.rect.y < auto.rect.y && auto.rect.y < parked.rect.y);
+    assert!(rows[lane.rect.y as usize].contains("lane-a"));
+    assert!(rows[auto.rect.y as usize].contains("automations 1"));
+    assert!(rows[parked.rect.y as usize].contains("parked 1"));
+    assert!(!rows.iter().any(|row| row.contains("noah sdr") || row.contains("lane-b")));
+    assert!(rows[parked.rect.y as usize].ends_with('!'));
+    let palette = ClientShellConfig::from_config(&Config::default()).palette;
+    assert_eq!(buffer[(24, parked.rect.y)].fg, palette.red);
+    let mut state = factory_state(snapshot.clone(), overlay.clone());
+    state.config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    state.hits = hits;
+    state.last_composed_size = Some((120, 60));
+    for (key, name) in [("automations", "lane-b"), ("parked", "noah sdr")] {
+        let (rows, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, state.tree_chrome_mut());
+        let rect = hits.tree_headers.iter().find(|hit| hit.key == format!("factory-background:{key}:ws_1")).unwrap().rect;
+        assert!(!rows.iter().any(|row| row.contains(name)));
+        state.hits = hits;
+        factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), rect.x + 3, rect.y);
+        factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), rect.x + 3, rect.y);
+        let (rows, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, state.tree_chrome_mut());
+        assert!(rows.iter().any(|row| row.contains(name)), "{rows:?}");
+    }
+    let restored = ClientTreeChrome::from_preferences(state.tree_chrome_mut().to_preferences());
+    assert!(restored.factory_auto_expanded.contains("ws_1"));
+    assert!(restored.factory_parked_expanded.contains("ws_1"));
 }
 
 #[test]
