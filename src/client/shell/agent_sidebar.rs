@@ -558,10 +558,17 @@ fn workflow_progress(phase: &str, age: Option<&str>, room: usize) -> String {
             if let Some(phase) = fit_phase(width) { return format!("{phase}{segment}"); }
         }
         // Hours may omit minutes, but never the unit.
-        if let Some(hours) = age.split_once('h').map(|(hours, _)| format!("{hours}h")) {
+        let hours = age.split_once('h').map(|(hours, _)| format!("{hours}h"));
+        if let Some(hours) = &hours {
             let segment = format!(" · {hours}");
             if let Some(width) = room.checked_sub(display_width(&segment)) {
                 if let Some(phase) = fit_phase(width) { return format!("{phase}{segment}"); }
+            }
+        }
+        if let Some((_, count)) = fraction {
+            for age in std::iter::once(age).chain(hours.as_deref()) {
+                let progress = format!("{count} · {age}");
+                if display_width(&progress) <= room { return progress; }
             }
         }
     }

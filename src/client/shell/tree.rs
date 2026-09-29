@@ -781,12 +781,16 @@ fn append_factory_space(
         .copied()
         .filter(|tab| foreground(tab) && kind(tab) == TabKind::Lane)
         .collect::<Vec<_>>();
-    let all_workflows = tabs.iter().copied()
+    let all_workflows = tabs
+        .iter()
+        .copied()
         .filter(|tab| kind(tab) == TabKind::Workflow)
         .collect::<Vec<_>>();
-    let workflows = all_workflows.iter().copied().filter(|tab| {
-        overlay.tab(&tab.tab_id).is_none_or(|tag| !tag.done)
-    }).collect::<Vec<_>>();
+    let workflows = all_workflows
+        .iter()
+        .copied()
+        .filter(|tab| overlay.tab(&tab.tab_id).is_none_or(|tag| !tag.done))
+        .collect::<Vec<_>>();
     let first_orchestrator = orchestrators.first().map(|tab| tab.tab_id.as_str());
     let lane_ids = lanes
         .iter()
@@ -812,14 +816,25 @@ fn append_factory_space(
                     .filter(|workflow| parent_for(workflow) == Some(orchestrator.tab_id.as_str()))
                     .collect::<Vec<_>>();
                 let focused = snapshot.focused_workspace_id.as_deref() == Some(workspace_id)
-                    && children.iter().any(|tab| snapshot.focused_tab_id.as_deref() == Some(tab.tab_id.as_str()));
-                let needs_action = all_workflows.iter()
+                    && children.iter().any(|tab| {
+                        snapshot.focused_tab_id.as_deref() == Some(tab.tab_id.as_str())
+                    });
+                let attention = all_workflows.iter()
                     .filter(|workflow| parent_for(workflow) == Some(orchestrator.tab_id.as_str()))
-                    .any(|workflow| overlay.tab(&workflow.tab_id).is_some_and(|tag| tag.attention == crate::factory_overlay::Attention::Act));
-                let expanded = tree.factory_expanded(&orchestrator.tab_id, focused, needs_action);
+                    .filter_map(|workflow| overlay.tab(&workflow.tab_id))
+                    .map(|tag| tag.attention)
+                    .max_by_key(|attention| attention.rank());
+                let expanded = tree.factory_expanded(&orchestrator.tab_id, focused,
+                    attention == Some(crate::factory_overlay::Attention::Act));
                 let mut row = factory_row(snapshot, rows, overlay, orchestrator, indent,
                     !expanded && !children.is_empty(), !children.is_empty());
-                summarize_factory_parent(&mut row, children.len(), overlay.tab(&orchestrator.tab_id).is_some_and(|tag| tag.busy));
+                if let AgentPanelListEntry::FactoryTab(tab) = &mut row {
+                    if let Some(attention) = attention.filter(|child| child.rank() > tab.attention.rank()) {
+                        tab.attention = attention;
+                    }
+                }
+                summarize_factory_parent(&mut row, children.len(),
+                    overlay.tab(&orchestrator.tab_id).is_some_and(|tag| tag.busy), true);
                 out.push(row);
                 if expanded {
                     for child in children {
@@ -886,7 +901,7 @@ fn append_factory_space(
                 }
             }
             summarize_factory_parent(&mut lane_row, running,
-                overlay.tab(&lane.tab_id).is_some_and(|tag| tag.busy));
+                overlay.tab(&lane.tab_id).is_some_and(|tag| tag.busy), false);
             out.push(lane_row);
             if expanded {
                 for child in children {
@@ -937,7 +952,7 @@ fn append_factory_space(
     }
 }
 
-fn summarize_factory_parent(row: &mut AgentPanelListEntry, running: usize, busy: bool) {
+fn summarize_factory_parent(row: &mut AgentPanelListEntry, running: usize, busy: bool, orchestrator: bool) {
     if let AgentPanelListEntry::FactoryTab(row) = row {
         if (running > 0 || busy)
             && matches!(row.status, crate::api::schema::AgentStatus::Idle
@@ -947,8 +962,15 @@ fn summarize_factory_parent(row: &mut AgentPanelListEntry, running: usize, busy:
             row.status = crate::api::schema::AgentStatus::Working;
             row.idle = false;
         }
+        let tag_summary = orchestrator.then(|| row.summary.as_deref().unwrap_or("").trim())
+            .filter(|summary| !summary.is_empty());
         row.summary = Some(if running > 0 {
-            running.to_string()
+            match tag_summary {
+                Some(summary) => format!("{running} · {summary}"),
+                None => running.to_string(),
+            }
+        } else if let Some(summary) = tag_summary {
+            summary.to_owned()
         } else if row.idle {
             "idle".to_owned()
         } else {
@@ -996,7 +1018,9 @@ fn factory_row(
                     .unwrap_or_else(|| tab.label.clone());
                 if tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Workflow) {
                     name.strip_prefix("wf ").unwrap_or(&name).to_owned()
-                } else { name }
+                } else {
+                    name
+                }
             },
             key: tab.tab_id.clone(),
             collapsed,

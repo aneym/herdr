@@ -261,6 +261,7 @@ fn factory_tab_strip_omits_workflows_but_preserves_other_tabs_and_click_targets(
 fn lab_fixture() -> (ClientShellSnapshot, FactoryOverlay) {
     let (mut snapshot, mut overlay) = fixture();
     snapshot.workspaces[0].label = "agent-rails".into();
+    overlay.tabs.get_mut("orch").unwrap().name = Some("orchestrator".into());
     snapshot.workspaces.push(ClientShellWorkspace {
         workspace_id: "ws_2".into(), active_tab_id: "poker".into(),
         new_workspace_cwd: String::new(), number: 2, label: "poker".into(),
@@ -320,6 +321,13 @@ fn factory_expanded_frame_w27() {
     tree.factory_expanded_lanes.insert("lane-a".into());
     let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 27);
     assert_golden(rows, include_str!("golden/factory_expanded_w27.txt"));
+
+    let (snapshot, mut overlay) = lab_fixture();
+    overlay.tabs.get_mut("wf-a").unwrap().name = Some("wf issues 3".into());
+    overlay.tabs.get_mut("wf-a").unwrap().phase = Some("decide 99/101".into());
+    let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 23);
+    let workflow = rows.iter().position(|row| row.contains("◐ issues 3")).unwrap();
+    assert!(rows[workflow + 1].contains("99/101 · 8h57m"), "{}", rows[workflow + 1]);
 }
 
 #[test]
@@ -484,11 +492,21 @@ fn factory_parent_with_running_workflow_or_busy_tag_shows_working() {
         assert_eq!(color, palette.working, "{id} with running workflow: {row}");
         assert!(!row.contains("idle"), "{row}");
     }
+    overlay.tabs.get_mut("wf-b").unwrap().parent = Some("orch".into());
+    overlay.tabs.get_mut("orch").unwrap().name = Some("orchestrator".into());
+    let mut folded = ClientTreeChrome::default();
+    folded.factory_collapsed_lanes.insert("orch".into());
+    let (wide, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &folded, 35);
+    assert!(wide.iter().any(|row| row.contains("orchestrator") && row.contains("2 · inbox 3")), "{wide:?}");
+    let (narrow, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &folded);
+    assert!(narrow.iter().any(|row| row.contains("orchestrator") && row.trim_end().ends_with('2')), "{narrow:?}");
     snapshot.tabs.retain(|tab| !matches!(tab.tab_id.as_str(), "wf-a" | "wf-b" | "orphan"));
+    let (empty, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &folded);
+    assert!(empty.iter().any(|row| row.contains("inbox 3")), "{empty:?}");
     for id in ["lane-a", "orch"] {
         let (color, row) = glyph_color(&snapshot, &overlay, id);
         assert_eq!(color, palette.overlay0, "{id} with no running workflow: {row}");
-        assert!(row.contains("idle"), "{row}");
+        assert!(row.contains(if id == "orch" { "inbox 3" } else { "idle" }), "{row}");
         overlay.tabs.get_mut(id).unwrap().busy = true;
         let (color, row) = glyph_color(&snapshot, &overlay, id);
         assert_eq!(color, palette.working, "{id} tagged busy: {row}");
@@ -521,4 +539,19 @@ fn factory_status_glyph_colors() {
     assert_eq!(glyph_color("lane-a"), palette.working, "working pane must outrank done pane");
     assert_eq!(glyph_color("lane-b"), palette.red, "blocked lane");
     assert_eq!(glyph_color("orch"), palette.red, "Attention::Act must show on the row");
+
+    overlay.tabs.get_mut("orch").unwrap().attention = Attention::None;
+    overlay.tabs.get_mut("orch").unwrap().name = Some("orchestrator".into());
+    overlay.tabs.get_mut("orphan").unwrap().attention = Attention::Warn;
+    let mut folded = ClientTreeChrome::default();
+    folded.factory_collapsed_lanes.insert("orch".into());
+    for (attention, expected) in [(Attention::Warn, palette.peach), (Attention::Act, palette.red)] {
+        overlay.tabs.get_mut("orphan").unwrap().attention = attention;
+        let (rows, hits, buffer) = rendered_factory_rows_with_tree(&snapshot, &overlay, &folded);
+        let hit = hits.tree_headers.iter().find(|hit| hit.tab_id.as_deref() == Some("orch")).unwrap();
+        assert!(hit.collapsed, "{attention:?} child must stay folded");
+        let y = hit.rect.y;
+        let x = rows[y as usize].chars().position(|ch| ch == '●').unwrap() as u16;
+        assert_eq!(buffer[(x, y)].fg, expected, "folded {attention:?} child");
+    }
 }

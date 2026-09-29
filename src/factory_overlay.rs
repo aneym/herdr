@@ -98,6 +98,7 @@ pub struct TabTag {
     pub attention: Attention,
     /// An idle lane draws dimmed and stays in place.
     pub idle: bool,
+    /// A lane or orchestrator whose seats are running; draws as working.
     pub busy: bool,
     /// Mark a lane running the local development loop.
     pub devloop: bool,
