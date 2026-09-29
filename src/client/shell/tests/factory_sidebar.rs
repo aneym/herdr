@@ -506,6 +506,7 @@ fn factory_parent_with_running_workflow_or_busy_tag_shows_working() {
     let (narrow, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &folded);
     assert!(narrow.iter().any(|row| row.contains("orchestrator") && row.trim_end().ends_with('2')), "{narrow:?}");
     snapshot.tabs.retain(|tab| !matches!(tab.tab_id.as_str(), "wf-a" | "wf-b" | "orphan"));
+    overlay.tabs.get_mut("lane-a").unwrap().summary = None;
     let (empty, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &folded);
     assert!(empty.iter().any(|row| row.contains("inbox 3")), "{empty:?}");
     for id in ["lane-a", "orch"] {
@@ -517,6 +518,48 @@ fn factory_parent_with_running_workflow_or_busy_tag_shows_working() {
         assert_eq!(color, palette.working, "{id} tagged busy: {row}");
         assert!(!row.contains("idle"), "{row}");
     }
+}
+
+#[test]
+fn lane_idle_follows_live_pane_instead_of_delayed_overlay_flag() {
+    let (mut snapshot, mut overlay) = fixture();
+    let palette = ClientShellConfig::from_config(&Config::default()).palette;
+    let agent = snapshot.agents[0].clone();
+    let check = |snapshot: &ClientShellSnapshot, overlay: &FactoryOverlay, id: &str,
+                 glyph: char, color: ratatui::style::Color, idle: bool| {
+        let (rows, hits, buffer) = rendered_factory_rows(snapshot, overlay);
+        let y = hits.tree_headers.iter().find(|hit| hit.tab_id.as_deref() == Some(id)).unwrap().rect.y;
+        let row = &rows[y as usize];
+        let x = row.chars().position(|ch| ch == '●' || ch == '○').unwrap() as u16;
+        assert_eq!(row.chars().nth(x as usize), Some(glyph), "{id}: {row}");
+        assert_eq!(buffer[(x, y)].fg, color, "{id}: {row}");
+        assert_eq!(row.contains("idle"), idle, "{id}: {row}");
+    };
+    snapshot.tabs.retain(|tab| tab.tab_id == "lane-b");
+    snapshot.agents = vec![agent];
+    snapshot.agents[0].tab_id = "lane-b".into();
+    overlay.tabs.get_mut("lane-b").unwrap().idle = false;
+    snapshot.agents[0].agent_status = AgentStatus::Done;
+    check(&snapshot, &overlay, "lane-b", '●', palette.green, false);
+    // Only the live pane changes when the client acknowledges the unread result.
+    snapshot.agents[0].agent_status = AgentStatus::Idle;
+    check(&snapshot, &overlay, "lane-b", '○', palette.overlay0, true);
+
+    overlay.tabs.get_mut("lane-b").unwrap().idle = true;
+    snapshot.agents[0].agent_status = AgentStatus::Working;
+    check(&snapshot, &overlay, "lane-b", '●', palette.working, false);
+    snapshot.agents[0].agent_status = AgentStatus::Idle;
+    overlay.tabs.get_mut("lane-b").unwrap().busy = true;
+    check(&snapshot, &overlay, "lane-b", '●', palette.working, false);
+    overlay.tabs.get_mut("lane-b").unwrap().busy = false;
+    overlay.tabs.get_mut("lane-b").unwrap().summary = Some("1 wf".into());
+    check(&snapshot, &overlay, "lane-b", '●', palette.overlay0, false);
+
+    snapshot.tabs[0].tab_id = "orch".into();
+    snapshot.agents[0].tab_id = "orch".into();
+    overlay.tabs.get_mut("orch").unwrap().summary = None;
+    overlay.tabs.get_mut("orch").unwrap().idle = true;
+    check(&snapshot, &overlay, "orch", '●', palette.overlay0, false);
 }
 
 #[test]

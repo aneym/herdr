@@ -96,7 +96,7 @@ pub struct TabTag {
     /// Summary shown when the row is collapsed, e.g. "2 wf" or "inbox 3".
     pub summary: Option<String>,
     pub attention: Attention,
-    /// An idle lane draws dimmed and stays in place.
+    /// Legacy writer hint; the client derives lane idle from live status instead.
     pub idle: bool,
     /// A lane or orchestrator whose seats are running; draws as working.
     pub busy: bool,

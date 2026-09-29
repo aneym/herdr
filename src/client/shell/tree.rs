@@ -266,6 +266,7 @@ pub(super) struct FactoryTabRow {
     pub(super) started: Option<i64>,
     pub(super) summary: Option<String>,
     pub(super) attention: crate::factory_overlay::Attention,
+    /// Derived from this client's live lane status, not the overlay's delayed idle hint.
     pub(super) idle: bool,
     pub(super) devloop: bool,
     pub(super) background: bool,
@@ -1092,8 +1093,10 @@ fn factory_row(
         started: tag.and_then(|tag| tag.started),
         summary: tag.and_then(|tag| tag.summary.clone()),
         attention: tag.map_or(crate::factory_overlay::Attention::None, |tag| tag.attention),
-        idle: tag.is_some_and(|tag| tag.idle)
-            && !matches!(status, crate::api::schema::AgentStatus::Working | crate::api::schema::AgentStatus::Blocked),
+        idle: tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Lane
+            && !tag.busy
+            && tag.summary.as_deref().is_none_or(|summary| summary.trim().is_empty()))
+            && status == crate::api::schema::AgentStatus::Idle,
         devloop: tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Lane && tag.devloop),
         background,
         workflow: tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Workflow),
