@@ -188,7 +188,7 @@ fn glyphs_for(mode: crate::config::ShowTabStatusConfig) -> Vec<String> {
     config.ui.show_tab_status = mode;
     let config = ClientShellConfig::from_config(&config);
     let snapshot = tab_status_snapshot();
-    crate::client::shell::render::tab_status_glyphs(&snapshot, &snapshot.tabs[0], &config)
+    crate::client::shell::render::tab_status_glyphs(&snapshot, &snapshot.tabs[0], &config, false)
         .into_iter()
         .map(|(glyph, _)| glyph.to_owned())
         .collect()
@@ -223,7 +223,7 @@ fn an_idle_tab_shows_status_only_in_all_mode() {
         snapshot.agents[0].agent_status = AgentStatus::Idle;
 
         let glyphs =
-            crate::client::shell::render::tab_status_glyphs(&snapshot, &snapshot.tabs[0], &config);
+            crate::client::shell::render::tab_status_glyphs(&snapshot, &snapshot.tabs[0], &config, false);
 
         assert_eq!(
             glyphs.is_empty(),
@@ -307,7 +307,7 @@ fn configured_state_icons_replace_the_default_glyphs() {
     let snapshot = tab_status_snapshot();
 
     let glyphs =
-        crate::client::shell::render::tab_status_glyphs(&snapshot, &snapshot.tabs[0], &config)
+        crate::client::shell::render::tab_status_glyphs(&snapshot, &snapshot.tabs[0], &config, false)
             .into_iter()
             .map(|(glyph, _)| glyph.to_owned())
             .collect::<Vec<_>>();
@@ -356,7 +356,7 @@ fn done_tab_glyphs(show_finished_dot: Option<bool>, state_icons: Option<&str>) -
     let mut snapshot = tab_status_snapshot();
     snapshot.tabs[0].agent_status = AgentStatus::Done;
     snapshot.agents[0].agent_status = AgentStatus::Done;
-    crate::client::shell::render::tab_status_glyphs(&snapshot, &snapshot.tabs[0], &config)
+    crate::client::shell::render::tab_status_glyphs(&snapshot, &snapshot.tabs[0], &config, false)
         .into_iter()
         .map(|(glyph, _)| glyph.to_owned())
         .collect()

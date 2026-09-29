@@ -100,10 +100,21 @@ pub struct TabTag {
     pub idle: bool,
     /// A lane or orchestrator whose seats are running; draws as working.
     pub busy: bool,
+    /// Registered running workflows without their own herdr tab.
+    pub runs: Vec<RunTag>,
     /// Mark a lane running the local development loop.
     pub devloop: bool,
     /// A finished tab moves to the background group.
     pub done: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RunTag {
+    pub id: String,
+    pub name: Option<String>,
+    pub phase: Option<String>,
+    pub agents: u32,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -238,6 +249,7 @@ mod tests {
         assert!(overlay.panels.is_empty());
         let legacy = parse(br#"{"version":1,"tabs":{"lane":{"kind":"lane"}}}"#).unwrap();
         assert!(!legacy.tabs["lane"].devloop);
+        assert!(legacy.tabs["lane"].runs.is_empty());
         assert!(legacy.hosts.is_empty());
     }
 

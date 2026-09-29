@@ -1,6 +1,6 @@
 use super::*;
 use crate::client::shell::tree::ClientTreeChrome;
-use crate::factory_overlay::{Attention, FactoryOverlay, HostRow, SpaceTag, TabKind, TabTag};
+use crate::factory_overlay::{Attention, FactoryOverlay, HostRow, RunTag, SpaceTag, TabKind, TabTag};
 
 fn fixture() -> (ClientShellSnapshot, FactoryOverlay) {
     let mut snapshot = snapshot();
@@ -69,6 +69,7 @@ fn fixture() -> (ClientShellSnapshot, FactoryOverlay) {
     overlay.tabs.get_mut("orch").unwrap().summary = Some("inbox 3".into());
     overlay.tabs.get_mut("lane-a").unwrap().summary = Some("pending".into());
     overlay.tabs.get_mut("lane-b").unwrap().idle = true;
+    snapshot.tabs.iter_mut().find(|tab| tab.tab_id == "lane-b").unwrap().agent_status = AgentStatus::Idle;
     overlay.tabs.get_mut("wf-a").unwrap().badge = Some("PC".into());
     overlay.tabs.get_mut("wf-a").unwrap().phase = Some("review 3/5".into());
     overlay.tabs.get_mut("done").unwrap().done = true;
@@ -451,8 +452,12 @@ fn factory_click_table() {
     alert_state.last_composed_size = Some((120, 60));
     factory_click(&mut alert_state, MouseEventKind::Down(MouseButton::Left), at.0, at.1);
     factory_click(&mut alert_state, MouseEventKind::Up(MouseButton::Left), at.0, at.1);
-    let (folded, _, _) = rendered_factory_rows_with_tree(&snapshot, &alert_overlay, alert_state.tree_chrome_mut());
+    let (folded, hits, buffer) = rendered_factory_rows_with_tree(&snapshot, &alert_overlay, alert_state.tree_chrome_mut());
     assert!(!folded.iter().any(|row| row.contains("issues 3")), "explicit fold must beat Act");
+    let y = hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap().rect.y;
+    let lane = &folded[y as usize];
+    assert!(lane.ends_with('!'), "Act workflow must mark folded lane: {lane}");
+    assert_eq!(buffer[(24, y)].fg, alert_state.config.palette.red);
 }
 
 #[test]
@@ -512,6 +517,112 @@ fn factory_parent_with_running_workflow_or_busy_tag_shows_working() {
         assert_eq!(color, palette.working, "{id} tagged busy: {row}");
         assert!(!row.contains("idle"), "{row}");
     }
+}
+
+#[test]
+fn busy_lane_syncs_tab_and_sidebar_and_preserves_shell_status() {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| tab.tab_id == "lane-b");
+    snapshot.tabs[0].agent_status = AgentStatus::Idle;
+    let mut idle_agent = snapshot.agents[0].clone();
+    idle_agent.tab_id = "lane-b".into();
+    idle_agent.agent_status = AgentStatus::Idle;
+    snapshot.agents = vec![idle_agent.clone()];
+    snapshot.panes = vec![ClientShellPane {
+        pane_id: idle_agent.pane_id.clone(), workspace_id: "ws_1".into(), tab_id: "lane-b".into(),
+        label: None, cwd: None, foreground_cwd: None, focused: false, right_click_passthrough: false,
+    }];
+    let palette = ClientShellConfig::from_config(&Config::default()).palette;
+    let check = |snapshot: &ClientShellSnapshot, overlay: &FactoryOverlay, expected, glyph| {
+        let mut state = factory_state(snapshot.clone(), overlay.clone());
+        state.config.show_tab_status = crate::config::ShowTabStatusConfig::All;
+        state.set_pane_surface(surface());
+        let frame = state.compose(110, 35).unwrap();
+        let tab_rect = state.hits.tabs.iter().find(|(_, id)| id == "lane-b").unwrap().0;
+        let tab_cells = (tab_rect.x..tab_rect.right())
+            .map(|x| &frame.cells[usize::from(tab_rect.y) * usize::from(frame.width) + usize::from(x)])
+            .collect::<Vec<_>>();
+        assert!(tab_cells.iter().any(|cell| cell.symbol == glyph && cell.fg == crate::protocol::color_to_u32(expected)),
+            "tab status should match sidebar: {:?}", tab_cells.iter().map(|cell| (cell.symbol.as_str(), cell.fg)).collect::<Vec<_>>());
+        let (rows, hits, buffer) = rendered_factory_rows(snapshot, overlay);
+        let y = hits.tree_headers.iter().find(|hit| hit.tab_id.as_deref() == Some("lane-b")).unwrap().rect.y;
+        let x = rows[y as usize].chars().position(|ch| ch == '●' || ch == '○').unwrap() as u16;
+        assert_eq!(buffer[(x, y)].fg, expected, "sidebar: {}", rows[y as usize]);
+        (rows, hits)
+    };
+    overlay.tabs.get_mut("lane-b").unwrap().busy = true;
+    let (rows, _) = check(&snapshot, &overlay, palette.working, "●");
+    assert!(!rows.iter().find(|row| row.contains("lane-b")).unwrap().contains("idle"));
+    overlay.tabs.get_mut("lane-b").unwrap().busy = false;
+    check(&snapshot, &overlay, palette.overlay0, "○");
+
+    snapshot.agents[0].agent_status = AgentStatus::Done;
+    snapshot.tabs[0].agent_status = AgentStatus::Done;
+    overlay.tabs.get_mut("lane-b").unwrap().busy = true;
+    check(&snapshot, &overlay, palette.working, "●");
+    snapshot.agents.clear();
+    snapshot.tabs[0].agent_status = AgentStatus::Unknown;
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    config.show_tab_status = crate::config::ShowTabStatusConfig::All;
+    let glyphs = crate::client::shell::render::tab_status_glyphs(&snapshot, &snapshot.tabs[0], &config, true);
+    assert_eq!(glyphs[0].0, "·", "shell pane stays Unknown while tagged busy");
+}
+
+#[test]
+fn registered_runs_count_and_expand_under_parent() {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| tab.tab_id == "lane-b" || tab.tab_id == "orch");
+    overlay.tabs.get_mut("lane-b").unwrap().runs = vec![
+        RunTag { id: "r1".into(), name: Some("review".into()), phase: Some("review 2/3".into()), agents: 2 },
+        RunTag { id: "r2".into(), name: None, phase: Some("build 1/2".into()), agents: 1 },
+    ];
+    let (folded, hits, _) = rendered_factory_rows(&snapshot, &overlay);
+    let lane = hits.tree_headers.iter().find(|hit| hit.key == "lane-b").unwrap();
+    assert!(!lane.chevron.is_empty() && lane.collapsed);
+    assert!(folded[lane.rect.y as usize].contains('2'));
+    let mut tree = ClientTreeChrome::default();
+    tree.factory_expanded_lanes.insert("lane-b".into());
+    let (expanded, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+    for (id, name, phase) in [("r1", "review", "review 2/3"), ("r2", "r2", "build 1/2")] {
+        let run = hits.tree_headers.iter().find(|hit| hit.key == format!("lane-b#run:{id}")).unwrap();
+        assert_eq!(run.tab_id.as_deref(), Some("lane-b"));
+        assert!(expanded[run.rect.y as usize].contains(&format!("◐ {name}")));
+        assert!(expanded[run.rect.y as usize + 1].contains(phase));
+    }
+}
+
+#[test]
+fn configured_factory_shapes_follow_state_but_idle_stays_hollow() {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "lane-a" | "lane-b" | "orch"));
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    config.factory.enabled = true;
+    config.agents.state_icons.extend([
+        ("working".into(), "●".into()), ("idle_unseen".into(), "■".into()),
+        ("blocked".into(), "■".into()), ("idle".into(), "■".into()),
+        ("unknown".into(), "".into()),
+    ]);
+    let symbol = |snapshot: &ClientShellSnapshot, overlay: &FactoryOverlay, id: &str| {
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 25, 50));
+        let mut hits = ShellHitMap::default();
+        let mut scroll = 0;
+        crate::client::shell::agent_sidebar::render_agent_panel_with_overlay(
+            &mut buffer, Rect::new(0, 0, 25, 50), snapshot, &config,
+            &ClientTreeChrome::default(), Some(overlay), &mut scroll, &mut hits,
+        );
+        let hit = hits.tree_headers.iter().find(|hit| hit.key == id).unwrap();
+        buffer[(hit.rect.x + 4, hit.rect.y)].symbol().to_owned()
+    };
+    assert_eq!(symbol(&snapshot, &overlay, "lane-a"), "●");
+    snapshot.tabs.iter_mut().find(|tab| tab.tab_id == "lane-b").unwrap().agent_status = AgentStatus::Done;
+    overlay.tabs.get_mut("lane-b").unwrap().idle = false;
+    assert_eq!(symbol(&snapshot, &overlay, "lane-b"), "■");
+    snapshot.tabs.iter_mut().find(|tab| tab.tab_id == "lane-b").unwrap().agent_status = AgentStatus::Blocked;
+    assert_eq!(symbol(&snapshot, &overlay, "lane-b"), "■");
+    snapshot.tabs.iter_mut().find(|tab| tab.tab_id == "lane-b").unwrap().agent_status = AgentStatus::Idle;
+    overlay.tabs.get_mut("lane-b").unwrap().idle = true;
+    assert_eq!(symbol(&snapshot, &overlay, "lane-b"), "○");
 }
 
 #[test]

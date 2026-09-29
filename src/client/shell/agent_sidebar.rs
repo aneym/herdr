@@ -428,7 +428,22 @@ fn render_factory_tab(
     let icon_x = start.saturating_add(2);
     let icon = if row.workflow {
         if row.done { "✓" } else { "◐" }
-    } else if row.idle { "○" } else { "●" };
+    } else if row.idle {
+        "○"
+    } else {
+        let key = match row.status {
+            crate::api::schema::AgentStatus::Blocked => "blocked",
+            crate::api::schema::AgentStatus::Working => "working",
+            crate::api::schema::AgentStatus::Done => "idle_unseen",
+            crate::api::schema::AgentStatus::Idle => "idle",
+            crate::api::schema::AgentStatus::Unknown => "unknown",
+        };
+        match config.agents.state_icons.get(key) {
+            Some(icon) if !icon.trim().is_empty() => icon.as_str(),
+            Some(_) if row.status != crate::api::schema::AgentStatus::Working => "■",
+            _ => "●",
+        }
+    };
     let color = if row.idle { palette.overlay0 } else { status_color(row.status, palette) };
     put_text(buffer, icon_x, rect.y, 1.min(rect.right().saturating_sub(icon_x)), icon,
         Style::default().fg(color));

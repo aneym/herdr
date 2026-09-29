@@ -32,7 +32,8 @@ pub(crate) fn render_tab_bar(
     }).collect::<Vec<_>>();
     let status_glyphs = visible_tabs
         .iter()
-        .map(|tab| tab_status_glyphs(snapshot, tab, config))
+        .map(|tab| tab_status_glyphs(snapshot, tab, config,
+            overlay.and_then(|overlay| overlay.tab(&tab.tab_id)).is_some_and(|tag| tag.busy)))
         .collect::<Vec<_>>();
     let desired_widths = visible_tabs
         .iter()
@@ -284,19 +285,25 @@ pub(in crate::client::shell) fn tab_status_glyphs<'a>(
     snapshot: &ClientShellSnapshot,
     tab: &ClientShellTab,
     config: &'a ClientShellConfig,
+    busy: bool,
 ) -> Vec<(&'a str, Style)> {
     // The glyphs borrow the config's configured overrides, so the lifetimes
     // here are load-bearing.
     use crate::api::schema::AgentStatus;
     use crate::config::ShowTabStatusConfig;
 
+    let tab_status = if busy && matches!(tab.agent_status, AgentStatus::Idle | AgentStatus::Done) {
+        AgentStatus::Working
+    } else {
+        tab.agent_status
+    };
     let show = match config.show_tab_status {
         ShowTabStatusConfig::Off => false,
         ShowTabStatusConfig::Attention => {
-            matches!(tab.agent_status, AgentStatus::Blocked | AgentStatus::Done)
+            matches!(tab_status, AgentStatus::Blocked | AgentStatus::Done)
         }
         ShowTabStatusConfig::Active => matches!(
-            tab.agent_status,
+            tab_status,
             AgentStatus::Blocked | AgentStatus::Done | AgentStatus::Working
         ),
         ShowTabStatusConfig::All => true,
@@ -315,6 +322,13 @@ pub(in crate::client::shell) fn tab_status_glyphs<'a>(
                 .find(|agent| agent.pane_id == pane.pane_id)
                 .map(|agent| agent.agent_status)
                 .unwrap_or(AgentStatus::Unknown)
+        })
+        .map(|status| {
+            if busy && matches!(status, AgentStatus::Idle | AgentStatus::Done) {
+                AgentStatus::Working
+            } else {
+                status
+            }
         })
         .filter(|status| {
             // A hidden unread-finished marker takes no tab-row width at all.

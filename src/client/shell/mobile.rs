@@ -1054,7 +1054,7 @@ fn mobile_items(
             } else {
                 format!("tab {}", tab.label)
             };
-            let glyphs = super::render::tab_status_glyphs(snapshot, tab, config);
+            let glyphs = super::render::tab_status_glyphs(snapshot, tab, config, false);
             let glyph_width = glyphs.iter().fold(0u16, |width, (glyph, _)| {
                 width.saturating_add(display_width(glyph).saturating_add(1))
             });

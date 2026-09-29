@@ -824,22 +824,27 @@ fn append_factory_space(
                     .filter_map(|workflow| overlay.tab(&workflow.tab_id))
                     .map(|tag| tag.attention)
                     .max_by_key(|attention| attention.rank());
+                let runs = overlay.tab(&orchestrator.tab_id).map_or(&[][..], |tag| tag.runs.as_slice());
+                let running = children.len() + runs.len();
                 let expanded = tree.factory_expanded(&orchestrator.tab_id, focused,
                     attention == Some(crate::factory_overlay::Attention::Act));
                 let mut row = factory_row(snapshot, rows, overlay, orchestrator, indent,
-                    !expanded && !children.is_empty(), !children.is_empty());
+                    !expanded && running > 0, running > 0);
                 if let AgentPanelListEntry::FactoryTab(tab) = &mut row {
                     if let Some(attention) = attention.filter(|child| child.rank() > tab.attention.rank()) {
                         tab.attention = attention;
                     }
                 }
-                summarize_factory_parent(&mut row, children.len(),
+                summarize_factory_parent(&mut row, running,
                     overlay.tab(&orchestrator.tab_id).is_some_and(|tag| tag.busy), true);
                 out.push(row);
                 if expanded {
                     for child in children {
                         out.push(factory_row(snapshot, rows, overlay, child,
                             indent.saturating_add(1), false, false));
+                    }
+                    for run in runs {
+                        out.push(factory_run_row(orchestrator, run, indent.saturating_add(1)));
                     }
                 }
             } else {
@@ -873,7 +878,8 @@ fn append_factory_space(
                 .copied()
                 .filter(|workflow| parent_for(workflow) == Some(lane.tab_id.as_str()))
                 .collect::<Vec<_>>();
-            let running = children.len();
+            let runs = overlay.tab(&lane.tab_id).map_or(&[][..], |tag| tag.runs.as_slice());
+            let running = children.len() + runs.len();
             let attention = all_workflows.iter().filter(|workflow| {
                 parent_for(workflow) == Some(lane.tab_id.as_str())
             }).filter_map(|workflow| overlay.tab(&workflow.tab_id))
@@ -890,7 +896,7 @@ fn append_factory_space(
                 attention == Some(crate::factory_overlay::Attention::Act));
             let mut lane_row = factory_row(
                 snapshot, rows, overlay, lane, indent,
-                !expanded && !children.is_empty(), !children.is_empty(),
+                !expanded && running > 0, running > 0,
             );
             if let AgentPanelListEntry::FactoryTab(row) = &mut lane_row {
                 if attention == Some(crate::factory_overlay::Attention::Act) {
@@ -907,6 +913,9 @@ fn append_factory_space(
                 for child in children {
                     out.push(factory_row(snapshot, rows, overlay, child,
                         indent.saturating_add(1), false, false));
+                }
+                for run in runs {
+                    out.push(factory_run_row(lane, run, indent.saturating_add(1)));
                 }
             }
         }
@@ -952,12 +961,48 @@ fn append_factory_space(
     }
 }
 
+fn factory_run_row(
+    parent: &crate::protocol::ClientShellTab,
+    run: &crate::factory_overlay::RunTag,
+    indent: u8,
+) -> AgentPanelListEntry {
+    AgentPanelListEntry::FactoryTab(FactoryTabRow {
+        header: TreeHeader {
+            workspace_id: parent.workspace_id.clone(),
+            tab_id: Some(parent.tab_id.clone()),
+            label: run.name.clone().unwrap_or_else(|| run.id.clone()),
+            key: format!("{}#run:{}", parent.tab_id, run.id),
+            collapsed: false,
+            child_states: Vec::new(),
+            collapsible: false,
+            pinned: false,
+            indent,
+            active: false,
+            group: None,
+            space_attention: None,
+            factory_space: false,
+        },
+        status: crate::api::schema::AgentStatus::Working,
+        badge: None,
+        phase: run.phase.clone(),
+        started: None,
+        summary: None,
+        attention: crate::factory_overlay::Attention::None,
+        idle: false,
+        devloop: false,
+        background: false,
+        workflow: true,
+        done: false,
+    })
+}
+
 fn summarize_factory_parent(row: &mut AgentPanelListEntry, running: usize, busy: bool, orchestrator: bool) {
     if let AgentPanelListEntry::FactoryTab(row) = row {
-        if (running > 0 || busy)
-            && matches!(row.status, crate::api::schema::AgentStatus::Idle
+        if (running > 0 && matches!(row.status, crate::api::schema::AgentStatus::Idle
                 | crate::api::schema::AgentStatus::Done
-                | crate::api::schema::AgentStatus::Unknown)
+                | crate::api::schema::AgentStatus::Unknown))
+            || (busy && matches!(row.status, crate::api::schema::AgentStatus::Idle
+                | crate::api::schema::AgentStatus::Done))
         {
             row.status = crate::api::schema::AgentStatus::Working;
             row.idle = false;
@@ -1007,6 +1052,13 @@ fn factory_row(
             crate::api::schema::AgentStatus::Unknown => 0,
         })
         .unwrap_or(tab.agent_status);
+    let status = if tag.is_some_and(|tag| tag.busy)
+        && matches!(status, crate::api::schema::AgentStatus::Idle | crate::api::schema::AgentStatus::Done)
+    {
+        crate::api::schema::AgentStatus::Working
+    } else {
+        status
+    };
     let background =
         tag.is_some_and(|tag| tag.done || tag.kind == crate::factory_overlay::TabKind::Advisor);
     AgentPanelListEntry::FactoryTab(FactoryTabRow {
@@ -1040,7 +1092,8 @@ fn factory_row(
         started: tag.and_then(|tag| tag.started),
         summary: tag.and_then(|tag| tag.summary.clone()),
         attention: tag.map_or(crate::factory_overlay::Attention::None, |tag| tag.attention),
-        idle: tag.is_some_and(|tag| tag.idle),
+        idle: tag.is_some_and(|tag| tag.idle)
+            && !matches!(status, crate::api::schema::AgentStatus::Working | crate::api::schema::AgentStatus::Blocked),
         devloop: tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Lane && tag.devloop),
         background,
         workflow: tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Workflow),
