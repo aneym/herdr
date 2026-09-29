@@ -467,8 +467,9 @@ fn render_factory_tab(
             if header.collapsed { "▸ " } else { "▾ " }, Style::default().fg(palette.accent));
     }
     let icon_x = start.saturating_add(2);
+    let failed = row.workflow && row.done && row.attention == crate::factory_overlay::Attention::Act;
     let icon = if row.workflow {
-        if row.done { "✓" } else { "◐" }
+        if failed { "✗" } else if row.done { "✓" } else { "◐" }
     } else if row.idle {
         "○"
     } else {
@@ -485,7 +486,7 @@ fn render_factory_tab(
             _ => "●",
         }
     };
-    let color = if row.idle { palette.overlay0 } else { status_color(row.status, palette) };
+    let color = if failed { palette.red } else if row.idle { palette.overlay0 } else { status_color(row.status, palette) };
     put_text(buffer, icon_x, rect.y, 1.min(rect.right().saturating_sub(icon_x)), icon,
         Style::default().fg(color));
     let attention_color = match row.attention {

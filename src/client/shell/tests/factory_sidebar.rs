@@ -680,8 +680,8 @@ fn registered_runs_count_and_expand_under_parent() {
     let (mut snapshot, mut overlay) = fixture();
     snapshot.tabs.retain(|tab| tab.tab_id == "lane-b" || tab.tab_id == "orch");
     overlay.tabs.get_mut("lane-b").unwrap().runs = vec![
-        RunTag { id: "r1".into(), name: Some("review".into()), phase: Some("review 2/3".into()), agents: 2 },
-        RunTag { id: "r2".into(), name: None, phase: Some("build 1/2".into()), agents: 1 },
+        RunTag { id: "r1".into(), name: Some("review".into()), phase: Some("review 2/3".into()), agents: 2, ..RunTag::default() },
+        RunTag { id: "r2".into(), name: None, phase: Some("build 1/2".into()), agents: 1, ..RunTag::default() },
     ];
     let (folded, hits, _) = rendered_factory_rows(&snapshot, &overlay);
     let lane = hits.tree_headers.iter().find(|hit| hit.key == "lane-b").unwrap();
@@ -695,6 +695,63 @@ fn registered_runs_count_and_expand_under_parent() {
         assert_eq!(run.tab_id.as_deref(), Some("lane-b"));
         assert!(expanded[run.rect.y as usize].contains(&format!("◐ {name}")));
         assert!(expanded[run.rect.y as usize + 1].contains(phase));
+    }
+}
+
+#[test]
+fn registered_run_progress_completion_and_failure_render_under_lane() {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| tab.tab_id == "lane-b");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+    let palette = ClientShellConfig::from_config(&Config::default()).palette;
+    for (done, attention, icon) in [
+        (false, Attention::None, "◐"),
+        (true, Attention::None, "✓"),
+        (true, Attention::Act, "✗"),
+    ] {
+        overlay.tabs.get_mut("lane-b").unwrap().runs = vec![RunTag {
+            id: "build".into(), name: Some("build run".into()),
+            phase: Some("Build 2/3".into()), started: Some(now - 90),
+            done, attention, badge: Some("PC".into()), ..RunTag::default()
+        }];
+        let (folded, hits, buffer) = rendered_factory_rows_at_width(
+            &snapshot, &overlay, &ClientTreeChrome::default(), 48);
+        let lane = hits.tree_headers.iter().find(|hit| hit.key == "lane-b").unwrap();
+        let lane_line = &folded[lane.rect.y as usize];
+        if done {
+            assert!(!lane_line.contains('1'), "{lane_line}");
+            assert_eq!(buffer[(lane_line.chars().position(|ch| ch == '○').unwrap() as u16, lane.rect.y)].fg,
+                palette.overlay0, "done run must not make its lane working");
+        } else {
+            assert!(lane_line.contains('1'), "{lane_line}");
+        }
+        assert_eq!(hits.tree_headers.iter().any(|hit| hit.key == "lane-b#run:build"),
+            attention == Attention::Act, "only a failed run should auto-expand its lane");
+        if attention == Attention::Act {
+            let x = lane_line.chars().position(|ch| ch == '!').unwrap() as u16;
+            assert_eq!(buffer[(x, lane.rect.y)].fg, palette.red);
+        }
+        let mut tree = ClientTreeChrome::default();
+        tree.factory_expanded_lanes.insert("lane-b".into());
+        let (rows, hits, buffer) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 48);
+        let run = hits.tree_headers.iter().find(|hit| hit.key == "lane-b#run:build").unwrap();
+        let line = &rows[run.rect.y as usize];
+        assert!(line.contains(&format!("{icon} build run")), "{rows:?}");
+        assert!(line.contains("PC"), "{line}");
+        if done {
+            assert_eq!(run.rect.height, 1);
+            assert!(!rows.iter().any(|line| line.contains("build 2/3")), "{rows:?}");
+        } else {
+            let progress = &rows[run.rect.y as usize + 1];
+            assert!(progress.contains("build 2/3") && progress.contains("1m"), "{progress}");
+        }
+        if attention == Attention::Act {
+            for ch in ['✗', '!'] {
+                let x = line.chars().position(|symbol| symbol == ch).unwrap() as u16;
+                assert_eq!(buffer[(x, run.rect.y)].fg, palette.red);
+            }
+        }
     }
 }
 
@@ -811,7 +868,7 @@ fn grouped_workflow_fixture() -> (ClientShellSnapshot, FactoryOverlay) {
     }
     overlay.tabs.get_mut("wf-b").unwrap().done = true;
     overlay.tabs.get_mut("lane-b").unwrap().runs = vec![RunTag {
-        id: "fold".into(), name: Some("fold run".into()), phase: None, agents: 1,
+        id: "fold".into(), name: Some("fold run".into()), phase: None, agents: 1, ..RunTag::default()
     }];
     (snapshot, overlay)
 }
@@ -874,7 +931,7 @@ fn orchestrator_grouped_lane_draws_workflow_and_run_and_rolls_up_state() {
     }
     overlay.tabs.get_mut("wf-b").unwrap().done = true;
     overlay.tabs.get_mut("lane-a").unwrap().runs = vec![RunTag {
-        id: "fold".into(), name: Some("fold run".into()), phase: None, agents: 1,
+        id: "fold".into(), name: Some("fold run".into()), phase: None, agents: 1, ..RunTag::default()
     }];
     let mut tree = ClientTreeChrome::default();
     tree.factory_expanded_lanes.insert("orch".into());

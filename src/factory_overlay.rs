@@ -164,6 +164,10 @@ pub struct RunTag {
     pub name: Option<String>,
     pub phase: Option<String>,
     pub agents: u32,
+    pub started: Option<i64>,
+    pub done: bool,
+    pub attention: Attention,
+    pub badge: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -301,6 +305,14 @@ mod tests {
         let legacy = parse(br#"{"version":1,"tabs":{"lane":{"kind":"lane"}}}"#).unwrap();
         assert!(!legacy.tabs["lane"].devloop);
         assert!(legacy.tabs["lane"].runs.is_empty());
+        let legacy_run = parse(br#"{"version":1,"tabs":{"lane":{"kind":"lane","runs":[{"id":"old","agents":2}]}}}"#).unwrap();
+        let run = &legacy_run.tabs["lane"].runs[0];
+        assert_eq!(run.id, "old");
+        assert_eq!(run.agents, 2);
+        assert_eq!(run.started, None);
+        assert!(!run.done);
+        assert_eq!(run.attention, Attention::None);
+        assert_eq!(run.badge, None);
         assert_eq!(legacy.tabs["lane"].mode, TabMode::Active);
         let modes = parse(br#"{"version":1,"tabs":{"p":{"mode":"parked"},"x":{"mode":"weird"}}}"#).unwrap();
         assert_eq!(modes.tabs["p"].mode, TabMode::Parked);

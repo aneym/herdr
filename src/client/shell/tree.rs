@@ -911,7 +911,7 @@ fn append_factory_space(
                     .filter(|workflow| parent_for(workflow).is_some_and(|id| grouped_ids.contains(id)))
                     .collect::<Vec<_>>();
                 let grouped_runs = grouped.iter().map(|lane| {
-                    overlay.tab(&lane.tab_id).map_or(0, |tag| tag.runs.len())
+                    overlay.tab(&lane.tab_id).map_or(0, |tag| tag.runs.iter().filter(|run| !run.done).count())
                 }).sum::<usize>();
                 let attention = all_workflows.iter()
                     .filter(|workflow| parent_for(workflow).is_some_and(|id| grouped_ids.contains(id)))
@@ -919,12 +919,15 @@ fn append_factory_space(
                     .map(|tag| tag.attention)
                     .chain(grouped.iter().filter_map(|lane| overlay.tab(&lane.tab_id))
                         .map(|tag| tag.attention))
+                    .chain(runs.iter().map(|run| run.attention))
+                    .chain(grouped.iter().filter_map(|lane| overlay.tab(&lane.tab_id))
+                        .flat_map(|tag| tag.runs.iter().map(|run| run.attention)))
                     .chain(attention).max_by_key(|value| value.rank());
                 let focused = focused || snapshot.focused_workspace_id.as_deref() == Some(workspace_id)
                     && grouped.iter().chain(grouped_workflows.iter()).any(|tab| {
                         snapshot.focused_tab_id.as_deref() == Some(tab.tab_id.as_str())
                     });
-                let running = children.len() + grouped.len() + runs.len()
+                let running = children.len() + grouped.len() + runs.iter().filter(|run| !run.done).count()
                     + grouped_workflows.len() + grouped_runs;
                 let expanded = tree.factory_expanded(&orchestrator.tab_id, focused,
                     attention == Some(crate::factory_overlay::Attention::Act));
@@ -996,9 +999,9 @@ fn append_factory_space(
                 .filter(|workflow| parent_for(workflow).is_some_and(|id| grouped_ids.contains(id)))
                 .collect::<Vec<_>>();
             let grouped_runs = grouped_lanes.iter().map(|child| {
-                overlay.tab(&child.tab_id).map_or(0, |tag| tag.runs.len())
+                overlay.tab(&child.tab_id).map_or(0, |tag| tag.runs.iter().filter(|run| !run.done).count())
             }).sum::<usize>();
-            let running = children.len() + grouped_lanes.len() + runs.len()
+            let running = children.len() + grouped_lanes.len() + runs.iter().filter(|run| !run.done).count()
                 + grouped_workflows.len() + grouped_runs;
             let attention = all_workflows.iter().filter(|workflow| {
                 parent_for(workflow) == Some(lane.tab_id.as_str())
@@ -1006,7 +1009,11 @@ fn append_factory_space(
             }).map(|tab| tab.tab_id.as_str())
                 .chain(grouped_lanes.iter().map(|tab| tab.tab_id.as_str()))
                 .filter_map(|id| overlay.tab(id))
-                .map(|tag| tag.attention).max_by_key(|attention| attention.rank());
+                .map(|tag| tag.attention)
+                .chain(runs.iter().map(|run| run.attention))
+                .chain(grouped_lanes.iter().filter_map(|lane| overlay.tab(&lane.tab_id))
+                    .flat_map(|tag| tag.runs.iter().map(|run| run.attention)))
+                .max_by_key(|attention| attention.rank());
             let focused = snapshot.focused_workspace_id.as_deref() == Some(workspace_id)
                 && children.iter().chain(grouped_lanes.iter()).chain(grouped_workflows.iter())
                     .any(|tab| snapshot.focused_tab_id.as_deref() == Some(tab.tab_id.as_str()));
@@ -1122,7 +1129,7 @@ fn append_factory_space(
                     let row = factory_row(snapshot, rows, overlay, lane, indent, false, false);
                     matches!(row, AgentPanelListEntry::FactoryTab(ref row) if
                         row.status == crate::api::schema::AgentStatus::Working)
-                        || overlay.tab(&lane.tab_id).is_some_and(|tag| tag.busy || !tag.runs.is_empty())
+                        || overlay.tab(&lane.tab_id).is_some_and(|tag| tag.busy || tag.runs.iter().any(|run| !run.done))
                 });
                 let collapsed = !tree.factory_idle_expanded.contains(workspace_id);
                 out.push(AgentPanelListEntry::FactoryBackground {
@@ -1204,7 +1211,7 @@ fn append_factory_space(
         let working = group == FactoryGroupKind::Automations && members.iter().any(|lane| {
             let row = factory_row(snapshot, rows, overlay, lane, indent, false, false);
             matches!(row, AgentPanelListEntry::FactoryTab(ref row) if row.status == crate::api::schema::AgentStatus::Working)
-                || overlay.tab(&lane.tab_id).is_some_and(|tag| tag.busy || !tag.runs.is_empty())
+                || overlay.tab(&lane.tab_id).is_some_and(|tag| tag.busy || tag.runs.iter().any(|run| !run.done))
                 || workflows.iter().any(|workflow| parent_for(workflow) == Some(lane.tab_id.as_str())
                     && matches!(factory_row(snapshot, rows, overlay, workflow, indent, false, false),
                         AgentPanelListEntry::FactoryTab(row) if row.status == crate::api::schema::AgentStatus::Working))
@@ -1281,17 +1288,17 @@ fn factory_run_row(
             space_attention: None,
             factory_space: false,
         },
-        status: crate::api::schema::AgentStatus::Working,
-        badge: None,
+        status: if run.done { crate::api::schema::AgentStatus::Done } else { crate::api::schema::AgentStatus::Working },
+        badge: run.badge.clone(),
         phase: run.phase.clone(),
-        started: None,
+        started: run.started,
         summary: None,
-        attention: crate::factory_overlay::Attention::None,
+        attention: run.attention,
         idle: false,
         devloop: false,
         background: false,
         workflow: true,
-        done: false,
+        done: run.done,
     })
 }
 
