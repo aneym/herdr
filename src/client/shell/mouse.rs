@@ -964,6 +964,16 @@ impl ClientShellState {
                             self.request_selection_copy(outcome, false);
                         }
                         outcome.repaint |= copied;
+                        // A plain click never became a selection. Drop its anchor, or it
+                        // stays "in progress" and the wheel scrolls it instead of the pane.
+                        if self.selection.as_ref().is_some_and(|selection| {
+                            selection.is_just_click()
+                                && self.pane_app_selection.as_deref()
+                                    == Some(selection.pane_id.as_str())
+                        }) {
+                            self.selection = None;
+                            self.pane_app_selection = None;
+                        }
                     }
                 }
                 self.push_pane_mouse_event(&hit, mouse, modifiers, outcome);

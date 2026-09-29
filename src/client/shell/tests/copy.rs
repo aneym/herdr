@@ -165,6 +165,40 @@ fn mouse_reporting_double_click_cmd_c_copies_word_without_forwarding_key() {
 }
 
 #[test]
+fn mouse_reporting_click_then_wheel_reaches_the_pane_app() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    let mut pane_surface = surface();
+    // Claude Code fullscreen: mouse reporting on, alternate screen, no host scrollback.
+    pane_surface.panes[0].mouse_reporting = true;
+    pane_surface.panes[0].alternate_screen_active = true;
+    pane_surface.panes[0].scroll = Some(crate::protocol::PaneSurfaceScrollMetrics {
+        offset_from_bottom: 0,
+        max_offset_from_bottom: 0,
+        viewport_rows: 2,
+    });
+    state.set_pane_surface(pane_surface);
+    state.compose(106, 20).expect("composed frame");
+    let pane = state.hits.panes[0].clone();
+    for kind in [
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Left),
+    ] {
+        state.handle_raw_events(vec![pane_mouse(kind, &pane, 1)]);
+    }
+
+    let wheel = state.handle_raw_events(vec![pane_mouse(MouseEventKind::ScrollUp, &pane, 1)]);
+    assert!(wheel.requests.iter().any(|request| matches!(
+        request,
+        ClientMessage::ClientShellPaneInput { events, .. }
+            if events.iter().any(|event| matches!(
+                event,
+                ClientPaneInputEvent::Mouse { kind: crate::protocol::ClientMouseKind::ScrollUp, .. }
+            ))
+    )));
+}
+
+#[test]
 fn mouse_reporting_drag_cmd_c_copies_shadow_without_sending_interrupt() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.config.copy_on_select = false;
