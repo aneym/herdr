@@ -259,7 +259,7 @@ fn completion_and_working_status_ink_matches_sidebar_and_tab_bar() {
         .insert("idle".into(), "R".into());
     let shell_config = ClientShellConfig::from_config(&config);
     for (status, glyph, expected) in [
-        (AgentStatus::Working, "W", shell_config.palette.peach),
+        (AgentStatus::Working, "W", shell_config.palette.working),
         (AgentStatus::Done, "D", shell_config.palette.green),
         (AgentStatus::Idle, "R", shell_config.palette.overlay0),
     ] {

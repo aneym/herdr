@@ -1498,7 +1498,12 @@ impl ClientShellState {
                 return;
             }
             if let Some(press) = self.tree_tab_press.take() {
-                if mouse.row == press.start_row {
+                let same_item = self.hits.tree_headers.iter().any(|hit| {
+                    hit.tab_id.as_deref() == Some(press.tab_id.as_str())
+                        && hit.workspace_id == press.workspace_id
+                        && super::contains(hit.rect, point)
+                });
+                if same_item {
                     if mouse.modifiers.contains(crossterm::event::KeyModifiers::ALT) {
                         self.change_detail_panel(
                             crate::factory_overlay::tab_panel_key(&press.tab_id), false, outcome,

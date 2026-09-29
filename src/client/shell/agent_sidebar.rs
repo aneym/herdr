@@ -169,10 +169,17 @@ pub(super) fn render_agent_panel_with_overlay(
         hits,
         super::tree::AgentPanelListEntry::line_count,
         entries.first().is_some_and(is_factory_entry),
-        |index| if overlay.is_some() && (is_factory_entry(&entries[index])
-            || entries.get(index + 1).is_some_and(is_factory_entry)) { 0 }
+        |index| if overlay.is_some() && (matches!(entries[index],
+                super::tree::AgentPanelListEntry::FactorySection { .. })
+            || matches!(&entries[index],
+                super::tree::AgentPanelListEntry::SpaceHeader(header) if header.factory_space)) { 0 }
             else { config.agents.row_gap },
         |buffer, rect, entry, hits| render_panel_list_entry(buffer, rect, entry, config, hits),
+        |entry| match entry {
+            super::tree::AgentPanelListEntry::FactoryTab(row) => (row.header.active, row.header.active),
+            super::tree::AgentPanelListEntry::Agent(row) => (row.focused, false),
+            _ => (false, false),
+        },
     );
     if footer_height > 0 {
         let y = area.bottom() - footer_height;
@@ -495,8 +502,7 @@ fn render_factory_tab(
                 let shorter = workflow_progress(&phase, age.as_deref(), remaining);
                 // A moved badge must not trade away an age the unbadged row can show.
                 let age_preserved = age.as_deref().is_none_or(|age| {
-                    let suffix = if phase.is_empty() { age.to_owned() } else { format!(" · {age}") };
-                    !progress.ends_with(&suffix) || shorter.ends_with(&suffix)
+                    !progress.ends_with(&format!(" · {age}")) || shorter.ends_with(&format!(" · {age}"))
                 });
                 if age_preserved {
                     progress = shorter;
@@ -522,6 +528,7 @@ fn render_factory_tab(
 }
 
 fn workflow_progress(phase: &str, age: Option<&str>, room: usize) -> String {
+    if phase.is_empty() { return String::new(); }
     let fraction = phase.rsplit_once(' ').filter(|(word, count)| {
         !word.is_empty() && count.split_once('/').is_some_and(|(numerator, denominator)| {
             !numerator.is_empty() && !denominator.is_empty()
@@ -530,33 +537,40 @@ fn workflow_progress(phase: &str, age: Option<&str>, room: usize) -> String {
         })
     });
     let fit_phase = |width: usize| -> Option<String> {
-        if let Some((word, count)) = fraction {
-            let suffix_width = 1 + display_width(count);
-            if display_width(phase) <= width { return Some(phase.to_owned()); }
-            // Keep a cell of breathing room when the phase word is abbreviated.
-            let word_width = width.checked_sub(suffix_width + 1)?;
-            if word_width < 2 { return None; }
-            return Some(format!("{} {count}", crate::ui::truncate_end(word, word_width)));
-        }
-        (width > 0).then(|| crate::ui::truncate_end(phase, width))
+        let (word, count) = fraction.unwrap_or((phase, ""));
+        let suffix_width = if count.is_empty() { 0 } else { 1 + display_width(count) };
+        if display_width(phase) <= width { return Some(phase.to_owned()); }
+        // Abbreviation keeps four letters plus its ellipsis and the entire fraction.
+        let word_width = width.checked_sub(suffix_width)?;
+        if word_width < 5 { return None; }
+        let shortened = crate::ui::truncate_end(word, word_width);
+        (display_width(&shortened) >= 5).then(|| format!("{shortened}{}", if count.is_empty() {
+            String::new()
+        } else {
+            format!(" {count}")
+        }))
     };
     if let Some(age) = age {
-        let segment = if phase.is_empty() { age.to_owned() } else { format!(" · {age}") };
+        let segment = format!(" · {age}");
         if let Some(width) = room.checked_sub(display_width(&segment)) {
-            if phase.is_empty() { return segment; }
-            if let Some(phase) = fit_phase(width) {
-                return format!("{phase}{segment}");
+            if let Some(phase) = fit_phase(width) { return format!("{phase}{segment}"); }
+        }
+        // Hours may omit minutes, but never the unit.
+        if let Some(hours) = age.split_once('h').map(|(hours, _)| format!("{hours}h")) {
+            let segment = format!(" · {hours}");
+            if let Some(width) = room.checked_sub(display_width(&segment)) {
+                if let Some(phase) = fit_phase(width) { return format!("{phase}{segment}"); }
             }
         }
     }
-    fit_phase(room).unwrap_or_else(|| crate::ui::truncate_end(phase, room))
+    fit_phase(room).unwrap_or_default()
 }
 
 fn workflow_age(seconds: u64) -> String {
     let minutes = seconds / 60;
     if minutes == 0 { "<1m".to_owned() }
     else if minutes < 60 { format!("{minutes}m") }
-    else { format!("{}h{:02}", minutes / 60, minutes % 60) }
+    else { format!("{}h{}m", minutes / 60, minutes % 60) }
 }
 
 fn render_tree_header(
@@ -590,28 +604,39 @@ fn render_tree_header(
             if is_space && header.factory_space { 0 } else { config.agents.row_gap });
     }
     let prefix = 1 + u16::from(header.indent);
-    // Keep space controls unless the name and attention count need their room.
+    // Factory spaces keep their pin, plus and chevron even under a scrollbar.
+    // The attention count yields first; the name truncates only after that.
     let summary_width = header.space_attention.as_ref().map_or(0, |(_, summary)| 2 + display_width(summary) as u16);
-    let compact_space = is_space && header.factory_space
+    let factory_controls = is_space && header.factory_space && rect.width >= 6;
+    let compact_space = is_space && header.factory_space && !factory_controls
         && prefix + display_width(&header.label) as u16 + 10 + summary_width > rect.width;
     // A header standing in for a group owner takes that group's chevron (and
     // its folded `+N`), since with agent rows hidden it is the only place the
     // group can be opened from.
     let group = header.group_chevron();
     // Space headers reserve extra cells for the pin and new-tab plus.
-    let summary_fits = !compact_space ||
-        (prefix + display_width(&header.label) as u16 + 2 + summary_width <= rect.width);
-    let trailing_width = (if compact_space { 2 } else if is_space { 10 } else { 6 })
+    let control_width = if compact_space { 2 } else if is_space { 10 } else { 6 };
+    let factory_summary_width = 3 + header.space_attention.as_ref().map_or(0, |(_, summary)| display_width(summary) as u16);
+    let summary_fits = if factory_controls {
+        header.space_attention.is_some() && prefix + display_width(&header.label) as u16
+            + 1 + factory_summary_width + 6 <= rect.width
+    } else {
+        !compact_space || prefix + display_width(&header.label) as u16 + 2 + summary_width <= rect.width
+    };
+    let reserve_summary = if factory_controls && summary_fits {
+        factory_summary_width
+    } else if summary_fits { summary_width } else { 0 };
+    let trailing_width = if factory_controls { 6 } else { control_width }
         + group.map(|group| group.summary_width() as u16).unwrap_or(0)
-        + if summary_fits { summary_width } else { 0 };
+        + reserve_summary;
+    let label_width = rect.width.saturating_sub(prefix).saturating_sub(trailing_width)
+        .saturating_sub(u16::from(factory_controls));
     put_text(
         buffer,
         rect.x.saturating_add(prefix),
         rect.y,
-        rect.width
-            .saturating_sub(prefix)
-            .saturating_sub(trailing_width),
-        &header.label,
+        label_width,
+        &crate::ui::truncate_end(&header.label, label_width as usize),
         label_style,
     );
 
@@ -713,9 +738,11 @@ fn render_tree_header(
                 crate::factory_overlay::Attention::Warn => palette.peach,
                 crate::factory_overlay::Attention::None => palette.overlay0,
             };
-            let x = rect
-                .right()
-                .saturating_sub(2 + display_width(summary) as u16 + if compact_space { 3 } else { 10 });
+            let x = if factory_controls {
+                rect.right().saturating_sub(6 + factory_summary_width)
+            } else {
+                rect.right().saturating_sub(2 + display_width(summary) as u16 + if compact_space { 3 } else { 10 })
+            };
             put_text(buffer, x, rect.y, 2, "● ", Style::default().fg(color));
             put_text(
                 buffer,
@@ -873,9 +900,10 @@ pub(super) fn render_agent_list<T>(
     render_row: impl FnMut(&mut Buffer, Rect, &T, &mut ShellHitMap),
 ) {
     render_agent_list_with_gaps(buffer, area, rows, empty_message, config, agent_scroll,
-        hits, row_lines, false, |_| config.agents.row_gap, render_row);
+        hits, row_lines, false, |_| config.agents.row_gap, render_row, |_| (false, false));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_agent_list_with_gaps<T>(
     buffer: &mut Buffer,
     area: Rect,
@@ -888,6 +916,7 @@ fn render_agent_list_with_gaps<T>(
     compact_header: bool,
     row_gap: impl Fn(usize) -> u16,
     mut render_row: impl FnMut(&mut Buffer, Rect, &T, &mut ShellHitMap),
+    highlighted: impl Fn(&T) -> (bool, bool),
 ) {
     let header_height = if compact_header { 2 } else { 3 };
     let body = Rect::new(
@@ -946,12 +975,26 @@ fn render_agent_list_with_gaps<T>(
         }
         let rect = Rect::new(body.x, y, content_width, height);
         render_row(buffer, rect, row, hits);
+        // A half-pad may only occupy a real spacer, never the next space's header.
+        if highlighted(row).0 && gaps[index] == 0 && rect.bottom() < body.bottom() {
+            for x in rect.x..rect.right() {
+                if let Some(cell) = buffer.cell_mut((x, rect.bottom())) {
+                    if matches!(cell.symbol(), "▀" | "▄") && cell.fg == config.palette.active_row_bg {
+                        cell.set_symbol(" ").set_fg(config.palette.text);
+                    }
+                }
+            }
+        }
         let gap = gaps[index];
         // A spacer belongs to the row above, including for mouse hit testing.
         if gap > 0 {
             let bottom = y.saturating_add(height);
             let extension = gap.min(body.bottom().saturating_sub(bottom));
             if extension > 0 {
+                if highlighted(row).1 {
+                    buffer.set_style(Rect::new(rect.x, bottom, rect.width, extension),
+                        Style::default().bg(config.palette.active_row_bg));
+                }
                 let extended = Rect::new(rect.x, rect.y, rect.width, height + extension);
                 if let Some((hit, _)) = hits.agents.iter_mut().find(|(hit, _)| *hit == rect) { *hit = extended; }
                 if let Some(hit) = hits.tree_headers.iter_mut().find(|hit| hit.rect == rect) { hit.rect = extended; }

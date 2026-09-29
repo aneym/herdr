@@ -266,7 +266,7 @@ impl AgentPanelListEntry {
         match self {
             Self::Agent(row) | Self::Automation(row) => row.rows.len().max(1),
             Self::FactoryTab(row) if row.workflow && !row.done
-                && (row.phase.as_ref().is_some_and(|phase| !phase.trim().is_empty()) || row.started.is_some()) => 2,
+                && row.phase.as_ref().is_some_and(|phase| !phase.trim().is_empty()) => 2,
             _ => 1,
         }
     }
@@ -830,7 +830,12 @@ fn append_factory_space(
     } else {
         Vec::new()
     };
-    if !lanes.is_empty() || !root_workflows.is_empty() {
+    let ordinary = tabs
+        .iter()
+        .copied()
+        .filter(|tab| foreground(tab) && kind(tab) == TabKind::Unknown)
+        .collect::<Vec<_>>();
+    if !lanes.is_empty() || !root_workflows.is_empty() || !ordinary.is_empty() {
         out.push(AgentPanelListEntry::FactorySection {
             label: "LANES",
             right: "⌘1..9".to_owned(),
@@ -890,6 +895,9 @@ fn append_factory_space(
                 snapshot, rows, overlay, workflow, indent, false, false,
             ));
         }
+        for tab in ordinary {
+            out.push(factory_row(snapshot, rows, overlay, tab, indent, false, false));
+        }
     }
     let background = tabs
         .iter()
@@ -920,21 +928,6 @@ fn append_factory_space(
                     false,
                 ));
             }
-        }
-    }
-    let ordinary = tabs
-        .iter()
-        .copied()
-        .filter(|tab| foreground(tab) && kind(tab) == TabKind::Unknown)
-        .collect::<Vec<_>>();
-    if !ordinary.is_empty() {
-        out.push(AgentPanelListEntry::FactorySection {
-            label: "TABS",
-            right: String::new(),
-            indent,
-        });
-        for tab in ordinary {
-            append_ordinary_tab(out, snapshot, tree, rows, tab, workspace_id, indent);
         }
     }
 }
@@ -996,57 +989,6 @@ fn factory_row(
         workflow: tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Workflow),
         done: tag.is_some_and(|tag| tag.done),
     })
-}
-
-fn append_ordinary_tab(
-    out: &mut Vec<AgentPanelListEntry>,
-    snapshot: &ClientShellSnapshot,
-    tree: &ClientTreeChrome,
-    rows: &[AgentRow],
-    tab: &crate::protocol::ClientShellTab,
-    workspace_id: &str,
-    indent: u8,
-) {
-    let mut tab_rows = rows
-        .iter()
-        .filter(|row| row.tab_id == tab.tab_id)
-        .cloned()
-        .collect::<Vec<_>>();
-    let key = tab_key(workspace_id, tab.number);
-    let collapsed = tree.collapsed_tabs.contains(&key);
-    if tree.show_tabs {
-        out.push(AgentPanelListEntry::TabHeader(TreeHeader {
-            workspace_id: workspace_id.to_owned(),
-            tab_id: Some(tab.tab_id.clone()),
-            label: tab.label.clone(),
-            key,
-            collapsed,
-            child_states: if collapsed || !tree.show_agents {
-                rollup_state(&tab_rows)
-            } else {
-                Vec::new()
-            },
-            collapsible: !tab_rows.is_empty() && tree.show_agents,
-            pinned: false,
-            indent,
-            active: !tree.show_agents
-                && tab.focused
-                && snapshot.focused_workspace_id.as_deref() == Some(workspace_id),
-            group: (!tree.show_agents)
-                .then(|| tree_header_group(&tab_rows))
-                .flatten(),
-            space_attention: None,
-            factory_space: false,
-        }));
-    }
-    if !tree.show_agents || (tree.show_tabs && collapsed) {
-        return;
-    }
-    for row in &mut tab_rows {
-        row.indent = indent.saturating_add(u8::from(tree.show_tabs));
-        row.strip_tokens(tree.show_spaces, tree.show_tabs);
-    }
-    out.extend(tab_rows.into_iter().map(AgentPanelListEntry::Agent));
 }
 
 /// Reorder whole space blocks to follow the manual drag order. Blocks not named
