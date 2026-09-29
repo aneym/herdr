@@ -353,9 +353,11 @@ fn assert_golden(actual: Vec<String>, expected: &str) {
 }
 
 #[test]
-fn factory_default_frame_w25() {
+fn factory_collapsed_frame_w25() {
     let (snapshot, overlay) = lab_fixture();
-    let (rows, _, _) = rendered_factory_rows(&snapshot, &overlay);
+    let mut tree = ClientTreeChrome::default();
+    tree.factory_collapsed_lanes.insert("lane-a".into());
+    let (rows, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
     assert_golden(rows, include_str!("golden/factory_default_w25.txt"));
 }
 
@@ -376,9 +378,11 @@ fn factory_expanded_frame_w27() {
 }
 
 #[test]
-fn factory_compact_frame_w25() {
+fn factory_collapsed_compact_frame_w25() {
     let (snapshot, overlay) = lab_fixture();
-    let (rows, _, _) = rendered_factory_rows_with_gap(&snapshot, &overlay, &ClientTreeChrome::default(), 25, 0);
+    let mut tree = ClientTreeChrome::default();
+    tree.factory_collapsed_lanes.insert("lane-a".into());
+    let (rows, _, _) = rendered_factory_rows_with_gap(&snapshot, &overlay, &tree, 25, 0);
     assert_golden(rows, include_str!("golden/factory_compact_w25.txt"));
 }
 
@@ -683,13 +687,14 @@ fn registered_runs_count_and_expand_under_parent() {
         RunTag { id: "r1".into(), name: Some("review".into()), phase: Some("review 2/3".into()), agents: 2, ..RunTag::default() },
         RunTag { id: "r2".into(), name: None, phase: Some("build 1/2".into()), agents: 1, ..RunTag::default() },
     ];
-    let (folded, hits, _) = rendered_factory_rows(&snapshot, &overlay);
+    let mut tree = ClientTreeChrome::default();
+    tree.factory_collapsed_lanes.insert("lane-b".into());
+    let (folded, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
     let lane = hits.tree_headers.iter().find(|hit| hit.key == "lane-b").unwrap();
     assert!(!lane.chevron.is_empty() && lane.collapsed);
     assert!(folded[lane.rect.y as usize].contains('2'));
-    let mut tree = ClientTreeChrome::default();
-    tree.factory_expanded_lanes.insert("lane-b".into());
-    let (expanded, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+    let (expanded, hits, _) = rendered_factory_rows(&snapshot, &overlay);
+    assert!(!hits.tree_headers.iter().find(|hit| hit.key == "lane-b").unwrap().collapsed);
     for (id, name, phase) in [("r1", "review", "review 2/3"), ("r2", "r2", "build 1/2")] {
         let run = hits.tree_headers.iter().find(|hit| hit.key == format!("lane-b#run:{id}")).unwrap();
         assert_eq!(run.tab_id.as_deref(), Some("lane-b"));
@@ -727,7 +732,7 @@ fn registered_run_progress_completion_and_failure_render_under_lane() {
             assert!(lane_line.contains('1'), "{lane_line}");
         }
         assert_eq!(hits.tree_headers.iter().any(|hit| hit.key == "lane-b#run:build"),
-            attention == Attention::Act, "only a failed run should auto-expand its lane");
+            !done || attention == Attention::Act, "running or failed runs should auto-expand their lane");
         if attention == Attention::Act {
             let x = lane_line.chars().position(|ch| ch == '!').unwrap() as u16;
             assert_eq!(buffer[(x, lane.rect.y)].fg, palette.red);
@@ -874,6 +879,34 @@ fn grouped_workflow_fixture() -> (ClientShellSnapshot, FactoryOverlay) {
 }
 
 #[test]
+fn lane_run_defaults_open_unless_done_or_explicitly_collapsed() {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| tab.tab_id == "lane-a");
+    snapshot.agents.clear();
+    for (done, collapsed, visible) in [(false, false, true), (false, true, false), (true, false, false)] {
+        overlay.tabs.get_mut("lane-a").unwrap().runs = vec![RunTag {
+            id: "fold".into(), name: Some("fold run".into()), done, ..RunTag::default()
+        }];
+        let mut tree = ClientTreeChrome::default();
+        if collapsed {
+            ClientTreeChrome::toggle(&mut tree.factory_collapsed_lanes, "lane-a".into());
+        }
+        let (rows, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+        let lane = hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap();
+        if !done {
+            assert_eq!(lane.collapsed, !visible, "done={done}, collapsed={collapsed}: {rows:?}");
+        }
+        assert_eq!(rows.iter().any(|row| row.contains("fold run")), visible,
+            "done={done}, collapsed={collapsed}: {rows:?}");
+        assert_eq!(hits.tree_headers.iter().any(|hit| hit.key == "lane-a#run:fold"), visible);
+        if visible {
+            let run = hits.tree_headers.iter().find(|hit| hit.key == "lane-a#run:fold").unwrap();
+            assert!(run.rect.y > lane.rect.y, "run must render under its lane: {rows:?}");
+        }
+    }
+}
+
+#[test]
 fn grouped_lane_draws_live_workflows_and_runs_and_rolls_up_state() {
     let (snapshot, overlay) = grouped_workflow_fixture();
     let mut tree = ClientTreeChrome::default();
@@ -897,12 +930,14 @@ fn grouped_lane_draws_live_workflows_and_runs_and_rolls_up_state() {
 }
 
 #[test]
-fn grouped_workflow_focus_or_act_auto_opens_parent_but_explicit_fold_hides_children() {
+fn grouped_running_workflow_focus_or_act_auto_opens_parent_but_explicit_fold_hides_children() {
     let (mut snapshot, mut overlay) = grouped_workflow_fixture();
     let mut tree = ClientTreeChrome::default();
-    let (folded, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
-    assert!(hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap().collapsed);
-    assert!(!folded.iter().any(|row| row.contains("lane-b") || row.contains("wf-a") || row.contains("fold run")));
+    let (running, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+    assert!(!hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap().collapsed);
+    for label in ["lane-b", "wf-a", "fold run"] {
+        assert!(running.iter().any(|row| row.contains(label)), "{running:?}");
+    }
     snapshot.focused_tab_id = Some("wf-a".into());
     let (focused, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
     assert!(!hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap().collapsed);
@@ -1258,12 +1293,14 @@ fn unknown_section_does_not_break_overlay_parse() {
 }
 
 #[test]
-fn factory_sectioned_compact_frame_w25() {
+fn factory_sectioned_collapsed_compact_frame_w25() {
     use crate::factory_overlay::TabSection;
     let (snapshot, mut overlay) = lab_fixture();
     overlay.tabs.get_mut("lane-a").unwrap().section = Some(TabSection::Scoping);
     overlay.tabs.get_mut("lane-a").unwrap().name = Some("[scoping] shared connections".into());
     overlay.tabs.get_mut("lane-b").unwrap().section = Some(TabSection::Idle);
-    let (rows, _, _) = rendered_factory_rows_with_gap(&snapshot, &overlay, &ClientTreeChrome::default(), 25, 0);
+    let mut tree = ClientTreeChrome::default();
+    tree.factory_collapsed_lanes.insert("lane-a".into());
+    let (rows, _, _) = rendered_factory_rows_with_gap(&snapshot, &overlay, &tree, 25, 0);
     assert_golden(rows, include_str!("golden/factory_sectioned_compact_w25.txt"));
 }

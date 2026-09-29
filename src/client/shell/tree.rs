@@ -1017,7 +1017,10 @@ fn append_factory_space(
             let focused = snapshot.focused_workspace_id.as_deref() == Some(workspace_id)
                 && children.iter().chain(grouped_lanes.iter()).chain(grouped_workflows.iter())
                     .any(|tab| snapshot.focused_tab_id.as_deref() == Some(tab.tab_id.as_str()));
-            let expanded = tree.factory_expanded(&lane.tab_id, focused,
+            let active = children.iter().chain(grouped_workflows.iter())
+                .filter(|tab| overlay.tab(&tab.tab_id).is_none_or(|tag| !tag.done))
+                .count() + runs.iter().filter(|run| !run.done).count() + grouped_runs;
+            let expanded = tree.factory_expanded(&lane.tab_id, focused || active > 0,
                 attention == Some(crate::factory_overlay::Attention::Act));
             let mut lane_row = factory_row(
                 snapshot, rows, overlay, lane, indent,
