@@ -28,6 +28,8 @@ pub(super) struct ClientTreeChrome {
     pub(super) factory_expanded_lanes: HashSet<String>,
     pub(super) factory_collapsed_lanes: HashSet<String>,
     pub(super) factory_background_expanded: HashSet<String>,
+    pub(super) factory_auto_expanded: HashSet<String>,
+    pub(super) factory_parked_expanded: HashSet<String>,
 }
 
 impl Default for ClientTreeChrome {
@@ -47,6 +49,8 @@ impl Default for ClientTreeChrome {
             factory_expanded_lanes: HashSet::new(),
             factory_collapsed_lanes: HashSet::new(),
             factory_background_expanded: HashSet::new(),
+            factory_auto_expanded: HashSet::new(),
+            factory_parked_expanded: HashSet::new(),
         }
     }
 }
@@ -74,6 +78,8 @@ impl ClientTreeChrome {
             factory_expanded_lanes: saved.factory_expanded_lanes.into_iter().collect(),
             factory_collapsed_lanes: saved.factory_collapsed_lanes.into_iter().collect(),
             factory_background_expanded: saved.factory_background_expanded.into_iter().collect(),
+            factory_auto_expanded: saved.factory_auto_expanded.into_iter().collect(),
+            factory_parked_expanded: saved.factory_parked_expanded.into_iter().collect(),
         }
     }
 
@@ -93,6 +99,8 @@ impl ClientTreeChrome {
             factory_expanded_lanes: sorted(&self.factory_expanded_lanes),
             factory_collapsed_lanes: sorted(&self.factory_collapsed_lanes),
             factory_background_expanded: sorted(&self.factory_background_expanded),
+            factory_auto_expanded: sorted(&self.factory_auto_expanded),
+            factory_parked_expanded: sorted(&self.factory_parked_expanded),
         }
     }
 
@@ -250,11 +258,31 @@ pub(super) enum AgentPanelListEntry {
         indent: u8,
     },
     FactoryBackground {
+        kind: FactoryGroupKind,
         workspace_id: String,
         count: usize,
         collapsed: bool,
         indent: u8,
+        alert: bool,
+        working: bool,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum FactoryGroupKind {
+    Automations,
+    Parked,
+    Background,
+}
+
+impl FactoryGroupKind {
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::Automations => "automations",
+            Self::Parked => "parked",
+            Self::Background => "background",
+        }
+    }
 }
 
 /// A tagged tab stands in for its agents, while still following the tab-header hit path.
@@ -756,7 +784,7 @@ fn append_factory_space(
     overlay: &crate::factory_overlay::FactoryOverlay,
     indent: u8,
 ) {
-    use crate::factory_overlay::TabKind;
+    use crate::factory_overlay::{TabKind, TabMode};
     let tabs = snapshot
         .tabs
         .iter()
@@ -780,8 +808,12 @@ fn append_factory_space(
     let lanes = tabs
         .iter()
         .copied()
-        .filter(|tab| foreground(tab) && kind(tab) == TabKind::Lane)
+        .filter(|tab| kind(tab) == TabKind::Lane && (foreground(tab)
+            || overlay.tab(&tab.tab_id).is_some_and(|tag| tag.mode != TabMode::Active)))
         .collect::<Vec<_>>();
+    let lane_mode = |tab: &crate::protocol::ClientShellTab| {
+        overlay.tab(&tab.tab_id).map_or(TabMode::Active, |tag| tag.mode)
+    };
     let all_workflows = tabs
         .iter()
         .copied()
@@ -867,13 +899,7 @@ fn append_factory_space(
         .copied()
         .filter(|tab| foreground(tab) && kind(tab) == TabKind::Unknown)
         .collect::<Vec<_>>();
-    if !lanes.is_empty() || !root_workflows.is_empty() || !ordinary.is_empty() {
-        out.push(AgentPanelListEntry::FactorySection {
-            label: "LANES",
-            right: "⌘1..9".to_owned(),
-            indent,
-        });
-        for lane in &lanes {
+    let push_lane = |out: &mut Vec<AgentPanelListEntry>, lane: &crate::protocol::ClientShellTab, indent: u8, grouped: bool| {
             let children = workflows
                 .iter()
                 .copied()
@@ -909,15 +935,44 @@ fn append_factory_space(
             }
             summarize_factory_parent(&mut lane_row, running,
                 overlay.tab(&lane.tab_id).is_some_and(|tag| tag.busy), false);
+            if grouped {
+                if let AgentPanelListEntry::FactoryTab(row) = &mut lane_row {
+                    row.background = lane_mode(lane) == TabMode::Parked;
+                }
+            }
             out.push(lane_row);
             if expanded {
                 for child in children {
-                    out.push(factory_row(snapshot, rows, overlay, child,
-                        indent.saturating_add(1), false, false));
+                    let mut row = factory_row(snapshot, rows, overlay, child,
+                        indent.saturating_add(1), false, false);
+                    if grouped && lane_mode(lane) == TabMode::Parked {
+                        if let AgentPanelListEntry::FactoryTab(tab) = &mut row {
+                            tab.background = true;
+                        }
+                    }
+                    out.push(row);
                 }
                 for run in runs {
-                    out.push(factory_run_row(lane, run, indent.saturating_add(1)));
+                    let mut row = factory_run_row(lane, run, indent.saturating_add(1));
+                    if grouped && lane_mode(lane) == TabMode::Parked {
+                        if let AgentPanelListEntry::FactoryTab(tab) = &mut row {
+                            tab.background = true;
+                        }
+                    }
+                    out.push(row);
                 }
+            }
+    };
+    if lanes.iter().any(|lane| lane_mode(lane) == TabMode::Active)
+        || !root_workflows.is_empty() || !ordinary.is_empty() {
+        out.push(AgentPanelListEntry::FactorySection {
+            label: "LANES",
+            right: "⌘1..9".to_owned(),
+            indent,
+        });
+        for lane in &lanes {
+            if lane_mode(lane) == TabMode::Active {
+                push_lane(out, lane, indent, false);
             }
         }
         for workflow in root_workflows {
@@ -929,22 +984,64 @@ fn append_factory_space(
             out.push(factory_row(snapshot, rows, overlay, tab, indent, false, false));
         }
     }
+    for (mode, group, expanded) in [
+        (TabMode::Auto, FactoryGroupKind::Automations, &tree.factory_auto_expanded),
+        (TabMode::Parked, FactoryGroupKind::Parked, &tree.factory_parked_expanded),
+    ] {
+        let members = lanes.iter().copied().filter(|lane| lane_mode(lane) == mode).collect::<Vec<_>>();
+        if members.is_empty() {
+            continue;
+        }
+        let alert = members.iter().any(|lane| {
+            let child_alert = all_workflows.iter().any(|workflow| {
+                parent_for(workflow) == Some(lane.tab_id.as_str())
+                    && (overlay.tab(&workflow.tab_id).is_some_and(|tag| tag.attention == crate::factory_overlay::Attention::Act)
+                        || matches!(factory_row(snapshot, rows, overlay, workflow, indent, false, false),
+                            AgentPanelListEntry::FactoryTab(row) if row.status == crate::api::schema::AgentStatus::Blocked))
+            });
+            let row = factory_row(snapshot, rows, overlay, lane, indent, false, false);
+            child_alert || matches!(row, AgentPanelListEntry::FactoryTab(ref row) if
+                row.status == crate::api::schema::AgentStatus::Blocked || row.attention == crate::factory_overlay::Attention::Act)
+        });
+        let working = group == FactoryGroupKind::Automations && members.iter().any(|lane| {
+            let row = factory_row(snapshot, rows, overlay, lane, indent, false, false);
+            matches!(row, AgentPanelListEntry::FactoryTab(ref row) if row.status == crate::api::schema::AgentStatus::Working)
+                || overlay.tab(&lane.tab_id).is_some_and(|tag| tag.busy || !tag.runs.is_empty())
+                || workflows.iter().any(|workflow| parent_for(workflow) == Some(lane.tab_id.as_str())
+                    && matches!(factory_row(snapshot, rows, overlay, workflow, indent, false, false),
+                        AgentPanelListEntry::FactoryTab(row) if row.status == crate::api::schema::AgentStatus::Working))
+        });
+        let collapsed = !expanded.contains(workspace_id);
+        out.push(AgentPanelListEntry::FactoryBackground {
+            kind: group, workspace_id: workspace_id.to_owned(), count: members.len(),
+            collapsed, indent, alert, working,
+        });
+        if !collapsed {
+            for lane in members {
+                push_lane(out, lane, indent.saturating_add(1), true);
+            }
+        }
+    }
     let background = tabs
         .iter()
         .copied()
         .filter(|tab| {
             overlay.tab(&tab.tab_id)
-                .is_some_and(|tag| (tag.done && tag.kind != TabKind::Workflow)
+                .is_some_and(|tag| (tag.done && tag.kind != TabKind::Workflow
+                    && !(tag.kind == TabKind::Lane && tag.mode != TabMode::Active))
                     || tag.kind == TabKind::Advisor)
         })
         .collect::<Vec<_>>();
     if !background.is_empty() {
         let collapsed = !tree.factory_background_expanded.contains(workspace_id);
         out.push(AgentPanelListEntry::FactoryBackground {
+            kind: FactoryGroupKind::Background,
             workspace_id: workspace_id.to_owned(),
             count: background.len(),
             collapsed,
             indent,
+            alert: false,
+            working: false,
         });
         if !collapsed {
             for tab in background {
@@ -1832,15 +1929,21 @@ impl ClientShellState {
         snapshot: &ClientShellSnapshot,
     ) -> Option<(Option<String>, String)> {
         use crate::api::schema::AgentStatus;
-        use crate::factory_overlay::{Attention, TabKind};
+        use crate::factory_overlay::{Attention, TabKind, TabMode};
 
         let overlay = self.factory_overlay();
         let mut entries = Vec::<(Option<String>, String, u8)>::new();
         for workspace in &snapshot.workspaces {
             for tab in snapshot.tabs.iter().filter(|tab| tab.workspace_id == workspace.workspace_id) {
                 let tag = overlay.and_then(|overlay| overlay.tab(&tab.tab_id));
-                let background = tag.is_some_and(|tag| tag.done || tag.kind == TabKind::Advisor);
-                let ask = !background && tag.is_some_and(|tag| tag.attention == Attention::Act);
+                let mode = tag.map_or(TabMode::Active, |tag| tag.mode);
+                let parent_mode = tag.and_then(|tag| tag.parent.as_deref())
+                    .and_then(|id| overlay.and_then(|overlay| overlay.tab(id)))
+                    .map_or(TabMode::Active, |parent| parent.mode);
+                let auto = mode == TabMode::Auto;
+                let background = tag.is_some_and(|tag| tag.done || tag.kind == TabKind::Advisor)
+                    || mode == TabMode::Parked || parent_mode != TabMode::Active;
+                let ask = !background && !auto && tag.is_some_and(|tag| tag.attention == Attention::Act);
                 let busy = tag.is_some_and(|tag| tag.busy);
                 let mut has_agent = false;
                 for pane in snapshot.panes.iter().filter(|pane| pane.tab_id == tab.tab_id) {
@@ -1855,7 +1958,9 @@ impl ClientShellState {
                     entries.push((
                         Some(pane.pane_id.clone()),
                         tab.tab_id.clone(),
-                        if background { 0 } else { rank.max(u8::from(ask && first_agent)) },
+                        if auto && parent_mode == TabMode::Active && rank == 3 { 3 }
+                        else if background || auto { 0 }
+                        else { rank.max(u8::from(ask && first_agent)) },
                     ));
                 }
                 if !has_agent && ask {

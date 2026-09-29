@@ -8,12 +8,12 @@
     ○ lane-b         idle
     ● plain-a            
     ● plain-b            
+                         
   ▸ background 1         
+                         
  poker             ⚲ + ▾ 
   LANES             ⌘1..9
     ● poker coach        
-                         
-                         
                          
                          
                          
