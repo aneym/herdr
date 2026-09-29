@@ -837,6 +837,32 @@ fn append_factory_space(
             first_orchestrator
         }
     };
+    // Only a tab's first agent pane determines its explicit sidebar placement.
+    // Resolve chains to their top row so the factory tree never grows past one level.
+    let direct_parent = lanes.iter().filter(|lane| lane_mode(lane) == TabMode::Active)
+        .filter_map(|lane| {
+            let primary = snapshot.agents.iter().find(|agent| agent.tab_id == lane.tab_id)?;
+            let pane = primary.group.parent_pane_id.as_deref()?;
+            let parent = snapshot.agents.iter().find(|agent| agent.pane_id == pane)?;
+            if parent.workspace_id != workspace_id || parent.tab_id == lane.tab_id {
+                return None;
+            }
+            let valid = lanes.iter().any(|candidate| candidate.tab_id == parent.tab_id)
+                || orchestrators.iter().any(|candidate| candidate.tab_id == parent.tab_id);
+            valid.then_some((lane.tab_id.as_str(), parent.tab_id.as_str()))
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    let grouped_root = |tab_id: &str| {
+        let mut seen = HashSet::new();
+        let mut current = tab_id;
+        while let Some(&parent) = direct_parent.get(current) {
+            if !seen.insert(current) || seen.contains(parent) {
+                return None; // A cycle is not a sidebar hierarchy.
+            }
+            current = parent;
+        }
+        (current != tab_id).then(|| current.to_owned())
+    };
     if !orchestrators.is_empty() {
         out.push(AgentPanelListEntry::FactorySection {
             label: "ORCHESTRATOR",
@@ -844,7 +870,8 @@ fn append_factory_space(
             indent,
         });
         for orchestrator in &orchestrators {
-            if first_orchestrator == Some(orchestrator.tab_id.as_str()) {
+            if first_orchestrator == Some(orchestrator.tab_id.as_str())
+                || lanes.iter().any(|lane| grouped_root(&lane.tab_id).as_deref() == Some(orchestrator.tab_id.as_str())) {
                 let children = workflows.iter().copied()
                     .filter(|workflow| parent_for(workflow) == Some(orchestrator.tab_id.as_str()))
                     .collect::<Vec<_>>();
@@ -858,7 +885,16 @@ fn append_factory_space(
                     .map(|tag| tag.attention)
                     .max_by_key(|attention| attention.rank());
                 let runs = overlay.tab(&orchestrator.tab_id).map_or(&[][..], |tag| tag.runs.as_slice());
-                let running = children.len() + runs.len();
+                let grouped = lanes.iter().copied()
+                    .filter(|lane| grouped_root(&lane.tab_id).as_deref() == Some(orchestrator.tab_id.as_str()))
+                    .collect::<Vec<_>>();
+                let attention = grouped.iter().filter_map(|lane| overlay.tab(&lane.tab_id))
+                    .map(|tag| tag.attention).chain(attention).max_by_key(|value| value.rank());
+                let focused = focused || grouped.iter().any(|lane| {
+                    snapshot.focused_workspace_id.as_deref() == Some(workspace_id)
+                        && snapshot.focused_tab_id.as_deref() == Some(lane.tab_id.as_str())
+                });
+                let running = children.len() + grouped.len() + runs.len();
                 let expanded = tree.factory_expanded(&orchestrator.tab_id, focused,
                     attention == Some(crate::factory_overlay::Attention::Act));
                 let mut row = factory_row(snapshot, rows, overlay, orchestrator, indent,
@@ -872,6 +908,10 @@ fn append_factory_space(
                     overlay.tab(&orchestrator.tab_id).is_some_and(|tag| tag.busy), true);
                 out.push(row);
                 if expanded {
+                    for lane in grouped {
+                        out.push(factory_row(snapshot, rows, overlay, lane,
+                            indent.saturating_add(1), false, false));
+                    }
                     for child in children {
                         out.push(factory_row(snapshot, rows, overlay, child,
                             indent.saturating_add(1), false, false));
@@ -905,19 +945,19 @@ fn append_factory_space(
                 .copied()
                 .filter(|workflow| parent_for(workflow) == Some(lane.tab_id.as_str()))
                 .collect::<Vec<_>>();
+            let grouped_lanes = lanes.iter().copied()
+                .filter(|child| grouped_root(&child.tab_id).as_deref() == Some(lane.tab_id.as_str()))
+                .collect::<Vec<_>>();
             let runs = overlay.tab(&lane.tab_id).map_or(&[][..], |tag| tag.runs.as_slice());
-            let running = children.len() + runs.len();
+            let running = children.len() + grouped_lanes.len() + runs.len();
             let attention = all_workflows.iter().filter(|workflow| {
                 parent_for(workflow) == Some(lane.tab_id.as_str())
-            }).filter_map(|workflow| overlay.tab(&workflow.tab_id))
-                .map(|tag| tag.attention).max_by_key(|attention| match attention {
-                    crate::factory_overlay::Attention::Act => 2,
-                    crate::factory_overlay::Attention::Warn => 1,
-                    crate::factory_overlay::Attention::None => 0,
-                });
+            }).map(|tab| tab.tab_id.as_str())
+                .chain(grouped_lanes.iter().map(|tab| tab.tab_id.as_str()))
+                .filter_map(|id| overlay.tab(id))
+                .map(|tag| tag.attention).max_by_key(|attention| attention.rank());
             let focused = snapshot.focused_workspace_id.as_deref() == Some(workspace_id)
-                && children
-                    .iter()
+                && children.iter().chain(grouped_lanes.iter())
                     .any(|tab| snapshot.focused_tab_id.as_deref() == Some(tab.tab_id.as_str()));
             let expanded = tree.factory_expanded(&lane.tab_id, focused,
                 attention == Some(crate::factory_overlay::Attention::Act));
@@ -942,6 +982,17 @@ fn append_factory_space(
             }
             out.push(lane_row);
             if expanded {
+                // Grouped lanes precede workflow runs, both in snapshot tab order.
+                for child in grouped_lanes {
+                    let mut row = factory_row(snapshot, rows, overlay, child,
+                        indent.saturating_add(1), false, false);
+                    if grouped && lane_mode(lane) == TabMode::Parked {
+                        if let AgentPanelListEntry::FactoryTab(tab) = &mut row {
+                            tab.background = true;
+                        }
+                    }
+                    out.push(row);
+                }
                 for child in children {
                     let mut row = factory_row(snapshot, rows, overlay, child,
                         indent.saturating_add(1), false, false);
@@ -963,7 +1014,7 @@ fn append_factory_space(
                 }
             }
     };
-    if lanes.iter().any(|lane| lane_mode(lane) == TabMode::Active)
+    if lanes.iter().any(|lane| lane_mode(lane) == TabMode::Active && grouped_root(&lane.tab_id).is_none())
         || !root_workflows.is_empty() || !ordinary.is_empty() {
         out.push(AgentPanelListEntry::FactorySection {
             label: "LANES",
@@ -971,7 +1022,7 @@ fn append_factory_space(
             indent,
         });
         for lane in &lanes {
-            if lane_mode(lane) == TabMode::Active {
+            if lane_mode(lane) == TabMode::Active && grouped_root(&lane.tab_id).is_none() {
                 push_lane(out, lane, indent, false);
             }
         }

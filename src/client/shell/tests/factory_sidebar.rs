@@ -700,6 +700,100 @@ fn parked_and_automated_lanes_fold_separately_and_keep_asks_visible() {
 }
 
 #[test]
+fn factory_grouped_lanes_fold_with_parent_and_roll_up_state() {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "lane-a" | "lane-b" | "orch" | "plain-a"));
+    snapshot.tabs.iter_mut().find(|tab| tab.tab_id == "lane-a").unwrap().agent_status = AgentStatus::Idle;
+    snapshot.tabs.iter_mut().find(|tab| tab.tab_id == "lane-b").unwrap().agent_status = AgentStatus::Working;
+    snapshot.agents.clear();
+    let template = fixture().0.agents[0].clone();
+    for (id, parent) in [("lane-a", None), ("lane-b", Some("lane-a-pane")),
+                         ("plain-a", None)] {
+        let mut agent = template.clone();
+        agent.tab_id = id.into();
+        agent.pane_id = format!("{id}-pane");
+        agent.group.parent_pane_id = parent.map(str::to_string);
+        agent.agent_status = if id == "lane-b" { AgentStatus::Working } else { AgentStatus::Idle };
+        snapshot.agents.push(agent);
+    }
+    // A second child follows the first, in snapshot tab order.
+    let mut child = snapshot.tabs.iter().find(|tab| tab.tab_id == "lane-b").unwrap().clone();
+    child.tab_id = "child-two".into();
+    child.label = "child-two".into();
+    snapshot.tabs.push(child);
+    overlay.tabs.insert("child-two".into(), TabTag { kind: TabKind::Lane, attention: Attention::Act, ..TabTag::default() });
+    let mut second = snapshot.agents[1].clone();
+    second.tab_id = "child-two".into();
+    second.pane_id = "child-two-pane".into();
+    snapshot.agents.push(second);
+    let mut tree = ClientTreeChrome::default();
+    let (rows, hits, buffer) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 35);
+    let position = |id: &str| hits.tree_headers.iter().find(|hit| hit.key == id).unwrap();
+    let parent = position("lane-a");
+    let first = position("lane-b");
+    let next = position("child-two");
+    assert!(parent.chevron.width > 0 && !parent.collapsed);
+    assert!(parent.rect.y < first.rect.y && first.rect.y < next.rect.y, "{rows:?}");
+    let x = |id: &str, y: u16| rows[y as usize].find(id).unwrap();
+    let sibling = position("plain-a");
+    assert_eq!(x("lane-b", first.rect.y), x("plain-a", sibling.rect.y) + 1);
+    assert_eq!(x("child-two", next.rect.y), x("lane-b", first.rect.y));
+    assert!(rows[parent.rect.y as usize].contains("2"), "{rows:?}");
+    assert_eq!(buffer[(parent.rect.x + 4, parent.rect.y)].fg,
+        ClientShellConfig::from_config(&Config::default()).palette.working);
+    assert!(rows[parent.rect.y as usize].ends_with('!'), "child Act rolls up: {rows:?}");
+    tree.factory_collapsed_lanes.insert("lane-a".into());
+    let (folded, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+    assert!(hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap().collapsed);
+    assert!(!folded.iter().any(|line| line.contains("lane-b") || line.contains("child-two")), "{folded:?}");
+}
+
+#[test]
+fn factory_grouping_ignores_cycles_and_cross_space_parents() {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "lane-a" | "lane-b" | "plain-a"));
+    let template = snapshot.agents[0].clone();
+    snapshot.agents.clear();
+    for (id, parent) in [("lane-a", "lane-b-pane"), ("lane-b", "lane-a-pane"),
+                         ("plain-a", "remote-pane")] {
+        let mut agent = template.clone();
+        agent.tab_id = id.into();
+        agent.pane_id = format!("{id}-pane");
+        agent.group.parent_pane_id = Some(parent.into());
+        snapshot.agents.push(agent);
+    }
+    let mut remote = template;
+    remote.workspace_id = "ws_2".into();
+    remote.tab_id = "remote".into();
+    remote.pane_id = "remote-pane".into();
+    snapshot.agents.push(remote);
+    snapshot.tabs.push(ClientShellTab {
+        tab_id: "remote".into(), workspace_id: "ws_2".into(), number: 1,
+        label: "remote".into(), custom_label: true, zoomed: false, focused: false,
+        agent_status: AgentStatus::Idle,
+    });
+    snapshot.workspaces.push(ClientShellWorkspace {
+        workspace_id: "ws_2".into(), active_tab_id: "remote".into(), new_workspace_cwd: String::new(),
+        number: 2, label: "elsewhere".into(), custom_label: true, branch: None,
+        git_ahead_behind: None, tokens: Vec::new(), worktree: None, focused: false,
+        agent_status: AgentStatus::Idle, orchestrator_mode: false, tab_count: 1, visible_in_profile: true,
+    });
+    overlay.tabs.insert("remote".into(), TabTag { kind: TabKind::Lane, ..TabTag::default() });
+    overlay.tabs.insert("plain-a".into(), TabTag { kind: TabKind::Lane, ..TabTag::default() });
+    let (rows, hits, _) = rendered_factory_rows(&snapshot, &overlay);
+    let a = hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap();
+    let b = hits.tree_headers.iter().find(|hit| hit.key == "lane-b").unwrap();
+    assert_eq!(rows[a.rect.y as usize].find("lane-a"), rows[b.rect.y as usize].find("lane-b"),
+        "cycle should stay flat: {rows:?}");
+    assert_eq!(a.chevron.width, 0, "{rows:?}");
+    assert_eq!(b.chevron.width, 0, "{rows:?}");
+    assert!(a.rect.y < b.rect.y, "{rows:?}");
+    let cross = hits.tree_headers.iter().find(|hit| hit.key == "plain-a").unwrap();
+    assert_eq!(cross.chevron.width, 0, "cross-space parent cannot fold: {rows:?}");
+    assert_eq!(rows[cross.rect.y as usize].find("plain-a"), rows[a.rect.y as usize].find("lane-a"));
+}
+
+#[test]
 fn configured_factory_shapes_follow_state_but_idle_stays_hollow() {
     let (mut snapshot, mut overlay) = fixture();
     snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "lane-a" | "lane-b" | "orch"));
