@@ -35,14 +35,43 @@ pub(crate) fn render_tab_bar(
         .map(|tab| tab_status_glyphs(snapshot, tab, config,
             overlay.and_then(|overlay| overlay.tab(&tab.tab_id)).is_some_and(|tag| tag.busy)))
         .collect::<Vec<_>>();
-    let desired_widths = visible_tabs
+    let attention_marks = visible_tabs
         .iter()
         .zip(&status_glyphs)
         .map(|(tab, glyphs)| {
+            let attention = overlay.and_then(|overlay| overlay.tab(&tab.tab_id))?.attention;
+            let color = match attention {
+                crate::factory_overlay::Attention::Act => palette.red,
+                crate::factory_overlay::Attention::Warn => palette.peach,
+                crate::factory_overlay::Attention::None => return None,
+            };
+            let pane_count = snapshot.panes.iter().filter(|pane| pane.tab_id == tab.tab_id).count();
+            if attention == crate::factory_overlay::Attention::Act
+                && pane_count > 0
+                && glyphs.len() == pane_count
+                && glyphs.iter().all(|(glyph, _)| *glyph == "!")
+                && snapshot.panes.iter().filter(|pane| pane.tab_id == tab.tab_id).all(|pane| {
+                    snapshot.agents.iter().any(|agent| {
+                        agent.pane_id == pane.pane_id
+                            && agent.agent_status == crate::api::schema::AgentStatus::Blocked
+                    })
+                })
+            {
+                return None;
+            }
+            Some(color)
+        })
+        .collect::<Vec<_>>();
+    let desired_widths = visible_tabs
+        .iter()
+        .zip(&status_glyphs)
+        .zip(&attention_marks)
+        .map(|((tab, glyphs), mark)| {
             let label = tab_label(tab);
             display_width(&label)
                 .saturating_add(4)
                 .saturating_add(tab_status_width(glyphs))
+                .saturating_add(if mark.is_some() { 2 } else { 0 })
                 .max(MIN_TAB_WIDTH)
         })
         .collect::<Vec<_>>();
@@ -133,10 +162,13 @@ pub(crate) fn render_tab_bar(
             Style::default().fg(palette.overlay0).bg(palette.surface0)
         };
         let glyphs = &status_glyphs[index];
-        let status_width = tab_status_width(glyphs).min(width);
+        let mark = attention_marks[index];
+        let mark_width = if mark.is_some() { 2 } else { 0 };
+        let status_width = tab_status_width(glyphs).min(width.saturating_sub(mark_width));
         // Pad by terminal columns, not chars, so wide glyphs stay centred.
         let padding = width
             .saturating_sub(status_width)
+            .saturating_sub(mark_width)
             .saturating_sub(display_width(&name));
         let left = padding / 2;
         let text = format!(
@@ -147,7 +179,7 @@ pub(crate) fn render_tab_bar(
         );
         put_text(buffer, rect.x, rect.y, rect.width, &text, style);
         if status_width > 0 {
-            let mut glyph_x = rect.right().saturating_sub(status_width);
+            let mut glyph_x = rect.right().saturating_sub(status_width + mark_width);
             for (glyph, glyph_style) in glyphs {
                 let glyph_width = display_width(glyph).min(rect.right().saturating_sub(glyph_x));
                 put_text(
@@ -161,6 +193,9 @@ pub(crate) fn render_tab_bar(
                 glyph_x = glyph_x.saturating_add(glyph_width);
             }
             put_text(buffer, glyph_x, rect.y, 1, " ", style);
+        }
+        if let Some(color) = mark.filter(|_| width >= 2) {
+            put_text(buffer, rect.right() - 2, rect.y, 2, "! ", style.fg(color));
         }
         hits.tabs.push((rect, tab.tab_id.clone()));
         first_visible.get_or_insert(index);

@@ -343,6 +343,85 @@ fn tab_status_glyphs_widen_the_tab_and_render_after_its_label() {
     );
 }
 
+#[test]
+fn overlay_attention_marks_follow_status_glyphs_and_reserve_width() {
+    use crate::factory_overlay::{Attention, FactoryOverlay, TabTag};
+    use std::sync::Arc;
+
+    let mut config = Config::default();
+    config.ui.factory.enabled = true;
+    config.ui.show_tab_status = crate::config::ShowTabStatusConfig::All;
+    config.ui.sidebar.agents.state_icons.insert("idle".into(), "i".into());
+    config.ui.sidebar.agents.state_icons.insert("blocked".into(), "!".into());
+    let shell_config = ClientShellConfig::from_config(&config);
+    let mut base = snapshot();
+    base.tabs[0].label = "a long tab label".into();
+    base.agents = tab_status_snapshot().agents;
+    base.agents[0].agent_status = AgentStatus::Idle;
+
+    let render = |attention: Option<Attention>, blocked: bool| {
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+        let mut snap = base.clone();
+        if blocked {
+            snap.tabs[0].agent_status = AgentStatus::Blocked;
+            snap.agents[0].agent_status = AgentStatus::Blocked;
+        }
+        state.set_snapshot(Box::new(snap));
+        if let Some(attention) = attention {
+            let mut overlay = FactoryOverlay::default();
+            overlay.tabs.insert("tab_1".into(), TabTag { attention, ..Default::default() });
+            state.factory_overlay = Some(Arc::new(overlay));
+        }
+        state.set_pane_surface(surface());
+        let frame = state.compose(106, 20).expect("tab bar frame");
+        let tab = state.hits.tabs[0].0;
+        let row = frame_rows(&frame)[tab.y as usize].clone();
+        (frame, tab, row)
+    };
+
+    let (_, plain, plain_row) = render(None, false);
+    let (_, none, none_row) = render(Some(Attention::None), false);
+    assert_eq!(none_row, plain_row, "no attention must preserve the tab row");
+    assert_eq!(none.width, plain.width);
+    assert!(!plain_row.contains('!'));
+    for (attention, expected) in [
+        (Attention::Act, shell_config.palette.red),
+        (Attention::Warn, shell_config.palette.peach),
+    ] {
+        let (frame, tab, row) = render(Some(attention), false);
+        assert_eq!(tab.width, plain.width + 2);
+        let tab_text = row.chars().skip(tab.x as usize).take(tab.width as usize).collect::<String>();
+        assert!(tab_text.ends_with("i ! "), "tab text: {tab_text:?}");
+        let (x, y) = cell_symbol_position(&frame, tab, "!");
+        assert_eq!(frame.cells[y as usize * frame.width as usize + x as usize].fg,
+            crate::protocol::color_to_u32(expected));
+        assert_eq!(frame.cells[y as usize * frame.width as usize + (x + 1) as usize].bg,
+            crate::protocol::color_to_u32(shell_config.palette.accent));
+    }
+
+    let mut clipped = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let mut long_tab = base.clone();
+    long_tab.tabs[0].label = "a tab label long enough to be clipped by the available strip".into();
+    clipped.set_snapshot(Box::new(long_tab));
+    let mut overlay = FactoryOverlay::default();
+    overlay.tabs.insert("tab_1".into(), TabTag { attention: Attention::Act, ..Default::default() });
+    clipped.factory_overlay = Some(Arc::new(overlay));
+    clipped.set_pane_surface(surface());
+    let frame = clipped.compose(80, 20).expect("clipped tab frame");
+    let tab = clipped.hits.tabs[0].0;
+    assert!(tab.width < 64, "tab must be clipped: {tab:?}");
+    let last = &frame.cells[tab.y as usize * frame.width as usize + (tab.right() - 1) as usize];
+    assert_eq!(last.symbol, " ");
+    assert_eq!(last.bg, crate::protocol::color_to_u32(shell_config.palette.accent));
+
+    let (_, blocked_without, _) = render(None, true);
+    let (_, blocked_with, blocked_row) = render(Some(Attention::Act), true);
+    assert_eq!(blocked_with.width, blocked_without.width);
+    let blocked_text = blocked_row.chars().skip(blocked_with.x as usize)
+        .take(blocked_with.width as usize).collect::<String>();
+    assert_eq!(blocked_text.matches('!').count(), 1, "tab text: {blocked_text:?}");
+}
+
 fn done_tab_glyphs(show_finished_dot: Option<bool>, state_icons: Option<&str>) -> Vec<String> {
     let mut config = Config::default();
     config.ui.show_tab_status = crate::config::ShowTabStatusConfig::All;
