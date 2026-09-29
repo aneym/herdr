@@ -526,32 +526,57 @@ fn factory_status_glyph_colors() {
         agent.agent_status = status;
         snapshot.agents.push(agent);
     }
-    overlay.tabs.get_mut("orch").unwrap().attention = Attention::Act;
+    let palette = ClientShellConfig::from_config(&Config::default()).palette;
+    let check_row = |snapshot: &ClientShellSnapshot, overlay: &FactoryOverlay, id: &str,
+                     dot: ratatui::style::Color, mark: Option<ratatui::style::Color>| {
+        let (rows, hits, buffer) = rendered_factory_rows(snapshot, overlay);
+        let y = hits.tree_headers.iter().find(|hit| hit.tab_id.as_deref() == Some(id)).unwrap().rect.y;
+        let x = rows[y as usize].chars().position(|ch| ch == '●' || ch == '○').unwrap() as u16;
+        assert_eq!(buffer[(x, y)].fg, dot, "{id}: {}", rows[y as usize]);
+        assert_eq!(mark.is_some(), rows[y as usize].ends_with('!'), "{id}: {}", rows[y as usize]);
+        if let Some(mark) = mark {
+            assert_eq!(buffer[(24, y)].fg, mark, "{id}: {}", rows[y as usize]);
+        }
+        rows[y as usize].clone()
+    };
+    assert!(check_row(&snapshot, &overlay, "lane-a", palette.working, None).contains("lane-a"),
+        "working pane must outrank done pane");
+    overlay.tabs.get_mut("lane-a").unwrap().attention = Attention::Act;
+    check_row(&snapshot, &overlay, "lane-a", palette.working, Some(palette.red));
+
     snapshot.tabs.iter_mut().find(|tab| tab.tab_id == "lane-b").unwrap().agent_status = AgentStatus::Blocked;
     overlay.tabs.get_mut("lane-b").unwrap().idle = false;
-    let (rows, _, buffer) = rendered_factory_rows(&snapshot, &overlay);
-    let palette = ClientShellConfig::from_config(&Config::default()).palette;
-    let glyph_color = |name: &str| {
-        let y = rows.iter().position(|row| row.contains(name)).unwrap() as u16;
-        let x = rows[y as usize].chars().position(|ch| ch == '●').unwrap() as u16;
-        buffer[(x, y)].fg
-    };
-    assert_eq!(glyph_color("lane-a"), palette.working, "working pane must outrank done pane");
-    assert_eq!(glyph_color("lane-b"), palette.red, "blocked lane");
-    assert_eq!(glyph_color("orch"), palette.red, "Attention::Act must show on the row");
+    check_row(&snapshot, &overlay, "lane-b", palette.red, None);
+    let mut done_pane = agent_template.clone();
+    done_pane.tab_id = "lane-b".into();
+    done_pane.agent_status = AgentStatus::Done;
+    snapshot.agents.push(done_pane);
+    check_row(&snapshot, &overlay, "lane-b", palette.green, None);
+    let (done_rows, _, done_buffer) = rendered_factory_rows(&snapshot, &overlay);
+    let done_y = done_rows.iter().position(|row| row.contains("lane-b")).unwrap() as u16;
+    let name_x = done_rows[done_y as usize].find("lane-b").unwrap() as u16;
+    assert_eq!(done_buffer[(name_x, done_y)].fg, palette.subtext0, "unread Done name stays full strength");
+    snapshot.agents.last_mut().unwrap().agent_status = AgentStatus::Idle;
+    check_row(&snapshot, &overlay, "lane-b", palette.overlay0, None);
 
-    overlay.tabs.get_mut("orch").unwrap().attention = Attention::None;
     overlay.tabs.get_mut("orch").unwrap().name = Some("orchestrator".into());
-    overlay.tabs.get_mut("orphan").unwrap().attention = Attention::Warn;
     let mut folded = ClientTreeChrome::default();
     folded.factory_collapsed_lanes.insert("orch".into());
+    let (plain_rows, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &folded);
+    let y = hits.tree_headers.iter().find(|hit| hit.tab_id.as_deref() == Some("orch")).unwrap().rect.y;
+    let plain = &plain_rows[y as usize];
     for (attention, expected) in [(Attention::Warn, palette.peach), (Attention::Act, palette.red)] {
-        overlay.tabs.get_mut("orphan").unwrap().attention = attention;
+        overlay.tabs.get_mut("orch").unwrap().attention = attention;
         let (rows, hits, buffer) = rendered_factory_rows_with_tree(&snapshot, &overlay, &folded);
         let hit = hits.tree_headers.iter().find(|hit| hit.tab_id.as_deref() == Some("orch")).unwrap();
         assert!(hit.collapsed, "{attention:?} child must stay folded");
         let y = hit.rect.y;
         let x = rows[y as usize].chars().position(|ch| ch == '●').unwrap() as u16;
-        assert_eq!(buffer[(x, y)].fg, expected, "folded {attention:?} child");
+        assert_eq!(buffer[(x, y)].fg, palette.working, "folded {attention:?} child");
+        assert_eq!(rows[y as usize].chars().last(), Some('!'));
+        assert_eq!(buffer[(24, y)].fg, expected);
+        let count_x = rows[y as usize].chars().collect::<Vec<_>>().iter().rposition(|ch| *ch == '1').unwrap();
+        assert_eq!(plain.chars().collect::<Vec<_>>().iter().rposition(|ch| *ch == '1'), Some(count_x + 2),
+            "count moves left by two");
     }
 }

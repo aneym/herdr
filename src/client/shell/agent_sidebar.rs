@@ -429,20 +429,17 @@ fn render_factory_tab(
     let icon = if row.workflow {
         if row.done { "✓" } else { "◐" }
     } else if row.idle { "○" } else { "●" };
-    let color = match row.attention {
-        crate::factory_overlay::Attention::Act => palette.red,
-        crate::factory_overlay::Attention::Warn => palette.peach,
-        crate::factory_overlay::Attention::None if row.idle || matches!(row.status, crate::api::schema::AgentStatus::Unknown | crate::api::schema::AgentStatus::Idle | crate::api::schema::AgentStatus::Done) => palette.overlay0,
-        crate::factory_overlay::Attention::None => status_color(row.status, palette),
+    let color = if row.idle { palette.overlay0 } else { status_color(row.status, palette) };
+    put_text(buffer, icon_x, rect.y, 1.min(rect.right().saturating_sub(icon_x)), icon,
+        Style::default().fg(color));
+    let attention_color = match row.attention {
+        crate::factory_overlay::Attention::Act => Some(palette.red),
+        crate::factory_overlay::Attention::Warn => Some(palette.peach),
+        crate::factory_overlay::Attention::None => None,
     };
-    let icon_style = if row.done && row.attention == crate::factory_overlay::Attention::None {
-        Style::default().fg(palette.overlay0).add_modifier(Modifier::DIM)
-    } else {
-        Style::default().fg(color)
-    };
-    put_text(buffer, icon_x, rect.y, 1.min(rect.right().saturating_sub(icon_x)), icon, icon_style);
+    let content_right = rect.right().saturating_sub(if attention_color.is_some() { 2 } else { 0 });
     let name_x = icon_x.saturating_add(2);
-    let available = rect.right().saturating_sub(name_x);
+    let available = content_right.saturating_sub(name_x);
     let metadata = if let Some(badge) = row.badge.as_deref() {
         badge.to_owned()
     } else {
@@ -477,15 +474,21 @@ fn render_factory_tab(
         put_text(buffer, name_x + display_width(&name) as u16, rect.y, marker_width, " ⟳", style);
     }
     if right_width > 0 {
-        let right_x = rect.right().saturating_sub(right_width);
+        let right_x = content_right.saturating_sub(right_width);
         if let Some(badge) = row.badge.as_deref() {
             let badge_width = display_width(badge) as u16;
-            put_text(buffer, rect.right().saturating_sub(badge_width), rect.y, badge_width,
-                badge, Style::default().fg(color));
+            let badge_color = attention_color.unwrap_or(color);
+            put_text(buffer, content_right.saturating_sub(badge_width), rect.y, badge_width,
+                badge, Style::default().fg(badge_color));
         } else {
             put_text(buffer, right_x, rect.y, right_width, right_label,
                 Style::default().fg(palette.overlay0).add_modifier(Modifier::DIM));
         }
+    }
+    if let Some(attention_color) = attention_color {
+        let mark_x = rect.right().saturating_sub(1);
+        put_text(buffer, mark_x, rect.y, 1.min(rect.right().saturating_sub(mark_x)), "!",
+            Style::default().fg(attention_color));
     }
     if rect.height > 1 && row.workflow && !row.done {
         let phase = row.phase.as_deref().unwrap_or("").trim().to_lowercase();
