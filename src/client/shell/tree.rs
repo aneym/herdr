@@ -791,7 +791,7 @@ fn append_factory_space(
     if !orchestrators.is_empty() {
         out.push(AgentPanelListEntry::FactorySection {
             label: "ORCHESTRATOR",
-            right: String::new(),
+            right: "⌘0".to_owned(),
             indent,
         });
         for orchestrator in &orchestrators {
@@ -833,7 +833,7 @@ fn append_factory_space(
     if !lanes.is_empty() || !root_workflows.is_empty() {
         out.push(AgentPanelListEntry::FactorySection {
             label: "LANES",
-            right: format!("{} open", lanes.len()),
+            right: "⌘1..9".to_owned(),
             indent,
         });
         for lane in &lanes {

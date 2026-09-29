@@ -313,15 +313,12 @@ fn render_panel_list_entry(
                 label,
                 style,
             );
-            let width = (display_width(right) as u16).min(rect.width);
-            put_text(
-                buffer,
-                rect.right().saturating_sub(width),
-                rect.y,
-                width,
-                right,
-                style,
-            );
+            let label_end = rect.x.saturating_add(1 + u16::from(*indent))
+                .saturating_add(display_width(label) as u16);
+            let width = display_width(right) as u16;
+            if width > 0 && rect.right().saturating_sub(width) > label_end {
+                put_text(buffer, rect.right() - width, rect.y, width, right, style);
+            }
         }
         AgentPanelListEntry::FactoryTab(row) => render_factory_tab(buffer, rect, row, config, hits),
         AgentPanelListEntry::FactoryHost {
@@ -450,7 +447,11 @@ fn render_factory_tab(
         && row.badge.is_none() && available > 0 && display_width(&header.label) + display_width(&metadata) + 1 > available as usize {
         metadata.split(" · ").next().unwrap_or("").to_owned()
     } else { metadata };
-    let right_label = metadata.as_str();
+    // A workflow name gets first claim on the row; its host can move below.
+    let badge_below = row.workflow && row.badge.as_deref().is_some_and(|badge| {
+        display_width(&header.label) + 1 + display_width(badge) > available as usize
+    });
+    let right_label = if badge_below { "" } else { metadata.as_str() };
     let right_width = (display_width(right_label) as u16).min(available.saturating_sub(1));
     let label_room = available.saturating_sub(right_width + u16::from(right_width > 0));
     let marker_width = if row.devloop && label_room >= 2 { 2 } else { 0 };
@@ -485,13 +486,26 @@ fn render_factory_tab(
                 .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
             workflow_age(now.saturating_sub(started.max(0) as u64))
         });
-        let progress = match age {
-            Some(age) if !phase.is_empty() => format!("{phase} · {age}"),
-            Some(age) => age,
-            None => phase,
-        };
         let x = name_x.saturating_add(1);
-        put_text(buffer, x, rect.y + 1, rect.right().saturating_sub(x), &progress,
+        let room = rect.right().saturating_sub(x) as usize;
+        let mut progress = workflow_progress(&phase, age.as_deref(), room);
+        if let Some(badge) = row.badge.as_deref().filter(|_| badge_below) {
+            let reserved = display_width(badge) + usize::from(!progress.is_empty());
+            if let Some(remaining) = room.checked_sub(reserved) {
+                let shorter = workflow_progress(&phase, age.as_deref(), remaining);
+                // A moved badge must not trade away an age the unbadged row can show.
+                let age_preserved = age.as_deref().is_none_or(|age| {
+                    let suffix = if phase.is_empty() { age.to_owned() } else { format!(" · {age}") };
+                    !progress.ends_with(&suffix) || shorter.ends_with(&suffix)
+                });
+                if age_preserved {
+                    progress = shorter;
+                    if !progress.is_empty() { progress.push(' '); }
+                    progress.push_str(badge);
+                }
+            }
+        }
+        put_text(buffer, x, rect.y + 1, room as u16, &progress,
             Style::default().fg(palette.overlay0).add_modifier(Modifier::DIM));
     }
     hits.tree_headers.push(TreeHeaderHit {
@@ -505,6 +519,37 @@ fn render_factory_tab(
         key: header.key.clone(),
         pinned: false,
     });
+}
+
+fn workflow_progress(phase: &str, age: Option<&str>, room: usize) -> String {
+    let fraction = phase.rsplit_once(' ').filter(|(word, count)| {
+        !word.is_empty() && count.split_once('/').is_some_and(|(numerator, denominator)| {
+            !numerator.is_empty() && !denominator.is_empty()
+                && numerator.bytes().all(|byte| byte.is_ascii_digit())
+                && denominator.bytes().all(|byte| byte.is_ascii_digit())
+        })
+    });
+    let fit_phase = |width: usize| -> Option<String> {
+        if let Some((word, count)) = fraction {
+            let suffix_width = 1 + display_width(count);
+            if display_width(phase) <= width { return Some(phase.to_owned()); }
+            // Keep a cell of breathing room when the phase word is abbreviated.
+            let word_width = width.checked_sub(suffix_width + 1)?;
+            if word_width < 2 { return None; }
+            return Some(format!("{} {count}", crate::ui::truncate_end(word, word_width)));
+        }
+        (width > 0).then(|| crate::ui::truncate_end(phase, width))
+    };
+    if let Some(age) = age {
+        let segment = if phase.is_empty() { age.to_owned() } else { format!(" · {age}") };
+        if let Some(width) = room.checked_sub(display_width(&segment)) {
+            if phase.is_empty() { return segment; }
+            if let Some(phase) = fit_phase(width) {
+                return format!("{phase}{segment}");
+            }
+        }
+    }
+    fit_phase(room).unwrap_or_else(|| crate::ui::truncate_end(phase, room))
 }
 
 fn workflow_age(seconds: u64) -> String {

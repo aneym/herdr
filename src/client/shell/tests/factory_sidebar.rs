@@ -513,7 +513,11 @@ fn rendered_factory_rows(snapshot: &ClientShellSnapshot, overlay: &FactoryOverla
 }
 
 fn rendered_factory_rows_with_tree(snapshot: &ClientShellSnapshot, overlay: &FactoryOverlay, tree: &ClientTreeChrome) -> (Vec<String>, ShellHitMap, Buffer) {
-    let area = Rect::new(0, 0, 25, 60);
+    rendered_factory_rows_at_width(snapshot, overlay, tree, 25)
+}
+
+fn rendered_factory_rows_at_width(snapshot: &ClientShellSnapshot, overlay: &FactoryOverlay, tree: &ClientTreeChrome, width: u16) -> (Vec<String>, ShellHitMap, Buffer) {
+    let area = Rect::new(0, 0, width, 60);
     let mut buffer = Buffer::empty(area);
     let mut config = ClientShellConfig::from_config(&Config::default());
     config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
@@ -529,6 +533,92 @@ fn rendered_factory_rows_with_tree(snapshot: &ClientShellSnapshot, overlay: &Fac
         .map(|y| (0..area.width).map(|x| buffer[(x, y)].symbol().to_owned()).collect())
         .collect();
     (rows, hits, buffer)
+}
+
+#[test]
+fn workflow_names_win_over_host_badges_at_narrow_widths() {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "orch" | "lane-a" | "wf-a" | "wf-b"));
+    snapshot.agents.clear();
+    let mut tree = ClientTreeChrome::default();
+    tree.factory_expanded_lanes.insert("lane-a".into());
+    for (id, name) in [("wf-a", "factory-infra"), ("wf-b", "pc-lane-host")] {
+        let tag = overlay.tabs.get_mut(id).unwrap();
+        tag.name = Some(name.into());
+        tag.badge = Some("Studio".into());
+        tag.phase = Some("build".into());
+    }
+    for width in [25, 32] {
+        let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, width);
+        for name in ["factory-infra", "pc-lane-host"] {
+            let y = rows.iter().position(|row| row.contains(name)).unwrap_or_else(|| panic!("{rows:?}"));
+            assert!(rows[y].contains(&format!("◐ {name}")) && !rows[y].contains('…'), "{rows:?}");
+            if width == 25 {
+                assert!(!rows[y].contains("Studio"), "{rows:?}");
+                assert!(rows[y + 1].contains("Studio"), "{rows:?}");
+            } else {
+                assert!(rows[y].contains("Studio"), "{rows:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn workflow_progress_shortens_phase_before_dropping_age_unit() {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "lane-a" | "wf-a" | "wf-b"));
+    snapshot.agents.clear();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    for (id, age) in [("wf-a", 60), ("wf-b", 13 * 60)] {
+        let tag = overlay.tabs.get_mut(id).unwrap();
+        tag.badge = None;
+        tag.phase = Some("implement 0/1".into());
+        tag.started = Some((now - age) as i64);
+    }
+    let mut tree = ClientTreeChrome::default();
+    tree.factory_expanded_lanes.insert("lane-a".into());
+    let (rows, _, _) = rendered_factory_rows(&snapshot, &overlay);
+    assert!(!rows.iter().any(|row| row.contains("implement")), "collapsed lane: {rows:?}");
+    let (rows, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+    for (name, progress) in [("wf-a", "implem… 0/1 · 1m"), ("wf-b", "imple… 0/1 · 13m")] {
+        let y = rows.iter().position(|row| row.contains(&format!("◐ {name}"))).unwrap();
+        assert_eq!(rows[y + 1].trim(), progress, "{rows:?}");
+    }
+    let (wide, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 32);
+    for (name, progress) in [("wf-a", "implement 0/1 · 1m"), ("wf-b", "implement 0/1 · 13m")] {
+        let y = wide.iter().position(|row| row.contains(&format!("◐ {name}"))).unwrap();
+        assert_eq!(wide[y + 1].trim(), progress, "{wide:?}");
+    }
+    let (narrow, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 17);
+    let y = narrow.iter().position(|row| row.contains("◐ wf-a")).unwrap();
+    assert_eq!(narrow[y + 1].trim(), "imp… 0/1", "{narrow:?}");
+    overlay.tabs.get_mut("wf-a").unwrap().phase = Some("an extraordinarily long phase name 0/1".into());
+    let (rows, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+    let y = rows.iter().position(|row| row.contains("◐ wf-a")).unwrap();
+    assert!(rows[y + 1].trim_end().ends_with(" · 1m"), "{rows:?}");
+    // A moved badge competes with phase text, not with the age's unit.
+    overlay.tabs.get_mut("wf-a").unwrap().name = Some("factory-infra".into());
+    overlay.tabs.get_mut("wf-a").unwrap().badge = Some("Studio".into());
+    let (rows, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+    let y = rows.iter().position(|row| row.contains("factory-infra")).unwrap();
+    assert!(rows[y + 1].trim_end().ends_with(" · 1m") && !rows[y + 1].contains("Studio"), "{rows:?}");
+}
+
+#[test]
+fn factory_section_hints_align_right_and_drop_whole_when_cramped() {
+    let (snapshot, overlay) = fixture();
+    for width in [25, 32] {
+        let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), width);
+        for (label, hint) in [("ORCHESTRATOR", "⌘0"), ("LANES", "⌘1..9")] {
+            let row = rows.iter().find(|row| row.contains(label)).unwrap();
+            assert!(row.trim_end().ends_with(hint), "{row:?}");
+            assert_eq!(row.chars().count(), width as usize);
+        }
+        assert!(!rows.iter().any(|row| row.contains(" open")), "{rows:?}");
+    }
+    let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 15);
+    let orchestrator = rows.iter().find(|row| row.contains("ORCHESTRATOR")).unwrap();
+    assert!(!orchestrator.contains('⌘'), "{orchestrator:?}");
 }
 
 #[test]
