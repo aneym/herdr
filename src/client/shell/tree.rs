@@ -1804,88 +1804,77 @@ impl ClientShellState {
 }
 
 impl ClientShellState {
-    /// Tab ids that want the user, in sidebar order: tagged tabs with attention
-    /// `warn` or `act`, plus the target tab of a space that carries attention.
-    /// Background (advisor and done) tabs and tabs inside a folded space are
-    /// skipped. Empty when the overlay is off.
-    pub(super) fn factory_attention_tabs(
-        &self,
-        snapshot: &ClientShellSnapshot,
-    ) -> Vec<(String, crate::factory_overlay::Attention)> {
-        use crate::factory_overlay::{Attention, TabKind};
-        let Some(overlay) = self.factory_overlay() else {
-            return Vec::new();
+    /// Open any factory fold enclosing a selected tab; normal pane focus
+    /// reveals ordinary space and agent-group folds on confirmation.
+    pub(super) fn reveal_attention_tab(&mut self, tab_id: &str) {
+        let Some(snapshot) = self.snapshot.as_deref() else {
+            return;
         };
-        let tree = self
-            .tree_chrome
-            .get(&self.active_endpoint_id)
-            .unwrap_or(&self.tree_chrome_default);
-        let mut found = Vec::<(String, Attention)>::new();
-        for workspace in &snapshot.workspaces {
-            let id = &workspace.workspace_id;
-            if tree_view_active(&self.config)
-                && tree.show_spaces
-                && tree.collapsed_spaces.contains(id)
-            {
-                continue;
-            }
-            let space_target = overlay
-                .space(id)
-                .filter(|tag| tag.attention != Attention::None)
-                .and_then(|tag| tag.target_tab.as_deref().map(|tab| (tab, tag.attention)));
-            for tab in snapshot.tabs.iter().filter(|tab| &tab.workspace_id == id) {
-                let tag = overlay.tab(&tab.tab_id);
-                if tag.is_some_and(|tag| tag.done || tag.kind == TabKind::Advisor) {
-                    continue;
-                }
-                let own = tag.map_or(Attention::None, |tag| tag.attention);
-                let from_space = space_target
-                    .filter(|(target, _)| *target == tab.tab_id)
-                    .map_or(Attention::None, |(_, attention)| attention);
-                let attention = if own.rank() >= from_space.rank() {
-                    own
-                } else {
-                    from_space
-                };
-                if attention != Attention::None {
-                    found.push((tab.tab_id.clone(), attention));
-                }
-            }
+        let Some(tab) = snapshot.tabs.iter().find(|tab| tab.tab_id == tab_id) else {
+            return;
+        };
+        let workspace_id = tab.workspace_id.clone();
+        let parent = self.factory_overlay()
+            .and_then(|overlay| overlay.tab(tab_id))
+            .and_then(|tag| tag.parent.clone());
+        let tree = self.tree_chrome_mut();
+        tree.collapsed_spaces.remove(&workspace_id);
+        if let Some(parent) = parent {
+            tree.factory_collapsed_lanes.remove(&parent);
+            tree.factory_expanded_lanes.insert(parent);
         }
-        found
     }
 
-    /// ⌘E while the overlay is on and something wants the user: the next such tab,
-    /// most urgent first, walking from the focused tab outward. `None` means the
-    /// stock rotation applies.
-    pub(super) fn factory_attention_cycle_target(
+    /// Next pane that needs attention on this endpoint. Keep non-candidates in
+    /// the order so a focused working pane is still the rotation's anchor.
+    pub(super) fn next_attention_target(
         &self,
         snapshot: &ClientShellSnapshot,
-        forward: bool,
-    ) -> Option<String> {
-        let wanted = self.factory_attention_tabs(snapshot);
-        if wanted.is_empty() {
+    ) -> Option<(Option<String>, String)> {
+        use crate::api::schema::AgentStatus;
+        use crate::factory_overlay::{Attention, TabKind};
+
+        let overlay = self.factory_overlay();
+        let mut entries = Vec::<(Option<String>, String, u8)>::new();
+        for workspace in &snapshot.workspaces {
+            for tab in snapshot.tabs.iter().filter(|tab| tab.workspace_id == workspace.workspace_id) {
+                let tag = overlay.and_then(|overlay| overlay.tab(&tab.tab_id));
+                let background = tag.is_some_and(|tag| tag.done || tag.kind == TabKind::Advisor);
+                let ask = !background && tag.is_some_and(|tag| tag.attention == Attention::Act);
+                let busy = tag.is_some_and(|tag| tag.busy);
+                let mut has_agent = false;
+                for pane in snapshot.panes.iter().filter(|pane| pane.tab_id == tab.tab_id) {
+                    let agent = snapshot.agents.iter().find(|agent| agent.pane_id == pane.pane_id);
+                    let rank = match agent.map(|agent| agent.agent_status) {
+                        Some(AgentStatus::Blocked) => 3,
+                        Some(AgentStatus::Done) if !busy => 2,
+                        _ => 0,
+                    };
+                    let first_agent = agent.is_some() && !has_agent;
+                    has_agent |= agent.is_some();
+                    entries.push((
+                        Some(pane.pane_id.clone()),
+                        tab.tab_id.clone(),
+                        if background { 0 } else { rank.max(u8::from(ask && first_agent)) },
+                    ));
+                }
+                if !has_agent && ask {
+                    entries.push((None, tab.tab_id.clone(), 1));
+                }
+            }
+        }
+        let focused = snapshot.focused_pane_id.as_deref();
+        let current = entries.iter().position(|(pane_id, tab_id, _)| {
+            pane_id.as_deref() == focused && (pane_id.is_some() || snapshot.focused_tab_id.as_deref() == Some(tab_id))
+        });
+        let order = rotation(entries.len(), current, true);
+        let best = order.iter().map(|index| entries[*index].2).max().unwrap_or(0);
+        if best == 0 {
             return None;
         }
-        let current = snapshot.focused_tab_id.as_deref().and_then(|focused| {
-            wanted
-                .iter()
-                .position(|(tab_id, _)| tab_id == focused)
-        });
-        let order = rotation(wanted.len(), current, forward);
-        if order.is_empty() {
-            // The focused tab is the only one asking; stay put.
-            return current.map(|index| wanted[index].0.clone());
-        }
-        let best = order
-            .iter()
-            .map(|index| wanted[*index].1.rank())
-            .max()
-            .unwrap_or(0);
-        order
-            .into_iter()
-            .find(|index| wanted[*index].1.rank() == best)
-            .map(|index| wanted[index].0.clone())
+        let index = order.into_iter().find(|index| entries[*index].2 == best)?;
+        let (pane_id, tab_id, _) = &entries[index];
+        Some((pane_id.clone(), tab_id.clone()))
     }
 }
 

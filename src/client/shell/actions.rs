@@ -1223,12 +1223,17 @@ impl ClientShellState {
                     pane_id: agents.get(index)?.clone(),
                 }))
             }
+            KeybindAction::NextAttention => {
+                let (pane_id, tab_id) = self.next_attention_target(snapshot)?;
+                self.reveal_attention_tab(&tab_id);
+                if let Some(pane_id) = pane_id {
+                    Some(Method::PaneFocus(PaneTarget { pane_id }))
+                } else {
+                    Some(Method::TabFocus(TabTarget { tab_id }))
+                }
+            }
             KeybindAction::PreviousAgent | KeybindAction::NextAgent => {
                 let forward = action == KeybindAction::NextAgent;
-                // With the factory overlay on, ⌘E visits only rows that want the user.
-                if let Some(tab_id) = self.factory_attention_cycle_target(snapshot, forward) {
-                    return Some(Method::TabFocus(TabTarget { tab_id }));
-                }
                 let candidates = self.agent_cycle_candidates(snapshot);
                 let next = self.agent_cycle_target(snapshot, &candidates, forward)?;
                 let pane_id = candidates[next].pane_id.clone();
