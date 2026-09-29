@@ -906,13 +906,26 @@ fn append_factory_space(
                 let grouped = lanes.iter().copied()
                     .filter(|lane| grouped_root(&lane.tab_id).as_deref() == Some(orchestrator.tab_id.as_str()))
                     .collect::<Vec<_>>();
-                let attention = grouped.iter().filter_map(|lane| overlay.tab(&lane.tab_id))
-                    .map(|tag| tag.attention).chain(attention).max_by_key(|value| value.rank());
-                let focused = focused || grouped.iter().any(|lane| {
-                    snapshot.focused_workspace_id.as_deref() == Some(workspace_id)
-                        && snapshot.focused_tab_id.as_deref() == Some(lane.tab_id.as_str())
-                });
-                let running = children.len() + grouped.len() + runs.len();
+                let grouped_ids = grouped.iter().map(|lane| lane.tab_id.as_str()).collect::<HashSet<_>>();
+                let grouped_workflows = workflows.iter().copied()
+                    .filter(|workflow| parent_for(workflow).is_some_and(|id| grouped_ids.contains(id)))
+                    .collect::<Vec<_>>();
+                let grouped_runs = grouped.iter().map(|lane| {
+                    overlay.tab(&lane.tab_id).map_or(0, |tag| tag.runs.len())
+                }).sum::<usize>();
+                let attention = all_workflows.iter()
+                    .filter(|workflow| parent_for(workflow).is_some_and(|id| grouped_ids.contains(id)))
+                    .filter_map(|workflow| overlay.tab(&workflow.tab_id))
+                    .map(|tag| tag.attention)
+                    .chain(grouped.iter().filter_map(|lane| overlay.tab(&lane.tab_id))
+                        .map(|tag| tag.attention))
+                    .chain(attention).max_by_key(|value| value.rank());
+                let focused = focused || snapshot.focused_workspace_id.as_deref() == Some(workspace_id)
+                    && grouped.iter().chain(grouped_workflows.iter()).any(|tab| {
+                        snapshot.focused_tab_id.as_deref() == Some(tab.tab_id.as_str())
+                    });
+                let running = children.len() + grouped.len() + runs.len()
+                    + grouped_workflows.len() + grouped_runs;
                 let expanded = tree.factory_expanded(&orchestrator.tab_id, focused,
                     attention == Some(crate::factory_overlay::Attention::Act));
                 let mut row = factory_row(snapshot, rows, overlay, orchestrator, indent,
@@ -929,6 +942,16 @@ fn append_factory_space(
                     for lane in grouped {
                         out.push(factory_row(snapshot, rows, overlay, lane,
                             indent.saturating_add(1), false, false));
+                        for workflow in workflows.iter().copied()
+                            .filter(|workflow| parent_for(workflow) == Some(lane.tab_id.as_str())) {
+                            out.push(factory_row(snapshot, rows, overlay, workflow,
+                                indent.saturating_add(2), false, false));
+                        }
+                        if let Some(tag) = overlay.tab(&lane.tab_id) {
+                            for run in &tag.runs {
+                                out.push(factory_run_row(lane, run, indent.saturating_add(2)));
+                            }
+                        }
                     }
                     for child in children {
                         out.push(factory_row(snapshot, rows, overlay, child,
@@ -1119,10 +1142,12 @@ fn append_factory_space(
                     let start = out.len();
                     push_lane(out, lane, indent, false);
                     if section == TabSection::Scoping {
-                        if let AgentPanelListEntry::FactoryTab(row) = &mut out[start] {
-                            if row.header.label.get(..9).is_some_and(|prefix| prefix.eq_ignore_ascii_case("[scoping]"))
-                                && row.header.label.as_bytes().get(9) == Some(&b' ') {
-                                row.header.label = row.header.label[10..].to_owned();
+                        for entry in &mut out[start..] {
+                            if let AgentPanelListEntry::FactoryTab(row) = entry {
+                                if row.header.label.get(..9).is_some_and(|prefix| prefix.eq_ignore_ascii_case("[scoping]"))
+                                    && row.header.label.as_bytes().get(9) == Some(&b' ') {
+                                    row.header.label = row.header.label[10..].to_owned();
+                                }
                             }
                         }
                     }

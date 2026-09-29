@@ -816,6 +816,52 @@ fn grouped_workflow_focus_or_act_auto_opens_parent_but_explicit_fold_hides_child
 }
 
 #[test]
+fn orchestrator_grouped_lane_draws_workflow_and_run_and_rolls_up_state() {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "orch" | "lane-a" | "wf-a" | "wf-b"));
+    let template = snapshot.agents[0].clone();
+    snapshot.agents.clear();
+    for (id, parent) in [("orch", None), ("lane-a", Some("orch-pane"))] {
+        let mut agent = template.clone();
+        agent.tab_id = id.into();
+        agent.pane_id = format!("{id}-pane");
+        agent.group.parent_pane_id = parent.map(str::to_string);
+        snapshot.agents.push(agent);
+    }
+    overlay.tabs.get_mut("wf-b").unwrap().done = true;
+    overlay.tabs.get_mut("lane-a").unwrap().runs = vec![RunTag {
+        id: "fold".into(), name: Some("fold run".into()), phase: None, agents: 1,
+    }];
+    let mut tree = ClientTreeChrome::default();
+    tree.factory_expanded_lanes.insert("orch".into());
+    let (rows, hits, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 42);
+    let hit = |id: &str| hits.tree_headers.iter().find(|hit| hit.key == id).unwrap();
+    let orch = hit("orch");
+    let lane = hit("lane-a");
+    let workflow = hit("wf-a");
+    let run = hit("lane-a#run:fold");
+    assert!(orch.rect.y < lane.rect.y && lane.rect.y < workflow.rect.y
+        && workflow.rect.y < run.rect.y, "{rows:?}");
+    assert_eq!(rows[workflow.rect.y as usize].find("wf-a"),
+        rows[run.rect.y as usize].find("fold run"), "{rows:?}");
+    assert!(rows[workflow.rect.y as usize].find("wf-a") > rows[lane.rect.y as usize].find("lane-a"), "{rows:?}");
+    assert!(rows[orch.rect.y as usize].contains("3"), "{rows:?}");
+    tree.factory_collapsed_lanes.insert("orch".into());
+    let (folded, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+    assert!(hits.tree_headers.iter().find(|hit| hit.key == "orch").unwrap().collapsed);
+    assert!(!folded.iter().any(|row| row.contains("lane-a") || row.contains("wf-a") || row.contains("fold run")));
+    tree.factory_collapsed_lanes.clear();
+    tree.factory_expanded_lanes.clear();
+    snapshot.focused_tab_id = Some("wf-a".into());
+    let (focused, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+    assert!(focused.iter().any(|row| row.contains("wf-a")));
+    snapshot.focused_tab_id = None;
+    overlay.tabs.get_mut("wf-a").unwrap().attention = Attention::Act;
+    let (alert, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+    assert!(alert.iter().any(|row| row.contains("wf-a")));
+}
+
+#[test]
 fn factory_grouping_ignores_cycles_and_cross_space_parents() {
     let (mut snapshot, mut overlay) = fixture();
     snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "lane-a" | "lane-b" | "plain-a"));
@@ -1024,6 +1070,49 @@ fn factory_sections_render_and_idle_click_persists() {
         assert!(idle.collapsed);
         assert!(rows[idle.rect.y as usize].ends_with('!'), "blocked={blocked}: {rows:?}");
         assert!(!rows.iter().any(|row| row.contains("idle-child")));
+    }
+
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "lane-a" | "lane-b"));
+    let mut second = snapshot.tabs[1].clone();
+    second.tab_id = "lane-c".into();
+    snapshot.tabs.push(second);
+    let mut inflight = snapshot.tabs[1].clone();
+    inflight.tab_id = "lane-inflight".into();
+    snapshot.tabs.push(inflight);
+    let template = snapshot.agents[0].clone();
+    snapshot.agents.clear();
+    for (id, parent) in [("lane-a", None), ("lane-b", Some("lane-a-pane")),
+                         ("lane-c", Some("lane-a-pane")), ("lane-inflight", None)] {
+        let mut agent = template.clone();
+        agent.tab_id = id.into();
+        agent.pane_id = format!("{id}-pane");
+        agent.group.parent_pane_id = parent.map(str::to_string);
+        snapshot.agents.push(agent);
+    }
+    for (id, section, name) in [
+        ("lane-a", TabSection::Scoping, "[Scoping] parent"),
+        ("lane-b", TabSection::Scoping, "[scoping] first child"),
+        ("lane-c", TabSection::Scoping, "[SCOPING] second child"),
+        ("lane-inflight", TabSection::Inflight, "[scoping] in flight"),
+    ] {
+        let tag = overlay.tabs.entry(id.into()).or_insert_with(TabTag::default);
+        tag.kind = TabKind::Lane;
+        tag.section = Some(section);
+        tag.name = Some(name.into());
+    }
+    let mut tree = ClientTreeChrome::default();
+    tree.factory_expanded_lanes.insert("lane-a".into());
+    let (rows, hits, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 40);
+    for (id, expected) in [("lane-a", "parent"), ("lane-b", "first child"),
+                            ("lane-c", "second child"), ("lane-inflight", "[scoping] in flight")] {
+        let y = hits.tree_headers.iter().find(|hit| hit.key == id).unwrap().rect.y;
+        assert!(rows[y as usize].contains(expected), "{id}: {rows:?}");
+        if id != "lane-inflight" {
+            assert!(!rows[y as usize].contains("[scoping]")
+                && !rows[y as usize].contains("[Scoping]")
+                && !rows[y as usize].contains("[SCOPING]"), "{id}: {rows:?}");
+        }
     }
 }
 
