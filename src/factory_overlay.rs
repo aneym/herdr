@@ -37,6 +37,8 @@ pub struct FactoryOverlay {
     pub tabs: BTreeMap<String, TabTag>,
     /// Host rows in the factory sidebar footer.
     pub hosts: Vec<HostRow>,
+    /// Provider usage rows in the factory sidebar footer.
+    pub usage: Vec<HostRow>,
     /// Keyed by herdr workspace id, e.g. "w5H".
     pub spaces: BTreeMap<String, SpaceTag>,
     /// Keyed by panel key: "overview" or "tab:<tab id>".
@@ -170,6 +172,7 @@ pub struct HostRow {
     pub name: String,
     pub summary: Option<String>,
     pub attention: Attention,
+    pub url: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -293,6 +296,7 @@ mod tests {
         let overlay = parse(br#"{"version":1}"#).unwrap();
         assert!(overlay.tabs.is_empty());
         assert!(overlay.hosts.is_empty());
+        assert!(overlay.usage.is_empty());
         assert!(overlay.panels.is_empty());
         let legacy = parse(br#"{"version":1,"tabs":{"lane":{"kind":"lane"}}}"#).unwrap();
         assert!(!legacy.tabs["lane"].devloop);
@@ -352,11 +356,14 @@ mod tests {
 
     #[test]
     fn hosts_and_devloop_round_trip() {
-        let json = br#"{"version":1,"tabs":{"lane":{"kind":"lane","devloop":true}},"hosts":[{"name":"PC","summary":"3/28 live","attention":"warn"}]}"#;
+        let json = br#"{"version":1,"tabs":{"lane":{"kind":"lane","devloop":true}},"hosts":[{"name":"PC","summary":"3/28 live","attention":"warn"}],"usage":[{"name":"claude","summary":"3/8 - 26%","url":"https://studio.tailf266ac.ts.net:2455/"}]}"#;
         let parsed = parse(json).unwrap();
         assert!(parsed.tabs["lane"].devloop);
         assert_eq!(parsed.hosts[0].summary.as_deref(), Some("3/28 live"));
         assert_eq!(parsed.hosts[0].attention, Attention::Warn);
+        assert_eq!(parsed.hosts[0].url, None);
+        assert_eq!(parsed.usage[0].summary.as_deref(), Some("3/8 - 26%"));
+        assert_eq!(parsed.usage[0].url.as_deref(), Some("https://studio.tailf266ac.ts.net:2455/"));
         let encoded = serde_json::to_vec(&parsed).unwrap();
         assert_eq!(parse(&encoded).unwrap(), parsed);
     }

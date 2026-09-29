@@ -115,6 +115,7 @@ pub(super) struct ShellHitMap {
     pub(super) agent_max_scroll: usize,
     pub(super) agent_sort_toggle: Rect,
     pub(super) agent_usage: Rect,
+    pub(super) factory_usage_urls: Vec<(Rect, String)>,
     /// Disclosure regions for collapsible ownership / orchestrator groups.
     pub(super) agent_groups: Vec<AgentGroupHit>,
     pub(super) tree_headers: Vec<TreeHeaderHit>,

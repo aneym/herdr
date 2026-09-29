@@ -276,7 +276,7 @@ fn lab_fixture() -> (ClientShellSnapshot, FactoryOverlay) {
         focused: false, agent_status: AgentStatus::Working,
     });
     overlay.tabs.insert("poker".into(), TabTag { kind: TabKind::Lane, ..TabTag::default() });
-    overlay.hosts.push(HostRow { name: "Studio".into(), summary: Some("3/28 live".into()), attention: Attention::None });
+    overlay.hosts.push(HostRow { name: "Studio".into(), summary: Some("3/28 live".into()), attention: Attention::None, ..HostRow::default() });
     overlay.spaces.insert("ws_1".into(), SpaceTag {
         attention: Attention::Act, target_tab: Some("wf-a".into()), summary: Some("3".into()),
     });
@@ -291,6 +291,50 @@ fn lab_fixture() -> (ClientShellSnapshot, FactoryOverlay) {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     overlay.tabs.get_mut("wf-a").unwrap().started = Some((now - (8 * 60 + 57) * 60 - 30) as i64);
     (snapshot, overlay)
+}
+
+#[test]
+fn factory_usage_footer_renders_and_opens_only_usage_urls() {
+    let (snapshot, mut overlay) = lab_fixture();
+    let url = "https://studio.tailf266ac.ts.net:2455/";
+    overlay.usage = vec![
+        HostRow { name: "claude".into(), summary: Some("3/8 · 26%".into()),
+            url: Some(url.into()), ..HostRow::default() },
+        HostRow { name: "codex".into(), summary: Some("4/5 · 33%".into()),
+            attention: Attention::Warn, url: Some(format!("{url}codex")) },
+        HostRow { name: "offline".into(), ..HostRow::default() },
+    ];
+    // Even a host carrying a URL must retain its non-clickable behaviour.
+    overlay.hosts[0].url = Some(format!("{url}hosts"));
+    let (rows, hits, buffer) = rendered_factory_rows(&snapshot, &overlay);
+    let usage = rows.iter().position(|row| row.contains("USAGE")).unwrap();
+    let hosts = rows.iter().position(|row| row.contains("HOSTS")).unwrap();
+    assert_eq!(hosts, usage + 4);
+    assert!(rows[usage + 1].contains("claude"));
+    assert!(rows[usage + 1].contains("3/8 · 26%"));
+    assert!(rows[usage + 2].contains("codex"));
+    assert!(rows[usage + 2].contains("4/5 · 33%"));
+    assert!(rows[hosts + 1].contains("Studio"));
+    assert!(rows[hosts + 1].contains("3/28 live"));
+    let mut state = factory_state(snapshot, overlay);
+    assert_eq!(buffer[(24, (usage + 2) as u16)].fg, state.config.palette.peach);
+    state.hits = hits;
+    state.last_composed_size = Some((120, 60));
+    for (row, expected) in [
+        (usage, Some(url.to_owned())),
+        (usage + 1, Some(url.to_owned())),
+        (usage + 2, Some(format!("{url}codex"))),
+        (usage + 3, None),
+        (hosts + 1, None),
+    ] {
+        let input = factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), 2, row as u16);
+        let urls = input.actions.iter().filter_map(|action| match action {
+            ClientShellAction::OpenSafeWebUrl(url) => Some(url.as_str()),
+            _ => None,
+        }).collect::<Vec<_>>();
+        assert_eq!(urls, expected.as_deref().into_iter().collect::<Vec<_>>(), "row {row}");
+        factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), 2, row as u16);
+    }
 }
 
 fn assert_golden(actual: Vec<String>, expected: &str) {

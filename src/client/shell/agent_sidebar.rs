@@ -148,13 +148,17 @@ pub(super) fn render_agent_panel_with_overlay(
                 .collect()
         };
     super::tree::append_automations(&mut entries, tree, automations);
-    // Hosts are a fixed footer, not part of the scrolling spaces list.
-    let hosts = overlay.filter(|overlay| snapshot.workspaces.iter().any(|space| {
+    // Usage and hosts are a fixed footer, not part of the scrolling spaces list.
+    let footer_overlay = overlay.filter(|overlay| snapshot.workspaces.iter().any(|space| {
         overlay.space_is_tagged(snapshot.tabs.iter()
             .filter(|tab| tab.workspace_id == space.workspace_id)
             .map(|tab| tab.tab_id.as_str()))
-    })).map(|overlay| overlay.hosts.as_slice()).unwrap_or(&[]);
-    let footer_height = if hosts.is_empty() { 0 } else { (hosts.len() + 1).min(area.height.saturating_sub(3) as usize) as u16 };
+    }));
+    let hosts = footer_overlay.map(|overlay| overlay.hosts.as_slice()).unwrap_or(&[]);
+    let usage = footer_overlay.map(|overlay| overlay.usage.as_slice()).unwrap_or(&[]);
+    let footer_rows = hosts.len() + usize::from(!hosts.is_empty())
+        + usage.len() + usize::from(!usage.is_empty());
+    let footer_height = footer_rows.min(area.height.saturating_sub(3) as usize) as u16;
     let list_area = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(footer_height));
     render_agent_list_with_gaps(
         buffer,
@@ -191,18 +195,35 @@ pub(super) fn render_agent_panel_with_overlay(
             _ => (false, false),
         },
     );
-    if footer_height > 0 {
-        let y = area.bottom() - footer_height;
-        render_panel_list_entry(buffer, Rect::new(area.x, y, area.width, 1),
+    let mut y = area.bottom() - footer_height;
+    for (label, rows) in [("USAGE", usage), ("HOSTS", hosts)] {
+        if rows.is_empty() || y >= area.bottom() {
+            continue;
+        }
+        let rect = Rect::new(area.x, y, area.width, 1);
+        render_panel_list_entry(buffer, rect,
             &super::tree::AgentPanelListEntry::FactorySection {
-                label: "HOSTS", right: String::new(), indent: 0,
+                label, right: String::new(), indent: 0,
             }, config, hits);
-        for (index, host) in hosts.iter().take(footer_height.saturating_sub(1) as usize).enumerate() {
-            render_panel_list_entry(buffer, Rect::new(area.x, y + 1 + index as u16, area.width, 1),
+        if label == "USAGE" {
+            if let Some(url) = &rows[0].url {
+                hits.factory_usage_urls.push((rect, url.clone()));
+            }
+        }
+        y += 1;
+        for row in rows.iter().take(area.bottom().saturating_sub(y) as usize) {
+            let rect = Rect::new(area.x, y, area.width, 1);
+            render_panel_list_entry(buffer, rect,
                 &super::tree::AgentPanelListEntry::FactoryHost {
-                    name: host.name.clone(), summary: host.summary.clone(),
-                    attention: host.attention, indent: 0,
+                    name: row.name.clone(), summary: row.summary.clone(),
+                    attention: row.attention, indent: 0,
                 }, config, hits);
+            if label == "USAGE" {
+                if let Some(url) = &row.url {
+                    hits.factory_usage_urls.push((rect, url.clone()));
+                }
+            }
+            y += 1;
         }
     }
 }
