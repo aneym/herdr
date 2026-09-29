@@ -1867,7 +1867,13 @@ impl ClientShellState {
         let current = entries.iter().position(|(pane_id, tab_id, _)| {
             pane_id.as_deref() == focused && (pane_id.is_some() || snapshot.focused_tab_id.as_deref() == Some(tab_id))
         });
-        let order = rotation(entries.len(), current, true);
+        let order: Vec<_> = rotation(entries.len(), current, true)
+            .into_iter()
+            .filter(|index| {
+                let (pane_id, tab_id, _) = &entries[*index];
+                pane_id.is_some() || snapshot.focused_tab_id.as_deref() != Some(tab_id)
+            })
+            .collect();
         let best = order.iter().map(|index| entries[*index].2).max().unwrap_or(0);
         if best == 0 {
             return None;

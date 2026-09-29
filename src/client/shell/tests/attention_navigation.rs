@@ -184,6 +184,42 @@ fn next_attention_rotates_after_focused_background_tab() {
 }
 
 #[test]
+fn next_attention_skips_focused_ask_tab_without_an_agent() {
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    config.factory.enabled = true;
+    let mut state = ClientShellState::new(config);
+    let mut projected = snapshot();
+    for number in 2..=3 {
+        let mut tab = projected.tabs[0].clone();
+        tab.tab_id = format!("tab_{number}");
+        tab.number = number;
+        tab.focused = false;
+        projected.tabs.push(tab);
+        let mut pane = projected.panes[0].clone();
+        pane.pane_id = format!("pane_{number}");
+        pane.tab_id = format!("tab_{number}");
+        pane.focused = false;
+        projected.panes.push(pane);
+    }
+    state.set_snapshot(Box::new(projected));
+    let mut overlay = FactoryOverlay::default();
+    for number in [1, 3] {
+        overlay.tabs.insert(format!("tab_{number}"), TabTag {
+            attention: Attention::Act,
+            ..TabTag::default()
+        });
+    }
+    state.factory_overlay = Some(std::sync::Arc::new(overlay));
+
+    let snapshot = state.snapshot.as_deref().unwrap();
+    assert_eq!(state.next_attention_target(snapshot), Some((None, "tab_3".into())));
+    let mut projected = snapshot.clone();
+    projected.focused_tab_id = Some("tab_3".into());
+    projected.focused_pane_id = Some("pane_3".into());
+    assert_eq!(state.next_attention_target(&projected), Some((None, "tab_1".into())));
+}
+
+#[test]
 fn next_attention_has_no_fallback_to_idle_or_working_agents() {
     let mut state = attention_state(&[AgentStatus::Idle, AgentStatus::Working, AgentStatus::Unknown]);
     assert_eq!(focused_pane(&mut state, KeybindAction::NextAttention), None);
