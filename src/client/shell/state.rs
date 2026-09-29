@@ -297,6 +297,7 @@ pub(super) struct TreeHeaderHit {
     /// Collapse-set key for this header.
     pub(super) key: String,
     pub(super) pinned: bool,
+    pub(super) collapsed: bool,
 }
 
 pub(super) struct WorkspaceHit {

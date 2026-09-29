@@ -2657,6 +2657,7 @@ impl ClientShellState {
         let key = hit.key.clone();
         let is_space = hit.tab_id.is_none();
         let pinned = hit.pinned;
+        let collapsed = hit.collapsed;
         let workspace_id = hit.workspace_id.clone();
         let tab_id = hit.tab_id.clone();
         if chevron || key.starts_with("factory-background:") {
@@ -2667,7 +2668,13 @@ impl ClientShellState {
                     workspace_id.to_owned(),
                 );
             } else if !is_space && key == tab_id.as_deref().unwrap_or_default() {
-                super::tree::ClientTreeChrome::toggle(&mut tree.factory_expanded_lanes, key);
+                if collapsed {
+                    tree.factory_collapsed_lanes.remove(&key);
+                    tree.factory_expanded_lanes.insert(key);
+                } else {
+                    tree.factory_expanded_lanes.remove(&key);
+                    tree.factory_collapsed_lanes.insert(key);
+                }
             } else if is_space {
                 super::tree::ClientTreeChrome::toggle(&mut tree.collapsed_spaces, key);
             } else {

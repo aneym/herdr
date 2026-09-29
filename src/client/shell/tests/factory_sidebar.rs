@@ -278,7 +278,7 @@ fn lab_fixture() -> (ClientShellSnapshot, FactoryOverlay) {
     overlay.spaces.insert("ws_1".into(), SpaceTag {
         attention: Attention::Act, target_tab: Some("wf-a".into()), summary: Some("3".into()),
     });
-    overlay.tabs.get_mut("wf-a").unwrap().name = Some("wf issues 3".into());
+    overlay.tabs.get_mut("wf-a").unwrap().name = Some("issues 3".into());
     overlay.tabs.get_mut("wf-a").unwrap().badge = None;
     overlay.tabs.get_mut("wf-a").unwrap().phase = Some("decide 59/62".into());
     overlay.tabs.get_mut("wf-b").unwrap().name = Some("factory-infra".into());
@@ -338,6 +338,10 @@ fn factory_click_table() {
     let item = |id: &str| hits.tree_headers.iter()
         .find(|hit| hit.tab_id.as_deref() == Some(id)).expect("click target");
     let lane = item("lane-a");
+    let orchestrator = item("orch");
+    assert!(!orchestrator.chevron.is_empty());
+    assert!(orchestrator.collapsed);
+    assert!(!rows.iter().any(|row| row.contains("orphan")), "{rows:?}");
     let workflow = item("wf-a");
     let untagged = item("plain-b");
     let point = |hit: &crate::client::shell::state::TreeHeaderHit| (hit.rect.x + 9, hit.rect.y);
@@ -345,6 +349,7 @@ fn factory_click_table() {
     let workflow_name = point(workflow);
     let untagged_name = point(untagged);
     let chevron = (lane.chevron.x, lane.chevron.y);
+    let orchestrator_chevron = (orchestrator.chevron.x, orchestrator.chevron.y);
     let chevron_end = (lane.chevron.x + 1, lane.chevron.y);
     let glyph = (lane.chevron.x + 2, lane.chevron.y);
     let gap = (lane_name.0, lane_name.1 + 1);
@@ -389,6 +394,105 @@ fn factory_click_table() {
             assert_eq!(detail.key, "tab:lane-a", "{description}");
             assert!(!detail.focused, "{description}: detail must not steal focus");
         }
+    }
+
+    let mut state = factory_state(snapshot.clone(), overlay.clone());
+    state.config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    state.hits = hits;
+    state.last_composed_size = Some((120, 60));
+    for (tab, at, visible) in [
+        ("orch", orchestrator_chevron, true),
+        ("orch", orchestrator_chevron, false),
+    ] {
+        factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), at.0, at.1);
+        factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), at.0, at.1);
+        let (rendered, new_hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, state.tree_chrome_mut());
+        assert_eq!(rendered.iter().any(|row| row.contains("orphan")), visible, "{tab} after chevron click");
+        assert_eq!(new_hits.tree_headers.iter().find(|hit| hit.tab_id.as_deref() == Some(tab)).unwrap().collapsed, !visible);
+        state.hits = new_hits;
+    }
+
+    let mut focused_snapshot = snapshot.clone();
+    focused_snapshot.focused_tab_id = Some("wf-a".into());
+    let mut focused_state = factory_state(focused_snapshot.clone(), overlay.clone());
+    focused_state.config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    let (visible, hits, _) = rendered_factory_rows(&focused_snapshot, &overlay);
+    assert!(visible.iter().any(|row| row.contains("issues 3")));
+    let hit = hits.tree_headers.iter().find(|hit| hit.tab_id.as_deref() == Some("lane-a")).unwrap();
+    let at = (hit.chevron.x, hit.chevron.y);
+    focused_state.hits = hits;
+    focused_state.last_composed_size = Some((120, 60));
+    factory_click(&mut focused_state, MouseEventKind::Down(MouseButton::Left), at.0, at.1);
+    factory_click(&mut focused_state, MouseEventKind::Up(MouseButton::Left), at.0, at.1);
+    for child in ["wf-a", "wf-b"] {
+        focused_snapshot.focused_tab_id = Some(child.into());
+        let (rendered, _, _) = rendered_factory_rows_with_tree(&focused_snapshot, &overlay, focused_state.tree_chrome_mut());
+        assert!(!rendered.iter().any(|row| row.contains("issues 3") || row.contains("factory-infra")),
+            "explicit fold must survive focus on {child}");
+    }
+
+    let mut alert_overlay = overlay.clone();
+    alert_overlay.tabs.get_mut("wf-a").unwrap().attention = Attention::Act;
+    let (visible, hits, _) = rendered_factory_rows(&snapshot, &alert_overlay);
+    assert!(visible.iter().any(|row| row.contains("issues 3")), "Act child auto-opens lane");
+    let hit = hits.tree_headers.iter().find(|hit| hit.tab_id.as_deref() == Some("lane-a")).unwrap();
+    let at = (hit.chevron.x, hit.chevron.y);
+    let mut alert_state = factory_state(snapshot.clone(), alert_overlay.clone());
+    alert_state.config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    alert_state.hits = hits;
+    alert_state.last_composed_size = Some((120, 60));
+    factory_click(&mut alert_state, MouseEventKind::Down(MouseButton::Left), at.0, at.1);
+    factory_click(&mut alert_state, MouseEventKind::Up(MouseButton::Left), at.0, at.1);
+    let (folded, _, _) = rendered_factory_rows_with_tree(&snapshot, &alert_overlay, alert_state.tree_chrome_mut());
+    assert!(!folded.iter().any(|row| row.contains("issues 3")), "explicit fold must beat Act");
+}
+
+#[test]
+fn factory_explicit_folds_survive_preferences_roundtrip() {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.focused_tab_id = Some("wf-a".into());
+    overlay.tabs.get_mut("orphan").unwrap().attention = Attention::Act;
+    let mut tree = ClientTreeChrome::default();
+    tree.factory_collapsed_lanes.extend(["lane-a".into(), "orch".into()]);
+    let before = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree).0;
+    assert!(!before.iter().any(|row| row.contains("orphan") || row.contains("wf-a")));
+    let saved = tree.to_preferences();
+    assert_eq!(saved.factory_collapsed_lanes, ["lane-a", "orch"]);
+    let restored = ClientTreeChrome::from_preferences(saved);
+    assert_eq!(rendered_factory_rows_with_tree(&snapshot, &overlay, &restored).0, before);
+}
+
+#[test]
+fn factory_parent_with_running_workflow_or_busy_tag_shows_working() {
+    let (mut snapshot, mut overlay) = fixture();
+    let palette = ClientShellConfig::from_config(&Config::default()).palette;
+    for tab in &mut snapshot.tabs {
+        if tab.tab_id == "lane-a" || tab.tab_id == "orch" {
+            tab.agent_status = AgentStatus::Idle;
+        }
+    }
+    overlay.tabs.get_mut("lane-a").unwrap().idle = true;
+    overlay.tabs.get_mut("orch").unwrap().idle = true;
+    let glyph_color = |snapshot: &ClientShellSnapshot, overlay: &FactoryOverlay, id: &str| {
+        let (rows, hits, buffer) = rendered_factory_rows(snapshot, overlay);
+        let y = hits.tree_headers.iter().find(|hit| hit.tab_id.as_deref() == Some(id)).unwrap().rect.y;
+        let x = rows[y as usize].chars().position(|ch| ch == '●' || ch == '○').unwrap() as u16;
+        (buffer[(x, y)].fg, rows[y as usize].clone())
+    };
+    for id in ["lane-a", "orch"] {
+        let (color, row) = glyph_color(&snapshot, &overlay, id);
+        assert_eq!(color, palette.working, "{id} with running workflow: {row}");
+        assert!(!row.contains("idle"), "{row}");
+    }
+    snapshot.tabs.retain(|tab| !matches!(tab.tab_id.as_str(), "wf-a" | "wf-b" | "orphan"));
+    for id in ["lane-a", "orch"] {
+        let (color, row) = glyph_color(&snapshot, &overlay, id);
+        assert_eq!(color, palette.overlay0, "{id} with no running workflow: {row}");
+        assert!(row.contains("idle"), "{row}");
+        overlay.tabs.get_mut(id).unwrap().busy = true;
+        let (color, row) = glyph_color(&snapshot, &overlay, id);
+        assert_eq!(color, palette.working, "{id} tagged busy: {row}");
+        assert!(!row.contains("idle"), "{row}");
     }
 }
 

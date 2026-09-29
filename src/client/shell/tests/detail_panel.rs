@@ -318,6 +318,7 @@ fn tagged_row_hit() -> TreeHeaderHit {
         tab_id: Some("tab_1".into()),
         key: "ws_1#1".into(),
         pinned: false,
+        collapsed: false,
     }
 }
 

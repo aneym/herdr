@@ -372,6 +372,7 @@ fn render_panel_list_entry(
                 tab_id: None,
                 key: format!("factory-background:{workspace_id}"),
                 pinned: false,
+                collapsed: *collapsed,
             });
         }
         AgentPanelListEntry::SpaceHeader(header) => {
@@ -524,6 +525,7 @@ fn render_factory_tab(
         tab_id: header.tab_id.clone(),
         key: header.key.clone(),
         pinned: false,
+        collapsed: header.collapsed,
     });
 }
 
@@ -788,6 +790,7 @@ fn render_tree_header(
         tab_id: header.tab_id.clone(),
         key: header.key.clone(),
         pinned: header.pinned,
+        collapsed: header.collapsed,
     });
 }
 

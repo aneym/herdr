@@ -40,6 +40,8 @@ pub(super) struct ClientTreeChromePreferences {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(super) factory_expanded_lanes: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(super) factory_collapsed_lanes: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(super) factory_background_expanded: Vec<String>,
 }
 
@@ -58,6 +60,7 @@ impl Default for ClientTreeChromePreferences {
             collapsed_agent_groups: Vec::new(),
             space_order: Vec::new(),
             factory_expanded_lanes: Vec::new(),
+            factory_collapsed_lanes: Vec::new(),
             factory_background_expanded: Vec::new(),
         }
     }
@@ -138,6 +141,7 @@ pub(super) fn migrated_from_session(
             collapsed_agent_groups: sorted(session.collapsed_agent_group_keys),
             space_order: Vec::new(),
             factory_expanded_lanes: Vec::new(),
+            factory_collapsed_lanes: Vec::new(),
             factory_background_expanded: Vec::new(),
         };
     }

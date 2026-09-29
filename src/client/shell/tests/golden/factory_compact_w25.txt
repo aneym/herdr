@@ -2,8 +2,7 @@
  agents                  
  agent-rails   ● 3 ⚲ + ▾ 
   ORCHESTRATOR         ⌘0
-    ● orch        inbox 3
-     ◐ orphan            
+  ▸ ● orch              1
   LANES             ⌘1..9
   ▸ ● lane-a            2
     ○ lane-b         idle
@@ -13,6 +12,7 @@
  poker             ⚲ + ▾ 
   LANES             ⌘1..9
     ● poker coach        
+                         
                          
                          
                          
