@@ -293,6 +293,20 @@ fn tab_command() -> Command {
                 .arg(required("tab_id", "TAB_ID"))
                 .arg(required("label", "LABEL").num_args(1..)),
         )
+        .subcommand(
+            Command::new("move")
+                .about("Reorder a tab within its workspace")
+                .arg(required("tab_id", "TAB_ID"))
+                .arg(option("before", "TAB_ID"))
+                .arg(option("after", "TAB_ID"))
+                .arg(option("position", "N"))
+                .group(
+                    ArgGroup::new("placement")
+                        .args(["before", "after", "position"])
+                        .required(true)
+                        .multiple(false),
+                ),
+        )
         .subcommand(id_command("close", "tab_id", "Close a tab"))
 }
 
