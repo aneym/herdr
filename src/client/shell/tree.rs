@@ -967,15 +967,25 @@ fn append_factory_space(
                 .filter(|child| grouped_root(&child.tab_id).as_deref() == Some(lane.tab_id.as_str()))
                 .collect::<Vec<_>>();
             let runs = overlay.tab(&lane.tab_id).map_or(&[][..], |tag| tag.runs.as_slice());
-            let running = children.len() + grouped_lanes.len() + runs.len();
+            let grouped_ids = grouped_lanes.iter().map(|child| child.tab_id.as_str())
+                .collect::<HashSet<_>>();
+            let grouped_workflows = workflows.iter().copied()
+                .filter(|workflow| parent_for(workflow).is_some_and(|id| grouped_ids.contains(id)))
+                .collect::<Vec<_>>();
+            let grouped_runs = grouped_lanes.iter().map(|child| {
+                overlay.tab(&child.tab_id).map_or(0, |tag| tag.runs.len())
+            }).sum::<usize>();
+            let running = children.len() + grouped_lanes.len() + runs.len()
+                + grouped_workflows.len() + grouped_runs;
             let attention = all_workflows.iter().filter(|workflow| {
                 parent_for(workflow) == Some(lane.tab_id.as_str())
+                    || parent_for(workflow).is_some_and(|id| grouped_ids.contains(id))
             }).map(|tab| tab.tab_id.as_str())
                 .chain(grouped_lanes.iter().map(|tab| tab.tab_id.as_str()))
                 .filter_map(|id| overlay.tab(id))
                 .map(|tag| tag.attention).max_by_key(|attention| attention.rank());
             let focused = snapshot.focused_workspace_id.as_deref() == Some(workspace_id)
-                && children.iter().chain(grouped_lanes.iter())
+                && children.iter().chain(grouped_lanes.iter()).chain(grouped_workflows.iter())
                     .any(|tab| snapshot.focused_tab_id.as_deref() == Some(tab.tab_id.as_str()));
             let expanded = tree.factory_expanded(&lane.tab_id, focused,
                 attention == Some(crate::factory_overlay::Attention::Act));
@@ -1010,6 +1020,28 @@ fn append_factory_space(
                         }
                     }
                     out.push(row);
+                    for workflow in workflows.iter().copied()
+                        .filter(|workflow| parent_for(workflow) == Some(child.tab_id.as_str())) {
+                        let mut row = factory_row(snapshot, rows, overlay, workflow,
+                            indent.saturating_add(1), false, false);
+                        if grouped && lane_mode(lane) == TabMode::Parked {
+                            if let AgentPanelListEntry::FactoryTab(tab) = &mut row {
+                                tab.background = true;
+                            }
+                        }
+                        out.push(row);
+                    }
+                    if let Some(tag) = overlay.tab(&child.tab_id) {
+                        for run in &tag.runs {
+                            let mut row = factory_run_row(child, run, indent.saturating_add(1));
+                            if grouped && lane_mode(lane) == TabMode::Parked {
+                                if let AgentPanelListEntry::FactoryTab(tab) = &mut row {
+                                    tab.background = true;
+                                }
+                            }
+                            out.push(row);
+                        }
+                    }
                 }
                 for child in children {
                     let mut row = factory_row(snapshot, rows, overlay, child,
@@ -1168,9 +1200,11 @@ fn append_factory_space(
         .copied()
         .filter(|tab| {
             overlay.tab(&tab.tab_id)
-                .is_some_and(|tag| (tag.done && tag.kind != TabKind::Workflow
-                    && !(tag.kind == TabKind::Lane && tag.mode != TabMode::Active))
-                    || tag.kind == TabKind::Advisor)
+                .is_some_and(|tag| (tag.done
+                    && !(tag.kind == TabKind::Lane && tag.mode != TabMode::Active)
+                    && (tag.kind != TabKind::Workflow || tag.parent.as_deref().is_some_and(|id| {
+                        grouped_root(id).is_some()
+                    }))) || tag.kind == TabKind::Advisor)
         })
         .collect::<Vec<_>>();
     if !background.is_empty() {

@@ -748,6 +748,73 @@ fn factory_grouped_lanes_fold_with_parent_and_roll_up_state() {
     assert!(!folded.iter().any(|line| line.contains("lane-b") || line.contains("child-two")), "{folded:?}");
 }
 
+fn grouped_workflow_fixture() -> (ClientShellSnapshot, FactoryOverlay) {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "lane-a" | "lane-b" | "wf-a" | "wf-b"));
+    snapshot.agents.clear();
+    let template = fixture().0.agents[0].clone();
+    for (id, parent) in [("lane-a", None), ("lane-b", Some("lane-a-pane"))] {
+        let mut agent = template.clone();
+        agent.tab_id = id.into();
+        agent.pane_id = format!("{id}-pane");
+        agent.group.parent_pane_id = parent.map(str::to_string);
+        agent.agent_status = AgentStatus::Idle;
+        snapshot.agents.push(agent);
+        snapshot.tabs.iter_mut().find(|tab| tab.tab_id == id).unwrap().agent_status = AgentStatus::Idle;
+    }
+    for id in ["wf-a", "wf-b"] {
+        overlay.tabs.get_mut(id).unwrap().parent = Some("lane-b".into());
+    }
+    overlay.tabs.get_mut("wf-b").unwrap().done = true;
+    overlay.tabs.get_mut("lane-b").unwrap().runs = vec![RunTag {
+        id: "fold".into(), name: Some("fold run".into()), phase: None, agents: 1,
+    }];
+    (snapshot, overlay)
+}
+
+#[test]
+fn grouped_lane_draws_live_workflows_and_runs_and_rolls_up_state() {
+    let (snapshot, overlay) = grouped_workflow_fixture();
+    let mut tree = ClientTreeChrome::default();
+    tree.factory_expanded_lanes.insert("lane-a".into());
+    tree.factory_background_expanded.insert("ws_1".into());
+    let (rows, hits, buffer) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 35);
+    let hit = |id: &str| hits.tree_headers.iter().find(|hit| hit.key == id).unwrap();
+    let parent = hit("lane-a");
+    let child = hit("lane-b");
+    let workflow = hit("wf-a");
+    let run = hit("lane-b#run:fold");
+    let done = hit("wf-b");
+    assert_eq!(workflow.rect.y, child.rect.y + 2, "{rows:?}");
+    assert_eq!(run.rect.y, workflow.rect.y + 3, "{rows:?}");
+    assert_eq!(rows[child.rect.y as usize].find("lane-b"), rows[workflow.rect.y as usize].find("wf-a"));
+    assert_eq!(rows[workflow.rect.y as usize].find("wf-a"), rows[run.rect.y as usize].find("fold run"));
+    assert!(done.rect.y > run.rect.y && rows.iter().any(|row| row.contains("background 1")), "{rows:?}");
+    assert!(rows[parent.rect.y as usize].contains('3'), "{rows:?}");
+    let palette = ClientShellConfig::from_config(&Config::default()).palette;
+    assert_eq!(buffer[(parent.rect.x + 4, parent.rect.y)].fg, palette.working);
+}
+
+#[test]
+fn grouped_workflow_focus_or_act_auto_opens_parent_but_explicit_fold_hides_children() {
+    let (mut snapshot, mut overlay) = grouped_workflow_fixture();
+    let mut tree = ClientTreeChrome::default();
+    let (folded, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+    assert!(hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap().collapsed);
+    assert!(!folded.iter().any(|row| row.contains("lane-b") || row.contains("wf-a") || row.contains("fold run")));
+    snapshot.focused_tab_id = Some("wf-a".into());
+    let (focused, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+    assert!(!hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap().collapsed);
+    assert!(focused.iter().any(|row| row.contains("wf-a")));
+    snapshot.focused_tab_id = None;
+    overlay.tabs.get_mut("wf-a").unwrap().attention = Attention::Act;
+    let (alert, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+    assert!(alert.iter().any(|row| row.contains("wf-a")));
+    tree.factory_collapsed_lanes.insert("lane-a".into());
+    let (folded, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+    assert!(!folded.iter().any(|row| row.contains("lane-b") || row.contains("wf-a") || row.contains("fold run")));
+}
+
 #[test]
 fn factory_grouping_ignores_cycles_and_cross_space_parents() {
     let (mut snapshot, mut overlay) = fixture();
