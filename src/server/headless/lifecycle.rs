@@ -27,6 +27,9 @@ impl HeadlessServer {
         params: crate::api::schema::ServerLiveHandoffParams,
     ) -> io::Result<()> {
         info!("starting live handoff");
+        let _marker = crate::server::handoff::HandoffMarker::create(
+            crate::server::handoff::handoff_marker_path(),
+        )?;
         let import_exe = params.import_exe.as_deref().map(std::path::PathBuf::from);
         let socket_path = crate::server::handoff::handoff_socket_path();
         let token = format!(

@@ -10,6 +10,8 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
+#[cfg(unix)]
+use std::time::Instant;
 
 use tracing::info;
 
@@ -21,6 +23,9 @@ const SERVER_READY_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Poll interval when waiting for the server socket to appear.
 const SOCKET_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+#[cfg(unix)]
+const HANDOFF_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Timeout for checking the stable JSON API before attaching to the binary protocol socket.
 const STATUS_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
@@ -273,7 +278,9 @@ pub fn wait_for_server_socket(socket_path: &Path, timeout: Duration) -> io::Resu
             "server did not become ready within {}s (socket: {}). The background server may still be starting; try `herdr` again, or check {}",
             timeout.as_secs(),
             socket_path.display(),
-            crate::session::data_dir().join("herdr-server.log").display()
+            crate::session::data_dir()
+                .join("herdr-server.log")
+                .display()
         ),
     ))
 }
@@ -281,6 +288,73 @@ pub fn wait_for_server_socket(socket_path: &Path, timeout: Duration) -> io::Resu
 // ---------------------------------------------------------------------------
 // Auto-detect launch
 // ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+fn live_handoff_file(data_dir: &Path, suffix: &str) -> Option<(libc::pid_t, PathBuf)> {
+    std::fs::read_dir(data_dir).ok()?.flatten().find_map(|entry| {
+        let name = entry.file_name();
+        let pid = name
+            .to_str()?
+            .strip_prefix("herdr-handoff-")?
+            .strip_suffix(suffix)?
+            .parse::<libc::pid_t>()
+            .ok()
+            .filter(|pid| *pid > 0)?;
+        let alive = unsafe { libc::kill(pid, 0) } == 0;
+        if alive || io::Error::last_os_error().raw_os_error() == Some(libc::EPERM) {
+            Some((pid, entry.path()))
+        } else {
+            None
+        }
+    })
+}
+
+#[cfg(unix)]
+fn handoff_in_progress(data_dir: &Path) -> bool {
+    live_handoff_file(data_dir, ".active").is_some()
+        || live_handoff_file(data_dir, ".sock").is_some()
+}
+
+#[cfg(not(unix))]
+#[allow(dead_code)]
+fn handoff_in_progress(_data_dir: &Path) -> bool {
+    false
+}
+
+#[cfg(unix)]
+#[derive(Debug, PartialEq, Eq)]
+enum HandoffWaitOutcome {
+    Attach,
+    Spawn,
+}
+
+#[cfg(unix)]
+fn wait_for_handoff<F, H>(
+    mut listening: F,
+    mut handoff: H,
+    deadline: Instant,
+) -> io::Result<HandoffWaitOutcome>
+where
+    F: FnMut() -> bool,
+    H: FnMut() -> bool,
+{
+    loop {
+        if listening() {
+            return Ok(HandoffWaitOutcome::Attach);
+        }
+        if !handoff() {
+            return Ok(HandoffWaitOutcome::Spawn);
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "handoff still in progress; refusing to start a second server",
+            ));
+        }
+        std::thread::sleep(HANDOFF_POLL_INTERVAL.min(deadline - now));
+    }
+}
 
 /// Performs auto-detect launch: check for server, spawn if needed, then
 /// attach as a thin client.
@@ -304,18 +378,50 @@ pub fn auto_detect_launch(saved_federation: bool) -> io::Result<()> {
     let socket_path = client_socket_path();
     info!(path = %socket_path.display(), "auto-detect launch starting");
 
-    let startup = if is_server_listening_at(&socket_path) {
-        info!("server already running, attaching as client");
-        if saved_federation {
-            Ok(())
-        } else {
-            validate_running_server_compatibility(false)
+    let startup = (|| {
+        let mut listening = is_server_listening_at(&socket_path);
+        #[cfg(unix)]
+        if !listening && handoff_in_progress(&crate::session::data_dir()) {
+            info!("handoff in progress, waiting for server socket");
+            let result = wait_for_handoff(
+                || is_server_listening_at(&socket_path),
+                || handoff_in_progress(&crate::session::data_dir()),
+                Instant::now() + crate::server::handoff::COMMIT_TIMEOUT + Duration::from_secs(10),
+            );
+            match &result {
+                Ok(HandoffWaitOutcome::Attach) => info!("handoff wait ended, attaching as client"),
+                Ok(HandoffWaitOutcome::Spawn) => {
+                    info!("handoff wait ended, spawning server daemon")
+                }
+                Err(_) => info!("handoff wait ended without a server socket"),
+            }
+            listening = matches!(result.map_err(|err| {
+                if let Some((pid, marker)) = live_handoff_file(&crate::session::data_dir(), ".active") {
+                    io::Error::new(
+                        err.kind(),
+                        format!(
+                            "live handoff by pid {pid} did not finish (marker: {}); refusing to start a second server",
+                            marker.display()
+                        ),
+                    )
+                } else {
+                    err
+                }
+            })?, HandoffWaitOutcome::Attach);
         }
-    } else {
-        info!("no server running, spawning server daemon");
-        spawn_server_daemon()
-            .and_then(|_| wait_for_server_socket(&socket_path, SERVER_READY_TIMEOUT))
-    };
+        if listening {
+            info!("server already running, attaching as client");
+            if saved_federation {
+                Ok(())
+            } else {
+                validate_running_server_compatibility(false)
+            }
+        } else {
+            info!("no server running, spawning server daemon");
+            spawn_server_daemon()
+                .and_then(|_| wait_for_server_socket(&socket_path, SERVER_READY_TIMEOUT))
+        }
+    })();
     if let Err(error) = startup {
         if !saved_federation {
             return Err(error);
@@ -350,6 +456,69 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::path::PathBuf::from(format!("/tmp/ha-{name}-{}-{nanos}", std::process::id()))
+    }
+
+    #[test]
+    fn handoff_detection_ignores_stale_files() {
+        let dir = unique_test_dir("handoff-files");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(!handoff_in_progress(&dir));
+
+        let mut child = Command::new("true").spawn().unwrap();
+        let dead_pid = child.id();
+        child.wait().unwrap();
+        std::fs::write(dir.join(format!("herdr-handoff-{dead_pid}.sock")), b"").unwrap();
+        std::fs::write(dir.join("herdr-handoff-not-a-pid.sock"), b"").unwrap();
+        assert!(!handoff_in_progress(&dir));
+
+        std::fs::write(
+            dir.join(format!("herdr-handoff-{}.sock", std::process::id())),
+            b"",
+        )
+        .unwrap();
+        assert!(handoff_in_progress(&dir));
+        std::fs::remove_file(dir.join(format!("herdr-handoff-{}.sock", std::process::id()))).unwrap();
+        std::fs::write(dir.join(format!("herdr-handoff-{dead_pid}.active")), b"").unwrap();
+        assert!(!handoff_in_progress(&dir));
+        let marker = dir.join(format!("herdr-handoff-{}.active", std::process::id()));
+        std::fs::write(&marker, b"").unwrap();
+        assert!(handoff_in_progress(&dir));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn handoff_wait_attaches_or_spawns_when_evidence_changes() {
+        let mut probes = 0;
+        let outcome = wait_for_handoff(
+            || {
+                probes += 1;
+                probes == 3
+            },
+            || true,
+            Instant::now() + Duration::from_secs(2),
+        )
+        .unwrap();
+        assert_eq!(outcome, HandoffWaitOutcome::Attach);
+        assert_eq!(probes, 3);
+
+        let timed_out = wait_for_handoff(|| false, || true, Instant::now()).unwrap_err();
+        assert_eq!(timed_out.kind(), io::ErrorKind::TimedOut);
+
+        let mut handoff_probes = 0;
+        let outcome = wait_for_handoff(
+            || false,
+            || {
+                handoff_probes += 1;
+                handoff_probes == 1
+            },
+            Instant::now() + Duration::from_secs(2),
+        )
+        .unwrap();
+        assert_eq!(outcome, HandoffWaitOutcome::Spawn);
+        assert_eq!(handoff_probes, 2);
+
+        let outcome = wait_for_handoff(|| false, || false, Instant::now()).unwrap();
+        assert_eq!(outcome, HandoffWaitOutcome::Spawn);
     }
 
     #[test]

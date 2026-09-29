@@ -71,6 +71,31 @@ pub(crate) fn handoff_socket_path() -> PathBuf {
 }
 
 #[cfg(unix)]
+pub(crate) fn handoff_marker_path() -> PathBuf {
+    crate::session::data_dir().join(format!("herdr-handoff-{}.active", std::process::id()))
+}
+
+#[cfg(unix)]
+pub(crate) struct HandoffMarker(PathBuf);
+
+#[cfg(unix)]
+impl HandoffMarker {
+    pub(crate) fn create(path: PathBuf) -> io::Result<Self> {
+        std::fs::write(&path, b"")?;
+        Ok(Self(path))
+    }
+}
+
+#[cfg(unix)]
+impl Drop for HandoffMarker {
+    fn drop(&mut self) {
+        if let Err(err) = std::fs::remove_file(&self.0) {
+            warn!(path = %self.0.display(), err = %err, "failed to remove handoff marker");
+        }
+    }
+}
+
+#[cfg(unix)]
 pub(crate) fn spawn_handoff_import(
     import_exe: Option<&Path>,
     socket_path: &Path,
@@ -639,6 +664,19 @@ mod tests {
             tree_show_hidden_spaces: false,
             hidden_spaces_expanded: false,
         }
+    }
+
+    #[test]
+    fn handoff_marker_spans_the_attempt_and_clears_on_rollback() {
+        let dir = std::env::temp_dir().join(format!("herdr-marker-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("handoff.active");
+        {
+            let _marker = HandoffMarker::create(path.clone()).unwrap();
+            assert!(path.exists(), "clients must see a handoff while it is underway");
+        }
+        assert!(!path.exists(), "rollback must clear the handoff marker");
+        std::fs::remove_dir(&dir).unwrap();
     }
 
     #[test]
