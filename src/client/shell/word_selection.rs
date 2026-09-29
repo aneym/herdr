@@ -10,9 +10,9 @@ pub(super) struct ClientWordSelection {
     anchor_bounds: Option<(u16, u16)>,
     cursor: (u32, u16),
     end_col: u16,
-    content_revision: Option<u64>,
-    cached_row: Option<(u32, String)>,
+    pub(super) cached_row: Option<(u32, String)>,
     pending_row: Option<u32>,
+    retried_stale_row: bool,
     pub(super) dragged: bool,
     pub(super) released: bool,
     mouse_reporting: bool,
@@ -68,15 +68,9 @@ impl ClientShellState {
             anchor_bounds: None,
             cursor: (row, col),
             end_col: hit.inner_rect.width.saturating_sub(1),
-            content_revision: self.pane_surface.as_ref().and_then(|surface| {
-                surface
-                    .panes
-                    .iter()
-                    .find(|pane| pane.pane_id == hit.pane_id)
-                    .map(|pane| pane.content_revision)
-            }),
             cached_row: None,
             pending_row: None,
+            retried_stale_row: false,
             dragged: false,
             released: false,
             mouse_reporting: hit.mouse_reporting,
@@ -106,7 +100,7 @@ impl ClientShellState {
                 row,
                 col: gesture.end_col,
             },
-            content_revision: gesture.content_revision,
+            content_revision: None,
         };
         if !self.push_endpoint_method_with_kind(
             crate::api::schema::Method::PaneSelectionRead(params),
@@ -223,6 +217,18 @@ impl ClientShellState {
                 pane_id: returned_pane_id,
                 text,
             }) if returned_pane_id == pane_id => text,
+            Err(error) if error.code.as_deref() == Some("stale_content") => {
+                let gesture = self.word_selection_gesture.as_mut().expect("checked above");
+                if !gesture.retried_stale_row {
+                    gesture.retried_stale_row = true;
+                    gesture.pending_row = None;
+                    let mut outcome = ClientShellInput::default();
+                    self.request_word_selection_row(absolute_row, &mut outcome);
+                    return (outcome.repaint, outcome.actions);
+                }
+                self.cancel_word_selection();
+                return (true, Vec::new());
+            }
             other => {
                 if matches!(other, Ok(value) if !matches!(value, crate::api::schema::ResponseResult::PaneSelection { .. }))
                 {
@@ -238,6 +244,7 @@ impl ClientShellState {
             return (false, Vec::new());
         };
         gesture.pending_row = None;
+        gesture.retried_stale_row = false;
         if gesture.anchor_bounds.is_none() {
             gesture.anchor_bounds =
                 crate::app::actions::word_bounds_at_column(&text, gesture.anchor.1);

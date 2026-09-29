@@ -550,7 +550,7 @@ fn double_click_drag_survives_focus_lag_after_anchor_reply() {
 }
 
 #[test]
-fn double_click_drag_invalidates_cached_boundaries_outside_selected_cells() {
+fn double_click_drag_refreshes_cached_row_after_content_changes() {
     for copy_on_select in [false, true] {
         let mut state = word_drag_state(copy_on_select);
         let initial = start_word_drag(&mut state);
@@ -560,26 +560,25 @@ fn double_click_drag_invalidates_cached_boundaries_outside_selected_cells() {
         changed.panes[0].content_revision += 2;
         changed.frame.cells[14].symbol = " ".into();
         state.set_pane_surface(changed);
-        assert!(
-            state.selection.is_none(),
-            "unchanged selected cells do not validate cached boundaries outside the selection"
-        );
-        assert!(
-            word_drag_mouse(&mut state, MouseEventKind::Drag(MouseButton::Left), 0, 14)
-                .actions
-                .is_empty()
-        );
-        assert!(
-            word_drag_mouse(&mut state, MouseEventKind::Up(MouseButton::Left), 0, 14)
-                .actions
-                .is_empty()
-        );
-        assert!(state.selection.is_none());
+        assert!(state.word_selection_gesture.is_some());
+        let motion = word_drag_mouse(&mut state, MouseEventKind::Drag(MouseButton::Left), 0, 14);
+        assert!(matches!(&motion.actions[..], [ClientShellAction::Endpoint { request, .. }]
+            if matches!(&request.method, crate::api::schema::Method::PaneSelectionRead(params)
+                if params.content_revision.is_none())));
+        word_drag_mouse(&mut state, MouseEventKind::Up(MouseButton::Left), 0, 14);
+        let actions = word_row_reply(&mut state, &word_read_id(&motion.actions), "alpha bravo   charlie");
+        if copy_on_select {
+            assert!(actions.iter().any(|action| matches!(action,
+                ClientShellAction::Endpoint { request, .. }
+                    if matches!(request.method, crate::api::schema::Method::PaneSelectionRead(_)))));
+        } else {
+            assert!(state.selection.as_ref().is_some_and(crate::selection::Selection::is_finalized));
+        }
     }
 }
 
 #[test]
-fn reconnect_word_selection_tracks_content_changes() {
+fn reconnect_word_selection_survives_content_changes() {
     for content_changed in [false, true] {
         let mut state = word_drag_state(true);
         let initial = start_word_drag(&mut state);
@@ -600,13 +599,13 @@ fn reconnect_word_selection_tracks_content_changes() {
         assert!(state.activate_endpoint_projection(&endpoint_id));
         state.set_pane_surface(next_surface);
 
-        assert_eq!(state.selection.is_some(), !content_changed);
-        assert_eq!(state.word_selection_gesture.is_some(), !content_changed);
+        assert!(state.selection.is_some());
+        assert!(state.word_selection_gesture.is_some());
     }
 }
 
 #[test]
-fn double_click_release_ignores_reply_after_focus_or_content_changes() {
+fn double_click_release_ignores_reply_after_focus_change_but_not_content_change() {
     for focus_changed in [false, true] {
         let mut state = word_drag_state(true);
         let initial = start_word_drag(&mut state);
@@ -630,17 +629,23 @@ fn double_click_release_ignores_reply_after_focus_or_content_changes() {
             changed.panes[0].content_revision += 2;
             state.set_pane_surface(changed);
         }
-        assert!(
-            word_row_reply(&mut state, &initial, "alpha bravo charlie").is_empty(),
-            "a stale released gesture must not copy"
-        );
-        assert!(state.selection.is_none());
+        let actions = word_row_reply(&mut state, &initial, "alpha bravo charlie");
+        if focus_changed {
+            assert!(actions.is_empty(), "focus loss must cancel the gesture");
+            assert!(state.selection.is_none());
+        } else {
+            assert!(actions.iter().any(|action| matches!(action,
+                ClientShellAction::Endpoint { request, .. }
+                    if matches!(request.method, crate::api::schema::Method::PaneSelectionRead(_)))));
+            assert!(state.selection.as_ref().is_some_and(crate::selection::Selection::is_finalized));
+        }
     }
 }
 
 #[test]
-fn double_click_drag_resize_cancels_pending_word_lookup() {
+fn double_click_drag_resize_or_screen_switch_cancels_pending_word_lookup() {
     for anchor_ready in [false, true] {
+        for screen_switch in [false, true] {
         let mut state = word_drag_state(true);
         let initial = start_word_drag(&mut state);
         let pending = if anchor_ready {
@@ -653,15 +658,20 @@ fn double_click_drag_resize_cancels_pending_word_lookup() {
         word_drag_mouse(&mut state, MouseEventKind::Up(MouseButton::Left), 1, 8);
         let mut resized = state.pane_surface.as_ref().unwrap().clone();
         resized.surface_revision += 1;
-        resized.panes[0].rect.width += 5;
-        resized.panes[0].inner_rect.width += 5;
+        if screen_switch {
+            resized.panes[0].alternate_screen_active = true;
+        } else {
+            resized.panes[0].rect.width += 5;
+            resized.panes[0].inner_rect.width += 5;
+        }
         state.set_pane_surface(resized);
         assert!(word_row_reply(&mut state, &pending, "alpha bravo charlie extra").is_empty());
         assert!(
             state.selection.is_none(),
-            "a late reply must not restore a resized selection"
+            "a late reply must not restore a resized or screen-switched selection"
         );
         assert!(state.selection_autoscroll.is_none());
+        }
     }
 }
 
