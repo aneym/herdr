@@ -947,10 +947,18 @@ fn factory_row(
         .filter(|row| row.tab_id == tab.tab_id)
         .map(|row| row.status)
         .collect::<Vec<_>>();
+    // A finished pane must not mask another pane still working in this factory row.
+    // Leave status_priority (used by non-factory rows) unchanged.
     let status = child_states
         .iter()
         .copied()
-        .max_by_key(|status| status_priority(*status))
+        .max_by_key(|status| match status {
+            crate::api::schema::AgentStatus::Blocked => 4,
+            crate::api::schema::AgentStatus::Working => 3,
+            crate::api::schema::AgentStatus::Done => 2,
+            crate::api::schema::AgentStatus::Idle => 1,
+            crate::api::schema::AgentStatus::Unknown => 0,
+        })
         .unwrap_or(tab.agent_status);
     let background =
         tag.is_some_and(|tag| tag.done || tag.kind == crate::factory_overlay::TabKind::Advisor);
