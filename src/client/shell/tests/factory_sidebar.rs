@@ -893,3 +893,120 @@ fn factory_status_glyph_colors() {
             "count moves left by two");
     }
 }
+
+#[test]
+fn factory_sections_render_and_idle_click_persists() {
+    use crate::factory_overlay::TabSection;
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "orch" | "lane-a" | "lane-b" | "plain-a" | "plain-b"));
+    let template = snapshot.tabs.iter().find(|tab| tab.tab_id == "lane-a").unwrap().clone();
+    for (id, section) in [("waiting-lane", Some(TabSection::Waiting)), ("idle-lane", Some(TabSection::Idle)),
+        ("orchestrator-lane", Some(TabSection::Orchestrator)), ("untagged-lane", None)] {
+        let mut tab = template.clone();
+        tab.tab_id = id.into();
+        tab.label = id.into();
+        snapshot.tabs.push(tab);
+        overlay.tabs.insert(id.into(), TabTag { kind: TabKind::Lane, section, ..Default::default() });
+    }
+    overlay.tabs.get_mut("lane-a").unwrap().section = Some(TabSection::Scoping);
+    overlay.tabs.get_mut("lane-a").unwrap().name = Some("[Scoping] shared connections".into());
+    overlay.tabs.get_mut("lane-b").unwrap().section = Some(TabSection::Inflight);
+    let (rows, hits, _) = rendered_factory_rows_with_gap(&snapshot, &overlay, &ClientTreeChrome::default(), 25, 0);
+    let find = |name: &str| rows.iter().position(|row| row.contains(name)).unwrap();
+    assert!(find("ORCHESTRATOR") < find("orchestrator-lane"));
+    assert!(find("orchestrator-lane") < find("SCOPING"));
+    assert!(find("SCOPING") < find("shared connections"));
+    assert!(find("shared connections") < find("IN FLIGHT"));
+    assert!(find("IN FLIGHT") < find("untagged-lane"));
+    assert!(find("untagged-lane") < find("plain-a"));
+    assert!(find("plain-a") < find("WAITING"));
+    assert!(find("WAITING") < find("waiting-lane"));
+    assert!(find("waiting-lane") < find("idle 1"));
+    assert!(rows[find("SCOPING")].contains("⌘1..9"));
+    assert!(!rows.iter().any(|row| row.contains("idle-lane") || row.contains("[Scoping]")));
+    let hit = hits.tree_headers.iter().find(|hit| hit.key == "factory-background:idle:ws_1").unwrap();
+    assert!(hit.collapsed);
+    let rect = hit.rect;
+    let mut state = factory_state(snapshot.clone(), overlay.clone());
+    state.config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    state.hits = hits;
+    state.last_composed_size = Some((120, 60));
+    factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), rect.x + 3, rect.y);
+    factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), rect.x + 3, rect.y);
+    let restored = ClientTreeChrome::from_preferences(state.tree_chrome_mut().to_preferences());
+    assert!(restored.factory_idle_expanded.contains("ws_1"));
+    let (expanded, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &restored);
+    assert!(expanded.iter().any(|row| row.contains("idle-lane")));
+
+    // A folded idle lane must not hide an actionable child workflow.
+    let mut child = snapshot.tabs.iter().find(|tab| tab.tab_id == "lane-a").unwrap().clone();
+    child.tab_id = "idle-child".into();
+    child.label = "idle-child".into();
+    snapshot.tabs.push(child);
+    overlay.tabs.insert("idle-child".into(), TabTag {
+        kind: TabKind::Workflow, parent: Some("idle-lane".into()), attention: Attention::Act,
+        ..Default::default()
+    });
+    for blocked in [false, true] {
+        snapshot.tabs.iter_mut().find(|tab| tab.tab_id == "idle-child").unwrap().agent_status =
+            if blocked { AgentStatus::Blocked } else { AgentStatus::Idle };
+        overlay.tabs.get_mut("idle-child").unwrap().attention =
+            if blocked { Attention::None } else { Attention::Act };
+        let (rows, hits, _) = rendered_factory_rows(&snapshot, &overlay);
+        let idle = hits.tree_headers.iter().find(|hit| hit.key == "factory-background:idle:ws_1").unwrap();
+        assert!(idle.collapsed);
+        assert!(rows[idle.rect.y as usize].ends_with('!'), "blocked={blocked}: {rows:?}");
+        assert!(!rows.iter().any(|row| row.contains("idle-child")));
+    }
+}
+
+#[test]
+fn sectioned_grouped_child_and_parked_lane_keep_their_parent_groups() {
+    use crate::factory_overlay::TabSection;
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "lane-a" | "lane-b"));
+    let template = fixture().0.agents[0].clone();
+    snapshot.agents.clear();
+    for (id, parent) in [("lane-a", None), ("lane-b", Some("lane-a-pane"))] {
+        let mut agent = template.clone();
+        agent.tab_id = id.into();
+        agent.pane_id = format!("{id}-pane");
+        agent.group.parent_pane_id = parent.map(str::to_string);
+        snapshot.agents.push(agent);
+    }
+    overlay.tabs.get_mut("lane-a").unwrap().section = Some(TabSection::Inflight);
+    overlay.tabs.get_mut("lane-b").unwrap().section = Some(TabSection::Idle);
+    let mut parked = snapshot.tabs[0].clone();
+    parked.tab_id = "parked-lane".into();
+    parked.label = "parked-lane".into();
+    snapshot.tabs.push(parked);
+    overlay.tabs.insert("parked-lane".into(), TabTag {
+        kind: TabKind::Lane, mode: TabMode::Parked, section: Some(TabSection::Scoping), ..Default::default()
+    });
+    let mut tree = ClientTreeChrome::default();
+    tree.factory_expanded_lanes.insert("lane-a".into());
+    let (rows, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+    let parent = hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap();
+    let child = hits.tree_headers.iter().find(|hit| hit.key == "lane-b").unwrap();
+    assert!(parent.rect.y < child.rect.y);
+    assert!(rows.iter().any(|row| row.contains("IN FLIGHT")));
+    assert!(!rows.iter().any(|row| row.contains("SCOPING") || row.contains("idle 1") || row.contains("parked-lane")));
+    assert!(rows.iter().any(|row| row.contains("parked 1")));
+}
+
+#[test]
+fn unknown_section_does_not_break_overlay_parse() {
+    let parsed = crate::factory_overlay::parse(br#"{"version":1,"tabs":{"lane":{"kind":"lane","section":"bogus"}}}"#).unwrap();
+    assert_eq!(parsed.tabs["lane"].section, None);
+}
+
+#[test]
+fn factory_sectioned_compact_frame_w25() {
+    use crate::factory_overlay::TabSection;
+    let (snapshot, mut overlay) = lab_fixture();
+    overlay.tabs.get_mut("lane-a").unwrap().section = Some(TabSection::Scoping);
+    overlay.tabs.get_mut("lane-a").unwrap().name = Some("[scoping] shared connections".into());
+    overlay.tabs.get_mut("lane-b").unwrap().section = Some(TabSection::Idle);
+    let (rows, _, _) = rendered_factory_rows_with_gap(&snapshot, &overlay, &ClientTreeChrome::default(), 25, 0);
+    assert_golden(rows, include_str!("golden/factory_sectioned_compact_w25.txt"));
+}

@@ -99,11 +99,37 @@ impl Attention {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TabSection {
+    Orchestrator,
+    Scoping,
+    Inflight,
+    Waiting,
+    Idle,
+}
+
+fn deserialize_section<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<TabSection>, D::Error> {
+    let value = Option::<String>::deserialize(deserializer)?;
+    Ok(match value.as_deref() {
+        Some("orchestrator") => Some(TabSection::Orchestrator),
+        Some("scoping") => Some(TabSection::Scoping),
+        Some("inflight") => Some(TabSection::Inflight),
+        Some("waiting") => Some(TabSection::Waiting),
+        Some("idle") => Some(TabSection::Idle),
+        _ => None,
+    })
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TabTag {
     pub kind: TabKind,
     pub mode: TabMode,
+    #[serde(default, deserialize_with = "deserialize_section")]
+    pub section: Option<TabSection>,
     /// Tab id this tab nests under (a workflow under its lane or the orchestrator).
     pub parent: Option<String>,
     /// Plain-words display name; falls back to the tab label.

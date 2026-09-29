@@ -30,6 +30,7 @@ pub(super) struct ClientTreeChrome {
     pub(super) factory_background_expanded: HashSet<String>,
     pub(super) factory_auto_expanded: HashSet<String>,
     pub(super) factory_parked_expanded: HashSet<String>,
+    pub(super) factory_idle_expanded: HashSet<String>,
 }
 
 impl Default for ClientTreeChrome {
@@ -51,6 +52,7 @@ impl Default for ClientTreeChrome {
             factory_background_expanded: HashSet::new(),
             factory_auto_expanded: HashSet::new(),
             factory_parked_expanded: HashSet::new(),
+            factory_idle_expanded: HashSet::new(),
         }
     }
 }
@@ -80,6 +82,7 @@ impl ClientTreeChrome {
             factory_background_expanded: saved.factory_background_expanded.into_iter().collect(),
             factory_auto_expanded: saved.factory_auto_expanded.into_iter().collect(),
             factory_parked_expanded: saved.factory_parked_expanded.into_iter().collect(),
+            factory_idle_expanded: saved.factory_idle_expanded.into_iter().collect(),
         }
     }
 
@@ -101,6 +104,7 @@ impl ClientTreeChrome {
             factory_background_expanded: sorted(&self.factory_background_expanded),
             factory_auto_expanded: sorted(&self.factory_auto_expanded),
             factory_parked_expanded: sorted(&self.factory_parked_expanded),
+            factory_idle_expanded: sorted(&self.factory_idle_expanded),
         }
     }
 
@@ -265,6 +269,7 @@ pub(super) enum AgentPanelListEntry {
         indent: u8,
         alert: bool,
         working: bool,
+        shortcut: bool,
     },
 }
 
@@ -272,6 +277,7 @@ pub(super) enum AgentPanelListEntry {
 pub(super) enum FactoryGroupKind {
     Automations,
     Parked,
+    Idle,
     Background,
 }
 
@@ -280,6 +286,7 @@ impl FactoryGroupKind {
         match self {
             Self::Automations => "automations",
             Self::Parked => "parked",
+            Self::Idle => "idle",
             Self::Background => "background",
         }
     }
@@ -784,7 +791,7 @@ fn append_factory_space(
     overlay: &crate::factory_overlay::FactoryOverlay,
     indent: u8,
 ) {
-    use crate::factory_overlay::{TabKind, TabMode};
+    use crate::factory_overlay::{TabKind, TabMode, TabSection};
     let tabs = snapshot
         .tabs
         .iter()
@@ -863,7 +870,18 @@ fn append_factory_space(
         }
         (current != tab_id).then(|| current.to_owned())
     };
-    if !orchestrators.is_empty() {
+    let sectioned = tabs.iter().any(|tab| overlay.tab(&tab.tab_id).is_some_and(|tag| tag.section.is_some()));
+    let lane_section = |lane: &crate::protocol::ClientShellTab| {
+        overlay.tab(&lane.tab_id).and_then(|tag| tag.section).unwrap_or(TabSection::Inflight)
+    };
+    let orchestrator_lanes = if sectioned {
+        lanes.iter().copied().filter(|lane| lane_mode(lane) == TabMode::Active
+            && grouped_root(&lane.tab_id).is_none() && lane_section(lane) == TabSection::Orchestrator)
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    if !orchestrators.is_empty() || !orchestrator_lanes.is_empty() {
         out.push(AgentPanelListEntry::FactorySection {
             label: "ORCHESTRATOR",
             right: "⌘0".to_owned(),
@@ -1014,7 +1032,81 @@ fn append_factory_space(
                 }
             }
     };
-    if lanes.iter().any(|lane| lane_mode(lane) == TabMode::Active && grouped_root(&lane.tab_id).is_none())
+    for lane in orchestrator_lanes {
+        push_lane(out, lane, indent, false);
+    }
+    if sectioned {
+        let mut first = true;
+        for (section, label) in [
+            (TabSection::Scoping, "SCOPING"),
+            (TabSection::Inflight, "IN FLIGHT"),
+            (TabSection::Waiting, "WAITING"),
+            (TabSection::Idle, "IDLE"),
+        ] {
+            let members = lanes.iter().copied().filter(|lane| lane_mode(lane) == TabMode::Active
+                && grouped_root(&lane.tab_id).is_none() && lane_section(lane) == section)
+                .collect::<Vec<_>>();
+            if members.is_empty() && (section != TabSection::Inflight
+                || (root_workflows.is_empty() && ordinary.is_empty())) {
+                continue;
+            }
+            if section == TabSection::Idle {
+                let alert = members.iter().any(|lane| {
+                    let child_alert = all_workflows.iter().any(|workflow| {
+                        parent_for(workflow) == Some(lane.tab_id.as_str())
+                            && (overlay.tab(&workflow.tab_id).is_some_and(|tag| tag.attention == crate::factory_overlay::Attention::Act)
+                                || matches!(factory_row(snapshot, rows, overlay, workflow, indent, false, false),
+                                    AgentPanelListEntry::FactoryTab(row) if row.status == crate::api::schema::AgentStatus::Blocked))
+                    });
+                    let row = factory_row(snapshot, rows, overlay, lane, indent, false, false);
+                    child_alert || matches!(row, AgentPanelListEntry::FactoryTab(ref row) if
+                        row.status == crate::api::schema::AgentStatus::Blocked
+                            || row.attention == crate::factory_overlay::Attention::Act)
+                });
+                let working = members.iter().any(|lane| {
+                    let row = factory_row(snapshot, rows, overlay, lane, indent, false, false);
+                    matches!(row, AgentPanelListEntry::FactoryTab(ref row) if
+                        row.status == crate::api::schema::AgentStatus::Working)
+                        || overlay.tab(&lane.tab_id).is_some_and(|tag| tag.busy || !tag.runs.is_empty())
+                });
+                let collapsed = !tree.factory_idle_expanded.contains(workspace_id);
+                out.push(AgentPanelListEntry::FactoryBackground {
+                    kind: FactoryGroupKind::Idle, workspace_id: workspace_id.to_owned(),
+                    count: members.len(), collapsed, indent, alert, working, shortcut: first,
+                });
+                if !collapsed {
+                    for lane in members {
+                        push_lane(out, lane, indent.saturating_add(1), false);
+                    }
+                }
+            } else {
+                out.push(AgentPanelListEntry::FactorySection {
+                    label, right: if first { "⌘1..9".to_owned() } else { String::new() }, indent,
+                });
+                for lane in members {
+                    let start = out.len();
+                    push_lane(out, lane, indent, false);
+                    if section == TabSection::Scoping {
+                        if let AgentPanelListEntry::FactoryTab(row) = &mut out[start] {
+                            if row.header.label.get(..9).is_some_and(|prefix| prefix.eq_ignore_ascii_case("[scoping]"))
+                                && row.header.label.as_bytes().get(9) == Some(&b' ') {
+                                row.header.label = row.header.label[10..].to_owned();
+                            }
+                        }
+                    }
+                }
+                if section == TabSection::Inflight {
+                    for workflow in &root_workflows {
+                        out.push(factory_row(snapshot, rows, overlay, workflow, indent, false, false));
+                    }
+                    for tab in &ordinary {
+                        out.push(factory_row(snapshot, rows, overlay, tab, indent, false, false));
+                    }
+                }
+            }
+            first = false;
+        }
+    } else if lanes.iter().any(|lane| lane_mode(lane) == TabMode::Active && grouped_root(&lane.tab_id).is_none())
         || !root_workflows.is_empty() || !ordinary.is_empty() {
         out.push(AgentPanelListEntry::FactorySection {
             label: "LANES",
@@ -1027,9 +1119,7 @@ fn append_factory_space(
             }
         }
         for workflow in root_workflows {
-            out.push(factory_row(
-                snapshot, rows, overlay, workflow, indent, false, false,
-            ));
+            out.push(factory_row(snapshot, rows, overlay, workflow, indent, false, false));
         }
         for tab in ordinary {
             out.push(factory_row(snapshot, rows, overlay, tab, indent, false, false));
@@ -1065,7 +1155,7 @@ fn append_factory_space(
         let collapsed = !expanded.contains(workspace_id);
         out.push(AgentPanelListEntry::FactoryBackground {
             kind: group, workspace_id: workspace_id.to_owned(), count: members.len(),
-            collapsed, indent, alert, working,
+            collapsed, indent, alert, working, shortcut: false,
         });
         if !collapsed {
             for lane in members {
@@ -1093,6 +1183,7 @@ fn append_factory_space(
             indent,
             alert: false,
             working: false,
+            shortcut: false,
         });
         if !collapsed {
             for tab in background {

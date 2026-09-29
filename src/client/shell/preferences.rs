@@ -47,6 +47,8 @@ pub(super) struct ClientTreeChromePreferences {
     pub(super) factory_auto_expanded: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(super) factory_parked_expanded: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(super) factory_idle_expanded: Vec<String>,
 }
 
 impl Default for ClientTreeChromePreferences {
@@ -68,6 +70,7 @@ impl Default for ClientTreeChromePreferences {
             factory_background_expanded: Vec::new(),
             factory_auto_expanded: Vec::new(),
             factory_parked_expanded: Vec::new(),
+            factory_idle_expanded: Vec::new(),
         }
     }
 }
@@ -151,6 +154,7 @@ pub(super) fn migrated_from_session(
             factory_background_expanded: Vec::new(),
             factory_auto_expanded: Vec::new(),
             factory_parked_expanded: Vec::new(),
+            factory_idle_expanded: Vec::new(),
         };
     }
     preferences

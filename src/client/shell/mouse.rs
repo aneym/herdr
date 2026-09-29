@@ -2676,6 +2676,8 @@ impl ClientShellState {
                 super::tree::ClientTreeChrome::toggle(&mut tree.factory_auto_expanded, workspace_id.to_owned());
             } else if let Some(workspace_id) = key.strip_prefix("factory-background:parked:") {
                 super::tree::ClientTreeChrome::toggle(&mut tree.factory_parked_expanded, workspace_id.to_owned());
+            } else if let Some(workspace_id) = key.strip_prefix("factory-background:idle:") {
+                super::tree::ClientTreeChrome::toggle(&mut tree.factory_idle_expanded, workspace_id.to_owned());
             } else if let Some(workspace_id) = key.strip_prefix("factory-background:") {
                 super::tree::ClientTreeChrome::toggle(&mut tree.factory_background_expanded, workspace_id.to_owned());
             } else if !is_space && key == tab_id.as_deref().unwrap_or_default() {

@@ -357,8 +357,8 @@ fn render_panel_list_entry(
             };
             put_text(buffer, rect.right().saturating_sub(right_width), rect.y, right_width, right, Style::default().fg(color));
         }
-        AgentPanelListEntry::FactoryBackground { kind, workspace_id, count, collapsed, indent, alert, working } => {
-            render_factory_group(buffer, rect, config, hits, workspace_id, kind.label(), *count, *collapsed, *indent, *alert, *working);
+        AgentPanelListEntry::FactoryBackground { kind, workspace_id, count, collapsed, indent, alert, working, shortcut } => {
+            render_factory_group(buffer, rect, config, hits, workspace_id, kind.label(), *count, *collapsed, *indent, *alert, *working, *shortcut);
         }
         AgentPanelListEntry::SpaceHeader(header) => {
             render_tree_header(buffer, rect, header, true, config, hits);
@@ -396,14 +396,14 @@ fn render_panel_list_entry(
 fn render_factory_group(
     buffer: &mut Buffer, rect: Rect, config: &ClientShellConfig, hits: &mut ShellHitMap,
     workspace_id: &str, label: &str, count: usize, collapsed: bool, indent: u8,
-    alert: bool, working: bool,
+    alert: bool, working: bool, shortcut: bool,
 ) {
     let style = Style::default().fg(config.palette.overlay0).add_modifier(Modifier::DIM);
     let start = rect.x.saturating_add(1 + u16::from(indent));
     let chevron = Rect::new(start, rect.y, 2.min(rect.right().saturating_sub(start)), 1);
     put_text(buffer, chevron.x, rect.y, 2.min(chevron.width), if collapsed { "▸ " } else { "▾ " }, style);
     let label_x = start.saturating_add(2);
-    let right_edge = rect.right().saturating_sub(u16::from(alert));
+    let right_edge = rect.right().saturating_sub(if shortcut { 5 } else { u16::from(alert) });
     let marker = if working { " ●" } else { "" };
     let text = crate::ui::truncate_end(&format!("{label} {count}{marker}"), right_edge.saturating_sub(label_x) as usize);
     put_text(buffer, label_x, rect.y, right_edge.saturating_sub(label_x), &text, style);
@@ -411,8 +411,12 @@ fn render_factory_group(
         let dot_x = label_x + display_width(&text).saturating_sub(1) as u16;
         put_text(buffer, dot_x, rect.y, 1, "●", Style::default().fg(config.palette.peach));
     }
+    if shortcut {
+        put_text(buffer, rect.right().saturating_sub(5), rect.y, 5, "⌘1..9", style);
+    }
     if alert {
-        put_text(buffer, rect.right().saturating_sub(1), rect.y, 1, "!", Style::default().fg(config.palette.red));
+        let x = rect.right().saturating_sub(if shortcut { 6 } else { 1 });
+        put_text(buffer, x, rect.y, 1, "!", Style::default().fg(config.palette.red));
     }
     hits.tree_headers.push(TreeHeaderHit {
         rect, chevron, plus: Rect::default(), pin: Rect::default(), group: None,
