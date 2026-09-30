@@ -116,6 +116,8 @@ pub(super) struct ShellHitMap {
     pub(super) agent_sort_toggle: Rect,
     pub(super) agent_usage: Rect,
     pub(super) factory_usage_urls: Vec<(Rect, String)>,
+    pub(super) factory_sections: Vec<FactorySectionHit>,
+    pub(super) factory_show_all: Vec<(Rect, String)>,
     /// Disclosure regions for collapsible ownership / orchestrator groups.
     pub(super) agent_groups: Vec<AgentGroupHit>,
     pub(super) tree_headers: Vec<TreeHeaderHit>,
@@ -581,10 +583,23 @@ pub(super) struct ClientWorktreeRemoveOverlay {
     pub(super) force_confirmation: bool,
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct FactorySectionHit {
+    pub(super) rect: Rect,
+    pub(super) label_rect: Rect,
+    pub(super) button: Rect,
+    pub(super) workspace_id: String,
+    pub(super) label: &'static str,
+    pub(super) collapsed: bool,
+    pub(super) focused: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ClientContextMenuAction {
     SetAgentSort(crate::config::AgentPanelSortConfig),
     MenuSeparator,
+    ToggleFactorySectionFocus,
+    ToggleFactorySectionCollapse,
     ToggleTreeSpaces,
     ToggleTreeTabs,
     ToggleTreeAgents,
@@ -618,6 +633,7 @@ pub(super) enum ClientContextMenuAction {
 
 #[derive(Debug)]
 pub(super) enum ClientContextMenuTarget {
+    FactorySection(FactorySectionHit),
     /// The agents-panel view picker: sort, tree layers, and hidden spaces.
     SidebarView {
         sort: crate::config::AgentPanelSortConfig,

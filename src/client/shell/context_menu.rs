@@ -9,6 +9,10 @@ impl ClientContextMenuOverlay {
             action,
         };
         match &self.target {
+            ClientContextMenuTarget::FactorySection(hit) => vec![
+                item(&if hit.focused { "Show all sections".to_owned() } else { format!("Focus {}", hit.label) }, Action::ToggleFactorySectionFocus),
+                item(if hit.collapsed { "Expand" } else { "Collapse" }, Action::ToggleFactorySectionCollapse),
+            ],
             ClientContextMenuTarget::SidebarView {
                 sort,
                 show_spaces,
@@ -528,6 +532,11 @@ impl ClientShellState {
         };
         let menu_position = (menu.x, menu.y);
         match menu.target {
+            ClientContextMenuTarget::FactorySection(hit) => match action {
+                ClientContextMenuAction::ToggleFactorySectionFocus => self.change_factory_section(&hit, true, outcome),
+                ClientContextMenuAction::ToggleFactorySectionCollapse => self.change_factory_section(&hit, false, outcome),
+                _ => {}
+            },
             ClientContextMenuTarget::SidebarView { .. } => {
                 self.activate_sidebar_view_action(action, outcome)
             }
