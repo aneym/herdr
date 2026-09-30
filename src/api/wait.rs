@@ -297,7 +297,7 @@ pub(super) fn prompt_agent(
         };
     }
     if agent_wait_matches(&initial, &until, None) {
-        return agent_prompt_success(request_id, initial).map(Some);
+        return agent_prompt_success(request_id, initial, &prompt_response).map(Some);
     }
 
     let Some(outcome) = wait_for_resolved_agent(
@@ -326,7 +326,7 @@ pub(super) fn prompt_agent(
         AgentWaitOutcome::Matched(agent) => *agent,
         AgentWaitOutcome::Response(response) => return Ok(Some(response)),
     };
-    agent_prompt_success(request_id, agent).map(Some)
+    agent_prompt_success(request_id, agent, &prompt_response).map(Some)
 }
 
 fn remaining_timeout_ms(total_ms: Option<u64>, started: std::time::Instant) -> Option<u64> {
@@ -339,11 +339,16 @@ fn remaining_timeout_ms(total_ms: Option<u64>, started: std::time::Instant) -> O
 fn agent_prompt_success(
     request_id: String,
     agent: crate::api::schema::AgentInfo,
+    prompt_response: &str,
 ) -> std::io::Result<String> {
+    let metadata: serde_json::Value =
+        serde_json::from_str(prompt_response).map_err(std::io::Error::other)?;
     serde_json::to_string(&SuccessResponse {
         id: request_id,
         result: ResponseResult::AgentPrompted {
             agent,
+            id: metadata["result"]["id"].as_str().unwrap_or_default().into(),
+            state: crate::api::schema::PaneSendState::Delivered,
             queued: false,
             dropped: false,
             queue_position: None,

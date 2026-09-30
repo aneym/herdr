@@ -2939,13 +2939,18 @@
               "default": false,
               "type": "boolean"
             },
+            "id": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "pane_id": {
+              "default": "",
               "type": "string"
             }
           },
-          "required": [
-            "pane_id"
-          ],
           "type": "object"
         },
         "PaneReadParams": {
@@ -9049,6 +9054,16 @@
         },
         "PaneQueuedSend": {
           "properties": {
+            "ack_timeout": {
+              "type": "boolean"
+            },
+            "acked_at": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
             "age_secs": {
               "format": "double",
               "type": "number"
@@ -9058,11 +9073,50 @@
               "minimum": 0,
               "type": "integer"
             },
+            "delivered_at": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
             "method": {
               "type": "string"
+            },
+            "pane": {
+              "type": "string"
+            },
+            "pgid": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "queued_at": {
+              "format": "double",
+              "type": "number"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "state": {
+              "$ref": "#/schemas/success_response/$defs/PaneSendState"
             }
           },
           "required": [
+            "id",
+            "pane",
+            "state",
+            "queued_at",
+            "ack_timeout",
             "method",
             "byte_length",
             "age_secs"
@@ -9173,6 +9227,16 @@
             "viewport_rows"
           ],
           "type": "object"
+        },
+        "PaneSendState": {
+          "enum": [
+            "queued",
+            "delivered",
+            "acked",
+            "dropped",
+            "stale_session"
+          ],
+          "type": "string"
         },
         "PaneSwapReason": {
           "enum": [
@@ -10273,6 +10337,9 @@
                   "default": false,
                   "type": "boolean"
                 },
+                "id": {
+                  "type": "string"
+                },
                 "queue_position": {
                   "format": "uint",
                   "minimum": 0,
@@ -10285,6 +10352,9 @@
                   "default": false,
                   "type": "boolean"
                 },
+                "state": {
+                  "$ref": "#/schemas/success_response/$defs/PaneSendState"
+                },
                 "type": {
                   "const": "agent_prompted",
                   "type": "string"
@@ -10292,7 +10362,9 @@
               },
               "required": [
                 "type",
-                "agent"
+                "agent",
+                "id",
+                "state"
               ],
               "type": "object"
             },
@@ -11261,6 +11333,12 @@
             },
             {
               "properties": {
+                "recent": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/PaneQueuedSend"
+                  },
+                  "type": "array"
+                },
                 "sends": {
                   "items": {
                     "$ref": "#/schemas/success_response/$defs/PaneQueuedSend"
@@ -11274,7 +11352,8 @@
               },
               "required": [
                 "type",
-                "sends"
+                "sends",
+                "recent"
               ],
               "type": "object"
             },

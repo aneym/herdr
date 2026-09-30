@@ -693,6 +693,7 @@ mod polite_send_tests {
             let queue = request(
                 &mut app,
                 Method::PaneQueue(PaneQueueParams {
+                    id: None,
                     pane_id: public.clone(),
                     flush: false,
                 }),
@@ -760,6 +761,7 @@ mod polite_send_tests {
                 let response = request(
                     &mut app,
                     Method::PaneQueue(PaneQueueParams {
+                        id: None,
                         pane_id: public,
                         flush: true,
                     }),

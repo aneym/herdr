@@ -1737,22 +1737,49 @@ fn print_pane_help() {
 }
 
 fn pane_queue(args: &[String]) -> std::io::Result<i32> {
-    if args.is_empty()
-        || args[1..]
-            .iter()
-            .any(|arg| arg != "--flush" && arg != "--json")
-    {
-        eprintln!("usage: herdr pane queue <pane> [--flush] [--json]");
-        return Ok(2);
-    }
+    let params = match pane_queue_params(args) {
+        Some(params) => params,
+        None => {
+            eprintln!(
+                "usage: herdr pane queue (--pane <pane> | --id <qid> | <pane>) [--flush] [--json]"
+            );
+            return Ok(2);
+        }
+    };
     let response = super::send_request(&Request {
         id: "cli:request".into(),
-        method: Method::PaneQueue(crate::api::schema::PaneQueueParams {
-            pane_id: super::normalize_pane_id(&args[0]),
-            flush: args.iter().any(|arg| arg == "--flush"),
-        }),
+        method: Method::PaneQueue(params),
     })?;
     super::print_response(&response)
+}
+
+fn pane_queue_params(args: &[String]) -> Option<crate::api::schema::PaneQueueParams> {
+    let mut pane_id = None;
+    let mut id = None;
+    let mut flush = false;
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--pane" if pane_id.is_none() && id.is_none() => pane_id = Some(args.next()?.clone()),
+            "--id" if pane_id.is_none() && id.is_none() => id = Some(args.next()?.clone()),
+            "--flush" => flush = true,
+            "--json" => {}
+            value if !value.starts_with('-') && pane_id.is_none() && id.is_none() => {
+                pane_id = Some(value.into())
+            }
+            _ => return None,
+        }
+    }
+    if pane_id.is_none() && (id.is_none() || flush) {
+        return None;
+    }
+    Some(crate::api::schema::PaneQueueParams {
+        pane_id: pane_id
+            .map(|pane| super::normalize_pane_id(&pane))
+            .unwrap_or_default(),
+        id,
+        flush,
+    })
 }
 
 fn send_pane_request(method: Method, json: bool) -> std::io::Result<i32> {
@@ -1788,6 +1815,19 @@ fn pane_tty_repair(args: &[String]) -> std::io::Result<i32> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn polite_queue_cli_accepts_id_and_explicit_pane() {
+        let params =
+            super::pane_queue_params(&["--id".into(), "q42".into(), "--json".into()]).unwrap();
+        assert_eq!(params.id.as_deref(), Some("q42"));
+        assert!(params.pane_id.is_empty());
+        let params = super::pane_queue_params(&["--pane".into(), "p7".into()]).unwrap();
+        assert_eq!(params.pane_id, "p7");
+        assert!(
+            super::pane_queue_params(&["--id".into(), "q42".into(), "--flush".into()]).is_none()
+        );
+    }
+
     #[test]
     fn polite_send_cli_flags_do_not_reach_pane_text() {
         let args = ["p1", "hello", "--if-idle", "--human", "--json"].map(str::to_owned);

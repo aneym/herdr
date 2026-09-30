@@ -1497,13 +1497,16 @@ impl PaneRuntimeIo {
                 let sender = sender.clone();
                 let (reply_tx, reply_rx) = std::sync::mpsc::channel();
                 std::thread::spawn(move || {
-                    let result = sender
-                        .try_send(text)
-                        .map_err(std::io::Error::other)
-                        .and_then(|()| {
-                            std::thread::sleep(delay);
-                            sender.try_send(enter).map_err(std::io::Error::other)
-                        });
+                    let result = (|| {
+                        if !text.is_empty() {
+                            sender.try_send(text).map_err(std::io::Error::other)?;
+                        }
+                        std::thread::sleep(delay);
+                        if !enter.is_empty() {
+                            sender.try_send(enter).map_err(std::io::Error::other)?;
+                        }
+                        Ok(())
+                    })();
                     let _ = reply_tx.send(result);
                 });
                 Ok(reply_rx)
@@ -3700,6 +3703,55 @@ impl PaneRuntime {
             .ok()
             .and_then(|cwd| cwd.clone())
             .or_else(|| self.reported_cwd.lock().ok().and_then(|cwd| cwd.clone()))
+    }
+
+    pub(crate) fn foreground_process_group_id(&self) -> Option<u32> {
+        #[cfg(unix)]
+        {
+            self.io.foreground_process_group_id()
+        }
+        #[cfg(not(unix))]
+        {
+            self.child_pid()
+        }
+    }
+
+    pub(crate) fn queue_tracked_submission(
+        &self,
+        text: Bytes,
+        enter: Bytes,
+        delay: std::time::Duration,
+        deadline: Option<std::time::Instant>,
+        id: String,
+    ) -> std::io::Result<std::sync::mpsc::Receiver<std::io::Result<()>>> {
+        #[cfg(unix)]
+        #[allow(irrefutable_let_patterns)]
+        if let PaneRuntimeIo::Actor(actor) = &self.io {
+            let _ = deadline;
+            return actor.queue_tracked_submission(text, enter, delay, Some(id));
+        }
+        #[cfg(test)]
+        if let PaneRuntimeIo::TestChannel { sender, .. } = &self.io {
+            if enter.is_empty() && delay.is_zero() {
+                if !text.is_empty() {
+                    sender.try_send(text).map_err(std::io::Error::other)?;
+                }
+                crate::terminal::polite_send::submission_delivered(&id, true);
+                let (tx, rx) = std::sync::mpsc::channel();
+                let _ = tx.send(Ok(()));
+                return Ok(rx);
+            }
+        }
+        let receiver = self.queue_user_input_submission(text, enter, delay, deadline)?;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let result = receiver
+                .recv()
+                .unwrap_or_else(|_| Err(std::io::Error::other("pty actor closed")));
+            crate::terminal::polite_send::submission_delivered(&id, result.is_ok());
+            let _ = tx.send(result);
+        });
+        Ok(rx)
     }
 
     pub fn child_pid(&self) -> Option<u32> {

@@ -27,14 +27,12 @@ pub(crate) fn encode_send_accepted(
         result: ResponseResult::Ok {},
     })
     .unwrap();
-    let position = match outcome {
-        crate::terminal::polite_send::SendOutcome::Queued(position) => Some(position),
-        _ => None,
-    };
+    value["result"]["id"] = outcome.id.into();
+    value["result"]["state"] = serde_json::to_value(&outcome.state).unwrap();
     value["result"]["dropped"] =
-        matches!(outcome, crate::terminal::polite_send::SendOutcome::Dropped).into();
-    value["result"]["queued"] = position.is_some().into();
-    if let Some(position) = position {
+        (outcome.state == crate::api::schema::PaneSendState::Dropped).into();
+    value["result"]["queued"] = outcome.position.is_some().into();
+    if let Some(position) = outcome.position {
         value["result"]["queue_position"] = position.into();
     }
     value.to_string()

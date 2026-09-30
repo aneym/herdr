@@ -90,6 +90,7 @@ enum PtyIoDataCommand {
         enter: Bytes,
         delay: Duration,
         reply: std_mpsc::Sender<std::io::Result<()>>,
+        receipt_id: Option<String>,
     },
 }
 
@@ -172,6 +173,16 @@ impl PtyIoActorHandle {
         enter: Bytes,
         delay: Duration,
     ) -> std::io::Result<std_mpsc::Receiver<std::io::Result<()>>> {
+        self.queue_tracked_submission(text, enter, delay, None)
+    }
+
+    pub(crate) fn queue_tracked_submission(
+        &self,
+        text: Bytes,
+        enter: Bytes,
+        delay: Duration,
+        receipt_id: Option<String>,
+    ) -> std::io::Result<std_mpsc::Receiver<std::io::Result<()>>> {
         let user_writes = self
             .user_writes
             .lock()
@@ -189,6 +200,7 @@ impl PtyIoActorHandle {
                 enter,
                 delay,
                 reply: reply_tx,
+                receipt_id,
             })
             .map_err(|err| match err {
                 mpsc::error::TrySendError::Full(_) => {
@@ -530,6 +542,7 @@ struct ActiveSubmission {
     delay: Duration,
     phase: SubmissionPhase,
     reply: std_mpsc::Sender<std::io::Result<()>>,
+    receipt_id: Option<String>,
 }
 
 #[derive(Debug)]
@@ -735,6 +748,7 @@ impl PtyIoActorRunner {
                 enter,
                 delay,
                 reply,
+                receipt_id,
             } => {
                 if self.state == ActorState::Running {
                     let phase = if text.is_empty() {
@@ -748,8 +762,12 @@ impl PtyIoActorRunner {
                         delay,
                         phase,
                         reply,
+                        receipt_id,
                     });
                 } else {
+                    if let Some(id) = &receipt_id {
+                        crate::terminal::polite_send::submission_delivered(id, false);
+                    }
                     let _ = reply.send(Err(std::io::Error::new(
                         std::io::ErrorKind::BrokenPipe,
                         "pty actor is not accepting input",
@@ -938,6 +956,11 @@ impl PtyIoActorRunner {
                 false
             }
             Ok(n) => {
+                crate::terminal::polite_send::observe_output(
+                    self.pane_id,
+                    crate::platform::foreground_process_group_id_for_tty_fd(self.file.as_raw_fd()),
+                    Instant::now(),
+                );
                 let response_order = Arc::clone(&self.response_order);
                 let _order = response_order
                     .lock()
@@ -985,6 +1008,9 @@ impl PtyIoActorRunner {
                     return;
                 };
                 debug_assert!(matches!(submission.phase, SubmissionPhase::WritingEnter));
+                if let Some(id) = &submission.receipt_id {
+                    crate::terminal::polite_send::submission_delivered(id, true);
+                }
                 let _ = submission.reply.send(Ok(()));
             }
         }
@@ -999,10 +1025,13 @@ impl PtyIoActorRunner {
         else {
             return;
         };
-        if Instant::now() >= *deadline {
+        if Instant::now() >= *deadline && self.pending_writes.is_empty() {
             let enter = enter.clone();
             if enter.is_empty() {
                 let submission = self.active_submission.take().unwrap();
+                if let Some(id) = &submission.receipt_id {
+                    crate::terminal::polite_send::submission_delivered(id, true);
+                }
                 let _ = submission.reply.send(Ok(()));
             } else {
                 self.active_submission.as_mut().unwrap().phase = SubmissionPhase::WritingEnter;
@@ -1028,6 +1057,9 @@ impl PtyIoActorRunner {
 
     fn fail_active_submission(&mut self, err: std::io::Error) {
         if let Some(submission) = self.active_submission.take() {
+            if let Some(id) = &submission.receipt_id {
+                crate::terminal::polite_send::submission_delivered(id, false);
+            }
             let _ = submission.reply.send(Err(err));
         }
     }
@@ -1036,7 +1068,13 @@ impl PtyIoActorRunner {
         self.data_rx.close();
         self.fail_active_submission(input_submission_closed_error());
         while let Some(command) = self.data_rx.blocking_recv() {
-            if let PtyIoDataCommand::SubmitUserInput { reply, .. } = command {
+            if let PtyIoDataCommand::SubmitUserInput {
+                reply, receipt_id, ..
+            } = command
+            {
+                if let Some(id) = &receipt_id {
+                    crate::terminal::polite_send::submission_delivered(id, false);
+                }
                 let _ = reply.send(Err(input_submission_closed_error()));
             }
         }

@@ -722,13 +722,35 @@ pub struct PaneLinkRegion {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PaneQueueParams {
+    #[serde(default)]
     pub pane_id: String,
+    #[serde(default)]
+    pub id: Option<String>,
     #[serde(default)]
     pub flush: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PaneSendState {
+    Queued,
+    Delivered,
+    Acked,
+    Dropped,
+    StaleSession,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PaneQueuedSend {
+    pub id: String,
+    pub pane: String,
+    pub pgid: Option<u32>,
+    pub state: PaneSendState,
+    pub reason: Option<String>,
+    pub queued_at: f64,
+    pub delivered_at: Option<f64>,
+    pub acked_at: Option<f64>,
+    pub ack_timeout: bool,
     pub method: String,
     pub byte_length: usize,
     pub age_secs: f64,
