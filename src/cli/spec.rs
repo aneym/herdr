@@ -664,7 +664,11 @@ fn pane_command() -> Command {
                 .arg(flag("no-focus")),
         )
         .subcommand(id_command("close", "pane_id", "Close a pane"))
-        .subcommand(Command::new("queue").about("Inspect or flush held sends").arg(required("pane_id", "PANE_ID")).arg(flag("flush")).arg(flag("json")))
+        .subcommand(Command::new("queue").about("Inspect held sends and recent receipts")
+            .arg(Arg::new("pane_id").value_name("PANE_ID").conflicts_with_all(["pane", "id"]))
+            .arg(option("pane", "PANE_ID").conflicts_with("id"))
+            .arg(option("id", "QID").conflicts_with("flush"))
+            .arg(flag("flush")).arg(flag("json")))
         .subcommand(
             Command::new("send-text")
                 .about("Send literal text to a pane").arg(flag("json"))

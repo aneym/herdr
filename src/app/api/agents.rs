@@ -160,23 +160,18 @@ impl App {
         };
         match self.queue_agent_prompt(request.id, params) {
             Ok((id, agent, completion, position)) => {
-                if !matches!(position, crate::terminal::polite_send::SendOutcome::Sent) {
+                if position.position.is_some()
+                    || position.state == crate::api::schema::PaneSendState::Dropped
+                {
                     let _ = respond_to.send(encode_success(
                         id,
                         ResponseResult::AgentPrompted {
                             agent,
-                            queued: matches!(
-                                position,
-                                crate::terminal::polite_send::SendOutcome::Queued(_)
-                            ),
-                            dropped: matches!(
-                                position,
-                                crate::terminal::polite_send::SendOutcome::Dropped
-                            ),
-                            queue_position: match position {
-                                crate::terminal::polite_send::SendOutcome::Queued(n) => Some(n),
-                                _ => None,
-                            },
+                            queued: position.position.is_some(),
+                            dropped: position.state == crate::api::schema::PaneSendState::Dropped,
+                            queue_position: position.position,
+                            id: position.id,
+                            state: position.state,
                         },
                     ));
                     return true;
@@ -190,6 +185,8 @@ impl App {
                                 queued: false,
                                 dropped: false,
                                 queue_position: None,
+                                id: position.id,
+                                state: crate::api::schema::PaneSendState::Delivered,
                             },
                         ),
                         Ok(Err(err)) if err.kind() == std::io::ErrorKind::TimedOut => {
@@ -640,6 +637,44 @@ mod tests {
             serde_json::from_str::<SuccessResponse>(&after).is_ok(),
             "a live agent must stay reachable by its assigned name: {after}"
         );
+    }
+
+    #[tokio::test]
+    async fn polite_queue_id_api_returns_receipt_without_payload() {
+        let mut app = app_with_agent();
+        app.polite_send_mode = crate::config::PoliteSendConfig::All;
+        let pane = app.state.workspaces[0].tabs[0].root_pane;
+        let (runtime, _rx) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
+        runtime.record_human_text();
+        app.state.insert_test_runtime(pane, runtime);
+        let public = app.public_pane_id(0, pane).unwrap();
+        let response = app.handle_api_request(crate::api::schema::Request {
+            id: "send".into(),
+            method: crate::api::schema::Method::PaneSendText(
+                crate::api::schema::PaneSendTextParams {
+                    pane_id: public.clone(),
+                    text: "never-store-this-payload".into(),
+                    if_idle: false,
+                    human: false,
+                },
+            ),
+        });
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        let qid = response["result"]["id"].as_str().unwrap();
+        assert_eq!(response["result"]["state"], "queued");
+        let response = app.handle_api_request(crate::api::schema::Request {
+            id: "query".into(),
+            method: crate::api::schema::Method::PaneQueue(crate::api::schema::PaneQueueParams {
+                pane_id: String::new(),
+                id: Some(qid.into()),
+                flush: false,
+            }),
+        });
+        assert!(!response.contains("never-store-this-payload"));
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["result"]["recent"].as_array().unwrap().len(), 1);
+        assert_eq!(response["result"]["recent"][0]["id"], qid);
+        assert_eq!(response["result"]["recent"][0]["byte_length"], 24);
     }
 
     #[tokio::test]

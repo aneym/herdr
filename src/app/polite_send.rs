@@ -98,7 +98,42 @@ impl App {
         }
     }
 
+    fn public_queue_receipts(
+        &self,
+        mut items: Vec<crate::api::schema::PaneQueuedSend>,
+    ) -> Vec<crate::api::schema::PaneQueuedSend> {
+        for item in &mut items {
+            if let Some(raw) = item
+                .pane
+                .strip_prefix('p')
+                .and_then(|raw| raw.parse::<u32>().ok())
+            {
+                let pane = PaneId::from_raw(raw);
+                if let Some((ws_idx, _)) = self.find_pane(pane) {
+                    if let Some(public) = self.public_pane_id(ws_idx, pane) {
+                        item.pane = public;
+                    }
+                }
+            }
+        }
+        items
+    }
+
     pub(super) fn handle_pane_queue(&self, id: String, params: PaneQueueParams) -> String {
+        if let Some(qid) = &params.id {
+            let recent = self
+                .public_queue_receipts(crate::terminal::polite_send::recent_sends(None, Some(qid)));
+            if recent.is_empty() {
+                return encode_error(id, "queue_item_not_found", "queue item not found");
+            }
+            return encode_success(
+                id,
+                ResponseResult::PaneQueue {
+                    sends: vec![],
+                    recent,
+                },
+            );
+        }
         let Some((ws_idx, pane_id)) = self.parse_pane_id(&params.pane_id) else {
             return encode_error(id, "pane_not_found", "pane not found");
         };
@@ -118,7 +153,8 @@ impl App {
         encode_success(
             id,
             ResponseResult::PaneQueue {
-                sends: runtime.polite_queue(),
+                sends: self.public_queue_receipts(runtime.held_polite_sends()),
+                recent: self.public_queue_receipts(runtime.polite_queue()),
             },
         )
     }

@@ -1320,6 +1320,10 @@
         },
         "AgentPromptParams": {
           "properties": {
+            "if_idle": {
+              "default": false,
+              "type": "boolean"
+            },
             "target": {
               "type": "string"
             },
@@ -2929,6 +2933,26 @@
           },
           "type": "object"
         },
+        "PaneQueueParams": {
+          "properties": {
+            "flush": {
+              "default": false,
+              "type": "boolean"
+            },
+            "id": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pane_id": {
+              "default": "",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
         "PaneReadParams": {
           "properties": {
             "format": {
@@ -3262,6 +3286,10 @@
         },
         "PaneSendInputParams": {
           "properties": {
+            "if_idle": {
+              "default": false,
+              "type": "boolean"
+            },
             "keys": {
               "items": {
                 "type": "string"
@@ -3282,6 +3310,14 @@
         },
         "PaneSendKeysParams": {
           "properties": {
+            "human": {
+              "default": false,
+              "type": "boolean"
+            },
+            "if_idle": {
+              "default": false,
+              "type": "boolean"
+            },
             "keys": {
               "items": {
                 "type": "string"
@@ -3300,6 +3336,14 @@
         },
         "PaneSendTextParams": {
           "properties": {
+            "human": {
+              "default": false,
+              "type": "boolean"
+            },
+            "if_idle": {
+              "default": false,
+              "type": "boolean"
+            },
             "pane_id": {
               "type": "string"
             },
@@ -6264,6 +6308,22 @@
         {
           "properties": {
             "method": {
+              "const": "pane.queue",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PaneQueueParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "pane.send_keys",
               "type": "string"
             },
@@ -8919,6 +8979,77 @@
           ],
           "type": "object"
         },
+        "PaneQueuedSend": {
+          "properties": {
+            "ack_timeout": {
+              "type": "boolean"
+            },
+            "acked_at": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "age_secs": {
+              "format": "double",
+              "type": "number"
+            },
+            "byte_length": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "delivered_at": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "type": "string"
+            },
+            "pane": {
+              "type": "string"
+            },
+            "pgid": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "queued_at": {
+              "format": "double",
+              "type": "number"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "state": {
+              "$ref": "#/schemas/success_response/$defs/PaneSendState"
+            }
+          },
+          "required": [
+            "id",
+            "pane",
+            "state",
+            "queued_at",
+            "ack_timeout",
+            "method",
+            "byte_length",
+            "age_secs"
+          ],
+          "type": "object"
+        },
         "PaneReadResult": {
           "properties": {
             "format": {
@@ -9023,6 +9154,16 @@
             "viewport_rows"
           ],
           "type": "object"
+        },
+        "PaneSendState": {
+          "enum": [
+            "queued",
+            "delivered",
+            "acked",
+            "dropped",
+            "stale_session"
+          ],
+          "type": "string"
         },
         "PaneSwapReason": {
           "enum": [
@@ -10081,6 +10222,28 @@
                 "agent": {
                   "$ref": "#/schemas/success_response/$defs/AgentInfo"
                 },
+                "dropped": {
+                  "default": false,
+                  "type": "boolean"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "queue_position": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "queued": {
+                  "default": false,
+                  "type": "boolean"
+                },
+                "state": {
+                  "$ref": "#/schemas/success_response/$defs/PaneSendState"
+                },
                 "type": {
                   "const": "agent_prompted",
                   "type": "string"
@@ -10088,7 +10251,9 @@
               },
               "required": [
                 "type",
-                "agent"
+                "agent",
+                "id",
+                "state"
               ],
               "type": "object"
             },
@@ -11036,6 +11201,32 @@
                 "type",
                 "active",
                 "projection_revision"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "recent": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/PaneQueuedSend"
+                  },
+                  "type": "array"
+                },
+                "sends": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/PaneQueuedSend"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "pane_queue",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "sends",
+                "recent"
               ],
               "type": "object"
             },

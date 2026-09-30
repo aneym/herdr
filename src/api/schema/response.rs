@@ -107,6 +107,8 @@ pub enum ResponseResult {
     },
     AgentPrompted {
         agent: AgentInfo,
+        id: String,
+        state: super::panes::PaneSendState,
         #[serde(default)]
         queued: bool,
         #[serde(default)]
@@ -295,6 +297,7 @@ pub enum ResponseResult {
     },
     PaneQueue {
         sends: Vec<super::panes::PaneQueuedSend>,
+        recent: Vec<super::panes::PaneQueuedSend>,
     },
     Ok {},
 }
