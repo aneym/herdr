@@ -277,16 +277,16 @@ pub(super) enum AgentPanelListEntry {
 pub(super) enum FactoryGroupKind {
     Automations,
     Parked,
-    Idle,
+    Closed,
     Background,
 }
 
 impl FactoryGroupKind {
     pub(super) fn label(self) -> &'static str {
         match self {
-            Self::Automations => "automations",
+            Self::Automations => "services",
             Self::Parked => "parked",
-            Self::Idle => "idle",
+            Self::Closed => "closed",
             Self::Background => "background",
         }
     }
@@ -872,7 +872,7 @@ fn append_factory_space(
     };
     let sectioned = tabs.iter().any(|tab| overlay.tab(&tab.tab_id).is_some_and(|tag| tag.section.is_some()));
     let lane_section = |lane: &crate::protocol::ClientShellTab| {
-        overlay.tab(&lane.tab_id).and_then(|tag| tag.section).unwrap_or(TabSection::Inflight)
+        overlay.tab(&lane.tab_id).and_then(|tag| tag.section).unwrap_or(TabSection::Implementing)
     };
     let orchestrator_lanes = if sectioned {
         lanes.iter().copied().filter(|lane| lane_mode(lane) == TabMode::Active
@@ -1107,7 +1107,7 @@ fn append_factory_space(
                 || grouped_root(&lane.tab_id).is_some_and(|id| member_ids.contains(id.as_str()))
         }).collect::<Vec<_>>();
         let group_ids = group_lanes.iter().map(|lane| lane.tab_id.as_str()).collect::<HashSet<_>>();
-        group_lanes.iter().copied().chain(all_workflows.iter().copied().filter(|workflow| {
+        group_lanes.iter().copied().chain(members.iter().copied().filter(|tab| !group_ids.contains(tab.tab_id.as_str()))).chain(all_workflows.iter().copied().filter(|workflow| {
             parent_for(workflow).is_some_and(|id| group_ids.contains(id))
         })).fold((false, false), |(alert, working), tab| {
             let row = factory_row(snapshot, rows, overlay, tab, indent, false, false);
@@ -1129,58 +1129,34 @@ fn append_factory_space(
     if sectioned {
         let mut first = true;
         for (section, label) in [
+            (TabSection::Reviewing, "REVIEWING"),
             (TabSection::Scoping, "SCOPING"),
-            (TabSection::Inflight, "IN FLIGHT"),
-            (TabSection::Waiting, "WAITING"),
-            (TabSection::Idle, "IDLE"),
+            (TabSection::Implementing, "IMPLEMENTING"),
+            (TabSection::Monitoring, "MONITORING"),
         ] {
             let members = lanes.iter().copied().filter(|lane| lane_mode(lane) == TabMode::Active
                 && grouped_root(&lane.tab_id).is_none() && lane_section(lane) == section)
                 .collect::<Vec<_>>();
-            if members.is_empty() && (section != TabSection::Inflight
-                || (root_workflows.is_empty() && ordinary.is_empty())) {
+            if members.is_empty() && (section != TabSection::Implementing || ordinary.is_empty()) {
                 continue;
             }
-            if section == TabSection::Idle {
-                let (alert, working) = group_state(&members);
-                let collapsed = !tree.factory_idle_expanded.contains(workspace_id);
-                out.push(AgentPanelListEntry::FactoryBackground {
-                    kind: FactoryGroupKind::Idle, workspace_id: workspace_id.to_owned(),
-                    count: members.len(), collapsed, indent, alert, working, shortcut: first,
-                });
-                if !collapsed {
-                    for lane in members {
-                        push_lane(out, lane, indent.saturating_add(1), false);
-                    }
-                }
+            let right = if section == TabSection::Reviewing {
+                members.len().to_string()
+            } else if first {
+                first = false;
+                "⌘1..9".to_owned()
             } else {
-                out.push(AgentPanelListEntry::FactorySection {
-                    label, right: if first { "⌘1..9".to_owned() } else { String::new() }, indent,
-                });
-                for lane in members {
-                    let start = out.len();
-                    push_lane(out, lane, indent, false);
-                    if section == TabSection::Scoping {
-                        for entry in &mut out[start..] {
-                            if let AgentPanelListEntry::FactoryTab(row) = entry {
-                                if row.header.label.get(..9).is_some_and(|prefix| prefix.eq_ignore_ascii_case("[scoping]"))
-                                    && row.header.label.as_bytes().get(9) == Some(&b' ') {
-                                    row.header.label = row.header.label[10..].to_owned();
-                                }
-                            }
-                        }
-                    }
-                }
-                if section == TabSection::Inflight {
-                    for workflow in &root_workflows {
-                        out.push(factory_row(snapshot, rows, overlay, workflow, indent, false, false));
-                    }
-                    for tab in &ordinary {
-                        out.push(factory_row(snapshot, rows, overlay, tab, indent, false, false));
-                    }
+                String::new()
+            };
+            out.push(AgentPanelListEntry::FactorySection { label, right, indent });
+            for lane in members {
+                push_lane(out, lane, indent, false);
+            }
+            if section == TabSection::Implementing {
+                for tab in &ordinary {
+                    out.push(factory_row(snapshot, rows, overlay, tab, indent, false, false));
                 }
             }
-            first = false;
         }
     } else if lanes.iter().any(|lane| lane_mode(lane) == TabMode::Active && grouped_root(&lane.tab_id).is_none())
         || !root_workflows.is_empty() || !ordinary.is_empty() {
@@ -1194,7 +1170,7 @@ fn append_factory_space(
                 push_lane(out, lane, indent, false);
             }
         }
-        for workflow in root_workflows {
+        for workflow in &root_workflows {
             out.push(factory_row(snapshot, rows, overlay, workflow, indent, false, false));
         }
         for tab in ordinary {
@@ -1204,21 +1180,35 @@ fn append_factory_space(
     for (mode, group, expanded) in [
         (TabMode::Auto, FactoryGroupKind::Automations, &tree.factory_auto_expanded),
         (TabMode::Parked, FactoryGroupKind::Parked, &tree.factory_parked_expanded),
+        (TabMode::Active, FactoryGroupKind::Closed, &tree.factory_idle_expanded),
     ] {
-        let members = lanes.iter().copied().filter(|lane| lane_mode(lane) == mode).collect::<Vec<_>>();
-        if members.is_empty() {
+        let members = lanes.iter().copied().filter(|lane| lane_mode(lane) == mode
+            && (group != FactoryGroupKind::Closed || (sectioned
+                && grouped_root(&lane.tab_id).is_none() && lane_section(lane) == TabSection::Closed)))
+            .collect::<Vec<_>>();
+        let roots = if sectioned && group == FactoryGroupKind::Automations {
+            root_workflows.as_slice()
+        } else {
+            &[]
+        };
+        if members.is_empty() && roots.is_empty() {
             continue;
         }
-        let (alert, working) = group_state(&members);
+        let mut state_members = members.clone();
+        state_members.extend_from_slice(roots);
+        let (alert, working) = group_state(&state_members);
         let working = group == FactoryGroupKind::Automations && working;
         let collapsed = !expanded.contains(workspace_id);
         out.push(AgentPanelListEntry::FactoryBackground {
-            kind: group, workspace_id: workspace_id.to_owned(), count: members.len(),
+            kind: group, workspace_id: workspace_id.to_owned(), count: members.len() + roots.len(),
             collapsed, indent, alert, working, shortcut: false,
         });
         if !collapsed {
             for lane in members {
                 push_lane(out, lane, indent.saturating_add(1), true);
+            }
+            for workflow in roots {
+                out.push(factory_row(snapshot, rows, overlay, workflow, indent.saturating_add(1), false, false));
             }
         }
     }
@@ -1371,6 +1361,18 @@ fn factory_row(
                     .unwrap_or_else(|| tab.label.clone());
                 if tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Workflow) {
                     name.strip_prefix("wf ").unwrap_or(&name).to_owned()
+                } else if tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Lane) {
+                    let name = if name.get(..10).is_some_and(|prefix| prefix.eq_ignore_ascii_case("[scoping] ")) {
+                        &name[10..]
+                    } else {
+                        &name
+                    };
+                    let name = match name.rsplit_once(" · ") {
+                        Some((label, stage)) if ["scoping", "implementing", "reviewing", "monitoring", "closed"]
+                            .iter().any(|candidate| stage.eq_ignore_ascii_case(candidate)) => label,
+                        _ => name,
+                    };
+                    name.to_owned()
                 } else {
                     name
                 }

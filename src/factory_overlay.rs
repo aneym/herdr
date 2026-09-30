@@ -106,9 +106,10 @@ impl Attention {
 pub enum TabSection {
     Orchestrator,
     Scoping,
-    Inflight,
-    Waiting,
-    Idle,
+    Implementing,
+    Reviewing,
+    Monitoring,
+    Closed,
 }
 
 fn deserialize_section<'de, D: serde::Deserializer<'de>>(
@@ -118,9 +119,10 @@ fn deserialize_section<'de, D: serde::Deserializer<'de>>(
     Ok(match value.as_deref() {
         Some("orchestrator") => Some(TabSection::Orchestrator),
         Some("scoping") => Some(TabSection::Scoping),
-        Some("inflight") => Some(TabSection::Inflight),
-        Some("waiting") => Some(TabSection::Waiting),
-        Some("idle") => Some(TabSection::Idle),
+        Some("implementing" | "inflight" | "idle") => Some(TabSection::Implementing),
+        Some("reviewing" | "waiting") => Some(TabSection::Reviewing),
+        Some("monitoring") => Some(TabSection::Monitoring),
+        Some("closed") => Some(TabSection::Closed),
         _ => None,
     })
 }
@@ -294,6 +296,26 @@ impl FactoryOverlay {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stage_sections_accept_current_and_legacy_writer_values() {
+        for (value, expected) in [
+            ("orchestrator", Some(TabSection::Orchestrator)),
+            ("scoping", Some(TabSection::Scoping)),
+            ("implementing", Some(TabSection::Implementing)),
+            ("reviewing", Some(TabSection::Reviewing)),
+            ("monitoring", Some(TabSection::Monitoring)),
+            ("closed", Some(TabSection::Closed)),
+            ("inflight", Some(TabSection::Implementing)),
+            ("waiting", Some(TabSection::Reviewing)),
+            ("idle", Some(TabSection::Implementing)),
+            ("bogus", None),
+        ] {
+            let json = format!(r#"{{"version":1,"tabs":{{"lane":{{"kind":"lane","section":"{value}"}}}}}}"#);
+            let overlay = parse(json.as_bytes()).unwrap();
+            assert_eq!(overlay.tabs["lane"].section, expected, "{value}");
+        }
+    }
 
     #[test]
     fn parses_a_minimal_document() {

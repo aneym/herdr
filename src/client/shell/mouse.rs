@@ -2680,11 +2680,11 @@ impl ClientShellState {
         let tab_id = hit.tab_id.clone();
         if chevron || key.starts_with("factory-background:") {
             let tree = self.tree_chrome_mut();
-            if let Some(workspace_id) = key.strip_prefix("factory-background:automations:") {
+            if let Some(workspace_id) = key.strip_prefix("factory-background:services:") {
                 super::tree::ClientTreeChrome::toggle(&mut tree.factory_auto_expanded, workspace_id.to_owned());
             } else if let Some(workspace_id) = key.strip_prefix("factory-background:parked:") {
                 super::tree::ClientTreeChrome::toggle(&mut tree.factory_parked_expanded, workspace_id.to_owned());
-            } else if let Some(workspace_id) = key.strip_prefix("factory-background:idle:") {
+            } else if let Some(workspace_id) = key.strip_prefix("factory-background:closed:") {
                 super::tree::ClientTreeChrome::toggle(&mut tree.factory_idle_expanded, workspace_id.to_owned());
             } else if let Some(workspace_id) = key.strip_prefix("factory-background:") {
                 super::tree::ClientTreeChrome::toggle(&mut tree.factory_background_expanded, workspace_id.to_owned());

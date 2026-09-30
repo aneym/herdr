@@ -780,12 +780,12 @@ fn parked_and_automated_lanes_fold_separately_and_keep_asks_visible() {
     overlay.tabs.get_mut("lane-b").unwrap().mode = TabMode::Auto;
     snapshot.tabs.iter_mut().find(|tab| tab.tab_id == "lane-b").unwrap().agent_status = AgentStatus::Working;
     let (rows, hits, buffer) = rendered_factory_rows(&snapshot, &overlay);
-    let auto = hits.tree_headers.iter().find(|hit| hit.key == "factory-background:automations:ws_1").unwrap();
+    let auto = hits.tree_headers.iter().find(|hit| hit.key == "factory-background:services:ws_1").unwrap();
     let parked = hits.tree_headers.iter().find(|hit| hit.key == "factory-background:parked:ws_1").unwrap();
     let lane = hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap();
     assert!(lane.rect.y < auto.rect.y && auto.rect.y < parked.rect.y);
     assert!(rows[lane.rect.y as usize].contains("lane-a"));
-    assert!(rows[auto.rect.y as usize].contains("automations 1"));
+    assert!(rows[auto.rect.y as usize].contains("services 1"));
     assert!(rows[parked.rect.y as usize].contains("parked 1"));
     assert!(!rows.iter().any(|row| row.contains("noah sdr") || row.contains("lane-b")));
     assert!(rows[parked.rect.y as usize].ends_with('!'));
@@ -795,7 +795,7 @@ fn parked_and_automated_lanes_fold_separately_and_keep_asks_visible() {
     state.config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
     state.hits = hits;
     state.last_composed_size = Some((120, 60));
-    for (key, name) in [("automations", "lane-b"), ("parked", "noah sdr")] {
+    for (key, name) in [("services", "lane-b"), ("parked", "noah sdr")] {
         let (rows, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, state.tree_chrome_mut());
         let rect = hits.tree_headers.iter().find(|hit| hit.key == format!("factory-background:{key}:ws_1")).unwrap().rect;
         assert!(!rows.iter().any(|row| row.contains(name)));
@@ -887,9 +887,9 @@ fn grouped_workflow_fixture() -> (ClientShellSnapshot, FactoryOverlay) {
 fn collapsed_factory_groups_show_grouped_workflow_alerts_and_work() {
     use crate::factory_overlay::TabSection;
     for (mode, section, label) in [
-        (TabMode::Active, Some(TabSection::Idle), "idle"),
+        (TabMode::Active, Some(TabSection::Closed), "closed"),
         (TabMode::Parked, None, "parked"),
-        (TabMode::Auto, None, "automations"),
+        (TabMode::Auto, None, "services"),
     ] {
         let (mut snapshot, mut overlay) = grouped_workflow_fixture();
         snapshot.tabs.retain(|tab| tab.tab_id != "wf-b");
@@ -919,7 +919,7 @@ fn collapsed_factory_groups_show_grouped_workflow_alerts_and_work() {
             let row = &rows[hit.rect.y as usize];
             assert!(hit.collapsed && row.contains(&format!("{label} 1")), "{rows:?}");
             assert_eq!(row.contains('!'), alert, "{label}, {status:?}, {attention:?}: {row}");
-            assert_eq!(row.contains('●'), working && mode != TabMode::Parked, "{label}, {status:?}: {row}");
+            assert_eq!(row.contains('●'), working && mode == TabMode::Auto, "{label}, {status:?}: {row}");
             assert!(!rows.iter().any(|row| row.contains("wf-a")), "{rows:?}");
         }
     }
@@ -930,14 +930,14 @@ fn collapsed_idle_group_shows_grouped_done_run_attention() {
     use crate::factory_overlay::TabSection;
     let (mut snapshot, mut overlay) = grouped_workflow_fixture();
     snapshot.tabs.retain(|tab| !tab.tab_id.starts_with("wf-"));
-    overlay.tabs.get_mut("lane-a").unwrap().section = Some(TabSection::Idle);
+    overlay.tabs.get_mut("lane-a").unwrap().section = Some(TabSection::Closed);
     let run = &mut overlay.tabs.get_mut("lane-b").unwrap().runs[0];
     run.done = true;
     run.attention = Attention::Act;
     let (rows, hits, _) = rendered_factory_rows(&snapshot, &overlay);
-    let hit = hits.tree_headers.iter().find(|hit| hit.key == "factory-background:idle:ws_1").unwrap();
+    let hit = hits.tree_headers.iter().find(|hit| hit.key == "factory-background:closed:ws_1").unwrap();
     let row = &rows[hit.rect.y as usize];
-    assert!(hit.collapsed && row.contains("idle 1"), "{rows:?}");
+    assert!(hit.collapsed && row.contains("closed 1"), "{rows:?}");
     assert!(row.contains('!'), "done run attention must remain visible: {row}");
     assert!(!row.contains('●'), "done run must not show work: {row}");
 }
@@ -1213,8 +1213,9 @@ fn factory_sections_render_and_idle_click_persists() {
     let (mut snapshot, mut overlay) = fixture();
     snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "orch" | "lane-a" | "lane-b" | "plain-a" | "plain-b"));
     let template = snapshot.tabs.iter().find(|tab| tab.tab_id == "lane-a").unwrap().clone();
-    for (id, section) in [("waiting-lane", Some(TabSection::Waiting)), ("idle-lane", Some(TabSection::Idle)),
-        ("orchestrator-lane", Some(TabSection::Orchestrator)), ("untagged-lane", None)] {
+    for (id, section) in [("waiting-lane", Some(TabSection::Reviewing)), ("idle-lane", Some(TabSection::Closed)),
+        ("orchestrator-lane", Some(TabSection::Orchestrator)), ("untagged-lane", None),
+        ("review-second", Some(TabSection::Reviewing)), ("monitor-lane", Some(TabSection::Monitoring))] {
         let mut tab = template.clone();
         tab.tab_id = id.into();
         tab.label = id.into();
@@ -1223,21 +1224,25 @@ fn factory_sections_render_and_idle_click_persists() {
     }
     overlay.tabs.get_mut("lane-a").unwrap().section = Some(TabSection::Scoping);
     overlay.tabs.get_mut("lane-a").unwrap().name = Some("[Scoping] shared connections".into());
-    overlay.tabs.get_mut("lane-b").unwrap().section = Some(TabSection::Inflight);
+    overlay.tabs.get_mut("lane-b").unwrap().section = Some(TabSection::Implementing);
     let (rows, hits, _) = rendered_factory_rows_with_gap(&snapshot, &overlay, &ClientTreeChrome::default(), 25, 0);
     let find = |name: &str| rows.iter().position(|row| row.contains(name)).unwrap();
     assert!(find("ORCHESTRATOR") < find("orchestrator-lane"));
-    assert!(find("orchestrator-lane") < find("SCOPING"));
+    assert!(find("orchestrator-lane") < find("REVIEWING"));
+    assert!(find("waiting-lane") < find("SCOPING"));
     assert!(find("SCOPING") < find("shared connections"));
-    assert!(find("shared connections") < find("IN FLIGHT"));
-    assert!(find("IN FLIGHT") < find("untagged-lane"));
+    assert!(find("shared connections") < find("IMPLEMENTING"));
+    assert!(find("IMPLEMENTING") < find("untagged-lane"));
     assert!(find("untagged-lane") < find("plain-a"));
-    assert!(find("plain-a") < find("WAITING"));
-    assert!(find("WAITING") < find("waiting-lane"));
-    assert!(find("waiting-lane") < find("idle 1"));
+    assert!(find("plain-a") < find("closed 1"));
+    assert!(find("REVIEWING") < find("waiting-lane"));
+    assert!(find("IMPLEMENTING") < find("MONITORING"));
+    assert!(find("monitor-lane") < find("closed 1"));
+    assert!(rows[find("REVIEWING")].trim_end().ends_with("2"));
+    assert!(!rows[find("REVIEWING")].contains("⌘1..9"));
     assert!(rows[find("SCOPING")].contains("⌘1..9"));
     assert!(!rows.iter().any(|row| row.contains("idle-lane") || row.contains("[Scoping]")));
-    let hit = hits.tree_headers.iter().find(|hit| hit.key == "factory-background:idle:ws_1").unwrap();
+    let hit = hits.tree_headers.iter().find(|hit| hit.key == "factory-background:closed:ws_1").unwrap();
     assert!(hit.collapsed);
     let rect = hit.rect;
     let mut state = factory_state(snapshot.clone(), overlay.clone());
@@ -1266,7 +1271,7 @@ fn factory_sections_render_and_idle_click_persists() {
         overlay.tabs.get_mut("idle-child").unwrap().attention =
             if blocked { Attention::None } else { Attention::Act };
         let (rows, hits, _) = rendered_factory_rows(&snapshot, &overlay);
-        let idle = hits.tree_headers.iter().find(|hit| hit.key == "factory-background:idle:ws_1").unwrap();
+        let idle = hits.tree_headers.iter().find(|hit| hit.key == "factory-background:closed:ws_1").unwrap();
         assert!(idle.collapsed);
         assert!(rows[idle.rect.y as usize].ends_with('!'), "blocked={blocked}: {rows:?}");
         assert!(!rows.iter().any(|row| row.contains("idle-child")));
@@ -1294,7 +1299,7 @@ fn factory_sections_render_and_idle_click_persists() {
         ("lane-a", TabSection::Scoping, "[Scoping] parent"),
         ("lane-b", TabSection::Scoping, "[scoping] first child"),
         ("lane-c", TabSection::Scoping, "[SCOPING] second child"),
-        ("lane-inflight", TabSection::Inflight, "[scoping] in flight"),
+        ("lane-inflight", TabSection::Implementing, "[scoping] in flight"),
     ] {
         let tag = overlay.tabs.entry(id.into()).or_insert_with(TabTag::default);
         tag.kind = TabKind::Lane;
@@ -1305,10 +1310,10 @@ fn factory_sections_render_and_idle_click_persists() {
     tree.factory_expanded_lanes.insert("lane-a".into());
     let (rows, hits, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 40);
     for (id, expected) in [("lane-a", "parent"), ("lane-b", "first child"),
-                            ("lane-c", "second child"), ("lane-inflight", "[scoping] in flight")] {
+                            ("lane-c", "second child"), ("lane-inflight", "in flight")] {
         let y = hits.tree_headers.iter().find(|hit| hit.key == id).unwrap().rect.y;
         assert!(rows[y as usize].contains(expected), "{id}: {rows:?}");
-        if id != "lane-inflight" {
+        {
             assert!(!rows[y as usize].contains("[scoping]")
                 && !rows[y as usize].contains("[Scoping]")
                 && !rows[y as usize].contains("[SCOPING]"), "{id}: {rows:?}");
@@ -1330,8 +1335,8 @@ fn sectioned_grouped_child_and_parked_lane_keep_their_parent_groups() {
         agent.group.parent_pane_id = parent.map(str::to_string);
         snapshot.agents.push(agent);
     }
-    overlay.tabs.get_mut("lane-a").unwrap().section = Some(TabSection::Inflight);
-    overlay.tabs.get_mut("lane-b").unwrap().section = Some(TabSection::Idle);
+    overlay.tabs.get_mut("lane-a").unwrap().section = Some(TabSection::Implementing);
+    overlay.tabs.get_mut("lane-b").unwrap().section = Some(TabSection::Closed);
     let mut parked = snapshot.tabs[0].clone();
     parked.tab_id = "parked-lane".into();
     parked.label = "parked-lane".into();
@@ -1345,8 +1350,8 @@ fn sectioned_grouped_child_and_parked_lane_keep_their_parent_groups() {
     let parent = hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap();
     let child = hits.tree_headers.iter().find(|hit| hit.key == "lane-b").unwrap();
     assert!(parent.rect.y < child.rect.y);
-    assert!(rows.iter().any(|row| row.contains("IN FLIGHT")));
-    assert!(!rows.iter().any(|row| row.contains("SCOPING") || row.contains("idle 1") || row.contains("parked-lane")));
+    assert!(rows.iter().any(|row| row.contains("IMPLEMENTING")));
+    assert!(!rows.iter().any(|row| row.contains("SCOPING") || row.contains("closed 1") || row.contains("parked-lane")));
     assert!(rows.iter().any(|row| row.contains("parked 1")));
 }
 
@@ -1362,9 +1367,70 @@ fn factory_sectioned_collapsed_compact_frame_w25() {
     let (snapshot, mut overlay) = lab_fixture();
     overlay.tabs.get_mut("lane-a").unwrap().section = Some(TabSection::Scoping);
     overlay.tabs.get_mut("lane-a").unwrap().name = Some("[scoping] shared connections".into());
-    overlay.tabs.get_mut("lane-b").unwrap().section = Some(TabSection::Idle);
+    overlay.tabs.get_mut("lane-b").unwrap().section = Some(TabSection::Closed);
     let mut tree = ClientTreeChrome::default();
     tree.factory_collapsed_lanes.insert("lane-a".into());
     let (rows, _, _) = rendered_factory_rows_with_gap(&snapshot, &overlay, &tree, 25, 0);
     assert_golden(rows, include_str!("golden/factory_sectioned_compact_w25.txt"));
+}
+
+#[test]
+fn legacy_sections_place_lanes_and_clean_implementing_labels() {
+    let (mut snapshot, _) = fixture();
+    snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "lane-a" | "lane-b" | "plain-a"));
+    let overlay = crate::factory_overlay::parse(r#"{"version":1,"tabs":{
+        "lane-a":{"kind":"lane","section":"inflight","name":"[scoping] issue reporter"},
+        "lane-b":{"kind":"lane","section":"idle","name":"routing · it2 · Scoping"},
+        "plain-a":{"kind":"lane","section":"waiting","name":"review lane"}
+    }}"#.as_bytes()).unwrap();
+    let (rows, hits, _) = rendered_factory_rows(&snapshot, &overlay);
+    let implementing = rows.iter().position(|row| row.contains("IMPLEMENTING")).unwrap();
+    let reviewing = rows.iter().position(|row| row.contains("REVIEWING")).unwrap();
+    let review = hits.tree_headers.iter().find(|hit| hit.key == "plain-a").unwrap();
+    assert!(reviewing < review.rect.y as usize && (review.rect.y as usize) < implementing);
+    for (id, label) in [("lane-a", "issue reporter"), ("lane-b", "routing · it2")] {
+        let hit = hits.tree_headers.iter().find(|hit| hit.key == id).unwrap();
+        let row = &rows[hit.rect.y as usize];
+        assert!(implementing < hit.rect.y as usize && row.contains(label), "{rows:?}");
+        assert!(!row.contains("[scoping]") && !row.contains("Scoping"), "{row}");
+    }
+}
+
+#[test]
+fn sectioned_parentless_workflow_lives_in_services_and_rolls_up_state() {
+    use crate::factory_overlay::TabSection;
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "lane-a" | "wf-a"));
+    overlay.tabs.get_mut("lane-a").unwrap().section = Some(TabSection::Implementing);
+    overlay.tabs.get_mut("wf-a").unwrap().parent = None;
+    for (status, attention, busy, run, alert, working) in [
+        (AgentStatus::Blocked, Attention::None, false, false, true, false),
+        (AgentStatus::Idle, Attention::Act, false, false, true, false),
+        (AgentStatus::Working, Attention::None, false, false, false, true),
+        (AgentStatus::Idle, Attention::None, true, false, false, true),
+        (AgentStatus::Idle, Attention::None, false, true, false, true),
+        (AgentStatus::Idle, Attention::None, false, false, false, false),
+    ] {
+        snapshot.tabs.iter_mut().find(|tab| tab.tab_id == "wf-a").unwrap().agent_status = status;
+        let tag = overlay.tabs.get_mut("wf-a").unwrap();
+        tag.attention = attention;
+        tag.busy = busy;
+        tag.runs = if run { vec![RunTag { id: "run".into(), ..Default::default() }] } else { vec![] };
+        let (rows, hits, _) = rendered_factory_rows(&snapshot, &overlay);
+        let group = hits.tree_headers.iter().find(|hit| hit.key == "factory-background:services:ws_1").unwrap();
+        let row = &rows[group.rect.y as usize];
+        assert!(group.collapsed && row.contains("services 1"), "{rows:?}");
+        assert_eq!(row.contains('!'), alert, "{row}");
+        assert_eq!(row.contains('●'), working, "{row}");
+        assert!(!hits.tree_headers.iter().any(|hit| hit.key == "wf-a"));
+        let mut tree = ClientTreeChrome::default();
+        tree.factory_auto_expanded.insert("ws_1".into());
+        let (expanded_rows, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+        let group = hits.tree_headers.iter().find(|hit| hit.key == "factory-background:services:ws_1").unwrap();
+        let workflow = hits.tree_headers.iter().find(|hit| hit.key == "wf-a").unwrap();
+        assert!(group.rect.y < workflow.rect.y);
+        let group_x = expanded_rows[group.rect.y as usize].find("services").unwrap();
+        let workflow_x = expanded_rows[workflow.rect.y as usize].find("wf-a").unwrap();
+        assert!(workflow_x > group_x, "{expanded_rows:?}");
+    }
 }
