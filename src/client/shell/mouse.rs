@@ -2109,11 +2109,13 @@ impl ClientShellState {
                     self.toggle_usage_overlay(outcome);
                     return;
                 }
-                if let Some((_, url)) = self.hits.factory_usage_urls.iter()
-                    .find(|(rect, _)| super::contains(*rect, point))
-                {
-                    outcome.actions.push(ClientShellAction::OpenSafeWebUrl(url.clone()));
-                    return;
+                if self.config.mouse_capture {
+                    if let Some((_, url)) = self.hits.factory_usage_urls.iter()
+                        .find(|(rect, _)| super::contains(*rect, point))
+                    {
+                        outcome.actions.push(ClientShellAction::OpenSafeWebUrl(url.clone()));
+                        return;
+                    }
                 }
                 if self.selection.take().is_some() {
                     outcome.repaint = true;

@@ -1100,6 +1100,32 @@ fn append_factory_space(
     for lane in orchestrator_lanes {
         push_lane(out, lane, indent, false);
     }
+    let group_state = |members: &[&crate::protocol::ClientShellTab]| {
+        let member_ids = members.iter().map(|lane| lane.tab_id.as_str()).collect::<HashSet<_>>();
+        let group_lanes = lanes.iter().copied().filter(|lane| {
+            member_ids.contains(lane.tab_id.as_str())
+                || grouped_root(&lane.tab_id).is_some_and(|id| member_ids.contains(id.as_str()))
+        }).collect::<Vec<_>>();
+        let group_ids = group_lanes.iter().map(|lane| lane.tab_id.as_str()).collect::<HashSet<_>>();
+        group_lanes.iter().copied().chain(all_workflows.iter().copied().filter(|workflow| {
+            parent_for(workflow).is_some_and(|id| group_ids.contains(id))
+        })).fold((false, false), |(alert, working), tab| {
+            let row = factory_row(snapshot, rows, overlay, tab, indent, false, false);
+            let (row_alert, row_working) = match row {
+                AgentPanelListEntry::FactoryTab(row) => (
+                    row.status == crate::api::schema::AgentStatus::Blocked
+                        || row.attention == crate::factory_overlay::Attention::Act,
+                    row.status == crate::api::schema::AgentStatus::Working,
+                ),
+                _ => (false, false),
+            };
+            let tag = overlay.tab(&tab.tab_id);
+            (alert || row_alert || tag.is_some_and(|tag| tag.runs.iter()
+                    .any(|run| run.attention == crate::factory_overlay::Attention::Act)),
+                working || row_working || tag.is_some_and(|tag| tag.busy
+                    || tag.runs.iter().any(|run| !run.done)))
+        })
+    };
     if sectioned {
         let mut first = true;
         for (section, label) in [
@@ -1116,24 +1142,7 @@ fn append_factory_space(
                 continue;
             }
             if section == TabSection::Idle {
-                let alert = members.iter().any(|lane| {
-                    let child_alert = all_workflows.iter().any(|workflow| {
-                        parent_for(workflow) == Some(lane.tab_id.as_str())
-                            && (overlay.tab(&workflow.tab_id).is_some_and(|tag| tag.attention == crate::factory_overlay::Attention::Act)
-                                || matches!(factory_row(snapshot, rows, overlay, workflow, indent, false, false),
-                                    AgentPanelListEntry::FactoryTab(row) if row.status == crate::api::schema::AgentStatus::Blocked))
-                    });
-                    let row = factory_row(snapshot, rows, overlay, lane, indent, false, false);
-                    child_alert || matches!(row, AgentPanelListEntry::FactoryTab(ref row) if
-                        row.status == crate::api::schema::AgentStatus::Blocked
-                            || row.attention == crate::factory_overlay::Attention::Act)
-                });
-                let working = members.iter().any(|lane| {
-                    let row = factory_row(snapshot, rows, overlay, lane, indent, false, false);
-                    matches!(row, AgentPanelListEntry::FactoryTab(ref row) if
-                        row.status == crate::api::schema::AgentStatus::Working)
-                        || overlay.tab(&lane.tab_id).is_some_and(|tag| tag.busy || tag.runs.iter().any(|run| !run.done))
-                });
+                let (alert, working) = group_state(&members);
                 let collapsed = !tree.factory_idle_expanded.contains(workspace_id);
                 out.push(AgentPanelListEntry::FactoryBackground {
                     kind: FactoryGroupKind::Idle, workspace_id: workspace_id.to_owned(),
@@ -1200,25 +1209,8 @@ fn append_factory_space(
         if members.is_empty() {
             continue;
         }
-        let alert = members.iter().any(|lane| {
-            let child_alert = all_workflows.iter().any(|workflow| {
-                parent_for(workflow) == Some(lane.tab_id.as_str())
-                    && (overlay.tab(&workflow.tab_id).is_some_and(|tag| tag.attention == crate::factory_overlay::Attention::Act)
-                        || matches!(factory_row(snapshot, rows, overlay, workflow, indent, false, false),
-                            AgentPanelListEntry::FactoryTab(row) if row.status == crate::api::schema::AgentStatus::Blocked))
-            });
-            let row = factory_row(snapshot, rows, overlay, lane, indent, false, false);
-            child_alert || matches!(row, AgentPanelListEntry::FactoryTab(ref row) if
-                row.status == crate::api::schema::AgentStatus::Blocked || row.attention == crate::factory_overlay::Attention::Act)
-        });
-        let working = group == FactoryGroupKind::Automations && members.iter().any(|lane| {
-            let row = factory_row(snapshot, rows, overlay, lane, indent, false, false);
-            matches!(row, AgentPanelListEntry::FactoryTab(ref row) if row.status == crate::api::schema::AgentStatus::Working)
-                || overlay.tab(&lane.tab_id).is_some_and(|tag| tag.busy || tag.runs.iter().any(|run| !run.done))
-                || workflows.iter().any(|workflow| parent_for(workflow) == Some(lane.tab_id.as_str())
-                    && matches!(factory_row(snapshot, rows, overlay, workflow, indent, false, false),
-                        AgentPanelListEntry::FactoryTab(row) if row.status == crate::api::schema::AgentStatus::Working))
-        });
+        let (alert, working) = group_state(&members);
+        let working = group == FactoryGroupKind::Automations && working;
         let collapsed = !expanded.contains(workspace_id);
         out.push(AgentPanelListEntry::FactoryBackground {
             kind: group, workspace_id: workspace_id.to_owned(), count: members.len(),

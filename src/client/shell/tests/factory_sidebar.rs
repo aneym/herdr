@@ -320,6 +320,11 @@ fn factory_usage_footer_renders_and_opens_only_usage_urls() {
     assert_eq!(buffer[(24, (usage + 2) as u16)].fg, state.config.palette.peach);
     state.hits = hits;
     state.last_composed_size = Some((120, 60));
+    state.config.mouse_capture = false;
+    let input = factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), 2, usage as u16);
+    assert!(!input.actions.iter().any(|action| matches!(action, ClientShellAction::OpenSafeWebUrl(_))));
+    factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), 2, usage as u16);
+    state.config.mouse_capture = true;
     for (row, expected) in [
         (usage, Some(url.to_owned())),
         (usage + 1, Some(url.to_owned())),
@@ -876,6 +881,65 @@ fn grouped_workflow_fixture() -> (ClientShellSnapshot, FactoryOverlay) {
         id: "fold".into(), name: Some("fold run".into()), phase: None, agents: 1, ..RunTag::default()
     }];
     (snapshot, overlay)
+}
+
+#[test]
+fn collapsed_factory_groups_show_grouped_workflow_alerts_and_work() {
+    use crate::factory_overlay::TabSection;
+    for (mode, section, label) in [
+        (TabMode::Active, Some(TabSection::Idle), "idle"),
+        (TabMode::Parked, None, "parked"),
+        (TabMode::Auto, None, "automations"),
+    ] {
+        let (mut snapshot, mut overlay) = grouped_workflow_fixture();
+        snapshot.tabs.retain(|tab| tab.tab_id != "wf-b");
+        overlay.tabs.get_mut("lane-b").unwrap().runs.clear();
+        let root = overlay.tabs.get_mut("lane-a").unwrap();
+        root.mode = mode;
+        root.section = section;
+        for (status, attention, busy, run, alert, working) in [
+            (AgentStatus::Blocked, Attention::None, false, None, true, false),
+            (AgentStatus::Working, Attention::None, false, None, false, true),
+            (AgentStatus::Idle, Attention::Act, false, None, true, false),
+            (AgentStatus::Idle, Attention::None, true, None, false, true),
+            (AgentStatus::Idle, Attention::None, false, Some((false, Attention::None)), false, true),
+            (AgentStatus::Idle, Attention::None, false, Some((true, Attention::None)), false, false),
+            (AgentStatus::Idle, Attention::None, false, None, false, false),
+        ] {
+            snapshot.tabs.iter_mut().find(|tab| tab.tab_id == "wf-a").unwrap().agent_status = status;
+            let workflow = overlay.tabs.get_mut("wf-a").unwrap();
+            workflow.attention = attention;
+            workflow.busy = busy;
+            workflow.runs = run.into_iter().map(|(done, attention)| RunTag {
+                id: "workflow-run".into(), done, attention, ..Default::default()
+            }).collect();
+            let (rows, hits, _) = rendered_factory_rows(&snapshot, &overlay);
+            let key = format!("factory-background:{label}:ws_1");
+            let hit = hits.tree_headers.iter().find(|hit| hit.key == key).unwrap();
+            let row = &rows[hit.rect.y as usize];
+            assert!(hit.collapsed && row.contains(&format!("{label} 1")), "{rows:?}");
+            assert_eq!(row.contains('!'), alert, "{label}, {status:?}, {attention:?}: {row}");
+            assert_eq!(row.contains('●'), working && mode != TabMode::Parked, "{label}, {status:?}: {row}");
+            assert!(!rows.iter().any(|row| row.contains("wf-a")), "{rows:?}");
+        }
+    }
+}
+
+#[test]
+fn collapsed_idle_group_shows_grouped_done_run_attention() {
+    use crate::factory_overlay::TabSection;
+    let (mut snapshot, mut overlay) = grouped_workflow_fixture();
+    snapshot.tabs.retain(|tab| !tab.tab_id.starts_with("wf-"));
+    overlay.tabs.get_mut("lane-a").unwrap().section = Some(TabSection::Idle);
+    let run = &mut overlay.tabs.get_mut("lane-b").unwrap().runs[0];
+    run.done = true;
+    run.attention = Attention::Act;
+    let (rows, hits, _) = rendered_factory_rows(&snapshot, &overlay);
+    let hit = hits.tree_headers.iter().find(|hit| hit.key == "factory-background:idle:ws_1").unwrap();
+    let row = &rows[hit.rect.y as usize];
+    assert!(hit.collapsed && row.contains("idle 1"), "{rows:?}");
+    assert!(row.contains('!'), "done run attention must remain visible: {row}");
+    assert!(!row.contains('●'), "done run must not show work: {row}");
 }
 
 #[test]
