@@ -320,7 +320,7 @@ fn factory_usage_footer_renders_and_opens_only_usage_urls() {
     state.hits = hits;
     state.last_composed_size = Some((120, 60));
     state.config.mouse_capture = true;
-    for (x, y, expected) in [(17, 58, Some(format!("{url}codex"))), (14, 58, None), (8, 59, None)] {
+    for (x, y, expected) in [(18, 58, Some(format!("{url}codex"))), (16, 58, None), (8, 59, None), (5, 58, Some(url.to_string()))] {
         let input = factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), x, y);
         let urls = input.actions.iter().filter_map(|action| match action {
             ClientShellAction::OpenSafeWebUrl(url) => Some(url.as_str()), _ => None,
@@ -341,7 +341,7 @@ fn factory_usage_footer_renders_and_opens_only_usage_urls() {
         HostRow { name: "idle".into(), summary: Some(String::new()), ..HostRow::default() },
         HostRow { name: "old".into(), summary: Some("3 live · drained".into()), ..HostRow::default() },
     ];
-    let (rows, _, buffer) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 38);
+    let (rows, _, buffer) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 40);
     assert_eq!(rows[59].trim(), "forge down · PC · idle · old 3 drained");
     for x in 7..11 {
         assert_eq!(buffer[(x, 59)].fg, state.config.palette.red);

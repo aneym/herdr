@@ -505,17 +505,24 @@ pub(super) fn tree_list_entries_with_overlay(
     }
 
     if let Some(overlay) = overlay {
-        // Insert agentless tagged spaces without reordering existing spaces.
+        // Include agentless tagged spaces and collapsed spaces with tabs, so
+        // folding an untagged space does not remove it from the hidden count.
+        // Preserve the existing relative order of agent-bearing spaces.
         for (index, workspace) in snapshot.workspaces.iter().enumerate() {
             let id = &workspace.workspace_id;
+            let collapsed_with_tabs = workspace.visible_in_profile
+                && tree.show_spaces
+                && tree.show_hidden_spaces
+                && tree.collapsed_spaces.contains(id)
+                && snapshot.tabs.iter().any(|tab| &tab.workspace_id == id);
             if workspace_order.contains(id)
-                || !overlay.space_is_tagged(
+                || !(collapsed_with_tabs || overlay.space_is_tagged(
                     snapshot
                         .tabs
                         .iter()
                         .filter(|tab| &tab.workspace_id == id)
                         .map(|tab| tab.tab_id.as_str()),
-                )
+                ))
             {
                 continue;
             }
