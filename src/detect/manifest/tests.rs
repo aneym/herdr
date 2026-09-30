@@ -19,6 +19,65 @@ fn fork_claude_prompt_keeps_working_to_idle_confirmation() {
     }
 }
 
+#[test]
+fn claude_live_permission_overrides_working_but_not_answered_scrollback() {
+    with_manifest_dirs("claude-live-permission", || {
+        let dialog = "Do you want to proceed?\n❯ 1. Yes\n  2. No\nEsc to cancel";
+        let live_turn = "✻ Thinking… (12s · esc to interrupt)";
+        let rule = "────────────────────────────────────────";
+        for (name, screen, title, state, matched_rule) in [
+            (
+                "permission with spinner title",
+                format!("{rule}\n{dialog}"),
+                "⠋ task",
+                AgentState::Blocked,
+                "generic_permission_prompt",
+            ),
+            (
+                "permission with live turn and idle title",
+                format!("{live_turn}\n{rule}\n{dialog}"),
+                "✳ task",
+                AgentState::Blocked,
+                "generic_permission_prompt",
+            ),
+            (
+                "working without dialog",
+                format!("{live_turn}\n{rule}\n❯\n{rule}"),
+                "⠋ task",
+                AgentState::Working,
+                "osc_title_working",
+            ),
+            (
+                "answered permission above prompt box",
+                format!("Bash command\n{dialog}\nApproved\n{rule}\n❯\n{rule}"),
+                "⠋ task",
+                AgentState::Working,
+                "osc_title_working",
+            ),
+        ] {
+            let result = explain_with_input(
+                Agent::Claude,
+                DetectionInput {
+                    screen: &screen,
+                    osc_title: title,
+                    osc_progress: "",
+                },
+            );
+            assert_eq!(result.state, state, "{name}");
+            assert_eq!(
+                result.matched_rule.as_ref().map(|rule| rule.id.as_str()),
+                Some(matched_rule),
+                "{name}"
+            );
+            assert_eq!(
+                result.visible_blocker,
+                state == AgentState::Blocked,
+                "{name}"
+            );
+        }
+    });
+}
+
 // Codex is only a registry key here; behavior tests supply synthetic rules.
 fn remote_manifest(version: &str, state: &str, contains: &str) -> String {
     format!(

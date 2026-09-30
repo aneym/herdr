@@ -1,7 +1,7 @@
 id = "claude"
-version = "2026.09.21.1"
+version = "2026.09.30.1"
 min_engine_version = 2
-updated_at = "2026-09-21T00:00:00Z"
+updated_at = "2026-09-30T00:00:00Z"
 aliases = ["claude-code"]
 
 [[rules]]
@@ -87,7 +87,7 @@ any = [
 [[rules]]
 id = "live_blocked_form"
 state = "blocked"
-priority = 980
+priority = 1160
 region = "after_last_horizontal_rule"
 visible_blocker = true
 contains = ["esc to cancel"]
@@ -190,7 +190,7 @@ all = [
 [[rules]]
 id = "generic_permission_prompt"
 state = "blocked"
-priority = 840
+priority = 1150
 region = "after_last_horizontal_rule"
 visible_blocker = true
 contains = ["do you want to proceed?", "esc to cancel"]
