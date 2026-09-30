@@ -1,6 +1,43 @@
 use super::*;
 
 impl ClientShellState {
+    /// Keep the existing tab numbering, but omit rows hidden by factory chrome.
+    pub(super) fn numbered_tab_ids(&self, snapshot: &ClientShellSnapshot) -> Vec<String> {
+        let Some(workspace_id) = snapshot.focused_workspace_id.as_deref() else {
+            return Vec::new();
+        };
+        let overlay = self.factory_overlay();
+        let hidden = overlay.filter(|_| self.config.factory.enabled).map(|overlay| {
+            let default_tree = super::tree::ClientTreeChrome::default();
+            let tree = self.tree_chrome.get(&self.active_endpoint_id).unwrap_or(&default_tree);
+            let drawn = |tree: &super::tree::ClientTreeChrome| {
+                super::tree::tree_list_entries_with_overlay(
+                    snapshot, tree,
+                    super::agent_sidebar::agent_rows(snapshot, &self.config, None),
+                    Some(overlay),
+                ).into_iter().filter_map(|entry| match entry {
+                    super::tree::AgentPanelListEntry::FactoryTab(row)
+                        if row.header.tab_id.as_deref() == Some(row.header.key.as_str()) => row.header.tab_id,
+                    super::tree::AgentPanelListEntry::TabHeader(header) => header.tab_id,
+                    _ => None,
+                }).collect::<std::collections::HashSet<_>>()
+            };
+            let visible = drawn(tree);
+            let mut unfiltered = tree.clone();
+            unfiltered.factory_goal_filter = None;
+            unfiltered.factory_sections_collapsed.clear();
+            unfiltered.factory_section_focus.clear();
+            drawn(&unfiltered).difference(&visible).cloned().collect::<std::collections::HashSet<_>>()
+        });
+        snapshot.tabs.iter()
+            .filter(|tab| tab.workspace_id == workspace_id)
+            .filter(|tab| overlay.and_then(|overlay| overlay.tab(&tab.tab_id))
+                .is_none_or(|tag| tag.kind != crate::factory_overlay::TabKind::Workflow))
+            .filter(|tab| hidden.as_ref().is_none_or(|hidden| !hidden.contains(&tab.tab_id)))
+            .map(|tab| tab.tab_id.clone())
+            .collect()
+    }
+
     pub(super) fn toggle_usage_overlay(&mut self, outcome: &mut ClientShellInput) {
         if matches!(self.overlay, Some(ClientShellOverlay::Usage(_))) {
             self.overlay = None;
@@ -1281,16 +1318,9 @@ impl ClientShellState {
                 Some(Method::WorkspaceFocus(WorkspaceTarget { workspace_id }))
             }
             KeybindAction::SwitchTab(index) => {
-                let tabs = snapshot
-                    .tabs
-                    .iter()
-                    .filter(|tab| tab.workspace_id == focused_workspace)
-                    .filter(|tab| self.factory_overlay()
-                        .and_then(|overlay| overlay.tab(&tab.tab_id))
-                        .is_none_or(|tag| tag.kind != crate::factory_overlay::TabKind::Workflow))
-                    .collect::<Vec<_>>();
+                let tabs = self.numbered_tab_ids(snapshot);
                 Some(Method::TabFocus(TabTarget {
-                    tab_id: tabs.get(index)?.tab_id.clone(),
+                    tab_id: tabs.get(index)?.clone(),
                 }))
             }
             KeybindAction::PreviousTab | KeybindAction::NextTab => {

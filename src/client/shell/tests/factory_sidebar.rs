@@ -1798,6 +1798,54 @@ fn factory_goal_filter_limits_sections_shortcuts_and_clear_restores_rows() {
 }
 
 #[test]
+fn numbered_shortcuts_skip_goal_filtered_collapsed_and_unfocused_rows() {
+    let (mut snapshot, mut overlay) = section_controls_fixture();
+    snapshot.tabs.retain(|tab| tab.tab_id == "lane-b");
+    snapshot.agents.clear();
+    let template = snapshot.tabs[0].clone();
+    snapshot.tabs.clear();
+    overlay.tabs.clear();
+    for (id, goal, section) in [
+        ("rails-a", "rails", "scoping"),
+        ("recruiter-b", "recruiter", "implementing"),
+        ("recruiter-c", "recruiter", "implementing"),
+    ] {
+        let mut tab = template.clone();
+        tab.tab_id = id.into();
+        tab.label = id.into();
+        snapshot.tabs.push(tab);
+        overlay.tabs.insert(id.into(), serde_json::from_value(serde_json::json!({
+            "kind": "lane", "goal": goal, "section": section
+        })).unwrap());
+    }
+    let mut state = factory_state(snapshot.clone(), overlay.clone());
+    let shortcut = |state: &mut ClientShellState, index| {
+        let mut output = ClientShellInput::default();
+        state.record_binding(crate::input::KeybindMatch::Action(
+            crate::input::KeybindAction::SwitchTab(index)), &mut output);
+        focused_tab(&output)
+    };
+    assert_eq!(shortcut(&mut state, 0), ["rails-a"]);
+    *state.tree_chrome_mut() = goal_preferences("recruiter");
+    let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, state.tree_chrome_mut(), 40);
+    assert!(!rows.iter().any(|row| row.contains("rails-a")));
+    assert!(rows.iter().any(|row| row.contains("recruiter-b")));
+    assert!(rows.iter().any(|row| row.contains("recruiter-c")));
+    assert_eq!(shortcut(&mut state, 0), ["recruiter-b"]);
+    assert_eq!(shortcut(&mut state, 1), ["recruiter-c"]);
+    assert!(shortcut(&mut state, 2).is_empty());
+    state.tree_chrome_mut().factory_goal_filter = None;
+    assert_eq!(shortcut(&mut state, 0), ["rails-a"]);
+    state.tree_chrome_mut().factory_sections_collapsed.insert("ws_1:SCOPING".into());
+    assert_eq!(shortcut(&mut state, 0), ["recruiter-b"]);
+    assert_eq!(shortcut(&mut state, 1), ["recruiter-c"]);
+    state.tree_chrome_mut().factory_sections_collapsed.clear();
+    state.tree_chrome_mut().factory_section_focus.insert("ws_1".into(), "IMPLEMENTING".into());
+    assert_eq!(shortcut(&mut state, 0), ["recruiter-b"]);
+    assert_eq!(shortcut(&mut state, 1), ["recruiter-c"]);
+}
+
+#[test]
 fn factory_goal_menu_area_selection_and_preferences_roundtrip() {
     let (snapshot, overlay) = goal_fixture();
     let mut state = factory_state(snapshot.clone(), overlay.clone());

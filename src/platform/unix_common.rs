@@ -8,6 +8,28 @@ pub(crate) fn classify_child_exit(status: &portable_pty::ExitStatus) -> super::C
     }
 }
 
+/// Restore the descriptor's original status flags when a bounded probe ends.
+pub(crate) struct NonblockingFdGuard {
+    fd: std::os::fd::RawFd,
+    flags: libc::c_int,
+}
+
+impl NonblockingFdGuard {
+    pub(crate) fn new(fd: std::os::fd::RawFd) -> std::io::Result<Self> {
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+        if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(Self { fd, flags })
+    }
+}
+
+impl Drop for NonblockingFdGuard {
+    fn drop(&mut self) {
+        unsafe { libc::fcntl(self.fd, libc::F_SETFL, self.flags) };
+    }
+}
+
 pub(crate) fn read_fd(fd: std::os::fd::RawFd, data: &mut [u8]) -> std::io::Result<usize> {
     let result = unsafe { libc::read(fd, data.as_mut_ptr().cast(), data.len()) };
     if result < 0 {

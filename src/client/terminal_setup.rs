@@ -160,7 +160,7 @@ struct HostKeyboardProbeResponses {
 fn query_host_escape_disambiguation() -> (bool, Vec<u8>) {
     const QUERY: &[u8] = b"\x1b[?u\x1b[c";
 
-    let mut buffered_input = Vec::new();
+    let buffered_input = Vec::new();
     if let Err(err) = io::stdout()
         .write_all(QUERY)
         .and_then(|()| io::stdout().flush())
@@ -172,14 +172,30 @@ fn query_host_escape_disambiguation() -> (bool, Vec<u8>) {
     // Bypass StdinLock's shared buffer so poll and read observe the same bytes.
     let stdin = io::stdin();
     let stdin_fd = stdin.as_raw_fd();
-    let deadline = Instant::now() + HOST_KEYBOARD_QUERY_TIMEOUT;
+    read_host_keyboard_probe(
+        stdin_fd,
+        Instant::now() + HOST_KEYBOARD_QUERY_TIMEOUT,
+        crate::platform::poll_fd_readable,
+    )
+}
+
+#[cfg(not(windows))]
+fn read_host_keyboard_probe(
+    stdin_fd: std::os::fd::RawFd,
+    deadline: Instant,
+    mut poll: impl FnMut(std::os::fd::RawFd, i32) -> io::Result<bool>,
+) -> (bool, Vec<u8>) {
+    // A readable notification can race another tty reader. Bound the read too,
+    // and restore flags before buffered input is handed to the normal reader.
+    let _nonblocking = crate::platform::NonblockingFdGuard::new(stdin_fd).ok();
+    let mut buffered_input = Vec::new();
     let mut responses = HostKeyboardProbeResponses::default();
     while !responses.primary_device_attributes && buffered_input.len() < MAX_BUFFERED_HOST_INPUT {
         let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
             break;
         };
         let timeout_ms = remaining.as_millis().clamp(1, i32::MAX as u128) as i32;
-        match crate::platform::poll_fd_readable(stdin_fd, timeout_ms) {
+        match poll(stdin_fd, timeout_ms) {
             Ok(true) => {}
             Ok(false) => break,
             Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
@@ -198,7 +214,7 @@ fn query_host_escape_disambiguation() -> (bool, Vec<u8>) {
                 buffered_input.extend_from_slice(&scratch[..read]);
                 consume_host_keyboard_probe_responses(&mut buffered_input, &mut responses);
             }
-            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+            Err(err) if matches!(err.kind(), io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock) => continue,
             Err(err) => {
                 tracing::debug!(%err, "host keyboard enhancement query read failed");
                 break;
@@ -789,6 +805,35 @@ impl Drop for TerminalGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn host_keyboard_probe_spurious_readability_is_bounded_and_restores_flags() {
+        use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+        let mut fds = [-1; 2];
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+        let reader = unsafe { OwnedFd::from_raw_fd(fds[0]) };
+        let writer = unsafe { OwnedFd::from_raw_fd(fds[1]) };
+        let (send, receive) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let fd = reader.as_raw_fd();
+            let original = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+            assert!(original >= 0);
+            let start = Instant::now();
+            let result = read_host_keyboard_probe(fd, start + HOST_KEYBOARD_QUERY_TIMEOUT, |_, _| Ok(true));
+            let restored = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+            send.send((result, start.elapsed(), original, restored)).unwrap();
+        });
+        // Closing the writer releases a blocking base read even when the guard
+        // regresses, so a failed regression never leaves the test process hung.
+        let result = receive.recv_timeout(HOST_KEYBOARD_QUERY_TIMEOUT + Duration::from_millis(200));
+        drop(writer);
+        worker.join().unwrap();
+        let (probe, elapsed, original, restored) = result.expect("probe exceeded its deadline after a spurious wakeup");
+        assert_eq!(probe, (false, Vec::new()));
+        assert!(elapsed <= HOST_KEYBOARD_QUERY_TIMEOUT + Duration::from_millis(200));
+        assert_eq!(restored, original, "probe must restore the fd flags");
+    }
 
     #[cfg(windows)]
     #[test]

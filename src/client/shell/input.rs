@@ -952,15 +952,7 @@ impl ClientShellState {
                 .snapshot
                 .as_deref()
                 .and_then(|snapshot| {
-                    let workspace_id = snapshot.focused_workspace_id.as_deref()?;
-                    snapshot
-                        .tabs
-                        .iter()
-                        .filter(|tab| tab.workspace_id == workspace_id)
-                        .filter(|tab| self.factory_overlay()
-                            .and_then(|overlay| overlay.tab(&tab.tab_id))
-                            .is_none_or(|tag| tag.kind != crate::factory_overlay::TabKind::Workflow))
-                        .nth(*index)
+                    self.numbered_tab_ids(snapshot).get(*index).cloned()
                 })
                 .is_some(),
             KeybindMatch::Action(KeybindAction::FocusAgent(index)) => {
