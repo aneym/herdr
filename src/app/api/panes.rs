@@ -540,6 +540,26 @@ impl App {
         encode_success(id, ResponseResult::PaneLayout { layout })
     }
 
+    pub(super) fn handle_pane_tty_repair(
+        &mut self,
+        id: String,
+        params: crate::api::schema::PaneTtyRepairParams,
+    ) -> String {
+        let Some((ws_idx, pane_id)) = self.resolve_optional_pane(params.pane_id.as_deref()) else {
+            return encode_error(id, "pane_not_found", "pane not found");
+        };
+        let Some((runtime, _)) = self.lookup_runtime(ws_idx, pane_id) else {
+            return encode_error(id, "pane_not_found", "pane not found");
+        };
+        match runtime.tty_repair(params.dry_run) {
+            Ok(mut repair) => {
+                repair.pane = self.public_pane_id(ws_idx, pane_id).unwrap_or_default();
+                encode_success(id, ResponseResult::PaneTtyRepair { repair })
+            }
+            Err(err) => encode_error(id, "tty_repair_refused", err.to_string()),
+        }
+    }
+
     pub(super) fn handle_pane_process_info(
         &mut self,
         id: String,
@@ -554,9 +574,12 @@ impl App {
         let Some(public_pane_id) = self.public_pane_id(ws_idx, pane_id) else {
             return encode_error(id, "pane_not_found", "pane not found");
         };
+        let tty_status = runtime.tty_status();
         let shell_pid = runtime.child_pid();
         let foreground_job = shell_pid.and_then(crate::detect::foreground_job);
-        let foreground_process_group_id = foreground_job.as_ref().map(|job| job.process_group_id);
+        let foreground_process_group_id = tty_status
+            .pgid
+            .or_else(|| foreground_job.as_ref().map(|job| job.process_group_id));
         let foreground_processes = foreground_job
             .map(|job| {
                 job.processes
@@ -579,6 +602,12 @@ impl App {
             ResponseResult::PaneProcessInfo {
                 process_info: PaneProcessInfo {
                     pane_id: public_pane_id,
+                    stopped: tty_status.stopped,
+                    canonical: tty_status.canonical,
+                    held_input_bytes: tty_status.held_input_bytes,
+                    dropped_mouse_reports: tty_status.dropped_mouse_reports,
+                    dropped_input_bytes: tty_status.dropped_input_bytes,
+                    last_good_termios_at: tty_status.last_good_termios_at,
                     shell_pid,
                     foreground_process_group_id,
                     tty: None,

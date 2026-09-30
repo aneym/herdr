@@ -1,8 +1,20 @@
+#[path = "tty.rs"]
+mod tty;
+pub(crate) use tty::TtyStatus;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InputKind {
+    Mouse,
+    Key,
+    Paste,
+    Api,
+}
+
 use std::{
     collections::VecDeque,
     io::{Read, Write},
     os::fd::{AsRawFd, OwnedFd, RawFd},
-    sync::{mpsc as std_mpsc, Arc, Mutex},
+    sync::{Arc, Mutex, mpsc as std_mpsc},
     time::{Duration, Instant},
 };
 
@@ -15,7 +27,7 @@ use crate::pty::fd;
 // Actor handle methods must call wake_actor() after queuing work. The idle
 // timeout is only a fallback for missed wakes; PTY and wake readiness drive
 // normal responsiveness.
-const ACTOR_IDLE_POLL_MS: i32 = 1000;
+const ACTOR_IDLE_POLL_MS: i32 = 250;
 const ACTOR_COMMAND_BUFFER: usize = 1024;
 const HANDOFF_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -72,7 +84,7 @@ pub(crate) struct PtyIoActorConfig {
 }
 
 enum PtyIoDataCommand {
-    WriteUserInput(Bytes),
+    WriteUserInput(Bytes, InputKind),
     SubmitUserInput {
         text: Bytes,
         enter: Bytes,
@@ -87,6 +99,12 @@ enum PtyIoControlCommand {
     ForegroundProcessGroup(std_mpsc::Sender<Option<u32>>),
     RollbackHandoff(std_mpsc::Sender<std::io::Result<()>>),
     ReleaseAfterCommit(std_mpsc::Sender<std::io::Result<()>>),
+    MouseAllowed(std_mpsc::Sender<bool>),
+    TtyStatus(std_mpsc::Sender<TtyStatus>),
+    TtyRepair(
+        bool,
+        std_mpsc::Sender<std::io::Result<crate::api::schema::PaneTtyRepairResult>>,
+    ),
     Shutdown,
 }
 
@@ -110,6 +128,14 @@ impl PtyIoActorHandle {
         &self,
         bytes: Bytes,
     ) -> Result<(), mpsc::error::TrySendError<Bytes>> {
+        self.try_write_input(bytes, InputKind::Api)
+    }
+
+    pub(crate) fn try_write_input(
+        &self,
+        bytes: Bytes,
+        kind: InputKind,
+    ) -> Result<(), mpsc::error::TrySendError<Bytes>> {
         let user_writes = self
             .user_writes
             .lock()
@@ -119,20 +145,20 @@ impl PtyIoActorHandle {
         }
         match self
             .data_tx
-            .try_send(PtyIoDataCommand::WriteUserInput(bytes))
+            .try_send(PtyIoDataCommand::WriteUserInput(bytes, kind))
         {
             Ok(()) => {
                 self.wake_actor();
                 Ok(())
             }
             Err(mpsc::error::TrySendError::Full(command)) => {
-                let PtyIoDataCommand::WriteUserInput(bytes) = command else {
+                let PtyIoDataCommand::WriteUserInput(bytes, _) = command else {
                     unreachable!("queued write returned another command")
                 };
                 Err(mpsc::error::TrySendError::Full(bytes))
             }
             Err(mpsc::error::TrySendError::Closed(command)) => {
-                let PtyIoDataCommand::WriteUserInput(bytes) = command else {
+                let PtyIoDataCommand::WriteUserInput(bytes, _) = command else {
                     unreachable!("queued write returned another command")
                 };
                 Err(mpsc::error::TrySendError::Closed(bytes))
@@ -299,6 +325,45 @@ impl PtyIoActorHandle {
         })?
     }
 
+    pub(crate) fn mouse_allowed(&self) -> bool {
+        let (tx, rx) = std_mpsc::channel();
+        if self
+            .control_tx
+            .send(PtyIoControlCommand::MouseAllowed(tx))
+            .is_err()
+        {
+            return true;
+        }
+        self.wake_actor();
+        rx.recv_timeout(Duration::from_secs(1)).unwrap_or(true)
+    }
+
+    pub(crate) fn tty_status(&self) -> TtyStatus {
+        let (tx, rx) = std_mpsc::channel();
+        if self
+            .control_tx
+            .send(PtyIoControlCommand::TtyStatus(tx))
+            .is_err()
+        {
+            return TtyStatus::default();
+        }
+        self.wake_actor();
+        rx.recv_timeout(Duration::from_secs(1)).unwrap_or_default()
+    }
+
+    pub(crate) fn tty_repair(
+        &self,
+        dry_run: bool,
+    ) -> std::io::Result<crate::api::schema::PaneTtyRepairResult> {
+        let (tx, rx) = std_mpsc::channel();
+        self.control_tx
+            .send(PtyIoControlCommand::TtyRepair(dry_run, tx))
+            .map_err(|_| std::io::Error::other("PTY actor closed"))?;
+        self.wake_actor();
+        rx.recv_timeout(Duration::from_secs(1))
+            .map_err(|_| std::io::Error::other("PTY repair timed out"))?
+    }
+
     pub(crate) fn foreground_process_group_id(&self) -> Option<u32> {
         let (reply_tx, reply_rx) = std_mpsc::channel();
         self.control_tx
@@ -413,6 +478,7 @@ impl PtyIoActor {
                 ActorState::Running
             },
             pending_writes: VecDeque::new(),
+            tty: tty::TtySafety::default(),
             current_write_offset: 0,
             active_submission: None,
             pending_handoff: None,
@@ -447,6 +513,7 @@ struct PtyIoActorRunner {
     control_rx: std_mpsc::Receiver<PtyIoControlCommand>,
     state: ActorState,
     pending_writes: VecDeque<PendingWrite>,
+    tty: tty::TtySafety,
     current_write_offset: usize,
     active_submission: Option<ActiveSubmission>,
     pending_handoff: Option<std_mpsc::Sender<std::io::Result<()>>>,
@@ -465,11 +532,20 @@ struct ActiveSubmission {
     reply: std_mpsc::Sender<std::io::Result<()>>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 struct PendingWrite {
     bytes: Bytes,
     boundary: Option<SubmissionBoundary>,
+    kind: Option<InputKind>,
+    queued_at: Instant,
 }
+
+impl PartialEq for PendingWrite {
+    fn eq(&self, other: &Self) -> bool {
+        self.bytes == other.bytes && self.boundary == other.boundary && self.kind == other.kind
+    }
+}
+impl Eq for PendingWrite {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SubmissionBoundary {
@@ -489,6 +565,8 @@ impl PtyIoActorRunner {
             self.pending_writes.push_back(PendingWrite {
                 bytes,
                 boundary: None,
+                kind: None,
+                queued_at: Instant::now(),
             });
         }
     }
@@ -498,6 +576,8 @@ impl PtyIoActorRunner {
             self.pending_writes.push_back(PendingWrite {
                 bytes,
                 boundary: Some(boundary),
+                kind: Some(InputKind::Api),
+                queued_at: Instant::now(),
             });
         }
     }
@@ -510,6 +590,7 @@ impl PtyIoActorRunner {
                 break;
             }
 
+            self.tty.refresh(self.file.as_raw_fd());
             self.apply_pending_controls();
 
             if !self.pending_writes.is_empty() {
@@ -535,7 +616,7 @@ impl PtyIoActorRunner {
                 self.file.as_raw_fd(),
                 self.wake_read_fd.as_raw_fd(),
                 self.state == ActorState::Running,
-                !self.pending_writes.is_empty(),
+                !self.pending_writes.is_empty() && !self.tty.stopped(),
                 self.poll_timeout_ms(),
             ) {
                 Ok(readiness) => {
@@ -636,9 +717,17 @@ impl PtyIoActorRunner {
 
     fn handle_data_command(&mut self, command: PtyIoDataCommand) -> bool {
         match command {
-            PtyIoDataCommand::WriteUserInput(bytes) => {
+            PtyIoDataCommand::WriteUserInput(bytes, kind) => {
                 if self.state == ActorState::Running {
-                    self.enqueue_write(bytes);
+                    self.tty.refresh(self.file.as_raw_fd());
+                    if kind == InputKind::Mouse && self.tty.block_mouse() {
+                        self.tty.dropped_mouse_reports += 1;
+                    } else {
+                        self.enqueue_write(bytes);
+                        if let Some(write) = self.pending_writes.back_mut() {
+                            write.kind = Some(kind);
+                        }
+                    }
                 }
             }
             PtyIoDataCommand::SubmitUserInput {
@@ -709,6 +798,31 @@ impl PtyIoActorRunner {
                 self.pending_writes.clear();
                 let _ = reply.send(Ok(()));
                 return true;
+            }
+            PtyIoControlCommand::MouseAllowed(reply) => {
+                self.tty.refresh(self.file.as_raw_fd());
+                let allowed = !self.tty.block_mouse();
+                if !allowed {
+                    self.tty.dropped_mouse_reports += 1;
+                }
+                let _ = reply.send(allowed);
+            }
+            PtyIoControlCommand::TtyStatus(reply) => {
+                self.tty.refresh(self.file.as_raw_fd());
+                let held = if self.tty.stopped() {
+                    self.pending_writes
+                        .iter()
+                        .filter(|w| w.kind.is_some())
+                        .map(|w| w.bytes.len())
+                        .sum::<usize>()
+                        .saturating_sub(self.current_write_offset)
+                } else {
+                    0
+                };
+                let _ = reply.send(self.tty.status(held));
+            }
+            PtyIoControlCommand::TtyRepair(dry_run, reply) => {
+                let _ = reply.send(self.tty.repair(self.file.as_raw_fd(), dry_run));
             }
             PtyIoControlCommand::Shutdown => return true,
         }
@@ -929,7 +1043,26 @@ impl PtyIoActorRunner {
     }
 
     fn flush_pending_writes_once(&mut self) -> std::io::Result<Option<SubmissionBoundary>> {
+        self.tty.refresh(self.file.as_raw_fd());
         while let Some(write) = self.pending_writes.front() {
+            if self.current_write_offset == 0 && write.kind.is_some() {
+                if write.kind == Some(InputKind::Mouse) && self.tty.block_mouse() {
+                    self.tty.dropped_mouse_reports += 1;
+                    self.pending_writes.pop_front();
+                    continue;
+                }
+                if self.tty.stopped() {
+                    if write.queued_at.elapsed() >= Duration::from_secs(600) {
+                        self.tty.dropped_input_bytes += write.bytes.len() as u64;
+                        self.pending_writes.pop_front();
+                        self.fail_active_submission(std::io::Error::other(
+                            "stopped foreground input expired",
+                        ));
+                        continue;
+                    }
+                    return Ok(None);
+                }
+            }
             let chunk = &write.bytes[self.current_write_offset..];
             match self.file.write(chunk) {
                 Ok(0) => {
@@ -1048,6 +1181,290 @@ mod tests {
         (pipe.writer, pipe.read_fd)
     }
 
+    // These real-PTY regressions protect delivery and tty restoration, not queue layout.
+    // A stopped foreground previously received mouse/paste bytes immediately;
+    // restoration previously had no per-pane capture and could discard queued input.
+    struct RealTty {
+        child: std::process::Child,
+        slave: std::fs::File,
+        master: OwnedFd,
+        handle: PtyIoActorHandle,
+        output: std::path::PathBuf,
+    }
+    impl RealTty {
+        fn new() -> Self {
+            Self::with_script(
+                "import os,sys,tty; tty.setraw(0); os.write(1,b'READY'); f=open(sys.argv[1],'w');\nwhile True:\n b=os.read(0,4096); f.write(b.hex()); f.flush()",
+            )
+        }
+        fn with_script(script: &str) -> Self {
+            use std::os::unix::process::CommandExt;
+            let mut master = -1;
+            let mut slave = -1;
+            assert_eq!(
+                unsafe {
+                    libc::openpty(
+                        &mut master,
+                        &mut slave,
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                    )
+                },
+                0
+            );
+            let master = unsafe { OwnedFd::from_raw_fd(master) };
+            let slave = unsafe { std::fs::File::from_raw_fd(slave) };
+            let output = std::env::temp_dir().join(format!(
+                "herdr-tty-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            let mut command = std::process::Command::new("python3");
+            command.args(["-u", "-c", script]);
+            command
+                .arg(&output)
+                .stdin(slave.try_clone().unwrap())
+                .stdout(slave.try_clone().unwrap())
+                .stderr(std::process::Stdio::null());
+            unsafe {
+                command.pre_exec(|| {
+                    if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) < 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+            let child = command.spawn().unwrap();
+            let probe_master = master.try_clone().unwrap();
+            let (tx, rx) = std_mpsc::channel();
+            let handle = PtyIoActor::spawn(PtyIoActorConfig {
+                pane_id: 1,
+                master_fd: master,
+                initially_quiesced: false,
+                on_read: Box::new(move |bytes| {
+                    let _ = tx.send(bytes.to_vec());
+                    PtyReadResult::empty()
+                }),
+                on_reader_exit: None,
+            })
+            .unwrap();
+            let mut ready = Vec::new();
+            while !ready.ends_with(b"READY") {
+                ready.extend(rx.recv_timeout(Duration::from_secs(5)).unwrap());
+            }
+            let fixture = Self {
+                child,
+                slave,
+                master: probe_master,
+                handle,
+                output,
+            };
+            fixture.wait_status(false);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while fixture.handle.tty_status().last_good_termios_at.is_none() {
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            fixture
+        }
+        fn wait_status(&self, stopped: bool) {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while self.handle.tty_status().stopped != Some(stopped) {
+                assert!(
+                    Instant::now() < deadline,
+                    "foreground status did not converge"
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+        fn stop(&self) {
+            assert_eq!(
+                unsafe { libc::kill(self.child.id() as i32, libc::SIGSTOP) },
+                0
+            );
+            let mut status = 0;
+            assert_eq!(
+                unsafe { libc::waitpid(self.child.id() as i32, &mut status, libc::WUNTRACED) },
+                self.child.id() as i32
+            );
+            assert!(libc::WIFSTOPPED(status));
+            self.wait_status(true);
+        }
+        fn resume(&self) {
+            assert_eq!(
+                unsafe { libc::kill(self.child.id() as i32, libc::SIGCONT) },
+                0
+            );
+        }
+        fn assert_output(&self, bytes: &[u8]) {
+            let expected: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let actual = std::fs::read_to_string(&self.output).unwrap_or_default();
+                if actual.len() >= expected.len() {
+                    assert_eq!(actual, expected);
+                    break;
+                }
+                assert!(Instant::now() < deadline, "missing bytes: {actual}");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+        fn assert_slave_empty(&self) {
+            let mut available: libc::c_int = 0;
+            assert_eq!(
+                unsafe { libc::ioctl(self.slave.as_raw_fd(), libc::FIONREAD, &mut available) },
+                0
+            );
+            assert_eq!(available, 0, "input was written to a stopped foreground");
+        }
+    }
+    impl Drop for RealTty {
+        fn drop(&mut self) {
+            self.handle.shutdown();
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+            let _ = std::fs::remove_file(&self.output);
+        }
+    }
+    #[test]
+    fn stopped_real_pty_drops_wheel_and_holds_whole_paste() {
+        let fixture = RealTty::new();
+        fixture.stop();
+        fixture
+            .handle
+            .try_write_input(Bytes::from_static(b"\x1b[<65;77;24M"), InputKind::Mouse)
+            .unwrap();
+        let paste = b"\x1b[200~hello\x1b[201~";
+        fixture
+            .handle
+            .try_write_input(Bytes::from_static(paste), InputKind::Paste)
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while fixture.handle.tty_status().held_input_bytes != paste.len() {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(fixture.handle.tty_status().dropped_mouse_reports, 1);
+        fixture.assert_slave_empty();
+        fixture.resume();
+        fixture.assert_output(paste);
+    }
+    #[test]
+    fn stopped_real_pty_holds_keys_in_order() {
+        let fixture = RealTty::new();
+        fixture.stop();
+        for bytes in [b"one" as &[u8], b"two", b"three"] {
+            fixture
+                .handle
+                .try_write_input(Bytes::copy_from_slice(bytes), InputKind::Key)
+                .unwrap();
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while fixture.handle.tty_status().held_input_bytes != 11 {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        fixture.assert_slave_empty();
+        fixture.resume();
+        fixture.assert_output(b"onetwothree");
+    }
+    #[test]
+    fn real_pty_repair_restores_own_modes_without_flushing() {
+        let fixture = RealTty::new();
+        fixture.stop();
+        let fd = fixture.slave.as_raw_fd();
+        let mut raw = unsafe { std::mem::zeroed() };
+        assert_eq!(unsafe { libc::tcgetattr(fd, &mut raw) }, 0);
+        let mut cooked = raw;
+        cooked.c_lflag |= libc::ICANON;
+        // Place existing input in the kernel tty independently of the actor's queue.
+        let preserved = b"preserved\n";
+        assert_eq!(
+            unsafe {
+                libc::write(
+                    fixture.master.as_raw_fd(),
+                    preserved.as_ptr().cast(),
+                    preserved.len(),
+                )
+            },
+            preserved.len() as isize
+        );
+        assert_eq!(unsafe { libc::tcdrain(fixture.master.as_raw_fd()) }, 0);
+        assert_eq!(unsafe { libc::tcsetattr(fd, libc::TCSANOW, &cooked) }, 0);
+        let preview = fixture.handle.tty_repair(true).unwrap();
+        assert!(preview.was_canonical && !preview.applied);
+        assert!(preview.changed_fields.contains(&"lflag".to_string()));
+        assert!(fixture.handle.tty_repair(false).unwrap().applied);
+        let mut restored = unsafe { std::mem::zeroed() };
+        assert_eq!(unsafe { libc::tcgetattr(fd, &mut restored) }, 0);
+        assert!(tty::changed_fields(&raw, &restored).is_empty());
+        fixture.resume();
+        fixture.assert_output(b"preserved\n");
+    }
+
+    #[test]
+    fn real_pty_repair_refuses_missing_capture_and_changed_foreground() {
+        // The session leader changes its real tty foreground to a second process
+        // group. Keep that group cooked so it cannot become a new good capture.
+        let fixture = RealTty::with_script(
+            r#"import os,sys,tty,signal,time,termios
+tty.setraw(0)
+os.write(1,b'READY')
+while not os.path.exists(sys.argv[1]):
+ time.sleep(.01)
+r,w=os.pipe()
+ready_r,ready_w=os.pipe()
+pid=os.fork()
+if pid == 0:
+ os.close(w)
+ os.close(ready_r)
+ os.setpgid(0,0)
+ os.write(ready_w,b'R')
+ os.close(ready_w)
+ os.read(r,1)
+ os._exit(0)
+os.close(r)
+os.close(ready_w)
+os.read(ready_r,1)
+os.close(ready_r)
+signal.signal(signal.SIGTTOU,signal.SIG_IGN)
+modes=termios.tcgetattr(0)
+modes[3] |= termios.ICANON
+termios.tcsetattr(0,termios.TCSANOW,modes)
+os.tcsetpgrp(0,pid)
+with open(sys.argv[1],'w') as f:
+ f.write(str(pid))
+while True:
+ time.sleep(1)
+"#,
+        );
+        let fd = fixture.master.as_raw_fd();
+        let mut safety = tty::TtySafety::default();
+        let error = safety.repair(fd, false).unwrap_err();
+        assert!(error.to_string().contains("no captured termios"));
+        safety.refresh(fd);
+        assert!(safety.status(0).last_good_termios_at.is_some());
+        std::fs::write(&fixture.output, b"switch").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let pgid = unsafe { libc::tcgetpgrp(fd) };
+            if pgid > 0 && pgid as u32 != fixture.child.id() {
+                break;
+            }
+            assert!(Instant::now() < deadline, "foreground group did not change");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let error = safety.repair(fd, false).unwrap_err();
+        assert!(error.to_string().contains("foreground pgid changed"));
+        let mut unchanged = unsafe { std::mem::zeroed() };
+        assert_eq!(unsafe { libc::tcgetattr(fd, &mut unchanged) }, 0);
+        assert_ne!(unchanged.c_lflag & libc::ICANON, 0);
+    }
+
     fn actor_with_socket_pair(
         initially_quiesced: bool,
     ) -> (PtyIoActorHandle, UnixStream, std_mpsc::Receiver<Bytes>) {
@@ -1103,6 +1520,7 @@ mod tests {
             control_rx,
             state: ActorState::Running,
             pending_writes: VecDeque::new(),
+            tty: tty::TtySafety::default(),
             current_write_offset: 0,
             active_submission: None,
             pending_handoff: None,
@@ -1120,7 +1538,12 @@ mod tests {
     fn actor_ignores_empty_user_input_write() {
         let (mut runner, _peer) = actor_runner_for_unit_test();
 
-        assert!(!runner.handle_data_command(PtyIoDataCommand::WriteUserInput(Bytes::new())));
+        assert!(
+            !runner.handle_data_command(PtyIoDataCommand::WriteUserInput(
+                Bytes::new(),
+                InputKind::Api
+            ))
+        );
 
         assert!(runner.pending_writes.is_empty());
     }
@@ -1550,9 +1973,11 @@ mod tests {
             .begin_handoff(Duration::from_secs(1))
             .expect_err("concurrent handoff rejected");
         assert_eq!(err.kind(), std::io::ErrorKind::WouldBlock);
-        assert!(handle
-            .try_write_user_input(Bytes::from_static(b"blocked"))
-            .is_err());
+        assert!(
+            handle
+                .try_write_user_input(Bytes::from_static(b"blocked"))
+                .is_err()
+        );
 
         peer.write_all(b"held").expect("peer write during quiesce");
         assert!(
@@ -1605,9 +2030,10 @@ mod tests {
         let (data_tx, _data_rx) = mpsc::channel(1);
         let (control_tx, _control_rx) = std_mpsc::channel();
         data_tx
-            .try_send(PtyIoDataCommand::WriteUserInput(Bytes::from_static(
-                b"fill",
-            )))
+            .try_send(PtyIoDataCommand::WriteUserInput(
+                Bytes::from_static(b"fill"),
+                InputKind::Api,
+            ))
             .expect("fill command queue");
         let controls = Arc::new(Mutex::new(SharedPtyControls::default()));
         let (wake, _wake_read_fd) = test_wake_pair();
@@ -1674,6 +2100,7 @@ mod tests {
             control_rx,
             state: ActorState::Running,
             pending_writes: VecDeque::new(),
+            tty: tty::TtySafety::default(),
             current_write_offset: 0,
             active_submission: None,
             pending_handoff: None,
@@ -1726,10 +2153,14 @@ mod tests {
                 PendingWrite {
                     bytes: Bytes::from_static(b"live-light"),
                     boundary: None,
+                    kind: None,
+                    queued_at: Instant::now(),
                 },
                 PendingWrite {
                     bytes: Bytes::from_static(b"query-light"),
                     boundary: None,
+                    kind: None,
+                    queued_at: Instant::now(),
                 },
             ])
         );
@@ -1754,9 +2185,10 @@ mod tests {
         let (data_tx, _data_rx) = mpsc::channel(1);
         let (control_tx, control_rx) = std_mpsc::channel();
         data_tx
-            .try_send(PtyIoDataCommand::WriteUserInput(Bytes::from_static(
-                b"fill",
-            )))
+            .try_send(PtyIoDataCommand::WriteUserInput(
+                Bytes::from_static(b"fill"),
+                InputKind::Api,
+            ))
             .expect("fill data queue");
         let (wake, _wake_read_fd) = test_wake_pair();
         let handle = PtyIoActorHandle {
@@ -1796,9 +2228,10 @@ mod tests {
         let (data_tx, data_rx) = mpsc::channel(ACTOR_COMMAND_BUFFER);
         let (_control_tx, control_rx) = std_mpsc::channel();
         data_tx
-            .try_send(PtyIoDataCommand::WriteUserInput(Bytes::from_static(
-                b"queued-before-ack",
-            )))
+            .try_send(PtyIoDataCommand::WriteUserInput(
+                Bytes::from_static(b"queued-before-ack"),
+                InputKind::Api,
+            ))
             .expect("queued write");
         let mut runner = PtyIoActorRunner {
             pane_id: 1,
@@ -1807,6 +2240,7 @@ mod tests {
             control_rx,
             state: ActorState::Running,
             pending_writes: VecDeque::new(),
+            tty: tty::TtySafety::default(),
             current_write_offset: 0,
             active_submission: None,
             pending_handoff: None,
@@ -1832,9 +2266,11 @@ mod tests {
         let (handle, mut peer, read_rx) = actor_with_socket_pair(false);
 
         handle.release_after_commit().expect("actor released");
-        assert!(handle
-            .try_write_user_input(Bytes::from_static(b"blocked"))
-            .is_err());
+        assert!(
+            handle
+                .try_write_user_input(Bytes::from_static(b"blocked"))
+                .is_err()
+        );
 
         let _ = peer.write_all(b"ignored");
         assert!(read_rx.recv_timeout(Duration::from_millis(150)).is_err());

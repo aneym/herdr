@@ -187,7 +187,7 @@ impl ChildExitReason {
 
 #[cfg(unix)]
 pub(crate) use unix_common::{
-    NonblockingFdGuard, classify_child_exit, poll_fd_readable, read_fd, shared_ssh_control_path,
+    classify_child_exit, poll_fd_readable, read_fd, shared_ssh_control_path, NonblockingFdGuard,
 };
 
 #[cfg(not(any(unix, windows)))]
@@ -937,4 +937,9 @@ pub(crate) fn clone_native_image_source(
         std::io::ErrorKind::Unsupported,
         "native source cloning requires Linux",
     ))
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+pub(crate) fn process_is_stopped(_pid: u32) -> Option<bool> {
+    None
 }

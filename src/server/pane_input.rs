@@ -159,12 +159,10 @@ fn apply_scroll(
                 position,
                 KeyModifiers::from_bits_truncate(modifiers),
             ) else {
-                return Err(format!(
-                    "failed to encode terminal attach mouse wheel event: {wheel_kind:?}"
-                ));
+                return Ok(());
             };
             runtime
-                .try_send_bytes(Bytes::from(bytes))
+                .try_send_mouse_bytes(Bytes::from(bytes))
                 .map_err(|err| format!("terminal attach mouse wheel input failed: {err}"))?;
         }
         Some(crate::pane::WheelRouting::AlternateScroll) => {
@@ -283,7 +281,7 @@ fn apply_client_terminal_input_events(
                     runtime.scroll_reset();
                 }
                 runtime
-                    .try_send_bytes(Bytes::from(bytes))
+                    .try_send_mouse_bytes(Bytes::from(bytes))
                     .map_err(|err| format!("targeted pane mouse input failed: {err}"))?;
             }
             continue;
@@ -316,7 +314,7 @@ fn apply_client_terminal_input_events(
                 let bytes = runtime.encode_terminal_key(key);
                 if !bytes.is_empty() {
                     runtime
-                        .try_send_bytes(Bytes::from(bytes))
+                        .try_send_key_bytes(Bytes::from(bytes))
                         .map_err(|err| format!("targeted pane key input failed: {err}"))?;
                 }
             }

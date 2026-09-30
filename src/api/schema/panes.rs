@@ -505,6 +505,18 @@ pub struct PaneScrollInfo {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PaneProcessInfo {
+    #[serde(default)]
+    pub stopped: Option<bool>,
+    #[serde(default)]
+    pub canonical: Option<bool>,
+    #[serde(default)]
+    pub held_input_bytes: usize,
+    #[serde(default)]
+    pub dropped_mouse_reports: u64,
+    #[serde(default)]
+    pub dropped_input_bytes: u64,
+    #[serde(default)]
+    pub last_good_termios_at: Option<u64>,
     pub pane_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shell_pid: Option<u32>,
@@ -720,4 +732,21 @@ pub struct PaneQueuedSend {
     pub method: String,
     pub byte_length: usize,
     pub age_secs: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, Default)]
+pub struct PaneTtyRepairParams {
+    #[serde(default)]
+    pub pane_id: Option<String>,
+    #[serde(default)]
+    pub dry_run: bool,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PaneTtyRepairResult {
+    pub pane: String,
+    pub pgid: u32,
+    pub captured_at: u64,
+    pub was_canonical: bool,
+    pub changed_fields: Vec<String>,
+    pub applied: bool,
 }

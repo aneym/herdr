@@ -20,6 +20,7 @@ pub(super) fn run_pane_command(args: &[String]) -> std::io::Result<i32> {
         "current" => pane_current(&args[1..]),
         "get" => pane_get(&args[1..]),
         "layout" => pane_layout(&args[1..]),
+        "tty-repair" => pane_tty_repair(&args[1..]),
         "process-info" => pane_process_info(&args[1..]),
         "neighbor" => pane_neighbor(&args[1..]),
         "edges" => pane_edges(&args[1..]),
@@ -1763,6 +1764,26 @@ fn send_pane_request(method: Method, json: bool) -> std::io::Result<i32> {
         method,
     })?;
     super::print_response(&response)
+}
+
+fn pane_tty_repair(args: &[String]) -> std::io::Result<i32> {
+    let dry_run = args.iter().any(|arg| arg == "--dry-run");
+    let rest: Vec<String> = args
+        .iter()
+        .filter(|arg| arg.as_str() != "--dry-run")
+        .cloned()
+        .collect();
+    let pane_id = match parse_optional_current_pane_args_from_env(&rest) {
+        Ok(pane_id) => pane_id,
+        Err(message) => {
+            eprintln!("{message}");
+            return Ok(2);
+        }
+    };
+    super::print_response(&super::send_request(&Request {
+        id: "cli:pane:tty_repair".into(),
+        method: Method::PaneTtyRepair(crate::api::schema::PaneTtyRepairParams { pane_id, dry_run }),
+    })?)
 }
 
 #[cfg(test)]

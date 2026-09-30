@@ -469,6 +469,25 @@ impl TerminalRuntime {
         self.0.encode_terminal_key(key)
     }
 
+    pub(crate) fn tty_status(&self) -> crate::pty::actor::TtyStatus {
+        self.0.tty_status()
+    }
+
+    pub(crate) fn tty_repair(
+        &self,
+        dry_run: bool,
+    ) -> std::io::Result<crate::api::schema::PaneTtyRepairResult> {
+        self.0.tty_repair(dry_run)
+    }
+
+    pub fn try_send_mouse_bytes(&self, bytes: Bytes) -> Result<(), mpsc::error::TrySendError<Bytes>> {
+        self.0.try_send_mouse_bytes(bytes)
+    }
+
+    pub fn try_send_key_bytes(&self, bytes: Bytes) -> Result<(), mpsc::error::TrySendError<Bytes>> {
+        self.0.try_send_key_bytes(bytes)
+    }
+
     pub fn try_send_bytes(&self, bytes: Bytes) -> Result<(), mpsc::error::TrySendError<Bytes>> {
         self.0.try_send_bytes(bytes)
     }

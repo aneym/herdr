@@ -148,6 +148,9 @@ pub enum ResponseResult {
     PaneLayout {
         layout: PaneLayoutSnapshot,
     },
+    PaneTtyRepair {
+        repair: super::panes::PaneTtyRepairResult,
+    },
     PaneProcessInfo {
         process_info: PaneProcessInfo,
     },

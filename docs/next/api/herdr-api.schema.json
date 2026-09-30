@@ -1320,6 +1320,10 @@
         },
         "AgentPromptParams": {
           "properties": {
+            "if_idle": {
+              "default": false,
+              "type": "boolean"
+            },
             "target": {
               "type": "string"
             },
@@ -2929,6 +2933,21 @@
           },
           "type": "object"
         },
+        "PaneQueueParams": {
+          "properties": {
+            "flush": {
+              "default": false,
+              "type": "boolean"
+            },
+            "pane_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane_id"
+          ],
+          "type": "object"
+        },
         "PaneReadParams": {
           "properties": {
             "format": {
@@ -3262,6 +3281,10 @@
         },
         "PaneSendInputParams": {
           "properties": {
+            "if_idle": {
+              "default": false,
+              "type": "boolean"
+            },
             "keys": {
               "items": {
                 "type": "string"
@@ -3282,6 +3305,14 @@
         },
         "PaneSendKeysParams": {
           "properties": {
+            "human": {
+              "default": false,
+              "type": "boolean"
+            },
+            "if_idle": {
+              "default": false,
+              "type": "boolean"
+            },
             "keys": {
               "items": {
                 "type": "string"
@@ -3300,6 +3331,14 @@
         },
         "PaneSendTextParams": {
           "properties": {
+            "human": {
+              "default": false,
+              "type": "boolean"
+            },
+            "if_idle": {
+              "default": false,
+              "type": "boolean"
+            },
             "pane_id": {
               "type": "string"
             },
@@ -3458,6 +3497,22 @@
             "start",
             "end"
           ],
+          "type": "object"
+        },
+        "PaneTtyRepairParams": {
+          "properties": {
+            "dry_run": {
+              "default": false,
+              "type": "boolean"
+            },
+            "pane_id": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
           "type": "object"
         },
         "PaneWaitForOutputParams": {
@@ -5896,6 +5951,22 @@
         {
           "properties": {
             "method": {
+              "const": "pane.tty_repair",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PaneTtyRepairParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "layout.export",
               "type": "string"
             },
@@ -6253,6 +6324,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/PaneSendTextParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "pane.queue",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PaneQueueParams"
             }
           },
           "required": [
@@ -8838,6 +8925,25 @@
         },
         "PaneProcessInfo": {
           "properties": {
+            "canonical": {
+              "default": null,
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "dropped_input_bytes": {
+              "default": 0,
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "dropped_mouse_reports": {
+              "default": 0,
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
             "foreground_process_group_id": {
               "format": "uint32",
               "minimum": 0,
@@ -8852,6 +8958,21 @@
               },
               "type": "array"
             },
+            "held_input_bytes": {
+              "default": 0,
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "last_good_termios_at": {
+              "default": null,
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "pane_id": {
               "type": "string"
             },
@@ -8860,6 +8981,13 @@
               "minimum": 0,
               "type": [
                 "integer",
+                "null"
+              ]
+            },
+            "stopped": {
+              "default": null,
+              "type": [
+                "boolean",
                 "null"
               ]
             },
@@ -8916,6 +9044,28 @@
           "required": [
             "pid",
             "name"
+          ],
+          "type": "object"
+        },
+        "PaneQueuedSend": {
+          "properties": {
+            "age_secs": {
+              "format": "double",
+              "type": "number"
+            },
+            "byte_length": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "method": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "method",
+            "byte_length",
+            "age_secs"
           ],
           "type": "object"
         },
@@ -9104,6 +9254,44 @@
           "required": [
             "start",
             "end"
+          ],
+          "type": "object"
+        },
+        "PaneTtyRepairResult": {
+          "properties": {
+            "applied": {
+              "type": "boolean"
+            },
+            "captured_at": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "changed_fields": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "pane": {
+              "type": "string"
+            },
+            "pgid": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "was_canonical": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "pane",
+            "pgid",
+            "captured_at",
+            "was_canonical",
+            "changed_fields",
+            "applied"
           ],
           "type": "object"
         },
@@ -10081,6 +10269,22 @@
                 "agent": {
                   "$ref": "#/schemas/success_response/$defs/AgentInfo"
                 },
+                "dropped": {
+                  "default": false,
+                  "type": "boolean"
+                },
+                "queue_position": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "queued": {
+                  "default": false,
+                  "type": "boolean"
+                },
                 "type": {
                   "const": "agent_prompted",
                   "type": "string"
@@ -10270,6 +10474,22 @@
               "required": [
                 "type",
                 "layout"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "repair": {
+                  "$ref": "#/schemas/success_response/$defs/PaneTtyRepairResult"
+                },
+                "type": {
+                  "const": "pane_tty_repair",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "repair"
               ],
               "type": "object"
             },
@@ -11036,6 +11256,25 @@
                 "type",
                 "active",
                 "projection_revision"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "sends": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/PaneQueuedSend"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "pane_queue",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "sends"
               ],
               "type": "object"
             },

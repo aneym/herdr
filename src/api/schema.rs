@@ -173,6 +173,8 @@ pub enum Method {
     PaneLayout(PaneLayoutParams),
     #[serde(rename = "pane.process_info")]
     PaneProcessInfo(PaneProcessInfoParams),
+    #[serde(rename = "pane.tty_repair")]
+    PaneTtyRepair(PaneTtyRepairParams),
     #[serde(rename = "layout.export")]
     LayoutExport(LayoutExportParams),
     #[serde(rename = "layout.apply")]

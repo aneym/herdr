@@ -592,3 +592,15 @@ mod windows {
 
 #[cfg(windows)]
 pub(crate) use windows::*;
+
+#[cfg(windows)]
+#[derive(Default)]
+pub(crate) struct TtyStatus {
+    pub pgid: Option<u32>,
+    pub stopped: Option<bool>,
+    pub canonical: Option<bool>,
+    pub held_input_bytes: usize,
+    pub dropped_mouse_reports: u64,
+    pub dropped_input_bytes: u64,
+    pub last_good_termios_at: Option<u64>,
+}

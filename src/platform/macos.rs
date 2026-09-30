@@ -1159,6 +1159,22 @@ pub fn process_exists(pid: u32) -> bool {
     }
 }
 
+pub(crate) fn process_is_stopped(pid: u32) -> Option<bool> {
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    let ret = unsafe {
+        libc::proc_pidinfo(
+            pid as libc::c_int,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            &mut info as *mut _ as *mut libc::c_void,
+            size,
+        )
+    };
+    // Darwin's sys/proc.h defines SSTOP as 4.
+    (ret == size).then_some(info.pbi_status == 4)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -3454,6 +3454,64 @@ impl PaneRuntime {
             .encode_terminal_key(key, self.keyboard_protocol())
     }
 
+    pub(crate) fn tty_status(&self) -> crate::pty::actor::TtyStatus {
+        match &self.io {
+            #[cfg(unix)]
+            PaneRuntimeIo::Actor(actor) => actor.tty_status(),
+            #[cfg(windows)]
+            PaneRuntimeIo::Actor(_) => crate::pty::actor::TtyStatus::default(),
+            #[cfg(test)]
+            PaneRuntimeIo::TestChannel { .. } => crate::pty::actor::TtyStatus::default(),
+        }
+    }
+    pub(crate) fn tty_repair(
+        &self,
+        dry_run: bool,
+    ) -> std::io::Result<crate::api::schema::PaneTtyRepairResult> {
+        match &self.io {
+            #[cfg(unix)]
+            PaneRuntimeIo::Actor(actor) => actor.tty_repair(dry_run),
+            #[cfg(windows)]
+            PaneRuntimeIo::Actor(_) => {
+                let _ = dry_run;
+                Err(std::io::Error::other(
+                    "TTY repair unavailable on this platform",
+                ))
+            }
+            #[cfg(test)]
+            PaneRuntimeIo::TestChannel { .. } => {
+                Err(std::io::Error::other("no captured termios for this pane"))
+            }
+        }
+    }
+    pub fn try_send_mouse_bytes(
+        &self,
+        bytes: Bytes,
+    ) -> Result<(), mpsc::error::TrySendError<Bytes>> {
+        match &self.io {
+            #[cfg(unix)]
+            PaneRuntimeIo::Actor(actor) => {
+                actor.try_write_input(bytes, crate::pty::actor::InputKind::Mouse)
+            }
+            #[cfg(windows)]
+            PaneRuntimeIo::Actor(_) => self.io.try_send_bytes(bytes),
+            #[cfg(test)]
+            PaneRuntimeIo::TestChannel { sender, .. } => sender.try_send(bytes),
+        }
+    }
+    pub fn try_send_key_bytes(&self, bytes: Bytes) -> Result<(), mpsc::error::TrySendError<Bytes>> {
+        match &self.io {
+            #[cfg(unix)]
+            PaneRuntimeIo::Actor(actor) => {
+                actor.try_write_input(bytes, crate::pty::actor::InputKind::Key)
+            }
+            #[cfg(windows)]
+            PaneRuntimeIo::Actor(_) => self.io.try_send_bytes(bytes),
+            #[cfg(test)]
+            PaneRuntimeIo::TestChannel { sender, .. } => sender.try_send(bytes),
+        }
+    }
+
     pub fn try_send_bytes(&self, bytes: Bytes) -> Result<(), mpsc::error::TrySendError<Bytes>> {
         self.io.try_send_bytes(bytes)
     }
@@ -3470,7 +3528,17 @@ impl PaneRuntime {
     }
 
     pub fn try_send_paste(&self, text: String) -> Result<(), mpsc::error::TrySendError<Bytes>> {
-        self.io.try_send_bytes(self.paste_payload(text))
+        let bytes = self.paste_payload(text);
+        match &self.io {
+            #[cfg(unix)]
+            PaneRuntimeIo::Actor(actor) => {
+                actor.try_write_input(bytes, crate::pty::actor::InputKind::Paste)
+            }
+            #[cfg(windows)]
+            PaneRuntimeIo::Actor(_) => self.io.try_send_bytes(bytes),
+            #[cfg(test)]
+            PaneRuntimeIo::TestChannel { sender, .. } => sender.try_send(bytes),
+        }
     }
 
     fn paste_payload(&self, text: String) -> Bytes {
@@ -3520,6 +3588,17 @@ impl PaneRuntime {
         result
     }
 
+    fn mouse_input_allowed(&self) -> bool {
+        match &self.io {
+            #[cfg(unix)]
+            PaneRuntimeIo::Actor(actor) => actor.mouse_allowed(),
+            #[cfg(windows)]
+            PaneRuntimeIo::Actor(_) => true,
+            #[cfg(test)]
+            PaneRuntimeIo::TestChannel { .. } => true,
+        }
+    }
+
     pub fn encode_mouse_button(
         &self,
         kind: crossterm::event::MouseEventKind,
@@ -3527,6 +3606,9 @@ impl PaneRuntime {
         modifiers: crossterm::event::KeyModifiers,
     ) -> Option<Vec<u8>> {
         if !self.mouse_reporting_enabled() {
+            return None;
+        }
+        if !self.mouse_input_allowed() {
             return None;
         }
         self.terminal.encode_mouse_button(kind, position, modifiers)
@@ -3538,6 +3620,9 @@ impl PaneRuntime {
         position: crate::input::mouse::Position,
         modifiers: crossterm::event::KeyModifiers,
     ) -> Option<Vec<u8>> {
+        if !self.mouse_input_allowed() {
+            return None;
+        }
         self.terminal.encode_mouse_motion(kind, position, modifiers)
     }
 
@@ -3548,6 +3633,9 @@ impl PaneRuntime {
         modifiers: crossterm::event::KeyModifiers,
     ) -> Option<Vec<u8>> {
         if self.wheel_routing()? != WheelRouting::MouseReport {
+            return None;
+        }
+        if !self.mouse_input_allowed() {
             return None;
         }
         self.terminal.encode_mouse_wheel(kind, position, modifiers)
