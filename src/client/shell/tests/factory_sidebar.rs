@@ -349,6 +349,54 @@ fn factory_usage_footer_renders_and_opens_only_usage_urls() {
 }
 
 #[test]
+fn factory_footer_uses_spaces_then_first_words_before_falling_back() {
+    let (snapshot, mut overlay) = lab_fixture();
+    overlay.hosts = vec![
+        HostRow { name: "Studio".into(), summary: Some("load 150/16".into()),
+            attention: Attention::Warn, ..HostRow::default() },
+        HostRow { name: "PC".into(), summary: Some("6/12 live".into()), ..HostRow::default() },
+        HostRow { name: "forge".into(), summary: Some("6/12 live".into()), ..HostRow::default() },
+    ];
+    let (rows, _, buffer) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 36);
+    assert_eq!(rows[59].trim(), "Studio 150/16  PC 6/12  forge 6/12");
+    for x in 8..14 {
+        assert_eq!(buffer[(x, 59)].fg, ClientShellConfig::from_config(&Config::default()).palette.peach);
+    }
+    let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 30);
+    for (row, expected) in rows[57..].iter().zip(["Studio 150/16", "PC 6/12", "forge 6/12"]) {
+        assert_eq!(row.split_whitespace().collect::<Vec<_>>().join(" "), expected);
+    }
+    overlay.hosts[0].name = "Studio workstation".into();
+    let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 36);
+    assert_eq!(rows[59].trim(), "Studio 150/16  PC 6/12  forge 6/12");
+
+    overlay.hosts.clear();
+    overlay.usage = vec![
+        HostRow { name: "claude".into(), summary: Some("3/8 · 66%".into()),
+            url: Some("https://example.com/claude".into()), ..HostRow::default() },
+        HostRow { name: "codex".into(), summary: Some("4/5 · 60%".into()),
+            url: Some("https://example.com/codex".into()), ..HostRow::default() },
+    ];
+    let (rows, hits, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 30);
+    assert_eq!(rows[59].trim(), "claude 3/8 66%  codex 4/5 60%");
+    let mut state = factory_state(snapshot, overlay);
+    state.hits = hits;
+    state.last_composed_size = Some((120, 60));
+    state.config.mouse_capture = true;
+    for (range, expected) in [(1..15, Some("https://example.com/claude")),
+        (15..17, None), (17..30, Some("https://example.com/codex"))] {
+        for x in range {
+            let input = factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), x, 59);
+            let urls = input.actions.iter().filter_map(|action| match action {
+                ClientShellAction::OpenSafeWebUrl(url) => Some(url.as_str()), _ => None,
+            }).collect::<Vec<_>>();
+            assert_eq!(urls, expected.into_iter().collect::<Vec<_>>(), "x={x}");
+            factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), x, 59);
+        }
+    }
+}
+
+#[test]
 fn collapsed_hidden_and_automations_share_independent_click_spans() {
     let (mut snapshot, overlay) = lab_fixture();
     snapshot.workspaces[1].label = "automated".into();

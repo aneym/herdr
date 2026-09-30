@@ -201,16 +201,18 @@ pub(super) fn render_agent_panel_with_overlay(
         if rows.is_empty() || y >= area.bottom() {
             continue;
         }
-        if footer_fits(rows, area.width) {
+        if let Some((separator, shorten_names)) = footer_layout(rows, area.width) {
             let mut x = area.x + 1;
             for (index, row) in rows.iter().enumerate() {
                 if index > 0 {
-                    put_text(buffer, x, y, 3, " · ", Style::default().fg(config.palette.overlay0));
-                    x += 3;
+                    let width = display_width(separator) as u16;
+                    put_text(buffer, x, y, width, separator, Style::default().fg(config.palette.overlay0));
+                    x += width;
                 }
                 let start = x;
-                let name_width = display_width(&row.name) as u16;
-                put_text(buffer, x, y, name_width, &row.name, Style::default().fg(config.palette.subtext0));
+                let name = footer_name(row, shorten_names);
+                let name_width = display_width(name) as u16;
+                put_text(buffer, x, y, name_width, name, Style::default().fg(config.palette.subtext0));
                 x += name_width;
                 if let Some(value) = row.summary.as_deref().filter(|value| !value.is_empty()) {
                     x += 1;
@@ -255,15 +257,27 @@ fn compact_footer_rows(rows: &[crate::factory_overlay::HostRow]) -> Vec<crate::f
 }
 
 fn footer_line_count(rows: &[crate::factory_overlay::HostRow], width: u16) -> usize {
-    if rows.is_empty() { 0 } else if footer_fits(rows, width) { 1 } else { rows.len() }
+    if rows.is_empty() { 0 } else if footer_layout(rows, width).is_some() { 1 } else { rows.len() }
 }
 
-fn footer_fits(rows: &[crate::factory_overlay::HostRow], width: u16) -> bool {
-    let joined_width = rows.iter().map(|row| {
-        display_width(&row.name) + row.summary.as_deref().filter(|value| !value.is_empty())
-            .map_or(0, |value| 1 + display_width(value))
-    }).sum::<usize>() + 3 * rows.len().saturating_sub(1);
-    joined_width <= usize::from(width.saturating_sub(1))
+fn footer_name(row: &crate::factory_overlay::HostRow, shorten: bool) -> &str {
+    if shorten {
+        let mut words = row.name.split_whitespace();
+        if let (Some(first), Some(_)) = (words.next(), words.next()) {
+            return first;
+        }
+    }
+    &row.name
+}
+
+fn footer_layout(rows: &[crate::factory_overlay::HostRow], width: u16) -> Option<(&'static str, bool)> {
+    [(" · ", false), ("  ", false), ("  ", true)].into_iter().find(|(separator, shorten)| {
+        let joined_width = rows.iter().map(|row| {
+            display_width(footer_name(row, *shorten)) + row.summary.as_deref().filter(|value| !value.is_empty())
+                .map_or(0, |value| 1 + display_width(value))
+        }).sum::<usize>() + display_width(separator) * rows.len().saturating_sub(1);
+        joined_width <= usize::from(width.saturating_sub(1))
+    })
 }
 
 fn footer_value_color(attention: crate::factory_overlay::Attention, config: &ClientShellConfig) -> ratatui::style::Color {
