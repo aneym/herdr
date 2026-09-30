@@ -396,6 +396,18 @@ fn render_panel_list_entry(
             );
             hits.automations_header = rect;
         }
+        AgentPanelListEntry::FactoryGoalPicker { filter, choices } => {
+            put_text(buffer, rect.x, rect.y, rect.width, " goal  ",
+                Style::default().fg(config.palette.overlay0).add_modifier(Modifier::DIM));
+            let clear = if filter.is_some() { Rect::new(rect.right().saturating_sub(2), rect.y, 2.min(rect.width), 1) } else { Rect::default() };
+            let value = filter.as_ref().map_or("All".to_owned(), |value| value.replace(':', " · "));
+            put_text(buffer, rect.x + 7, rect.y, rect.width.saturating_sub(7 + clear.width), &format!("{value} ▾"),
+                Style::default().fg(if filter.is_some() { config.palette.blue } else { config.palette.subtext0 }));
+            if filter.is_some() {
+                put_text(buffer, clear.x, clear.y, clear.width, " ✕", Style::default().fg(config.palette.blue));
+            }
+            hits.factory_goal_picker = Some((rect, clear, choices.clone()));
+        }
         AgentPanelListEntry::FactorySection { label, right, indent, controls } => {
             let style = Style::default().fg(config.palette.subtext0).add_modifier(Modifier::DIM);
             if controls.is_none() {

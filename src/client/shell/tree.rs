@@ -32,6 +32,7 @@ pub(super) struct ClientTreeChrome {
     pub(super) factory_parked_expanded: HashSet<String>,
     pub(super) factory_idle_expanded: HashSet<String>,
     pub(super) factory_sections_collapsed: HashSet<String>,
+    pub(super) factory_goal_filter: Option<String>,
     pub(super) factory_section_focus: HashMap<String, String>,
 }
 
@@ -56,9 +57,28 @@ impl Default for ClientTreeChrome {
             factory_parked_expanded: HashSet::new(),
             factory_idle_expanded: HashSet::new(),
             factory_sections_collapsed: HashSet::new(),
+            factory_goal_filter: None,
             factory_section_focus: HashMap::new(),
         }
     }
+}
+
+fn valid_factory_goal(value: &str) -> bool {
+    let (goal, area) = value.split_once(':').map_or((value, None), |(goal, area)| (goal, Some(area)));
+    matches!(goal, "recruiter" | "closer" | "rails") && area.is_none_or(|area| !area.is_empty())
+}
+
+pub(super) fn factory_goal_choices(overlay: &crate::factory_overlay::FactoryOverlay) -> Vec<String> {
+    let mut choices = Vec::new();
+    for goal in ["recruiter", "closer", "rails"] {
+        let tags = overlay.tabs.values().filter(|tag| tag.goal.as_deref() == Some(goal)).collect::<Vec<_>>();
+        if tags.is_empty() { continue; }
+        choices.push(goal.to_owned());
+        let areas = tags.iter().filter_map(|tag| tag.goal_area.as_deref()).filter(|area| !area.is_empty())
+            .collect::<std::collections::BTreeSet<_>>();
+        choices.extend(areas.into_iter().map(|area| format!("{goal}:{area}")));
+    }
+    choices
 }
 
 fn valid_factory_section(section: &str) -> bool {
@@ -93,6 +113,7 @@ impl ClientTreeChrome {
             factory_idle_expanded: saved.factory_idle_expanded.into_iter().collect(),
             factory_sections_collapsed: saved.factory_sections_collapsed.into_iter()
                 .filter(|key| key.rsplit_once(':').is_some_and(|(space, section)| !space.is_empty() && valid_factory_section(section))).collect(),
+            factory_goal_filter: saved.factory_goal_filter.filter(|value| valid_factory_goal(value)),
             factory_section_focus: saved.factory_section_focus.into_iter()
                 .filter(|(space, section)| !space.is_empty() && valid_factory_section(section)).collect(),
         }
@@ -118,6 +139,7 @@ impl ClientTreeChrome {
             factory_parked_expanded: sorted(&self.factory_parked_expanded),
             factory_idle_expanded: sorted(&self.factory_idle_expanded),
             factory_sections_collapsed: sorted(&self.factory_sections_collapsed),
+            factory_goal_filter: self.factory_goal_filter.clone(),
             factory_section_focus: self.factory_section_focus.clone(),
         }
     }
@@ -270,6 +292,7 @@ pub(super) enum AgentPanelListEntry {
         indent: u8,
         controls: Option<FactorySectionControls>,
     },
+    FactoryGoalPicker { filter: Option<String>, choices: Vec<String> },
     FactoryShowAll { workspace_id: String, count: usize, alert: bool, indent: u8 },
     FactoryTab(FactoryTabRow),
     FactoryHost {
@@ -541,6 +564,14 @@ pub(super) fn tree_list_entries_with_overlay(
         }
     }
     let mut out = Vec::new();
+    if let Some(overlay) = overlay.filter(|overlay| overlay.tabs.values().any(|tag| tag.section.is_some())) {
+        let choices = factory_goal_choices(overlay);
+        if !choices.is_empty() {
+            out.push(AgentPanelListEntry::FactoryGoalPicker {
+                filter: tree.factory_goal_filter.clone().filter(|value| choices.contains(value)), choices,
+            });
+        }
+    }
     // Collapsed spaces move out of their slot and collect under one collapsible
     // section at the bottom, so folding a space away actually clears the row it
     // occupied instead of leaving a stub mid-tree.
@@ -834,10 +865,20 @@ fn append_factory_space(
 ) {
     use crate::factory_overlay::{TabKind, TabMode, TabSection};
     let start = out.len();
+    let sectioned = snapshot.tabs.iter().filter(|tab| tab.workspace_id == workspace_id)
+        .any(|tab| overlay.tab(&tab.tab_id).is_some_and(|tag| tag.section.is_some()));
+    let choices = factory_goal_choices(overlay);
+    let filter = tree.factory_goal_filter.as_deref().filter(|value| sectioned
+        && !tree.collapsed_spaces.contains(workspace_id) && choices.iter().any(|choice| choice == value));
     let tabs = snapshot
         .tabs
         .iter()
         .filter(|tab| tab.workspace_id == workspace_id)
+        .filter(|tab| filter.is_none_or(|filter| overlay.tab(&tab.tab_id).is_some_and(|tag| {
+            let (goal, area) = filter.split_once(':').map_or((filter, None), |(goal, area)| (goal, Some(area)));
+            tag.kind == TabKind::Orchestrator || tag.mode == TabMode::Auto
+                || (tag.goal.as_deref() == Some(goal) && area.is_none_or(|area| tag.goal_area.as_deref() == Some(area)))
+        })))
         .collect::<Vec<_>>();
     let kind = |tab: &crate::protocol::ClientShellTab| {
         overlay
@@ -912,7 +953,6 @@ fn append_factory_space(
         }
         (current != tab_id).then(|| current.to_owned())
     };
-    let sectioned = tabs.iter().any(|tab| overlay.tab(&tab.tab_id).is_some_and(|tag| tag.section.is_some()));
     let lane_section = |lane: &crate::protocol::ClientShellTab| {
         overlay.tab(&lane.tab_id).and_then(|tag| tag.section).unwrap_or(TabSection::Implementing)
     };
@@ -1536,7 +1576,12 @@ fn reorder_spaces(
         return entries;
     }
     let mut blocks = Vec::<(Option<String>, Vec<AgentPanelListEntry>)>::new();
+    let mut prefix = Vec::new();
     for entry in entries {
+        if matches!(entry, AgentPanelListEntry::FactoryGoalPicker { .. }) {
+            prefix.push(entry);
+            continue;
+        }
         match &entry {
             AgentPanelListEntry::SpaceHeader(header) => {
                 blocks.push((Some(header.workspace_id.clone()), vec![entry]));
@@ -1555,10 +1600,7 @@ fn reorder_spaces(
     };
     let mut ordered = blocks.into_iter().enumerate().collect::<Vec<_>>();
     ordered.sort_by_key(|(index, (workspace_id, _))| (rank(workspace_id), *index));
-    ordered
-        .into_iter()
-        .flat_map(|(_, (_, block))| block)
-        .collect()
+    prefix.into_iter().chain(ordered.into_iter().flat_map(|(_, (_, block))| block)).collect()
 }
 
 fn workspace_label(snapshot: &ClientShellSnapshot, workspace_id: &str) -> String {

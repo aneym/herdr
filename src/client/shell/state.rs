@@ -118,6 +118,7 @@ pub(super) struct ShellHitMap {
     pub(super) factory_usage_urls: Vec<(Rect, String)>,
     pub(super) factory_review_urls: Vec<(Rect, String)>,
     pub(super) factory_sections: Vec<FactorySectionHit>,
+    pub(super) factory_goal_picker: Option<(Rect, Rect, Vec<String>)>,
     pub(super) factory_show_all: Vec<(Rect, String)>,
     /// Disclosure regions for collapsible ownership / orchestrator groups.
     pub(super) agent_groups: Vec<AgentGroupHit>,
@@ -599,6 +600,7 @@ pub(super) struct FactorySectionHit {
 pub(super) enum ClientContextMenuAction {
     SetAgentSort(crate::config::AgentPanelSortConfig),
     MenuSeparator,
+    SetFactoryGoalFilter(usize),
     ToggleFactorySectionFocus,
     ToggleFactorySectionCollapse,
     ToggleTreeSpaces,
@@ -634,6 +636,7 @@ pub(super) enum ClientContextMenuAction {
 
 #[derive(Debug)]
 pub(super) enum ClientContextMenuTarget {
+    FactoryGoalPicker(Vec<String>),
     FactorySection(FactorySectionHit),
     /// The agents-panel view picker: sort, tree layers, and hidden spaces.
     SidebarView {

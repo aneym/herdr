@@ -9,6 +9,10 @@ impl ClientContextMenuOverlay {
             action,
         };
         match &self.target {
+            ClientContextMenuTarget::FactoryGoalPicker(choices) => std::iter::once(item("All", Action::SetFactoryGoalFilter(0)))
+                .chain(choices.iter().enumerate().map(|(index, value)| item(
+                    &value.split_once(':').map_or(value.clone(), |(_, area)| format!("  {area}")),
+                    Action::SetFactoryGoalFilter(index + 1)))).collect(),
             ClientContextMenuTarget::FactorySection(hit) => vec![
                 item(&if hit.focused { "Show all sections".to_owned() } else { format!("Focus {}", hit.label) }, Action::ToggleFactorySectionFocus),
                 item(if hit.collapsed { "Expand" } else { "Collapse" }, Action::ToggleFactorySectionCollapse),
@@ -532,6 +536,14 @@ impl ClientShellState {
         };
         let menu_position = (menu.x, menu.y);
         match menu.target {
+            ClientContextMenuTarget::FactoryGoalPicker(choices) => {
+                if let ClientContextMenuAction::SetFactoryGoalFilter(index) = action {
+                    self.tree_chrome_mut().factory_goal_filter = index.checked_sub(1).and_then(|index| choices.get(index).cloned());
+                    self.agent_scroll = 0;
+                    self.persist_chrome_preferences(outcome);
+                    outcome.repaint = true;
+                }
+            }
             ClientContextMenuTarget::FactorySection(hit) => match action {
                 ClientContextMenuAction::ToggleFactorySectionFocus => self.change_factory_section(&hit, true, outcome),
                 ClientContextMenuAction::ToggleFactorySectionCollapse => self.change_factory_section(&hit, false, outcome),

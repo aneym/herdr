@@ -1733,3 +1733,112 @@ fn factory_space_header_omits_child_status_but_keeps_count() {
         }
     }
 }
+
+// Goal filtering is exercised through the rendered sidebar and its real menu/click
+// handlers; JSON preferences also let the same regressions run on the base.
+fn goal_fixture() -> (ClientShellSnapshot, FactoryOverlay) {
+    let (mut snapshot, mut overlay) = section_controls_fixture();
+    let template = snapshot.tabs[1].clone();
+    for (id, goal, area, section) in [
+        ("lane-a", "recruiter", None, "reviewing"),
+        ("lane-b", "rails", Some("workspace ui"), "scoping"),
+        ("rail-other", "rails", Some("infra"), "implementing"),
+        ("closer-lane", "closer", None, "implementing"),
+    ] {
+        if !snapshot.tabs.iter().any(|tab| tab.tab_id == id) {
+            let mut tab = template.clone();
+            tab.tab_id = id.into();
+            tab.label = id.into();
+            snapshot.tabs.push(tab);
+        }
+        overlay.tabs.insert(id.into(), serde_json::from_value(serde_json::json!({
+            "kind": "lane", "goal": goal, "goal_area": area, "section": section
+        })).unwrap());
+    }
+    (snapshot, overlay)
+}
+
+fn goal_preferences(filter: &str) -> ClientTreeChrome {
+    ClientTreeChrome::from_preferences(serde_json::from_value(serde_json::json!({
+        "factory_goal_filter": filter
+    })).unwrap())
+}
+
+#[test]
+fn factory_goal_filter_limits_sections_shortcuts_and_clear_restores_rows() {
+    let (snapshot, overlay) = goal_fixture();
+    let tree = goal_preferences("recruiter");
+    let mut state = factory_state(snapshot.clone(), overlay.clone());
+    *state.tree_chrome_mut() = tree;
+    let (rows, hits, buffer) = rendered_factory_rows_at_width(&snapshot, &overlay, state.tree_chrome_mut(), 40);
+    let y = rows.iter().position(|row| row.contains("goal") && row.contains("recruiter") && row.contains('✕')).unwrap() as u16;
+    assert_eq!(buffer[(7, y)].fg, state.config.palette.blue);
+    assert!(rows.iter().any(|row| row.contains("orch")));
+    assert!(rows.iter().any(|row| row.contains("lane-a")));
+    assert!(!rows.iter().any(|row| row.contains("lane-b") || row.contains("rail-other") || row.contains("closer-lane")
+        || row.contains("IMPLEMENTING") || row.contains("SCOPING") || row.contains("closed") || row.contains("background")));
+    // Services remain outside goal filtering.
+    assert!(rows.iter().any(|row| row.contains("services")));
+    let mut shortcut = ClientShellInput::default();
+    state.record_binding(crate::input::KeybindMatch::Action(crate::input::KeybindAction::SwitchTab(1)), &mut shortcut);
+    assert_eq!(focused_tab(&shortcut), ["lane-a"]);
+    state.tree_chrome_mut().factory_section_focus.insert("ws_1".into(), "SCOPING".into());
+    let (focused, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, state.tree_chrome_mut(), 40);
+    assert!(focused.iter().any(|row| row.contains("show all · 2 more")));
+    state.tree_chrome_mut().factory_section_focus.clear();
+    state.hits = hits;
+    state.last_composed_size = Some((120, 60));
+    factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), 39, y);
+    factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), 39, y);
+    let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, state.tree_chrome_mut(), 40);
+    assert!(rows.iter().any(|row| row.contains("goal") && row.contains("All")));
+    assert!(rows.iter().any(|row| row.contains("lane-b")));
+    assert!(rows.iter().any(|row| row.contains("IMPLEMENTING")));
+    assert!(rows.iter().any(|row| row.contains("closed")));
+}
+
+#[test]
+fn factory_goal_menu_area_selection_and_preferences_roundtrip() {
+    let (snapshot, overlay) = goal_fixture();
+    let mut state = factory_state(snapshot.clone(), overlay.clone());
+    state.tree_chrome_mut().space_order = vec!["ws_1".into()];
+    let (rows, hits, _) = rendered_factory_rows_at_width(&snapshot, &overlay, state.tree_chrome_mut(), 40);
+    let y = rows.iter().position(|row| row.contains("goal") && row.contains("All")).unwrap() as u16;
+    assert!(y < rows.iter().position(|row| row.contains("ORCHESTRATOR")).unwrap() as u16, "picker stays before manually ordered spaces");
+    state.hits = hits;
+    state.last_composed_size = Some((120, 60));
+    factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), 8, y);
+    factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), 8, y);
+    let Some(ClientShellOverlay::ContextMenu(menu)) = &state.overlay else { panic!("missing goal menu") };
+    assert_eq!(menu.items().iter().map(|item| item.label.as_str()).collect::<Vec<_>>(),
+        ["All", "recruiter", "closer", "rails", "  infra", "  workspace ui"]);
+    let mut input = ClientShellInput::default();
+    state.activate_context_menu_item(5, &mut input);
+    assert!(input.actions.is_empty());
+    let saved = serde_json::to_value(state.tree_chrome_mut().to_preferences()).unwrap();
+    assert_eq!(saved["factory_goal_filter"], "rails:workspace ui");
+    let tree = ClientTreeChrome::from_preferences(serde_json::from_value(saved).unwrap());
+    let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 40);
+    assert!(rows.iter().any(|row| row.contains("rails · workspace ui") && row.contains('✕')));
+    assert!(rows.iter().any(|row| row.contains("lane-b")));
+    assert!(rows.iter().any(|row| row.contains("orch")));
+    assert!(!rows.iter().any(|row| row.contains("rail-other") || row.contains("lane-a") || row.contains("closer-lane")));
+    for invalid in ["unknown", "rails:", "rails:missing"] {
+        let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &goal_preferences(invalid), 40);
+        assert!(rows.iter().any(|row| row.contains("goal") && row.contains("All")));
+        assert!(rows.iter().any(|row| row.contains("lane-a")));
+    }
+    // No tagged goals (and non-sectioned layouts) never draw the picker.
+    for sectioned in [true, false] {
+        let mut no_goals = overlay.clone();
+        for tag in no_goals.tabs.values_mut() {
+            if sectioned {
+                let mut json = serde_json::to_value(&*tag).unwrap();
+                json["goal"] = serde_json::Value::Null;
+                *tag = serde_json::from_value(json).unwrap();
+            } else { tag.section = None; }
+        }
+        let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &no_goals, &ClientTreeChrome::default(), 40);
+        assert!(!rows.iter().any(|row| row.contains("goal")));
+    }
+}

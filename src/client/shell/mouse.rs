@@ -2659,6 +2659,19 @@ impl ClientShellState {
         mouse: crossterm::event::MouseEvent,
         outcome: &mut ClientShellInput,
     ) -> bool {
+        if let Some((rect, clear, choices)) = self.hits.factory_goal_picker.clone().filter(|(rect, _, _)| super::contains(*rect, point)) {
+            if super::contains(clear, point) {
+                self.tree_chrome_mut().factory_goal_filter = None;
+                self.agent_scroll = 0;
+                self.persist_chrome_preferences(outcome);
+            } else {
+                self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
+                    target: ClientContextMenuTarget::FactoryGoalPicker(choices), x: rect.x, y: rect.bottom(), highlighted: 0,
+                }));
+            }
+            outcome.repaint = true;
+            return true;
+        }
         if let Some((_, workspace_id)) = self.hits.factory_show_all.iter().find(|(rect, _)| super::contains(*rect, point)).cloned() {
             self.tree_chrome_mut().factory_section_focus.remove(&workspace_id);
             self.agent_scroll = 0;

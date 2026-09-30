@@ -132,6 +132,8 @@ fn deserialize_section<'de, D: serde::Deserializer<'de>>(
 pub struct TabTag {
     pub kind: TabKind,
     pub mode: TabMode,
+    pub goal: Option<String>,
+    pub goal_area: Option<String>,
     #[serde(default, deserialize_with = "deserialize_section")]
     pub section: Option<TabSection>,
     /// Review page for a lane awaiting review.
@@ -396,9 +398,11 @@ mod tests {
 
     #[test]
     fn hosts_and_devloop_round_trip() {
-        let json = br#"{"version":1,"tabs":{"lane":{"kind":"lane","devloop":true}},"hosts":[{"name":"PC","summary":"3/28 live","attention":"warn"}],"usage":[{"name":"claude","summary":"3/8 - 26%","url":"https://studio.tailf266ac.ts.net:2455/"}]}"#;
+        let json = br#"{"version":1,"tabs":{"lane":{"kind":"lane","devloop":true,"goal":"rails","goal_area":"workspace ui"}},"hosts":[{"name":"PC","summary":"3/28 live","attention":"warn"}],"usage":[{"name":"claude","summary":"3/8 - 26%","url":"https://studio.tailf266ac.ts.net:2455/"}]}"#;
         let parsed = parse(json).unwrap();
         assert!(parsed.tabs["lane"].devloop);
+        assert_eq!(serde_json::to_value(&parsed.tabs["lane"]).unwrap()["goal"], "rails");
+        assert_eq!(serde_json::to_value(&parsed.tabs["lane"]).unwrap()["goal_area"], "workspace ui");
         assert_eq!(parsed.hosts[0].summary.as_deref(), Some("3/28 live"));
         assert_eq!(parsed.hosts[0].attention, Attention::Warn);
         assert_eq!(parsed.hosts[0].url, None);
