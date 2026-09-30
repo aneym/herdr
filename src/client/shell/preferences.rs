@@ -49,6 +49,10 @@ pub(super) struct ClientTreeChromePreferences {
     pub(super) factory_parked_expanded: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(super) factory_idle_expanded: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(super) factory_sections_collapsed: Vec<String>,
+    #[serde(skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub(super) factory_section_focus: std::collections::HashMap<String, String>,
 }
 
 impl Default for ClientTreeChromePreferences {
@@ -71,6 +75,8 @@ impl Default for ClientTreeChromePreferences {
             factory_auto_expanded: Vec::new(),
             factory_parked_expanded: Vec::new(),
             factory_idle_expanded: Vec::new(),
+            factory_sections_collapsed: Vec::new(),
+            factory_section_focus: std::collections::HashMap::new(),
         }
     }
 }
@@ -155,6 +161,8 @@ pub(super) fn migrated_from_session(
             factory_auto_expanded: Vec::new(),
             factory_parked_expanded: Vec::new(),
             factory_idle_expanded: Vec::new(),
+            factory_sections_collapsed: Vec::new(),
+            factory_section_focus: std::collections::HashMap::new(),
         };
     }
     preferences

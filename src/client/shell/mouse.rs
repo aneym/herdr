@@ -1999,6 +1999,13 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
+                if let Some(hit) = self.hits.factory_sections.iter().find(|hit| super::contains(hit.rect, point)).cloned() {
+                    self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
+                        target: ClientContextMenuTarget::FactorySection(hit), x: mouse.column, y: mouse.row, highlighted: 0,
+                    }));
+                    outcome.repaint = true;
+                    return;
+                }
                 let agent_pane_id = self
                     .hits
                     .agents
@@ -2628,6 +2635,22 @@ impl ClientShellState {
         );
     }
 
+    pub(super) fn change_factory_section(&mut self, hit: &FactorySectionHit, focus: bool, outcome: &mut ClientShellInput) {
+        let tree = self.tree_chrome_mut();
+        if focus {
+            if tree.factory_section_focus.get(&hit.workspace_id).is_some_and(|label| label == hit.label) {
+                tree.factory_section_focus.remove(&hit.workspace_id);
+            } else {
+                tree.factory_section_focus.insert(hit.workspace_id.clone(), hit.label.to_owned());
+            }
+        } else {
+            super::tree::ClientTreeChrome::toggle(&mut tree.factory_sections_collapsed, format!("{}:{}", hit.workspace_id, hit.label));
+        }
+        self.agent_scroll = 0;
+        self.persist_chrome_preferences(outcome);
+        outcome.repaint = true;
+    }
+
     /// Clicks on a space or tab header row in the unified tree view. Returns
     /// true when the click was consumed here.
     fn handle_tree_header_click(
@@ -2636,6 +2659,21 @@ impl ClientShellState {
         mouse: crossterm::event::MouseEvent,
         outcome: &mut ClientShellInput,
     ) -> bool {
+        if let Some((_, workspace_id)) = self.hits.factory_show_all.iter().find(|(rect, _)| super::contains(*rect, point)).cloned() {
+            self.tree_chrome_mut().factory_section_focus.remove(&workspace_id);
+            self.agent_scroll = 0;
+            self.persist_chrome_preferences(outcome);
+            outcome.repaint = true;
+            return true;
+        }
+        if let Some(hit) = self.hits.factory_sections.iter().find(|hit| super::contains(hit.rect, point)).cloned() {
+            if super::contains(hit.button, point) {
+                self.change_factory_section(&hit, true, outcome);
+            } else if super::contains(hit.label_rect, point) {
+                self.change_factory_section(&hit, false, outcome);
+            }
+            return true;
+        }
         if super::contains(self.hits.automations_header, point) {
             let tree = self.tree_chrome_mut();
             tree.automations_expanded = !tree.automations_expanded;

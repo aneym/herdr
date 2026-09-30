@@ -396,28 +396,42 @@ fn render_panel_list_entry(
             );
             hits.automations_header = rect;
         }
-        AgentPanelListEntry::FactorySection {
-            label,
-            right,
-            indent,
-        } => {
-            let style = Style::default()
-                .fg(config.palette.subtext0)
-                .add_modifier(Modifier::DIM);
-            put_text(
-                buffer,
-                rect.x.saturating_add(1 + u16::from(*indent)),
-                rect.y,
-                rect.width.saturating_sub(1 + u16::from(*indent)),
-                label,
-                style,
-            );
-            let label_end = rect.x.saturating_add(1 + u16::from(*indent))
-                .saturating_add(display_width(label) as u16);
-            let width = display_width(right) as u16;
-            if width > 0 && rect.right().saturating_sub(width) > label_end {
-                put_text(buffer, rect.right() - width, rect.y, width, right, style);
+        AgentPanelListEntry::FactorySection { label, right, indent, controls } => {
+            let style = Style::default().fg(config.palette.subtext0).add_modifier(Modifier::DIM);
+            if controls.is_none() {
+                let start = rect.x.saturating_add(1 + u16::from(*indent));
+                put_text(buffer, start, rect.y, rect.right().saturating_sub(start), label, style);
+                let width = display_width(right) as u16;
+                if width > 0 && rect.right().saturating_sub(width) > start.saturating_add(display_width(label) as u16) {
+                    put_text(buffer, rect.right() - width, rect.y, width, right, style);
+                }
+                return;
             }
+            let button = if controls.is_some() { tree_header_chevron_rect(rect) } else { Rect::default() };
+            let end = if controls.is_some() { button.x } else { rect.right() };
+            let width = (display_width(right) as u16).min(end.saturating_sub(rect.x));
+            let right_x = end.saturating_sub(width);
+            let label_text = if let Some(controls) = controls {
+                format!("{} {label}", if controls.collapsed { "▸" } else { "▾" })
+            } else { (*label).to_owned() };
+            put_text(buffer, rect.x.saturating_add(1 + u16::from(*indent)), rect.y,
+                right_x.saturating_sub(rect.x + 1 + u16::from(*indent)), &label_text, style);
+            put_text(buffer, right_x, rect.y, width, right,
+                if controls.as_ref().is_some_and(|controls| controls.alert) { style.fg(config.palette.red) } else { style });
+            if let Some(controls) = controls {
+                put_text(buffer, button.x, rect.y, button.width, if controls.focused { "✕" } else { "◎" },
+                    Style::default().fg(config.palette.overlay0));
+                hits.factory_sections.push(FactorySectionHit { rect,
+                    label_rect: Rect::new(rect.x, rect.y, right_x.saturating_sub(rect.x), 1), button,
+                    workspace_id: controls.workspace_id.clone(), label,
+                    collapsed: controls.collapsed, focused: controls.focused });
+            }
+        }
+        AgentPanelListEntry::FactoryShowAll { workspace_id, count, alert, indent } => {
+            put_text(buffer, rect.x + u16::from(*indent), rect.y, rect.width.saturating_sub(u16::from(*indent)),
+                &format!(" show all · {count} more{}", if *alert { " !" } else { "" }),
+                Style::default().fg(if *alert { config.palette.red } else { config.palette.overlay0 }));
+            hits.factory_show_all.push((rect, workspace_id.clone()));
         }
         AgentPanelListEntry::FactoryTab(row) => render_factory_tab(buffer, rect, row, config, hits),
         AgentPanelListEntry::FactoryHost {
