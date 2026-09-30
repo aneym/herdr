@@ -156,8 +156,9 @@ pub(super) fn render_agent_panel_with_overlay(
     }));
     let hosts = footer_overlay.map(|overlay| overlay.hosts.as_slice()).unwrap_or(&[]);
     let usage = footer_overlay.map(|overlay| overlay.usage.as_slice()).unwrap_or(&[]);
-    let footer_rows = hosts.len() + usize::from(!hosts.is_empty())
-        + usage.len() + usize::from(!usage.is_empty());
+    let usage = compact_footer_rows(usage);
+    let hosts = compact_footer_rows(hosts);
+    let footer_rows = footer_line_count(&usage, area.width) + footer_line_count(&hosts, area.width);
     let footer_height = footer_rows.min(area.height.saturating_sub(3) as usize) as u16;
     let list_area = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(footer_height));
     render_agent_list_with_gaps(
@@ -196,35 +197,80 @@ pub(super) fn render_agent_panel_with_overlay(
         },
     );
     let mut y = area.bottom() - footer_height;
-    for (label, rows) in [("USAGE", usage), ("HOSTS", hosts)] {
+    for (rows, clickable) in [(&usage, true), (&hosts, false)] {
         if rows.is_empty() || y >= area.bottom() {
             continue;
         }
-        let rect = Rect::new(area.x, y, area.width, 1);
-        render_panel_list_entry(buffer, rect,
-            &super::tree::AgentPanelListEntry::FactorySection {
-                label, right: String::new(), indent: 0,
-            }, config, hits);
-        if label == "USAGE" {
-            if let Some(url) = &rows[0].url {
-                hits.factory_usage_urls.push((rect, url.clone()));
-            }
-        }
-        y += 1;
-        for row in rows.iter().take(area.bottom().saturating_sub(y) as usize) {
-            let rect = Rect::new(area.x, y, area.width, 1);
-            render_panel_list_entry(buffer, rect,
-                &super::tree::AgentPanelListEntry::FactoryHost {
-                    name: row.name.clone(), summary: row.summary.clone(),
-                    attention: row.attention, indent: 0,
-                }, config, hits);
-            if label == "USAGE" {
-                if let Some(url) = &row.url {
-                    hits.factory_usage_urls.push((rect, url.clone()));
+        if footer_fits(rows, area.width) {
+            let mut x = area.x + 1;
+            for (index, row) in rows.iter().enumerate() {
+                if index > 0 {
+                    put_text(buffer, x, y, 3, " · ", Style::default().fg(config.palette.overlay0));
+                    x += 3;
+                }
+                let start = x;
+                let name_width = display_width(&row.name) as u16;
+                put_text(buffer, x, y, name_width, &row.name, Style::default().fg(config.palette.subtext0));
+                x += name_width;
+                if let Some(value) = row.summary.as_deref().filter(|value| !value.is_empty()) {
+                    x += 1;
+                    let width = display_width(value) as u16;
+                    put_text(buffer, x, y, width, value, Style::default().fg(footer_value_color(row.attention, config)));
+                    x += width;
+                }
+                if clickable {
+                    if let Some(url) = &row.url {
+                        hits.factory_usage_urls.push((Rect::new(start, y, x - start, 1), url.clone()));
+                    }
                 }
             }
             y += 1;
+        } else {
+            for row in rows.iter().take(area.bottom().saturating_sub(y) as usize) {
+                let rect = Rect::new(area.x, y, area.width, 1);
+                render_panel_list_entry(buffer, rect,
+                    &super::tree::AgentPanelListEntry::FactoryHost {
+                        name: row.name.clone(), summary: row.summary.clone(),
+                        attention: row.attention, indent: 0,
+                    }, config, hits);
+                if clickable {
+                    if let Some(url) = &row.url {
+                        hits.factory_usage_urls.push((rect, url.clone()));
+                    }
+                }
+                y += 1;
+            }
         }
+    }
+}
+
+fn compact_footer_rows(rows: &[crate::factory_overlay::HostRow]) -> Vec<crate::factory_overlay::HostRow> {
+    rows.iter().cloned().map(|mut row| {
+        row.summary = row.summary.map(|summary| {
+            summary.strip_prefix("load ").unwrap_or(&summary)
+                .replace(" live", "").replace(" · ", " ")
+        });
+        row
+    }).collect()
+}
+
+fn footer_line_count(rows: &[crate::factory_overlay::HostRow], width: u16) -> usize {
+    if rows.is_empty() { 0 } else if footer_fits(rows, width) { 1 } else { rows.len() }
+}
+
+fn footer_fits(rows: &[crate::factory_overlay::HostRow], width: u16) -> bool {
+    let joined_width = rows.iter().map(|row| {
+        display_width(&row.name) + row.summary.as_deref().filter(|value| !value.is_empty())
+            .map_or(0, |value| 1 + display_width(value))
+    }).sum::<usize>() + 3 * rows.len().saturating_sub(1);
+    joined_width <= usize::from(width.saturating_sub(1))
+}
+
+fn footer_value_color(attention: crate::factory_overlay::Attention, config: &ClientShellConfig) -> ratatui::style::Color {
+    match attention {
+        crate::factory_overlay::Attention::Act => config.palette.red,
+        crate::factory_overlay::Attention::Warn => config.palette.peach,
+        crate::factory_overlay::Attention::None => config.palette.subtext0,
     }
 }
 
@@ -317,6 +363,21 @@ fn render_panel_list_entry(
                 });
             }
             render_agent_row(buffer, rect, row, config);
+        }
+        AgentPanelListEntry::QuietSections { hidden, automations } => {
+            let quiet = Style::default().fg(config.palette.overlay0).add_modifier(Modifier::DIM);
+            let hidden_label = format!("{hidden} hidden");
+            let automation_label = format!("{} automations ▸", automations.total);
+            let start = rect.x.saturating_add(1);
+            let hidden_width = (display_width(&hidden_label) as u16).min(rect.right().saturating_sub(start));
+            put_text(buffer, start, rect.y, hidden_width, &hidden_label, quiet);
+            hits.tree_hidden_header = Rect::new(start, rect.y, hidden_width, 1);
+            let separator = start + hidden_width;
+            put_text(buffer, separator, rect.y, 3.min(rect.right().saturating_sub(separator)), " · ", quiet);
+            let start = separator.saturating_add(3).min(rect.right());
+            let width = (display_width(&automation_label) as u16).min(rect.right().saturating_sub(start));
+            put_text(buffer, start, rect.y, width, &automation_label, quiet.fg(automations.color(&config.palette)));
+            hits.automations_header = Rect::new(start, rect.y, width, 1);
         }
         AgentPanelListEntry::AutomationsHeader(summary) => {
             let style = Style::default()

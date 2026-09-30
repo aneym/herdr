@@ -298,48 +298,118 @@ fn factory_usage_footer_renders_and_opens_only_usage_urls() {
     let (snapshot, mut overlay) = lab_fixture();
     let url = "https://studio.tailf266ac.ts.net:2455/";
     overlay.usage = vec![
-        HostRow { name: "claude".into(), summary: Some("3/8 · 26%".into()),
+        HostRow { name: "claude".into(), summary: Some("3/8 · 66%".into()),
             url: Some(url.into()), ..HostRow::default() },
-        HostRow { name: "codex".into(), summary: Some("4/5 · 33%".into()),
-            attention: Attention::Warn, url: Some(format!("{url}codex")) },
-        HostRow { name: "offline".into(), ..HostRow::default() },
+        HostRow { name: "codex".into(), summary: Some("4/5 · 60%".into()),
+            url: Some(format!("{url}codex")), ..HostRow::default() },
     ];
-    // Even a host carrying a URL must retain its non-clickable behaviour.
-    overlay.hosts[0].url = Some(format!("{url}hosts"));
-    let (rows, hits, buffer) = rendered_factory_rows(&snapshot, &overlay);
-    let usage = rows.iter().position(|row| row.contains("USAGE")).unwrap();
-    let hosts = rows.iter().position(|row| row.contains("HOSTS")).unwrap();
-    assert_eq!(hosts, usage + 4);
-    assert!(rows[usage + 1].contains("claude"));
-    assert!(rows[usage + 1].contains("3/8 · 26%"));
-    assert!(rows[usage + 2].contains("codex"));
-    assert!(rows[usage + 2].contains("4/5 · 33%"));
-    assert!(rows[hosts + 1].contains("Studio"));
-    assert!(rows[hosts + 1].contains("3/28 live"));
-    let mut state = factory_state(snapshot, overlay);
-    assert_eq!(buffer[(24, (usage + 2) as u16)].fg, state.config.palette.peach);
+    overlay.hosts = vec![
+        HostRow { name: "Studio".into(), summary: Some("load 198/16".into()),
+            attention: Attention::Warn, url: Some(format!("{url}hosts")) },
+        HostRow { name: "PC".into(), summary: Some("1/12 live".into()), ..HostRow::default() },
+        HostRow { name: "forge".into(), summary: Some("3/12 live".into()), ..HostRow::default() },
+    ];
+    let (rows, hits, buffer) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 38);
+    assert_eq!(rows[58].trim(), "claude 3/8 66% · codex 4/5 60%");
+    assert_eq!(rows[59].trim(), "Studio 198/16 · PC 1/12 · forge 3/12");
+    assert!(!rows.iter().any(|row| row.contains("USAGE") || row.contains("HOSTS")));
+    let mut state = factory_state(snapshot.clone(), overlay.clone());
+    for x in 8..14 {
+        assert_eq!(buffer[(x, 59)].fg, state.config.palette.peach);
+    }
     state.hits = hits;
     state.last_composed_size = Some((120, 60));
-    state.config.mouse_capture = false;
-    let input = factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), 2, usage as u16);
-    assert!(!input.actions.iter().any(|action| matches!(action, ClientShellAction::OpenSafeWebUrl(_))));
-    factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), 2, usage as u16);
     state.config.mouse_capture = true;
-    for (row, expected) in [
-        (usage, Some(url.to_owned())),
-        (usage + 1, Some(url.to_owned())),
-        (usage + 2, Some(format!("{url}codex"))),
-        (usage + 3, None),
-        (hosts + 1, None),
-    ] {
-        let input = factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), 2, row as u16);
+    for (x, y, expected) in [(17, 58, Some(format!("{url}codex"))), (14, 58, None), (8, 59, None)] {
+        let input = factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), x, y);
         let urls = input.actions.iter().filter_map(|action| match action {
-            ClientShellAction::OpenSafeWebUrl(url) => Some(url.as_str()),
-            _ => None,
+            ClientShellAction::OpenSafeWebUrl(url) => Some(url.as_str()), _ => None,
         }).collect::<Vec<_>>();
-        assert_eq!(urls, expected.as_deref().into_iter().collect::<Vec<_>>(), "row {row}");
-        factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), 2, row as u16);
+        assert_eq!(urls, expected.as_deref().into_iter().collect::<Vec<_>>());
+        factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), x, y);
     }
+    // The default expanded sidebar clamp has an 18-column minimum.
+    let (rows, hits, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 18);
+    for (row, value) in rows[55..].iter().zip(["3/8 66%", "4/5 60%", "198/16", "1/12", "3/12"]) {
+        assert!(row.contains(value), "{row}");
+    }
+    assert_eq!(hits.factory_usage_urls.len(), 2);
+    overlay.usage.clear();
+    overlay.hosts = vec![
+        HostRow { name: "forge".into(), summary: Some("down".into()), attention: Attention::Act, ..HostRow::default() },
+        HostRow { name: "PC".into(), summary: None, ..HostRow::default() },
+        HostRow { name: "idle".into(), summary: Some(String::new()), ..HostRow::default() },
+        HostRow { name: "old".into(), summary: Some("3 live · drained".into()), ..HostRow::default() },
+    ];
+    let (rows, _, buffer) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 38);
+    assert_eq!(rows[59].trim(), "forge down · PC · idle · old 3 drained");
+    for x in 7..11 {
+        assert_eq!(buffer[(x, 59)].fg, state.config.palette.red);
+    }
+}
+
+#[test]
+fn collapsed_hidden_and_automations_share_independent_click_spans() {
+    let (mut snapshot, overlay) = lab_fixture();
+    snapshot.workspaces[1].label = "automated".into();
+    let mut automation = snapshot.agents[0].clone();
+    automation.workspace_id = "ws_2".into();
+    automation.tab_id = "poker".into();
+    automation.pane_id = "auto-1".into();
+    automation.agent_status = AgentStatus::Blocked;
+    snapshot.agents.push(automation.clone());
+    automation.pane_id = "auto-2".into();
+    snapshot.agents.push(automation);
+    let mut hidden = snapshot.workspaces[0].clone();
+    hidden.workspace_id = "ws_3".into();
+    hidden.label = "hidden-two".into();
+    snapshot.workspaces.push(hidden);
+    let mut hidden_tab = snapshot.tabs[0].clone();
+    hidden_tab.tab_id = "hidden-tab".into();
+    hidden_tab.workspace_id = "ws_3".into();
+    snapshot.tabs.push(hidden_tab);
+    let mut state = factory_state(snapshot.clone(), overlay.clone());
+    state.config.automations.workspaces = vec!["automated".into()];
+    let mut tree = ClientTreeChrome::default();
+    tree.collapsed_spaces.extend(["ws_1".into(), "ws_3".into()]);
+    let draw = |tree: &ClientTreeChrome| {
+        let area = Rect::new(0, 0, 38, 60);
+        let mut buffer = Buffer::empty(area);
+        let mut hits = ShellHitMap::default();
+        crate::client::shell::agent_sidebar::render_agent_panel_with_overlay(
+            &mut buffer, area, &snapshot, &state.config, tree, Some(&overlay), &mut 0, &mut hits,
+        );
+        (buffer, hits)
+    };
+    let (buffer, hits) = draw(&tree);
+    let row = hits.tree_hidden_header.y;
+    let text: String = (0..38).map(|x| buffer[(x, row)].symbol()).collect();
+    assert!(text.contains("2 hidden · 2 automations ▸"), "{text}");
+    assert_eq!(hits.automations_header.y, row);
+    assert_eq!(buffer[(hits.automations_header.x, row)].fg, state.config.palette.red);
+    let mut expanded = tree.clone();
+    expanded.hidden_spaces_expanded = true;
+    let (_, expanded_hits) = draw(&expanded);
+    assert_ne!(expanded_hits.tree_hidden_header.y, expanded_hits.automations_header.y);
+    let mut expanded = tree.clone();
+    expanded.automations_expanded = true;
+    let (_, expanded_hits) = draw(&expanded);
+    assert_ne!(expanded_hits.tree_hidden_header.y, expanded_hits.automations_header.y);
+    state.tree_chrome.insert(crate::client::endpoint::ClientEndpointId::Local, tree);
+    state.last_composed_size = Some((120, 60));
+    state.hits = hits;
+    state.config.mouse_capture = true;
+    let hidden = state.hits.tree_hidden_header;
+    let automation = state.hits.automations_header;
+    factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), hidden.x, hidden.y);
+    factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), hidden.x, hidden.y);
+    let tree = &state.tree_chrome[&crate::client::endpoint::ClientEndpointId::Local];
+    assert!(tree.hidden_spaces_expanded);
+    assert!(!tree.automations_expanded);
+    factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), automation.x, automation.y);
+    let tree = &state.tree_chrome[&crate::client::endpoint::ClientEndpointId::Local];
+    assert!(tree.hidden_spaces_expanded);
+    assert!(tree.automations_expanded);
 }
 
 fn assert_golden(actual: Vec<String>, expected: &str) {

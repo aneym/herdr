@@ -146,6 +146,7 @@ fn shape(state: &ClientShellState, tree: &ClientTreeChrome) -> Vec<String> {
             AgentPanelListEntry::AutomationsHeader(summary) => {
                 format!("automations:{}", summary.label())
             }
+            AgentPanelListEntry::QuietSections { hidden, automations } => format!("quiet:{hidden}:{}", automations.label()),
             AgentPanelListEntry::Automation(row) => format!("automation:{}", row.pane_id),
             AgentPanelListEntry::FactorySection { label, .. } => format!("section:{label}"),
             AgentPanelListEntry::FactoryTab(row) => format!("factory:{}", row.header.label),

@@ -239,6 +239,7 @@ pub(super) enum AgentPanelListEntry {
     Agent(AgentRow),
     /// The header of the automations section, carrying its activity summary.
     AutomationsHeader(AutomationSummary),
+    QuietSections { hidden: usize, automations: AutomationSummary },
     /// An agent in a workspace named by `ui.sidebar.automations.workspaces`.
     Automation(AgentRow),
     /// The collapsible section collecting spaces that were folded away. Only
@@ -403,9 +404,16 @@ pub(super) fn append_automations(
     if automations.is_empty() {
         return;
     }
-    entries.push(AgentPanelListEntry::AutomationsHeader(
-        AutomationSummary::of(&automations),
-    ));
+    let summary = AutomationSummary::of(&automations);
+    if !tree.automations_expanded {
+        if let Some(AgentPanelListEntry::HiddenSpacesHeader { count, collapsed: true }) = entries.last() {
+            let hidden = *count;
+            entries.pop();
+            entries.push(AgentPanelListEntry::QuietSections { hidden, automations: summary });
+            return;
+        }
+    }
+    entries.push(AgentPanelListEntry::AutomationsHeader(summary));
     if tree.automations_expanded {
         entries.extend(automations.into_iter().map(AgentPanelListEntry::Automation));
     }
