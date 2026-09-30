@@ -1709,6 +1709,76 @@ fn reviewing_lane_links_render_and_open_without_focusing() {
 }
 
 #[test]
+fn scoping_lane_links_render_and_open_without_focusing() {
+    use crate::factory_overlay::TabSection;
+    for grouped in [false, true] {
+        for (section, scope_url, review_url) in [
+            (TabSection::Scoping, Some("https://studio.tailf266ac.ts.net:8799/scope"), None),
+            (TabSection::Scoping, None, None),
+            (TabSection::Implementing, Some("https://studio.tailf266ac.ts.net:8799/scope"), None),
+            (TabSection::Reviewing, Some("https://studio.tailf266ac.ts.net:8799/scope"), Some("https://studio.tailf266ac.ts.net:8799/review")),
+        ] {
+            let (mut snapshot, mut overlay) = fixture();
+            snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "lane-a" | "lane-b"));
+            let template = snapshot.agents[0].clone();
+            snapshot.agents.clear();
+            if grouped {
+                for (id, parent) in [("lane-a", None), ("lane-b", Some("lane-a-pane"))] {
+                    let mut agent = template.clone();
+                    agent.tab_id = id.into();
+                    agent.pane_id = format!("{id}-pane");
+                    agent.group.parent_pane_id = parent.map(str::to_string);
+                    snapshot.agents.push(agent);
+                }
+            }
+            for id in ["lane-a", "lane-b"] {
+                let mut value = serde_json::to_value(&overlay.tabs[id]).unwrap();
+                value["section"] = serde_json::to_value(section).unwrap();
+                value["scope_url"] = serde_json::to_value(scope_url).unwrap();
+                value["review_url"] = serde_json::to_value(review_url).unwrap();
+                value["attention"] = serde_json::json!("act");
+                overlay.tabs.insert(id.into(), serde_json::from_value(value).unwrap());
+            }
+            let mut state = factory_state(snapshot.clone(), overlay.clone());
+            state.tree_chrome_mut().factory_expanded_lanes.insert("lane-a".into());
+            let (rows, hits, buffer) = rendered_factory_rows_at_width(&snapshot, &overlay, state.tree_chrome_mut(), 35);
+            let row = hits.tree_headers.iter().find(|hit| hit.key == "lane-b").unwrap().rect;
+            let text = &rows[row.y as usize];
+            assert!(text.ends_with('!'), "{rows:?}");
+            state.hits = hits;
+            if section == TabSection::Scoping && scope_url.is_some() {
+                let label = "scope ↗";
+                assert!(text.contains(label), "grouped={grouped}: {rows:?}");
+                let x = text[..text.find(label).unwrap()].chars().count() as u16;
+                assert_eq!(buffer[(x, row.y)].fg, state.config.palette.blue);
+                for offset in 0..label.chars().count() as u16 {
+                    let input = factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), x + offset, row.y);
+                    let opened: Vec<_> = input.actions.iter().filter_map(|action| match action {
+                        ClientShellAction::OpenSafeWebUrl(url) => Some(url.as_str()),
+                        _ => None,
+                    }).collect();
+                    assert_eq!(opened, scope_url.into_iter().collect::<Vec<_>>());
+                    assert!(focused_tab(&input).is_empty());
+                    factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), x + offset, row.y);
+                }
+            } else if section == TabSection::Scoping {
+                assert!(!text.contains("scope ↗") && !text.contains("no link"), "{rows:?}");
+            } else {
+                assert!(!text.contains("scope ↗"), "{rows:?}");
+                if section == TabSection::Reviewing {
+                    assert!(text.contains("review ↗"), "{rows:?}");
+                }
+            }
+            let name_x = text[..text.find("lane-b").unwrap()].chars().count() as u16;
+            factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), name_x, row.y);
+            let input = factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), name_x, row.y);
+            assert_eq!(focused_tab(&input), vec!["lane-b"]);
+            assert!(!input.actions.iter().any(|action| matches!(action, ClientShellAction::OpenSafeWebUrl(_))));
+        }
+    }
+}
+
+#[test]
 fn factory_space_header_omits_child_status_but_keeps_count() {
     let (mut snapshot, mut overlay) = fixture();
     snapshot.tabs.retain(|tab| tab.tab_id == "plain-a");

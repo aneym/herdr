@@ -346,6 +346,8 @@ pub(super) struct FactoryTabRow {
     pub(super) status: crate::api::schema::AgentStatus,
     pub(super) reviewing: bool,
     pub(super) review_url: Option<String>,
+    pub(super) scoping: bool,
+    pub(super) scope_url: Option<String>,
     pub(super) badge: Option<String>,
     pub(super) phase: Option<String>,
     pub(super) started: Option<i64>,
@@ -1431,6 +1433,8 @@ fn factory_run_row(
         status: if run.done { crate::api::schema::AgentStatus::Done } else { crate::api::schema::AgentStatus::Working },
         reviewing: false,
         review_url: None,
+        scoping: false,
+        scope_url: None,
         badge: run.badge.clone(),
         phase: run.phase.clone(),
         started: run.started,
@@ -1550,6 +1554,9 @@ fn factory_row(
         reviewing: !background && tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Lane
             && tag.section == Some(crate::factory_overlay::TabSection::Reviewing)),
         review_url: tag.and_then(|tag| tag.review_url.clone()),
+        scoping: !background && tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Lane
+            && tag.section == Some(crate::factory_overlay::TabSection::Scoping)),
+        scope_url: tag.and_then(|tag| tag.scope_url.clone()),
         badge: tag.and_then(|tag| tag.badge.clone()),
         phase: tag.and_then(|tag| tag.phase.clone()),
         started: tag.and_then(|tag| tag.started),

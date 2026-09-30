@@ -117,6 +117,7 @@ pub(super) struct ShellHitMap {
     pub(super) agent_usage: Rect,
     pub(super) factory_usage_urls: Vec<(Rect, String)>,
     pub(super) factory_review_urls: Vec<(Rect, String)>,
+    pub(super) factory_scope_urls: Vec<(Rect, String)>,
     pub(super) factory_sections: Vec<FactorySectionHit>,
     pub(super) factory_goal_picker: Option<(Rect, Rect, Vec<String>)>,
     pub(super) factory_show_all: Vec<(Rect, String)>,

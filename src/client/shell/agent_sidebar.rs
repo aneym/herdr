@@ -586,6 +586,8 @@ fn render_factory_tab(
     let available = content_right.saturating_sub(name_x);
     let metadata = if row.reviewing {
         if row.review_url.is_some() { "review ↗" } else { "no link" }.to_owned()
+    } else if row.scoping && row.scope_url.is_some() {
+        "scope ↗".to_owned()
     } else if let Some(badge) = row.badge.as_deref() {
         badge.to_owned()
     } else {
@@ -629,6 +631,9 @@ fn render_factory_tab(
                 Style::default().fg(palette.overlay0).add_modifier(Modifier::DIM)
             };
             put_text(buffer, right_x, rect.y, right_width, right_label, style);
+        } else if let Some(url) = row.scope_url.as_ref().filter(|_| row.scoping) {
+            hits.factory_scope_urls.push((Rect::new(right_x, rect.y, right_width, 1), url.clone()));
+            put_text(buffer, right_x, rect.y, right_width, right_label, Style::default().fg(palette.blue));
         } else if let Some(badge) = row.badge.as_deref() {
             let badge_width = display_width(badge) as u16;
             let badge_color = attention_color.unwrap_or(color);
