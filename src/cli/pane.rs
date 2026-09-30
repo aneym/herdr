@@ -1015,46 +1015,70 @@ fn pane_close(args: &[String]) -> std::io::Result<i32> {
     super::runtime::pane_close(super::normalize_pane_id(raw_pane_id))
 }
 
+fn pane_send_args(args: &[String], allow_human: bool) -> (Vec<String>, bool, bool, bool) {
+    let mut positional = Vec::new();
+    let mut json = false;
+    let mut if_idle = false;
+    let mut human = false;
+    let mut literal = false;
+    for arg in args {
+        match arg.as_str() {
+            "--" if !literal => literal = true,
+            "--json" if !literal => json = true,
+            "--if-idle" if !literal => if_idle = true,
+            "--human" if !literal && allow_human => human = true,
+            _ => positional.push(arg.clone()),
+        }
+    }
+    (positional, json, if_idle, human)
+}
+
 fn pane_send_text(args: &[String]) -> std::io::Result<i32> {
-    let json = args.last().is_some_and(|arg| arg == "--json");
-    let args = if json { &args[..args.len() - 1] } else { args };
+    let (args, json, if_idle, human) = pane_send_args(args, true);
     if args.len() < 2 {
-        eprintln!("usage: herdr pane send-text <pane_id> <text>");
+        eprintln!("usage: herdr pane send-text <pane_id> <text> [--if-idle] [--human] [--json]");
         return Ok(2);
     }
-
     let pane_id = super::normalize_pane_id(&args[0]);
     let text = args[1..].join(" ");
     send_pane_request(
-        Method::PaneSendText(PaneSendTextParams { pane_id, text }),
+        Method::PaneSendText(PaneSendTextParams {
+            pane_id,
+            text,
+            if_idle,
+            human,
+        }),
         json,
     )
 }
 
 fn pane_send_keys(args: &[String]) -> std::io::Result<i32> {
-    let json = args.last().is_some_and(|arg| arg == "--json");
-    let args = if json { &args[..args.len() - 1] } else { args };
+    let (args, json, if_idle, human) = pane_send_args(args, true);
     if args.len() < 2 {
-        eprintln!("usage: herdr pane send-keys <pane_id> <key> [key ...]");
+        eprintln!(
+            "usage: herdr pane send-keys <pane_id> <key> [key ...] [--if-idle] [--human] [--json]"
+        );
         return Ok(2);
     }
-
     let pane_id = super::normalize_pane_id(&args[0]);
     let keys = args[1..].to_vec();
     send_pane_request(
-        Method::PaneSendKeys(PaneSendKeysParams { pane_id, keys }),
+        Method::PaneSendKeys(PaneSendKeysParams {
+            pane_id,
+            keys,
+            if_idle,
+            human,
+        }),
         json,
     )
 }
 
 fn pane_run(args: &[String]) -> std::io::Result<i32> {
-    let json = args.last().is_some_and(|arg| arg == "--json");
-    let args = if json { &args[..args.len() - 1] } else { args };
+    let (args, json, if_idle, _) = pane_send_args(args, false);
     if args.len() < 2 {
-        eprintln!("usage: herdr pane run <pane_id> <command>");
+        eprintln!("usage: herdr pane run <pane_id> <command> [--if-idle] [--json]");
         return Ok(2);
     }
-
     let pane_id = super::normalize_pane_id(&args[0]);
     let text = args[1..].join(" ");
     send_pane_request(
@@ -1062,6 +1086,7 @@ fn pane_run(args: &[String]) -> std::io::Result<i32> {
             pane_id,
             text,
             keys: vec!["Enter".into()],
+            if_idle,
         }),
         json,
     )
@@ -1700,14 +1725,14 @@ fn print_pane_help() {
     eprintln!("  herdr pane move <pane_id> --new-tab [--workspace ID] [--label TEXT] [--focus|--no-focus]");
     eprintln!("  herdr pane move <pane_id> --new-workspace [--label TEXT] [--tab-label TEXT] [--focus|--no-focus]");
     eprintln!("  herdr pane close <pane_id>");
-    eprintln!("  herdr pane send-text <pane_id> <text>");
-    eprintln!("  herdr pane send-keys <pane_id> <key> [key ...]");
+    eprintln!("  herdr pane send-text <pane_id> <text> [--if-idle] [--human] [--json]");
+    eprintln!("  herdr pane send-keys <pane_id> <key> [key ...] [--if-idle] [--human] [--json]");
     eprintln!("  herdr pane wait-output <pane_id> (--match TEXT | --regex PATTERN) [--source visible|recent|recent-unwrapped] [--lines N] [--timeout MS] [--raw]");
     eprintln!("  herdr pane report-agent <pane_id> --source ID --agent LABEL --state idle|working|blocked|unknown [--message TEXT] [--seq N] [--agent-session-id ID] [--agent-session-path PATH]");
     eprintln!("  herdr pane report-agent-session <pane_id> --source ID --agent LABEL [--seq N] [--agent-session-id ID] [--agent-session-path PATH]");
     eprintln!("  herdr pane release-agent <pane_id> --source ID --agent LABEL [--seq N]");
     eprintln!("  herdr pane report-metadata <pane_id> --source ID [--agent LABEL] [--applies-to-source ID] [--title TEXT|--clear-title] [--display-agent TEXT|--clear-display-agent] [--state-label STATUS=TEXT] [--clear-state-labels] [--token NAME=VALUE] [--clear-token NAME] [--seq N] [--ttl-ms N]");
-    eprintln!("  herdr pane run <pane_id> <command>");
+    eprintln!("  herdr pane run <pane_id> <command> [--if-idle] [--json]");
 }
 
 fn pane_queue(args: &[String]) -> std::io::Result<i32> {
@@ -1742,6 +1767,18 @@ fn send_pane_request(method: Method, json: bool) -> std::io::Result<i32> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn polite_send_cli_flags_do_not_reach_pane_text() {
+        let args = ["p1", "hello", "--if-idle", "--human", "--json"].map(str::to_owned);
+        let (text, json, if_idle, human) = super::pane_send_args(&args, true);
+        assert_eq!(text, ["p1", "hello"]);
+        assert!(json && if_idle && human);
+        let args = ["p1", "--", "--if-idle"].map(str::to_owned);
+        let (text, _, if_idle, _) = super::pane_send_args(&args, true);
+        assert_eq!(text, ["p1", "--if-idle"]);
+        assert!(!if_idle);
+    }
+
     use super::*;
 
     fn args(values: &[&str]) -> Vec<String> {

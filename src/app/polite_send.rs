@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use crate::api::schema::{PaneQueueParams, ResponseResult};
 use crate::config::PoliteSendConfig;
 use crate::layout::PaneId;
-use crate::terminal::polite_send::Payload;
+use crate::terminal::polite_send::{Payload, SendOptions, SendOutcome};
 
 use super::api::responses::{encode_error, encode_success};
 use super::App;
@@ -23,13 +23,37 @@ impl App {
         }
     }
 
+    pub(crate) fn polite_options(
+        &self,
+        ws_idx: usize,
+        pane_id: PaneId,
+        if_idle: bool,
+        human: bool,
+    ) -> SendOptions {
+        let claude = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .and_then(|ws| ws.terminal_id(pane_id))
+            .and_then(|id| self.state.terminals.get(id))
+            .is_some_and(|terminal| terminal.detected_agent == Some(crate::detect::Agent::Claude));
+        SendOptions {
+            if_idle,
+            human,
+            claude,
+            settle: self.polite_send_settle,
+        }
+    }
+
     pub(crate) fn send_polite_bytes(
         &self,
         ws_idx: usize,
         pane_id: PaneId,
         method: &'static str,
         bytes: bytes::Bytes,
-    ) -> std::io::Result<Option<usize>> {
+        if_idle: bool,
+        human: bool,
+    ) -> std::io::Result<SendOutcome> {
         let runtime = self
             .lookup_runtime_sender(ws_idx, pane_id)
             .ok_or_else(|| std::io::Error::other("pane runtime closed"))?;
@@ -38,6 +62,7 @@ impl App {
             self.polite_send_quiet,
             method,
             Payload::Bytes(bytes),
+            self.polite_options(ws_idx, pane_id, if_idle, human),
         )
     }
 
@@ -49,14 +74,25 @@ impl App {
     }
 
     pub(crate) fn flush_polite_sends(&self, now: Instant) {
-        for runtime in self.terminal_runtimes.values() {
-            if runtime.has_polite_queue() {
-                if let Err(err) = runtime.flush_polite_queue(
-                    now,
-                    self.polite_send_quiet,
-                    self.polite_send_mode == PoliteSendConfig::Off,
-                ) {
-                    tracing::warn!(%err, "polite send flush failed");
+        for (ws_idx, ws) in self.state.workspaces.iter().enumerate() {
+            for (pane_id, terminal_id) in ws
+                .tabs
+                .iter()
+                .flat_map(|tab| tab.panes.keys().copied())
+                .filter_map(|pane| ws.terminal_id(pane).map(|id| (pane, id)))
+            {
+                let Some(runtime) = self.terminal_runtimes.get(terminal_id) else {
+                    continue;
+                };
+                if runtime.has_polite_queue() {
+                    if let Err(err) = runtime.flush_polite_queue(
+                        now,
+                        self.polite_send_quiet,
+                        self.polite_send_mode == PoliteSendConfig::Off,
+                        self.polite_options(ws_idx, pane_id, false, false),
+                    ) {
+                        tracing::warn!(%err, "polite send flush failed");
+                    }
                 }
             }
         }
@@ -70,9 +106,12 @@ impl App {
             return encode_error(id, "pane_not_found", "pane not found");
         };
         if params.flush {
-            if let Err(err) =
-                runtime.flush_polite_queue(Instant::now(), self.polite_send_quiet, true)
-            {
+            if let Err(err) = runtime.flush_polite_queue(
+                Instant::now(),
+                self.polite_send_quiet,
+                true,
+                self.polite_options(ws_idx, pane_id, false, false),
+            ) {
                 return encode_error(id, "pane_send_failed", err.to_string());
             }
         }

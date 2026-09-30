@@ -107,6 +107,7 @@ pub struct App {
     pub state: AppState,
     pub(crate) polite_send_mode: crate::config::PoliteSendConfig,
     pub(crate) polite_send_quiet: Duration,
+    pub(crate) polite_send_settle: Duration,
     pub(crate) factory_ui: crate::config::FactoryUiConfig,
     pub(crate) pixel_mouse_available: bool,
     pub(crate) terminal_runtimes: crate::terminal::TerminalRuntimeRegistry,
@@ -644,6 +645,7 @@ impl App {
         let mut app = Self {
             polite_send_mode: config.server.polite_send,
             polite_send_quiet: Duration::from_secs(config.server.polite_send_quiet_secs),
+            polite_send_settle: Duration::from_millis(config.server.polite_send_submit_settle_ms),
             factory_ui: config.ui.factory.clone(),
             usage_sampler: usage::UsageSampler::default(),
             config_diagnostic_deadline: None,
@@ -920,6 +922,8 @@ impl App {
                 self.factory_ui = config.ui.factory.clone();
                 self.polite_send_mode = config.server.polite_send;
                 self.polite_send_quiet = Duration::from_secs(config.server.polite_send_quiet_secs);
+                self.polite_send_settle =
+                    Duration::from_millis(config.server.polite_send_submit_settle_ms);
                 self.loaded_host_cursor = config.ui.host_cursor;
                 self.state.mouse_scroll_lines = config.ui.mouse_scroll_lines();
                 self.state.right_click_passthrough_modifiers =

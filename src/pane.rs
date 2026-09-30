@@ -3502,6 +3502,12 @@ impl PaneRuntime {
         self.terminal.wheel_routing()
     }
 
+    pub(crate) fn claude_prompt_draft(&self) -> Option<bool> {
+        let result = self.terminal.claude_prompt_draft();
+        self.compression.wake();
+        result
+    }
+
     pub(crate) fn screen_text_snapshot(
         &self,
     ) -> Option<(

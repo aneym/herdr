@@ -37,7 +37,7 @@ type QueuedAgentPrompt = (
     String,
     crate::api::schema::AgentInfo,
     std::sync::mpsc::Receiver<std::io::Result<()>>,
-    Option<usize>,
+    crate::terminal::polite_send::SendOutcome,
 );
 
 impl App {
@@ -160,13 +160,23 @@ impl App {
         };
         match self.queue_agent_prompt(request.id, params) {
             Ok((id, agent, completion, position)) => {
-                if position.is_some() {
+                if !matches!(position, crate::terminal::polite_send::SendOutcome::Sent) {
                     let _ = respond_to.send(encode_success(
                         id,
                         ResponseResult::AgentPrompted {
                             agent,
-                            queued: true,
-                            queue_position: position,
+                            queued: matches!(
+                                position,
+                                crate::terminal::polite_send::SendOutcome::Queued(_)
+                            ),
+                            dropped: matches!(
+                                position,
+                                crate::terminal::polite_send::SendOutcome::Dropped
+                            ),
+                            queue_position: match position {
+                                crate::terminal::polite_send::SendOutcome::Queued(n) => Some(n),
+                                _ => None,
+                            },
                         },
                     ));
                     return true;
@@ -178,6 +188,7 @@ impl App {
                             ResponseResult::AgentPrompted {
                                 agent,
                                 queued: false,
+                                dropped: false,
                                 queue_position: None,
                             },
                         ),
@@ -299,6 +310,7 @@ impl App {
                     deadline: submit_deadline,
                     completion: completion_tx,
                 },
+                self.polite_options(resolved.ws_idx, resolved.pane_id, params.if_idle, false),
             )
             .map_err(|err| encode_error(id.clone(), "agent_prompt_failed", err.to_string()))?;
         Ok((id, agent, completion, position))
@@ -459,6 +471,8 @@ impl App {
             resolved.pane_id,
             "agent.send_keys",
             Bytes::from(bytes),
+            false,
+            false,
         ) {
             Ok(position) => encode_send_accepted(id, position),
             Err(err) => encode_error(id, "agent_send_keys_failed", err.to_string()),
@@ -550,6 +564,7 @@ mod tests {
             &mut app,
             "req",
             AgentPromptParams {
+                if_idle: false,
                 target: "reviewer".into(),
                 text: "A != B".into(),
                 wait: None,
@@ -628,6 +643,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn polite_send_agent_prompt_if_idle_drops_without_waiting_for_completion() {
+        let mut app = app_with_agent();
+        let pane = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].terminal_id(pane).unwrap().clone();
+        let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.set_agent_name("reviewer".into());
+        terminal.set_detected_state(Some(Agent::OpenCode), AgentState::Idle);
+        let (runtime, mut rx) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
+        runtime.record_human_text();
+        app.state.insert_test_runtime(pane, runtime);
+        let response = run_deferred_agent_prompt(
+            &mut app,
+            "polite",
+            AgentPromptParams {
+                target: "reviewer".into(),
+                text: "wake".into(),
+                wait: None,
+                if_idle: true,
+            },
+        );
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["result"]["dropped"], true);
+        assert_eq!(response["result"]["queued"], false);
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
     async fn agent_prompt_sends_text_then_delays_enter() {
         let mut app = app_with_agent();
         let pane_id = app.state.workspaces[0].tabs[0].root_pane;
@@ -650,6 +692,7 @@ mod tests {
             &mut app,
             "req",
             AgentPromptParams {
+                if_idle: false,
                 target: public_pane_id,
                 text: "A != B".into(),
                 wait: None,
@@ -679,6 +722,7 @@ mod tests {
             &mut app,
             "req-raw",
             AgentPromptParams {
+                if_idle: false,
                 target: "reviewer".into(),
                 text: "A != B".into(),
                 wait: None,
@@ -694,6 +738,7 @@ mod tests {
             &mut app,
             "req-label",
             AgentPromptParams {
+                if_idle: false,
                 target: "opencode".into(),
                 text: "wrong target".into(),
                 wait: None,
@@ -721,6 +766,7 @@ mod tests {
             &mut app,
             "req",
             AgentPromptParams {
+                if_idle: false,
                 target: "reviewer".into(),
                 text: "unrelated prompt".into(),
                 wait: None,
@@ -761,6 +807,7 @@ mod tests {
             &mut app,
             "req",
             AgentPromptParams {
+                if_idle: false,
                 target: "reviewer".into(),
                 text: "A != B".into(),
                 wait: None,
@@ -840,6 +887,7 @@ mod tests {
             &mut app,
             "req-pending",
             AgentPromptParams {
+                if_idle: false,
                 target: "reviewer".into(),
                 text: "A != B".into(),
                 wait: None,

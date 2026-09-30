@@ -231,7 +231,9 @@ pub(super) fn prompt_agent(
     let prompt_response = dispatch_to_app_with_timeout(prompt_request, api_tx, None);
     if serde_json::from_str::<serde_json::Value>(&prompt_response)
         .ok()
-        .is_some_and(|value| value["result"]["queued"] == true)
+        .is_some_and(|value| {
+            value["result"]["queued"] == true || value["result"]["dropped"] == true
+        })
     {
         return Ok(Some(prompt_response));
     }
@@ -343,6 +345,7 @@ fn agent_prompt_success(
         result: ResponseResult::AgentPrompted {
             agent,
             queued: false,
+            dropped: false,
             queue_position: None,
         },
     })

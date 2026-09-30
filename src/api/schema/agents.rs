@@ -262,6 +262,9 @@ pub struct AgentOwnershipInfo {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AgentPromptParams {
+    #[serde(default)]
+    pub if_idle: bool,
+
     pub target: String,
     pub text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

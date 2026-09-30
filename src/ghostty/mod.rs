@@ -1262,6 +1262,70 @@ impl Terminal {
         Ok((wide, graphemes))
     }
 
+    pub(crate) fn claude_prompt_draft(&self) -> Result<Option<bool>, Error> {
+        // Read the live screen, not the user's scrolled viewport or old history.
+        let end = self.total_rows()?;
+        let start = end.saturating_sub(usize::from(self.rows()?));
+        let rows = self.screen_text_rows_range(start, end)?;
+        let text: Vec<String> = rows
+            .iter()
+            .map(|row| {
+                row.cells
+                    .iter()
+                    .flat_map(|cell| cell.graphemes.iter().filter_map(|ch| char::from_u32(*ch)))
+                    .collect()
+            })
+            .collect();
+        let rules: Vec<usize> = text
+            .iter()
+            .enumerate()
+            .filter_map(|(i, line)| {
+                let line = line.trim();
+                (line.starts_with("───")).then_some(i)
+            })
+            .collect();
+        let (top, bottom) = if rules.len() >= 2 {
+            (rules[rules.len() - 2] + 1, rules[rules.len() - 1])
+        } else {
+            (0, rows.len())
+        };
+        let Some(prompt) = (top..bottom)
+            .rev()
+            .find(|i| text[*i].trim_start().starts_with('❯'))
+        else {
+            return Ok(None);
+        };
+        for (y, row) in rows.iter().enumerate().take(bottom).skip(prompt) {
+            let mut after_prompt = y != prompt;
+            for (x, cell) in row.cells.iter().enumerate() {
+                if !after_prompt {
+                    after_prompt = cell.graphemes.contains(&u32::from('❯'));
+                    continue;
+                }
+                if !cell
+                    .graphemes
+                    .iter()
+                    .filter_map(|ch| char::from_u32(*ch))
+                    .any(|ch| !ch.is_whitespace())
+                {
+                    continue;
+                }
+                let grid_ref = self.grid_ref(ghostty_screen_point(x as u16, (start + y) as u32))?;
+                let mut style = ffi::GhosttyStyle {
+                    size: mem::size_of::<ffi::GhosttyStyle>(),
+                    ..Default::default()
+                };
+                let attributes =
+                    unsafe { ffi::ghostty_grid_ref_style(&grid_ref, &mut style).into_result() };
+                // If attributes cannot be read, visible text is conservatively a draft.
+                if attributes.is_err() || !style.faint {
+                    return Ok(Some(true));
+                }
+            }
+        }
+        Ok(Some(false))
+    }
+
     pub(crate) fn screen_text_rows(&self) -> Result<Vec<ScreenTextRow>, Error> {
         self.screen_text_rows_range(0, usize::MAX)
     }

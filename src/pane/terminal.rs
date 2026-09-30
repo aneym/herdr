@@ -465,6 +465,10 @@ impl PaneTerminal {
         self.ghostty.wheel_routing()
     }
 
+    pub(crate) fn claude_prompt_draft(&self) -> Option<bool> {
+        self.ghostty.claude_prompt_draft()
+    }
+
     pub(crate) fn screen_text_snapshot(
         &self,
     ) -> Option<(
@@ -2151,6 +2155,16 @@ impl GhosttyPaneTerminal {
             .encode(&event)
             .ok()
             .filter(|bytes| !bytes.is_empty())
+    }
+
+    fn claude_prompt_draft(&self) -> Option<bool> {
+        self.core
+            .lock()
+            .ok()?
+            .terminal
+            .claude_prompt_draft()
+            .ok()
+            .flatten()
     }
 
     pub(crate) fn screen_text_snapshot(

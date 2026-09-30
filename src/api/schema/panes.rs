@@ -330,18 +330,31 @@ pub struct PaneRenameParams {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PaneSendTextParams {
+    #[serde(default)]
+    pub if_idle: bool,
+    #[serde(default)]
+    pub human: bool,
+
     pub pane_id: String,
     pub text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PaneSendKeysParams {
+    #[serde(default)]
+    pub if_idle: bool,
+    #[serde(default)]
+    pub human: bool,
+
     pub pane_id: String,
     pub keys: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PaneSendInputParams {
+    #[serde(default)]
+    pub if_idle: bool,
+
     pub pane_id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub text: String,

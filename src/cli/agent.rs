@@ -820,7 +820,7 @@ fn agent_rename(args: &[String]) -> std::io::Result<i32> {
 fn agent_prompt(args: &[String]) -> std::io::Result<i32> {
     let Some(target) = args.first() else {
         eprintln!(
-            "usage: herdr agent prompt <target> <text> [--wait] [--until STATUS]... [--timeout MS]"
+            "usage: herdr agent prompt <target> <text> [--if-idle] [--wait] [--until STATUS]... [--timeout MS]"
         );
         return Ok(2);
     };
@@ -829,11 +829,16 @@ fn agent_prompt(args: &[String]) -> std::io::Result<i32> {
         return Ok(2);
     };
     let mut wait = false;
+    let mut if_idle = false;
     let mut until = Vec::new();
     let mut timeout_ms = None;
     let mut index = 2;
     while index < args.len() {
         match args[index].as_str() {
+            "--if-idle" => {
+                if_idle = true;
+                index += 1;
+            }
             "--wait" => {
                 wait = true;
                 index += 1;
@@ -881,6 +886,7 @@ fn agent_prompt(args: &[String]) -> std::io::Result<i32> {
     let response = super::send_request(&Request {
         id: "cli:agent:prompt".into(),
         method: Method::AgentPrompt(AgentPromptParams {
+            if_idle,
             target: target.clone(),
             text: text.clone(),
             wait: wait.then_some(AgentPromptWaitOptions {
@@ -1096,7 +1102,7 @@ fn print_agent_help() {
     eprintln!("  herdr agent get <target>");
     eprintln!("  herdr agent read <target> [--source visible|recent|recent-unwrapped|detection] [--lines N] [--format text|ansi] [--ansi]");
     eprintln!("  herdr agent send-keys <target> <key> [key ...]");
-    eprintln!("  herdr agent prompt <target> <text> [--wait] [--until STATUS]... [--timeout MS]");
+    eprintln!("  herdr agent prompt <target> <text> [--if-idle] [--wait] [--until STATUS]... [--timeout MS]");
     eprintln!("  herdr agent rename <target> <name>|--clear");
     eprintln!("  herdr agent focus <target>");
     eprintln!("  herdr agent wait <target> [--until STATUS]... [--timeout MS]");

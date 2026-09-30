@@ -374,7 +374,7 @@ fn agent_command() -> Command {
                         .help("Fail after this many milliseconds"),
                 )
                 .after_help(
-                    "If the agent is already blocked, submission is rejected with agent_blocked before any input is sent. When an accepted submission starts from another non-working state, --wait requires an observed working or blocked state within 5000ms; otherwise it returns agent_prompt_stalled. A caller timeout that expires first returns timeout. It then matches idle, done, or blocked by default, or any exact --until state. It does not track turns: if the agent is already working, that active turn's completion may match.",
+                    "--if-idle: Send only when the pane is idle; otherwise drop without queueing.\n\nIf the agent is already blocked, submission is rejected with agent_blocked before any input is sent. When an accepted submission starts from another non-working state, --wait requires an observed working or blocked state within 5000ms; otherwise it returns agent_prompt_stalled. A caller timeout that expires first returns timeout. It then matches idle, done, or blocked by default, or any exact --until state. It does not track turns: if the agent is already working, that active turn's completion may match.",
                 ),
         )
         .subcommand(
@@ -671,7 +671,7 @@ fn pane_command() -> Command {
                 .arg(required("pane_id", "PANE_ID"))
                 .arg(required("text", "TEXT"))
                 .after_help(
-                    "next: herdr pane run <PANE_ID> <COMMAND> sends text and Enter in one call",
+                    "--if-idle: Send only when the pane is idle; otherwise drop without queueing.\n--human: Send immediately and record this as human input.\n\nnext: herdr pane run <PANE_ID> <COMMAND> sends text and Enter in one call",
                 ),
         )
         .subcommand(
@@ -679,7 +679,7 @@ fn pane_command() -> Command {
                 .about("Send key presses to a pane").arg(flag("json"))
                 .arg(required("pane_id", "PANE_ID"))
                 .arg(required("key", "KEY").num_args(1..))
-                .after_help("Use esc as the canonical Escape key name; escape is also accepted."),
+                .after_help("--if-idle: Send only when the pane is idle; otherwise drop without queueing.\n--human: Send immediately and record this as human input.\n\nUse esc as the canonical Escape key name; escape is also accepted."),
         )
         .subcommand(
             Command::new("wait-output")
@@ -714,7 +714,8 @@ fn pane_command() -> Command {
             Command::new("run")
                 .about("Run a command in a pane").arg(flag("json"))
                 .arg(required("pane_id", "PANE_ID"))
-                .arg(required("command", "COMMAND").num_args(1..)),
+                .arg(required("command", "COMMAND").num_args(1..))
+                .after_help("--if-idle: Send only when the pane is idle; otherwise drop without queueing."),
         )
         .subcommand(report_agent_command())
         .subcommand(report_agent_session_command())
@@ -1425,6 +1426,15 @@ mod tests {
         assert!(
             !leaf.contains(super::super::AGENT_HELP_FOOTER),
             "leaf help should stay focused: {leaf}"
+        );
+    }
+
+    #[test]
+    fn polite_send_panes_run_help_advertises_if_idle() {
+        let help = long_help(&["pane", "run"]);
+        assert!(
+            help.contains("--if-idle"),
+            "pane run help omits idle-only sending: {help}"
         );
     }
 

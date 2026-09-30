@@ -593,6 +593,8 @@ mod polite_send_tests {
             let response = request(
                 &mut app,
                 Method::PaneSendText(PaneSendTextParams {
+                    if_idle: false,
+                    human: false,
                     pane_id: public,
                     text: "message".into(),
                 }),
@@ -611,7 +613,13 @@ mod polite_send_tests {
     #[tokio::test]
     async fn polite_send_raw_mixed_text_ctrl_j_and_kitty_enter() {
         assert!(crate::input::parse_terminal_key_sequence("\x1b[13u").is_some());
-        for draft in [b"abc\x1b[I".as_slice(), b"\n", b"\x1b[200~pasted\x1b[201~"] {
+        for draft in [
+            b"abc\x1b[I".as_slice(),
+            b"\n",
+            b"\x1b\r",
+            b"\x1b[13;2u",
+            b"\x1b[200~pasted\x1b[201~",
+        ] {
             let (mut app, pane, public, mut rx) = fixture(PoliteSendConfig::All);
             let runtime = app
                 .state
@@ -622,6 +630,8 @@ mod polite_send_tests {
             let response = request(
                 &mut app,
                 Method::PaneSendText(PaneSendTextParams {
+                    if_idle: false,
+                    human: false,
                     pane_id: public,
                     text: "message".into(),
                 }),
@@ -636,6 +646,8 @@ mod polite_send_tests {
             apply_terminal_attach_input(runtime, b"\x1b[13u".to_vec()).unwrap();
             rx.try_recv().unwrap();
             app.flush_polite_sends(Instant::now());
+            assert!(rx.try_recv().is_err());
+            app.flush_polite_sends(Instant::now() + Duration::from_secs(2));
             assert_eq!(rx.try_recv().unwrap().as_ref(), b"message");
         }
     }
@@ -660,6 +672,8 @@ mod polite_send_tests {
             let text = request(
                 &mut app,
                 Method::PaneSendText(PaneSendTextParams {
+                    if_idle: false,
+                    human: false,
                     pane_id: public.clone(),
                     text: "MSG-1".into(),
                 }),
@@ -667,6 +681,8 @@ mod polite_send_tests {
             let keys = request(
                 &mut app,
                 Method::PaneSendKeys(PaneSendKeysParams {
+                    if_idle: false,
+                    human: false,
                     pane_id: public.clone(),
                     keys: vec!["Enter".into()],
                 }),
@@ -704,6 +720,8 @@ mod polite_send_tests {
             }
             app.flush_polite_sends(Instant::now());
             assert_eq!(rx.try_recv().unwrap().as_ref(), b"\r");
+            assert!(rx.try_recv().is_err());
+            app.flush_polite_sends(Instant::now() + Duration::from_secs(2));
             assert_eq!(rx.try_recv().unwrap().as_ref(), b"MSG-1");
             assert_eq!(rx.try_recv().unwrap().as_ref(), b"\r");
             assert!(rx.try_recv().is_err());
@@ -732,6 +750,8 @@ mod polite_send_tests {
             let response = request(
                 &mut app,
                 Method::PaneSendText(PaneSendTextParams {
+                    if_idle: false,
+                    human: false,
                     pane_id: public.clone(),
                     text: "message".into(),
                 }),
@@ -766,6 +786,8 @@ mod polite_send_tests {
         let response = request(
             &mut app,
             Method::PaneSendText(PaneSendTextParams {
+                if_idle: false,
+                human: false,
                 pane_id: public,
                 text: "message".into(),
             }),
@@ -788,6 +810,8 @@ mod polite_send_tests {
         let response = request(
             &mut app,
             Method::PaneSendText(PaneSendTextParams {
+                if_idle: false,
+                human: false,
                 pane_id: public,
                 text: "message".into(),
             }),
@@ -797,5 +821,126 @@ mod polite_send_tests {
         assert!(rx.try_recv().is_err());
         app.flush_polite_sends(Instant::now() + Duration::from_secs(2));
         assert_eq!(rx.try_recv().unwrap().as_ref(), b"message");
+    }
+    #[tokio::test]
+    async fn polite_send_screen_draft_faint_and_submit_settle() {
+        let (mut app, pane, public, mut rx) = fixture(PoliteSendConfig::Agents);
+        let terminal_id = app.state.workspaces[0].terminal_id(pane).unwrap().clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_state(
+                Some(crate::detect::Agent::Claude),
+                crate::detect::AgentState::Idle,
+            );
+        let runtime = app.terminal_runtimes.get(&terminal_id).unwrap();
+        runtime.test_process_pty_bytes(
+            "────────\r\n❯ half typed\r\n  continuation\r\n────────".as_bytes(),
+        );
+        let response = request(
+            &mut app,
+            Method::PaneSendText(PaneSendTextParams {
+                pane_id: public.clone(),
+                text: "wake".into(),
+                if_idle: false,
+                human: false,
+            }),
+        );
+        assert_eq!(response["result"]["queued"], true);
+        app.flush_polite_sends(Instant::now() + Duration::from_secs(31));
+        assert!(rx.try_recv().is_err());
+        let runtime = app.terminal_runtimes.get(&terminal_id).unwrap();
+        runtime.test_process_pty_bytes(
+            "\x1b[2J\x1b[H────────\r\n❯ \r\n  continuation only\r\n────────".as_bytes(),
+        );
+        app.flush_polite_sends(Instant::now() + Duration::from_secs(31));
+        assert!(rx.try_recv().is_err());
+        let runtime = app.terminal_runtimes.get(&terminal_id).unwrap();
+        apply_terminal_attach_input(runtime, b"\r".to_vec()).unwrap();
+        assert_eq!(rx.try_recv().unwrap().as_ref(), b"\r");
+        runtime.test_process_pty_bytes(
+            "\x1b[2J\x1b[H────────\r\n❯ \x1b[2mTry \"refactor\"\x1b[0m\r\n────────".as_bytes(),
+        );
+        app.flush_polite_sends(Instant::now());
+        assert!(rx.try_recv().is_err());
+        app.flush_polite_sends(Instant::now() + Duration::from_secs(2));
+        assert_eq!(rx.try_recv().unwrap().as_ref(), b"wake");
+        let runtime = app.terminal_runtimes.get(&terminal_id).unwrap();
+        // An empty screen clears a stale key flag (e.g. a dialog choice).
+        runtime.record_human_text();
+        runtime.test_process_pty_bytes("\x1b[2J\x1b[H────────\r\n❯ \r\n────────".as_bytes());
+        let response = request(
+            &mut app,
+            Method::PaneSendText(PaneSendTextParams {
+                pane_id: public,
+                text: "next".into(),
+                if_idle: false,
+                human: false,
+            }),
+        );
+        assert_eq!(response["result"]["queued"], true);
+        app.flush_polite_sends(Instant::now() + Duration::from_secs(2));
+        assert_eq!(rx.try_recv().unwrap().as_ref(), b"next");
+    }
+
+    #[tokio::test]
+    async fn polite_send_if_idle_drop_and_human_bypass() {
+        let (mut app, pane, public, mut rx) = fixture(PoliteSendConfig::All);
+        let send = |if_idle, human, text: &str| {
+            Method::PaneSendText(PaneSendTextParams {
+                pane_id: public.clone(),
+                text: text.into(),
+                if_idle,
+                human,
+            })
+        };
+        let response = request(&mut app, send(true, false, "idle"));
+        assert_eq!(response["result"]["dropped"], false);
+        assert_eq!(rx.try_recv().unwrap().as_ref(), b"idle");
+        let runtime = app
+            .state
+            .runtime_for_pane_in_workspace(&app.terminal_runtimes, 0, pane)
+            .unwrap();
+        runtime.record_human_text();
+        let response = request(&mut app, send(true, false, "drop"));
+        assert_eq!(response["result"]["dropped"], true);
+        assert_eq!(response["result"]["queued"], false);
+        assert!(rx.try_recv().is_err());
+        request(&mut app, send(false, false, "held"));
+        let response = request(&mut app, send(true, false, "drop queued"));
+        assert_eq!(response["result"]["dropped"], true);
+        let response = request(
+            &mut app,
+            Method::PaneSendKeys(PaneSendKeysParams {
+                pane_id: public.clone(),
+                keys: vec!["x".into()],
+                if_idle: false,
+                human: true,
+            }),
+        );
+        assert_eq!(response["result"]["queued"], false);
+        assert_eq!(rx.try_recv().unwrap().as_ref(), b"x");
+        app.flush_polite_sends(Instant::now() + Duration::from_secs(2));
+        assert!(rx.try_recv().is_err());
+        request(
+            &mut app,
+            Method::PaneSendKeys(PaneSendKeysParams {
+                pane_id: public.clone(),
+                keys: vec!["ctrl+u".into()],
+                if_idle: false,
+                human: true,
+            }),
+        );
+        assert_eq!(rx.try_recv().unwrap().as_ref(), b"\x15");
+        // Queue alone drops an idle-only send even after the draft clears.
+        assert_eq!(
+            request(&mut app, send(true, false, "still queued"))["result"]["dropped"],
+            true
+        );
+        app.flush_polite_sends(Instant::now());
+        assert!(rx.try_recv().is_err());
+        app.flush_polite_sends(Instant::now() + Duration::from_secs(2));
+        assert_eq!(rx.try_recv().unwrap().as_ref(), b"held");
     }
 }

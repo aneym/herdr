@@ -6,6 +6,20 @@ use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 
 use super::TerminalRuntime;
 
+#[derive(Clone, Copy, Default)]
+pub(crate) struct SendOptions {
+    pub if_idle: bool,
+    pub human: bool,
+    pub claude: bool,
+    pub settle: Duration,
+}
+
+pub(crate) enum SendOutcome {
+    Sent,
+    Queued(usize),
+    Dropped,
+}
+
 type Completion = std::sync::mpsc::Sender<std::io::Result<()>>;
 
 pub(crate) enum Payload {
@@ -65,15 +79,17 @@ impl PoliteSend {
         if key.kind == KeyEventKind::Release {
             return;
         }
-        if (key.code == KeyCode::Enter && key.modifiers.is_empty())
-            || (matches!(key.code, KeyCode::Char('c' | 'u'))
-                && key.modifiers == KeyModifiers::CONTROL)
-        {
+        if key.code == KeyCode::Enter && key.modifiers.is_empty() {
             self.submit();
+        } else if matches!(key.code, KeyCode::Char('c' | 'u'))
+            && key.modifiers == KeyModifiers::CONTROL
+        {
+            self.draft = false;
+            self.typing(false);
         } else {
             self.typing(matches!(
                 key.code,
-                KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Delete
+                KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Delete | KeyCode::Enter
             ));
         }
     }
@@ -160,7 +176,9 @@ impl TerminalRuntime {
                         || sequence.starts_with(b"\x1b[<")
                         || sequence.starts_with(b"\x1b[M");
                     if !report {
-                        if let Ok(text) = std::str::from_utf8(sequence) {
+                        if sequence == b"\x1b\r" {
+                            state.typing(true);
+                        } else if let Ok(text) = std::str::from_utf8(sequence) {
                             if let Some(key) = crate::input::parse_terminal_key_sequence(text) {
                                 state.key(&key);
                             }
@@ -174,7 +192,11 @@ impl TerminalRuntime {
                 state.typing(true);
             } else {
                 match rest[0] {
-                    b'\r' | 3 | 21 => state.submit(),
+                    b'\r' => state.submit(),
+                    3 | 21 => {
+                        state.draft = false;
+                        state.typing(false);
+                    }
                     b'\n' | 8 | 127 => state.typing(true),
                     byte if byte >= 32 => state.typing(true),
                     _ => state.typing(false),
@@ -191,11 +213,42 @@ impl TerminalRuntime {
         quiet: Duration,
         method: &'static str,
         payload: Payload,
-    ) -> std::io::Result<Option<usize>> {
+        options: SendOptions,
+    ) -> std::io::Result<SendOutcome> {
+        let screen_draft = options
+            .claude
+            .then(|| self.0.claude_prompt_draft())
+            .flatten();
         let mut state = self.1.lock().unwrap();
-        if guarded
-            && (!state.queue.is_empty() || state.draft || !state.quiet(Instant::now(), quiet))
+        if options.human {
+            drop(state);
+            match &payload {
+                Payload::Bytes(bytes) => self.record_human_bytes(bytes),
+                Payload::Keys(keys) => {
+                    for bytes in keys {
+                        self.record_human_bytes(bytes);
+                    }
+                }
+                Payload::Submission { .. } => unreachable!("human submissions use pane sends"),
+            }
+            self.write_polite_payload(&payload, false)?;
+            return Ok(SendOutcome::Sent);
+        }
+        if screen_draft == Some(false) {
+            state.draft = false;
+        }
+        let now = Instant::now();
+        let settling = state
+            .last_submit_at
+            .is_some_and(|at| now.saturating_duration_since(at) < options.settle);
+        if !state.queue.is_empty()
+            || (guarded
+                && (screen_draft.unwrap_or(state.draft) || !state.quiet(now, quiet) || settling))
         {
+            if options.if_idle {
+                tracing::info!(pane_id = ?self.0.pane_id, method, bytes = payload.len(), "polite send dropped");
+                return Ok(SendOutcome::Dropped);
+            }
             let len = payload.len();
             state.queue.push_back(HeldSend {
                 pane_id: self.0.pane_id,
@@ -204,10 +257,10 @@ impl TerminalRuntime {
                 at: Instant::now(),
             });
             tracing::info!(pane_id = ?self.0.pane_id, method, bytes = len, "polite send held");
-            return Ok(Some(state.queue.len()));
+            return Ok(SendOutcome::Queued(state.queue.len()));
         }
         self.write_polite_payload(&payload, false)?;
-        Ok(None)
+        Ok(SendOutcome::Sent)
     }
 
     fn write_polite_payload(&self, payload: &Payload, flushing: bool) -> std::io::Result<()> {
@@ -287,14 +340,29 @@ impl TerminalRuntime {
         now: Instant,
         quiet: Duration,
         force: bool,
+        options: SendOptions,
     ) -> std::io::Result<()> {
+        let screen_draft = options
+            .claude
+            .then(|| self.0.claude_prompt_draft())
+            .flatten();
         let mut state = self.1.lock().unwrap();
+        if screen_draft == Some(false) {
+            state.draft = false;
+        }
+        let settled = state
+            .last_submit_at
+            .is_none_or(|at| now.saturating_duration_since(at) >= options.settle);
         let submitted = state.last_submit_at.is_some_and(|submit| {
             state
                 .last_human_input_at
                 .is_none_or(|input| submit >= input)
         });
-        if !force && (state.draft || (!state.quiet(now, quiet) && !submitted)) {
+        if !force
+            && (screen_draft.unwrap_or(state.draft)
+                || !settled
+                || (!state.quiet(now, quiet) && !submitted))
+        {
             return Ok(());
         }
         while let Some(item) = state.queue.front() {

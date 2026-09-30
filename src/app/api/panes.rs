@@ -1856,7 +1856,14 @@ impl App {
         if self.lookup_runtime_sender(ws_idx, pane_id).is_none() {
             return pane_not_found(id, &params.pane_id);
         }
-        match self.send_polite_bytes(ws_idx, pane_id, "pane.send_text", Bytes::from(params.text)) {
+        match self.send_polite_bytes(
+            ws_idx,
+            pane_id,
+            "pane.send_text",
+            Bytes::from(params.text),
+            params.if_idle,
+            params.human,
+        ) {
             Ok(position) => encode_send_accepted(id, position),
             Err(err) => encode_error(id, "pane_send_failed", err.to_string()),
         }
@@ -1881,7 +1888,14 @@ impl App {
             Ok(bytes) => bytes,
             Err(key) => return encode_error(id, "invalid_key", format!("unsupported key {key}")),
         };
-        match self.send_polite_bytes(ws_idx, pane_id, "pane.send_input", Bytes::from(bytes)) {
+        match self.send_polite_bytes(
+            ws_idx,
+            pane_id,
+            "pane.send_input",
+            Bytes::from(bytes),
+            params.if_idle,
+            false,
+        ) {
             Ok(position) => encode_send_accepted(id, position),
             Err(err) => encode_error(id, "pane_send_failed", err.to_string()),
         }
@@ -1986,6 +2000,7 @@ impl App {
             crate::terminal::polite_send::Payload::Keys(
                 encoded_keys.into_iter().map(Bytes::from).collect(),
             ),
+            self.polite_options(ws_idx, pane_id, params.if_idle, params.human),
         ) {
             Ok(position) => encode_send_accepted(id, position),
             Err(err) => encode_error(id, "pane_send_failed", err.to_string()),
@@ -2420,6 +2435,8 @@ mod tests {
         let response = app.handle_api_request(crate::api::schema::Request {
             id: "req".into(),
             method: crate::api::schema::Method::PaneSendKeys(PaneSendKeysParams {
+                if_idle: false,
+                human: false,
                 pane_id,
                 keys: vec![
                     "ctrl+h".into(),
@@ -2447,6 +2464,8 @@ mod tests {
         let response = app.handle_api_request(crate::api::schema::Request {
             id: "req".into(),
             method: crate::api::schema::Method::PaneSendKeys(PaneSendKeysParams {
+                if_idle: false,
+                human: false,
                 pane_id,
                 keys: vec!["shift+tab".into()],
             }),
@@ -2810,6 +2829,8 @@ mod tests {
         let response = app.handle_api_request(crate::api::schema::Request {
             id: "req".into(),
             method: crate::api::schema::Method::PaneSendKeys(PaneSendKeysParams {
+                if_idle: false,
+                human: false,
                 pane_id,
                 keys: vec!["C-c".into(), "c-c".into(), "ctrl+c".into()],
             }),
@@ -2838,6 +2859,8 @@ mod tests {
         let response = app.handle_api_request(crate::api::schema::Request {
             id: "req".into(),
             method: crate::api::schema::Method::PaneSendKeys(PaneSendKeysParams {
+                if_idle: false,
+                human: false,
                 pane_id,
                 keys: vec!["cmd+c".into()],
             }),
@@ -2860,6 +2883,8 @@ mod tests {
         let response = app.handle_api_request(crate::api::schema::Request {
             id: "req".into(),
             method: crate::api::schema::Method::PaneSendKeys(PaneSendKeysParams {
+                if_idle: false,
+                human: false,
                 pane_id,
                 keys: vec!["+".into()],
             }),
@@ -2889,6 +2914,8 @@ mod tests {
         let response = app.handle_api_request(crate::api::schema::Request {
             id: "req".into(),
             method: crate::api::schema::Method::PaneSendKeys(PaneSendKeysParams {
+                if_idle: false,
+                human: false,
                 pane_id,
                 keys: vec!["shift+?".into()],
             }),
@@ -2912,6 +2939,7 @@ mod tests {
         let response = app.handle_api_request(crate::api::schema::Request {
             id: "req".into(),
             method: crate::api::schema::Method::PaneSendInput(PaneSendInputParams {
+                if_idle: false,
                 pane_id,
                 text: "A != B".into(),
                 keys: vec!["Enter".into()],
@@ -2934,6 +2962,7 @@ mod tests {
         let response = app.handle_api_request(crate::api::schema::Request {
             id: "req".into(),
             method: crate::api::schema::Method::PaneSendInput(PaneSendInputParams {
+                if_idle: false,
                 pane_id,
                 text: String::new(),
                 keys: vec!["ctrl+j".into()],
@@ -2954,6 +2983,8 @@ mod tests {
         let response = app.handle_api_request(crate::api::schema::Request {
             id: "req".into(),
             method: crate::api::schema::Method::PaneSendKeys(PaneSendKeysParams {
+                if_idle: false,
+                human: false,
                 pane_id,
                 keys: vec!["ctrl+h".into(), "not-a-key".into()],
             }),
@@ -2973,6 +3004,7 @@ mod tests {
         let response = app.handle_api_request(crate::api::schema::Request {
             id: "req".into(),
             method: crate::api::schema::Method::PaneSendInput(PaneSendInputParams {
+                if_idle: false,
                 pane_id,
                 text: "hello".into(),
                 keys: vec!["ctrl+h".into(), raw_key.clone()],
