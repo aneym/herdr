@@ -219,6 +219,8 @@ pub enum Method {
     PaneRename(PaneRenameParams),
     #[serde(rename = "pane.send_text")]
     PaneSendText(PaneSendTextParams),
+    #[serde(rename = "pane.queue")]
+    PaneQueue(PaneQueueParams),
     #[serde(rename = "pane.send_keys")]
     PaneSendKeys(PaneSendKeysParams),
     #[serde(rename = "pane.send_input")]

@@ -1135,6 +1135,7 @@ impl HeadlessServer {
                     return false;
                 };
                 if let Some(runtime) = self.runtime_for_terminal_id_string(terminal_id) {
+                    runtime.record_human_text();
                     let payload = paste_payload_for_runtime(runtime, &path);
                     if let Err(err) = runtime.try_send_bytes(Bytes::from(payload)) {
                         warn!(client_id, terminal_id = %terminal_id, err = %err, "terminal attach clipboard image paste failed");
@@ -3225,6 +3226,7 @@ impl HeadlessServer {
     /// Similar to the former App scheduler but without terminal resize polling.
     fn handle_scheduled_tasks_headless(&mut self, now: Instant, geometry_dirty: bool) -> bool {
         let mut changed = false;
+        self.app.flush_polite_sends(now);
 
         if !self.app.factory_ui.enabled {
             // Drop any stale deadline so a disabled overlay never wakes the loop.

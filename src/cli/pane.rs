@@ -33,6 +33,7 @@ pub(super) fn run_pane_command(args: &[String]) -> std::io::Result<i32> {
         "swap" => pane_swap(&args[1..]),
         "move" => pane_move(&args[1..]),
         "close" => pane_close(&args[1..]),
+        "queue" => pane_queue(&args[1..]),
         "send-text" => pane_send_text(&args[1..]),
         "send-keys" => pane_send_keys(&args[1..]),
         "wait-output" => pane_wait_output(&args[1..]),
@@ -1015,6 +1016,8 @@ fn pane_close(args: &[String]) -> std::io::Result<i32> {
 }
 
 fn pane_send_text(args: &[String]) -> std::io::Result<i32> {
+    let json = args.last().is_some_and(|arg| arg == "--json");
+    let args = if json { &args[..args.len() - 1] } else { args };
     if args.len() < 2 {
         eprintln!("usage: herdr pane send-text <pane_id> <text>");
         return Ok(2);
@@ -1022,10 +1025,15 @@ fn pane_send_text(args: &[String]) -> std::io::Result<i32> {
 
     let pane_id = super::normalize_pane_id(&args[0]);
     let text = args[1..].join(" ");
-    super::send_ok_request(Method::PaneSendText(PaneSendTextParams { pane_id, text }))
+    send_pane_request(
+        Method::PaneSendText(PaneSendTextParams { pane_id, text }),
+        json,
+    )
 }
 
 fn pane_send_keys(args: &[String]) -> std::io::Result<i32> {
+    let json = args.last().is_some_and(|arg| arg == "--json");
+    let args = if json { &args[..args.len() - 1] } else { args };
     if args.len() < 2 {
         eprintln!("usage: herdr pane send-keys <pane_id> <key> [key ...]");
         return Ok(2);
@@ -1033,10 +1041,15 @@ fn pane_send_keys(args: &[String]) -> std::io::Result<i32> {
 
     let pane_id = super::normalize_pane_id(&args[0]);
     let keys = args[1..].to_vec();
-    super::send_ok_request(Method::PaneSendKeys(PaneSendKeysParams { pane_id, keys }))
+    send_pane_request(
+        Method::PaneSendKeys(PaneSendKeysParams { pane_id, keys }),
+        json,
+    )
 }
 
 fn pane_run(args: &[String]) -> std::io::Result<i32> {
+    let json = args.last().is_some_and(|arg| arg == "--json");
+    let args = if json { &args[..args.len() - 1] } else { args };
     if args.len() < 2 {
         eprintln!("usage: herdr pane run <pane_id> <command>");
         return Ok(2);
@@ -1044,11 +1057,14 @@ fn pane_run(args: &[String]) -> std::io::Result<i32> {
 
     let pane_id = super::normalize_pane_id(&args[0]);
     let text = args[1..].join(" ");
-    super::send_ok_request(Method::PaneSendInput(PaneSendInputParams {
-        pane_id,
-        text,
-        keys: vec!["Enter".into()],
-    }))
+    send_pane_request(
+        Method::PaneSendInput(PaneSendInputParams {
+            pane_id,
+            text,
+            keys: vec!["Enter".into()],
+        }),
+        json,
+    )
 }
 
 fn pane_wait_output(args: &[String]) -> std::io::Result<i32> {
@@ -1692,6 +1708,36 @@ fn print_pane_help() {
     eprintln!("  herdr pane release-agent <pane_id> --source ID --agent LABEL [--seq N]");
     eprintln!("  herdr pane report-metadata <pane_id> --source ID [--agent LABEL] [--applies-to-source ID] [--title TEXT|--clear-title] [--display-agent TEXT|--clear-display-agent] [--state-label STATUS=TEXT] [--clear-state-labels] [--token NAME=VALUE] [--clear-token NAME] [--seq N] [--ttl-ms N]");
     eprintln!("  herdr pane run <pane_id> <command>");
+}
+
+fn pane_queue(args: &[String]) -> std::io::Result<i32> {
+    if args.is_empty()
+        || args[1..]
+            .iter()
+            .any(|arg| arg != "--flush" && arg != "--json")
+    {
+        eprintln!("usage: herdr pane queue <pane> [--flush] [--json]");
+        return Ok(2);
+    }
+    let response = super::send_request(&Request {
+        id: "cli:request".into(),
+        method: Method::PaneQueue(crate::api::schema::PaneQueueParams {
+            pane_id: super::normalize_pane_id(&args[0]),
+            flush: args.iter().any(|arg| arg == "--flush"),
+        }),
+    })?;
+    super::print_response(&response)
+}
+
+fn send_pane_request(method: Method, json: bool) -> std::io::Result<i32> {
+    if !json {
+        return super::send_ok_request(method);
+    }
+    let response = super::send_request(&Request {
+        id: "cli:request".into(),
+        method,
+    })?;
+    super::print_response(&response)
 }
 
 #[cfg(test)]

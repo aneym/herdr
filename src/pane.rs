@@ -1315,7 +1315,7 @@ async fn run_terminal_compression_task(
 /// Dropping this aborts async tasks and closes the PTY. An already-running bounded
 /// compression step may finish before releasing its terminal reference.
 pub struct PaneRuntime {
-    pane_id: PaneId,
+    pub(crate) pane_id: PaneId,
     terminal: Arc<PaneTerminal>,
     io: PaneRuntimeIo,
     current_size: Cell<(u16, u16, u32, u32)>,
@@ -4775,16 +4775,18 @@ mod tests {
         let mut output = Vec::new();
         for line in 0..2000 {
             output.extend_from_slice(
-                format!("\x1b[38;5;{}mline {line}\x1b[0m colored output\r\n", line % 256)
-                    .as_bytes(),
+                format!(
+                    "\x1b[38;5;{}mline {line}\x1b[0m colored output\r\n",
+                    line % 256
+                )
+                .as_bytes(),
             );
         }
         let before = PaneRuntime::test_with_scrollback_bytes(80, 24, 10_000_000, &output);
         let history = before
             .handoff_history_ansi(crate::server::handoff::MAX_REPLAY_BYTES_PER_PANE)
             .unwrap();
-        let after =
-            PaneRuntime::test_with_scrollback_bytes(80, 24, 10_000_000, history.as_bytes());
+        let after = PaneRuntime::test_with_scrollback_bytes(80, 24, 10_000_000, history.as_bytes());
 
         let scrollable = after.scroll_metrics().unwrap().max_offset_from_bottom;
         assert!(

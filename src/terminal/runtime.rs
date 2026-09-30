@@ -14,7 +14,10 @@ use crate::layout::PaneId;
 /// The PTY implementation still delegates to the legacy pane runtime while the
 /// migration proceeds, but production code now depends on this terminal-layer
 /// type instead of the pane module's implementation detail.
-pub struct TerminalRuntime(crate::pane::PaneRuntime);
+pub struct TerminalRuntime(
+    pub(super) crate::pane::PaneRuntime,
+    pub(super) std::sync::Mutex<super::polite_send::PoliteSend>,
+);
 
 impl TerminalRuntime {
     pub fn shutdown(self) {
@@ -78,7 +81,7 @@ impl TerminalRuntime {
             render_notify,
             render_dirty,
         )
-        .map(Self)
+        .map(|runtime| Self(runtime, Default::default()))
     }
 
     // Wrapper mirrors pane runtime construction arguments.
@@ -111,7 +114,7 @@ impl TerminalRuntime {
             render_notify,
             render_dirty,
         )
-        .map(Self)
+        .map(|runtime| Self(runtime, Default::default()))
     }
 
     // Wrapper mirrors pane runtime construction arguments.
@@ -146,7 +149,7 @@ impl TerminalRuntime {
             render_notify,
             render_dirty,
         )
-        .map(Self)
+        .map(|runtime| Self(runtime, Default::default()))
     }
 
     // Wrapper mirrors pane runtime construction arguments.
@@ -181,7 +184,7 @@ impl TerminalRuntime {
             render_notify,
             render_dirty,
         )
-        .map(Self)
+        .map(|runtime| Self(runtime, Default::default()))
     }
 
     // Wrapper mirrors pane runtime construction arguments, including detection policy.
@@ -216,7 +219,7 @@ impl TerminalRuntime {
             render_notify,
             render_dirty,
         )
-        .map(Self)
+        .map(|runtime| Self(runtime, Default::default()))
     }
 
     pub fn apply_host_terminal_theme(&self, theme: crate::terminal_theme::TerminalTheme) {
@@ -607,7 +610,7 @@ impl TerminalRuntime {
 
     pub(crate) fn test_with_channel(cols: u16, rows: u16) -> (Self, mpsc::Receiver<Bytes>) {
         let (runtime, rx) = crate::pane::PaneRuntime::test_with_channel(cols, rows);
-        (Self(runtime), rx)
+        (Self(runtime, Default::default()), rx)
     }
 
     pub(crate) fn test_with_channel_capacity(
@@ -617,13 +620,14 @@ impl TerminalRuntime {
     ) -> (Self, mpsc::Receiver<Bytes>) {
         let (runtime, rx) =
             crate::pane::PaneRuntime::test_with_channel_capacity(cols, rows, capacity);
-        (Self(runtime), rx)
+        (Self(runtime, Default::default()), rx)
     }
 
     pub(crate) fn test_with_screen_bytes(cols: u16, rows: u16, bytes: &[u8]) -> Self {
-        Self(crate::pane::PaneRuntime::test_with_screen_bytes(
-            cols, rows, bytes,
-        ))
+        Self(
+            crate::pane::PaneRuntime::test_with_screen_bytes(cols, rows, bytes),
+            Default::default(),
+        )
     }
 
     pub(crate) fn test_process_pty_bytes(&self, bytes: &[u8]) {
@@ -636,12 +640,15 @@ impl TerminalRuntime {
         scrollback_limit_bytes: usize,
         bytes: &[u8],
     ) -> Self {
-        Self(crate::pane::PaneRuntime::test_with_scrollback_bytes(
-            cols,
-            rows,
-            scrollback_limit_bytes,
-            bytes,
-        ))
+        Self(
+            crate::pane::PaneRuntime::test_with_scrollback_bytes(
+                cols,
+                rows,
+                scrollback_limit_bytes,
+                bytes,
+            ),
+            Default::default(),
+        )
     }
 
     pub(crate) fn test_with_channel_and_scrollback_bytes(
@@ -658,6 +665,6 @@ impl TerminalRuntime {
             bytes,
             channel_capacity,
         );
-        (Self(runtime), rx)
+        (Self(runtime, Default::default()), rx)
     }
 }

@@ -26,8 +26,8 @@ pub use self::{
     model::{
         validated_sidebar_bounds, AgentCloseFocusConfig, AgentPanelSortConfig, AttentionReadConfig,
         Config, ConfigReloadReport, ConfigReloadStatus, HostCursorModeConfig,
-        MouseNavButtonActionConfig, NewTerminalCwdConfig, PaneBordersConfig, ShellModeConfig,
-        ShowTabStatusConfig, SidebarCollapsedModeConfig, StatusIndicatorStyle,
+        MouseNavButtonActionConfig, NewTerminalCwdConfig, PaneBordersConfig, PoliteSendConfig,
+        ShellModeConfig, ShowTabStatusConfig, SidebarCollapsedModeConfig, StatusIndicatorStyle,
         TabBarPositionConfig, ToastClipboardPosition, ToastConfig, ToastDelivery,
         ToastHerdrPosition, UpdateChannelConfig, MAX_TOAST_DELAY_SECONDS,
     },

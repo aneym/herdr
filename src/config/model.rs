@@ -1134,6 +1134,8 @@ impl ImeCursorShape {
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct ServerConfig {
+    pub polite_send: PoliteSendConfig,
+    pub polite_send_quiet_secs: u64,
     /// Virtual terminal width used when no client is attached. Default: 120.
     pub headless_cols: u16,
     /// Virtual terminal height used when no client is attached. Default: 40.
@@ -1418,9 +1420,20 @@ impl<'de> Deserialize<'de> for ToastConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PoliteSendConfig {
+    #[default]
+    Agents,
+    All,
+    Off,
+}
+
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
+            polite_send: PoliteSendConfig::Agents,
+            polite_send_quiet_secs: 30,
             headless_cols: crate::config::DEFAULT_HEADLESS_COLS,
             headless_rows: crate::config::DEFAULT_HEADLESS_ROWS,
         }

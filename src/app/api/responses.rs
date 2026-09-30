@@ -17,3 +17,16 @@ pub(crate) fn encode_error(id: String, code: &str, message: impl Into<String>) -
 pub(super) fn encode_error_body(id: String, error: ErrorBody) -> String {
     serde_json::to_string(&ErrorResponse { id, error }).unwrap()
 }
+
+pub(crate) fn encode_send_accepted(id: String, position: Option<usize>) -> String {
+    let mut value = serde_json::to_value(SuccessResponse {
+        id,
+        result: ResponseResult::Ok {},
+    })
+    .unwrap();
+    value["result"]["queued"] = position.is_some().into();
+    if let Some(position) = position {
+        value["result"]["queue_position"] = position.into();
+    }
+    value.to_string()
+}

@@ -107,6 +107,10 @@ pub enum ResponseResult {
     },
     AgentPrompted {
         agent: AgentInfo,
+        #[serde(default)]
+        queued: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        queue_position: Option<usize>,
     },
     AgentList {
         agents: Vec<AgentInfo>,
@@ -286,6 +290,9 @@ pub enum ResponseResult {
     ClientShellSurfaceSet {
         active: bool,
         projection_revision: u64,
+    },
+    PaneQueue {
+        sends: Vec<super::panes::PaneQueuedSend>,
     },
     Ok {},
 }

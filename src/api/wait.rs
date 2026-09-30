@@ -229,6 +229,12 @@ pub(super) fn prompt_agent(
     );
     #[cfg(not(windows))]
     let prompt_response = dispatch_to_app_with_timeout(prompt_request, api_tx, None);
+    if serde_json::from_str::<serde_json::Value>(&prompt_response)
+        .ok()
+        .is_some_and(|value| value["result"]["queued"] == true)
+    {
+        return Ok(Some(prompt_response));
+    }
     let Ok(prompted) = agent_from_response(&request_id, &prompt_response) else {
         return Ok(Some(prompt_response));
     };
@@ -334,7 +340,11 @@ fn agent_prompt_success(
 ) -> std::io::Result<String> {
     serde_json::to_string(&SuccessResponse {
         id: request_id,
-        result: ResponseResult::AgentPrompted { agent },
+        result: ResponseResult::AgentPrompted {
+            agent,
+            queued: false,
+            queue_position: None,
+        },
     })
     .map_err(std::io::Error::other)
 }

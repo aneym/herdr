@@ -654,3 +654,33 @@ fn removed_show_changelog_flag_fails_before_nested_guard() {
         "unknown flag should be rejected before nested guard: {stderr}"
     );
 }
+
+#[test]
+fn polite_send_cli_json_preserves_queue_acknowledgment() {
+    let base = unique_test_dir();
+    fs::create_dir_all(&base).unwrap();
+    let socket_path = base.join("herdr.sock");
+    let listener = UnixListener::bind(&socket_path).unwrap();
+    let server = thread::spawn(move || {
+        let (mut stream, line) = accept_fake_cli_operation(&listener);
+        let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(request["method"], "pane.send_text");
+        assert_eq!(request["params"]["text"], "message");
+        stream.write_all(b"{\"id\":\"cli:request\",\"result\":{\"type\":\"ok\",\"queued\":true,\"queue_position\":2}}\n").unwrap();
+        stream.flush().unwrap();
+    });
+    let output = run_cli(
+        &socket_path,
+        &["pane", "send-text", "1-1", "message", "--json"],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(response["result"]["queued"], true);
+    assert_eq!(response["result"]["queue_position"], 2);
+    server.join().unwrap();
+    cleanup_test_base(&base);
+}

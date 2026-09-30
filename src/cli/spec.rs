@@ -664,9 +664,10 @@ fn pane_command() -> Command {
                 .arg(flag("no-focus")),
         )
         .subcommand(id_command("close", "pane_id", "Close a pane"))
+        .subcommand(Command::new("queue").about("Inspect or flush held sends").arg(required("pane_id", "PANE_ID")).arg(flag("flush")).arg(flag("json")))
         .subcommand(
             Command::new("send-text")
-                .about("Send literal text to a pane")
+                .about("Send literal text to a pane").arg(flag("json"))
                 .arg(required("pane_id", "PANE_ID"))
                 .arg(required("text", "TEXT"))
                 .after_help(
@@ -675,7 +676,7 @@ fn pane_command() -> Command {
         )
         .subcommand(
             Command::new("send-keys")
-                .about("Send key presses to a pane")
+                .about("Send key presses to a pane").arg(flag("json"))
                 .arg(required("pane_id", "PANE_ID"))
                 .arg(required("key", "KEY").num_args(1..))
                 .after_help("Use esc as the canonical Escape key name; escape is also accepted."),
@@ -711,7 +712,7 @@ fn pane_command() -> Command {
         )
         .subcommand(
             Command::new("run")
-                .about("Run a command in a pane")
+                .about("Run a command in a pane").arg(flag("json"))
                 .arg(required("pane_id", "PANE_ID"))
                 .arg(required("command", "COMMAND").num_args(1..)),
         )

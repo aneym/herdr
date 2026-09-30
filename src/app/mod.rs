@@ -18,6 +18,7 @@ mod custom_commands;
 pub(crate) mod fuzzy;
 mod git_refresh;
 mod ids;
+mod polite_send;
 mod popup;
 mod runtime;
 mod session;
@@ -104,6 +105,8 @@ impl AppPolicy {
 
 pub struct App {
     pub state: AppState,
+    pub(crate) polite_send_mode: crate::config::PoliteSendConfig,
+    pub(crate) polite_send_quiet: Duration,
     pub(crate) factory_ui: crate::config::FactoryUiConfig,
     pub(crate) pixel_mouse_available: bool,
     pub(crate) terminal_runtimes: crate::terminal::TerminalRuntimeRegistry,
@@ -639,6 +642,8 @@ impl App {
             custom_commands::EndpointCommandRegistry::new(&state.keybinds.custom_commands);
 
         let mut app = Self {
+            polite_send_mode: config.server.polite_send,
+            polite_send_quiet: Duration::from_secs(config.server.polite_send_quiet_secs),
             factory_ui: config.ui.factory.clone(),
             usage_sampler: usage::UsageSampler::default(),
             config_diagnostic_deadline: None,
@@ -913,6 +918,8 @@ impl App {
                 ));
 
                 self.factory_ui = config.ui.factory.clone();
+                self.polite_send_mode = config.server.polite_send;
+                self.polite_send_quiet = Duration::from_secs(config.server.polite_send_quiet_secs);
                 self.loaded_host_cursor = config.ui.host_cursor;
                 self.state.mouse_scroll_lines = config.ui.mouse_scroll_lines();
                 self.state.right_click_passthrough_modifiers =

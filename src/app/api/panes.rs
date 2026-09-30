@@ -28,7 +28,7 @@ use super::super::api_helpers::{
 };
 #[cfg(test)]
 use super::super::api_helpers::{METADATA_SOURCE_MAX_CHARS, METADATA_TTL_MAX_MS};
-use super::responses::{encode_error, encode_success};
+use super::responses::{encode_error, encode_send_accepted, encode_success};
 
 impl App {
     pub(super) fn handle_pane_split(&mut self, id: String, params: PaneSplitParams) -> String {
@@ -1853,14 +1853,13 @@ impl App {
         let Some((ws_idx, pane_id)) = self.parse_pane_id(&params.pane_id) else {
             return pane_not_found(id, &params.pane_id);
         };
-        let Some(runtime) = self.lookup_runtime_sender(ws_idx, pane_id) else {
+        if self.lookup_runtime_sender(ws_idx, pane_id).is_none() {
             return pane_not_found(id, &params.pane_id);
-        };
-        if let Err(err) = runtime.try_send_bytes(Bytes::from(params.text)) {
-            return encode_error(id, "pane_send_failed", err.to_string());
         }
-
-        encode_success(id, ResponseResult::Ok {})
+        match self.send_polite_bytes(ws_idx, pane_id, "pane.send_text", Bytes::from(params.text)) {
+            Ok(position) => encode_send_accepted(id, position),
+            Err(err) => encode_error(id, "pane_send_failed", err.to_string()),
+        }
     }
 
     pub(super) fn handle_pane_send_input(
@@ -1882,11 +1881,10 @@ impl App {
             Ok(bytes) => bytes,
             Err(key) => return encode_error(id, "invalid_key", format!("unsupported key {key}")),
         };
-        if let Err(err) = runtime.try_send_bytes(Bytes::from(bytes)) {
-            return encode_error(id, "pane_send_failed", err.to_string());
+        match self.send_polite_bytes(ws_idx, pane_id, "pane.send_input", Bytes::from(bytes)) {
+            Ok(position) => encode_send_accepted(id, position),
+            Err(err) => encode_error(id, "pane_send_failed", err.to_string()),
         }
-
-        encode_success(id, ResponseResult::Ok {})
     }
 
     pub(super) fn handle_pane_close(&mut self, id: String, target: PaneTarget) -> String {
@@ -1981,13 +1979,17 @@ impl App {
             Ok(encoded_keys) => encoded_keys,
             Err(key) => return encode_error(id, "invalid_key", format!("unsupported key {key}")),
         };
-        for bytes in encoded_keys {
-            if let Err(err) = runtime.try_send_bytes(Bytes::from(bytes)) {
-                return encode_error(id, "pane_send_failed", err.to_string());
-            }
+        match runtime.polite_send(
+            self.polite_guarded(ws_idx, pane_id),
+            self.polite_send_quiet,
+            "pane.send_keys",
+            crate::terminal::polite_send::Payload::Keys(
+                encoded_keys.into_iter().map(Bytes::from).collect(),
+            ),
+        ) {
+            Ok(position) => encode_send_accepted(id, position),
+            Err(err) => encode_error(id, "pane_send_failed", err.to_string()),
         }
-
-        encode_success(id, ResponseResult::Ok {})
     }
 }
 

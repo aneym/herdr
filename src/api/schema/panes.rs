@@ -694,3 +694,17 @@ pub struct PaneLinkRegion {
     pub start_col: u16,
     pub end_col: u16,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PaneQueueParams {
+    pub pane_id: String,
+    #[serde(default)]
+    pub flush: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PaneQueuedSend {
+    pub method: String,
+    pub byte_length: usize,
+    pub age_secs: f64,
+}

@@ -9,7 +9,7 @@ use crate::api::schema::{
 };
 use crate::app::App;
 
-use super::responses::{encode_error, encode_error_body, encode_success};
+use super::responses::{encode_error, encode_error_body, encode_send_accepted, encode_success};
 
 const AGENT_PROMPT_SUBMIT_DELAY: Duration = Duration::from_millis(300);
 
@@ -32,6 +32,13 @@ fn append_codex_paste_boundary(runtime: &crate::terminal::TerminalRuntime, text:
         text.extend_from_slice(&key);
     }
 }
+
+type QueuedAgentPrompt = (
+    String,
+    crate::api::schema::AgentInfo,
+    std::sync::mpsc::Receiver<std::io::Result<()>>,
+    Option<usize>,
+);
 
 impl App {
     pub(super) fn handle_agent_list(&mut self, id: String) -> String {
@@ -152,10 +159,28 @@ impl App {
             return false;
         };
         match self.queue_agent_prompt(request.id, params) {
-            Ok((id, agent, completion)) => {
+            Ok((id, agent, completion, position)) => {
+                if position.is_some() {
+                    let _ = respond_to.send(encode_success(
+                        id,
+                        ResponseResult::AgentPrompted {
+                            agent,
+                            queued: true,
+                            queue_position: position,
+                        },
+                    ));
+                    return true;
+                }
                 std::thread::spawn(move || {
                     let response = match completion.recv() {
-                        Ok(Ok(())) => encode_success(id, ResponseResult::AgentPrompted { agent }),
+                        Ok(Ok(())) => encode_success(
+                            id,
+                            ResponseResult::AgentPrompted {
+                                agent,
+                                queued: false,
+                                queue_position: None,
+                            },
+                        ),
                         Ok(Err(err)) if err.kind() == std::io::ErrorKind::TimedOut => {
                             encode_error(id, "timeout", err.to_string())
                         }
@@ -176,14 +201,7 @@ impl App {
         &mut self,
         id: String,
         params: AgentPromptParams,
-    ) -> Result<
-        (
-            String,
-            crate::api::schema::AgentInfo,
-            std::sync::mpsc::Receiver<std::io::Result<()>>,
-        ),
-        String,
-    > {
+    ) -> Result<QueuedAgentPrompt, String> {
         if params.text.is_empty() {
             return Err(encode_error(
                 id,
@@ -243,6 +261,7 @@ impl App {
             .and_then(|wait| wait.submission_deadline);
         #[cfg(not(windows))]
         let submit_deadline = None;
+        let mut focus_bytes = Vec::new();
         if expected_agent == crate::detect::Agent::GithubCopilot {
             // Copilot ignores synthetic Enter after focus loss until it receives focus gained.
             let focus = match crate::ghostty::encode_focus(crate::ghostty::FocusEvent::Gained) {
@@ -251,9 +270,7 @@ impl App {
                     return Err(encode_error(id, "agent_prompt_failed", err.to_string()));
                 }
             };
-            if let Err(err) = runtime.try_send_bytes(Bytes::from(focus)) {
-                return Err(encode_error(id, "agent_prompt_failed", err.to_string()));
-            }
+            focus_bytes = focus;
         }
         let (text, enter) =
             crate::app::api_helpers::encode_api_submission_parts(runtime, &params.text);
@@ -268,15 +285,23 @@ impl App {
         let Some(agent) = self.agent_info(resolved.ws_idx, resolved.pane_id) else {
             return Err(agent_not_found(id, &params.target));
         };
-        let completion = runtime
-            .queue_user_input_submission(
-                Bytes::from(text),
-                Bytes::from(enter),
-                AGENT_PROMPT_SUBMIT_DELAY,
-                submit_deadline,
+        let (completion_tx, completion) = std::sync::mpsc::channel();
+        let position = runtime
+            .polite_send(
+                self.polite_guarded(resolved.ws_idx, resolved.pane_id),
+                self.polite_send_quiet,
+                "agent.prompt",
+                crate::terminal::polite_send::Payload::Submission {
+                    focus: Bytes::from(focus_bytes),
+                    text: Bytes::from(text),
+                    enter: Bytes::from(enter),
+                    delay: AGENT_PROMPT_SUBMIT_DELAY,
+                    deadline: submit_deadline,
+                    completion: completion_tx,
+                },
             )
             .map_err(|err| encode_error(id.clone(), "agent_prompt_failed", err.to_string()))?;
-        Ok((id, agent, completion))
+        Ok((id, agent, completion, position))
     }
 
     pub(super) fn handle_agent_read(
@@ -429,11 +454,15 @@ impl App {
             }
         };
         let bytes: Vec<u8> = encoded.into_iter().flatten().collect();
-        if let Err(err) = runtime.try_send_bytes(Bytes::from(bytes)) {
-            return encode_error(id, "agent_send_keys_failed", err.to_string());
+        match self.send_polite_bytes(
+            resolved.ws_idx,
+            resolved.pane_id,
+            "agent.send_keys",
+            Bytes::from(bytes),
+        ) {
+            Ok(position) => encode_send_accepted(id, position),
+            Err(err) => encode_error(id, "agent_send_keys_failed", err.to_string()),
         }
-
-        encode_success(id, ResponseResult::Ok {})
     }
 }
 

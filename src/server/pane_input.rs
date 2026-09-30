@@ -188,6 +188,7 @@ pub(super) fn apply_terminal_attach_input(
     runtime: &crate::terminal::TerminalRuntime,
     data: Vec<u8>,
 ) -> Result<(), String> {
+    runtime.record_human_bytes(&data);
     runtime.scroll_reset();
     if let Some(text) = crate::raw_input::complete_text_bracketed_paste(&data) {
         runtime
@@ -290,6 +291,7 @@ fn apply_client_terminal_input_events(
 
         match event.to_raw_input_event() {
             crate::raw_input::RawInputEvent::Key(key) => {
+                runtime.record_human_key(&key);
                 let key_event = key.as_key_event();
                 if host_page_keys
                     && matches!(key_event.code, KeyCode::PageUp | KeyCode::PageDown)
@@ -319,12 +321,14 @@ fn apply_client_terminal_input_events(
                 }
             }
             crate::raw_input::RawInputEvent::Text(text) => {
+                runtime.record_human_text();
                 runtime.scroll_reset();
                 runtime
                     .try_send_bytes(Bytes::copy_from_slice(text.as_str().as_bytes()))
                     .map_err(|err| format!("targeted pane text input failed: {err}"))?;
             }
             crate::raw_input::RawInputEvent::Paste(text) => {
+                runtime.record_human_text();
                 runtime.scroll_reset();
                 runtime
                     .try_send_paste(text)
@@ -514,5 +518,284 @@ mod tests {
                 ..
             }]
         ));
+    }
+}
+
+#[cfg(test)]
+mod polite_send_tests {
+    use crate::api::schema::PaneQueueParams;
+    use crate::api::schema::{Method, PaneSendKeysParams, PaneSendTextParams, Request};
+    use crate::app::App;
+    use crate::config::PoliteSendConfig;
+    use crate::layout::PaneId;
+    use crate::protocol::ClientPaneInputEvent;
+    use crate::server::pane_input::{apply_client_pane_input_events, apply_terminal_attach_input};
+    use std::time::{Duration, Instant};
+
+    fn fixture(
+        mode: PoliteSendConfig,
+    ) -> (
+        App,
+        PaneId,
+        String,
+        tokio::sync::mpsc::Receiver<bytes::Bytes>,
+    ) {
+        let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut config = crate::config::Config::default();
+        config.server.polite_send = mode;
+        config.server.polite_send_quiet_secs = 1;
+        let mut app = App::new(
+            &config,
+            crate::app::AppPolicy::TEST,
+            None,
+            rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("polite")];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        let pane = app.state.workspaces[0].tabs[0].root_pane;
+        let (runtime, receiver) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
+        let terminal_id = app.state.workspaces[0].terminal_id(pane).unwrap().clone();
+        app.terminal_runtimes.insert(terminal_id, runtime);
+        let public = app.public_pane_id(0, pane).unwrap();
+        (app, pane, public, receiver)
+    }
+
+    fn request(app: &mut App, method: Method) -> serde_json::Value {
+        serde_json::from_str(&app.handle_api_request(Request {
+            id: "polite".into(),
+            method,
+        }))
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn polite_send_raw_reports_do_not_create_a_draft() {
+        for report in [
+            b"\x1b[I".as_slice(),
+            b"\x1b[O",
+            b"\x1b[<0;10;5M",
+            b"\x1b[M *%",
+            b"\x1b[Z",
+            b"\x1b]0;title\x07",
+            b"\x1bPpayload\x1b\\",
+            b"\x1b",
+            b"\x1b[200~\x1b[201~",
+        ] {
+            let (mut app, pane, public, mut rx) = fixture(PoliteSendConfig::All);
+            let runtime = app
+                .state
+                .runtime_for_pane_in_workspace(&app.terminal_runtimes, 0, pane)
+                .unwrap();
+            apply_terminal_attach_input(runtime, report.to_vec()).unwrap();
+            rx.try_recv().unwrap();
+            let response = request(
+                &mut app,
+                Method::PaneSendText(PaneSendTextParams {
+                    pane_id: public,
+                    text: "message".into(),
+                }),
+            );
+            // Recognized keys may start the quiet window, but must never create
+            // a draft. Non-key reports do not even start that window.
+            if report == b"\x1b[Z" {
+                app.flush_polite_sends(Instant::now() + Duration::from_secs(2));
+            } else {
+                assert_eq!(response["result"]["queued"], false, "{report:?}");
+            }
+            assert_eq!(rx.try_recv().unwrap().as_ref(), b"message");
+        }
+    }
+
+    #[tokio::test]
+    async fn polite_send_raw_mixed_text_ctrl_j_and_kitty_enter() {
+        assert!(crate::input::parse_terminal_key_sequence("\x1b[13u").is_some());
+        for draft in [b"abc\x1b[I".as_slice(), b"\n", b"\x1b[200~pasted\x1b[201~"] {
+            let (mut app, pane, public, mut rx) = fixture(PoliteSendConfig::All);
+            let runtime = app
+                .state
+                .runtime_for_pane_in_workspace(&app.terminal_runtimes, 0, pane)
+                .unwrap();
+            apply_terminal_attach_input(runtime, draft.to_vec()).unwrap();
+            rx.try_recv().unwrap();
+            let response = request(
+                &mut app,
+                Method::PaneSendText(PaneSendTextParams {
+                    pane_id: public,
+                    text: "message".into(),
+                }),
+            );
+            assert_eq!(response["result"]["queued"], true);
+            app.flush_polite_sends(Instant::now() + Duration::from_secs(2));
+            assert!(rx.try_recv().is_err());
+            let runtime = app
+                .state
+                .runtime_for_pane_in_workspace(&app.terminal_runtimes, 0, pane)
+                .unwrap();
+            apply_terminal_attach_input(runtime, b"\x1b[13u".to_vec()).unwrap();
+            rx.try_recv().unwrap();
+            app.flush_polite_sends(Instant::now());
+            assert_eq!(rx.try_recv().unwrap().as_ref(), b"message");
+        }
+    }
+
+    #[tokio::test]
+    async fn polite_send_preserves_human_draft_and_fifo_in_both_attach_modes() {
+        for raw_attach in [false, true] {
+            let (mut app, pane, public, mut rx) = fixture(PoliteSendConfig::All);
+            let runtime = app
+                .state
+                .runtime_for_pane_in_workspace(&app.terminal_runtimes, 0, pane)
+                .unwrap();
+            if raw_attach {
+                apply_terminal_attach_input(runtime, b"draft-abc".to_vec()).unwrap();
+            } else {
+                apply_client_pane_input_events(
+                    runtime,
+                    &[ClientPaneInputEvent::TextCommit("draft-abc".into())],
+                )
+                .unwrap();
+            }
+            let text = request(
+                &mut app,
+                Method::PaneSendText(PaneSendTextParams {
+                    pane_id: public.clone(),
+                    text: "MSG-1".into(),
+                }),
+            );
+            let keys = request(
+                &mut app,
+                Method::PaneSendKeys(PaneSendKeysParams {
+                    pane_id: public.clone(),
+                    keys: vec!["Enter".into()],
+                }),
+            );
+            assert_eq!(text["result"]["queued"], true);
+            assert_eq!(text["result"]["queue_position"], 1);
+            assert_eq!(keys["result"]["queue_position"], 2);
+            assert_eq!(rx.try_recv().unwrap().as_ref(), b"draft-abc");
+            assert!(rx.try_recv().is_err());
+            let queue = request(
+                &mut app,
+                Method::PaneQueue(PaneQueueParams {
+                    pane_id: public.clone(),
+                    flush: false,
+                }),
+            );
+            assert_eq!(queue["result"]["sends"][0]["byte_length"], 5);
+            assert!(!queue.to_string().contains("MSG-1"));
+            let runtime = app
+                .state
+                .runtime_for_pane_in_workspace(&app.terminal_runtimes, 0, pane)
+                .unwrap();
+            if raw_attach {
+                apply_terminal_attach_input(runtime, b"\r".to_vec()).unwrap();
+            } else {
+                let key = crate::input::TerminalKey::new(
+                    crossterm::event::KeyCode::Enter,
+                    crossterm::event::KeyModifiers::NONE,
+                );
+                apply_client_pane_input_events(
+                    runtime,
+                    &[ClientPaneInputEvent::from_terminal_key(key).unwrap()],
+                )
+                .unwrap();
+            }
+            app.flush_polite_sends(Instant::now());
+            assert_eq!(rx.try_recv().unwrap().as_ref(), b"\r");
+            assert_eq!(rx.try_recv().unwrap().as_ref(), b"MSG-1");
+            assert_eq!(rx.try_recv().unwrap().as_ref(), b"\r");
+            assert!(rx.try_recv().is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn polite_send_modes_and_explicit_flush() {
+        for (mode, human, queued) in [
+            (PoliteSendConfig::All, false, false),
+            (PoliteSendConfig::Off, true, false),
+            (PoliteSendConfig::Agents, true, false),
+            (PoliteSendConfig::All, true, true),
+        ] {
+            let (mut app, pane, public, mut rx) = fixture(mode);
+            if human {
+                apply_client_pane_input_events(
+                    app.state
+                        .runtime_for_pane_in_workspace(&app.terminal_runtimes, 0, pane)
+                        .unwrap(),
+                    &[ClientPaneInputEvent::Paste("draft".into())],
+                )
+                .unwrap();
+                rx.try_recv().unwrap();
+            }
+            let response = request(
+                &mut app,
+                Method::PaneSendText(PaneSendTextParams {
+                    pane_id: public.clone(),
+                    text: "message".into(),
+                }),
+            );
+            assert_eq!(response["result"]["queued"], queued);
+            if queued {
+                assert!(rx.try_recv().is_err());
+                let response = request(
+                    &mut app,
+                    Method::PaneQueue(PaneQueueParams {
+                        pane_id: public,
+                        flush: true,
+                    }),
+                );
+                assert_eq!(response["result"]["sends"], serde_json::json!([]));
+            }
+            assert_eq!(rx.try_recv().unwrap().as_ref(), b"message");
+        }
+    }
+
+    #[tokio::test]
+    async fn polite_send_ctrl_u_clears_draft_and_holds_recent_input() {
+        let (mut app, pane, public, mut rx) = fixture(PoliteSendConfig::All);
+        let runtime = app
+            .state
+            .runtime_for_pane_in_workspace(&app.terminal_runtimes, 0, pane)
+            .unwrap();
+        apply_terminal_attach_input(runtime, b"draft".to_vec()).unwrap();
+        apply_terminal_attach_input(runtime, vec![21]).unwrap();
+        rx.try_recv().unwrap();
+        rx.try_recv().unwrap();
+        let response = request(
+            &mut app,
+            Method::PaneSendText(PaneSendTextParams {
+                pane_id: public,
+                text: "message".into(),
+            }),
+        );
+        assert_eq!(response["result"]["queued"], true);
+        assert!(rx.try_recv().is_err());
+        app.flush_polite_sends(Instant::now() + Duration::from_secs(2));
+        assert_eq!(rx.try_recv().unwrap().as_ref(), b"message");
+    }
+
+    #[tokio::test]
+    async fn polite_send_quiet_window_holds_non_draft_input() {
+        let (mut app, pane, public, mut rx) = fixture(PoliteSendConfig::All);
+        let runtime = app
+            .state
+            .runtime_for_pane_in_workspace(&app.terminal_runtimes, 0, pane)
+            .unwrap();
+        apply_terminal_attach_input(runtime, b"\x1b[A".to_vec()).unwrap();
+        rx.try_recv().unwrap();
+        let response = request(
+            &mut app,
+            Method::PaneSendText(PaneSendTextParams {
+                pane_id: public,
+                text: "message".into(),
+            }),
+        );
+        assert_eq!(response["result"]["queued"], true);
+        app.flush_polite_sends(Instant::now());
+        assert!(rx.try_recv().is_err());
+        app.flush_polite_sends(Instant::now() + Duration::from_secs(2));
+        assert_eq!(rx.try_recv().unwrap().as_ref(), b"message");
     }
 }
