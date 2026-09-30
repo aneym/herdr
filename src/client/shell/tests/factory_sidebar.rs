@@ -1295,7 +1295,7 @@ fn factory_sections_render_and_idle_click_persists() {
     overlay.tabs.get_mut("lane-a").unwrap().section = Some(TabSection::Scoping);
     overlay.tabs.get_mut("lane-a").unwrap().name = Some("[Scoping] shared connections".into());
     overlay.tabs.get_mut("lane-b").unwrap().section = Some(TabSection::Implementing);
-    let (rows, hits, _) = rendered_factory_rows_with_gap(&snapshot, &overlay, &ClientTreeChrome::default(), 25, 0);
+    let (rows, hits, _) = rendered_factory_rows_with_gap(&snapshot, &overlay, &ClientTreeChrome::default(), 40, 0);
     let find = |name: &str| rows.iter().position(|row| row.contains(name)).unwrap();
     assert!(find("ORCHESTRATOR") < find("orchestrator-lane"));
     assert!(find("orchestrator-lane") < find("REVIEWING"));
@@ -1638,4 +1638,98 @@ fn factory_section_context_menu_changes_visibility_without_endpoint_requests() {
     state.activate_context_menu_item(0, &mut input);
     let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, state.tree_chrome_mut(), 40);
     assert!(rows.iter().any(|row| row.contains("SCOPING")));
+}
+
+
+#[test]
+fn reviewing_lane_links_render_and_open_without_focusing() {
+    use crate::factory_overlay::TabSection;
+    for grouped in [false, true] {
+        for (section, url) in [
+            (TabSection::Reviewing, Some("https://studio.tailf266ac.ts.net:8799/review")),
+            (TabSection::Reviewing, None),
+            (TabSection::Implementing, Some("https://studio.tailf266ac.ts.net:8799/review")),
+        ] {
+            let (mut snapshot, mut overlay) = fixture();
+            snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "lane-a" | "lane-b"));
+            let template = snapshot.agents[0].clone();
+            snapshot.agents.clear();
+            if grouped {
+                for (id, parent) in [("lane-a", None), ("lane-b", Some("lane-a-pane"))] {
+                    let mut agent = template.clone();
+                    agent.tab_id = id.into();
+                    agent.pane_id = format!("{id}-pane");
+                    agent.group.parent_pane_id = parent.map(str::to_string);
+                    snapshot.agents.push(agent);
+                }
+            }
+            for id in ["lane-a", "lane-b"] {
+                let mut value = serde_json::to_value(&overlay.tabs[id]).unwrap();
+                value["section"] = serde_json::to_value(section).unwrap();
+                value["review_url"] = serde_json::to_value(url).unwrap();
+                value["attention"] = serde_json::json!("act");
+                overlay.tabs.insert(id.into(), serde_json::from_value(value).unwrap());
+            }
+            let mut state = factory_state(snapshot.clone(), overlay.clone());
+            state.tree_chrome_mut().factory_expanded_lanes.insert("lane-a".into());
+            let (rows, hits, buffer) = rendered_factory_rows_at_width(&snapshot, &overlay, state.tree_chrome_mut(), 35);
+            let row = hits.tree_headers.iter().find(|hit| hit.key == "lane-b").unwrap().rect;
+            let text = &rows[row.y as usize];
+            assert!(text.ends_with('!'), "{rows:?}");
+            state.hits = hits;
+            if section == TabSection::Reviewing {
+                let label = if url.is_some() { "review ↗" } else { "no link" };
+                assert!(text.contains(label), "grouped={grouped}: {rows:?}");
+                let x = text[..text.find(label).unwrap()].chars().count() as u16;
+                let palette = &state.config.palette;
+                assert_eq!(buffer[(x, row.y)].fg, if url.is_some() { palette.blue } else { palette.overlay0 });
+                if url.is_none() {
+                    assert!(buffer[(x, row.y)].modifier.contains(Modifier::DIM));
+                }
+                for offset in 0..label.chars().count() as u16 {
+                    let input = factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), x + offset, row.y);
+                    let opened: Vec<_> = input.actions.iter().filter_map(|action| match action {
+                        ClientShellAction::OpenSafeWebUrl(url) => Some(url.as_str()),
+                        _ => None,
+                    }).collect();
+                    assert_eq!(opened, url.into_iter().collect::<Vec<_>>());
+                    if url.is_some() { assert!(focused_tab(&input).is_empty()); }
+                    factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), x + offset, row.y);
+                }
+            } else {
+                assert!(!text.contains("review ↗") && !text.contains("no link"), "{rows:?}");
+            }
+            let name_x = text[..text.find("lane-b").unwrap()].chars().count() as u16;
+            factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), name_x, row.y);
+            let input = factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), name_x, row.y);
+            assert_eq!(focused_tab(&input), vec!["lane-b"]);
+            assert!(!input.actions.iter().any(|action| matches!(action, ClientShellAction::OpenSafeWebUrl(_))));
+        }
+    }
+}
+
+#[test]
+fn factory_space_header_omits_child_status_but_keeps_count() {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| tab.tab_id == "plain-a");
+    snapshot.tabs[0].agent_status = AgentStatus::Blocked;
+    snapshot.agents[0].agent_status = AgentStatus::Blocked;
+    overlay.tabs.clear();
+    overlay.spaces.insert("ws_1".into(), SpaceTag { attention: Attention::Act, summary: Some("1".into()), ..Default::default() });
+    for factory in [true, false] {
+        if factory {
+            overlay.tabs.insert("plain-a".into(), TabTag { kind: TabKind::Lane, ..Default::default() });
+        } else {
+            overlay.tabs.clear();
+        }
+        let tree = ClientTreeChrome { show_tabs: false, show_agents: false, ..Default::default() };
+        let (rows, hits, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 40);
+        let header = hits.tree_headers.iter().find(|hit| hit.tab_id.is_none() && hit.key == "ws_1").unwrap();
+        let text = &rows[header.rect.y as usize];
+        assert!(text.contains('1'), "{rows:?}");
+        assert_eq!(text.contains('●'), !factory, "factory={factory}: {rows:?}");
+        if factory {
+            assert!(!text.contains(['○', '■', '◐', '✓', '✗']), "{rows:?}");
+        }
+    }
 }

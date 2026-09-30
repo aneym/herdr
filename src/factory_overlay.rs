@@ -134,6 +134,8 @@ pub struct TabTag {
     pub mode: TabMode,
     #[serde(default, deserialize_with = "deserialize_section")]
     pub section: Option<TabSection>,
+    /// Review page for a lane awaiting review.
+    pub review_url: Option<String>,
     /// Tab id this tab nests under (a workflow under its lane or the orchestrator).
     pub parent: Option<String>,
     /// Plain-words display name; falls back to the tab label.
@@ -350,7 +352,7 @@ mod tests {
               "generated_at": "2026-09-28T15:40:00Z",
               "tabs": {
                 "w5H:t1": {"kind": "orchestrator", "summary": "inbox 3"},
-                "w5H:t2": {"kind": "lane", "name": "recruiter", "summary": "2 wf", "idle": true},
+                "w5H:t2": {"kind": "lane", "name": "recruiter", "summary": "2 wf", "idle": true, "review_url": "https://rails.so/review"},
                 "w5H:t3": {"kind": "workflow", "parent": "w5H:t2", "badge": "PC",
                            "phase": "review 3/5", "attention": "act"},
                 "w5H:t4": {"kind": "something-new", "attention": "purple", "extra": 1}
@@ -375,6 +377,10 @@ mod tests {
         assert_eq!(workflow.badge.as_deref(), Some("PC"));
         assert_eq!(workflow.attention, Attention::Act);
         assert!(overlay.tab("w5H:t2").unwrap().idle);
+        let serialized = serde_json::to_value(overlay.tab("w5H:t2").unwrap()).unwrap();
+        assert_eq!(serialized["review_url"], "https://rails.so/review");
+        let absent = serde_json::to_value(overlay.tab("w5H:t1").unwrap()).unwrap();
+        assert!(absent["review_url"].is_null());
         let unknown = overlay.tab("w5H:t4").unwrap();
         assert_eq!(unknown.kind, TabKind::Unknown);
         assert_eq!(unknown.attention, Attention::None);

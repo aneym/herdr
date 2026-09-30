@@ -1,6 +1,6 @@
 ─────────────────────────
  agents                  
- agent-rails   ● 3 ⚲ + ▾ 
+ agent-rails     3 ⚲ + ▾ 
   ORCHESTRATOR         ⌘0
   ▸ ● orchestrator      1
   LANES             ⌘1..9

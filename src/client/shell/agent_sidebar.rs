@@ -572,7 +572,9 @@ fn render_factory_tab(
     let content_right = rect.right().saturating_sub(if attention_color.is_some() { 2 } else { 0 });
     let name_x = icon_x.saturating_add(2);
     let available = content_right.saturating_sub(name_x);
-    let metadata = if let Some(badge) = row.badge.as_deref() {
+    let metadata = if row.reviewing {
+        if row.review_url.is_some() { "review ↗" } else { "no link" }.to_owned()
+    } else if let Some(badge) = row.badge.as_deref() {
         badge.to_owned()
     } else {
         row.summary.as_deref()
@@ -580,7 +582,7 @@ fn render_factory_tab(
             .unwrap_or(if row.idle { "idle" } else { "" })
             .to_owned()
     };
-    let metadata = if !row.workflow && !row.background && !row.idle && row.summary.is_some()
+    let metadata = if !row.reviewing && !row.workflow && !row.background && !row.idle && row.summary.is_some()
         && row.badge.is_none() && available > 0 && display_width(&header.label) + display_width(&metadata) + 1 > available as usize {
         metadata.split(" · ").next().unwrap_or("").to_owned()
     } else { metadata };
@@ -607,7 +609,15 @@ fn render_factory_tab(
     }
     if right_width > 0 {
         let right_x = content_right.saturating_sub(right_width);
-        if let Some(badge) = row.badge.as_deref() {
+        if row.reviewing {
+            let style = if let Some(url) = &row.review_url {
+                hits.factory_review_urls.push((Rect::new(right_x, rect.y, right_width, 1), url.clone()));
+                Style::default().fg(palette.blue)
+            } else {
+                Style::default().fg(palette.overlay0).add_modifier(Modifier::DIM)
+            };
+            put_text(buffer, right_x, rect.y, right_width, right_label, style);
+        } else if let Some(badge) = row.badge.as_deref() {
             let badge_width = display_width(badge) as u16;
             let badge_color = attention_color.unwrap_or(color);
             put_text(buffer, content_right.saturating_sub(badge_width), rect.y, badge_width,
@@ -785,7 +795,7 @@ fn render_tree_header(
     );
 
     let mut trailing = Vec::<(String, Style)>::new();
-    if !header.child_states.is_empty() {
+    if !(header.child_states.is_empty() || is_space && header.factory_space) {
         // One dot per agent this header stands in for, so a collapsed tab still
         // reports every agent's state rather than a count. Past the cap the dots
         // would crowd the label, so the rest collapse into a trailing count.
@@ -887,7 +897,7 @@ fn render_tree_header(
             } else {
                 rect.right().saturating_sub(2 + display_width(summary) as u16 + if compact_space { 3 } else { 10 })
             };
-            put_text(buffer, x, rect.y, 2, "● ", Style::default().fg(color));
+            put_text(buffer, x, rect.y, 2, if header.factory_space { "  " } else { "● " }, Style::default().fg(color));
             put_text(
                 buffer,
                 x.saturating_add(2),
