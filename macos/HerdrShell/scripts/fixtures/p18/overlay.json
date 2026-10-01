@@ -1,0 +1,9 @@
+{
+  "generated_at": "2026-10-01T22:30:00Z",
+  "hosts": [
+    {"name": "Studio", "summary": "load 235/16 · 3 kept: 2 pinned", "attention": "warn"},
+    {"name": "PC", "summary": "14/12 live"},
+    {"name": "ax42", "summary": "4/26 live"},
+    {"name": "MacBook", "summary": "idle", "attention": "act"}
+  ]
+}

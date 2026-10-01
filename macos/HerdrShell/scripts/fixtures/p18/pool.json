@@ -1,0 +1,7 @@
+{
+  "drained": ["forge-1"],
+  "drained_why": {"forge-1": {"reason": "disk under floor"}},
+  "down": {"ax42": 2000000000},
+  "down_why": {"ax42": {"reason": "banner timeout"}},
+  "capped": {}
+}
