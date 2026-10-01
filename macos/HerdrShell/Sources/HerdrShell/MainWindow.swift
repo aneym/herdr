@@ -131,11 +131,15 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         detailPanel = DetailPanelController(herdr: model, theme: theme) { [weak self] id in self?.openFullTab(id) }
         root.detail = detailPanel.view
         docPanel = DocPanelController()
+        docPanel.attach(self)
         docPanel.onClose = { [weak self] in self?.setDocs(open: false) }
         docPanel.onWidth = { [weak self] w in self?.setDocs(width: w) }
         root.docs = docPanel.view
         applyDocs()
-        Keymap.shared.addContextual(chord: "escape", action: "close_detail") { [weak self] in self?.detailClaimsEscape ?? false }
+        Keymap.shared.addContextual(chord: "escape", action: "close_detail") { [weak self] in
+            guard let self else { return false }
+            return self.docPanel.hasFocus || self.detailClaimsEscape
+        }
         window.contentView = root
         applyTheme()
         registry.onReplace = { [weak self] old, new in self?.replaceSurface(old: old, new: new) }
@@ -145,6 +149,9 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             DispatchQueue.main.async { self?.applyTheme() }
         }.store(in: &bag)
         model.$snapshot.receive(on: RunLoop.main).sink { [weak self] _ in self?.snapshotChanged() }.store(in: &bag)
+        model.catalog.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in
+            DispatchQueue.main.async { self?.refreshDocs() }
+        }.store(in: &bag)
 
         host.onDividerDrag = { [weak self] d, phase, delta, extentPx in
             self?.resizer.handle(d, phase, deltaPx: delta, extentPx: extentPx)
@@ -200,6 +207,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                 didRestoreTabFocus = true
                 focusHerdr(t)
             }
+            refreshDocs()
             return
         }
         if state.selectedTab != nil, model.snapshot != nil {
@@ -210,6 +218,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             selectTab(first.id)
             return
         }
+        refreshDocs()
         refreshHost()
     }
 
@@ -224,7 +233,12 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         }
         lastLayoutKey = ""
         refreshHost()
+        refreshDocs()
         focusPane(focusedPaneByTab[tabId] ?? host.rects.first?.0.paneId)
+    }
+
+    private func refreshDocs() {
+        docPanel.show(model: model, tabId: state.selectedTab)
     }
 
     /// Areas-mode row click, ⌘1..9 and Focus next/prev: select the tab and open its docs.

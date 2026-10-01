@@ -168,6 +168,12 @@ final class TestHook {
             view = c.sidebarHostView
             guard let f = c.state.rowFrames["focus"] else { log("hook: click: no focus row"); return }
             frame = f
+        case "doc_tab":
+            let name = obj["label"] as? String ?? ""
+            guard let b = c.docPanel.tabButton(name) else { log("hook: click: no doc tab \(name)"); return }
+            let loc = b.convert(NSPoint(x: b.bounds.midX, y: b.bounds.midY), to: nil)
+            postClick(c, loc: loc, mods: clickMods(obj))
+            return
         default:
             view = c.sidebarHostView
             let label = obj["label"] as? String
@@ -175,11 +181,7 @@ final class TestHook {
                   let f = c.state.rowFrames[line.id] else { log("hook: click: no row \(label ?? "?")"); return }
             frame = f
         }
-        var mods: NSEvent.ModifierFlags = []
-        for m in obj["mods"] as? [String] ?? [] {
-            switch m { case "shift": mods.insert(.shift); case "ctrl": mods.insert(.control)
-                       case "opt": mods.insert(.option); case "cmd": mods.insert(.command); default: break }
-        }
+        let mods = clickMods(obj)
         c.state.clickOption = mods.contains(.option)
         // The frame is in SwiftUI's space: top-left origin at the top-left of the view's safe area
         // (the transparent title bar insets it). Convert to view coordinates, then to the window.
@@ -208,6 +210,30 @@ final class TestHook {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { c.state.clickOption = false }
         delivered.append("click \(obj["target"] ?? "row") \(obj["label"] ?? "") at window \(Int(loc.x)),\(Int(loc.y)) via NSApp.sendEvent")
         log("hook: click \(obj["target"] ?? "row") \(obj["label"] ?? "") frame=\(NSStringFromRect(frame)) window=\(NSStringFromPoint(loc)) key=\(c.window.isKeyWindow)")
+    }
+
+    private func clickMods(_ obj: [String: Any]) -> NSEvent.ModifierFlags {
+        var mods: NSEvent.ModifierFlags = []
+        for m in obj["mods"] as? [String] ?? [] {
+            switch m { case "shift": mods.insert(.shift); case "ctrl": mods.insert(.control)
+                       case "opt": mods.insert(.option); case "cmd": mods.insert(.command); default: break }
+        }
+        return mods
+    }
+
+    private func postClick(_ c: MainWindowController, loc: NSPoint, mods: NSEvent.ModifierFlags) {
+        var n = 0
+        func post(_ type: NSEvent.EventType) {
+            n += 1
+            guard let ev = NSEvent.mouseEvent(with: type, location: loc, modifierFlags: mods,
+                                              timestamp: ProcessInfo.processInfo.systemUptime,
+                                              windowNumber: c.window.windowNumber, context: nil, eventNumber: n,
+                                              clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1) else { return }
+            NSApp.sendEvent(ev)
+        }
+        post(.mouseMoved)
+        post(.leftMouseDown)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { post(.leftMouseUp) }
     }
 
     /// Mouse events built as NSEvents addressed to the app's window and dispatched with
@@ -568,6 +594,7 @@ final class TestHook {
             "hosts_provider": c.model.hostsModel.provider.name,
             "theme": themeState(c),
             "detail": detailState(c),
+            "docs": c.docPanel.dump(),
             "poll_ms": c.model.pollMs,
             "surfaces": surfaces,
             "lifecycle": c.registry.lifecycleState(),

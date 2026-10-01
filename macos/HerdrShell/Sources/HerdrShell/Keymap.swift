@@ -199,7 +199,9 @@ extension MainWindowController {
         case "new_tab": newTab(nil)
         case "split_right": splitRight(nil)
         case "split_down": splitDown(nil)
-        case "close_detail": closeDetail()
+        case "close_detail":
+            if docPanel.hasFocus { docPanel.returnFocus(); break }
+            closeDetail()
         default:
             if action.hasPrefix("goto_tab_"), let n = Int(action.dropFirst("goto_tab_".count)) {
                 let rows = model.allRowsInOrder
