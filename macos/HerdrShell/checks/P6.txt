@@ -1,0 +1,62 @@
+HerdrShell P6 check  2026-09-28T20:56:06Z
+config: shipped ghostty.conf sets macos-option-as-alt = false; user config sets it: False
+[PASS] dead-key run uses the shipped option setting (no override in the check or the user config)
+app start: {"pids": [40424], "fifo_ready_s": 1.18}
+[PASS] both scenario panes attached and rendered
+[PASS] pane 1 has keyboard focus on mount -- focused=w1:p2
+window: key=False app_active=False post_event_access=True
+keymap load line: keymap: 42 app chords, 1 terminal chords from /Volumes/StudioExt/repos/herdr-worktrees/native-shell/macos/HerdrShell/Resources/keymap.json
+activation attempt: app_active=False window_key=False
+[INFO] dead key through the system input method: e-acute (app inactive in the lab, so unverified here)
+[PASS] dead key: option+e then e reached pane 1 as e-acute (herdr pane read) -- 0.091s; line: 'tmp % é'
+[PASS] dead key: the pane got exactly e-acute (line is `% é`: no bare accent, no extra e) -- line: 'tmp % é'
+[PASS] dead key: the accent alone left nothing in the pane before the letter
+herdr pane read w1:p2 --source recent:
+  | tmp % é
+  | zsh: command not found: é
+  | tmp %
+[PASS] live actions move focus: cmd+l right, cmd+h left, cmd+] next, cmd+[ previous -- focus order=['w1:p2', 'w1:p3', 'w1:p2', 'w1:p3', 'w1:p2']
+[PASS] cmd+backspace reached pane 1 as ctrl+u (line cleared; the next command ran alone) -- 0.137s; echoed line: 'tmp % echo kill-ok'
+[PASS] an unclaimed chord (cmd+y) reached the focused pane's Ghostty surface (press delivered, physical key y + super) -- keys_sent +1; last='keycode=16 mods=8'
+[PASS] unclaimed ctrl+b reached the pane (cat -v printed ^B) -- 0.053s
+[PASS] an unclaimed chord (cmd+y) fires no keymap action -- fired=[]
+herdr pane read w1:p2 --source recent:
+  | zsh: command not found: é
+  | tmp % echo kill-ok
+  | kill-ok
+  | tmp % cat -v
+  | ^B
+  | ^B
+  | ^C
+  | tmp %
+tab order: 5 tabs
+[PASS] cmd+1 (goto_tab_1) selects tab 1 -- selected=w1:t1 want=w1:t1
+[PASS] cmd+2 (goto_tab_2) selects tab 2 -- selected=w1:t5 want=w1:t5
+[PASS] cmd+3 (goto_tab_3) selects tab 3 -- selected=w1:t2 want=w1:t2
+[PASS] cmd+4 (goto_tab_4) selects tab 4 -- selected=w1:t3 want=w1:t3
+[PASS] cmd+5 (goto_tab_5) selects tab 5 -- selected=w1:t4 want=w1:t4
+[PASS] cmd+6 (goto_tab_6) with only 5 tabs changes nothing -- selected=w1:t1 start=w1:t1
+[PASS] cmd+7 (goto_tab_7) with only 5 tabs changes nothing -- selected=w1:t1 start=w1:t1
+[PASS] cmd+8 (goto_tab_8) with only 5 tabs changes nothing -- selected=w1:t1 start=w1:t1
+[PASS] cmd+9 (goto_tab_9) with only 5 tabs changes nothing -- selected=w1:t1 start=w1:t1
+[PASS] cmd+shift+] (next_tab) selects the neighbouring tab in sidebar order -- selected=w1:t2 want=w1:t2
+[PASS] cmd+shift+[ (prev_tab) selects the neighbouring tab in sidebar order -- selected=w1:t1 want=w1:t1
+[PASS] cmd+t (new_tab) makes one herdr tab and shows it -- tabs 5 -> 6; selected=w1:t6
+[PASS] cmd+d (split_right) makes one herdr pane and focuses it -- panes 2 -> 3
+[PASS] cmd+shift+d (split_down) makes one herdr pane and focuses it -- panes 2 -> 4
+[PASS] cmd+shift+k (focus_pane_up) moves focus to the pane above the new split -- focused=w1:p8 want=w1:p8
+[PASS] cmd+j (focus_pane_down) moves focus back to the pane below -- focused=w1:p9 want=w1:p9
+[PASS] every live keymap action has a result check above -- unchecked=[]
+keymap entries: 42
+[PASS] all 42 keymap entries fire exactly their own action (app log)
+[PASS] no keymap chord reached any Ghostty surface (key presses handed to Ghostty: before == after) -- before=42 after=42
+[PASS] no keymap chord sent anything to any pane (every lab pane reads the same before and after)
+[PASS] panes made by keymap actions (6) hold only a bare prompt (nothing leaked into them)
+  live     20  cmd+] cmd+[ cmd+shift+] cmd+shift+[ cmd+h cmd+j cmd+shift+k cmd+l cmd+1 cmd+2 cmd+3 cmd+4 cmd+5 cmd+6 cmd+7 cmd+8 cmd+9 cmd+d cmd+shift+d cmd+t
+  P9        2  cmd+w cmd+e
+  P10      12  cmd+b cmd+opt+1 cmd+opt+2 cmd+opt+3 cmd+opt+4 cmd+opt+5 cmd+opt+6 cmd+opt+7 cmd+opt+8 cmd+opt+9 cmd+opt+j cmd+opt+k
+  P13       8  cmd+o opt+o cmd+k cmd+g cmd+n cmd+p cmd+m cmd+shift+c
+[PASS] attach clients exit with the app -- left=[]
+lab down: stop: 0
+
+RESULT: PASS

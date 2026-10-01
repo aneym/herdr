@@ -1,0 +1,33 @@
+HerdrShell P11 check  2026-09-28T21:43:15Z
+app start: {"pids": [87372], "fifo_ready_s": 1.5}
+[PASS] app up, 'shell spike' selected, pane 1 focused -- tab=w1:t2 pane=w1:p2
+[PASS] panel closed at start and takes no space
+[PASS] a real click on the orchestrator row opens the panel
+[PASS] a second real click closes it
+[PASS] the window was key and active for the clicks
+[PASS] orchestrator click opens the panel for that row -- row=rails orchestrator
+[PASS] inbox shows the tokened items and the blocked workflow that wants you -- inbox=[('Outreach drafts drop the role title', 'plugin'), ('Sidebar header height jumps', 'VPD'), ('wf embed wave-a wants you', 'blocked')]
+[PASS] inbox is not shown as an item, and the sidebar keeps its numeric count -- header trailing='inbox 3'
+[PASS] routed items shown for the orchestrator -- routed=[('recruiter drafts bug', '10:52'), ('workspace embed header', '10:48')]
+[PASS] workflows under the orchestrator: its own folded one, then each lane's, with phases and host badges -- groups={None: [('wf embed wave-a', 'blocked', 'PC')], 'recruiter': [('wf recruiter-2320', 'impl 3/5', 'PC')]}
+[PASS] the other space's lane, workflow, ask and inbox never show in this space's panel -- checked panel state for other-space rows
+[PASS] panel sits between the sidebar and the pane host and never holds focus -- panel_frame=[301, 0, 340, 900]
+[PASS] opening the panel leaves the selected tab and the focused pane alone -- tab=w1:t2 pane=w1:p2
+[PASS] pane host moved right by the panel width, sidebar did not move -- host x 301.0 -> 642.0
+[PASS] with the panel open, typed text still reaches the focused pane (herdr pane read) -- output line seen 0.070s after the last key
+[PASS] panel still open after typing, pane 1 still first responder
+[PASS] Esc closed the panel
+[PASS] pane host is back at full width after Esc -- host x 301.0
+[PASS] Esc did not send ESC into the pane: cat -v echoed 'ab', not 'a^[b' -- tail=['tmp % cat -v', 'ab', 'ab']
+[PASS] the log shows Esc fired close_detail
+[PASS] with no panel open Esc reaches the pane (cat -v echoed ^[) -- tail=['ab', '^[', '^[']
+[PASS] lane click opens that lane's panel with its workflows, no routed section -- row=recruiter groups={None: [('wf recruiter-2320', 'impl 3/5', 'PC')]}
+[PASS] clicking another row switches the panel to it
+[PASS] a second click on the open row closes the panel
+[PASS] selected tab unchanged through all of it
+[PASS] 'open full tab' button click selects the row's tab and closes the panel -- tab=w1:t3
+panel image (SwiftUI ImageRenderer of the open panel): P11-panel.png exists=True
+screenshot (in-app capture, panel open on the orchestrator): P11.png exists=True
+lab down: stop: 0
+
+RESULT: PASS
