@@ -437,11 +437,15 @@ fn render_panel_list_entry(
             let end = if controls.is_some() { button.x } else { rect.right() };
             let width = (display_width(right) as u16).min(end.saturating_sub(rect.x));
             let right_x = end.saturating_sub(width);
+            let label_start = rect.x.saturating_add(1 + u16::from(*indent));
+            let label_width = right_x.saturating_sub(label_start);
+            let display_label = if *label == "READY FOR REVIEW" && label_width < display_width(label) as u16 + 2 {
+                "READY"
+            } else { label };
             let label_text = if let Some(controls) = controls {
-                format!("{} {label}", if controls.collapsed { "▸" } else { "▾" })
+                format!("{} {display_label}", if controls.collapsed { "▸" } else { "▾" })
             } else { (*label).to_owned() };
-            put_text(buffer, rect.x.saturating_add(1 + u16::from(*indent)), rect.y,
-                right_x.saturating_sub(rect.x + 1 + u16::from(*indent)), &label_text, style);
+            put_text(buffer, label_start, rect.y, label_width, &label_text, style);
             put_text(buffer, right_x, rect.y, width, right,
                 if controls.as_ref().is_some_and(|controls| controls.alert) { style.fg(config.palette.red) } else { style });
             if let Some(controls) = controls {

@@ -1346,18 +1346,18 @@ fn factory_sections_render_and_idle_click_persists() {
     let (rows, hits, _) = rendered_factory_rows_with_gap(&snapshot, &overlay, &ClientTreeChrome::default(), 40, 0);
     let find = |name: &str| rows.iter().position(|row| row.contains(name)).unwrap();
     assert!(find("ORCHESTRATOR") < find("orchestrator-lane"));
-    assert!(find("orchestrator-lane") < find("REVIEWING"));
+    assert!(find("orchestrator-lane") < find("READY FOR REVIEW"));
     assert!(find("waiting-lane") < find("SCOPING"));
     assert!(find("SCOPING") < find("shared connections"));
     assert!(find("shared connections") < find("IMPLEMENTING"));
     assert!(find("IMPLEMENTING") < find("untagged-lane"));
     assert!(find("untagged-lane") < find("plain-a"));
     assert!(find("plain-a") < find("closed 1"));
-    assert!(find("REVIEWING") < find("waiting-lane"));
+    assert!(find("READY FOR REVIEW") < find("waiting-lane"));
     assert!(find("IMPLEMENTING") < find("MONITORING"));
     assert!(find("monitor-lane") < find("closed 1"));
-    assert!(rows[find("REVIEWING")].contains("2◎"));
-    assert!(!rows[find("REVIEWING")].contains("⌘1..9"));
+    assert!(rows[find("READY FOR REVIEW")].contains("2◎"));
+    assert!(!rows[find("READY FOR REVIEW")].contains("⌘1..9"));
     assert!(rows[find("SCOPING")].contains("⌘1..9"));
     assert!(!rows.iter().any(|row| row.contains("idle-lane") || row.contains("[Scoping]")));
     let hit = hits.tree_headers.iter().find(|hit| hit.key == "factory-background:closed:ws_1").unwrap();
@@ -1503,7 +1503,7 @@ fn legacy_sections_place_lanes_and_clean_implementing_labels() {
     }}"#.as_bytes()).unwrap();
     let (rows, hits, _) = rendered_factory_rows(&snapshot, &overlay);
     let implementing = rows.iter().position(|row| row.contains("IMPLEMENTING")).unwrap();
-    let reviewing = rows.iter().position(|row| row.contains("REVIEWING")).unwrap();
+    let reviewing = rows.iter().position(|row| row.contains("READY FOR REVIEW")).unwrap();
     let review = hits.tree_headers.iter().find(|hit| hit.key == "plain-a").unwrap();
     assert!(reviewing < review.rect.y as usize && (review.rect.y as usize) < implementing);
     for (id, label) in [("lane-a", "issue reporter"), ("lane-b", "routing · it2")] {
@@ -1594,14 +1594,14 @@ fn click_section_control(state: &mut ClientShellState, label: &str, button: bool
 fn factory_section_label_collapses_restores_and_reports_hidden_blocked_member() {
     let (snapshot, overlay) = section_controls_fixture();
     let mut state = factory_state(snapshot, overlay);
-    let (rows, buffer) = click_section_control(&mut state, "REVIEWING", false);
-    let y = rows.iter().position(|row| row.contains("REVIEWING")).unwrap();
-    assert!(rows[y].contains("▸ REVIEWING") && rows[y].contains("1!"), "{rows:?}");
+    let (rows, buffer) = click_section_control(&mut state, "READY FOR REVIEW", false);
+    let y = rows.iter().position(|row| row.contains("READY FOR REVIEW")).unwrap();
+    assert!(rows[y].contains("▸ READY FOR REVIEW") && rows[y].contains("1!"), "{rows:?}");
     assert!(!rows.iter().any(|row| row.contains("lane-a")));
     let x = rows[y].chars().position(|c| c == '!').unwrap();
     assert_eq!(buffer[(x as u16, y as u16)].fg, state.config.palette.red);
-    let (rows, _) = click_section_control(&mut state, "REVIEWING", false);
-    assert!(rows.iter().any(|row| row.contains("▾ REVIEWING")));
+    let (rows, _) = click_section_control(&mut state, "READY FOR REVIEW", false);
+    assert!(rows.iter().any(|row| row.contains("▾ READY FOR REVIEW")));
     assert!(rows.iter().any(|row| row.contains("lane-a")));
     let (rows, _) = click_section_control(&mut state, "ORCHESTRATOR", false);
     assert!(rows.iter().any(|row| row.contains("▸ ORCHESTRATOR")));
@@ -1616,11 +1616,11 @@ fn factory_section_focus_hides_other_sections_groups_and_keeps_alert_reveal() {
     assert!(rows.iter().any(|row| row.contains("SCOPING") && row.contains('✕')));
     assert!(rows.iter().any(|row| row.contains("ORCHESTRATOR")));
     assert!(rows.iter().any(|row| row.contains("lane-b")));
-    assert!(!rows.iter().any(|row| row.contains("REVIEWING") || row.contains("services") || row.contains("closed") || row.contains("background")));
+    assert!(!rows.iter().any(|row| row.contains("READY FOR REVIEW") || row.contains("services") || row.contains("closed") || row.contains("background")));
     let y = rows.iter().position(|row| row.contains("show all · 4 more !")).unwrap();
     assert_eq!(buffer[(1, y as u16)].fg, state.config.palette.red);
     let (rows, _) = click_section_control(&mut state, "SCOPING", true);
-    assert!(rows.iter().any(|row| row.contains("REVIEWING")));
+    assert!(rows.iter().any(|row| row.contains("READY FOR REVIEW")));
     assert!(rows.iter().any(|row| row.contains("services")));
     assert!(rows.iter().any(|row| row.contains("closed")));
     let (rows, _) = click_section_control(&mut state, "SCOPING", true);
@@ -1632,7 +1632,7 @@ fn factory_section_focus_hides_other_sections_groups_and_keeps_alert_reveal() {
     factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), 3, y);
     factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), 3, y);
     let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, state.tree_chrome_mut(), 40);
-    assert!(rows.iter().any(|row| row.contains("REVIEWING")));
+    assert!(rows.iter().any(|row| row.contains("READY FOR REVIEW")));
     assert!(!rows.iter().any(|row| row.contains("show all")));
 }
 
@@ -1640,25 +1640,54 @@ fn factory_section_focus_hides_other_sections_groups_and_keeps_alert_reveal() {
 fn factory_section_preferences_preserve_controls_and_ignore_unknown_values() {
     let (snapshot, overlay) = section_controls_fixture();
     let mut state = factory_state(snapshot.clone(), overlay.clone());
-    click_section_control(&mut state, "REVIEWING", false);
+    click_section_control(&mut state, "READY FOR REVIEW", false);
     click_section_control(&mut state, "SCOPING", true);
     let saved = serde_json::to_value(state.tree_chrome_mut().to_preferences()).unwrap();
-    assert_eq!(saved["factory_sections_collapsed"], serde_json::json!(["ws_1:REVIEWING"]));
+    assert_eq!(saved["factory_sections_collapsed"], serde_json::json!(["ws_1:READY FOR REVIEW"]));
     assert_eq!(saved["factory_section_focus"]["ws_1"], "SCOPING");
     let mut saved = saved;
     saved["factory_sections_collapsed"].as_array_mut().unwrap().push(serde_json::json!("ws_1:bogus"));
     saved["factory_section_focus"]["ws_2"] = serde_json::json!("bogus");
     let tree = ClientTreeChrome::from_preferences(serde_json::from_value(saved).unwrap());
     let clean = serde_json::to_value(tree.to_preferences()).unwrap();
-    assert_eq!(clean["factory_sections_collapsed"], serde_json::json!(["ws_1:REVIEWING"]));
+    assert_eq!(clean["factory_sections_collapsed"], serde_json::json!(["ws_1:READY FOR REVIEW"]));
     assert!(clean["factory_section_focus"].get("ws_2").is_none());
     let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 40);
     assert!(rows.iter().any(|row| row.contains("SCOPING") && row.contains('✕')));
     let mut state = factory_state(snapshot, overlay);
     *state.tree_chrome_mut() = tree;
     let (rows, _) = click_section_control(&mut state, "SCOPING", true);
-    assert!(rows.iter().any(|row| row.contains("▸ REVIEWING")));
+    assert!(rows.iter().any(|row| row.contains("▸ READY FOR REVIEW")));
     assert!(!rows.iter().any(|row| row.contains("lane-a")));
+}
+
+#[test]
+fn factory_legacy_reviewing_preferences_restore_ready_for_review_controls() {
+    let (snapshot, overlay) = section_controls_fixture();
+    let mut saved = serde_json::to_value(ClientTreeChrome::default().to_preferences()).unwrap();
+    saved["factory_sections_collapsed"] = serde_json::json!(["ws_1:REVIEWING"]);
+    let mut tree = ClientTreeChrome::from_preferences(serde_json::from_value(saved.clone()).unwrap());
+    let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 40);
+    assert!(rows.iter().any(|row| row.contains("▸ READY FOR REVIEW")), "{rows:?}");
+    assert!(!rows.iter().any(|row| row.contains("lane-a")));
+    saved["factory_section_focus"] = serde_json::json!({"ws_1": "REVIEWING"});
+    tree = ClientTreeChrome::from_preferences(serde_json::from_value(saved).unwrap());
+    let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 40);
+    assert!(rows.iter().any(|row| row.contains("READY FOR REVIEW") && row.contains('✕')));
+    assert!(rows.iter().any(|row| row.contains("lane-a")));
+    assert!(!rows.iter().any(|row| row.contains("SCOPING")));
+}
+
+#[test]
+fn ready_for_review_header_preserves_count_and_focus_at_narrow_width() {
+    let (snapshot, overlay) = section_controls_fixture();
+    for (width, label) in [(40, "READY FOR REVIEW"), (20, "READY")] {
+        let (rows, hits, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), width);
+        let hit = hits.factory_sections.iter().find(|hit| hit.label == "READY FOR REVIEW").unwrap();
+        let row = &rows[hit.rect.y as usize];
+        assert!(row.contains(&format!("▾ {label}")) && row.contains("1◎"), "{row}");
+        assert!(!row.contains("⌘1..9"));
+    }
 }
 
 #[test]
@@ -1666,19 +1695,19 @@ fn factory_section_context_menu_changes_visibility_without_endpoint_requests() {
     let (snapshot, overlay) = section_controls_fixture();
     let mut state = factory_state(snapshot.clone(), overlay.clone());
     let (rows, hits, _) = rendered_factory_rows_at_width(&snapshot, &overlay, state.tree_chrome_mut(), 40);
-    let y = rows.iter().position(|row| row.contains("REVIEWING")).unwrap() as u16;
+    let y = rows.iter().position(|row| row.contains("READY FOR REVIEW")).unwrap() as u16;
     state.hits = hits;
     state.last_composed_size = Some((120, 60));
     factory_click(&mut state, MouseEventKind::Down(MouseButton::Right), 3, y);
     let Some(ClientShellOverlay::ContextMenu(menu)) = &state.overlay else { panic!("missing section menu") };
     let items = menu.items();
-    assert_eq!(items.iter().map(|item| item.label.as_str()).collect::<Vec<_>>(), ["Focus REVIEWING", "Collapse"]);
+    assert_eq!(items.iter().map(|item| item.label.as_str()).collect::<Vec<_>>(), ["Focus READY FOR REVIEW", "Collapse"]);
     let mut input = ClientShellInput::default();
     state.activate_context_menu_item(0, &mut input);
     assert!(input.actions.is_empty());
     let (rows, hits, _) = rendered_factory_rows_at_width(&snapshot, &overlay, state.tree_chrome_mut(), 40);
     assert!(!rows.iter().any(|row| row.contains("SCOPING")));
-    let y = rows.iter().position(|row| row.contains("REVIEWING")).unwrap() as u16;
+    let y = rows.iter().position(|row| row.contains("READY FOR REVIEW")).unwrap() as u16;
     state.hits = hits;
     factory_click(&mut state, MouseEventKind::Down(MouseButton::Right), 3, y);
     let Some(ClientShellOverlay::ContextMenu(menu)) = &state.overlay else { panic!("missing section menu") };

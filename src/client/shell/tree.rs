@@ -81,8 +81,12 @@ pub(super) fn factory_goal_choices(overlay: &crate::factory_overlay::FactoryOver
     choices
 }
 
+fn canonical_factory_section(section: &str) -> &str {
+    if section == "REVIEWING" { "READY FOR REVIEW" } else { section }
+}
+
 fn valid_factory_section(section: &str) -> bool {
-    matches!(section, "ORCHESTRATOR" | "REVIEWING" | "SCOPING" | "IMPLEMENTING" | "MONITORING")
+    matches!(section, "ORCHESTRATOR" | "READY FOR REVIEW" | "SCOPING" | "IMPLEMENTING" | "MONITORING")
 }
 
 fn sorted(values: &HashSet<String>) -> Vec<String> {
@@ -112,9 +116,14 @@ impl ClientTreeChrome {
             factory_parked_expanded: saved.factory_parked_expanded.into_iter().collect(),
             factory_idle_expanded: saved.factory_idle_expanded.into_iter().collect(),
             factory_sections_collapsed: saved.factory_sections_collapsed.into_iter()
+                .map(|key| match key.rsplit_once(':') {
+                    Some((space, section)) => format!("{space}:{}", canonical_factory_section(section)),
+                    None => key,
+                })
                 .filter(|key| key.rsplit_once(':').is_some_and(|(space, section)| !space.is_empty() && valid_factory_section(section))).collect(),
             factory_goal_filter: saved.factory_goal_filter.filter(|value| valid_factory_goal(value)),
             factory_section_focus: saved.factory_section_focus.into_iter()
+                .map(|(space, section)| (space, canonical_factory_section(&section).to_owned()))
                 .filter(|(space, section)| !space.is_empty() && valid_factory_section(section)).collect(),
         }
     }
@@ -1219,7 +1228,7 @@ fn append_factory_space(
     if sectioned {
         let mut first = true;
         for (section, label) in [
-            (TabSection::Reviewing, "REVIEWING"),
+            (TabSection::Reviewing, "READY FOR REVIEW"),
             (TabSection::Scoping, "SCOPING"),
             (TabSection::Implementing, "IMPLEMENTING"),
             (TabSection::Monitoring, "MONITORING"),
@@ -1390,7 +1399,7 @@ fn apply_factory_sections(out: &mut Vec<AgentPanelListEntry>, start: usize, tree
         let mut collapsed = false;
         if let AgentPanelListEntry::FactorySection { label, right, controls, .. } = &mut entry {
             collapsed = focus.is_none() && tree.factory_sections_collapsed.contains(&format!("{workspace_id}:{label}"));
-            if focus.is_some() && *label != "ORCHESTRATOR" && *label != "REVIEWING" && shortcut {
+            if focus.is_some() && *label != "ORCHESTRATOR" && *label != "READY FOR REVIEW" && shortcut {
                 *right = "⌘1..9".to_owned();
                 shortcut = false;
             }
