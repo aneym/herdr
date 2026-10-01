@@ -941,6 +941,7 @@ fn append_factory_space(
     // Only a tab's first agent pane determines its explicit sidebar placement.
     // Resolve chains to their top row so the factory tree never grows past one level.
     let direct_parent = lanes.iter().filter(|lane| lane_mode(lane) == TabMode::Active)
+        .filter(|lane| overlay.tab(&lane.tab_id).and_then(|tag| tag.section) != Some(TabSection::Scoping))
         .filter_map(|lane| {
             let primary = snapshot.agents.iter().find(|agent| agent.tab_id == lane.tab_id)?;
             let pane = primary.group.parent_pane_id.as_deref()?;

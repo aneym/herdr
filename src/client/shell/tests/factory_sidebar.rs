@@ -1440,6 +1440,39 @@ fn factory_sections_render_and_idle_click_persists() {
 }
 
 #[test]
+fn scoping_lane_grouped_under_other_section_draws_flat_in_scoping() {
+    use crate::factory_overlay::TabSection;
+    for parent_section in [TabSection::Monitoring, TabSection::Scoping] {
+        let (mut snapshot, mut overlay) = fixture();
+        snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "lane-a" | "lane-b" | "plain-a"));
+        let template = snapshot.agents[0].clone();
+        snapshot.agents.clear();
+        for (id, parent) in [("lane-a", None), ("lane-b", Some("lane-a-pane"))] {
+            let mut agent = template.clone();
+            agent.tab_id = id.into();
+            agent.pane_id = format!("{id}-pane");
+            agent.group.parent_pane_id = parent.map(str::to_string);
+            snapshot.agents.push(agent);
+        }
+        overlay.tabs.get_mut("lane-a").unwrap().section = Some(parent_section);
+        overlay.tabs.get_mut("lane-b").unwrap().section = Some(TabSection::Scoping);
+        overlay.tabs.get_mut("lane-b").unwrap().attention = Attention::Act;
+        let mut tree = ClientTreeChrome::default();
+        tree.factory_collapsed_lanes.insert("lane-a".into());
+        let (rows, hits, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 40);
+        let child = hits.tree_headers.iter().find(|hit| hit.key == "lane-b").unwrap();
+        let parent = hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap();
+        let sibling = hits.tree_headers.iter().find(|hit| hit.key == "plain-a").unwrap();
+        let scoping = rows.iter().position(|row| row.contains("SCOPING")).unwrap();
+        let next_section = rows.iter().position(|row| row.contains("IMPLEMENTING")).unwrap();
+        assert!(scoping < child.rect.y as usize && (child.rect.y as usize) < next_section, "{rows:?}");
+        assert_eq!(rows[child.rect.y as usize].find("lane-b"), rows[sibling.rect.y as usize].find("plain-a"));
+        assert_eq!(parent.chevron.width, 0, "scoping child must not count in parent roll-up: {rows:?}");
+        assert!(!rows[parent.rect.y as usize].ends_with('!'), "scoping attention must not roll up: {rows:?}");
+    }
+}
+
+#[test]
 fn sectioned_grouped_child_and_parked_lane_keep_their_parent_groups() {
     use crate::factory_overlay::TabSection;
     let (mut snapshot, mut overlay) = fixture();
