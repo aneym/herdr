@@ -20,7 +20,10 @@
 6. --live-pane: `--demo chat --pane <id> --read-only` on a real Claude pane, captured
    once its transcript renders. Read-only: the sender refuses to send, and no key event
    is sent to that window.
-No command in this check sends input to a non-lab pane.
+No command in this check sends input to a non-lab pane, and no window it starts is put on
+screen or made active: check windows are background-only (activation policy prohibited),
+never ordered in, captured in-process with cacheDisplay, and every state read asserts
+window_on_screen and app_active are false.
 """
 import argparse
 import json
@@ -97,6 +100,11 @@ def records():
 VISIBLE = ['human', 'bash', 'read', 'grep', 'answer:0', 'edit', 'bulletin:0', 'duration', 'human-2', 'build', 'check', 'queued']
 
 
+def offscreen(view):
+    """Every check window stays off screen and never becomes the active app (Alex, 2026-10-01 19:15 ET)."""
+    assert view['window_on_screen'] is False and view['app_active'] is False, {k: view.get(k) for k in ('window_on_screen', 'app_active')}
+
+
 def append(path, record):
     with path.open('a') as f:
         f.write(json.dumps(record) + '\n')
@@ -158,8 +166,20 @@ def fixture_checks(temp, out_dir, lines):
             wait_for(lambda: bool(snapshot(dump)))
             visible = snapshot(dump)
             ok = capture(dump, out_dir / f'P19-{appearance}.png')
+            time.sleep(.3)
+            view = json.loads(Path(str(dump) + '.view.json').read_text())
         finally:
             stop(p)
+        offscreen(view)
+        runs = {g['first']: (g['count'], g['tools'], g['open']) for g in view['tool_groups']}
+        if mode == 'focus':
+            assert runs == {'bash': (3, ['Bash', 'Read', 'Grep'], False), 'edit': (1, ['Edit'], False), 'build': (2, ['Bash', 'Bash'], False)}, runs
+            assert view['activity'] == 'Run the P19 check', view['activity']
+            lines.append('PASS --dump-chat view (focus, working): runs bash x3 [Bash, Read, Grep] and build x2 [Bash, Bash] folded; '
+                         'live line "Run the P19 check"')
+        else:
+            assert all(o for c, _, o in runs.values() if c > 1), runs
+            lines.append('PASS --dump-chat view (full): every run of tool calls open')
         lines.append(f'{"PASS" if ok else "FAIL"} fixture {appearance} screenshot ({mode}, {state} state): checks/P19-{appearance}.png')
         if not ok:
             raise AssertionError(f'{appearance} screenshot missing')
@@ -335,7 +355,9 @@ class App:
         self.state_path.unlink(missing_ok=True)
         self.cmd({'cmd': 'state', 'out': str(self.state_path)})
         wait_for(lambda: self.state_path.exists() and self.state_path.stat().st_size > 0, 5)
-        return json.loads(self.state_path.read_text())
+        state = json.loads(self.state_path.read_text())
+        offscreen(state)
+        return state
 
     def shot(self, out):
         self.cmd({'cmd': 'shot', 'out': str(out)})
@@ -467,6 +489,7 @@ def live_check(pane, temp, out_dir, lines):
             f.write(json.dumps({'cmd': 'shot', 'out': str(out)}) + '\n')
         wait_for(lambda: out.exists() and out.stat().st_size > 1000, 5)
         s = json.loads(state.read_text())
+        offscreen(s)
     finally:
         stop(p)
     lines.append(f'PASS live: --demo chat --pane {pane} --read-only rendered {len(s["items"])} items from the real session '

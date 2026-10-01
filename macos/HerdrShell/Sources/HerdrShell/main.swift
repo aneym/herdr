@@ -6,7 +6,7 @@ import GhosttyKit
 //                   [--appearance system|light|dark] [--glass sidebar,overlay] [--hosts-stub FILE] [--allow-live]
 //        HerdrShell --dump-tokens      (print the theme tokens as JSON and exit)
 //        HerdrShell --demo chat --pane <pane> [--read-only] [--control <fifo>]   (P19 chat for one pane)
-//        HerdrShell --transcript <file> [--dump-chat <json>] [--chat-state working|blocked|asleep] [--agent-name <n>]
+//        HerdrShell --transcript <file> [--dump-chat <json> (also <json>.png, <json>.view.json)] [--chat-state working|blocked|asleep] [--agent-name <n>]
 //        (either chat: [--chat-mode focus|full] pins the mode instead of the saved one)
 var args: [String: String] = [:]
 var flags = Set<String>()
@@ -52,7 +52,7 @@ if args["demo"] == "chat" || args["transcript"] != nil {
     if let bin = args["herdr"] { setenv("HERDR_BIN", bin, 1) }
     if let socket = args["socket"] { setenv("HERDR_SOCKET_PATH", socket, 1) }
     let chatApp = NSApplication.shared
-    chatApp.setActivationPolicy(.regular)
+    chatApp.setActivationPolicy(ChatDemoDelegate.offscreen ? .prohibited : .regular)
     let chatDelegate = ChatDemoDelegate()
     chatApp.delegate = chatDelegate
     withExtendedLifetime(chatDelegate) { chatApp.run() }

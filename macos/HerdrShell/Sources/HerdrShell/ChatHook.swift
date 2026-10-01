@@ -82,7 +82,7 @@ final class ChatHook {
     private func click(_ target: String, id: String?) {
         switch target {
         case "group":
-            if let group = groups().first(where: { $0.first?.id == id }) { ui.toggle(group) }
+            if let group = Self.groups(transcript.items).first(where: { $0.first?.id == id }) { ui.toggle(group) }
         case "cancel": _ = sender.cancel()
         case "send_anyway": sender.send(sender.pending, anyway: true, known: transcript.items.map(\.id))
         default: log("chat hook: unknown click target \(target)")
@@ -90,9 +90,9 @@ final class ChatHook {
     }
 
     /// Runs of consecutive tool items, as the view groups them.
-    private func groups() -> [[ChatItem]] {
+    static func groups(_ items: [ChatItem]) -> [[ChatItem]] {
         var out: [[ChatItem]] = [], previousWasTool = false
-        for item in transcript.items {
+        for item in items {
             let tool = item.kind == "tool"
             if tool && previousWasTool { out[out.count - 1].append(item) } else if tool { out.append([item]) }
             previousWasTool = tool
@@ -112,14 +112,26 @@ final class ChatHook {
             "agent_name": transcript.name,
             "items": transcript.items.map { ["id": $0.id, "kind": $0.kind, "text": $0.text] },
             "delivered": delivered,
-            "mode": ui.mode.rawValue,
-            "tool_groups": groups().map { g in ["first": g[0].id, "count": g.count, "open": ui.isOpen(g)] as [String: Any] },
-            "rendered_tools": Array(ui.rendered).sorted(),
-            "activity": transcript.state == "working" ? ChatUI.activity(transcript.items) : "",
-        ]
+            "window_on_screen": window?.isVisible ?? false,
+            "app_active": NSApp.isActive,
+        ].merging(Self.view(transcript, ui)) { a, _ in a }
         if let data = try? JSONSerialization.data(withJSONObject: state, options: [.sortedKeys]) {
             try? data.write(to: URL(fileURLWithPath: out), options: .atomic)
         }
+    }
+
+    /// What the view shows of the tool calls: Focus or Full, each run (open or folded),
+    /// the rows drawn, and the live line. `--dump-chat` writes it beside the item dump.
+    static func view(_ transcript: Transcript, _ ui: ChatUI) -> [String: Any] {
+        [
+            "mode": ui.mode.rawValue,
+            "tool_groups": groups(transcript.items).map { g in
+                ["first": g[0].id, "count": g.count, "tools": g.compactMap(\.tool), "failed": g.filter { $0.status == "error" }.count,
+                 "open": ui.isOpen(g)] as [String: Any]
+            },
+            "rendered_tools": Array(ui.rendered).sorted(),
+            "activity": transcript.state == "working" ? ChatUI.activity(transcript.items) : "",
+        ]
     }
 
     /// This window's content as a PNG, drawn by AppKit (no Screen Recording grant needed).

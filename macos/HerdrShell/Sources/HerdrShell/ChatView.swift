@@ -793,6 +793,8 @@ private struct ComposerField: NSViewRepresentable {
 // MARK: Demo window
 
 final class ChatDemoDelegate: NSObject, NSApplicationDelegate {
+    /// A check or a read-only render: no window on screen, no focus, no Dock icon.
+    static var offscreen: Bool { args["dump-chat"] != nil || args["control"] != nil || flags.contains("--read-only") }
     var window: NSWindow?
     var transcript: Transcript?
     var sender: ChatSender?
@@ -814,16 +816,22 @@ final class ChatDemoDelegate: NSObject, NSApplicationDelegate {
         window.appearance = theme.nsAppearance
         window.contentView = NSHostingView(rootView: view)
         window.center()
-        // Script-driven and read-only windows never take focus from whatever the person is
-        // typing into; only an interactive `--demo chat --pane` comes to the front.
-        if args["dump-chat"] == nil && args["control"] == nil && !flags.contains("--read-only") {
+        // Script-driven and read-only windows are never ordered on screen (main.swift also
+        // makes them background-only): captures draw in-process, keys go to the window
+        // object. Only an interactive `--demo chat --pane` comes to the front.
+        if !ChatDemoDelegate.offscreen {
             window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
-        } else {
-            window.orderBack(nil)
         }
         self.window = window
         if let dump = args["dump-chat"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { ChatHook.capture(window, to: dump + ".png") }
+            let timer = Timer(timeInterval: 0.25, repeats: true) { _ in
+                let view = ChatHook.view(transcript, ui).merging(["window_on_screen": window.isVisible, "app_active": NSApp.isActive]) { a, _ in a }
+                if let data = try? JSONSerialization.data(withJSONObject: view, options: [.sortedKeys]) {
+                    try? data.write(to: URL(fileURLWithPath: dump + ".view.json"), options: .atomic)
+                }
+            }
+            RunLoop.main.add(timer, forMode: .common)
         }
         if let fifo = args["control"] {
             hook = ChatHook(path: fifo, window: window, transcript: transcript, sender: sender, ui: ui)
