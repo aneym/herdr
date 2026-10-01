@@ -364,6 +364,7 @@ pub(super) struct FactoryTabRow {
     pub(super) attention: crate::factory_overlay::Attention,
     /// Derived from this client's live lane status, not the overlay's delayed idle hint.
     pub(super) idle: bool,
+    pub(super) idle_reason: Option<String>,
     pub(super) devloop: bool,
     pub(super) background: bool,
     pub(super) workflow: bool,
@@ -644,6 +645,20 @@ pub(super) fn tree_list_entries_with_overlay(
                 factory_space: tagged.is_some(),
             }));
             if space_collapsed {
+                if let Some(overlay) = tagged {
+                    if super::sidebar_report::recording() && snapshot.tabs.iter().any(|tab|
+                        tab.workspace_id == *workspace_id && overlay.tab(&tab.tab_id).is_some_and(|tag| tag.section.is_some())) {
+                        let mut report = super::sidebar_report::WorkspaceReport::new(workspace_id, tree, None);
+                        for tab in snapshot.tabs.iter().filter(|tab| tab.workspace_id == *workspace_id) {
+                            if let Some(tag) = overlay.tab(&tab.tab_id) {
+                                report.add(&tab.tab_id, tag.kind,
+                                    super::sidebar_report::section_label(tag.section).map(str::to_owned),
+                                    tag.parent.clone(), "space_collapsed");
+                            }
+                        }
+                        super::sidebar_report::record(report);
+                    }
+                }
                 continue;
             }
         }
@@ -1355,7 +1370,39 @@ fn append_factory_space(
             }
         }
     }
-    if sectioned {
+    if sectioned && super::sidebar_report::recording() {
+        let mut report = super::sidebar_report::WorkspaceReport::new(workspace_id, tree, filter);
+        report.placements(&out[start..]);
+        report.kinds(overlay);
+        for tab in snapshot.tabs.iter().filter(|tab| tab.workspace_id == workspace_id) {
+            let Some(tag) = overlay.tab(&tab.tab_id) else { continue };
+            if report.tabs.iter().any(|entry| entry.tab == tab.tab_id) { continue; }
+            let under = if tag.kind == TabKind::Workflow {
+                parent_for(tab).map(str::to_owned)
+            } else { grouped_root(&tab.tab_id) };
+            let parent = under.as_deref().and_then(|id| report.tabs.iter().find(|entry| entry.tab == id));
+            let section = parent.and_then(|entry| entry.section.clone()).or_else(|| {
+                let label = if tag.done || tag.kind == TabKind::Advisor { Some("background") }
+                    else if tag.mode == TabMode::Parked { Some("parked") }
+                    else if tag.mode == TabMode::Auto || (tag.kind == TabKind::Workflow && under.is_none()) { Some("services") }
+                    else { super::sidebar_report::section_label(tag.section) };
+                label.map(str::to_owned)
+            });
+            let hidden = if !tabs.iter().any(|candidate| candidate.tab_id == tab.tab_id) { "goal_filter" }
+                else if tag.done || tag.kind == TabKind::Advisor { "background" }
+                else if tag.mode == TabMode::Parked { "parked_folded" }
+                else if tag.mode == TabMode::Auto { "auto_folded" }
+                else if tag.section == Some(TabSection::Closed) { "closed_folded" }
+                else if under.is_some() { "group_folded" }
+                else if tag.kind == TabKind::Workflow && first_orchestrator.is_none() { "services_folded" }
+                else { "unplaced" };
+            report.add(&tab.tab_id, tag.kind, section, under, hidden);
+        }
+        report.inherit_sections();
+        apply_factory_sections(out, start, tree, workspace_id, indent);
+        report.visibility(&out[start..], tree);
+        super::sidebar_report::record(report);
+    } else if sectioned {
         apply_factory_sections(out, start, tree, workspace_id, indent);
     }
 }
@@ -1451,6 +1498,7 @@ fn factory_run_row(
         summary: None,
         attention: run.attention,
         idle: false,
+        idle_reason: None,
         devloop: false,
         background: false,
         workflow: true,
@@ -1478,7 +1526,7 @@ fn summarize_factory_parent(row: &mut AgentPanelListEntry, running: usize, busy:
             }
         } else if let Some(summary) = tag_summary {
             summary.to_owned()
-        } else if row.idle {
+        } else if row.idle && row.idle_reason.is_none() {
             "idle".to_owned()
         } else {
             String::new()
@@ -1576,6 +1624,7 @@ fn factory_row(
             && !tag.busy
             && tag.summary.as_deref().is_none_or(|summary| summary.trim().is_empty()))
             && status == crate::api::schema::AgentStatus::Idle,
+        idle_reason: tag.and_then(|tag| tag.idle_reason.clone()),
         devloop: tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Lane && tag.devloop),
         background,
         workflow: tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Workflow),

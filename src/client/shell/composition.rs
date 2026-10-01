@@ -108,6 +108,7 @@ impl ClientShellState {
                 &mut self.hits,
             );
         }
+        super::sidebar_report::finish(self.config.preferences_path.as_deref());
         if !self.config.mouse_capture {
             self.hits = ShellHitMap::default();
         }
@@ -273,6 +274,7 @@ impl ClientShellState {
                 workspace_drop_indicator_row,
             },
         );
+        super::sidebar_report::finish(self.config.preferences_path.as_deref());
         if let (Some(overlay), Some(panel)) = (
             self.factory_overlay
                 .as_deref()

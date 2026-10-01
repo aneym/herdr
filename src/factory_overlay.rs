@@ -155,6 +155,8 @@ pub struct TabTag {
     pub attention: Attention,
     /// Legacy writer hint; the client derives lane idle from live status instead.
     pub idle: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_reason: Option<String>,
     /// A lane or orchestrator whose seats are running; draws as working.
     pub busy: bool,
     /// Registered running workflows without their own herdr tab.

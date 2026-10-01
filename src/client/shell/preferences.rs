@@ -183,6 +183,12 @@ pub(super) fn path_for_local_endpoint(socket_path: &Path) -> PathBuf {
         .join(format!("local-{hash:016x}.json"))
 }
 
+pub(super) fn sidebar_path(preferences: &Path) -> Option<PathBuf> {
+    let name = preferences.file_name()?.to_str()?;
+    let hash = name.strip_prefix("local-")?.strip_suffix(".json")?;
+    Some(preferences.with_file_name(format!("sidebar-{hash}.json")))
+}
+
 pub(super) fn load(path: &Path) -> Option<ClientChromePreferences> {
     let content = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&content).ok()

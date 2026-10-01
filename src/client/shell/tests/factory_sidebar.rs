@@ -2070,3 +2070,147 @@ fn factory_goal_menu_area_selection_and_preferences_roundtrip() {
         assert!(!rows.iter().any(|row| row.contains("goal")));
     }
 }
+
+fn sidebar_report_fixture(snapshot: &ClientShellSnapshot, overlay: &FactoryOverlay, tree: &ClientTreeChrome) -> serde_json::Value {
+    sidebar_report_fixture_at_height(snapshot, overlay, tree, 100)
+}
+
+fn sidebar_report_fixture_at_height(snapshot: &ClientShellSnapshot, overlay: &FactoryOverlay, tree: &ClientTreeChrome, height: u16) -> serde_json::Value {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let directory = std::env::temp_dir().join(format!("herdr-sidebar-report-{}-{}", std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+    std::fs::create_dir_all(&directory).unwrap();
+    let preferences = directory.join("local-test.json");
+    let mut state = factory_state(snapshot.clone(), overlay.clone());
+    state.config.preferences_path = Some(preferences);
+    state.config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    *state.tree_chrome_mut() = tree.clone();
+    state.compose(160, height).expect("factory sidebar frame");
+    let bytes = std::fs::read(directory.join("sidebar-test.json"))
+        .expect("a frame drawing the factory sidebar must publish its placement report");
+    let report = serde_json::from_slice(&bytes).unwrap();
+    std::fs::remove_dir_all(directory).unwrap();
+    report
+}
+
+#[test]
+fn factory_sidebar_report_covers_shown_collapsed_grouped_and_scoping_tabs() {
+    use crate::factory_overlay::TabSection;
+    let (mut snapshot, mut overlay) = grouped_workflow_fixture();
+    snapshot.tabs.retain(|tab| !tab.tab_id.starts_with("wf-"));
+    for agent in &mut snapshot.agents { agent.agent_status = AgentStatus::Idle; }
+    overlay.tabs.get_mut("lane-a").unwrap().section = Some(TabSection::Monitoring);
+    overlay.tabs.get_mut("lane-a").unwrap().summary = None;
+    overlay.tabs.get_mut("lane-b").unwrap().section = Some(TabSection::Implementing);
+    overlay.tabs.get_mut("lane-b").unwrap().runs.clear();
+    let template = snapshot.tabs[0].clone();
+    for (id, section) in [("shown", TabSection::Implementing), ("collapsed", TabSection::Reviewing), ("scoping", TabSection::Scoping), ("idle", TabSection::Closed)] {
+        let mut tab = template.clone(); tab.tab_id = id.into(); tab.label = id.into();
+        snapshot.tabs.push(tab);
+        overlay.tabs.insert(id.into(), TabTag { kind: TabKind::Lane, section: Some(section), ..Default::default() });
+    }
+    let mut scoping = snapshot.agents[1].clone();
+    scoping.tab_id = "scoping".into(); scoping.pane_id = "scoping-pane".into();
+    snapshot.agents.push(scoping);
+    let mut tree = ClientTreeChrome::default();
+    tree.factory_collapsed_lanes.insert("lane-a".into());
+    tree.factory_sections_collapsed.insert("ws_1:READY FOR REVIEW".into());
+    let report = sidebar_report_fixture(&snapshot, &overlay, &tree);
+    let workspace = &report["workspaces"][0];
+    let tabs = workspace["tabs"].as_array().unwrap();
+    assert_eq!(tabs.len(), snapshot.tabs.len());
+    for (id, section, shown, hidden, under) in [
+        ("lane-a", "MONITORING", true, None, None),
+        ("lane-b", "MONITORING", false, Some("group_folded"), Some("lane-a")),
+        ("shown", "IMPLEMENTING", true, None, None),
+        ("collapsed", "READY FOR REVIEW", false, Some("section_collapsed"), None),
+        ("scoping", "SCOPING", true, None, None),
+        ("idle", "closed", false, Some("closed_folded"), None),
+    ] {
+        let matches = tabs.iter().filter(|tab| tab["tab"] == id).collect::<Vec<_>>();
+        assert_eq!(matches.len(), 1, "{id}: {report}");
+        let tab = matches[0];
+        assert_eq!(tab["kind"], "lane", "{id}: {report}");
+        assert_eq!(tab["section"], section, "{id}: {report}");
+        assert_eq!(tab["shown"], shown, "{id}: {report}");
+        assert_eq!(tab["hidden"].as_str(), hidden, "{id}: {report}");
+        assert_eq!(tab["under"].as_str(), under, "{id}: {report}");
+        assert_eq!(tab["row"].is_number(), shown);
+        if shown { assert!(tab["indent"].is_number()); }
+    }
+}
+
+#[test]
+fn factory_sidebar_report_has_no_unplaced_tagged_tabs_in_sectioned_fixtures() {
+    for (snapshot, overlay) in [section_controls_fixture(), goal_fixture(), grouped_workflow_fixture()] {
+        for collapsed in [false, true] {
+            let mut overlay = overlay.clone();
+            overlay.tabs.get_mut("lane-a").unwrap().section = Some(crate::factory_overlay::TabSection::Implementing);
+            let mut tree = ClientTreeChrome::default();
+            if collapsed { tree.collapsed_spaces.insert("ws_1".into()); }
+            let report = sidebar_report_fixture(&snapshot, &overlay, &tree);
+            let tabs = report["workspaces"][0]["tabs"].as_array().unwrap();
+            let expected = snapshot.tabs.iter().filter(|tab| overlay.tab(&tab.tab_id).is_some()).count();
+            assert_eq!(tabs.len(), expected, "{report}");
+            let ids = tabs.iter().map(|tab| tab["tab"].as_str().unwrap()).collect::<std::collections::HashSet<_>>();
+            assert_eq!(ids.len(), expected, "{report}");
+            assert!(tabs.iter().all(|tab| tab["hidden"] != "unplaced"), "{report}");
+        }
+    }
+}
+
+#[test]
+fn factory_idle_reason_draws_stalled_peach_and_fold_but_ignores_working() {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| tab.tab_id == "lane-b");
+    snapshot.agents.clear();
+    let palette = ClientShellConfig::from_config(&Config::default()).palette;
+    for (status, reason, badge, expected) in [(AgentStatus::Idle, "stalled", None, Some("stalled")), (AgentStatus::Idle, "fold 2", None, Some("fold 2")), (AgentStatus::Working, "stalled", None, None), (AgentStatus::Idle, "stalled", Some("PC"), Some("PC"))] {
+        snapshot.tabs[0].agent_status = status;
+        let mut tag = serde_json::to_value(&overlay.tabs["lane-b"]).unwrap();
+        tag["idle_reason"] = serde_json::json!(reason);
+        tag["badge"] = serde_json::json!(badge);
+        overlay.tabs.insert("lane-b".into(), serde_json::from_value(tag).unwrap());
+        let (rows, hits, buffer) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 40);
+        let y = hits.tree_headers.iter().find(|hit| hit.key == "lane-b").unwrap().rect.y;
+        let text = &rows[y as usize];
+        if let Some(expected) = expected {
+            let byte = text.find(expected).expect("idle reason must replace the idle metadata");
+            if badge == Some("PC") {
+                assert!(text.contains("PC"), "{text}");
+                assert!(!text.contains("stalled"), "{text}");
+            } else {
+                let x = unicode_width::UnicodeWidthStr::width(&text[..byte]) as u16;
+                assert_eq!(buffer[(x, y)].fg, if reason == "stalled" && badge.is_none() { palette.peach } else { palette.overlay0 });
+            }
+            assert!(!text.contains("idle"), "{text}");
+        } else { assert!(!text.contains(reason), "{text}"); }
+    }
+}
+
+
+#[test]
+fn factory_sidebar_report_marks_scrolled_rows_offscreen_not_background() {
+    let (mut snapshot, mut overlay) = section_controls_fixture();
+    let template = snapshot.tabs[0].clone();
+    for index in 0..20 {
+        let id = format!("offscreen-{index}");
+        let mut tab = template.clone();
+        tab.tab_id = id.clone(); tab.label = id.clone();
+        snapshot.tabs.push(tab);
+        overlay.tabs.insert(id, TabTag { kind: TabKind::Lane,
+            section: Some(crate::factory_overlay::TabSection::Implementing), ..Default::default() });
+    }
+    let report = sidebar_report_fixture_at_height(&snapshot, &overlay, &ClientTreeChrome::default(), 12);
+    let tabs = report["workspaces"][0]["tabs"].as_array().unwrap();
+    let offscreen = tabs.iter().filter(|tab| tab["tab"].as_str().unwrap().starts_with("offscreen-")
+        && !tab["shown"].as_bool().unwrap()).collect::<Vec<_>>();
+    assert!(!offscreen.is_empty(), "{report}");
+    for tab in offscreen {
+        assert_eq!(tab["hidden"], "offscreen", "{report}");
+        assert_eq!(tab["section"], "IMPLEMENTING", "{report}");
+        assert_eq!(tab["indent"], 1, "{report}");
+        assert!(tab["row"].is_null(), "{report}");
+    }
+    assert!(tabs.iter().all(|tab| tab["hidden"] != "background" || tab["section"] == "background"), "{report}");
+}

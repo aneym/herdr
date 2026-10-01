@@ -133,6 +133,7 @@ pub(super) fn render_agent_panel_with_overlay(
     ) {
         return;
     }
+    super::sidebar_report::begin();
     let rows = agent_rows(snapshot, config, None);
     let (rows, automations) = super::tree::partition_automations(snapshot, config, rows);
     let tree_tabs = super::tree::tree_view_active(config)
@@ -189,13 +190,17 @@ pub(super) fn render_agent_panel_with_overlay(
                 config.agents.row_gap
             }
         },
-        |buffer, rect, entry, hits| render_panel_list_entry(buffer, rect, entry, config, hits),
+        |buffer, rect, entry, hits| {
+            super::sidebar_report::drawn(entry, rect.y.saturating_sub(list_area.y));
+            render_panel_list_entry(buffer, rect, entry, config, hits);
+        },
         |entry| match entry {
             super::tree::AgentPanelListEntry::FactoryTab(row) => (row.header.active, row.header.active),
             super::tree::AgentPanelListEntry::Agent(row) => (row.focused, false),
             _ => (false, false),
         },
     );
+    super::sidebar_report::end();
     let mut y = area.bottom() - footer_height;
     for (rows, clickable) in [(&usage, true), (&hosts, false)] {
         if rows.is_empty() || y >= area.bottom() {
@@ -608,12 +613,12 @@ fn render_factory_tab(
         "scope ↗".to_owned()
     } else if let Some(badge) = row.badge.as_deref() {
         badge.to_owned()
-    } else {
-        row.summary.as_deref()
-            .filter(|value| !value.is_empty())
-            .unwrap_or(if row.idle { "idle" } else { "" })
-            .to_owned()
-    };
+    } else if let Some(summary) = row.summary.as_deref().filter(|value| !value.is_empty()) {
+        summary.to_owned()
+    } else if row.idle {
+        row.idle_reason.as_deref().map(|reason| crate::ui::truncate_end(reason, 10))
+            .unwrap_or_else(|| "idle".to_owned())
+    } else { String::new() };
     let metadata = if !row.reviewing && !row.workflow && !row.background && !row.idle && row.summary.is_some()
         && row.badge.is_none() && available > 0 && display_width(&header.label) + display_width(&metadata) + 1 > available as usize {
         metadata.split(" · ").next().unwrap_or("").to_owned()
@@ -659,7 +664,7 @@ fn render_factory_tab(
                 badge, Style::default().fg(badge_color));
         } else {
             put_text(buffer, right_x, rect.y, right_width, right_label,
-                Style::default().fg(palette.overlay0).add_modifier(Modifier::DIM));
+                Style::default().fg(if row.idle && row.idle_reason.as_deref() == Some("stalled") { palette.peach } else { palette.overlay0 }).add_modifier(Modifier::DIM));
         }
     }
     if let Some(attention_color) = attention_color {
