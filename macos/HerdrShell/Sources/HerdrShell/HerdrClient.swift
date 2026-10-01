@@ -393,4 +393,9 @@ struct HerdrCommands {
               let env = try? JSONDecoder().decode(Env.self, from: data) else { return nil }
         return CreatedPane(paneId: env.result.root_pane.pane_id, terminalId: env.result.root_pane.terminal_id, tabId: env.result.tab.tab_id)
     }
+
+    /// `tab.focus`. The shell shows the tab either way; this is what herdr records as selected.
+    func tabFocus(tabId: String) {
+        guard call("tab.focus", ["tab_id": tabId]) != nil else { log("tab.focus failed \(tabId)"); return }
+    }
 }

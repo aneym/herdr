@@ -57,6 +57,13 @@ if (socket == liveSocket || socket.hasSuffix("/.config/herdr/herdr.sock")) && !f
     exit(2)
 }
 
+// P15 fixtures. Read before HERDR_* is cleared; the lab launcher forwards these two.
+let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
+let shellLanesPath = ProcessInfo.processInfo.environment["HERDR_LANES_PATH"] ?? (home + "/.agent-rails/herdr/lanes.json")
+let shellAreasPath = ProcessInfo.processInfo.environment["HERDR_AREAS_PATH"] ?? (home + "/.agent-rails/herdr/areas.json")
+ShellPaths.lanes = shellLanesPath
+ShellPaths.areas = shellAreasPath
+
 // Children must not inherit the launching pane's herdr identity (HERDR_ENV and
 // friends) or any Claude session markers.
 for (k, _) in ProcessInfo.processInfo.environment where k.hasPrefix("HERDR_") || k.hasPrefix("CLAUDE") {

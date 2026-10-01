@@ -1,5 +1,7 @@
 import SwiftUI
 
+enum SidebarMode: String { case areas, spaces }
+
 final class SidebarState: ObservableObject {
     @Published var selectedTab: String?
     /// Fold state the user set by hand, by fold id (`tab:<id>`, `hidden`, `background`).
@@ -14,6 +16,97 @@ final class SidebarState: ObservableObject {
     /// Where each row was last drawn (view-local, top-left origin), by line id. Read only by the
     /// test hook, which turns it into a real mouse click; not observed, so it never redraws.
     var rowFrames: [String: CGRect] = [:]
+
+    /// Areas is the default once a lanes or areas file is present. Without one, the sidebar
+    /// stays the spaces list (P10). A saved choice wins over that default.
+    @Published var mode: SidebarMode
+    @Published var chip: AreaChip
+    @Published var areaOnly: String?
+    @Published var foldedAreas: Set<String>
+    @Published var focusExpanded: Bool
+    /// 1-based index into the Focus ranking while ⌘] / ⌘[ is stepping. Nil otherwise.
+    @Published var focusCursor: Int?
+    @Published var docOpen: Bool
+    @Published var docWidth: CGFloat
+    /// Set by the test hook for the duration of a synthetic option-click. A real option
+    /// click is read from the current event.
+    var clickOption = false
+
+    /// Per-lab suite. `UserDefaults.standard` is the app's domain in the real home, so two
+    /// labs would reopen each other's setup. The suite name follows SHELL_LAB.
+    static let store: UserDefaults = {
+        let lab = ProcessInfo.processInfo.environment["SHELL_LAB"] ?? "live"
+        return UserDefaults(suiteName: "herdr.shell.\(lab)") ?? .standard
+    }()
+    private static let prefix = "herdr.shell."
+
+    init() {
+        let d = Self.store
+        if let raw = d.string(forKey: Self.prefix + "mode"), let m = SidebarMode(rawValue: raw) {
+            mode = m
+        } else {
+            mode = ShellPaths.filesPresent ? .areas : .spaces
+        }
+        chip = AreaChip(rawValue: d.string(forKey: Self.prefix + "chip") ?? "") ?? .all
+        areaOnly = d.string(forKey: Self.prefix + "areaOnly")
+        foldedAreas = Set(d.stringArray(forKey: Self.prefix + "folded") ?? [])
+        focusExpanded = (d.object(forKey: Self.prefix + "focusExpanded") as? Bool) ?? false
+        selectedTab = d.string(forKey: Self.prefix + "selectedTab")
+        docOpen = (d.object(forKey: Self.prefix + "docOpen") as? Bool) ?? false
+        docWidth = CGFloat((d.object(forKey: Self.prefix + "docWidth") as? Double) ?? 420)
+        if docWidth < 320 { docWidth = 320 }
+    }
+
+    func setMode(_ m: SidebarMode) {
+        mode = m
+        focusCursor = nil
+        write("mode", m.rawValue)
+    }
+
+    func setChip(_ c: AreaChip) {
+        chip = c
+        focusCursor = nil
+        write("chip", c.rawValue)
+    }
+
+    func setAreaOnly(_ id: String?) {
+        areaOnly = id
+        if let id { write("areaOnly", id) } else { Self.store.removeObject(forKey: Self.prefix + "areaOnly"); sync() }
+    }
+
+    func setFolded(_ area: String, open: Bool) {
+        if open { foldedAreas.remove(area) } else { foldedAreas.insert(area) }
+        Self.store.set(foldedAreas.sorted(), forKey: Self.prefix + "folded")
+        sync()
+    }
+
+    func setFocusExpanded(_ open: Bool) {
+        focusExpanded = open
+        Self.store.set(open, forKey: Self.prefix + "focusExpanded")
+        sync()
+    }
+
+    func saveSelected() {
+        if let selectedTab { write("selectedTab", selectedTab) }
+        else { Self.store.removeObject(forKey: Self.prefix + "selectedTab"); sync() }
+    }
+
+    func saveDocs() {
+        Self.store.set(docOpen, forKey: Self.prefix + "docOpen")
+        Self.store.set(Double(docWidth), forKey: Self.prefix + "docWidth")
+        sync()
+    }
+
+    private func write(_ key: String, _ value: String) {
+        Self.store.set(value, forKey: Self.prefix + key)
+        sync()
+    }
+
+    private func sync() { Self.store.synchronize() }
+
+    var optionHeld: Bool {
+        clickOption || NSApp.currentEvent?.modifierFlags.contains(.option) == true
+    }
 }
 
 /// Frames of clickable things, keyed by name, reported up from the SwiftUI views (P11 check clicks).
@@ -47,6 +140,7 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            chrome
             if state.flat {
                 rows
                 Spacer(minLength: 0)
@@ -58,7 +152,7 @@ struct SidebarView: View {
             Divider().overlay(t.line)
             hostsRow
         }
-        .font(.system(size: 12.5, design: .monospaced))
+        .font(.system(size: 12.5, design: state.mode == .areas ? .default : .monospaced))
         .foregroundStyle(t.ink)
         // Glass on the sidebar puts a panel-colored scrim over the blur layer under the
         // view, so text keeps its contrast whatever the desktop behind is.
@@ -77,16 +171,94 @@ struct SidebarView: View {
 
     /// What the sidebar draws, from SidebarModel (the state dump reads the same lines).
     private var lines: [SidebarLine] {
-        SidebarModel.build(snapshot: model.snapshot, orchestrators: model.orchestrators, lanes: model.lanes,
-                           workflows: model.workflows, selectedTab: state.selectedTab, manualOpen: state.manualOpen)
+        if state.mode == .spaces {
+            return SidebarModel.build(snapshot: model.snapshot, orchestrators: model.orchestrators, lanes: model.lanes,
+                                      workflows: model.workflows, selectedTab: state.selectedTab, manualOpen: state.manualOpen)
+        }
+        return SidebarModel.buildAreas(snapshot: model.snapshot, orchestrators: model.orchestrators, lanes: model.lanes,
+                                       workflows: model.workflows, catalog: model.catalog.snapshot, chip: state.chip,
+                                       areaOnly: state.areaOnly, folded: state.foldedAreas, focusExpanded: state.focusExpanded,
+                                       focusCursor: state.focusCursor, selectedTab: state.selectedTab, manualOpen: state.manualOpen)
+    }
+
+    private var chrome: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                modeButton("Areas", .areas)
+                modeButton("Spaces", .spaces)
+                Spacer(minLength: 0)
+            }
+            if state.mode == .areas {
+                chipRow
+                if let id = state.areaOnly {
+                    Text("only: \(model.catalog.snapshot.areaName(id)) ✕")
+                        .font(.system(size: 11))
+                        .foregroundStyle(t.ink)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(RoundedRectangle(cornerRadius: 5).fill(t.sel))
+                        .onTapGesture { state.setAreaOnly(nil) }
+                        .clickTarget("only")
+                }
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.top, 8)
+    }
+
+    private func modeButton(_ title: String, _ mode: SidebarMode) -> some View {
+        Text(title)
+            .font(.system(size: 12, weight: state.mode == mode ? .semibold : .regular))
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 5).fill(state.mode == mode ? t.sel : Color.clear))
+            .contentShape(Rectangle())
+            .onTapGesture { state.setMode(mode) }
+            .clickTarget("mode:\(mode.rawValue)")
+    }
+
+    private var chipRow: some View {
+        let chips: [(AreaChip, String)] = [
+            (.all, "All"), (.needs, "Needs you"), (.scoping, "Scoping"),
+            (.building, "Building"), (.review, "Review"), (.use, "Use"),
+        ]
+        return LazyVGrid(columns: [GridItem(.adaptive(minimum: 78), spacing: 4)], alignment: .leading, spacing: 4) {
+            ForEach(chips, id: \.0.rawValue) { chip, title in
+                Text(title)
+                    .font(.system(size: 11, weight: state.chip == chip ? .semibold : .regular))
+                    .foregroundStyle(state.chip == chip ? t.ink : t.mute)
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .frame(maxWidth: .infinity)
+                    .background(RoundedRectangle(cornerRadius: 5).fill(state.chip == chip ? t.sel : t.ink.opacity(0.06)))
+                    .contentShape(Rectangle())
+                    .onTapGesture { state.setChip(chip) }
+                    .clickTarget("chip:\(chip.rawValue)")
+            }
+        }
     }
 
     @ViewBuilder private func lineView(_ l: SidebarLine) -> some View {
         switch l.kind {
         case .header: header(l)
         case .note: note(l)
+        case .area: areaHeader(l)
         default: rowView(l)
         }
+    }
+
+    private func areaHeader(_ l: SidebarLine) -> some View {
+        HStack(spacing: 6) {
+            if let open = l.chevron {
+                Text(open ? "▾" : "▸").foregroundStyle(t.mute)
+            }
+            Circle().fill(Color(shellHex: l.color ?? "#999999")).frame(width: 8, height: 8)
+            Text(l.title).lineLimit(1)
+            Spacer(minLength: 4)
+            Text(l.trailing).foregroundStyle(t.mute)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .onTapGesture { areaClick(l) }
+        .clickTarget(l.id)
     }
 
     private func header(_ l: SidebarLine) -> some View {
@@ -124,9 +296,18 @@ struct SidebarView: View {
             } else if l.depth == 0 {
                 Text(" ").foregroundStyle(.clear)
             }
-            if !l.glyph.isEmpty { Text(l.glyph).foregroundStyle(l.kind == .space ? t.mute : tone(l.glyphTone)) }
+            if !l.glyph.isEmpty {
+                Text(l.glyph).foregroundStyle(glyphColor(l))
+            }
             Text(l.title).foregroundStyle(titleColor(l)).lineLimit(1)
             Spacer(minLength: 4)
+            if !l.badge.isEmpty {
+                Text(l.badge)
+                    .font(.system(size: 10))
+                    .foregroundStyle(t.mute)
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(t.ink.opacity(0.08)))
+            }
             if !l.trailing.isEmpty { Text(l.trailing).foregroundStyle(tone(l.trailingTone)) }
             if let host = l.host {
                 Text(host)
@@ -151,9 +332,28 @@ struct SidebarView: View {
         l.titleKind.map(kindColor) ?? t.ink
     }
 
+    private func glyphColor(_ l: SidebarLine) -> Color {
+        if l.selected, let hex = l.color { return Color(shellHex: hex) }
+        if l.kind == .space { return t.mute }
+        return tone(l.glyphTone)
+    }
+
+    private func areaClick(_ l: SidebarLine) {
+        guard let area = l.area else { return }
+        if state.optionHeld { state.setAreaOnly(area) }
+        else { state.setFolded(area, open: !(l.chevron ?? true)) }
+    }
+
     private func click(_ l: SidebarLine) {
+        if l.kind == .focus {
+            state.setFocusExpanded(!(l.chevron ?? false))
+            return
+        }
+        if l.kind == .area { areaClick(l); return }
         if let tab = l.tab {
-            if l.kind != .workflow, let openDetail, let r = model.allRowsInOrder.first(where: { $0.id == tab }) {
+            if state.mode == .areas || l.kind == .workflow {
+                select(tab)
+            } else if let openDetail, let r = model.allRowsInOrder.first(where: { $0.id == tab }) {
                 openDetail(r)
             } else {
                 select(tab)
@@ -193,10 +393,25 @@ struct SidebarView: View {
     }
 
     private func toggle(_ id: String, currentlyOpen: Bool) {
+        if id == "focus" { state.setFocusExpanded(!currentlyOpen); return }
+        if id.hasPrefix("area:") {
+            state.setFolded(String(id.dropFirst("area:".count)), open: !currentlyOpen)
+            return
+        }
         state.manualOpen[id] = !currentlyOpen
     }
 
     private func kindColor(_ k: TabRow.Kind) -> Color {
         switch k { case .orchestrator: return t.orch; case .lane: return t.lane; case .workflow: return t.wf }
+    }
+}
+
+extension Color {
+    init(shellHex: String) {
+        var s = shellHex.trimmingCharacters(in: .whitespaces)
+        if s.hasPrefix("#") { s.removeFirst() }
+        var v: UInt64 = 0
+        Scanner(string: s).scanHexInt64(&v)
+        self.init(red: Double((v >> 16) & 0xFF) / 255, green: Double((v >> 8) & 0xFF) / 255, blue: Double(v & 0xFF) / 255)
     }
 }

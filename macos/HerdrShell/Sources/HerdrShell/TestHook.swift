@@ -89,6 +89,14 @@ final class TestHook {
             controller?.split(obj["direction"] as? String ?? "right")
         case "scroll":
             scroll(obj)
+        case "frame":
+            let w = CGFloat(obj["w"] as? Double ?? Double(obj["w"] as? Int ?? 1440))
+            let h = CGFloat(obj["h"] as? Double ?? Double(obj["h"] as? Int ?? 900))
+            controller?.window.setContentSize(NSSize(width: w, height: h))
+        case "docs":
+            let open = obj["open"] as? Bool
+            let width = (obj["width"] as? Double).map { CGFloat($0) } ?? (obj["width"] as? Int).map { CGFloat($0) }
+            controller?.setDocs(open: open, width: width)
         case "appearance":
             // {"cmd":"appearance","mode":"system|light|dark"}: the live override.
             controller?.theme.override = AppearanceOverride(rawValue: obj["mode"] as? String ?? "") ?? .system
@@ -137,10 +145,28 @@ final class TestHook {
     private func click(_ obj: [String: Any]) {
         guard let c = controller else { return }
         let view: NSView, frame: CGRect
-        switch obj["target"] as? String ?? "row" {
+        let target = obj["target"] as? String ?? "row"
+        switch target {
         case "open_full":
             view = c.detailPanel.view
             guard let f = c.detailPanel.model.targets["open_full"] else { log("hook: click: no open_full button"); return }
+            frame = f
+        case "chip", "mode", "only":
+            view = c.sidebarHostView
+            let key: String
+            if target == "only" { key = "only" }
+            else { key = "\(target):\(obj["label"] as? String ?? "")" }
+            guard let f = c.state.rowFrames[key] else { log("hook: click: no \(key)"); return }
+            frame = f
+        case "area":
+            view = c.sidebarHostView
+            let label = obj["label"] as? String
+            guard let line = c.sidebarLines.first(where: { $0.kind == .area && $0.title == label }),
+                  let f = c.state.rowFrames[line.id] else { log("hook: click: no area \(label ?? "?")"); return }
+            frame = f
+        case "focus":
+            view = c.sidebarHostView
+            guard let f = c.state.rowFrames["focus"] else { log("hook: click: no focus row"); return }
             frame = f
         default:
             view = c.sidebarHostView
@@ -149,6 +175,12 @@ final class TestHook {
                   let f = c.state.rowFrames[line.id] else { log("hook: click: no row \(label ?? "?")"); return }
             frame = f
         }
+        var mods: NSEvent.ModifierFlags = []
+        for m in obj["mods"] as? [String] ?? [] {
+            switch m { case "shift": mods.insert(.shift); case "ctrl": mods.insert(.control)
+                       case "opt": mods.insert(.option); case "cmd": mods.insert(.command); default: break }
+        }
+        c.state.clickOption = mods.contains(.option)
         // The frame is in SwiftUI's space: top-left origin at the top-left of the view's safe area
         // (the transparent title bar insets it). Convert to view coordinates, then to the window.
         let safe = view.safeAreaRect
@@ -162,7 +194,7 @@ final class TestHook {
         var n = 0
         func post(_ type: NSEvent.EventType) {
             n += 1
-            guard let ev = NSEvent.mouseEvent(with: type, location: loc, modifierFlags: [],
+            guard let ev = NSEvent.mouseEvent(with: type, location: loc, modifierFlags: mods,
                                               timestamp: ProcessInfo.processInfo.systemUptime,
                                               windowNumber: c.window.windowNumber, context: nil, eventNumber: n,
                                               clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1) else { return }
@@ -173,6 +205,7 @@ final class TestHook {
         // the gesture from the down event on a later turn.
         post(.leftMouseDown)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { post(.leftMouseUp) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { c.state.clickOption = false }
         delivered.append("click \(obj["target"] ?? "row") \(obj["label"] ?? "") at window \(Int(loc.x)),\(Int(loc.y)) via NSApp.sendEvent")
         log("hook: click \(obj["target"] ?? "row") \(obj["label"] ?? "") frame=\(NSStringFromRect(frame)) window=\(NSStringFromPoint(loc)) key=\(c.window.isKeyWindow)")
     }
@@ -515,6 +548,18 @@ final class TestHook {
             "sidebar": ["orchestrator": rows(c.model.orchestrators), "lanes": rows(c.model.lanes),
                         "workflows": rows(c.model.workflows)],
             "sidebar_lines": c.sidebarLines.map { $0.dump },   // P10: the rows as drawn, in order
+            "shell": [
+                "mode": c.state.mode.rawValue,
+                "chip": c.state.chip.rawValue,
+                "area_only": c.state.areaOnly ?? NSNull(),
+                "folded_areas": c.state.foldedAreas.sorted(),
+                "focus_expanded": c.state.focusExpanded,
+                "focus_cursor": c.state.focusCursor ?? NSNull(),
+                "doc_open": c.state.docOpen,
+                "doc_width": c.state.docWidth,
+                "doc_frame_width": c.root.docs?.frame.width ?? 0,
+                "selected_tab": c.state.selectedTab ?? NSNull(),
+            ],
             "hosts": c.model.hostsModel.rows.map { r -> [String: Any] in
                 ["host": r.host, "tabs": r.tabs, "slots_used": r.stats?.slotsUsed ?? NSNull(),
                  "slots_total": r.stats?.slotsTotal ?? NSNull(), "sessions": r.stats?.sessions ?? NSNull(),

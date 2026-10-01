@@ -21,7 +21,21 @@ import time
 
 NAME = os.environ.get("SHELL_LAB", "shellspike")
 assert NAME.startswith("shellspike") and "/" not in NAME, "SHELL_LAB must be shellspike[-suffix]"
-LAB = os.path.expanduser(f"~/.cache/herdr-build/{NAME}")
+
+
+def _lab_dir(name):
+    """Directory for this lab. A long name makes the herdr socket exceed sun_path
+    (104 bytes, and herdr appends a suffix), so those labs keep the session name
+    and use a shorter directory."""
+    direct = os.path.expanduser(f"~/.cache/herdr-build/{name}")
+    sock = os.path.join(direct, "h", ".config", "herdr", "sessions", name, "herdr.sock")
+    if len(sock.encode()) <= 100:
+        return direct
+    tail = name.split("-")[-1][:12]
+    return os.path.expanduser(f"~/.cache/herdr-build/s/{tail}")
+
+
+LAB = _lab_dir(NAME)
 # Until P1 (--no-escape) ships in the herdr on PATH, the lab uses the spike binary.
 BIN_SRC = os.environ.get("HERDR_SHELL_BIN") or os.path.expanduser("~/.cache/herdr-build/target-pane-attach/release/herdr")
 BIN = os.path.join(LAB, "bin", "herdr")
@@ -80,7 +94,7 @@ def spawn_detached(cmd, log):
 def up():
     # Fresh session every time: drop the lab's persisted state (only under LAB).
     import shutil
-    assert os.path.basename(LAB).startswith("shellspike") and HOME.startswith(LAB + os.sep)
+    assert NAME.startswith("shellspike") and HOME.startswith(LAB + os.sep)
     if not (os.path.exists(SOCK) and subprocess.run(
             [BIN, "--session", SESSION, "workspace", "list"], env=env(), capture_output=True).returncode == 0):
         shutil.rmtree(HOME, ignore_errors=True)

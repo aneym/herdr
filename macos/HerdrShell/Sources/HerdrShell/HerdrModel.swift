@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 /// Live herdr state: the `session.snapshot` shape (what `herdr api snapshot` prints), read by HerdrClient.
@@ -57,6 +58,8 @@ final class HerdrModel: ObservableObject {
     let client: HerdrClient
     /// Per-host counts for the sidebar's hosts row (P12); slots and sessions come from the provider.
     let hostsModel: HostsModel
+    /// lanes.json and areas.json (P15).
+    let catalog = LaneCatalog()
 
     init(herdrBin: String, env: [String: String], hostsProvider: HostsProvider = HerdrOnlyHostsProvider()) {
         self.herdrBin = herdrBin
@@ -82,7 +85,13 @@ final class HerdrModel: ObservableObject {
         }
         client.start()
         hostsModel.start()
+        catalog.start()
+        catalog.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &bag)
     }
+
+    private var bag = Set<AnyCancellable>()
 
     private func apply(_ s: Snapshot) {
         snapshot = s

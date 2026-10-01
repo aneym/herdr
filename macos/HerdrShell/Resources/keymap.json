@@ -144,6 +144,54 @@
       "pending": "P10"
     },
     {
+      "chord": "cmd+shift+a",
+      "action": "toggle_area_mode",
+      "title": "Areas or Spaces",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+\\",
+      "action": "toggle_docs",
+      "title": "Toggle Docs",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+opt+1",
+      "action": "filter_1",
+      "title": "Filter All",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+opt+2",
+      "action": "filter_2",
+      "title": "Filter Needs You",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+opt+3",
+      "action": "filter_3",
+      "title": "Filter Scoping",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+opt+4",
+      "action": "filter_4",
+      "title": "Filter Building",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+opt+5",
+      "action": "filter_5",
+      "title": "Filter Review",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+opt+6",
+      "action": "filter_6",
+      "title": "Filter Use",
+      "menu": "View"
+    },
+    {
       "chord": "cmd+shift+1",
       "action": "goto_space_1",
       "title": "Space 1",

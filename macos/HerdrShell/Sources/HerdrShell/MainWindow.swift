@@ -93,6 +93,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     var root: RootView!
     /// P11: details beside the sidebar (DetailPanel.swift).
     private(set) var detailPanel: DetailPanelController!
+    /// P15/P16: docs on the right of the panes.
+    private(set) var docPanel: DocPanelController!
     private var focusedPaneByTab: [String: String] = [:]
     private var lastLayoutKey = ""
     let commands: HerdrCommands
@@ -101,6 +103,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     private(set) var shownLayout: Snapshot.Layout?
     private var pendingSelectTab: String?
     private var pendingFocusPane: String?
+    private var didRestoreTabFocus = false
 
     init(model: HerdrModel, registry: SurfaceRegistry, theme: ThemeStore) {
         self.model = model
@@ -119,11 +122,19 @@ final class MainWindowController: NSObject, NSWindowDelegate {
 
         let sidebar = NSHostingView(rootView: SidebarView(model: model, state: state, theme: theme,
                                                           openDetail: { [weak self] row in self?.toggleDetail(row.id) },
-                                                          select: { [weak self] tab in self?.selectTab(tab) }))
+                                                          select: { [weak self] tab in
+                                                              guard let self else { return }
+                                                              if self.state.mode == .areas { self.selectAreaTab(tab) } else { self.selectTab(tab) }
+                                                          }))
         sidebarContainer = SidebarContainer(content: sidebar)
         root = RootView(sidebar: sidebarContainer, host: host)
         detailPanel = DetailPanelController(herdr: model, theme: theme) { [weak self] id in self?.openFullTab(id) }
         root.detail = detailPanel.view
+        docPanel = DocPanelController()
+        docPanel.onClose = { [weak self] in self?.setDocs(open: false) }
+        docPanel.onWidth = { [weak self] w in self?.setDocs(width: w) }
+        root.docs = docPanel.view
+        applyDocs()
         Keymap.shared.addContextual(chord: "escape", action: "close_detail") { [weak self] in self?.detailClaimsEscape ?? false }
         window.contentView = root
         applyTheme()
@@ -161,6 +172,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         root.setBackground(t.windowBgNS)
         host.setBackground(t.terminalBgNS)
         sidebarContainer.apply(glass: theme.glass.sidebar, panel: NSColor(hex: t.chrome.panel))
+        docPanel?.apply(panel: NSColor(hex: t.chrome.panel), ink: NSColor(hex: t.chrome.ink))
         GhosttyRuntime.shared?.setColorScheme(theme.effective, theme: theme.terminal, surfaces: Array(registry.byTerminal.values))
     }
 
@@ -177,23 +189,84 @@ final class MainWindowController: NSObject, NSWindowDelegate {
            !model.allRowsInOrder.contains(where: { $0.id == id && $0.kind != .workflow }) {
             closeDetail()
         }
-        if state.selectedTab == nil, let first = model.lanes.first(where: { ($0.label) == "shell spike" }) ?? model.lanes.first {
-            selectTab(first.id)
-            return
-        }
         if let t = pendingSelectTab, model.snapshot?.tabs.contains(where: { $0.tab_id == t }) == true {
             pendingSelectTab = nil
             selectTab(t)
             return
         }
+        if let t = state.selectedTab, model.snapshot?.tabs.contains(where: { $0.tab_id == t }) == true {
+            refreshHost()
+            if !didRestoreTabFocus {
+                didRestoreTabFocus = true
+                focusHerdr(t)
+            }
+            return
+        }
+        if state.selectedTab != nil, model.snapshot != nil {
+            state.selectedTab = nil
+            state.saveSelected()
+        }
+        if state.selectedTab == nil, let first = model.lanes.first(where: { ($0.label) == "shell spike" }) ?? model.lanes.first {
+            selectTab(first.id)
+            return
+        }
         refreshHost()
     }
 
-    func selectTab(_ tabId: String) {
+    func selectTab(_ tabId: String, revealDocs: Bool = false) {
+        let stepping = state.focusCursor != nil && revealDocs
         state.selectedTab = tabId
+        if !stepping { state.focusCursor = nil }
+        state.saveSelected()
+        if revealDocs, state.mode == .areas {
+            setDocs(open: true)
+            focusHerdr(tabId)
+        }
         lastLayoutKey = ""
         refreshHost()
         focusPane(focusedPaneByTab[tabId] ?? host.rects.first?.0.paneId)
+    }
+
+    /// Areas-mode row click, ⌘1..9 and Focus next/prev: select the tab and open its docs.
+    func selectAreaTab(_ tabId: String) {
+        selectTab(tabId, revealDocs: true)
+    }
+
+    func focusStep(_ delta: Int) {
+        let ids = SidebarModel.focusTabs(snapshot: model.snapshot, orchestrators: model.orchestrators,
+                                         lanes: model.lanes, workflows: model.workflows, catalog: model.catalog.snapshot)
+        guard !ids.isEmpty else { return }
+        let next: Int
+        if let cur = state.focusCursor {
+            next = cur - 1 + delta
+        } else if let i = ids.firstIndex(of: state.selectedTab ?? "") {
+            next = i + delta
+        } else {
+            next = delta > 0 ? 0 : ids.count - 1
+        }
+        let i = (next % ids.count + ids.count) % ids.count
+        state.focusCursor = i + 1
+        selectTab(ids[i], revealDocs: true)
+    }
+
+    func setDocs(open: Bool? = nil, width: CGFloat? = nil) {
+        if let open { state.docOpen = open }
+        if let width { state.docWidth = max(DocPanelController.minWidth, width) }
+        state.saveDocs()
+        applyDocs()
+    }
+
+    private func applyDocs() {
+        root.docsOpen = state.docOpen
+        root.docs?.isHidden = !state.docOpen
+        root.docsWidth = state.docWidth
+        root.needsLayout = true
+        root.layoutSubtreeIfNeeded()
+    }
+
+    private func focusHerdr(_ tabId: String) {
+        let cmds = commands
+        DispatchQueue.global(qos: .userInitiated).async { cmds.tabFocus(tabId: tabId) }
     }
 
     /// Rebuild the pane host only when the tab's geometry actually changed.
@@ -354,21 +427,31 @@ final class MainWindowController: NSObject, NSWindowDelegate {
 }
 
 
-/// Fixed-width sidebar and a pane host filling the rest. (An NSSplitView let the
-/// SwiftUI sidebar claim half the window.)
-final class RootView: NSView {
-    let sidebar: NSView, host: NSView
-    static let sidebarWidth: CGFloat = 300
-    /// P11 detail panel between the sidebar and the pane host; takes no space while closed.
-    var detail: NSView? {
-        didSet {
-            oldValue?.removeFromSuperview()
-            if let detail { addSubview(detail, positioned: .above, relativeTo: sidebar) }
+    /// Fixed-width sidebar and a pane host filling the rest. (An NSSplitView let the
+    /// SwiftUI sidebar claim half the window.) Docs sit to the right of the panes.
+    final class RootView: NSView {
+        let sidebar: NSView, host: NSView
+        static let sidebarWidth: CGFloat = 300
+        /// P11 detail panel between the sidebar and the pane host; takes no space while closed.
+        var detail: NSView? {
+            didSet {
+                oldValue?.removeFromSuperview()
+                if let detail { addSubview(detail, positioned: .above, relativeTo: sidebar) }
+            }
         }
-    }
-    var detailOpen = false {
-        didSet { detail?.isHidden = !detailOpen; needsLayout = true }
-    }
+        var detailOpen = false {
+            didSet { detail?.isHidden = !detailOpen; needsLayout = true }
+        }
+        var docs: NSView? {
+            didSet {
+                oldValue?.removeFromSuperview()
+                if let docs { addSubview(docs) }
+            }
+        }
+        var docsOpen = false {
+            didSet { docs?.isHidden = !docsOpen; needsLayout = true }
+        }
+        var docsWidth: CGFloat = DocPanelController.defaultWidth
 
     func setBackground(_ c: NSColor) { layer?.backgroundColor = c.cgColor }
 
@@ -392,6 +475,12 @@ final class RootView: NSView {
             detail.frame = NSRect(x: x, y: 0, width: DetailPanelController.width, height: bounds.height)
             x += DetailPanelController.width + 1
         }
-        host.frame = NSRect(x: x, y: 0, width: max(0, bounds.width - x), height: bounds.height)
+        var docW: CGFloat = 0
+        if let docs, docsOpen {
+            docW = max(DocPanelController.minWidth, docsWidth)
+            docs.frame = NSRect(x: bounds.width - docW, y: 0, width: docW, height: bounds.height)
+            docW += 1
+        }
+        host.frame = NSRect(x: x, y: 0, width: max(0, bounds.width - x - docW), height: bounds.height)
     }
 }

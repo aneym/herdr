@@ -176,8 +176,20 @@ extension MainWindowController {
     /// Runs one keymap action. Returns false for a name nobody handles.
     func perform(action: String) -> Bool {
         switch action {
-        case "next_pane": nextPane(nil)
-        case "prev_pane": prevPane(nil)
+        case "next_pane":
+            if state.mode == .areas { focusStep(1) } else { nextPane(nil) }
+        case "prev_pane":
+            if state.mode == .areas { focusStep(-1) } else { prevPane(nil) }
+        case "toggle_area_mode":
+            state.setMode(state.mode == .areas ? .spaces : .areas)
+        case "toggle_docs":
+            setDocs(open: !state.docOpen)
+        case "filter_1": state.setChip(.all)
+        case "filter_2": state.setChip(.needs)
+        case "filter_3": state.setChip(.scoping)
+        case "filter_4": state.setChip(.building)
+        case "filter_5": state.setChip(.review)
+        case "filter_6": state.setChip(.use)
         case "next_tab": nextTab(nil)
         case "prev_tab": prevTab(nil)
         case "focus_pane_left": focusNeighbor(dx: -1, dy: 0)
@@ -191,7 +203,7 @@ extension MainWindowController {
         default:
             if action.hasPrefix("goto_tab_"), let n = Int(action.dropFirst("goto_tab_".count)) {
                 let rows = model.allRowsInOrder
-                if n >= 1, n <= rows.count { selectTab(rows[n - 1].id) }
+                if n >= 1, n <= rows.count { selectTab(rows[n - 1].id, revealDocs: state.mode == .areas) }
                 return true
             }
             if action.hasPrefix("goto_space_"), let n = Int(action.dropFirst("goto_space_".count)) {
