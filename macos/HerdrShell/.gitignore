@@ -1,2 +1,5 @@
 .build/
 Vendor/
+
+# live screenshots show private sessions; never commit (repo is public)
+checks/*-live.png
