@@ -28,6 +28,8 @@ final class UpdateController: NSObject {
         popover.behavior = .transient
     }
 
+    var shown: Bool { !pill.isHidden }
+
     func start() {
         let dir = Channel.appSupport
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -75,6 +77,7 @@ final class UpdateController: NSObject {
         let width = max(pill.frame.width + 18, 72)
         pill.frame = NSRect(x: 0, y: 1, width: width, height: 20)
         box.frame = NSRect(x: 0, y: 0, width: width + 8, height: 22)
+        windowController?.root.titleReserve = pill.isHidden ? 0 : 28
     }
 
     @objc private func togglePopover() {

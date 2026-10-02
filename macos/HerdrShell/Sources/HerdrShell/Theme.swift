@@ -37,6 +37,13 @@ struct ChromePalette: Equatable {
     var wf: UInt32
     var ok: UInt32
     var warn: UInt32
+    var cap: UInt32
+    var hover: UInt32
+    var split: UInt32
+    var field: UInt32
+    var faint: UInt32
+    var accent: UInt32
+    var bad: UInt32
 
     static let textTokenNames = ["ink", "mute", "orch", "lane", "wf", "ok", "warn"]
     static let surfaceTokenNames = ["panel", "sel"]
@@ -45,13 +52,17 @@ struct ChromePalette: Equatable {
     static let dark = ChromePalette(
         windowBg: 0x0F1013, panel: 0x16171B, line: 0x26272D, sel: 0x1F2230,
         ink: 0xE6E6EA, mute: 0x8B8C94, orch: 0x5AA9FF, lane: 0xA3AAFF, wf: 0x5CC8C8,
-        ok: 0x4CD27A, warn: 0xF2B04C)
+        ok: 0x4CD27A, warn: 0xF2B04C,
+        cap: 0x181825, hover: 0x222232, split: 0x3B3D54, field: 0x24253A,
+        faint: 0x6C7086, accent: 0x89B4FA, bad: 0xF38BA8)
 
     /// Paper-toned counterpart: same hues, darkened until each text token clears 4.5:1.
     static let light = ChromePalette(
         windowBg: 0xE9EBEF, panel: 0xF3F4F6, line: 0xD5D8DE, sel: 0xE1E6F2,
         ink: 0x1F2328, mute: 0x565C66, orch: 0x0A5FC4, lane: 0x4A4FC7, wf: 0x0B6E74,
-        ok: 0x17692F, warn: 0x8A5300)
+        ok: 0x17692F, warn: 0x8A5300,
+        cap: 0xF1F1EE, hover: 0xF0F0ED, split: 0xD4D4CF, field: 0xF2F2EF,
+        faint: 0xA3A8AF, accent: 0x0969DA, bad: 0xCF222E)
 
     /// Text tokens for the sidebar when its glass token is on. Glass shows an arbitrary
     /// desktop through a `glassScrimAlpha` panel tint, so the panel behind the text can
@@ -60,9 +71,9 @@ struct ChromePalette: Equatable {
     /// extremes and on the opaque `sel` row fill. scripts/contrast.py checks them.
     var glassText: ChromePalette {
         var p = self
-        if self == ChromePalette.dark {
+        if panel == ChromePalette.dark.panel && ink == ChromePalette.dark.ink {
             p.mute = 0x9B9CA3
-        } else if self == ChromePalette.light {
+        } else if panel == ChromePalette.light.panel && ink == ChromePalette.light.ink {
             p.orch = 0x0959B8; p.lane = 0x484DC6; p.wf = 0x0A656B; p.warn = 0x855000
         }
         return p
@@ -84,8 +95,28 @@ struct ChromePalette: Equatable {
         case "wf": return wf
         case "ok": return ok
         case "warn": return warn
+        case "cap": return cap
+        case "hover": return hover
+        case "split": return split
+        case "field": return field
+        case "faint": return faint
+        case "accent": return accent
+        case "bad": return bad
         default: return nil
         }
+    }
+
+    /// sRGB mix: `a` toward `b` by `t`.
+    static func mix(_ a: UInt32, _ b: UInt32, _ t: Double) -> UInt32 {
+        func ch(_ v: UInt32, _ shift: UInt32) -> Double { Double((v >> shift) & 0xFF) }
+        func pack(_ r: Double, _ g: Double, _ b: Double) -> UInt32 {
+            func c(_ v: Double) -> UInt32 { UInt32(min(255, max(0, Int(v.rounded())))) }
+            return (c(r) << 16) | (c(g) << 8) | c(b)
+        }
+        let t = min(1, max(0, t))
+        return pack(ch(a, 16) * (1 - t) + ch(b, 16) * t,
+                    ch(a, 8) * (1 - t) + ch(b, 8) * t,
+                    ch(a, 0) * (1 - t) + ch(b, 0) * t)
     }
 }
 
@@ -115,9 +146,22 @@ struct Tokens {
     var wf: Color { Color(hex: chrome.wf) }
     var ok: Color { Color(hex: chrome.ok) }
     var warn: Color { Color(hex: chrome.warn) }
+    var cap: Color { Color(hex: chrome.cap) }
+    var hover: Color { Color(hex: chrome.hover) }
+    var split: Color { Color(hex: chrome.split) }
+    var field: Color { Color(hex: chrome.field) }
+    var faint: Color { Color(hex: chrome.faint) }
+    var accent: Color { Color(hex: chrome.accent) }
+    var bad: Color { Color(hex: chrome.bad) }
+    /// Ink at a few percent: toggle tracks and small tags.
+    var tint: Color { ink.opacity(mode == .dark ? 0.055 : 0.045) }
 
     var terminalBgNS: NSColor { NSColor(hex: terminalBg) }
-    var windowBgNS: NSColor { NSColor(hex: chrome.windowBg) }
+    var windowBgNS: NSColor { NSColor(hex: terminalBg) }
+    var splitNS: NSColor { NSColor(hex: chrome.split) }
+    var capNS: NSColor { NSColor(hex: chrome.cap) }
+    var accentNS: NSColor { NSColor(hex: chrome.accent) }
+    var inkNS: NSColor { NSColor(hex: chrome.ink) }
 }
 
 extension Color {
@@ -276,7 +320,32 @@ final class ThemeStore: ObservableObject {
 
     static func tokens(for mode: Mode, terminal: TerminalTheme) -> Tokens {
         let c = terminal.colors(mode)
-        return Tokens(mode: mode, chrome: mode == .dark ? .dark : .light, terminalBg: c.bg, terminalFg: c.fg)
+        var chrome: ChromePalette = mode == .dark ? .dark : .light
+        let name = mode == .dark ? terminal.dark : terminal.light
+        let stock = (mode == .dark && (name == "Catppuccin Mocha" || c.bg == 0x1E1E2E))
+            || (mode == .light && (name == "SF Paper" || name == "Catppuccin Latte" || c.bg == 0xFFFFFF || c.bg == TerminalTheme.fallbackLight.bg))
+        if !stock {
+            chrome = derived(bg: c.bg, fg: c.fg, mode: mode, base: chrome)
+        }
+        chrome.windowBg = c.bg
+        chrome.split = ChromePalette.mix(c.bg, c.fg, 0.16)
+        if mode == .light { chrome.cap = ChromePalette.mix(c.bg, c.fg, 0.06) }
+        return Tokens(mode: mode, chrome: chrome, terminalBg: c.bg, terminalFg: c.fg)
+    }
+
+    /// Chrome for a Ghostty theme that is not the stock pair. Text colors stay on `base`
+    /// so the contrast gate keeps its pairs; the surfaces that sit on the terminal move with it.
+    private static func derived(bg: UInt32, fg: UInt32, mode: Mode, base: ChromePalette) -> ChromePalette {
+        var p = base
+        p.windowBg = bg
+        p.panel = mode == .dark ? ChromePalette.mix(bg, 0x000000, 0.20) : ChromePalette.mix(bg, fg, 0.035)
+        p.cap = mode == .dark ? p.panel : ChromePalette.mix(bg, fg, 0.06)
+        p.hover = ChromePalette.mix(p.panel, fg, 0.04)
+        p.sel = ChromePalette.mix(p.panel, fg, 0.09)
+        p.line = ChromePalette.mix(bg, fg, 0.08)
+        p.split = ChromePalette.mix(bg, fg, 0.16)
+        p.field = ChromePalette.mix(bg, fg, 0.04)
+        return p
     }
 
     var nsAppearance: NSAppearance? {

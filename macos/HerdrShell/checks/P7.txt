@@ -1,54 +1,54 @@
-HerdrShell P7 check  2026-10-02T14:31:49Z
-host load average: 69 on 16 cores
+HerdrShell P7 check  2026-10-02T16:37:40Z
+host load average: 20 on 16 cores
 swift build: ok
-lab session shellspike-p7; panes w1:p2 (terminal term_65cdc64a5f41f2), w1:p3 (terminal term_65cdc64a620c63)
-{"pids": [48913], "fifo_ready_s": 0.42}
-app (own build) pid [48913]
+lab session shellspike-p7; panes w1:p2 (terminal term_65cde27ff0b6e2), w1:p3 (terminal term_65cde27ff32e33)
+{"pids": [46973], "fifo_ready_s": 0.72}
+app (own build) pid [46973]
 [PASS] both panes attached and showing a prompt
 
 == 1. kill of one attach process
 [PASS] typed marker reached pane 1
 [PASS] pane 1 has keyboard focus before the kill -- focused=w1:p2
-[PASS] one attach process per pane -- p1=[49284] p2=[49285]
-[PASS] pane 1 is back with its screen (marker visible in the new surface) within 1 s of the kill -- 0.472s
-   app-side: respawns=1 exit seen -> first screen 0.000s state=running
+[PASS] one attach process per pane -- p1=[47223] p2=[47224]
+[PASS] pane 1 is back with its screen (marker visible in the new surface) within 1 s of the kill -- 0.484s
+   app-side: respawns=1 exit seen -> first screen 0.471s state=running
 [PASS] app counted one respawn, state running
 [PASS] keyboard focus stayed on pane 1 -- focused=w1:p2
-[PASS] a new attach process serves pane 1; pane 2's attach is the same process -- p1 [49284]->[49659], p2 [49285]->[49285]
-[PASS] typing reaches pane 1 after the respawn -- 0.035s
+[PASS] a new attach process serves pane 1; pane 2's attach is the same process -- p1 [47223]->[47470], p2 [47224]->[47224]
+[PASS] typing reaches pane 1 after the respawn -- 0.034s
 
 == 1b. kill while the pane displays the words a takeover uses
 [PASS] pane 1 displays 'taken over' as ordinary output
 [PASS] killed attach with 'taken over' on screen is respawned, not marked held -- state=running respawns=2 (was 1)
-[PASS] a new attach process serves pane 1 -- [49659]->[50267]
-[PASS] typing reaches pane 1 after the poisoned-viewport respawn -- 0.047s
+[PASS] a new attach process serves pane 1 -- [47470]->[47755]
+[PASS] typing reaches pane 1 after the poisoned-viewport respawn -- 0.034s
 
 == 2. --takeover from a CLI client
 [PASS] app shows pane 1 as held after the CLI takeover
-   notice: Held by another herdr client (pid 50568: herdr terminal attach --takeover). Typing is paused here.
-   holder: another herdr client (pid 50568: herdr terminal attach --takeover)
-[PASS] notice names the holding client (pid of the CLI attach) -- cli pid 50568
+   notice: Held by another herdr client (pid 47868: herdr terminal attach --takeover). Typing is paused here.
+   holder: another herdr client (pid 47868: herdr terminal attach --takeover)
+[PASS] notice names the holding client (pid of the CLI attach) -- cli pid 47868
 [PASS] keyboard focus is not on the ended surface
 [PASS] typing in the app does not reach the held pane --  echo |  P7-poison-done | herdr: terminal attach taken over | terminal already has an attached client | P7-poison-done | tmp % echo P7-after-poison | P7-after-poison | tmp % | 
-[PASS] the CLI holder can type into the pane (the app did not steal it back) -- 0.036s
+[PASS] the CLI holder can type into the pane (the app did not steal it back) -- 0.035s
 [PASS] CLI holder still attached while the app is held
-[PASS] Take back re-attaches the pane with its screen -- 0.17s
+[PASS] Take back re-attaches the pane with its screen -- 0.12s
 [PASS] the CLI client was shut down by the takeback
 [PASS] notice is gone after taking back
 [PASS] keyboard focus is on pane 1 again -- focused=w1:p2
 [PASS] typing reaches pane 1 after taking back -- 0.036s
 
 == 3. hidden-tab policy (measured)
-policy=keep : hidden_policy=keep attach processes=6 (panes in snapshot 6) app rss=153 MB
+policy=keep : hidden_policy=keep attach processes=6 (panes in snapshot 6) app rss=157 MB
 [PASS] keep: panes of tabs not on screen stay attached -- 6 of 6
 [PASS] keep: the hidden pane 1 attach process is still alive
-policy=detach: attach processes=1 app rss=128 MB (released in 0.2s)
+policy=detach: attach processes=1 app rss=132 MB (released in 0.2s)
 [PASS] detach: only the visible tab's pane keeps an attach -- 1 attach processes
 [PASS] detach: hidden pane 1 has no attach process
-[PASS] detach: showing the tab again reattaches both panes with their screens -- 0.12s
+[PASS] detach: showing the tab again reattaches both panes with their screens -- 0.18s
 [PASS] detach: typing reaches the pane after the reattach
-[PASS] detach: flipping away and straight back reattaches both panes (never shown as held) -- 1.21s; respawns p1=0
-measured: keep = 6 attach clients, 153 MB; detach = 1 attach clients, 128 MB (this lab: 6 panes, one tab on screen). Default stays keep.
+[PASS] detach: flipping away and straight back reattaches both panes (never shown as held) -- 1.25s; respawns p1=0
+measured: keep = 6 attach clients, 157 MB; detach = 1 attach clients, 132 MB (this lab: 6 panes, one tab on screen). Default stays keep.
 [PASS] frontmost app unchanged -- Aside
 [PASS] no attach clients left after the app quits -- left=[]
 lab down: stop: 0

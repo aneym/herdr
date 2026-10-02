@@ -203,6 +203,8 @@ extension MainWindowController {
         case "close_detail":
             if docPanel.hasFocus { docPanel.returnFocus(); break }
             closeDetail()
+        case "open_factory":
+            toggleFactory()
         default:
             if action.hasPrefix("goto_tab_"), let n = Int(action.dropFirst("goto_tab_".count)) {
                 let rows = model.allRowsInOrder

@@ -12,6 +12,7 @@ Asserts come from the JSON dump the app writes on each refresh.
 """
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -242,7 +243,9 @@ def copy_shot(dump_path, dest):
 
 def sensitive(blob):
     text = json.dumps(blob)
-    return "@" in text or "sk-" in text or "ghp_" in text or "gho_" in text
+    if "@" in text or "sk-" in text or "ghp_" in text or "gho_" in text:
+        return True
+    return re.search(r'(?i)\b(?:acct|account)[_-][A-Za-z0-9]{4,}\b', text) is not None
 
 
 def main():
@@ -333,6 +336,8 @@ def main():
               and flights[0].get("lane") == "native" and str(flights[0].get("age", "")).endswith("m"),
               str(flight_names))
         check("dump stores no emails or tokens", not sensitive(got))
+        check("no-identities check catches bare account ids",
+              sensitive({"note": "acct_9f3ab2c1"}) and sensitive({"note": "account_9f3ab2"}) and not sensitive(got))
 
         light_png = os.path.join(CHECKS, "P18-light.png")
         check("light screenshot", copy_shot(dump, light_png), light_png)

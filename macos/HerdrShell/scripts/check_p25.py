@@ -164,15 +164,26 @@ def main():
     check("restart_swap_s", isinstance(swap_s, (int, float)) and 0 <= swap_s < 2, f"{swap_s}s")
 
     hits = []
-    for rel in ("Sources/HerdrShell/UpdateRestart.swift", "Sources/HerdrShell/UpdatePill.swift"):
-        with open(os.path.join(D0, rel)) as handle:
-            for number, line in enumerate(handle, 1):
-                folded = line.lower()
-                for token in ("herdr", ".sock", "pkill", "kill(", "killall"):
-                    hay = folded if token in ("pkill", "killall") else line
-                    if token in hay:
-                        hits.append(f"{os.path.basename(rel)}:{number}:{token}")
-    check("update path", not hits, " ".join(hits) if hits else "no herdr socket or kill")
+    src_root = os.path.join(D0, "Sources")
+    for dirpath, _, files in os.walk(src_root):
+        for name in files:
+            if not name.endswith(".swift"):
+                continue
+            path = os.path.join(dirpath, name)
+            update_file = "update" in name.lower()
+            with open(path) as handle:
+                for number, line in enumerate(handle, 1):
+                    folded = line.lower()
+                    rel = os.path.relpath(path, src_root)
+                    if "pkill" in folded or "killall" in folded:
+                        hits.append(f"{rel}:{number}:kill")
+                    if not update_file:
+                        continue
+                    if "kill(" in folded or ".sock" in folded:
+                        hits.append(f"{rel}:{number}:update-path")
+                    if "herdr" in folded and "herdr shell.app" not in folded:
+                        hits.append(f"{rel}:{number}:herdr")
+    check("update path", not hits, " ".join(hits) if hits else "case-insensitive scan of Sources")
 
     argv = load_json(os.path.join(update_root, "open-argv.json"))
     expected = ""

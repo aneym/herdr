@@ -70,10 +70,17 @@ final class DividerHandleView: NSView {
     var onDrag: ((PaneDivider, Phase, CGFloat) -> Void)?
     private var startPoint: NSPoint = .zero
     private(set) var dragging = false
+    var lineColor = NSColor.separatorColor
+    var hoverColor = NSColor.labelColor.withAlphaComponent(0.26)
+    var dragColor = NSColor.controlAccentColor.withAlphaComponent(0.75)
+    private var hovering = false
+    private var hoverItem: DispatchWorkItem?
 
     init(divider: PaneDivider) {
         self.divider = divider
         super.init(frame: .zero)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -82,8 +89,44 @@ final class DividerHandleView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override var acceptsFirstResponder: Bool { false }
 
+    override var isOpaque: Bool { false }
+
     override func resetCursorRects() {
         addCursorRect(bounds, cursor: divider.vertical ? .resizeLeftRight : .resizeUpDown)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach { removeTrackingArea($0) }
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        hoverItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.dragging else { return }
+            self.hovering = true
+            self.needsDisplay = true
+        }
+        hoverItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hoverItem?.cancel()
+        hovering = false
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let thick: CGFloat = (dragging || hovering) ? 3 : 1
+        let color = dragging ? dragColor : (hovering ? hoverColor : lineColor)
+        color.setFill()
+        if divider.vertical {
+            NSRect(x: bounds.midX - thick / 2, y: 0, width: thick, height: bounds.height).fill()
+        } else {
+            NSRect(x: 0, y: bounds.midY - thick / 2, width: bounds.width, height: thick).fill()
+        }
     }
 
     private func hostPoint(_ e: NSEvent) -> NSPoint { (superview ?? self).convert(e.locationInWindow, from: nil) }
@@ -93,6 +136,8 @@ final class DividerHandleView: NSView {
     override func mouseDown(with event: NSEvent) {
         startPoint = hostPoint(event)
         dragging = true
+        hovering = false
+        needsDisplay = true
         onDrag?(divider, .began, 0)
     }
 
@@ -104,6 +149,7 @@ final class DividerHandleView: NSView {
     override func mouseUp(with event: NSEvent) {
         guard dragging else { return }
         dragging = false
+        needsDisplay = true
         onDrag?(divider, .ended, along(hostPoint(event)))
     }
 }

@@ -9,11 +9,15 @@ struct ChatCLI {
         let env = ProcessInfo.processInfo.environment
         p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         p.arguments = [env["HERDR_BIN"] ?? "herdr"] + args
-        p.standardOutput = output; p.standardError = FileHandle.nullDevice
+        let err = Pipe()
+        p.standardOutput = output; p.standardError = err
         try p.run()
         let data = output.fileHandleForReading.readDataToEndOfFile()
+        let errText = String(decoding: err.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         p.waitUntilExit()
-        guard p.terminationStatus == 0 else { throw NSError(domain: "ChatCLI", code: Int(p.terminationStatus)) }
+        guard p.terminationStatus == 0 else {
+            throw NSError(domain: "ChatCLI", code: Int(p.terminationStatus), userInfo: [NSLocalizedDescriptionKey: errText])
+        }
         return String(decoding: data, as: UTF8.self)
     }
     static func agent(_ pane: String) throws -> [String: Any] {
@@ -126,11 +130,14 @@ final class ChatSender: ObservableObject {
             let points = Array(text.unicodeScalars)
             for start in stride(from: 0, to: points.count, by: 300) {
                 let chunk = String(String.UnicodeScalarView(points[start..<min(start + 300, points.count)]))
-                _ = try ChatCLI.run(["pane", "send-text", "--human", pane, chunk])
+                _ = try ChatCLI.run(["pane", "send-text", pane, chunk])
             }
-            _ = try ChatCLI.run(["pane", "send-text", "--human", pane, "\r"])
+            _ = try ChatCLI.run(["pane", "send-text", pane, "\r"])
             held.removeFirst()
-        } catch { held.removeFirst(); update("Send failed; delivery is uncertain") }
+        } catch {
+            log("chat send failed: \(error)")
+            held.removeFirst(); update("Send failed; delivery is uncertain")
+        }
     }
     func acknowledge(_ items: [ChatItem]) {
         guard !pending.isEmpty, !warning else { return }

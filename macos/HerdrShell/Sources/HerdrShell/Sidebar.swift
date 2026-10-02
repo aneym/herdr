@@ -28,6 +28,8 @@ final class SidebarState: ObservableObject {
     @Published var focusCursor: Int?
     @Published var docOpen: Bool
     @Published var docWidth: CGFloat
+    /// Factory view fills the pane host while this is true.
+    @Published var factoryOpen = false
     /// Set by the test hook for the duration of a synthetic option-click. A real option
     /// click is read from the current event.
     var clickOption = false
@@ -150,6 +152,7 @@ struct SidebarView: View {
     /// nil means every row selects its tab.
     var openDetail: ((TabRow) -> Void)? = nil
     var select: (String) -> Void
+    var onFactory: () -> Void = {}
 
     /// Tokens for the effective mode; the view re-renders when the store changes.
     private var t: Tokens { theme.sidebarTokens }
@@ -163,12 +166,9 @@ struct SidebarView: View {
             } else {
                 ScrollView { rows }
             }
-            Divider().overlay(t.line)
-            detail
-            Divider().overlay(t.line)
-            hostsRow
+            factoryFooter
         }
-        .font(.system(size: 12.5, design: state.mode == .areas ? .default : .monospaced))
+        .font(.system(size: 12.5))
         .foregroundStyle(t.ink)
         // Glass on the sidebar puts a panel-colored scrim over the blur layer under the
         // view, so text keeps its contrast whatever the desktop behind is.
@@ -198,28 +198,32 @@ struct SidebarView: View {
     }
 
     private var chrome: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 4) {
+                Spacer(minLength: 0)
                 modeButton("Areas", .areas)
                 modeButton("Spaces", .spaces)
-                Spacer(minLength: 0)
             }
+            .padding(.leading, 52)
+            .frame(height: 36)
             if state.mode == .areas {
                 chipRow
                 if let id = state.areaOnly {
-                    Text("only: \(model.catalog.snapshot.areaName(id)) ✕")
-                        .font(.system(size: 11))
-                        .foregroundStyle(t.ink)
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(RoundedRectangle(cornerRadius: 5).fill(t.sel))
-                        .onTapGesture { state.setAreaOnly(nil) }
-                        .hookAction("only") { state.setAreaOnly(nil) }
-                        .clickTarget("only")
+                    HStack(spacing: 4) {
+                        Text("Only").foregroundStyle(t.mute)
+                        Text(model.catalog.snapshot.areaName(id)).foregroundStyle(t.ink)
+                        Text("✕").foregroundStyle(t.mute)
+                    }
+                    .font(.system(size: 11.5))
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .contentShape(Rectangle())
+                    .onTapGesture { state.setAreaOnly(nil) }
+                    .hookAction("only") { state.setAreaOnly(nil) }
+                    .clickTarget("only")
                 }
             }
         }
         .padding(.horizontal, 8)
-        .padding(.top, 8)
     }
 
     private func modeButton(_ title: String, _ mode: SidebarMode) -> some View {
@@ -235,32 +239,57 @@ struct SidebarView: View {
 
     private var chipRow: some View {
         let chips: [(AreaChip, String)] = [
-            (.all, "All"), (.needs, "Needs you"), (.scoping, "Scoping"),
-            (.building, "Building"), (.review, "Review"), (.use, "Use"),
+            (.all, "All"), (.scoping, "Scope"), (.building, "Build"), (.review, "Review"), (.use, "Use"),
         ]
-        return LazyVGrid(columns: [GridItem(.adaptive(minimum: 78), spacing: 4)], alignment: .leading, spacing: 4) {
+        return HStack(spacing: 8) {
             ForEach(chips, id: \.0.rawValue) { chip, title in
                 Text(title)
-                    .font(.system(size: 11, weight: state.chip == chip ? .semibold : .regular))
+                    .font(.system(size: 12, weight: state.chip == chip ? .medium : .regular))
                     .foregroundStyle(state.chip == chip ? t.ink : t.mute)
-                    .padding(.horizontal, 7).padding(.vertical, 3)
-                    .frame(maxWidth: .infinity)
-                    .background(RoundedRectangle(cornerRadius: 5).fill(state.chip == chip ? t.sel : t.ink.opacity(0.06)))
+                    .padding(.horizontal, 4).padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(state.chip == chip ? t.sel : Color.clear))
                     .contentShape(Rectangle())
                     .onTapGesture { state.setChip(chip) }
                     .hookAction("chip:\(chip.rawValue)") { state.setChip(chip) }
                     .clickTarget("chip:\(chip.rawValue)")
             }
+            Spacer(minLength: 0)
         }
     }
 
     @ViewBuilder private func lineView(_ l: SidebarLine) -> some View {
         switch l.kind {
-        case .header: header(l)
+        case .header:
+            if state.mode == .areas { Color.clear.frame(height: 6) } else { header(l) }
         case .note: note(l)
         case .area: areaHeader(l)
+        case .focus: focusHeader(l)
         default: rowView(l)
         }
+    }
+
+    private func focusHeader(_ l: SidebarLine) -> some View {
+        HStack(spacing: 6) {
+            StateGlyph(state: .needs, tokens: t)
+            Text("Focus").font(.system(size: 12, weight: .semibold)).foregroundStyle(t.ink)
+            Text(l.trailing).font(.system(size: 11, weight: .semibold)).foregroundStyle(t.warn)
+            Spacer(minLength: 4)
+            if let open = l.chevron {
+                Text(open ? "▾" : "▸").foregroundStyle(t.faint)
+            }
+        }
+        .padding(.horizontal, 6)
+        .frame(height: 28)
+        .background(RoundedRectangle(cornerRadius: 6).fill(state.chip == .needs ? t.sel : Color.clear))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            state.setChip(.needs)
+            click(l)
+        }
+        .hookAction("focus") { click(l) }
+        .hookAction("chip:needs") { state.setChip(.needs) }
+        .clickTarget("focus")
+        .clickTarget("chip:needs")
     }
 
     private func areaHeader(_ l: SidebarLine) -> some View {
@@ -321,12 +350,10 @@ struct SidebarView: View {
             }
             Text(l.title).foregroundStyle(titleColor(l)).lineLimit(1)
             Spacer(minLength: 4)
-            if !l.badge.isEmpty {
-                Text(l.badge)
-                    .font(.system(size: 10))
-                    .foregroundStyle(t.mute)
-                    .padding(.horizontal, 5).padding(.vertical, 1)
-                    .background(RoundedRectangle(cornerRadius: 4).fill(t.ink.opacity(0.08)))
+            if !l.badge.isEmpty, state.chip == .all || !stageImplied(l) {
+                Text(stageWord(l.badge))
+                    .font(.system(size: 11))
+                    .foregroundStyle(l.badge == "Review" || l.stage == "reviewing" ? t.ink : t.mute)
             }
             if !l.trailing.isEmpty { Text(l.trailing).foregroundStyle(tone(l.trailingTone)) }
             if let host = l.host {
@@ -341,8 +368,7 @@ struct SidebarView: View {
         .padding(.leading, CGFloat(6 + l.depth * 16))
         .padding(.trailing, 6)
         .padding(.vertical, 4)
-        .background(RoundedRectangle(cornerRadius: 5).fill(l.selected ? t.sel : .clear))
-        .overlay(RoundedRectangle(cornerRadius: 5).stroke(l.tab != nil && state.detailRow == l.tab ? t.mute : .clear, lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 6).fill(l.selected ? t.sel : .clear))
         .contentShape(Rectangle())
         .onTapGesture { click(l) }
         .hookAction(l.kind == .focus ? "focus" : "row:\(l.title)") { click(l) }
@@ -350,7 +376,7 @@ struct SidebarView: View {
     }
 
     private func titleColor(_ l: SidebarLine) -> Color {
-        l.titleKind.map(kindColor) ?? t.ink
+        l.dim || l.stage == "closed" ? t.faint : t.ink
     }
 
     private func glyphColor(_ l: SidebarLine) -> Color {
@@ -386,31 +412,51 @@ struct SidebarView: View {
         }
     }
 
-    private var detail: some View {
-        let row = model.allRowsInOrder.first { $0.id == state.selectedTab }
-        let panes = model.snapshot?.panes.filter { $0.tab_id == state.selectedTab } ?? []
-        return VStack(alignment: .leading, spacing: 3) {
-            Text("DETAIL").font(.system(size: 10.5, weight: .semibold)).tracking(0.8).foregroundStyle(t.mute)
-            if let row {
-                Text(row.label).foregroundStyle(kindColor(row.kind))
-                Text("\(row.kind.rawValue) · \(row.agent ?? "shell") · \(row.status) · \(row.host)").foregroundStyle(t.mute)
-                ForEach(panes, id: \.pane_id) { p in
-                    Text("\(p.pane_id == state.focusedPane ? "›" : " ") \(p.pane_id)  \(p.terminal_id)")
-                        .foregroundStyle(p.pane_id == state.focusedPane ? t.ink : t.mute)
-                }
-            } else {
-                Text("no tab selected").foregroundStyle(t.mute)
-            }
+    private func stageImplied(_ l: SidebarLine) -> Bool {
+        switch state.chip {
+        case .scoping: return l.stage == "scoping"
+        case .building: return l.stage == "implementing" || l.role == "desk" || l.role == "job"
+        case .review: return l.stage == "reviewing"
+        case .use: return l.role == "desk" || l.role == "job"
+        default: return false
         }
-        .font(.system(size: 11, design: .monospaced))
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var hostsRow: some View {
-        HostsRow(hosts: model.hostsModel, tokens: t,
-                 status: model.lastError == nil ? String(format: "%.0f ms", model.pollMs) : "offline",
-                 statusIsError: model.lastError != nil)
+    private func stageWord(_ badge: String) -> String {
+        switch badge {
+        case "Scoping": return "Scope"
+        case "Building": return "Build"
+        case "Ready for review": return "Review"
+        case "Monitoring": return "Live"
+        case "In use": return "desk"
+        default: return badge
+        }
+    }
+
+    private var factoryFooter: some View {
+        HStack(spacing: 8) {
+            Text("Factory")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(t.ink)
+            Spacer(minLength: 4)
+            ForEach(model.hostsModel.rows.prefix(4)) { h in
+                Text(h.host)
+                    .font(.system(size: 11))
+                    .foregroundStyle(t.mute)
+                    .lineLimit(1)
+            }
+            if Channel.kind == .dev {
+                Text("DEV").font(.system(size: 9, weight: .semibold)).foregroundStyle(t.warn)
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 36)
+        .frame(maxWidth: .infinity)
+        .background(state.factoryOpen ? t.sel : Color.clear)
+        .contentShape(Rectangle())
+        .onTapGesture { onFactory() }
+        .hookAction("factory") { onFactory() }
+        .clickTarget("factory")
     }
 
     private func toggle(_ id: String, currentlyOpen: Bool) {
@@ -422,9 +468,6 @@ struct SidebarView: View {
         state.manualOpen[id] = !currentlyOpen
     }
 
-    private func kindColor(_ k: TabRow.Kind) -> Color {
-        switch k { case .orchestrator: return t.orch; case .lane: return t.lane; case .workflow: return t.wf }
-    }
 }
 
 extension Color {

@@ -1,0 +1,19 @@
+HerdrShell P22 check  2026-10-02T16:33:16Z
+split panes: w1:p2 w1:p3
+app start: {"pids": [85684], "fifo_ready_s": 0.96}
+[PASS] agent pane and blank pane both have caps
+[PASS] blank terminal has no toggle -- {'agent': False, 'chat': False, 'density': 'focus', 'focused': False, 'frame': [570, 0, 569, 36], 'id': 'w1:p3', 'name': 'Brief'}
+[PASS] agent pane is named from herdr and starts as a terminal
+[PASS] pane A is chat while pane B stays a terminal
+[PASS] light and dark screenshots of the split with chat -- /Volumes/StudioExt/repos/herdr-worktrees/native-shell-areas/macos/HerdrShell/checks/P22-light.png /Volumes/StudioExt/repos/herdr-worktrees/native-shell-areas/macos/HerdrShell/checks/P22-dark.png
+relaunch: {"pids": [86998], "fifo_ready_s": 0.37}
+[PASS] chat mode persists across relaunch and the blank pane still has no toggle -- {'w1:p2': {'agent': True, 'chat': True, 'density': 'focus', 'focused': True, 'frame': [0, 0, 550, 36], 'id': 'w1:p2', 'name': 'claude'}, 'w1:p3': {'agent': False, 'chat': False, 'density': 'focus', 'focused': False, 'frame': [550, 0, 549, 36], 'id': 'w1:p3', 'name': 'Brief'}}
+[PASS] Factory row opens the Factory view and a machine row shows fresh usage -- [{'name': 'studio', 'usage': '1.25/core  40%  16000/64000 MB  2/8', 'usage_state': 'ok'}, {'name': 'pc-wsl', 'usage': '', 'usage_state': ''}, {'name': 'ax42', 'usage': '', 'usage_state': ''}, {'name': 'forge-1', 'usage': '', 'usage_state': ''}, {'name': 'forge-2', 'usage': '', 'usage_state': ''}, {'name': 'forge-3', 'usage': '', 'usage_state': ''}, {'name': 'forge-4', 'usage': '', 'usage_state': ''}, {'name': 'forge-lanes', 'usage': '', 'usage_state': ''}, {'name': 'stale', 'usage': '', 'usage_state': ''}]
+[PASS] usage older than 30s is hidden -- {'name': 'stale', 'usage': '', 'usage_state': ''}
+[PASS] light and dark screenshots of the Factory view and sidebar -- /Volumes/StudioExt/repos/herdr-worktrees/native-shell-areas/macos/HerdrShell/checks/P22-factory-light.png /Volumes/StudioExt/repos/herdr-worktrees/native-shell-areas/macos/HerdrShell/checks/P22-factory-dark.png
+[PASS] update pill shows when staged.json has a different commit -- running=''
+[PASS] update pill is absent when the staged commit matches -- running=''
+[PASS] frontmost app unchanged -- Aside
+lab down: stop: 0
+
+RESULT: PASS

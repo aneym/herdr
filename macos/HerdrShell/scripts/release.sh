@@ -67,8 +67,20 @@ nice -n 10 swift build -c release --package-path "$WT/macos/HerdrShell"
 "$WT/macos/HerdrShell/scripts/bundle.sh" prod "$WT/macos/HerdrShell/.build/bundle-prod"
 STAGE="$HOME/Library/Application Support/HerdrShell/staged"
 mkdir -p "$STAGE"
-rm -rf "$STAGE/Herdr Shell.app"
-mv "$WT/macos/HerdrShell/.build/bundle-prod/Herdr Shell.app" "$STAGE/Herdr Shell.app"
+INCOMING="$STAGE/Herdr Shell.app.incoming"
+rm -rf "$INCOMING"
+ditto "$WT/macos/HerdrShell/.build/bundle-prod/Herdr Shell.app" "$INCOMING"
+if [[ ! -x "$INCOMING/Contents/MacOS/HerdrShell" ]]; then
+  echo "staged incoming failed verification" >&2
+  exit 1
+fi
+PREV="$STAGE/Herdr Shell.app.previous"
+rm -rf "$PREV"
+if [[ -d "$STAGE/Herdr Shell.app" ]]; then
+  mv "$STAGE/Herdr Shell.app" "$PREV"
+fi
+mv "$INCOMING" "$STAGE/Herdr Shell.app"
+rm -rf "$PREV"
 python3 - "$STAGE" "$REF" "$HOME/Applications/Herdr Shell.app" "$WT" <<'PY'
 import json, os, subprocess, sys
 stage, ref, installed, repo = sys.argv[1:]
@@ -106,8 +118,20 @@ PY
 DEST="$HOME/Applications/Herdr Shell.app"
 if [[ ! -d "$DEST" || "$INSTALL" == 1 ]]; then
   mkdir -p "$HOME/Applications"
-  rm -rf "$DEST"
-  mv "$STAGE/Herdr Shell.app" "$DEST"
+  INCOMING="$HOME/Applications/Herdr Shell.app.incoming"
+  rm -rf "$INCOMING"
+  ditto "$STAGE/Herdr Shell.app" "$INCOMING"
+  if [[ ! -x "$INCOMING/Contents/MacOS/HerdrShell" ]]; then
+    echo "install incoming failed verification" >&2
+    exit 1
+  fi
+  PREV="$HOME/Applications/Herdr Shell.app.previous"
+  rm -rf "$PREV"
+  if [[ -d "$DEST" ]]; then
+    mv "$DEST" "$PREV"
+  fi
+  mv "$INCOMING" "$DEST"
+  rm -rf "$PREV"
 fi
 echo "staged $STAGE"
 if [[ -d "$DEST" ]]; then

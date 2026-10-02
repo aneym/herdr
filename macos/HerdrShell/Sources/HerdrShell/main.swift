@@ -159,7 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             hook = TestHook(path: fifo, controller: controller)
             hook?.start()
         }
-        if Channel.kind == .prod { controller.updates?.start() }
+        controller.updates?.start()
         log(String(format: "launched in %.0f ms (window %d)", Date().timeIntervalSince(t0) * 1000, controller.window.windowNumber))
     }
 

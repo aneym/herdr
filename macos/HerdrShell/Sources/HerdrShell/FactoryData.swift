@@ -48,6 +48,7 @@ enum FactoryText {
         let patterns = [
             #"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"#,
             #"\b(?:sk-|ghp_|gho_|github_pat_|xox[baprs]-|AKIA)[A-Za-z0-9_\-]{8,}"#,
+            #"(?i)\b(?:acct|account)[_-][A-Za-z0-9]{4,}\b"#,
         ]
         for p in patterns {
             guard let re = try? NSRegularExpression(pattern: p) else { continue }
@@ -106,7 +107,32 @@ struct MachineRow: Equatable, Identifiable {
     var state: String
     var attention: String
     var dimmed: Bool
+    var usageState: String = ""
+    var usageLine: String = ""
     var id: String { name }
+}
+
+struct HostUsage: Equatable {
+    var state: String
+    var loadPerCore: Double?
+    var cpuPct: Int?
+    var memUsed: Int?
+    var memTotal: Int?
+    var slotsUsed: Int?
+    var slotsTotal: Int?
+    var age: Int?
+
+    var visible: Bool { if let age { return age <= 30 }; return false }
+
+    var line: String {
+        guard visible else { return "" }
+        var parts: [String] = []
+        if let loadPerCore { parts.append(String(format: "%.2f/core", locale: Locale(identifier: "en_US_POSIX"), loadPerCore)) }
+        if let cpuPct { parts.append("\(cpuPct)%") }
+        if let memUsed, let memTotal { parts.append("\(memUsed)/\(memTotal) MB") }
+        if let slotsUsed, let slotsTotal { parts.append("\(slotsUsed)/\(slotsTotal)") }
+        return parts.joined(separator: "  ")
+    }
 }
 
 struct PoolRow: Equatable, Identifiable {
@@ -195,6 +221,7 @@ private struct HostInfo {
     var name: String
     var summary: String
     var attention: String
+    var usage: HostUsage?
 }
 
 private struct BoxInfo {
@@ -337,9 +364,23 @@ private enum FactoryRead {
             hosts[name.lowercased()] = HostInfo(
                 name: name,
                 summary: FactoryText.scrub(JSONBox.str(d["summary"]) ?? ""),
-                attention: attention == "warn" || attention == "act" ? attention : "")
+                attention: attention == "warn" || attention == "act" ? attention : "",
+                usage: Self.usage(JSONBox.obj(d["usage"])))
         }
         return (JSONBox.date(overlay?["generated_at"]), hosts)
+    }
+
+    static func usage(_ d: [String: Any]?) -> HostUsage? {
+        guard let d else { return nil }
+        return HostUsage(
+            state: JSONBox.str(d["state"]) ?? "",
+            loadPerCore: JSONBox.num(d["load_per_core"]),
+            cpuPct: JSONBox.int(d["cpu_pct"]),
+            memUsed: JSONBox.int(d["mem_used_mb"]),
+            memTotal: JSONBox.int(d["mem_total_mb"]),
+            slotsUsed: JSONBox.int(d["slots_used"]),
+            slotsTotal: JSONBox.int(d["slots_total"]),
+            age: JSONBox.int(d["age_s"]))
     }
 
     static func boxes(_ path: String) -> [String: BoxInfo] {
@@ -386,8 +427,9 @@ private enum FactoryRead {
 
     static func pools(_ data: Data) -> [PoolSrc]? {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        guard let list = JSONBox.list(root["pools"]), !list.isEmpty else { return nil }
         var out: [PoolSrc] = []
-        for item in JSONBox.list(root["pools"]) ?? [] {
+        for item in list {
             guard let d = JSONBox.obj(item), let id = JSONBox.str(d["id"]) else { continue }
             var refillAt: Date?
             var refillN: Int?
@@ -548,6 +590,7 @@ final class FactoryModel: ObservableObject {
         config.urlCache = nil
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.timeoutIntervalForRequest = 4
+        config.timeoutIntervalForResource = 4
         return URLSession(configuration: config)
     }()
     private var routingLoaded = false
@@ -599,11 +642,13 @@ final class FactoryModel: ObservableObject {
     }
 
     func openRoutingTable() {
-        NSWorkspace.shared.open(URL(fileURLWithPath: sources.routing))
+        shellOpen(URL(fileURLWithPath: sources.routing))
     }
 
     private func tick() {
+        let t0 = CFAbsoluteTimeGetCurrent()
         publish()
+        log(String(format: "factory tick %.2f ms", (CFAbsoluteTimeGetCurrent() - t0) * 1000))
         guard primed, !watching else { return }
         watching = true
         let src = sources
@@ -813,8 +858,9 @@ final class FactoryModel: ObservableObject {
 
     private static func pick(_ name: String) -> String {
         let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        proc.arguments = ["route", "pick", name]
+        let route = (TerminalTheme.realHome() as NSString).appendingPathComponent(".local/bin/route")
+        proc.executableURL = URL(fileURLWithPath: route)
+        proc.arguments = ["pick", name]
         let out = Pipe()
         let err = Pipe()
         proc.standardOutput = out
@@ -822,9 +868,17 @@ final class FactoryModel: ObservableObject {
         do { try proc.run() } catch { return "route pick failed" }
         let deadline = Date().addingTimeInterval(5)
         while proc.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
-        if proc.isRunning { proc.terminate() }
-        let stdout = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let stderr = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let finished = !proc.isRunning
+        if !finished { proc.terminate() }
+        let stdout: String
+        let stderr: String
+        if finished {
+            stdout = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            stderr = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        } else {
+            stdout = ""
+            stderr = ""
+        }
         let text = stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? stderr : stdout
         return FactoryText.scrub(text.trimmingCharacters(in: .whitespacesAndNewlines))
     }
@@ -889,9 +943,13 @@ final class FactoryModel: ObservableObject {
                     diskText = info.status
                 }
             }
+            let usage = host?.usage
+            let show = usage?.visible == true
             rows.append(MachineRow(
                 name: name, kind: box?.kind ?? "", summary: host?.summary ?? "", slots: slots, disk: diskText,
-                state: state, attention: host?.attention ?? "", dimmed: box?.enabled == false))
+                state: state, attention: host?.attention ?? "", dimmed: box?.enabled == false,
+                usageState: show ? (usage?.state ?? "") : "",
+                usageLine: usage?.line ?? ""))
         }
         rows.sort { machineLess($0.name, $1.name) }
         return rows

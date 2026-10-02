@@ -383,8 +383,15 @@ extension SidebarModel {
             focusLine.trailing = "\(c) of \(focus.count)"
         }
         out.append(focusLine)
+        let byId = Dictionary(items.flatMap { flatItems($0) }.map { ($0.row.id, $0) }, uniquingKeysWith: { a, _ in a })
+        if !focusExpanded, let id = focus.first, let i = byId[id] {
+            var line = itemLine(i, facts: facts[id] ?? Facts(), depth: 1, selected: id == selectedTab, idPrefix: "focus:")
+            line.chevron = nil
+            line.toggle = nil
+            line.trailing = "next · \(catalog.areaName(i.area))"
+            out.append(line)
+        }
         if focusExpanded {
-            let byId = Dictionary(items.flatMap { flatItems($0) }.map { ($0.row.id, $0) }, uniquingKeysWith: { a, _ in a })
             for id in focus {
                 guard let i = byId[id] else { continue }
                 var line = itemLine(i, facts: facts[id] ?? Facts(), depth: 1, selected: id == selectedTab, idPrefix: "focus:")

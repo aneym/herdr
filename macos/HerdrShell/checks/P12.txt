@@ -1,12 +1,12 @@
-HerdrShell P12 check  2026-10-02T14:30:54Z
+HerdrShell P12 check  2026-10-02T16:39:12Z
 expected tabs per host from herdr snapshot tokens: {"PC": 3, "Studio": 3, "forge-1": 2}
 [PASS] lab has host=PC and host=forge-1 tabs -- expected={'Studio': 3, 'PC': 3, 'forge-1': 2}
-app start (default provider): {"pids": [12062], "fifo_ready_s": 0.36}
+app start (default provider): {"pids": [69842], "fifo_ready_s": 0.39}
 hosts row (default): PC 3 tabs; Studio 3 tabs; forge-1 2 tabs
 [PASS] default provider is herdr-only -- provider=herdr-only
 [PASS] hosts row tab counts match host tokens (PC and forge-1) -- row={'PC': 3, 'Studio': 3, 'forge-1': 2} expected={'Studio': 3, 'PC': 3, 'forge-1': 2}
 [PASS] no slot or session numbers without a provider
-app start (stub provider /var/folders/58/j110bjyx10j199g9pmv7zzhc0000gn/T/p12-xman84ss/hosts.json): {"pids": [12949], "fifo_ready_s": 0.44}
+app start (stub provider /var/folders/58/j110bjyx10j199g9pmv7zzhc0000gn/T/p12-w1jhlnof/hosts.json): {"pids": [70169], "fifo_ready_s": 0.38}
 hosts row (stub): PC 3 tabs · slots 1/4 · 1 session; Studio 3 tabs; forge-1 2 tabs · slots 3/8 · 5 sessions; box-9 0 tabs · slots 0/6 · 0 sessions
 [PASS] stub provider active
 [PASS] stub slot numbers appear for forge-1 (3/8, 5 sessions) and PC (1/4, 1 session) -- forge-1='forge-1 2 tabs · slots 3/8 · 5 sessions' PC='PC 3 tabs · slots 1/4 · 1 session'

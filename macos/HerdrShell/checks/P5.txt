@@ -1,5 +1,5 @@
-HerdrShell P5 check  2026-10-02T14:30:05Z  lab=shellspike-p5
-host load average: 34 on 16 cores
+HerdrShell P5 check  2026-10-02T16:36:48Z  lab=shellspike-p5
+host load average: 20 on 16 cores
   contrast floor 4.5:1; terminal theme pair {'dark': 'Catppuccin Mocha', 'light': '/Users/aneyman/.config/ghostty/themes/SF Paper'}
   [PASS] dark  ink   #E6E6EA on panel #16171B  14.39:1
   [PASS] dark  ink   #E6E6EA on sel   #1F2230  12.69:1
@@ -78,14 +78,14 @@ host load average: 34 on 16 cores
   CONTRAST: PASS
 [PASS] contrast: every text token at 4.5:1 in light and dark
 lab up: {"id":"cli:workspace:list","result":{"type":"workspace_list","workspaces":[]}}
-app start --appearance light: {"pids": [73717], "fifo_ready_s": 0.35}
+app start --appearance light: {"pids": [23579], "fifo_ready_s": 0.34}
 --- --appearance light: effective=light system=light window_appearance=NSAppearanceNameAqua terminal theme pair={'dark': 'Catppuccin Mocha', 'light': '/Users/aneyman/.config/ghostty/themes/SF Paper'}
     sidebar pixel #F3F4F6 (token panel #F3F4F6); terminal pixel #FFFFFF (token terminalBg #FFFFFF)
 [PASS] light: override flag sets the effective mode
 [PASS] light: window uses the light native appearance -- NSAppearanceNameAqua
 [PASS] light: sidebar background matches the chrome token
 [PASS] light: terminal background matches the Ghostty theme pair
-app start --appearance dark: {"pids": [75444], "fifo_ready_s": 0.34}
+app start --appearance dark: {"pids": [24470], "fifo_ready_s": 0.37}
 --- --appearance dark: effective=dark system=light window_appearance=NSAppearanceNameDarkAqua terminal theme pair={'dark': 'Catppuccin Mocha', 'light': '/Users/aneyman/.config/ghostty/themes/SF Paper'}
     sidebar pixel #16171B (token panel #16171B); terminal pixel #1E1E2E (token terminalBg #1E1E2E)
 [PASS] dark: override flag sets the effective mode

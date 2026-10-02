@@ -6,6 +6,14 @@ import SwiftUI
 // SurfaceRegistry (retained surfaces and their attach lifecycle) lives in SurfaceRegistry.swift.
 
 /// Lays out one tab's panes using herdr's own split geometry (layouts[].panes[].rect).
+final class CapHostingView: NSHostingView<PaneCapBar> {
+    override var acceptsFirstResponder: Bool { false }
+}
+
+final class FactoryHostingView: NSHostingView<FactoryPage> {
+    override var acceptsFirstResponder: Bool { false }
+}
+
 final class PaneHostView: NSView {
     var rects: [(SurfaceView, Snapshot.Rect)] = []
     var area = Snapshot.Rect(x: 0, y: 0, width: 1, height: 1)
@@ -13,6 +21,12 @@ final class PaneHostView: NSView {
     private var handles: [String: DividerHandleView] = [:]
     var onDividerDrag: ((PaneDivider, DividerHandleView.Phase, CGFloat, CGFloat) -> Void)?
     var dividerHandles: [DividerHandleView] { handles.values.sorted { $0.divider.splitId < $1.divider.splitId } }
+    var caps: [String: PaneCapState] = [:]
+    var capAction: ((String, String) -> Void)?
+    var chatViews: [String: NSView] = [:]
+    var tokens = ThemeStore.tokens(for: .dark, terminal: TerminalTheme(dark: "", light: "", darkColors: TerminalTheme.fallbackDark, lightColors: TerminalTheme.fallbackLight))
+    private var capHosts: [String: NSHostingView<PaneCapBar>] = [:]
+    var capFrames: [String: NSRect] { capHosts.mapValues { $0.frame } }
 
     override var isFlipped: Bool { true }
 
@@ -42,11 +56,27 @@ final class PaneHostView: NSView {
         super.layout()
         guard area.width > 0, area.height > 0 else { return }
         let sx = bounds.width / area.width, sy = bounds.height / area.height
+        let live = Set(rects.map { $0.0.paneId })
+        for (id, v) in capHosts where !live.contains(id) { v.removeFromSuperview(); capHosts[id] = nil }
+        for (id, v) in chatViews where !live.contains(id) { v.removeFromSuperview(); chatViews[id] = nil }
         for (s, r) in rects {
             let gapL: CGFloat = r.x > area.x ? 1 : 0
             let gapT: CGFloat = r.y > area.y ? 1 : 0
-            s.frame = NSRect(x: (r.x - area.x) * sx + gapL, y: (r.y - area.y) * sy + gapT,
+            let full = NSRect(x: (r.x - area.x) * sx + gapL, y: (r.y - area.y) * sy + gapT,
                              width: r.width * sx - gapL, height: r.height * sy - gapT).integral
+            let capH = min(36, full.height)
+            let capFrame = NSRect(x: full.minX, y: full.minY, width: full.width, height: capH)
+            let body = NSRect(x: full.minX, y: full.minY + capH, width: full.width, height: max(0, full.height - capH))
+            let cap = ensureCap(s.paneId)
+            cap.frame = capFrame
+            let chatting = caps[s.paneId]?.chat == true
+            s.isHidden = chatting
+            s.frame = body
+            if let chat = chatViews[s.paneId] {
+                if chat.superview !== self { addSubview(chat) }
+                chat.isHidden = !chatting
+                chat.frame = body
+            }
         }
         let reach: CGFloat = 4
         for h in handles.values {
@@ -60,6 +90,37 @@ final class PaneHostView: NSView {
         }
     }
 
+    private func ensureCap(_ paneId: String) -> NSView {
+        if let v = capHosts[paneId] {
+            if let state = caps[paneId] {
+                v.rootView = PaneCapBar(state: state, tokens: tokens,
+                                        onTerminal: { [weak self] in self?.capAction?(paneId, "terminal") },
+                                        onChat: { [weak self] in self?.capAction?(paneId, "chat") },
+                                        onFocus: { [weak self] in self?.capAction?(paneId, "focus") },
+                                        onFull: { [weak self] in self?.capAction?(paneId, "full") })
+            }
+            return v
+        }
+        let state = caps[paneId] ?? PaneCapState(paneId: paneId, name: "Brief", agent: false, focused: false, chat: false, density: "focus", glyph: .asleep)
+        let v = CapHostingView(rootView: PaneCapBar(state: state, tokens: tokens,
+                                                   onTerminal: { [weak self] in self?.capAction?(paneId, "terminal") },
+                                                   onChat: { [weak self] in self?.capAction?(paneId, "chat") },
+                                                   onFocus: { [weak self] in self?.capAction?(paneId, "focus") },
+                                                   onFull: { [weak self] in self?.capAction?(paneId, "full") }))
+        capHosts[paneId] = v
+        addSubview(v)
+        return v
+    }
+
+    func placeChat(_ paneId: String, view: NSView?) {
+        if chatViews[paneId] !== view {
+            chatViews[paneId]?.removeFromSuperview()
+            chatViews[paneId] = view
+            if let view { addSubview(view) }
+        }
+        needsLayout = true
+    }
+
     /// One handle per divider id, kept above the surfaces.
     private func syncHandles(_ dividers: [PaneDivider]) {
         let ids = Set(dividers.map(\.splitId))
@@ -71,6 +132,10 @@ final class PaneHostView: NSView {
                 return n
             }()
             h.divider = d
+            h.lineColor = tokens.splitNS
+            h.hoverColor = tokens.inkNS.withAlphaComponent(0.26)
+            h.dragColor = tokens.accentNS.withAlphaComponent(0.75)
+            h.needsDisplay = true
             h.onDrag = { [weak self] div, phase, delta in
                 guard let self else { return }
                 let scale = div.vertical ? bounds.width / area.width : bounds.height / area.height
@@ -127,7 +192,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                                                           select: { [weak self] tab in
                                                               guard let self else { return }
                                                               if self.state.mode == .areas { self.selectAreaTab(tab) } else { self.selectTab(tab) }
-                                                          }))
+                                                          },
+                                                          onFactory: { [weak self] in self?.toggleFactory() }))
         sidebarContainer = SidebarContainer(content: sidebar)
         root = RootView(sidebar: sidebarContainer, host: host)
         detailPanel = DetailPanelController(herdr: model, theme: theme) { [weak self] id in self?.openFullTab(id) }
@@ -161,13 +227,14 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         host.onDividerDrag = { [weak self] d, phase, delta, extentPx in
             self?.resizer.handle(d, phase, deltaPx: delta, extentPx: extentPx)
         }
+        host.capAction = { [weak self] id, action in self?.setPaneMode(id, action) }
         resizer.currentRatio = { [weak self] id in self?.shownLayout?.splits?.first { $0.id == id }?.ratio }
         resizer.onLayout = { [weak self] layout in self?.refreshHost(using: layout) }
         // Snapshots are held back during a drag; catch up with the latest one afterwards.
         resizer.onIdle = { [weak self] in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self?.refreshHost() }
         }
-        if Channel.kind == .prod { updates = UpdateController(controller: self) }
+        updates = UpdateController(controller: self)
     }
 
     var updates: UpdateController?
@@ -239,6 +306,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         host.setBackground(t.terminalBgNS)
         sidebarContainer.apply(glass: theme.glass.sidebar, panel: NSColor(hex: t.chrome.panel))
         docPanel?.apply(panel: NSColor(hex: t.chrome.panel), ink: NSColor(hex: t.chrome.ink))
+        host.tokens = t
+        host.needsLayout = true
         GhosttyRuntime.shared?.setColorScheme(theme.effective, theme: theme.terminal, surfaces: Array(registry.byTerminal.values))
     }
 
@@ -374,7 +443,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         guard let tab = state.selectedTab, let layout = forced ?? model.layout(forTab: tab), layout.tab_id == tab else { return }
         shownLayout = layout
         let key = tab + layout.panes.map { "\($0.pane_id)@\($0.rect.x),\($0.rect.y),\($0.rect.width),\($0.rect.height)" }.joined(separator: "|")
-        guard key != lastLayoutKey else { return }
+        guard key != lastLayoutKey else { applyCaps(); return }
         lastLayoutKey = key
         var items: [(SurfaceView, Snapshot.Rect)] = []
         for lp in layout.panes {
@@ -386,6 +455,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         host.show(items, area: layout.area, dividers: PaneDivider.from(layout))
         applyPendingFocus()
         applyVisibility()
+        applyCaps()
     }
 
     private func wire(_ s: SurfaceView, tab: String) {
@@ -393,6 +463,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         s.onFocus = { [weak self] v in
             self?.focusedPaneByTab[tab] = v.paneId
             self?.state.focusedPane = v.paneId
+            self?.applyCaps()
         }
     }
 
@@ -434,11 +505,90 @@ final class MainWindowController: NSObject, NSWindowDelegate {
 
     var currentPanes: [SurfaceView] { host.rects.map { $0.0 } }
 
+    private var factoryModel: FactoryModel?
+    private var chats: [String: PaneChat] = [:]
+
+    func toggleFactory() { setFactory(open: !state.factoryOpen) }
+
+    func setFactory(open: Bool) {
+        state.factoryOpen = open
+        if open {
+            if factoryModel == nil {
+                let model = FactoryModel()
+                factoryModel = model
+                model.start()
+                let page = FactoryHostingView(rootView: FactoryPage(model: model, theme: theme))
+                root.factory = page
+                root.addSubview(page)
+                if let s = focusedSurface { window.makeFirstResponder(s) }
+            }
+        }
+        root.factoryOpen = open
+        root.layoutSubtreeIfNeeded()
+    }
+
+    func setPaneMode(_ id: String, _ mode: String) {
+        if mode == "focus" || mode == "full" {
+            Channel.setMode("chat", for: id)
+            Channel.setDensity(mode, for: id)
+            ensureChat(id)
+            chats[id]?.ui.set(mode == "full" ? .full : .focus)
+        } else if mode == "chat" {
+            Channel.setMode("chat", for: id)
+            ensureChat(id)
+        } else {
+            Channel.setMode("terminal", for: id)
+        }
+        applyCaps()
+    }
+
+    private func ensureChat(_ id: String) {
+        if chats[id] != nil {
+            host.placeChat(id, view: chats[id]?.view)
+            return
+        }
+        let transcript = Transcript(pane: id, file: nil, dump: nil, state: nil, name: nil)
+        let sender = ChatSender(pane: id, readOnly: flags.contains("--read-only"))
+        let ui = ChatUI(pinned: Channel.density(for: id) == "full" ? .full : .focus)
+        let view = NSHostingView(rootView: ChatView(transcript: transcript, theme: theme, sender: sender, ui: ui,
+                                                    codeFamily: ChatFont.family(config: ghosttyConfigText)))
+        chats[id] = PaneChat(transcript: transcript, sender: sender, ui: ui, view: view)
+        host.placeChat(id, view: view)
+    }
+
+    func applyCaps() {
+        guard let tab = state.selectedTab, let snap = model.snapshot else { return }
+        var next: [String: PaneCapState] = [:]
+        for p in snap.panes where p.tab_id == tab {
+            let agents = snap.agents.filter { $0.pane_id == p.pane_id }
+            let reported = !agents.isEmpty
+            let agent = agents.first
+            let named = (agent?.agent?.isEmpty == false ? agent?.agent : nil) ?? "Brief"
+            let status = agent?.agent_status ?? p.agent_status ?? ""
+            let chat = reported && Channel.mode(for: p.pane_id) == "chat"
+            if chat { ensureChat(p.pane_id) }
+            next[p.pane_id] = PaneCapState(
+                paneId: p.pane_id, name: named.isEmpty ? "Brief" : named, agent: reported,
+                focused: (state.focusedPane ?? snap.panes.first { $0.focused == true }?.pane_id) == p.pane_id,
+                chat: chat, density: Channel.density(for: p.pane_id),
+                glyph: ShellState.from(status: status, failed: false, hasAgent: reported))
+        }
+        host.caps = next
+        host.needsLayout = true
+        host.layoutSubtreeIfNeeded()
+        root.titleReserve = (updates?.shown == true) ? 28 : 0
+    }
+
+    var factoryMachines: [MachineRow] { factoryModel?.snapshot.machines ?? [] }
+
     var focusedSurface: SurfaceView? { window.firstResponder as? SurfaceView }
 
     func focusPane(_ paneId: String?) {
         guard let paneId, let s = currentPanes.first(where: { $0.paneId == paneId }) else { return }
+        state.focusedPane = paneId
+        if let tab = state.selectedTab { focusedPaneByTab[tab] = paneId }
         window.makeFirstResponder(s)
+        applyCaps()
     }
 
     // MARK: menu actions (app-level chords)
@@ -566,6 +716,12 @@ final class ShellWindow: NSWindow {
             didSet { docs?.isHidden = !docsOpen; needsLayout = true }
         }
         var docsWidth: CGFloat = DocPanelController.defaultWidth
+        var factory: NSView?
+        var factoryOpen = false {
+            didSet { factory?.isHidden = !factoryOpen; host.isHidden = factoryOpen; needsLayout = true }
+        }
+        /// Extra top inset while the update pill is showing, so it never covers a pane cap.
+        var titleReserve: CGFloat = 0 { didSet { needsLayout = true } }
 
     func setBackground(_ c: NSColor) { layer?.backgroundColor = c.cgColor }
 
@@ -595,6 +751,8 @@ final class ShellWindow: NSWindow {
             docs.frame = NSRect(x: bounds.width - docW, y: 0, width: docW, height: bounds.height)
             docW += 1
         }
-        host.frame = NSRect(x: x, y: 0, width: max(0, bounds.width - x - docW), height: bounds.height)
+        let top = titleReserve
+        host.frame = NSRect(x: x, y: 0, width: max(0, bounds.width - x - docW), height: max(0, bounds.height - top))
+        factory?.frame = host.frame
     }
 }

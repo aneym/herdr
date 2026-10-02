@@ -24,7 +24,7 @@ private enum Metric {
 private struct Palette {
     let t: Tokens
     var dark: Bool { t.mode == .dark }
-    var page: Color { t.panel }
+    var page: Color { Color(hex: t.terminalBg) }
     var ink: Color { t.ink }
     var mute: Color { t.mute }
     var faint: Color { t.mute.opacity(0.75) }
@@ -444,7 +444,6 @@ struct ChatView: View {
     var body: some View {
         let p = Palette(t: theme.tokens)
         VStack(spacing: 0) {
-            header(p)
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: Metric.itemGap) {
@@ -545,32 +544,6 @@ struct ChatView: View {
         default:
             note(item.text, p)
         }
-    }
-
-    /// The chat's one header: who it is, and Focus | Full.
-    private func header(_ p: Palette) -> some View {
-        HStack(spacing: 10) {
-            Text(transcript.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-            Spacer()
-            HStack(spacing: 2) {
-                ForEach([ChatUI.Mode.focus, .full], id: \.self) { m in
-                    Button { ui.set(m) } label: {
-                        Text(m == .focus ? "Focus" : "Full").font(.system(size: Metric.caption, weight: .medium))
-                            .foregroundStyle(ui.mode == m ? p.ink : p.mute)
-                            .padding(.horizontal, 10).frame(height: 22)
-                            .background(Capsule().fill(ui.mode == m ? (p.dark ? p.ink.opacity(0.12) : Color.white) : Color.clear)
-                                .shadow(color: .black.opacity(ui.mode == m && !p.dark ? 0.08 : 0), radius: 1.5, y: 0.5))
-                            .contentShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(2)
-            .background(Capsule().fill(p.surface))
-            .help("Focus folds tool calls into one line; Full shows every call")
-        }
-        .padding(.horizontal, Metric.gutter).frame(height: 44)
-        .frame(maxWidth: Metric.column).frame(maxWidth: .infinity)
     }
 
     private func youBubble(_ s: String, _ p: Palette) -> some View {

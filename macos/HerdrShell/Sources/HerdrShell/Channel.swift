@@ -56,6 +56,7 @@ enum Channel {
     }
 
     static let paneModesKey = "herdr.shell.paneModes"
+    static let paneDensityKey = "herdr.shell.paneDensity"
     static let frameKey = "herdr.shell.windowFrame"
     static let detailRowKey = "herdr.shell.detailRow"
     static let dismissedKey = "herdr.shell.updateDismissed"
@@ -67,6 +68,36 @@ enum Channel {
     static func setPaneModes(_ modes: [String: String]) {
         store.set(modes, forKey: paneModesKey)
         store.synchronize()
+    }
+
+    static func paneDensity() -> [String: String] {
+        store.dictionary(forKey: paneDensityKey) as? [String: String] ?? [:]
+    }
+
+    static func setPaneDensity(_ modes: [String: String]) {
+        store.set(modes, forKey: paneDensityKey)
+        store.synchronize()
+    }
+
+    static func mode(for pane: String) -> String {
+        let v = paneModes()[pane] ?? "terminal"
+        return v == "chat" ? "chat" : "terminal"
+    }
+
+    static func setMode(_ mode: String, for pane: String) {
+        var m = paneModes()
+        m[pane] = mode == "chat" ? "chat" : "terminal"
+        setPaneModes(m)
+    }
+
+    static func density(for pane: String) -> String {
+        paneDensity()[pane] == "full" ? "full" : "focus"
+    }
+
+    static func setDensity(_ density: String, for pane: String) {
+        var m = paneDensity()
+        m[pane] = density == "full" ? "full" : "focus"
+        setPaneDensity(m)
     }
 
     static var sessionFile: URL { appSupport.appendingPathComponent("session.json") }

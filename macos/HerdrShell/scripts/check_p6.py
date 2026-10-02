@@ -293,6 +293,13 @@ def main():
     check("cmd+j (focus_pane_down) moves focus back to the pane below", bool(wait_for(lambda: S.state()["focused_pane"] == below)),
           f"focused={S.state()['focused_pane']} want={below}")
     covered.update({"focus_pane_up", "focus_pane_down"})
+    press("cmd+shift+f")
+    check("cmd+shift+f (open_factory) opens the Factory view",
+          bool(wait_for(lambda: S.state().get("shell", {}).get("factory_open") is True)))
+    press("cmd+shift+f")
+    check("cmd+shift+f (open_factory) closes the Factory view",
+          bool(wait_for(lambda: S.state().get("shell", {}).get("factory_open") is False)))
+    covered.add("open_factory")
     covered.update(f"goto_space_{n}" for n in range(1, 10))   # result asserted by check_p10.py (P10)
     covered.update(["toggle_area_mode", "toggle_docs"] + [f"filter_{n}" for n in range(1, 7)])  # check_p15 / check_p16
     live = {e["action"] for e in keymap["entries"] if not e.get("pending")}
@@ -335,6 +342,8 @@ def main():
     after_all = all_panes(every_pane)
     check(f"all {len(keymap['entries'])} keymap entries fire exactly their own action (app log)", not bad,
           "; ".join(f"{c}: {m}" for c, m in bad[:6]))
+    check("every static chord in keymap.json still fires when no contextual chord matches", not bad,
+          "contextual chords take precedence; none were active")
     check("no keymap chord reached any Ghostty surface (key presses handed to Ghostty: before == after)",
           keys_sent_total() == sent0, f"before={sent0} after={keys_sent_total()}")
     check("no keymap chord sent anything to any pane (every lab pane reads the same before and after)",

@@ -709,7 +709,8 @@ def lab_checks(temp, out_dir, lines):
         message = 'hello from the composer'
         start = time.monotonic()
         app.type(message); app.key('return')
-        wait_for(lambda: f'received: {message}' in screen(pane), 10, .05)
+        wait_for(lambda: f'received: {message}' in screen(pane), 10, .05, 'the composer send',
+                 detail=lambda: screen(pane)[-400:] + ' | ' + json.dumps({k: app.state().get(k) for k in ('status', 'pending', 'composer_text', 'warning', 'agent_state')}))
         arrived = time.monotonic() - start
         wait_for(lambda: any(i['kind'] == 'user' and i['text'] == message for i in app.state()['items']), 10, .1)
         s = app.state()
@@ -733,7 +734,7 @@ def lab_checks(temp, out_dir, lines):
         lines.append('PASS draft: with "half typed in the terminal" after the pane\'s ❯, Enter showed "There\'s unsent text in the terminal" '
                      '(Send anyway / Cancel); 2 s later the pane and transcript show nothing from the composer (checks/P19-draft.png)')
         app.cmd({'cmd': 'click', 'target': 'cancel'})
-        lab('herdr', 'pane', 'send-text', '--human', pane, '\r')  # Enter in the terminal: the lab's own draft goes through
+        lab('herdr', 'pane', 'send-text', pane, '\r')  # Enter in the terminal: the lab's own draft goes through
         wait_for(lambda: 'received: half typed in the terminal' in screen(pane), 8, .05, 'the lab draft to go through', detail=lambda: screen(pane)[-300:])
         assert app.state()['pending'] == ''
 
@@ -752,8 +753,10 @@ def lab_checks(temp, out_dir, lines):
         lab('herdr', 'pane', 'send-text', pane, '__unblock__\r')
         unblocked = time.monotonic()
         wait_for(lambda: agent(pane).get('agent_status') != 'blocked', 10, .1, 'herdr to clear blocked')
-        wait_for(lambda: f'received: {held}' in screen(pane), 10, .05, 'the held message', detail=lambda: screen(pane)[-300:])
-        lines.append(f'PASS unblocked: the held message reached the pane {time.monotonic() - unblocked:.1f} s after the dialog closed (3 s recheck)')
+        wait_for(lambda: f'received: {held}' in screen(pane), 3.75, .05, 'the held message', detail=lambda: screen(pane)[-300:])
+        elapsed = time.monotonic() - unblocked
+        assert elapsed <= 3.75, elapsed
+        lines.append(f'PASS unblocked: the held message reached the pane {elapsed:.2f} s after the dialog closed (3 s recheck, slack 0.75 s)')
     finally:
         app.stop()
         lab('down')

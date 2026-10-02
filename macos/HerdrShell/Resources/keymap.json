@@ -27,6 +27,30 @@
       "menu": "Go"
     },
     {
+      "chord": "cmd+opt+left",
+      "action": "focus_pane_left",
+      "title": "Focus Pane Left",
+      "menu": "Go"
+    },
+    {
+      "chord": "cmd+opt+right",
+      "action": "focus_pane_right",
+      "title": "Focus Pane Right",
+      "menu": "Go"
+    },
+    {
+      "chord": "cmd+opt+up",
+      "action": "focus_pane_up",
+      "title": "Focus Pane Above",
+      "menu": "Go"
+    },
+    {
+      "chord": "cmd+opt+down",
+      "action": "focus_pane_down",
+      "title": "Focus Pane Below",
+      "menu": "Go"
+    },
+    {
       "chord": "cmd+h",
       "action": "focus_pane_left",
       "title": "Focus Pane Left",
@@ -142,6 +166,12 @@
       "title": "Toggle Sidebar",
       "menu": "View",
       "pending": "P10"
+    },
+    {
+      "chord": "cmd+shift+f",
+      "action": "open_factory",
+      "title": "Factory",
+      "menu": "View"
     },
     {
       "chord": "cmd+shift+a",

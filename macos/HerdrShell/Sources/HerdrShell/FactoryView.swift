@@ -3,6 +3,15 @@ import SwiftUI
 
 // P18: one scrolling page. Every string and color choice arrives already decided.
 
+struct FactoryPage: View {
+    @ObservedObject var model: FactoryModel
+    @ObservedObject var theme: ThemeStore
+    var body: some View {
+        FactoryView(snapshot: model.snapshot, tokens: theme.tokens, scrolls: true,
+                    toggleRoute: { model.toggleRoute($0) }, openRouting: { model.openRoutingTable() })
+    }
+}
+
 struct FactoryView: View {
     var snapshot: FactorySnapshot
     var tokens: Tokens
@@ -117,6 +126,9 @@ struct FactoryView: View {
     private func machineRow(_ row: MachineRow) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
+                if !row.usageState.isEmpty {
+                    StateGlyph(state: usageGlyph(row.usageState), tokens: t, scale: 0.8)
+                }
                 Text(row.name).foregroundStyle(attention(row.attention)).lineLimit(1)
                 if !row.kind.isEmpty {
                     Text(row.kind).foregroundStyle(t.mute).font(.system(size: 11))
@@ -126,6 +138,9 @@ struct FactoryView: View {
                 Text(row.state).foregroundStyle(stateColor(row.state)).monospacedDigit().lineLimit(1)
             }
             HStack(spacing: 8) {
+                if !row.usageLine.isEmpty {
+                    Text(row.usageLine).foregroundStyle(usageColor(row.usageState)).monospacedDigit().lineLimit(1)
+                }
                 if !row.slots.isEmpty {
                     Text(row.slots).monospacedDigit().frame(width: 64, alignment: .trailing)
                 }
@@ -218,6 +233,22 @@ struct FactoryView: View {
             }
             Spacer(minLength: 4)
             Text(row.age).foregroundStyle(t.mute).monospacedDigit()
+        }
+    }
+
+    private func usageGlyph(_ state: String) -> ShellState {
+        switch state {
+        case "overloaded": return .blocked
+        case "idle": return .idle
+        default: return .working
+        }
+    }
+
+    private func usageColor(_ state: String) -> Color {
+        switch state {
+        case "overloaded": return t.bad
+        case "idle": return t.mute
+        default: return t.ok
         }
     }
 

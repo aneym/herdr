@@ -98,6 +98,14 @@ final class TestHook {
             let open = obj["open"] as? Bool
             let width = (obj["width"] as? Double).map { CGFloat($0) } ?? (obj["width"] as? Int).map { CGFloat($0) }
             controller?.setDocs(open: open, width: width)
+        case "factory":
+            controller?.setFactory(open: obj["open"] as? Bool ?? true)
+        case "pane_mode":
+            if let id = obj["id"] as? String, let mode = obj["mode"] as? String {
+                controller?.setPaneMode(id, mode)
+            }
+        case "updates":
+            controller?.updates?.checkNow()
         case "appearance":
             // {"cmd":"appearance","mode":"system|light|dark"}: the live override.
             controller?.theme.override = AppearanceOverride(rawValue: obj["mode"] as? String ?? "") ?? .system
@@ -651,9 +659,19 @@ final class TestHook {
                 "focus_cursor": c.state.focusCursor ?? NSNull(),
                 "doc_open": c.state.docOpen,
                 "doc_width": c.state.docWidth,
+                "factory_open": c.state.factoryOpen,
+                "running_commit": Channel.commit,
                 "doc_frame_width": c.root.docs?.frame.width ?? 0,
                 "selected_tab": c.state.selectedTab ?? NSNull(),
             ],
+            "update_pill": c.updates?.shown ?? false,
+            "pane_caps": c.host.caps.map { id, cap -> [String: Any] in
+                let f = c.host.capFrames[id] ?? .zero
+                return ["id": id, "name": cap.name, "agent": cap.agent, "chat": cap.chat,
+                        "density": cap.density, "focused": cap.focused,
+                        "frame": [f.minX, f.minY, f.width, f.height]]
+            },
+            "machines": c.factoryMachines.map { ["name": $0.name, "usage": $0.usageLine, "usage_state": $0.usageState] },
             "hosts": c.model.hostsModel.rows.map { r -> [String: Any] in
                 ["host": r.host, "tabs": r.tabs, "slots_used": r.stats?.slotsUsed ?? NSNull(),
                  "slots_total": r.stats?.slotsTotal ?? NSNull(), "sessions": r.stats?.sessions ?? NSNull(),

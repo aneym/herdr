@@ -1,6 +1,6 @@
-HerdrShell P8 check  2026-10-02T14:30:46Z
+HerdrShell P8 check  2026-10-02T16:38:16Z
 lab session 'shellspike-p8', pane under test w1:p2 (plain zsh)
-app: {"pids": [4408], "fifo_ready_s": 0.46}
+app: {"pids": [51318], "fifo_ready_s": 0.4}
 [PASS] pane attached and rendered by a Ghostty surface
 [PASS] after seq 1 500 the visible screen ends at 500 and line 1 is off screen
 [PASS] wheel up shows line 1 (herdr pane read --source visible) -- after 3 wheel events; top of screen ['tmp % seq 1 500', '1', '2']

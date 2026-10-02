@@ -155,3 +155,11 @@ final class GhosttyRuntime {
 func log(_ s: String) {
     FileHandle.standardError.write(("[herdr-shell] " + s + "\n").data(using: .utf8)!)
 }
+
+func shellOpen(_ url: URL) {
+    if agentRun {
+        log("open ignored (--agent-run) \(url.absoluteString)")
+        return
+    }
+    NSWorkspace.shared.open(url)
+}

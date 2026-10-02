@@ -313,11 +313,7 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
     }
 
     private func openOutsideApp(_ url: URL) {
-        if agentRun {
-            log("doc: open ignored (--agent-run) \(url.absoluteString)")
-            return
-        }
-        NSWorkspace.shared.open(url)
+        shellOpen(url)
     }
 
     @objc private func commitAddress() {

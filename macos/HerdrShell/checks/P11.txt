@@ -1,8 +1,8 @@
-HerdrShell P11 check  2026-10-02T02:00:08Z
-app start: {"pids": [35350], "fifo_ready_s": 0.98}
+HerdrShell P11 check  2026-10-02T16:38:54Z
+app start: {"pids": [64748], "fifo_ready_s": 0.33}
 [PASS] app up, 'shell spike' selected, pane 1 focused -- tab=w1:t2 pane=w1:p2
 [PASS] panel closed at start and takes no space
-[PASS] a real click on the orchestrator row opens the panel
+[PASS] the action closure is invoked on the orchestrator row and opens the panel
 [PASS] a second real click closes it
 [PASS] clicks ran without making the window key
 [PASS] orchestrator click opens the panel for that row -- row=rails orchestrator
@@ -14,7 +14,7 @@ app start: {"pids": [35350], "fifo_ready_s": 0.98}
 [PASS] panel sits between the sidebar and the pane host and never holds focus -- panel_frame=[301, 0, 340, 820]
 [PASS] opening the panel leaves the selected tab and the focused pane alone -- tab=w1:t2 pane=w1:p2
 [PASS] pane host moved right by the panel width, sidebar did not move -- host x 301.0 -> 642.0
-[PASS] with the panel open, typed text still reaches the focused pane (herdr pane read) -- output line seen 0.098s after the last key
+[PASS] with the panel open, typed text still reaches the focused pane (herdr pane read) -- output line seen 0.034s after the last key
 [PASS] panel still open after typing, pane 1 still first responder
 [PASS] Esc closed the panel
 [PASS] pane host is back at full width after Esc -- host x 301.0
@@ -28,7 +28,7 @@ app start: {"pids": [35350], "fifo_ready_s": 0.98}
 [PASS] 'open full tab' button click selects the row's tab and closes the panel -- tab=w1:t3
 panel image (SwiftUI ImageRenderer of the open panel): P11-panel.png exists=True
 screenshot (in-app capture, panel open on the orchestrator): P11.png exists=True
-[PASS] frontmost app unchanged -- ghostty
+[PASS] frontmost app unchanged -- Aside
 lab down: stop: 0
 
 RESULT: PASS
