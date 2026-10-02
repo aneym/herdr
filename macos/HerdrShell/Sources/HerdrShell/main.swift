@@ -6,12 +6,15 @@ import GhosttyKit
 //                   [--appearance system|light|dark] [--glass sidebar,overlay] [--hosts-stub FILE] [--allow-live]
 //        HerdrShell --dump-tokens      (print the theme tokens as JSON and exit)
 //        HerdrShell --demo factory [--dump-factory <json>] [--appearance light|dark]
+//        HerdrShell --demo chat --pane <pane> [--read-only] [--control <fifo>]   (P19 chat for one pane)
+//        HerdrShell --transcript <file> [--dump-chat <json> (also <json>.png, <json>.view.json)] [--chat-state working|blocked|asleep] [--agent-name <n>]
+//        (either chat: [--chat-mode focus|full] pins the mode instead of the saved one)
 var args: [String: String] = [:]
 var flags = Set<String>()
 do {
     var it = CommandLine.arguments.dropFirst().makeIterator()
     while let a = it.next() {
-        if a == "--allow-live" || a == "--dump-tokens" || a == "--agent-run" { flags.insert(a); continue }
+        if a == "--allow-live" || a == "--dump-tokens" || a == "--agent-run" || a == "--read-only" { flags.insert(a); continue }
         if a.hasPrefix("--"), let v = it.next() { args[String(a.dropFirst(2))] = v }
     }
 }
@@ -47,6 +50,21 @@ for s in (args["glass"] ?? "").split(separator: ",") {
 }
 if args["demo"] == "factory" {
     runFactoryDemo()
+}
+if args["demo"] == "chat" || args["transcript"] != nil {
+    if args["transcript"] == nil && args["pane"] == nil { log("chat requires --pane or --transcript"); exit(2) }
+    if args["transcript"] != nil && args["pane"] != nil && !flags.contains("--read-only") {
+        log("refusing --transcript \(args["transcript"]!) --pane \(args["pane"]!) without --read-only")
+        exit(2)
+    }
+    if let bin = args["herdr"] { setenv("HERDR_BIN", bin, 1) }
+    if let socket = args["socket"] { setenv("HERDR_SOCKET_PATH", socket, 1) }
+    let chatApp = NSApplication.shared
+    chatApp.setActivationPolicy(ChatDemoDelegate.offscreen ? .prohibited : .regular)
+    let chatDelegate = ChatDemoDelegate()
+    chatApp.delegate = chatDelegate
+    withExtendedLifetime(chatDelegate) { chatApp.run() }
+    exit(0)
 }
 let herdrBin = args["herdr"] ?? ""
 let socket = args["socket"] ?? ""
