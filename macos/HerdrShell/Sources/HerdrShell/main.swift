@@ -5,6 +5,7 @@ import GhosttyKit
 //                   [--ghostty-config <file>] [--user-ghostty-config <file>]
 //                   [--appearance system|light|dark] [--glass sidebar,overlay] [--hosts-stub FILE] [--allow-live]
 //        HerdrShell --dump-tokens      (print the theme tokens as JSON and exit)
+//        HerdrShell --demo factory [--dump-factory <json>] [--appearance light|dark]
 var args: [String: String] = [:]
 var flags = Set<String>()
 do {
@@ -43,6 +44,9 @@ var glassTokens = GlassTokens()
 for s in (args["glass"] ?? "").split(separator: ",") {
     if s == "sidebar" { glassTokens.sidebar = true }
     if s == "overlay" { glassTokens.overlay = true }
+}
+if args["demo"] == "factory" {
+    runFactoryDemo()
 }
 let herdrBin = args["herdr"] ?? ""
 let socket = args["socket"] ?? ""
@@ -142,3 +146,62 @@ func buildMenu(target: MainWindowController) -> NSMenu {
 let delegate = AppDelegate()
 app.delegate = delegate
 app.run()
+
+func runFactoryDemo() -> Never {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.regular)
+    let demo = FactoryDemo()
+    app.delegate = demo
+    app.run()
+    exit(0)
+}
+
+final class FactoryDemo: NSObject, NSApplicationDelegate {
+    let theme = ThemeStore(override: appearanceOverride, glass: glassTokens, terminal: terminalTheme)
+    let model = FactoryModel(dumpPath: args["dump-factory"])
+    var window: NSWindow!
+    private var shot = false
+    private var started: Date?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        started = Date()
+        theme.startFollowingSystem()
+        let host = FactoryDemoUI.hosting(model: model, theme: theme)
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 900),
+                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                           backing: .buffered, defer: false)
+        window.title = "Factory"
+        window.appearance = theme.nsAppearance
+        window.contentView = host
+        window.setContentSize(NSSize(width: 1100, height: 900))
+        window.center()
+        window.backgroundColor = theme.tokens.windowBgNS
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        let menu = NSMenu()
+        let appMenu = NSMenuItem()
+        menu.addItem(appMenu)
+        let sub = NSMenu()
+        sub.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        appMenu.submenu = sub
+        NSApp.mainMenu = menu
+        model.start()
+        Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] timer in
+            MainActor.assumeIsolated { self?.capture(timer) }
+        }
+        log("factory demo")
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    @MainActor private func capture(_ timer: Timer) {
+        guard !shot, let dump = args["dump-factory"] else { return }
+        let waited = Date().timeIntervalSince(started ?? Date())
+        let pageReady = !model.snapshot.machines.isEmpty || !model.snapshot.pools.isEmpty
+        if (!pageReady || !model.routingReady || !model.flightsReady || !model.landedReady) && waited < 20 { return }
+        shot = true
+        timer.invalidate()
+        let png = URL(fileURLWithPath: dump).deletingPathExtension().appendingPathExtension("png").path
+        _ = FactoryShot.write(model.snapshot, tokens: theme.tokens, to: png)
+    }
+}

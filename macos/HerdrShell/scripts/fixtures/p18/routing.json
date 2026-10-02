@@ -1,0 +1,29 @@
+{
+  "ladder_mode": "interim",
+  "interim_ladder": {
+    "implement": [
+      {"label": "grok-4.7-medium"},
+      {"label": "composer-2.5"},
+      {"label": "sol-medium"},
+      {"label": "swe-2-high"},
+      {"label": "sonnet stand-in"}
+    ],
+    "mechanical": [
+      {"label": "composer-2.5"},
+      {"label": "grok-4.7-medium"}
+    ],
+    "explore": [
+      {"label": "sol-low"},
+      {"label": "grok-latest-low"}
+    ],
+    "review": [
+      {"label": "sol-high"},
+      {"label": "opus-high"}
+    ]
+  },
+  "classes": {
+    "implement": {"chain": [{"model": "STALE-FIRST"}, {"model": "STALE-SECOND"}]},
+    "mechanical": {"chain": [{"model": "STALE-MECH"}]},
+    "explore": {"chain": [{"model": "STALE-EXPLORE"}]}
+  }
+}
