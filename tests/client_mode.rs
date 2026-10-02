@@ -167,8 +167,26 @@ fn spawn_server_with_config(
     config_home: &PathBuf,
     runtime_dir: &PathBuf,
     api_socket_path: &PathBuf,
+    client_socket_path: &PathBuf,
+    config: &str,
+) -> SpawnedHerdr {
+    spawn_server_with_config_env(
+        config_home,
+        runtime_dir,
+        api_socket_path,
+        client_socket_path,
+        config,
+        &[],
+    )
+}
+
+fn spawn_server_with_config_env(
+    config_home: &PathBuf,
+    runtime_dir: &PathBuf,
+    api_socket_path: &PathBuf,
     _client_socket_path: &PathBuf,
     config: &str,
+    extra_env: &[(&str, &str)],
 ) -> SpawnedHerdr {
     fs::create_dir_all(config_home.join(app_dir_name())).unwrap();
     fs::create_dir_all(runtime_dir).unwrap();
@@ -192,6 +210,9 @@ fn spawn_server_with_config(
     cmd.env_remove("HERDR_CLIENT_SOCKET_PATH");
     cmd.env("SHELL", "/bin/sh");
     cmd.env_remove("HERDR_ENV");
+    for (key, value) in extra_env {
+        cmd.env(*key, *value);
+    }
 
     let child = pair.slave.spawn_command(cmd).unwrap();
     register_spawned_herdr_pid(child.process_id());
@@ -1913,8 +1934,8 @@ fn unavailable_restored_pane_keeps_saved_cwd_in_server() {
 
 #[test]
 fn graceful_shutdown_sends_server_shutdown_to_client() {
-    // Issue 2 fix: SIGINT triggers initiate_shutdown → ServerShutdown
-    // broadcast to all clients before the server exits.
+    // A lone SIGINT is ignored. This server opts into the first-signal quit so
+    // SIGINT still runs initiate_shutdown and broadcasts ServerShutdown.
     let _lock = test_lock();
     let base = unique_test_dir();
     let config_home = base.join("config");
@@ -1922,7 +1943,14 @@ fn graceful_shutdown_sends_server_shutdown_to_client() {
     let api_socket = runtime_dir.join("herdr.sock");
     let client_socket = runtime_dir.join("herdr-client.sock");
 
-    let mut spawned = spawn_server(&config_home, &runtime_dir, &api_socket, &client_socket);
+    let mut spawned = spawn_server_with_config_env(
+        &config_home,
+        &runtime_dir,
+        &api_socket,
+        &client_socket,
+        "onboarding = false\n",
+        &[("HERDR_SERVER_SIGNAL_QUIT", "1")],
+    );
     wait_for_socket(&api_socket, Duration::from_secs(10));
     wait_for_socket(&client_socket, Duration::from_secs(10));
 

@@ -83,7 +83,6 @@ mod render;
 mod retained_surface;
 mod surface_interest;
 
-pub use bootstrap::run_server;
 use lifecycle::wait_for_live_handoff_response_write;
 #[cfg(unix)]
 use lifecycle::wait_for_old_public_sockets_to_close;
@@ -96,6 +95,12 @@ use crate::protocol::RenderEncoding;
 use crate::server::client_transport::ClientWriter;
 #[cfg(test)]
 use std::fs;
+
+pub fn run_server() -> io::Result<()> {
+    #[cfg(unix)]
+    super::signals::install();
+    bootstrap::run_server()
+}
 
 fn sound_notify_message(sound: crate::sound::Sound) -> &'static str {
     match sound {
@@ -238,7 +243,7 @@ pub struct HeadlessServer {
     /// Imported panes get one app-safe resize nudge after the first client attaches.
     #[cfg(unix)]
     pending_handoff_repaint_nudge: bool,
-    /// Flag set by Ctrl+C or `server stop` signal.
+    /// Flag set when the server should shut down.
     should_quit: Arc<AtomicBool>,
     host_shutdown_requested: Arc<AtomicBool>,
     /// Channel for receiving server events from client connection threads.
@@ -389,10 +394,12 @@ impl HeadlessServer {
     pub async fn run(&mut self) -> io::Result<()> {
         crate::logging::startup("server");
 
-        // Register SIGINT handler for graceful shutdown.
-        let should_quit = self.should_quit.clone();
-        let quit_notify = self.server_event_tx.clone();
-        ctrlc_handler(should_quit, quit_notify);
+        #[cfg(windows)]
+        {
+            let should_quit = self.should_quit.clone();
+            let quit_notify = self.server_event_tx.clone();
+            ctrlc_handler(should_quit, quit_notify);
+        }
         let quit_notify = self.server_event_tx.clone();
         let _host_shutdown = crate::platform::HostShutdownMonitor::start(
             self.host_shutdown_requested.clone(),
@@ -424,6 +431,7 @@ impl HeadlessServer {
             }
 
             // Check if we should start shutting down.
+            note_server_signal(&self.should_quit, &self.server_event_tx);
             if self.app.state.should_quit || self.should_quit.load(Ordering::Acquire) {
                 self.drain_internal_events_with_forwarding_up_to(
                     crate::app::APP_EVENT_CHANNEL_CAPACITY,
@@ -445,6 +453,7 @@ impl HeadlessServer {
                 needs_graphics_render = false;
                 crate::render_prof::event("full_render_cause.internal_events");
             }
+            note_server_signal(&self.should_quit, &self.server_event_tx);
             if self.should_quit.load(Ordering::Acquire) {
                 continue;
             }
@@ -460,6 +469,7 @@ impl HeadlessServer {
                 needs_full_render = true;
                 crate::render_prof::event("full_render_cause.api_requests");
             }
+            note_server_signal(&self.should_quit, &self.server_event_tx);
             if self.should_quit.load(Ordering::Acquire) {
                 continue;
             }
@@ -476,6 +486,7 @@ impl HeadlessServer {
                 needs_full_render = true;
                 crate::render_prof::event("full_render_cause.server_events");
             }
+            note_server_signal(&self.should_quit, &self.server_event_tx);
             if self.should_quit.load(Ordering::Acquire) {
                 continue;
             }
@@ -619,6 +630,7 @@ impl HeadlessServer {
                 }
             };
 
+            note_server_signal(&self.should_quit, &self.server_event_tx);
             if self.should_quit.load(Ordering::Acquire)
                 || self.host_shutdown_requested.load(Ordering::Acquire)
             {
@@ -1021,7 +1033,10 @@ impl HeadlessServer {
     /// Drains server events from the dedicated channel.
     fn drain_server_events(&mut self) -> bool {
         let mut changed = false;
-        while !self.should_quit.load(Ordering::Acquire) {
+        while {
+            note_server_signal(&self.should_quit, &self.server_event_tx);
+            !self.should_quit.load(Ordering::Acquire)
+        } {
             let Ok(ev) = self.server_event_rx.try_recv() else {
                 break;
             };
@@ -2833,7 +2848,10 @@ impl HeadlessServer {
     /// During shutdown, remaining requests get a `server_unavailable` error.
     fn drain_api_requests_with_shutdown_check(&mut self) -> bool {
         let mut changed = false;
-        while !self.should_quit.load(Ordering::Acquire) {
+        while {
+            note_server_signal(&self.should_quit, &self.server_event_tx);
+            !self.should_quit.load(Ordering::Acquire)
+        } {
             let Ok(msg) = self.app.api_rx.try_recv() else {
                 break;
             };
@@ -3382,12 +3400,37 @@ impl Drop for HeadlessServer {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Installs a Ctrl+C handler that sets the should_quit flag and wakes up
-/// the event loop by sending a QuitSignal on the server event channel.
+fn note_server_signal(should_quit: &AtomicBool, server_event_tx: &mpsc::Sender<ServerEvent>) {
+    #[cfg(unix)]
+    loop {
+        let Some(observed) = super::signals::poll() else {
+            break;
+        };
+        match observed.decision {
+            super::signals::Decision::Ignore => {
+                super::signals::log_ignored(observed.signal, observed.sender_pid);
+            }
+            super::signals::Decision::Quit => {
+                if let Some(reason) = observed.quit_reason {
+                    super::signals::log_quit(observed.signal, observed.sender_pid, reason);
+                }
+                should_quit.store(true, Ordering::Release);
+                let _ = server_event_tx.try_send(ServerEvent::QuitSignal);
+                break;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (should_quit, server_event_tx);
+    }
+}
+
+/// Windows console close/Ctrl+C. Unix servers decide in `signals`.
+#[cfg(windows)]
 fn ctrlc_handler(should_quit: Arc<AtomicBool>, server_event_tx: mpsc::Sender<ServerEvent>) {
     let _ = ctrlc::set_handler(move || {
         should_quit.store(true, Ordering::Release);
-        // Wake up the event loop so the quit flag is checked promptly.
         let _ = server_event_tx.try_send(ServerEvent::QuitSignal);
     });
 }
