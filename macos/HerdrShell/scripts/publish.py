@@ -281,9 +281,10 @@ def data():
         tar.wait()
         if r is not None and r.returncode == 0 and "synced" in r.stdout:
             state[name] = digest
-        elif state.get(f"{name}.err") != digest:
-            state[f"{name}.err"] = digest
-            log(f"{name}: data sync failed, will retry")
+            state.pop(f"{name}.down", None)
+        elif not state.get(f"{name}.down"):
+            state[f"{name}.down"] = True
+            log(f"{name}: data sync failed, will retry quietly")
     os.makedirs(LOGDIR, exist_ok=True)
     with open(state_path + ".tmp", "w") as fh:
         json.dump(state, fh)
