@@ -11,11 +11,52 @@ elif [[ -n "${2:-}" ]]; then
   echo "usage: release.sh <git-ref> [--install]" >&2
   exit 2
 fi
-REPO="/Volumes/StudioExt/repos/herdr"
-WT="/Volumes/StudioExt/repos/herdr-worktrees/shell-release"
-VENDOR_SRC="/Volumes/StudioExt/repos/herdr-worktrees/native-shell/macos/HerdrShell/Vendor"
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SOURCE_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
+COMMON="$(git -C "$SOURCE_ROOT" rev-parse --path-format=absolute --git-common-dir)"
+MAIN="${HERDR_REPO:-$(cd "$(dirname "$COMMON")" && pwd)}"
+
+worktrees() {
+  git -C "$MAIN" worktree list --porcelain | while IFS= read -r line; do
+    case "$line" in
+      worktree\ *) printf '%s\n' "${line#worktree }" ;;
+      /*) printf '%s\n' "${line%% *}" ;;
+    esac
+  done
+}
+
+WT="${HERDR_RELEASE_WORKTREE:-}"
+if [[ -z "$WT" ]]; then
+  while IFS= read -r wt; do
+    if [[ "$(basename "$wt")" == "shell-release" ]]; then
+      WT="$wt"
+      break
+    fi
+  done < <(worktrees)
+fi
+if [[ -z "$WT" ]]; then
+  WT="$(dirname "$SOURCE_ROOT")/shell-release"
+fi
+
+VENDOR_SRC="${HERDR_VENDOR:-}"
+if [[ -z "$VENDOR_SRC" ]]; then
+  while IFS= read -r wt; do
+    [[ "$wt" == "$WT" ]] && continue
+    cand="$wt/macos/HerdrShell/Vendor"
+    if [[ -d "$cand" ]]; then
+      VENDOR_SRC="$(cd "$cand" && pwd -P)"
+      break
+    fi
+  done < <(worktrees)
+fi
+if [[ -z "$VENDOR_SRC" ]]; then
+  echo "release.sh: no HerdrShell Vendor in the git worktree list" >&2
+  exit 1
+fi
+
 if [[ ! -e "$WT/.git" ]]; then
-  git -C "$REPO" worktree add --detach "$WT" "$REF"
+  git -C "$MAIN" worktree add --detach "$WT" "$REF"
 else
   git -C "$WT" checkout --detach "$REF"
 fi
@@ -28,9 +69,9 @@ STAGE="$HOME/Library/Application Support/HerdrShell/staged"
 mkdir -p "$STAGE"
 rm -rf "$STAGE/Herdr Shell.app"
 mv "$WT/macos/HerdrShell/.build/bundle-prod/Herdr Shell.app" "$STAGE/Herdr Shell.app"
-python3 - "$STAGE" "$REF" "$HOME/Applications/Herdr Shell.app" <<'PY'
+python3 - "$STAGE" "$REF" "$HOME/Applications/Herdr Shell.app" "$WT" <<'PY'
 import json, os, subprocess, sys
-stage, ref, installed = sys.argv[1:]
+stage, ref, installed, repo = sys.argv[1:]
 plist = os.path.join(stage, "Herdr Shell.app", "Contents", "Info.plist")
 commit = subprocess.check_output(
     ["/usr/libexec/PlistBuddy", "-c", "Print :HerdrShellCommit", plist], text=True
@@ -48,7 +89,6 @@ if os.path.isfile(ip):
     except subprocess.CalledProcessError:
         prev = ""
 notes = []
-repo = "/Volumes/StudioExt/repos/herdr-worktrees/shell-release"
 if prev and prev != commit:
     probe = subprocess.run(["git", "-C", repo, "cat-file", "-e", prev + "^{commit}"])
     if probe.returncode == 0:

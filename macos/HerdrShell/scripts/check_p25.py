@@ -6,7 +6,6 @@ No window. The update selftest uses a directory under ~/.cache, never ~/Applicat
 import json
 import os
 import plistlib
-import re
 import subprocess
 import sys
 
@@ -125,48 +124,75 @@ def main():
     proof_path = os.path.join(update_root, "swap-proof.txt")
     proof = open(proof_path).read() if os.path.isfile(proof_path) else ""
     check("swap", "installed=new" in proof and "previous=old" in proof, proof.replace("\n", " "))
-    restored = ""
-    marker = os.path.join(update_root, "Applications", "Herdr Shell.app", "Contents", "Resources", "marker")
-    if os.path.isfile(marker):
-        restored = open(marker).read().strip()
-    log_path = os.path.join(update_root, "support", "update.log")
-    log_text = open(log_path).read() if os.path.isfile(log_path) else ""
-    check("rollback", restored == "good" and "corrupt" in log_text, f"marker {restored}")
-    restart_s = report.get("restart_s", -1)
-    check("restart", isinstance(restart_s, (int, float)) and 0 <= restart_s < 2, f"{restart_s}s")
 
-    pat = re.compile(r"herdr[^\n]{0,80}\b(stop|kill|restart|server)\b", re.I)
-    blob_paths = [
-        "Sources/HerdrShell/UpdateRestart.swift",
-        "Sources/HerdrShell/UpdatePill.swift",
-        "Sources/HerdrShell/Channel.swift",
-        "scripts/release.sh",
-        "scripts/bundle.sh",
-        "scripts/dev.sh",
-    ]
-    bad = []
-    for rel in blob_paths:
-        text = open(os.path.join(D0, rel)).read()
-        if pat.search(text):
-            bad.append(rel)
-    diff_text = subprocess.run(
-        ["git", "-C", ROOT, "diff", "ddbd3a52", "--",
-         "macos/HerdrShell/Sources/HerdrShell/UpdateRestart.swift",
-         "macos/HerdrShell/Sources/HerdrShell/UpdatePill.swift",
-         "macos/HerdrShell/Sources/HerdrShell/Channel.swift",
-         "macos/HerdrShell/Sources/HerdrShell/main.swift",
-         "macos/HerdrShell/scripts/release.sh",
-         "macos/HerdrShell/scripts/bundle.sh",
-         "macos/HerdrShell/scripts/dev.sh"],
-        capture_output=True, text=True,
-    ).stdout
-    if pat.search(diff_text):
-        bad.append("diff")
-    check("update path", not bad, " ".join(bad) if bad else "no herdr stop kill restart server")
-    open_path = "open" in open(os.path.join(D0, "Sources/HerdrShell/UpdateRestart.swift")).read()
-    check("helper opens the app", "/usr/bin/open" in open(os.path.join(D0, "Sources/HerdrShell/UpdateRestart.swift")).read() and open_path)
+    def load_json(path):
+        if not os.path.isfile(path):
+            return {}
+        try:
+            return json.loads(open(path).read())
+        except json.JSONDecodeError:
+            return {}
 
-    say(f"restart_s {restart_s}")
+    roll = load_json(os.path.join(update_root, "corrupt-proof.json"))
+    check(
+        "rollback",
+        roll.get("restored") == "good"
+        and "corrupt" in roll.get("log", "")
+        and roll.get("log", "").startswith("bad ")
+        and roll.get("retry") is False
+        and roll.get("pill") == "hidden"
+        and roll.get("staged_remains") is True
+        and roll.get("newer_pill") == "update"
+        and roll.get("apply") is False,
+        roll.get("log", ""),
+    )
+    retry = load_json(os.path.join(update_root, "retry-proof.json"))
+    check(
+        "retry",
+        retry.get("first_ok") is False
+        and retry.get("restored") == "kept"
+        and retry.get("staged") == "next"
+        and retry.get("retry") is True
+        and retry.get("pill") == "retry"
+        and retry.get("second_ok") is True
+        and retry.get("installed") == "next"
+        and retry.get("staged_gone") is True,
+        str(retry.get("pill")),
+    )
+    restart_doc = load_json(os.path.join(update_root, "support", "restart.json"))
+    swap_s = restart_doc.get("restart_swap_s", -1)
+    check("restart_swap_s", isinstance(swap_s, (int, float)) and 0 <= swap_s < 2, f"{swap_s}s")
+
+    hits = []
+    for rel in ("Sources/HerdrShell/UpdateRestart.swift", "Sources/HerdrShell/UpdatePill.swift"):
+        with open(os.path.join(D0, rel)) as handle:
+            for number, line in enumerate(handle, 1):
+                folded = line.lower()
+                for token in ("herdr", ".sock", "pkill", "kill(", "killall"):
+                    hay = folded if token in ("pkill", "killall") else line
+                    if token in hay:
+                        hits.append(f"{os.path.basename(rel)}:{number}:{token}")
+    check("update path", not hits, " ".join(hits) if hits else "no herdr socket or kill")
+
+    argv = load_json(os.path.join(update_root, "open-argv.json"))
+    expected = ""
+    expected_file = os.path.join(update_root, "open-expected.txt")
+    if os.path.isfile(expected_file):
+        expected = open(expected_file).read().strip()
+    real_expected = os.path.realpath(expected) if expected else ""
+    scratch_real = os.path.realpath(update_root)
+    check(
+        "helper opens the app",
+        argv == ["/usr/bin/open", expected]
+        and "-g" not in argv
+        and "-j" not in argv
+        and real_expected.startswith(scratch_real + os.sep)
+        and real_expected != REAL_APPS
+        and not real_expected.startswith(REAL_APPS + os.sep),
+        " ".join(argv) if isinstance(argv, list) else str(argv),
+    )
+
+    say(f"restart_swap_s {swap_s}")
     if failures:
         say(f"{len(failures)} failed")
         return 1

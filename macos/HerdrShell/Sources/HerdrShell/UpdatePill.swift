@@ -66,7 +66,11 @@ final class UpdateController: NSObject {
             return
         }
         pill.isHidden = false
-        pill.title = current.failed ? "Update failed — Retry" : "Update"
+        if current.failed {
+            pill.title = current.retry ? "Update failed — Retry" : "Update failed"
+        } else {
+            pill.title = "Update"
+        }
         pill.sizeToFit()
         let width = max(pill.frame.width + 18, 72)
         pill.frame = NSRect(x: 0, y: 1, width: width, height: 20)
@@ -132,7 +136,8 @@ final class UpdatePopoverController: NSViewController {
         text.textColor = .secondaryLabelColor
         text.frame = NSRect(x: 16, y: 64, width: width - 32, height: 96)
 
-        let go = NSButton(title: "Restart to update", target: self, action: #selector(restart))
+        let primary = offer.failed && offer.retry ? "Retry" : "Restart to update"
+        let go = NSButton(title: primary, target: self, action: #selector(restart))
         go.bezelStyle = .rounded
         go.keyEquivalent = "\r"
         go.frame = NSRect(x: 16, y: 32, width: width - 32, height: 28)
@@ -143,7 +148,7 @@ final class UpdatePopoverController: NSViewController {
 
         view.addSubview(title)
         view.addSubview(text)
-        view.addSubview(go)
+        if !(offer.failed && !offer.retry) { view.addSubview(go) }
         view.addSubview(later)
         self.view = view
     }
