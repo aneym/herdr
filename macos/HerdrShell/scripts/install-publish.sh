@@ -4,6 +4,7 @@
 #   ~/.local/bin/herdr-shell-publish                 a copy of publish.py (launchd can't read /Volumes)
 #   <herdr repo>/.git/hooks/reference-transaction    a push to origin/<release branch> runs `herdr-shell-publish auto`
 #   ~/Library/LaunchAgents/com.aneyman.herdr-shell-fanout.plist   `herdr-shell-publish fanout` every 5 min
+#   ~/Library/LaunchAgents/com.aneyman.herdr-shell-data.plist     `herdr-shell-publish data` every 20 s
 #   ~/.config/herdr-shell/targets.json               only if missing (Book over ssh)
 set -euo pipefail
 D="$(cd "$(dirname "$0")" && pwd)"
@@ -68,4 +69,12 @@ cat >"$PLIST" <<XML
 XML
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
-echo "installed $BIN, $HOOK, $PLIST"
+
+# Areas/Parked inputs for the other machines' apps, every 20 s when they change.
+DLABEL=com.aneyman.herdr-shell-data
+DPLIST="$HOME/Library/LaunchAgents/$DLABEL.plist"
+sed -e "s/$LABEL/$DLABEL/" -e "s|<string>fanout</string>|<string>data</string>|" \
+    -e "s|<integer>300</integer>|<integer>20</integer>|" -e "s|fanout.launchd.log|data.launchd.log|g" "$PLIST" >"$DPLIST"
+launchctl bootout "gui/$(id -u)/$DLABEL" 2>/dev/null || true
+launchctl bootstrap "gui/$(id -u)" "$DPLIST"
+echo "installed $BIN, $HOOK, $PLIST, $DPLIST"

@@ -9,6 +9,12 @@
                                 hook, so a push publishes by itself
   herdr-shell-publish fanout    copy the release into each target's staged dir
                                 (launchd every 5 min; never reads the repo)
+  herdr-shell-publish data      copy Studio's lanes/areas/modes files to each target's
+                                ~/.agent-rails/herdr when they change (launchd every 20 s),
+                                so Areas and Parked draw there; read-only copies
+  herdr-shell-publish install NAME
+                                put the release in NAME's ~/Applications now (a new
+                                machine, or one far behind); refuses while it runs there
   herdr-shell-publish status    release commit and each target's installed/staged commit
 
 On each machine the running app watches ~/Library/Application Support/HerdrShell.
@@ -195,6 +201,95 @@ def fanout():
             log(f"{name}: FAIL deliver {commit}: {(r.stderr or r.stdout).strip()[-300:]}")
 
 
+REMOTE_INSTALL = r'''
+set -e
+if pgrep -f "Applications/Herdr Shell.app/Contents/MacOS/" >/dev/null; then echo running; exit 3; fi
+A="$HOME/Applications"
+mkdir -p "$A"
+IN="$A/.herdr-shell-incoming"
+rm -rf "$IN"; mkdir "$IN"
+tar -xzf - -C "$IN"
+/usr/bin/codesign --verify "$IN/Herdr Shell.app"
+rm -rf "$A/Herdr Shell.app.previous"
+[ -d "$A/Herdr Shell.app" ] && mv "$A/Herdr Shell.app" "$A/Herdr Shell.app.previous"
+mv "$IN/Herdr Shell.app" "$A/Herdr Shell.app"
+rm -rf "$IN" "$A/Herdr Shell.app.previous"
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$A/Herdr Shell.app" || true
+echo installed
+'''
+
+
+def install(name):
+    rel = release()
+    t = next((t for t in targets() if t.get("name") == name), None)
+    if not rel or not t:
+        sys.exit(f"install: no release or no target {name}")
+    tar = subprocess.Popen(["tar", "-czf", "-", "-C", STORE, APP], stdout=subprocess.PIPE)
+    r = subprocess.run(t["ssh"][:1] + SSH_OPTS + t["ssh"][1:] + ["/bin/sh", "-c", shlex.quote(REMOTE_INSTALL)],
+                       stdin=tar.stdout, capture_output=True, text=True, timeout=900)
+    tar.stdout.close()
+    tar.wait()
+    if r.returncode == 0 and "installed" in r.stdout:
+        log(f"{name}: installed {rel['commit']}")
+    else:
+        sys.exit(f"{name}: install failed: {(r.stdout + r.stderr).strip()[-300:]}")
+
+
+DATA_DIR = f"{HOME}/.agent-rails/herdr"
+DATA_FILES = ("lanes.json", "areas.json", "modes.json")
+
+REMOTE_DATA = r'''
+set -e
+D="$HOME/.agent-rails/herdr"
+mkdir -p "$D"
+IN=$(mktemp -d "$D/.incoming.XXXXXX")
+tar -xf - -C "$IN"
+for f in "$IN"/*.json; do mv "$f" "$D/$(basename "$f")"; done
+rmdir "$IN"
+echo synced
+'''
+
+
+def data():
+    """Push the Areas/Parked inputs to each target when their content changed."""
+    import hashlib
+    have = [f for f in DATA_FILES if os.path.isfile(f"{DATA_DIR}/{f}")]
+    if not have:
+        return
+    h = hashlib.sha256()
+    for f in have:
+        with open(f"{DATA_DIR}/{f}", "rb") as fh:
+            h.update(f.encode() + b"\0" + fh.read())
+    digest = h.hexdigest()
+    state_path = f"{LOGDIR}/data-state.json"
+    try:
+        with open(state_path) as fh:
+            state = json.load(fh)
+    except (OSError, ValueError):
+        state = {}
+    for t in targets():
+        name = t.get("name", "?")
+        if state.get(name) == digest:
+            continue
+        tar = subprocess.Popen(["tar", "-cf", "-", "-C", DATA_DIR, *have], stdout=subprocess.PIPE)
+        try:
+            r = subprocess.run(t["ssh"][:1] + SSH_OPTS + t["ssh"][1:] + ["/bin/sh", "-c", shlex.quote(REMOTE_DATA)],
+                               stdin=tar.stdout, capture_output=True, text=True, timeout=60)
+        except subprocess.TimeoutExpired:
+            r = None
+        tar.stdout.close()
+        tar.wait()
+        if r is not None and r.returncode == 0 and "synced" in r.stdout:
+            state[name] = digest
+        elif state.get(f"{name}.err") != digest:
+            state[f"{name}.err"] = digest
+            log(f"{name}: data sync failed, will retry")
+    os.makedirs(LOGDIR, exist_ok=True)
+    with open(state_path + ".tmp", "w") as fh:
+        json.dump(state, fh)
+    os.replace(state_path + ".tmp", state_path)
+
+
 def auto():
     os.makedirs(LOGDIR, exist_ok=True)
     with open(LOCK, "w") as lk:
@@ -233,6 +328,10 @@ def main():
         auto()
     elif a and a[0] == "fanout":
         fanout()
+    elif a and a[0] == "install" and len(a) == 2:
+        install(a[1])
+    elif a and a[0] == "data":
+        data()
     elif a and a[0] == "status":
         status()
     else:
