@@ -5,6 +5,9 @@ import Foundation
 enum ShellPaths {
     static var lanes = ""
     static var areas = ""
+    /// herdr-control's modes file (`herdr-lane park|unpark` writes it). `CONTROL_MODES` overrides it,
+    /// the same variable lane.js reads, so a lab and its lane tool share one file.
+    static var modes = ""
     static var filesPresent: Bool {
         FileManager.default.fileExists(atPath: lanes) || FileManager.default.fileExists(atPath: areas)
     }
@@ -20,6 +23,13 @@ struct LaneRecord: Equatable {
     var section: String?
     var scopeURL: String?
     var reviewURL: String?
+}
+
+/// A parked tab: out of every filter but Parked, resumable in one click.
+struct ParkRecord: Equatable {
+    var note: String?
+    var at: Date?
+    var by: String?
 }
 
 struct AreaDef: Equatable, Identifiable {
@@ -42,6 +52,7 @@ struct LaneSnapshot: Equatable {
     var spaces: [String: String] = [:]
     var goalArea: [String: String] = [:]
     var goal: [String: String] = [:]
+    var parked: [String: ParkRecord] = [:]
     var hasFiles = false
 
     static let empty = LaneSnapshot()
@@ -108,7 +119,7 @@ final class LaneCatalog: ObservableObject {
     private func reloadIfChanged() {
         var next: [String: Date] = [:]
         var changed = false
-        for path in [ShellPaths.lanes, ShellPaths.areas] where !path.isEmpty {
+        for path in [ShellPaths.lanes, ShellPaths.areas, ShellPaths.modes] where !path.isEmpty {
             let date = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date) ?? Date.distantPast
             next[path] = date
             if stamp[path] != date { changed = true }
@@ -119,7 +130,14 @@ final class LaneCatalog: ObservableObject {
     func reload() {
         var snap = LaneSnapshot.empty
         snap.hasFiles = ShellPaths.filesPresent
-        if let obj = Self.json(ShellPaths.lanes) { snap.lanes = Self.lanes(obj) }
+        if let obj = Self.json(ShellPaths.lanes) {
+            snap.lanes = Self.lanes(obj)
+            // lanes.json carries the mode too, a writer tick behind; the modes file adds note and date.
+            for item in obj["lanes"] as? [[String: Any]] ?? [] where Self.str(item["mode"]) == "parked" {
+                if let tab = Self.str(item["tab"]) { snap.parked[tab] = ParkRecord() }
+            }
+        }
+        if let obj = Self.json(ShellPaths.modes) { snap.parked = Self.parked(obj) }
         if let obj = Self.json(ShellPaths.areas) {
             snap.areas = Self.areas(obj)
             snap.tabs = Self.tabAssign(obj["tabs"] as? [String: Any] ?? [:])
@@ -129,9 +147,10 @@ final class LaneCatalog: ObservableObject {
         }
         stamp[ShellPaths.lanes] = (try? FileManager.default.attributesOfItem(atPath: ShellPaths.lanes)[.modificationDate] as? Date) ?? Date.distantPast
         stamp[ShellPaths.areas] = (try? FileManager.default.attributesOfItem(atPath: ShellPaths.areas)[.modificationDate] as? Date) ?? Date.distantPast
+        stamp[ShellPaths.modes] = (try? FileManager.default.attributesOfItem(atPath: ShellPaths.modes)[.modificationDate] as? Date) ?? Date.distantPast
         if snap != snapshot {
             snapshot = snap
-            log("lanes: \(snap.lanes.count) areas: \(snap.areas.count)")
+            log("lanes: \(snap.lanes.count) areas: \(snap.areas.count) parked: \(snap.parked.count)")
         }
     }
 
@@ -156,6 +175,20 @@ final class LaneCatalog: ObservableObject {
                                   goal: str(item["goal"]), goalArea: str(item["goal_area"]),
                                   section: str(item["section"]), scopeURL: str(item["scope_url"]),
                                   reviewURL: str(item["review_url"]))
+        }
+        return out
+    }
+
+    /// modes.json is the source of truth for parking: a tab is parked when its mode says so.
+    private static func parked(_ obj: [String: Any]) -> [String: ParkRecord] {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let plain = ISO8601DateFormatter()
+        var out: [String: ParkRecord] = [:]
+        for (tab, v) in obj["tabs"] as? [String: Any] ?? [:] {
+            guard let d = v as? [String: Any], str(d["mode"]) == "parked" else { continue }
+            let at = str(d["at"]).flatMap { iso.date(from: $0) ?? plain.date(from: $0) }
+            out[tab] = ParkRecord(note: str(d["note"]), at: at, by: str(d["by"]))
         }
         return out
     }

@@ -154,6 +154,9 @@ struct SidebarView: View {
     var select: (String) -> Void
     var onFactory: () -> Void = {}
 
+    /// Tabs whose Resume is running, so a second click does nothing and the button says so.
+    @State private var resuming: Set<String> = []
+
     /// Tokens for the effective mode; the view re-renders when the store changes.
     private var t: Tokens { theme.sidebarTokens }
 
@@ -189,7 +192,8 @@ struct SidebarView: View {
     private var lines: [SidebarLine] {
         if state.mode == .spaces {
             return SidebarModel.build(snapshot: model.snapshot, orchestrators: model.orchestrators, lanes: model.lanes,
-                                      workflows: model.workflows, selectedTab: state.selectedTab, manualOpen: state.manualOpen)
+                                      workflows: model.workflows, selectedTab: state.selectedTab, manualOpen: state.manualOpen,
+                                      parked: Set(model.catalog.snapshot.parked.keys))
         }
         return SidebarModel.buildAreas(snapshot: model.snapshot, orchestrators: model.orchestrators, lanes: model.lanes,
                                        workflows: model.workflows, catalog: model.catalog.snapshot, chip: state.chip,
@@ -238,8 +242,11 @@ struct SidebarView: View {
     }
 
     private var chipRow: some View {
+        let parked = model.catalog.snapshot.parked
+        let parkedCount = model.snapshot?.tabs.filter { parked[$0.tab_id] != nil }.count ?? 0
         let chips: [(AreaChip, String)] = [
             (.all, "All"), (.scoping, "Scope"), (.building, "Build"), (.review, "Review"), (.use, "Use"),
+            (.parked, parkedCount > 0 ? "Parked \(parkedCount)" : "Parked"),
         ]
         return HStack(spacing: 8) {
             ForEach(chips, id: \.0.rawValue) { chip, title in
@@ -264,7 +271,9 @@ struct SidebarView: View {
         case .note: note(l)
         case .area: areaHeader(l)
         case .focus: focusHeader(l)
-        default: rowView(l)
+        case .parked: parkedHeader(l)
+        default:
+            if l.parked { parkedRow(l) } else { rowView(l) }
         }
     }
 
@@ -290,6 +299,71 @@ struct SidebarView: View {
         .hookAction("chip:needs") { state.setChip(.needs) }
         .clickTarget("focus")
         .clickTarget("chip:needs")
+    }
+
+    /// The foot group: a hairline above, then "Parked N", shut until opened.
+    private func parkedHeader(_ l: SidebarLine) -> some View {
+        VStack(spacing: 0) {
+            Rectangle().fill(t.line).frame(height: 1).padding(.top, 10).padding(.bottom, 6)
+            HStack(spacing: 6) {
+                Text((l.chevron ?? false) ? "▾" : "▸").foregroundStyle(t.mute)
+                Text(l.title).foregroundStyle(t.mute)
+                Spacer(minLength: 4)
+                Text(l.trailing).foregroundStyle(t.mute)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+            .onTapGesture { if let id = l.toggle { toggle(id, currentlyOpen: l.chevron ?? false) } }
+            .clickTarget(l.id)
+        }
+    }
+
+    /// A parked row: name, then when and why on a second line; Resume on the right.
+    private func parkedRow(_ l: SidebarLine) -> some View {
+        HStack(alignment: .center, spacing: 6) {
+            if !l.glyph.isEmpty { Text(l.glyph).foregroundStyle(t.mute) }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(l.title).foregroundStyle(t.ink).lineLimit(1)
+                if let note = l.parkNote, !note.isEmpty {
+                    Text(note).font(.system(size: 11)).foregroundStyle(t.mute).lineLimit(2).truncationMode(.tail)
+                        .help(note)
+                }
+            }
+            Spacer(minLength: 4)
+            if let tab = l.tab {
+                Text(resuming.contains(tab) ? "Resuming…" : "Resume")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(t.ink)
+                    .padding(.horizontal, 8).padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 5).stroke(t.line, lineWidth: 1))
+                    .contentShape(Rectangle())
+                    .onTapGesture { resume(tab) }
+                    .clickTarget("resume:\(tab)")
+            }
+        }
+        .padding(.leading, CGFloat(6 + l.depth * 16))
+        .padding(.trailing, 6)
+        .padding(.vertical, 4)
+        .background(RoundedRectangle(cornerRadius: 5).fill(l.selected ? t.sel : .clear))
+        .contentShape(Rectangle())
+        .onTapGesture { click(l) }
+        .contextMenu { if let tab = l.tab { Button("Resume") { resume(tab) } } }
+        .clickTarget(l.id)
+    }
+
+    private func resume(_ tab: String) {
+        guard !resuming.contains(tab) else { return }
+        resuming.insert(tab)
+        ParkActions.run("unpark", tab: tab) { _, _ in
+            resuming.remove(tab)
+            model.catalog.reload()
+        }
+    }
+
+    private func park(_ l: SidebarLine) {
+        guard let tab = l.tab, let note = ParkActions.askNote(name: l.title, window: NSApp.keyWindow) else { return }
+        ParkActions.run("park", tab: tab, note: note.isEmpty ? nil : note) { _, _ in model.catalog.reload() }
     }
 
     private func areaHeader(_ l: SidebarLine) -> some View {
@@ -372,6 +446,11 @@ struct SidebarView: View {
         .contentShape(Rectangle())
         .onTapGesture { click(l) }
         .hookAction(l.kind == .focus ? "focus" : "row:\(l.title)") { click(l) }
+        .contextMenu {
+            if state.mode == .areas, l.tab != nil, l.kind == .orchestrator || l.kind == .lane {
+                Button("Park…") { park(l) }
+            }
+        }
         .clickTarget(l.id)
     }
 
