@@ -141,6 +141,9 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             guard let self else { return false }
             return self.docPanel.hasFocus || self.detailClaimsEscape
         }
+        Keymap.shared.addContextual(chord: "cmd+l", action: "focus_doc_address") { [weak self] in
+            self?.docPanel.hasFocus == true && self?.docPanel.showingWeb == true
+        }
         window.contentView = root
         applyTheme()
         registry.onReplace = { [weak self] old, new in self?.replaceSurface(old: old, new: new) }
@@ -472,6 +475,13 @@ final class ShellWindow: NSWindow {
     var staysInactive = false
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
         staysInactive ? frameRect : super.constrainFrameRect(frameRect, to: screen)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.type == .keyDown, let entry = Keymap.shared.entry(for: event), entry.contextual {
+            return Keymap.shared.fire(entry)
+        }
+        return super.performKeyEquivalent(with: event)
     }
 }
 

@@ -87,8 +87,8 @@ final class Keymap {
 
     func entry(for event: NSEvent) -> Entry? {
         let chord = Chord(keyCode: event.keyCode, mods: event.modifierFlags.intersection(Self.modMask))
-        if let e = byChord[chord] { return e }
-        return contextual.first { $0.entry.parsed == chord && $0.isActive() }?.entry
+        if let hit = contextual.first(where: { $0.entry.parsed == chord && $0.isActive() }) { return hit.entry }
+        return byChord[chord]
     }
 
     /// A chord the app claims only while a condition holds (Esc while the detail panel is open).
@@ -194,6 +194,7 @@ extension MainWindowController {
         case "prev_tab": prevTab(nil)
         case "focus_pane_left": focusNeighbor(dx: -1, dy: 0)
         case "focus_pane_right": focusNeighbor(dx: 1, dy: 0)
+        case "focus_doc_address": docPanel.focusAddress()
         case "focus_pane_up": focusNeighbor(dx: 0, dy: -1)
         case "focus_pane_down": focusNeighbor(dx: 0, dy: 1)
         case "new_tab": newTab(nil)

@@ -1,0 +1,26 @@
+HerdrShell P17 check  2026-10-02T08:43:19Z
+pages on http://127.0.0.1:58224
+pane A w2:p1 from herdr pane list
+[PASS] herdr-context add from pane A's HERDR_PANE_ID -- c1
+[PASS] herdr-context add of a file from pane A -- c2
+app start: {"pids": [45299], "fifo_ready_s": 1.0}
+[PASS] app is up with lane A
+[PASS] row A shows the two context items in order -- tabs=['Ref', 'note.md']
+[PASS] the url item loads (and sets the cookie) -- title='Ref page'
+[PASS] row B does not show row A's items -- tabs=[]
+[PASS] a page in row B sees the cookie set in row A -- title='cookie-yes' tabs=['127.0.0.1']
+[PASS] + writes the item with added_by you -- [{"added_at": "2026-10-02T08:43:25Z", "added_by": "you", "id": "c1", "kind": "url", "ref": "http://127.0.0.1:58224/see.html", "title": "127.0.0.1"}]
+[PASS] typing in the address field navigates -- title='Second page' url='http://127.0.0.1:58224/second.html'
+[PASS] back returns to the first page -- title='Ref page'
+[PASS] cmd+L focuses the address field when the panel has focus -- docs={'active': 'Ref', 'address_focused': True, 'focused': True, 'tabs': ['Ref', 'note.md'], 'text': 'ref ok', 'title': 'Ref page', 'url': 'http://127.0.0.1:58224/ref.html'}
+[PASS] with the panel open, typed text still reaches the focused pane -- seen 0.058s
+[PASS] ✕ removes the item from the context file -- file=[] tabs=[]
+[PASS] re-add the cookie page on row B before relaunch -- c1
+[PASS] frontmost app unchanged -- OrbStack
+app start: {"pids": [51555], "fifo_ready_s": 0.74}
+[PASS] the cookie is still there after relaunch -- title='cookie-yes'
+[PASS] screenshot checks/P17.png with row A's two items -- /Volumes/StudioExt/repos/herdr-worktrees/native-shell-areas/macos/HerdrShell/checks/P17.png
+[PASS] frontmost app unchanged -- OrbStack
+lab down: stop: 0
+
+RESULT: PASS

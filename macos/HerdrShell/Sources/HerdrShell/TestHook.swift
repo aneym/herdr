@@ -419,7 +419,7 @@ final class TestHook {
             } else if let w = controller?.window {
                 // Not key: the app must not be activated. Claimed chords run through
                 // performKeyEquivalent; everything else is delivered to the first responder.
-                let viewClaimed = ev.type == .keyDown && w.performKeyEquivalent(with: ev)
+                let viewClaimed = ev.type == .keyDown && claimKeyEquivalent(ev, window: w)
                 // The menu matches a bare letter to an item whose equivalent is command+that letter
                 // when the app is not active, which swallows the letter. Only command chords go there.
                 let menuClaimed = !viewClaimed && ev.type == .keyDown && ev.modifierFlags.contains(.command)
@@ -438,6 +438,21 @@ final class TestHook {
             }
             if down { delivered.append("\(mods.joined(separator: "+"))\(mods.isEmpty ? "" : "+")\(name) via \(isKey ? "NSApp.sendEvent" : "window-emulated")") }
         }
+    }
+
+    /// The window's own performKeyEquivalent returns false while the window is not key.
+    /// Walk the first responder so a focused doc web view can claim ⌘L.
+    private func claimKeyEquivalent(_ ev: NSEvent, window w: NSWindow) -> Bool {
+        if w.performKeyEquivalent(with: ev) { return true }
+        var responder = w.firstResponder
+        var seen = Set<ObjectIdentifier>()
+        while let r = responder, !(r is NSWindow) {
+            let id = ObjectIdentifier(r)
+            if !seen.insert(id).inserted { break }
+            if r.performKeyEquivalent(with: ev) { return true }
+            responder = r.nextResponder
+        }
+        return false
     }
 
     /// Captures this app's own window, Metal layers included, through the window

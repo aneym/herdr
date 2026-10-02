@@ -63,6 +63,7 @@ let shellLanesPath = ProcessInfo.processInfo.environment["HERDR_LANES_PATH"] ?? 
 let shellAreasPath = ProcessInfo.processInfo.environment["HERDR_AREAS_PATH"] ?? (home + "/.agent-rails/herdr/areas.json")
 ShellPaths.lanes = shellLanesPath
 ShellPaths.areas = shellAreasPath
+ContextStore.directory = ProcessInfo.processInfo.environment["HERDR_CONTEXT_DIR"] ?? (home + "/.agent-rails/herdr/context")
 
 // Children must not inherit the launching pane's herdr identity (HERDR_ENV and
 // friends) or any Claude session markers.
