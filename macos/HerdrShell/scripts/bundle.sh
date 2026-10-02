@@ -35,6 +35,12 @@ if [[ -d "$D/Resources" ]]; then
   cp -R "$D/Resources/." "$APP/Contents/Resources/"
 fi
 ICON=""
+# Dev carries its own badged icon so it's never mistaken for prod.
+if [[ "$CHANNEL" == "dev" && -f "$APP/Contents/Resources/AppIcon-dev.icns" ]]; then
+  mv -f "$APP/Contents/Resources/AppIcon-dev.icns" "$APP/Contents/Resources/AppIcon.icns"
+else
+  rm -f "$APP/Contents/Resources/AppIcon-dev.icns"
+fi
 if [[ -f "$APP/Contents/Resources/AppIcon.icns" ]]; then
   ICON="AppIcon"
 fi
