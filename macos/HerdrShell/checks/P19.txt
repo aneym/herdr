@@ -1,20 +1,26 @@
-P19 chat view check  2026-10-01T23:18:38Z  load 866 on 16 cores
+P19 chat view check  2026-10-02T02:06:40Z  load 400 on 16 cores
 PASS --dump-chat view (focus, working): runs bash x3 [Bash, Read, Grep] and build x2 [Bash, Bash] folded; live line "Run the P19 check"
 PASS fixture light screenshot (focus, working state): checks/P19-light.png
 PASS --dump-chat view (full): every run of tool calls open
 PASS fixture dark screenshot (full, blocked state): checks/P19-dark.png
-PASS fixture: exactly 12 visible items in order; sidechain, isMeta, compact summary, thinking and tool_result records hidden; results, error/running status, Edit diff, lane bulletin, queued prompt and turn duration associated
-PASS focus (default): runs of 3 and 2 tool calls are one line each, none of their rows drawn; the live line reads "Run the P19 check", the newest running tool
+PASS fixture: exactly 12 visible items in order; sidechain, isMeta, compact summary, thinking and tool_result records hidden; bash is done and grep is error (distinct); Edit diff, lane bulletin, queued prompt and turn duration associated
+PASS focus (pinned): runs of 3 and 2 tool calls are one line each, none of their rows drawn; the live line reads "Run the P19 check", the newest running tool
 PASS focus click: the "2 tool calls" line opened to its Build and Check rows; the other run stayed folded
 PASS Full: every run opens
+PASS focus default: one launch with no --chat-mode and HerdrShell.chatMode deleted; initial mode is focus
 PASS mode persists: unpinned window started in focus (saved value: none, so Focus); switching to full wrote HerdrShell HerdrShell.chatMode=full; the saved value was restored afterwards
-PASS append n=20: every message within 1.5 s; p50=23.9 ms p95=146.6 ms max=252.3 ms
-PASS 300 MiB transcript: first render 787 ms, peak sampled RSS 101.2 MiB (< 300 MiB; tail read only)
-lab shellspike-ch: pane w1:p7 runs a script named claude (herdr detects agent=claude by process); native session report p19-383374aa; transcript h/.claude/projects/-private-tmp/p19-383374aa.jsonl
+PASS append n=20: every message within 1.5 s; p50=38.6 ms p95=251.1 ms max=722.1 ms
+PASS 300 MiB transcript: first render 1271 ms, peak sampled RSS 99.3 MiB (< 300 MiB); transcript bytes read 2097152 (≤ 2 MiB + 1 MiB slack, file was 314573885 bytes)
+PASS draft unknown: last 12 rows had no ❯; Enter held "hello unknown" and warned "can't see the prompt; send anyway?"; send-text was not called
+PASS equal-length rewrite: 96-byte record `old` truncated and replaced with `new`; dump shows new
+PASS load earlier: file over 2 MiB with 400 tail items; after Load earlier, EARLIER-VISIBLE is in the list
+PASS per-pane send queue: two 600-scalar sends logged AARBBR (one message finished before the other started)
+PASS reject --transcript with --pane unless --read-only: exit 2; [herdr-shell] refusing --transcript /Volumes/StudioExt/repos/herdr-worktrees/native-shell-chat/macos/HerdrShell/scripts/fixtures/p19/conversation.jsonl --pane p19-combo without --read-only
+lab shellspike-ch: pane w1:p7 runs a script named claude (herdr detects agent=claude by process); native session report p19-cc42dca3; transcript h/.claude/projects/-private-tmp/p19-cc42dca3.jsonl
 PASS lab chat opened the fake session from `herdr agent get` (state unknown); composer is first responder
 PASS Shift+Enter inserts a newline in the composer and sends nothing
-PASS send: typed "hello from the composer" + Enter in the composer; `herdr pane read` shows "received: hello from the composer" (the fake reads a whole line, so the text and its trailing return arrived) 0.83 s after the last key; the You message came back from the transcript and the sending state cleared
+PASS send: typed "hello from the composer" + Enter in the composer; `herdr pane read` shows "received: hello from the composer" (the fake reads a whole line, so the text and its trailing return arrived) 0.70 s after the last key; the You message came back from the transcript and the sending state cleared
 PASS draft: with "half typed in the terminal" after the pane's ❯, Enter showed "There's unsent text in the terminal" (Send anyway / Cancel); 2 s later the pane and transcript show nothing from the composer (checks/P19-draft.png)
 PASS blocked: herdr reported the fake's permission dialog as blocked; Enter held "third message" ("held: will send when the terminal stops asking"), nothing reached the pane in 4 s (checks/P19-held.png)
-PASS unblocked: the held message reached the pane 0.9 s after the dialog closed (3 s recheck)
-PASS live: --demo chat --pane w5H:pZZ --read-only rendered 68 items from the real session (agent state working); no key events and no sends (checks/P19-live.png)
+PASS unblocked: the held message reached the pane 1.0 s after the dialog closed (3 s recheck)
+NOT RUN live screenshot: no --live-pane given

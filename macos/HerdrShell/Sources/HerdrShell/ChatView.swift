@@ -631,8 +631,8 @@ struct ChatView: View {
                 HStack(spacing: 10) {
                     Image(systemName: "exclamationmark.circle").font(.system(size: 13)).foregroundStyle(p.t.warn)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("There's unsent text in the terminal").font(.system(size: 13, weight: .medium))
-                        Text("Sending now would join it to your message.").font(.system(size: Metric.small)).foregroundStyle(p.mute)
+                        Text(sender.status).font(.system(size: 13, weight: .medium))
+                        Text(sender.status.contains("prompt") ? "The prompt isn't in view, so this may append to a draft." : "Sending now would join it to your message.").font(.system(size: Metric.small)).foregroundStyle(p.mute)
                     }
                     Spacer()
                     Button("Cancel") { text = sender.cancel() }.buttonStyle(.plain).font(.system(size: Metric.small, weight: .medium)).foregroundStyle(p.mute)

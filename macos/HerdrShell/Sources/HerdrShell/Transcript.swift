@@ -15,6 +15,17 @@ struct ChatItem: Identifiable, Codable, Equatable {
 
 final class Transcript: ObservableObject {
     static let block = 2 * 1024 * 1024
+    private static let bytesLock = NSLock()
+    private static var readBytes: UInt64 = 0
+    /// Bytes this process has read from transcript files. The check uses it to prove a tail read.
+    static var bytesRead: UInt64 {
+        bytesLock.lock(); defer { bytesLock.unlock() }
+        return readBytes
+    }
+    static func noteRead(_ count: Int) {
+        guard count > 0 else { return }
+        bytesLock.lock(); readBytes += UInt64(count); bytesLock.unlock()
+    }
     @Published private(set) var items: [ChatItem] = []
     @Published private(set) var state = "asleep"
     @Published private(set) var waiting = false
@@ -26,6 +37,8 @@ final class Transcript: ObservableObject {
     private var rows: [ChatItem] = []
     private var path = "", session = "", cwd = ""
     private var offset: UInt64 = 0, first: UInt64 = 0
+    private var dev: UInt64 = 0, ino: UInt64 = 0, digest: UInt64 = 0
+    private var renderLimit = 400
     private var pending = Data()
     private var watcher: DispatchSourceFileSystemObject?
     private var timer: DispatchSourceTimer?
@@ -89,7 +102,8 @@ final class Transcript: ObservableObject {
     }
     private func switchFile(_ file: String) {
         watcher?.cancel(); watcher = nil
-        path = file; offset = 0; pending = Data(); rows = []
+        path = file; offset = 0; pending = Data(); rows = []; renderLimit = 400
+        dev = 0; ino = 0; digest = 0
         read(initial: true)
     }
     private func watch() {
@@ -105,18 +119,58 @@ final class Transcript: ObservableObject {
         source.setCancelHandler { close(fd) }
         watcher = source; source.resume()
     }
+    private func fileID(_ handle: FileHandle) -> (UInt64, UInt64) {
+        var st = stat()
+        guard fstat(handle.fileDescriptor, &st) == 0 else { return (0, 0) }
+        return (UInt64(st.st_dev), st.st_ino)
+    }
+    private func mix(_ data: Data, into start: UInt64 = 14695981039346656037) -> UInt64 {
+        var h = start
+        for b in data { h ^= UInt64(b); h &*= 1099511628211 }
+        return h
+    }
+    /// Fingerprint of the loaded window. A same-size rewrite changes it even when the inode does not.
+    private func windowDigest(_ handle: FileHandle, from start: UInt64, to end: UInt64) -> UInt64 {
+        guard end > start else { return 0 }
+        let sample = 4096
+        let span = end - start
+        if span <= UInt64(sample * 2) {
+            try? handle.seek(toOffset: start)
+            let data = (try? handle.read(upToCount: Int(span))) ?? Data()
+            Self.noteRead(data.count)
+            return mix(data)
+        }
+        try? handle.seek(toOffset: start)
+        let head = (try? handle.read(upToCount: sample)) ?? Data()
+        Self.noteRead(head.count)
+        try? handle.seek(toOffset: end - UInt64(sample))
+        let tail = (try? handle.read(upToCount: sample)) ?? Data()
+        Self.noteRead(tail.count)
+        return mix(tail, into: mix(head))
+    }
     private func read(initial: Bool = false) {
         guard !path.isEmpty, let handle = FileHandle(forReadingAtPath: path) else {
             DispatchQueue.main.async { self.waiting = !self.path.isEmpty; self.items = [] }; return
         }
         defer { try? handle.close() }
         guard let size = try? handle.seekToEnd() else { return }
-        let reset = initial || size < offset
-        if reset { rows = []; pending = Data(); offset = size > UInt64(Self.block) ? size - UInt64(Self.block) : 0; first = offset }
-        if size - offset > UInt64(Self.block) { offset = size - UInt64(Self.block); pending = Data() }
+        let id = fileID(handle)
+        let identityChanged = !initial && (id.0 != dev || id.1 != ino)
+        var rewritten = false
+        if !initial && !identityChanged && size == offset && offset > 0 {
+            let start = offset > UInt64(Self.block) ? offset - UInt64(Self.block) : 0
+            rewritten = windowDigest(handle, from: start, to: size) != digest
+        }
+        let reset = initial || size < offset || identityChanged || rewritten
+        if reset {
+            rows = []; pending = Data(); offset = size > UInt64(Self.block) ? size - UInt64(Self.block) : 0; first = offset
+            dev = id.0; ino = id.1
+        }
+        if size > offset && size - offset > UInt64(Self.block) { offset = size - UInt64(Self.block); pending = Data() }
         guard size > offset || reset else { watch(); return }
         try? handle.seek(toOffset: offset)
         guard let bytes = try? handle.read(upToCount: Self.block) else { return }
+        Self.noteRead(bytes.count)
         let dropPartial = pending.isEmpty && offset > 0 && (reset || size - offset >= UInt64(Self.block))
         offset += UInt64(bytes.count)
         var data = pending + bytes
@@ -127,6 +181,10 @@ final class Transcript: ObservableObject {
             pending = Data(data.suffix(from: data.index(after: last)))
         } else { pending = data }
         if pending.count > Self.block { pending = Data() }
+        dev = id.0; ino = id.1
+        let end = offset
+        let winStart = end > UInt64(Self.block) ? end - UInt64(Self.block) : 0
+        digest = windowDigest(handle, from: winStart, to: end)
         publish(); watch()
     }
     func loadEarlier() {
@@ -136,6 +194,7 @@ final class Transcript: ObservableObject {
             let end = self.first, start = end > UInt64(Self.block) ? end - UInt64(Self.block) : 0
             try? handle.seek(toOffset: start)
             guard var data = try? handle.read(upToCount: Int(end - start) + Self.block) else { return }
+            Self.noteRead(data.count)
             // Include the boundary line, but stop at the first newline at/after the old boundary.
             let boundary = Int(end - start)
             if boundary < data.count, let last = data[boundary...].firstIndex(of: 10) { data = Data(data.prefix(through: last)) }
@@ -143,11 +202,13 @@ final class Transcript: ObservableObject {
             let old = self.rows; self.rows = []
             for line in String(decoding: data, as: UTF8.self).split(separator: "\n") { self.feed(String(line)) }
             let ids = Set(self.rows.map(\.id)); self.rows += old.filter { !ids.contains($0.id) }
+            let added = self.rows.count - old.count
+            if added > 0 { self.renderLimit += added }
             self.first = start; self.publish()
         }
     }
     private func publish() {
-        rows = Array(rows.suffix(400))
+        if rows.count > renderLimit { rows = Array(rows.suffix(renderLimit)) }
         let snapshot = rows, hasEarlier = first > 0
         DispatchQueue.main.async {
             self.items = snapshot; self.waiting = false; self.earlier = hasEarlier

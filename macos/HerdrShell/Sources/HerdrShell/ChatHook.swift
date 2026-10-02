@@ -13,6 +13,8 @@ import CoreGraphics
 ///   {"cmd":"click","target":"cancel|send_anyway"}  the draft warning's buttons
 ///   {"cmd":"click","target":"group","id":"<first tool id>"}  a tool run's line
 ///   {"cmd":"mode","mode":"focus|full"}     the header's Focus | Full switch
+///   {"cmd":"load_earlier"}                 the "Load earlier messages" button
+///   {"cmd":"race"}                         two 600-scalar sends on this pane, at once
 /// Clicks call the button's own action: SwiftUI takes real mouse clicks only in the
 /// active app, and a check must never take focus from what the person is typing into.
 final class ChatHook {
@@ -22,6 +24,7 @@ final class ChatHook {
     let sender: ChatSender
     let ui: ChatUI
     var delivered: [String] = []
+    var racers: [ChatSender] = []
 
     init(path: String, window: NSWindow, transcript: Transcript, sender: ChatSender, ui: ChatUI) {
         self.path = path; self.window = window; self.transcript = transcript; self.sender = sender; self.ui = ui
@@ -54,6 +57,8 @@ final class ChatHook {
         case "shot": if let w = window { Self.capture(w, to: obj["out"] as? String ?? "/tmp/chat.png") }
         case "click": click(obj["target"] as? String ?? "", id: obj["id"] as? String)
         case "mode": ui.set(ChatUI.Mode(rawValue: obj["mode"] as? String ?? "") ?? .focus)
+        case "load_earlier": transcript.loadEarlier()
+        case "race": race()
         default: log("chat hook: unknown cmd \(cmd)")
         }
     }
@@ -77,6 +82,16 @@ final class ChatHook {
             if w.isKeyWindow { NSApp.sendEvent(addressed) } else { w.sendEvent(addressed) }
             if down { delivered.append((mods + [name]).joined(separator: "+")) }
         }
+    }
+
+    /// Two senders, one pane. A process-wide queue keeps their chunks from mixing.
+    private func race() {
+        let other = ChatSender(pane: sender.pane, readOnly: false)
+        racers.append(other)
+        let a = String(repeating: "A", count: 600)
+        let b = String(repeating: "B", count: 600)
+        sender.send(a, anyway: true)
+        other.send(b, anyway: true)
     }
 
     private func click(_ target: String, id: String?) {
@@ -112,6 +127,7 @@ final class ChatHook {
             "agent_name": transcript.name,
             "items": transcript.items.map { ["id": $0.id, "kind": $0.kind, "text": $0.text] },
             "delivered": delivered,
+            "earlier": transcript.earlier,
             "window_on_screen": window?.isVisible ?? false,
             "app_active": NSApp.isActive,
         ].merging(Self.view(transcript, ui)) { a, _ in a }
@@ -131,6 +147,7 @@ final class ChatHook {
             },
             "rendered_tools": Array(ui.rendered).sorted(),
             "activity": transcript.state == "working" ? ChatUI.activity(transcript.items) : "",
+            "transcript_bytes_read": Transcript.bytesRead,
         ]
     }
 

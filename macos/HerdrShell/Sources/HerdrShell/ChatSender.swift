@@ -1,6 +1,8 @@
 import Foundation
 import Combine
 
+enum PanePrompt { case clear, draft, unknown }
+
 struct ChatCLI {
     static func run(_ args: [String]) throws -> String {
         let p = Process(), output = Pipe()
@@ -19,7 +21,8 @@ struct ChatCLI {
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any], let result = root["result"] as? [String: Any], let agent = result["agent"] as? [String: Any] else { throw NSError(domain: "ChatCLI", code: 1) }
         return agent
     }
-    static func hasDraft(_ screen: String) -> Bool {
+    /// `.unknown` when the scanned rows never show the ❯ prompt (the draft wrapped past them, or the viewport is scrolled).
+    static func prompt(_ screen: String) -> PanePrompt {
         let regex = try! NSRegularExpression(pattern: "\u{1b}\\[([0-9;:]*)m|\u{1b}\\[[0-?]*[ -/]*[@-~]")
         var visible = "", plain = "", faint = false, offset = screen.startIndex
         func append(_ s: String) {
@@ -44,14 +47,14 @@ struct ChatCLI {
         }
         append(String(screen[offset...]))
         let lines = plain.components(separatedBy: .newlines), shown = visible.components(separatedBy: .newlines)
-        guard let start = lines.lastIndex(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("❯") }), let marker = lines[start].firstIndex(of: "❯") else { return false }
+        guard let start = lines.lastIndex(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("❯") }), let marker = lines[start].firstIndex(of: "❯") else { return .unknown }
         let count = lines[start].distance(from: lines[start].startIndex, to: marker) + 1
         var input = String(shown[start].dropFirst(count))
         for i in (start + 1)..<lines.count {
             if lines[i].trimmingCharacters(in: .whitespaces).hasPrefix("─") { break }
             input += "\n" + shown[i]
         }
-        return !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .clear : .draft
     }
 }
 
@@ -59,11 +62,22 @@ final class ChatSender: ObservableObject {
     @Published var status = ""
     @Published var warning = false
     @Published var pending = ""
-    private let pane: String
+    let pane: String
     /// A read-only window (a `--transcript` render, or `--read-only` on a real pane)
     /// never runs `send-text`.
     let readOnly: Bool
     private let queue: DispatchQueue
+    private static let queuesLock = NSLock()
+    private static var queues: [String: DispatchQueue] = [:]
+    /// One serial queue per pane, shared by every sender in this process.
+    static func queue(for pane: String) -> DispatchQueue {
+        if pane.isEmpty { return DispatchQueue(label: "herdr.chat.send.readonly", qos: .utility) }
+        queuesLock.lock(); defer { queuesLock.unlock() }
+        if let existing = queues[pane] { return existing }
+        let created = DispatchQueue(label: "herdr.chat.send.\(pane)", qos: .utility)
+        queues[pane] = created
+        return created
+    }
     private var held: [(String, Bool)] = []
     private var timer: DispatchSourceTimer?
     /// Transcript ids present when the message went out; only a newer You item acknowledges it.
@@ -71,7 +85,7 @@ final class ChatSender: ObservableObject {
     init(pane: String, readOnly: Bool = false) {
         self.pane = pane
         self.readOnly = readOnly || pane.isEmpty
-        queue = DispatchQueue(label: "herdr.chat.send.\(pane)", qos: .utility)
+        queue = Self.queue(for: pane)
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 3, repeating: 3)
         timer.setEventHandler { [weak self] in self?.drain() }
@@ -94,7 +108,16 @@ final class ChatSender: ObservableObject {
             guard a["agent"] as? String == "claude", let session = (a["agent_session"] as? [String: Any])?["value"] as? String, !session.isEmpty else { held.removeFirst(); update("No Claude session is running in that pane"); return }
             if a["agent_status"] as? String == "blocked" { update("held: will send when the terminal stops asking"); return }
             let screen = try ChatCLI.run(["pane", "read", pane, "--source", "visible", "--lines", "12", "--format", "ansi"])
-            if !anyway && ChatCLI.hasDraft(screen) { held.removeFirst(); update("There's unsent text in the terminal", warning: true); return }
+            if !anyway {
+                switch ChatCLI.prompt(screen) {
+                case .draft:
+                    held.removeFirst(); update("There's unsent text in the terminal", warning: true); return
+                case .unknown:
+                    held.removeFirst(); update("can't see the prompt; send anyway?", warning: true); return
+                case .clear:
+                    break
+                }
+            }
             update("sending")
             let points = Array(text.unicodeScalars)
             for start in stride(from: 0, to: points.count, by: 300) {

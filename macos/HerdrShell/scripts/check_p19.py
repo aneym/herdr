@@ -81,7 +81,7 @@ def records():
             tool('bash', 'Bash', {'description': 'List the chat sources', 'command': 'ls Sources/HerdrShell'}),
             tool('read', 'Read', {'file_path': '/project/Sources/HerdrShell/ChatView.swift'}),
             tool('grep', 'Grep', {'pattern': 'foregroundStyle', 'path': 'Sources'})]}},
-        {'uuid': 'look-results', 'type': 'user', 'message': {'content': [result('bash', 'ChatView.swift\nTranscript.swift'), result('read', '231 lines'), result('grep', '14 matches')]}},
+        {'uuid': 'look-results', 'type': 'user', 'message': {'content': [result('bash', 'ChatView.swift\nTranscript.swift'), result('read', '231 lines'), result('grep', 'boom', error=True)]}},
         {'uuid': 'answer', 'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': ANSWER}]}},
         {'uuid': 'edit-turn', 'type': 'assistant', 'message': {'content': [
             tool('edit', 'Edit', {'file_path': '/project/Sources/HerdrShell/ChatView.swift', 'old_string': 'static let toolRow: CGFloat = 28\n.foregroundStyle(tokens.ink)', 'new_string': 'static let toolRow: CGFloat = 22\n.foregroundStyle(p.mute)'})]}},
@@ -188,6 +188,8 @@ def fixture_checks(temp, out_dir, lines):
     by = {r['id']: r for r in visible}
     assert by['human']['text'].startswith('The tool rows feel loud'), by['human']
     assert by['bash']['status'] == 'done' and by['bash']['result'].startswith('ChatView.swift')
+    assert by['grep']['status'] == 'error' and by['grep']['result'] == 'boom'
+    assert by['read']['status'] == 'done' and by['grep']['status'] != by['read']['status']
     assert by['edit']['status'] == 'done' and '-static let toolRow: CGFloat = 28' in by['edit']['input'] and '+.foregroundStyle(p.mute)' in by['edit']['input']
     assert by['check']['status'] == 'running' and by['build']['status'] == 'done'
     assert by['bulletin:0']['text'].startswith('from w5H:p6: P18 factory view landed')
@@ -196,7 +198,7 @@ def fixture_checks(temp, out_dir, lines):
     assert '| Element | Before | After |' in by['answer:0']['text'] and '```swift' in by['answer:0']['text']
     assert 'HIDDEN' not in json.dumps(visible)
     lines.append(f'PASS fixture: exactly {len(VISIBLE)} visible items in order; sidechain, isMeta, compact summary, thinking and tool_result records hidden; '
-                 'results, error/running status, Edit diff, lane bulletin, queued prompt and turn duration associated')
+                 'bash is done and grep is error (distinct); Edit diff, lane bulletin, queued prompt and turn duration associated')
 
 
 def focus_checks(temp, lines):
@@ -214,7 +216,7 @@ def focus_checks(temp, lines):
         folded = {'bash', 'read', 'grep', 'build', 'check'}
         assert not folded & set(s['rendered_tools']), s['rendered_tools']
         assert s['activity'] == 'Run the P19 check', s['activity']
-        lines.append('PASS focus (default): runs of 3 and 2 tool calls are one line each, none of their rows drawn; '
+        lines.append('PASS focus (pinned): runs of 3 and 2 tool calls are one line each, none of their rows drawn; '
                      'the live line reads "Run the P19 check", the newest running tool')
         app.cmd({'cmd': 'click', 'target': 'group', 'id': 'build'})
         wait_for(lambda: {'build', 'check'} <= set(app.state()['rendered_tools']), 5, .1, 'the clicked run to draw its rows',
@@ -229,6 +231,22 @@ def focus_checks(temp, lines):
         lines.append('PASS Full: every run opens')
     finally:
         app.stop()
+    # Fresh defaults, no --chat-mode: the initial mode is Focus. Restore whatever was saved.
+    domain, key = 'HerdrShell', 'HerdrShell.chatMode'
+    before = subprocess.run(['defaults', 'read', domain, key], capture_output=True, text=True)
+    subprocess.run(['defaults', 'delete', domain, key], capture_output=True)
+    app = App(['--transcript', str(fixture), '--chat-state', 'idle'], dict(os.environ), temp, 'fresh.fifo')
+    try:
+        wait_for(lambda: bool(app.state()['items']), 10, .1)
+        fresh = app.state()['mode']
+        assert fresh == 'focus', fresh
+    finally:
+        app.stop()
+        if before.returncode == 0:
+            subprocess.run(['defaults', 'write', domain, key, before.stdout.strip()], check=True)
+        else:
+            subprocess.run(['defaults', 'delete', domain, key], capture_output=True)
+    lines.append('PASS focus default: one launch with no --chat-mode and HerdrShell.chatMode deleted; initial mode is focus')
     # The choice persists in UserDefaults when no flag pins it. Restore whatever was saved before.
     domain, key = 'HerdrShell', 'HerdrShell.chatMode'
     before = subprocess.run(['defaults', 'read', domain, key], capture_output=True, text=True)
@@ -289,10 +307,190 @@ def large_checks(temp, lines):
         elapsed = (time.monotonic() - start) * 1000
         assert snapshot(dump)[-1]['id'] == 'large-visible:0'
         assert rss_max < 300 * 1024, rss_max
+        view_path = Path(str(dump) + '.view.json')
+        wait_for(lambda: view_path.exists() and view_path.stat().st_size > 0, 8)
+        offscreen(json.loads(view_path.read_text()))
+        read_n = json.loads(view_path.read_text())['transcript_bytes_read']
+        file_n = large.stat().st_size
+        slack = 1024 * 1024
+        assert 2 * 1024 * 1024 <= read_n <= 2 * 1024 * 1024 + slack, read_n
+        assert read_n < file_n // 2, (read_n, file_n)
     finally:
         stop(p)
         large.unlink(missing_ok=True)
-    lines.append(f'PASS 300 MiB transcript: first render {elapsed:.0f} ms, peak sampled RSS {rss_max / 1024:.1f} MiB (< 300 MiB; tail read only)')
+    lines.append(f'PASS 300 MiB transcript: first render {elapsed:.0f} ms, peak sampled RSS {rss_max / 1024:.1f} MiB (< 300 MiB); '
+                 f'transcript bytes read {read_n} (≤ 2 MiB + 1 MiB slack, file was {file_n} bytes)')
+
+
+RECORD_96 = {
+    'old': b'{"uuid":"old","type":"assistant","message":{"content":[{"type":"text","text":"old"}]},"pad":""}\n',
+    'new': b'{"uuid":"new","type":"assistant","message":{"content":[{"type":"text","text":"new"}]},"pad":""}\n',
+}
+assert len(RECORD_96['old']) == len(RECORD_96['new']) == 96
+
+
+def write_fake(path, log, screen):
+    path.write_text(f'''#!/usr/bin/env python3
+import json, os, sys, time
+args = sys.argv[1:]
+log = {str(log)!r}
+screen = {screen!r}
+if args[:2] == ["agent", "get"]:
+    print(json.dumps({{"result": {{"agent": {{"agent": "claude", "agent_session": {{"value": "sess"}}, "agent_status": "idle", "cwd": "/tmp", "terminal_title_stripped": "Claude"}}}}}}))
+elif len(args) >= 2 and args[0] == "pane" and args[1] == "send-text":
+    chunk = args[-1]
+    mark = "R" if chunk == "\\r" else (chunk[0] if chunk else "?")
+    with open(log, "a") as handle:
+        handle.write(f"{{time.time():.6f}} {{mark}}\\n")
+    if os.environ.get("P19_SEND_DELAY"):
+        time.sleep(float(os.environ["P19_SEND_DELAY"]))
+    print("ok")
+elif args[:2] == ["pane", "read"]:
+    sys.stdout.write(screen)
+else:
+    print("ok")
+''')
+    os.chmod(path, 0o755)
+
+
+def draft_unknown_check(temp, lines):
+    """No ❯ in the last 12 rows: hold and warn, do not send."""
+    log = temp / 'draft-sends.log'
+    fake = temp / 'fake-herdr'
+    write_fake(fake, log, 'scrolled away from the prompt\nstill no marker on this row\n')
+    app = App(['--demo', 'chat', '--pane', 'p19-draft-probe', '--herdr', str(fake), '--chat-mode', 'focus'],
+              dict(os.environ), temp, 'draft.fifo')
+    try:
+        wait_for(lambda: app.state().get('composer_focused'), 10, .1)
+        app.type('hello unknown')
+        time.sleep(.3)
+        app.key('return')
+        wait_for(lambda: app.state().get('warning') and app.state().get('status') == "can't see the prompt; send anyway?",
+                 8, .1, 'the unknown-prompt warning', lambda: json.dumps({k: app.state().get(k) for k in ('status', 'warning', 'pending')}))
+        time.sleep(.8)
+        sends = log.read_text() if log.exists() else ''
+        assert 'hello unknown' not in sends and not log.exists(), sends
+        s = app.state()
+        assert s['pending'] == 'hello unknown' and s['warning'] is True, s
+    finally:
+        app.stop()
+    lines.append('PASS draft unknown: last 12 rows had no ❯; Enter held "hello unknown" and warned '
+                 '"can\'t see the prompt; send anyway?"; send-text was not called')
+
+
+def rewrite_check(temp, lines):
+    """Truncate and rewrite an equal-length record. The dump must show `new`, not `old`."""
+    file = temp / 'rewrite.jsonl'
+    dump = temp / 'rewrite.json'
+    file.write_bytes(RECORD_96['old'])
+    p = launch(file, dump)
+    try:
+        wait_for(lambda: any(i.get('text') == 'old' for i in snapshot(dump)), 8, .05, 'the old record')
+        fd = os.open(file, os.O_RDWR)
+        os.ftruncate(fd, 0)
+        os.write(fd, RECORD_96['new'])
+        os.close(fd)
+        assert file.stat().st_size == 96
+        wait_for(lambda: any(i.get('text') == 'new' for i in snapshot(dump)) and not any(i.get('text') == 'old' for i in snapshot(dump)),
+                 5, .05, 'the rewritten record', lambda: json.dumps(snapshot(dump)))
+        view_path = Path(str(dump) + '.view.json')
+        wait_for(lambda: view_path.exists() and view_path.stat().st_size > 0, 8)
+        offscreen(json.loads(view_path.read_text()))
+    finally:
+        stop(p)
+    lines.append('PASS equal-length rewrite: 96-byte record `old` truncated and replaced with `new`; dump shows new')
+
+
+def earlier_check(temp, lines):
+    """A tail of 400 visible items must not discard the block Load earlier reads."""
+    path = temp / 'earlier.jsonl'
+    earlier = (json.dumps({'uuid': 'earlier-marker', 'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'EARLIER-VISIBLE'}]}}) + '\n').encode()
+    pad = (json.dumps({'type': 'unknown', 'padding': 'x' * 180}) + '\n').encode()
+    tail = b''.join(
+        (json.dumps({'uuid': f'tail-{i}', 'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': f'tail {i}'}]}}) + '\n').encode()
+        for i in range(400)
+    )
+    with path.open('wb') as handle:
+        handle.write(earlier)
+        while handle.tell() < 2 * 1024 * 1024 + len(earlier):
+            handle.write(pad)
+        handle.write(tail)
+    assert path.stat().st_size > 2 * 1024 * 1024
+    app = App(['--transcript', str(path), '--chat-mode', 'focus', '--chat-state', 'idle'], dict(os.environ), temp, 'earlier.fifo')
+    try:
+        def ids():
+            return [i['id'] for i in app.state()['items']]
+        wait_for(lambda: len(ids()) >= 400 and 'earlier-marker:0' not in ids(), 20, .1, 'the 400-item tail', lambda: str(len(ids())))
+        assert app.state()['earlier'] is True
+        app.cmd({'cmd': 'load_earlier'})
+        wait_for(lambda: 'earlier-marker:0' in ids(), 15, .1, 'the earlier item to stay visible', lambda: str(ids()[:3]))
+        assert any(i['text'] == 'EARLIER-VISIBLE' for i in app.state()['items'])
+    finally:
+        app.stop()
+    lines.append('PASS load earlier: file over 2 MiB with 400 tail items; after Load earlier, EARLIER-VISIBLE is in the list')
+
+
+def race_check(temp, lines):
+    """Two 600-scalar sends to one pane must not interleave their chunks."""
+    log = temp / 'race.log'
+    fake = temp / 'fake-herdr-race'
+    write_fake(fake, log, '\n❯ \n')
+    env = dict(os.environ, P19_SEND_DELAY='0.15')
+    app = App(['--demo', 'chat', '--pane', 'p19-race', '--herdr', str(fake), '--chat-mode', 'focus'], env, temp, 'race.fifo')
+    try:
+        wait_for(lambda: app.state().get('composer_focused'), 10, .1)
+        app.cmd({'cmd': 'race'})
+        def marks():
+            if not log.exists():
+                return []
+            rows = []
+            for line in log.read_text().splitlines():
+                t, m = line.split()
+                rows.append((float(t), m))
+            return rows
+        wait_for(lambda: len(marks()) >= 6, 15, .1, 'six send-text calls', lambda: str(marks()))
+        events = marks()
+        letters = ''.join(m for _, m in events)
+        r_times = [t for t, m in events if m == 'R']
+        a_times = [t for t, m in events if m == 'A']
+        b_times = [t for t, m in events if m == 'B']
+        assert len(a_times) == 2 and len(b_times) == 2 and len(r_times) == 2, letters
+        first_r = min(r_times)
+        assert min(a_times) > first_r or min(b_times) > first_r, letters
+        assert letters in ('AARBBR', 'BBRAAR'), letters
+    finally:
+        app.stop()
+    lines.append(f'PASS per-pane send queue: two 600-scalar sends logged {letters} (one message finished before the other started)')
+
+
+def combo_check(temp, lines):
+    """--transcript and --pane together must not send unless --read-only."""
+    fixture = FIX / 'conversation.jsonl'
+    if not fixture.exists():
+        fixture.write_text(''.join(json.dumps(r) + '\n' for r in records()))
+    fake = temp / 'fake-herdr-combo'
+    write_fake(fake, temp / 'combo.log', '\n❯ \n')
+    proc = subprocess.Popen([str(BIN), '--transcript', str(fixture), '--pane', 'p19-combo', '--herdr', str(fake)],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        _, stderr = proc.communicate(timeout=3)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+        raise AssertionError('--transcript with --pane kept running without --read-only')
+    text = stderr.decode()
+    assert proc.returncode == 2, (proc.returncode, text)
+    assert 'read-only' in text, text
+    dump = temp / 'combo.json'
+    allowed = subprocess.Popen([str(BIN), '--transcript', str(fixture), '--pane', 'p19-combo', '--read-only',
+                                '--herdr', str(fake), '--dump-chat', str(dump)],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        time.sleep(.4)
+        assert allowed.poll() is None, allowed.returncode
+    finally:
+        stop(allowed)
+    lines.append(f'PASS reject --transcript with --pane unless --read-only: exit 2; {text.strip()}')
 
 
 # ---- lab ----
@@ -501,6 +699,7 @@ def main():
     parser.add_argument('--out', default='checks/P19.txt')
     parser.add_argument('--live-pane', help='a real Claude pane to render read-only for checks/P19-live.png')
     parser.add_argument('--skip-lab', action='store_true')
+    parser.add_argument('--only', action='append', default=[], help='run just these step names')
     args = parser.parse_args()
     out = ROOT / args.out
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -509,9 +708,16 @@ def main():
     failure = False
     steps = [('fixture', lambda t: fixture_checks(t, out.parent, lines)), ('focus', lambda t: focus_checks(t, lines)),
              ('append', lambda t: append_checks(t, lines)),
-             ('large transcript', lambda t: large_checks(t, lines))]
-    if not args.skip_lab:
+             ('large transcript', lambda t: large_checks(t, lines)),
+             ('draft unknown', lambda t: draft_unknown_check(t, lines)),
+             ('rewrite', lambda t: rewrite_check(t, lines)),
+             ('load earlier', lambda t: earlier_check(t, lines)),
+             ('send queue', lambda t: race_check(t, lines)),
+             ('transcript pane', lambda t: combo_check(t, lines))]
+    if not args.skip_lab and not args.only:
         steps.append(('lab', lambda t: lab_checks(t, out.parent, lines)))
+    if args.only:
+        steps = [step for step in steps if step[0] in args.only]
     if args.live_pane:
         steps.append(('live', lambda t: live_check(args.live_pane, t, out.parent, lines)))
     with tempfile.TemporaryDirectory(prefix='p19-', dir=os.environ.get('TMPDIR')) as temp:

@@ -49,6 +49,10 @@ for s in (args["glass"] ?? "").split(separator: ",") {
 }
 if args["demo"] == "chat" || args["transcript"] != nil {
     if args["transcript"] == nil && args["pane"] == nil { log("chat requires --pane or --transcript"); exit(2) }
+    if args["transcript"] != nil && args["pane"] != nil && !flags.contains("--read-only") {
+        log("refusing --transcript \(args["transcript"]!) --pane \(args["pane"]!) without --read-only")
+        exit(2)
+    }
     if let bin = args["herdr"] { setenv("HERDR_BIN", bin, 1) }
     if let socket = args["socket"] { setenv("HERDR_SOCKET_PATH", socket, 1) }
     let chatApp = NSApplication.shared
