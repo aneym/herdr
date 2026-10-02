@@ -248,9 +248,12 @@ struct SidebarView: View {
             (.all, "All"), (.scoping, "Scope"), (.building, "Build"), (.review, "Review"), (.use, "Use"),
             (.parked, parkedCount > 0 ? "Parked \(parkedCount)" : "Parked"),
         ]
-        return HStack(spacing: 8) {
+        // Six chips share the sidebar width: one line each, tighter gaps, never a wrapped "Parked N".
+        return HStack(spacing: 4) {
             ForEach(chips, id: \.0.rawValue) { chip, title in
                 Text(title)
+                    .lineLimit(1)
+                    .fixedSize()
                     .font(.system(size: 12, weight: state.chip == chip ? .medium : .regular))
                     .foregroundStyle(state.chip == chip ? t.ink : t.mute)
                     .padding(.horizontal, 4).padding(.vertical, 2)
