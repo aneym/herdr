@@ -117,12 +117,31 @@ struct ClickTargetKey: PreferenceKey {
     }
 }
 
+/// The button action a check invokes by target and id. SwiftUI only takes real mouse
+/// clicks in the active app, so `--agent-run` calls these instead of posting a click.
+final class ClickRegistry {
+    static let shared = ClickRegistry()
+    private var actions: [String: () -> Void] = [:]
+    func set(_ key: String, _ action: @escaping () -> Void) { actions[key] = action }
+    @discardableResult func call(_ key: String) -> Bool {
+        guard let action = actions[key] else { return false }
+        action()
+        return true
+    }
+}
+
 extension View {
     /// Reports this view's frame in the named "click" space under `id`.
     func clickTarget(_ id: String) -> some View {
         background(GeometryReader { g in
             Color.clear.preference(key: ClickTargetKey.self, value: [id: g.frame(in: .named("click"))])
         })
+    }
+
+    /// Registers `action` under `key` on every refresh, the same closure the control runs.
+    func hookAction(_ key: String, _ action: @escaping () -> Void) -> some View {
+        ClickRegistry.shared.set(key, action)
+        return self
     }
 }
 
@@ -197,6 +216,7 @@ struct SidebarView: View {
                         .padding(.horizontal, 8).padding(.vertical, 3)
                         .background(RoundedRectangle(cornerRadius: 5).fill(t.sel))
                         .onTapGesture { state.setAreaOnly(nil) }
+                        .hookAction("only") { state.setAreaOnly(nil) }
                         .clickTarget("only")
                 }
             }
@@ -212,6 +232,7 @@ struct SidebarView: View {
             .background(RoundedRectangle(cornerRadius: 5).fill(state.mode == mode ? t.sel : Color.clear))
             .contentShape(Rectangle())
             .onTapGesture { state.setMode(mode) }
+            .hookAction("mode:\(mode.rawValue)") { state.setMode(mode) }
             .clickTarget("mode:\(mode.rawValue)")
     }
 
@@ -230,6 +251,7 @@ struct SidebarView: View {
                     .background(RoundedRectangle(cornerRadius: 5).fill(state.chip == chip ? t.sel : t.ink.opacity(0.06)))
                     .contentShape(Rectangle())
                     .onTapGesture { state.setChip(chip) }
+                    .hookAction("chip:\(chip.rawValue)") { state.setChip(chip) }
                     .clickTarget("chip:\(chip.rawValue)")
             }
         }
@@ -258,6 +280,7 @@ struct SidebarView: View {
         .padding(.vertical, 4)
         .contentShape(Rectangle())
         .onTapGesture { areaClick(l) }
+        .hookAction("area:\(l.title)") { areaClick(l) }
         .clickTarget(l.id)
     }
 
@@ -325,6 +348,7 @@ struct SidebarView: View {
         .overlay(RoundedRectangle(cornerRadius: 5).stroke(l.tab != nil && state.detailRow == l.tab ? t.mute : .clear, lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture { click(l) }
+        .hookAction(l.kind == .focus ? "focus" : "row:\(l.title)") { click(l) }
         .clickTarget(l.id)
     }
 

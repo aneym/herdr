@@ -42,7 +42,39 @@ def herdr_json(*a):
     return json.loads(lab("herdr", *a))
 
 
+_front_before = None
+
+
+def frontmost_app():
+    """Name of the front app. A check fails if this changes."""
+    r = subprocess.run(
+        ["osascript", "-e", 'tell application "System Events" to get name of first application process whose frontmost is true'],
+        capture_output=True, text=True)
+    name = (r.stdout or "").strip()
+    if name:
+        return name
+    r = subprocess.run(["lsappinfo", "front"], capture_output=True, text=True)
+    line = (r.stdout or "").splitlines()[0] if r.stdout else ""
+    if ':"' in line:
+        return line.split(':"', 1)[1].split('"', 1)[0]
+    return line.strip() or "unknown"
+
+
+def mark_front():
+    global _front_before
+    if _front_before is None:
+        _front_before = frontmost_app()
+
+
+def check_front(check):
+    now = frontmost_app()
+    ok = _front_before is not None and now == _front_before
+    check("frontmost app unchanged", ok, _front_before if ok else "took focus")
+
+
 def app(*a):
+    if a and a[0] == "start":
+        mark_front()
     return sh("python3", os.path.join(D, "scripts", "app.py"), *a)
 
 
@@ -82,12 +114,18 @@ def check(name, ok, detail=""):
         failures.append(name)
 
 
-def key(k, mods=(), via="pid"):
-    cmd({"cmd": "key", "key": k, "mods": list(mods), "via": via})
+def key(k, mods=(), via=None):
+    body = {"cmd": "key", "key": k, "mods": list(mods)}
+    if via:
+        body["via"] = via
+    cmd(body)
 
 
-def type_(t, via="pid"):
-    cmd({"cmd": "type", "text": t, "via": via})
+def type_(t, via=None):
+    body = {"cmd": "type", "text": t}
+    if via:
+        body["via"] = via
+    cmd(body)
 
 
 def main():
@@ -211,15 +249,10 @@ def main():
     # Screenshot.
     if os.path.exists(SHOT):
         os.unlink(SHOT)
-    r = subprocess.run(["screencapture", "-x", "-o", "-l", str(s["window_number"]), SHOT], capture_output=True, text=True)
-    if r.returncode == 0 and os.path.exists(SHOT):
-        say(f"screenshot: screencapture -l {s['window_number']} -> {os.path.basename(SHOT)}")
-    else:
-        say(f"screencapture -l {s['window_number']} failed ({(r.stderr or r.stdout).strip()}): no Screen Recording "
-            "grant for this shell; used the app's own window capture instead")
-        cmd({"cmd": "shot", "out": SHOT})
-        time.sleep(1)
-        say(f"screenshot: in-app CGWindowListCreateImage(own window) -> {os.path.basename(SHOT)} exists={os.path.exists(SHOT)}")
+    cmd({"cmd": "shot", "out": SHOT})
+    time.sleep(1)
+    say(f"screenshot: in-app cacheDisplay -> {os.path.basename(SHOT)} exists={os.path.exists(SHOT)}")
+    check_front(check)
 
     app("stop")
     time.sleep(0.5)

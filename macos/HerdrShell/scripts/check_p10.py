@@ -26,7 +26,7 @@ import os
 import sys
 import time
 
-os.environ.setdefault("SHELL_LAB", "shellspike-q")
+os.environ["SHELL_LAB"] = "shellspike-q"
 D0 = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LABDIR = os.path.expanduser(f"~/.cache/herdr-build/{os.environ['SHELL_LAB']}")
 os.makedirs(os.path.join(LABDIR, "app"), exist_ok=True)
@@ -236,8 +236,10 @@ def main():
     say(f"lab seeded: {len(snap['workspaces'])} spaces, {len(snap['tabs'])} tabs, {len(snap['agents'])} agents")
 
     import shutil
+    import subprocess
     shutil.copy2(os.path.join(D0, ".build", "release", "HerdrShell"), APP_COPY + ".new")
     os.replace(APP_COPY + ".new", APP_COPY)
+    subprocess.run(["defaults", "delete", f"herdr.shell.{os.environ['SHELL_LAB']}"], capture_output=True)
     say(f"app start: {S.app('start').strip()}")
     want = expected()
     s = wait_lines(lambda s: len(s["sidebar_lines"]) >= len(want) and texts(s)[:1] == want[:1] and "▾ ◆ agent-rails  factory" in texts(s))
@@ -270,6 +272,9 @@ def main():
     # Fold by hand: open, close, and a hand-set close beats the come-forward rule.
     S.cmd({"cmd": "sidebar_fold", "id": f"tab:{tab_of['recruiter']}", "open": True})
     s2 = wait_lines(lambda s: "▾ ● recruiter  2 wf" in texts(s))
+    if s2 is None or "▾ ● recruiter  2 wf" not in texts(s2):
+        check("opening a folded lane lists its workflows in order", False, f"{texts(s2)[:6] if s2 else None}")
+        return finish()
     i = texts(s2).index("▾ ● recruiter  2 wf")
     check("opening a folded lane lists its workflows in order",
           texts(s2)[i + 1:i + 3] == ["  ● wf recruiter-2320  [PC]", "  ● wf recruiter-2315  [PC]"], f"{texts(s2)[i:i + 3]}")
@@ -336,8 +341,6 @@ def main():
     S.cmd({"cmd": "sidebar_fold", "id": "hidden", "open": False})
 
     # Space chord: cmd+shift+3 is homebase (plain: lanes only), cmd+shift+2 agent-lb, cmd+shift+1 back.
-    S.cmd({"cmd": "activate"})
-    time.sleep(0.3)
     S.key("3", ["cmd", "shift"])
     s2 = wait_lines(lambda s: "▾ ◆ homebase  plain" in texts(s))
     want_hb = ["SPACES  ⌘⇧1..9", "▸ ◆ agent-rails  ● 2", "▸ ◆ agent-lb  1", "▾ ◆ homebase  plain",
@@ -383,6 +386,7 @@ def main():
 
 
 def finish():
+    S.check_front(check)
     S.app("stop")
     time.sleep(0.5)
     say(f"lab down: {S.lab('down').strip()}")

@@ -172,6 +172,7 @@ struct DetailPanelView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .hookAction("open_full") { openFull(c.rowId) }
         .clickTarget("open_full")
     }
 

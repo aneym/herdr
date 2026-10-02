@@ -58,6 +58,8 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         urlField.action = #selector(commitURL)
         urlField.onEscape = { [weak self] in self?.returnFocus() }
         handle.onDrag = { [weak self] width in self?.onWidth?(width) }
+        ClickRegistry.shared.set("+") { [weak self] in self?.addDoc() }
+        ClickRegistry.shared.set("✕") { [weak self] in self?.closed() }
         view.addSubview(web)
         view.addSubview(empty)
         view.addSubview(urlField)
@@ -117,6 +119,7 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         empty.isHidden = !tabTitles.isEmpty
         web.isHidden = tabTitles.isEmpty
         rebuildButtons()
+        registerDocHooks()
         if !same { loadActive() }
         view.needsLayout = true
     }
@@ -237,6 +240,20 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         urlField.isHidden = true
         active = item.title
         if let c = windowController { show(model: c.model, tabId: rowId) }
+    }
+
+    private func registerDocHooks() {
+        ClickRegistry.shared.set("+") { [weak self] in self?.addDoc() }
+        ClickRegistry.shared.set("✕") { [weak self] in self?.closed() }
+        for item in docs {
+            let title = item.title
+            ClickRegistry.shared.set("doc_tab:\(title)") { [weak self] in
+                guard let self else { return }
+                self.active = title
+                self.loadActive()
+                self.returnFocus()
+            }
+        }
     }
 
     private func rebuildButtons() {

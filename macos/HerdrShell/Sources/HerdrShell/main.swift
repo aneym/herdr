@@ -10,7 +10,7 @@ var flags = Set<String>()
 do {
     var it = CommandLine.arguments.dropFirst().makeIterator()
     while let a = it.next() {
-        if a == "--allow-live" || a == "--dump-tokens" { flags.insert(a); continue }
+        if a == "--allow-live" || a == "--dump-tokens" || a == "--agent-run" { flags.insert(a); continue }
         if a.hasPrefix("--"), let v = it.next() { args[String(a.dropFirst(2))] = v }
     }
 }
@@ -76,8 +76,10 @@ var argv0: [UnsafeMutablePointer<CChar>?] = [strdup(CommandLine.arguments[0]), n
 guard ghostty_init(1, &argv0) == GHOSTTY_SUCCESS else { log("ghostty_init failed"); exit(1) }
 
 let appStart = Date()
+/// Checks pass this so the window stays offscreen and never becomes the front app.
+let agentRun = flags.contains("--agent-run")
 let app = NSApplication.shared
-app.setActivationPolicy(.regular)
+app.setActivationPolicy(agentRun ? .accessory : .regular)
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var controller: MainWindowController!

@@ -1,2 +1,3 @@
 .build/
 Vendor/
+checks/*-live.png

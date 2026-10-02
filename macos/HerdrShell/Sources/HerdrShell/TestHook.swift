@@ -93,6 +93,7 @@ final class TestHook {
             let w = CGFloat(obj["w"] as? Double ?? Double(obj["w"] as? Int ?? 1440))
             let h = CGFloat(obj["h"] as? Double ?? Double(obj["h"] as? Int ?? 900))
             controller?.window.setContentSize(NSSize(width: w, height: h))
+            controller?.pinOffscreen()
         case "docs":
             let open = obj["open"] as? Bool
             let width = (obj["width"] as? Double).map { CGFloat($0) } ?? (obj["width"] as? Int).map { CGFloat($0) }
@@ -130,8 +131,12 @@ final class TestHook {
                 s.interpretOverride = nil
             }
         case "activate":
-            NSApp.activate(ignoringOtherApps: true)
-            controller?.window.makeKeyAndOrderFront(nil)
+            if agentRun {
+                log("hook: activate ignored (--agent-run)")
+            } else {
+                NSApp.activate(ignoringOtherApps: true)
+                controller?.window.makeKeyAndOrderFront(nil)
+            }
         default:
             log("hook: unknown cmd \(cmd)")
         }
@@ -144,6 +149,10 @@ final class TestHook {
     /// SwiftUI ignores clicks while the app is inactive, so the caller sends {"cmd":"activate"} first.
     private func click(_ obj: [String: Any]) {
         guard let c = controller else { return }
+        if agentRun {
+            clickAction(obj, c)
+            return
+        }
         let view: NSView, frame: CGRect
         let target = obj["target"] as? String ?? "row"
         switch target {
@@ -210,6 +219,28 @@ final class TestHook {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { c.state.clickOption = false }
         delivered.append("click \(obj["target"] ?? "row") \(obj["label"] ?? "") at window \(Int(loc.x)),\(Int(loc.y)) via NSApp.sendEvent")
         log("hook: click \(obj["target"] ?? "row") \(obj["label"] ?? "") frame=\(NSStringFromRect(frame)) window=\(NSStringFromPoint(loc)) key=\(c.window.isKeyWindow)")
+    }
+
+    /// Same action the control runs. No mouse event: SwiftUI drops clicks unless the app is active.
+    private func clickAction(_ obj: [String: Any], _ c: MainWindowController) {
+        let target = obj["target"] as? String ?? "row"
+        let label = obj["label"] as? String ?? ""
+        let key: String
+        switch target {
+        case "only", "focus", "open_full", "+", "✕": key = target
+        case "add": key = "+"
+        case "close": key = "✕"
+        default: key = label.isEmpty ? target : "\(target):\(label)"
+        }
+        c.state.clickOption = clickMods(obj).contains(.option)
+        let ok = ClickRegistry.shared.call(key)
+        c.state.clickOption = false
+        if ok {
+            delivered.append("click \(target) \(label) via action")
+            log("hook: click \(target) \(label) via action key=\(c.window.isKeyWindow)")
+        } else {
+            log("hook: click: no action \(key)")
+        }
     }
 
     private func clickMods(_ obj: [String: Any]) -> NSEvent.ModifierFlags {
@@ -364,6 +395,10 @@ final class TestHook {
             guard let cg = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down) else { continue }
             cg.flags = flags
             if viaPid {
+                if agentRun {
+                    log("hook: refusing CGEvent via pid under --agent-run")
+                    return
+                }
                 cg.postToPid(getpid())
                 if down { delivered.append("\(mods.joined(separator: "+"))\(mods.isEmpty ? "" : "+")\(name) via postToPid") }
                 continue
@@ -382,9 +417,21 @@ final class TestHook {
             if isKey {
                 NSApp.sendEvent(ev)
             } else if let w = controller?.window {
-                // Not key (app not frontmost): emulate AppKit's order for a key event.
-                if ev.type == .keyDown,
-                   w.performKeyEquivalent(with: ev) || (NSApp.mainMenu?.performKeyEquivalent(with: ev) ?? false) {
+                // Not key: the app must not be activated. Claimed chords run through
+                // performKeyEquivalent; everything else is delivered to the first responder.
+                let viewClaimed = ev.type == .keyDown && w.performKeyEquivalent(with: ev)
+                // The menu matches a bare letter to an item whose equivalent is command+that letter
+                // when the app is not active, which swallows the letter. Only command chords go there.
+                let menuClaimed = !viewClaimed && ev.type == .keyDown && ev.modifierFlags.contains(.command)
+                    && (NSApp.mainMenu?.performKeyEquivalent(with: ev) ?? false)
+                if viewClaimed || menuClaimed {
+                } else if let view = w.firstResponder as? NSView {
+                    switch ev.type {
+                    case .keyDown: view.keyDown(with: ev)
+                    case .keyUp: view.keyUp(with: ev)
+                    case .flagsChanged: view.flagsChanged(with: ev)
+                    default: w.sendEvent(ev)
+                    }
                 } else {
                     w.sendEvent(ev)
                 }
@@ -405,7 +452,7 @@ final class TestHook {
         RunLoop.current.run(until: Date().addingTimeInterval(0.4))
         var how = "window server"
         var img: CGImage?
-        if let w = controller?.window,
+        if !agentRun, let w = controller?.window,
            let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGWindowListCreateImage") {
             typealias Fn = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
             let f = unsafeBitCast(sym, to: Fn.self)
@@ -423,7 +470,7 @@ final class TestHook {
             // has every fill and the Ghostty surfaces' IOSurface contents, but no
             // window-level blur, so glass shows as its (transparent) layer only.
             img = renderLayers()
-            how = "layer render (window server capture was blank)"
+            how = agentRun ? "cacheDisplay" : "layer render (window server capture was blank)"
         }
         guard let img else { log("shot: no image"); return }
         let rep = NSBitmapImageRep(cgImage: img)
@@ -449,6 +496,12 @@ final class TestHook {
         guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: cs,
                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
         ctx.scaleBy(x: scale, y: scale)
+        if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+            view.cacheDisplay(in: view.bounds, to: rep)
+            if let cached = rep.cgImage {
+                ctx.draw(cached, in: CGRect(x: 0, y: 0, width: view.bounds.width, height: view.bounds.height))
+            }
+        }
         layer.render(in: ctx)
         // SwiftUI content (sidebar, detail panel) does not come through CALayer.render;
         // draw those hosting views with AppKit's own view caching.

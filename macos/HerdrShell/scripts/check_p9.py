@@ -20,7 +20,7 @@ import subprocess
 import sys
 import time
 
-os.environ.setdefault("SHELL_LAB", "shellspike-p9")
+os.environ["SHELL_LAB"] = "shellspike-p9"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import scenario as S  # noqa: E402  (helpers: lab, app, cmd, state, herdr_json)
 
@@ -294,6 +294,7 @@ def main():
 
 
 def finish():
+    S.check_front(check)
     S.app("stop")
     time.sleep(0.5)
     left = S.sh("pgrep", "-f", f"{S.NAME}/bin/herdr terminal attach").split()

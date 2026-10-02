@@ -265,7 +265,7 @@ final class SurfaceView: NSView {
         let keyboardIdBefore: String? = markedTextBefore ? nil : currentInputSourceId()
         lastPerformKeyEvent = nil
 
-        if let interpretOverride { interpretOverride(translationEvent) } else { interpretKeyEvents([translationEvent]) }
+        if let interpretOverride { interpretOverride(event) } else { interpretKeyEvents([translationEvent]) }
 
         if !markedTextBefore && keyboardIdBefore != currentInputSourceId() { return }
 
@@ -683,12 +683,15 @@ extension SurfaceView: NSTextInputClient {
     }
 
     func insertText(_ string: Any, replacementRange: NSRange) {
-        guard NSApp.currentEvent != nil else { return }
+        // keyDown sets the accumulator before the input method calls back. An in-process
+        // key (the check hook) has no NSApp.currentEvent, and still has to commit.
+        guard keyTextAccumulator != nil || NSApp.currentEvent != nil else { return }
         var chars = ""
-        switch string {
-        case let v as NSAttributedString:
+        if let v = string as? String {
+            chars = v
+        } else if let v = string as? NSAttributedString {
             chars = v.string
-        case let v as NSString:
+        } else if let v = string as? NSString {
             if v.length == 1, UTF16.isLeadSurrogate(v.character(at: 0)) {
                 leadSurrogate = v.character(at: 0)
             } else if v.length == 1, UTF16.isTrailSurrogate(v.character(at: 0)) {
@@ -699,7 +702,7 @@ extension SurfaceView: NSTextInputClient {
                 chars = v as String
                 leadSurrogate = nil
             }
-        default:
+        } else {
             return
         }
         // insertText means the preedit is over.

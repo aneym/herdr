@@ -1,17 +1,18 @@
-HerdrShell P16 check  2026-10-01T22:41:30Z
-scope page on http://127.0.0.1:56869/
-app start: {"pids": [62383], "fifo_ready_s": 1.08}
+HerdrShell P16 check  2026-10-02T01:56:57Z
+scope page on http://127.0.0.1:56902/
+app start: {"pids": [29918], "fifo_ready_s": 1.28}
 [PASS] app is up in Areas with the doc row -- doc lane in sidebar
 docs after select: tabs=['Scope', 'RESUME', 'BRIEF'] active=Scope title='P16 Scope' text='scope page ok'
 [PASS] selecting the row shows tabs Scope, RESUME, BRIEF -- tabs=['Scope', 'RESUME', 'BRIEF'] active=Scope
 [PASS] Scope web view loads the served page (title read back) -- title='P16 Scope' text='scope page ok'
 [PASS] RESUME renders a heading and a table -- active=RESUME text='Resume\n\nAlpha\tBeta\none\ttwo'
-[PASS] with the panel open, typed text still reaches the focused pane (herdr pane read) -- seen 0.048s after the last key
+[PASS] with the panel open, typed text still reaches the focused pane (herdr pane read) -- seen 0.079s after the last key
 [PASS] with the panel open, cat -v echoes the typed character -- tail=['p16-typed-ok', 'tmp % cat -v', 'z', 'z']
 [PASS] editing RESUME.md updates the panel within 6s -- text tail='Resume\n\nAlpha\tBeta\none\ttwo\nP16-EDITED'
 [PASS] cmd+\ hides and shows the doc panel -- open=True hidden=False shown=True
 [PASS] pane host width changes when the doc panel hides and shows -- host width open=718 hidden=1139 shown=718
 [PASS] screenshot checks/P16.png -- /Volumes/StudioExt/repos/herdr-worktrees/native-shell-areas/macos/HerdrShell/checks/P16.png
+[PASS] frontmost app unchanged -- ghostty
 lab down: stop: 0
 
 RESULT: PASS

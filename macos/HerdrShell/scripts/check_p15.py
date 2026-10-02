@@ -261,7 +261,6 @@ def main():
     if s is None:
         return finish()
 
-    S.cmd({"cmd": "activate"})
     time.sleep(0.4)
     S.cmd({"cmd": "frame", "w": 1440, "h": 900})
     time.sleep(0.4)
@@ -481,6 +480,7 @@ def main():
 
 
 def finish():
+    S.check_front(check)
     S.app("stop")
     time.sleep(0.4)
     say(f"lab down: {S.lab('down').strip()}")

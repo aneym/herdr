@@ -176,7 +176,6 @@ def run():
         finish()
         return
 
-    S.cmd({"cmd": "activate"})
     time.sleep(0.4)
     click("row", "doc lane")
     s = wait_state(lambda s: s.get("docs", {}).get("tabs") == ["Scope", "RESUME", "BRIEF"] and s["docs"].get("title") == "P16 Scope", 20)
@@ -264,6 +263,7 @@ def run():
 
 
 def finish():
+    S.check_front(check)
     S.app("stop")
     time.sleep(0.4)
     say(f"lab down: {S.lab('down').strip()}")

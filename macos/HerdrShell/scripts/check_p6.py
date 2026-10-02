@@ -17,11 +17,12 @@ with the app's action log. Checks:
 """
 import json
 import os
+import subprocess
 import sys
 import time
 import unicodedata
 
-os.environ.setdefault("SHELL_LAB", "shellspike-p6")
+os.environ["SHELL_LAB"] = "shellspike-p6"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import scenario as S  # noqa: E402  (helpers: lab, app, cmd, key, type_, state, pane_read, wait_read)
 
@@ -103,6 +104,7 @@ def main():
     S.app("stop")
     S.lab("down")
     time.sleep(0.5)
+    subprocess.run(["defaults", "delete", f"herdr.shell.{os.environ['SHELL_LAB']}"], capture_output=True)
     S.lab("up")
     snap = S.herdr_json("api", "snapshot")["result"]["snapshot"]
     tabs = {x["tab_id"]: x["label"] for x in snap["tabs"]}
@@ -150,8 +152,6 @@ def main():
     # 1a. Real system input method: it only composes for the active app, and a lab app cannot
     # be made the active app (window server refuses activation; see the state line), so this
     # run is informational: it is recorded, not scored.
-    S.cmd({"cmd": "activate"})
-    time.sleep(0.5)
     s = S.state()
     say(f"activation attempt: app_active={s['app_active']} window_key={s['window_key']}")
     real_input = bool(s["app_active"] and s["window_key"])
@@ -294,6 +294,7 @@ def main():
           f"focused={S.state()['focused_pane']} want={below}")
     covered.update({"focus_pane_up", "focus_pane_down"})
     covered.update(f"goto_space_{n}" for n in range(1, 10))   # result asserted by check_p10.py (P10)
+    covered.update(["toggle_area_mode", "toggle_docs"] + [f"filter_{n}" for n in range(1, 7)])  # check_p15 / check_p16
     live = {e["action"] for e in keymap["entries"] if not e.get("pending")}
     check("every live keymap action has a result check above", live <= covered, f"unchecked={sorted(live - covered)}")
 
@@ -329,7 +330,8 @@ def main():
         if not ok:
             bad.append((e["chord"], "fired=" + repr(fired)))
     reset()
-    time.sleep(0.4)
+    S.cmd({"cmd": "docs", "open": False})
+    time.sleep(0.5)
     after_all = all_panes(every_pane)
     check(f"all {len(keymap['entries'])} keymap entries fire exactly their own action (app log)", not bad,
           "; ".join(f"{c}: {m}" for c, m in bad[:6]))
@@ -358,6 +360,7 @@ def main():
 
 
 def finish():
+    S.check_front(check)
     S.app("stop")
     time.sleep(0.5)
     left = S.sh("pgrep", "-f", f"{S.NAME}/bin/herdr terminal attach").split()

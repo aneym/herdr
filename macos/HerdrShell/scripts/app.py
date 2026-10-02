@@ -11,6 +11,7 @@ def pids():
     return [int(p) for p in r.stdout.split()]
 
 def start(extra=()):
+    extra = ("--agent-run",) + tuple(a for a in extra if a != "--agent-run")
     t0 = time.time()
     if os.path.exists(FIFO):
         os.unlink(FIFO)  # else a writer can open the old inode before the app replaces it

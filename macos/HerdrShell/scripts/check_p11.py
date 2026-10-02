@@ -21,10 +21,11 @@ second space with its own orchestrator, lane and blocked workflow. Then, in the 
 """
 import json
 import os
+import subprocess
 import sys
 import time
 
-os.environ.setdefault("SHELL_LAB", "shellspike-d")
+os.environ["SHELL_LAB"] = "shellspike-d"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import scenario as S  # noqa: E402  (helpers: lab, app, cmd, state, key, type_, wait_read, pane_read)
 
@@ -115,9 +116,9 @@ def main():
     herdr("pane", "report-metadata", pane_of["wf recruiter-2320"], "--source", "spike", "--token", "host=PC", "--token", "phase=impl 3/5")
     seed_other_space()
 
+    subprocess.run(["defaults", "delete", f"herdr.shell.{os.environ['SHELL_LAB']}"], capture_output=True)
     open(os.path.join(S.LAB, "app.log"), "w").close()   # so the log evidence below is from this run
     say(f"app start: {S.app('start').strip()}")
-    S.cmd({"cmd": "activate"})   # SwiftUI ignores clicks while the app is inactive
     time.sleep(1.5)
     s = wait_state(lambda s: s["focused_pane"] == p1 and s["selected_tab"] == tabs["shell spike"]
                    and any(r["label"] == "recruiter" and r["children"] for r in s["sidebar"]["lanes"]), 15)
@@ -133,7 +134,7 @@ def main():
     check("a real click on the orchestrator row opens the panel", S.state()["detail"]["open"] is True)
     click("rails orchestrator")
     check("a second real click closes it", S.state()["detail"]["open"] is False)
-    check("the window was key and active for the clicks", "key=true" in open(os.path.join(S.LAB, "app.log")).read().split("hook: click")[-1])
+    check("clicks ran without making the window key", "key=false" in open(os.path.join(S.LAB, "app.log")).read().split("hook: click")[-1])
 
     # Orchestrator row: inbox, routed, workflows under it by lane.
     click("rails orchestrator")
@@ -247,6 +248,7 @@ def main():
     say(f"panel image (SwiftUI ImageRenderer of the open panel): {os.path.basename(pshot)} exists={os.path.exists(pshot)}")
     say(f"screenshot (in-app capture, panel open on the orchestrator): {os.path.basename(shot)} exists={os.path.exists(shot)}")
 
+    S.check_front(check)
     S.app("stop")
     time.sleep(0.5)
     say(f"lab down: {S.lab('down').strip()}")

@@ -158,8 +158,6 @@ def points(s, img):
 
 def measure(label, png):
     s = wait_ready()
-    cmd({"cmd": "activate"})
-    time.sleep(0.4)
     s = state()
     img = shot(png)
     scale, sp, tp = points(s, img)

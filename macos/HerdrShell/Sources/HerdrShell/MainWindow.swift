@@ -104,6 +104,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     private var pendingSelectTab: String?
     private var pendingFocusPane: String?
     private var didRestoreTabFocus = false
+    private var didRestorePaneFocus = false
 
     init(model: HerdrModel, registry: SurfaceRegistry, theme: ThemeStore) {
         self.model = model
@@ -111,9 +112,9 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         self.theme = theme
         commands = HerdrCommands(socketPath: model.env["HERDR_SOCKET_PATH"] ?? "")
         resizer = PaneResizeController(client: commands)
-        window = NSWindow(contentRect: NSRect(x: 120, y: 120, width: 1400, height: 820),
-                          styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-                          backing: .buffered, defer: false)
+        window = ShellWindow(contentRect: NSRect(x: 120, y: 120, width: 1400, height: 820),
+                             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                             backing: .buffered, defer: false)
         super.init()
         window.title = "herdr shell"
         window.titlebarAppearsTransparent = true
@@ -187,7 +188,24 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     /// The sidebar's SwiftUI host view (the test hook clicks inside it).
     var sidebarHostView: NSView { sidebarContainer.content }
     func show() {
-        window.makeKeyAndOrderFront(nil)
+        if agentRun {
+            (window as? ShellWindow)?.staysInactive = true
+            window.isMovable = false
+            var f = window.frame
+            f.origin.x = -20000
+            window.setFrame(f, display: false)
+            window.orderBack(nil)
+        } else {
+            window.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    /// `--agent-run` keeps the window fully offscreen. AppKit would otherwise clamp it onto a display.
+    func pinOffscreen() {
+        guard agentRun, window.frame.origin.x != -20000 else { return }
+        var f = window.frame
+        f.origin.x = -20000
+        window.setFrame(f, display: false)
     }
 
     func snapshotChanged() {
@@ -206,6 +224,13 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             if !didRestoreTabFocus {
                 didRestoreTabFocus = true
                 focusHerdr(t)
+            }
+            if !didRestorePaneFocus {
+                let pane = focusedPaneByTab[t] ?? host.rects.first?.0.paneId
+                if let pane, currentPanes.contains(where: { $0.paneId == pane }) {
+                    focusPane(pane)
+                    didRestorePaneFocus = true
+                }
             }
             refreshDocs()
             return
@@ -440,6 +465,15 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 }
 
+
+/// `--agent-run` keeps the frame offscreen. The window is ordered back and never made key,
+/// so it does not become the front app; it can still take key events sent in-process.
+final class ShellWindow: NSWindow {
+    var staysInactive = false
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        staysInactive ? frameRect : super.constrainFrameRect(frameRect, to: screen)
+    }
+}
 
     /// Fixed-width sidebar and a pane host filling the rest. (An NSSplitView let the
     /// SwiftUI sidebar claim half the window.) Docs sit to the right of the panes.

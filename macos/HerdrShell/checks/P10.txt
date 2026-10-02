@@ -1,6 +1,6 @@
-HerdrShell P10 check  2026-09-28T21:33:03Z
+HerdrShell P10 check  2026-10-02T01:59:38Z
 lab seeded: 6 spaces, 29 tabs, 24 agents
-app start: {"pids": [28644], "fifo_ready_s": 0.95}
+app start: {"pids": [23588], "fifo_ready_s": 1.49}
 sidebar lines as drawn:
   header       SPACES  ⌘⇧1..9
   space        ▾ ◆ agent-rails  factory
@@ -40,9 +40,10 @@ sidebar lines as drawn:
 [PASS] cmd+shift+1 returns to agent-rails
 [PASS] cmd+shift+9 (no ninth space) changes nothing
 [PASS] space rows carry their space id (a click is not exercised here)
-[PASS] screenshot light: checks/P10-light.png written -- /Volumes/StudioExt/repos/herdr-worktrees/native-shell/macos/HerdrShell/checks/P10-light.png
-[PASS] screenshot dark: checks/P10-dark.png written -- /Volumes/StudioExt/repos/herdr-worktrees/native-shell/macos/HerdrShell/checks/P10-dark.png
+[PASS] screenshot light: checks/P10-light.png written -- /Volumes/StudioExt/repos/herdr-worktrees/native-shell-areas/macos/HerdrShell/checks/P10-light.png
+[PASS] screenshot dark: checks/P10-dark.png written -- /Volumes/StudioExt/repos/herdr-worktrees/native-shell-areas/macos/HerdrShell/checks/P10-dark.png
 [PASS] the two screenshots differ in the sidebar (light vs dark) -- {'light': (243, 244, 246), 'dark': (22, 23, 27)}
+[PASS] frontmost app unchanged -- ghostty
 lab down: stop: 0
 
 RESULT: PASS
