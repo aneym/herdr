@@ -86,7 +86,7 @@ final class ChatHook {
 
     /// Two senders, one pane. A process-wide queue keeps their chunks from mixing.
     private func race() {
-        let other = ChatSender(pane: sender.pane, readOnly: false)
+        let other = ChatSender(pane: sender.pane, readOnly: sender.readOnly)
         racers.append(other)
         let a = String(repeating: "A", count: 600)
         let b = String(repeating: "B", count: 600)

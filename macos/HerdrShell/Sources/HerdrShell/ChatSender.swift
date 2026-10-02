@@ -94,7 +94,11 @@ final class ChatSender: ObservableObject {
     deinit { timer?.cancel() }
     func send(_ text: String, anyway: Bool = false, known ids: [String] = []) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.count <= 20_000 else { status = "Message must contain 1 to 20,000 characters"; return }
-        guard !readOnly else { status = "Read-only: this window does not send"; return }
+        guard !readOnly else {
+            status = "Read-only: this window does not send"
+            log(status)
+            return
+        }
         pending = text; warning = false; known = Set(ids)
         queue.async { self.held.append((text, anyway)); self.drain() }
     }

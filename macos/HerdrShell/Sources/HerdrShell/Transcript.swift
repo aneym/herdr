@@ -37,7 +37,7 @@ final class Transcript: ObservableObject {
     private var rows: [ChatItem] = []
     private var path = "", session = "", cwd = ""
     private var offset: UInt64 = 0, first: UInt64 = 0
-    private var dev: UInt64 = 0, ino: UInt64 = 0, digest: UInt64 = 0
+    private var dev: UInt64 = 0, ino: UInt64 = 0, mtimeSec: Int64 = 0, mtimeNsec: Int64 = 0
     private var renderLimit = 400
     private var pending = Data()
     private var watcher: DispatchSourceFileSystemObject?
@@ -103,7 +103,7 @@ final class Transcript: ObservableObject {
     private func switchFile(_ file: String) {
         watcher?.cancel(); watcher = nil
         path = file; offset = 0; pending = Data(); rows = []; renderLimit = 400
-        dev = 0; ino = 0; digest = 0
+        dev = 0; ino = 0; mtimeSec = 0; mtimeNsec = 0
         read(initial: true)
     }
     private func watch() {
@@ -119,34 +119,10 @@ final class Transcript: ObservableObject {
         source.setCancelHandler { close(fd) }
         watcher = source; source.resume()
     }
-    private func fileID(_ handle: FileHandle) -> (UInt64, UInt64) {
+    private func fileStamp(_ handle: FileHandle) -> (dev: UInt64, ino: UInt64, sec: Int64, nsec: Int64) {
         var st = stat()
-        guard fstat(handle.fileDescriptor, &st) == 0 else { return (0, 0) }
-        return (UInt64(st.st_dev), st.st_ino)
-    }
-    private func mix(_ data: Data, into start: UInt64 = 14695981039346656037) -> UInt64 {
-        var h = start
-        for b in data { h ^= UInt64(b); h &*= 1099511628211 }
-        return h
-    }
-    /// Fingerprint of the loaded window. A same-size rewrite changes it even when the inode does not.
-    private func windowDigest(_ handle: FileHandle, from start: UInt64, to end: UInt64) -> UInt64 {
-        guard end > start else { return 0 }
-        let sample = 4096
-        let span = end - start
-        if span <= UInt64(sample * 2) {
-            try? handle.seek(toOffset: start)
-            let data = (try? handle.read(upToCount: Int(span))) ?? Data()
-            Self.noteRead(data.count)
-            return mix(data)
-        }
-        try? handle.seek(toOffset: start)
-        let head = (try? handle.read(upToCount: sample)) ?? Data()
-        Self.noteRead(head.count)
-        try? handle.seek(toOffset: end - UInt64(sample))
-        let tail = (try? handle.read(upToCount: sample)) ?? Data()
-        Self.noteRead(tail.count)
-        return mix(tail, into: mix(head))
+        guard fstat(handle.fileDescriptor, &st) == 0 else { return (0, 0, 0, 0) }
+        return (UInt64(st.st_dev), st.st_ino, Int64(st.st_mtimespec.tv_sec), Int64(st.st_mtimespec.tv_nsec))
     }
     private func read(initial: Bool = false) {
         guard !path.isEmpty, let handle = FileHandle(forReadingAtPath: path) else {
@@ -154,17 +130,15 @@ final class Transcript: ObservableObject {
         }
         defer { try? handle.close() }
         guard let size = try? handle.seekToEnd() else { return }
-        let id = fileID(handle)
-        let identityChanged = !initial && (id.0 != dev || id.1 != ino)
-        var rewritten = false
-        if !initial && !identityChanged && size == offset && offset > 0 {
-            let start = offset > UInt64(Self.block) ? offset - UInt64(Self.block) : 0
-            rewritten = windowDigest(handle, from: start, to: size) != digest
-        }
-        let reset = initial || size < offset || identityChanged || rewritten
+        let stamp = fileStamp(handle)
+        let identityChanged = !initial && (stamp.dev != dev || stamp.ino != ino)
+        let mtimeChanged = !initial && (stamp.sec != mtimeSec || stamp.nsec != mtimeNsec)
+        // An append-only transcript only grows. Unchanged or smaller, with a new mtime or inode, is a rewrite of the tail.
+        let stale = size <= offset && offset > 0 && (mtimeChanged || identityChanged)
+        let reset = initial || size < offset || identityChanged || stale
         if reset {
             rows = []; pending = Data(); offset = size > UInt64(Self.block) ? size - UInt64(Self.block) : 0; first = offset
-            dev = id.0; ino = id.1
+            dev = stamp.dev; ino = stamp.ino; mtimeSec = stamp.sec; mtimeNsec = stamp.nsec
         }
         if size > offset && size - offset > UInt64(Self.block) { offset = size - UInt64(Self.block); pending = Data() }
         guard size > offset || reset else { watch(); return }
@@ -181,10 +155,7 @@ final class Transcript: ObservableObject {
             pending = Data(data.suffix(from: data.index(after: last)))
         } else { pending = data }
         if pending.count > Self.block { pending = Data() }
-        dev = id.0; ino = id.1
-        let end = offset
-        let winStart = end > UInt64(Self.block) ? end - UInt64(Self.block) : 0
-        digest = windowDigest(handle, from: winStart, to: end)
+        dev = stamp.dev; ino = stamp.ino; mtimeSec = stamp.sec; mtimeNsec = stamp.nsec
         publish(); watch()
     }
     func loadEarlier() {

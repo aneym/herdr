@@ -30,6 +30,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import statistics
 import subprocess
 import sys
@@ -103,6 +104,28 @@ VISIBLE = ['human', 'bash', 'read', 'grep', 'answer:0', 'edit', 'bulletin:0', 'd
 def offscreen(view):
     """Every check window stays off screen and never becomes the active app (Alex, 2026-10-01 19:15 ET)."""
     assert view['window_on_screen'] is False and view['app_active'] is False, {k: view.get(k) for k in ('window_on_screen', 'app_active')}
+
+
+def fresh_view(dump, after):
+    """A .view.json written after `after`. An earlier timer tick can predate the finished read."""
+    view_path = Path(str(dump) + '.view.json')
+    found = {}
+
+    def ready():
+        try:
+            st = view_path.stat()
+        except OSError:
+            return False
+        if st.st_mtime <= after or st.st_size == 0:
+            return False
+        try:
+            found['view'] = json.loads(view_path.read_text())
+        except (OSError, ValueError):
+            return False
+        return 'transcript_bytes_read' in found['view']
+
+    wait_for(ready, 8, .05, 'a fresh post-render view')
+    return found['view']
 
 
 def append(path, record):
@@ -307,10 +330,9 @@ def large_checks(temp, lines):
         elapsed = (time.monotonic() - start) * 1000
         assert snapshot(dump)[-1]['id'] == 'large-visible:0'
         assert rss_max < 300 * 1024, rss_max
-        view_path = Path(str(dump) + '.view.json')
-        wait_for(lambda: view_path.exists() and view_path.stat().st_size > 0, 8)
-        offscreen(json.loads(view_path.read_text()))
-        read_n = json.loads(view_path.read_text())['transcript_bytes_read']
+        view = fresh_view(dump, time.time())
+        offscreen(view)
+        read_n = view['transcript_bytes_read']
         file_n = large.stat().st_size
         slack = 1024 * 1024
         assert 2 * 1024 * 1024 <= read_n <= 2 * 1024 * 1024 + slack, read_n
@@ -401,6 +423,55 @@ def rewrite_check(temp, lines):
     lines.append('PASS equal-length rewrite: 96-byte record `old` truncated and replaced with `new`; dump shows new')
 
 
+def pad_record(size=8192):
+    prefix, suffix = '{"type":"unknown","padding":"', '"}\n'
+    fill = size - len(prefix) - len(suffix)
+    assert fill > 0
+    return (prefix + ('x' * fill) + suffix).encode()
+
+
+def rewrite_middle_check(temp, lines):
+    """Same inode and size: only the middle 96 bytes change. Head and tail 4 KiB stay put, so a head/tail sample misses it."""
+    pad = pad_record()
+    assert len(pad) == 8192
+    file = temp / 'rewrite-middle.jsonl'
+    body = pad + RECORD_96['old'] + pad
+    file.write_bytes(body)
+    app = App(['--transcript', str(file), '--chat-mode', 'focus', '--chat-state', 'idle'], dict(os.environ), temp, 'rewrite-middle.fifo')
+    try:
+        def texts():
+            return [i.get('text') for i in app.state()['items']]
+        wait_for(lambda: texts() == ['old'], 8, .05, 'the middle old record', lambda: str(texts()))
+        ino = file.stat().st_ino
+        mtime = file.stat().st_mtime
+        os.kill(app.p.pid, signal.SIGSTOP)
+        wait_for(lambda: subprocess.run(['ps', '-o', 'state=', '-p', str(app.p.pid)], capture_output=True, text=True).stdout.strip().startswith('T'),
+                 2, .02, 'the app to stop')
+        rewritten = pad + RECORD_96['new'] + pad
+        assert len(rewritten) == len(body)
+        assert rewritten[:4096] == body[:4096] and rewritten[-4096:] == body[-4096:]
+        assert rewritten[8192:8192 + 96] == RECORD_96['new']
+        fd = os.open(file, os.O_RDWR)
+        os.ftruncate(fd, 0)
+        os.write(fd, rewritten)
+        os.close(fd)
+        assert file.stat().st_ino == ino and file.stat().st_size == len(body)
+        ahead = time.time() + 5
+        os.utime(file, (ahead, ahead))
+        assert file.stat().st_mtime > mtime
+        os.kill(app.p.pid, signal.SIGCONT)
+        wait_for(lambda: texts() == ['new'], 5, .05, 'the rewritten middle record', lambda: str(texts()))
+    finally:
+        if app.p.poll() is None:
+            try:
+                os.kill(app.p.pid, signal.SIGCONT)
+            except ProcessLookupError:
+                pass
+        app.stop()
+    lines.append('PASS middle rewrite: same inode, two 8 KiB pads around a 96-byte record; SIGSTOP, replace old with new, '
+                 'mtime forward, SIGCONT; a fresh state shows new')
+
+
 def earlier_check(temp, lines):
     """A tail of 400 visible items must not discard the block Load earlier reads."""
     path = temp / 'earlier.jsonl'
@@ -461,6 +532,31 @@ def race_check(temp, lines):
     finally:
         app.stop()
     lines.append(f'PASS per-pane send queue: two 600-scalar sends logged {letters} (one message finished before the other started)')
+
+
+def race_readonly_check(temp, lines):
+    """The race hook's second sender must inherit --read-only and deliver nothing."""
+    log = temp / 'race-ro-sends.log'
+    err = temp / 'race-ro.err'
+    fake = temp / 'fake-herdr-race-ro'
+    write_fake(fake, log, '\n❯ \n')
+    env = dict(os.environ, P19_SEND_DELAY='0.05')
+    app = App(['--demo', 'chat', '--pane', 'P', '--read-only', '--herdr', str(fake), '--chat-mode', 'focus'],
+              env, temp, 'race-ro.fifo', log=str(err))
+    try:
+        wait_for(lambda: app.state().get('composer_focused'), 10, .1)
+        app.cmd({'cmd': 'race'})
+        time.sleep(1)
+        sends = log.read_text() if log.exists() else ''
+        assert sends == '', sends
+        err_text = err.read_text() if err.exists() else ''
+        assert 'Read-only: this window does not send' in err_text, err_text
+        status = app.state()['status']
+        assert status == 'Read-only: this window does not send', status
+    finally:
+        app.stop()
+    lines.append('PASS read-only race: --demo chat --pane P --read-only --control, {"cmd":"race"} delivered nothing '
+                 'and logged "Read-only: this window does not send"')
 
 
 def combo_check(temp, lines):
@@ -711,8 +807,10 @@ def main():
              ('large transcript', lambda t: large_checks(t, lines)),
              ('draft unknown', lambda t: draft_unknown_check(t, lines)),
              ('rewrite', lambda t: rewrite_check(t, lines)),
+             ('rewrite middle', lambda t: rewrite_middle_check(t, lines)),
              ('load earlier', lambda t: earlier_check(t, lines)),
              ('send queue', lambda t: race_check(t, lines)),
+             ('read-only race', lambda t: race_readonly_check(t, lines)),
              ('transcript pane', lambda t: combo_check(t, lines))]
     if not args.skip_lab and not args.only:
         steps.append(('lab', lambda t: lab_checks(t, out.parent, lines)))
