@@ -37,6 +37,7 @@ LAB_BIN = os.path.join(LAB, "bin", "herdr")
 SCRATCH = os.path.expanduser("~/.cache/herdr-build/p7-swift")
 APP_BIN = os.path.join(SCRATCH, "release", "HerdrShell")
 FIFO = os.path.join(LAB, "control.fifo")
+_launched = False
 STATE = os.path.join(LAB, "p7-state.json")
 OUT = os.path.join(D, "checks", "P7.txt")
 if "--out" in sys.argv:
@@ -70,23 +71,14 @@ def app_pids():
 
 
 def app_start():
-    if os.path.exists(FIFO):
-        os.unlink(FIFO)
-    envs = [l for l in S.lab("env").splitlines() if "=" in l]
-    sock = next(l.split("=", 1)[1] for l in envs if l.startswith("HERDR_SOCKET_PATH="))
-    argv = ["env", "-i", *envs, APP_BIN, "--herdr", LAB_BIN, "--socket", sock, "--control", FIFO]
-    pid = os.fork()
-    if pid == 0:
-        os.setsid()
-        if os.fork() == 0:
-            fd = os.open(os.path.join(LAB, "app-p7.log"), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
-            nul = os.open(os.devnull, os.O_RDONLY)
-            os.dup2(nul, 0); os.dup2(fd, 1); os.dup2(fd, 2)
-            os.execv("/usr/bin/env", argv)
-        os._exit(0)
-    os.waitpid(pid, 0)
+    global _launched
+    # app.py always passes --agent-run. This build lives outside .build/release.
+    os.environ["HERDR_SHELL_APP"] = APP_BIN
+    S.mark_front()
+    say(S.app("start").strip())
     for _ in range(200):
         if os.path.exists(FIFO) and app_pids():
+            _launched = True
             return app_pids()
         time.sleep(0.05)
     sys.exit("app did not start")
@@ -128,11 +120,11 @@ def state(timeout=6.0, tries=3):
 
 
 def key(k, mods=()):
-    hook({"cmd": "key", "key": k, "mods": list(mods), "via": "pid"})
+    hook({"cmd": "key", "key": k, "mods": list(mods)})
 
 
 def typ(t):
-    hook({"cmd": "type", "text": t, "via": "pid"})
+    hook({"cmd": "type", "text": t})
 
 
 # ---- process helpers ---------------------------------------------------------------------
@@ -425,6 +417,8 @@ def main():
 
 
 def finish():
+    if _launched:
+        S.check_front(check)
     app_stop()
     time.sleep(0.6)
     left = attach_pids()

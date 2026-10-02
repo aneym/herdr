@@ -1,5 +1,5 @@
-HerdrShell P5 check  2026-09-28T20:38:50Z  lab=shellspike-p5
-host load average: 118 on 16 cores
+HerdrShell P5 check  2026-10-02T14:30:05Z  lab=shellspike-p5
+host load average: 34 on 16 cores
   contrast floor 4.5:1; terminal theme pair {'dark': 'Catppuccin Mocha', 'light': '/Users/aneyman/.config/ghostty/themes/SF Paper'}
   [PASS] dark  ink   #E6E6EA on panel #16171B  14.39:1
   [PASS] dark  ink   #E6E6EA on sel   #1F2230  12.69:1
@@ -78,14 +78,14 @@ host load average: 118 on 16 cores
   CONTRAST: PASS
 [PASS] contrast: every text token at 4.5:1 in light and dark
 lab up: {"id":"cli:workspace:list","result":{"type":"workspace_list","workspaces":[]}}
-app start --appearance light: {"pids": [14486], "fifo_ready_s": 0.47}
+app start --appearance light: {"pids": [73717], "fifo_ready_s": 0.35}
 --- --appearance light: effective=light system=light window_appearance=NSAppearanceNameAqua terminal theme pair={'dark': 'Catppuccin Mocha', 'light': '/Users/aneyman/.config/ghostty/themes/SF Paper'}
     sidebar pixel #F3F4F6 (token panel #F3F4F6); terminal pixel #FFFFFF (token terminalBg #FFFFFF)
 [PASS] light: override flag sets the effective mode
 [PASS] light: window uses the light native appearance -- NSAppearanceNameAqua
 [PASS] light: sidebar background matches the chrome token
 [PASS] light: terminal background matches the Ghostty theme pair
-app start --appearance dark: {"pids": [15356], "fifo_ready_s": 0.34}
+app start --appearance dark: {"pids": [75444], "fifo_ready_s": 0.34}
 --- --appearance dark: effective=dark system=light window_appearance=NSAppearanceNameDarkAqua terminal theme pair={'dark': 'Catppuccin Mocha', 'light': '/Users/aneyman/.config/ghostty/themes/SF Paper'}
     sidebar pixel #16171B (token panel #16171B); terminal pixel #1E1E2E (token terminalBg #1E1E2E)
 [PASS] dark: override flag sets the effective mode
@@ -98,20 +98,21 @@ app start --appearance dark: {"pids": [15356], "fifo_ready_s": 0.34}
 --- live switch dark -> light: sidebar #F3F4F6, terminal #FFFFFF
 [PASS] live: override dark -> light without restart flips chrome and terminal together
 [PASS] live: 'system' follows the macOS appearance -- system=light
---- sidebar glass on: view=NSGlassEffectView window_opaque=False; sidebar #16171A, terminal #1E1E2E
+--- sidebar glass on: view=NSGlassEffectView window_opaque=False; sidebar #333337, terminal #1E1E2E
 [PASS] glass: sidebar token installs the glass layer and a translucent window
 [PASS] glass: terminal pane stays opaque at its token color -- #1E1E2E
-    sidebar pixel RGBA (22, 23, 26, 255) -> over black #16171A, over white #16171A
-    ink on panel@black 14.40:1  ink on panel@white 14.40:1  ink on sel 12.69:1
-    mute on panel@black 6.55:1  mute on panel@white 6.55:1  mute on sel 5.77:1
-    orch on panel@black 7.30:1  orch on panel@white 7.30:1  orch on sel 6.43:1
-    lane on panel@black 8.32:1  lane on panel@white 8.32:1  lane on sel 7.33:1
-    wf on panel@black 9.01:1  wf on panel@white 9.01:1  wf on sel 7.93:1
-    ok on panel@black 9.22:1  ok on panel@white 9.22:1  ok on sel 8.13:1
-    warn on panel@black 9.47:1  warn on panel@white 9.47:1  warn on sel 8.34:1
-[PASS] glass: sidebar text at 4.5:1 over the captured glass background, on the darkest and lightest desktop -- worst 5.77:1 (mute on sel)
-[PASS] glass: sidebar carries the panel scrim (captured pixel between scrim-over-black and scrim-over-white) -- alpha 0.88, pixel #16171A, range #131418..#323336
+    sidebar pixel RGBA (51, 51, 55, 255) -> over black #333337, over white #333337
+    ink on panel@black 10.11:1  ink on panel@white 10.11:1  ink on sel 12.69:1
+    mute on panel@black 4.60:1  mute on panel@white 4.60:1  mute on sel 5.77:1
+    orch on panel@black 5.12:1  orch on panel@white 5.12:1  orch on sel 6.43:1
+    lane on panel@black 5.84:1  lane on panel@white 5.84:1  lane on sel 7.33:1
+    wf on panel@black 6.32:1  wf on panel@white 6.32:1  wf on sel 7.93:1
+    ok on panel@black 6.47:1  ok on panel@white 6.47:1  ok on sel 8.13:1
+    warn on panel@black 6.64:1  warn on panel@white 6.64:1  warn on sel 8.34:1
+[PASS] glass: sidebar text at 4.5:1 over the captured glass background, on the darkest and lightest desktop -- worst 4.60:1 (mute on panel@black)
+[PASS] glass: sidebar carries the panel scrim (captured pixel between scrim-over-black and scrim-over-white) -- alpha 0.88, pixel #333337, range #131418..#323336
 [PASS] glass: token off restores the opaque panel -- #16171B
+[PASS] frontmost app unchanged -- Aside
 lab down: stop: 0
 
 RESULT: PASS

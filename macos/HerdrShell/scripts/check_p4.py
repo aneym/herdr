@@ -131,6 +131,7 @@ def main():
 
 
 def finish():
+    S.check_front(check)
     S.app("stop")
     time.sleep(0.5)
     say(f"lab down: {S.lab('down').strip()}")

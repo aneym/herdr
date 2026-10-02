@@ -1,33 +1,34 @@
-P3 check: live state by subscription  2026-09-28T20:25:17Z
-lab session 'shellspike-p3' up; host load 72 on 16 cores
+P3 check: live state by subscription  2026-10-02T14:29:43Z
+lab session 'shellspike-p3' up; host load 32 on 16 cores
 lab tabs: ['rails orchestrator', 'shell spike', 'recruiter', 'wf recruiter-2320', 'wf embed wave-a']
-app start: {"pids": [98175], "fifo_ready_s": 1.15}
+app start: {"pids": [55381], "fifo_ready_s": 0.41}
 [PASS] sidebar filled from the first snapshot -- 5 rows
-rename -> model latencies (ms): 161, 23, 14, 40, 92
-[PASS] tab rename in the model within 200 ms (every one of 5) -- median 40 ms, worst 161 ms
+rename -> model latencies (ms): 77, 1, 104, 12, 10
+[PASS] tab rename in the model within 200 ms (every one of 5) -- median 12 ms, worst 104 ms
 [PASS] sidebar row shows the last rename
-[PASS] agent status change reaches the sidebar -- visible 0.30s after the report command returned
-[PASS] host token change reaches the sidebar -- visible 0.17s after the report command returned
+[PASS] agent status change reaches the sidebar -- visible 0.27s after the report command returned
+[PASS] host token change reaches the sidebar -- visible 0.28s after the report command returned
 [PASS] new tab appears in the sidebar
 [PASS] closed tab leaves the sidebar
 [PASS] no snapshot request while nothing changes (4 s idle) -- 0 requests logged by the app
-[PASS] no `herdr api snapshot` child process of the app while idle -- app pid 98175; 0 sightings in 4 s
+[PASS] no `herdr api snapshot` child process of the app while idle -- app pid 55381; 0 sightings in 4 s
 lab server stopped
 [PASS] sidebar reconnects and resubscribes after the lab server restarts -- new snapshot applied 0.00s after the server came back
-[PASS] rename after the restart still arrives by event -- 21 ms
+[PASS] rename after the restart still arrives by event -- 64 ms
+[PASS] frontmost app unchanged -- Aside
 
 app.log p3 lines (last 12):
-  [herdr-shell] p3: snapshot #27 fetched in 1.6 ms, event->apply 1.8 ms
-  [herdr-shell] p3: applied epoch=1790627134.669 tabs=rails orchestrator|shell spike|recruiter|wf recruiter-2320|wf embed wave-a
-  [herdr-shell] p3: snapshot #28 fetched in 0.7 ms, event->apply 0.8 ms
-  [herdr-shell] p3: applied epoch=1790627134.670 tabs=rails orchestrator|shell spike|recruiter|wf recruiter-2320|wf embed wave-a
-  [herdr-shell] p3: snapshot #29 fetched in 0.6 ms, event->apply 1.6 ms
-  [herdr-shell] p3: applied epoch=1790627134.671 tabs=rails orchestrator|shell spike|recruiter|wf recruiter-2320|wf embed wave-a
-  [herdr-shell] p3: snapshot #30 fetched in 0.8 ms, event->apply 1.0 ms
-  [herdr-shell] p3: applied epoch=1790627134.746 tabs=rails orchestrator|shell spike|recruiter|wf recruiter-2320|wf embed wave-a
-  [herdr-shell] p3: snapshot #31 fetched in 0.7 ms, event->apply 0.9 ms
-  [herdr-shell] p3: applied epoch=1790627134.780 tabs=rails orchestrator|shell spike|recruiter|wf recruiter-2320|wf embed wave-a
-  [herdr-shell] p3: snapshot #32 fetched in 0.5 ms, event->apply 0.7 ms
-  [herdr-shell] p3: applied epoch=1790627134.847 tabs=rails orchestrator|shell spike|after restart|wf recruiter-2320|wf embed wave-a
+  [herdr-shell] p3: snapshot #22 fetched in 0.4 ms, event->apply 0.6 ms
+  [herdr-shell] p3: applied epoch=1790951399.302 tabs=rails orchestrator|shell spike|recruiter|wf recruiter-2320|wf embed wave-a
+  [herdr-shell] p3: snapshot #23 fetched in 0.3 ms, event->apply 1.0 ms
+  [herdr-shell] p3: applied epoch=1790951399.320 tabs=rails orchestrator|shell spike|recruiter|wf recruiter-2320|wf embed wave-a
+  [herdr-shell] p3: snapshot #24 fetched in 0.4 ms
+  [herdr-shell] p3: applied epoch=1790951399.405 tabs=rails orchestrator|shell spike|recruiter|wf recruiter-2320|wf embed wave-a
+  [herdr-shell] p3: snapshot #25 fetched in 0.4 ms, event->apply 0.5 ms
+  [herdr-shell] p3: snapshot #26 fetched in 0.4 ms, event->apply 1.0 ms
+  [herdr-shell] p3: applied epoch=1790951399.408 tabs=rails orchestrator|shell spike|recruiter|wf recruiter-2320|wf embed wave-a
+  [herdr-shell] p3: applied epoch=1790951399.409 tabs=rails orchestrator|shell spike|recruiter|wf recruiter-2320|wf embed wave-a
+  [herdr-shell] p3: snapshot #27 fetched in 0.4 ms, event->apply 0.6 ms
+  [herdr-shell] p3: applied epoch=1790951399.510 tabs=rails orchestrator|shell spike|after restart|wf recruiter-2320|wf embed wave-a
 
 RESULT: PASS

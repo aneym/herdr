@@ -28,6 +28,8 @@ from PIL import Image
 D = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NAME = os.environ.get("SHELL_LAB", "shellspike-p5")
 os.environ["SHELL_LAB"] = NAME
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import scenario as S  # noqa: E402  (mark_front / check_front)
 LAB = os.path.expanduser(f"~/.cache/herdr-build/{NAME}")
 STATE = os.path.join(LAB, "state.json")
 OUT = os.path.join(D, "checks", "P5.txt")
@@ -167,6 +169,7 @@ def measure(label, png):
 def start_app(*extra):
     script("app.py", "stop")
     time.sleep(0.5)
+    S.mark_front()
     say(f"app start {' '.join(extra)}: {script('app.py', 'start', *extra).strip()}")
 
 
@@ -279,6 +282,7 @@ def main():
           s["theme"]["sidebar_glass_view"] == "none" and s["theme"]["window_opaque"] and near(side, rgb(tok["dark"]["panel"])),
           hexs(side))
 
+    S.check_front(check)
     script("app.py", "stop")
     time.sleep(0.5)
     say(f"lab down: {script('lab.py', 'down').strip()}")

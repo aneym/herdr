@@ -131,7 +131,7 @@ def main():
 
     # Warm-up: a real click opens the panel and a second one closes it (the window is key for these).
     click("rails orchestrator")
-    check("a real click on the orchestrator row opens the panel", S.state()["detail"]["open"] is True)
+    check("the action closure is invoked on the orchestrator row and opens the panel", S.state()["detail"]["open"] is True)
     click("rails orchestrator")
     check("a second real click closes it", S.state()["detail"]["open"] is False)
     check("clicks ran without making the window key", "key=false" in open(os.path.join(S.LAB, "app.log")).read().split("hook: click")[-1])

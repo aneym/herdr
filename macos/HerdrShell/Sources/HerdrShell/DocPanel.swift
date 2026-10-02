@@ -284,7 +284,7 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         if navigationAction.navigationType == .linkActivated, let url = navigationAction.request.url {
             let host = url.host
             if host != nil, host != allowedHost {
-                NSWorkspace.shared.open(url)
+                openOutsideApp(url)
                 decisionHandler(.cancel)
                 return
             }
@@ -309,6 +309,14 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
     @objc private func openOutside() {
         let raw = address.stringValue.isEmpty ? (docs.first { $0.title == active }?.url ?? "") : address.stringValue
         guard let url = URL(string: raw), url.scheme == "http" || url.scheme == "https" else { return }
+        openOutsideApp(url)
+    }
+
+    private func openOutsideApp(_ url: URL) {
+        if agentRun {
+            log("doc: open ignored (--agent-run) \(url.absoluteString)")
+            return
+        }
         NSWorkspace.shared.open(url)
     }
 

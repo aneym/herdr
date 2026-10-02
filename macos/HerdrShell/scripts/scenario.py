@@ -68,8 +68,12 @@ def mark_front():
 
 def check_front(check):
     now = frontmost_app()
-    ok = _front_before is not None and now == _front_before
-    check("frontmost app unchanged", ok, _front_before if ok else "took focus")
+    before = _front_before
+    if before == "unknown" or now == "unknown":
+        check("frontmost app unchanged", False, "unknown")
+        return
+    ok = before is not None and now == before
+    check("frontmost app unchanged", ok, before if ok else "took focus")
 
 
 def app(*a):

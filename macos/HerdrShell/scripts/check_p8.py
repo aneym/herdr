@@ -71,17 +71,17 @@ def main():
     p1 = sorted(lay["panes"], key=lambda p: p["rect"]["x"])[0]["pane_id"]
     sc.say(f"lab session '{sc.NAME}', pane under test {p1} (plain zsh)")
     sc.say(f"app: {sc.app('start').strip()}")
-    ready = False
-    for _ in range(200):
-        s = sc.state()
-        x = {x["pane"]: x for x in s["surfaces"]}.get(p1)
-        if x and any("%" in l for l in x["visible_nonblank"]):
-            ready = True
-            break
-        time.sleep(0.05)
-    sc.check("pane attached and rendered by a Ghostty surface", ready)
     saved = pasteboard()
     try:
+        ready = False
+        for _ in range(200):
+            s = sc.state()
+            x = {x["pane"]: x for x in s["surfaces"]}.get(p1)
+            if x and any("%" in l for l in x["visible_nonblank"]):
+                ready = True
+                break
+            time.sleep(0.05)
+        sc.check("pane attached and rendered by a Ghostty surface", ready)
         # 1. Wheel to herdr scrollback.
         sc.type_("seq 1 500")
         sc.key("return")
@@ -159,6 +159,7 @@ def main():
     finally:
         set_pasteboard(saved)
         sc.say("pasteboard restored")
+        sc.check_front(sc.check)
         sc.app("stop")
         time.sleep(0.5)
         sc.say(f"lab down: {sc.lab('down').strip()}")

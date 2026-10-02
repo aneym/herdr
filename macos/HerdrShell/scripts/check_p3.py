@@ -24,6 +24,8 @@ import time
 D = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NAME = os.environ.get("SHELL_LAB", "shellspike-p3")
 os.environ["SHELL_LAB"] = NAME
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import scenario as S  # noqa: E402  (mark_front / check_front)
 LAB = os.path.expanduser(f"~/.cache/herdr-build/{NAME}")
 STATE = os.path.join(LAB, "state.json")
 APPLOG = os.path.join(LAB, "app.log")
@@ -132,6 +134,7 @@ def main():
     ag = {a["pane_id"]: a for a in snap["agents"]}
     say(f"lab tabs: {list(tabs)}")
 
+    S.mark_front()
     say(f"app start: {app('start').strip()}")
     for _ in range(200):
         s = state()
@@ -247,6 +250,7 @@ def main():
         check("rename after the restart still arrives by event", hit is not None,
               f"{hit:.0f} ms" if hit is not None else "")
 
+    S.check_front(check)
     app("stop")
     time.sleep(0.5)
     lab("down")
