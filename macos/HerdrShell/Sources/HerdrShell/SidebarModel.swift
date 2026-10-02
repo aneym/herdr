@@ -22,7 +22,7 @@ import Foundation
 /// A row comes forward only when it fails or asks: a workflow that is blocked or
 /// failed opens its lane on its own, and an advisor that asks is a lane again.
 struct SidebarLine: Identifiable, Equatable {
-    enum Kind: String { case header, space, hidden, orchestrator, lane, workflow, background, note, area, focus }
+    enum Kind: String { case header, space, hidden, orchestrator, lane, workflow, background, note, area, focus, parked }
     enum Tone: String { case normal, ok, warn, mute }
 
     var id: String
@@ -48,6 +48,9 @@ struct SidebarLine: Identifiable, Equatable {
     var stage: String?
     var badge = ""
     var color: String?
+    /// Parked rows (P26): the park note and date line under the title, and a Resume button.
+    var parked = false
+    var parkNote: String?
 
     /// The row as text, the way the mock draws it. Fold state is the chevron.
     var text: String {
@@ -67,7 +70,7 @@ struct SidebarLine: Identifiable, Equatable {
          "chevron": chevron.map { $0 as Any } ?? NSNull(), "glyph": glyph, "trailing": trailing,
          "host": host ?? NSNull(), "tab": tab ?? NSNull(), "space": space ?? NSNull(),
          "area": area ?? NSNull(), "role": role ?? NSNull(), "stage": stage ?? NSNull(),
-         "selected": selected, "dim": dim]
+         "selected": selected, "dim": dim, "parked": parked, "park_note": parkNote ?? NSNull()]
     }
 }
 
@@ -137,9 +140,11 @@ enum SidebarModel {
     }
 
     static func build(snapshot s: Snapshot?, orchestrators: [TabRow], lanes: [TabRow], workflows: [TabRow],
-                      selectedTab: String?, manualOpen: [String: Bool]) -> [SidebarLine] {
+                      selectedTab: String?, manualOpen: [String: Bool], parked: Set<String> = []) -> [SidebarLine] {
         guard let s else { return [] }
-        let facts = Self.facts(s)
+        var facts = Self.facts(s)
+        // A parked tab never asks for you: it does not open its lane or count on its space.
+        for t in parked { facts[t]?.attention = false }
         let space = currentSpace(s, selectedTab: selectedTab)
         let tabSpace = Dictionary(s.tabs.map { ($0.tab_id, $0.workspace_id) }, uniquingKeysWith: { a, _ in a })
         func inSpace(_ r: TabRow) -> Bool { tabSpace[r.id] == space }
@@ -293,7 +298,7 @@ enum SidebarModel {
 // MARK: areas (P15)
 
 enum AreaChip: String, CaseIterable {
-    case all, needs, scoping, building, review, use
+    case all, needs, scoping, building, review, use, parked
 }
 
 extension SidebarModel {
@@ -308,6 +313,7 @@ extension SidebarModel {
         var number: Int
         var failed: Bool
         var devLoop: Bool
+        var park: ParkRecord?
         var children: [AreaItem]
     }
 
@@ -329,7 +335,10 @@ extension SidebarModel {
         guard let s else { return [] }
         let items = areaItems(snapshot: s, orchestrators: orchestrators, lanes: lanes, workflows: workflows, catalog: catalog)
         var flat: [AreaItem] = []
-        func walk(_ i: AreaItem) { flat.append(i); i.children.forEach(walk) }
+        func walk(_ i: AreaItem) {
+            guard i.park == nil else { return }
+            flat.append(i); i.children.forEach(walk)
+        }
         items.forEach(walk)
         let order = catalog.orderedAreaIds(Set(flat.map(\.area)))
         func bucket(_ i: AreaItem) -> Int? {
@@ -354,7 +363,10 @@ extension SidebarModel {
 
     static func passes(_ i: AreaItem, chip: AreaChip) -> Bool {
         let closed = i.stage == "closed"
+        if chip == .parked { return i.park != nil }
+        if i.park != nil { return false }
         switch chip {
+        case .parked: return false
         case .all: return true
         case .needs:
             if closed { return false }
@@ -373,7 +385,8 @@ extension SidebarModel {
         guard let s else { return [] }
         let facts = Self.facts(s)
         let items = areaItems(snapshot: s, orchestrators: orchestrators, lanes: lanes, workflows: workflows, catalog: catalog)
-        let shown = items.filter { passes($0, chip: chip) && (areaOnly == nil || $0.area == areaOnly) }
+        // The Parked chip draws its own flat list below, not area groups.
+        let shown = chip == .parked ? [] : items.filter { passes($0, chip: chip) && (areaOnly == nil || $0.area == areaOnly) }
         let focus = focusTabs(snapshot: s, orchestrators: orchestrators, lanes: lanes, workflows: workflows, catalog: catalog)
         var out: [SidebarLine] = []
 
@@ -415,7 +428,49 @@ extension SidebarModel {
             group("PROJECTS", rows.filter { $0.role == "project" })
             group("USE", rows.filter { $0.role == "desk" || $0.role == "job" })
         }
+
+        // MARK: parked: one group at the foot, shut until opened; the Parked chip lists it alone.
+        let parked = parkedItems(items).filter { areaOnly == nil || $0.area == areaOnly }
+        if chip == .parked {
+            out.removeAll { $0.kind == .focus || $0.id.hasPrefix("focus:") }
+            for i in parked { out.append(parkedLine(i, facts: facts[i.row.id] ?? Facts(), depth: 0, selected: i.row.id == selectedTab)) }
+        } else if !parked.isEmpty {
+            let open = manualOpen["parked"] ?? false
+            out.append(SidebarLine(id: "parked", kind: .parked, chevron: open, title: "Parked",
+                                   trailing: "\(parked.count)", toggle: "parked", dim: true))
+            if open {
+                for i in parked { out.append(parkedLine(i, facts: facts[i.row.id] ?? Facts(), depth: 1, selected: i.row.id == selectedTab)) }
+            }
+        }
         return out
+    }
+
+    /// Every parked item, a parked child pulled out from under a live owner too. Newest park first.
+    static func parkedItems(_ items: [AreaItem]) -> [AreaItem] {
+        var out: [AreaItem] = []
+        func walk(_ i: AreaItem) {
+            if i.park != nil { out.append(i); return }
+            i.children.forEach(walk)
+        }
+        items.forEach(walk)
+        return out.sorted { a, b in
+            let da = a.park?.at ?? .distantPast, db = b.park?.at ?? .distantPast
+            if da != db { return da > db }
+            return a.number < b.number
+        }
+    }
+
+    private static func parkedLine(_ i: AreaItem, facts f: Facts, depth: Int, selected: Bool) -> SidebarLine {
+        var l = itemLine(i, facts: f, depth: depth, selected: selected, idPrefix: "parked:")
+        l.parked = true
+        l.badge = ""
+        l.dim = true
+        // p6's bulk parks lead with "Parked 2026-10-02 16:30 ET: "; the date is already shown.
+        var note = i.park?.note ?? ""
+        if note.hasPrefix("Parked "), let colon = note.range(of: ": ") { note = String(note[colon.upperBound...]) }
+        let when = ParkActions.when(i.park?.at)
+        l.parkNote = [when, note].filter { !$0.isEmpty }.joined(separator: " · ")
+        return l
     }
 
     private static func orderGroup(_ title: String, _ rows: [AreaItem]) -> [AreaItem] {
@@ -452,6 +507,7 @@ extension SidebarModel {
                             name: catalog.displayName(tab: r.id, lane: lane, fallback: r.label),
                             color: catalog.areaColor(area),
                             number: number[r.id] ?? 0, failed: f.failed, devLoop: f.devLoop,
+                            park: catalog.parked[r.id],
                             children: r.children.map(item))
         }
         return (orchestrators + lanes + workflows).map(item)
@@ -460,6 +516,8 @@ extension SidebarModel {
     private static func groupLines(_ i: AreaItem, facts: [String: Facts], depth: Int, selectedTab: String?,
                                   manualOpen: [String: Bool]) -> [SidebarLine] {
         let f = facts[i.row.id] ?? Facts()
+        var i = i
+        i.children.removeAll { $0.park != nil }
         let attn = i.children.contains { facts[$0.row.id]?.attention == true }
         let open = i.children.isEmpty ? false : (manualOpen["tab:\(i.row.id)"] ?? attn)
         var line = itemLine(i, facts: f, depth: depth, selected: i.row.id == selectedTab, idPrefix: "tab:")
@@ -498,7 +556,8 @@ extension MainWindowController {
     var sidebarLines: [SidebarLine] {
         if state.mode == .spaces {
             return SidebarModel.build(snapshot: model.snapshot, orchestrators: model.orchestrators, lanes: model.lanes,
-                                      workflows: model.workflows, selectedTab: state.selectedTab, manualOpen: state.manualOpen)
+                                      workflows: model.workflows, selectedTab: state.selectedTab, manualOpen: state.manualOpen,
+                                      parked: Set(model.catalog.snapshot.parked.keys))
         }
         return SidebarModel.buildAreas(snapshot: model.snapshot, orchestrators: model.orchestrators, lanes: model.lanes,
                                        workflows: model.workflows, catalog: model.catalog.snapshot, chip: state.chip,

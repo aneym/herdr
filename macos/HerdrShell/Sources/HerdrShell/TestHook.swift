@@ -83,6 +83,10 @@ final class TestHook {
             case "full": if let id { c.openFullTab(id) }
             default: if let id { c.toggleDetail(id) } else { log("hook: detail: no such row") }
             }
+        case "park":
+            // {"cmd":"park","tab":"<id>","note":"..."}: what the row menu's Park… does after its prompt.
+            guard let c = controller, let tab = obj["tab"] as? String else { break }
+            ParkActions.run("park", tab: tab, note: obj["note"] as? String) { _, _ in c.model.catalog.reload() }
         case "click":
             click(obj)
         case "split":
@@ -167,6 +171,20 @@ final class TestHook {
         case "focus":
             view = c.sidebarHostView
             guard let f = c.state.rowFrames["focus"] else { log("hook: click: no focus row"); return }
+            frame = f
+        case "resume", "parked":
+            // {"target":"resume","label":"<parked row title>"}: that row's Resume button.
+            // {"target":"parked"}: the foot group's header.
+            view = c.sidebarHostView
+            var key = "parked"
+            if target == "resume" {
+                let label = obj["label"] as? String
+                guard let line = c.sidebarLines.first(where: { $0.parked && $0.title == label }), let tab = line.tab else {
+                    log("hook: click: no parked row \(label ?? "?")"); return
+                }
+                key = "resume:\(tab)"
+            }
+            guard let f = c.state.rowFrames[key] else { log("hook: click: no \(key)"); return }
             frame = f
         case "doc_tab":
             let name = obj["label"] as? String ?? ""
