@@ -124,36 +124,58 @@ final class UpdatePopoverController: NSViewController {
 
     override func loadView() {
         let width: CGFloat = 280
-        let notes = offer.notes.isEmpty ? "No notes." : offer.notes.map { "• \($0)" }.joined(separator: "\n")
-        let when = offer.builtAt.isEmpty ? "" : offer.builtAt
-        let reason = offer.reason.isEmpty ? "" : offer.reason
-        let body = [notes, when, reason].filter { !$0.isEmpty }.joined(separator: "\n")
+        let pad: CGFloat = 16
+        // The newest few changes; a long gap since the last update collapses to a count.
+        let shown = Array(offer.notes.prefix(4))
+        var lines = shown.map { "• \($0)" }
+        if offer.notes.count > shown.count { lines.append("and \(offer.notes.count - shown.count) more") }
+        let notes = lines.isEmpty ? "No notes." : lines.joined(separator: "\n")
+        let meta = [String(offer.commit.prefix(8)), Self.when(offer.builtAt)].filter { !$0.isEmpty }.joined(separator: " · ")
 
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 196))
         let title = NSTextField(labelWithString: "What's new")
         title.font = .systemFont(ofSize: 13, weight: .semibold)
-        title.frame = NSRect(x: 16, y: 164, width: width - 32, height: 18)
-
-        let text = NSTextField(wrappingLabelWithString: body)
+        let text = NSTextField(wrappingLabelWithString: notes)
         text.font = .systemFont(ofSize: 12)
         text.textColor = .secondaryLabelColor
-        text.frame = NSRect(x: 16, y: 64, width: width - 32, height: 96)
+        text.preferredMaxLayoutWidth = width - 2 * pad
+        let foot = NSTextField(labelWithString: offer.reason.isEmpty ? meta : offer.reason)
+        foot.font = .systemFont(ofSize: 11)
+        foot.textColor = .tertiaryLabelColor
+        foot.lineBreakMode = .byTruncatingTail
 
         let primary = offer.failed && offer.retry ? "Retry" : "Restart to update"
         let go = NSButton(title: primary, target: self, action: #selector(restart))
         go.bezelStyle = .rounded
         go.keyEquivalent = "\r"
-        go.frame = NSRect(x: 16, y: 32, width: width - 32, height: 28)
-
         let later = NSButton(title: "Later", target: self, action: #selector(later))
         later.bezelStyle = .rounded
-        later.frame = NSRect(x: 16, y: 6, width: 72, height: 24)
+
+        let textH = ceil(text.sizeThatFits(NSSize(width: width - 2 * pad, height: 1000)).height)
+        let height = 14 + 18 + 6 + textH + 8 + 14 + 12 + 28 + 10
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        var y = height - 14 - 18
+        title.frame = NSRect(x: pad, y: y, width: width - 2 * pad, height: 18)
+        y -= 6 + textH
+        text.frame = NSRect(x: pad, y: y, width: width - 2 * pad, height: textH)
+        y -= 8 + 14
+        foot.frame = NSRect(x: pad, y: y, width: width - 2 * pad, height: 14)
+        later.frame = NSRect(x: pad - 6, y: 10, width: 80, height: 28)
+        go.frame = NSRect(x: width - pad + 6 - 150, y: 10, width: 150, height: 28)
 
         view.addSubview(title)
         view.addSubview(text)
+        view.addSubview(foot)
         if !(offer.failed && !offer.retry) { view.addSubview(go) }
         view.addSubview(later)
         self.view = view
+    }
+
+    /// "Oct 2, 7:08 PM" in local time from the bundle's UTC stamp.
+    private static func when(_ iso: String) -> String {
+        guard let d = ISO8601DateFormatter().date(from: iso) else { return iso }
+        let f = DateFormatter()
+        f.dateFormat = "MMM d, h:mm a"
+        return f.string(from: d)
     }
 
     @objc private func restart() { owner?.restartNow() }
