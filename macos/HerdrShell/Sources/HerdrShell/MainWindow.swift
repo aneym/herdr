@@ -115,7 +115,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                           styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                           backing: .buffered, defer: false)
         super.init()
-        window.title = "herdr shell"
+        window.title = Channel.name
+        if Channel.kind == .dev { window.subtitle = "DEV" }
         window.titlebarAppearsTransparent = true
         window.delegate = self
         window.isReleasedWhenClosed = false
@@ -162,6 +163,60 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         resizer.onIdle = { [weak self] in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self?.refreshHost() }
         }
+        if Channel.kind == .prod { updates = UpdateController(controller: self) }
+    }
+
+    var updates: UpdateController?
+
+    @objc func checkForUpdates(_ sender: Any?) { updates?.checkNow() }
+
+    /// Persist the UI the shell can put back after it is replaced. The panes stay up.
+    func saveForRelaunch() {
+        state.saveSelected()
+        state.saveDocs()
+        if let row = state.detailRow { Channel.store.set(row, forKey: Channel.detailRowKey) }
+        let f = window.frame
+        Channel.store.set("\(f.origin.x),\(f.origin.y),\(f.size.width),\(f.size.height)", forKey: Channel.frameKey)
+        Channel.store.synchronize()
+        let obj: [String: Any] = [
+            "selectedTab": state.selectedTab ?? "",
+            "selectedRow": state.detailRow ?? "",
+            "sidebarMode": state.mode.rawValue,
+            "docTabs": docPanel.tabTitles,
+            "docActive": docPanel.active ?? "",
+            "paneModes": Channel.paneModes(),
+            "windowFrame": [f.origin.x, f.origin.y, f.size.width, f.size.height],
+        ]
+        try? FileManager.default.createDirectory(at: Channel.appSupport, withIntermediateDirectories: true)
+        if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]) {
+            try? data.write(to: Channel.sessionFile)
+        }
+    }
+
+    private func restoreSavedUI() {
+        var raw = Channel.store.string(forKey: Channel.frameKey)
+        if raw == nil,
+           let data = try? Data(contentsOf: Channel.sessionFile),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let arr = obj["windowFrame"] as? [Any] {
+                let nums = arr.compactMap { ($0 as? NSNumber)?.doubleValue }
+                if nums.count == 4 { raw = "\(nums[0]),\(nums[1]),\(nums[2]),\(nums[3])" }
+            }
+            if let row = obj["selectedRow"] as? String, !row.isEmpty {
+                Channel.store.set(row, forKey: Channel.detailRowKey)
+            }
+            if let modes = obj["paneModes"] as? [String: String] { Channel.setPaneModes(modes) }
+        }
+        if let raw {
+            let p = raw.split(separator: ",").compactMap { Double($0) }
+            if p.count == 4, p[2] >= 400, p[3] >= 300 {
+                window.setFrame(NSRect(x: p[0], y: p[1], width: p[2], height: p[3]), display: false)
+            }
+        }
+        if let row = Channel.store.string(forKey: Channel.detailRowKey), !row.isEmpty {
+            state.detailRow = row
+            detailPanel.model.open(row)
+        }
     }
 
     private var bag = Set<AnyCancellable>()
@@ -187,6 +242,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     /// The sidebar's SwiftUI host view (the test hook clicks inside it).
     var sidebarHostView: NSView { sidebarContainer.content }
     func show() {
+        restoreSavedUI()
         window.makeKeyAndOrderFront(nil)
     }
 

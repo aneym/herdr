@@ -32,12 +32,9 @@ final class SidebarState: ObservableObject {
     /// click is read from the current event.
     var clickOption = false
 
-    /// Per-lab suite. `UserDefaults.standard` is the app's domain in the real home, so two
-    /// labs would reopen each other's setup. The suite name follows SHELL_LAB.
-    static let store: UserDefaults = {
-        let lab = ProcessInfo.processInfo.environment["SHELL_LAB"] ?? "live"
-        return UserDefaults(suiteName: "herdr.shell.\(lab)") ?? .standard
-    }()
+    /// Dev keeps a suite per lab under the dev prefix. Prod uses the bundle domain.
+    /// `UserDefaults.standard` in the real home would let two labs reopen each other.
+    static let store: UserDefaults = Channel.store
     private static let prefix = "herdr.shell."
 
     init() {

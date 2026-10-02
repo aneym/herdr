@@ -41,7 +41,7 @@ final class Keymap {
 
     static let modMask: NSEvent.ModifierFlags = [.command, .shift, .option, .control]
 
-    static let shared = Keymap(path: args["keymap"] ?? (pkgRoot + "/Resources/keymap.json"))
+    static let shared = Keymap(path: args["keymap"] ?? shellResource("keymap.json"))
 
     private(set) var entries: [Entry] = []
     private(set) var terminal: [TerminalEntry] = []

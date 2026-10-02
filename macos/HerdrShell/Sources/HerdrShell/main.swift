@@ -10,9 +10,29 @@ var flags = Set<String>()
 do {
     var it = CommandLine.arguments.dropFirst().makeIterator()
     while let a = it.next() {
-        if a == "--allow-live" || a == "--dump-tokens" { flags.insert(a); continue }
+        if a == "--allow-live" || a == "--dump-tokens" || a == "--selftest-channel" || a == "--update-helper" {
+            flags.insert(a); continue
+        }
         if a.hasPrefix("--"), let v = it.next() { args[String(a.dropFirst(2))] = v }
     }
+}
+if flags.contains("--update-helper") {
+    UpdateRestart.helperMain(args: args)
+}
+if Channel.kind == .dev && flags.contains("--allow-live") {
+    log("refusing: dev channel does not take --allow-live")
+    exit(2)
+}
+if Channel.kind == .prod && (args["control"] != nil || args["chat-hook"] != nil) {
+    log("refusing: prod channel does not take --control or a chat hook")
+    exit(2)
+}
+if flags.contains("--selftest-channel") {
+    Channel.printSelfTest()
+    exit(0)
+}
+if let dir = args["selftest-update"] {
+    UpdateSelfTest.run(dir)
 }
 let pkgRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
 
@@ -21,14 +41,19 @@ let pkgRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deleti
 // Ghostty resources (themes, shell integration): the flag, then the package's own
 // Resources/ghostty, then an installed Ghostty.app, then the vendored build tree.
 let resourcesDir: String = {
-    let candidates = [args["ghostty-resources"], pkgRoot + "/Resources/ghostty",
-                      "/Applications/Ghostty.app/Contents/Resources/ghostty",
-                      pkgRoot + "/../vendor/ghostty/zig-out/share/ghostty",
-                      "/Volumes/StudioExt/repos/herdr-shell-spikes/vendor/ghostty/zig-out/share/ghostty"]
-        .compactMap { $0 }.map { ($0 as NSString).standardizingPath }
-    return candidates.first { FileManager.default.fileExists(atPath: $0 + "/themes") } ?? candidates[0]
+    var candidates: [String] = []
+    if let bundled = Bundle.main.resourceURL?.appendingPathComponent("ghostty").path { candidates.append(bundled) }
+    if let flag = args["ghostty-resources"] { candidates.append(flag) }
+    candidates.append(contentsOf: [
+        pkgRoot + "/Resources/ghostty",
+        "/Applications/Ghostty.app/Contents/Resources/ghostty",
+        pkgRoot + "/../vendor/ghostty/zig-out/share/ghostty",
+        "/Volumes/StudioExt/repos/herdr-shell-spikes/vendor/ghostty/zig-out/share/ghostty",
+    ])
+    let paths = candidates.map { ($0 as NSString).standardizingPath }
+    return paths.first { FileManager.default.fileExists(atPath: $0 + "/themes") } ?? paths[0]
 }()
-let baseConfig = (try? String(contentsOfFile: args["ghostty-config"] ?? (pkgRoot + "/Resources/ghostty.conf"), encoding: .utf8)) ?? ""
+let baseConfig = (try? String(contentsOfFile: args["ghostty-config"] ?? shellResource("ghostty.conf"), encoding: .utf8)) ?? ""
 let userConfigPath = args["user-ghostty-config"] ?? (TerminalTheme.realHome() + "/.config/ghostty/config")
 let userConfig = try? String(contentsOfFile: userConfigPath, encoding: .utf8)
 let ghosttyConfigText = TerminalTheme.mergedConfig(base: baseConfig, user: userConfig)
@@ -44,8 +69,13 @@ for s in (args["glass"] ?? "").split(separator: ",") {
     if s == "sidebar" { glassTokens.sidebar = true }
     if s == "overlay" { glassTokens.overlay = true }
 }
-let herdrBin = args["herdr"] ?? ""
-let socket = args["socket"] ?? ""
+var herdrBin = args["herdr"] ?? ""
+var socket = args["socket"] ?? ""
+if Channel.kind == .prod {
+    if herdrBin.isEmpty { herdrBin = (Channel.home as NSString).appendingPathComponent(".local/bin/herdr") }
+    if socket.isEmpty { socket = (Channel.home as NSString).appendingPathComponent(".config/herdr/herdr.sock") }
+    flags.insert("--allow-live")
+}
 if herdrBin.isEmpty || socket.isEmpty {
     log("usage: HerdrShell --herdr <bin> --socket <api socket> [--control <fifo>]")
     exit(2)
@@ -98,10 +128,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = buildMenu(target: controller)
         controller.show()
         model.start()
-        if let fifo = args["control"] {
+        if let fifo = args["control"], Channel.kind == .dev {
             hook = TestHook(path: fifo, controller: controller)
             hook?.start()
         }
+        if Channel.kind == .prod { controller.updates?.start() }
         log(String(format: "launched in %.0f ms (window %d)", Date().timeIntervalSince(t0) * 1000, controller.window.windowNumber))
     }
 
@@ -125,7 +156,11 @@ func buildMenu(target: MainWindowController) -> NSMenu {
         return i
     }
     let quit = NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-    submenu("HerdrShell", [quit])
+    var appItems = [quit]
+    if Channel.kind == .prod {
+        appItems.insert(item("Check for Updates…", #selector(MainWindowController.checkForUpdates(_:)), "u", [.command, .shift]), at: 0)
+    }
+    submenu(Channel.name, appItems)
     submenu("Edit", [
         item("Copy", #selector(MainWindowController.copy(_:)), "c"),
         item("Paste", #selector(MainWindowController.paste(_:)), "v"),

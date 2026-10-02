@@ -77,6 +77,12 @@ struct HostsRow: View {
                     Text(h.detail).foregroundStyle(tokens.mute).lineLimit(1)
                 }
             }
+            if Channel.kind == .dev {
+                Text("DEV")
+                    .font(.system(size: 9, weight: .semibold))
+                    .tracking(0.6)
+                    .foregroundStyle(tokens.warn)
+            }
         }
         .font(.system(size: 11, design: .monospaced))
         .padding(.horizontal, 10).padding(.vertical, 7)
