@@ -587,30 +587,7 @@ enum SharedWebStore {
         return WKWebsiteDataStore(forIdentifier: id)
     }()
 
-    private static func channelSupportDirectory() -> URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("herdr", isDirectory: true)
-        if let lab = ProcessInfo.processInfo.environment["SHELL_LAB"], !lab.isEmpty {
-            return base.appendingPathComponent(lab, isDirectory: true)
-        }
-        return base.appendingPathComponent(updateChannel(), isDirectory: true)
-    }
-
-    private static func updateChannel() -> String {
-        let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
-        guard let text = try? String(contentsOfFile: home + "/.config/herdr/config.toml", encoding: .utf8) else {
-            return "stable"
-        }
-        for raw in text.split(separator: "\n") {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            guard line.hasPrefix("channel") else { continue }
-            let parts = line.split(separator: "=", maxSplits: 1)
-            guard parts.count == 2 else { continue }
-            let value = parts[1].trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-            if !value.isEmpty { return value }
-        }
-        return "stable"
-    }
+    private static func channelSupportDirectory() -> URL { Channel.appSupport }
 }
 
 /// Takes focus only after a click, so opening the panel leaves the pane typing.
