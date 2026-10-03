@@ -130,20 +130,20 @@ def publish(ref):
     wt = release_worktree()
     subprocess.run(["git", "-C", wt, "checkout", "-q", "--detach", sha], check=True)
     script = f"{wt}/macos/HerdrShell/scripts/release.sh"
-    # release.sh stages Studio itself; hold the delivery lock so a local (Studio) fanout
-    # never swaps the staged directory out from under it mid-build.
+    # release.sh stages Studio itself; hold the delivery lock through the build and the read of
+    # what it staged, so a local (Studio) fanout never swaps staged/ in between.
     with open(f"{LOGDIR}/build.log", "a") as out, delivery_lock():
         r = subprocess.run(["bash", script, sha], stdout=out, stderr=subprocess.STDOUT,
                            env={**os.environ, "HERDR_REPO": REPO})
-    if r.returncode != 0:
-        log(f"FAIL release.sh {sha[:12]} exit {r.returncode} (see {LOGDIR}/build.log)")
-        return False
-    try:
-        with open(f"{STAGE}/staged.json") as f:
-            meta = json.load(f)
-    except (OSError, ValueError) as e:
-        log(f"FAIL staged metadata {sha[:12]}: {e}")
-        return False
+        if r.returncode != 0:
+            log(f"FAIL release.sh {sha[:12]} exit {r.returncode} (see {LOGDIR}/build.log)")
+            return False
+        try:
+            with open(f"{STAGE}/staged.json") as f:
+                meta = json.load(f)
+        except (OSError, ValueError) as e:
+            log(f"FAIL staged metadata {sha[:12]}: {e}")
+            return False
     if not same(meta.get("commit", ""), sha):
         log(f"FAIL staged.json names {meta.get('commit')} after building {sha[:12]}")
         return False
