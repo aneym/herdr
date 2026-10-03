@@ -307,15 +307,13 @@
       "chord": "cmd+k",
       "action": "search",
       "title": "Search",
-      "menu": "View",
-      "pending": "P13"
+      "menu": "View"
     },
     {
       "chord": "cmd+g",
       "action": "goto",
       "title": "Go To",
-      "menu": "View",
-      "pending": "P13"
+      "menu": "View"
     },
     {
       "chord": "cmd+n",

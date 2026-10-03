@@ -149,6 +149,15 @@ final class TestHook {
                 NSApp.activate(ignoringOtherApps: true)
                 controller?.window.makeKeyAndOrderFront(nil)
             }
+        case "switcher":
+            // {"cmd":"switcher","open":true|false,"query":"...","pick":N}
+            // pick is 1-based, the same row ⌘N chooses.
+            guard let c = controller else { break }
+            if let q = obj["query"] as? String { c.quickSwitch.setQuery(q) }
+            if let open = obj["open"] as? Bool {
+                if open { c.quickSwitch.present(selectAll: false) } else { c.quickSwitch.dismiss() }
+            }
+            if let n = obj["pick"] as? Int { c.quickSwitch.pick(n) }
         default:
             log("hook: unknown cmd \(cmd)")
         }
@@ -652,6 +661,8 @@ final class TestHook {
             "window_frame": NSStringFromRect(c.window.frame),
             "host_frame": NSStringFromRect(c.host.frame),
             "selected_tab": c.state.selectedTab ?? NSNull(),
+            "switcher_open": c.quickSwitch.isOpen,
+            "switcher_results": c.quickSwitch.results,
             "focused_pane": c.focusedSurface?.paneId ?? NSNull(),
             "dividers": c.host.dividerHandles.map { h -> [String: Any] in
                 ["split": h.divider.splitId, "vertical": h.divider.vertical, "ratio": h.divider.ratio,

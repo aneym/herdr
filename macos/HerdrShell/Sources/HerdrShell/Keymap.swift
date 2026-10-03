@@ -201,12 +201,20 @@ extension MainWindowController {
         case "split_right": splitRight(nil)
         case "split_down": splitDown(nil)
         case "close_detail":
+            if quickSwitch.isOpen { quickSwitch.dismiss(); break }
             if docPanel.hasFocus { docPanel.returnFocus(); break }
             closeDetail()
+        case "close_switcher":
+            quickSwitch.dismiss()
+        case "search":
+            quickSwitch.present(selectAll: false)
+        case "goto":
+            quickSwitch.present(selectAll: true)
         case "open_factory":
             toggleFactory()
         default:
             if action.hasPrefix("goto_tab_"), let n = Int(action.dropFirst("goto_tab_".count)) {
+                if quickSwitch.isOpen { quickSwitch.pick(n); return true }
                 let rows = model.allRowsInOrder
                 if n >= 1, n <= rows.count { selectTab(rows[n - 1].id, revealDocs: state.mode == .areas) }
                 return true
