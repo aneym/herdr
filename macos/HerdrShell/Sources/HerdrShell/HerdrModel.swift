@@ -24,7 +24,10 @@ struct Snapshot: Decodable {
     struct Rect: Decodable { let x: Double; let y: Double; let width: Double; let height: Double }
     struct LayoutPane: Decodable { let pane_id: String; let rect: Rect }
     struct Split: Decodable { let id: String; let direction: String; let ratio: Double; let rect: Rect }
-    struct Layout: Decodable { let tab_id: String; let area: Rect; let panes: [LayoutPane]; let splits: [Split]? }
+    struct Layout: Decodable {
+        let tab_id: String; let area: Rect; let panes: [LayoutPane]; let splits: [Split]?
+        let zoomed: Bool?; let focused_pane_id: String?
+    }
 
     let workspaces: [Workspace]
     let tabs: [Tab]
@@ -57,6 +60,13 @@ final class HerdrModel: ObservableObject {
 
     /// Fetch time of the latest `session.snapshot`, for the status line.
     var pollMs: Double { lastRefreshMs }
+
+    /// Tabs whose pane changed into blocked or done since the app started, newest first.
+    /// The first snapshot is the baseline: a tab that was already blocked is not a jump.
+    private(set) var attentionTrail: [String] = []
+    var latestAttentionTab: String? { attentionTrail.first }
+    private var paneAttention: [String: String] = [:]
+    private var attentionBaseline = false
 
     let herdrBin: String
     let env: [String: String]
@@ -121,6 +131,41 @@ final class HerdrModel: ObservableObject {
         for t in s.tabs { h[c.host(of: t), default: 0] += 1 }
         hosts = h.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
         hostsModel.update(tabCounts: hosts)
+        trackAttention(s)
+    }
+
+    /// A pane moving into blocked or done while we are running. Kept to the last 20.
+    private func trackAttention(_ s: Snapshot) {
+        let agentsByPane = Dictionary(grouping: s.agents, by: { $0.pane_id })
+        var next: [String: String] = [:]
+        var hits: [String] = []
+        for p in s.panes {
+            let agents = agentsByPane[p.pane_id] ?? []
+            let status = (agents.first?.agent_status ?? p.agent_status ?? "unknown").lowercased()
+            var phase = ""
+            for a in agents {
+                if let v = a.tokens?["phase"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !v.isEmpty {
+                    phase = v
+                    break
+                }
+            }
+            let cls: String
+            if status == "blocked" { cls = "blocked" }
+            else if status == "done" || phase == "done" || phase == "finished" { cls = "done" }
+            else { cls = "other" }
+            next[p.pane_id] = cls
+            if attentionBaseline, let prev = paneAttention[p.pane_id], prev != cls, (cls == "blocked" || cls == "done") {
+                hits.append(p.tab_id)
+                log("attention: \(p.tab_id) pane=\(p.pane_id) \(prev)->\(cls)")
+            }
+        }
+        paneAttention = next
+        if !attentionBaseline {
+            attentionBaseline = true
+            return
+        }
+        for tab in hits { attentionTrail.insert(tab, at: 0) }
+        if attentionTrail.count > 20 { attentionTrail.removeLast(attentionTrail.count - 20) }
     }
 
     func layout(forTab tabId: String) -> Snapshot.Layout? {

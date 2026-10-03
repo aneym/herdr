@@ -200,6 +200,14 @@ extension MainWindowController {
         case "new_tab": newTab(nil)
         case "split_right": splitRight(nil)
         case "split_down": splitDown(nil)
+        case "close_pane": closePane()
+        case "zoom_pane": zoomPane()
+        case "next_attention": nextAttention()
+        case "attention_jump": attentionJump()
+        case "toggle_sidebar": toggleSidebar()
+        case "agent_list_up": stepAgentList(-1)
+        case "agent_list_down": stepAgentList(1)
+        case "rename_tab": promptRenameTab(nil)
         case "close_detail":
             if quickSwitch.isOpen { quickSwitch.dismiss(); break }
             if docPanel.hasFocus { docPanel.returnFocus(); break }

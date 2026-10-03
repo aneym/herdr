@@ -28,6 +28,8 @@ final class SidebarState: ObservableObject {
     @Published var focusCursor: Int?
     @Published var docOpen: Bool
     @Published var docWidth: CGFloat
+    /// The sidebar column. Hidden, the pane host takes that width. Persists like docs.
+    @Published var sidebarVisible: Bool
     /// Factory view fills the pane host while this is true.
     @Published var factoryOpen = false
     /// Set by the test hook for the duration of a synthetic option-click. A real option
@@ -53,6 +55,7 @@ final class SidebarState: ObservableObject {
         selectedTab = d.string(forKey: Self.prefix + "selectedTab")
         docOpen = (d.object(forKey: Self.prefix + "docOpen") as? Bool) ?? false
         docWidth = CGFloat((d.object(forKey: Self.prefix + "docWidth") as? Double) ?? 420)
+        sidebarVisible = (d.object(forKey: Self.prefix + "sidebarVisible") as? Bool) ?? true
         if docWidth < 320 { docWidth = 320 }
     }
 
@@ -93,6 +96,11 @@ final class SidebarState: ObservableObject {
     func saveDocs() {
         Self.store.set(docOpen, forKey: Self.prefix + "docOpen")
         Self.store.set(Double(docWidth), forKey: Self.prefix + "docWidth")
+        sync()
+    }
+
+    func saveSidebar() {
+        Self.store.set(sidebarVisible, forKey: Self.prefix + "sidebarVisible")
         sync()
     }
 
@@ -153,6 +161,7 @@ struct SidebarView: View {
     var openDetail: ((TabRow) -> Void)? = nil
     var select: (String) -> Void
     var onFactory: () -> Void = {}
+    var onRename: (String) -> Void = { _ in }
 
     /// Tabs whose Resume is running, so a second click does nothing and the button says so.
     @State private var resuming: Set<String> = []
@@ -361,6 +370,7 @@ struct SidebarView: View {
         .onTapGesture { click(l) }
         .contextMenu {
             if let tab = l.tab {
+                Button("Rename…") { onRename(tab) }
                 Button("Resume") { resume(tab) }
                 if RemoteActions.slug(model.catalog.snapshot.lanes[tab]?.scopeURL) != nil {
                     Button("Approve scope…") { approve(tab) }
@@ -471,6 +481,7 @@ struct SidebarView: View {
         .onTapGesture { click(l) }
         .hookAction(l.kind == .focus ? "focus" : "row:\(l.title)") { click(l) }
         .contextMenu {
+            if let tab = l.tab { Button("Rename…") { onRename(tab) } }
             if state.mode == .areas, l.tab != nil, l.kind == .orchestrator || l.kind == .lane {
                 Button("Park…") { park(l) }
             }

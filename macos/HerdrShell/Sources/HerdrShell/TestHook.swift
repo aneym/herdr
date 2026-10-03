@@ -101,6 +101,19 @@ final class TestHook {
             click(obj)
         case "split":
             controller?.split(obj["direction"] as? String ?? "right")
+        case "action":
+            // {"cmd":"action","name":"<keymap action>"}: the same fire a menu item runs.
+            let name = obj["name"] as? String ?? ""
+            guard let entry = Keymap.shared.entries.first(where: { $0.action == name && $0.pending == nil })
+                    ?? Keymap.shared.entries.first(where: { $0.action == name }) else {
+                log("hook: no action \(name)"); break
+            }
+            Keymap.shared.fire(entry)
+        case "rename":
+            // {"cmd":"rename","tab":"...","label":"..."}: tab.rename without the alert.
+            if let c = controller, let tab = obj["tab"] as? String, let label = obj["label"] as? String {
+                c.renameTab(tab, label)
+            }
         case "scroll":
             scroll(obj)
         case "frame":
@@ -677,6 +690,9 @@ final class TestHook {
             "selected_tab": c.state.selectedTab ?? NSNull(),
             "switcher_open": c.quickSwitch.isOpen,
             "switcher_results": c.quickSwitch.results,
+            "sidebar_visible": c.state.sidebarVisible,
+            "attention_order": c.attentionOrderIds(),
+            "attention_latest": c.model.latestAttentionTab ?? NSNull(),
             "focused_pane": c.focusedSurface?.paneId ?? NSNull(),
             "dividers": c.host.dividerHandles.map { h -> [String: Any] in
                 ["split": h.divider.splitId, "vertical": h.divider.vertical, "ratio": h.divider.ratio,
