@@ -130,7 +130,9 @@ def publish(ref):
     wt = release_worktree()
     subprocess.run(["git", "-C", wt, "checkout", "-q", "--detach", sha], check=True)
     script = f"{wt}/macos/HerdrShell/scripts/release.sh"
-    with open(f"{LOGDIR}/build.log", "a") as out:
+    # release.sh stages Studio itself; hold the delivery lock so a local (Studio) fanout
+    # never swaps the staged directory out from under it mid-build.
+    with open(f"{LOGDIR}/build.log", "a") as out, delivery_lock():
         r = subprocess.run(["bash", script, sha], stdout=out, stderr=subprocess.STDOUT,
                            env={**os.environ, "HERDR_REPO": REPO})
     if r.returncode != 0:
