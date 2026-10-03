@@ -159,6 +159,8 @@ def main():
         return finish()
 
     S.cmd({"cmd": "select", "tab": look})
+    # In the Space the app is a real foreground app: make its window key, as when Alex looks at it.
+    S.cmd({"cmd": "activate"})
     time.sleep(0.3)
     # Marks the offscreen window as key for the attention rule (agent-run never activates).
     S.cmd({"cmd": "mouse", "pane": look_pane, "action": "down", "col": 1, "row": 1})
@@ -193,7 +195,8 @@ def main():
     s = S.state()
     check("two flips in 1s coalesce to one notification", len(notes(s, bg)) == 1, f"{notes(s, bg)}")
 
-    herdr("pane", "report-agent", fin_pane, "--source", "spike", "--agent", "claude", "--state", "done")
+    # herdr has no reported "done": an idle agent in a tab nobody has looked at reads as done.
+    herdr("pane", "report-agent", fin_pane, "--source", "spike", "--agent", "claude", "--state", "idle")
     s = wait_state(lambda s: s.get("dock_badge") == "2" and any(n.get("tab") == fin and n.get("kind") == "done" for n in notes(s)), 20)
     fin_notes = notes(s, fin) if s else []
     check("working to done on a background tab notifies finished",

@@ -1,6 +1,6 @@
-HerdrShell P28 check  2026-10-03T05:38:10Z
+HerdrShell P28 check  2026-10-03T05:50:12Z
 app start: {"space": "herdr-qa", "ip": "192.168.64.5", "herdr_sha": "bf97e4cf7b64"}
-{"space": "herdr-qa", "app_pid": "9293", "exe": "/Users/lume/.herdr-space/bin/HerdrShell", "host_socket": "/Users/aneyman/.cache/herdr-build/s/p28/h/.config/herdr/sessions/shellspike-p28/herdr.sock", "guest_socket": "/Users/lume/.herdr-space/herdr.sock"}
+{"space": "herdr-qa", "app_pid": "10881", "exe": "/Users/lume/.herdr-space/bin/HerdrShell", "host_socket": "/Users/aneyman/.cache/herdr-build/s/p28/h/.config/herdr/sessions/shellspike-p28/herdr.sock", "guest_socket": "/Users/lume/.herdr-space/herdr.sock"}
 [PASS] switcher opens over the six tabs -- ['w3:t3', 'w3:t1', 'w2:t1', 'w3:t2', 'w2:t3', 'w2:t2']
 [PASS] empty query lists the blocked tab first -- ['w3:t3', 'w3:t1', 'w2:t1', 'w3:t2', 'w2:t3', 'w2:t2']
 [PASS] query rec ranks recruiter ahead of rolodex-record -- ['w2:t1', 'w2:t2']

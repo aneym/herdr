@@ -1,6 +1,6 @@
-HerdrShell P26 check  2026-10-03T05:34:56Z
+HerdrShell P26 check  2026-10-03T05:49:02Z
 app start: {"space": "herdr-qa", "ip": "192.168.64.5", "herdr_sha": "bf97e4cf7b64"}
-{"space": "herdr-qa", "app_pid": "8946", "exe": "/Users/lume/.herdr-space/bin/HerdrShell", "host_socket": "/Users/aneyman/.cache/herdr-build/s/parked/h/.config/herdr/sessions/shellspike-parked/herdr.sock", "guest_socket": "/Users/lume/.herdr-space/herdr.sock"}
+{"space": "herdr-qa", "app_pid": "10692", "exe": "/Users/lume/.herdr-space/bin/HerdrShell", "host_socket": "/Users/aneyman/.cache/herdr-build/s/parked/h/.config/herdr/sessions/shellspike-parked/herdr.sock", "guest_socket": "/Users/lume/.herdr-space/herdr.sock"}
 [PASS] app came up in Areas with a Parked group
   All: ['rails orchestrator', 'scope page', 'live build', 'wf active child']
 [PASS] All leaves both parked tabs out of their area -- ['rails orchestrator', 'scope page', 'live build', 'wf active child']
@@ -19,7 +19,7 @@ app start: {"space": "herdr-qa", "ip": "192.168.64.5", "herdr_sha": "bf97e4cf7b6
 [PASS] screenshot checks/P26-all-open.png -- /Volumes/StudioExt/repos/herdr-worktrees/shell-finish/macos/HerdrShell/checks/P26-all-open.png
 [PASS] Resume runs herdr-lane unpark: the mode leaves the modes file -- null
 [PASS] the resumed row is back in its area and the group count drops -- ['rails orchestrator', 'scope page', 'old research', 'live build', 'wf active child']
-[PASS] Park runs herdr-lane park with the note and by=herdr-shell@<host> -- {"at": "2026-10-03T05:36:09.341Z", "by": "herdr-shell@apple-virtual-machine-1", "mode": "parked", "note": "waiting on the PC"}
+[PASS] Park runs herdr-lane park with the note and by=herdr-shell@<host> -- {"at": "2026-10-03T05:50:08.635Z", "by": "herdr-shell@apple-virtual-machine-1", "mode": "parked", "note": "waiting on the PC"}
 [PASS] the parked row leaves its area at once
 lab down: stop: 0
 

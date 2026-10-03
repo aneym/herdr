@@ -134,7 +134,9 @@ enum RemoteActions {
             guard alert.runModal() == .alertFirstButtonReturn else { return }
             words = field.stringValue
         }
-        run(verb: "approve", args: [slug, "--quote=\(words!)", "--by=alex"]) { ok, message in
+        // An approval without the approver's words is not one; an emptied field cancels.
+        guard let said = words, !said.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        run(verb: "approve", args: [slug, "--quote=\(said)", "--by=alex"]) { ok, message in
             if !ok {
                 log("approve failed: \(message)")
                 if quote == nil {

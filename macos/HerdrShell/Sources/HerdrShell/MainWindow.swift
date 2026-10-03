@@ -474,17 +474,23 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         if forced == nil, resizer.isBusy { return }
         guard let tab = state.selectedTab, let layout = forced ?? model.layout(forTab: tab), layout.tab_id == tab else { return }
         shownLayout = layout
-        let key = tab + layout.panes.map { "\($0.pane_id)@\($0.rect.x),\($0.rect.y),\($0.rect.width),\($0.rect.height)" }.joined(separator: "|")
+        // herdr reports the split rects even while a tab is zoomed; the shell draws the zoom itself.
+        let zoomedPane = layout.zoomed == true ? layout.focused_pane_id : nil
+        let shown: [Snapshot.LayoutPane] = zoomedPane.map { id in
+            layout.panes.filter { $0.pane_id == id }.map { Snapshot.LayoutPane(pane_id: $0.pane_id, rect: layout.area) }
+        } ?? layout.panes
+        let key = tab + (zoomedPane.map { "zoom:\($0)|" } ?? "")
+            + shown.map { "\($0.pane_id)@\($0.rect.x),\($0.rect.y),\($0.rect.width),\($0.rect.height)" }.joined(separator: "|")
         guard key != lastLayoutKey else { applyCaps(); return }
         lastLayoutKey = key
         var items: [(SurfaceView, Snapshot.Rect)] = []
-        for lp in layout.panes {
+        for lp in shown {
             guard let p = model.pane(lp.pane_id) else { continue }
             let s = registry.surface(paneId: p.pane_id, terminalId: p.terminal_id)
             wire(s, tab: tab)
             items.append((s, lp.rect))
         }
-        host.show(items, area: layout.area, dividers: PaneDivider.from(layout))
+        host.show(items, area: layout.area, dividers: zoomedPane == nil ? PaneDivider.from(layout) : [])
         applyPendingFocus()
         applyVisibility()
         applyCaps()

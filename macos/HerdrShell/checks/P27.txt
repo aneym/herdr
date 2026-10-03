@@ -1,0 +1,22 @@
+HerdrShell P27 check  2026-10-03T05:47:44Z
+app start: {"space": "herdr-qa", "ip": "192.168.64.5", "herdr_sha": "bf97e4cf7b64"}
+{"space": "herdr-qa", "app_pid": "10418", "exe": "/Users/lume/.herdr-space/bin/HerdrShell", "host_socket": "/Users/aneyman/.cache/herdr-build/s/p27/h/.config/herdr/sessions/shellspike-p27/herdr.sock", "guest_socket": "/Users/lume/.herdr-space/herdr.sock"}
+[PASS] attention order is blocked then done, parked left out -- ['w2:t3', 'w2:t4']
+[PASS] starts on the idle lane
+[PASS] cmd+e selects the blocked tab -- w2:t3
+[PASS] cmd+e then selects the done tab -- w2:t4
+[PASS] cmd+e wraps to blocked, skipping the parked tab -- w2:t3
+[PASS] a blocked transition is recorded -- w2:t1
+[PASS] cmd+o selects the latest transition -- w2:t1
+[PASS] split adds a pane -- panes 5 -> 6
+[PASS] zoom toggles on (layout zoomed, pane fills the area) -- zoomed=True host_panes=[{'frame': [0, 36, 723, 642], 'pane': 'w2:p6'}] host=[723, 678]
+[PASS] zoom toggles off
+[PASS] cmd+w closes a split pane (pane list drops by 1) -- 6 -> 5
+[PASS] cmd+b hides the sidebar and the pane host takes the width -- visible=False host 301.0 -> 0.0
+[PASS] screenshot checks/P27-sidebar-hidden.png -- /Volumes/StudioExt/repos/herdr-worktrees/shell-finish/macos/HerdrShell/checks/P27-sidebar-hidden.png
+[PASS] cmd+b shows the sidebar again
+[PASS] cmd+opt+k selects the next visible row -- want w2:t2 got w2:t2 order=['w2:t1', 'w2:t2', 'w2:t3', 'w2:t4']
+[PASS] rename changes the lab tab label -- renamed lane
+lab down: stop: 0
+
+RESULT: PASS

@@ -230,9 +230,13 @@ def main():
     act("zoom_pane")
     s = wait_state(lambda s: jherdr("pane", "layout", "--pane", idle_pane)["layout"]["zoomed"] is True, 15)
     lay = jherdr("pane", "layout", "--pane", idle_pane)["layout"]
-    wide = any(p["rect"]["width"] == lay["area"]["width"] for p in lay["panes"])
+    # herdr keeps the split rects while zoomed; the shell must draw only the zoomed pane, full width.
+    zp = lay.get("focused_pane_id")  # the split moved focus to the new pane; that one zooms
+    s = wait_state(lambda s: [p["pane"] for p in s.get("host_panes", [])] == [zp], 10) or S.state()
+    hp = s.get("host_panes", [])
+    wide = len(hp) == 1 and hp[0]["pane"] == zp and abs(hp[0]["frame"][2] - s["host_size"][0]) <= 1
     check("zoom toggles on (layout zoomed, pane fills the area)",
-          lay["zoomed"] is True and wide, f"zoomed={lay['zoomed']}")
+          lay["zoomed"] is True and wide, f"zoomed={lay['zoomed']} host_panes={hp} host={s.get('host_size')}")
     act("zoom_pane")
     s = wait_state(lambda s: jherdr("pane", "layout", "--pane", idle_pane)["layout"]["zoomed"] is False, 15)
     check("zoom toggles off", s is not None and jherdr("pane", "layout", "--pane", idle_pane)["layout"]["zoomed"] is False)

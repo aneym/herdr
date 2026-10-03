@@ -694,6 +694,11 @@ final class TestHook {
             "attention_order": c.attentionOrderIds(),
             "attention_latest": c.model.latestAttentionTab ?? NSNull(),
             "focused_pane": c.focusedSurface?.paneId ?? NSNull(),
+            // Panes the host draws, with their frames in points (a zoomed tab draws one).
+            "host_panes": c.host.rects.map { r -> [String: Any] in
+                ["pane": r.0.paneId, "frame": [r.0.frame.minX, r.0.frame.minY, r.0.frame.width, r.0.frame.height]]
+            },
+            "host_size": [c.host.bounds.width, c.host.bounds.height],
             "dividers": c.host.dividerHandles.map { h -> [String: Any] in
                 ["split": h.divider.splitId, "vertical": h.divider.vertical, "ratio": h.divider.ratio,
                  "first_pane": h.divider.firstPane, "second_pane": h.divider.secondPane,

@@ -24,7 +24,9 @@ installs over or launches an app.
 
 Release branch: `git config herdr-shell.releaseBranch` in the herdr repo
 (default feat/native-shell-latest). Targets: ~/.config/herdr-shell/targets.json,
-  {"targets": [{"name": "book", "ssh": ["ssh", "macbook-ts"]}]}
+  {"targets": [{"name": "book", "ssh": ["ssh", "macbook-ts"],
+                "server": {"ssh": ["ssh", "studio-ts"], "remote_bin": "~/.local/bin/herdr-shell-remote"}}]}
+A target's "server" becomes its ~/.config/herdr-shell/server.json when it has none.
 Studio itself is staged by release.sh. An unreachable target is skipped quietly and
 picked up on the next fanout. Install: macos/HerdrShell/scripts/install-publish.sh.
 """
@@ -234,6 +236,8 @@ def fanout():
         if st is None:
             log(f"{name}: unreachable, will retry")
             continue
+        if t.get("server"):
+            send_server_config(t)
         if same(st.get("installed", ""), commit):
             continue
         if same(st.get("staged", ""), commit) and same(st.get("staged_app", ""), commit):
@@ -256,6 +260,29 @@ def fanout():
         elif r is not None:
             log(f"{name}: FAIL deliver {commit}: {(r.stderr or r.stdout).strip()[-300:]}")
 
+
+
+# A target's "server" entry is how its app reaches the herdr server for Park, Resume and
+# Approve (RemoteActions). Written once; a hand-edited server.json on the target wins.
+REMOTE_SERVER = r'''
+C="$HOME/.config/herdr-shell/server.json"
+[ -e "$C" ] && { echo kept; exit 0; }
+mkdir -p "$HOME/.config/herdr-shell"
+cat > "$C.tmp" && mv "$C.tmp" "$C" && echo written
+'''
+
+
+def send_server_config(t):
+    try:
+        r = subprocess.run(t["ssh"][:1] + SSH_OPTS + t["ssh"][1:] + ["/bin/sh", "-c", shlex.quote(REMOTE_SERVER)],
+                           input=json.dumps(t["server"]), capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        log(f"{t.get('name', '?')}: FAIL server config: {e}")
+        return
+    if "written" in r.stdout:
+        log(f"{t.get('name', '?')}: wrote server.json")
+    elif r.returncode != 0:
+        log(f"{t.get('name', '?')}: FAIL server config: {(r.stderr or r.stdout).strip()[-200:]}")
 
 
 REMOTE_INSTALL = r'''
