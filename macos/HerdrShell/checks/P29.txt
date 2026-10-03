@@ -1,6 +1,6 @@
-HerdrShell P29 check  2026-10-03T05:45:24Z
+HerdrShell P29 check  2026-10-03T06:04:39Z
 app start: {"space": "herdr-qa", "ip": "192.168.64.5", "herdr_sha": "bf97e4cf7b64"}
-{"space": "herdr-qa", "app_pid": "9958", "exe": "/Users/lume/.herdr-space/bin/HerdrShell", "host_socket": "/Users/aneyman/.cache/herdr-build/s/p29/h/.config/herdr/sessions/shellspike-p29/herdr.sock", "guest_socket": "/Users/lume/.herdr-space/herdr.sock"}
+{"space": "herdr-qa", "app_pid": "12396", "exe": "/Users/lume/.herdr-space/bin/HerdrShell", "host_socket": "/Users/aneyman/.cache/herdr-build/s/9b9fb3/h/.config/herdr/sessions/shellspike-p29/herdr.sock", "guest_socket": "/Users/lume/.herdr-space/herdr.sock"}
 [PASS] baseline is working before any transition -- look=working bg=working
 [PASS] selected key tab going blocked does not notify -- []
 [PASS] parked tab going blocked does not notify -- []

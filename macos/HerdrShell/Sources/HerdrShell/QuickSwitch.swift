@@ -238,38 +238,51 @@ struct QuickSwitchPanel: View {
 
     var body: some View {
         let t = theme.tokens
-        ZStack {
-            t.ink.opacity(0.32)
-                .contentShape(Rectangle())
-                .onTapGesture { model.dismiss() }
-            VStack(alignment: .leading, spacing: 2) {
-                field(t)
-                Rectangle().fill(t.mute.opacity(0.25)).frame(height: 1)
-                    .padding(.horizontal, -12)
-                    .padding(.bottom, 6)
-                let rows = model.visible
-                if rows.isEmpty {
-                    Text("No matches")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(t.mute)
-                        .padding(.horizontal, 8)
+        GeometryReader { geo in
+            // Upper third, like Spotlight, but never pushed off a short window: the list scrolls.
+            let top = min(96, max(12, geo.size.height * 0.14))
+            let listMax = max(32, geo.size.height - top - 12 - 70)
+            ZStack(alignment: .top) {
+                t.ink.opacity(0.32)
+                    .contentShape(Rectangle())
+                    .onTapGesture { model.dismiss() }
+                VStack(alignment: .leading, spacing: 2) {
+                    field(t)
+                    Rectangle().fill(t.mute.opacity(0.25)).frame(height: 1)
+                        .padding(.horizontal, -12)
                         .padding(.bottom, 6)
-                } else {
-                    ForEach(Array(rows.enumerated()), id: \.element.id) { i, row in
-                        rowView(row, index: i, on: i == model.cursor, tokens: t)
-                            .contentShape(Rectangle())
-                            .onTapGesture { model.pick(i + 1) }
+                    let rows = model.visible
+                    if rows.isEmpty {
+                        Text("No matches")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(t.mute)
+                            .padding(.horizontal, 8)
+                            .padding(.bottom, 6)
+                    } else {
+                        ScrollViewReader { proxy in
+                            ScrollView(.vertical) {
+                                VStack(spacing: 0) {
+                                    ForEach(Array(rows.enumerated()), id: \.element.id) { i, row in
+                                        rowView(row, index: i, on: i == model.cursor, tokens: t)
+                                            .id(i)
+                                            .contentShape(Rectangle())
+                                            .onTapGesture { model.pick(i + 1) }
+                                    }
+                                }
+                            }
+                            .scrollIndicators(.never)
+                            .frame(height: min(CGFloat(rows.count) * 32, listMax))
+                            .onChange(of: model.cursor) { _, c in proxy.scrollTo(c) }
+                        }
                     }
                 }
+                .padding(12)
+                .frame(width: 560)
+                .background(OverlayBackground(theme: theme, corner: 10))
+                .padding(.top, top)
             }
-            .padding(12)
-            .frame(width: 560)
-            .background(OverlayBackground(theme: theme, corner: 10))
-            // Upper third, like Spotlight: the list grows down from a fixed field.
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .padding(.top, 96)
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func field(_ t: Tokens) -> some View {

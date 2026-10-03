@@ -268,7 +268,11 @@ REMOTE_SERVER = r'''
 C="$HOME/.config/herdr-shell/server.json"
 [ -e "$C" ] && { echo kept; exit 0; }
 mkdir -p "$HOME/.config/herdr-shell"
-cat > "$C.tmp" && mv "$C.tmp" "$C" && echo written
+T="$C.tmp.$$"
+cat > "$T" || { rm -f "$T"; exit 1; }
+# ln never replaces: a server.json made since the check above wins.
+if ln "$T" "$C" 2>/dev/null; then echo written; else echo kept; fi
+rm -f "$T"
 '''
 
 

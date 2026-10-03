@@ -239,7 +239,10 @@ def main():
           lay["zoomed"] is True and wide, f"zoomed={lay['zoomed']} host_panes={hp} host={s.get('host_size')}")
     act("zoom_pane")
     s = wait_state(lambda s: jherdr("pane", "layout", "--pane", idle_pane)["layout"]["zoomed"] is False, 15)
-    check("zoom toggles off", s is not None and jherdr("pane", "layout", "--pane", idle_pane)["layout"]["zoomed"] is False)
+    s2 = wait_state(lambda s: len(s.get("host_panes", [])) == len(lay["panes"]), 10)
+    check("zoom toggles off (herdr unzoomed, the host draws every split pane again)",
+          s is not None and s2 is not None and jherdr("pane", "layout", "--pane", idle_pane)["layout"]["zoomed"] is False,
+          None if s2 is None else f"host_panes={len(s2.get('host_panes', []))} layout={len(lay['panes'])}")
 
     mid = len(jherdr("pane", "list")["panes"])
     act("close_pane")

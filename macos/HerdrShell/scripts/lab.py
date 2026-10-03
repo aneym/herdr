@@ -13,6 +13,7 @@ Safety: the environment is built from nothing (no HERDR_*, CLAUDE*), HOME and
 XDG dirs live under LAB, and every socket path is asserted to be inside LAB.
 The live session's socket, config and binary are never used.
 """
+import hashlib
 import json
 import os
 import subprocess
@@ -31,7 +32,9 @@ def _lab_dir(name):
     sock = os.path.join(direct, "h", ".config", "herdr", "sessions", name, "herdr.sock")
     if len(sock.encode()) <= 88:  # herdr appends a suffix (e.g. ".client.sock") to this path
         return direct
-    tail = name.split("-")[-1][:12]
+    # A hash, not the name's tail: tails collide (shellspike-p, shellspike-long-p), and the
+    # path must stay short enough for ssh's socket forward of herdr-client.sock too.
+    tail = hashlib.sha1(name.encode()).hexdigest()[:6]
     return os.path.expanduser(f"~/.cache/herdr-build/s/{tail}")
 
 
