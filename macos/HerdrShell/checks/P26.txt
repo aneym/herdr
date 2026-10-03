@@ -1,5 +1,6 @@
-HerdrShell P26 check  2026-10-02T20:38:07Z
-app start: {"pids": [42616], "fifo_ready_s": 1.98}
+HerdrShell P26 check  2026-10-03T05:14:38Z
+app start: {"space": "herdr-qa", "ip": "192.168.64.5", "herdr_sha": "bf97e4cf7b64"}
+{"space": "herdr-qa", "app_pid": "6916", "exe": "/Users/lume/.herdr-space/bin/HerdrShell", "host_socket": "/Users/aneyman/.cache/herdr-build/s/parked/h/.config/herdr/sessions/shellspike-parked/herdr.sock", "guest_socket": "/Users/lume/.herdr-space/herdr.sock"}
 [PASS] app came up in Areas with a Parked group
   All: ['rails orchestrator', 'scope page', 'live build']
 [PASS] All leaves both parked tabs out of their area -- ['rails orchestrator', 'scope page', 'live build']
@@ -8,14 +9,14 @@ app start: {"pids": [42616], "fifo_ready_s": 1.98}
 [PASS] Needs you / Focus skips the blocked tab once it is parked -- ['scope page']
 [PASS] Needs you chip leaves parked tabs out -- ['scope page']
 [PASS] Parked chip lists only parked rows, newest park first -- ['stuck build', 'old research']
-[PASS] each parked row shows its date and note -- ['today 4:25 PM · factory paused for the postmortem; resume after Alex approves', 'Sep 30 · come back after the raise']
-[PASS] screenshot checks/P26-parked-chip-light.png -- /Volumes/StudioExt/repos/herdr-worktrees/native-shell-parked/macos/HerdrShell/checks/P26-parked-chip-light.png
-[PASS] screenshot checks/P26-parked-chip-dark.png -- /Volumes/StudioExt/repos/herdr-worktrees/native-shell-parked/macos/HerdrShell/checks/P26-parked-chip-dark.png
+[PASS] each parked row shows its date and note -- ['today 1:25 PM · factory paused for the postmortem; resume after Alex approves', 'Sep 30 · come back after the raise']
+[PASS] screenshot checks/P26-parked-chip-light.png -- /Volumes/StudioExt/repos/herdr-worktrees/p31-space-harness/macos/HerdrShell/checks/P26-parked-chip-light.png
+[PASS] screenshot checks/P26-parked-chip-dark.png -- /Volumes/StudioExt/repos/herdr-worktrees/p31-space-harness/macos/HerdrShell/checks/P26-parked-chip-dark.png
 [PASS] clicking the group header opens it
-[PASS] screenshot checks/P26-all-open.png -- /Volumes/StudioExt/repos/herdr-worktrees/native-shell-parked/macos/HerdrShell/checks/P26-all-open.png
+[PASS] screenshot checks/P26-all-open.png -- /Volumes/StudioExt/repos/herdr-worktrees/p31-space-harness/macos/HerdrShell/checks/P26-all-open.png
 [PASS] Resume runs herdr-lane unpark: the mode leaves the modes file -- null
 [PASS] the resumed row is back in its area and the group count drops -- ['rails orchestrator', 'scope page', 'old research', 'live build']
-[PASS] Park runs herdr-lane park with the note and by=herdr-shell -- {"mode": "parked", "at": "2026-10-02T20:38:36.984Z", "by": "herdr-shell", "note": "waiting on the PC"}
+[PASS] Park runs herdr-lane park with the note and by=herdr-shell -- {"mode": "parked", "at": "2026-10-03T05:15:42.609Z", "by": "herdr-shell", "note": "waiting on the PC"}
 [PASS] the parked row leaves its area at once
 lab down: stop: 0
 
