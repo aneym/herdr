@@ -29,7 +29,7 @@ def _lab_dir(name):
     and use a shorter directory."""
     direct = os.path.expanduser(f"~/.cache/herdr-build/{name}")
     sock = os.path.join(direct, "h", ".config", "herdr", "sessions", name, "herdr.sock")
-    if len(sock.encode()) <= 100:
+    if len(sock.encode()) <= 88:  # herdr appends a suffix (e.g. ".client.sock") to this path
         return direct
     tail = name.split("-")[-1][:12]
     return os.path.expanduser(f"~/.cache/herdr-build/s/{tail}")
