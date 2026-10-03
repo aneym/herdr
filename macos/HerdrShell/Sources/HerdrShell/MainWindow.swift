@@ -168,6 +168,9 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     private(set) var shownLayout: Snapshot.Layout?
     private var pendingSelectTab: String?
     private var pendingFocusPane: String?
+    private var pendingClose: (pane: String, tab: String?, order: [String])?
+    /// Finished tabs the user has selected. They drop out of Next Needing You until they finish again.
+    private var lookedAtFinished: Set<String> = []
     private var didRestoreTabFocus = false
     private var didRestorePaneFocus = false
 
@@ -193,7 +196,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                                                               guard let self else { return }
                                                               if self.state.mode == .areas { self.selectAreaTab(tab) } else { self.selectTab(tab) }
                                                           },
-                                                          onFactory: { [weak self] in self?.toggleFactory() }))
+                                                          onFactory: { [weak self] in self?.toggleFactory() },
+                                                          onRename: { [weak self] tab in self?.promptRenameTab(tab) }))
         sidebarContainer = SidebarContainer(content: sidebar)
         root = RootView(sidebar: sidebarContainer, host: host)
         detailPanel = DetailPanelController(herdr: model, theme: theme) { [weak self] id in self?.openFullTab(id) }
@@ -204,6 +208,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         docPanel.onWidth = { [weak self] w in self?.setDocs(width: w) }
         root.docs = docPanel.view
         applyDocs()
+        root.sidebarVisible = state.sidebarVisible
         Keymap.shared.addContextual(chord: "escape", action: "close_detail") { [weak self] in
             guard let self else { return false }
             return self.docPanel.hasFocus || self.detailClaimsEscape
@@ -337,6 +342,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     func snapshotChanged() {
+        if reconcileClose() { return }
         // A panel for a row that no longer exists (or is now a workflow) has nothing to show.
         if let id = detailPanel.model.rowId, detailContent == nil, model.snapshot != nil,
            !model.allRowsInOrder.contains(where: { $0.id == id && $0.kind != .workflow }) {
@@ -376,6 +382,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     func selectTab(_ tabId: String, revealDocs: Bool = false) {
+        noteLookedAt(tabId)
         let stepping = state.focusCursor != nil && revealDocs
         state.selectedTab = tabId
         if !stepping { state.focusCursor = nil }
@@ -643,6 +650,162 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         }
     }
 
+    /// Visible agent rows, in the order the sidebar draws them. Focus duplicates are the same tab.
+    func visibleAgentTabs() -> [String] {
+        var ids: [String] = []
+        var seen = Set<String>()
+        for line in sidebarLines {
+            guard let tab = line.tab, !line.id.hasPrefix("focus:") else { continue }
+            if seen.insert(tab).inserted { ids.append(tab) }
+        }
+        return ids
+    }
+
+    func attentionOrderIds() -> [String] {
+        if let s = model.snapshot {
+            let facts = SidebarModel.facts(s)
+            lookedAtFinished = lookedAtFinished.filter { facts[$0]?.finished == true }
+        }
+        return SidebarModel.attentionOrder(snapshot: model.snapshot, orchestrators: model.orchestrators,
+                                           lanes: model.lanes, workflows: model.workflows,
+                                           catalog: model.catalog.snapshot, areas: state.mode == .areas,
+                                           lookedAt: lookedAtFinished)
+    }
+
+    private func noteLookedAt(_ tabId: String) {
+        guard let s = model.snapshot else { return }
+        let facts = SidebarModel.facts(s)
+        lookedAtFinished = lookedAtFinished.filter { facts[$0]?.finished == true }
+        if facts[tabId]?.finished == true { lookedAtFinished.insert(tabId) }
+    }
+
+    /// After pane.close, the next snapshot says where focus goes: herdr's focused pane,
+    /// else the tab's first pane, else the next sidebar row when the tab itself closed.
+    private func reconcileClose() -> Bool {
+        guard let pending = pendingClose, let snap = model.snapshot else { return false }
+        guard !snap.panes.contains(where: { $0.pane_id == pending.pane }) else { return false }
+        pendingClose = nil
+        if let tab = pending.tab, focusedPaneByTab[tab] == pending.pane { focusedPaneByTab[tab] = nil }
+        if let tab = pending.tab, snap.tabs.contains(where: { $0.tab_id == tab }) {
+            let layout = snap.layouts.first { $0.tab_id == tab }
+            var focused = layout?.focused_pane_id
+            if focused == pending.pane { focused = nil }
+            if focused == nil || !snap.panes.contains(where: { $0.pane_id == focused }) {
+                focused = snap.panes.first { $0.tab_id == tab && $0.focused == true && $0.pane_id != pending.pane }?.pane_id
+                    ?? layout?.panes.first { $0.pane_id != pending.pane }?.pane_id
+                    ?? snap.panes.first { $0.tab_id == tab && $0.pane_id != pending.pane }?.pane_id
+            }
+            if state.selectedTab != tab { selectTab(tab) }
+            lastLayoutKey = ""
+            refreshHost()
+            if let focused { focusPane(focused) }
+            refreshDocs()
+            return true
+        }
+        let ids = pending.order
+        let i = pending.tab.flatMap { ids.firstIndex(of: $0) } ?? -1
+        let after = i >= 0 ? Array(ids.dropFirst(i + 1)) : ids
+        let before = i > 0 ? Array(ids.prefix(i)) : []
+        if let next = (after + before).first(where: { id in snap.tabs.contains { $0.tab_id == id } }) {
+            selectTab(next)
+        }
+        return true
+    }
+
+    func closePane() {
+        guard let pane = focusedSurface?.paneId ?? state.focusedPane else { log("close pane: no focused pane"); return }
+        let tab = state.selectedTab
+        let order = visibleAgentTabs()
+        let cmds = commands
+        DispatchQueue.global(qos: .userInitiated).async {
+            guard cmds.paneClose(paneId: pane) else { return }
+            DispatchQueue.main.async { [self] in
+                pendingClose = (pane, tab, order)
+                lastLayoutKey = ""
+                snapshotChanged()
+            }
+        }
+    }
+
+    func zoomPane() {
+        guard let pane = focusedSurface?.paneId ?? state.focusedPane else { log("zoom: no focused pane"); return }
+        let cmds = commands
+        DispatchQueue.global(qos: .userInitiated).async {
+            if cmds.paneZoom(paneId: pane) {
+                DispatchQueue.main.async { [self] in
+                    lastLayoutKey = ""
+                    refreshHost()
+                }
+            }
+        }
+    }
+
+    func nextAttention() {
+        let order = attentionOrderIds()
+        guard !order.isEmpty else { log("next_attention: none"); return }
+        let next: String
+        if let cur = state.selectedTab, let i = order.firstIndex(of: cur) {
+            next = order[(i + 1) % order.count]
+        } else {
+            next = order[0]
+        }
+        log("next_attention: \(next)")
+        selectTab(next)
+    }
+
+    func attentionJump() {
+        if let tab = model.latestAttentionTab {
+            log("attention_jump: \(tab)")
+            selectTab(tab)
+        } else {
+            log("attention_jump: none, next_attention")
+            nextAttention()
+        }
+    }
+
+    func toggleSidebar() {
+        state.sidebarVisible.toggle()
+        state.saveSidebar()
+        root.sidebarVisible = state.sidebarVisible
+        root.layoutSubtreeIfNeeded()
+    }
+
+    func stepAgentList(_ d: Int) {
+        let ids = visibleAgentTabs()
+        guard !ids.isEmpty else { return }
+        let i = ids.firstIndex(of: state.selectedTab ?? "") ?? (d > 0 ? -1 : 0)
+        selectTab(ids[(i + d + ids.count) % ids.count])
+    }
+
+    func promptRenameTab(_ tabId: String?) {
+        let tab = tabId ?? state.selectedTab
+        guard let tab else { log("rename: no tab"); return }
+        let label = model.snapshot?.tabs.first { $0.tab_id == tab }?.label
+            ?? model.allRowsInOrder.first { $0.id == tab }?.label
+            ?? ""
+        let alert = NSAlert()
+        alert.messageText = "Rename Tab"
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Cancel")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+        field.stringValue = label
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty { return }
+        renameTab(tab, text)
+    }
+
+    func renameTab(_ tab: String, _ label: String) {
+        let text = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty { return }
+        let cmds = commands
+        DispatchQueue.global(qos: .userInitiated).async {
+            _ = cmds.tabRename(tabId: tab, label: text)
+        }
+    }
+
     @objc func copy(_ sender: Any?) { binding("copy_to_clipboard") }
     @objc func paste(_ sender: Any?) { binding("paste_from_clipboard") }
 
@@ -720,6 +883,9 @@ final class ShellWindow: NSWindow {
         var factoryOpen = false {
             didSet { factory?.isHidden = !factoryOpen; host.isHidden = factoryOpen; needsLayout = true }
         }
+        var sidebarVisible = true {
+            didSet { sidebar.isHidden = !sidebarVisible; needsLayout = true }
+        }
         /// Extra top inset while the update pill is showing, so it never covers a pane cap.
         var titleReserve: CGFloat = 0 { didSet { needsLayout = true } }
 
@@ -738,9 +904,9 @@ final class ShellWindow: NSWindow {
 
     override func layout() {
         super.layout()
-        let w = Self.sidebarWidth
+        let w: CGFloat = sidebarVisible ? Self.sidebarWidth : 0
         sidebar.frame = NSRect(x: 0, y: 0, width: w, height: bounds.height)
-        var x = w + 1
+        var x = sidebarVisible ? w + 1 : 0
         if let detail, detailOpen {
             detail.frame = NSRect(x: x, y: 0, width: DetailPanelController.width, height: bounds.height)
             x += DetailPanelController.width + 1

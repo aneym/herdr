@@ -398,4 +398,32 @@ struct HerdrCommands {
     func tabFocus(tabId: String) {
         guard call("tab.focus", ["tab_id": tabId]) != nil else { log("tab.focus failed \(tabId)"); return }
     }
+
+    /// `pane.close`. No confirm; herdr's next snapshot is what the window rebuilds from.
+    func paneClose(paneId: String) -> Bool {
+        succeeded("pane.close", ["pane_id": paneId])
+    }
+
+    /// `pane.zoom` toggle. Sending only `pane_id` is herdr's toggle.
+    func paneZoom(paneId: String) -> Bool {
+        succeeded("pane.zoom", ["pane_id": paneId])
+    }
+
+    /// `tab.rename`.
+    func tabRename(tabId: String, label: String) -> Bool {
+        succeeded("tab.rename", ["tab_id": tabId, "label": label])
+    }
+
+    private func succeeded(_ method: String, _ params: [String: Any]) -> Bool {
+        guard let data = call(method, params),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            log("\(method) failed")
+            return false
+        }
+        if let err = obj["error"] {
+            log("\(method) failed \(err)")
+            return false
+        }
+        return true
+    }
 }

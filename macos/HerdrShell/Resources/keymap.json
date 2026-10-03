@@ -150,22 +150,31 @@
       "chord": "cmd+w",
       "action": "close_pane",
       "title": "Close Pane",
-      "menu": "Pane",
-      "pending": "P9"
+      "menu": "Pane"
     },
     {
       "chord": "cmd+e",
+      "action": "next_attention",
+      "title": "Next Needing You",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+shift+return",
       "action": "zoom_pane",
       "title": "Zoom Pane",
-      "menu": "Pane",
-      "pending": "P9"
+      "menu": "Pane"
+    },
+    {
+      "chord": "cmd+shift+r",
+      "action": "rename_tab",
+      "title": "Rename Tab…",
+      "menu": "Pane"
     },
     {
       "chord": "cmd+b",
       "action": "toggle_sidebar",
       "title": "Toggle Sidebar",
-      "menu": "View",
-      "pending": "P10"
+      "menu": "View"
     },
     {
       "chord": "cmd+shift+f",
@@ -279,22 +288,19 @@
       "chord": "cmd+opt+j",
       "action": "agent_list_up",
       "title": "Agent List Up",
-      "menu": "View",
-      "pending": "P10"
+      "menu": "View"
     },
     {
       "chord": "cmd+opt+k",
       "action": "agent_list_down",
       "title": "Agent List Down",
-      "menu": "View",
-      "pending": "P10"
+      "menu": "View"
     },
     {
       "chord": "cmd+o",
       "action": "attention_jump",
-      "title": "Jump To Attention",
-      "menu": "View",
-      "pending": "P13"
+      "title": "Jump To Latest",
+      "menu": "View"
     },
     {
       "chord": "opt+o",

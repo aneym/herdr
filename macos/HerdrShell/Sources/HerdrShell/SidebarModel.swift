@@ -554,6 +554,67 @@ extension SidebarModel {
                             badge: badge(stage: i.stage, role: i.role), color: i.color)
         return l
     }
+
+    /// Tabs that need you, in priority order: blocked, then finished and not yet looked at,
+    /// then an attention token. Parked tabs never count. Ties follow the sidebar's row order.
+    /// `lookedAt` is tabs the user has selected since they became finished.
+    static func attentionOrder(snapshot s: Snapshot?, orchestrators: [TabRow], lanes: [TabRow], workflows: [TabRow],
+                               catalog: LaneSnapshot, areas: Bool, lookedAt: Set<String>) -> [String] {
+        guard let s else { return [] }
+        let facts = Self.facts(s)
+        let parked = Set(catalog.parked.keys)
+        var visual: [String] = []
+        if areas {
+            let items = areaItems(snapshot: s, orchestrators: orchestrators, lanes: lanes, workflows: workflows, catalog: catalog)
+            let live = items.filter { $0.park == nil }
+            let order = catalog.orderedAreaIds(Set(live.map(\.area)))
+            func append(_ i: AreaItem) {
+                visual.append(i.row.id)
+                for c in i.children where c.park == nil { append(c) }
+            }
+            for area in order {
+                let rows = live.filter { $0.area == area }
+                func group(_ title: String, _ rows: [AreaItem]) {
+                    for i in orderGroup(title, rows) { append(i) }
+                }
+                group("ORCHESTRATOR", rows.filter { $0.role == "top" || $0.role == "orchestrator" })
+                group("PROJECTS", rows.filter { $0.role == "project" })
+                group("USE", rows.filter { $0.role == "desk" || $0.role == "job" })
+            }
+        } else {
+            func walk(_ r: TabRow) {
+                if parked.contains(r.id) { return }
+                visual.append(r.id)
+                r.children.forEach(walk)
+            }
+            (orchestrators + lanes + workflows).forEach(walk)
+        }
+        func status(_ id: String) -> String {
+            let agent = s.agents.first { $0.tab_id == id }?.agent_status
+            return (agent ?? s.tabs.first { $0.tab_id == id }?.agent_status ?? "unknown").lowercased()
+        }
+        func asks(_ id: String) -> Bool {
+            for a in s.agents where a.tab_id == id {
+                let v = a.tokens?["attention"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+                if !v.isEmpty && !["none", "false", "0", "no"].contains(v) { return true }
+            }
+            return false
+        }
+        func rank(_ id: String) -> Int? {
+            if parked.contains(id) { return nil }
+            if status(id) == "blocked" { return 0 }
+            if facts[id]?.finished == true && !lookedAt.contains(id) { return 1 }
+            if asks(id) { return 2 }
+            return nil
+        }
+        return visual.enumerated().compactMap { idx, id -> (Int, Int, String)? in
+            guard let r = rank(id) else { return nil }
+            return (r, idx, id)
+        }.sorted { a, b in
+            if a.0 != b.0 { return a.0 < b.0 }
+            return a.1 < b.1
+        }.map { $0.2 }
+    }
 }
 
 // MARK: window side
