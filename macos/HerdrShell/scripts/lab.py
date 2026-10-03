@@ -98,6 +98,18 @@ def up():
     # Fresh session every time: drop the lab's persisted state (only under LAB).
     import shutil
     assert NAME.startswith("shellspike") and HOME.startswith(LAB + os.sep)
+    # A short hashed dir can be shared by two names; never wipe another lab's home.
+    owner = os.path.join(LAB, ".lab-name")
+    try:
+        with open(owner) as f:
+            other = f.read().strip()
+    except OSError:
+        other = NAME
+    if other != NAME:
+        sys.exit(f"lab dir {LAB} belongs to {other}; pick another SHELL_LAB")
+    os.makedirs(LAB, exist_ok=True)
+    with open(owner, "w") as f:
+        f.write(NAME)
     if not (os.path.exists(SOCK) and subprocess.run(
             [BIN, "--session", SESSION, "workspace", "list"], env=env(), capture_output=True).returncode == 0):
         shutil.rmtree(HOME, ignore_errors=True)
