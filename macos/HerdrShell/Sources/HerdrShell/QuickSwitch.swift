@@ -242,8 +242,11 @@ struct QuickSwitchPanel: View {
             t.ink.opacity(0.32)
                 .contentShape(Rectangle())
                 .onTapGesture { model.dismiss() }
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 2) {
                 field(t)
+                Rectangle().fill(t.mute.opacity(0.25)).frame(height: 1)
+                    .padding(.horizontal, -12)
+                    .padding(.bottom, 6)
                 let rows = model.visible
                 if rows.isEmpty {
                     Text("No matches")
@@ -253,7 +256,7 @@ struct QuickSwitchPanel: View {
                         .padding(.bottom, 6)
                 } else {
                     ForEach(Array(rows.enumerated()), id: \.element.id) { i, row in
-                        rowView(row, on: i == model.cursor, tokens: t)
+                        rowView(row, index: i, on: i == model.cursor, tokens: t)
                             .contentShape(Rectangle())
                             .onTapGesture { model.pick(i + 1) }
                     }
@@ -262,51 +265,52 @@ struct QuickSwitchPanel: View {
             .padding(12)
             .frame(width: 560)
             .background(OverlayBackground(theme: theme, corner: 10))
+            // Upper third, like Spotlight: the list grows down from a fixed field.
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .padding(.top, 96)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func field(_ t: Tokens) -> some View {
         let shown = model.query.isEmpty ? "Jump to a lane, agent, or tab" : model.query
-        return Text(shown)
-            .font(.system(size: 13))
-            .foregroundStyle(model.query.isEmpty ? t.mute : t.ink)
-            .lineLimit(1)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 2)
-            .background(RoundedRectangle(cornerRadius: 4).fill(model.selectAll && !model.query.isEmpty ? t.sel : Color.clear))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(8)
-            .background(RoundedRectangle(cornerRadius: 6).fill(t.field))
+        // The field sits straight on the panel; a hairline below it, no inner box.
+        return HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 14))
+                .foregroundStyle(t.mute)
+            Text(shown)
+                .font(.system(size: 16))
+                .foregroundStyle(model.query.isEmpty ? t.mute : t.ink)
+                .lineLimit(1)
+                .padding(.horizontal, 2)
+                .background(RoundedRectangle(cornerRadius: 4).fill(model.selectAll && !model.query.isEmpty ? t.sel : Color.clear))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 8)
+        .padding(.top, 2)
+        .padding(.bottom, 10)
     }
 
-    private func rowView(_ row: QuickSwitch.Row, on: Bool, tokens t: Tokens) -> some View {
-        HStack(spacing: 8) {
+    private func rowView(_ row: QuickSwitch.Row, index: Int, on: Bool, tokens t: Tokens) -> some View {
+        let state = row.parked ? "parked" : row.badge
+        let meta = [row.workspace, state, row.host].filter { !$0.isEmpty }.joined(separator: " · ")
+        return HStack(spacing: 8) {
             StateGlyph(state: row.glyph, tokens: t)
             Text(row.label)
-                .font(.system(size: 12.5))
-                .foregroundStyle(t.ink)
+                .font(.system(size: 13))
+                .foregroundStyle(row.parked ? t.mute : t.ink)
                 .lineLimit(1)
                 .layoutPriority(1)
             Spacer(minLength: 8)
-            Text(row.workspace)
+            Text(meta)
                 .font(.system(size: 11))
                 .foregroundStyle(t.mute)
                 .lineLimit(1)
-            if row.parked {
-                Text("parked")
-                    .font(.system(size: 11))
-                    .foregroundStyle(t.mute)
-            } else if !row.badge.isEmpty {
-                Text(row.badge)
-                    .font(.system(size: 11))
-                    .foregroundStyle(t.mute)
-                    .lineLimit(1)
-            }
-            Text(row.host)
-                .font(.system(size: 11))
-                .foregroundStyle(t.mute)
-                .lineLimit(1)
+            Text("⌘\(index + 1)")
+                .font(.system(size: 11).monospacedDigit())
+                .foregroundStyle(t.mute.opacity(on ? 1 : 0.6))
+                .frame(width: 22, alignment: .trailing)
         }
         .padding(.horizontal, 8)
         .frame(height: 32)

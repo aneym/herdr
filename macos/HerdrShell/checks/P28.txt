@@ -1,8 +1,8 @@
-HerdrShell P28 check  2026-10-03T05:36:21Z
+HerdrShell P28 check  2026-10-03T05:38:10Z
 app start: {"space": "herdr-qa", "ip": "192.168.64.5", "herdr_sha": "bf97e4cf7b64"}
-{"space": "herdr-qa", "app_pid": "9137", "exe": "/Users/lume/.herdr-space/bin/HerdrShell", "host_socket": "/Users/aneyman/.cache/herdr-build/s/p28/h/.config/herdr/sessions/shellspike-p28/herdr.sock", "guest_socket": "/Users/lume/.herdr-space/herdr.sock"}
-[PASS] switcher opens over the six tabs -- ['w3:t3', 'w2:t1', 'w3:t1', 'w3:t2', 'w2:t3', 'w2:t2']
-[PASS] empty query lists the blocked tab first -- ['w3:t3', 'w2:t1', 'w3:t1', 'w3:t2', 'w2:t3', 'w2:t2']
+{"space": "herdr-qa", "app_pid": "9293", "exe": "/Users/lume/.herdr-space/bin/HerdrShell", "host_socket": "/Users/aneyman/.cache/herdr-build/s/p28/h/.config/herdr/sessions/shellspike-p28/herdr.sock", "guest_socket": "/Users/lume/.herdr-space/herdr.sock"}
+[PASS] switcher opens over the six tabs -- ['w3:t3', 'w3:t1', 'w2:t1', 'w3:t2', 'w2:t3', 'w2:t2']
+[PASS] empty query lists the blocked tab first -- ['w3:t3', 'w3:t1', 'w2:t1', 'w3:t2', 'w2:t3', 'w2:t2']
 [PASS] query rec ranks recruiter ahead of rolodex-record -- ['w2:t1', 'w2:t2']
 [PASS] screenshot checks/P28-switcher-light.png -- /Volumes/StudioExt/repos/herdr-worktrees/shell-finish/macos/HerdrShell/checks/P28-switcher-light.png
 [PASS] screenshot checks/P28-switcher-dark.png -- /Volumes/StudioExt/repos/herdr-worktrees/shell-finish/macos/HerdrShell/checks/P28-switcher-dark.png
