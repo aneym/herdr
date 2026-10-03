@@ -9,12 +9,17 @@ struct Snapshot: Decodable {
         let focused: Bool?; let active_tab_id: String?; let tokens: [String: String]?
     }
     struct Tab: Decodable { let tab_id: String; let workspace_id: String; let label: String?; let number: Int; let agent_status: String?; let pane_count: Int? }
-    struct Pane: Decodable { let pane_id: String; let tab_id: String; let terminal_id: String; let agent_status: String?; let focused: Bool? }
+    struct Pane: Decodable {
+        let pane_id: String; let tab_id: String; let terminal_id: String; let agent_status: String?; let focused: Bool?
+        // Titles the quick switcher matches. Older snapshots omit them.
+        let title: String?; let terminal_title: String?; let terminal_title_stripped: String?
+    }
     struct Owner: Decodable { let pane_id: String? }
     struct Ownership: Decodable { let current: Owner? }
     struct Agent: Decodable {
         let pane_id: String; let tab_id: String; let agent: String?; let agent_status: String?
         let tokens: [String: String]?; let ownership: Ownership?
+        let title: String?; let terminal_title: String?; let terminal_title_stripped: String?
     }
     struct Rect: Decodable { let x: Double; let y: Double; let width: Double; let height: Double }
     struct LayoutPane: Decodable { let pane_id: String; let rect: Rect }

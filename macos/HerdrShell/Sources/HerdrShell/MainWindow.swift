@@ -170,6 +170,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     private var pendingFocusPane: String?
     private var didRestoreTabFocus = false
     private var didRestorePaneFocus = false
+    private(set) var quickSwitch: QuickSwitchController!
 
     init(model: HerdrModel, registry: SurfaceRegistry, theme: ThemeStore) {
         self.model = model
@@ -181,6 +182,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                              backing: .buffered, defer: false)
         super.init()
+        quickSwitch = QuickSwitchController(owner: self)
         window.title = Channel.name
         if Channel.kind == .dev { window.subtitle = "DEV" }
         window.titlebarAppearsTransparent = true
@@ -205,13 +207,17 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         root.docs = docPanel.view
         applyDocs()
         Keymap.shared.addContextual(chord: "escape", action: "close_detail") { [weak self] in
-            guard let self else { return false }
+            guard let self, !self.quickSwitch.isOpen else { return false }
             return self.docPanel.hasFocus || self.detailClaimsEscape
+        }
+        Keymap.shared.addContextual(chord: "escape", action: "close_switcher") { [weak self] in
+            self?.quickSwitch.isOpen == true
         }
         Keymap.shared.addContextual(chord: "cmd+l", action: "focus_doc_address") { [weak self] in
             self?.docPanel.hasFocus == true && self?.docPanel.showingWeb == true
         }
         window.contentView = root
+        quickSwitch.install(in: root, theme: theme)
         applyTheme()
         registry.onReplace = { [weak self] old, new in self?.replaceSurface(old: old, new: new) }
 
@@ -337,6 +343,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     func snapshotChanged() {
+        quickSwitch.reload()
         // A panel for a row that no longer exists (or is now a workflow) has nothing to show.
         if let id = detailPanel.model.rowId, detailContent == nil, model.snapshot != nil,
            !model.allRowsInOrder.contains(where: { $0.id == id && $0.kind != .workflow }) {
@@ -376,6 +383,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     func selectTab(_ tabId: String, revealDocs: Bool = false) {
+        quickSwitch.noteSelected(tabId)
         let stepping = state.focusCursor != nil && revealDocs
         state.selectedTab = tabId
         if !stepping { state.focusCursor = nil }
@@ -587,7 +595,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         guard let paneId, let s = currentPanes.first(where: { $0.paneId == paneId }) else { return }
         state.focusedPane = paneId
         if let tab = state.selectedTab { focusedPaneByTab[tab] = paneId }
-        window.makeFirstResponder(s)
+        // While the switcher is up the pane must not take keys.
+        if !quickSwitch.isOpen { window.makeFirstResponder(s) }
         applyCaps()
     }
 
@@ -644,7 +653,14 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     @objc func copy(_ sender: Any?) { binding("copy_to_clipboard") }
-    @objc func paste(_ sender: Any?) { binding("paste_from_clipboard") }
+    @objc func paste(_ sender: Any?) {
+        // With the switcher up, a paste is a query, never terminal input.
+        if quickSwitch.isOpen {
+            quickSwitch.setQuery(quickSwitch.query + (NSPasteboard.general.string(forType: .string) ?? ""))
+            return
+        }
+        binding("paste_from_clipboard")
+    }
 
     private func binding(_ action: String) {
         guard let s = focusedSurface?.surface else { return }
@@ -683,7 +699,20 @@ final class ShellWindow: NSWindow {
         staysInactive ? frameRect : super.constrainFrameRect(frameRect, to: screen)
     }
 
+    override func sendEvent(_ event: NSEvent) {
+        // The hook delivers keys with sendEvent only while the window is key.
+        // Swallow them here so a focused pane never sees switcher typing.
+        if event.type == .keyDown, let c = delegate as? MainWindowController, c.quickSwitch.sink(event) {
+            return
+        }
+        super.sendEvent(event)
+    }
+
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        // Not-key path (the lab): the hook calls this instead of sendEvent.
+        if event.type == .keyDown, let c = delegate as? MainWindowController, c.quickSwitch.sink(event) {
+            return true
+        }
         if event.type == .keyDown, let entry = Keymap.shared.entry(for: event), entry.contextual {
             return Keymap.shared.fire(entry)
         }
@@ -717,11 +746,19 @@ final class ShellWindow: NSWindow {
         }
         var docsWidth: CGFloat = DocPanelController.defaultWidth
         var factory: NSView?
+        private var switcher: NSView?
         var factoryOpen = false {
             didSet { factory?.isHidden = !factoryOpen; host.isHidden = factoryOpen; needsLayout = true }
         }
         /// Extra top inset while the update pill is showing, so it never covers a pane cap.
         var titleReserve: CGFloat = 0 { didSet { needsLayout = true } }
+
+    func attachSwitcher(_ view: NSView) {
+        switcher?.removeFromSuperview()
+        switcher = view
+        addSubview(view, positioned: .above, relativeTo: nil)
+        needsLayout = true
+    }
 
     func setBackground(_ c: NSColor) { layer?.backgroundColor = c.cgColor }
 
@@ -754,5 +791,9 @@ final class ShellWindow: NSWindow {
         let top = titleReserve
         host.frame = NSRect(x: x, y: 0, width: max(0, bounds.width - x - docW), height: max(0, bounds.height - top))
         factory?.frame = host.frame
+        if let switcher {
+            switcher.frame = bounds
+            addSubview(switcher, positioned: .above, relativeTo: nil)
+        }
     }
 }
