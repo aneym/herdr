@@ -217,8 +217,12 @@ enum SpacesTree {
                 let open = chrome.expandedGroups.contains(key)
                 // As Rust group_state: a bool set only by Act or Blocked, over the members, their runs and
                 // every workflow whose parent is a member (tree.rs ~990-1015).
-                let ids = Set(members.map(\.id))
-                let pool = members + workflows.filter { parent($0).map(ids.contains) ?? false }
+                let memberIds = Set(members.map(\.id))
+                let groupLanes = lanes.filter { memberIds.contains($0.id) || root($0).map(memberIds.contains) ?? false }
+                let groupIds = Set(groupLanes.map(\.id))
+                // Completed workflows count too (Rust all_workflows).
+                let pool = groupLanes + members.filter { !groupIds.contains($0.id) }
+                    + tabs.filter { tag($0).kind == "workflow" && (parent($0).map(groupIds.contains) ?? false) }
                 let needs = pool.contains { member in
                     let t = tag(member)
                     return ([member.status] + member.agents.map(\.status)).contains("blocked") || t.attention == "act"

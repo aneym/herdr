@@ -1,0 +1,47 @@
+{
+  "_source": "src/client/shell/tests/factory_sidebar.rs:1005-1045 + tree.rs group_state ~986-1015",
+  "input": {
+    "spaces": [
+      {
+        "id": "ws",
+        "name": "factory",
+        "pinned": false,
+        "collapsed": false
+      }
+    ],
+    "focusedTab": null,
+    "tabs": [
+      {
+        "id": "lane-a",
+        "space": "ws",
+        "label": "lane-a",
+        "status": "idle",
+        "agents": [],
+        "focused": false
+      },
+      {
+        "id": "wf-a",
+        "space": "ws",
+        "label": "wf-a",
+        "status": "working",
+        "agents": [],
+        "focused": false
+      }
+    ]
+  },
+  "overlay": {
+    "tabs": {
+      "lane-a": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "wf-a": {
+        "kind": "workflow",
+        "parent": "lane-a",
+        "attention": "warn"
+      }
+    }
+  },
+  "chrome": {},
+  "now": 0
+}
