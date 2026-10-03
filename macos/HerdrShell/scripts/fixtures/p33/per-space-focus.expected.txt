@@ -1,0 +1,9 @@
+title|agents|0|none||mute|agents||none||||
+space|space:ws|0|open||mute|factory||none||lane|space:ws|
+section|section:ws:SCOPING|1|open||mute|SCOPING|⌘1..9|none|||section:ws:SCOPING|
+tab|tab:lane|1|none|●|working|lane||none||lane||
+group|all:ws|1|none||mute|show all|0|none|||all:ws|dim
+space|space:two|0|open||mute|second||none||other|space:two|
+section|section:two:IMPLEMENTING|1|open||mute|IMPLEMENTING|⌘1..9|none|||section:two:IMPLEMENTING|
+tab|tab:other|1|none|●|working|other||none||other||
+group|all:two|1|none||mute|show all|0|none|||all:two|dim

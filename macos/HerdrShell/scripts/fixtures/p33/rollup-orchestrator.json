@@ -1,0 +1,52 @@
+{
+  "_source": "src/client/shell/tests/factory_sidebar.rs:830-918; tree.rs:948-1062,1157-1180",
+  "input": {
+    "spaces": [
+      {
+        "id": "ws",
+        "name": "factory",
+        "pinned": false,
+        "collapsed": false
+      }
+    ],
+    "tabs": [
+      {
+        "id": "lane",
+        "space": "ws",
+        "label": "lane",
+        "status": "working",
+        "agents": [],
+        "focused": false
+      },
+      {
+        "id": "child",
+        "space": "ws",
+        "label": "child",
+        "status": "working",
+        "agents": [],
+        "focused": false
+      }
+    ],
+    "focusedTab": null
+  },
+  "overlay": {
+    "tabs": {
+      "lane": {
+        "kind": "orchestrator",
+        "section": "orchestrator"
+      },
+      "child": {
+        "kind": "workflow",
+        "parent": "lane",
+        "attention": "act"
+      }
+    },
+    "spaces": {}
+  },
+  "chrome": {
+    "collapsedTabs": [
+      "lane"
+    ]
+  },
+  "now": 1000
+}

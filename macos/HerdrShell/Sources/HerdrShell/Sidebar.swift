@@ -179,15 +179,16 @@ struct SidebarView: View {
     private var t: Tokens { theme.sidebarTokens }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let spaces = state.mode == .spaces ? model.spacesRows(state: state) : []
+        return VStack(alignment: .leading, spacing: 0) {
             chrome
             if state.flat {
-                rows
+                rows(spaces)
                 Spacer(minLength: 0)
             } else {
-                ScrollView { rows }
+                ScrollView { rows(spaces) }
             }
-            if state.mode == .spaces { spacesFooter } else { factoryFooter }
+            if state.mode == .spaces { spacesFooter(spaces) } else { factoryFooter }
         }
         .font(.system(size: 12.5))
         .foregroundStyle(t.ink)
@@ -204,10 +205,10 @@ struct SidebarView: View {
         .onPreferenceChange(ClickTargetKey.self) { state.rowFrames = $0 }
     }
 
-    private var rows: some View {
+    private func rows(_ spaces: [SpacesRow]) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             if state.mode == .spaces {
-                ForEach(model.spacesRows(state: state).filter { $0.kind != .footerUsage && $0.kind != .footerHost }) { spacesRow($0) }
+                ForEach(spaces.filter { $0.kind != .footerUsage && $0.kind != .footerHost }) { spacesRow($0, firstSpaceId: spaces.first { $0.kind == .space }?.id) }
             } else { ForEach(lines) { line in lineView(line) } }
         }
         .padding(.horizontal, 8)
@@ -228,15 +229,15 @@ struct SidebarView: View {
     }
 
 
-    private var spacesFooter: some View {
+    private func spacesFooter(_ rows: [SpacesRow]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            footerGroup(.footerUsage)
-            footerGroup(.footerHost)
+            footerGroup(.footerUsage, allRows: rows)
+            footerGroup(.footerHost, allRows: rows)
         }.padding(.horizontal, 8).padding(.bottom, 8)
     }
 
-    private func footerGroup(_ kind: SpacesRow.Kind) -> some View {
-        let rows = model.spacesRows(state: state).filter { $0.kind == kind }
+    private func footerGroup(_ kind: SpacesRow.Kind, allRows: [SpacesRow]) -> some View {
+        let rows = allRows.filter { $0.kind == kind }
         return ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) {
                 ForEach(rows) { row in
@@ -247,11 +248,10 @@ struct SidebarView: View {
                         .onTapGesture { if kind == .footerUsage { spacesClick(row, part: "link") } }
                 }
             }.frame(height: 23)
-            VStack(alignment: .leading, spacing: 0) { ForEach(rows) { spacesRow($0) } }
+            VStack(alignment: .leading, spacing: 0) { ForEach(rows) { spacesRow($0, firstSpaceId: nil) } }
         }
     }
 
-    private var spacesFirstSpaceId: String? { model.spacesRows(state: state).first { $0.kind == .space }?.id }
 
     /// Status color, as Ghostty: working green, blocked red, done peach, idle and unknown mute.
     private func spacesTone(_ tone: String) -> Color {
@@ -272,7 +272,7 @@ struct SidebarView: View {
         }
     }
 
-    private func spacesRow(_ row: SpacesRow) -> some View {
+    private func spacesRow(_ row: SpacesRow, firstSpaceId: String?) -> some View {
         HStack(spacing: 5) {
             if row.chevron != "none", row.kind != .space, row.kind != .hidden {
                 Image(systemName: row.chevron == "open" ? "chevron.down" : "chevron.right").font(.system(size: 8, weight: .semibold)).foregroundStyle(t.mute)
@@ -311,7 +311,7 @@ struct SidebarView: View {
                 Button("Resume") { resume(tab) }.buttonStyle(.plain).foregroundStyle(t.accent)
             }
             if row.kind == .section, row.toggleKey != nil {
-                Text(state.spacesChrome.focusedSection == String(row.id.dropFirst(8)) ? "✕" : "◎")
+                Text(state.spacesChrome.focusedSection[String(row.id.dropFirst(8)).components(separatedBy: ":").dropLast().joined(separator: ":")] == row.title ? "✕" : "◎")
                     .font(.system(size: 10)).foregroundStyle(t.mute).onTapGesture { spacesClick(row, part: "focus") }
             }
             if row.kind == .space {
@@ -324,7 +324,7 @@ struct SidebarView: View {
                     .frame(width: 9).onTapGesture { spacesClick(row, part: "chevron") }
             }
         }
-        .padding(.top, row.kind == .space && row.id != spacesFirstSpaceId ? 10 : 0)
+        .padding(.top, row.kind == .space && row.id != firstSpaceId ? 10 : 0)
         .frame(height: 23).padding(.leading, spacesIndent(row)).padding(.horizontal, 4)
         .background(RoundedRectangle(cornerRadius: 4).fill(row.tab == state.selectedTab && row.kind == .tab ? t.sel : .clear))
         .contentShape(Rectangle()).onTapGesture { spacesClick(row, part: "body") }
@@ -353,8 +353,10 @@ struct SidebarView: View {
             state.spacesChrome.toggle("pin:" + String(row.id.dropFirst(6))); state.saveSpacesChrome()
         } else if part == "focus" {
             let key = String(row.id.dropFirst(8))
-            state.spacesChrome.focusedSection = state.spacesChrome.focusedSection == key ? nil : key; state.saveSpacesChrome()
-        } else if part == "chevron" || [.section, .group, .hidden, .space].contains(row.kind) {
+            let split = key.lastIndex(of: ":")!
+            let space = String(key[..<split]); let label = String(key[key.index(after: split)...])
+            state.spacesChrome.focusedSection[space] = state.spacesChrome.focusedSection[space] == label ? nil : label; state.saveSpacesChrome()
+        } else if part == "chevron" || [.section, .group, .hidden].contains(row.kind) {
             if let key = row.toggleKey { state.spacesChrome.toggle(key); state.saveSpacesChrome() }
         } else if row.kind == .footerUsage {
             spacesClick(row, part: "link")

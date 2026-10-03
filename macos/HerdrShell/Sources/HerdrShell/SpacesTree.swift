@@ -64,15 +64,16 @@ private extension KeyedDecodingContainer where Key == Field {
 
 struct SpacesChrome: Codable {
     var collapsedSections: Set<String> = []; var expandedGroups: Set<String> = []; var expandedTabs: Set<String> = []; var collapsedTabs: Set<String> = []
-    var pinnedSpaces: Set<String> = []; var collapsedSpaces: Set<String> = []; var hiddenExpanded = false; var goalFilter: String?; var focusedSection: String?
+    var pinnedSpaces: Set<String> = []; var collapsedSpaces: Set<String> = []; var hiddenExpanded = false; var goalFilter: String?; var focusedSection: [String: String] = [:]
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Field.self)
         collapsedSections = c.value("collapsedSections", []); expandedGroups = c.value("expandedGroups", []); expandedTabs = c.value("expandedTabs", []); collapsedTabs = c.value("collapsedTabs", [])
-        pinnedSpaces = c.value("pinnedSpaces", []); collapsedSpaces = c.value("collapsedSpaces", []); hiddenExpanded = c.value("hiddenExpanded", false); goalFilter = c.optional("goalFilter"); focusedSection = c.optional("focusedSection")
+        pinnedSpaces = c.value("pinnedSpaces", []); collapsedSpaces = c.value("collapsedSpaces", []); hiddenExpanded = c.value("hiddenExpanded", false); goalFilter = c.optional("goalFilter"); focusedSection = c.value("focusedSection", [:])
+        if let legacy: String = c.optional("focusedSection"), let split = legacy.lastIndex(of: ":") { focusedSection[String(legacy[..<split])] = String(legacy[legacy.index(after: split)...]) }
     }
     mutating func toggle(_ key: String) {
-        if key.hasPrefix("all:") { focusedSection = nil; return }
+        if key.hasPrefix("all:") { focusedSection.removeValue(forKey: String(key.dropFirst(4))); return }
         if key == "hidden" { hiddenExpanded.toggle(); return }
         let parts = key.split(separator: ":", maxSplits: 1).map(String.init)
         guard parts.count == 2 else { return }
@@ -104,13 +105,13 @@ enum SpacesTree {
         var out = [SpacesRow(id: "agents", kind: .title, title: "agents")]
         let choices = overlay.goalChoices
         let filter = chrome.goalFilter.flatMap { choices.contains($0) ? $0 : nil }
-        if !choices.isEmpty { out.append(SpacesRow(id: "goal", kind: .goal, title: "goal " + (filter ?? "All"), trailing: filter == nil ? "▾" : "✕")) }
+        if !choices.isEmpty { out.append(SpacesRow(id: "goal", kind: .goal, title: "goal " + (filter?.replacingOccurrences(of: ":", with: " · ") ?? "All"), trailing: filter == nil ? "▾" : "✕")) }
         let hidden = input.spaces.filter { $0.collapsed || chrome.collapsedSpaces.contains($0.id) }
         let visible = input.spaces.filter { !$0.collapsed && !chrome.collapsedSpaces.contains($0.id) }
         let ordered = visible.filter { $0.pinned || chrome.pinnedSpaces.contains($0.id) } + visible.filter { !$0.pinned && !chrome.pinnedSpaces.contains($0.id) }
         func appendSpace(_ space: SpacesInput.Space, depth: Int) {
             let meta = overlay.spaces[space.id]
-            out.append(SpacesRow(id: "space:" + space.id, kind: .space, depth: depth, chevron: "open", title: space.name, trailing: meta?.summary ?? "", alert: meta?.attention ?? "none", tab: meta?.target_tab, toggleKey: "space:" + space.id))
+            out.append(SpacesRow(id: "space:" + space.id, kind: .space, depth: depth, chevron: "open", title: space.name, trailing: meta?.summary ?? "", alert: meta?.attention ?? "none", tab: meta?.target_tab ?? input.tabs.first(where: { $0.space == space.id })?.id, toggleKey: "space:" + space.id))
             let all = input.tabs.filter { $0.space == space.id }
             let sectioned = all.contains { overlay.tabs[$0.id]?.section != nil }
             let tabs = all.filter { tab in
@@ -141,8 +142,15 @@ enum SpacesTree {
                 let grouped = nest ? lanes.filter { root($0) == tab.id } : []
                 let children = nest ? workflows.filter { parent($0) == tab.id } : []
                 let runs = nest ? t.runs : []
+                let childTags = tabs.filter { candidate in
+                    let ct = tag(candidate)
+                    return ct.kind == "workflow" && (parent(candidate) == tab.id || grouped.contains { $0.id == parent(candidate) })
+                }.map { tag($0) }
+                let attentions = [t.attention] + childTags.map(\.attention) + runs.map(\.attention) + grouped.map { tag($0).attention }
+                let rank = ["none": 0, "warn": 1, "act": 2]
+                let attention = attentions.max { (rank[$0] ?? 0) < (rank[$1] ?? 0) } ?? "none"
                 let expandable = !children.isEmpty || !runs.isEmpty || !grouped.isEmpty
-                let open = (chrome.expandedTabs.contains(tab.id) || (t.kind != "orchestrator" && (!children.isEmpty || runs.contains { !$0.done })) || children.contains { $0.id == input.focusedTab }) && !chrome.collapsedTabs.contains(tab.id)
+                let open = (chrome.expandedTabs.contains(tab.id) || (t.kind != "orchestrator" && (!children.isEmpty || runs.contains { !$0.done })) || children.contains { $0.id == input.focusedTab } || attention == "act") && !chrome.collapsedTabs.contains(tab.id)
                 let priority = ["unknown": 0, "idle": 1, "done": 2, "working": 3, "blocked": 4]
                 var status = tab.agents.max { (priority[$0.status] ?? 0) < (priority[$1.status] ?? 0) }?.status ?? tab.status
                 if t.busy && ["idle", "done"].contains(status) { status = "working" }
@@ -159,10 +167,10 @@ enum SpacesTree {
                 else if t.section == "scoping", let url = t.scope_url { trailing = "scope ↗"; link = url }
                 if expandable {
                     let count = children.count + runs.filter { !$0.done }.count + grouped.count
-                    trailing = String(count)
+                    trailing = count > 0 ? String(count) : (idle ? t.idle_reason ?? "idle" : "")
                     // The terminal golden truncates the inbox suffix at 25 columns;
                     // native rows retain the complete orchestrator hint.
-                    if t.kind == "orchestrator", let summary = t.summary, !summary.isEmpty { trailing += " · " + summary }
+                    if t.kind == "orchestrator", let summary = t.summary, !summary.isEmpty { trailing = count > 0 ? trailing + " · " + summary : summary }
                     if t.section == "scoping", t.scope_url != nil { trailing = "scope ↗" }
                 }
                 let workflow = t.kind == "workflow"
@@ -171,13 +179,13 @@ enum SpacesTree {
                     trailing = [trailing, progress].filter { !$0.isEmpty }.joined(separator: " · ")
                 }
                 let glyph = workflow ? (t.done ? (t.attention == "act" ? "✗" : "✓") : "◐") : idle ? "○" : status == "blocked" ? "■" : "●"
-                out.append(SpacesRow(id: "tab:" + tab.id, kind: .tab, depth: level, chevron: expandable ? (open ? "open" : "closed") : "none", glyph: glyph, tone: idle ? "mute" : status, title: name, trailing: trailing, alert: t.attention, link: link, tab: tab.id, toggleKey: expandable ? "tab:" + tab.id : nil, dim: idle || t.done || t.kind == "advisor" || t.mode == "parked"))
+                out.append(SpacesRow(id: "tab:" + tab.id, kind: .tab, depth: level, chevron: expandable ? (open ? "open" : "closed") : "none", glyph: glyph, tone: idle ? "mute" : status, title: name, trailing: trailing, alert: attention, link: link, tab: tab.id, toggleKey: expandable ? "tab:" + tab.id : nil, dim: idle || t.done || t.kind == "advisor" || t.mode == "parked"))
                 if open {
                     for child in grouped { appendTab(child, level + 1) }
                     for child in children { appendTab(child, level + 1, nest: false) }
                     for run in runs {
-                        let progress = [run.phase, run.started.map { age(now - $0) }].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
-                        out.append(SpacesRow(id: "run:" + run.id, kind: .run, depth: level + 1, glyph: run.done ? (run.attention == "act" ? "✗" : "✓") : "◐", tone: run.done ? "mute" : "working", title: run.name ?? run.id, trailing: [run.badge, progress.isEmpty ? nil : progress].compactMap { $0 }.joined(separator: " · "), alert: run.attention, tab: tab.id, dim: run.done))
+                        let progress = run.done ? "" : [run.phase?.lowercased(), run.started.map { age(now - $0) }].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+                        out.append(SpacesRow(id: "run:" + run.id, kind: .run, depth: level + 1, glyph: run.done ? (run.attention == "act" ? "✗" : "✓") : "◐", tone: run.done && run.attention == "act" ? "blocked" : run.done ? "mute" : "working", title: run.name ?? run.id, trailing: [run.badge, progress.isEmpty ? nil : progress].compactMap { $0 }.joined(separator: " · "), alert: run.attention, tab: tab.id, dim: run.done))
                     }
                 }
             }
@@ -186,12 +194,12 @@ enum SpacesTree {
             func section(_ label: String, _ members: [SpacesInput.Tab], shortcut: String) {
                 guard !members.isEmpty else { return }
                 let key = space.id + ":" + label
-                if let focus = chrome.focusedSection, focus.hasPrefix(space.id + ":"), focus != key && label != "ORCHESTRATOR" { hiddenCount += members.count; return }
-                let closed = chrome.collapsedSections.contains(key) && chrome.focusedSection != key
+                if let focus = chrome.focusedSection[space.id], focus != label && label != "ORCHESTRATOR" { hiddenCount += members.count; return }
+                let closed = chrome.collapsedSections.contains(key) && chrome.focusedSection[space.id] == nil
                 out.append(SpacesRow(id: "section:" + key, kind: .section, depth: depth + 1, chevron: sectioned ? (closed ? "closed" : "open") : "none", title: label, trailing: closed ? String(members.count) + (shortcut.contains("⌘") ? " " + shortcut : "") : shortcut, alert: closed && members.contains { tag($0).attention == "act" || $0.status == "blocked" } ? "act" : "none", toggleKey: sectioned ? "section:" + key : nil))
                 if !closed { for tab in members { appendTab(tab, depth + 1) } }
             }
-            section("ORCHESTRATOR", orch + lanes.filter { tag($0).section == "orchestrator" && root($0) == nil }, shortcut: "⌘0")
+            section("ORCHESTRATOR", orch + lanes.filter { tag($0).section == "orchestrator" && tag($0).mode == "active" && root($0) == nil }, shortcut: "⌘0")
             if sectioned {
                 for (value, label) in [("reviewing", "READY FOR REVIEW"), ("scoping", "SCOPING"), ("implementing", "IMPLEMENTING"), ("monitoring", "MONITORING")] {
                     let members = lanes.filter { tag($0).mode == "active" && root($0) == nil && (tag($0).section ?? "implementing") == value } + (value == "implementing" ? ordinary : [])
@@ -204,13 +212,19 @@ enum SpacesTree {
             }
             for (group, members) in [("services", lanes.filter { tag($0).mode == "auto" } + (sectioned ? workflows.filter { parent($0) == nil } : [])), ("parked", lanes.filter { tag($0).mode == "parked" }), ("closed", sectioned ? lanes.filter { tag($0).mode == "active" && tag($0).section == "closed" } : []), ("background", background)] {
                 guard !members.isEmpty else { continue }
-                if chrome.focusedSection?.hasPrefix(space.id + ":") == true { hiddenCount += members.count; continue }
+                if chrome.focusedSection[space.id] != nil { hiddenCount += members.count; continue }
                 let key = space.id + ":" + group
                 let open = chrome.expandedGroups.contains(key)
-                out.append(SpacesRow(id: "group:" + key, kind: .group, depth: depth + 1, chevron: open ? "open" : "closed", title: group + " " + String(members.count), toggleKey: "group:" + key, dim: true))
+                let rank = ["none": 0, "warn": 1, "act": 2]
+                let attention = members.map { member -> String in
+                    let t = tag(member)
+                    let own = ([member.status] + member.agents.map(\.status)).contains("blocked") ? "act" : t.attention
+                    return ([own] + t.runs.map(\.attention)).max { (rank[$0] ?? 0) < (rank[$1] ?? 0) } ?? "none"
+                }.max { (rank[$0] ?? 0) < (rank[$1] ?? 0) } ?? "none"
+                out.append(SpacesRow(id: "group:" + key, kind: .group, depth: depth + 1, chevron: open ? "open" : "closed", title: group + " " + String(members.count), alert: attention, toggleKey: "group:" + key, dim: true))
                 if open { for tab in members { appendTab(tab, depth + 2) } }
             }
-            if chrome.focusedSection?.hasPrefix(space.id + ":") == true {
+            if chrome.focusedSection[space.id] != nil {
                 out.append(SpacesRow(id: "all:" + space.id, kind: .group, depth: depth + 1, title: "show all", trailing: String(hiddenCount), toggleKey: "all:" + space.id, dim: true))
             }
         }

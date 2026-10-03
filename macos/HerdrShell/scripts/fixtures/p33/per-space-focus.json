@@ -1,0 +1,58 @@
+{
+  "_source": "src/client/shell/tests/factory_sidebar.rs:830-918; tree.rs:948-1062,1157-1180",
+  "input": {
+    "spaces": [
+      {
+        "id": "ws",
+        "name": "factory",
+        "pinned": false,
+        "collapsed": false
+      },
+      {
+        "id": "two",
+        "name": "second",
+        "pinned": false,
+        "collapsed": false
+      }
+    ],
+    "tabs": [
+      {
+        "id": "lane",
+        "space": "ws",
+        "label": "lane",
+        "status": "working",
+        "agents": [],
+        "focused": false
+      },
+      {
+        "id": "other",
+        "space": "two",
+        "label": "other",
+        "status": "working",
+        "agents": [],
+        "focused": false
+      }
+    ],
+    "focusedTab": null
+  },
+  "overlay": {
+    "tabs": {
+      "lane": {
+        "kind": "lane",
+        "section": "scoping"
+      },
+      "other": {
+        "kind": "lane",
+        "section": "implementing"
+      }
+    },
+    "spaces": {}
+  },
+  "chrome": {
+    "focusedSection": {
+      "ws": "SCOPING",
+      "two": "IMPLEMENTING"
+    }
+  },
+  "now": 1000
+}

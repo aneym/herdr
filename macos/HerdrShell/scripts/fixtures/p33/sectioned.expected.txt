@@ -9,7 +9,7 @@ tab|tab:plain-a|1|none|●|working|plain-a||none||plain-a||
 tab|tab:plain-b|1|none|●|working|plain-b||none||plain-b||
 group|group:ws_1:closed|1|closed||mute|closed 1||none|||group:ws_1:closed|dim
 group|group:ws_1:background|1|closed||mute|background 1||none|||group:ws_1:background|dim
-space|space:ws_2|0|open||mute|poker||none|||space:ws_2|
+space|space:ws_2|0|open||mute|poker||none||poker|space:ws_2|
 section|section:ws_2:LANES|1|none||mute|LANES|⌘1..9|none||||
 tab|tab:poker|1|none|●|working|poker coach||none||poker||
 footerHost|host:0|0|none||mute|Studio|3/28|none||||

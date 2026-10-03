@@ -66,7 +66,9 @@ final class TestHook {
             let part = obj["part"] as? String ?? "body"
             if part == "focus" {
                 let key = String(row.id.dropFirst(8))
-                c.state.spacesChrome.focusedSection = c.state.spacesChrome.focusedSection == key ? nil : key
+                let split = key.lastIndex(of: ":")!
+            let space = String(key[..<split]); let label = String(key[key.index(after: split)...])
+            c.state.spacesChrome.focusedSection[space] = c.state.spacesChrome.focusedSection[space] == label ? nil : label
             } else if part == "pin" { c.state.spacesChrome.toggle("pin:" + String(row.id.dropFirst(6))) }
             else if part == "plus" {
                 let commands = c.commands
@@ -76,7 +78,7 @@ final class TestHook {
                 }
             } else if part == "link" {
                 if let raw = row.link, let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") { NSWorkspace.shared.open(url) }
-            } else if part == "chevron" || [.section, .group, .space, .hidden].contains(row.kind) {
+            } else if part == "chevron" || [.section, .group, .hidden].contains(row.kind) {
                 if let key = row.toggleKey { c.state.spacesChrome.toggle(key) }
             } else if let tab = row.tab { c.selectTab(tab) }
             c.state.saveSpacesChrome()
