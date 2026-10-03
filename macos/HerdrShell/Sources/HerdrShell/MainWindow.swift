@@ -170,6 +170,11 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     private var pendingFocusPane: String?
     private var didRestoreTabFocus = false
     private var didRestorePaneFocus = false
+    /// Last snapshot the notifier has applied. The next one is compared against it.
+    private var attentionOld = Notifier.Facts.empty
+    /// `--agent-run` never activates, so the window stays non-key. A click through the
+    /// test hook still means Alex is looking at the selected tab.
+    var inProcessKey = false
 
     init(model: HerdrModel, registry: SurfaceRegistry, theme: ThemeStore) {
         self.model = model
@@ -221,7 +226,10 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         }.store(in: &bag)
         model.$snapshot.receive(on: RunLoop.main).sink { [weak self] _ in self?.snapshotChanged() }.store(in: &bag)
         model.catalog.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in
-            DispatchQueue.main.async { self?.refreshDocs() }
+            DispatchQueue.main.async {
+                self?.refreshDocs()
+                self?.noteAttention()
+            }
         }.store(in: &bag)
 
         host.onDividerDrag = { [weak self] d, phase, delta, extentPx in
@@ -337,6 +345,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     func snapshotChanged() {
+        noteAttention()
         // A panel for a row that no longer exists (or is now a workflow) has nothing to show.
         if let id = detailPanel.model.rowId, detailContent == nil, model.snapshot != nil,
            !model.allRowsInOrder.contains(where: { $0.id == id && $0.kind != .workflow }) {
@@ -373,6 +382,14 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         }
         refreshDocs()
         refreshHost()
+    }
+
+    /// Blocked, or done after working, on a tab Alex is not looking at.
+    private func noteAttention() {
+        let new = Notifier.capture(snapshot: model.snapshot, parked: Set(model.catalog.snapshot.parked.keys))
+        Notifier.shared.observe(old: attentionOld, new: new, selected: state.selectedTab,
+                                windowKey: window.isKeyWindow || inProcessKey)
+        attentionOld = new
     }
 
     func selectTab(_ tabId: String, revealDocs: Bool = false) {

@@ -488,7 +488,7 @@ final class SurfaceView: NSView {
     private func sendPos(_ event: NSEvent) {
         guard let surface else { return }
         let p = surfacePoint(event)
-        ghostty_surface_mouse_pos(surface, p.x, p.y, ghosttyMods(event.modifierFlags))
+        ghostty_surface_mouse_pos(surface, p.x, p.y, ghosttyMouseMods(event.modifierFlags))
     }
 
     /// Ghostty decides what a mouse event means: selection when the program has
@@ -498,7 +498,7 @@ final class SurfaceView: NSView {
                             _ event: NSEvent) -> Bool {
         guard let surface else { return false }
         sendPos(event)
-        return ghostty_surface_mouse_button(surface, state, button, ghosttyMods(event.modifierFlags))
+        return ghostty_surface_mouse_button(surface, state, button, ghosttyMouseMods(event.modifierFlags))
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -543,7 +543,7 @@ final class SurfaceView: NSView {
         // Leave the position alone while a button is held: a drag selection keeps
         // extending outside the view. Otherwise park it outside so hover state clears.
         guard let surface, NSEvent.pressedMouseButtons == 0 else { return }
-        ghostty_surface_mouse_pos(surface, -1, -1, ghosttyMods(event.modifierFlags))
+        ghostty_surface_mouse_pos(surface, -1, -1, ghosttyMouseMods(event.modifierFlags))
     }
 
     /// Packed like Ghostty's macOS app: bit 0 precise (trackpad), bits 1...3 momentum phase.
@@ -612,6 +612,16 @@ func ghosttyMods(_ flags: NSEvent.ModifierFlags) -> ghostty_input_mods_e {
     if flags.contains(.option) { m |= GHOSTTY_MODS_ALT.rawValue }
     if flags.contains(.command) { m |= GHOSTTY_MODS_SUPER.rawValue }
     if flags.contains(.capsLock) { m |= GHOSTTY_MODS_CAPS.rawValue }
+    return ghostty_input_mods_e(m)
+}
+
+/// Command is the macOS link click. While a program owns the mouse, Ghostty
+/// only rechecks links for the shift capture-override, so a ⌘-hover has to
+/// carry that bit too or the URL never becomes a link under the cursor.
+/// Keyboard paths stay on `ghosttyMods`: an unclaimed ⌘ chord must not arrive as super+shift.
+func ghosttyMouseMods(_ flags: NSEvent.ModifierFlags) -> ghostty_input_mods_e {
+    var m = ghosttyMods(flags).rawValue
+    if flags.contains(.command) { m |= GHOSTTY_MODS_SHIFT.rawValue }
     return ghostty_input_mods_e(m)
 }
 

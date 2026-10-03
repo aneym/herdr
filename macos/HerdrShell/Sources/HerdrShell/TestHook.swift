@@ -142,6 +142,9 @@ final class TestHook {
             } else {
                 s.interpretOverride = nil
             }
+        case "open_url_sim":
+            // Same path as GHOSTTY_ACTION_OPEN_URL, without a surface under the pointer.
+            GhosttyRuntime.openDetectedURL(obj["url"] as? String ?? "")
         case "activate":
             if agentRun {
                 log("hook: activate ignored (--agent-run)")
@@ -325,6 +328,7 @@ final class TestHook {
                                           context: nil, eventNumber: 0, clickCount: 1, pressure: type == .mouseMoved ? 0 : 1) else { return }
         // mouseMoved never reaches a view without acceptsMouseMovedEvents; hand it over directly.
         if type == .mouseMoved { s.mouseMoved(with: ev) } else { w.sendEvent(ev) }
+        if agentRun { c.inProcessKey = true }
         delivered.append("mouse \(obj["action"] ?? "") on \(s.paneId) via window.sendEvent")
     }
 
@@ -699,6 +703,9 @@ final class TestHook {
             "theme": themeState(c),
             "detail": detailState(c),
             "docs": c.docPanel.dump(),
+            "opened_urls": Notifier.shared.openedURLs,
+            "notifications": Notifier.shared.notifications.map { ["tab": $0.tab, "kind": $0.kind, "title": $0.title] },
+            "dock_badge": Notifier.shared.dockBadge,
             "poll_ms": c.model.pollMs,
             "surfaces": surfaces,
             "lifecycle": c.registry.lifecycleState(),
