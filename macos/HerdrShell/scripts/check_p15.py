@@ -255,9 +255,14 @@ def main():
     shutil.copy2(os.path.join(D0, ".build", "release", "HerdrShell"), APP_COPY + ".new")
     os.replace(APP_COPY + ".new", APP_COPY)
     say(f"app start: {S.app('start').strip()}")
+    # P33 (Alex, 2026-10-03): Spaces is the default; this scenario then works in Areas.
+    s0 = wait_state(lambda s: s.get("shell", {}).get("mode") in ("spaces", "areas"), 40)
+    S.cmd({"cmd": "activate"})
+    S.cmd({"cmd": "click", "target": "mode", "label": "areas"})
     s = wait_state(lambda s: s.get("shell", {}).get("mode") == "areas" and any(l["kind"] == "area" for l in s["sidebar_lines"]), 40)
-    check("app state readable and Areas mode is the default", s is not None and s.get("shell", {}).get("mode") == "areas",
-          f"mode={None if s is None else s.get('shell', {}).get('mode')}")
+    check("app state readable; Spaces is the default, Areas one click away",
+          s0 is not None and s0.get("shell", {}).get("mode") == "spaces" and s is not None,
+          f"first mode={None if s0 is None else s0.get('shell', {}).get('mode')}")
     if s is None:
         return finish()
 

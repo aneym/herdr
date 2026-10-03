@@ -170,6 +170,10 @@ def run():
     os.replace(APP_COPY + ".new", APP_COPY)
     say(f"app start: {S.app('start').strip()}")
     S.cmd({"cmd": "frame", "w": 1440, "h": 900})
+    # Spaces is the default since P33; this scenario is about Areas rows and their docs.
+    wait_state(lambda s: s.get("shell", {}).get("mode") in ("spaces", "areas"), 40)
+    S.cmd({"cmd": "activate"})
+    S.cmd({"cmd": "click", "target": "mode", "label": "areas"})
     s = wait_state(lambda s: s.get("shell", {}).get("mode") == "areas" and any(l.get("title") == "doc lane" for l in s["sidebar_lines"]), 40)
     check("app is up in Areas with the doc row", s is not None, None if s is None else "doc lane in sidebar")
     if s is None:
