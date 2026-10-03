@@ -5,16 +5,18 @@ import Foundation
 /// the TUI's "parked N" group and every other reader see one modes file change.
 enum ParkActions {
     /// The helper updates modes on the server and returns them for the local sidebar.
-    static func run(_ action: String, tab: String, note: String? = nil, done: @escaping (Bool, String) -> Void) {
+    static func run(_ action: String, tab: String, note: String? = nil, promptOnFailure: Bool = true, done: @escaping (Bool, String) -> Void) {
         var args = [tab, "--by=\(RemoteActions.by)"]
         if let note, !note.isEmpty { args += ["--note=\(note)"] }
         RemoteActions.run(verb: action, args: args) { ok, message in
             if !ok {
                 log("park: \(action) \(tab) -> failed \(message)")
-                let alert = NSAlert()
-                alert.messageText = action == "park" ? "Park failed" : "Resume failed"
-                alert.informativeText = message
-                alert.runModal()
+                if promptOnFailure {
+                    let alert = NSAlert()
+                    alert.messageText = action == "park" ? "Park failed" : "Resume failed"
+                    alert.informativeText = message
+                    alert.runModal()
+                }
             }
             done(ok, message)
         }

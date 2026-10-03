@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Run shell actions on the machine that owns the herdr server."""
-import argparse
 import json
 import os
 import re
@@ -15,13 +14,25 @@ def modes():
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("verb", choices=["ping", "modes", "park", "unpark", "approve"])
-    parser.add_argument("target", nargs="?")
-    parser.add_argument("--note")
-    parser.add_argument("--quote")
-    parser.add_argument("--by")
-    a = parser.parse_args()
+    from types import SimpleNamespace
+    argv = sys.argv[1:]
+    if not argv or argv[0] not in ("ping", "modes", "park", "unpark", "approve"):
+        raise ValueError("Invalid verb")
+    a = SimpleNamespace(verb=argv.pop(0), target=None, note=None, quote=None, by=None)
+    if a.verb not in ("ping", "modes"):
+        if not argv or argv[0].startswith("--"):
+            raise ValueError("Missing target")
+        a.target = argv.pop(0)
+    while argv:
+        option = argv.pop(0)
+        key, equals, value = option.partition("=")
+        if key not in ("--note", "--quote", "--by"):
+            raise ValueError("Invalid argument")
+        if not equals:
+            if not argv or argv[0].startswith("-"):
+                raise ValueError("Use option=value for leading-dash values")
+            value = argv.pop(0)
+        setattr(a, key[2:], value)
     if a.verb == "ping":
         return {"ok": True, "version": 1}
     if a.verb == "modes":
@@ -34,10 +45,10 @@ def main():
         if a.quote is None:
             raise ValueError("Missing approval quote")
         args = [os.environ.get("UNBLOCK_BIN", os.path.expanduser("~/.local/bin/unblock")),
-                "scope", "approve", a.target, "--by", a.by or "alex", "--quote", a.quote]
+                "scope", "approve", a.target, "--by", a.by if a.by is not None else "alex", "--quote", a.quote]
     else:
         args = [os.environ.get("HERDR_LANE_BIN", os.path.expanduser("~/.local/bin/herdr-lane")),
-                a.verb, a.target, "--by", a.by or "herdr-shell"]
+                a.verb, a.target, "--by", a.by if a.by is not None else "herdr-shell"]
         if a.note is not None:
             args += ["--note", a.note]
     result = subprocess.run(args, capture_output=True, text=True, timeout=18)

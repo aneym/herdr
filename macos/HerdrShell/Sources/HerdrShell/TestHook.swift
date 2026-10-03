@@ -92,11 +92,11 @@ final class TestHook {
             }
         case "unpark":
             guard let c = controller, let tab = obj["tab"] as? String else { break }
-            ParkActions.run("unpark", tab: tab) { _, _ in c.model.catalog.reload() }
+            ParkActions.run("unpark", tab: tab, promptOnFailure: false) { _, _ in c.model.catalog.reload() }
         case "park":
             // {"cmd":"park","tab":"<id>","note":"..."}: what the row menu's Park… does after its prompt.
             guard let c = controller, let tab = obj["tab"] as? String else { break }
-            ParkActions.run("park", tab: tab, note: obj["note"] as? String) { _, _ in c.model.catalog.reload() }
+            ParkActions.run("park", tab: tab, note: obj["note"] as? String, promptOnFailure: false) { _, _ in c.model.catalog.reload() }
         case "click":
             click(obj)
         case "split":
