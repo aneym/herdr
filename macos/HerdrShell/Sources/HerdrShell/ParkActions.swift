@@ -4,42 +4,19 @@ import Foundation
 /// Park and Resume run herdr-control's own tool (`herdr-lane park|unpark`), so the sidebar,
 /// the TUI's "parked N" group and every other reader see one modes file change.
 enum ParkActions {
-    static var laneBin = ""
-    static var kindBin: String?
-    static var herdrBin = ""
-    static let by = "herdr-shell"
-
-    /// Runs off the main thread; `done` gets the tool's exit status and its last output line.
+    /// The helper updates modes on the server and returns them for the local sidebar.
     static func run(_ action: String, tab: String, note: String? = nil, done: @escaping (Bool, String) -> Void) {
-        var args = [action, tab, "--by", by]
-        if let note, !note.isEmpty { args += ["--note", note] }
-        DispatchQueue.global(qos: .userInitiated).async {
-            let p = Process()
-            // lane.js is `#!/usr/bin/env node`; a Finder launch has no Homebrew on PATH.
-            p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            p.arguments = [laneBin] + args
-            var env = ProcessInfo.processInfo.environment
-            env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" + (env["PATH"].map { ":" + $0 } ?? "")
-            env["HERDR_BIN_PATH"] = herdrBin
-            env["CONTROL_MODES"] = ShellPaths.modes
-            if let kindBin { env["HERDR_KIND_BIN"] = kindBin }
-            p.environment = env
-            let out = Pipe()
-            p.standardOutput = out
-            p.standardError = out
-            var ok = false, text = ""
-            do {
-                try p.run()
-                let data = out.fileHandleForReading.readDataToEndOfFile()
-                p.waitUntilExit()
-                ok = p.terminationStatus == 0
-                text = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-            } catch {
-                text = "\(error)"
+        var args = [tab, "--by=\(RemoteActions.by)"]
+        if let note, !note.isEmpty { args += ["--note=\(note)"] }
+        RemoteActions.run(verb: action, args: args) { ok, message in
+            if !ok {
+                log("park: \(action) \(tab) -> failed \(message)")
+                let alert = NSAlert()
+                alert.messageText = action == "park" ? "Park failed" : "Resume failed"
+                alert.informativeText = message
+                alert.runModal()
             }
-            let last = text.split(separator: "\n").last.map(String.init) ?? ""
-            log("park: \(action) \(tab) -> \(ok ? "ok" : "failed") \(last)")
-            DispatchQueue.main.async { done(ok, last) }
+            done(ok, message)
         }
     }
 

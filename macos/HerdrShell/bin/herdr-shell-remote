@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""Run shell actions on the machine that owns the herdr server."""
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+
+
+def modes():
+    path = os.environ.get("CONTROL_MODES", os.path.expanduser("~/.agent-rails/herdr/modes.json"))
+    with open(path) as f:
+        return json.load(f)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("verb", choices=["ping", "modes", "park", "unpark", "approve"])
+    parser.add_argument("target", nargs="?")
+    parser.add_argument("--note")
+    parser.add_argument("--quote")
+    parser.add_argument("--by")
+    a = parser.parse_args()
+    if a.verb == "ping":
+        return {"ok": True, "version": 1}
+    if a.verb == "modes":
+        return {"ok": True, "modes": modes()}
+    if not a.target:
+        raise ValueError("Missing target")
+    if a.verb == "approve":
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,80}", a.target):
+            raise ValueError("Invalid scope slug")
+        if a.quote is None:
+            raise ValueError("Missing approval quote")
+        args = [os.environ.get("UNBLOCK_BIN", os.path.expanduser("~/.local/bin/unblock")),
+                "scope", "approve", a.target, "--by", a.by or "alex", "--quote", a.quote]
+    else:
+        args = [os.environ.get("HERDR_LANE_BIN", os.path.expanduser("~/.local/bin/herdr-lane")),
+                a.verb, a.target, "--by", a.by or "herdr-shell"]
+        if a.note is not None:
+            args += ["--note", a.note]
+    result = subprocess.run(args, capture_output=True, text=True, timeout=18)
+    if result.returncode:
+        lines = (result.stderr.strip() or result.stdout.strip()).splitlines()
+        raise ValueError(lines[-1] if lines else f"{a.verb} tool failed (exit {result.returncode})")
+    lines = result.stdout.strip().splitlines()
+    reply = {"ok": True, "message": lines[-1] if lines else ""}
+    if a.verb != "approve":
+        reply["modes"] = modes()
+    return reply
+
+
+if __name__ == "__main__":
+    try:
+        reply = main()
+    except (Exception, SystemExit) as e:
+        reply = {"ok": False, "error": str(e) if not isinstance(e, SystemExit) else "Invalid arguments"}
+    print(json.dumps(reply))
+    sys.exit(0 if reply["ok"] else 1)

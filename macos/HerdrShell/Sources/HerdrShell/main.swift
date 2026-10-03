@@ -119,9 +119,7 @@ ShellPaths.areas = shellAreasPath
 ContextStore.directory = ProcessInfo.processInfo.environment["HERDR_CONTEXT_DIR"]
     ?? Channel.appSupport.appendingPathComponent("context").path
 ShellPaths.modes = ProcessInfo.processInfo.environment["CONTROL_MODES"] ?? (home + "/.agent-rails/herdr/modes.json")
-ParkActions.laneBin = ProcessInfo.processInfo.environment["HERDR_LANE_BIN"] ?? (home + "/.local/bin/herdr-lane")
-ParkActions.kindBin = ProcessInfo.processInfo.environment["HERDR_KIND_BIN"]
-ParkActions.herdrBin = herdrBin
+RemoteActions.configure(herdrBin: herdrBin)
 
 // Children must not inherit the launching pane's herdr identity (HERDR_ENV and
 // friends) or any Claude session markers.
