@@ -249,8 +249,9 @@ struct SidebarView: View {
     }
 
     private var chipRow: some View {
-        let parked = model.catalog.snapshot.parked
-        let parkedCount = model.snapshot?.tabs.filter { parked[$0.tab_id] != nil }.count ?? 0
+        let parkedCount = SidebarModel.parkedCount(snapshot: model.snapshot, orchestrators: model.orchestrators,
+                                                  lanes: model.lanes, workflows: model.workflows,
+                                                  catalog: model.catalog.snapshot, areaOnly: state.areaOnly)
         let chips: [(AreaChip, String)] = [
             (.all, "All"), (.scoping, "Scope"), (.building, "Build"), (.review, "Review"), (.use, "Use"),
             (.parked, parkedCount > 0 ? "Parked \(parkedCount)" : "Parked"),

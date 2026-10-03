@@ -28,7 +28,10 @@ Release branch: `git config herdr-shell.releaseBranch` in the herdr repo
 Studio itself is staged by release.sh. An unreachable target is skipped quietly and
 picked up on the next fanout. Install: macos/HerdrShell/scripts/install-publish.sh.
 """
+from contextlib import contextmanager
+from functools import wraps
 import fcntl
+import hashlib
 import json
 import os
 import shlex
@@ -36,6 +39,7 @@ import shutil
 import subprocess
 import sys
 import time
+import tempfile
 
 HOME = os.path.expanduser("~")
 REPO = os.environ.get("HERDR_REPO", "/Volumes/StudioExt/repos/herdr")
@@ -44,6 +48,7 @@ STORE = os.environ.get("HERDR_SHELL_RELEASE_DIR", f"{HOME}/.local/share/herdr-sh
 TARGETS = os.environ.get("HERDR_SHELL_TARGETS", f"{HOME}/.config/herdr-shell/targets.json")
 LOGDIR = f"{HOME}/.cache/herdr-shell-publish"
 LOCK = f"{LOGDIR}/publish.lock"
+RELEASES = f"{HOME}/Library/Caches/herdr-shell-publish/releases"
 STAGE = f"{HOME}/Library/Application Support/HerdrShell"
 SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]
 # Run from a git hook, the environment carries GIT_DIR and friends for the pushing worktree.
@@ -57,6 +62,22 @@ def log(msg):
     with open(f"{LOGDIR}/publish.log", "a") as f:
         f.write(line + "\n")
     print(line, flush=True)
+
+
+@contextmanager
+def delivery_lock():
+    os.makedirs(LOGDIR, exist_ok=True)
+    with open(f"{LOGDIR}/delivery.lock", "a") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        yield
+
+
+def serialized_delivery(fn):
+    @wraps(fn)
+    def locked(*args, **kwargs):
+        with delivery_lock():
+            return fn(*args, **kwargs)
+    return locked
 
 
 def git(*a):
@@ -111,26 +132,45 @@ def publish(ref):
     if r.returncode != 0:
         log(f"FAIL release.sh {sha[:12]} exit {r.returncode} (see {LOGDIR}/build.log)")
         return False
-    with open(f"{STAGE}/staged.json") as f:
-        meta = json.load(f)
+    try:
+        with open(f"{STAGE}/staged.json") as f:
+            meta = json.load(f)
+    except (OSError, ValueError) as e:
+        log(f"FAIL staged metadata {sha[:12]}: {e}")
+        return False
     if not same(meta.get("commit", ""), sha):
         log(f"FAIL staged.json names {meta.get('commit')} after building {sha[:12]}")
         return False
-    # Keep our own copy: Studio's staged app is consumed when Studio clicks Update.
-    os.makedirs(os.path.dirname(STORE), exist_ok=True)
-    tmp = STORE + ".incoming"
-    shutil.rmtree(tmp, ignore_errors=True)
-    os.makedirs(tmp)
-    subprocess.run(["ditto", f"{STAGE}/staged/{APP}", f"{tmp}/{APP}"], check=True)
-    with open(f"{tmp}/release.json", "w") as f:
-        json.dump(meta, f, indent=2)
-        f.write("\n")
-    old = STORE + ".previous"
-    shutil.rmtree(old, ignore_errors=True)
-    if os.path.isdir(STORE):
-        os.rename(STORE, old)
-    os.rename(tmp, STORE)
-    shutil.rmtree(old, ignore_errors=True)
+    # Snapshot the build output, never Studio's consumable Update staging directory.
+    os.makedirs(RELEASES, exist_ok=True)
+    snapshot = f"{RELEASES}/{sha}"
+    tmp = tempfile.mkdtemp(prefix=f".{sha}.", dir=RELEASES)
+    try:
+        subprocess.run(["ditto", f"{wt}/macos/HerdrShell/.build/bundle-prod/{APP}", f"{tmp}/{APP}"], check=True)
+        with open(f"{tmp}/release.json", "w") as f:
+            json.dump(meta, f, indent=2)
+            f.write("\n")
+        with delivery_lock():
+            if not os.path.isdir(snapshot):
+                os.rename(tmp, snapshot)
+            os.makedirs(os.path.dirname(STORE), exist_ok=True)
+            link = STORE + ".incoming"
+            if os.path.lexists(link):
+                if os.path.islink(link):
+                    os.unlink(link)
+                else:
+                    shutil.rmtree(link)
+            os.symlink(snapshot, link)
+            if os.path.isdir(STORE) and not os.path.islink(STORE):
+                old = STORE + ".previous"
+                shutil.rmtree(old, ignore_errors=True)
+                os.rename(STORE, old)
+            os.replace(link, STORE)
+    except (OSError, subprocess.CalledProcessError) as e:
+        log(f"FAIL snapshot {sha[:12]}: {e}")
+        return False
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
     log(f"release {meta['commit']} staged on studio")
     fanout()
     return True
@@ -144,21 +184,27 @@ a=$(/usr/libexec/PlistBuddy -c "Print :HerdrShellCommit" "$S/staged/Herdr Shell.
 echo "installed=$i"; echo "staged=$s"; echo "staged_app=$a"
 '''
 
-# The app is written first and checked; staged.json last, with a rename, so a
-# running app never sees a commit whose bundle isn't complete.
+# Both files live behind one staged directory pointer, swapped only after verification.
 REMOTE_DELIVER = r'''
 set -e
 S="$HOME/Library/Application Support/HerdrShell"
-mkdir -p "$S/staged"
-IN="$S/staged/.incoming"
-rm -rf "$IN"; mkdir "$IN"
+mkdir -p "$S/releases"
+IN=$(mktemp -d "$S/releases/incoming.XXXXXX")
+trap 'rm -rf "$IN"' EXIT
 tar -xzf - -C "$IN"
 /usr/bin/codesign --verify "$IN/Herdr Shell.app"
-rm -rf "$S/staged/Herdr Shell.app"
-mv "$IN/Herdr Shell.app" "$S/staged/Herdr Shell.app"
-mv "$IN/release.json" "$S/staged.json.tmp"
-rmdir "$IN"
-mv "$S/staged.json.tmp" "$S/staged.json"
+# Migrate the old layout once; subsequent deliveries replace a symlink atomically.
+if [ -d "$S/staged" ] && [ ! -L "$S/staged" ]; then
+    mv "$S/staged" "$IN/legacy"
+fi
+if [ ! -L "$S/staged.json" ]; then
+    rm -f "$S/staged.json"
+    ln -s staged/release.json "$S/staged.json"
+fi
+LINK="$IN.pointer"
+ln -s "$IN" "$LINK"
+/bin/mv -fh "$LINK" "$S/staged"
+trap - EXIT
 echo delivered
 '''
 
@@ -171,17 +217,19 @@ def probe(t):
     return dict(l.split("=", 1) for l in r.stdout.splitlines() if "=" in l)
 
 
+@serialized_delivery
 def fanout():
     rel = release()
     if not rel:
         log("fanout: no release yet")
         return
     commit = rel["commit"]
+    source = os.path.realpath(STORE)
     for t in targets():
         name = t.get("name", "?")
         try:
             st = probe(t)
-        except subprocess.TimeoutExpired:
+        except (OSError, subprocess.TimeoutExpired):
             st = None
         if st is None:
             log(f"{name}: unreachable, will retry")
@@ -190,20 +238,29 @@ def fanout():
             continue
         if same(st.get("staged", ""), commit) and same(st.get("staged_app", ""), commit):
             continue
-        tar = subprocess.Popen(["tar", "-czf", "-", "-C", STORE, APP, "release.json"], stdout=subprocess.PIPE)
-        r = subprocess.run(t["ssh"][:1] + SSH_OPTS + t["ssh"][1:] + ["/bin/sh", "-c", shlex.quote(REMOTE_DELIVER)],
-                           stdin=tar.stdout, capture_output=True, text=True, timeout=900)
-        tar.stdout.close()
-        tar.wait()
-        if r.returncode == 0 and "delivered" in r.stdout:
+        if not os.path.isdir(f"{source}/{APP}") or not os.path.isfile(f"{source}/release.json"):
+            log(f"{name}: FAIL deliver {commit}: release source missing")
+            continue
+        tar = subprocess.Popen(["tar", "-czf", "-", "-C", source, APP, "release.json"], stdout=subprocess.PIPE)
+        try:
+            r = subprocess.run(t["ssh"][:1] + SSH_OPTS + t["ssh"][1:] + ["/bin/sh", "-c", shlex.quote(REMOTE_DELIVER)],
+                               stdin=tar.stdout, capture_output=True, text=True, timeout=900)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            log(f"{name}: FAIL deliver {commit}: {e}")
+            r = None
+        finally:
+            tar.stdout.close()
+            tar_code = tar.wait()
+        if r is not None and r.returncode == 0 and tar_code == 0 and "delivered" in r.stdout:
             log(f"{name}: staged {commit} (installed {st.get('installed') or 'none'})")
-        else:
+        elif r is not None:
             log(f"{name}: FAIL deliver {commit}: {(r.stderr or r.stdout).strip()[-300:]}")
+
 
 
 REMOTE_INSTALL = r'''
 set -e
-if pgrep -f "Applications/Herdr Shell.app/Contents/MacOS/" >/dev/null; then echo running; exit 3; fi
+if pgrep -x HerdrShell >/dev/null; then echo running; exit 3; fi
 A="$HOME/Applications"
 mkdir -p "$A"
 IN="$A/.herdr-shell-incoming"
@@ -219,12 +276,16 @@ echo installed
 '''
 
 
+@serialized_delivery
 def install(name):
     rel = release()
     t = next((t for t in targets() if t.get("name") == name), None)
     if not rel or not t:
         sys.exit(f"install: no release or no target {name}")
-    tar = subprocess.Popen(["tar", "-czf", "-", "-C", STORE, APP], stdout=subprocess.PIPE)
+    source = os.path.realpath(STORE)
+    if not os.path.isdir(f"{source}/{APP}"):
+        sys.exit(f"{name}: install failed: release source missing")
+    tar = subprocess.Popen(["tar", "-czf", "-", "-C", source, APP], stdout=subprocess.PIPE)
     r = subprocess.run(t["ssh"][:1] + SSH_OPTS + t["ssh"][1:] + ["/bin/sh", "-c", shlex.quote(REMOTE_INSTALL)],
                        stdin=tar.stdout, capture_output=True, text=True, timeout=900)
     tar.stdout.close()
@@ -236,7 +297,7 @@ def install(name):
 
 
 DATA_DIR = f"{HOME}/.agent-rails/herdr"
-DATA_FILES = ("lanes.json", "areas.json", "modes.json")
+DATA_FILES = ("lanes.json", "areas.json", "modes.json", "overlay.json")
 
 REMOTE_DATA = r'''
 set -e
@@ -250,17 +311,23 @@ echo synced
 '''
 
 
+@serialized_delivery
 def data():
     """Push the Areas/Parked inputs to each target when their content changed."""
-    import hashlib
     have = [f for f in DATA_FILES if os.path.isfile(f"{DATA_DIR}/{f}")]
     if not have:
         return
-    h = hashlib.sha256()
-    for f in have:
-        with open(f"{DATA_DIR}/{f}", "rb") as fh:
-            h.update(f.encode() + b"\0" + fh.read())
-    digest = h.hexdigest()
+    # Hash and send the same snapshot even if Studio updates a file during delivery.
+    with tempfile.TemporaryDirectory(prefix="herdr-data-", dir=LOGDIR) as snapshot:
+        digests = {}
+        for f in have:
+            shutil.copyfile(f"{DATA_DIR}/{f}", f"{snapshot}/{f}")
+            with open(f"{snapshot}/{f}", "rb") as fh:
+                digests[f] = hashlib.sha256(fh.read()).hexdigest()
+        send_data(snapshot, digests)
+
+
+def send_data(snapshot, digests):
     state_path = f"{LOGDIR}/data-state.json"
     try:
         with open(state_path) as fh:
@@ -269,18 +336,22 @@ def data():
         state = {}
     for t in targets():
         name = t.get("name", "?")
-        if state.get(name) == digest:
+        sent = state.get(name)
+        if not isinstance(sent, dict):
+            sent = {}
+        changed = [f for f, digest in digests.items() if sent.get(f) != digest]
+        if not changed:
             continue
-        tar = subprocess.Popen(["tar", "-cf", "-", "-C", DATA_DIR, *have], stdout=subprocess.PIPE)
+        tar = subprocess.Popen(["tar", "-cf", "-", "-C", snapshot, *changed], stdout=subprocess.PIPE)
         try:
             r = subprocess.run(t["ssh"][:1] + SSH_OPTS + t["ssh"][1:] + ["/bin/sh", "-c", shlex.quote(REMOTE_DATA)],
                                stdin=tar.stdout, capture_output=True, text=True, timeout=60)
-        except subprocess.TimeoutExpired:
+        except (OSError, subprocess.TimeoutExpired):
             r = None
         tar.stdout.close()
-        tar.wait()
-        if r is not None and r.returncode == 0 and "synced" in r.stdout:
-            state[name] = digest
+        tar_code = tar.wait()
+        if r is not None and r.returncode == 0 and tar_code == 0 and "synced" in r.stdout:
+            state[name] = {**sent, **{f: digests[f] for f in changed}}
             state.pop(f"{name}.down", None)
         elif not state.get(f"{name}.down"):
             state[f"{name}.down"] = True

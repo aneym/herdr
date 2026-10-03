@@ -4,7 +4,7 @@
   python3 scripts/check_p26.py [--out checks/P26.txt]
 
 Lab `shellspike-parked`. Fixtures: lanes.json, areas.json and a modes.json (CONTROL_MODES)
-with two parked tabs, one of them a blocked lane that would otherwise lead Needs you.
+with parked lanes and workflows, including a blocked live workflow under a parked lane.
 Park and Resume run the real herdr-lane (lane.js) against the fixture modes file; its
 kinds registry is an empty lab dir and HERDR_KIND_BIN is /usr/bin/true, so nothing
 outside the lab is written. Asserts from the state dump, a real click on Resume, and
@@ -163,14 +163,23 @@ def main():
     scope, scope_pane = tab("scope page")          # scoping, live
     old_lane, old_pane = tab("old research")       # parked, idle
     build, build_pane = tab("live build")          # implementing, live
+    child, child_pane = tab("wf active child")
+    parked_child, parked_child_pane = tab("wf parked child")
+    nested_parked, nested_pane = tab("wf nested parked")
     agent(orch_pane, "working")
     agent(stuck_pane, "blocked")
     agent(scope_pane, "working")
     agent(old_pane, "idle")
     agent(build_pane, "working")
+    agent(child_pane, "blocked")
+    agent(parked_child_pane, "idle")
+    agent(nested_pane, "idle")
+    herdr("agent", "owner", "set", child_pane, stuck_pane)
+    herdr("agent", "owner", "set", parked_child_pane, build_pane)
+    herdr("agent", "owner", "set", nested_pane, stuck_pane)
 
-    def lane(t, name, section, kind="lane"):
-        return {"tab": t, "name": name, "label": name, "kind": kind, "goal": None, "goal_area": "factory infra",
+    def lane(t, name, section, kind="lane", goal_area="factory infra"):
+        return {"tab": t, "name": name, "label": name, "kind": kind, "goal": None, "goal_area": goal_area,
                 "section": section, "section_source": "project", "scope_url": None, "review_url": None, "mode": None}
 
     lanes = {"version": 1, "generated_at": "2026-10-02T00:00:00Z", "lanes": [
@@ -179,16 +188,22 @@ def main():
         lane(scope, "scope page", "scoping"),
         lane(old_lane, "old research", "implementing"),
         lane(build, "live build", "implementing"),
+        # No goal and no space mapping: its area can only come from its parked owner's tab assignment.
+        lane(child, "wf active child", "implementing", "workflow", goal_area=None),
+        lane(parked_child, "wf parked child", "implementing", "workflow"),
+        lane(nested_parked, "wf nested parked", "implementing", "workflow"),
     ]}
     areas = {"version": 1,
              "areas": [{"id": "factory", "name": "factory", "color": "#5AA9FF"},
                        {"id": "unsorted", "name": "unsorted", "color": "#999999"}],
-             "tabs": {orch: {"area": "factory", "role": "top"}},
-             "spaces": {fw: "factory"}, "goal_area": {"factory infra": "factory"}, "goal": {}}
+             "tabs": {orch: {"area": "factory", "role": "top"}, stuck: {"area": "factory"}},
+             "spaces": {}, "goal_area": {"factory infra": "factory"}, "goal": {}}
     modes = {"version": 1, "tabs": {
         stuck: {"mode": "parked", "at": "2026-10-02T20:25:04.785Z", "by": "p6",
                 "note": "Parked 2026-10-02 16:30 ET: factory paused for the postmortem; resume after Alex approves"},
         old_lane: {"mode": "parked", "at": "2026-09-30T14:00:00.000Z", "by": "alex", "note": "come back after the raise"},
+        parked_child: {"mode": "parked", "at": "2026-09-29T14:00:00.000Z", "by": "alex", "note": "child paused"},
+        nested_parked: {"mode": "parked", "at": "2026-09-28T14:00:00.000Z", "by": "alex", "note": "nested paused"},
     }}
     for name, doc in (("lanes.json", lanes), ("areas.json", areas), ("modes.json", modes)):
         with open(os.path.join(FIX, name), "w") as f:
@@ -240,23 +255,30 @@ def main():
           "stuck build" not in names and "old research" not in names and {"scope page", "live build"} <= set(names), f"{names}")
     grp = next(l for l in s["sidebar_lines"] if l["kind"] == "parked")
     check("one Parked group at the foot, shut, with its count",
-          s["sidebar_lines"][-1]["id"] == "parked" and grp["chevron"] is False and grp["trailing"] == "2", grp["text"])
+          s["sidebar_lines"][-1]["id"] == "parked" and grp["chevron"] is False and grp["trailing"] == "4", grp["text"])
     area = next(l for l in s["sidebar_lines"] if l["kind"] == "area")
-    check("the factory area count leaves parked tabs out", area["trailing"] == "3", area["text"])
+    check("the factory area count leaves parked tabs out", area["trailing"] == "4", area["text"])
+    active_child = next((l for l in s["sidebar_lines"] if l.get("tab") == child and not l["parked"]
+                         and not str(l["id"]).startswith("focus:")), None)
+    check("live workflow under a parked owner is a top-level area row",
+          active_child is not None and active_child["depth"] == 1 and active_child["area"] == "factory", str(active_child))
+    check("parked workflow leaves its active owner's group", "wf parked child" not in names, str(names))
     s = S.state()
     if not s["shell"]["focus_expanded"]:
         s = click_until("focus", None, lambda s: s["shell"]["focus_expanded"] is True)
     focus = focus_titles(s)
-    check("Needs you / Focus skips the blocked tab once it is parked", focus == ["scope page"], f"{focus}")
+    check("Needs you / Focus skips the blocked tab once it is parked", focus == ["wf active child", "scope page"], f"{focus}")
     click_until("focus", None, lambda s: s["shell"]["focus_expanded"] is False)
 
     s = click_until("chip", "needs", lambda s: s["shell"]["chip"] == "needs")
-    check("Needs you chip leaves parked tabs out", live(s) == ["scope page"], f"{live(s)}")
+    check("Needs you chip leaves parked tabs out", live(s) == ["scope page", "wf active child"], f"{live(s)}")
 
     s = click_until("chip", "parked", lambda s: s["shell"]["chip"] == "parked")
     rows = parked_rows(s)
     check("Parked chip lists only parked rows, newest park first",
-          [r["title"] for r in rows] == ["stuck build", "old research"] and live(s) == [], f"{[r['title'] for r in rows]}")
+          [r["title"] for r in rows] == ["stuck build", "old research", "wf parked child", "wf nested parked"] and live(s) == [], f"{[r['title'] for r in rows]}")
+    check("Parked chip count equals its rows, including descendants of parked owners",
+          s["shell"]["parked_count"] == len(rows), str(s["shell"].get("parked_count")))
     check("each parked row shows its date and note",
           rows and (rows[0]["park_note"] or "").endswith(" · factory paused for the postmortem; resume after Alex approves")
           and (rows[1]["park_note"] or "").startswith("Sep 30 · come back after the raise"),
@@ -269,7 +291,7 @@ def main():
 
     click_until("chip", "all", lambda s: s["shell"]["chip"] == "all")
     s = click_until("parked", None, lambda s: any(l["parked"] for l in s["sidebar_lines"]))
-    check("clicking the group header opens it", len(parked_rows(s)) == 2)
+    check("clicking the group header opens it", len(parked_rows(s)) == 4)
     shot("P26-all-open.png")
 
     s = click_until("resume", "old research", lambda s: "old research" in live(s))
@@ -278,7 +300,7 @@ def main():
           doc["tabs"].get(old_lane, {}).get("mode") is None, json.dumps(doc["tabs"].get(old_lane)))
     check("the resumed row is back in its area and the group count drops",
           s is not None and "old research" in live(s)
-          and next(l for l in s["sidebar_lines"] if l["kind"] == "parked")["trailing"] == "1", f"{live(s) if s else None}")
+          and next(l for l in s["sidebar_lines"] if l["kind"] == "parked")["trailing"] == "3", f"{live(s) if s else None}")
 
     S.cmd({"cmd": "park", "tab": build, "note": "waiting on the PC"})
     s = wait_state(lambda s: "live build" not in live(s), 20)

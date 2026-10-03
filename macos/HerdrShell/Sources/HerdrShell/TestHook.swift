@@ -681,6 +681,9 @@ final class TestHook {
             "shell": [
                 "mode": c.state.mode.rawValue,
                 "chip": c.state.chip.rawValue,
+                "parked_count": SidebarModel.parkedCount(snapshot: c.model.snapshot, orchestrators: c.model.orchestrators,
+                                                         lanes: c.model.lanes, workflows: c.model.workflows,
+                                                         catalog: c.model.catalog.snapshot, areaOnly: c.state.areaOnly),
                 "area_only": c.state.areaOnly ?? NSNull(),
                 "folded_areas": c.state.foldedAreas.sorted(),
                 "focus_expanded": c.state.focusExpanded,

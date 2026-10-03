@@ -336,8 +336,8 @@ extension SidebarModel {
         let items = areaItems(snapshot: s, orchestrators: orchestrators, lanes: lanes, workflows: workflows, catalog: catalog)
         var flat: [AreaItem] = []
         func walk(_ i: AreaItem) {
-            guard i.park == nil else { return }
-            flat.append(i); i.children.forEach(walk)
+            if i.park == nil { flat.append(i) }
+            i.children.forEach(walk)
         }
         items.forEach(walk)
         let order = catalog.orderedAreaIds(Set(flat.map(\.area)))
@@ -386,7 +386,7 @@ extension SidebarModel {
         let facts = Self.facts(s)
         let items = areaItems(snapshot: s, orchestrators: orchestrators, lanes: lanes, workflows: workflows, catalog: catalog)
         // The Parked chip draws its own flat list below, not area groups.
-        let shown = chip == .parked ? [] : items.filter { passes($0, chip: chip) && (areaOnly == nil || $0.area == areaOnly) }
+        let shown = chip == .parked ? [] : liveItems(items).filter { passes($0, chip: chip) && (areaOnly == nil || $0.area == areaOnly) }
         let focus = focusTabs(snapshot: s, orchestrators: orchestrators, lanes: lanes, workflows: workflows, catalog: catalog)
         var out: [SidebarLine] = []
 
@@ -452,11 +452,30 @@ extension SidebarModel {
         return out
     }
 
+    static func parkedCount(snapshot: Snapshot?, orchestrators: [TabRow], lanes: [TabRow], workflows: [TabRow],
+                            catalog: LaneSnapshot, areaOnly: String?) -> Int {
+        guard let snapshot else { return 0 }
+        let items = areaItems(snapshot: snapshot, orchestrators: orchestrators, lanes: lanes, workflows: workflows, catalog: catalog)
+        return parkedItems(items).filter { areaOnly == nil || $0.area == areaOnly }.count
+    }
+
+    /// Parking belongs to the tab, not its tree; live children of a parked owner become roots.
+    private static func liveItems(_ items: [AreaItem]) -> [AreaItem] {
+        items.flatMap { item -> [AreaItem] in
+            let children = liveItems(item.children)
+            // A promoted child with no area of its own stays in its parked owner's area.
+            if item.park != nil { return children.map { var c = $0; if c.area == "unsorted" { c.area = item.area }; return c } }
+            var live = item
+            live.children = children
+            return [live]
+        }
+    }
+
     /// Every parked item, a parked child pulled out from under a live owner too. Newest park first.
     static func parkedItems(_ items: [AreaItem]) -> [AreaItem] {
         var out: [AreaItem] = []
         func walk(_ i: AreaItem) {
-            if i.park != nil { out.append(i); return }
+            if i.park != nil { out.append(i) }
             i.children.forEach(walk)
         }
         items.forEach(walk)
