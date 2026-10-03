@@ -1,5 +1,6 @@
 import AppKit
 import GhosttyKit
+import UserNotifications
 
 // Usage: HerdrShell --herdr <bin> --socket <herdr api socket> [--control <fifo>]
 //                   [--ghostty-config <file>] [--user-ghostty-config <file>]
@@ -121,6 +122,8 @@ ContextStore.directory = ProcessInfo.processInfo.environment["HERDR_CONTEXT_DIR"
 ShellPaths.modes = ProcessInfo.processInfo.environment["CONTROL_MODES"] ?? (home + "/.agent-rails/herdr/modes.json")
 RemoteActions.configure(herdrBin: herdrBin)
 
+// Read before HERDR_* is cleared. Flag wins, then the env, then defaults (in the delegate).
+let notifyEnv = ProcessInfo.processInfo.environment["HERDR_NOTIFY"]
 // Children must not inherit the launching pane's herdr identity (HERDR_ENV and
 // friends) or any Claude session markers.
 for (k, _) in ProcessInfo.processInfo.environment where k.hasPrefix("HERDR_") || k.hasPrefix("CLAUDE") {
@@ -156,6 +159,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller = MainWindowController(model: model, registry: registry, theme: theme)
         NSApp.mainMenu = buildMenu(target: controller)
         controller.show()
+        Notifier.shared.enabled = Notifier.enabled(flag: args["notify"], env: notifyEnv)
+        Notifier.shared.onSelect = { [weak controller] tab in
+            controller?.selectTab(tab)
+            controller?.window.makeKeyAndOrderFront(nil)
+        }
+        // A banner click can cold-relaunch the app. The center delivers that click only
+        // to a delegate already installed; setting it on the first post misses the click.
+        if Bundle.main.bundleIdentifier != nil {
+            UNUserNotificationCenter.current().delegate = Notifier.shared
+        }
         model.start()
         if let fifo = args["control"], Channel.kind == .dev {
             hook = TestHook(path: fifo, controller: controller)

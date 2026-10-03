@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+"""P29 check: command-click opens a link; a background tab that blocks or finishes notifies once.
+
+  python3 scripts/check_p29.py [--out checks/P29.txt]
+
+Lab `shellspike-p29`. Agent status is reported on plain shells (same as check_p26). The
+app is --agent-run, so it records opened_urls / notifications / dock_badge and does not
+open a browser or post a banner. A click marks the offscreen window as the one Alex is
+looking at; the selected tab then blocks with no notification, a parked tab never does,
+and two flips of a background tab inside a second stay one notification.
+"""
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+
+os.environ["SHELL_LAB"] = "shellspike-p29"
+os.environ.setdefault("HERDR_SHELL_BIN", os.path.expanduser("~/.local/bin/herdr"))
+D0 = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LABDIR = os.path.expanduser(f"~/.cache/herdr-build/{os.environ['SHELL_LAB']}")
+os.makedirs(os.path.join(LABDIR, "app"), exist_ok=True)
+APP_COPY = os.path.join(LABDIR, "app", "HerdrShell")
+os.environ["HERDR_SHELL_APP"] = APP_COPY
+FIX = os.path.join(LABDIR, "fixtures")
+os.makedirs(FIX, exist_ok=True)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import scenario as S  # noqa: E402
+
+lines, failures = [], []
+CHK = os.path.dirname(S.OUT) if "--out" in sys.argv else os.path.join(D0, "checks")
+if "--out" not in sys.argv:
+    S.OUT = os.path.join(D0, "checks", "P29.txt")
+
+URL = "https://example.com/p29"
+
+
+def say(s=""):
+    print(s, flush=True)
+    lines.append(s)
+
+
+def check(name, ok, detail=""):
+    say(f"[{'PASS' if ok else 'FAIL'}] {name}" + (f" -- {detail}" if detail else ""))
+    if not ok:
+        failures.append(name)
+
+
+def herdr(*a):
+    return S.lab("herdr", *a)
+
+
+def jherdr(*a):
+    return json.loads(herdr(*a))["result"]
+
+
+def wait_state(pred, timeout=25):
+    t0 = time.time()
+    last = None
+    while time.time() - t0 < timeout:
+        try:
+            last = S.state()
+        except SystemExit:
+            time.sleep(0.2)
+            continue
+        if pred(last):
+            return last
+        time.sleep(0.2)
+    return last
+
+
+def notes(s, tab=None):
+    rows = s.get("notifications") or []
+    if tab is None:
+        return rows
+    return [n for n in rows if n.get("tab") == tab]
+
+
+def status_of(s, tab):
+    def walk(rows):
+        for r in rows or []:
+            if r.get("tab") == tab:
+                return r.get("status")
+            found = walk(r.get("children"))
+            if found:
+                return found
+        return None
+    sb = s.get("sidebar") or {}
+    return walk(sb.get("orchestrator")) or walk(sb.get("lanes")) or walk(sb.get("workflows"))
+
+
+def shot(name):
+    png = os.path.join(CHK, name)
+    if os.path.exists(png):
+        os.unlink(png)
+    S.cmd({"cmd": "shot", "out": png})
+    for _ in range(80):
+        if os.path.exists(png) and os.path.getsize(png) > 1000:
+            break
+        time.sleep(0.1)
+    check(f"screenshot checks/{name}", os.path.exists(png) and os.path.getsize(png) > 1000, png)
+
+
+def main():
+    say(f"HerdrShell P29 check  {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}")
+    S.app("stop")
+    S.lab("down")
+    time.sleep(0.5)
+    S.lab("up")
+    real = subprocess.run(["python3", os.path.join(D0, "scripts", "lab.py"), "env"], capture_output=True, text=True).stdout
+    home = next(l.split("=", 1)[1] for l in real.splitlines() if l.startswith("HOME="))
+    os.makedirs(os.path.join(LABDIR, "bin"), exist_ok=True)
+    link = os.path.join(LABDIR, "bin", "herdr")
+    if os.path.lexists(link):
+        os.unlink(link)
+    os.symlink(os.path.join(os.path.dirname(home), "bin", "herdr"), link)
+    subprocess.run(["defaults", "delete", f"herdr.shell.dev.{os.environ['SHELL_LAB']}"], capture_output=True)
+
+    old = jherdr("workspace", "list")["workspaces"]
+    ws = jherdr("workspace", "create", "--label", "p29", "--cwd", "/tmp", "--no-focus")
+    fw = ws["workspace"]["workspace_id"]
+    for w in old:
+        herdr("workspace", "close", w["workspace_id"])
+
+    def tab(label):
+        r = jherdr("tab", "create", "--workspace", fw, "--label", label, "--cwd", "/tmp", "--no-focus")
+        return r["tab"]["tab_id"], r["root_pane"]["pane_id"]
+
+    def agent(pane, state):
+        for _ in range(200):
+            if "%" in herdr("pane", "read", pane, "--source", "visible"):
+                break
+            time.sleep(0.05)
+        herdr("pane", "report-agent", pane, "--source", "spike", "--agent", "claude", "--state", state)
+
+    look, look_pane = ws["tab"]["tab_id"], ws["root_pane"]["pane_id"]
+    herdr("tab", "rename", look, "looking")
+    bg, bg_pane = tab("background")
+    parked, parked_pane = tab("parked one")
+    fin, fin_pane = tab("finisher")
+    for pane in (look_pane, bg_pane, parked_pane, fin_pane):
+        agent(pane, "working")
+
+    modes = {"version": 1, "tabs": {
+        parked: {"mode": "parked", "at": "2026-10-03T00:00:00.000Z", "by": "p29", "note": "parked for p29"},
+    }}
+    with open(os.path.join(FIX, "modes.json"), "w") as f:
+        json.dump(modes, f)
+    os.environ["CONTROL_MODES"] = os.path.join(FIX, "modes.json")
+
+    shutil.copy2(os.path.join(D0, ".build", "release", "HerdrShell"), APP_COPY + ".new")
+    os.replace(APP_COPY + ".new", APP_COPY)
+    say(f"app start: {S.app('start').strip()}")
+
+    s = wait_state(lambda s: status_of(s, bg) == "working" and status_of(s, look) == "working", 40)
+    check("baseline is working before any transition", s is not None, "" if s is None else f"look={status_of(s, look)} bg={status_of(s, bg)}")
+    if s is None:
+        return finish()
+
+    S.cmd({"cmd": "select", "tab": look})
+    time.sleep(0.3)
+    # Marks the offscreen window as key for the attention rule (agent-run never activates).
+    S.cmd({"cmd": "mouse", "pane": look_pane, "action": "down", "col": 1, "row": 1})
+    S.cmd({"cmd": "mouse", "pane": look_pane, "action": "up", "col": 1, "row": 1})
+    before = len(notes(S.state()))
+
+    herdr("pane", "report-agent", look_pane, "--source", "spike", "--agent", "claude", "--state", "blocked")
+    time.sleep(1.5)
+    s = S.state()
+    check("selected key tab going blocked does not notify",
+          not notes(s, look), f"{notes(s, look)}")
+    herdr("pane", "report-agent", look_pane, "--source", "spike", "--agent", "claude", "--state", "working")
+
+    herdr("pane", "report-agent", parked_pane, "--source", "spike", "--agent", "claude", "--state", "blocked")
+    time.sleep(1.5)
+    s = S.state()
+    check("parked tab going blocked does not notify", not notes(s, parked), f"{notes(s, parked)}")
+
+    herdr("pane", "report-agent", bg_pane, "--source", "spike", "--agent", "claude", "--state", "blocked")
+    s = wait_state(lambda s: len(notes(s, bg)) == 1, 20)
+    bg_notes = notes(s, bg) if s else []
+    check("background tab going blocked notifies once",
+          len(bg_notes) == 1 and bg_notes[0].get("kind") == "blocked" and bg_notes[0].get("title") == "background",
+          f"{bg_notes}")
+    check("that notification is the only new one",
+          s is not None and len(notes(s)) == before + 1, f"{notes(s) if s else None}")
+
+    herdr("pane", "report-agent", bg_pane, "--source", "spike", "--agent", "claude", "--state", "working")
+    time.sleep(0.3)
+    herdr("pane", "report-agent", bg_pane, "--source", "spike", "--agent", "claude", "--state", "blocked")
+    time.sleep(2.0)
+    s = S.state()
+    check("two flips in 1s coalesce to one notification", len(notes(s, bg)) == 1, f"{notes(s, bg)}")
+
+    herdr("pane", "report-agent", fin_pane, "--source", "spike", "--agent", "claude", "--state", "done")
+    s = wait_state(lambda s: s.get("dock_badge") == "2" and any(n.get("tab") == fin and n.get("kind") == "done" for n in notes(s)), 20)
+    fin_notes = notes(s, fin) if s else []
+    check("working to done on a background tab notifies finished",
+          len(fin_notes) == 1 and fin_notes[0].get("kind") == "done" and fin_notes[0].get("title") == "finisher",
+          f"{fin_notes}")
+    check("dock badge counts blocked and done, not the parked tab",
+          s is not None and s.get("dock_badge") == "2", f"{s.get('dock_badge') if s else None}")
+
+    S.cmd({"cmd": "select", "tab": look})
+    time.sleep(0.4)
+    S.cmd({"cmd": "type", "text": "printf 'https://example.com/p29\\n'\n"})
+    seen = ""
+    t0 = time.time()
+    while time.time() - t0 < 15:
+        seen = herdr("pane", "read", look_pane, "--source", "visible")
+        if URL in seen:
+            break
+        time.sleep(0.2)
+    check("pane shows the url", URL in seen, seen[-180:].replace("\n", " | "))
+    rows = seen.splitlines()
+    row = next((i for i, line in enumerate(rows) if URL in line), 0)
+    col = rows[row].find("https") if row < len(rows) else 0
+    if col < 0:
+        col = 0
+    click = {"cmd": "mouse", "pane": look_pane, "col": col + 4, "row": row, "mods": ["cmd"]}
+    S.cmd({**click, "action": "move"})
+    time.sleep(0.15)
+    S.cmd({**click, "action": "down"})
+    S.cmd({**click, "action": "up"})
+    s = wait_state(lambda s: any(URL in u for u in (s.get("opened_urls") or [])), 8)
+    opened = (s or {}).get("opened_urls") or []
+    check("cmd-click opens the link", any(URL in u for u in opened), f"{opened}")
+
+    before_sim = len(opened)
+    S.cmd({"cmd": "open_url_sim", "url": URL})
+    s = wait_state(lambda s: len(s.get("opened_urls") or []) > before_sim, 8)
+    opened = (s or {}).get("opened_urls") or []
+    check("open_url_sim records the link",
+          len(opened) > before_sim and any(URL in u for u in opened), f"{opened}")
+
+    shot("P29-links.png")
+    finish()
+
+
+def finish():
+    S.app("stop")
+    time.sleep(0.4)
+    say(f"lab down: {S.lab('down').strip()}")
+    say()
+    say(f"RESULT: {'PASS' if not failures else 'FAIL ' + ', '.join(failures)}")
+    os.makedirs(os.path.dirname(S.OUT), exist_ok=True)
+    with open(S.OUT, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    sys.exit(1 if failures else 0)
+
+
+if __name__ == "__main__":
+    main()

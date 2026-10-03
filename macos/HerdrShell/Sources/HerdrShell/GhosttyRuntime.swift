@@ -95,7 +95,52 @@ final class GhosttyRuntime {
             DispatchQueue.main.async { view.processExited() }
             return true
         }
+        // Claim these so libghostty's own opener does not run (it would open a browser
+        // even from an agent run). The bytes are only valid until this returns.
+        if action.tag == GHOSTTY_ACTION_OPEN_URL {
+            let raw = text(action.action.open_url.url, len: Int(action.action.open_url.len))
+            DispatchQueue.main.async { openDetectedURL(raw) }
+            return true
+        }
+        if action.tag == GHOSTTY_ACTION_DESKTOP_NOTIFICATION {
+            let n = action.action.desktop_notification
+            let title = n.title.map { String(cString: $0) } ?? ""
+            let body = n.body.map { String(cString: $0) } ?? ""
+            var pane = ""
+            if target.tag == GHOSTTY_TARGET_SURFACE, let ud = ghostty_surface_userdata(target.target.surface) {
+                pane = Unmanaged<SurfaceView>.fromOpaque(ud).takeUnretainedValue().paneId
+            }
+            DispatchQueue.main.async {
+                let tab = Notifier.shared.tabId(forPane: pane, in: Notifier.shared.latest) ?? ""
+                Notifier.shared.desktop(title: title, body: body, tab: tab)
+            }
+            return true
+        }
         return false
+    }
+
+    /// `len` is the byte count Ghostty hands us; the pointer is not a C string.
+    private static func text(_ ptr: UnsafePointer<CChar>?, len: Int) -> String {
+        guard let ptr, len > 0 else { return "" }
+        var n = len
+        if ptr[n - 1] == 0 { n -= 1 }
+        guard n > 0 else { return "" }
+        return String(decoding: UnsafeRawBufferPointer(start: ptr, count: n), as: UTF8.self)
+    }
+
+    /// http/https/file/mailto only. Agent runs log and record, and never call NSWorkspace.
+    static func openDetectedURL(_ raw: String) {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(),
+              ["http", "https", "file", "mailto"].contains(scheme) else { return }
+        let s = url.absoluteString
+        if agentRun {
+            log("open_url \(s)")
+            Notifier.shared.recordOpened(s)
+            return
+        }
+        Notifier.shared.recordOpened(s)
+        NSWorkspace.shared.open(url)
     }
 
     static func readClipboard(
