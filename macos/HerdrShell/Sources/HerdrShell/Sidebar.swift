@@ -156,6 +156,7 @@ struct SidebarView: View {
 
     /// Tabs whose Resume is running, so a second click does nothing and the button says so.
     @State private var resuming: Set<String> = []
+    @State private var approved: Set<String> = []
 
     /// Tokens for the effective mode; the view re-renders when the store changes.
     private var t: Tokens { theme.sidebarTokens }
@@ -177,6 +178,12 @@ struct SidebarView: View {
         // view, so text keeps its contrast whatever the desktop behind is.
         .background(theme.glass.sidebar ? t.panel.opacity(ChromePalette.glassScrimAlpha) : t.panel)
         .coordinateSpace(name: "click")
+        .onReceive(NotificationCenter.default.publisher(for: .remoteActionFinished)) { _ in
+            model.catalog.reload()
+            approved = Set(model.catalog.snapshot.lanes.values.filter {
+                $0.scopeURL.map { RemoteActions.approvedScopes.contains($0) } ?? false
+            }.map(\.tab))
+        }
         .onPreferenceChange(ClickTargetKey.self) { state.rowFrames = $0 }
     }
 
@@ -351,7 +358,14 @@ struct SidebarView: View {
         .background(RoundedRectangle(cornerRadius: 5).fill(l.selected ? t.sel : .clear))
         .contentShape(Rectangle())
         .onTapGesture { click(l) }
-        .contextMenu { if let tab = l.tab { Button("Resume") { resume(tab) } } }
+        .contextMenu {
+            if let tab = l.tab {
+                Button("Resume") { resume(tab) }
+                if RemoteActions.slug(model.catalog.snapshot.lanes[tab]?.scopeURL) != nil {
+                    Button("Approve scope…") { approve(tab) }
+                }
+            }
+        }
         .clickTarget(l.id)
     }
 
@@ -362,6 +376,11 @@ struct SidebarView: View {
             resuming.remove(tab)
             model.catalog.reload()
         }
+    }
+
+    private func approve(_ tab: String) {
+        guard let lane = model.catalog.snapshot.lanes[tab] else { return }
+        RemoteActions.approve(scopeURL: lane.scopeURL, title: lane.name) { _, _ in }
     }
 
     private func park(_ l: SidebarLine) {
@@ -432,6 +451,7 @@ struct SidebarView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(l.badge == "Review" || l.stage == "reviewing" ? t.ink : t.mute)
             }
+            if let tab = l.tab, approved.contains(tab) { Text("Approved").foregroundStyle(t.ok) }
             if !l.trailing.isEmpty { Text(l.trailing).foregroundStyle(tone(l.trailingTone)) }
             if let host = l.host {
                 Text(host)
@@ -452,6 +472,9 @@ struct SidebarView: View {
         .contextMenu {
             if state.mode == .areas, l.tab != nil, l.kind == .orchestrator || l.kind == .lane {
                 Button("Park…") { park(l) }
+            }
+            if let tab = l.tab, RemoteActions.slug(model.catalog.snapshot.lanes[tab]?.scopeURL) != nil {
+                Button("Approve scope…") { approve(tab) }
             }
         }
         .clickTarget(l.id)

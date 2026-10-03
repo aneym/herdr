@@ -17,6 +17,7 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
     private(set) var pageText = ""
 
     private let handle = DocWidthHandle()
+    private let approve = NoFocusButton()
     private let add = NoFocusButton()
     private let close = NoFocusButton()
     private let back = NoFocusButton()
@@ -51,6 +52,12 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
             self.focusAddress()
             return true
         }
+        approve.title = "Approve"
+        approve.isBordered = false
+        approve.font = .systemFont(ofSize: 12, weight: .medium)
+        approve.target = self
+        approve.action = #selector(approveScope)
+        approve.isHidden = true
         add.title = "+"
         add.isBordered = false
         add.font = .systemFont(ofSize: 16, weight: .medium)
@@ -102,6 +109,7 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         view.addSubview(forward)
         view.addSubview(reload)
         view.addSubview(openBrowser)
+        view.addSubview(approve)
         view.addSubview(add)
         view.addSubview(close)
         view.addSubview(handle)
@@ -187,10 +195,13 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         let bar: CGFloat = 36
         close.frame = NSRect(x: bounds.width - 28, y: 8, width: 22, height: 22)
         add.frame = NSRect(x: bounds.width - 52, y: 6, width: 22, height: 24)
+        approve.isHidden = active != "Scope" || RemoteActions.slug(rowId.flatMap { windowController?.model.catalog.snapshot.lanes[$0]?.scopeURL }) == nil
+        approve.frame = NSRect(x: add.frame.minX - 70, y: 6, width: 66, height: 24)
+        let tabLimit = approve.isHidden ? add.frame.minX : approve.frame.minX
         var x: CGFloat = 8
         for b in tabButtons {
             let w = min(120, max(56, b.intrinsicContentSize.width + 16))
-            if x + w > add.frame.minX - 4 { break }
+            if x + w > tabLimit - 4 { break }
             b.frame = NSRect(x: x, y: 6, width: w, height: 24)
             x += w + 4
         }
@@ -290,6 +301,16 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
             }
         }
         decisionHandler(.allow)
+    }
+
+    @objc private func approveScope() {
+        guard active == "Scope", let rowId, let lane = windowController?.model.catalog.snapshot.lanes[rowId] else { return }
+        RemoteActions.approve(scopeURL: lane.scopeURL, title: lane.name) { [weak self] ok, _ in
+            if ok {
+                self?.approve.title = "Approved"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5) { self?.approve.title = "Approve" }
+            }
+        }
     }
 
     @objc private func closed() {

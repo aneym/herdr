@@ -101,6 +101,8 @@ That binary is copied into the lab (`~/.cache/herdr-build/shellspike/bin/herdr`)
 - **Test keys** are CGEvents posted to the app's own pid (`CGEvent.postToPid`), never system-wide. The in-process `NSApp.sendEvent` path, used when the window is not key, dropped the first key after a ⌘[ focus switch. Real hardware keys were not tried; that path is unverified and was left out of the scenario.
 - The live herdr session has never been attached, and neither has a remote host.
 
+Park, Resume and Approve scope run on the server machine through `herdr-shell-remote` (installed by `scripts/install-publish.sh`). On Book, set `~/.config/herdr-shell/server.json` to `{"ssh":["ssh","studio-ts"],"remote_bin":"~/.local/bin/herdr-shell-remote"}`; without `ssh`, the helper runs locally. `HERDR_SHELL_SERVER_CONFIG` and `HERDR_SHELL_REMOTE_BIN` override those paths for fixtures. Approval always asks for your words before running; returned modes update the sidebar immediately.
+
 ## Checks run in the Space
 
 Build on the host, then run checks on the `herdr-qa` Cua Space desktop, never the host desktop:

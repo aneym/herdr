@@ -83,6 +83,16 @@ final class TestHook {
             case "full": if let id { c.openFullTab(id) }
             default: if let id { c.toggleDetail(id) } else { log("hook: detail: no such row") }
             }
+        case "approve":
+            guard let c = controller, let tab = obj["tab"] as? String,
+                  let quote = obj["quote"] as? String,
+                  let lane = c.model.catalog.snapshot.lanes[tab] else { break }
+            DispatchQueue.main.async {
+                RemoteActions.approve(scopeURL: lane.scopeURL, title: lane.name, quote: quote) { _, _ in c.model.catalog.reload() }
+            }
+        case "unpark":
+            guard let c = controller, let tab = obj["tab"] as? String else { break }
+            ParkActions.run("unpark", tab: tab) { _, _ in c.model.catalog.reload() }
         case "park":
             // {"cmd":"park","tab":"<id>","note":"..."}: what the row menu's Park… does after its prompt.
             guard let c = controller, let tab = obj["tab"] as? String else { break }
@@ -699,6 +709,7 @@ final class TestHook {
             "theme": themeState(c),
             "detail": detailState(c),
             "docs": c.docPanel.dump(),
+            "last_remote": RemoteActions.last,
             "poll_ms": c.model.pollMs,
             "surfaces": surfaces,
             "lifecycle": c.registry.lifecycleState(),

@@ -15,6 +15,7 @@ LABEL=com.aneyman.herdr-shell-fanout
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 
 install -m 755 "$D/publish.py" "$BIN"
+install -m 755 "$D/../bin/herdr-shell-remote" "$HOME/.local/bin/herdr-shell-remote"
 
 git -C "$REPO" config herdr-shell.releaseBranch >/dev/null || git -C "$REPO" config herdr-shell.releaseBranch feat/native-shell-latest
 
