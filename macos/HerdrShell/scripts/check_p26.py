@@ -219,6 +219,8 @@ def main():
         "HERDR_KIND_BIN": "/usr/bin/true",
         # The lab app's HOME is the lab home; point it at the installed lane tool.
         "HERDR_LANE_BIN": os.path.expanduser("~/.local/bin/herdr-lane"),
+        # Park and Resume go through the helper (P30); use this checkout's copy.
+        "HERDR_SHELL_REMOTE_BIN": os.path.join(D0, "bin", "herdr-shell-remote"),
     })
 
     if S.SPACE:
@@ -306,8 +308,8 @@ def main():
     s = wait_state(lambda s: "live build" not in live(s), 20)
     doc = modes_doc()
     entry = doc["tabs"].get(build, {})
-    check("Park runs herdr-lane park with the note and by=herdr-shell",
-          entry.get("mode") == "parked" and entry.get("note") == "waiting on the PC" and entry.get("by") == "herdr-shell",
+    check("Park runs herdr-lane park with the note and by=herdr-shell@<host>",
+          entry.get("mode") == "parked" and entry.get("note") == "waiting on the PC" and str(entry.get("by", "")).startswith("herdr-shell@"),
           json.dumps(entry))
     check("the parked row leaves its area at once", s is not None and "live build" not in live(s)
           and any(l["title"] == "live build" for l in parked_rows(s)))
