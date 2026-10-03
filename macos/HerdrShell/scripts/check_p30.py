@@ -151,6 +151,10 @@ def main():
             os.environ["HERDR_SHELL_APP"] = str(binary)
             push_tree(str(FIX), guest(FIX))
         S.app("start")
+        # Spaces is the default since P33; these park/approve rows are asserted in the Areas view.
+        wait(lambda s: s.get("shell", {}).get("mode") in ("spaces", "areas"))
+        S.cmd({"cmd": "activate"})
+        S.cmd({"cmd": "click", "target": "mode", "label": "areas"})
         ready = wait(lambda s: any(l.get("tab") == tab for l in s.get("sidebar_lines", [])))
         check(f"{transport}: fixture sidebar loaded", ready is not None)
         if ready is None:

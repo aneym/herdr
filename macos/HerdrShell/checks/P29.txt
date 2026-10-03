@@ -1,6 +1,6 @@
-HerdrShell P29 check  2026-10-03T06:04:39Z
+HerdrShell P29 check  2026-10-03T14:19:50Z
 app start: {"space": "herdr-qa", "ip": "192.168.64.5", "herdr_sha": "bf97e4cf7b64"}
-{"space": "herdr-qa", "app_pid": "12396", "exe": "/Users/lume/.herdr-space/bin/HerdrShell", "host_socket": "/Users/aneyman/.cache/herdr-build/s/9b9fb3/h/.config/herdr/sessions/shellspike-p29/herdr.sock", "guest_socket": "/Users/lume/.herdr-space/herdr.sock"}
+{"space": "herdr-qa", "app_pid": "22903", "exe": "/Users/lume/.herdr-space/bin/HerdrShell", "host_socket": "/Users/aneyman/.cache/herdr-build/s/9b9fb3/h/.config/herdr/sessions/shellspike-p29/herdr.sock", "guest_socket": "/Users/lume/.herdr-space/herdr.sock"}
 [PASS] baseline is working before any transition -- look=working bg=working
 [PASS] selected key tab going blocked does not notify -- []
 [PASS] parked tab going blocked does not notify -- []
@@ -12,7 +12,7 @@ app start: {"space": "herdr-qa", "ip": "192.168.64.5", "herdr_sha": "bf97e4cf7b6
 [PASS] pane shows the url -- tmp % printf 'https://example.com/p29\n' | 
 [PASS] cmd-click opens the link -- ['https://example.com/p29']
 [PASS] open_url_sim records the link -- ['https://example.com/p29', 'https://example.com/p29']
-[PASS] screenshot checks/P29-links.png -- /Volumes/StudioExt/repos/herdr-worktrees/shell-finish/macos/HerdrShell/checks/P29-links.png
+[PASS] screenshot checks/P29-links.png -- /Volumes/StudioExt/repos/herdr-worktrees/spaces-ghostty/macos/HerdrShell/checks/P29-links.png
 lab down: stop: 0
 
 RESULT: PASS
