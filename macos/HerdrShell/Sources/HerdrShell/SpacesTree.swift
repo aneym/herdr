@@ -131,7 +131,9 @@ enum SpacesTree {
             func root(_ tab: SpacesInput.Tab) -> String? {
                 guard tag(tab).kind == "lane", tag(tab).mode == "active", tag(tab).section != "scoping" else { return nil }
                 var seen = Set([tab.id]); var current = tab
-                while let parent = current.agents.first?.parent, let next = (lanes + orch).first(where: { $0.id == parent }) {
+                // Edges exist only from active, non-scoping lanes (tree.rs direct_parent), so a parked lane ends the walk.
+                func edge(_ t: SpacesInput.Tab) -> Bool { tag(t).kind == "lane" && tag(t).mode == "active" && tag(t).section != "scoping" }
+                while edge(current), let parent = current.agents.first?.parent, let next = (lanes + orch).first(where: { $0.id == parent }) {
                     guard seen.insert(parent).inserted else { return nil }
                     current = next
                 }
