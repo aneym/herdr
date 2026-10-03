@@ -1,0 +1,59 @@
+{
+  "input": {
+    "spaces": [
+      {
+        "id": "ws",
+        "name": "factory",
+        "pinned": false,
+        "collapsed": false
+      }
+    ],
+    "focusedTab": null,
+    "tabs": [
+      {
+        "id": "lane-a",
+        "space": "ws",
+        "label": "lane-a",
+        "status": "idle",
+        "agents": [],
+        "focused": false
+      },
+      {
+        "id": "wf-a",
+        "space": "ws",
+        "label": "wf-a",
+        "status": "blocked",
+        "agents": [],
+        "focused": false
+      },
+      {
+        "id": "wf-b",
+        "space": "ws",
+        "label": "wf-b",
+        "status": "working",
+        "agents": [],
+        "focused": false
+      }
+    ]
+  },
+  "overlay": {
+    "tabs": {
+      "lane-a": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "wf-a": {
+        "kind": "workflow",
+        "parent": "lane-a"
+      },
+      "wf-b": {
+        "kind": "workflow",
+        "parent": "lane-a",
+        "attention": "act"
+      }
+    }
+  },
+  "chrome": {},
+  "now": 0,
+  "_source": "src/client/shell/tests/factory_sidebar.rs:1005-1045 collapsed_factory_groups_show_grouped_workflow_alerts_and_work: a group's ! counts workflows whose parent is a member (Blocked or Act only)"
+}

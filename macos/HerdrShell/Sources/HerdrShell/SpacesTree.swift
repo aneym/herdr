@@ -215,12 +215,16 @@ enum SpacesTree {
                 if chrome.focusedSection[space.id] != nil { hiddenCount += members.count; continue }
                 let key = space.id + ":" + group
                 let open = chrome.expandedGroups.contains(key)
-                let rank = ["none": 0, "warn": 1, "act": 2]
-                let attention = members.map { member -> String in
+                // As Rust group_state: a bool set only by Act or Blocked, over the members, their runs and
+                // every workflow whose parent is a member (tree.rs ~990-1015).
+                let ids = Set(members.map(\.id))
+                let pool = members + workflows.filter { parent($0).map(ids.contains) ?? false }
+                let needs = pool.contains { member in
                     let t = tag(member)
-                    let own = ([member.status] + member.agents.map(\.status)).contains("blocked") ? "act" : t.attention
-                    return ([own] + t.runs.map(\.attention)).max { (rank[$0] ?? 0) < (rank[$1] ?? 0) } ?? "none"
-                }.max { (rank[$0] ?? 0) < (rank[$1] ?? 0) } ?? "none"
+                    return ([member.status] + member.agents.map(\.status)).contains("blocked") || t.attention == "act"
+                        || t.runs.contains { $0.attention == "act" }
+                }
+                let attention = needs ? "act" : "none"
                 out.append(SpacesRow(id: "group:" + key, kind: .group, depth: depth + 1, chevron: open ? "open" : "closed", title: group + " " + String(members.count), alert: attention, toggleKey: "group:" + key, dim: true))
                 if open { for tab in members { appendTab(tab, depth + 2) } }
             }
