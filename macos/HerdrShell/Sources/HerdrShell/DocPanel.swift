@@ -136,6 +136,7 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         return r === view || r.isDescendant(of: view) || r === web
     }
 
+    var hasDocs: Bool { !docs.isEmpty }
     var showingWeb: Bool { docs.first { $0.title == active }?.kind == .web }
 
     func focusAddress() {

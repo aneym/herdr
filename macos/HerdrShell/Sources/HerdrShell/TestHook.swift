@@ -56,6 +56,30 @@ final class TestHook {
         case "sidebar_fold":
             // {"cmd":"sidebar_fold","id":"tab:<id>|hidden|background","open":true}: what a chevron click does.
             if let id = obj["id"] as? String, let open = obj["open"] as? Bool { controller?.state.manualOpen[id] = open }
+        case "goal":
+            guard let c = controller else { return }
+            c.state.spacesChrome.goalFilter = obj["value"] as? String
+            c.state.saveSpacesChrome()
+        case "spaces_click":
+            guard let c = controller else { return }
+            guard let id = obj["row"] as? String, let row = c.model.spacesRows(state: c.state).first(where: { $0.id == id }) else { return }
+            let part = obj["part"] as? String ?? "body"
+            if part == "focus" {
+                let key = String(row.id.dropFirst(8))
+                c.state.spacesChrome.focusedSection = c.state.spacesChrome.focusedSection == key ? nil : key
+            } else if part == "pin" { c.state.spacesChrome.toggle("pin:" + String(row.id.dropFirst(6))) }
+            else if part == "plus" {
+                let commands = c.commands
+                let space = String(row.id.dropFirst(6))
+                DispatchQueue.global(qos: .userInitiated).async {
+                    if let made = commands.tabCreate(workspaceId: space, cwd: nil) { DispatchQueue.main.async { c.selectTab(made.tabId) } }
+                }
+            } else if part == "link" {
+                if let raw = row.link, let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") { NSWorkspace.shared.open(url) }
+            } else if part == "chevron" || [.section, .group, .space, .hidden].contains(row.kind) {
+                if let key = row.toggleKey { c.state.spacesChrome.toggle(key) }
+            } else if let tab = row.tab { c.selectTab(tab) }
+            c.state.saveSpacesChrome()
         case "state":
             writeState(obj["out"] as? String ?? "/dev/stderr")
         case "shot":
@@ -713,6 +737,10 @@ final class TestHook {
             "post_event_access": CGPreflightPostEventAccess(),
             "sidebar": ["orchestrator": rows(c.model.orchestrators), "lanes": rows(c.model.lanes),
                         "workflows": rows(c.model.workflows)],
+            "spaces_rows": c.model.spacesRows(state: c.state).map { $0.dump },
+            "spaces_chrome": (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(c.state.spacesChrome))) ?? [:],
+            "docs_visible": c.root.docsOpen,
+            "detail_open": c.detailPanel.model.isOpen,
             "sidebar_lines": c.sidebarLines.map { $0.dump },   // P10: the rows as drawn, in order
             "shell": [
                 "mode": c.state.mode.rawValue,

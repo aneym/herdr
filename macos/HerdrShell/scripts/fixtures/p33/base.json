@@ -1,0 +1,175 @@
+{
+  "_source": "src/client/shell/tests/factory_sidebar.rs:5,262,479; golden/factory_default_w25.txt",
+  "input": {
+    "spaces": [
+      {
+        "id": "ws_1",
+        "name": "agent-rails",
+        "pinned": false,
+        "collapsed": false
+      },
+      {
+        "id": "ws_2",
+        "name": "poker",
+        "pinned": false,
+        "collapsed": false
+      }
+    ],
+    "tabs": [
+      {
+        "id": "orch",
+        "space": "ws_1",
+        "label": "orch",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "lane-a",
+        "space": "ws_1",
+        "label": "lane-a",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "wf-a",
+        "space": "ws_1",
+        "label": "wf-a",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "wf-b",
+        "space": "ws_1",
+        "label": "wf-b",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "lane-b",
+        "space": "ws_1",
+        "label": "lane-b",
+        "agents": [],
+        "focused": false,
+        "status": "idle"
+      },
+      {
+        "id": "orphan",
+        "space": "ws_1",
+        "label": "orphan",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "advisor",
+        "space": "ws_1",
+        "label": "advisor",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "done",
+        "space": "ws_1",
+        "label": "done",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "plain-a",
+        "space": "ws_1",
+        "label": "plain-a",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "plain-b",
+        "space": "ws_1",
+        "label": "plain-b",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "poker",
+        "space": "ws_2",
+        "label": "poker coach",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      }
+    ],
+    "focusedTab": null
+  },
+  "overlay": {
+    "tabs": {
+      "orch": {
+        "kind": "orchestrator",
+        "name": "orchestrator",
+        "summary": "inbox 3"
+      },
+      "lane-a": {
+        "kind": "lane",
+        "summary": "pending"
+      },
+      "wf-a": {
+        "kind": "workflow",
+        "parent": "lane-a",
+        "name": "issues 3",
+        "phase": "decide 59/62",
+        "started": 67750
+      },
+      "wf-b": {
+        "kind": "workflow",
+        "parent": "lane-a",
+        "name": "factory-infra",
+        "badge": "Studio",
+        "phase": "build 1/2"
+      },
+      "lane-b": {
+        "kind": "lane"
+      },
+      "orphan": {
+        "kind": "workflow",
+        "parent": "missing",
+        "started": 1
+      },
+      "advisor": {
+        "kind": "advisor"
+      },
+      "done": {
+        "kind": "workflow",
+        "done": true
+      },
+      "poker": {
+        "kind": "lane"
+      }
+    },
+    "spaces": {
+      "ws_1": {
+        "summary": "3",
+        "attention": "act",
+        "target_tab": "wf-a"
+      }
+    },
+    "hosts": [
+      {
+        "name": "Studio",
+        "summary": "3/28 live"
+      }
+    ]
+  },
+  "chrome": {
+    "collapsedTabs": [
+      "orch",
+      "lane-a"
+    ]
+  },
+  "now": 100000
+}

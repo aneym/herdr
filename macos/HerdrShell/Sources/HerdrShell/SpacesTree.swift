@@ -1,0 +1,226 @@
+import Foundation
+
+struct SpacesInput: Codable {
+    struct Space: Codable { var id: String; var name: String; var pinned = false; var collapsed = false }
+    struct Agent: Codable { var status: String; var parent: String? = nil }
+    struct Tab: Codable { var id: String; var space: String; var label: String; var agents: [Agent] = []; var focused = false; var status = "unknown" }
+    var spaces: [Space]; var tabs: [Tab]; var focusedTab: String?
+}
+
+/// Overlay writers evolve independently of the shell. Missing fields use the Rust defaults.
+struct Overlay: Codable {
+    struct Run: Codable {
+        var id = ""; var name: String?; var phase: String?; var agents = 0; var started: Double?; var done = false; var attention = "none"; var badge: String?
+        init() {}
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: Field.self)
+            id = c.value("id", ""); name = c.optional("name"); phase = c.optional("phase"); agents = c.value("agents", 0)
+            started = c.optional("started"); done = c.value("done", false); attention = c.value("attention", "none"); badge = c.optional("badge")
+        }
+    }
+    struct Tag: Codable {
+        var kind = "unknown"; var section: String?; var mode = "active"; var name: String?; var parent: String?; var goal: String?; var goal_area: String?
+        var scope_url: String?; var review_url: String?; var summary: String?; var attention = "none"; var busy = false; var idle_reason: String?
+        var runs: [Run] = []; var phase: String?; var started: Double?; var done = false; var badge: String?
+        init() {}
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: Field.self)
+            kind = c.value("kind", "unknown"); section = c.optional("section"); mode = c.value("mode", "active");
+            if !["orchestrator", "lane", "workflow", "advisor"].contains(kind) { kind = "unknown" }
+            if !["parked", "auto"].contains(mode) { mode = "active" }
+            if ["inflight", "idle"].contains(section ?? "") { section = "implementing" }
+            if ["waiting", "ready", "ready_for_review"].contains(section ?? "") { section = "reviewing" }
+            if !["orchestrator", "scoping", "implementing", "reviewing", "monitoring", "closed"].contains(section ?? "") { section = nil }
+             name = c.optional("name"); parent = c.optional("parent")
+            goal = c.optional("goal"); goal_area = c.optional("goal_area"); scope_url = c.optional("scope_url"); review_url = c.optional("review_url")
+            summary = c.optional("summary"); attention = c.value("attention", "none"); busy = c.value("busy", false); idle_reason = c.optional("idle_reason")
+            runs = c.value("runs", []); phase = c.optional("phase"); started = c.optional("started"); done = c.value("done", false); badge = c.optional("badge")
+        }
+    }
+    struct Space: Codable {
+        var attention = "none"; var summary: String?; var target_tab: String?
+        init(from decoder: Decoder) throws { let c = try decoder.container(keyedBy: Field.self); attention = c.value("attention", "none"); summary = c.optional("summary"); target_tab = c.optional("target_tab") }
+    }
+    struct Host: Codable {
+        var name = ""; var summary: String?; var attention = "none"; var url: String?
+        init(from decoder: Decoder) throws { let c = try decoder.container(keyedBy: Field.self); name = c.value("name", ""); summary = c.optional("summary"); attention = c.value("attention", "none"); url = c.optional("url") }
+    }
+    var tabs: [String: Tag] = [:]; var spaces: [String: Space] = [:]; var usage: [Host] = []; var hosts: [Host] = []
+    init() {}
+    init(from decoder: Decoder) throws { let c = try decoder.container(keyedBy: Field.self); tabs = c.value("tabs", [:]); spaces = c.value("spaces", [:]); usage = c.value("usage", []); hosts = c.value("hosts", []) }
+    var goalChoices: [String] {
+        ["recruiter", "closer", "rails"].flatMap { goal -> [String] in
+            let tags = tabs.values.filter { $0.goal == goal }
+            guard !tags.isEmpty else { return [] }
+            return [goal] + Set(tags.compactMap(\.goal_area).filter { !$0.isEmpty }).sorted().map { goal + ":" + $0 }
+        }
+    }
+}
+private struct Field: CodingKey { var stringValue: String; var intValue: Int? { nil }; init(_ s: String) { stringValue = s }; init?(stringValue: String) { self.init(stringValue) }; init?(intValue: Int) { return nil } }
+private extension KeyedDecodingContainer where Key == Field {
+    func value<T: Decodable>(_ name: String, _ fallback: T) -> T { (try? decode(T.self, forKey: Field(name))) ?? fallback }
+    func optional<T: Decodable>(_ name: String) -> T? { try? decodeIfPresent(T.self, forKey: Field(name)) }
+}
+
+struct SpacesChrome: Codable {
+    var collapsedSections: Set<String> = []; var expandedGroups: Set<String> = []; var expandedTabs: Set<String> = []; var collapsedTabs: Set<String> = []
+    var pinnedSpaces: Set<String> = []; var collapsedSpaces: Set<String> = []; var hiddenExpanded = false; var goalFilter: String?; var focusedSection: String?
+    init() {}
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Field.self)
+        collapsedSections = c.value("collapsedSections", []); expandedGroups = c.value("expandedGroups", []); expandedTabs = c.value("expandedTabs", []); collapsedTabs = c.value("collapsedTabs", [])
+        pinnedSpaces = c.value("pinnedSpaces", []); collapsedSpaces = c.value("collapsedSpaces", []); hiddenExpanded = c.value("hiddenExpanded", false); goalFilter = c.optional("goalFilter"); focusedSection = c.optional("focusedSection")
+    }
+    mutating func toggle(_ key: String) {
+        if key.hasPrefix("all:") { focusedSection = nil; return }
+        if key == "hidden" { hiddenExpanded.toggle(); return }
+        let parts = key.split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return }
+        func flip(_ set: inout Set<String>, _ value: String) { if !set.insert(value).inserted { set.remove(value) } }
+        switch parts[0] {
+        case "section": flip(&collapsedSections, parts[1])
+        case "group": flip(&expandedGroups, parts[1])
+        case "tab":
+            if collapsedTabs.remove(parts[1]) != nil { expandedTabs.insert(parts[1]) }
+            else { expandedTabs.remove(parts[1]); collapsedTabs.insert(parts[1]) }
+        case "space": flip(&collapsedSpaces, parts[1])
+        case "pin": flip(&pinnedSpaces, parts[1])
+        default: break
+        }
+    }
+}
+
+struct SpacesRow: Identifiable, Equatable {
+    enum Kind: String { case title, goal, space, section, group, tab, run, hidden, footerUsage, footerHost }
+    var id: String; var kind: Kind; var depth = 0; var chevron = "none"; var glyph = ""; var tone = "mute"; var title: String; var trailing = ""
+    var alert = "none"; var link: String?; var tab: String?; var toggleKey: String?; var dim = false
+    /// Semantic rather than width-dependent: native fonts do not truncate like a terminal grid.
+    var dump: String { [kind.rawValue, id, String(depth), chevron, glyph, tone, title, trailing, alert, link ?? "", tab ?? "", toggleKey ?? "", dim ? "dim" : ""].joined(separator: "|") }
+}
+
+enum SpacesTree {
+    static func age(_ seconds: Double) -> String { let m = Int(max(0, seconds)) / 60; return m == 0 ? "<1m" : m < 60 ? "\(m)m" : "\(m / 60)h\(m % 60)m" }
+    static func build(_ input: SpacesInput, overlay: Overlay, chrome: SpacesChrome, now: Double) -> [SpacesRow] {
+        var out = [SpacesRow(id: "agents", kind: .title, title: "agents")]
+        let choices = overlay.goalChoices
+        let filter = chrome.goalFilter.flatMap { choices.contains($0) ? $0 : nil }
+        if !choices.isEmpty { out.append(SpacesRow(id: "goal", kind: .goal, title: "goal " + (filter ?? "All"), trailing: filter == nil ? "▾" : "✕")) }
+        let hidden = input.spaces.filter { $0.collapsed || chrome.collapsedSpaces.contains($0.id) }
+        let visible = input.spaces.filter { !$0.collapsed && !chrome.collapsedSpaces.contains($0.id) }
+        let ordered = visible.filter { $0.pinned || chrome.pinnedSpaces.contains($0.id) } + visible.filter { !$0.pinned && !chrome.pinnedSpaces.contains($0.id) }
+        func appendSpace(_ space: SpacesInput.Space, depth: Int) {
+            let meta = overlay.spaces[space.id]
+            out.append(SpacesRow(id: "space:" + space.id, kind: .space, depth: depth, chevron: "open", title: space.name, trailing: meta?.summary ?? "", alert: meta?.attention ?? "none", tab: meta?.target_tab, toggleKey: "space:" + space.id))
+            let all = input.tabs.filter { $0.space == space.id }
+            let sectioned = all.contains { overlay.tabs[$0.id]?.section != nil }
+            let tabs = all.filter { tab in
+                guard sectioned, depth == 0, let filter else { return true }
+                guard let tag = overlay.tabs[tab.id] else { return false }
+                let bits = filter.split(separator: ":", maxSplits: 1).map(String.init)
+                return tag.kind == "orchestrator" || tag.mode == "auto" || (tag.goal == bits[0] && (bits.count == 1 || tag.goal_area == bits[1]))
+            }
+            func tag(_ tab: SpacesInput.Tab) -> Overlay.Tag { overlay.tabs[tab.id] ?? Overlay.Tag() }
+            let background = tabs.filter { let t = tag($0); return t.kind == "advisor" || (t.done && t.kind != "workflow" && !(t.kind == "lane" && t.mode != "active")) }
+            let foreground = tabs.filter { !tag($0).done && tag($0).kind != "advisor" }
+            let orch = foreground.filter { tag($0).kind == "orchestrator" }
+            let lanes = tabs.filter { tag($0).kind == "lane" && (!tag($0).done || tag($0).mode != "active") }
+            let workflows = foreground.filter { tag($0).kind == "workflow" }
+            let ordinary = foreground.filter { !["orchestrator", "lane", "workflow"].contains(tag($0).kind) }
+            func parent(_ tab: SpacesInput.Tab) -> String? { let p = tag(tab).parent; return lanes.contains { $0.id == p } ? p : orch.first?.id }
+            func root(_ tab: SpacesInput.Tab) -> String? {
+                guard tag(tab).kind == "lane", tag(tab).mode == "active", tag(tab).section != "scoping" else { return nil }
+                var seen = Set([tab.id]); var current = tab
+                while let parent = current.agents.first?.parent, let next = (lanes + orch).first(where: { $0.id == parent }) {
+                    guard seen.insert(parent).inserted else { return nil }
+                    current = next
+                }
+                return current.id == tab.id ? nil : current.id
+            }
+            func appendTab(_ tab: SpacesInput.Tab, _ level: Int, nest: Bool = true) {
+                let t = tag(tab)
+                let grouped = nest ? lanes.filter { root($0) == tab.id } : []
+                let children = nest ? workflows.filter { parent($0) == tab.id } : []
+                let runs = nest ? t.runs : []
+                let expandable = !children.isEmpty || !runs.isEmpty || !grouped.isEmpty
+                let open = (chrome.expandedTabs.contains(tab.id) || (t.kind != "orchestrator" && (!children.isEmpty || runs.contains { !$0.done })) || children.contains { $0.id == input.focusedTab }) && !chrome.collapsedTabs.contains(tab.id)
+                let priority = ["unknown": 0, "idle": 1, "done": 2, "working": 3, "blocked": 4]
+                var status = tab.agents.max { (priority[$0.status] ?? 0) < (priority[$1.status] ?? 0) }?.status ?? tab.status
+                if t.busy && ["idle", "done"].contains(status) { status = "working" }
+                let idle = t.kind == "lane" && !t.busy && (t.summary ?? "").trimmingCharacters(in: .whitespaces).isEmpty && status == "idle"
+                var name = t.name ?? tab.label
+                if t.kind == "workflow", name.hasPrefix("wf ") { name = String(name.dropFirst(3)) }
+                if t.kind == "lane" {
+                    if name.lowercased().hasPrefix("[scoping] ") { name = String(name.dropFirst(10)) }
+                    if let range = name.range(of: " · ", options: .backwards), ["scoping", "implementing", "reviewing", "monitoring", "closed"].contains(String(name[range.upperBound...]).lowercased()) { name = String(name[..<range.lowerBound]) }
+                }
+                var trailing = t.badge ?? t.summary ?? (idle ? t.idle_reason ?? "idle" : "")
+                var link: String?
+                if t.section == "reviewing" { trailing = t.review_url == nil ? "no link" : "review ↗"; link = t.review_url }
+                else if t.section == "scoping", let url = t.scope_url { trailing = "scope ↗"; link = url }
+                if expandable {
+                    let count = children.count + runs.filter { !$0.done }.count + grouped.count
+                    trailing = String(count)
+                    // The terminal golden truncates the inbox suffix at 25 columns;
+                    // native rows retain the complete orchestrator hint.
+                    if t.kind == "orchestrator", let summary = t.summary, !summary.isEmpty { trailing += " · " + summary }
+                    if t.section == "scoping", t.scope_url != nil { trailing = "scope ↗" }
+                }
+                let workflow = t.kind == "workflow"
+                if workflow, !t.done, let phase = t.phase, !phase.isEmpty {
+                    let progress = [phase.lowercased(), t.started.map { age(now - $0) }].compactMap { $0 }.joined(separator: " · ")
+                    trailing = [trailing, progress].filter { !$0.isEmpty }.joined(separator: " · ")
+                }
+                let glyph = workflow ? (t.done ? (t.attention == "act" ? "✗" : "✓") : "◐") : idle ? "○" : status == "blocked" ? "■" : "●"
+                out.append(SpacesRow(id: "tab:" + tab.id, kind: .tab, depth: level, chevron: expandable ? (open ? "open" : "closed") : "none", glyph: glyph, tone: idle ? "mute" : status, title: name, trailing: trailing, alert: t.attention, link: link, tab: tab.id, toggleKey: expandable ? "tab:" + tab.id : nil, dim: idle || t.done || t.kind == "advisor" || t.mode == "parked"))
+                if open {
+                    for child in grouped { appendTab(child, level + 1) }
+                    for child in children { appendTab(child, level + 1, nest: false) }
+                    for run in runs {
+                        let progress = [run.phase, run.started.map { age(now - $0) }].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+                        out.append(SpacesRow(id: "run:" + run.id, kind: .run, depth: level + 1, glyph: run.done ? (run.attention == "act" ? "✗" : "✓") : "◐", tone: run.done ? "mute" : "working", title: run.name ?? run.id, trailing: [run.badge, progress.isEmpty ? nil : progress].compactMap { $0 }.joined(separator: " · "), alert: run.attention, tab: tab.id, dim: run.done))
+                    }
+                }
+            }
+            var first = true
+            var hiddenCount = 0
+            func section(_ label: String, _ members: [SpacesInput.Tab], shortcut: String) {
+                guard !members.isEmpty else { return }
+                let key = space.id + ":" + label
+                if let focus = chrome.focusedSection, focus.hasPrefix(space.id + ":"), focus != key && label != "ORCHESTRATOR" { hiddenCount += members.count; return }
+                let closed = chrome.collapsedSections.contains(key) && chrome.focusedSection != key
+                out.append(SpacesRow(id: "section:" + key, kind: .section, depth: depth + 1, chevron: sectioned ? (closed ? "closed" : "open") : "none", title: label, trailing: closed ? String(members.count) + (shortcut.contains("⌘") ? " " + shortcut : "") : shortcut, alert: closed && members.contains { tag($0).attention == "act" || $0.status == "blocked" } ? "act" : "none", toggleKey: sectioned ? "section:" + key : nil))
+                if !closed { for tab in members { appendTab(tab, depth + 1) } }
+            }
+            section("ORCHESTRATOR", orch + lanes.filter { tag($0).section == "orchestrator" && root($0) == nil }, shortcut: "⌘0")
+            if sectioned {
+                for (value, label) in [("reviewing", "READY FOR REVIEW"), ("scoping", "SCOPING"), ("implementing", "IMPLEMENTING"), ("monitoring", "MONITORING")] {
+                    let members = lanes.filter { tag($0).mode == "active" && root($0) == nil && (tag($0).section ?? "implementing") == value } + (value == "implementing" ? ordinary : [])
+                    let hint = value == "reviewing" ? String(members.count) : first ? "⌘1..9" : ""
+                    if !members.isEmpty && value != "reviewing" { first = false }
+                    section(label, members, shortcut: hint)
+                }
+            } else {
+                section("LANES", lanes.filter { tag($0).mode == "active" && root($0) == nil } + workflows.filter { parent($0) == nil } + ordinary, shortcut: "⌘1..9")
+            }
+            for (group, members) in [("services", lanes.filter { tag($0).mode == "auto" } + (sectioned ? workflows.filter { parent($0) == nil } : [])), ("parked", lanes.filter { tag($0).mode == "parked" }), ("closed", sectioned ? lanes.filter { tag($0).mode == "active" && tag($0).section == "closed" } : []), ("background", background)] {
+                guard !members.isEmpty else { continue }
+                if chrome.focusedSection?.hasPrefix(space.id + ":") == true { hiddenCount += members.count; continue }
+                let key = space.id + ":" + group
+                let open = chrome.expandedGroups.contains(key)
+                out.append(SpacesRow(id: "group:" + key, kind: .group, depth: depth + 1, chevron: open ? "open" : "closed", title: group + " " + String(members.count), toggleKey: "group:" + key, dim: true))
+                if open { for tab in members { appendTab(tab, depth + 2) } }
+            }
+            if chrome.focusedSection?.hasPrefix(space.id + ":") == true {
+                out.append(SpacesRow(id: "all:" + space.id, kind: .group, depth: depth + 1, title: "show all", trailing: String(hiddenCount), toggleKey: "all:" + space.id, dim: true))
+            }
+        }
+        for space in ordered { appendSpace(space, depth: 0) }
+        if !hidden.isEmpty {
+            out.append(SpacesRow(id: "hidden", kind: .hidden, chevron: chrome.hiddenExpanded ? "open" : "closed", title: "hidden \(hidden.count)", toggleKey: "hidden"))
+            if chrome.hiddenExpanded { for space in hidden { appendSpace(space, depth: 1) } }
+        }
+        for (i, host) in overlay.usage.enumerated() { out.append(SpacesRow(id: "usage:\(i)", kind: .footerUsage, title: host.name, trailing: (host.summary ?? "").replacingOccurrences(of: " · ", with: " "), alert: host.attention, link: host.url)) }
+        for (i, host) in overlay.hosts.enumerated() { out.append(SpacesRow(id: "host:\(i)", kind: .footerHost, title: host.name, trailing: (host.summary ?? "").replacingOccurrences(of: "load ", with: "").replacingOccurrences(of: " live", with: "").replacingOccurrences(of: " · ", with: " "), alert: host.attention)) }
+        return out
+    }
+}

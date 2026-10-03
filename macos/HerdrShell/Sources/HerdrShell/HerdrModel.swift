@@ -50,6 +50,8 @@ struct TabRow: Identifiable, Equatable {
 }
 
 final class HerdrModel: ObservableObject {
+    @Published private(set) var spacesOverlay = Overlay()
+    private var spacesOverlayMtime: Date?
     @Published private(set) var snapshot: Snapshot?
     @Published private(set) var orchestrators: [TabRow] = []
     @Published private(set) var lanes: [TabRow] = []
@@ -101,6 +103,7 @@ final class HerdrModel: ObservableObject {
         client.start()
         hostsModel.start()
         catalog.start()
+        Timer.publish(every: 1, on: .main, in: .common).autoconnect().sink { [weak self] _ in self?.reloadSpacesOverlay() }.store(in: &bag)
         catalog.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in
             self?.objectWillChange.send()
         }.store(in: &bag)
@@ -108,7 +111,17 @@ final class HerdrModel: ObservableObject {
 
     private var bag = Set<AnyCancellable>()
 
+    private func reloadSpacesOverlay() {
+        let path = FactorySources.resolved().overlay
+        let stamp = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date
+        if stamp != spacesOverlayMtime {
+            spacesOverlayMtime = stamp
+            spacesOverlay = (try? Data(contentsOf: URL(fileURLWithPath: path))).flatMap { try? JSONDecoder().decode(Overlay.self, from: $0) } ?? Overlay()
+        }
+    }
+
     private func apply(_ s: Snapshot) {
+        reloadSpacesOverlay()
         snapshot = s
         let c = TabClassifier(s)
         var orch: [TabRow] = [], lane: [TabRow] = [], wf: [TabRow] = []
@@ -244,5 +257,24 @@ struct TabClassifier {
         return TabRow(id: t.tab_id, label: t.label ?? "tab \(t.number)", kind: kind,
                       status: a?.agent_status ?? t.agent_status ?? "unknown",
                       host: host(of: t), agent: a?.agent, children: [])
+    }
+}
+
+
+extension HerdrModel {
+    func spacesRows(state: SidebarState) -> [SpacesRow] {
+        guard let s = snapshot else { return [SpacesRow(id: "agents", kind: .title, title: "agents")] }
+        let input = SpacesInput(spaces: s.workspaces.map {
+            SpacesInput.Space(id: $0.workspace_id, name: $0.label ?? $0.workspace_id, pinned: $0.tokens?["pinned"] == "true", collapsed: $0.tokens?["hidden"] == "true")
+        }, tabs: s.tabs.map { tab in
+            SpacesInput.Tab(id: tab.tab_id, space: tab.workspace_id, label: tab.label ?? tab.tab_id,
+                agents: s.agents.filter { $0.tab_id == tab.tab_id }.map { agent in
+                    let parentPane = agent.tokens?["parent_pane_id"] ?? agent.ownership?.current?.pane_id
+                    let parentTab = s.agents.first { $0.pane_id == parentPane }?.tab_id
+                    return SpacesInput.Agent(status: agent.agent_status ?? "unknown", parent: parentTab)
+                },
+                focused: tab.tab_id == state.selectedTab, status: tab.agent_status ?? "unknown")
+        }, focusedTab: state.selectedTab)
+        return SpacesTree.build(input, overlay: spacesOverlay, chrome: state.spacesChrome, now: Date().timeIntervalSince1970)
     }
 }

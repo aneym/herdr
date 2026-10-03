@@ -1,0 +1,951 @@
+{
+  "_source": "alex-ghostty-full-0928.png sidebar; requested content run from P33:63; Rust row/section semantics tree.rs:1244,1537",
+  "input": {
+    "spaces": [
+      {
+        "id": "rails",
+        "name": "agent-rails",
+        "pinned": false,
+        "collapsed": false
+      },
+      {
+        "id": "recruiting",
+        "name": "recruiting",
+        "pinned": false,
+        "collapsed": false
+      },
+      {
+        "id": "raise",
+        "name": "raise",
+        "pinned": false,
+        "collapsed": false
+      },
+      {
+        "id": "hidden-space",
+        "name": "hidden space",
+        "pinned": false,
+        "collapsed": true
+      }
+    ],
+    "tabs": [
+      {
+        "id": "orch",
+        "space": "rails",
+        "label": "orchestrator",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "content",
+        "space": "rails",
+        "label": "content writing agent",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "glossary",
+        "space": "rails",
+        "label": "factory glossary",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "public",
+        "space": "rails",
+        "label": "build in public",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "video",
+        "space": "rails",
+        "label": "video editing",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "vpd",
+        "space": "rails",
+        "label": "product map (VPD)",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "purpose",
+        "space": "rails",
+        "label": "purpose and shape",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "impl0",
+        "space": "rails",
+        "label": "implementation 0",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "impl1",
+        "space": "rails",
+        "label": "implementation 1",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "impl2",
+        "space": "rails",
+        "label": "implementation 2",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "impl3",
+        "space": "rails",
+        "label": "implementation 3",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "impl4",
+        "space": "rails",
+        "label": "implementation 4",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park0",
+        "space": "rails",
+        "label": "parked 0",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park1",
+        "space": "rails",
+        "label": "parked 1",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park2",
+        "space": "rails",
+        "label": "parked 2",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park3",
+        "space": "rails",
+        "label": "parked 3",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park4",
+        "space": "rails",
+        "label": "parked 4",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park5",
+        "space": "rails",
+        "label": "parked 5",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park6",
+        "space": "rails",
+        "label": "parked 6",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park7",
+        "space": "rails",
+        "label": "parked 7",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park8",
+        "space": "rails",
+        "label": "parked 8",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park9",
+        "space": "rails",
+        "label": "parked 9",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park10",
+        "space": "rails",
+        "label": "parked 10",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park11",
+        "space": "rails",
+        "label": "parked 11",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park12",
+        "space": "rails",
+        "label": "parked 12",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park13",
+        "space": "rails",
+        "label": "parked 13",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park14",
+        "space": "rails",
+        "label": "parked 14",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park15",
+        "space": "rails",
+        "label": "parked 15",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park16",
+        "space": "rails",
+        "label": "parked 16",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park17",
+        "space": "rails",
+        "label": "parked 17",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park18",
+        "space": "rails",
+        "label": "parked 18",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park19",
+        "space": "rails",
+        "label": "parked 19",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park20",
+        "space": "rails",
+        "label": "parked 20",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park21",
+        "space": "rails",
+        "label": "parked 21",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park22",
+        "space": "rails",
+        "label": "parked 22",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park23",
+        "space": "rails",
+        "label": "parked 23",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park24",
+        "space": "rails",
+        "label": "parked 24",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park25",
+        "space": "rails",
+        "label": "parked 25",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park26",
+        "space": "rails",
+        "label": "parked 26",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park27",
+        "space": "rails",
+        "label": "parked 27",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park28",
+        "space": "rails",
+        "label": "parked 28",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park29",
+        "space": "rails",
+        "label": "parked 29",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park30",
+        "space": "rails",
+        "label": "parked 30",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park31",
+        "space": "rails",
+        "label": "parked 31",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park32",
+        "space": "rails",
+        "label": "parked 32",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park33",
+        "space": "rails",
+        "label": "parked 33",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park34",
+        "space": "rails",
+        "label": "parked 34",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park35",
+        "space": "rails",
+        "label": "parked 35",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park36",
+        "space": "rails",
+        "label": "parked 36",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park37",
+        "space": "rails",
+        "label": "parked 37",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park38",
+        "space": "rails",
+        "label": "parked 38",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park39",
+        "space": "rails",
+        "label": "parked 39",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park40",
+        "space": "rails",
+        "label": "parked 40",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park41",
+        "space": "rails",
+        "label": "parked 41",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park42",
+        "space": "rails",
+        "label": "parked 42",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park43",
+        "space": "rails",
+        "label": "parked 43",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park44",
+        "space": "rails",
+        "label": "parked 44",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park45",
+        "space": "rails",
+        "label": "parked 45",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park46",
+        "space": "rails",
+        "label": "parked 46",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park47",
+        "space": "rails",
+        "label": "parked 47",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park48",
+        "space": "rails",
+        "label": "parked 48",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park49",
+        "space": "rails",
+        "label": "parked 49",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "park50",
+        "space": "rails",
+        "label": "parked 50",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "rec-orch",
+        "space": "recruiting",
+        "label": "orchestrator",
+        "agents": [],
+        "focused": false,
+        "status": "blocked"
+      },
+      {
+        "id": "outreach",
+        "space": "recruiting",
+        "label": "outreach",
+        "agents": [],
+        "focused": false,
+        "status": "idle"
+      },
+      {
+        "id": "email",
+        "space": "recruiting",
+        "label": "email",
+        "agents": [],
+        "focused": false,
+        "status": "blocked"
+      },
+      {
+        "id": "submissions",
+        "space": "recruiting",
+        "label": "submissions",
+        "agents": [],
+        "focused": false,
+        "status": "blocked"
+      },
+      {
+        "id": "sourcing",
+        "space": "recruiting",
+        "label": "sourcing",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "raise-park",
+        "space": "raise",
+        "label": "raise",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      }
+    ],
+    "focusedTab": null
+  },
+  "overlay": {
+    "tabs": {
+      "orch": {
+        "kind": "orchestrator",
+        "summary": "inbox 1",
+        "attention": "act"
+      },
+      "content": {
+        "kind": "lane",
+        "section": "scoping",
+        "goal": "rails",
+        "scope_url": "https://studio.tailf266ac.ts.net:8797/s/content",
+        "attention": "act",
+        "runs": [
+          {
+            "id": "content-run",
+            "name": "content-room-mock",
+            "phase": "opus-seat",
+            "started": 66940
+          }
+        ]
+      },
+      "glossary": {
+        "kind": "lane",
+        "section": "scoping",
+        "goal": "rails",
+        "scope_url": "https://studio.tailf266ac.ts.net:8797/s/glossary",
+        "attention": "none"
+      },
+      "public": {
+        "kind": "lane",
+        "section": "scoping",
+        "goal": "rails",
+        "scope_url": "https://studio.tailf266ac.ts.net:8797/s/public",
+        "attention": "none"
+      },
+      "video": {
+        "kind": "lane",
+        "section": "scoping",
+        "goal": "rails",
+        "scope_url": "https://studio.tailf266ac.ts.net:8797/s/video",
+        "attention": "warn"
+      },
+      "vpd": {
+        "kind": "lane",
+        "section": "scoping",
+        "goal": "rails",
+        "scope_url": "https://studio.tailf266ac.ts.net:8797/s/vpd",
+        "attention": "none"
+      },
+      "purpose": {
+        "kind": "lane",
+        "section": "scoping",
+        "goal": "rails",
+        "scope_url": "https://studio.tailf266ac.ts.net:8797/s/purpose",
+        "attention": "none"
+      },
+      "impl0": {
+        "kind": "lane",
+        "section": "implementing",
+        "goal": "rails"
+      },
+      "impl1": {
+        "kind": "lane",
+        "section": "implementing",
+        "goal": "rails"
+      },
+      "impl2": {
+        "kind": "lane",
+        "section": "implementing",
+        "goal": "rails"
+      },
+      "impl3": {
+        "kind": "lane",
+        "section": "implementing",
+        "goal": "rails"
+      },
+      "impl4": {
+        "kind": "lane",
+        "section": "implementing",
+        "goal": "rails"
+      },
+      "park0": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park1": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park2": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park3": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park4": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park5": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park6": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park7": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park8": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park9": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park10": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park11": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park12": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park13": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park14": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park15": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park16": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park17": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park18": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park19": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park20": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park21": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park22": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park23": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park24": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park25": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park26": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park27": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park28": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park29": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park30": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park31": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park32": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park33": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park34": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park35": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park36": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park37": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park38": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park39": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park40": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park41": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park42": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park43": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park44": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park45": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park46": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park47": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park48": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park49": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "park50": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "rec-orch": {
+        "kind": "orchestrator",
+        "attention": "act",
+        "runs": [
+          {
+            "id": "rec-run",
+            "name": "recruiting run"
+          }
+        ]
+      },
+      "outreach": {
+        "kind": "lane",
+        "section": "implementing",
+        "goal": "recruiter",
+        "idle_reason": "no work"
+      },
+      "email": {
+        "kind": "lane",
+        "section": "implementing",
+        "goal": "recruiter"
+      },
+      "submissions": {
+        "kind": "lane",
+        "section": "implementing",
+        "goal": "recruiter"
+      },
+      "sourcing": {
+        "kind": "lane",
+        "section": "implementing",
+        "goal": "recruiter"
+      },
+      "raise-park": {
+        "kind": "lane",
+        "mode": "parked"
+      }
+    },
+    "spaces": {
+      "rails": {
+        "summary": "2"
+      }
+    },
+    "usage": [
+      {
+        "name": "claude",
+        "summary": "2/8 \u00b7 73%"
+      },
+      {
+        "name": "codex",
+        "summary": "5/5 \u00b7 100%"
+      }
+    ],
+    "hosts": [
+      {
+        "name": "Studio",
+        "summary": "load 11/16"
+      },
+      {
+        "name": "PC",
+        "summary": "1/12 live"
+      },
+      {
+        "name": "ax42",
+        "summary": "1/12 live"
+      },
+      {
+        "name": "forge",
+        "summary": "0/4 live"
+      }
+    ]
+  },
+  "chrome": {
+    "collapsedSections": [
+      "rails:IMPLEMENTING"
+    ],
+    "collapsedTabs": [
+      "rec-orch"
+    ]
+  },
+  "now": 100000
+}

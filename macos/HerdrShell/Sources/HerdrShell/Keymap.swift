@@ -183,6 +183,7 @@ extension MainWindowController {
         case "toggle_area_mode":
             state.setMode(state.mode == .areas ? .spaces : .areas)
         case "toggle_docs":
+            forcedEmptyDocs = !state.docOpen
             setDocs(open: !state.docOpen)
         case "filter_1": state.setChip(.all)
         case "filter_2": state.setChip(.needs)

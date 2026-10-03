@@ -405,7 +405,10 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         attentionOld = new
     }
 
+    var forcedEmptyDocs = false
+
     func selectTab(_ tabId: String, revealDocs: Bool = false) {
+        if state.selectedTab != tabId { forcedEmptyDocs = false }
         quickSwitch.noteSelected(tabId)
         noteLookedAt(tabId)
         let stepping = state.focusCursor != nil && revealDocs
@@ -424,6 +427,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
 
     private func refreshDocs() {
         docPanel.show(model: model, tabId: state.selectedTab)
+        applyDocs()
     }
 
     /// Areas-mode row click, ⌘1..9 and Focus next/prev: select the tab and open its docs.
@@ -456,8 +460,9 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     private func applyDocs() {
-        root.docsOpen = state.docOpen
-        root.docs?.isHidden = !state.docOpen
+        let visible = state.docOpen && (docPanel.hasDocs || forcedEmptyDocs)
+        root.docsOpen = visible
+        root.docs?.isHidden = !visible
         root.docsWidth = state.docWidth
         root.needsLayout = true
         root.layoutSubtreeIfNeeded()
