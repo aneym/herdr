@@ -11,6 +11,13 @@ def pids():
     return [int(p) for p in r.stdout.split()]
 
 def start(extra=()):
+    if os.environ.get("HERDR_SHELL_SPACE") == "1":
+        import scenario
+        print(scenario.app("start", *extra))
+        return
+    if "--host-ok" not in extra:
+        raise SystemExit("start requires HERDR_SHELL_SPACE=1 or explicit --host-ok")
+    extra = tuple(a for a in extra if a != "--host-ok")
     extra = ("--agent-run",) + tuple(a for a in extra if a != "--agent-run")
     t0 = time.time()
     if os.path.exists(FIFO):
@@ -30,9 +37,17 @@ def start(extra=()):
     print(json.dumps({"pids": pids(), "fifo_ready_s": round(time.time() - t0, 2)}))
 
 def stop():
+    if os.environ.get("HERDR_SHELL_SPACE") == "1":
+        import scenario
+        print(scenario.app("stop"))
+        return
     for p in pids(): os.kill(p, signal.SIGTERM)
 
 def cmd(obj):
+    if os.environ.get("HERDR_SHELL_SPACE") == "1":
+        import scenario
+        scenario.cmd(obj)
+        return
     with open(FIFO, "w") as f: f.write(json.dumps(obj) + "\n")
 
 if __name__ == "__main__":

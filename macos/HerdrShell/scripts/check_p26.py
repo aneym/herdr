@@ -106,6 +106,8 @@ def focus_titles(s):
 
 
 def modes_doc():
+    if S.SPACE:
+        S.pull(S.guest_path(os.path.join(FIX, "modes.json")), os.path.join(FIX, "modes.json"))
     with open(os.path.join(FIX, "modes.json")) as f:
         return json.load(f)
 
@@ -203,6 +205,22 @@ def main():
         # The lab app's HOME is the lab home; point it at the installed lane tool.
         "HERDR_LANE_BIN": os.path.expanduser("~/.local/bin/herdr-lane"),
     })
+
+    if S.SPACE:
+        S.space("node")
+        lane = os.path.realpath(os.path.expanduser("~/.local/bin/herdr-lane"))
+        tree = os.path.dirname(os.path.dirname(lane))
+        guest_tree = "/Users/lume/.herdr-space/herdr-control"
+        # Keep lane.js beside its real src imports, not a stand-in implementation.
+        from space import push_tree
+        push_tree(tree, guest_tree)
+        wrapper = os.path.join(FIX, "herdr-lane")
+        with open(wrapper, "w") as f:
+            f.write('#!/bin/sh\nexec /Users/lume/.herdr-space/node/bin/node '
+                    + guest_tree + '/bin/lane.js "$@"\n')
+        os.chmod(wrapper, 0o755)
+        os.environ["HERDR_LANE_BIN"] = wrapper
+        S.space("exec", "defaults delete herdr.shell." + os.environ["SHELL_LAB"] + " 2>/dev/null || true")
 
     shutil.copy2(os.path.join(D0, ".build", "release", "HerdrShell"), APP_COPY + ".new")
     os.replace(APP_COPY + ".new", APP_COPY)

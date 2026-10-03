@@ -100,3 +100,19 @@ That binary is copied into the lab (`~/.cache/herdr-build/shellspike/bin/herdr`)
 - **Screenshots.** `screencapture -l` fails from this shell because it has no Screen Recording grant. `shot.png` comes from the app's own capture instead (a runtime-resolved `CGWindowListCreateImage` on its own window).
 - **Test keys** are CGEvents posted to the app's own pid (`CGEvent.postToPid`), never system-wide. The in-process `NSApp.sendEvent` path, used when the window is not key, dropped the first key after a ⌘[ focus switch. Real hardware keys were not tried; that path is unverified and was left out of the scenario.
 - The live herdr session has never been attached, and neither has a remote host.
+
+## Checks run in the Space
+
+Build on the host, then run checks on the `herdr-qa` Cua Space desktop, never the host desktop:
+
+```sh
+nice -n 10 swift build -c release
+HERDR_SHELL_SPACE=1 python3 scripts/check_p26.py
+python3 -m py_compile scripts/*.py
+python3 scripts/space.py stop
+```
+
+`scenario.py` bridges only the isolated lab socket, pushes fixture paths, drives the guest
+control FIFO, and pulls state and in-app screenshots back into `checks/`. P26 installs
+an official Node 22 runtime once in the guest and runs the real herdr-lane tree there.
+`app.py start` refuses host launches unless `--host-ok` is explicitly supplied.

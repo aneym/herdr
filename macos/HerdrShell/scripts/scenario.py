@@ -9,11 +9,14 @@ the app and the lab session.
 """
 import json
 import os
+import shlex
 import subprocess
 import sys
 import time
 
 D = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SPACE = os.environ.get("HERDR_SHELL_SPACE") == "1"
+GUEST_ROOT = "/Users/lume/.herdr-space/lab/"
 NAME = os.environ.get("SHELL_LAB", "shellspike")
 LAB = os.path.expanduser(f"~/.cache/herdr-build/{NAME}")
 STATE = os.path.join(LAB, "state.json")
@@ -67,6 +70,8 @@ def mark_front():
 
 
 def check_front(check):
+    if SPACE:
+        return
     now = frontmost_app()
     before = _front_before
     if before == "unknown" or now == "unknown":
@@ -76,19 +81,89 @@ def check_front(check):
     check("frontmost app unchanged", ok, before if ok else "took focus")
 
 
+def space(*a):
+    r = subprocess.run([sys.executable, os.path.join(D, "scripts", "space.py"), *a],
+                       capture_output=True, text=True)
+    if r.returncode:
+        raise RuntimeError(r.stderr or r.stdout)
+    return r.stdout
+
+
+def guest_path(host_path):
+    path = os.path.abspath(os.path.expanduser(host_path))
+    if path == LAB or path.startswith(LAB + os.sep):
+        return GUEST_ROOT + NAME + path[len(LAB):]
+    return GUEST_ROOT + NAME + "/paths" + path
+
+
+def pull(guest, host):
+    return space("pull", guest, host)
+
+
 def app(*a):
+    if SPACE:
+        if a[0] == "start":
+            env = dict(l.split("=", 1) for l in lab("env").splitlines())
+            args = ["start", "--app", os.environ.get("HERDR_SHELL_APP") or
+                    os.path.join(D, ".build", "release", "HerdrShell"),
+                    "--socket", env["HERDR_SOCKET_PATH"]]
+            forwarded = {"HERDR_LANES_PATH", "HERDR_AREAS_PATH", "HERDR_CONTEXT_DIR", "SHELL_LAB",
+                         "FACTORY_OVERLAY", "CONTROL_MODES", "CONTROL_WORKFLOWS", "HERDR_KIND_BIN",
+                         "HERDR_LANE_BIN", "UNBLOCK_BIN"}
+            pushes = {}
+            for k, value in os.environ.items():
+                if k not in forwarded and not k.startswith("HERDR_SHELL_"):
+                    continue
+                if k in {"HERDR_SHELL_APP", "HERDR_SHELL_BIN", "HERDR_SHELL_SPACE"}:
+                    continue
+                if value.startswith("/") and not value.startswith("/usr/bin/"):
+                    if not value.startswith("/Users/lume/.herdr-space/"):
+                        target = guest_path(value)
+                        if os.path.exists(value):
+                            pushes[value] = target
+                        value = target
+                args += ["--env", k + "=" + value]
+            for local, guest in pushes.items():
+                args += ["--push", local + "=" + guest]
+            keymap = os.path.join(D, "Resources", "keymap.json")
+            args += ["--push", keymap + "=" + guest_path(keymap)]
+            args += ["--env", "HERDR_SOCKET_PATH=/Users/lume/.herdr-space/herdr.sock",
+                     "--env", "PATH=/Users/lume/.herdr-space/node/bin:/Users/lume/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+                     "--", "--control", "/Users/lume/.herdr-space/control.fifo",
+                     "--keymap", guest_path(keymap)]
+            args += [x for x in a[1:] if x != "--agent-run"]
+            return space(*args)
+        if a[0] == "stop":
+            return space("stop")
+        if a[0] == "cmd":
+            return cmd(json.loads(a[1]))
     if a and a[0] == "start":
         mark_front()
     return sh("python3", os.path.join(D, "scripts", "app.py"), *a)
 
 
 def cmd(obj):
+    if SPACE:
+        obj = dict(obj)
+        host_out = obj.get("out")
+        if host_out:
+            obj["out"] = guest_path(host_out)
+            space("exec", "mkdir -p " + shlex.quote(os.path.dirname(obj["out"]))
+                  + " && rm -f " + shlex.quote(obj["out"]))
+        space("fifo", json.dumps(obj))
+        if host_out:
+            path = shlex.quote(obj["out"])
+            space("exec", f"for i in $(seq 1 100); do test -s {path} && exit 0; /bin/sleep 0.05; done; exit 1")
+            pull(obj["out"], host_out)
+        return
     app("cmd", json.dumps(obj))
 
 
 def state():
     if os.path.exists(STATE):
         os.unlink(STATE)
+    if SPACE:
+        space("exec", "rm -f " + shlex.quote(guest_path(STATE)))
     cmd({"cmd": "state", "out": STATE})
     for _ in range(50):
         if os.path.exists(STATE) and os.path.getsize(STATE) > 0:
