@@ -27,7 +27,9 @@ Release branch: `git config herdr-shell.releaseBranch` in the herdr repo
   {"targets": [{"name": "book", "ssh": ["ssh", "macbook-ts"],
                 "server": {"ssh": ["ssh", "studio-ts"], "remote_bin": "~/.local/bin/herdr-shell-remote"}}]}
 A target's "server" becomes its ~/.config/herdr-shell/server.json when it has none.
-Studio itself is staged by release.sh. An unreachable target is skipped quietly and
+A target with "local": true (Studio, {"name": "studio", "local": true}) runs the same
+scripts here without ssh; release.sh stages Studio at build time and fanout restages it
+if that staging was lost. An unreachable target is skipped quietly and
 picked up on the next fanout. Install: macos/HerdrShell/scripts/install-publish.sh.
 """
 from contextlib import contextmanager
@@ -211,8 +213,15 @@ echo delivered
 '''
 
 
+def on(t, script):
+    """argv that runs script on target t: over ssh, or here for a "local" target (Studio)."""
+    if t.get("local"):
+        return ["/bin/sh", "-c", script]
+    return t["ssh"][:1] + SSH_OPTS + t["ssh"][1:] + ["/bin/sh", "-c", shlex.quote(script)]
+
+
 def probe(t):
-    r = subprocess.run(t["ssh"][:1] + SSH_OPTS + t["ssh"][1:] + ["/bin/sh", "-c", shlex.quote(REMOTE_PROBE)],
+    r = subprocess.run(on(t, REMOTE_PROBE),
                        capture_output=True, text=True, timeout=60)
     if r.returncode != 0:
         return None
@@ -236,7 +245,7 @@ def fanout():
         if st is None:
             log(f"{name}: unreachable, will retry")
             continue
-        if t.get("server"):
+        if t.get("server") and not t.get("local"):
             send_server_config(t)
         if same(st.get("installed", ""), commit):
             continue
@@ -247,7 +256,7 @@ def fanout():
             continue
         tar = subprocess.Popen(["tar", "-czf", "-", "-C", source, APP, "release.json"], stdout=subprocess.PIPE)
         try:
-            r = subprocess.run(t["ssh"][:1] + SSH_OPTS + t["ssh"][1:] + ["/bin/sh", "-c", shlex.quote(REMOTE_DELIVER)],
+            r = subprocess.run(on(t, REMOTE_DELIVER),
                                stdin=tar.stdout, capture_output=True, text=True, timeout=900)
         except (OSError, subprocess.TimeoutExpired) as e:
             log(f"{name}: FAIL deliver {commit}: {e}")
@@ -278,7 +287,7 @@ rm -f "$T"
 
 def send_server_config(t):
     try:
-        r = subprocess.run(t["ssh"][:1] + SSH_OPTS + t["ssh"][1:] + ["/bin/sh", "-c", shlex.quote(REMOTE_SERVER)],
+        r = subprocess.run(on(t, REMOTE_SERVER),
                            input=json.dumps(t["server"]), capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.TimeoutExpired) as e:
         log(f"{t.get('name', '?')}: FAIL server config: {e}")
@@ -317,7 +326,7 @@ def install(name):
     if not os.path.isdir(f"{source}/{APP}"):
         sys.exit(f"{name}: install failed: release source missing")
     tar = subprocess.Popen(["tar", "-czf", "-", "-C", source, APP], stdout=subprocess.PIPE)
-    r = subprocess.run(t["ssh"][:1] + SSH_OPTS + t["ssh"][1:] + ["/bin/sh", "-c", shlex.quote(REMOTE_INSTALL)],
+    r = subprocess.run(on(t, REMOTE_INSTALL),
                        stdin=tar.stdout, capture_output=True, text=True, timeout=900)
     tar.stdout.close()
     tar.wait()
@@ -366,6 +375,8 @@ def send_data(snapshot, digests):
     except (OSError, ValueError):
         state = {}
     for t in targets():
+        if t.get("local"):
+            continue  # the data files already live here
         name = t.get("name", "?")
         sent = state.get(name)
         if not isinstance(sent, dict):
@@ -375,7 +386,7 @@ def send_data(snapshot, digests):
             continue
         tar = subprocess.Popen(["tar", "-cf", "-", "-C", snapshot, *changed], stdout=subprocess.PIPE)
         try:
-            r = subprocess.run(t["ssh"][:1] + SSH_OPTS + t["ssh"][1:] + ["/bin/sh", "-c", shlex.quote(REMOTE_DATA)],
+            r = subprocess.run(on(t, REMOTE_DATA),
                                stdin=tar.stdout, capture_output=True, text=True, timeout=60)
         except (OSError, subprocess.TimeoutExpired):
             r = None
