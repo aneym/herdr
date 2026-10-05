@@ -3785,9 +3785,8 @@ impl PaneRuntime {
                 .io
                 .foreground_process_group_id()
                 .or_else(|| crate::platform::foreground_process_group_id(pid))?;
-            if foreground_pgid == pid {
-                return None;
-            }
+            // No shortcut when the shell leads the group: `exec ssh ax42`
+            // keeps the shell's pid.
             crate::remote_machine::cached(pid, foreground_pgid, || {
                 let leader = crate::detect::foreground_group_leader_job(foreground_pgid)?
                     .processes

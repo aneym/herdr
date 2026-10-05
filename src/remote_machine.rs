@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 /// ssh options that take a value as the next argument (OpenSSH 9).
 const SSH_VALUE_FLAGS: &[char] = &[
@@ -39,13 +40,17 @@ pub(crate) fn from_argv(name: &str, argv: &[String]) -> Option<String> {
     let destination = match program {
         "ssh" => ssh_destination(argv.get(1..)?),
         "mosh" => mosh_destination(argv.get(1..)?),
-        // `mosh` execs `mosh-client -# '<original args>' | <ip> <port>`.
+        // mosh 1.4 execs `mosh-client "-# <original args> |" <ip> <port>`;
+        // accept the value as its own argument too.
         "mosh-client" => {
-            let original = argv
-                .iter()
-                .position(|arg| arg == "-#")
-                .and_then(|index| argv.get(index + 1))?;
+            let index = argv.iter().position(|arg| arg.starts_with("-#"))?;
+            let original = match argv[index].strip_prefix("-#").map(str::trim) {
+                Some("") => argv.get(index + 1)?.as_str(),
+                Some(inline) => inline,
+                None => return None,
+            };
             let words = original
+                .trim_end_matches('|')
                 .split_whitespace()
                 .map(str::to_owned)
                 .collect::<Vec<_>>();
@@ -110,16 +115,28 @@ fn short_host(destination: &str) -> Option<String> {
     if host.parse::<std::net::IpAddr>().is_ok() {
         return Some(host.to_owned());
     }
-    let host = host.split(':').next().unwrap_or(host);
+    // One colon is a port (`100.64.0.9:2222`, `ax42:2222`); more is bare IPv6.
+    let host = match host.split_once(':') {
+        Some((name, port)) if !port.contains(':') => name,
+        _ => host,
+    };
+    if host.parse::<std::net::IpAddr>().is_ok() {
+        return Some(host.to_owned());
+    }
     let label = host.split('.').next().unwrap_or(host);
     (!label.is_empty()).then(|| label.to_owned())
 }
 
-type MachineCache = HashMap<(u32, u32), Option<String>>;
+type MachineCache = HashMap<(u32, u32), (Instant, Option<String>)>;
 
-/// Memoize a lookup per (pane shell pid, foreground process group). The
-/// pair only changes when the pane's foreground job does, so a snapshot
-/// reads process arguments once per job rather than on every publish.
+/// How long a lookup stands. `exec` keeps the pid and process group while
+/// swapping the program (`exec ssh ax42`, `sh -c '...; exec ssh ax42'`), so
+/// the key alone cannot tell a stale answer from a fresh one.
+const CACHE_TTL: Duration = Duration::from_secs(5);
+
+/// Memoize a lookup per (pane shell pid, foreground process group) for
+/// `CACHE_TTL`, so a snapshot reads process arguments at most once per pane
+/// every few seconds rather than on every publish.
 pub(crate) fn cached(
     shell_pid: u32,
     process_group_id: u32,
@@ -128,15 +145,21 @@ pub(crate) fn cached(
     static CACHE: OnceLock<Mutex<MachineCache>> = OnceLock::new();
     let cache = CACHE.get_or_init(Default::default);
     let key = (shell_pid, process_group_id);
-    if let Some(hit) = cache.lock().ok().and_then(|cache| cache.get(&key).cloned()) {
+    let now = Instant::now();
+    if let Some(hit) = cache.lock().ok().and_then(|cache| {
+        cache
+            .get(&key)
+            .filter(|(at, _)| now.duration_since(*at) < CACHE_TTL)
+            .map(|(_, value)| value.clone())
+    }) {
         return hit;
     }
     let value = lookup();
     if let Ok(mut cache) = cache.lock() {
         if cache.len() >= 4096 {
-            cache.clear();
+            cache.retain(|_, (at, _)| now.duration_since(*at) < CACHE_TTL);
         }
-        cache.insert(key, value.clone());
+        cache.insert(key, (now, value.clone()));
     }
     value
 }
@@ -177,6 +200,11 @@ mod tests {
                 Some("100.107.202.126"),
             ),
             (&["ssh", "[fd7a::1]"][..], Some("fd7a::1")),
+            (&["ssh", "fd7a::1"][..], Some("fd7a::1")),
+            (
+                &["ssh", "ssh://jobs@100.64.0.9:2222"][..],
+                Some("100.64.0.9"),
+            ),
             (&["ssh", "-V"][..], None),
             (&["ssh"][..], None),
         ] {
@@ -207,6 +235,10 @@ mod tests {
                     "60001",
                 ][..],
                 Some("ax42"),
+            ),
+            (
+                &["mosh-client", "-# book |", "100.64.0.9", "60001"][..],
+                Some("book"),
             ),
             (&["mosh-client", "100.64.0.9", "60001"][..], None),
         ] {
