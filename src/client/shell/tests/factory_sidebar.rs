@@ -816,7 +816,12 @@ fn registered_runs_count_and_expand_under_parent() {
     let lane = hits.tree_headers.iter().find(|hit| hit.key == "lane-b").unwrap();
     assert!(!lane.chevron.is_empty() && lane.collapsed);
     assert!(folded[lane.rect.y as usize].contains('2'));
-    let (expanded, hits, _) = rendered_factory_rows(&snapshot, &overlay);
+    let (_, hits, _) = rendered_factory_rows(&snapshot, &overlay);
+    assert!(hits.tree_headers.iter().find(|hit| hit.key == "lane-b").unwrap().collapsed,
+        "running runs leave their lane folded by default");
+    let mut tree = ClientTreeChrome::default();
+    tree.factory_expanded_lanes.insert("lane-b".into());
+    let (expanded, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
     assert!(!hits.tree_headers.iter().find(|hit| hit.key == "lane-b").unwrap().collapsed);
     for (id, name, phase) in [("r1", "review", "review 2/3"), ("r2", "r2", "build 1/2")] {
         let run = hits.tree_headers.iter().find(|hit| hit.key == format!("lane-b#run:{id}")).unwrap();
@@ -855,7 +860,7 @@ fn registered_run_progress_completion_and_failure_render_under_lane() {
             assert!(lane_line.contains('1'), "{lane_line}");
         }
         assert_eq!(hits.tree_headers.iter().any(|hit| hit.key == "lane-b#run:build"),
-            !done || attention == Attention::Act, "running or failed runs should auto-expand their lane");
+            attention == Attention::Act, "only a failed run auto-expands its lane; a running one stays folded");
         if attention == Attention::Act {
             let x = lane_line.chars().position(|ch| ch == '!').unwrap() as u16;
             assert_eq!(buffer[(x, lane.rect.y)].fg, palette.red);
@@ -1061,25 +1066,34 @@ fn collapsed_idle_group_shows_grouped_done_run_attention() {
 }
 
 #[test]
-fn lane_run_defaults_open_unless_done_or_explicitly_collapsed() {
+fn lane_run_defaults_folded_unless_user_expanded() {
     let (mut snapshot, mut overlay) = fixture();
     snapshot.tabs.retain(|tab| tab.tab_id == "lane-a");
     snapshot.agents.clear();
-    for (done, collapsed, visible) in [(false, false, true), (false, true, false), (true, false, false)] {
+    // (done, user expanded, user collapsed, visible)
+    for (done, expanded, collapsed, visible) in [
+        (false, false, false, false),
+        (false, true, false, true),
+        (false, false, true, false),
+        (true, false, false, false),
+    ] {
         overlay.tabs.get_mut("lane-a").unwrap().runs = vec![RunTag {
             id: "fold".into(), name: Some("fold run".into()), done, ..RunTag::default()
         }];
         let mut tree = ClientTreeChrome::default();
+        if expanded {
+            tree.factory_expanded_lanes.insert("lane-a".into());
+        }
         if collapsed {
             ClientTreeChrome::toggle(&mut tree.factory_collapsed_lanes, "lane-a".into());
         }
         let (rows, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
         let lane = hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap();
         if !done {
-            assert_eq!(lane.collapsed, !visible, "done={done}, collapsed={collapsed}: {rows:?}");
+            assert_eq!(lane.collapsed, !visible, "done={done}, expanded={expanded}, collapsed={collapsed}: {rows:?}");
         }
         assert_eq!(rows.iter().any(|row| row.contains("fold run")), visible,
-            "done={done}, collapsed={collapsed}: {rows:?}");
+            "done={done}, expanded={expanded}, collapsed={collapsed}: {rows:?}");
         assert_eq!(hits.tree_headers.iter().any(|hit| hit.key == "lane-a#run:fold"), visible);
         if visible {
             let run = hits.tree_headers.iter().find(|hit| hit.key == "lane-a#run:fold").unwrap();
@@ -1112,14 +1126,22 @@ fn grouped_lane_draws_live_workflows_and_runs_and_rolls_up_state() {
 }
 
 #[test]
-fn grouped_running_workflow_focus_or_act_auto_opens_parent_but_explicit_fold_hides_children() {
+fn grouped_running_workflow_stays_folded_until_expanded_focused_or_act() {
     let (mut snapshot, mut overlay) = grouped_workflow_fixture();
     let mut tree = ClientTreeChrome::default();
     let (running, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+    assert!(hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap().collapsed,
+        "running workflows leave their parent folded: {running:?}");
+    for label in ["lane-b", "wf-a", "fold run"] {
+        assert!(!running.iter().any(|row| row.contains(label)), "{running:?}");
+    }
+    tree.factory_expanded_lanes.insert("lane-a".into());
+    let (opened, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
     assert!(!hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap().collapsed);
     for label in ["lane-b", "wf-a", "fold run"] {
-        assert!(running.iter().any(|row| row.contains(label)), "{running:?}");
+        assert!(opened.iter().any(|row| row.contains(label)), "{opened:?}");
     }
+    tree.factory_expanded_lanes.clear();
     snapshot.focused_tab_id = Some("wf-a".into());
     let (focused, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
     assert!(!hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap().collapsed);

@@ -153,6 +153,9 @@ impl ClientTreeChrome {
         }
     }
 
+    /// Lanes start folded. One opens when the user expanded it, the focused tab
+    /// sits inside it, or something inside asks for action; a user collapse
+    /// always wins.
     fn factory_expanded(&self, tab_id: &str, focused: bool, needs_action: bool) -> bool {
         if self.factory_collapsed_lanes.contains(tab_id) {
             false
@@ -1158,10 +1161,10 @@ fn append_factory_space(
             let focused = snapshot.focused_workspace_id.as_deref() == Some(workspace_id)
                 && children.iter().chain(grouped_lanes.iter()).chain(grouped_workflows.iter())
                     .any(|tab| snapshot.focused_tab_id.as_deref() == Some(tab.tab_id.as_str()));
-            let active = children.iter().chain(grouped_workflows.iter())
-                .filter(|tab| overlay.tab(&tab.tab_id).is_none_or(|tag| !tag.done))
-                .count() + runs.iter().filter(|run| !run.done).count() + grouped_runs;
-            let expanded = tree.factory_expanded(&lane.tab_id, focused || active > 0,
+            // Running workflows and runs no longer unfold their lane (Alex,
+            // 2026-10-05: "workflows show expanded rather than collapsed within
+            // agents by default"); the lane row carries their count instead.
+            let expanded = tree.factory_expanded(&lane.tab_id, focused,
                 attention == Some(crate::factory_overlay::Attention::Act));
             let mut lane_row = factory_row(
                 snapshot, rows, overlay, lane, indent,
