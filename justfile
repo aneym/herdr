@@ -3,6 +3,10 @@ set windows-shell := ["cmd.exe", "/d", "/s", "/c"]
 
 python := if os() == "windows" { "python" } else { "python3" }
 
+# Share Studio artifacts across worktrees; preserve CI and explicit overrides.
+export CARGO_TARGET_DIR := shell(python + " scripts/cargo_shared.py target")
+export RUSTC_WRAPPER := shell(python + " scripts/cargo_shared.py wrapper")
+
 # Run tests
 test:
     cargo nextest run --locked --status-level fail --final-status-level fail --failure-output final --success-output never
@@ -13,7 +17,7 @@ test:
 
 # Run repository maintenance contract tests
 maintenance-test:
-    {{python}} -m unittest scripts.test_agent_detection_manifest_check scripts.test_changelog scripts.test_config_reference_check scripts.test_docs_translation_parity scripts.test_hermes_integration_asset scripts.test_package_windows_conpty scripts.test_preview scripts.test_release scripts.test_unix_installer scripts.test_vendor_libghostty_vt scripts.test_vendor_portable_pty scripts.test_windows_cross scripts.test_windows_input
+    {{python}} -m unittest scripts.test_cargo_shared scripts.test_agent_detection_manifest_check scripts.test_changelog scripts.test_config_reference_check scripts.test_docs_translation_parity scripts.test_hermes_integration_asset scripts.test_package_windows_conpty scripts.test_preview scripts.test_release scripts.test_unix_installer scripts.test_vendor_libghostty_vt scripts.test_vendor_portable_pty scripts.test_windows_cross scripts.test_windows_input
     bun test scripts/release-workflows.test.ts
 
 # Local interactive Windows Terminal input qualification (never runs in normal CI).
