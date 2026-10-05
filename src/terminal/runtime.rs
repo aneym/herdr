@@ -589,6 +589,10 @@ impl TerminalRuntime {
         self.0.foreground_cwd()
     }
 
+    pub fn foreground_machine(&self) -> Option<String> {
+        self.0.foreground_machine()
+    }
+
     pub fn child_pid(&self) -> Option<u32> {
         self.0.child_pid()
     }

@@ -3775,6 +3775,34 @@ impl PaneRuntime {
         }
     }
 
+    /// Short name of the machine the pane's foreground job runs on when that
+    /// job is a remote shell (`ssh ax42`), e.g. "ax42"; `None` for local work.
+    pub fn foreground_machine(&self) -> Option<String> {
+        #[cfg(unix)]
+        {
+            let pid = self.child_pid.load(Ordering::Acquire);
+            let foreground_pgid = self
+                .io
+                .foreground_process_group_id()
+                .or_else(|| crate::platform::foreground_process_group_id(pid))?;
+            if foreground_pgid == pid {
+                return None;
+            }
+            crate::remote_machine::cached(pid, foreground_pgid, || {
+                let leader = crate::detect::foreground_group_leader_job(foreground_pgid)?
+                    .processes
+                    .into_iter()
+                    .next()?;
+                crate::remote_machine::from_argv(&leader.name, leader.argv.as_deref()?)
+            })
+        }
+
+        #[cfg(not(unix))]
+        {
+            None
+        }
+    }
+
     /// Get the current working directory of the process group controlling the pane PTY.
     pub fn foreground_cwd(&self) -> Option<std::path::PathBuf> {
         #[cfg(unix)]

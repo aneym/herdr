@@ -361,6 +361,8 @@ pub(super) struct FactoryTabRow {
     pub(super) scoping: bool,
     pub(super) scope_url: Option<String>,
     pub(super) badge: Option<String>,
+    /// Remote machine a pane in this tab runs its foreground job on.
+    pub(super) machine: Option<String>,
     pub(super) phase: Option<String>,
     pub(super) started: Option<i64>,
     pub(super) summary: Option<String>,
@@ -1496,6 +1498,7 @@ fn factory_run_row(
         scoping: false,
         scope_url: None,
         badge: run.badge.clone(),
+        machine: None,
         phase: run.phase.clone(),
         started: run.started,
         summary: None,
@@ -1619,6 +1622,11 @@ fn factory_row(
             && tag.section == Some(crate::factory_overlay::TabSection::Scoping)),
         scope_url: tag.and_then(|tag| tag.scope_url.clone()),
         badge: tag.and_then(|tag| tag.badge.clone()),
+        machine: snapshot
+            .panes
+            .iter()
+            .filter(|pane| pane.tab_id == tab.tab_id)
+            .find_map(|pane| pane.machine.clone()),
         phase: tag.and_then(|tag| tag.phase.clone()),
         started: tag.and_then(|tag| tag.started),
         summary: tag.and_then(|tag| tag.summary.clone()),

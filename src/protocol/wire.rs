@@ -1089,6 +1089,11 @@ pub struct ClientShellPane {
     pub foreground_cwd: Option<String>,
     pub focused: bool,
     pub right_click_passthrough: bool,
+    /// Machine the pane's foreground program runs on when it is not this
+    /// endpoint, e.g. "ax42" for an interactive `ssh ax42`. Absent for local
+    /// work and on endpoints that predate it.
+    #[serde(default)]
+    pub machine: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2920,6 +2925,7 @@ mod tests {
                 foreground_cwd: Some("/repo".into()),
                 focused: true,
                 right_click_passthrough: false,
+                machine: None,
             }],
             agents: Vec::new(),
             commands: vec![ClientShellCommand {

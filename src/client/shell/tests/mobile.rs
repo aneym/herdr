@@ -152,6 +152,7 @@ fn mobile_switcher_tab_rows_show_per_pane_glyphs_only_when_enabled() {
         foreground_cwd: None,
         focused: false,
         right_click_passthrough: false,
+        machine: None,
     });
     projected.agents.push(ClientShellAgent {
         pane_id: "pane_1".into(),

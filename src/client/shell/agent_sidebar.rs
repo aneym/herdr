@@ -623,6 +623,13 @@ fn render_factory_tab(
         && row.badge.is_none() && available > 0 && display_width(&header.label) + display_width(&metadata) + 1 > available as usize {
         metadata.split(" · ").next().unwrap_or("").to_owned()
     } else { metadata };
+    // A tab whose chat runs on another machine says which, after any summary.
+    let metadata = match row.machine.as_deref() {
+        Some(machine) if !row.reviewing && (!row.scoping || row.scope_url.is_none()) && row.badge.is_none() => {
+            if metadata.is_empty() { machine.to_owned() } else { format!("{metadata} · {machine}") }
+        }
+        _ => metadata,
+    };
     // A workflow name gets first claim on the row; its host can move below.
     let badge_below = row.workflow && row.badge.as_deref().is_some_and(|badge| {
         display_width(&header.label) + 1 + display_width(badge) > available as usize
@@ -1268,7 +1275,8 @@ pub(super) fn agent_row(
     let rows = crate::ui::sidebar_agent_rows(
         &config.agents,
         crate::ui::AgentTokenContext {
-            machine,
+            // A pane running a remote shell names its host over the endpoint's.
+            machine: pane.and_then(|pane| pane.machine.as_deref()).or(machine),
             workspace: &workspace.label,
             tab: tab_label,
             pane: agent

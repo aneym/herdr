@@ -156,6 +156,7 @@ fn tab_status_snapshot() -> ClientShellSnapshot {
         foreground_cwd: None,
         focused: false,
         right_click_passthrough: false,
+        machine: None,
     });
     snapshot.agents.push(ClientShellAgent {
         pane_id: "pane_1".into(),

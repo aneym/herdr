@@ -765,6 +765,7 @@ fn busy_lane_syncs_tab_and_sidebar_and_preserves_shell_status() {
     snapshot.panes = vec![ClientShellPane {
         pane_id: idle_agent.pane_id.clone(), workspace_id: "ws_1".into(), tab_id: "lane-b".into(),
         label: None, cwd: None, foreground_cwd: None, focused: false, right_click_passthrough: false,
+        machine: None,
     }];
     let palette = ClientShellConfig::from_config(&Config::default()).palette;
     let check = |snapshot: &ClientShellSnapshot, overlay: &FactoryOverlay, expected, glyph| {
@@ -2235,4 +2236,27 @@ fn factory_sidebar_report_marks_scrolled_rows_offscreen_not_background() {
         assert!(tab["row"].is_null(), "{report}");
     }
     assert!(tabs.iter().all(|tab| tab["hidden"] != "background" || tab["section"] == "background"), "{report}");
+}
+
+#[test]
+fn remote_shell_pane_names_its_machine_on_lane_and_plain_agent_rows() {
+    let (mut snapshot, overlay) = fixture();
+    let pane = |pane_id: &str, tab_id: &str, machine: Option<&str>| ClientShellPane {
+        pane_id: pane_id.into(), workspace_id: "ws_1".into(), tab_id: tab_id.into(),
+        label: None, cwd: None, foreground_cwd: None, focused: false, right_click_passthrough: false,
+        machine: machine.map(str::to_owned),
+    };
+    snapshot.panes = vec![pane("lane-b-pane", "lane-b", Some("ax42")), pane("plain-pane", "plain-a", Some("book"))];
+    let (rows, _, buffer) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 30);
+    let (y, lane) = rows.iter().enumerate().find(|(_, row)| row.contains("lane-b")).unwrap();
+    assert!(lane.trim_end().ends_with("idle · ax42"), "lane row: {lane}");
+    let x = lane.find("ax42").map(|byte| lane[..byte].chars().count()).unwrap() as u16;
+    let palette = ClientShellConfig::from_config(&Config::default()).palette;
+    assert_eq!(buffer[(x, y as u16)].fg, palette.overlay0, "machine label stays quiet");
+    assert!(rows.iter().any(|row| row.contains("book")), "plain agent row names its machine: {rows:#?}");
+    assert!(!rows.iter().any(|row| row.contains("lane-a") && row.contains("ax42")), "local tabs stay unlabeled");
+
+    snapshot.panes = vec![pane("lane-b-pane", "lane-b", None), pane("plain-pane", "plain-a", None)];
+    let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 30);
+    assert!(!rows.iter().any(|row| row.contains("ax42") || row.contains("book")), "no machine for local work: {rows:#?}");
 }

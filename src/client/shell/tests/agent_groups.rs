@@ -34,6 +34,7 @@ fn owned_snapshot() -> ClientShellSnapshot {
             foreground_cwd: None,
             focused: pane == "owner",
             right_click_passthrough: false,
+            machine: None,
         });
         snapshot.agents.push(ClientShellAgent {
             pane_id: pane.into(),
@@ -806,6 +807,7 @@ fn panel_next_stays_spatial_when_the_tab_keeps_siblings() {
         foreground_cwd: None,
         focused: false,
         right_click_passthrough: false,
+        machine: None,
     });
     state.set_snapshot(Box::new(snapshot));
 

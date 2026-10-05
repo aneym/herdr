@@ -86,6 +86,7 @@ pub(super) fn tree_snapshot() -> ClientShellSnapshot {
             foreground_cwd: None,
             focused: true,
             right_click_passthrough: false,
+            machine: None,
         },
         ClientShellPane {
             pane_id: "pane_2".into(),
@@ -96,6 +97,7 @@ pub(super) fn tree_snapshot() -> ClientShellSnapshot {
             foreground_cwd: None,
             focused: false,
             right_click_passthrough: false,
+            machine: None,
         },
         ClientShellPane {
             pane_id: "pane_3".into(),
@@ -106,6 +108,7 @@ pub(super) fn tree_snapshot() -> ClientShellSnapshot {
             foreground_cwd: None,
             focused: false,
             right_click_passthrough: false,
+            machine: None,
         },
     ];
     snapshot.agents = vec![

@@ -34,6 +34,7 @@ fn attention_state(statuses: &[AgentStatus]) -> ClientShellState {
             foreground_cwd: None,
             focused: index == 0,
             right_click_passthrough: false,
+            machine: None,
         });
         projected.agents.push(ClientShellAgent {
             pane_id,
