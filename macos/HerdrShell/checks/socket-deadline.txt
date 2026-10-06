@@ -1,0 +1,4 @@
+[PASS] peer accepts and never reads an 8 MB request: 2.00 nil (wall 2.29s, timeout 2.0s)
+[PASS] peer reads the request and never replies: 2.00 nil (wall 2.08s, timeout 2.0s)
+[PASS] peer answers: 0.38 {"id":"t","result":{"ok":true}} (wall 0.46s, timeout 2.0s)
+PASS socket deadline
