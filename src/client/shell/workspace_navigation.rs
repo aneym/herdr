@@ -129,8 +129,17 @@ impl ClientShellState {
         let surface_available = self.snapshot.is_some() && self.pane_surface.is_some();
         let empty_collapsed_groups = HashSet::new();
         let mut targets = Vec::new();
+        let additive = self.machines_additive();
         for endpoint in &self.endpoints {
             if endpoint.status != ClientEndpointStatus::Online {
+                continue;
+            }
+            // Sections: step only through what the sidebar shows.
+            if additive
+                && !endpoint.endpoint_id.is_local()
+                && (self.config.machines == crate::config::SidebarMachinesConfig::Off
+                    || self.collapsed_endpoints.contains(&endpoint.endpoint_id))
+            {
                 continue;
             }
             let Some(snapshot) = endpoint.snapshot.as_deref() else {
@@ -183,7 +192,7 @@ impl ClientShellState {
         };
         let target = targets.swap_remove(next);
         self.collapsed_endpoints.remove(&target.endpoint_id);
-        if self.endpoints.len() == 1 && !mobile {
+        if (self.endpoints.len() == 1 || (additive && target.endpoint_id.is_local())) && !mobile {
             self.reveal_workspace(&target.workspace_id);
         }
         self.navigate_workspace_id = Some(target);

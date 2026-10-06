@@ -106,6 +106,19 @@ impl ClientShellState {
             next.iter()
                 .any(|endpoint| &endpoint.endpoint_id == endpoint_id)
         });
+        if self.config.machines == crate::config::SidebarMachinesConfig::Sections {
+            // A machine section starts folded to its header row.
+            for endpoint in &next {
+                if !endpoint.endpoint_id.is_local()
+                    && !self
+                        .endpoints
+                        .iter()
+                        .any(|previous| previous.endpoint_id == endpoint.endpoint_id)
+                {
+                    self.collapsed_endpoints.insert(endpoint.endpoint_id.clone());
+                }
+            }
+        }
         self.endpoints = next;
         self.sync_active_factory_overlay();
     }
@@ -551,6 +564,13 @@ impl ClientShellState {
         self.endpoints.len() > 1
     }
 
+    /// Saved machines join as sections; Local's own view and navigation stay as
+    /// they are with no machines (`[ui.sidebar] machines` other than "list").
+    pub(crate) fn machines_additive(&self) -> bool {
+        self.multi_endpoint_active()
+            && self.config.machines != crate::config::SidebarMachinesConfig::List
+    }
+
     #[cfg(test)]
     pub(crate) fn set_snapshot(&mut self, snapshot: Box<ClientShellSnapshot>) {
         let endpoint_id = self.active_endpoint_id.clone();
@@ -883,4 +903,37 @@ pub(super) fn local_endpoint() -> ClientShellEndpoint {
         factory_overlay: None,
         methods: None,
     }
+}
+
+/// Local's snapshot, tree chrome and factory overlay for the sidebar, even while
+/// another endpoint is active. The snapshot is `None` while Local is not online.
+/// Takes fields, not `&ClientShellState`, so compose can borrow the rest mutably.
+pub(super) fn local_sidebar_sources<'a>(
+    endpoints: &'a [ClientShellEndpoint],
+    tree_chrome: &'a HashMap<ClientEndpointId, super::tree::ClientTreeChrome>,
+    tree_chrome_default: &'a super::tree::ClientTreeChrome,
+    factory_enabled: bool,
+) -> (
+    Option<&'a ClientShellSnapshot>,
+    &'a super::tree::ClientTreeChrome,
+    Option<&'a crate::factory_overlay::FactoryOverlay>,
+) {
+    let local = endpoints
+        .iter()
+        .find(|endpoint| endpoint.endpoint_id.is_local());
+    let snapshot = local
+        .filter(|endpoint| endpoint.status == ClientEndpointStatus::Online)
+        .and_then(|endpoint| endpoint.snapshot.as_deref());
+    let overlay = local.filter(|_| factory_enabled).and_then(|endpoint| {
+        let snapshot = endpoint.snapshot.as_deref()?;
+        let projection = endpoint.factory_overlay.as_ref()?;
+        (projection.generation == endpoint.snapshot_generation
+            && projection.boot_id == snapshot.boot_id)
+            .then_some(projection.overlay.as_deref())
+            .flatten()
+    });
+    let tree = tree_chrome
+        .get(&ClientEndpointId::Local)
+        .unwrap_or(tree_chrome_default);
+    (snapshot, tree, overlay)
 }

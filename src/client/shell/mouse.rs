@@ -1938,6 +1938,13 @@ impl ClientShellState {
 
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Right) => {
+                // Local rows shown beside a machine have no menu: their actions
+                // would reach the machine.
+                if !self.active_endpoint_id.is_local()
+                    && super::contains(self.hits.local_sidebar, point)
+                {
+                    return;
+                }
                 let pane_hit = self
                     .hits
                     .panes
@@ -2217,7 +2224,13 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
+                if self.handle_local_sidebar_click_while_remote(point, outcome) {
+                    return;
+                }
                 if self.handle_endpoint_machine_click(point, outcome) {
+                    return;
+                }
+                if self.handle_endpoint_tab_click(point, outcome) {
                     return;
                 }
                 if super::contains(self.hits.global_launcher, point) {

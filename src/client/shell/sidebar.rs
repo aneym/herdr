@@ -563,9 +563,11 @@ pub(in crate::client::shell) fn ordered_sidebar_sections(
         if content.height < 2 {
             return (Rect::default(), content);
         }
-        let agents_height = content.height - 1;
+        let footer_y = content.bottom() - 1;
+        // Machine sections, when any, take the rows just above the footer.
+        let agents_height = (content.height - 1).saturating_sub(state.machine_rows);
         return (
-            Rect::new(content.x, content.y + agents_height, content.width, 1),
+            Rect::new(content.x, footer_y, content.width, 1),
             Rect::new(content.x, content.y, content.width, agents_height),
         );
     }

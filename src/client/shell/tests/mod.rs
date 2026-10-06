@@ -267,6 +267,7 @@ mod graphics;
 mod input_domain;
 mod keybindings_settings;
 mod link_hover;
+mod machine_sections;
 mod mobile;
 mod mouse_selection;
 mod navigation_history;

@@ -254,6 +254,135 @@ pub(super) struct ShellRenderState<'a> {
     pub(super) reveal_navigation_workspace: &'a mut bool,
     pub(super) dragged_workspace_id: Option<&'a str>,
     pub(super) workspace_drop_indicator_row: Option<u16>,
+    /// Local's own snapshot, tree chrome and overlay. With `machines = "sections"`
+    /// the Local sidebar draws from these even while a machine owns the main area.
+    pub(super) local_snapshot: Option<&'a ClientShellSnapshot>,
+    pub(super) local_tree: &'a super::tree::ClientTreeChrome,
+    pub(super) local_factory_overlay: Option<&'a crate::factory_overlay::FactoryOverlay>,
+    /// Rows the tree-view sidebar leaves free above its footer for machine sections.
+    pub(super) machine_rows: u16,
+}
+
+static LOCAL_ENDPOINT: ClientEndpointId = ClientEndpointId::Local;
+
+/// Expanded or collapsed sidebar for any endpoint count.
+///
+/// One endpoint, or `machines = "list"`: unchanged upstream paths. Otherwise
+/// Local renders exactly as it would alone, and each enabled machine adds a
+/// section under it (`machines = "sections"`) or nothing (`"off"`). When Local
+/// itself has no snapshot the flat machines list keeps machines reachable.
+pub(super) fn render_sidebar_area(
+    buffer: &mut Buffer,
+    area: Rect,
+    active_snapshot: Option<&ClientShellSnapshot>,
+    config: &ClientShellConfig,
+    state: &mut ShellRenderState<'_>,
+    hits: &mut ShellHitMap,
+) {
+    let local_active = state.active_endpoint_id.is_local();
+    let selected = state.selected_workspace_id;
+    let additive = state.endpoints.len() > 1
+        && config.machines != crate::config::SidebarMachinesConfig::List;
+    let local_snapshot = if !additive || local_active {
+        active_snapshot
+    } else {
+        state.local_snapshot
+    };
+    let Some(snapshot) = local_snapshot.filter(|_| state.endpoints.len() == 1 || additive) else {
+        if state.sidebar_collapsed {
+            super::endpoint_sidebar::render_collapsed(buffer, area, config, state, hits);
+        } else {
+            super::endpoint_sidebar::render_expanded(
+                buffer,
+                area,
+                active_snapshot,
+                config,
+                state,
+                hits,
+            );
+        }
+        return;
+    };
+    if !local_active {
+        // A machine owns the main area; the Local rows still show Local.
+        state.active_endpoint_id = &LOCAL_ENDPOINT;
+        state.tree = state.local_tree;
+        state.factory_overlay = state.local_factory_overlay;
+        state.selected_workspace_id = state
+            .selected_workspace_id
+            .filter(|target| target.endpoint_id.is_local());
+    }
+    let rows = if additive
+        && config.machines == crate::config::SidebarMachinesConfig::Sections
+        && !state.sidebar_collapsed
+    {
+        super::machine_sections::fit_rows(
+            super::machine_sections::section_rows(state.endpoints, state.collapsed_endpoints),
+            area.height,
+        )
+    } else {
+        Vec::new()
+    };
+    if state.sidebar_collapsed {
+        render_collapsed_sidebar(
+            buffer,
+            area,
+            snapshot,
+            config,
+            state
+                .selected_workspace_id
+                .map(|target| target.workspace_id.as_str()),
+            hits,
+        );
+    } else if rows.is_empty() {
+        render_sidebar(buffer, area, snapshot, config, state, hits);
+    } else {
+        let strip_height = (rows.len().min(usize::from(u16::MAX)) as u16).min(area.height);
+        let strip_width = area.width.saturating_sub(1);
+        let (local_area, strip) = if super::tree::tree_view_active(config) {
+            // The strip sits between the agents tree and the footer row.
+            state.machine_rows = strip_height;
+            let footer = u16::from(area.height >= 2);
+            (
+                area,
+                Rect::new(
+                    area.x,
+                    area.bottom()
+                        .saturating_sub(footer)
+                        .saturating_sub(strip_height),
+                    strip_width,
+                    strip_height,
+                ),
+            )
+        } else {
+            let local_height = area.height.saturating_sub(strip_height);
+            render_sidebar_background(
+                buffer,
+                Rect::new(area.x, area.y + local_height, area.width, strip_height),
+                &config.palette,
+            );
+            (
+                Rect::new(area.x, area.y, area.width, local_height),
+                Rect::new(area.x, area.y + local_height, strip_width, strip_height),
+            )
+        };
+        render_sidebar(buffer, local_area, snapshot, config, state, hits);
+        state.machine_rows = 0;
+        state.selected_workspace_id = selected;
+        super::machine_sections::render(buffer, strip, &rows, config, state, hits);
+        if !local_active {
+            hits.local_sidebar = Rect::new(
+                area.x,
+                area.y,
+                strip_width,
+                strip.y.saturating_sub(area.y),
+            );
+        }
+        return;
+    }
+    if !local_active {
+        hits.local_sidebar = Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height);
+    }
 }
 
 pub(super) fn render_shell(
@@ -275,46 +404,14 @@ pub(super) fn render_shell(
         );
     }
     if layout.sidebar.width > 0 {
-        if state.endpoints.len() > 1 {
-            if state.sidebar_collapsed {
-                super::endpoint_sidebar::render_collapsed(
-                    buffer,
-                    layout.sidebar,
-                    config,
-                    &mut state,
-                    &mut hits,
-                );
-            } else {
-                super::endpoint_sidebar::render_expanded(
-                    buffer,
-                    layout.sidebar,
-                    Some(snapshot),
-                    config,
-                    &mut state,
-                    &mut hits,
-                );
-            }
-        } else if state.sidebar_collapsed {
-            render_collapsed_sidebar(
-                buffer,
-                layout.sidebar,
-                snapshot,
-                config,
-                state
-                    .selected_workspace_id
-                    .map(|target| target.workspace_id.as_str()),
-                &mut hits,
-            );
-        } else {
-            render_sidebar(
-                buffer,
-                layout.sidebar,
-                snapshot,
-                config,
-                &mut state,
-                &mut hits,
-            );
-        }
+        render_sidebar_area(
+            buffer,
+            layout.sidebar,
+            Some(snapshot),
+            config,
+            &mut state,
+            &mut hits,
+        );
     }
     if layout.tab_bar.height > 0 {
         render_tab_bar(

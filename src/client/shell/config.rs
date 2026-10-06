@@ -149,6 +149,7 @@ impl ClientShellConfig {
             section_order: config.ui.sidebar.section_order,
             new_button: config.ui.sidebar.new_button,
             menu_position: config.ui.sidebar.menu_position,
+            machines: config.ui.sidebar.machines,
             agent_panel_sort: config.ui.agent_panel_sort,
             agent_close_focus: config.ui.agent_close_focus,
             attention_read: config.ui.attention_read,
@@ -372,6 +373,7 @@ impl ClientShellConfig {
                 self.section_order = ui.sidebar.section_order;
                 self.new_button = ui.sidebar.new_button;
                 self.menu_position = ui.sidebar.menu_position;
+                self.machines = ui.sidebar.machines;
                 self.agent_panel_sort = ui.agent_panel_sort;
                 self.agent_close_focus = ui.agent_close_focus;
                 self.attention_read = ui.attention_read;

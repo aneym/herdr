@@ -309,7 +309,6 @@ pub(super) fn navigator_rows(
     };
     let filtering = navigator.filter.is_some() || !query.is_empty();
     let federated = endpoints.len() > 1;
-    let depth_offset = u8::from(federated && !navigator.search_entry);
     let active_profile = endpoints
         .iter()
         .find(|endpoint| endpoint.endpoint_id == *active_endpoint_id)
@@ -318,6 +317,11 @@ pub(super) fn navigator_rows(
     let mut rows = Vec::new();
 
     for endpoint in endpoints {
+        // Machines as sections: Local reads as it does with no machines.
+        let machine_parent = federated
+            && !navigator.search_entry
+            && !(navigator.machine_sections && endpoint.endpoint_id.is_local());
+        let depth_offset = u8::from(machine_parent);
         let stale = endpoint.status != ClientEndpointStatus::Online;
         let endpoint_query_matches = !query.is_empty() && text(&endpoint.label);
         let mut endpoint_rows = Vec::new();
@@ -520,7 +524,7 @@ pub(super) fn navigator_rows(
             }
         }
         if !filtering || endpoint_query_matches || !endpoint_rows.is_empty() {
-            if federated && !navigator.search_entry {
+            if machine_parent {
                 rows.push(ClientNavigatorRow {
                     depth: 0,
                     label: endpoint.label.to_owned(),

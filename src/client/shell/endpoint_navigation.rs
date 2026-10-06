@@ -78,6 +78,79 @@ impl ClientShellState {
         true
     }
 
+    /// A click on the Local sidebar while a machine owns the main area. The rows
+    /// are Local's, so the click returns to Local (and to the row's target)
+    /// instead of acting on the machine.
+    pub(super) fn handle_local_sidebar_click_while_remote(
+        &mut self,
+        point: (u16, u16),
+        outcome: &mut ClientShellInput,
+    ) -> bool {
+        if self.active_endpoint_id.is_local() || !super::contains(self.hits.local_sidebar, point)
+        {
+            return false;
+        }
+        let at = |rect: Rect| super::contains(rect, point);
+        let target = self
+            .hits
+            .agents
+            .iter()
+            .find(|(rect, _)| at(*rect))
+            .map(|(_, pane_id)| ClientEndpointFocusTarget::Pane(pane_id.clone()))
+            .or_else(|| {
+                self.hits
+                    .tree_headers
+                    .iter()
+                    .find(|hit| at(hit.rect))
+                    .map(|hit| match &hit.tab_id {
+                        Some(tab_id) => ClientEndpointFocusTarget::Tab(tab_id.clone()),
+                        None => ClientEndpointFocusTarget::Workspace(hit.workspace_id.clone()),
+                    })
+            })
+            .or_else(|| {
+                self.hits
+                    .tabs
+                    .iter()
+                    .find(|(rect, _)| at(*rect))
+                    .map(|(_, tab_id)| ClientEndpointFocusTarget::Tab(tab_id.clone()))
+            })
+            .or_else(|| {
+                self.hits
+                    .workspaces
+                    .iter()
+                    .find(|hit| hit.endpoint_id.is_local() && at(hit.rect))
+                    .map(|hit| ClientEndpointFocusTarget::Workspace(hit.workspace_id.clone()))
+            });
+        match target {
+            Some(target) => {
+                self.focus_or_activate(ClientEndpointId::Local, target, outcome);
+            }
+            None => {
+                self.activate_endpoint(ClientEndpointId::Local, outcome);
+            }
+        }
+        true
+    }
+
+    /// A tab row in a machine section: stream that machine and focus the tab.
+    pub(super) fn handle_endpoint_tab_click(
+        &mut self,
+        point: (u16, u16),
+        outcome: &mut ClientShellInput,
+    ) -> bool {
+        let Some((endpoint_id, tab_id)) = self
+            .hits
+            .endpoint_tabs
+            .iter()
+            .find(|(rect, _, _)| super::contains(*rect, point))
+            .map(|(_, endpoint_id, tab_id)| (endpoint_id.clone(), tab_id.clone()))
+        else {
+            return false;
+        };
+        self.focus_or_activate(endpoint_id, ClientEndpointFocusTarget::Tab(tab_id), outcome);
+        true
+    }
+
     pub(super) fn handle_endpoint_agent_click(
         &mut self,
         point: (u16, u16),
@@ -106,7 +179,9 @@ impl ClientShellState {
         outcome: &mut ClientShellInput,
     ) -> bool {
         use crate::input::KeybindAction;
-        if !self.multi_endpoint_active() {
+        // With machines as sections, workspace and agent stepping stay inside the
+        // active endpoint, exactly as with no machines.
+        if !self.multi_endpoint_active() || self.machines_additive() {
             return false;
         }
         if matches!(

@@ -47,13 +47,23 @@ impl ClientShellState {
                     && self.navigation_target_valid(&pending.target)
             });
         // A resize invalidates pane geometry, not the healthy Local workspace chrome.
-        let local_snapshot = self.snapshot.as_deref().filter(|_| {
-            self.endpoints.len() == 1
-                && !self.sidebar_collapsed
-                && layout.sidebar.width > 0
+        let sidebar_visible = !self.sidebar_collapsed && layout.sidebar.width > 0;
+        let healthy_snapshot = self.snapshot.as_deref().filter(|_| {
+            sidebar_visible
                 && self.endpoint_status(&self.active_endpoint_id)
                     == Some(ClientEndpointStatus::Online)
         });
+        let additive = self.endpoints.len() > 1
+            && self.config.machines != crate::config::SidebarMachinesConfig::List;
+        let local_snapshot = healthy_snapshot.filter(|_| self.endpoints.len() == 1 || additive);
+        let (local_sidebar_snapshot, local_tree, local_factory_overlay) =
+            super::endpoints::local_sidebar_sources(
+                &self.endpoints,
+                &self.tree_chrome,
+                &self.tree_chrome_default,
+                self.config.factory.enabled,
+            );
+        let local_sidebar_snapshot = local_sidebar_snapshot.filter(|_| sidebar_visible);
         let factory_overlay = self
             .config
             .factory
@@ -88,21 +98,25 @@ impl ClientShellState {
             reveal_navigation_workspace: &mut self.reveal_navigation_workspace,
             dragged_workspace_id: None,
             workspace_drop_indicator_row: None,
+            local_snapshot: local_sidebar_snapshot,
+            local_tree,
+            local_factory_overlay,
+            machine_rows: 0,
         };
-        if let Some(snapshot) = local_snapshot {
-            render::render_sidebar(
+        if local_snapshot.is_none() && (self.endpoints.len() == 1 || !additive) {
+            super::endpoint_sidebar::render_expanded(
                 &mut buffer,
                 sidebar,
-                snapshot,
+                self.snapshot.as_deref(),
                 &self.config,
                 &mut render_state,
                 &mut self.hits,
             );
         } else {
-            super::endpoint_sidebar::render_expanded(
+            render::render_sidebar_area(
                 &mut buffer,
                 sidebar,
-                self.snapshot.as_deref(),
+                local_snapshot,
                 &self.config,
                 &mut render_state,
                 &mut self.hits,
@@ -234,6 +248,13 @@ impl ClientShellState {
             _ => (None, None),
         };
         let mut buffer = Buffer::empty(Rect::new(0, 0, cols, rows));
+        let (local_sidebar_snapshot, local_tree, local_factory_overlay) =
+            super::endpoints::local_sidebar_sources(
+                &self.endpoints,
+                &self.tree_chrome,
+                &self.tree_chrome_default,
+                self.config.factory.enabled,
+            );
         self.hits = render::render_shell(
             &mut buffer,
             layout,
@@ -272,6 +293,10 @@ impl ClientShellState {
                 reveal_navigation_workspace: &mut self.reveal_navigation_workspace,
                 dragged_workspace_id,
                 workspace_drop_indicator_row,
+                local_snapshot: local_sidebar_snapshot,
+                local_tree,
+                local_factory_overlay,
+                machine_rows: 0,
             },
         );
         super::sidebar_report::finish(self.config.preferences_path.as_deref());

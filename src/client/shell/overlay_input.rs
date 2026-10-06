@@ -218,6 +218,7 @@ impl ClientShellState {
             selected: None,
             scroll: 0,
             filter: None,
+            machine_sections: self.machines_additive(),
         };
         let rows =
             render::client_navigator_rows(&self.endpoints, &self.active_endpoint_id, &navigator);

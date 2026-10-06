@@ -1177,6 +1177,17 @@
           ]
         },
         {
+          "key": "ui.sidebar.machines",
+          "type": "enum",
+          "default": "\"sections\"",
+          "description": "How saved SSH machines appear in the expanded sidebar. sections keeps the Local sidebar unchanged and adds one collapsible section per enabled machine; list is the flat machines list; off hides machines without removing them.",
+          "values": [
+            "sections",
+            "list",
+            "off"
+          ]
+        },
+        {
           "key": "ui.sidebar.debug_bounds",
           "type": "boolean",
           "default": "false",

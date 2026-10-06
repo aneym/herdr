@@ -550,6 +550,20 @@ pub enum SidebarNewButtonConfig {
     Header,
 }
 
+/// How saved SSH machines appear in the expanded sidebar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SidebarMachinesConfig {
+    /// Local renders exactly as it does with no machines; each enabled machine
+    /// adds its own collapsible section below it.
+    #[default]
+    Sections,
+    /// Upstream view: one flat machines list replaces the Local sidebar.
+    List,
+    /// Saved machines stay connected but get no sidebar rows.
+    Off,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum SidebarMenuPositionConfig {
@@ -587,6 +601,7 @@ pub struct SidebarConfig {
     pub section_order: [SidebarSection; 2],
     pub new_button: SidebarNewButtonConfig,
     pub menu_position: SidebarMenuPositionConfig,
+    pub machines: SidebarMachinesConfig,
     pub agents: AgentsSidebarConfig,
     pub automations: AutomationsSidebarConfig,
     pub spaces: SpacesSidebarConfig,
@@ -602,6 +617,7 @@ impl Default for SidebarConfig {
             section_order: default_section_order(),
             new_button: SidebarNewButtonConfig::Footer,
             menu_position: SidebarMenuPositionConfig::Right,
+            machines: SidebarMachinesConfig::Sections,
             agents: AgentsSidebarConfig::default(),
             automations: AutomationsSidebarConfig::default(),
             spaces: SpacesSidebarConfig::default(),

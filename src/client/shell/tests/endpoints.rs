@@ -62,8 +62,17 @@ fn current_workspace_view() -> crate::api::schema::AgentViewSetParams {
     }
 }
 
+/// These tests cover the upstream flat machines list (`machines = "list"`);
+/// sections have their own tests in machine_sections.rs.
+fn list_config() -> Config {
+    let mut config = Config::default();
+    config.ui.sidebar.machines = crate::config::SidebarMachinesConfig::List;
+    config
+}
+
 fn state_with_remote() -> (ClientShellState, ClientEndpointId) {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let config = list_config();
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
     let profile = remote_profile();
     let endpoint_id = ClientEndpointId::Ssh(profile.id.clone());
     state.set_endpoint_catalog(&[profile]);
@@ -1066,7 +1075,7 @@ fn aggregate_agents_use_configured_rows_machine_token_and_status_colors() {
     use crate::api::schema::AgentStatus;
     use crate::config::{AgentSidebarToken, StatusIndicatorStyle};
 
-    let mut config = Config::default();
+    let mut config = list_config();
     config.ui.status_indicators = StatusIndicatorStyle::Symbols;
     config.ui.sidebar.agents.rows = vec![vec![
         AgentSidebarToken::StateIcon,
@@ -1134,7 +1143,7 @@ fn current_workspace_agent_view_excludes_same_workspace_id_on_other_machine() {
     use crate::api::schema::AgentStatus;
     use crate::config::AgentSidebarToken;
 
-    let mut config = Config::default();
+    let mut config = list_config();
     config.ui.sidebar.agents.rows =
         vec![vec![AgentSidebarToken::Machine, AgentSidebarToken::Agent]];
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
@@ -1200,7 +1209,7 @@ fn current_workspace_or_blocked_keeps_foreign_attention_only() {
     };
     use crate::config::AgentSidebarToken;
 
-    let mut config = Config::default();
+    let mut config = list_config();
     config.ui.sidebar.agents.rows =
         vec![vec![AgentSidebarToken::Machine, AgentSidebarToken::Agent]];
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
@@ -1270,7 +1279,7 @@ fn selected_default_view_ignores_inactive_endpoint_projection() {
     };
     use crate::config::AgentSidebarToken;
 
-    let mut config = Config::default();
+    let mut config = list_config();
     config.ui.sidebar.agents.rows =
         vec![vec![AgentSidebarToken::Machine, AgentSidebarToken::Agent]];
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
@@ -1367,7 +1376,7 @@ fn legacy_custom_views_keep_v1_per_endpoint_projection() {
     use crate::api::schema::AgentStatus;
     use crate::config::AgentSidebarToken;
 
-    let mut config = Config::default();
+    let mut config = list_config();
     config.ui.sidebar.agents.rows =
         vec![vec![AgentSidebarToken::Machine, AgentSidebarToken::Agent]];
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
@@ -1412,7 +1421,7 @@ fn selected_custom_sort_orders_rendering_and_indexed_navigation() {
     };
     use crate::config::AgentSidebarToken;
 
-    let mut config = Config::default();
+    let mut config = list_config();
     config.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
     config.ui.sidebar.agents.rows =
         vec![vec![AgentSidebarToken::Machine, AgentSidebarToken::Agent]];
@@ -1543,7 +1552,7 @@ fn aggregate_priority_uses_client_observed_recency_across_machines() {
     use crate::api::schema::AgentStatus;
     use crate::config::AgentSidebarToken;
 
-    let mut config = Config::default();
+    let mut config = list_config();
     config.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
     config.ui.sidebar.agents.rows =
         vec![vec![AgentSidebarToken::Machine, AgentSidebarToken::Agent]];
@@ -1985,7 +1994,7 @@ fn reconnect_same_endpoint_accepts_new_generation_surface_revision() {
 
 #[test]
 fn on_unfocus_navigation_acknowledges_only_the_displayed_completion_generation() {
-    let mut config = Config::default();
+    let mut config = list_config();
     config.ui.attention_read = crate::config::AttentionReadConfig::OnUnfocus;
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
 
@@ -2048,7 +2057,7 @@ fn on_unfocus_navigation_acknowledges_only_the_displayed_completion_generation()
 
 #[test]
 fn on_unfocus_navigation_preserves_read_mark_when_next_surface_arrives_first() {
-    let mut config = Config::default();
+    let mut config = list_config();
     config.ui.attention_read = crate::config::AttentionReadConfig::OnUnfocus;
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
 
@@ -2784,7 +2793,7 @@ fn workspace_drag_rejects_foreign_endpoint_slots() {
 
 #[test]
 fn collapsed_sidebar_orders_agents_before_spaces_for_local_and_remote_views() {
-    let mut config = Config::default();
+    let mut config = list_config();
     config.ui.sidebar.section_order = [
         crate::config::SidebarSection::Agents,
         crate::config::SidebarSection::Spaces,

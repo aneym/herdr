@@ -28,6 +28,7 @@ pub(crate) struct ClientShellConfig {
     pub(super) section_order: [crate::config::SidebarSection; 2],
     pub(super) new_button: crate::config::SidebarNewButtonConfig,
     pub(super) menu_position: crate::config::SidebarMenuPositionConfig,
+    pub(super) machines: crate::config::SidebarMachinesConfig,
     pub(super) agent_panel_sort: crate::config::AgentPanelSortConfig,
     pub(super) agent_close_focus: crate::config::AgentCloseFocusConfig,
     pub(super) attention_read: crate::config::AttentionReadConfig,
@@ -109,6 +110,11 @@ pub(super) struct ShellHitMap {
     pub(super) pane_splits: Vec<PaneSplitHit>,
     pub(super) agents: Vec<(Rect, String)>,
     pub(super) endpoint_agents: Vec<(Rect, ClientEndpointId, String)>,
+    /// Tab rows in machine sections: (row, machine, tab id).
+    pub(super) endpoint_tabs: Vec<(Rect, ClientEndpointId, String)>,
+    /// Local sidebar rows drawn while a machine owns the main area. A click here
+    /// returns to Local instead of acting on the machine.
+    pub(super) local_sidebar: Rect,
     pub(super) agent_body: Rect,
     pub(super) agent_scrollbar: Rect,
     pub(super) agent_scroll_metrics: Option<crate::pane::ScrollMetrics>,
@@ -445,6 +451,9 @@ pub(super) struct ClientNavigatorOverlay {
     pub(super) selected: Option<ClientNavigatorTarget>,
     pub(super) scroll: usize,
     pub(super) filter: Option<ClientNavigatorFilter>,
+    /// Machines are sections: Local rows keep their no-machine depth and get no
+    /// machine parent; only saved machines get a parent row.
+    pub(super) machine_sections: bool,
 }
 
 #[derive(Debug)]
