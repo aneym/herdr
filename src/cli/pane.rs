@@ -1005,6 +1005,7 @@ fn parse_pane_direction(value: &str) -> Result<PaneDirection, String> {
 
 const DEFERRED_CLOSE_DELAY_ENV_VAR: &str = "HERDR_PANE_CLOSE_DELAY_MS";
 const DEFERRED_CLOSE_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
+const DEFERRED_CLOSE_LIFETIME: std::time::Duration = std::time::Duration::from_secs(5);
 
 fn pane_close(args: &[String]) -> std::io::Result<i32> {
     let env_pane_id = super::target::caller_pane_id();
@@ -1019,6 +1020,13 @@ fn pane_close(args: &[String]) -> std::io::Result<i32> {
         return close_own_pane(&pane_id);
     }
     if std::env::var_os(DEFERRED_CLOSE_DELAY_ENV_VAR).is_some() {
+        // The detached helper is outside the pane's session, so PTY teardown
+        // cannot reap it. Bound its whole lifetime, including connect, protocol
+        // probing and the close acknowledgement, even if the server is hung.
+        std::thread::spawn(|| {
+            std::thread::sleep(DEFERRED_CLOSE_LIFETIME);
+            std::process::exit(1);
+        });
         std::thread::sleep(deferred_close_delay());
     }
     super::runtime::pane_close(pane_id)
