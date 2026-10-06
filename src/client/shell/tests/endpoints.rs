@@ -3512,3 +3512,160 @@ fn aggregate_agent_pins_display_and_cmd_digits_agree() {
     assert_eq!(numbered[0], (remote.clone(), "tab_1".into()));
     assert_eq!(numbered[1], (ClientEndpointId::Local, "tab_1".into()));
 }
+
+#[test]
+fn machine_diagnostic_badge_on_remote_pin_reopens_notice() {
+    let (mut state, id) = state_with_remote();
+    let mut remote = snapshot();
+    remote.boot_id = "remote-boot".into();
+    remote.workspaces[0].label = "remote-workspace".into();
+    remote
+        .pinned_tabs
+        .push(crate::protocol::ClientShellPinnedTab {
+            workspace_id: "ws_1".into(),
+            tab_id: "tab_1".into(),
+            role: None,
+        });
+    state.set_endpoint_snapshot(&id, Box::new(remote));
+    state.set_endpoint_status(&id, ClientEndpointStatus::Attention);
+    state.set_machine_diagnostic(&id, "Permission denied".into());
+    for _ in 0..2 {
+        state.compose(120, 40).expect("remote pinned row");
+        let pin = state
+            .hits
+            .endpoint_pins
+            .iter()
+            .find(|(_, _, endpoint, _)| endpoint == &id)
+            .expect("remote pin")
+            .0;
+        let badge = state
+            .hits
+            .machines
+            .iter()
+            .find(|hit| hit.endpoint_id == id && hit.status_badge.y == pin.y)
+            .expect("pinned machine diagnostic badge")
+            .status_badge;
+        state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: badge.x,
+            row: badge.y,
+            modifiers: KeyModifiers::NONE,
+        })]);
+        assert!(state
+            .visible_endpoint_notice
+            .take()
+            .expect("diagnostic notice")
+            .body
+            .contains("Permission denied"));
+    }
+}
+
+#[test]
+fn collapsed_sidebar_machine_badge_reopens_diagnostic() {
+    let (mut state, id) = state_with_remote();
+    state.sidebar_collapsed = true;
+    state.set_endpoint_status(&id, ClientEndpointStatus::Attention);
+    state.set_machine_diagnostic(&id, "Permission denied".into());
+    for _ in 0..2 {
+        state.compose(120, 40).expect("collapsed sidebar");
+        let workspace = state
+            .hits
+            .workspaces
+            .iter()
+            .find(|hit| hit.endpoint_id == id)
+            .expect("remote workspace")
+            .rect;
+        let badge = state
+            .hits
+            .machines
+            .iter()
+            .find(|hit| hit.endpoint_id == id && hit.status_badge.y == workspace.y)
+            .expect("collapsed machine diagnostic badge")
+            .status_badge;
+        state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: badge.x,
+            row: badge.y,
+            modifiers: KeyModifiers::NONE,
+        })]);
+        assert!(state
+            .visible_endpoint_notice
+            .take()
+            .expect("diagnostic notice")
+            .body
+            .contains("Permission denied"));
+    }
+}
+
+
+#[test]
+fn remote_spaces_that_share_a_label_keep_rows_of_their_own() {
+    let (mut state, remote_id) = state_with_remote();
+    let mut remote = snapshot();
+    remote.boot_id = "remote-boot".into();
+    let mut second = remote.workspaces[0].clone();
+    second.workspace_id = "ws_2".into();
+    second.number = 2;
+    second.focused = false;
+    remote.workspaces.push(second);
+    for workspace in &mut remote.workspaces {
+        workspace.label = "rails".into();
+        remote.pinned_tabs.push(crate::protocol::ClientShellPinnedTab {
+            workspace_id: workspace.workspace_id.clone(),
+            tab_id: format!("tab_{}", workspace.workspace_id),
+            role: None,
+        });
+    }
+    state.set_endpoint_snapshot(&remote_id, Box::new(remote));
+    state.compose(100, 30).expect("two remote rails spaces");
+    let rows = state
+        .hits
+        .workspaces
+        .iter()
+        .filter(|hit| hit.endpoint_id == remote_id)
+        .map(|hit| hit.workspace_id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(rows, ["ws_1", "ws_2"]);
+}
+
+#[test]
+fn folded_remote_worktree_group_stays_while_only_a_hidden_child_has_a_chat() {
+    let (mut state, remote_id) = state_with_remote();
+    let mut remote = snapshot();
+    remote.boot_id = "remote-boot".into();
+    remote.workspaces[0].label = "remote repo".into();
+    remote.workspaces[0].worktree = Some(ClientShellWorktree {
+        key: "repo".into(),
+        label: "repo".into(),
+        is_linked_worktree: false,
+    });
+    let mut child = remote.workspaces[0].clone();
+    child.workspace_id = "ws_2".into();
+    child.number = 2;
+    child.label = "feature".into();
+    child.focused = false;
+    child.worktree = Some(ClientShellWorktree {
+        key: "repo".into(),
+        label: "repo".into(),
+        is_linked_worktree: true,
+    });
+    remote.workspaces.push(child);
+    // The parent's agent exited; the only chat left is the child's.
+    let mut chat = agent("remote", AgentStatus::Idle, 0);
+    chat.workspace_id = "ws_2".into();
+    chat.pane_id = "pane_ws_2".into();
+    chat.focused = false;
+    remote.agents.push(chat);
+    state.set_endpoint_snapshot(&remote_id, Box::new(remote));
+    state
+        .remote_collapsed_groups
+        .entry(remote_id.clone())
+        .or_default()
+        .insert("repo".into());
+    state.compose(100, 30).expect("folded remote group");
+    assert!(state
+        .hits
+        .workspaces
+        .iter()
+        .any(|hit| hit.endpoint_id == remote_id && hit.workspace_id == "ws_1"));
+}
