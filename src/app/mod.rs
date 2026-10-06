@@ -755,6 +755,11 @@ impl App {
         app.state.pane_id_aliases = pane_id_aliases;
         app.state.workspaces = workspaces;
         app.state.terminals = terminals;
+        // Pins are a shared session fact; a live handoff carries them in the
+        // snapshot, and the replacement must keep them (the handoff policy
+        // skips the session restore that applies them on a cold start).
+        app.state.pinned_tabs = snapshot.pinned_tabs.clone();
+        app.state.prune_pinned_tabs();
         app.terminal_runtimes = runtimes.into();
         app.state.active = snapshot
             .active
