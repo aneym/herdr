@@ -1,11 +1,11 @@
 import Foundation
 
-/// Other machines' herdr servers, shown beside the local one.
+/// Other machines' herdr servers, whose chats join the local spaces tree (MachineMerge).
 ///
 /// Each machine is a pair of sockets that `herdr-machine-tunnels` keeps forwarded
 /// (`~/.config/herdr-machines/<name>/herdr.sock` and `herdr-client.sock`). The shell
-/// never touches herdr's own endpoint catalog, so the local session draws exactly as
-/// it does with no machines.
+/// never touches herdr's own endpoint catalog; local rows draw as they do with no machines,
+/// and a remote chat adds only its own row and badge.
 ///
 /// Remote ids carry the machine name: `ax42/w1:t2`, `ax42/term_65cc…`. Local ids never
 /// contain `/`, so one string says which server owns a tab, pane or terminal.
@@ -109,97 +109,27 @@ struct MachineState: Identifiable, Equatable {
     var epoch = 0
 }
 
-/// Sidebar rows for other machines, below the local spaces.
-///
-/// A machine header (open by default; its fold is remembered), then each workspace
-/// with its agent tabs. Tabs with no agent fold into one quiet "shells N" row, so a
-/// machine full of job shells reads as one line. The header names no version: it says
-/// "needs update" only when the machine's protocol differs from the local server's,
-/// which is why its tabs would not open.
+/// Other machines as MachineMerge input: their spaces and tabs, ids already namespaced, and
+/// each machine's health for its badge. No machine has rows of its own.
 enum MachineRows {
-    private static let priority = ["unknown": 0, "idle": 1, "done": 2, "working": 3, "blocked": 4]
-    private static func glyph(_ status: String) -> String { status == "blocked" ? "■" : status == "idle" || status == "unknown" ? "○" : "●" }
-    /// A tab's state: its most urgent agent, else the tab's own status.
-    private static func status(_ tab: Snapshot.Tab, _ agentsByTab: [String: [Snapshot.Agent]]) -> String {
-        (agentsByTab[tab.tab_id] ?? []).map { $0.agent_status ?? "unknown" }
-            .max { (priority[$0] ?? 0) < (priority[$1] ?? 0) } ?? tab.agent_status ?? "unknown"
-    }
-
-    /// Other machines' pinned tabs for the PINNED section, in each machine's pin order, with the
-    /// glyph and tone their row in the machine block draws (a tab with no agent is a quiet shell).
-    static func pinned(_ machines: [MachineState]) -> [SpacesRow] {
-        machines.flatMap { machine -> [SpacesRow] in
-            guard let snapshot = machine.snapshot else { return [] }
-            let agentsByTab = Dictionary(grouping: snapshot.agents, by: \.tab_id)
-            return snapshot.tabs.filter { $0.pin_index != nil }
-                .sorted { ($0.pin_index ?? 0) < ($1.pin_index ?? 0) }.map { tab in
-                    let space = snapshot.workspaces.first { $0.workspace_id == tab.workspace_id }
-                    let st = status(tab, agentsByTab)
-                    let agent = agentsByTab[tab.tab_id] != nil
-                    return SpacesRow(id: "pinned:" + tab.tab_id, kind: .tab, glyph: agent ? glyph(st) : "○", tone: agent ? st : "mute",
-                                     title: tab.label ?? tab.tab_id,
-                                     trailing: machine.name + " · " + (space?.label ?? tab.workspace_id), tab: tab.tab_id)
-                }
+    static func inputs(_ machines: [MachineState], localProtocol: Int? = nil) -> [MachineMerge.Machine] {
+        machines.compactMap { m in
+            guard let s = m.snapshot else { return nil }
+            // Only a known protocol on both sides is a mismatch; an unknown one says nothing.
+            let mismatch = localProtocol.flatMap { local in s.protocol.map { $0 != local } } ?? false
+            let health = m.problem != nil ? "unreachable" : mismatch ? "needs update" : nil
+            return MachineMerge.Machine(name: m.name, health: health, spaces: s.workspaces.map {
+                SpacesInput.Space(id: $0.workspace_id, name: $0.label ?? $0.workspace_id,
+                                  pinned: $0.tokens?["pinned"] == "true", collapsed: $0.tokens?["hidden"] == "true")
+            }, tabs: s.tabs.map { tab in
+                SpacesInput.Tab(id: tab.tab_id, space: tab.workspace_id, label: tab.label ?? "tab \(tab.number)",
+                    agents: s.agents.filter { $0.tab_id == tab.tab_id }.map { agent in
+                        let parentPane = agent.tokens?["parent_pane_id"] ?? agent.ownership?.current?.pane_id
+                        return SpacesInput.Agent(status: agent.agent_status ?? "unknown",
+                                                 parent: s.agents.first { $0.pane_id == parentPane }?.tab_id)
+                    }, status: tab.agent_status ?? "unknown", pinIndex: tab.pin_index)
+            })
         }
-    }
-
-    static func build(_ machines: [MachineState], chrome: SpacesChrome, localProtocol: Int? = nil) -> [SpacesRow] {
-        var out = [SpacesRow(id: "machines", kind: .title, title: "machines")]
-        for m in machines {
-            let open = !chrome.collapsedMachines.contains(m.name)
-            let s = m.snapshot
-            let agentsByTab = Dictionary(grouping: s?.agents ?? [], by: \.tab_id)
-            func status(_ tab: Snapshot.Tab) -> String { Self.status(tab, agentsByTab) }
-            let agentTabs = (s?.tabs ?? []).filter { agentsByTab[$0.tab_id] != nil }
-            let top = agentTabs.map(status).max { (priority[$0] ?? 0) < (priority[$1] ?? 0) } ?? "unknown"
-            let trailing: String
-            if s == nil {
-                trailing = "connecting"
-            } else if m.problem != nil {
-                trailing = "offline" + (m.downSince.map { " since " + Self.clock.string(from: $0) } ?? "")
-            } else if open {
-                // Only a known protocol on both sides is a mismatch; an unknown one says nothing.
-                let mismatch = localProtocol.flatMap { local in s?.protocol.map { $0 != local } } ?? false
-                trailing = mismatch ? "needs update" : ""
-            } else {
-                trailing = agentTabs.isEmpty ? "no agents" : "\(agentTabs.count) agent" + (agentTabs.count == 1 ? "" : "s")
-            }
-            out.append(SpacesRow(id: "machine:" + m.name, kind: .machine, chevron: open ? "open" : "closed",
-                                 glyph: open || agentTabs.isEmpty ? "" : glyph(top), tone: top, title: m.name,
-                                 trailing: trailing, toggleKey: "machine:" + m.name, dim: m.problem != nil))
-            guard open, let s else { continue }
-            let filled = s.workspaces.filter { ws in s.tabs.contains { $0.workspace_id == ws.workspace_id } }
-            let hasLanes = s.tabs.contains { agentsByTab[$0.tab_id] != nil }
-            for ws in filled.sorted(by: { $0.number < $1.number }) {
-                let tabs = s.tabs.filter { $0.workspace_id == ws.workspace_id }.sorted { $0.number < $1.number }
-                // A workspace label shows only on a machine with lanes: over agent tabs, or over a
-                // shells row that would otherwise read as part of the workspace above it.
-                if hasLanes && (filled.count > 1 || tabs.contains(where: { agentsByTab[$0.tab_id] != nil })) {
-                    out.append(SpacesRow(id: "msection:" + ws.workspace_id, kind: .section, depth: 1,
-                                         title: (ws.label ?? ws.workspace_id).uppercased(), dim: m.problem != nil))
-                }
-                for tab in tabs where agentsByTab[tab.tab_id] != nil {
-                    let st = status(tab)
-                    let quiet = st == "idle" || st == "unknown" || st == "done"
-                    out.append(SpacesRow(id: "tab:" + tab.tab_id, kind: .tab, depth: 1, glyph: glyph(st), tone: st,
-                                         title: tab.label ?? "tab \(tab.number)", trailing: st == "done" ? "done" : "",
-                                         tab: tab.tab_id, dim: quiet || m.problem != nil))
-                }
-                let shells = tabs.filter { agentsByTab[$0.tab_id] == nil }
-                guard !shells.isEmpty else { continue }
-                let key = ws.workspace_id + ":shells"
-                let shown = chrome.expandedGroups.contains(key)
-                out.append(SpacesRow(id: "group:" + key, kind: .group, depth: 2, chevron: shown ? "open" : "closed",
-                                     title: "shells \(shells.count)", toggleKey: "group:" + key, dim: true))
-                if shown {
-                    for tab in shells {
-                        out.append(SpacesRow(id: "tab:" + tab.tab_id, kind: .tab, depth: 2, glyph: "○", tone: "mute",
-                                             title: tab.label ?? "tab \(tab.number)", tab: tab.tab_id, dim: true))
-                    }
-                }
-            }
-        }
-        return out
     }
 
     /// One name per machine: a host footer row that names a machine in another case
@@ -219,10 +149,4 @@ enum MachineRows {
             return r
         }
     }
-
-    private static let clock: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return f
-    }()
 }

@@ -10,7 +10,7 @@ only on Alex's say until this harness is ported.
 Lab A (SHELL_LAB=shellspike-h0a) is the local session; lab B (shellspike-h0b) stands in for
 another machine, named `mlab` in the app's machines file. Two more machines, `MLAB` and `pcx`,
 point at nothing and stay offline. Checks:
-  - a pinned tab on mlab shows the state glyph and tone its machine-block row draws;
+  - a pinned tab on mlab shows the state glyph and tone its row in the space draws;
   - its row menu offers Unpin and an unpinned mlab tab offers Pin; the pin action (the call the
     menu item makes) changes the pin on lab B, not on lab A;
   - host footer rows keep `mlab` and `MLAB` apart; a case-only match still takes the one
@@ -99,9 +99,9 @@ def main():
     st = wait(lambda s: row(s.get("spaces_rows", []), pinned_id) and row(s.get("spaces_rows", []), tab_id), 40)
     rows = st.get("spaces_rows", [])
     pinned, block = row(rows, pinned_id), row(rows, tab_id)
-    S.check("remote pinned row shows the machine row's state",
+    S.check("remote pinned row shows its space row's state",
             bool(pinned and block) and pinned[4:6] == block[4:6] == ["●", "working"],
-            f"pinned {pinned and pinned[4:6]} machine {block and block[4:6]}")
+            f"pinned {pinned and pinned[4:6]} space row {block and block[4:6]}")
     menus = st.get("spaces_menus", {})
     S.check("remote pinned row menu offers Unpin", "Unpin" in menus.get(pinned_id, []), str(menus.get(pinned_id)))
     S.check("remote unpinned tab menu offers Pin", "Pin" in menus.get(f"tab:mlab/{other}", []), str(menus.get(f"tab:mlab/{other}")))

@@ -355,26 +355,10 @@ extension HerdrModel {
         // server merges them; without it the overlay's own groups stand.
         var groupedOverlay = spacesOverlay
         if let groups = catalog.snapshot.spaceGroups { groupedOverlay.spaceGroups = groups }
-        var rows = SpacesTree.build(input, overlay: groupedOverlay, chrome: state.spacesChrome, now: Date().timeIntervalSince1970)
-        let remotePins = MachineRows.pinned(machines)
-        if !remotePins.isEmpty {
-            if !rows.contains(where: { $0.id == "pinned" }) {
-                rows.insert(SpacesRow(id: "pinned", kind: .section, title: "PINNED"), at: 1)
-            }
-            let end = rows.lastIndex(where: { $0.id == "pinned" || $0.id.hasPrefix("pinned:") }).map { $0 + 1 } ?? 1
-            rows.insert(contentsOf: remotePins, at: end)
-            let count = min(rows.filter { $0.id.hasPrefix("pinned:") }.count, 9)
-            if let header = rows.firstIndex(where: { $0.id == "pinned" }) {
-                rows[header].trailing = count == 1 ? "⌘1" : "⌘1..\(count)"
-            }
-            for i in rows.indices where rows[i].id != "pinned" {
-                rows[i].trailing = rows[i].trailing.replacingOccurrences(of: "⌘1..9", with: "")
-            }
-        }
-        guard !machines.isEmpty else { return rows }
-        // Machines go after the local spaces and before the footer, so no local row moves.
-        let footer = rows.firstIndex { $0.kind == .footerUsage || $0.kind == .footerHost } ?? rows.endIndex
-        let block = MachineRows.build(machines, chrome: state.spacesChrome, localProtocol: snapshot?.protocol)
-        return Array(rows[..<footer]) + block + MachineRows.renameHosts(Array(rows[footer...]), machines: machines.map(\.name))
+        // Other machines' chats join their spaces; each carries its machine's badge (MachineMerge).
+        let remote = MachineRows.inputs(machines, localProtocol: snapshot?.protocol)
+        let rows = SpacesTree.build(MachineMerge.merge(input, machines: remote), overlay: groupedOverlay,
+                                    chrome: state.spacesChrome, now: Date().timeIntervalSince1970)
+        return MachineRows.renameHosts(MachineMerge.badge(rows, machines: remote), machines: machines.map(\.name))
     }
 }

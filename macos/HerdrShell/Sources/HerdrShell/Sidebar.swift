@@ -314,7 +314,7 @@ struct SidebarView: View {
             let split = key.lastIndex(of: ":")!
             let space = String(key[..<split]); let label = String(key[key.index(after: split)...])
             state.spacesChrome.focusedSection[space] = state.spacesChrome.focusedSection[space] == label ? nil : label; state.saveSpacesChrome()
-        } else if part == "chevron" || [.section, .group, .hidden, .machine].contains(row.kind) {
+        } else if part == "chevron" || [.section, .group, .hidden].contains(row.kind) {
             if let key = row.toggleKey { state.spacesChrome.toggle(key, open: row.chevron == "open"); state.saveSpacesChrome() }
         } else if row.kind == .footerUsage {
             spacesClick(row, part: "link")
