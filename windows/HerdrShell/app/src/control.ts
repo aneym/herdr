@@ -4,6 +4,8 @@ import type { DocsState } from "./docs";
 import type { MachineStatus } from "./bridge";
 import type { SidebarRow } from "./model";
 import type { PaneController } from "./PaneTerm";
+import { appTheme } from "./theme";
+import type { Appearance } from "./theme";
 export interface ControlState { machine: MachineStatus; selected: string | null; docs: DocsState; rows: SidebarRow[]; panes: PaneController[]; focused: PaneController | undefined; open: (id: string) => void; action: (name: string) => Promise<void> }
 export function installControl(get: () => ControlState): () => void {
   let disposed = false;
@@ -29,7 +31,7 @@ export function installControl(get: () => ControlState): () => void {
     }
     return bridge.updateStatus();
   });
-  watch("ui", async () => { const state = get(); return { ok: true, machine: state.machine, selected_tab: state.selected, docs: state.docs, rows: state.rows.map(({ kind, id, label, status, hotkey }) => ({ kind, id, label, status, hotkey })), panes: state.panes.map(p => p.info()) }; });
+  watch("ui", async () => { const state = get(); return { ok: true, machine: state.machine, selected_tab: state.selected, appearance: { override: appTheme().override, mode: appTheme().mode }, docs: state.docs, rows: state.rows.map(({ kind, id, label, status, hotkey }) => ({ kind, id, label, status, hotkey })), panes: state.panes.map(p => p.info()) }; });
   watch<{ tab_id: string }>("open", async payload => { get().open(payload.tab_id); return { ok: true }; });
   watch<{ key: string }>("key", async payload => ({ ok: true, sent_b64: await focused().key(payload.key) }));
   watch<{ name: string }>("action", async payload => { await get().action(payload.name); return { ok: true }; });
@@ -38,6 +40,9 @@ export function installControl(get: () => ControlState): () => void {
     if (!pane?.chat) throw new Error("Pane unavailable");
     return pane.chat(payload.mode);
   });
+  // The window theme (title bar, WebView scheme) is set natively before this runs; the
+  // override lasts for this run only, like the Mac shell's --appearance.
+  watch<{ mode?: Appearance }>("appearance", async payload => { appTheme().setOverride(payload.mode ?? "system"); return { ok: true, override: appTheme().override, mode: appTheme().mode }; });
   watch<{ dy: number }>("wheel", async payload => { focused().wheel(payload.dy); return { ok: true }; });
   return () => { disposed = true; listeners.forEach(unlisten => unlisten()); };
 }

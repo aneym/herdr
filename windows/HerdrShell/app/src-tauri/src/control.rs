@@ -181,6 +181,22 @@ mod imp {
                 }
             }
             "read" => read_cmd(app),
+            "appearance" => {
+                let theme = match req.get("mode").and_then(|m| m.as_str()).unwrap_or("system") {
+                    "system" => None,
+                    "light" => Some(tauri::Theme::Light),
+                    "dark" => Some(tauri::Theme::Dark),
+                    _ => return json!({"ok": false, "error": "mode must be system, light or dark"}),
+                };
+                // The window theme drives the DWM title bar and the WebView's color scheme;
+                // the UI then applies the same override to its own tokens.
+                if let Some(w) = app.get_webview_window("main") {
+                    if let Err(e) = w.set_theme(theme) {
+                        return json!({"ok": false, "error": e.to_string()});
+                    }
+                }
+                forward_cmd(app, "appearance", req)
+            }
             cmd @ ("ui" | "open" | "key" | "wheel" | "action" | "chat" | "update") => {
                 forward_cmd(app, cmd, req)
             }

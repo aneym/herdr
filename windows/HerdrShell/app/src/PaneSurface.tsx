@@ -34,6 +34,6 @@ export default function PaneSurface(props: { pane: Pane; machine: string; focuse
   return <div className="pane-surface" onMouseDown={() => props.onFocus(pane.pane_id)}>
     <div className={`terminal-surface ${chat ? "terminal-hidden" : ""}`} aria-hidden={chat}><PaneTerm {...props} focused={props.focused && !chat} register={wrappedRegister} /></div>
     {mounted && hasAgent && <div className={`chat-surface ${chat ? "" : "chat-hidden"}`}><Chat machine={machine} pane={pane.pane_id} focused={props.focused} visible={chat} onItems={onItems} /></div>}
-    {hasAgent && <button className="pane-mode" title="Toggle chat (Ctrl+Shift+M)" onClick={() => set(chat ? "terminal" : "chat")}>{chat ? "Terminal" : "Chat"}</button>}
+    {hasAgent && <button className="pane-mode" title="Toggle chat" onClick={() => set(chat ? "terminal" : "chat")}>{chat ? "Terminal" : "Chat"}</button>}
   </div>;
 }

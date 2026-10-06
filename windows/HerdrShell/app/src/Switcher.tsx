@@ -26,7 +26,7 @@ export default function Switcher({ rows, selected, open, close }: { rows: Sideba
     }}>
       <input autoFocus aria-label="Filter tabs" placeholder="Find a tab…" value={query} onChange={event => { setQuery(event.target.value); setIndex(0); }} aria-controls="switcher-results" aria-activedescendant={results[active] ? `switcher-${active}` : undefined} />
       <div id="switcher-results" role="listbox" ref={list}>{results.map((row, i) => <button id={`switcher-${i}`} role="option" aria-selected={active === i} key={row.id} className={`sidebar-row ${active === i ? "selected" : ""}`} onMouseEnter={() => setIndex(i)} onClick={() => pick(row.id)}>
-        <Status status={row.status} /><span className="label">{row.label}</span><span className="muted">{row.spaceLabel}</span>{row.hotkey && <span className="muted hotkey">Ctrl+{row.hotkey}</span>}{selected === row.id && <span className="muted" aria-label="Current tab">✓</span>}
+        <Status status={row.status} /><span className="label">{row.label}</span><span className="muted">{row.spaceLabel}</span>{selected === row.id && <span className="muted" aria-label="Current tab">✓</span>}
       </button>)}{!results.length && <div className="muted empty-results">No matching tabs</div>}</div>
     </section>
   </div>;

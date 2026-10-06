@@ -9,17 +9,13 @@ import type { Mode } from "./bridge";
 import type { Pane } from "./model";
 import { copy, paste, controlKey, handleKey } from "./keys";
 import { Status } from "./Sidebar";
+import { appTheme, terminalThemes } from "./theme";
 export interface PaneController {
   chat?: (mode: "terminal" | "chat") => Promise<{ ok: boolean; items: number }>;
   toggleChat?: () => void;
   info: () => { pane_id: string; terminal_id: string; mode: "attach" | "observe" | "closed"; cols: number; rows: number; focused: boolean };
   type: (text: string) => Promise<void>; read: () => string; key: (key: string) => Promise<string | null>; wheel: (dy: number) => void; focus: () => void;
 }
-const theme = {
-  background: "#1e1e2e", foreground: "#cdd6f4", cursor: "#f5e0dc", cursorAccent: "#1e1e2e", selectionBackground: "#45475a",
-  black: "#45475a", red: "#f38ba8", green: "#a6e3a1", yellow: "#f9e2af", blue: "#89b4fa", magenta: "#f5c2e7", cyan: "#94e2d5", white: "#bac2de",
-  brightBlack: "#585b70", brightRed: "#f38ba8", brightGreen: "#a6e3a1", brightYellow: "#f9e2af", brightBlue: "#89b4fa", brightMagenta: "#f5c2e7", brightCyan: "#94e2d5", brightWhite: "#a6adc8",
-};
 export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, register }: { pane: Pane; machine: string; focused: boolean; onFocus: (id: string) => void; shortcut: (event: KeyboardEvent) => boolean; register: (id: string, value: PaneController | null) => void }) {
   const host = useRef<HTMLDivElement>(null);
   const element = useRef<HTMLDivElement>(null);
@@ -32,13 +28,14 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
   const takeover = useRef<() => void>(() => {});
   useEffect(() => {
     if (!host.current || !element.current) return;
-    const term = new Terminal({ fontFamily: "Cascadia Mono, Consolas, monospace", fontSize: 13, theme, scrollback: 0, allowProposedApi: true });
+    const term = new Terminal({ fontFamily: "Cascadia Mono, Consolas, monospace", fontSize: 13, theme: terminalThemes[appTheme().mode], scrollback: 0, allowProposedApi: true });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.loadAddon(new Unicode11Addon());
     term.unicode.activeVersion = "11";
     term.loadAddon(new WebLinksAddon((event, uri) => { if (event.ctrlKey) void bridge.openUrl(uri).catch(error => setNotice(String(error))); }));
     term.open(host.current);
+    const unsubscribeTheme = appTheme().subscribe(mode => { term.options.theme = terminalThemes[mode]; });
     try { const webgl = new WebglAddon(); webgl.onContextLoss(() => webgl.dispose()); term.loadAddon(webgl); } catch { /* DOM renderer remains available without WebGL. */ }
     let disposed = false;
     let handle: number | null = null;
@@ -145,7 +142,7 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
     const observer = new ResizeObserver(() => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (disposed) return; fit.fit(); if (handle != null && (term.cols !== sentCols || term.rows !== sentRows)) { sentCols = term.cols; sentRows = term.rows; void bridge.resize(handle, sentCols, sentRows).catch(error); } }, 50); });
     observer.observe(node);
     void open();
-    return () => { disposed = true; register(pane.pane_id, null); observer.disconnect(); clearTimeout(resizeTimer); clearTimeout(bellTimer); cancelAnimationFrame(wheelFrame); node.removeEventListener("wheel", onWheel, true); node.removeEventListener("contextmenu", onContext); data.dispose(); binary.dispose(); if (handle != null) void bridge.close(handle).catch(() => {}); term.dispose(); };
+    return () => { disposed = true; unsubscribeTheme(); register(pane.pane_id, null); observer.disconnect(); clearTimeout(resizeTimer); clearTimeout(bellTimer); cancelAnimationFrame(wheelFrame); node.removeEventListener("wheel", onWheel, true); node.removeEventListener("contextmenu", onContext); data.dispose(); binary.dispose(); if (handle != null) void bridge.close(handle).catch(() => {}); term.dispose(); };
   }, [machine, pane.pane_id, pane.terminal_id, register]);
   useEffect(() => { if (focused) host.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }, [focused]);
   return <div ref={element} className={`pane ${bell ? "bell" : ""}`} onMouseDown={() => { live.current.onFocus(pane.pane_id); host.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }}>

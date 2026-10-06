@@ -61,6 +61,11 @@ fn ctl_chat_result(result: serde_json::Value) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn ctl_appearance_result(result: serde_json::Value) -> Result<(), String> {
+    control::deliver_result("appearance", result)
+}
+
+#[tauri::command]
 fn ctl_wheel_result(result: serde_json::Value) -> Result<(), String> {
     control::deliver_result("wheel", result)
 }
@@ -83,6 +88,7 @@ fn main() {
             ctl_action_result,
             ctl_chat_result,
             ctl_wheel_result,
+            ctl_appearance_result,
             bridge::machines_list,
             bridge::snapshot,
             bridge::api_request,
