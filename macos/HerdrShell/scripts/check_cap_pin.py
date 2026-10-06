@@ -87,8 +87,10 @@ def main():
     b = made["tab"]["tab_id"]
     S.lab("herdr", "pane", "split", made["root_pane"]["pane_id"], "--direction", "right")
     agent = api("tab", "create", "--workspace", elsewhere, "--label", "lead", "--no-focus")["tab"]["tab_id"]
-    for tab in (a, agent):
-        S.lab("herdr", "tab", "pin", tab)
+    # a pin's priority orders it; a's -1 sorts it after any plain pin, so b ends up last
+    # only through the pin_move to the end, not through tab.set_pinned alone.
+    S.lab("herdr", "tab", "pin", agent)
+    S.lab("herdr", "tab", "pin", a, "--priority", "-1")
     S.lab("herdr", "tab", "set-role", agent, "agent")
     S.app("start")
     # SwiftUI drops synthesized mouse events on a window that is not key; the Space is the
