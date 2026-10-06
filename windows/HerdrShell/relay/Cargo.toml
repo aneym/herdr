@@ -1,0 +1,15 @@
+[package]
+name = "herdr-pipe-relay"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Standalone until the HerdrShell workspace exists; built on the PC only.
+[workspace]
+
+[dependencies]
+interprocess = "2.4.2"
+widestring = "1"
+
+[profile.release]
+opt-level = 3
