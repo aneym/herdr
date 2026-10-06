@@ -112,8 +112,10 @@ else:
 # pinned_and_lane_rows_follow_the_endpoint_chat_status_over_a_stale_busy_overlay.
 for work, want_tone, want_run in [("done", "done", "✓"), ("working", "working", "◐")]:
     stale = json.loads((FIXTURES / "live-child-working.json").read_text())
-    stale["input"]["tabs"][0].update(pinIndex=0, status="done", work=work,
-                                     agents=[{"status": work}])
+    # The agents report the opposite of work, so the rows can only follow the work fact.
+    other = "working" if work == "done" else "done"
+    stale["input"]["tabs"][0].update(pinIndex=0, status=other, work=work,
+                                     agents=[{"status": other}])
     stale["overlay"]["tabs"]["lane"].update(busy=True, runs=[
         {"id": "agent:agent-atrial-chase-lists-c98d7b9ae81a05d0", "name": "trial-chase-lists", "phase": "opus-seat"}])
     stale["chrome"]["expandedTabs"] = ["lane"]

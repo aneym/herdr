@@ -24,6 +24,9 @@ pub(crate) struct FactoryOverlayPoller {
     last_space_groups: Option<Vec<crate::factory_overlay::SpaceGroup>>,
     pub(crate) revision: u64,
     pub(crate) current: Option<Arc<FactoryOverlay>>,
+    /// mtime of the last overlay that parsed. A malformed rewrite keeps the
+    /// old overlay and must not make it look freshly written.
+    current_written: Option<SystemTime>,
     logged_errors: HashSet<String>,
 }
 
@@ -77,6 +80,7 @@ impl FactoryOverlayPoller {
         match crate::factory_overlay::parse(&bytes) {
             Ok(mut overlay) => {
                 self.apply_space_groups(&mut overlay, &areas_path);
+                self.current_written = modified;
                 self.publish(Some(Arc::new(overlay)), stamp_changed)
             }
             Err(error) => {
@@ -130,7 +134,7 @@ impl FactoryOverlayPoller {
     /// When the current overlay file was last written, for freshness checks.
     pub(crate) fn written(&self) -> Option<SystemTime> {
         self.current.as_ref()?;
-        self.last_seen.as_ref()?.modified
+        self.current_written
     }
 
     fn log_error(&mut self, error: String) {
@@ -183,6 +187,45 @@ mod tests {
         assert_eq!(poller.revision, 3);
         assert!(poller.poll(Some(&path)).is_none());
         fs::remove_dir(&dir).unwrap();
+    }
+
+    /// Review of bbbf052a: a malformed rewrite after a valid overlay went
+    /// stale kept the old overlay but reported the failed write's mtime, so
+    /// its expired workflows read working again.
+    #[test]
+    fn factory_overlay_poller_keeps_the_parsed_overlays_write_time_over_a_malformed_rewrite() {
+        let dir = std::env::temp_dir().join(format!(
+            "herdr-factory-written-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&dir).unwrap();
+        let path = dir.join("overlay.json");
+        let set_mtime = |at: SystemTime| {
+            fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_times(fs::FileTimes::new().set_modified(at))
+                .unwrap();
+        };
+        let valid_at = SystemTime::now() - Duration::from_secs(300);
+        let mut poller = FactoryOverlayPoller::default();
+        fs::write(&path, br#"{"version":1,"tabs":{"one":{"kind":"workflow"}}}"#).unwrap();
+        set_mtime(valid_at);
+        let valid_at = fs::metadata(&path).unwrap().modified().unwrap();
+        assert!(poller.poll(Some(&path)).is_some());
+        assert_eq!(poller.written(), Some(valid_at));
+
+        fs::write(&path, b"not json").unwrap();
+        set_mtime(valid_at + Duration::from_secs(121));
+        assert!(poller.poll(Some(&path)).is_none());
+        assert!(poller.current.is_some());
+        assert_eq!(poller.written(), Some(valid_at));
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

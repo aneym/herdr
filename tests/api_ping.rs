@@ -2640,6 +2640,26 @@ fn claude_screen_state_ignores_leftover_shells_and_keeps_workflow_waits_working(
             ),
             "idle",
         ),
+        // Review of 930c81aa: a connection question under a spinner title
+        // still blocks; the title rule must not outrank the dialog.
+        (
+            "connection-permission-spinner-title",
+            "◐ Lane brief",
+            format!(
+                "✻ Waiting for 1 dynamic workflow to finish\n{rule}\n Do you want to allow this connection?\n ❯ Yes\n   No\n"
+            ),
+            "blocked",
+        ),
+        // Review of 8ea85fdf: "esc to interrupt" advice in the transcript is
+        // not the footer; a resting chat with only teammates reads idle.
+        (
+            "esc-advice-teammates-at-rest",
+            "◐ Lane brief",
+            format!(
+                "  To stop a job, press esc to interrupt.\n{rule}\n❯\n{rule}\n  ⏵⏵ bypass permissions on · ctx 33%\n  ◯ reviewer  2m 3s\n"
+            ),
+            "idle",
+        ),
     ];
     // `claude <case>` sets the case's OSC title (none when empty), draws its
     // screen, then holds the pane until the test stops it.

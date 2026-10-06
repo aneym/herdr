@@ -1,5 +1,5 @@
 id = "claude"
-version = "2026.10.06.5"
+version = "2026.10.06.6"
 min_engine_version = 2
 updated_at = "2026-10-06T00:00:00Z"
 aliases = ["claude-code"]
@@ -28,7 +28,9 @@ region = "bottom_non_empty_lines(24)"
 # within six lines under it, past the footer, blank lines and the "main" row.
 regex = ['(?m)^─[^\n]*\n[ \t]*❯[^\n]*(?:\n[ \t]+[^\n]*){0,8}\n─[^\n]*\n(?:[^\n]*\n){0,6}[ \t]*◯[ \t]+\S']
 not = [
-  { line_regex = ['esc to i'] },
+  # "esc to interrupt" in the footer under the prompt box, not anywhere in
+  # the transcript ("press esc to interrupt" advice above a resting prompt).
+  { regex = ['(?m)^─[^\n]*\n[ \t]*❯[^\n]*(?:\n[ \t]+[^\n]*){0,8}\n─[^\n]*\n(?:[^\n]*\n){0,2}[^\n]*esc to i'] },
   { line_regex = ['^\s*[\x{002A}\x{00B7}\x{2722}\x{2733}\x{2736}\x{273B}\x{273D}]\s+\S.*…'] },
   # The live wait line directly above the prompt box, as background_agents_working reads it.
   { regex = ['(?m)^[\x{002A}\x{00B7}\x{2722}\x{2736}\x{273B}\x{273D}][ \t]+Waiting for [1-9]\d* (?:background agents?|dynamic workflows?) to finish(?:[ \t]+·[^\n]*)?[ \t]*\n(?:(?:[ \t]+[^\n]*)?\n){0,6}─[^\n]*\n[ \t]*❯'] },
@@ -210,6 +212,21 @@ all = [
     { line_regex = ['(?i)^\s*❯?\s*2\.\s*no\b'] },
     { line_regex = ['(?i)^\s*❯?\s*3\.\s*no\b'] },
   ] },
+]
+
+# A connection question that replaced the prompt box blocks even while the
+# title keeps its spinner (a workflow or teammate wait), so it sits above
+# osc_title_working like the other dialog rules.
+[[rules]]
+id = "connection_permission_prompt"
+state = "blocked"
+priority = 1150
+region = "after_last_horizontal_rule"
+visible_blocker = true
+contains = ["do you want to allow this connection?"]
+any = [
+  { line_regex = ['(?i)^\s*❯?\s*(?:1\.\s*)?yes\b'] },
+  { line_regex = ['(?i)^\s*❯?\s*(?:[23]\.\s*)?no\b'] },
 ]
 
 [[rules]]

@@ -1328,13 +1328,16 @@ fn pinned_and_lane_rows_follow_the_endpoint_chat_status_over_a_stale_busy_overla
         snapshot.tabs.retain(|tab| tab.tab_id == "lane-a");
         snapshot.agents.retain(|agent| agent.tab_id == "lane-a");
         overlay.tabs.retain(|id, _| id == "lane-a");
-        snapshot.agents[0].agent_status = reported;
+        // The agents report the opposite of the work fact, so the rows can
+        // only read `reported` by following work_status.
+        let other = if working { AgentStatus::Done } else { AgentStatus::Working };
+        snapshot.agents[0].agent_status = other;
         let lane = snapshot
             .tabs
             .iter_mut()
             .find(|tab| tab.tab_id == "lane-a")
             .unwrap();
-        lane.agent_status = reported;
+        lane.agent_status = other;
         lane.work_status = Some(reported);
         snapshot.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
             tab_id: "lane-a".into(),
