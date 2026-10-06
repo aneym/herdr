@@ -1,14 +1,14 @@
-HerdrShell trackpad scroll check  2026-10-06T22:00:35Z
+HerdrShell trackpad scroll check  2026-10-06T22:15:14Z
 attach binary: /Users/aneyman/.local/bin/herdr
 app start (Cua Space): {"space": "herdr-qa", "ip": "192.168.64.5", "herdr_sha": "0e4999fd3fea"}
-{"space": "herdr-qa", "app_pid": "6850", "exe": "/Users/lume/.herdr-space/bin/HerdrShel
+{"space": "herdr-qa", "app_pid": "8300", "exe": "/Users/lume/.herdr-space/bin/HerdrShel
 frame log (std swipe): /Volumes/StudioExt/repos/herdr-wt/scroll-feel/macos/HerdrShell/checks/scroll-space-frames.tsv  (# events=70 precise=70 interval_ms=8.333333333333334)
 screenshot: /Volumes/StudioExt/repos/herdr-wt/scroll-feel/macos/HerdrShell/checks/scroll-space-frames.png
 [PASS] slow swipe scrolls Ghostty.app's rows -- Shell 11, Ghostty 10
 [PASS] medium swipe scrolls Ghostty.app's rows -- Shell 19, Ghostty 18
 [PASS] std swipe scrolls Ghostty.app's rows -- Shell 40, Ghostty 38
 [PASS] fast swipe scrolls Ghostty.app's rows -- Shell 58, Ghostty 55
-std cadence: 23 visible changes, rows per change [1, 2, 3], ms between changes median 17.2 max 50.6
+std cadence: 23 visible changes, rows per change [1, 2, 3], ms between changes median 16.8 max 50.5
 [PASS] every gesture event reached the surface as precise -- # events=70 precise=70 interval_ms=8.333333333333334
 lab down: stop: 0
 

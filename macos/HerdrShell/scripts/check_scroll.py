@@ -27,7 +27,7 @@ Lab `shellspike-scroll`; pane 1 of "shell spike" holds 3000 numbered lines.
    a resumed 3000-row transcript, fullscreen) runs in the lab pane and gets 38 reports 8
    ms apart through the Shell's attach. Both must scroll one row per report (within 15%).
    The setting comes from ~/.claude/settings.json (`user`); `on`/`off` force it, and `on`
-   fails, as the head did before the setting.
+   fails, as the head did before the setting (checks/scroll-accel-on.txt).
 3. --space: the dev app in the Cua Space, attaching with --attach-bin (default
    HERDR_SHELL_BIN) over the forwarded lab socket. Four trackpad swipes (scroll_gesture
    hook: slow, medium, std, fast; see PROFILES) run; each must scroll Ghostty.app's rows
@@ -393,7 +393,7 @@ def main():
         say(f"screenshot: {shot}")
         for name, want in GHOSTTY_ROWS.items():
             got = moved.get(name, 0)
-            check(f"{name} swipe scrolls Ghostty.app's rows", abs(got - want) <= max(2, GHOSTTY_TOLERANCE * want),
+            check(f"{name} swipe scrolls Ghostty.app's rows", abs(got - want) <= GHOSTTY_TOLERANCE * want,
                   f"Shell {got}, Ghostty {want}")
         jumps = [d for _, d in changes]
         gaps = [b[0] - a[0] for a, b in zip(changes, changes[1:])]
