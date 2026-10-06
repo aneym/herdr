@@ -43,10 +43,12 @@ def sandbox(holder_age_s):
     return home, lock
 
 
-def run(home, *args):
-    env = {"HOME": str(home), "PATH": "/usr/bin:/bin", "HERDR_SPACE_OWNER": "seat-b"}
+def run(home, *args, code=None):
+    env = {"HOME": str(home), "PATH": "/usr/bin:/bin", "HERDR_SPACE_OWNER": "seat-b",
+           "PYTHONDONTWRITEBYTECODE": "1"}
     t0 = time.time()
-    r = subprocess.run([sys.executable, str(SCRIPT), *args], env=env, capture_output=True, text=True,
+    argv = [sys.executable, "-c", code, str(SCRIPT)] if code is not None else [sys.executable, str(SCRIPT), *args]
+    r = subprocess.run(argv, env=env, capture_output=True, text=True,
                        stdin=subprocess.DEVNULL, timeout=60)
     return r, time.time() - t0
 
@@ -78,13 +80,50 @@ for args, rc in ((("stop",), 75), (("down",), 75), (("stop", "--force"), 75), ((
     check(f"held: {label} stops nothing", backend(r) == [] and (lock / "owner").exists(), str(backend(r)))
     shutil.rmtree(home)
 
-# 3. A stale holder (16 minutes, no owner process): start breaks it and reaches the
+# 3. A stale holder (16 minutes, recorded dead owner process): start breaks it and reaches the
 #    backend (which fails here), then drops the lock it took. Shows case 1 is not vacuous.
 home, lock = sandbox(holder_age_s=16 * 60)
+dead = subprocess.Popen([sys.executable, "-c", "pass"], stdin=subprocess.DEVNULL)
+dead.wait()
+(lock / "pid").write_text(str(dead.pid))
 r, _ = run(home, *START, "--wait", "2")
 check("stale: start breaks the lock", "broke a stale lock held by seat-a" in r.stderr, r.stderr.strip()[-200:])
 check("stale: start reaches the backend", backend(r) == ["lume-serve-ext"], str(backend(r)))
 check("stale: a failed start releases its lock", not lock.exists())
+shutil.rmtree(home)
+
+# 4. An aged manual lock has unknown process liveness: start cannot break it, but
+#    explicit --force can. These CLI checks exercise the real filesystem boundary.
+home, lock = sandbox(holder_age_s=16 * 60)
+before = (lock / "owner").read_text()
+r, _ = run(home, *START, "--wait", "0")
+check("manual: aged lock makes start exit 75", r.returncode == 75, f"rc={r.returncode} stderr={r.stderr.strip()[-300:]}")
+check("manual: start leaves the lock untouched", (lock / "owner").exists() and (lock / "owner").read_text() == before)
+check("manual: start calls no backend", backend(r) == [], str(backend(r)))
+shutil.rmtree(home)
+home, lock = sandbox(holder_age_s=16 * 60)
+r, _ = run(home, "stop", "--force")
+check("manual: force breaks the aged lock", backend(r) == ["cua"] and not lock.exists(), f"rc={r.returncode} backend={backend(r)}")
+shutil.rmtree(home)
+
+# 5. A breaker with an obsolete observation must not move a new holder's directory,
+#    even transiently. An audit hook observes real filesystem renames without mocking
+#    lock code; a final-state assertion alone misses the old rename-back race.
+home, lock = sandbox(holder_age_s=0)
+r, _ = run(home, code='''
+import importlib.util, pathlib, sys
+spec = importlib.util.spec_from_file_location("space", sys.argv[1])
+space = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(space)
+lock = pathlib.Path(space.LOCK)
+before = (lock / "owner").read_text()
+renames = []
+sys.addaudithook(lambda event, args: renames.append(args) if event == "os.rename" else None)
+assert space.lock_break({"owner": "old-seat", "epoch": 1, "pid": 0}) is False
+assert (lock / "owner").read_text() == before
+assert not renames, f"fresh lock was moved: {renames}"
+''')
+check("breaker: stale observation leaves fresh lock unmoved", r.returncode == 0, r.stderr.strip()[-300:])
 shutil.rmtree(home)
 
 print(f"RESULT: {'PASS' if not failures else 'FAIL ' + ', '.join(failures)}")

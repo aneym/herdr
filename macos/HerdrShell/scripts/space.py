@@ -31,7 +31,7 @@ owner file "<name> <epoch>") before touching the app. While another owner holds 
 start prints "waiting for <owner>", polls every 10 s and exits 75 after --wait seconds
 (default 240). stop and down act only for the holder (or on a free lock) and exit 75
 otherwise; stop --if-mine exits 0 instead, for cleanup before a check. --force breaks a
-stale lock (older than 15 minutes, owner process gone). The owner name is HERDR_SPACE_OWNER, else
+stale lock (older than 15 minutes, owner process gone or no recorded pid). The owner name is HERDR_SPACE_OWNER, else
 this agent session's id; set HERDR_SPACE_OWNER when several agents share one session.
 exec, driver, shot, fifo and pull by the holder refresh the lock's age.
 
@@ -72,8 +72,8 @@ PY = "/opt/homebrew/bin/python3"
 # The Space has one desktop, and start replaces whatever app runs there (incident
 # 2026-10-06 11:15 ET: one seat's `start --live` killed another seat's check mid-run).
 # The lock is the manual one seats take by hand: mkdir, an owner file "<name> <epoch>",
-# rm -rf after stop, stale after 15 minutes. The pid file beside it is ours: a lock whose
-# owner process still runs never goes stale.
+# rm -rf after stop. A manual lock older than 15 minutes requires --force to break.
+# The pid file beside it is ours: a lock whose owner process still runs never goes stale.
 LOCK = os.path.expanduser(f"~/.agent-rails/locks/{SPACE}-space")
 STALE_S = 15 * 60
 EX_TEMPFAIL = 75
@@ -120,7 +120,7 @@ def lock_stale(info):
     if lock_age(info) <= STALE_S:
         return False
     if info["pid"] <= 0:
-        return True
+        return False
     try:
         os.kill(info["pid"], 0)
     except ProcessLookupError:
@@ -136,22 +136,25 @@ def lock_write(name):
 
 
 def lock_break(seen):
-    """Remove the stale lock `seen`. It is renamed aside first and checked, so a holder
-    that replaced it in the meantime keeps its lock."""
+    """Serialize breakers and re-check `seen` before moving the lock aside."""
+    mutex = f"{LOCK}.break"
     aside = f"{LOCK}.stale-{os.getpid()}"
     try:
-        os.rename(LOCK, aside)
+        os.mkdir(mutex)
     except OSError:
         return False
-    moved = lock_read(aside) or {}
-    if (moved.get("owner"), moved.get("epoch")) != (seen["owner"], seen["epoch"]):
+    try:
+        cur = lock_read() or {}
+        if (cur.get("owner"), cur.get("epoch")) != (seen["owner"], seen["epoch"]):
+            return False
         try:
-            os.rename(aside, LOCK)
+            os.rename(LOCK, aside)
         except OSError:
-            pass
-        return False
-    shutil.rmtree(aside, ignore_errors=True)
-    return True
+            return False
+        shutil.rmtree(aside, ignore_errors=True)
+        return True
+    finally:
+        os.rmdir(mutex)
 
 
 def lock_take(name, wait):
@@ -192,9 +195,10 @@ def lock_claim(name, force):
         if not force:
             die(f"the Space is held by {cur['owner']} ({lock_age(cur)}s), not {name}. If that run is yours, "
                 f"set HERDR_SPACE_OWNER={cur['owner']}; if it is stale, use --force", EX_TEMPFAIL)
-        if not lock_stale(cur):
+        manual_stale = cur["pid"] <= 0 and lock_age(cur) > STALE_S
+        if not (lock_stale(cur) or manual_stale):
             die(f"the lock of {cur['owner']} ({lock_age(cur)}s) is not stale: it needs {STALE_S // 60} minutes "
-                "and its owner process gone", EX_TEMPFAIL)
+                "and its owner process gone or no recorded pid", EX_TEMPFAIL)
         if not lock_break(cur):
             die("the lock changed while breaking it; run status", EX_TEMPFAIL)
     lock_take(name, 0)
