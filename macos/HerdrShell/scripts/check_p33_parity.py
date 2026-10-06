@@ -58,6 +58,15 @@ if -1 in at or at != sorted(at) or at[1] != at[0] + 1 or refolded != base_rows(f
     failures.append("default-folded lane toggle")
 else:
     print("PASS default-folded lane opens on one click and folds on the next")
+focused = dict(fresh, input=dict(fresh["input"], focusedTab="wf-a"))
+fixture = BUILD / "base-focused.json"
+fixture.write_text(json.dumps(focused))
+held = base_rows(fixture)
+clicked = subprocess.check_output([str(DRIVER), str(fixture), "tab:lane-a"], text=True).splitlines()
+if not any(r.startswith("tab|tab:lane-a|1|open|") for r in held) or not any(r.startswith("tab|tab:lane-a|1|closed|") for r in clicked):
+    failures.append("focus-held lane folds on one click")
+else:
+    print("PASS a lane held open by focus folds on one click")
 if failures:
     raise SystemExit("FAIL: " + ", ".join(failures))
 print("PASS P33 parity")
