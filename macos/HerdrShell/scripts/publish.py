@@ -87,6 +87,40 @@ def serialized_delivery(fn):
     return locked
 
 
+BUILD_LOCK = os.environ.get("HERDR_STUDIO_BUILD_LOCK", f"{HOME}/.agent-rails/locks/studio-build")
+BUILD_LOCK_STALE = 30 * 60
+
+
+@contextmanager
+def studio_build_lock():
+    """Studio runs one build at a time (Rails orchestrator rule, 2026-10-06): the shared
+    mkdir lock with an owner file "<name> <epoch>", stale after 30 minutes."""
+    os.makedirs(os.path.dirname(BUILD_LOCK), exist_ok=True)
+    announced = False
+    while True:
+        try:
+            os.mkdir(BUILD_LOCK)
+            break
+        except FileExistsError:
+            try:
+                age = time.time() - os.stat(f"{BUILD_LOCK}/owner").st_mtime
+            except OSError:
+                age = time.time() - os.stat(BUILD_LOCK).st_mtime
+            if age > BUILD_LOCK_STALE:
+                shutil.rmtree(BUILD_LOCK, ignore_errors=True)
+                continue
+            if not announced:
+                log("waiting for the studio-build lock")
+                announced = True
+            time.sleep(20)
+    try:
+        with open(f"{BUILD_LOCK}/owner", "w") as f:
+            f.write(f"herdr-shell-publish {int(time.time())}\n")
+        yield
+    finally:
+        shutil.rmtree(BUILD_LOCK, ignore_errors=True)
+
+
 def git(*a):
     return subprocess.run(["git", "-C", REPO, *a], capture_output=True, text=True, check=True).stdout.strip()
 
@@ -143,7 +177,7 @@ def publish(ref):
     script = f"{wt}/macos/HerdrShell/scripts/release.sh"
     # release.sh stages Studio itself; hold the delivery lock through the build and the read of
     # what it staged, so a local (Studio) fanout never swaps staged/ in between.
-    with open(f"{LOGDIR}/build.log", "a") as out, delivery_lock():
+    with open(f"{LOGDIR}/build.log", "a") as out, studio_build_lock(), delivery_lock():
         r = subprocess.run(["bash", script, sha], stdout=out, stderr=subprocess.STDOUT,
                            env={**os.environ, "HERDR_REPO": REPO})
         if r.returncode != 0:

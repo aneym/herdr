@@ -123,7 +123,7 @@ def main():
     )
     proof_path = os.path.join(update_root, "swap-proof.txt")
     proof = open(proof_path).read() if os.path.isfile(proof_path) else ""
-    check("swap", "installed=new" in proof and "previous=old" in proof, proof.replace("\n", " "))
+    check("swap", "installed=new" in proof and "leftovers=\n" in proof, proof.replace("\n", " "))
 
     def load_json(path):
         if not os.path.isfile(path):

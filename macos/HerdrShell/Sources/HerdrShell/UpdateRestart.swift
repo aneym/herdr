@@ -158,22 +158,29 @@ enum UpdateRestart {
         }
     }
 
+    static let lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+
+    /// Replaces the installed app with the staged one. The two bundles trade places in one
+    /// renamex_np(RENAME_SWAP), so the app's path never goes missing: moving the app aside and
+    /// the new one in left Raycast's app index without Herdr Shell (2026-10-06). The old bundle
+    /// is unregistered and deleted, and the new one registered, so LaunchServices holds one copy.
     @discardableResult
     static func apply(installRoot: URL, support: URL, relaunch how: Relaunch) -> Bool {
         let fm = FileManager.default
         let app = installRoot.appendingPathComponent(appName)
-        let previous = installRoot.appendingPathComponent(appName + ".previous")
         let incoming = installRoot.appendingPathComponent(appName + ".incoming")
         let staged = stagedApp(support)
         let stagedCommit = StagedRelease.load(support: support)?.commit ?? ""
+        // Left behind by the swap this replaced (move aside, then move in).
+        discard(installRoot.appendingPathComponent(appName + ".previous"))
         if let why = corruptReason(staged) {
             writeFailure(support: support, commit: stagedCommit, reason: why, bad: true)
             if fm.fileExists(atPath: app.path) { spawn(app, how) }
             return false
         }
-        var replaced = false
+        var swapped = false
+        var movedIn = false
         do {
-            if fm.fileExists(atPath: previous.path) { try fm.removeItem(at: previous) }
             if fm.fileExists(atPath: incoming.path) { try fm.removeItem(at: incoming) }
             try copyBundle(staged, incoming)
             if corruptReason(incoming) != nil {
@@ -181,41 +188,67 @@ enum UpdateRestart {
                 throw NSError(domain: "ShellUpdate", code: 2, userInfo: [NSLocalizedDescriptionKey: "staged app is corrupt"])
             }
             if fm.fileExists(atPath: app.path) {
-                try fm.moveItem(at: app, to: previous)
-                replaced = true
+                try exchange(incoming, app)
+                swapped = true
+            } else {
+                try fm.moveItem(at: incoming, to: app)
+                movedIn = true
             }
-            try fm.moveItem(at: incoming, to: app)
             if corruptReason(app) != nil {
                 throw NSError(domain: "ShellUpdate", code: 2, userInfo: [NSLocalizedDescriptionKey: "staged app is corrupt"])
             }
+            discard(incoming)
+            register(app)
             try fm.removeItem(at: staged)
             try? fm.removeItem(at: support.appendingPathComponent("update.log"))
             spawn(app, how)
             return true
         } catch {
             let reason = (error as NSError).localizedDescription.replacingOccurrences(of: "\n", with: " ")
-            if replaced || !fm.fileExists(atPath: app.path) {
-                restore(app: app, previous: previous, incoming: incoming, installRoot: installRoot)
-            } else {
-                try? fm.removeItem(at: incoming)
+            if swapped {
+                // The old bundle is at `incoming`; trade back.
+                try? exchange(incoming, app)
+            } else if movedIn {
+                let broken = installRoot.appendingPathComponent(appName + ".broken")
+                try? fm.removeItem(at: broken)
+                try? fm.moveItem(at: app, to: broken)
             }
+            try? fm.removeItem(at: incoming)
             writeFailure(support: support, commit: stagedCommit, reason: reason, bad: corruptReason(staged) != nil)
             if fm.fileExists(atPath: app.path) { spawn(app, how) }
             return false
         }
     }
 
-    static func restore(app: URL, previous: URL, incoming: URL, installRoot: URL) {
-        let fm = FileManager.default
-        let broken = installRoot.appendingPathComponent(appName + ".broken")
-        try? fm.removeItem(at: incoming)
-        if fm.fileExists(atPath: app.path) {
-            try? fm.removeItem(at: broken)
-            try? fm.moveItem(at: app, to: broken)
+    /// Atomically trades the two paths' contents (both must exist, on one volume).
+    static func exchange(_ a: URL, _ b: URL) throws {
+        guard renamex_np(a.path, b.path, UInt32(RENAME_SWAP)) == 0 else {
+            let why = String(cString: strerror(errno))
+            throw NSError(domain: "ShellUpdate", code: 5, userInfo: [NSLocalizedDescriptionKey: "swap failed: \(why)"])
         }
-        if fm.fileExists(atPath: previous.path) {
-            try? fm.moveItem(at: previous, to: app)
-        }
+    }
+
+    /// Drops a bundle and its LaunchServices record.
+    static func discard(_ bundle: URL) {
+        guard FileManager.default.fileExists(atPath: bundle.path) else { return }
+        runLSRegister(["-u", bundle.path])
+        try? FileManager.default.removeItem(at: bundle)
+    }
+
+    static func register(_ app: URL) { runLSRegister(["-f", app.path]) }
+
+    private static func runLSRegister(_ args: [String]) {
+        // Only the real install is LaunchServices' business; a selftest root holds fake bundles.
+        guard let path = args.last,
+              URL(fileURLWithPath: path).deletingLastPathComponent().standardizedFileURL.path
+                == Channel.installRoot.standardizedFileURL.path else { return }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: lsregister)
+        p.arguments = args
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        do { try p.run() } catch { return }
+        p.waitUntilExit()
     }
 
     /// Production relaunch argv. `SHELL_OPEN_BIN` replaces the executable for a selftest.
@@ -374,8 +407,10 @@ enum UpdateSelfTest {
 
         let restart = waitJSON(support.appendingPathComponent("restart.json"), timeout: 5)
         let installed = marker(installedApp)
-        let previous = marker(apps.appendingPathComponent(UpdateRestart.appName + ".previous"))
-        let proof = "installed=\(installed)\nprevious=\(previous)\n"
+        let leftovers = [".previous", ".incoming"].filter {
+            fm.fileExists(atPath: apps.appendingPathComponent(UpdateRestart.appName + $0).path)
+        }
+        let proof = "installed=\(installed)\nleftovers=\(leftovers.joined(separator: ","))\n"
         try Data(proof.utf8).write(to: root.appendingPathComponent("swap-proof.txt"))
         let openArgv = (try? JSONSerialization.jsonObject(with: Data(contentsOf: sink))) as? [String] ?? []
         unsetenv("SHELL_OPEN_DRY")
@@ -454,9 +489,9 @@ enum UpdateSelfTest {
                 "notes": different?.notes ?? [],
             ],
             "swap": [
-                "ok": installed == "new" && previous == "old",
+                "ok": installed == "new" && leftovers.isEmpty,
                 "installed": installed,
-                "previous": previous,
+                "leftovers": leftovers,
             ],
             "open_argv": openArgv,
             "rollback": corruptProof,
@@ -466,7 +501,7 @@ enum UpdateSelfTest {
         guard let data = try? JSONSerialization.data(withJSONObject: out, options: [.sortedKeys]) else { exit(1) }
         FileHandle.standardOutput.write(data)
         FileHandle.standardOutput.write(Data("\n".utf8))
-        let swapOK = installed == "new" && previous == "old"
+        let swapOK = installed == "new" && leftovers.isEmpty
         let openOK = openArgv == ["/usr/bin/open", installedApp.path]
         let rolled = !corruptOK && restored == "good" && logText.contains("corrupt") && logText.hasPrefix("bad ")
             && corruptPill == "hidden" && corruptOffer == nil && stagedRemains && newerPill == "update"

@@ -112,10 +112,25 @@ def publish_side():
         check("a burst of pushes builds once, at the last commit", got == [c3], f"builds {got} (c1 {c1[:8]}, c3 {c3[:8]})")
         check("the build waits for the quiet window", time.time() - t0 >= 2.5, f"{time.time() - t0:.1f} s after the last push")
 
+        # Another seat's Studio build holds the studio-build lock: the Shell build waits for it.
+        lock = os.path.join(home, ".agent-rails", "locks", "studio-build")
+        os.makedirs(lock)
+        with open(os.path.join(lock, "owner"), "w") as f:
+            f.write(f"other-seat {int(time.time())}\n")
+        c5 = commit(seed, "macos/HerdrShell/a.txt", "5\n", "shell 5")
+        p = watch(background=True)
+        time.sleep(8)
+        held = builds()[2:]
+        shutil.rmtree(lock)
+        p.wait(timeout=120)
+        check("a held studio-build lock holds the build", held == [] and builds()[2:] == [c5],
+              f"while held {held}, after {builds()[2:]}")
+        check("the build releases the studio-build lock", not os.path.exists(lock))
+
         # A push that leaves macos/HerdrShell alone builds nothing.
         commit(seed, "src/main.rs", "fn main() {}\n", "rust only")
         watch()
-        check("a push without Shell changes builds nothing", len(builds()) == 2, f"builds {len(builds())}")
+        check("a push without Shell changes builds nothing", len(builds()) == 3, f"builds {len(builds())}")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
