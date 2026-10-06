@@ -120,14 +120,14 @@ enum MachineRows {
             let health = m.problem != nil ? "unreachable" : mismatch ? "needs update" : nil
             return MachineMerge.Machine(name: m.name, health: health, spaces: s.workspaces.map {
                 SpacesInput.Space(id: $0.workspace_id, name: $0.label ?? $0.workspace_id,
-                                  pinned: $0.tokens?["pinned"] == "true", collapsed: $0.tokens?["hidden"] == "true")
+                                  pinned: $0.tokens?["pinned"] == "true", collapsed: $0.tokens?["hidden"] == "true", sortRank: $0.sort_rank ?? 0, parked: $0.parked ?? false)
             }, tabs: s.tabs.map { tab in
                 SpacesInput.Tab(id: tab.tab_id, space: tab.workspace_id, label: tab.label ?? "tab \(tab.number)",
                     agents: s.agents.filter { $0.tab_id == tab.tab_id }.map { agent in
                         let parentPane = agent.tokens?["parent_pane_id"] ?? agent.ownership?.current?.pane_id
                         return SpacesInput.Agent(status: agent.agent_status ?? "unknown",
                                                  parent: s.agents.first { $0.pane_id == parentPane }?.tab_id)
-                    }, status: tab.agent_status ?? "unknown", pinIndex: tab.pin_index, work: tab.work_status, role: tab.role)
+                    }, status: tab.agent_status ?? "unknown", pinIndex: tab.pin_index, work: tab.work_status, role: tab.role, sortRank: tab.sort_rank ?? 0)
             })
         }
     }

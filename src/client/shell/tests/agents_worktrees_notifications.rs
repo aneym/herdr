@@ -100,6 +100,8 @@ fn grouped_worktrees_render_parent_branch_and_indented_child() {
         is_linked_worktree: false,
     });
     snapshot.workspaces.push(ClientShellWorkspace {
+        sort_rank: 0,
+        parked: false,
         visible_in_profile: true,
         workspace_id: "ws_2".into(),
         active_tab_id: "tab_ws2".into(),

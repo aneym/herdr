@@ -27,6 +27,8 @@ pub(super) struct ClientTreeChromePreferences {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(super) collapsed_spaces: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(super) expanded_parked_spaces: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(super) collapsed_tabs: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(super) pinned_spaces: Vec<String>,
@@ -64,6 +66,7 @@ impl Default for ClientTreeChromePreferences {
             show_tabs: true,
             show_agents: true,
             collapsed_spaces: Vec::new(),
+            expanded_parked_spaces: Vec::new(),
             collapsed_tabs: Vec::new(),
             pinned_spaces: Vec::new(),
             show_hidden_spaces: true,
@@ -151,6 +154,7 @@ pub(super) fn migrated_from_session(
             show_tabs: session.tree_show_tabs,
             show_agents: session.tree_show_agents,
             collapsed_spaces: sorted(session.tree_collapsed_spaces),
+            expanded_parked_spaces: Vec::new(),
             collapsed_tabs: sorted(session.tree_collapsed_tabs),
             pinned_spaces: sorted(session.tree_pinned_spaces),
             show_hidden_spaces: session.tree_show_hidden_spaces,

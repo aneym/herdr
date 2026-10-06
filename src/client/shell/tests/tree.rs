@@ -7,6 +7,7 @@ use crate::client::shell::tree::{tree_list_entries, AgentPanelListEntry, ClientT
 
 fn tab(tab_id: &str, workspace_id: &str, number: usize, label: &str) -> ClientShellTab {
     ClientShellTab {
+        sort_rank: 0,
         desk_count: 0,
         tab_id: tab_id.into(),
         workspace_id: workspace_id.into(),
@@ -54,6 +55,8 @@ fn agent(
 pub(super) fn tree_snapshot() -> ClientShellSnapshot {
     let mut snapshot = snapshot();
     snapshot.workspaces.push(ClientShellWorkspace {
+        sort_rank: 0,
+        parked: false,
         visible_in_profile: true,
         workspace_id: "ws_2".into(),
         active_tab_id: "tab_3".into(),
@@ -1772,4 +1775,79 @@ fn agent_pin_appears_only_in_agents_while_plain_pin_stays_in_space() {
             "tab:three",
         ]
     );
+}
+/// Pure tree projection/ranking algorithm: ties, independent tab ranks and parked
+/// folds are distinct contracts from transport decoding and server pin ordering.
+#[test]
+fn priority_sort_rank_and_parked_preferences() {
+    let mut snapshot = tree_snapshot();
+    snapshot.workspaces[0].sort_rank = 2;
+    snapshot.workspaces[1].sort_rank = 0;
+    snapshot.tabs[0].sort_rank = 3;
+    snapshot.tabs[1].sort_rank = 1;
+    let mut state = tree_state(ClientTreeChrome::default());
+    state.set_snapshot(Box::new(snapshot.clone()));
+    let mut tree = ClientTreeChrome::default();
+    tree.show_hidden_spaces = false;
+    let headers = |state: &ClientShellState, tree: &ClientTreeChrome| {
+        shape(state, tree)
+            .into_iter()
+            .filter(|value| value.starts_with("space:") || value.starts_with("tab:"))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        headers(&state, &tree),
+        [
+            "space:beta",
+            "tab:three",
+            "space:alpha",
+            "tab:two",
+            "tab:one"
+        ]
+    );
+    let mut tied = snapshot.clone();
+    tied.workspaces[0].sort_rank = 0;
+    tied.tabs[0].sort_rank = 1;
+    state.set_snapshot(Box::new(tied));
+    assert_eq!(headers(&state, &tree), ["space:alpha", "tab:one", "tab:two", "space:beta", "tab:three"]);
+    snapshot.workspaces[1].parked = true;
+    state.set_snapshot(Box::new(snapshot));
+    assert_eq!(
+        headers(&state, &tree),
+        ["space:beta", "space:alpha", "tab:two", "tab:one"]
+    );
+    tree.expanded_parked_spaces.insert("ws_2".into());
+    let saved = serde_json::to_string(&tree.to_preferences()).unwrap();
+    let restored = ClientTreeChrome::from_preferences(serde_json::from_str(&saved).unwrap());
+    assert_eq!(
+        headers(&state, &restored),
+        [
+            "space:beta",
+            "tab:three",
+            "space:alpha",
+            "tab:two",
+            "tab:one"
+        ]
+    );
+}
+
+/// Pure projection/fold transition algorithm guards both reveal routes and report truth.
+#[test]
+fn parked_tree_reveal_focus_and_attention() {
+    let mut snapshot = tree_snapshot();
+    snapshot.workspaces[0].parked = true;
+    let mut state = tree_state(ClientTreeChrome::default());
+    state.set_snapshot(Box::new(snapshot.clone()));
+    let report = |tree: &ClientTreeChrome| serde_json::to_value(
+        crate::client::shell::sidebar_report::WorkspaceReport::new("ws_1", tree, &snapshot, None)
+    ).unwrap()["space_collapsed"].as_bool().unwrap();
+    assert!(report(state.tree_chrome_mut()));
+    assert!(state.reveal_tree_ancestors_for_pane("pane_1"));
+    assert!(!report(state.tree_chrome_mut()));
+    assert!(!state.reveal_tree_ancestors_for_pane("pane_1"));
+    state.tree_chrome_mut().expanded_parked_spaces.clear();
+    state.reveal_attention_tab("tab_1");
+    assert!(!report(state.tree_chrome_mut()));
+    let tree = state.tree_chrome_mut().clone();
+    assert!(shape(&state, &tree).iter().any(|row| row == "tab:one"));
 }

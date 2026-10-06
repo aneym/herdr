@@ -573,6 +573,7 @@ fn mobile_background_workspace_uses_its_own_active_tab_status() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     let mut projected = snapshot();
     projected.tabs.push(ClientShellTab {
+        sort_rank: 0,
         desk_count: 0,
         tab_id: "tab_7".into(),
         workspace_id: "ws_1".into(),
@@ -585,6 +586,8 @@ fn mobile_background_workspace_uses_its_own_active_tab_status() {
         work_status: None,
     });
     projected.workspaces.push(ClientShellWorkspace {
+        sort_rank: 0,
+        parked: false,
         visible_in_profile: true,
         workspace_id: "ws_2".into(),
         active_tab_id: "tab_3".into(),
@@ -603,6 +606,7 @@ fn mobile_background_workspace_uses_its_own_active_tab_status() {
     });
     for (number, tab_id, label) in [(1, "tab_2", "one"), (7, "tab_3", "two")] {
         projected.tabs.push(ClientShellTab {
+            sort_rank: 0,
             desk_count: 0,
             tab_id: tab_id.into(),
             workspace_id: "ws_2".into(),
@@ -789,6 +793,8 @@ fn mobile_previous_workspace_action_wraps_across_expanded_entries() {
     let mut projected = snapshot();
     for index in 2..=3 {
         projected.workspaces.push(ClientShellWorkspace {
+            sort_rank: 0,
+            parked: false,
             visible_in_profile: true,
             workspace_id: format!("ws_{index}"),
             active_tab_id: format!("tab_{index}"),
@@ -832,6 +838,8 @@ fn mobile_switcher_scroll_close_and_width_transition_clear_mobile_hits() {
     let mut projected = snapshot();
     for index in 2..=8 {
         projected.workspaces.push(ClientShellWorkspace {
+            sort_rank: 0,
+            parked: false,
             visible_in_profile: true,
             workspace_id: format!("ws_{index}"),
             active_tab_id: format!("tab_{index}"),

@@ -102,6 +102,10 @@ pub struct WorkspaceReportMetadataParams {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkspaceInfo {
+    #[serde(default)]
+    pub sort_rank: u32,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub parked: bool,
     pub workspace_id: String,
     pub number: usize,
     pub label: String,

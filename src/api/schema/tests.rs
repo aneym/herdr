@@ -951,6 +951,8 @@ fn worktree_request_and_response_round_trip() {
         id: "req_worktree".into(),
         result: ResponseResult::WorktreeCreated {
             workspace: WorkspaceInfo {
+                sort_rank: 0,
+                parked: false,
                 workspace_id: "w_1".into(),
                 number: 2,
                 label: "herdr".into(),
@@ -972,6 +974,7 @@ fn worktree_request_and_response_round_trip() {
                 }),
             },
             tab: TabInfo {
+                sort_rank: 0,
                 desk: None,
                 tab_id: "w_1:1".into(),
                 workspace_id: "w_1".into(),
@@ -1046,6 +1049,8 @@ fn worktree_lifecycle_events_round_trip() {
     assert_eq!(restored, subscription);
 
     let workspace = WorkspaceInfo {
+        sort_rank: 0,
+        parked: false,
         workspace_id: "w_2".into(),
         number: 2,
         label: "herdr".into(),
@@ -1409,6 +1414,7 @@ fn create_response_round_trips_with_root_pane() {
         id: "req_2".into(),
         result: ResponseResult::TabCreated {
             tab: TabInfo {
+                sort_rank: 0,
                 desk: None,
                 tab_id: "w_1:2".into(),
                 workspace_id: "w_1".into(),

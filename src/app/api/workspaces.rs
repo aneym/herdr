@@ -219,11 +219,27 @@ impl App {
         let Some(index) = self.parse_workspace_id(&params.workspace_id) else {
             return workspace_not_found(id, &params.workspace_id);
         };
+        let old_ranks = (0..self.state.workspaces[index].tabs.len()).map(|ti| self.priority_tab_rank(index, ti).value).collect::<Vec<_>>();
         let Some(ws) = self.state.workspaces.get_mut(index) else {
             return workspace_not_found(id, &params.workspace_id);
         };
         ws.set_custom_name(params.label.clone());
         crate::logging::workspace_renamed(&ws.id);
+        let ids = self.state.workspaces[index]
+            .tabs
+            .iter()
+            .enumerate()
+            .filter(|(ti, _)| self.priority_tab_rank(index, *ti).value != old_ranks[*ti])
+            .map(|(_, tab)| {
+                crate::workspace::public_tab_id_for_number(
+                    &self.state.workspaces[index].id,
+                    tab.number,
+                )
+            })
+            .collect::<Vec<_>>();
+        if !ids.is_empty() {
+            self.state.priority_renamed_pins(&ids);
+        }
         self.schedule_session_save();
         self.emit_event(EventEnvelope {
             event: EventKind::WorkspaceRenamed,

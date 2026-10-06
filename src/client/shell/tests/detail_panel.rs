@@ -533,6 +533,7 @@ fn overview_task_counts_follow_live_workflows_including_orchestrator() {
         ("done", "completed"),
         ("orch-child", "child"),
     ].into_iter().enumerate().map(|(index, (id, label))| ClientShellTab {
+        sort_rank: 0,
         desk_count: 0,
         tab_id: id.into(), workspace_id: "ws_1".into(), number: index + 1,
         label: label.into(), custom_label: true, zoomed: false, focused: false,

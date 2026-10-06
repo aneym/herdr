@@ -915,6 +915,7 @@ pub struct AppState {
     pub sidebar_agents: crate::config::AgentsSidebarConfig,
     pub sidebar_automations: crate::config::AutomationsSidebarConfig,
     pub sidebar_spaces: crate::config::SpacesSidebarConfig,
+    pub sidebar_priority: crate::config::SidebarPriorityConfig,
     /// TEMPORARY diagnostic: tint each sidebar row's container block.
     pub sidebar_debug_bounds: bool,
     /// The automations section is expanded.
@@ -1095,6 +1096,11 @@ impl AppState {
                 role,
             },
         );
+        if role.is_none()
+            && !(self.sidebar_priority.order.is_empty() && self.sidebar_priority.last.is_empty())
+        {
+            self.priority_renamed_pins(&[self.pinned_tabs[position].tab_id.clone()]);
+        }
     }
 
     /// The inclusive global index range a pin may occupy.
@@ -1163,11 +1169,15 @@ impl AppState {
             .take_while(|pin| pin.role.is_some())
             .count();
         self.insert_pin_at(pin, index);
+        if role.is_none() {
+            self.priority_renamed_pins(&[tab_id.to_owned()]);
+        }
         true
     }
 
     pub fn normalize_pin_roles(&mut self) {
         self.pinned_tabs.sort_by_key(|pin| pin.role.is_none());
+        self.sort_priority_pins();
     }
 
     pub fn unpin_tab(&mut self, tab_id: &str) -> bool {
@@ -1617,6 +1627,7 @@ impl AppState {
             sidebar_agents: crate::config::AgentsSidebarConfig::default(),
             sidebar_automations: crate::config::AutomationsSidebarConfig::default(),
             sidebar_spaces: crate::config::SpacesSidebarConfig::default(),
+            sidebar_priority: crate::config::SidebarPriorityConfig::default(),
             sidebar_debug_bounds: false,
             automations_expanded: false,
             collapsed_agent_group_keys: std::collections::HashSet::new(),

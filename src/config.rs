@@ -33,8 +33,8 @@ pub use self::{
     },
     sidebar::{
         AgentSidebarToken, AgentsSidebarConfig, AutomationsSidebarConfig, SidebarConfig,
-        SidebarMenuPositionConfig, SidebarNewButtonConfig, SidebarSection, SidebarTokenStyle,
-        SpaceSidebarToken, SpacesSidebarConfig,
+        SidebarMenuPositionConfig, SidebarNewButtonConfig, SidebarPriorityConfig, SidebarSection,
+        SidebarTokenStyle, SpaceSidebarToken, SpacesSidebarConfig,
     },
     sound::SoundConfig,
     tab_bar::TabBarRightEntryConfig,

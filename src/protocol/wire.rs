@@ -989,7 +989,6 @@ pub struct ClientShellPinnedTab {
     /// ClientShellSnapshot variant is rejected by current clients.
     #[serde(
         default,
-        skip_serializing_if = "Option::is_none",
         deserialize_with = "crate::api::schema::deserialize_pin_role"
     )]
     pub role: Option<crate::api::schema::TabRole>,
@@ -1068,6 +1067,10 @@ fn default_visible_in_profile() -> bool {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientShellWorkspace {
+    #[serde(default)]
+    pub sort_rank: u32,
+    #[serde(default)]
+    pub parked: bool,
     /// Sidebar visibility in the endpoint's active profile; older peers expose all spaces.
     #[serde(default = "default_visible_in_profile")]
     pub visible_in_profile: bool,
@@ -1103,6 +1106,8 @@ pub struct ClientShellWorktree {
 pub struct ClientShellTab {
     #[serde(default)]
     pub desk_count: usize,
+    #[serde(default)]
+    pub sort_rank: u32,
     pub tab_id: String,
     pub workspace_id: String,
     pub number: usize,
@@ -2933,6 +2938,8 @@ mod tests {
             active_profile: "default".into(),
             agent_order: Vec::new(),
             workspaces: vec![ClientShellWorkspace {
+                sort_rank: 0,
+                parked: false,
                 visible_in_profile: true,
                 workspace_id: "w1".into(),
                 active_tab_id: "w1:t1".into(),
@@ -2951,6 +2958,7 @@ mod tests {
             }],
             tabs: vec![ClientShellTab {
                 desk_count: 0,
+                sort_rank: 0,
                 tab_id: "w1:t1".into(),
                 workspace_id: "w1".into(),
                 number: 1,

@@ -203,6 +203,7 @@ impl App {
         let Some((ws_idx, tab_idx)) = self.parse_tab_id(&params.tab_id) else {
             return tab_not_found(id, &params.tab_id);
         };
+        let old_rank = self.priority_tab_rank(ws_idx, tab_idx).value;
         let workspace_id = self.state.workspaces[ws_idx].id.clone();
         let tab_id = self.public_tab_id(ws_idx, tab_idx).unwrap_or_else(|| {
             crate::workspace::public_tab_id_for_number(&workspace_id, tab_idx + 1)
@@ -217,6 +218,9 @@ impl App {
         };
         tab.set_custom_name(params.label.clone());
         crate::logging::tab_renamed(&workspace_id, &tab_id);
+        if self.priority_tab_rank(ws_idx, tab_idx).value != old_rank {
+            self.state.priority_renamed_pins(&[tab_id.clone()]);
+        }
         self.schedule_session_save();
         self.emit_event(EventEnvelope {
             event: EventKind::TabRenamed,
@@ -1048,5 +1052,39 @@ mod tests {
         );
         app.state.assert_invariants_for_test();
         shutdown_test_runtimes(&mut app);
+    }
+    /// Real JSON API boundary: ranks and parked status survive serialization,
+    /// and rename repositions a plain pin without changing workspace/tab identity.
+    #[test]
+    fn api_priority_sort_rank_and_parked() {
+        let (mut app, tabs, _) = pin_test_app();
+        app.state.ensure_test_terminals();
+        app.state.sidebar_priority.order = vec!["tab:two".into()];
+        app.state.sidebar_priority.last = vec!["tabs".into()];
+        set_pinned(&mut app, &tabs[0], true, None);
+        set_pinned(&mut app, &tabs[1], true, None);
+        assert_eq!(pin_order(&app), [tabs[1].clone(), tabs[0].clone()]);
+        let workspace = serde_json::to_value(app.workspace_info(0)).unwrap();
+        assert_eq!(workspace["sort_rank"], 2);
+        assert_eq!(workspace["parked"], true);
+        let tab = serde_json::to_value(app.tab_info(0, 1).unwrap()).unwrap();
+        assert_eq!(tab["sort_rank"], 0);
+        let response = app.handle_tab_rename(
+            "rename".into(),
+            TabRenameParams {
+                tab_id: tabs[0].clone(),
+                label: "two".into(),
+            },
+        );
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["result"]["tab"]["sort_rank"], 0);
+        assert_eq!(pin_order(&app), [tabs[1].clone(), tabs[0].clone()]);
+        app.state.assert_invariants_for_test();
+        // A label change within the same rank must not reshuffle tied pins.
+        let before = pin_order(&app);
+        let response = app.handle_tab_rename("same-group".into(), TabRenameParams { tab_id: tabs[1].clone(), label: "TWO".into() });
+        assert!(serde_json::from_str::<SuccessResponse>(&response).is_ok());
+        assert_eq!(pin_order(&app), before);
+        app.state.assert_invariants_for_test();
     }
 }

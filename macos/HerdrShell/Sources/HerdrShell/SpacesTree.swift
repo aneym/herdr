@@ -1,10 +1,20 @@
 import Foundation
 
 struct SpacesInput: Codable {
-    struct Space: Codable { var id: String; var name: String; var pinned = false; var collapsed = false }
+    struct Space: Codable { var id: String; var name: String; var pinned = false; var collapsed = false; var sortRank: UInt32 = 0; var parked = false
+        init(id: String, name: String, pinned: Bool = false, collapsed: Bool = false, sortRank: UInt32 = 0, parked: Bool = false) { self.id = id; self.name = name; self.pinned = pinned; self.collapsed = collapsed; self.sortRank = sortRank; self.parked = parked }
+        init(from decoder: Decoder) throws { let c = try decoder.container(keyedBy: Field.self); id = try c.decode(String.self, forKey: Field("id")); name = try c.decode(String.self, forKey: Field("name")); pinned = c.value("pinned", false); collapsed = c.value("collapsed", false); sortRank = c.value("sortRank", 0); parked = c.value("parked", false) }
+    }
     struct Agent: Codable { var status: String; var parent: String? = nil }
     /// `work` is herdr's one answer to "is this chat working" (server app/work_status.rs); nil from older servers.
-    struct Tab: Codable { var id: String; var space: String; var label: String; var agents: [Agent] = []; var focused = false; var status = "unknown"; var pinIndex: Int? = nil; var work: String? = nil; var role: String? = nil }
+    struct Tab: Codable { var id: String; var space: String; var label: String; var agents: [Agent] = []; var focused = false; var status = "unknown"; var pinIndex: Int? = nil; var work: String? = nil; var role: String? = nil; var sortRank: UInt32 = 0
+        init(id: String, space: String, label: String, agents: [Agent] = [], focused: Bool = false, status: String = "unknown", pinIndex: Int? = nil, work: String? = nil, role: String? = nil, sortRank: UInt32 = 0) { self.id = id; self.space = space; self.label = label; self.agents = agents; self.focused = focused; self.status = status; self.pinIndex = pinIndex; self.work = work; self.role = role; self.sortRank = sortRank }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: Field.self)
+            id = try c.decode(String.self, forKey: Field("id")); space = try c.decode(String.self, forKey: Field("space")); label = try c.decode(String.self, forKey: Field("label"))
+            agents = c.value("agents", []); focused = c.value("focused", false); status = c.value("status", "unknown"); pinIndex = c.optional("pinIndex"); work = c.optional("work"); role = c.optional("role"); sortRank = c.value("sortRank", 0)
+        }
+    }
     var spaces: [Space]; var tabs: [Tab]; var focusedTab: String?
 }
 
@@ -82,12 +92,12 @@ private extension KeyedDecodingContainer where Key == Field {
 
 struct SpacesChrome: Codable {
     var collapsedSections: Set<String> = []; var expandedGroups: Set<String> = []; var expandedTabs: Set<String> = []; var collapsedTabs: Set<String> = []
-    var pinnedSpaces: Set<String> = []; var collapsedSpaces: Set<String> = []; var hiddenExpanded = false; var goalFilter: String?; var focusedSection: [String: String] = [:]
+    var pinnedSpaces: Set<String> = []; var collapsedSpaces: Set<String> = []; var expandedParkedSpaces: Set<String> = []; var hiddenExpanded = false; var goalFilter: String?; var focusedSection: [String: String] = [:]
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Field.self)
         collapsedSections = c.value("collapsedSections", []); expandedGroups = c.value("expandedGroups", []); expandedTabs = c.value("expandedTabs", []); collapsedTabs = c.value("collapsedTabs", [])
-        pinnedSpaces = c.value("pinnedSpaces", []); collapsedSpaces = c.value("collapsedSpaces", []); hiddenExpanded = c.value("hiddenExpanded", false); goalFilter = c.optional("goalFilter"); focusedSection = c.value("focusedSection", [:])
+        pinnedSpaces = c.value("pinnedSpaces", []); collapsedSpaces = c.value("collapsedSpaces", []); expandedParkedSpaces = c.value("expandedParkedSpaces", []); hiddenExpanded = c.value("hiddenExpanded", false); goalFilter = c.optional("goalFilter"); focusedSection = c.value("focusedSection", [:])
         if let legacy: String = c.optional("focusedSection"), let split = legacy.lastIndex(of: ":") { focusedSection[String(legacy[..<split])] = String(legacy[legacy.index(after: split)...]) }
     }
     /// `open` is the row's rendered state; a tab row needs it because lanes fold by default
@@ -105,6 +115,7 @@ struct SpacesChrome: Codable {
             if open ?? expandedTabs.contains(parts[1]) { expandedTabs.remove(parts[1]); collapsedTabs.insert(parts[1]) }
             else { collapsedTabs.remove(parts[1]); expandedTabs.insert(parts[1]) }
         case "space": flip(&collapsedSpaces, parts[1])
+        case "parkedspace": flip(&expandedParkedSpaces, parts[1])
         case "pin": flip(&pinnedSpaces, parts[1])
         default: break
         }
@@ -193,10 +204,16 @@ enum SpacesTree {
         if !choices.isEmpty { out.append(SpacesRow(id: "goal", kind: .goal, title: "goal " + (filter?.replacingOccurrences(of: ":", with: " · ") ?? "All"), trailing: filter == nil ? "▾" : "✕")) }
         let hidden = input.spaces.filter { $0.collapsed || chrome.collapsedSpaces.contains($0.id) }
         let visible = input.spaces.filter { !$0.collapsed && !chrome.collapsedSpaces.contains($0.id) }
-        let ordered = visible.filter { $0.pinned || chrome.pinnedSpaces.contains($0.id) } + visible.filter { !$0.pinned && !chrome.pinnedSpaces.contains($0.id) }
+        // Preserve the client pin partition, then rank stably within each partition.
+        func ranked(_ spaces: [SpacesInput.Space]) -> [SpacesInput.Space] {
+            spaces.enumerated().sorted { a, b in a.element.sortRank == b.element.sortRank ? a.offset < b.offset : a.element.sortRank < b.element.sortRank }.map(\.element)
+        }
+        let ordered = ranked(visible.filter { $0.pinned || chrome.pinnedSpaces.contains($0.id) }) + ranked(visible.filter { !$0.pinned && !chrome.pinnedSpaces.contains($0.id) })
         func appendSpace(_ space: SpacesInput.Space, depth: Int) {
             let meta = overlay.spaces[space.id]
-            out.append(SpacesRow(id: "space:" + space.id, kind: .space, depth: depth, chevron: "open", title: space.name, trailing: meta?.summary ?? "", alert: meta?.attention ?? "none", tab: meta?.target_tab ?? input.tabs.first(where: { $0.space == space.id })?.id, toggleKey: "space:" + space.id))
+            let folded = space.parked && !chrome.expandedParkedSpaces.contains(space.id)
+            out.append(SpacesRow(id: "space:" + space.id, kind: .space, depth: depth, chevron: folded ? "closed" : "open", title: space.name, trailing: meta?.summary ?? "", alert: meta?.attention ?? "none", tab: meta?.target_tab ?? input.tabs.first(where: { $0.space == space.id })?.id, toggleKey: (space.parked ? "parkedspace:" : "space:") + space.id))
+            guard !folded else { return }
             let scope = SpaceScope(space, input: input, overlay: overlay, filter: filter, depth: depth)
             let tabs = scope.tabs, sectioned = scope.sectioned, background = scope.background
             let orch = scope.orch, lanes = scope.lanes, workflows = scope.workflows, ordinary = scope.ordinary
@@ -319,7 +336,11 @@ enum SpacesTree {
         }
         for (group, spaces) in zip(groups, members) where !spaces.isEmpty {
             out.append(SpacesRow(id: "spacegroup:" + group.name, kind: .title, title: group.name))
-            for space in spaces { appendSpace(space, depth: 0) }
+            // Explicit client member order wins over server rank; unlisted members retain rank order.
+            func position(_ space: SpacesInput.Space) -> Int {
+                group.spaces.firstIndex { $0 == space.id || $0.trimmingCharacters(in: .whitespaces).lowercased() == space.name.trimmingCharacters(in: .whitespaces).lowercased() } ?? Int.max
+            }
+            for space in spaces.enumerated().sorted(by: { a, b in position(a.element) == position(b.element) ? a.offset < b.offset : position(a.element) < position(b.element) }).map(\.element) { appendSpace(space, depth: 0) }
         }
         for space in rest { appendSpace(space, depth: 0) }
         if !hidden.isEmpty {
@@ -336,12 +357,18 @@ enum SpacesTree {
 /// pinned section so a pinned lane rolls up exactly what its header in the space does.
 private struct SpaceScope {
     let overlay: Overlay
+    let leader: String?
     let tabs: [SpacesInput.Tab]; let sectioned: Bool; let background: [SpacesInput.Tab]
     let orch: [SpacesInput.Tab]; let lanes: [SpacesInput.Tab]; let workflows: [SpacesInput.Tab]; let ordinary: [SpacesInput.Tab]
 
     init(_ space: SpacesInput.Space, input: SpacesInput, overlay: Overlay, filter: String?, depth: Int, includeAgents: Bool = false) {
         self.overlay = overlay
-        let all = input.tabs.filter { $0.space == space.id }
+        // Priority affects display only, not the original orchestrator used for implicit parents.
+        leader = input.tabs.first { $0.space == space.id && (includeAgents || $0.role != "agent") && overlay.tabs[$0.id]?.kind == "orchestrator" && overlay.tabs[$0.id]?.done != true }?.id
+        let all = input.tabs.filter { $0.space == space.id }.enumerated().sorted { a, b in
+            if a.element.sortRank != b.element.sortRank { return a.element.sortRank < b.element.sortRank }
+            return a.offset < b.offset
+        }.map(\.element)
         let sectioned = all.contains { overlay.tabs[$0.id]?.section != nil }
         let tabs = all.filter { tab in
             guard includeAgents || tab.role != "agent" else { return false }
@@ -361,7 +388,7 @@ private struct SpaceScope {
     }
 
     func tag(_ tab: SpacesInput.Tab) -> Overlay.Tag { overlay.tabs[tab.id] ?? Overlay.Tag() }
-    func parent(_ tab: SpacesInput.Tab) -> String? { let p = tag(tab).parent; return lanes.contains { $0.id == p } ? p : orch.first?.id }
+    func parent(_ tab: SpacesInput.Tab) -> String? { let p = tag(tab).parent; return lanes.contains { $0.id == p } ? p : leader }
     func root(_ tab: SpacesInput.Tab) -> String? {
         guard tag(tab).kind == "lane", tag(tab).mode == "active", tag(tab).section != "scoping" else { return nil }
         var seen = Set([tab.id]); var current = tab

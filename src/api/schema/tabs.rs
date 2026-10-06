@@ -82,6 +82,8 @@ pub struct TabMoveParams {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TabInfo {
+    #[serde(default)]
+    pub sort_rank: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub desk: Option<super::desk::DeskInfo>,
     pub tab_id: String,

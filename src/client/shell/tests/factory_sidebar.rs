@@ -16,6 +16,7 @@ fn fixture() -> (ClientShellSnapshot, FactoryOverlay) {
     .enumerate()
     {
         snapshot.tabs.push(ClientShellTab {
+            sort_rank: 0,
             desk_count: 0,
             tab_id: label.to_string(),
             workspace_id: "ws_1".into(),
@@ -176,6 +177,8 @@ fn focused_agent_half_pad_does_not_overlap_next_factory_space() {
     extra.focused = true;
     snapshot.agents.push(extra);
     snapshot.workspaces.push(ClientShellWorkspace {
+        sort_rank: 0,
+        parked: false,
         workspace_id: "ws_2".into(), active_tab_id: "other-tab".into(),
         new_workspace_cwd: String::new(), number: 2, label: "poker".into(),
         custom_label: true, branch: None, git_ahead_behind: None, tokens: Vec::new(),
@@ -183,6 +186,7 @@ fn focused_agent_half_pad_does_not_overlap_next_factory_space() {
         orchestrator_mode: false, tab_count: 1, visible_in_profile: true,
     });
     snapshot.tabs.push(ClientShellTab {
+        sort_rank: 0,
         desk_count: 0,
         tab_id: "other-tab".into(), workspace_id: "ws_2".into(), number: 1,
         label: "other".into(), custom_label: true, zoomed: false, focused: false,
@@ -294,6 +298,8 @@ fn lab_fixture() -> (ClientShellSnapshot, FactoryOverlay) {
     snapshot.workspaces[0].label = "agent-rails".into();
     overlay.tabs.get_mut("orch").unwrap().name = Some("orchestrator".into());
     snapshot.workspaces.push(ClientShellWorkspace {
+        sort_rank: 0,
+        parked: false,
         workspace_id: "ws_2".into(), active_tab_id: "poker".into(),
         new_workspace_cwd: String::new(), number: 2, label: "poker".into(),
         custom_label: true, branch: None, git_ahead_behind: None, tokens: Vec::new(),
@@ -301,6 +307,7 @@ fn lab_fixture() -> (ClientShellSnapshot, FactoryOverlay) {
         orchestrator_mode: false, tab_count: 1, visible_in_profile: true,
     });
     snapshot.tabs.push(ClientShellTab {
+        sort_rank: 0,
         desk_count: 0,
         tab_id: "poker".into(), workspace_id: "ws_2".into(), number: 1,
         label: "poker coach".into(), custom_label: true, zoomed: false,
@@ -1508,6 +1515,7 @@ fn factory_grouping_ignores_cycles_and_cross_space_parents() {
     remote.pane_id = "remote-pane".into();
     snapshot.agents.push(remote);
     snapshot.tabs.push(ClientShellTab {
+        sort_rank: 0,
         desk_count: 0,
         tab_id: "remote".into(), workspace_id: "ws_2".into(), number: 1,
         label: "remote".into(), custom_label: true, zoomed: false, focused: false,
@@ -1515,6 +1523,8 @@ fn factory_grouping_ignores_cycles_and_cross_space_parents() {
         work_status: None,
     });
     snapshot.workspaces.push(ClientShellWorkspace {
+        sort_rank: 0,
+        parked: false,
         workspace_id: "ws_2".into(), active_tab_id: "remote".into(), new_workspace_cwd: String::new(),
         number: 2, label: "elsewhere".into(), custom_label: true, branch: None,
         git_ahead_behind: None, tokens: Vec::new(), worktree: None, focused: false,
@@ -2703,4 +2713,28 @@ fn space_groups_from_areas_file_split_the_sidebar_by_label_or_id() {
     assert!(at("Open Factory") < at("open factory"), "{rows:?}");
     // Areas-mode assignments are not sidebar groups.
     assert!(!rows.iter().any(|row| row.trim() == "recruiter"), "{rows:?}");
+}
+
+/// Pure tree projection algorithm: display rank must not change implicit parent identity.
+#[test]
+fn priority_tree_keeps_original_workflow_parent() {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "orch" | "orphan" | "plain-b"));
+    overlay.tabs.insert("plain-b".into(), TabTag {
+        kind: TabKind::Orchestrator, ..TabTag::default()
+    });
+    // Server projection of a tab:plain-b priority rule puts the later leader first.
+    snapshot.tabs.iter_mut().find(|tab| tab.tab_id == "orch").unwrap().sort_rank = 1;
+    let mut tree = ClientTreeChrome::default();
+    tree.factory_expanded_lanes.extend(["orch".into(), "plain-b".into()]);
+    let rows = crate::client::shell::tree::tree_list_entries_with_overlay(
+        &snapshot, &tree, Vec::new(), Some(&overlay));
+    let keys = rows.iter().filter_map(|row| match row {
+        crate::client::shell::tree::AgentPanelListEntry::FactoryTab(row) => Some(row.header.key.as_str()),
+        _ => None,
+    }).collect::<Vec<_>>();
+    let first = keys.iter().position(|id| *id == "plain-b").unwrap();
+    let original = keys.iter().position(|id| *id == "orch").unwrap();
+    let workflow = keys.iter().position(|id| *id == "orphan").unwrap();
+    assert!(first < original && original < workflow, "{keys:?}");
 }

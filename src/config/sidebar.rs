@@ -580,9 +580,17 @@ pub struct AutomationsSidebarConfig {
     pub workspaces: Vec<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct SidebarPriorityConfig {
+    pub order: Vec<String>,
+    pub last: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct SidebarConfig {
+    pub priority: SidebarPriorityConfig,
     #[serde(deserialize_with = "deserialize_section_order")]
     pub section_order: [SidebarSection; 2],
     pub new_button: SidebarNewButtonConfig,
@@ -599,6 +607,7 @@ pub struct SidebarConfig {
 impl Default for SidebarConfig {
     fn default() -> Self {
         Self {
+            priority: SidebarPriorityConfig::default(),
             section_order: default_section_order(),
             new_button: SidebarNewButtonConfig::Footer,
             menu_position: SidebarMenuPositionConfig::Right,
