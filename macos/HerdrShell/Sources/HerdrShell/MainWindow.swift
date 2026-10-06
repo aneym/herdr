@@ -566,8 +566,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         } ?? layout.panes
         let key = tab + (zoomedPane.map { "zoom:\($0)|" } ?? "")
             + shown.map { "\($0.pane_id)@\($0.rect.x),\($0.rect.y),\($0.rect.width),\($0.rect.height)" }.joined(separator: "|")
-            // A restarted remote server keeps pane ids but hands out new terminals.
-            + (Machines.isRemote(tab) ? "|" + shown.compactMap { model.pane($0.pane_id)?.terminal_id }.joined(separator: ",") : "")
+            // A restarted remote server or a local live handoff keeps pane ids but hands out new terminals.
+            + "|" + shown.compactMap { model.pane($0.pane_id)?.terminal_id }.joined(separator: ",")
         guard key != lastLayoutKey else { applyCaps(); return }
         lastLayoutKey = key
         var items: [(SurfaceView, Snapshot.Rect)] = []
