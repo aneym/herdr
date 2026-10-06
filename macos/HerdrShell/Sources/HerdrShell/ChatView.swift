@@ -422,7 +422,8 @@ private struct ChatGroup: Identifiable {
 }
 
 /// Composers holding text nobody has sent. The draft lives only in view state, so an
-/// update that installs itself waits until this is empty.
+/// update that installs itself waits until this is empty. A hidden tab's chat keeps its
+/// entry (its view and draft are kept), so only sending or clearing the text removes it.
 enum ChatDrafts {
     private static var unsent = Set<ObjectIdentifier>()
     static var any: Bool { !unsent.isEmpty }
@@ -481,8 +482,8 @@ struct ChatView: View {
                 }
                 .onChange(of: sender.pending) { _ in if stick { toBottom(proxy) } }
                 .onChange(of: text) { t in ChatDrafts.set(ObjectIdentifier(sender), unsent: !t.isEmpty) }
-                .onDisappear { ChatDrafts.set(ObjectIdentifier(sender), unsent: false) }
                 .onAppear {
+                    ChatDrafts.set(ObjectIdentifier(sender), unsent: !text.isEmpty)
                     toBottom(proxy)
                     wheel = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
                         if event.scrollingDeltaY > 0 { stick = false }
