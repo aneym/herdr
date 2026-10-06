@@ -2,6 +2,8 @@
 
 pub mod endpoint;
 pub(crate) mod render_ansi;
+#[cfg(test)]
+mod shell_core_goldens;
 pub(crate) mod surface_delta;
 pub(crate) mod surface_reuse;
 mod wire;
