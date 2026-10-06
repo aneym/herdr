@@ -351,7 +351,7 @@ struct HerdrCommands {
             log("\(method): \(error)")
             return .failed
         }
-        guard let result = envelope["result"] as? [String: Any] else { return .unsupported }
+        guard let result = envelope["result"] as? [String: Any] else { return .failed }
         return .result(result)
     }
 

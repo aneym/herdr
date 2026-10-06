@@ -478,8 +478,10 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     private func refreshDocs() {
         let snapshots = [model.snapshot].compactMap { $0 } + model.machines.compactMap(\.snapshot)
         if !snapshots.isEmpty {
-            let desks = Dictionary(uniqueKeysWithValues: snapshots.flatMap(\.tabs).map { ($0.tab_id, $0.desk ?? .empty) })
-            let newTabs = landed(previous: seenDeskIds, current: desks)
+            let desks = Dictionary(snapshots.flatMap(\.tabs).map { ($0.tab_id, $0.desk ?? .empty) },
+                                   uniquingKeysWith: { _, latest in latest })
+            let newTabs = landed(previous: seenDeskIds, current: desks,
+                                 machineForTab: { Machines.split($0)?.machine ?? "" })
             seenDeskIds = desks.mapValues { Set($0.items.map(\.id)) }
             for tab in newTabs { SidebarState.store.set(true, forKey: Self.docsShownKey(tab)) }
             docPanel.show(model: model, tabId: state.selectedTab)
@@ -575,6 +577,11 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             + "|" + shown.compactMap { model.pane($0.pane_id)?.terminal_id }.joined(separator: ",")
         guard key != lastLayoutKey else { applyCaps(); return }
         lastLayoutKey = key
+        // Capture actual keyboard ownership before terminal replacement removes the old view.
+        let responder = window.firstResponder as? NSView
+        let focusedPane = host.rects.first { surface, _ in
+            responder === surface || (responder?.isDescendant(of: surface) ?? false)
+        }?.0.paneId
         var items: [(SurfaceView, Snapshot.Rect)] = []
         for lp in shown {
             guard let p = model.pane(lp.pane_id) else { continue }
@@ -585,6 +592,9 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         // Splits on another machine are not dragged from here: a resize in flight could outlive the selection.
         host.show(items, area: layout.area, dividers: zoomedPane == nil && !Machines.isRemote(tab) ? PaneDivider.from(layout) : [])
         applyPendingFocus()
+        if let focusedPane, let replacement = items.first(where: { $0.0.paneId == focusedPane })?.0 {
+            window.makeFirstResponder(replacement)
+        }
         applyVisibility()
         applyCaps()
     }

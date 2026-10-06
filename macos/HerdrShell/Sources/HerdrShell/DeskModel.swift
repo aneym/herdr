@@ -16,10 +16,15 @@ struct DeskInfo: Codable, Equatable {
     static let empty = DeskInfo(items: [], front: nil)
 }
 
-func landed(previous: [String: Set<String>]?, current: [String: DeskInfo]) -> Set<String> {
+func landed(previous: [String: Set<String>]?, current: [String: DeskInfo],
+            machineForTab: (String) -> String = { id in
+                id.firstIndex(of: "/").map { String(id[..<$0]) } ?? ""
+            }) -> Set<String> {
     guard let previous else { return [] }
+    let seenMachines = Set(previous.keys.map(machineForTab))
     return Set(current.compactMap { tab, desk in
-        Set(desk.items.map(\.id)).subtracting(previous[tab] ?? []).isEmpty ? nil : tab
+        guard seenMachines.contains(machineForTab(tab)) else { return nil }
+        return Set(desk.items.map(\.id)).subtracting(previous[tab] ?? []).isEmpty ? nil : tab
     })
 }
 

@@ -1,4 +1,4 @@
-DESK MODEL: PASS (7 transition cases, Swift interpreter)
+DESK MODEL: PASS (9 transition cases, Swift interpreter)
 PASS first load opens nothing
 PASS new item on another tab
 PASS closed item opens nothing
@@ -6,3 +6,5 @@ PASS server front changed
 PASS user active kept
 PASS removed active follows front
 PASS empty desk
+PASS remote first snapshot opens nothing
+PASS new remote item lands
