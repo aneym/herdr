@@ -8,12 +8,13 @@ for scripts/fixtures/machines/merge.json, with and without the machines. No app,
 Writes checks/MACHINES-MERGE.txt.
 """
 import pathlib
+import tempfile
 import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "scripts/fixtures/machines/merge.json"
-BUILD = pathlib.Path.home() / ".cache/herdr-build/machines-merge"
-BUILD.mkdir(parents=True, exist_ok=True)
+_scratch = tempfile.TemporaryDirectory(prefix="herdr-machines-merge-")
+BUILD = pathlib.Path(_scratch.name)
 DRIVER = BUILD / "machines_merge_dump"
 subprocess.run(["swiftc", str(ROOT / "Sources/HerdrShell/SpacesTree.swift"), str(ROOT / "Sources/HerdrShell/MachineMerge.swift"),
                 str(ROOT / "scripts/machines_merge_dump.swift"), "-o", str(DRIVER)], check=True)

@@ -86,7 +86,7 @@ struct SpacesRowView: View {
             }
             // The PINNED header already says it, so pinned rows keep no pin glyph at rest; it comes
             // back on hover to unpin, as does the row's context menu.
-            if row.kind == .tab, !row.id.hasPrefix("pinned:") || hovered {
+            if row.kind == .tab, (!row.id.hasPrefix("pinned:") && !row.id.hasPrefix("agent:")) || hovered {
                 Text("⚲").foregroundStyle(pinned ? t.accent : t.mute).fixedSize().onTapGesture { click("pin") }
             }
             if row.kind == .space {

@@ -106,13 +106,19 @@ final class TestHook {
             dragDivider(obj)
         case "drag_pin":
             dragPin(obj)
+        case "set_role":
+            guard let c = controller else { return }
+            let row = (obj["row"] as? String).flatMap { id in c.model.spacesRows(state: c.state).first { $0.id == id }?.tab }
+            guard let tab = obj["tab"] as? String ?? obj["tab_id"] as? String ?? row else { return }
+            c.model.setAgentRole(tab, obj["role"] as? String == "agent")
         case "pin_move":
             // {"cmd":"pin_move","row":"pinned:<tab>","to":slot}: what a drop on that slot does.
             guard let c = controller, let id = obj["row"] as? String, let to = obj["to"] as? Int else { return }
             let rows = c.model.spacesRows(state: c.state)
-            let machine = PinDrag.machine(of: String(id.dropFirst("pinned:".count)))
-            let ids = rows.filter { $0.id.hasPrefix("pinned:") && PinDrag.machine(of: $0.tab ?? "") == machine }.compactMap(\.tab)
-            if let from = ids.firstIndex(of: String(id.dropFirst("pinned:".count))) {
+            guard let section = PinDrag.section(of: id), let row = rows.first(where: { $0.id == id }), let tab = row.tab else { return }
+            let machine = PinDrag.machine(of: tab)
+            let ids = rows.filter { PinDrag.section(of: $0.id) == section && PinDrag.machine(of: $0.tab ?? "") == machine }.compactMap(\.tab)
+            if let from = ids.firstIndex(of: tab) {
                 PinDrag.shared.commit(model: c.model, ids: ids, from: from, to: to)
             }
         case "new_tab":
@@ -889,7 +895,8 @@ final class TestHook {
                         "workflows": rows(c.model.workflows)],
             "spaces_rows": c.model.spacesRows(state: c.state).map { $0.dump },
             // What ⌘1..9 select, in order (pins first).
-            "numbered_tabs": Array(c.model.numberedTabIds.prefix(9)),
+            "numbered_tabs": Array(c.model.numberedTabIds(state: c.state).prefix(9)),
+            "agent_tabs": c.model.numberedTabIds(state: c.state).filter { c.model.isAgent($0) },
             "pin_drag": ["dragged": PinDrag.shared.dragged as Any? ?? NSNull(), "target": PinDrag.shared.target as Any? ?? NSNull()] as [String: Any],
             // Each tab row's context menu items, as a right-click shows them.
             "spaces_menus": Dictionary(c.model.spacesRows(state: c.state).filter { $0.tab != nil }

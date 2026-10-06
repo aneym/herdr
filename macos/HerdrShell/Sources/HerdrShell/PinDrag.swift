@@ -22,7 +22,7 @@ final class PinDrag: ObservableObject {
     @Published private(set) var travel: CGFloat = 0
     /// Slot in the dragged row's machine block it would land in; nil off the section.
     @Published private(set) var target: Int?
-    /// Dropped orders, by machine ("" is this Mac), as tab ids, until their snapshot agrees.
+    /// Dropped orders, by machine and section ("" is this Mac), as tab ids, until their snapshot agrees.
     @Published private(set) var pending: [String: (order: [String], at: Date)] = [:]
 
     /// The dragged row's machine block at the press: row ids and their frames, top to bottom.
@@ -32,6 +32,11 @@ final class PinDrag: ObservableObject {
 
     static func machine(of tab: String) -> String { Machines.split(tab)?.machine ?? "" }
 
+    static func section(of row: String) -> String? {
+        row.hasPrefix("agent:") ? "agents" : row.hasPrefix("pinned:") ? "pinned" : nil
+    }
+    private static func key(machine: String, section: String) -> String { machine + ":" + section }
+
     // MARK: Gesture
 
     func changed(_ row: SpacesRow, rows: [SpacesRow], frames: [String: CGRect], location: CGPoint, start: CGPoint) {
@@ -39,7 +44,7 @@ final class PinDrag: ObservableObject {
         if dragged == nil {
             guard let tab = row.tab else { return }
             let machine = Self.machine(of: tab)
-            block = rows.filter { $0.id.hasPrefix("pinned:") && Self.machine(of: $0.tab ?? "") == machine }
+            block = rows.filter { Self.section(of: $0.id) == Self.section(of: row.id) && Self.machine(of: $0.tab ?? "") == machine }
                 .compactMap { r in frames[r.id].map { (r.id, $0) } }
             guard block.count > 1, block.contains(where: { $0.id == row.id }) else { block = []; return }
             dragged = row.id
@@ -94,53 +99,66 @@ final class PinDrag: ObservableObject {
     // MARK: Drop
 
     private func tabId(fromRow id: String) -> String? {
-        id.hasPrefix("pinned:") ? String(id.dropFirst("pinned:".count)) : nil
+        Self.section(of: id) != nil ? String(id.dropFirst(id.hasPrefix("agent:") ? 6 : 7)) : nil
     }
 
     /// Moves `ids[from]` to slot `to` on its machine and shows the new order until it lands.
     func commit(model: HerdrModel, ids: [String], from: Int, to: Int) {
         guard ids.indices.contains(from), ids.indices.contains(to), from != to else { return }
         let tab = ids[from]
+        guard let source = model.source(for: tab),
+              let moving = source.tabs.first(where: { $0.tab_id == tab }),
+              let destination = source.tabs.first(where: { $0.tab_id == ids[to] }),
+              ids.allSatisfy({ Self.machine(of: $0) == Self.machine(of: tab) }),
+              (moving.role == "agent") == (destination.role == "agent") else { return }
+        let section = moving.role == "agent" ? "agents" : "pinned"
+        let key = Self.key(machine: Self.machine(of: tab), section: section)
         // The server counts its whole pin list; the chat now in that slot names the index.
         guard let pinIndex = model.source(for: ids[to])?.tabs.first(where: { $0.tab_id == ids[to] })?.pin_index else { return }
         var order = ids
         order.remove(at: from)
         order.insert(tab, at: to)
-        withAnimation(.easeOut(duration: 0.18)) { pending[Self.machine(of: tab)] = (order, Date()) }
+        withAnimation(.easeOut(duration: 0.18)) { pending[key] = (order, Date()) }
         let commands = HerdrCommands(socketPath: model.env["HERDR_SOCKET_PATH"] ?? "")
         DispatchQueue.global(qos: .userInitiated).async {
             let ok = commands.tabPinMove(tabId: tab, pinIndex: pinIndex)
-            if !ok { DispatchQueue.main.async { withAnimation { self.pending[Self.machine(of: tab)] = nil } } }
+            if !ok { DispatchQueue.main.async { withAnimation { self.pending[key] = nil } } }
         }
     }
 
     // MARK: Pending order
 
     /// `ids` (one machine's pins in snapshot order) in the dropped order while that stands.
-    func ordered(_ ids: [String]) -> [String] {
-        guard let first = ids.first, let entry = pending[Self.machine(of: first)],
-              Date().timeIntervalSince(entry.at) < Self.pendingLifetime,
-              Set(entry.order) == Set(ids) else { return ids }
-        if entry.order == ids {
-            // The machine has caught up; drop the stand-in after this pass.
-            let machine = Self.machine(of: first)
-            DispatchQueue.main.async { if self.pending[machine]?.order == ids { self.pending[machine] = nil } }
+    func ordered(_ ids: [String], section: String) -> [String] {
+        var out = ids
+        for machine in Set(ids.map { Self.machine(of: $0) }) {
+            let slots = ids.indices.filter { Self.machine(of: ids[$0]) == machine }
+            let mine = slots.map { ids[$0] }
+            let key = Self.key(machine: machine, section: section)
+            guard let entry = pending[key], Date().timeIntervalSince(entry.at) < Self.pendingLifetime,
+                  Set(entry.order) == Set(mine) else { continue }
+            if entry.order == mine {
+                DispatchQueue.main.async { if self.pending[key]?.order == mine { self.pending[key] = nil } }
+            }
+            for (slot, tab) in zip(slots, entry.order) { out[slot] = tab }
         }
-        return entry.order
+        return out
     }
 
-    /// Reorders each machine's PINNED rows in place to its dropped order.
+    /// Reorders each machine's agent and plain pinned rows in place to its dropped order.
     func reorder(_ rows: [SpacesRow]) -> [SpacesRow] {
         guard !pending.isEmpty else { return rows }
         var out = rows
-        let slots = rows.indices.filter { rows[$0].id.hasPrefix("pinned:") }
-        for machine in Set(slots.map { Self.machine(of: rows[$0].tab ?? "") }) {
-            let mine = slots.filter { Self.machine(of: rows[$0].tab ?? "") == machine }
-            let ids = mine.compactMap { rows[$0].tab }
-            let order = ordered(ids)
-            guard order != ids else { continue }
-            let byTab = Dictionary(mine.map { (rows[$0].tab ?? "", rows[$0]) }, uniquingKeysWith: { a, _ in a })
-            for (slot, tab) in zip(mine, order) { if let row = byTab[tab] { out[slot] = row } }
+        for section in ["agents", "pinned"] {
+            let slots = rows.indices.filter { Self.section(of: rows[$0].id) == section }
+            for machine in Set(slots.map { Self.machine(of: rows[$0].tab ?? "") }) {
+                let mine = slots.filter { Self.machine(of: rows[$0].tab ?? "") == machine }
+                let ids = mine.compactMap { rows[$0].tab }
+                let order = ordered(ids, section: section)
+                guard order != ids else { continue }
+                let byTab = Dictionary(mine.map { (rows[$0].tab ?? "", rows[$0]) }, uniquingKeysWith: { a, _ in a })
+                for (slot, tab) in zip(mine, order) { if let row = byTab[tab] { out[slot] = row } }
+            }
         }
         return out
     }
@@ -183,7 +201,7 @@ private struct PinDragRow: ViewModifier {
                     }
                     .onEnded { _ in drag.ended(model: model) },
                 // Only PINNED rows drag; every other row keeps its gestures as they were.
-                including: row.id.hasPrefix("pinned:") ? .all : .subviews
+                including: PinDrag.section(of: row.id) != nil ? .all : .subviews
             )
     }
 
@@ -193,7 +211,7 @@ private struct PinDragRow: ViewModifier {
     /// when it moves down, nowhere for the pin's own slot.
     private var insertion: Edge? {
         guard let dragged = drag.dragged, let target = drag.target, dragged != row.id else { return nil }
-        let block = rows.filter { $0.id.hasPrefix("pinned:") && PinDrag.machine(of: $0.tab ?? "") == PinDrag.machine(of: row.tab ?? "") }
+        let block = rows.filter { PinDrag.section(of: $0.id) == PinDrag.section(of: row.id) && PinDrag.machine(of: $0.tab ?? "") == PinDrag.machine(of: row.tab ?? "") }
         guard let from = block.firstIndex(where: { $0.id == dragged }),
               let mine = block.firstIndex(where: { $0.id == row.id }), mine == target, target != from else { return nil }
         return target < from ? .above : .below

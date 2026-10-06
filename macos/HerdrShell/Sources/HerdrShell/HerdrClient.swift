@@ -381,6 +381,13 @@ struct HerdrCommands {
         succeeded("tab.set_pinned", ["tab_id": tabId, "pinned": pinned])
     }
 
+    func tabSetRole(tabId: String, role: String?) -> Bool {
+        guard let data = call("tab.set_role", ["tab_id": tabId, "role": role as Any? ?? NSNull()]),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        // Older servers do not implement roles; their rejection has no user-facing notice.
+        return obj["error"] == nil
+    }
+
     /// `tab.pin_move`: the pin's new place in its machine's shared pin order (0 is ⌘1).
     func tabPinMove(tabId: String, pinIndex: Int) -> Bool {
         succeeded("tab.pin_move", ["tab_id": tabId, "pin_index": pinIndex])

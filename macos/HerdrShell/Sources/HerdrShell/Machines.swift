@@ -127,7 +127,7 @@ enum MachineRows {
                         let parentPane = agent.tokens?["parent_pane_id"] ?? agent.ownership?.current?.pane_id
                         return SpacesInput.Agent(status: agent.agent_status ?? "unknown",
                                                  parent: s.agents.first { $0.pane_id == parentPane }?.tab_id)
-                    }, status: tab.agent_status ?? "unknown", pinIndex: tab.pin_index, work: tab.work_status)
+                    }, status: tab.agent_status ?? "unknown", pinIndex: tab.pin_index, work: tab.work_status, role: tab.role)
             })
         }
     }

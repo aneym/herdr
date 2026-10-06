@@ -280,6 +280,8 @@ struct SidebarView: View {
                         case .park: ParkActions.run("park", tab: tab, note: nil) { _, _ in model.catalog.reload() }
                         case .approve: approve(tab)
                         case .pin, .unpin: spacesClick(row, part: "pin")
+                        case .addAgent: model.setAgentRole(tab, true)
+                        case .removeAgent: model.setAgentRole(tab, false)
                         }
                     }
                 }
@@ -708,7 +710,7 @@ extension Color {
 /// A spaces row's context menu, in order. The sidebar draws it and TestHook's state reads it, so a
 /// check sees the items a right-click shows.
 enum RowMenu: String {
-    case rename = "Rename…", info = "Show info", resume = "Resume", park = "Park…", approve = "Approve scope…", pin = "Pin", unpin = "Unpin"
+    case rename = "Rename…", info = "Show info", resume = "Resume", park = "Park…", approve = "Approve scope…", pin = "Pin", unpin = "Unpin", addAgent = "Add to Agents", removeAgent = "Remove from Agents"
 
     static func items(for row: SpacesRow, model: HerdrModel) -> [RowMenu] {
         guard let tab = row.tab else { return [] }
@@ -720,7 +722,10 @@ enum RowMenu: String {
             if RemoteActions.slug(model.catalog.snapshot.lanes[tab]?.scopeURL) != nil { out.append(.approve) }
         }
         // A pin is a fact on the server that owns the tab, so another machine's tab pins there.
-        if row.kind == .tab { out.append(model.isPinned(tab) ? .unpin : .pin) }
+        if row.kind == .tab {
+            out.append(model.isPinned(tab) ? .unpin : .pin)
+            out.append(model.isAgent(tab) ? .removeAgent : .addAgent)
+        }
         return out
     }
 }

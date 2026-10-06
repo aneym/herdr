@@ -9,7 +9,7 @@ struct Snapshot: Decodable {
         let focused: Bool?; let active_tab_id: String?; let tokens: [String: String]?
     }
     /// `work_status` is herdr's one answer to "is this chat working" (server app/work_status.rs); older servers omit it.
-    struct Tab: Decodable { let tab_id: String; let workspace_id: String; let label: String?; let number: Int; let agent_status: String?; let pane_count: Int?; let pin_index: Int?; var work_status: String? = nil }
+    struct Tab: Decodable { let tab_id: String; let workspace_id: String; let label: String?; let number: Int; let agent_status: String?; let pane_count: Int?; let pin_index: Int?; var work_status: String? = nil; var role: String? = nil }
     struct Pane: Decodable {
         let pane_id: String; let tab_id: String; let terminal_id: String; let agent_status: String?; let focused: Bool?
         // Titles the quick switcher matches. Older snapshots omit them.
@@ -316,16 +316,25 @@ struct TabClassifier {
 
 extension HerdrModel {
     /// The shared pin order owns the numbered slots on every surface.
-    var numberedTabIds: [String] {
-        // A dropped pin order counts before its machine reports it (PinDrag).
-        let pinned = PinDrag.shared.ordered((snapshot?.tabs ?? []).filter { $0.pin_index != nil }
-            .sorted { ($0.pin_index ?? 0) < ($1.pin_index ?? 0) }.map(\.tab_id))
-        let remote = machines.flatMap { machine in
-            PinDrag.shared.ordered((machine.snapshot?.tabs ?? []).filter { $0.pin_index != nil }
-                .sorted { ($0.pin_index ?? 0) < ($1.pin_index ?? 0) }.map(\.tab_id))
+    func numberedTabIds(state: SidebarState) -> [String] {
+        let tabs = ([snapshot].compactMap { $0 } + machines.compactMap(\.snapshot)).flatMap { $0.tabs }.map {
+            SpacesInput.Tab(id: $0.tab_id, space: $0.workspace_id, label: $0.label ?? $0.tab_id, pinIndex: $0.pin_index, role: $0.role)
+        }
+        let pins = [true, false].flatMap { agents in
+            PinDrag.shared.ordered(SpacesTree.pinTabs(tabs, agents: agents).map(\.id), section: agents ? "agents" : "pinned")
         }
         var seen = Set<String>()
-        return (pinned + remote + allRowsInOrder.map(\.id)).filter { seen.insert($0).inserted }
+        let displayed = spacesRows(state: state).filter { $0.kind == .tab }.compactMap(\.tab)
+        return (pins + displayed + allRowsInOrder.map(\.id)).filter { seen.insert($0).inserted }
+    }
+
+    func isAgent(_ tab: String) -> Bool {
+        source(for: tab)?.tabs.first { $0.tab_id == tab }?.role == "agent"
+    }
+
+    func setAgentRole(_ tab: String, _ on: Bool) {
+        let commands = HerdrCommands(socketPath: env["HERDR_SOCKET_PATH"] ?? "")
+        DispatchQueue.global(qos: .userInitiated).async { _ = commands.tabSetRole(tabId: tab, role: on ? "agent" : nil) }
     }
 
     func isPinned(_ tab: String) -> Bool {
@@ -350,7 +359,7 @@ extension HerdrModel {
                     let parentTab = s.agents.first { $0.pane_id == parentPane }?.tab_id
                     return SpacesInput.Agent(status: agent.agent_status ?? "unknown", parent: parentTab)
                 },
-                focused: tab.tab_id == state.selectedTab, status: tab.agent_status ?? "unknown", pinIndex: tab.pin_index, work: tab.work_status)
+                focused: tab.tab_id == state.selectedTab, status: tab.agent_status ?? "unknown", pinIndex: tab.pin_index, work: tab.work_status, role: tab.role)
         }, focusedTab: state.selectedTab)
         // areas.json owns the space groups whenever it exists (an empty list clears them), as the Rust
         // server merges them; without it the overlay's own groups stand.

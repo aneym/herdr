@@ -702,7 +702,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     @objc func prevTab(_ sender: Any?) { cycleTab(-1) }
 
     @objc func gotoTab(_ sender: NSMenuItem) {
-        let rows = model.numberedTabIds
+        let rows = model.numberedTabIds(state: state)
         if sender.tag >= 1, sender.tag <= rows.count { selectTab(rows[sender.tag - 1]) }
     }
 

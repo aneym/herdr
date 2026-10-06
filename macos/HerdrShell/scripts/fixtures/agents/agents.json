@@ -1,0 +1,189 @@
+{
+  "_about": "Local rails and poker; ax42 has a chat in Rails (other case), a recruiting space grouped under Rails, a shell-only jobs space; pc is unreachable with a chat in poker; forge has no agents.",
+  "input": {
+    "spaces": [
+      {
+        "id": "s1",
+        "name": "rails",
+        "pinned": false,
+        "collapsed": false
+      },
+      {
+        "id": "s2",
+        "name": "poker",
+        "pinned": false,
+        "collapsed": false
+      }
+    ],
+    "tabs": [
+      {
+        "id": "s1:t1",
+        "space": "s1",
+        "label": "orchestrator",
+        "agents": [
+          {
+            "status": "working"
+          }
+        ],
+        "status": "working",
+        "pinIndex": 0,
+        "focused": false,
+        "role": "plain"
+      },
+      {
+        "id": "s1:t2",
+        "space": "s1",
+        "label": "lane",
+        "agents": [
+          {
+            "status": "idle"
+          }
+        ],
+        "status": "idle",
+        "focused": false
+      },
+      {
+        "id": "s2:t1",
+        "space": "s2",
+        "label": "coach",
+        "agents": [
+          {
+            "status": "working"
+          }
+        ],
+        "status": "working",
+        "focused": false
+      }
+    ],
+    "focusedTab": "s1:t1"
+  },
+  "overlay": {
+    "space_groups": [
+      {
+        "name": "Rails",
+        "spaces": [
+          "rails",
+          "recruiting"
+        ]
+      }
+    ]
+  },
+  "chrome": {},
+  "now": 0,
+  "machines": [
+    {
+      "name": "ax42",
+      "spaces": [
+        {
+          "id": "ax42/w1",
+          "name": "Rails",
+          "pinned": false,
+          "collapsed": false
+        },
+        {
+          "id": "ax42/w2",
+          "name": "recruiting",
+          "pinned": false,
+          "collapsed": false
+        },
+        {
+          "id": "ax42/w3",
+          "name": "jobs",
+          "pinned": false,
+          "collapsed": false
+        }
+      ],
+      "tabs": [
+        {
+          "id": "ax42/w1:t1",
+          "space": "ax42/w1",
+          "label": "remote chat",
+          "agents": [
+            {
+              "status": "working"
+            }
+          ],
+          "status": "working",
+          "pinIndex": 0,
+          "focused": false,
+          "role": "agent"
+        },
+        {
+          "id": "ax42/w1:t2",
+          "space": "ax42/w1",
+          "label": "job shell",
+          "status": "unknown",
+          "agents": [],
+          "focused": false
+        },
+        {
+          "id": "ax42/w2:t1",
+          "space": "ax42/w2",
+          "label": "recruiter",
+          "agents": [
+            {
+              "status": "blocked"
+            }
+          ],
+          "status": "blocked",
+          "focused": false
+        },
+        {
+          "id": "ax42/w3:t1",
+          "space": "ax42/w3",
+          "label": "cron",
+          "status": "unknown",
+          "agents": [],
+          "focused": false
+        }
+      ]
+    },
+    {
+      "name": "pc",
+      "health": "unreachable",
+      "spaces": [
+        {
+          "id": "pc/w1",
+          "name": "poker",
+          "pinned": false,
+          "collapsed": false
+        }
+      ],
+      "tabs": [
+        {
+          "id": "pc/w1:t1",
+          "space": "pc/w1",
+          "label": "pc chat",
+          "agents": [
+            {
+              "status": "idle"
+            }
+          ],
+          "status": "idle",
+          "focused": false
+        }
+      ]
+    },
+    {
+      "name": "forge",
+      "spaces": [
+        {
+          "id": "forge/w1",
+          "name": "forge",
+          "pinned": false,
+          "collapsed": false
+        }
+      ],
+      "tabs": [
+        {
+          "id": "forge/w1:t1",
+          "space": "forge/w1",
+          "label": "shell",
+          "status": "unknown",
+          "agents": [],
+          "focused": false
+        }
+      ]
+    }
+  ]
+}

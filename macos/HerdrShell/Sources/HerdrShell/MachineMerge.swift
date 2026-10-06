@@ -9,8 +9,8 @@ import Foundation
 /// space; any other remote workspace is its own space after the local ones, and SpacesTree puts
 /// it in its areas.json group by label like a local space. Remote tabs follow the local tabs of
 /// a space. Only chats travel: a remote tab shows when it has an agent or a pin, so a machine
-/// with no agents adds nothing. Remote pins follow the local pins, machine by machine, in each
-/// machine's own pin order, as the Cmd digits number them.
+/// with no agents adds nothing. Agent pins precede plain pins across all machines; within each section local pins come
+/// first, then remote machines in input order. Source indices remain unchanged for moves.
 enum MachineMerge {
     struct Machine: Codable {
         var name: String
@@ -26,15 +26,8 @@ enum MachineMerge {
         var out = local
         var byLabel: [String: String] = [:]
         for space in local.spaces where byLabel[key(space.name)] == nil { byLabel[key(space.name)] = space.id }
-        var nextPin = (local.tabs.compactMap(\.pinIndex).max() ?? -1) + 1
         for machine in machines {
             let shown = machine.tabs.filter { !$0.agents.isEmpty || $0.pinIndex != nil }
-            // Pins renumber after every pin before them, keeping this machine's order.
-            var pins: [String: Int] = [:]
-            for tab in shown.filter({ $0.pinIndex != nil }).sorted(by: { ($0.pinIndex ?? 0) < ($1.pinIndex ?? 0) }) {
-                pins[tab.id] = nextPin
-                nextPin += 1
-            }
             for var tab in shown {
                 guard let space = machine.spaces.first(where: { $0.id == tab.space }) else { continue }
                 if let home = byLabel[key(space.name)] {
@@ -44,7 +37,6 @@ enum MachineMerge {
                     byLabel[key(space.name)] = space.id
                     out.spaces.append(space)
                 }
-                tab.pinIndex = pins[tab.id]
                 tab.focused = tab.id == local.focusedTab
                 out.tabs.append(tab)
             }

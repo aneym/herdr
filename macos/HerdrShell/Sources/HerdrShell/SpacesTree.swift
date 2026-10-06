@@ -4,7 +4,7 @@ struct SpacesInput: Codable {
     struct Space: Codable { var id: String; var name: String; var pinned = false; var collapsed = false }
     struct Agent: Codable { var status: String; var parent: String? = nil }
     /// `work` is herdr's one answer to "is this chat working" (server app/work_status.rs); nil from older servers.
-    struct Tab: Codable { var id: String; var space: String; var label: String; var agents: [Agent] = []; var focused = false; var status = "unknown"; var pinIndex: Int? = nil; var work: String? = nil }
+    struct Tab: Codable { var id: String; var space: String; var label: String; var agents: [Agent] = []; var focused = false; var status = "unknown"; var pinIndex: Int? = nil; var work: String? = nil; var role: String? = nil }
     var spaces: [Space]; var tabs: [Tab]; var focusedTab: String?
 }
 
@@ -151,25 +151,43 @@ enum SpacesTree {
         run.done || run.id.hasPrefix("agent:") && tab.work.map { !["working", "blocked"].contains($0) } == true
     }
     static func age(_ seconds: Double) -> String { let m = Int(max(0, seconds)) / 60; return m == 0 ? "<1m" : m < 60 ? "\(m)m" : "\(m / 60)h\(m % 60)m" }
+    static func pinTabs(_ tabs: [SpacesInput.Tab], agents: Bool) -> [SpacesInput.Tab] {
+        func machine(_ id: String) -> String { id.firstIndex(of: "/").map { String(id[..<$0]) } ?? "" }
+        var machines = [""]
+        for tab in tabs { let name = machine(tab.id); if !machines.contains(name) { machines.append(name) } }
+        return machines.flatMap { name in
+            tabs.filter { machine($0.id) == name && ($0.role == "agent") == agents && (agents || $0.pinIndex != nil) }
+                .sorted { ($0.pinIndex ?? 0) < ($1.pinIndex ?? 0) }
+        }
+    }
     static func build(_ input: SpacesInput, overlay: Overlay, chrome: SpacesChrome, now: Double) -> [SpacesRow] {
         var out = [SpacesRow(id: "agents", kind: .title, title: "agents")]
         let choices = overlay.goalChoices
         let filter = chrome.goalFilter.flatMap { choices.contains($0) ? $0 : nil }
-        let pins = input.tabs.filter { $0.pinIndex != nil }.sorted { ($0.pinIndex ?? 0) < ($1.pinIndex ?? 0) }
+        func hint(start: Int, count: Int) -> String {
+            guard count > 0, start <= 9 else { return "" }
+            let end = min(start + count - 1, 9)
+            return start == end ? "⌘\(start)" : "⌘\(start)..\(end)"
+        }
+        func pinRow(_ tab: SpacesInput.Tab, prefix: String) -> SpacesRow {
+            let space = input.spaces.first { $0.id == tab.space }
+            let header = space.map { space in
+                let depth = space.collapsed || chrome.collapsedSpaces.contains(space.id) ? 1 : 0
+                return SpaceScope(space, input: input, overlay: overlay, filter: filter, depth: depth, includeAgents: true).rollup(tab, nest: true).count > 0
+            } ?? false
+            let state = mark(tab, overlay.tabs[tab.id] ?? Overlay.Tag(), foldable: header)
+            return SpacesRow(id: prefix + tab.id, kind: .tab, glyph: state.glyph, tone: state.tone,
+                             title: tab.label, trailing: space?.name ?? tab.space, tab: tab.id)
+        }
+        let agents = pinTabs(input.tabs, agents: true)
+        let pins = pinTabs(input.tabs, agents: false)
+        if !agents.isEmpty {
+            out.append(SpacesRow(id: "agentpins", kind: .section, title: "AGENTS", trailing: hint(start: 1, count: agents.count)))
+            out += agents.map { pinRow($0, prefix: "agent:") }
+        }
         if !pins.isEmpty {
-            out.append(SpacesRow(id: "pinned", kind: .section, title: "PINNED", trailing: pins.count == 1 ? "⌘1" : "⌘1..\(min(pins.count, 9))"))
-            for tab in pins {
-                let space = input.spaces.first { $0.id == tab.space }
-                let source = space?.name ?? tab.space
-                // As its header row in the space: live children make a pinned lane read as working.
-                let header = space.map { space in
-                    let depth = space.collapsed || chrome.collapsedSpaces.contains(space.id) ? 1 : 0
-                    return SpaceScope(space, input: input, overlay: overlay, filter: filter, depth: depth).rollup(tab, nest: true).count > 0
-                } ?? false
-                let state = mark(tab, overlay.tabs[tab.id] ?? Overlay.Tag(), foldable: header)
-                out.append(SpacesRow(id: "pinned:" + tab.id, kind: .tab, glyph: state.glyph, tone: state.tone, title: tab.label,
-                                     trailing: source, tab: tab.id))
-            }
+            out.append(SpacesRow(id: "pinned", kind: .section, title: "PINNED", trailing: hint(start: agents.count + 1, count: pins.count)))
+            out += pins.map { pinRow($0, prefix: "pinned:") }
         }
         if !choices.isEmpty { out.append(SpacesRow(id: "goal", kind: .goal, title: "goal " + (filter?.replacingOccurrences(of: ":", with: " · ") ?? "All"), trailing: filter == nil ? "▾" : "✕")) }
         let hidden = input.spaces.filter { $0.collapsed || chrome.collapsedSpaces.contains($0.id) }
@@ -257,12 +275,12 @@ enum SpacesTree {
             if sectioned {
                 for (value, label) in [("reviewing", "READY FOR REVIEW"), ("scoping", "SCOPING"), ("implementing", "IMPLEMENTING"), ("monitoring", "MONITORING")] {
                     let members = lanes.filter { tag($0).mode == "active" && root($0) == nil && (tag($0).section ?? "implementing") == value } + (value == "implementing" ? ordinary : [])
-                    let hint = value == "reviewing" ? String(members.count) : first && pins.isEmpty ? "⌘1..9" : ""
+                    let hint = value == "reviewing" ? String(members.count) : first && pins.isEmpty && agents.isEmpty ? "⌘1..9" : ""
                     if !members.isEmpty && value != "reviewing" { first = false }
                     section(label, members, shortcut: hint)
                 }
             } else {
-                section("LANES", lanes.filter { tag($0).mode == "active" && root($0) == nil } + workflows.filter { parent($0) == nil } + ordinary, shortcut: pins.isEmpty ? "⌘1..9" : "")
+                section("LANES", lanes.filter { tag($0).mode == "active" && root($0) == nil } + workflows.filter { parent($0) == nil } + ordinary, shortcut: pins.isEmpty && agents.isEmpty ? "⌘1..9" : "")
             }
             for (group, members) in [("services", lanes.filter { tag($0).mode == "auto" } + (sectioned ? workflows.filter { parent($0) == nil } : [])), ("parked", lanes.filter { tag($0).mode == "parked" }), ("closed", sectioned ? lanes.filter { tag($0).mode == "active" && tag($0).section == "closed" } : []), ("background", background)] {
                 guard !members.isEmpty else { continue }
@@ -320,11 +338,12 @@ private struct SpaceScope {
     let tabs: [SpacesInput.Tab]; let sectioned: Bool; let background: [SpacesInput.Tab]
     let orch: [SpacesInput.Tab]; let lanes: [SpacesInput.Tab]; let workflows: [SpacesInput.Tab]; let ordinary: [SpacesInput.Tab]
 
-    init(_ space: SpacesInput.Space, input: SpacesInput, overlay: Overlay, filter: String?, depth: Int) {
+    init(_ space: SpacesInput.Space, input: SpacesInput, overlay: Overlay, filter: String?, depth: Int, includeAgents: Bool = false) {
         self.overlay = overlay
         let all = input.tabs.filter { $0.space == space.id }
         let sectioned = all.contains { overlay.tabs[$0.id]?.section != nil }
         let tabs = all.filter { tab in
+            guard includeAgents || tab.role != "agent" else { return false }
             guard sectioned, depth == 0, let filter else { return true }
             guard let tag = overlay.tabs[tab.id] else { return false }
             let bits = filter.split(separator: ":", maxSplits: 1).map(String.init)
