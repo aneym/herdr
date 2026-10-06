@@ -593,6 +593,7 @@ final class DocWidthHandle: NSView {
     private var start: CGFloat = 0
 
     override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
     override func mouseDown(with event: NSEvent) { origin = event.locationInWindow.x; start = current }
     override func mouseDragged(with event: NSEvent) {
