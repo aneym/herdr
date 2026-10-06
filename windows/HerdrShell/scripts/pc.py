@@ -91,19 +91,20 @@ def guard(quiet=False):
     return rc == 3, data
 
 
-def git_sha():
+def git_sha(repo=REPO):
     sha = subprocess.run(
-        ["git", "-C", str(REPO), "rev-parse", "HEAD"],
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
         capture_output=True, text=True,
     ).stdout.strip()
     dirty = subprocess.run(
-        ["git", "-C", str(REPO), "status", "--porcelain", "--", "windows/HerdrShell"],
+        ["git", "-C", str(repo), "status", "--porcelain", "--", "windows/HerdrShell"],
         capture_output=True, text=True,
     ).stdout.strip()
     return sha + ("+dirty" if dirty else "")
 
 
 def cmd_sync(_args):
+    repo = Path(_args.src).resolve()
     bootstrap()
     remote(
         f"{PS} -Command \"if (Test-Path '{R_STAGE}') {{ Remove-Item -Recurse -Force '{R_STAGE}' }}; "
@@ -118,7 +119,7 @@ def cmd_sync(_args):
     ):
         excl += ["--exclude", pat]
     tar = subprocess.Popen(
-        ["tar", "-cf", "-", "-C", str(REPO)] + excl + ["windows/HerdrShell"],
+        ["tar", "-cf", "-", "-C", str(repo)] + excl + ["windows/HerdrShell"],
         stdout=subprocess.PIPE,
         env={**os.environ, "COPYFILE_DISABLE": "1"},
     )
@@ -155,7 +156,7 @@ def cmd_build(_args):
         print("game running; not building (exit 75)", file=sys.stderr)
         sys.exit(75)
     cmd_sync(_args)
-    sha = git_sha()
+    sha = git_sha(Path(_args.src).resolve())
     rc, _ = ps_file("build.ps1", "-Sha", sha, stream=True)
     if rc == 75:
         print("build aborted: a game started mid-build", file=sys.stderr)
@@ -295,10 +296,11 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("sync", help="tar windows/HerdrShell to the PC")
-    p.add_argument("--src", default=str(SHELL), help="source dir (unused; tree is fixed)")
+    p.add_argument("--src", default=str(REPO), help="source repository directory")
     p.set_defaults(fn=cmd_sync)
 
     p = sub.add_parser("build", help="guard + sync + tauri build --bundles nsis")
+    p.add_argument("--src", default=str(REPO), help="source repository directory")
     p.set_defaults(fn=cmd_build)
 
     p = sub.add_parser("install", help="run the NSIS installer silently")
