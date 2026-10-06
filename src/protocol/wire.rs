@@ -1106,6 +1106,7 @@ pub struct ClientShellWorktree {
 pub struct ClientShellTab {
     #[serde(default)]
     pub desk_count: usize,
+    #[serde(default)]
     pub sort_rank: u32,
     pub tab_id: String,
     pub workspace_id: String,

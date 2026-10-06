@@ -1610,6 +1610,27 @@
           ],
           "type": "object"
         },
+        "AgentResumeParams": {
+          "description": "Restart an idle agent in its own pane, resuming its reported session.",
+          "properties": {
+            "input_quiet_ms": {
+              "description": "Also refuse with `agent_busy` while a person typed into the pane within\nthis many milliseconds.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "pane_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane_id"
+          ],
+          "type": "object"
+        },
         "AgentSendKeysParams": {
           "properties": {
             "keys": {
@@ -4241,6 +4262,18 @@
           ],
           "type": "string"
         },
+        "PluginReloadParams": {
+          "description": "Re-read one linked plugin's manifest from its registered location.",
+          "properties": {
+            "plugin_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "plugin_id"
+          ],
+          "type": "object"
+        },
         "PluginSetEnabledParams": {
           "properties": {
             "plugin_id": {
@@ -6330,6 +6363,22 @@
         {
           "properties": {
             "method": {
+              "const": "agent.resume",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentResumeParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "agent.owner.set",
               "type": "string"
             },
@@ -7247,6 +7296,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/PluginSetEnabledParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "plugin.reload",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PluginReloadParams"
             }
           },
           "required": [
@@ -11113,6 +11178,37 @@
             {
               "properties": {
                 "agent": {
+                  "type": "string"
+                },
+                "argv": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "pane_id": {
+                  "type": "string"
+                },
+                "session_id": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "agent_resumed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "pane_id",
+                "agent",
+                "session_id",
+                "argv"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "agent": {
                   "$ref": "#/schemas/success_response/$defs/AgentInfo"
                 },
                 "dropped": {
@@ -11897,6 +11993,30 @@
               "required": [
                 "type",
                 "plugin"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "plugin_id": {
+                  "type": "string"
+                },
+                "plugin_root": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "plugin_reloaded",
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "plugin_id",
+                "version",
+                "plugin_root"
               ],
               "type": "object"
             },
