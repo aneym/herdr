@@ -2204,6 +2204,35 @@ impl TerminalState {
         self.end_agent_occupancy();
     }
 
+    /// Put a live agent terminal into the restored-and-pending-resume shape
+    /// before its runtime is replaced: forget the old process's detection and
+    /// hook authority, keep the session reference, name, identity, ownership,
+    /// group, and metadata tokens, and queue the resume plan.
+    pub fn begin_in_place_agent_resume(
+        &mut self,
+        session: crate::agent_resume::PersistedAgentSession,
+        plan: crate::agent_resume::AgentResumePlan,
+    ) {
+        self.detected_agent = None;
+        self.fallback_state = AgentState::Unknown;
+        self.fallback_visible_blocker = false;
+        self.fallback_observed_at = None;
+        self.hook_authority = None;
+        self.agent_metadata.clear();
+        self.metadata_report_agents.clear();
+        self.suppressed_full_lifecycle_hook_reports.clear();
+        self.stale_full_lifecycle_hook_sessions.clear();
+        self.codex_prompt_ready = false;
+        self.state = AgentState::Unknown;
+        self.recent_agent_process_exit = None;
+        self.agent_process_acquisition_pending = false;
+        self.respawn_shell_on_exit = false;
+        self.restore_error = None;
+        self.persisted_agent_session = Some(session);
+        self.pending_agent_resume_plan = Some(plan);
+        self.revision = self.revision.wrapping_add(1);
+    }
+
     /// End the current agent occupancy: drop its durable identity and
     /// ownership record. Un-naming an agent does NOT end its occupancy; only
     /// process exit, hook release, or a respawn reset does.

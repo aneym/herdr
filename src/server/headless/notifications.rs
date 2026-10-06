@@ -663,6 +663,10 @@ impl HeadlessServer {
                         .app
                         .pending_worktree_remove_runtime_exits
                         .contains_key(&pane_id_val)
+                    && !self
+                        .app
+                        .pending_agent_resume_runtime_exits
+                        .contains_key(&pane_id_val)
                 {
                     if let Some(update) = self
                         .app

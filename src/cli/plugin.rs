@@ -17,6 +17,17 @@ use crate::popup_size::PopupSize;
 const PLUGIN_BUILD_OUTPUT_MAX_BYTES: usize = 64 * 1024;
 const PLUGIN_INSTALL_USAGE: &str =
     "usage: herdr plugin install [--ref REF] [--yes|-y] <owner>/<repo>[/subdir...]";
+const PLUGIN_RELOAD_USAGE: &str = "herdr plugin reload <PLUGIN_ID> --pane <PANE> --request <ID> --changelog <LINE> [--json] [--timeout <MS>]";
+const PLUGIN_RELOAD_DEFAULT_TIMEOUT_MS: u64 = 600_000;
+/// Exit code for "the agent stayed busy; nothing was restarted, retry later".
+const PLUGIN_RELOAD_EXIT_BUSY: i32 = 75;
+/// Exit code for "plugin reloaded, but the pane runs no agent to resume" (for
+/// example a hibernated pane); the caller wakes it with the changelog line.
+const PLUGIN_RELOAD_EXIT_NO_AGENT: i32 = 3;
+const PLUGIN_RELOAD_POLL: std::time::Duration = std::time::Duration::from_secs(1);
+const PLUGIN_RELOAD_INPUT_QUIET_MS: u64 = 20_000;
+const PLUGIN_RELOAD_ACTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+const PLUGIN_RELOAD_RESUME_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
 pub(super) fn run_plugin_command(args: &[String]) -> std::io::Result<i32> {
     let Some(subcommand) = args.first().map(|arg| arg.as_str()) else {
@@ -33,6 +44,7 @@ pub(super) fn run_plugin_command(args: &[String]) -> std::io::Result<i32> {
         "unlink" => plugin_unlink(&args[1..]),
         "enable" => plugin_set_enabled(&args[1..], true),
         "disable" => plugin_set_enabled(&args[1..], false),
+        "reload" => plugin_reload(&args[1..]),
         "action" => run_plugin_action_command(&args[1..]),
         "log" | "logs" => plugin_log_list(&args[1..]),
         "pane" => run_plugin_pane_command(&args[1..]),
@@ -369,6 +381,446 @@ fn plugin_set_enabled(args: &[String], enabled: bool) -> std::io::Result<i32> {
     } else {
         print_plugin_response(Method::PluginDisable(params))
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PluginReloadArgs {
+    plugin_id: String,
+    pane: String,
+    request: String,
+    changelog: String,
+    timeout_ms: u64,
+}
+
+/// Parse `plugin reload` arguments; `Err` carries the exit code and its one
+/// stderr line.
+fn parse_plugin_reload_args(args: &[String]) -> Result<PluginReloadArgs, (i32, String)> {
+    let usage = || (1, format!("usage: {PLUGIN_RELOAD_USAGE}"));
+    let mut plugin_id = None;
+    let mut pane = None;
+    let mut request = None;
+    let mut changelog = None;
+    let mut timeout_ms = PLUGIN_RELOAD_DEFAULT_TIMEOUT_MS;
+    let mut index = 0;
+    while index < args.len() {
+        let value = || args.get(index + 1).cloned();
+        match args[index].as_str() {
+            "--pane" => pane = Some(value().ok_or_else(usage)?),
+            "--request" => request = Some(value().ok_or_else(usage)?),
+            "--changelog" => changelog = Some(value().ok_or_else(usage)?),
+            "--timeout" => {
+                let raw = value().ok_or_else(usage)?;
+                timeout_ms = raw
+                    .parse::<u64>()
+                    .map_err(|_| (1, format!("invalid --timeout value: {raw}")))?;
+            }
+            // Output is always exactly one JSON object; `--json` is accepted
+            // so callers can say so.
+            "--json" => {
+                index += 1;
+                continue;
+            }
+            other if other.starts_with('-') => {
+                return Err((1, format!("unknown option: {other}")));
+            }
+            other if plugin_id.is_none() => {
+                plugin_id = Some(other.to_string());
+                index += 1;
+                continue;
+            }
+            _ => return Err(usage()),
+        }
+        index += 2;
+    }
+    let (Some(plugin_id), Some(pane), Some(request), Some(changelog)) =
+        (plugin_id, pane, request, changelog)
+    else {
+        return Err(usage());
+    };
+    if !valid_reload_request_id(&request) {
+        return Err((
+            1,
+            format!("invalid --request id {request:?}: use 1-128 of A-Z a-z 0-9 . _ -"),
+        ));
+    }
+    Ok(PluginReloadArgs {
+        plugin_id,
+        pane,
+        request,
+        changelog,
+        timeout_ms,
+    })
+}
+
+fn valid_reload_request_id(request: &str) -> bool {
+    (1..=128).contains(&request.len())
+        && request
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn plugin_reload_record_path(plugin_id: &str, request: &str) -> PathBuf {
+    crate::plugin_paths::plugin_state_dir(plugin_id)
+        .join("reloads")
+        .join(format!("{request}.json"))
+}
+
+/// A finished reload for this request, if one was recorded.
+fn completed_plugin_reload_record(path: &Path) -> Option<serde_json::Value> {
+    let record: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+    (record.get("resumed") == Some(&serde_json::Value::Bool(true))).then_some(record)
+}
+
+fn plugin_reload_prompt(changelog: &str, request: &str) -> String {
+    format!(
+        "Your plugin was updated: {changelog}, request {request} done. Run its check, then `agent-request confirm {request}` (or `--fail \"<why>\"`)."
+    )
+}
+
+fn utc_now_iso() -> String {
+    let now = time::OffsetDateTime::now_utc();
+    let now = now.replace_nanosecond(0).unwrap_or(now);
+    now.format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| now.unix_timestamp().to_string())
+}
+
+struct PluginReloadFailure {
+    exit_code: i32,
+    message: String,
+}
+
+impl PluginReloadFailure {
+    fn failed(message: impl Into<String>) -> Self {
+        Self {
+            exit_code: 1,
+            message: message.into(),
+        }
+    }
+}
+
+/// One API call; `Err` carries the error code and message.
+fn plugin_reload_call(method: Method) -> Result<serde_json::Value, (String, String)> {
+    let response = super::send_request(&Request {
+        id: "cli:plugin:reload".into(),
+        method,
+    })
+    .map_err(|err| ("request_failed".to_string(), err.to_string()))?;
+    if let Some(error) = response.get("error") {
+        let field = |name: &str| {
+            error
+                .get(name)
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        };
+        return Err((field("code"), field("message")));
+    }
+    Ok(response
+        .get("result")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null))
+}
+
+fn plugin_reload_step(
+    step: &str,
+    method: Method,
+) -> Result<serde_json::Value, PluginReloadFailure> {
+    plugin_reload_call(method).map_err(|(code, message)| {
+        PluginReloadFailure::failed(format!("{step}: {code}: {message}"))
+    })
+}
+
+fn plugin_reload(args: &[String]) -> std::io::Result<i32> {
+    let args = match parse_plugin_reload_args(args) {
+        Ok(args) => args,
+        Err((exit_code, message)) => {
+            eprintln!("{message}");
+            return Ok(exit_code);
+        }
+    };
+    let record_path = plugin_reload_record_path(&args.plugin_id, &args.request);
+    if let Some(record) = completed_plugin_reload_record(&record_path) {
+        println!("{record}");
+        return Ok(0);
+    }
+    match run_plugin_reload(&args, &record_path) {
+        Ok(record) => {
+            println!("{record}");
+            if record.get("resumed") == Some(&serde_json::Value::Bool(true)) {
+                Ok(0)
+            } else {
+                Ok(PLUGIN_RELOAD_EXIT_NO_AGENT)
+            }
+        }
+        Err(failure) => {
+            eprintln!("{}", failure.message);
+            Ok(failure.exit_code)
+        }
+    }
+}
+
+fn run_plugin_reload(
+    args: &PluginReloadArgs,
+    record_path: &Path,
+) -> Result<serde_json::Value, PluginReloadFailure> {
+    plugin_reload_step(
+        "plugin.reload",
+        Method::PluginReload(crate::api::schema::PluginReloadParams {
+            plugin_id: args.plugin_id.clone(),
+        }),
+    )?;
+    run_plugin_reload_action(args)?;
+
+    let deadline = std::time::Instant::now()
+        .checked_add(std::time::Duration::from_millis(args.timeout_ms))
+        .ok_or_else(|| PluginReloadFailure::failed("--timeout is too large"))?;
+    let resumed = loop {
+        let agent = match plugin_reload_call(Method::AgentGet(crate::api::schema::AgentTarget {
+            target: args.pane.clone(),
+        })) {
+            Ok(agent) => agent,
+            Err((code, _)) if code == "agent_not_found" => {
+                return Ok(serde_json::json!({
+                    "plugin_id": args.plugin_id,
+                    "reloaded_at": utc_now_iso(),
+                    "pane": args.pane,
+                    "session_id": serde_json::Value::Null,
+                    "resumed": false,
+                    "request": args.request,
+                    "changelog": args.changelog,
+                }));
+            }
+            Err((code, message)) => {
+                return Err(PluginReloadFailure::failed(format!(
+                    "agent.get: {code}: {message}"
+                )));
+            }
+        };
+        let status = agent
+            .get("agent")
+            .and_then(|agent| agent.get("agent_status"))
+            .and_then(serde_json::Value::as_str);
+        if !matches!(status, Some("idle" | "done")) {
+            if std::time::Instant::now() + PLUGIN_RELOAD_POLL > deadline {
+                return Err(PluginReloadFailure {
+                    exit_code: PLUGIN_RELOAD_EXIT_BUSY,
+                    message: "agent busy".into(),
+                });
+            }
+            std::thread::sleep(PLUGIN_RELOAD_POLL);
+            continue;
+        }
+        // Recheck status and the existing per-terminal human-input timestamp
+        // atomically at the mutation boundary, not just in this client poll.
+        match plugin_reload_call(Method::AgentResume(crate::api::schema::AgentResumeParams {
+            pane_id: args.pane.clone(),
+            input_quiet_ms: Some(PLUGIN_RELOAD_INPUT_QUIET_MS),
+        })) {
+            Ok(resumed) => break resumed,
+            Err((code, _)) if code == "agent_busy" => {
+                if std::time::Instant::now() + PLUGIN_RELOAD_POLL > deadline {
+                    return Err(PluginReloadFailure {
+                        exit_code: PLUGIN_RELOAD_EXIT_BUSY,
+                        message: "agent busy".into(),
+                    });
+                }
+                std::thread::sleep(PLUGIN_RELOAD_POLL);
+            }
+            Err((code, message)) => {
+                return Err(PluginReloadFailure::failed(format!(
+                    "agent.resume: {code}: {message}"
+                )));
+            }
+        }
+    };
+    let session_id = resumed
+        .get("session_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    tracing::info!(
+        plugin_id = %args.plugin_id,
+        pane = %args.pane,
+        request = %args.request,
+        "resumed agent after plugin reload"
+    );
+
+    wait_for_resumed_agent_idle(&args.pane)?;
+    plugin_reload_step(
+        "agent.prompt",
+        Method::AgentPrompt(crate::api::schema::AgentPromptParams {
+            if_idle: false,
+            target: args.pane.clone(),
+            text: plugin_reload_prompt(&args.changelog, &args.request),
+            wait: None,
+        }),
+    )?;
+
+    let record = serde_json::json!({
+        "plugin_id": args.plugin_id,
+        "reloaded_at": utc_now_iso(),
+        "pane": args.pane,
+        "session_id": session_id,
+        "resumed": true,
+        "request": args.request,
+        "changelog": args.changelog,
+    });
+    write_plugin_reload_record(record_path, &record).map_err(|err| {
+        PluginReloadFailure::failed(format!("failed to write {}: {err}", record_path.display()))
+    })?;
+    Ok(record)
+}
+
+/// Run the plugin's optional `reload` action with the pane as context and
+/// wait for it to finish.
+fn run_plugin_reload_action(args: &PluginReloadArgs) -> Result<(), PluginReloadFailure> {
+    let actions = plugin_reload_step(
+        "plugin.action.list",
+        Method::PluginActionList(PluginActionListParams {
+            plugin_id: Some(args.plugin_id.clone()),
+        }),
+    )?;
+    let has_reload_action = actions
+        .get("actions")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|actions| {
+            actions.iter().any(|action| {
+                action.get("action_id").and_then(serde_json::Value::as_str) == Some("reload")
+            })
+        });
+    if !has_reload_action {
+        return Ok(());
+    }
+    let pane = plugin_reload_call(Method::PaneGet(crate::api::schema::PaneTarget {
+        pane_id: args.pane.clone(),
+    }))
+    .ok();
+    let pane_field = |name: &str| {
+        pane.as_ref()
+            .and_then(|pane| pane.get("pane"))
+            .and_then(|pane| pane.get(name))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+    };
+    let invoked = plugin_reload_step(
+        "plugin.action.invoke",
+        Method::PluginActionInvoke(PluginActionInvokeParams {
+            action_id: "reload".into(),
+            plugin_id: Some(args.plugin_id.clone()),
+            context: Some(PluginInvocationContext {
+                workspace_id: pane_field("workspace_id"),
+                workspace_label: None,
+                workspace_cwd: None,
+                worktree: None,
+                tab_id: pane_field("tab_id"),
+                tab_label: None,
+                focused_pane_id: Some(args.pane.clone()),
+                focused_pane_cwd: pane_field("cwd"),
+                focused_pane_agent: pane_field("agent"),
+                focused_pane_status: None,
+                selected_text: None,
+                invocation_source: Some("plugin-reload".into()),
+                correlation_id: Some(args.request.clone()),
+                clicked_url: None,
+                link_handler_id: None,
+            }),
+        }),
+    )?;
+    let Some(log_id) = invoked
+        .get("log")
+        .and_then(|log| log.get("log_id"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+    else {
+        return Err(PluginReloadFailure::failed(
+            "plugin.action.invoke: response has no log id",
+        ));
+    };
+    let deadline = std::time::Instant::now() + PLUGIN_RELOAD_ACTION_TIMEOUT;
+    loop {
+        let logs = plugin_reload_step(
+            "plugin.log.list",
+            Method::PluginLogList(PluginLogListParams {
+                plugin_id: Some(args.plugin_id.clone()),
+                limit: Some(200),
+            }),
+        )?;
+        let log = logs
+            .get("logs")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|logs| {
+                logs.iter().find(|log| {
+                    log.get("log_id").and_then(serde_json::Value::as_str) == Some(log_id.as_str())
+                })
+            })
+            .cloned();
+        match log
+            .as_ref()
+            .and_then(|log| log.get("status"))
+            .and_then(serde_json::Value::as_str)
+        {
+            Some("succeeded") => return Ok(()),
+            Some("failed") => {
+                let detail = log
+                    .as_ref()
+                    .and_then(|log| {
+                        log.get("error")
+                            .or_else(|| log.get("stderr"))
+                            .and_then(serde_json::Value::as_str)
+                    })
+                    .unwrap_or_default()
+                    .lines()
+                    .last()
+                    .unwrap_or_default()
+                    .to_string();
+                return Err(PluginReloadFailure::failed(format!(
+                    "reload action failed: {detail}"
+                )));
+            }
+            _ if std::time::Instant::now() >= deadline => {
+                return Err(PluginReloadFailure::failed(
+                    "reload action did not finish within 120 s",
+                ));
+            }
+            _ => std::thread::sleep(PLUGIN_RELOAD_POLL),
+        }
+    }
+}
+
+fn wait_for_resumed_agent_idle(pane: &str) -> Result<(), PluginReloadFailure> {
+    let deadline = std::time::Instant::now() + PLUGIN_RELOAD_RESUME_IDLE_TIMEOUT;
+    loop {
+        let status = plugin_reload_call(Method::AgentGet(crate::api::schema::AgentTarget {
+            target: pane.to_string(),
+        }))
+        .ok()
+        .and_then(|result| {
+            result
+                .get("agent")
+                .and_then(|agent| agent.get("agent_status"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        });
+        if status.as_deref() == Some("idle") {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(PluginReloadFailure::failed(
+                "resumed agent did not report idle within 120 s",
+            ));
+        }
+        std::thread::sleep(PLUGIN_RELOAD_POLL);
+    }
+}
+
+fn write_plugin_reload_record(path: &Path, record: &serde_json::Value) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let temp = path.with_extension("json.tmp");
+    std::fs::write(&temp, format!("{record}\n"))?;
+    std::fs::rename(&temp, path)
 }
 
 fn plugin_log_list(args: &[String]) -> std::io::Result<i32> {
@@ -1683,6 +2135,7 @@ fn print_plugin_help() {
     eprintln!("  herdr plugin unlink <plugin_id>");
     eprintln!("  herdr plugin enable <plugin_id>");
     eprintln!("  herdr plugin disable <plugin_id>");
+    eprintln!("  {PLUGIN_RELOAD_USAGE}");
     eprintln!("  herdr plugin action <list|invoke>");
     eprintln!("  herdr plugin log list [--plugin ID] [--limit N]");
     eprintln!("  herdr plugin pane <open|focus|close>");
@@ -1696,7 +2149,9 @@ fn print_plugin_action_help() {
 
 fn print_plugin_pane_help() {
     eprintln!("herdr plugin pane commands:");
-    eprintln!("  herdr plugin pane open --plugin ID --entrypoint ID [--placement overlay|popup|split|tab|zoomed] [--width SIZE] [--height SIZE] [--workspace ID] [--target-pane PANE] [--direction right|down] [--cwd PATH] [--env KEY=VALUE] [--focus|--no-focus]");
+    eprintln!(
+        "  herdr plugin pane open --plugin ID --entrypoint ID [--placement overlay|popup|split|tab|zoomed] [--width SIZE] [--height SIZE] [--workspace ID] [--target-pane PANE] [--direction right|down] [--cwd PATH] [--env KEY=VALUE] [--focus|--no-focus]"
+    );
     eprintln!("  herdr plugin pane focus <pane_id>");
     eprintln!("  herdr plugin pane close <pane_id>");
 }
@@ -1712,6 +2167,102 @@ mod tests {
                 std::io::ErrorKind::ConnectionRefused
             )));
         });
+    }
+
+    /// Parser edge cases protect the public reload command contract.
+    #[test]
+    fn plugin_reload_args_match_the_command_catalog_and_validate_request_ids() {
+        let args: Vec<String> = [
+            "example.reload",
+            "--pane",
+            "w1:p1",
+            "--request",
+            "ar-agent_1.2",
+            "--changelog",
+            "updated handler",
+            "--json",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect();
+        let parsed = parse_plugin_reload_args(&args).unwrap();
+        assert_eq!(parsed.plugin_id, "example.reload");
+        assert_eq!(parsed.pane, "w1:p1");
+        assert_eq!(parsed.request, "ar-agent_1.2");
+        assert_eq!(parsed.changelog, "updated handler");
+        assert_eq!(parsed.timeout_ms, 600_000);
+        let mut catalog_args = vec![
+            "herdr".to_string(),
+            "plugin".to_string(),
+            "reload".to_string(),
+        ];
+        catalog_args.extend(args.clone());
+        super::super::spec::command()
+            .try_get_matches_from(catalog_args)
+            .unwrap();
+        let mut timed = args.clone();
+        timed.extend(["--timeout".into(), "1500".into()]);
+        assert_eq!(parse_plugin_reload_args(&timed).unwrap().timeout_ms, 1500);
+        for request in [
+            String::new(),
+            "bad/id".into(),
+            "bad id".into(),
+            "é".into(),
+            "a".repeat(129),
+        ] {
+            let mut invalid = args.clone();
+            invalid[4] = request;
+            assert_eq!(parse_plugin_reload_args(&invalid).unwrap_err().0, 1);
+        }
+        for request in ["a".repeat(128), ".".into(), "A-Z_0.9".into()] {
+            let mut valid = args.clone();
+            valid[4] = request;
+            assert!(parse_plugin_reload_args(&valid).is_ok());
+        }
+    }
+
+    /// A real record must short-circuit before contacting even an available socket.
+    #[cfg(unix)]
+    #[test]
+    fn plugin_reload_completed_record_never_calls_the_socket() {
+        let plugin_id = unique_plugin_id("reload-record");
+        let record_path = plugin_reload_record_path(&plugin_id, "request-1");
+        let record = serde_json::json!({
+            "plugin_id": plugin_id, "reloaded_at": "2026-10-06T12:00:00Z",
+            "pane": "w1:p1", "session_id": "session-1", "resumed": true,
+            "request": "request-1",
+        });
+        write_plugin_reload_record(&record_path, &record).unwrap();
+        // A listening test socket detects an accidental API call without ever
+        // connecting to the user's server.
+        let socket_path = std::env::temp_dir().join(format!("hr-r-{}.sock", std::process::id()));
+        let listener = std::os::unix::net::UnixListener::bind(&socket_path).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let args: Vec<String> = [
+            plugin_id.as_str(),
+            "--pane",
+            "w1:p1",
+            "--request",
+            "request-1",
+            "--changelog",
+            "updated",
+            "--json",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect();
+        let client = crate::api::client::ApiClient::for_target(
+            crate::api::client::ConnectionTarget::SocketPath(socket_path.clone()),
+        );
+        let code = crate::cli::target::with_test_client(client, || plugin_reload(&args)).unwrap();
+        assert_eq!(code, 0);
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+        assert_eq!(completed_plugin_reload_record(&record_path), Some(record));
+        std::fs::remove_dir_all(record_path.parent().unwrap().parent().unwrap()).unwrap();
+        std::fs::remove_file(socket_path).unwrap();
     }
 
     fn unique_plugin_id(label: &str) -> String {

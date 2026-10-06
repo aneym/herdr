@@ -953,6 +953,16 @@ fn plugin_command() -> Command {
                 .arg(json_flag()),
         )
         .subcommand(
+            Command::new("reload")
+                .about("Reload a plugin and resume its idle agent in place")
+                .arg(required("plugin_id", "PLUGIN_ID"))
+                .arg(option("pane", "PANE").required(true))
+                .arg(option("request", "ID").required(true))
+                .arg(option("changelog", "LINE").required(true))
+                .arg(option("timeout", "MS").default_value("600000"))
+                .arg(json_flag()),
+        )
+        .subcommand(
             Command::new("config-dir")
                 .about("Print a plugin config directory")
                 .arg(required("plugin_id", "PLUGIN_ID")),

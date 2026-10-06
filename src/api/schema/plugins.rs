@@ -33,6 +33,12 @@ pub struct PluginSetEnabledParams {
     pub plugin_id: String,
 }
 
+/// Re-read one linked plugin's manifest from its registered location.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PluginReloadParams {
+    pub plugin_id: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct InstalledPluginInfo {
     pub plugin_id: String,

@@ -120,6 +120,12 @@ pub enum ResponseResult {
         agent: AgentInfo,
         argv: Vec<String>,
     },
+    AgentResumed {
+        pane_id: String,
+        agent: String,
+        session_id: String,
+        argv: Vec<String>,
+    },
     AgentPrompted {
         agent: AgentInfo,
         id: String,
@@ -271,6 +277,11 @@ pub enum ResponseResult {
     },
     PluginDisabled {
         plugin: InstalledPluginInfo,
+    },
+    PluginReloaded {
+        plugin_id: String,
+        version: String,
+        plugin_root: String,
     },
     PluginActionList {
         actions: Vec<PluginActionInfo>,

@@ -9,8 +9,8 @@ use crate::api::schema::{
     InstalledPluginInfo, PaneLinkActivateParams, PluginActionInfo, PluginActionInvokeParams,
     PluginActionListParams, PluginLinkParams, PluginListParams, PluginLogListParams,
     PluginManifestAction, PluginManifestLinkHandler, PluginPaneCloseParams, PluginPaneFocusParams,
-    PluginPaneInfo, PluginPaneOpenParams, PluginPanePlacement, PluginSetEnabledParams,
-    PluginUnlinkParams, ResponseResult,
+    PluginPaneInfo, PluginPaneOpenParams, PluginPanePlacement, PluginReloadParams,
+    PluginSetEnabledParams, PluginUnlinkParams, ResponseResult,
 };
 use crate::app::App;
 pub(super) use manifest::normalize_plugin_id;
@@ -149,6 +149,59 @@ impl App {
         params: PluginSetEnabledParams,
     ) -> String {
         self.set_plugin_enabled(id, params.plugin_id, false)
+    }
+
+    pub(super) fn handle_plugin_reload(
+        &mut self,
+        id: String,
+        params: PluginReloadParams,
+    ) -> String {
+        let Some(plugin_id) = normalize_plugin_id(&params.plugin_id) else {
+            return invalid_plugin_id(id);
+        };
+        if let Err(err) = self.refresh_installed_plugins() {
+            return encode_error(id, "plugin_registry_load_failed", err.to_string());
+        }
+        let Some(existing) = self.state.installed_plugins.get(&plugin_id).cloned() else {
+            return encode_error(id, "plugin_not_found", "plugin not found");
+        };
+        let mut fresh = match load_plugin_manifest(&existing.manifest_path, existing.enabled) {
+            Ok(plugin) => plugin,
+            Err((code, message)) => {
+                return encode_error(id, "plugin_manifest_invalid", format!("{code}: {message}"));
+            }
+        };
+        if fresh.plugin_id != plugin_id {
+            return encode_error(
+                id,
+                "plugin_manifest_invalid",
+                format!(
+                    "manifest at {} now declares plugin id {}",
+                    existing.manifest_path, fresh.plugin_id
+                ),
+            );
+        }
+        fresh.enabled = existing.enabled;
+        fresh.source = existing.source;
+        let reloaded = fresh.clone();
+        if let Err(err) = self.update_installed_plugins(|plugins| {
+            plugins.insert(plugin_id.clone(), fresh);
+        }) {
+            return encode_error(id, "plugin_registry_save_failed", err.to_string());
+        }
+        tracing::info!(
+            plugin_id = %plugin_id,
+            version = %reloaded.version,
+            "reloaded plugin manifest"
+        );
+        encode_success(
+            id,
+            ResponseResult::PluginReloaded {
+                plugin_id,
+                version: reloaded.version,
+                plugin_root: reloaded.plugin_root,
+            },
+        )
     }
 
     pub(super) fn handle_plugin_action_list(
@@ -4053,5 +4106,106 @@ command = ["act.exe"]
 
         let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(registry_dir);
+    }
+
+    fn reload_manifest_content(version: &str, extra: &str) -> String {
+        format!(
+            r#"
+id = "example.reloadable"
+name = "Reloadable"
+version = "{version}"
+min_herdr_version = "0.6.10"
+platforms = ["linux", "macos", "windows"]
+{extra}"#
+        )
+    }
+
+    fn reload_plugin(app: &mut App, plugin_id: &str) -> String {
+        app.handle_api_request(Request {
+            id: "reload".into(),
+            method: Method::PluginReload(PluginReloadParams {
+                plugin_id: plugin_id.into(),
+            }),
+        })
+    }
+
+    fn error_code(response: &str) -> String {
+        let value: serde_json::Value = serde_json::from_str(response).unwrap();
+        value["error"]["code"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    #[test]
+    fn plugin_reload_picks_up_a_changed_manifest_version_and_actions() {
+        let mut app = test_app();
+        let root = unique_temp_path("plugin-reload");
+        write_manifest_content(&root, &reload_manifest_content("0.1.0", ""));
+        link_manifest(&mut app, &root);
+        assert!(app.state.installed_plugins["example.reloadable"]
+            .actions
+            .is_empty());
+
+        write_manifest_content(
+            &root,
+            &reload_manifest_content(
+                "0.2.0",
+                r#"
+[[actions]]
+id = "reload"
+title = "Reload"
+command = ["sh", "reload.sh"]
+"#,
+            ),
+        );
+        let response = reload_plugin(&mut app, "example.reloadable");
+        let ResponseResult::PluginReloaded {
+            plugin_id,
+            version,
+            plugin_root,
+        } = response_result(&response)
+        else {
+            panic!("expected plugin_reloaded: {response}");
+        };
+        assert_eq!(plugin_id, "example.reloadable");
+        assert_eq!(version, "0.2.0");
+        assert_eq!(
+            plugin_root,
+            crate::platform::plugin_runtime_path(&root.canonicalize().unwrap())
+                .display()
+                .to_string()
+        );
+        let installed = &app.state.installed_plugins["example.reloadable"];
+        assert_eq!(installed.version, "0.2.0");
+        assert!(installed.enabled);
+        assert_eq!(installed.actions.len(), 1);
+        assert_eq!(installed.actions[0].id, "reload");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn plugin_reload_reports_missing_plugins_and_invalid_manifests() {
+        let mut app = test_app();
+        assert_eq!(
+            error_code(&reload_plugin(&mut app, "example.not-linked")),
+            "plugin_not_found"
+        );
+
+        let root = unique_temp_path("plugin-reload-invalid");
+        write_manifest_content(&root, &reload_manifest_content("0.1.0", ""));
+        link_manifest(&mut app, &root);
+        write_manifest_content(&root, "id = \"example.reloadable\"\nname = ");
+        assert_eq!(
+            error_code(&reload_plugin(&mut app, "example.reloadable")),
+            "plugin_manifest_invalid"
+        );
+        assert_eq!(
+            app.state.installed_plugins["example.reloadable"].version, "0.1.0",
+            "a failed reload keeps the last good manifest"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
     }
 }
