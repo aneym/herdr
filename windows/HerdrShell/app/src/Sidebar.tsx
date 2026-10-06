@@ -1,4 +1,5 @@
 import { useState } from "react";
+import UpdatePill from "./UpdatePill";
 import type { MachineStatus } from "./bridge";
 import type { SidebarRow } from "./model";
 export function Status({ status }: { status: string }) { return <span className={`status ${status}`} aria-label={status}>{status === "blocked" ? "■" : "●"}</span>; }
@@ -29,5 +30,5 @@ export default function Sidebar({ rows, selected, machine, notice, select, pin, 
     <section className="spaces">{rows.filter(r => r.kind === "space" && !r.hidden).map(spaceRow)}
     {rows.some(r => r.kind === "space" && r.hidden) && <><button className="sidebar-row muted" aria-expanded={hidden} onClick={() => setHidden(!hidden)}><span className="chevron">{hidden ? "⌄" : "›"}</span>Hidden</button>{(hidden || rows.some(r => r.hidden && r.id === renaming)) && rows.filter(r => r.kind === "space" && r.hidden).map(spaceRow)}</>}
     </section>
-  </nav><footer role="status">{notice ?? (machine.state === "up" ? `${machine.name} · connected` : machine.state === "connecting" ? "connecting…" : `offline: ${machine.error || "disconnected"}`)}</footer></aside>;
+  </nav><footer role="status">{notice ?? (machine.state === "up" ? `${machine.name} · connected` : machine.state === "connecting" ? "connecting…" : `offline: ${machine.error || "disconnected"}`)}<UpdatePill /></footer></aside>;
 }
