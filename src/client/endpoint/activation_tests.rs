@@ -842,24 +842,45 @@ fn sent_surface_widths(sent: &SentMessages) -> Vec<u16> {
         .collect()
 }
 
-/// Regression: an overlay change on one endpoint during an A to B handoff was laid out with A's
-/// geometry and written to B. Each endpoint must be sized for its own overlay, and A's latest
-/// geometry must survive for rollback.
-#[test]
-fn overlay_changes_during_a_handoff_size_each_endpoint_for_its_own_layout() {
-    use crate::client::shell_runtime::{
-        apply_client_shell_factory_overlay, client_shell_activation_resize, route_endpoint_resize,
-    };
-    const SIZE: (u16, u16) = (110, 30);
-    const CELL: (u32, u32) = (8, 16);
-    // The default layout at 110x30: the open detail panel takes 46 of the pane's 84 columns.
-    const WIDE: u16 = 84;
-    const NARROW: u16 = 38;
+const HANDOFF_SIZE: (u16, u16) = (110, 30);
+const HANDOFF_CELL: (u32, u32) = (8, 16);
+// The default layout at 110x30: the open detail panel takes 46 of the pane's 84 columns.
+const HANDOFF_WIDE: u16 = 84;
+const HANDOFF_NARROW: u16 = 38;
+
+fn factory_overlay(
+    boot_id: &str,
+    revision: u64,
+    present: bool,
+) -> crate::protocol::endpoint::EndpointFactoryOverlay {
+    crate::protocol::endpoint::EndpointFactoryOverlay {
+        boot_id: boot_id.into(),
+        revision,
+        overlay: present.then(crate::factory_overlay::FactoryOverlay::default),
+    }
+}
+
+fn factory_config() -> crate::config::Config {
     let mut config = crate::config::Config::default();
     config.ui.factory.enabled = true;
     config.keys.toggle_factory_overview = crate::config::BindingConfig::one("alt+o");
+    config
+}
+
+/// A (Local) shows an overlay with the detail panel open and B (remote) has none; an A to B
+/// handoff has released A and sent B its target-on at B's own width.
+fn handoff_from_open_panel() -> (
+    crate::client::ClientShellState,
+    EndpointRegistry,
+    SentMessages,
+    SentMessages,
+    PendingEndpointActivation,
+) {
+    use crate::client::shell_runtime::{
+        apply_client_shell_factory_overlay, client_shell_activation_resize,
+    };
     let (mut shell, mut endpoints, local_sent, remote_sent) =
-        shell_and_registry_with_config(&config, false);
+        shell_and_registry_with_config(&factory_config(), false);
     let local = ClientEndpointId::Local;
     shell.set_endpoint_snapshot_for_generation(&local, 1, Box::new(test_snapshot("local-boot", 1)));
     shell.set_endpoint_snapshot_for_generation(
@@ -867,22 +888,13 @@ fn overlay_changes_during_a_handoff_size_each_endpoint_for_its_own_layout() {
         7,
         Box::new(test_snapshot("remote-boot", 1)),
     );
-    let overlay = |boot_id: &str, revision: u64, present: bool| {
-        crate::protocol::endpoint::EndpointFactoryOverlay {
-            boot_id: boot_id.into(),
-            revision,
-            overlay: present.then(crate::factory_overlay::FactoryOverlay::default),
-        }
-    };
-
-    // A shows an overlay with the detail panel open; B has no overlay yet.
     let (frame, _) = apply_client_shell_factory_overlay(
         &mut shell,
         &local,
         1,
-        overlay("local-boot", 1, true),
-        SIZE,
-        CELL,
+        factory_overlay("local-boot", 1, true),
+        HANDOFF_SIZE,
+        HANDOFF_CELL,
         false,
     );
     assert!(frame.is_some());
@@ -892,15 +904,18 @@ fn overlay_changes_during_a_handoff_size_each_endpoint_for_its_own_layout() {
             crossterm::event::KeyModifiers::ALT,
         ),
     )]);
-    assert_eq!(shell.surface_size(SIZE.0, SIZE.1).cols, NARROW);
+    assert_eq!(
+        shell.surface_size(HANDOFF_SIZE.0, HANDOFF_SIZE.1).cols,
+        HANDOFF_NARROW
+    );
     local_sent.lock().unwrap().clear();
 
     let resize = client_shell_activation_resize(
         &shell,
         endpoints.active_id(),
         &endpoint(),
-        SIZE,
-        CELL,
+        HANDOFF_SIZE,
+        HANDOFF_CELL,
         false,
     );
     let mut activation = PendingEndpointActivation::begin(
@@ -922,9 +937,26 @@ fn overlay_changes_during_a_handoff_size_each_endpoint_for_its_own_layout() {
     );
     assert_eq!(
         sent_surface_widths(&remote_sent),
-        vec![WIDE],
+        vec![HANDOFF_WIDE],
         "B is activated at its own width, not A's panel width"
     );
+    (shell, endpoints, local_sent, remote_sent, activation)
+}
+
+/// Regression: an overlay change on one endpoint during an A to B handoff was laid out with A's
+/// geometry and written to B. Each endpoint must be sized for its own overlay, and A's latest
+/// geometry must survive for rollback.
+#[test]
+fn overlay_changes_during_a_handoff_size_each_endpoint_for_its_own_layout() {
+    use crate::client::shell_runtime::{apply_client_shell_factory_overlay, route_endpoint_resize};
+    const SIZE: (u16, u16) = HANDOFF_SIZE;
+    const CELL: (u32, u32) = HANDOFF_CELL;
+    const WIDE: u16 = HANDOFF_WIDE;
+    const NARROW: u16 = HANDOFF_NARROW;
+    let (mut shell, mut endpoints, local_sent, remote_sent, mut activation) =
+        handoff_from_open_panel();
+    let local = ClientEndpointId::Local;
+    let overlay = factory_overlay;
 
     // A drops its overlay while B is activating: A widens, B's layout is unchanged.
     let (_, resize) = apply_client_shell_factory_overlay(
@@ -974,6 +1006,94 @@ fn overlay_changes_during_a_handoff_size_each_endpoint_for_its_own_layout() {
         &mut endpoints,
     );
     assert_eq!(sent_surface_widths(&local_sent), vec![WIDE]);
+}
+
+/// Regression: a config reload that changes only the source's layout while B is the committed,
+/// still-synchronizing endpoint must refresh A's rollback geometry. B kept 84 columns, so the
+/// reload skipped the handoff and a later B disconnect restored A at the stale 38 instead of 34.
+#[test]
+fn config_reload_during_a_handoff_refreshes_the_rollback_geometry() {
+    use crate::client::ClientState;
+    let (mut shell, mut endpoints, local_sent, remote_sent, mut activation) =
+        handoff_from_open_panel();
+    let target_rows = shell
+        .surface_size_for_endpoint(&endpoint(), HANDOFF_SIZE.0, HANDOFF_SIZE.1)
+        .rows;
+    assert_eq!(
+        activation.receive_response(
+            &endpoint(),
+            7,
+            "client-shell-surface:30:on",
+            &surface_success("client-shell-surface:30:on", true, 2),
+            &mut endpoints,
+        ),
+        SurfaceActivationProgress::Pending
+    );
+    let snapshot = test_snapshot("remote-boot", 2);
+    shell.set_endpoint_snapshot_for_generation(&endpoint(), 7, Box::new(snapshot.clone()));
+    let _ = activation.receive_snapshot(&endpoint(), 7, &snapshot);
+    let mut target_surface = surface("remote-boot", 2, "pane");
+    target_surface.frame.width = HANDOFF_WIDE;
+    target_surface.frame.height = target_rows;
+    assert_eq!(
+        activation.receive_surface(&endpoint(), 7, target_surface),
+        SurfaceActivationProgress::Ready
+    );
+    assert!(matches!(
+        activation.complete(&mut shell, &mut endpoints),
+        Ok(ActivationCompletion::AwaitingPresentationSync { .. })
+    ));
+    assert_eq!(endpoints.active_id(), &endpoint());
+
+    let _guard = crate::config::test_config_env_lock().lock().unwrap();
+    let dir = std::env::temp_dir().join(format!(
+        "herdr-reload-handoff-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("config.toml");
+    std::fs::write(
+        &path,
+        "[ui.factory]\nenabled = true\npanel_width = 50\n\n[keys]\ntoggle_factory_overview = \"alt+o\"\n",
+    )
+    .unwrap();
+    std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+    let mut state = ClientState::test_new();
+    state.reported_size = HANDOFF_SIZE;
+    state.reported_cell_size = HANDOFF_CELL;
+    state.shell = Some(shell);
+    // As `install_pending_activation` does, so the reload composes without painting the terminal.
+    state.freeze_presentation();
+    let mut pending = Some(activation);
+    let result = crate::client::config_reload::apply_reload(
+        &mut state,
+        &mut endpoints,
+        &mut pending,
+        &std::sync::atomic::AtomicBool::new(false),
+        &std::sync::atomic::AtomicBool::new(false),
+        &mut crate::platform::RealPrefixInputSource::default(),
+    );
+    std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(result.is_ok());
+    assert_eq!(
+        sent_surface_widths(&remote_sent),
+        vec![HANDOFF_WIDE],
+        "B's layout did not change, so B gets no resize"
+    );
+    assert!(sent_surface_widths(&local_sent).is_empty());
+
+    let mut activation = pending.expect("the reload keeps the handoff pending");
+    assert_eq!(
+        activation.endpoint_disconnected(&mut endpoints, &endpoint(), "B disconnected".into()),
+        ActivationRollback::Pending
+    );
+    assert_eq!(
+        sent_surface_widths(&local_sent),
+        vec![34],
+        "A is restored at its width under the reloaded 50-column panel"
+    );
 }
 
 #[test]

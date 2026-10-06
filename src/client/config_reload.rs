@@ -51,51 +51,76 @@ pub(super) fn apply_reload(
         host_mouse_capture_active.store(enabled, Ordering::Release);
         host_sgr_pixels_active.store(sgr_pixels, Ordering::Release);
     }
-    let (frame, resize) = if let Some(shell) = state.shell.as_mut() {
-        let previous_size = shell.surface_size(state.reported_size.0, state.reported_size.1);
+    // A pending handoff keeps a resize per side, each laid out for that endpoint's own chrome.
+    // A reload can change one side's layout while the visible endpoint stays the same size, so
+    // each side is compared on its own.
+    let pending_sides = pending_activation
+        .as_ref()
+        .map(|activation| (activation.source().clone(), activation.target().clone()));
+    let (cols, rows) = state.reported_size;
+    let (frame, resize, changed_sides) = if let Some(shell) = state.shell.as_mut() {
+        let side_sizes = |shell: &shell::ClientShellState| {
+            pending_sides.as_ref().map(|(source, target)| {
+                (
+                    shell.surface_size_for_endpoint(source, cols, rows),
+                    shell.surface_size_for_endpoint(target, cols, rows),
+                )
+            })
+        };
+        let previous_size = shell.surface_size(cols, rows);
+        let previous_sides = side_sizes(shell);
         shell.reload_client_config();
-        let next_size = shell.surface_size(state.reported_size.0, state.reported_size.1);
+        let next_size = shell.surface_size(cols, rows);
+        let next_sides = side_sizes(shell);
         let resize = (previous_size != next_size).then(|| {
             shell.invalidate_pane_surface();
             client_shell_resize_message(
                 shell,
-                state.reported_size.0,
-                state.reported_size.1,
+                cols,
+                rows,
                 state.reported_cell_size.0,
                 state.reported_cell_size.1,
                 state.pixel_geometry_exact,
             )
         });
-        (
-            shell.compose(state.reported_size.0, state.reported_size.1),
-            resize,
-        )
+        let changed_sides = match (&pending_sides, previous_sides, next_sides) {
+            (Some((source, target)), Some(previous), Some(next)) => {
+                let mut changed = Vec::new();
+                if previous.0 != next.0 {
+                    changed.push(source.clone());
+                }
+                if previous.1 != next.1 && target != source {
+                    changed.push(target.clone());
+                }
+                changed
+            }
+            _ => Vec::new(),
+        };
+        (shell.compose(cols, rows), resize, changed_sides)
     } else {
-        (None, None)
+        (None, None, Vec::new())
     };
     apply_client_shell_input_source_changes(state, prefix_input_source);
-    if let Some(resize) = resize {
-        let update = match (pending_activation.as_mut(), state.shell.as_ref()) {
-            (Some(activation), Some(shell)) => {
-                Some(super::shell_runtime::update_pending_activation_resize(
-                    shell,
-                    activation,
-                    endpoints,
-                    state.reported_size,
-                    state.reported_cell_size,
-                    state.pixel_geometry_exact,
-                ))
+    if let (Some(activation), Some(shell)) = (pending_activation.as_mut(), state.shell.as_ref()) {
+        let mut update = Ok(());
+        for endpoint_id in &changed_sides {
+            let resize = super::shell_runtime::client_shell_resize_message_for(
+                shell,
+                endpoint_id,
+                state.reported_size,
+                state.reported_cell_size,
+                state.pixel_geometry_exact,
+            );
+            update = activation.update_endpoint_resize(endpoint_id, resize, endpoints);
+            if update.is_err() {
+                break;
             }
-            (Some(activation), None) => Some(activation.update_resize(resize.clone(), endpoints)),
-            (None, _) => None,
-        };
-        match update {
-            Some(Ok(())) => {}
-            Some(Err(error)) => {
-                rollback_endpoint_activation(state, endpoints, pending_activation, error, false);
-            }
-            None => write_to_server(endpoints, &resize).map_err(ClientError::ConnectionLost)?,
         }
+        if let Err(error) = update {
+            rollback_endpoint_activation(state, endpoints, pending_activation, error, false);
+        }
+    } else if let Some(resize) = resize {
+        write_to_server(endpoints, &resize).map_err(ClientError::ConnectionLost)?;
     }
     if let Some(frame) = frame {
         state.present_frame(frame);
