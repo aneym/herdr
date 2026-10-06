@@ -363,7 +363,7 @@ fn factory_footer_uses_spaces_then_first_words_before_falling_back() {
         assert_eq!(buffer[(x, 59)].fg, ClientShellConfig::from_config(&Config::default()).palette.peach);
     }
     let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 30);
-    for (row, expected) in rows[57..].iter().zip(["Studio 150/16", "PC 6/12", "forge 6/12"]) {
+    for (row, expected) in rows[57..].iter().zip(["studio 150/16", "pc 6/12", "forge 6/12"]) {
         assert_eq!(row.split_whitespace().collect::<Vec<_>>().join(" "), expected);
     }
     overlay.hosts[0].name = "Studio workstation".into();
@@ -2317,14 +2317,19 @@ fn factory_host_footer_rows_fit_and_align_at_40_44_52() {
         HostRow { name: "forge".into(),
             summary: Some("1 running · 9.2G free · waiting on memory".into()), ..HostRow::default() },
     ];
+    // Print every width first, so a failing run still shows the whole picture.
+    for width in [40u16, 44, 52] {
+        let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), width);
+        eprintln!("width {width}:\n{}", rows[55..].iter().map(|row| row.trim_end()).collect::<Vec<_>>().join("\n"));
+    }
     for (width, studio) in [
-        (40u16, "studio 2 running   2G free wait mem 1 k…"),
-        (44, "studio 2 running   2G free wait mem 1 kept: …"),
-        (52, "studio 2 running   2G free wait mem 1 kept: 1 secret"),
+        // At 40 the kept note has under six columns left, so it is left out whole.
+        (40u16, "studio 2 running   2G free wait mem"),
+        (44, "studio 2 running   2G free wait mem 1 kept…"),
+        (52, "studio 2 running   2G free wait mem 1 kept: 1 secr…"),
     ] {
         let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), width);
         let footer: Vec<&str> = rows[55..].iter().map(|row| row.trim_end()).collect();
-        eprintln!("width {width}:\n{}", footer.join("\n"));
         assert_eq!(footer[0].trim(), "claude 4/8 75% · codex 5/5 97%", "width {width}");
         assert_eq!(footer[1].trim(), studio, "width {width}");
         assert_eq!(&footer[2..], [

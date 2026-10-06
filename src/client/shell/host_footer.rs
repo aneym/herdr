@@ -94,7 +94,9 @@ fn fields(summary: &str) -> Fields {
                 continue;
             }
         }
-        out.extras.push(part.to_owned());
+        // The same trims the one-line footer applies: "load 150/16" and "3 live" read as "150/16" and "3".
+        let part = part.strip_prefix("load ").unwrap_or(part).replace(" live", "");
+        out.extras.push(part);
     }
     out
 }
@@ -113,7 +115,7 @@ pub(super) fn host_lines(rows: &[HostRow], width: u16) -> Vec<HostLine> {
     rows.iter().zip(&parsed).map(|(row, fields)| {
         let mut value = String::new();
         let mut used = 0usize;
-        let mut push = |value: &mut String, used: &mut usize, cell: String, cell_w: usize, gap: bool| -> bool {
+        let push = |value: &mut String, used: &mut usize, cell: String, cell_w: usize, gap: bool| -> bool {
             let need = cell_w + usize::from(gap && *used > 0);
             if *used + need > room {
                 return false;
@@ -149,7 +151,7 @@ pub(super) fn host_lines(rows: &[HostRow], width: u16) -> Vec<HostLine> {
             }
         }
         if fits && !fields.extras.is_empty() {
-            let extra = fields.extras.join(" · ");
+            let extra = fields.extras.join(" ");
             let gap = usize::from(used > 0);
             let left = room.saturating_sub(used + gap);
             if left >= MIN_EXTRA.min(display_width(&extra)) && left > 0 {
@@ -224,6 +226,6 @@ mod tests {
     #[test]
     fn non_admit_summaries_fall_through_as_extras() {
         let rows = vec![host("forge", "down"), host("old", "3 live · drained")];
-        assert_eq!(render(&rows, 40), vec![" forge  down", " old    3 live · drained"]);
+        assert_eq!(render(&rows, 40), vec![" forge  down", " old    3 drained"]);
     }
 }
