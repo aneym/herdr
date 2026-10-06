@@ -13,6 +13,7 @@
 """
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -169,13 +170,43 @@ def app_side(evidence):
                     os.path.join(b_app, "Contents", "Info.plist")], check=True)
     subprocess.run(["codesign", "-s", "-", "--force", "--deep", b_app], check=True, capture_output=True)
 
-    started = json.loads(space("start", "--wait", "1500", "--app", a_app, "--live").splitlines()[-1])
+    started = json.loads(space("start", "--wait", "1500", "--app", a_app, "--live",
+                               "--", "--control", "/Users/lume/.herdr-space/control.fifo").splitlines()[-1])
     # With the lock held: no staged release, no earlier tries, dev reload on (read live by the app).
     space("exec", f'S="{GS}"; rm -rf "$S/staged" "$S/staged.json" "$S/update.log" "$S/reload.json" "$S/reload-result.json"; '
                   "defaults delete com.aneyman.herdr-shell herdr.shell.autoUpdateTried 2>/dev/null; "
                   "defaults write com.aneyman.herdr-shell herdr.shell.devReload -bool true")
     old_pid = started["app_pid"]
     time.sleep(6)
+    # A disposable two-pane tab: without seedFocus, relaunch selects its first pane.
+    def herdr(*a):
+        cmd = shlex.join(["env", "-u", "HERDR_CLIENT_SOCKET_PATH", "HERDR_SOCKET_PATH=" + started["guest_socket"],
+                          "/Users/lume/.local/bin/herdr", *a])
+        return json.loads(space("exec", cmd))["result"]
+
+    fixture = herdr("workspace", "create", "--label", "dev reload check", "--cwd", "/tmp", "--no-focus")
+    wid, tab = fixture["workspace"]["workspace_id"], fixture["tab"]["tab_id"]
+    default_pane = fixture["root_pane"]["pane_id"]
+    herdr("pane", "split", default_pane, "--direction", "right")
+    panes = herdr("pane", "list", "--workspace", wid)["panes"]
+    non_default = next(p["pane_id"] for p in panes if p["tab_id"] == tab and p["pane_id"] != default_pane)
+    check("reload fixture has at least two panes", len([p for p in panes if p["tab_id"] == tab]) >= 2)
+    space("fifo", json.dumps({"cmd": "select", "tab": tab}))
+    state_file = "/tmp/herdr-dev-reload-state.json"
+    before = None
+    for _ in range(60):
+        space("fifo", json.dumps({"cmd": "state", "out": state_file}))
+        before = json.loads(space("exec", "cat " + state_file))
+        if before["selected_tab"] == tab and len(before["host_panes"]) >= 2:
+            break
+        time.sleep(0.25)
+    check("reload fixture's default pane is first", bool(before["host_panes"]) and before["host_panes"][0]["pane"] == default_pane)
+    for action in ("down", "up"):
+        space("fifo", json.dumps({"cmd": "mouse", "pane": non_default, "action": action, "col": 1, "row": 1}))
+    space("fifo", json.dumps({"cmd": "state", "out": state_file}))
+    before = json.loads(space("exec", "cat " + state_file))
+    check("reload starts on the non-default pane", before["selected_tab"] == tab and before["focused_pane"] == non_default,
+          f"default {default_pane}, focused {before['focused_pane']}")
     # Another app in front, the way Alex works: the swap must not pull the shell forward.
     space("exec", "open ~/Documents")
     time.sleep(2)
@@ -214,13 +245,16 @@ def app_side(evidence):
     if result:
         check("selected tab restored", result["selected_tab"] == result["selected_tab_before"] and result["selected_tab"] != "",
               f"{result['selected_tab_before']} -> {result['selected_tab']}")
-        check("focused pane restored", result["focused_pane"] == result["focused_pane_before"],
+        check("focused pane before reload is non-default", result["focused_pane_before"] == non_default,
+              f"expected {non_default}, got {result['focused_pane_before']}")
+        check("focused pane restored", result["focused_pane"] == result["focused_pane_before"] == non_default,
               f"{result['focused_pane_before']} -> {result['focused_pane']}")
         check("the relaunch keeps the app's foreground state", result["active"] == result["was_active"],
               f"active before {result['was_active']}, after {result['active']}")
         check("window back in under 2 s", 0 <= result["window_s"] < 2, f"{result['window_s']:.2f} s")
         say(f"swap: window {result['window_s']:.2f} s, panes {result['panes_s']:.2f} s after the old app quit")
     space("exec", "defaults delete com.aneyman.herdr-shell herdr.shell.devReload", check_ok=False)
+    herdr("workspace", "close", wid)
     space("stop", check_ok=False)
 
 

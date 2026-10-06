@@ -539,7 +539,12 @@ def auto(refetch=False):
                 continue
             quiet = settled(ref)
             if quiet != sha:
-                continue
+                sha = quiet
+                if (rel and same(rel.get("commit", ""), sha)) or sha in tried:
+                    return
+                tried.add(sha)
+                if rel and not shell_changed(rel.get("commit", ""), sha):
+                    continue
             publish(sha)
 
 

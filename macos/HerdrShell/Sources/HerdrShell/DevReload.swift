@@ -54,14 +54,23 @@ enum DevReload {
         }
         log(String(format: "dev reload %@ -> %@, window in %.2f s", mark["from"] as? String ?? "?", to, windowS))
         // A relaunch activates the new app even with `open -g`. Hand the front back to the app
-        // Alex was in, for as long as launch activation can still arrive.
+        // Alex was in, once more if launch activation arrives late.
         if mark["wasActive"] as? Bool != true, let pid = (mark["frontPid"] as? NSNumber)?.int32Value, pid > 0,
            let front = NSRunningApplication(processIdentifier: pid) {
             let back = { if NSApp.isActive { front.activate() } }
-            let token = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification,
-                                                               object: nil, queue: .main) { _ in back() }
+            var token: NSObjectProtocol?
+            token = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification,
+                                                           object: nil, queue: .main) { _ in
+                guard let observer = token else { return }
+                token = nil
+                NotificationCenter.default.removeObserver(observer)
+                back()
+            }
             back()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { NotificationCenter.default.removeObserver(token) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                if let token { NotificationCenter.default.removeObserver(token) }
+                token = nil
+            }
         }
         toast("Updated to \(to.prefix(8))", in: controller.root)
         // Panes come back with the first snapshot; time that too, up to 10 s.
