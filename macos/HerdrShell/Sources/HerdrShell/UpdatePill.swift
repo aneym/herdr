@@ -52,6 +52,7 @@ final class UpdateController: NSObject {
         RunLoop.main.add(t, forMode: .common)
         timer = t
         reload(show: false)
+        if let windowController { DevReload.arrive(controller: windowController) }
     }
 
     func checkNow() { reload(show: true) }
@@ -73,29 +74,52 @@ final class UpdateController: NSObject {
     private var applying = false
 
     /// Installs a staged release with no click: after the machine has been idle for
-    /// autoIdleSeconds, or soon after an agent creates `apply.request` in the support
-    /// directory. Never mid-typing, never a release that failed or that Later put off.
+    /// autoIdleSeconds (DevReload.idleSeconds on the dev track), or soon after an agent
+    /// creates `apply.request` in the support directory. Never mid-typing, never over a
+    /// modal or the switcher, never a release that failed or that Later put off.
     /// The relaunch stays in the background unless this app was the active one.
     private func autoApply() {
         guard let current, !current.failed, !applying else { return }
         let request = Channel.appSupport.appendingPathComponent("apply.request")
         let asked = FileManager.default.fileExists(atPath: request.path)
+        let dev = DevReload.enabled
         let auto = Channel.store.object(forKey: Self.autoUpdateKey) as? Bool ?? true
-        guard asked || auto else { return }
+        guard asked || auto || dev else { return }
         // One automatic try per release: if it did not take (and could not record why),
         // the relaunched old app must not try again. A click still can.
         guard Channel.store.string(forKey: Self.autoTriedKey) != current.commit else { return }
-        // Relaunch restores the frame only, and a chat draft lives only in view state.
-        if let w = windowController?.window, w.isMiniaturized || w.styleMask.contains(.fullScreen) { return }
-        if windowController?.hasUnsentDraft == true { return }
+        // Relaunch restores the frame only (a dev reload also restores full screen), and a
+        // chat draft lives only in view state.
+        if let w = windowController?.window, w.isMiniaturized || (!dev && w.styleMask.contains(.fullScreen)) { return }
+        if windowController?.hasUnsentDraft == true || windowController?.busyWithModal == true {
+            if dev { recheck(after: 2) }
+            return
+        }
         let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
-        guard idle >= (asked ? 5 : Self.autoIdleSeconds) else { return }
+        let need = asked ? 5 : dev ? DevReload.idleSeconds : Self.autoIdleSeconds
+        guard idle >= need else {
+            if dev { recheck(after: max(0.5, need - idle)) }
+            return
+        }
         try? FileManager.default.removeItem(at: request)
         Channel.store.set(current.commit, forKey: Self.autoTriedKey)
         Channel.store.synchronize()
         applying = true
-        log("auto update to \(current.commit) (\(asked ? "requested" : "idle")), idle \(Int(idle)) s")
+        log("auto update to \(current.commit) (\(asked ? "requested" : dev ? "dev" : "idle")), idle \(Int(idle)) s")
+        if dev, let windowController { DevReload.noteLeaving(to: current.commit, controller: windowController) }
         restartNow(background: !NSApp.isActive)
+    }
+
+    /// The dev track looks again soon instead of waiting for the 15 s poll. Only the
+    /// cached offer is rechecked here; `reload` (which verifies the bundle) stays on the poll.
+    private var recheckPending = false
+    private func recheck(after seconds: Double) {
+        guard !recheckPending else { return }
+        recheckPending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            self?.recheckPending = false
+            self?.autoApply()
+        }
     }
 
     private func applyPill() {

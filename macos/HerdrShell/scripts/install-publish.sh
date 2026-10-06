@@ -5,6 +5,7 @@
 #   <herdr repo>/.git/hooks/reference-transaction    a push to origin/<release branch> runs `herdr-shell-publish auto`
 #   ~/Library/LaunchAgents/com.aneyman.herdr-shell-fanout.plist   `herdr-shell-publish fanout` every 5 min
 #   ~/Library/LaunchAgents/com.aneyman.herdr-shell-data.plist     `herdr-shell-publish data` every 20 s
+#   ~/Library/LaunchAgents/com.aneyman.herdr-shell-watch.plist    `herdr-shell-publish watch` every 30 s
 #   ~/.config/herdr-shell/targets.json               only if missing (Book over ssh)
 set -euo pipefail
 D="$(cd "$(dirname "$0")" && pwd)"
@@ -78,4 +79,11 @@ sed -e "s/$LABEL/$DLABEL/" -e "s|<string>fanout</string>|<string>data</string>|"
     -e "s|<integer>300</integer>|<integer>20</integer>|" -e "s|fanout.launchd.log|data.launchd.log|g" "$PLIST" >"$DPLIST"
 launchctl bootout "gui/$(id -u)/$DLABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$DPLIST"
-echo "installed $BIN, $HOOK, $PLIST, $DPLIST"
+# Pushes made from other machines reach Studio's origin/<release branch> only by a fetch.
+WLABEL=com.aneyman.herdr-shell-watch
+WPLIST="$HOME/Library/LaunchAgents/$WLABEL.plist"
+sed -e "s/$LABEL/$WLABEL/" -e "s|<string>fanout</string>|<string>watch</string>|" \
+    -e "s|<integer>300</integer>|<integer>30</integer>|" -e "s|fanout.launchd.log|watch.launchd.log|g" "$PLIST" >"$WPLIST"
+launchctl bootout "gui/$(id -u)/$WLABEL" 2>/dev/null || true
+launchctl bootstrap "gui/$(id -u)" "$WPLIST"
+echo "installed $BIN, $HOOK, $PLIST, $DPLIST, $WPLIST"

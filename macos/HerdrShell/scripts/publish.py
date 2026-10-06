@@ -8,6 +8,8 @@
                                 the release and changed macos/HerdrShell; called by the
                                 repo's reference-transaction hook, so a push publishes
                                 by itself
+  herdr-shell-publish watch     fetch origin/<release branch>, then `auto`; launchd every 30 s,
+                                so a push from any machine publishes within a minute
   herdr-shell-publish fanout    copy the release into each target's staged dir
                                 (launchd every 5 min; never reads the repo)
   herdr-shell-publish data      copy Studio's lanes/areas/modes files to each target's
@@ -446,7 +448,34 @@ def send_data(snapshot, digests):
     os.replace(state_path + ".tmp", state_path)
 
 
-def auto():
+def fetch():
+    """Bring origin/<release branch> up to date. The hook skips this ref update; the caller
+    runs `auto` itself."""
+    subprocess.run(["git", "-C", REPO, "fetch", "-q", "origin", branch()],
+                   capture_output=True, timeout=60, env={**os.environ, "HERDR_SHELL_PUBLISHING": "1"})
+
+
+QUIET = float(os.environ.get("HERDR_SHELL_QUIET", "20"))
+QUIET_MAX = 180
+
+
+def settled(ref):
+    """The branch tip once it has not moved for QUIET seconds (a burst of pushes builds once),
+    refetching every few seconds. Gives up waiting after QUIET_MAX and takes the tip then."""
+    sha, since, start = git("rev-parse", "--verify", ref), time.time(), time.time()
+    while time.time() - since < QUIET and time.time() - start < QUIET_MAX:
+        time.sleep(min(5, QUIET))
+        try:
+            fetch()
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        now = git("rev-parse", "--verify", ref)
+        if now != sha:
+            sha, since = now, time.time()
+    return sha
+
+
+def auto(refetch=False):
     os.makedirs(LOGDIR, exist_ok=True)
     with open(LOCK, "w") as lk:
         try:
@@ -454,6 +483,11 @@ def auto():
         except BlockingIOError:
             # A publish is running; it re-reads the branch when it finishes.
             return
+        if refetch:
+            try:
+                fetch()
+            except (OSError, subprocess.TimeoutExpired):
+                pass
         tried = set()
         while True:
             ref = f"refs/remotes/origin/{branch()}"
@@ -468,6 +502,9 @@ def auto():
             tried.add(sha)
             if rel and not shell_changed(rel.get("commit", ""), sha):
                 # Re-read the branch: a push that lost the lock to this run is still ours.
+                continue
+            quiet = settled(ref)
+            if quiet != sha:
                 continue
             publish(sha)
 
@@ -485,6 +522,8 @@ def main():
         print(__doc__)
     elif a and a[0] == "auto":
         auto()
+    elif a and a[0] == "watch":
+        auto(refetch=True)
     elif a and a[0] == "fanout":
         fanout()
     elif a and a[0] == "install" and len(a) == 2:

@@ -599,6 +599,10 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     private var chats: [String: PaneChat] = [:]
     /// True while any pane's chat composer, on screen or in a hidden tab, holds unsent text.
     var hasUnsentDraft: Bool { chats.values.contains { !$0.ui.draft.isEmpty } }
+    /// A sheet, an app-modal alert or the switcher is up; a dev reload waits for it to close.
+    var busyWithModal: Bool { NSApp.modalWindow != nil || window.attachedSheet != nil || quickSwitch.isOpen }
+    /// The pane a dev reload had focused comes back with its tab (DevReload.swift).
+    func seedFocus(tab: String, pane: String) { focusedPaneByTab[tab] = pane }
     /// Each open chat as the view sees it: the agent state from herdr and the items read.
     var chatDump: [[String: Any]] {
         chats.map { id, c in ["id": id, "agent_state": c.transcript.state, "agent_name": c.transcript.name,
