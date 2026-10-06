@@ -4,7 +4,7 @@
   ORCHESTRATOR         ⌘0
   ▸ ● orchestrator      1
   LANES             ⌘1..9
-  ▸ ● lane-a            2
+  ▸ ● lane-a  2 workflows
     ○ lane-b         idle
     ● plain-a            
     ● plain-b            

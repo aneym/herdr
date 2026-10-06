@@ -9,6 +9,11 @@
 use super::agent_sidebar::AgentRow;
 use super::*;
 
+/// Whether a child that needs action unfolds its lane. Off (Alex,
+/// 2026-10-05: "default collapse everything workflows so we only see
+/// talking agent"); the lane header carries the child's `!` instead.
+const ACTION_UNFOLDS_LANE: bool = false;
+
 /// Per-endpoint tree chrome. Defaults show every layer with nothing folded.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ClientTreeChrome {
@@ -154,13 +159,13 @@ impl ClientTreeChrome {
     }
 
     /// Lanes start folded. One opens when the user expanded it, the focused tab
-    /// sits inside it, or something inside asks for action; a user collapse
-    /// always wins.
+    /// sits inside it, or action unfolding is enabled and a child needs action;
+    /// a user collapse always wins.
     fn factory_expanded(&self, tab_id: &str, focused: bool, needs_action: bool) -> bool {
         if self.factory_collapsed_lanes.contains(tab_id) {
             false
         } else {
-            self.factory_expanded_lanes.contains(tab_id) || focused || needs_action
+            self.factory_expanded_lanes.contains(tab_id) || focused || (ACTION_UNFOLDS_LANE && needs_action)
         }
     }
 
@@ -1056,9 +1061,10 @@ fn append_factory_space(
                 let grouped_workflows = workflows.iter().copied()
                     .filter(|workflow| parent_for(workflow).is_some_and(|id| grouped_ids.contains(id)))
                     .collect::<Vec<_>>();
-                let grouped_runs = grouped.iter().map(|lane| {
-                    overlay.tab(&lane.tab_id).map_or(0, |tag| tag.runs.iter().filter(|run| !run.done).count())
-                }).sum::<usize>();
+                let (run_agents, run_workflows) = split_runs(runs);
+                let (grouped_agents, grouped_runs) = grouped.iter().filter_map(|lane| overlay.tab(&lane.tab_id))
+                    .map(|tag| split_runs(&tag.runs))
+                    .fold((0, 0), |(agents, workflows), (a, w)| (agents + a, workflows + w));
                 let attention = all_workflows.iter()
                     .filter(|workflow| parent_for(workflow).is_some_and(|id| grouped_ids.contains(id)))
                     .filter_map(|workflow| overlay.tab(&workflow.tab_id))
@@ -1073,8 +1079,9 @@ fn append_factory_space(
                     && grouped.iter().chain(grouped_workflows.iter()).any(|tab| {
                         snapshot.focused_tab_id.as_deref() == Some(tab.tab_id.as_str())
                     });
-                let running = children.len() + grouped.len() + runs.iter().filter(|run| !run.done).count()
-                    + grouped_workflows.len() + grouped_runs;
+                let agents = grouped.len() + run_agents + grouped_agents;
+                let workflow_count = children.len() + grouped_workflows.len() + run_workflows + grouped_runs;
+                let running = agents + workflow_count;
                 let expanded = tree.factory_expanded(&orchestrator.tab_id, focused,
                     attention == Some(crate::factory_overlay::Attention::Act));
                 let mut row = factory_row(snapshot, rows, overlay, orchestrator, indent,
@@ -1084,7 +1091,7 @@ fn append_factory_space(
                         tab.attention = attention;
                     }
                 }
-                summarize_factory_parent(&mut row, running,
+                summarize_factory_parent(&mut row, agents, workflow_count,
                     overlay.tab(&orchestrator.tab_id).is_some_and(|tag| tag.busy), true);
                 out.push(row);
                 if expanded {
@@ -1144,11 +1151,13 @@ fn append_factory_space(
             let grouped_workflows = workflows.iter().copied()
                 .filter(|workflow| parent_for(workflow).is_some_and(|id| grouped_ids.contains(id)))
                 .collect::<Vec<_>>();
-            let grouped_runs = grouped_lanes.iter().map(|child| {
-                overlay.tab(&child.tab_id).map_or(0, |tag| tag.runs.iter().filter(|run| !run.done).count())
-            }).sum::<usize>();
-            let running = children.len() + grouped_lanes.len() + runs.iter().filter(|run| !run.done).count()
-                + grouped_workflows.len() + grouped_runs;
+            let (run_agents, run_workflows) = split_runs(runs);
+            let (grouped_agents, grouped_runs) = grouped_lanes.iter().filter_map(|child| overlay.tab(&child.tab_id))
+                .map(|tag| split_runs(&tag.runs))
+                .fold((0, 0), |(agents, workflows), (a, w)| (agents + a, workflows + w));
+            let agents = grouped_lanes.len() + run_agents + grouped_agents;
+            let workflow_count = children.len() + grouped_workflows.len() + run_workflows + grouped_runs;
+            let running = agents + workflow_count;
             let attention = all_workflows.iter().filter(|workflow| {
                 parent_for(workflow) == Some(lane.tab_id.as_str())
                     || parent_for(workflow).is_some_and(|id| grouped_ids.contains(id))
@@ -1180,7 +1189,7 @@ fn append_factory_space(
                     row.attention = crate::factory_overlay::Attention::Warn;
                 }
             }
-            summarize_factory_parent(&mut lane_row, running,
+            summarize_factory_parent(&mut lane_row, agents, workflow_count,
                 overlay.tab(&lane.tab_id).is_some_and(|tag| tag.busy), false);
             if grouped {
                 if let AgentPanelListEntry::FactoryTab(row) = &mut lane_row {
@@ -1512,9 +1521,16 @@ fn factory_run_row(
     })
 }
 
-fn summarize_factory_parent(row: &mut AgentPanelListEntry, running: usize, busy: bool, orchestrator: bool) {
+fn split_runs(runs: &[crate::factory_overlay::RunTag]) -> (usize, usize) {
+    // The agent-rails overlay names Agent-tool subagents agent:<id> and workflow runs wf_<id>.
+    runs.iter().filter(|run| !run.done).fold((0, 0), |(agents, workflows), run| {
+        if run.id.starts_with("agent:") { (agents + 1, workflows) } else { (agents, workflows + 1) }
+    })
+}
+
+fn summarize_factory_parent(row: &mut AgentPanelListEntry, agents: usize, workflows: usize, busy: bool, orchestrator: bool) {
     if let AgentPanelListEntry::FactoryTab(row) = row {
-        if (running > 0 && matches!(row.status, crate::api::schema::AgentStatus::Idle
+        if (agents + workflows > 0 && matches!(row.status, crate::api::schema::AgentStatus::Idle
                 | crate::api::schema::AgentStatus::Done
                 | crate::api::schema::AgentStatus::Unknown))
             || (busy && matches!(row.status, crate::api::schema::AgentStatus::Idle
@@ -1525,11 +1541,18 @@ fn summarize_factory_parent(row: &mut AgentPanelListEntry, running: usize, busy:
         }
         let tag_summary = orchestrator.then(|| row.summary.as_deref().unwrap_or("").trim())
             .filter(|summary| !summary.is_empty());
-        row.summary = Some(if running > 0 {
-            match tag_summary {
-                Some(summary) => format!("{running} · {summary}"),
-                None => running.to_string(),
+        row.summary = Some(if agents + workflows > 0 {
+            let mut parts = Vec::new();
+            if agents > 0 {
+                parts.push(format!("{agents} {}", if agents == 1 { "agent" } else { "agents" }));
             }
+            if workflows > 0 {
+                parts.push(format!("{workflows} {}", if workflows == 1 { "workflow" } else { "workflows" }));
+            }
+            if let Some(summary) = tag_summary {
+                parts.push(summary.to_owned());
+            }
+            parts.join(" · ")
         } else if let Some(summary) = tag_summary {
             summary.to_owned()
         } else if row.idle && row.idle_reason.is_none() {

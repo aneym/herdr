@@ -621,7 +621,24 @@ fn render_factory_tab(
     } else { String::new() };
     let metadata = if !row.reviewing && !row.workflow && !row.background && !row.idle && row.summary.is_some()
         && row.badge.is_none() && available > 0 && display_width(&header.label) + display_width(&metadata) + 1 > available as usize {
-        metadata.split(" · ").next().unwrap_or("").to_owned()
+        let mut segments = metadata.split(" · ");
+        let mut leading = segments.next().unwrap_or("").to_owned();
+        // The name wins over the count words: "2 agents" shrinks to "2" before
+        // the label truncates.
+        if display_width(&header.label) + display_width(&leading) + 1 > available as usize {
+            if let Some((count, _)) = leading.split_once(' ').filter(|(count, _)| count.bytes().all(|byte| byte.is_ascii_digit())) {
+                leading = count.to_owned();
+            }
+        } else {
+            for segment in segments {
+                let candidate = format!("{leading} · {segment}");
+                if display_width(&header.label) + display_width(&candidate) + 1 > available as usize {
+                    break;
+                }
+                leading = candidate;
+            }
+        }
+        leading
     } else { metadata };
     // A tab whose chat runs on another machine says which, after any summary.
     let metadata = match row.machine.as_deref() {

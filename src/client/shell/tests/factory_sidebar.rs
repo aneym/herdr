@@ -522,7 +522,7 @@ fn compact_factory_spaces_have_one_boundary_row_without_section_gaps() {
     let background = header("factory-background:ws_1");
     let second = header("ws_2");
     assert_eq!(orchestrator, first + 1, "no gap after space header");
-    assert!(rows[lanes - 1].contains("orchestrator"), "no gap between sections");
+    assert_eq!(header("orch"), lanes - 1, "no gap between sections");
     assert!(rows[background - 1].trim().is_empty(), "gap before background");
     assert!(rows[background - 2].contains("plain-b"), "one gap before background");
     assert!(rows[second - 1].trim().is_empty(), "gap between spaces");
@@ -633,14 +633,22 @@ fn factory_click_table() {
 
     let mut alert_overlay = overlay.clone();
     alert_overlay.tabs.get_mut("wf-a").unwrap().attention = Attention::Act;
-    let (visible, hits, _) = rendered_factory_rows(&snapshot, &alert_overlay);
-    assert!(visible.iter().any(|row| row.contains("issues 3")), "Act child auto-opens lane");
+    let (visible, hits, buffer) = rendered_factory_rows(&snapshot, &alert_overlay);
+    assert!(!visible.iter().any(|row| row.contains("issues 3")), "Act child leaves lane folded");
     let hit = hits.tree_headers.iter().find(|hit| hit.tab_id.as_deref() == Some("lane-a")).unwrap();
+    assert!(hit.collapsed);
+    assert!(visible[hit.rect.y as usize].ends_with('!'));
+    assert_eq!(buffer[(24, hit.rect.y)].fg, ClientShellConfig::from_config(&Config::default()).palette.red);
     let at = (hit.chevron.x, hit.chevron.y);
     let mut alert_state = factory_state(snapshot.clone(), alert_overlay.clone());
     alert_state.config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
     alert_state.hits = hits;
     alert_state.last_composed_size = Some((120, 60));
+    factory_click(&mut alert_state, MouseEventKind::Down(MouseButton::Left), at.0, at.1);
+    factory_click(&mut alert_state, MouseEventKind::Up(MouseButton::Left), at.0, at.1);
+    let (opened, hits, _) = rendered_factory_rows_with_tree(&snapshot, &alert_overlay, alert_state.tree_chrome_mut());
+    assert!(opened.iter().any(|row| row.contains("issues 3")), "user expand shows Act child");
+    alert_state.hits = hits;
     factory_click(&mut alert_state, MouseEventKind::Down(MouseButton::Left), at.0, at.1);
     factory_click(&mut alert_state, MouseEventKind::Up(MouseButton::Left), at.0, at.1);
     let (folded, hits, buffer) = rendered_factory_rows_with_tree(&snapshot, &alert_overlay, alert_state.tree_chrome_mut());
@@ -692,10 +700,11 @@ fn factory_parent_with_running_workflow_or_busy_tag_shows_working() {
     overlay.tabs.get_mut("orch").unwrap().name = Some("orchestrator".into());
     let mut folded = ClientTreeChrome::default();
     folded.factory_collapsed_lanes.insert("orch".into());
-    let (wide, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &folded, 35);
-    assert!(wide.iter().any(|row| row.contains("orchestrator") && row.contains("2 · inbox 3")), "{wide:?}");
-    let (narrow, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &folded);
-    assert!(narrow.iter().any(|row| row.contains("orchestrator") && row.trim_end().ends_with('2')), "{narrow:?}");
+    let (wide, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &folded, 48);
+    assert!(wide.iter().any(|row| row.contains("orchestrator") && row.contains("2 workflows · inbox 3")), "{wide:?}");
+    let (narrow, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &folded);
+    let orch = hits.tree_headers.iter().find(|hit| hit.key == "orch").unwrap();
+    assert!(narrow[orch.rect.y as usize].trim_end().ends_with(" 2"), "{narrow:?}");
     snapshot.tabs.retain(|tab| !matches!(tab.tab_id.as_str(), "wf-a" | "wf-b" | "orphan"));
     overlay.tabs.get_mut("lane-a").unwrap().summary = None;
     let (empty, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &folded);
@@ -854,14 +863,15 @@ fn registered_run_progress_completion_and_failure_render_under_lane() {
         let lane = hits.tree_headers.iter().find(|hit| hit.key == "lane-b").unwrap();
         let lane_line = &folded[lane.rect.y as usize];
         if done {
-            assert!(!lane_line.contains('1'), "{lane_line}");
+            assert!(!lane_line.contains("1 workflow"), "{lane_line}");
             assert_eq!(buffer[(lane_line.chars().position(|ch| ch == '○').unwrap() as u16, lane.rect.y)].fg,
                 palette.overlay0, "done run must not make its lane working");
         } else {
-            assert!(lane_line.contains('1'), "{lane_line}");
+            assert!(lane_line.contains("1 workflow"), "{lane_line}");
         }
-        assert_eq!(hits.tree_headers.iter().any(|hit| hit.key == "lane-b#run:build"),
-            attention == Attention::Act, "only a failed run auto-expands its lane; a running one stays folded");
+        assert!(!hits.tree_headers.iter().any(|hit| hit.key == "lane-b#run:build"),
+            "runs stay folded even when they need action");
+        assert!(!folded.iter().any(|row| row.contains("build run")));
         if attention == Attention::Act {
             let x = lane_line.chars().position(|ch| ch == '!').unwrap() as u16;
             assert_eq!(buffer[(x, lane.rect.y)].fg, palette.red);
@@ -962,6 +972,7 @@ fn factory_grouped_lanes_fold_with_parent_and_roll_up_state() {
     second.pane_id = "child-two-pane".into();
     snapshot.agents.push(second);
     let mut tree = ClientTreeChrome::default();
+    tree.factory_expanded_lanes.insert("lane-a".into());
     let (rows, hits, buffer) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 35);
     let position = |id: &str| hits.tree_headers.iter().find(|hit| hit.key == id).unwrap();
     let parent = position("lane-a");
@@ -973,7 +984,7 @@ fn factory_grouped_lanes_fold_with_parent_and_roll_up_state() {
     let sibling = position("plain-a");
     assert_eq!(x("lane-b", first.rect.y), x("plain-a", sibling.rect.y) + 1);
     assert_eq!(x("child-two", next.rect.y), x("lane-b", first.rect.y));
-    assert!(rows[parent.rect.y as usize].contains("2"), "{rows:?}");
+    assert!(rows[parent.rect.y as usize].contains("2 agents"), "{rows:?}");
     assert_eq!(buffer[(parent.rect.x + 4, parent.rect.y)].fg,
         ClientShellConfig::from_config(&Config::default()).palette.working);
     assert!(rows[parent.rect.y as usize].ends_with('!'), "child Act rolls up: {rows:?}");
@@ -1071,15 +1082,16 @@ fn lane_run_defaults_folded_unless_user_expanded() {
     let (mut snapshot, mut overlay) = fixture();
     snapshot.tabs.retain(|tab| tab.tab_id == "lane-a");
     snapshot.agents.clear();
-    // (done, user expanded, user collapsed, visible)
-    for (done, expanded, collapsed, visible) in [
-        (false, false, false, false),
-        (false, true, false, true),
-        (false, false, true, false),
-        (true, false, false, false),
+    // (done, attention, user expanded, user collapsed, visible)
+    for (done, attention, expanded, collapsed, visible) in [
+        (false, Attention::None, false, false, false),
+        (false, Attention::Act, false, false, false),
+        (false, Attention::None, true, false, true),
+        (false, Attention::None, false, true, false),
+        (true, Attention::None, false, false, false),
     ] {
         overlay.tabs.get_mut("lane-a").unwrap().runs = vec![RunTag {
-            id: "fold".into(), name: Some("fold run".into()), done, ..RunTag::default()
+            id: "fold".into(), name: Some("fold run".into()), done, attention, ..RunTag::default()
         }];
         let mut tree = ClientTreeChrome::default();
         if expanded {
@@ -1088,8 +1100,12 @@ fn lane_run_defaults_folded_unless_user_expanded() {
         if collapsed {
             ClientTreeChrome::toggle(&mut tree.factory_collapsed_lanes, "lane-a".into());
         }
-        let (rows, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+        let (rows, hits, buffer) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
         let lane = hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap();
+        if attention == Attention::Act {
+            assert!(rows[lane.rect.y as usize].ends_with('!'));
+            assert_eq!(buffer[(24, lane.rect.y)].fg, ClientShellConfig::from_config(&Config::default()).palette.red);
+        }
         if !done {
             assert_eq!(lane.collapsed, !visible, "done={done}, expanded={expanded}, collapsed={collapsed}: {rows:?}");
         }
@@ -1100,6 +1116,16 @@ fn lane_run_defaults_folded_unless_user_expanded() {
             let run = hits.tree_headers.iter().find(|hit| hit.key == "lane-a#run:fold").unwrap();
             assert!(run.rect.y > lane.rect.y, "run must render under its lane: {rows:?}");
         }
+    }
+    overlay.tabs.get_mut("lane-a").unwrap().runs = vec![
+        RunTag { id: "agent:one".into(), ..RunTag::default() },
+        RunTag { id: "wf_two".into(), ..RunTag::default() },
+        RunTag { id: "agent:done".into(), done: true, ..RunTag::default() },
+    ];
+    for (width, summary) in [(48, "1 agent · 1 workflow"), (25, "1 agent")] {
+        let (rows, hits, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), width);
+        let lane = hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap();
+        assert!(rows[lane.rect.y as usize].trim_end().ends_with(summary), "{rows:?}");
     }
 }
 
@@ -1121,13 +1147,13 @@ fn grouped_lane_draws_live_workflows_and_runs_and_rolls_up_state() {
     assert_eq!(rows[child.rect.y as usize].find("lane-b"), rows[workflow.rect.y as usize].find("wf-a"));
     assert_eq!(rows[workflow.rect.y as usize].find("wf-a"), rows[run.rect.y as usize].find("fold run"));
     assert!(done.rect.y > run.rect.y && rows.iter().any(|row| row.contains("background 1")), "{rows:?}");
-    assert!(rows[parent.rect.y as usize].contains('3'), "{rows:?}");
+    assert!(rows[parent.rect.y as usize].contains("1 agent · 2 workflows"), "{rows:?}");
     let palette = ClientShellConfig::from_config(&Config::default()).palette;
     assert_eq!(buffer[(parent.rect.x + 4, parent.rect.y)].fg, palette.working);
 }
 
 #[test]
-fn grouped_running_workflow_stays_folded_until_expanded_focused_or_act() {
+fn grouped_running_workflow_stays_folded_until_expanded_or_focused() {
     let (mut snapshot, mut overlay) = grouped_workflow_fixture();
     let mut tree = ClientTreeChrome::default();
     let (running, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
@@ -1149,8 +1175,11 @@ fn grouped_running_workflow_stays_folded_until_expanded_focused_or_act() {
     assert!(focused.iter().any(|row| row.contains("wf-a")));
     snapshot.focused_tab_id = None;
     overlay.tabs.get_mut("wf-a").unwrap().attention = Attention::Act;
-    let (alert, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
-    assert!(alert.iter().any(|row| row.contains("wf-a")));
+    let (alert, hits, buffer) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+    assert!(!alert.iter().any(|row| row.contains("wf-a")));
+    let parent = hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap();
+    assert!(parent.collapsed && alert[parent.rect.y as usize].ends_with('!'));
+    assert_eq!(buffer[(24, parent.rect.y)].fg, ClientShellConfig::from_config(&Config::default()).palette.red);
     tree.factory_collapsed_lanes.insert("lane-a".into());
     let (folded, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
     assert!(!folded.iter().any(|row| row.contains("lane-b") || row.contains("wf-a") || row.contains("fold run")));
@@ -1186,7 +1215,10 @@ fn orchestrator_grouped_lane_draws_workflow_and_run_and_rolls_up_state() {
     assert_eq!(rows[workflow.rect.y as usize].find("wf-a"),
         rows[run.rect.y as usize].find("fold run"), "{rows:?}");
     assert!(rows[workflow.rect.y as usize].find("wf-a") > rows[lane.rect.y as usize].find("lane-a"), "{rows:?}");
-    assert!(rows[orch.rect.y as usize].contains("3"), "{rows:?}");
+    assert!(rows[orch.rect.y as usize].contains("1 agent · 2 workflows"), "{rows:?}");
+    let (trimmed, trimmed_hits, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 35);
+    let header = trimmed_hits.tree_headers.iter().find(|hit| hit.key == "orch").unwrap();
+    assert!(trimmed[header.rect.y as usize].trim_end().ends_with("1 agent · 2 workflows"), "{trimmed:?}");
     tree.factory_collapsed_lanes.insert("orch".into());
     let (folded, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
     assert!(hits.tree_headers.iter().find(|hit| hit.key == "orch").unwrap().collapsed);
@@ -1198,8 +1230,14 @@ fn orchestrator_grouped_lane_draws_workflow_and_run_and_rolls_up_state() {
     assert!(focused.iter().any(|row| row.contains("wf-a")));
     snapshot.focused_tab_id = None;
     overlay.tabs.get_mut("wf-a").unwrap().attention = Attention::Act;
-    let (alert, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
-    assert!(alert.iter().any(|row| row.contains("wf-a")));
+    let (alert, hits, buffer) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+    assert!(!alert.iter().any(|row| row.contains("wf-a")));
+    let parent = hits.tree_headers.iter().find(|hit| hit.key == "orch").unwrap();
+    assert!(parent.collapsed && alert[parent.rect.y as usize].ends_with('!'));
+    assert_eq!(buffer[(24, parent.rect.y)].fg, ClientShellConfig::from_config(&Config::default()).palette.red);
+    tree.factory_expanded_lanes.insert("orch".into());
+    let (opened, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+    assert!(opened.iter().any(|row| row.contains("wf-a")));
 }
 
 #[test]
