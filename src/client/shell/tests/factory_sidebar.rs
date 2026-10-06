@@ -2298,3 +2298,42 @@ fn remote_shell_pane_names_its_machine_on_lane_and_plain_agent_rows() {
     let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 30);
     assert!(!rows.iter().any(|row| row.contains("ax42") || row.contains("book")), "no machine for local work: {rows:#?}");
 }
+
+#[test]
+fn factory_host_footer_rows_fit_and_align_at_40_44_52() {
+    // Alex, 2026-10-05 ~20:50 ET: "this herdr ui is shit lol, text not fitting".
+    // These are the summaries the overlay writer sent at the time.
+    let (snapshot, mut overlay) = lab_fixture();
+    overlay.usage = vec![
+        HostRow { name: "claude".into(), summary: Some("4/8 · 75%".into()), ..HostRow::default() },
+        HostRow { name: "codex".into(), summary: Some("5/5 · 97%".into()), ..HostRow::default() },
+    ];
+    overlay.hosts = vec![
+        HostRow { name: "Studio".into(),
+            summary: Some("2 running · 2G free · waiting on memory · 1 kept: 1 secret".into()), ..HostRow::default() },
+        HostRow { name: "PC".into(), summary: Some("3 running · 3.6G free".into()), ..HostRow::default() },
+        HostRow { name: "ax42".into(),
+            summary: Some("2 running · 12G free · waiting on slowdown:check".into()), ..HostRow::default() },
+        HostRow { name: "forge".into(),
+            summary: Some("1 running · 9.2G free · waiting on memory".into()), ..HostRow::default() },
+    ];
+    for (width, studio) in [
+        (40u16, "studio 2 running   2G free wait mem 1 k…"),
+        (44, "studio 2 running   2G free wait mem 1 kept: …"),
+        (52, "studio 2 running   2G free wait mem 1 kept: 1 secret"),
+    ] {
+        let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), width);
+        let footer: Vec<&str> = rows[55..].iter().map(|row| row.trim_end()).collect();
+        eprintln!("width {width}:\n{}", footer.join("\n"));
+        assert_eq!(footer[0].trim(), "claude 4/8 75% · codex 5/5 97%", "width {width}");
+        assert_eq!(footer[1].trim(), studio, "width {width}");
+        assert_eq!(&footer[2..], [
+            " pc     3 running 3.6G free",
+            " ax42   2 running  12G free wait slow",
+            " forge  1 running 9.2G free wait mem",
+        ], "width {width}");
+        for row in &footer {
+            assert!(row.chars().count() <= usize::from(width), "width {width}: {row:?}");
+        }
+    }
+}

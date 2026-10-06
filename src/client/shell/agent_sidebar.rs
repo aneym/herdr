@@ -158,6 +158,7 @@ pub(super) fn render_agent_panel_with_overlay(
     let hosts = footer_overlay.map(|overlay| overlay.hosts.as_slice()).unwrap_or(&[]);
     let usage = footer_overlay.map(|overlay| overlay.usage.as_slice()).unwrap_or(&[]);
     let usage = compact_footer_rows(usage);
+    let host_table = super::host_footer::host_lines(hosts, area.width);
     let hosts = compact_footer_rows(hosts);
     let footer_rows = footer_line_count(&usage, area.width) + footer_line_count(&hosts, area.width);
     let footer_height = footer_rows.min(area.height.saturating_sub(3) as usize) as u16;
@@ -232,6 +233,18 @@ pub(super) fn render_agent_panel_with_overlay(
                 }
             }
             y += 1;
+        } else if !clickable {
+            // Hosts get one aligned row each; see host_footer for the columns.
+            for (row, line) in rows.iter().zip(&host_table).take(area.bottom().saturating_sub(y) as usize) {
+                let host_x = area.x + 1;
+                let host_w = super::host_footer::HOST_COLUMNS as u16;
+                put_text(buffer, host_x, y, host_w.min(area.right().saturating_sub(host_x)), &line.host,
+                    Style::default().fg(config.palette.subtext0));
+                let value_x = host_x + host_w + 1;
+                put_text(buffer, value_x, y, area.right().saturating_sub(value_x), &line.value,
+                    Style::default().fg(footer_value_color(row.attention, config)));
+                y += 1;
+            }
         } else {
             for row in rows.iter().take(area.bottom().saturating_sub(y) as usize) {
                 let rect = Rect::new(area.x, y, area.width, 1);
