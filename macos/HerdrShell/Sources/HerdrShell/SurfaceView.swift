@@ -518,12 +518,12 @@ final class SurfaceView: NSView {
 
     override func rightMouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
-        // Not consumed by the terminal (no mouse mode, no binding): AppKit's context menu path.
-        if !sendButton(GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_RIGHT, event) { super.rightMouseDown(with: event) }
+        // A shadow selection or an unconsumed click takes AppKit's context menu path.
+        if appSelection != nil || !sendButton(GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_RIGHT, event) { super.rightMouseDown(with: event) }
     }
 
     override func rightMouseUp(with event: NSEvent) {
-        if !sendButton(GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_RIGHT, event) { super.rightMouseUp(with: event) }
+        if appSelection != nil || !sendButton(GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_RIGHT, event) { super.rightMouseUp(with: event) }
     }
 
     override func otherMouseDown(with event: NSEvent) {

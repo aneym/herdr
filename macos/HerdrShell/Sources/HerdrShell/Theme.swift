@@ -193,10 +193,11 @@ struct TerminalTheme {
 
     /// Directive lines from Alex's own config that must never reach a surface: keybinds
     /// (the shell owns chords through its menu and keymap), includes, and anything that
-    /// would make a terminal pane translucent.
+    /// would make a terminal pane translucent or change the shell's grid padding.
     static let strippedKeys: Set<String> = [
         "keybind", "config-file", "background-opacity", "background-blur", "background-blur-radius",
         "background-opacity-cells",
+        "window-padding-x", "window-padding-y", "window-padding-balance",
     ]
 
     static func key(of line: String) -> String? {
@@ -216,6 +217,9 @@ struct TerminalTheme {
             }
         }
         out.append("background-opacity = 1")
+        out.append("window-padding-x = 8")
+        out.append("window-padding-y = 6")
+        out.append("window-padding-balance = false")
         return out.joined(separator: "\n") + "\n"
     }
 
