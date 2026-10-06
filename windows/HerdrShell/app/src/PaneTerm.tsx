@@ -10,6 +10,8 @@ import type { Pane } from "./model";
 import { copy, paste, controlKey, handleKey } from "./keys";
 import { Status } from "./Sidebar";
 export interface PaneController {
+  chat?: (mode: "terminal" | "chat") => Promise<{ ok: boolean; items: number }>;
+  toggleChat?: () => void;
   info: () => { pane_id: string; terminal_id: string; mode: "attach" | "observe" | "closed"; cols: number; rows: number; focused: boolean };
   type: (text: string) => Promise<void>; read: () => string; key: (key: string) => Promise<string | null>; wheel: (dy: number) => void; focus: () => void;
 }

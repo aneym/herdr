@@ -70,6 +70,7 @@ export default function App() {
   const shortcut = useCallback((event: KeyboardEvent) => {
     if (event.type !== "keydown" || !event.ctrlKey || event.altKey || event.metaKey) return false;
     const current = state.current;
+    if (event.shiftKey && event.key.toLowerCase() === "m") { controllers.current.get(current.focused ?? "")?.toggleChat?.(); return true; }
     let target: string | undefined;
     if (/^[1-9]$/.test(event.key)) target = current.rows.find(r => r.hotkey === Number(event.key))?.id;
     else if (event.key === "Tab") { const order = tabOrder(current.rows); const index = order.indexOf(current.selected ?? ""); target = order[(index + (event.shiftKey ? -1 : 1) + order.length) % order.length]; }
