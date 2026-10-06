@@ -349,17 +349,21 @@ extension HerdrModel {
     }
 
     /// A new chat pinned at the end of PINNED, in the focused chat's space (a local space when
-    /// nothing is focused), then `done` with its id to focus it. Alex, 2026-10-06: "i need a
-    /// button next to pinned to make a new tab that's pinned please".
+    /// nothing is focused), then `done` with its id once it is pinned. Alex, 2026-10-06: "i need
+    /// a button next to pinned to make a new tab that's pinned please".
     func newPinnedTab(focused: String?, done: @escaping (String) -> Void) {
-        let owner = focused.flatMap { id in source(for: id).flatMap { s in s.tabs.first { $0.tab_id == id }.map { (s, $0.workspace_id) } } }
-        guard let (source, workspace) = owner ?? snapshot.flatMap({ s in s.workspaces.first.map { (s, $0.workspace_id) } }) else { return }
-        // Pins keep server order; the new pin's place is after every pin its machine holds.
-        let end = source.tabs.filter { $0.pin_index != nil }.count
+        let workspace = focused.flatMap { id in source(for: id)?.tabs.first { $0.tab_id == id }?.workspace_id }
+            ?? snapshot?.workspaces.first?.workspace_id
+        guard let workspace else { return }
         let commands = HerdrCommands(socketPath: env["HERDR_SOCKET_PATH"] ?? "")
         DispatchQueue.global(qos: .userInitiated).async {
             guard let made = commands.tabCreate(workspaceId: workspace, cwd: nil) else { log("new pinned tab failed"); return }
-            if commands.tabSetPinned(tabId: made.tabId, pinned: true) { _ = commands.tabPinMove(tabId: made.tabId, pinIndex: end) }
+            guard commands.tabSetPinned(tabId: made.tabId, pinned: true) else { log("new pinned tab: pin failed \(made.tabId)"); return }
+            // A pin lands by priority, so one dragged to the end can still sit after it. The end is
+            // read from the owning server after the pin, not from a snapshot that may be behind.
+            if let pins = commands.pinCount(near: made.tabId), pins > 0, !commands.tabPinMove(tabId: made.tabId, pinIndex: pins - 1) {
+                log("new pinned tab: pin_move failed \(made.tabId)")
+            }
             DispatchQueue.main.async { done(made.tabId) }
         }
     }

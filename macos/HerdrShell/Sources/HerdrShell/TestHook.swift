@@ -85,7 +85,7 @@ final class TestHook {
                 if row.kind == .tab, let tab = row.tab { c.model.togglePin(tab) } else { c.state.spacesChrome.toggle("pin:" + String(row.id.dropFirst(6))) }
             }
             else if part == "plus", row.id == "pinned" {
-                c.model.newPinnedTab(focused: c.state.selectedTab) { c.selectTab($0) }
+                c.model.newPinnedTab(focused: c.state.selectedTab, done: c.selectWhenListed)
             } else if part == "plus" {
                 let commands = c.commands
                 let space = String(row.id.dropFirst(6))

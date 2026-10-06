@@ -168,6 +168,8 @@ struct SidebarView: View {
     /// nil means every row selects its tab.
     var openDetail: ((TabRow) -> Void)? = nil
     var select: (String) -> Void
+    /// Selects a tab just created, once a snapshot lists it.
+    var selectNew: (String) -> Void = { _ in }
     var onFactory: () -> Void = {}
     var onRename: (String) -> Void = { _ in }
 
@@ -302,7 +304,7 @@ struct SidebarView: View {
 
     private func spacesClick(_ row: SpacesRow, part: String) {
         if part == "plus", row.id == "pinned" {
-            model.newPinnedTab(focused: state.selectedTab) { select($0) }
+            model.newPinnedTab(focused: state.selectedTab, done: selectNew)
         } else if part == "plus" {
             let id = String(row.id.dropFirst(6))
             let commands = HerdrCommands(socketPath: model.env["HERDR_SOCKET_PATH"] ?? "")

@@ -6,7 +6,7 @@ Run only in the Cua Space: HERDR_SHELL_SPACE=1 python3 scripts/check_pinned_new_
 The click goes through NSApp.sendEvent at the + frame (the click hook, target pinned_plus).
 Checks:
   - a click adds one chat in the focused chat's space, last in PINNED and in the server's
-    pin order, and selects it.
+    pin order (whose index counts the agent pins ahead of it), and selects it.
 Writes checks/PINNED-NEW-TAB.txt and before/after shots.
 """
 import json
@@ -71,8 +71,10 @@ def main():
     a = home["tab"]["tab_id"]
     b = api("tab", "create", "--workspace", ws, "--label", "beta", "--no-focus")["tab"]["tab_id"]
     c = other["tab"]["tab_id"]
-    for tab in (a, c):
+    agent = api("tab", "create", "--workspace", elsewhere, "--label", "lead", "--no-focus")["tab"]["tab_id"]
+    for tab in (a, c, agent):
         S.lab("herdr", "tab", "pin", tab)
+    S.lab("herdr", "tab", "set-role", agent, "agent")
     S.app("start")
     # SwiftUI drops synthesized mouse events on a window that is not key; the Space is the
     # app's own desktop, so bringing it front takes nothing from anyone.
@@ -94,7 +96,7 @@ def main():
     check("it is last in PINNED", rows == [a, c, new], str(rows))
     pins = sorted((t for t in server_tabs(ws, elsewhere) if t.get("pin_index") is not None), key=lambda t: t["pin_index"])
     order = [t["tab_id"] for t in pins]
-    check("server pin order ends with it", order == [a, c, new], str(order))
+    check("server pin order ends with it", order == [agent, a, c, new], str(order))
     check("it is focused", state.get("selected_tab") == new, str(state.get("selected_tab")))
     S.cmd({"cmd": "shot", "out": str(ROOT / "checks/PINNED-NEW-TAB-after.png")})
 

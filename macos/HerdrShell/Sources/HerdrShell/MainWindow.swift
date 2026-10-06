@@ -209,6 +209,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                                                               guard let self else { return }
                                                               if self.state.mode == .areas { self.selectAreaTab(tab) } else { self.selectTab(tab) }
                                                           },
+                                                          selectNew: { [weak self] in self?.selectWhenListed($0) },
                                                           onFactory: { [weak self] in self?.toggleFactory() },
                                                           onRename: { [weak self] tab in self?.promptRenameTab(tab) }))
         sidebarContainer = SidebarContainer(content: sidebar)
@@ -723,10 +724,15 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             let r = cmds.tabCreate(workspaceId: ws, cwd: nil)
             DispatchQueue.main.async { [self] in
                 guard let r else { log("new tab failed"); return }
-                pendingSelectTab = r.tabId
-                snapshotChanged()   // the tab.created event may already have landed
+                selectWhenListed(r.tabId)
             }
         }
+    }
+
+    /// Selects a tab just created once a snapshot lists it.
+    func selectWhenListed(_ tabId: String) {
+        pendingSelectTab = tabId
+        snapshotChanged()   // the tab.created event may already have landed
     }
 
     @objc func splitRight(_ sender: Any?) { split("right") }

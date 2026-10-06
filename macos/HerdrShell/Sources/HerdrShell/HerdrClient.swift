@@ -393,6 +393,17 @@ struct HerdrCommands {
         succeeded("tab.pin_move", ["tab_id": tabId, "pin_index": pinIndex])
     }
 
+    /// Pins on the server that owns `tabId`, from `tab.list`. The tab id only routes the call to
+    /// that machine; tab.list ignores it and lists every workspace.
+    func pinCount(near tabId: String) -> Int? {
+        struct Env: Decodable {
+            struct R: Decodable { struct T: Decodable { let pin_index: Int? }; let tabs: [T] }
+            let result: R
+        }
+        guard let data = call("tab.list", ["tab_id": tabId]), let env = try? JSONDecoder().decode(Env.self, from: data) else { return nil }
+        return env.result.tabs.filter { $0.pin_index != nil }.count
+    }
+
     /// `tab.rename`.
     func tabRename(tabId: String, label: String) -> Bool {
         succeeded("tab.rename", ["tab_id": tabId, "label": label])
