@@ -4,7 +4,8 @@
 For each mode it sets the app's own appearance override through the control
 pipe (never the Windows theme), takes a window shot, and checks that the title
 bar, the sidebar and the pane area all switched: median luminance above 200 in
-light, below 80 in dark. The override is reset to `system` at the end, even on
+light, below 80 in dark. Every terminal on the selected tab must also report the
+mode's xterm background, so a chat view over a stale terminal cannot pass. The override is reset to `system` at the end, even on
 failure. Shots are kept in --out-dir for review.
 
     python3 windows/HerdrShell/scripts/theme_check.py --out-dir /tmp/theme
@@ -82,6 +83,9 @@ def ctl(obj):
         return {"ok": False, "error": out}
 
 
+TERMINAL_BG = {"light": "#ffffff", "dark": "#1e1e2e"}
+
+
 def check_mode(mode, out_dir):
     failures = []
     reply = ctl({"cmd": "appearance", "mode": mode})
@@ -91,6 +95,12 @@ def check_mode(mode, out_dir):
     ui = ctl({"cmd": "ui"})
     if (ui.get("appearance") or {}).get("mode") != mode:
         failures.append(f"{mode}: ui reports appearance {ui.get('appearance')}")
+    panes = ui.get("panes") or []
+    if not any(p.get("mode") in ("attach", "observe") for p in panes):
+        failures.append(f"{mode}: no connected terminal on the selected tab: {panes}")
+    for p in panes:
+        if p.get("background") != TERMINAL_BG[mode]:
+            failures.append(f"{mode}: terminal {p.get('pane_id')} background {p.get('background')}")
     rpath = f"{pc.R_SHOTS}/theme-{mode}-{time.strftime('%Y%m%d-%H%M%S')}.png".replace("/", "\\")
     shot = ctl({"cmd": "shot", "out": rpath})
     local = Path(out_dir) / f"after-{mode}.png"
@@ -122,7 +132,10 @@ def main():
             report[mode] = lumas
     finally:
         reset = ctl({"cmd": "appearance", "mode": "system"})
-        report["reset"] = reset
+        override = (ctl({"cmd": "ui"}).get("appearance") or {}).get("override")
+        report["reset"] = {"reply": reset, "override": override}
+        if not reset.get("ok") or override != "system":
+            failures.append(f"reset to system failed: {reset}, override {override}")
     print(json.dumps(report, indent=1))
     for f in failures:
         print(f"FAIL {f}")

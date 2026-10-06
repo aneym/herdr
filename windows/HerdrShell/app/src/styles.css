@@ -8,9 +8,9 @@
 }
 :root[data-theme="light"] {
   color-scheme: light;
-  --shell-bg: #ffffff; --shell-surface: #f3f4f6; --shell-gap: #e0e0df; --shell-text: #1f2328; --shell-muted: #565c66; --shell-faint: #6e7781;
-  --shell-idle: #8c959f; --shell-hover: #e9ebef; --shell-selection: #e1e6f2; --shell-line: #d5d8de; --shell-accent: #0969da;
-  --shell-ok: #17692f; --shell-warn: #8a5300; --shell-bad: #cf222e; --shell-scrim: #ffffffee; --shell-scroll: #b4b9c1;
+  --shell-bg: #ffffff; --shell-surface: #f3f4f6; --shell-gap: #e0e0df; --shell-text: #1f2328; --shell-muted: #565c66; --shell-faint: #59636e;
+  --shell-idle: #6e7781; --shell-hover: #e9ebef; --shell-selection: #e1e6f2; --shell-line: #d5d8de; --shell-accent: #0969da;
+  --shell-ok: #17692f; --shell-warn: #8a5300; --shell-bad: #b91c26; --shell-scrim: #ffffffee; --shell-scroll: #b4b9c1;
 }
 /* Thin bars that show only while the pointer is over the scrolling area. */
 * { scrollbar-width: thin; scrollbar-color: transparent transparent; }

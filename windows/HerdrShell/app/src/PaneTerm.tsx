@@ -13,7 +13,7 @@ import { appTheme, terminalThemes } from "./theme";
 export interface PaneController {
   chat?: (mode: "terminal" | "chat") => Promise<{ ok: boolean; items: number }>;
   toggleChat?: () => void;
-  info: () => { pane_id: string; terminal_id: string; mode: "attach" | "observe" | "closed"; cols: number; rows: number; focused: boolean };
+  info: () => { pane_id: string; terminal_id: string; mode: "attach" | "observe" | "closed"; cols: number; rows: number; focused: boolean; background?: string };
   type: (text: string) => Promise<void>; read: () => string; key: (key: string) => Promise<string | null>; wheel: (dy: number) => void; focus: () => void;
 }
 export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, register }: { pane: Pane; machine: string; focused: boolean; onFocus: (id: string) => void; shortcut: (event: KeyboardEvent) => boolean; register: (id: string, value: PaneController | null) => void }) {
@@ -115,7 +115,7 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
     const onWheel = (event: WheelEvent) => { if (mode.mouse) return; event.preventDefault(); event.stopPropagation(); wheel(event.deltaY * (event.deltaMode === 1 ? 1 : event.deltaMode === 2 ? term.rows : 1 / 40)); };
     const onContext = (event: MouseEvent) => { event.preventDefault(); void (term.hasSelection() ? copy(term) : paste(term)).catch(error); };
     const controller: PaneController = {
-      info: () => ({ pane_id: pane.pane_id, terminal_id: pane.terminal_id, mode: attachMode, cols: term.cols, rows: term.rows, focused: live.current.focused }),
+      info: () => ({ pane_id: pane.pane_id, terminal_id: pane.terminal_id, mode: attachMode, cols: term.cols, rows: term.rows, focused: live.current.focused, background: term.options.theme?.background }),
       type: send,
       read: () => Array.from({ length: term.rows }, (_, i) => term.buffer.active.getLine(term.buffer.active.viewportY + i)?.translateToString(true) ?? "").join("\n"),
       key: async value => {
