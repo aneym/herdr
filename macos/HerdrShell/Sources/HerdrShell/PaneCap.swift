@@ -22,6 +22,8 @@ struct PaneCapState: Equatable {
     var chat: Bool
     var density: String
     var glyph: ShellState
+    /// The tab's pin, a server fact, shown on the top-right pane's cap only (nil elsewhere).
+    var pinned: Bool? = nil
 }
 
 struct PaneCapBar: View {
@@ -31,6 +33,7 @@ struct PaneCapBar: View {
     var onChat: () -> Void
     var onFocus: () -> Void
     var onFull: () -> Void
+    var onPin: () -> Void = {}
 
     var body: some View {
         let bg = state.focused ? Color(hex: tokens.terminalBg) : tokens.cap
@@ -50,8 +53,9 @@ struct PaneCapBar: View {
                 }
                 segment
             }
+            if let pinned = state.pinned { pin(pinned) }
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, PaneCapBar.trailing)
         .frame(height: 36)
         .background(bg)
         .opacity(state.focused ? 1 : 0.92)
@@ -67,6 +71,23 @@ struct PaneCapBar: View {
             .contentShape(Rectangle())
             .onTapGesture(perform: action)
     }
+
+    /// Same quiet language as the segment: tint behind it while the tab is pinned.
+    private func pin(_ pinned: Bool) -> some View {
+        Image(systemName: pinned ? "pin.slash" : "pin")
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(pinned ? tokens.ink : tokens.mute)
+            .frame(width: PaneCapBar.pinWidth, height: 20)
+            .background(RoundedRectangle(cornerRadius: 6).fill(pinned ? tokens.tint : Color.clear))
+            .opacity(state.focused ? 1 : 0.55)
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onPin)
+            .help(pinned ? "Unpin this chat" : "Pin this chat to the end of Pinned")
+    }
+
+    /// The pin's width and the bar's trailing padding: the test hook clicks its centre.
+    static let pinWidth: CGFloat = 24
+    static let trailing: CGFloat = 10
 
     private var segment: some View {
         HStack(spacing: 0) {

@@ -685,6 +685,7 @@ pub(super) enum ClientContextMenuAction {
     NestUnderSelect(usize),
     /// Pin or unpin a chat in the sidebar's pinned section.
     TogglePin,
+    ToggleRole,
 }
 
 #[derive(Debug)]
@@ -712,12 +713,16 @@ pub(super) enum ClientContextMenuTarget {
         workspace_id: String,
         /// The chat sits in the pinned section, so the menu offers Unpin.
         pinned: bool,
+        agent: bool,
+        supports_role: bool,
     },
     /// A pinned chat in the multi-machine sidebar, on any endpoint.
     EndpointChat {
         endpoint_id: ClientEndpointId,
         tab_id: String,
         pinned: bool,
+        agent: bool,
+        supports_role: bool,
     },
     Pane {
         pane_id: String,

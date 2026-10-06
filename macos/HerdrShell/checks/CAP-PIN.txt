@@ -1,0 +1,8 @@
+[PASS] only the right pane's header has the pin, unpinned
+[PASS] a click pins it last in the server's pin order
+[PASS] it is last in PINNED
+[PASS] the header shows it pinned
+[PASS] an unpin elsewhere reaches the header
+[PASS] a pin elsewhere reaches the header
+[PASS] a click on a pinned chat unpins it on the server
+[PASS] the header shows it unpinned

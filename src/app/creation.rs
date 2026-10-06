@@ -236,6 +236,18 @@ impl App {
             .unwrap_or((crate::detect::AgentState::Unknown, true));
         let tab_id = self.public_tab_id(ws_idx, tab_idx)?;
         Some(crate::api::schema::TabInfo {
+            desk: self
+                .state
+                .desks
+                .get(&tab_id)
+                .filter(|desk| !desk.info.items.is_empty())
+                .map(|desk| desk.info.clone()),
+            role: self
+                .state
+                .pinned_tabs
+                .iter()
+                .find(|pin| pin.tab_id == tab_id)
+                .and_then(|pin| pin.role),
             work_status: Some(self.tab_work_status_for(ws_idx, tab_idx, &tab_id)),
             tab_id,
             workspace_id: self.public_workspace_id(ws_idx),

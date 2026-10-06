@@ -102,6 +102,14 @@ final class GhosttyRuntime {
             DispatchQueue.main.async { openDetectedURL(raw) }
             return true
         }
+        if action.tag == GHOSTTY_ACTION_MOUSE_OVER_LINK, target.tag == GHOSTTY_TARGET_SURFACE,
+           let ud = ghostty_surface_userdata(target.target.surface) {
+            let view = Unmanaged<SurfaceView>.fromOpaque(ud).takeUnretainedValue()
+            let link = action.action.mouse_over_link
+            let raw = text(link.url, len: Int(link.len))
+            DispatchQueue.main.async { [weak view] in view?.setHoveredLink(raw) }
+            return true
+        }
         if action.tag == GHOSTTY_ACTION_DESKTOP_NOTIFICATION {
             let n = action.action.desktop_notification
             let title = n.title.map { String(cString: $0) } ?? ""
@@ -128,7 +136,8 @@ final class GhosttyRuntime {
         return String(decoding: UnsafeRawBufferPointer(start: ptr, count: n), as: UTF8.self)
     }
 
-    /// http/https/file/mailto only. Agent runs log and record, and never call NSWorkspace.
+    /// http/https/file/mailto only, opened through `shellOpen`. Agent runs log and record,
+    /// and never call NSWorkspace.
     static func openDetectedURL(_ raw: String) {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(),
@@ -140,7 +149,7 @@ final class GhosttyRuntime {
             return
         }
         Notifier.shared.recordOpened(s)
-        NSWorkspace.shared.open(url)
+        shellOpen(url)
     }
 
     static func readClipboard(

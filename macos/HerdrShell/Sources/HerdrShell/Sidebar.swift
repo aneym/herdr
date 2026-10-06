@@ -168,6 +168,8 @@ struct SidebarView: View {
     /// nil means every row selects its tab.
     var openDetail: ((TabRow) -> Void)? = nil
     var select: (String) -> Void
+    /// Selects a tab just created, once a snapshot lists it.
+    var selectNew: (String) -> Void = { _ in }
     var onFactory: () -> Void = {}
     var onRename: (String) -> Void = { _ in }
 
@@ -280,6 +282,8 @@ struct SidebarView: View {
                         case .park: ParkActions.run("park", tab: tab, note: nil) { _, _ in model.catalog.reload() }
                         case .approve: approve(tab)
                         case .pin, .unpin: spacesClick(row, part: "pin")
+                        case .addAgent: model.setAgentRole(tab, true)
+                        case .removeAgent: model.setAgentRole(tab, false)
                         }
                     }
                 }
@@ -299,11 +303,14 @@ struct SidebarView: View {
     }
 
     private func spacesClick(_ row: SpacesRow, part: String) {
-        if part == "plus" {
+        if part == "plus", row.id == "pinned" {
+            model.newPinnedTab(focused: state.selectedTab, done: selectNew)
+        } else if part == "plus" {
             let id = String(row.id.dropFirst(6))
             let commands = HerdrCommands(socketPath: model.env["HERDR_SOCKET_PATH"] ?? "")
             DispatchQueue.global(qos: .userInitiated).async {
-                if let made = commands.tabCreate(workspaceId: id, cwd: nil) { DispatchQueue.main.async { select(made.tabId) } }
+                // Selected once a snapshot lists it: another machine's tab can arrive after the reply.
+                if let made = commands.tabCreate(workspaceId: id, cwd: nil) { DispatchQueue.main.async { selectNew(made.tabId) } }
             }
         } else if part == "link" {
             if let raw = row.link, let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") { NSWorkspace.shared.open(url) }
@@ -708,7 +715,7 @@ extension Color {
 /// A spaces row's context menu, in order. The sidebar draws it and TestHook's state reads it, so a
 /// check sees the items a right-click shows.
 enum RowMenu: String {
-    case rename = "Rename…", info = "Show info", resume = "Resume", park = "Park…", approve = "Approve scope…", pin = "Pin", unpin = "Unpin"
+    case rename = "Rename…", info = "Show info", resume = "Resume", park = "Park…", approve = "Approve scope…", pin = "Pin", unpin = "Unpin", addAgent = "Add to Agents", removeAgent = "Remove from Agents"
 
     static func items(for row: SpacesRow, model: HerdrModel) -> [RowMenu] {
         guard let tab = row.tab else { return [] }
@@ -720,7 +727,10 @@ enum RowMenu: String {
             if RemoteActions.slug(model.catalog.snapshot.lanes[tab]?.scopeURL) != nil { out.append(.approve) }
         }
         // A pin is a fact on the server that owns the tab, so another machine's tab pins there.
-        if row.kind == .tab { out.append(model.isPinned(tab) ? .unpin : .pin) }
+        if row.kind == .tab {
+            out.append(model.isPinned(tab) ? .unpin : .pin)
+            out.append(model.isAgent(tab) ? .removeAgent : .addAgent)
+        }
         return out
     }
 }

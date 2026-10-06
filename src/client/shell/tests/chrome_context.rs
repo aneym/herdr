@@ -4,6 +4,7 @@ use super::*;
 fn tab_overflow_controls_scroll_the_client_owned_tab_bar() {
     let mut snapshot = snapshot();
     snapshot.tabs.extend((2..=8).map(|number| ClientShellTab {
+        desk_count: 0,
         tab_id: format!("tab_{number}"),
         workspace_id: "ws_1".into(),
         number,
@@ -64,6 +65,7 @@ fn focused_last_overflow_tab_shows_its_full_label() {
         .iter()
         .enumerate()
         .map(|(index, label)| ClientShellTab {
+            desk_count: 0,
             tab_id: format!("tab_{}", index + 1),
             workspace_id: "ws_1".into(),
             number: index + 1,
@@ -572,6 +574,7 @@ fn section_divider_follows_the_pinned_agents_section_and_drags_with_the_pointer(
     // must follow that drawn boundary instead of the configured order.
     let mut snapshot = snapshot();
     snapshot.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+        role: None,
         tab_id: "tab_1".into(),
         workspace_id: "ws_1".into(),
     }];

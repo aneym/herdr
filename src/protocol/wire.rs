@@ -985,6 +985,14 @@ pub struct ClientShellSnapshot {
 pub struct ClientShellPinnedTab {
     pub tab_id: String,
     pub workspace_id: String,
+    /// Live snapshots use JSON in EndpointControl.data. The legacy bincode
+    /// ClientShellSnapshot variant is rejected by current clients.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::api::schema::deserialize_pin_role"
+    )]
+    pub role: Option<crate::api::schema::TabRole>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1093,6 +1101,8 @@ pub struct ClientShellWorktree {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientShellTab {
+    #[serde(default)]
+    pub desk_count: usize,
     pub tab_id: String,
     pub workspace_id: String,
     pub number: usize,
@@ -2940,6 +2950,7 @@ mod tests {
                 agent_status: crate::api::schema::AgentStatus::Idle,
             }],
             tabs: vec![ClientShellTab {
+                desk_count: 0,
                 tab_id: "w1:t1".into(),
                 workspace_id: "w1".into(),
                 number: 1,

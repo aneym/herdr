@@ -103,6 +103,7 @@ fn pinned_chats_survive_aggregate_sidebar_and_route_to_their_endpoint() {
     snapshot
         .pinned_tabs
         .push(crate::protocol::ClientShellPinnedTab {
+            role: None,
             tab_id: "tab_1".into(),
             workspace_id: "ws_1".into(),
         });
@@ -3088,6 +3089,7 @@ fn dragging_a_remote_pin_moves_it_on_its_own_machine() {
     let (mut state, remote) = state_with_remote();
     let mut local = state.snapshot.as_deref().expect("local snapshot").clone();
     local.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+        role: None,
         tab_id: "tab_1".into(),
         workspace_id: "ws_1".into(),
     }];
@@ -3101,6 +3103,7 @@ fn dragging_a_remote_pin_moves_it_on_its_own_machine() {
     let template = snapshot.tabs[0].clone();
     snapshot.tabs = (1..=3)
         .map(|number| ClientShellTab {
+            desk_count: 0,
             tab_id: format!("tab_{number}"),
             number,
             label: format!("chat {number}"),
@@ -3112,6 +3115,7 @@ fn dragging_a_remote_pin_moves_it_on_its_own_machine() {
         .tabs
         .iter()
         .map(|tab| crate::protocol::ClientShellPinnedTab {
+            role: None,
             tab_id: tab.tab_id.clone(),
             workspace_id: tab.workspace_id.clone(),
         })
@@ -3232,6 +3236,7 @@ fn aggregate_pins_scroll_within_their_section_and_keep_the_divider_below_them() 
     let template = snapshot.tabs[0].clone();
     snapshot.tabs = (1..=30)
         .map(|number| ClientShellTab {
+            desk_count: 0,
             tab_id: format!("tab_{number}"),
             number,
             label: format!("chat {number}"),
@@ -3243,6 +3248,7 @@ fn aggregate_pins_scroll_within_their_section_and_keep_the_divider_below_them() 
         .tabs
         .iter()
         .map(|tab| crate::protocol::ClientShellPinnedTab {
+            role: None,
             tab_id: tab.tab_id.clone(),
             workspace_id: tab.workspace_id.clone(),
         })
@@ -3353,6 +3359,7 @@ fn inactive_machine_pin_rolls_up_from_that_machines_factory_overlay() {
     let mut remote_snapshot = snapshot();
     remote_snapshot.boot_id = "remote-boot".into();
     remote_snapshot.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+        role: None,
         tab_id: "tab_1".into(),
         workspace_id: "ws_1".into(),
     }];
@@ -3439,6 +3446,7 @@ fn inactive_machine_overlay_change_redraws_its_pin_only_when_pinned() {
     assert!(deliver(&mut state, 1, idle).is_none());
 
     remote_snapshot.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+        role: None,
         tab_id: "tab_1".into(),
         workspace_id: "ws_1".into(),
     }];
@@ -3459,4 +3467,48 @@ fn inactive_machine_overlay_change_redraws_its_pin_only_when_pinned() {
         "the redraw shows the remote's live run on its pin"
     );
     assert!(state.endpoint_is_active(&ClientEndpointId::Local));
+}
+
+/// Aggregate sidebar projection: a remote agent must precede a local plain pin
+/// in both displayed rows and Cmd+digit dispatch, despite machine order.
+#[test]
+fn aggregate_agent_pins_display_and_cmd_digits_agree() {
+    let (mut state, remote) = state_with_remote();
+    let mut local = state.snapshot.as_deref().unwrap().clone();
+    local.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+        tab_id: "tab_1".into(),
+        workspace_id: "ws_1".into(),
+        role: None,
+    }];
+    state.set_snapshot(Box::new(local));
+    let mut snapshot = state
+        .endpoints
+        .iter()
+        .find(|endpoint| endpoint.endpoint_id == remote)
+        .unwrap()
+        .snapshot
+        .as_deref()
+        .unwrap()
+        .clone();
+    snapshot.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+        tab_id: "tab_1".into(),
+        workspace_id: "ws_1".into(),
+        role: Some(crate::api::schema::TabRole::Agent),
+    }];
+    state.set_endpoint_snapshot(&remote, Box::new(snapshot));
+    let frame = state.compose(100, 30).unwrap();
+    for (index, hit) in state.hits.pinned_rows.iter().enumerate() {
+        let slot = super::super::agent_sidebar::chat_pin_rect(hit.rect);
+        let cell =
+            usize::from(hit.rect.y) * usize::from(frame.width) + usize::from(slot.right() - 1);
+        assert_eq!(frame.cells[cell].symbol, (index + 1).to_string());
+    }
+    assert_eq!(state.hits.pinned_rows[0].endpoint_id, Some(remote.clone()));
+    assert_eq!(
+        state.hits.pinned_rows[1].endpoint_id,
+        Some(ClientEndpointId::Local)
+    );
+    let numbered = state.aggregate_numbered_tabs().unwrap();
+    assert_eq!(numbered[0], (remote.clone(), "tab_1".into()));
+    assert_eq!(numbered[1], (ClientEndpointId::Local, "tab_1".into()));
 }

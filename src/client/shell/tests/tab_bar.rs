@@ -120,6 +120,7 @@ fn overflowing_tabs_never_overwrite_the_badge() {
     let mut snapshot = badge_snapshot(Some("work"), "default");
     for number in 2..24 {
         snapshot.tabs.push(ClientShellTab {
+            desk_count: 0,
             tab_id: format!("tab_{number}"),
             workspace_id: "ws_1".into(),
             number,
@@ -519,5 +520,26 @@ fn hiding_the_finished_marker_keeps_the_other_status_glyphs() {
                 );
             }
         }
+    }
+}
+
+// Integration boundary: the server count must reach tab-bar ink, not merely a helper.
+#[test]
+fn desk_tab_label_count_is_visible_only_when_nonzero() {
+    for (count, expected) in [(2, "1 ▤2"), (0, "1")] {
+        let mut projected = snapshot();
+        projected.tabs[0].desk_count = count;
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+        state.set_snapshot(Box::new(projected));
+        state.set_pane_surface(surface());
+        let frame = state.compose(106, 20).expect("desk tab frame");
+        let rect = state.hits.tabs[0].0;
+        let buffer = frame.to_ratatui_buffer().expect("desk tab buffer");
+        let text = (rect.x..rect.right())
+            .filter_map(|x| buffer.cell((x, rect.y)))
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(text.contains(expected), "{text:?}");
+        assert_eq!(text.contains('▤'), count > 0);
     }
 }

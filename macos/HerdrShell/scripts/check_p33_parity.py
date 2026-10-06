@@ -7,12 +7,13 @@ Space scenario. Expected files must never be recorded from this driver.
 """
 import difflib
 import pathlib
+import tempfile
 import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "scripts/fixtures/p33"
-BUILD = pathlib.Path.home() / ".cache/herdr-build/p33"
-BUILD.mkdir(parents=True, exist_ok=True)
+_scratch = tempfile.TemporaryDirectory(prefix="herdr-p33-")
+BUILD = pathlib.Path(_scratch.name)
 DRIVER = BUILD / "p33_dump"
 subprocess.run(["swiftc", str(ROOT / "Sources/HerdrShell/SpacesTree.swift"),
                 str(ROOT / "scripts/p33_dump.swift"), "-o", str(DRIVER)], check=True)

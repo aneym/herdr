@@ -115,6 +115,7 @@ pub(super) fn snapshot_with_completions(
         .map(|(tab, state)| {
             let tab_id = tab.tab_id;
             protocol::ClientShellTab {
+                desk_count: app.state.desks.get(&tab_id).map_or(0, |desk| desk.info.items.len()),
                 focused: focused_tab_id.as_deref() == Some(tab_id.as_str()),
                 tab_id,
                 workspace_id: tab.workspace_id,
@@ -337,6 +338,7 @@ pub(super) fn snapshot_with_completions(
             .filter_map(|pin| {
                 let (ws_idx, _) = app.parse_tab_id(&pin.tab_id)?;
                 Some(protocol::ClientShellPinnedTab {
+                    role: pin.role,
                     tab_id: pin.tab_id.clone(),
                     workspace_id: app.public_workspace_id(ws_idx),
                 })

@@ -80,13 +80,17 @@ struct SpacesRowView: View {
             if showResume {
                 Button("Resume") { resume() }.buttonStyle(.plain).foregroundStyle(t.accent).fixedSize()
             }
+            if row.id == "pinned" {
+                // A new chat pinned at the end of this section (HerdrModel.newPinnedTab).
+                Text("+").foregroundStyle(t.mute).fixedSize().onTapGesture { click("plus") }.clickTarget("pinned+")
+            }
             if row.kind == .section {
                 Text(focusMark ?? "").font(.system(size: 10)).foregroundStyle(t.mute)
                     .frame(width: 10).onTapGesture { if focusMark != nil { click("focus") } }
             }
             // The PINNED header already says it, so pinned rows keep no pin glyph at rest; it comes
             // back on hover to unpin, as does the row's context menu.
-            if row.kind == .tab, !row.id.hasPrefix("pinned:") || hovered {
+            if row.kind == .tab, (!row.id.hasPrefix("pinned:") && !row.id.hasPrefix("agent:")) || hovered {
                 Text("⚲").foregroundStyle(pinned ? t.accent : t.mute).fixedSize().onTapGesture { click("pin") }
             }
             if row.kind == .space {

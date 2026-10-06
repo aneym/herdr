@@ -82,7 +82,7 @@ impl ClientShellState {
             return;
         };
         let (endpoint_id, tab_id, current) = (endpoint_id.clone(), tab_id.clone(), *slot);
-        let next = self.pin_slot_at(&endpoint_id, point);
+        let next = self.pin_slot_at(&endpoint_id, &tab_id, point);
         if next == current {
             return;
         }
@@ -187,6 +187,62 @@ impl ClientShellState {
         }
     }
 
+    pub(super) fn endpoint_supports_tab_role(&self, endpoint_id: &ClientEndpointId) -> bool {
+        self.endpoint_is_online(endpoint_id)
+            && self
+                .endpoints
+                .iter()
+                .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+                .and_then(|endpoint| endpoint.methods.as_ref())
+                .is_some_and(|methods| methods.contains("tab.set_role"))
+    }
+
+    pub(super) fn push_tab_role(
+        &mut self,
+        endpoint_id: ClientEndpointId,
+        tab_id: String,
+        agent: bool,
+        outcome: &mut ClientShellInput,
+    ) {
+        if !self.endpoint_supports_tab_role(&endpoint_id) {
+            return;
+        }
+        let Some(boot_id) = self
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+            .and_then(|endpoint| endpoint.snapshot.as_deref())
+            .map(|snapshot| snapshot.boot_id.clone())
+        else {
+            return;
+        };
+        let id = format!("client-shell:{}", self.next_request_id);
+        self.next_request_id = self.next_request_id.saturating_add(1);
+        self.pending_requests.insert(
+            id.clone(),
+            PendingEndpointRequest {
+                boot_id: boot_id.clone(),
+                method_name: "tab.set_role".into(),
+                confirmation_workspace_id: None,
+                kind: PendingEndpointKind::Generic,
+            },
+        );
+        outcome.actions.push(ClientShellAction::Endpoint {
+            endpoint_id,
+            boot_id,
+            request: Box::new(crate::api::schema::Request {
+                id,
+                method: crate::api::schema::Method::TabSetRole(
+                    crate::api::schema::TabSetRoleParams {
+                        tab_id,
+                        role: agent.then_some(crate::api::schema::TabRole::Agent),
+                    },
+                ),
+            }),
+        });
+        outcome.repaint = true;
+    }
+
     fn endpoint_supports_pin_move(&self, endpoint_id: &ClientEndpointId) -> bool {
         self.endpoint_is_online(endpoint_id)
             && self
@@ -246,7 +302,15 @@ impl ClientShellState {
             Some(index) => *index,
             None => live.last().map_or(order.len(), |index| index + 1),
         };
-        order.insert(index, moved);
+        let start = order
+            .iter()
+            .position(|pin| pin.role == moved.role)
+            .unwrap_or_else(|| if moved.role.is_some() { 0 } else { order.len() });
+        let end = order
+            .iter()
+            .rposition(|pin| pin.role == moved.role)
+            .map_or(start, |i| i + 1);
+        order.insert(index.clamp(start, end), moved);
         order
     }
 
@@ -276,7 +340,12 @@ impl ClientShellState {
     /// Which of `endpoint_id`'s slots the pointer stands for. Above or below
     /// that machine's rows clamps to its first or last; off the section (more
     /// than a row past it, or outside its columns) is `None`.
-    fn pin_slot_at(&self, endpoint_id: &ClientEndpointId, point: (u16, u16)) -> Option<usize> {
+    fn pin_slot_at(
+        &self,
+        endpoint_id: &ClientEndpointId,
+        tab_id: &str,
+        point: (u16, u16),
+    ) -> Option<usize> {
         let rows = &self.hits.pinned_rows;
         let first = rows.first()?.rect;
         let last = rows.last()?.rect;
@@ -285,10 +354,25 @@ impl ClientShellState {
         if point.0 < first.x || point.0 >= first.right() || point.1 < top || point.1 >= bottom {
             return None;
         }
+        let snapshot = self
+            .endpoints
+            .iter()
+            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)?
+            .snapshot
+            .as_deref()?;
+        let role = snapshot
+            .pinned_tabs
+            .iter()
+            .find(|pin| pin.tab_id == tab_id)?
+            .role;
         let own = rows
             .iter()
             .filter(|hit| {
                 hit.endpoint_id.as_ref().unwrap_or(&self.active_endpoint_id) == endpoint_id
+                    && snapshot
+                        .pinned_tabs
+                        .iter()
+                        .any(|pin| pin.tab_id == hit.tab_id && pin.role == role)
             })
             .collect::<Vec<_>>();
         let first_own = own.first()?;
@@ -382,6 +466,9 @@ impl ClientShellState {
         let Some(to) = order.iter().position(|pin| pin.tab_id == tab_id) else {
             return false;
         };
+        if to == from {
+            return true;
+        }
         self.pin_preview = Some(ClientPinPreview {
             endpoint_id: endpoint_id.clone(),
             applied: order.clone(),

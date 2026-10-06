@@ -646,13 +646,17 @@ fn render_panel_list_entry(
         AgentPanelListEntry::FactoryBackground { kind, workspace_id, count, collapsed, indent, alert, working, shortcut } => {
             render_factory_group(buffer, rect, config, hits, workspace_id, kind.label(), *count, *collapsed, *indent, *alert, *working, *shortcut);
         }
-        AgentPanelListEntry::PinnedChatsHeader => {
+        AgentPanelListEntry::PinnedChatsHeader | AgentPanelListEntry::AgentChatsHeader => {
             put_text(
                 buffer,
                 rect.x,
                 rect.y,
                 rect.width,
-                " pinned",
+                if matches!(entry, AgentPanelListEntry::AgentChatsHeader) {
+                    " agents"
+                } else {
+                    " pinned"
+                },
                 Style::default()
                     .fg(config.palette.overlay0)
                     .add_modifier(Modifier::BOLD),

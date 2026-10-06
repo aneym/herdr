@@ -100,7 +100,8 @@ final class PaneHostView: NSView {
                                         onTerminal: { [weak self] in self?.capAction?(paneId, "terminal") },
                                         onChat: { [weak self] in self?.capAction?(paneId, "chat") },
                                         onFocus: { [weak self] in self?.capAction?(paneId, "focus") },
-                                        onFull: { [weak self] in self?.capAction?(paneId, "full") })
+                                        onFull: { [weak self] in self?.capAction?(paneId, "full") },
+                                        onPin: { [weak self] in self?.capAction?(paneId, "pin") })
             }
             return v
         }
@@ -109,7 +110,8 @@ final class PaneHostView: NSView {
                                                    onTerminal: { [weak self] in self?.capAction?(paneId, "terminal") },
                                                    onChat: { [weak self] in self?.capAction?(paneId, "chat") },
                                                    onFocus: { [weak self] in self?.capAction?(paneId, "focus") },
-                                                   onFull: { [weak self] in self?.capAction?(paneId, "full") }))
+                                                   onFull: { [weak self] in self?.capAction?(paneId, "full") },
+                                                   onPin: { [weak self] in self?.capAction?(paneId, "pin") }))
         // The cap sits under the transparent titlebar; with the titlebar's safe area its content
         // slid down into the body, where a chat view covered its lower half.
         v.safeAreaRegions = []
@@ -209,6 +211,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                                                               guard let self else { return }
                                                               if self.state.mode == .areas { self.selectAreaTab(tab) } else { self.selectTab(tab) }
                                                           },
+                                                          selectNew: { [weak self] in self?.selectWhenListed($0) },
                                                           onFactory: { [weak self] in self?.toggleFactory() },
                                                           onRename: { [weak self] tab in self?.promptRenameTab(tab) }))
         sidebarContainer = SidebarContainer(content: sidebar)
@@ -411,9 +414,11 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     /// A machine answered. Only a selected tab on that machine has panes to redraw; a
-    /// selection that was waiting for it goes through the normal snapshot path.
+    /// selection that was waiting for it, or a new tab there waiting to be listed, goes through
+    /// the normal snapshot path.
     func machinesChanged() {
-        guard let t = state.selectedTab, Machines.isRemote(t) else { return }
+        let remote = [state.selectedTab, pendingSelectTab].contains { $0.map(Machines.isRemote) == true }
+        guard remote else { return }
         snapshotChanged()
     }
 
@@ -629,6 +634,12 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     func setPaneMode(_ id: String, _ mode: String) {
+        if mode == "pin" {
+            // The pin belongs to the tab the cap's pane is in; the icon follows the next snapshot.
+            guard let tab = state.selectedTab else { return }
+            model.setPinnedAtEnd(tab, !model.isPinned(tab))
+            return
+        }
         if Machines.isRemote(id), mode != "terminal" { log("pane mode \(mode): local panes only"); return }
         if mode == "focus" || mode == "full" {
             Channel.setMode("chat", for: id)
@@ -676,6 +687,11 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                 chat: chat, density: Channel.density(for: p.pane_id),
                 glyph: ShellState.from(status: status, failed: false, hasAgent: reported))
         }
+        // The tab's pin sits top right: on the cap of the top pane in the rightmost column.
+        if let corner = host.rects.filter({ $0.1.y <= host.area.y })
+            .max(by: { $0.1.x + $0.1.width < $1.1.x + $1.1.width })?.0.paneId, next[corner] != nil {
+            next[corner]?.pinned = model.isPinned(tab)
+        }
         host.caps = next
         host.needsLayout = true
         host.layoutSubtreeIfNeeded()
@@ -702,7 +718,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     @objc func prevTab(_ sender: Any?) { cycleTab(-1) }
 
     @objc func gotoTab(_ sender: NSMenuItem) {
-        let rows = model.numberedTabIds
+        let rows = model.numberedTabIds(state: state)
         if sender.tag >= 1, sender.tag <= rows.count { selectTab(rows[sender.tag - 1]) }
     }
 
@@ -723,10 +739,15 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             let r = cmds.tabCreate(workspaceId: ws, cwd: nil)
             DispatchQueue.main.async { [self] in
                 guard let r else { log("new tab failed"); return }
-                pendingSelectTab = r.tabId
-                snapshotChanged()   // the tab.created event may already have landed
+                selectWhenListed(r.tabId)
             }
         }
+    }
+
+    /// Selects a tab just created once a snapshot lists it.
+    func selectWhenListed(_ tabId: String) {
+        pendingSelectTab = tabId
+        snapshotChanged()   // the tab.created event may already have landed
     }
 
     @objc func splitRight(_ sender: Any?) { split("right") }

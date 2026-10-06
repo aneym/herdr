@@ -116,6 +116,11 @@ impl App {
                 workspace_id,
                 ..
             }
+            | EventData::DeskChanged {
+                tab_id,
+                workspace_id,
+                ..
+            }
             | EventData::TabPinMoved {
                 tab_id,
                 workspace_id,

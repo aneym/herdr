@@ -1335,6 +1335,7 @@ impl App {
         };
 
         self.state.remove_alias_shadowed_by_new_pane(moved_pane_id);
+        self.state.prune_desks();
         self.state.mark_session_dirty();
         self.schedule_session_save();
         let Some(pane) = self.pane_info(target_ws_idx, moved_pane_id) else {

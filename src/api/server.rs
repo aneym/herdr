@@ -305,7 +305,12 @@ fn handle_connection_with_stop(
                 retired_pane_graphics_method_error(line, &id).unwrap_or_else(|| ErrorResponse {
                     id,
                     error: ErrorBody {
-                        code: "invalid_request".into(),
+                        code: if crate::api::schema::tabs::invalid_role_request(line) {
+                            "invalid_role"
+                        } else {
+                            "invalid_request"
+                        }
+                        .into(),
                         message: format!("invalid request: {request_error}"),
                     },
                 });
@@ -657,6 +662,12 @@ pub(crate) fn api_method_name(method: &Method) -> &'static str {
         Method::TabRename(_) => "tab.rename",
         Method::TabMove(_) => "tab.move",
         Method::TabSetPinned(_) => "tab.set_pinned",
+        Method::DeskOpen(_) => "desk.open",
+        Method::DeskClose(_) => "desk.close",
+        Method::DeskFocus(_) => "desk.focus",
+        Method::DeskList(_) => "desk.list",
+        Method::DeskRead(_) => "desk.read",
+        Method::TabSetRole(_) => "tab.set_role",
         Method::TabPinMove(_) => "tab.pin_move",
         Method::TabClose(_) => "tab.close",
         Method::AgentList(_) => "agent.list",
@@ -2076,5 +2087,24 @@ mod tests {
         let result = done_rx.recv_timeout(Duration::from_secs(2)).unwrap();
         assert!(result.is_ok());
         server_thread.join().unwrap();
+    }
+    #[test]
+    fn api_tab_set_role_unknown_role_returns_invalid_role() {
+        let (mut client, server, _path) = local_stream_pair("invalid-tab-role");
+        let (api_tx, mut api_rx) = mpsc::unbounded_channel::<ApiRequestMessage>();
+        client.write_all(b"{\"id\":\"role\",\"method\":\"tab.set_role\",\"params\":{\"tab_id\":\"w1:t1\",\"role\":\"future\"}}\n").unwrap();
+        client.flush().unwrap();
+        handle_connection(
+            server,
+            &api_tx,
+            &EventHub::default(),
+            &Arc::new(AtomicBool::new(true)),
+            None,
+        )
+        .unwrap();
+        let response: serde_json::Value = serde_json::from_str(&read_line(&mut client)).unwrap();
+        assert_eq!(response["id"], "role");
+        assert_eq!(response["error"]["code"], "invalid_role");
+        assert!(api_rx.try_recv().is_err());
     }
 }

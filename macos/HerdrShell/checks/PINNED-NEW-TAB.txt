@@ -1,0 +1,11 @@
+[PASS] pins listed before the click
+[PASS] one new chat on the server
+[PASS] it is in the focused chat's space
+[PASS] it is last in PINNED
+[PASS] server pin order ends with it
+[PASS] it is focused
+[PASS] a selection on a machine that has not answered is kept
+[PASS] nothing is made before that machine answers
+[PASS] once it answers, one chat is made in the selected chat's space there
+[PASS] it is pinned last on that machine
+[PASS] it is focused as that machine's chat

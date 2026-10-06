@@ -84,11 +84,13 @@ final class TestHook {
                 // As the sidebar: a tab row's pin is a server fact, a space row's a local preference.
                 if row.kind == .tab, let tab = row.tab { c.model.togglePin(tab) } else { c.state.spacesChrome.toggle("pin:" + String(row.id.dropFirst(6))) }
             }
-            else if part == "plus" {
+            else if part == "plus", row.id == "pinned" {
+                c.model.newPinnedTab(focused: c.state.selectedTab, done: c.selectWhenListed)
+            } else if part == "plus" {
                 let commands = c.commands
                 let space = String(row.id.dropFirst(6))
                 DispatchQueue.global(qos: .userInitiated).async {
-                    if let made = commands.tabCreate(workspaceId: space, cwd: nil) { DispatchQueue.main.async { c.selectTab(made.tabId) } }
+                    if let made = commands.tabCreate(workspaceId: space, cwd: nil) { DispatchQueue.main.async { c.selectWhenListed(made.tabId) } }
                 }
             } else if part == "link" {
                 if let raw = row.link, let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") { NSWorkspace.shared.open(url) }
@@ -106,13 +108,19 @@ final class TestHook {
             dragDivider(obj)
         case "drag_pin":
             dragPin(obj)
+        case "set_role":
+            guard let c = controller else { return }
+            let row = (obj["row"] as? String).flatMap { id in c.model.spacesRows(state: c.state).first { $0.id == id }?.tab }
+            guard let tab = obj["tab"] as? String ?? obj["tab_id"] as? String ?? row else { return }
+            c.model.setAgentRole(tab, obj["role"] as? String == "agent")
         case "pin_move":
             // {"cmd":"pin_move","row":"pinned:<tab>","to":slot}: what a drop on that slot does.
             guard let c = controller, let id = obj["row"] as? String, let to = obj["to"] as? Int else { return }
             let rows = c.model.spacesRows(state: c.state)
-            let machine = PinDrag.machine(of: String(id.dropFirst("pinned:".count)))
-            let ids = rows.filter { $0.id.hasPrefix("pinned:") && PinDrag.machine(of: $0.tab ?? "") == machine }.compactMap(\.tab)
-            if let from = ids.firstIndex(of: String(id.dropFirst("pinned:".count))) {
+            guard let section = PinDrag.section(of: id), let row = rows.first(where: { $0.id == id }), let tab = row.tab else { return }
+            let machine = PinDrag.machine(of: tab)
+            let ids = rows.filter { PinDrag.section(of: $0.id) == section && PinDrag.machine(of: $0.tab ?? "") == machine }.compactMap(\.tab)
+            if let from = ids.firstIndex(of: tab) {
                 PinDrag.shared.commit(model: c.model, ids: ids, from: from, to: to)
             }
         case "new_tab":
@@ -273,6 +281,10 @@ final class TestHook {
             guard let line = c.sidebarLines.first(where: { $0.kind == .area && $0.title == label }),
                   let f = c.state.rowFrames[line.id] else { log("hook: click: no area \(label ?? "?")"); return }
             frame = f
+        case "pinned_plus":
+            view = c.sidebarHostView
+            guard let f = c.state.rowFrames["pinned+"] else { log("hook: click: no pinned +"); return }
+            frame = f
         case "focus":
             view = c.sidebarHostView
             guard let f = c.state.rowFrames["focus"] else { log("hook: click: no focus row"); return }
@@ -291,6 +303,14 @@ final class TestHook {
             }
             guard let f = c.state.rowFrames[key] else { log("hook: click: no \(key)"); return }
             frame = f
+        case "cap_pin":
+            // The pane header's pin, centred at its fixed trailing slot (PaneCapBar.pin).
+            guard let (id, _) = c.host.caps.first(where: { $0.value.pinned != nil }), let f = c.host.capFrames[id] else {
+                log("hook: click: no cap pin"); return
+            }
+            let x = f.maxX - PaneCapBar.trailing - PaneCapBar.pinWidth / 2
+            postClick(c, loc: c.host.convert(NSPoint(x: x, y: f.midY), to: nil), mods: clickMods(obj))
+            return
         case "doc_tab":
             let name = obj["label"] as? String ?? ""
             guard let b = c.docPanel.tabButton(name) else { log("hook: click: no doc tab \(name)"); return }
@@ -533,11 +553,12 @@ final class TestHook {
         delivered.append("scroll \(obj["dy"] ?? 0) on \(s.paneId)")
     }
 
-    /// {"cmd":"scroll_gesture","pane":id,"dy":px,"steps":n,"momentum":m,"interval":s,"out":path}:
+    /// {"cmd":"scroll_gesture","pane":id,"dy":px,"steps":n,"momentum":m,"decay":d,"interval":s,"out":path}:
     /// a trackpad swipe as AppKit delivers one: continuous pixel deltas with scroll phase
-    /// began, changed and ended, then `m` momentum events that decay, one event per
-    /// `interval` (default 1/120 s). On every tick, and for 0.4 s after, the surface's top
-    /// visible row is sampled; `out` gets "ms<TAB>row" lines, a client-side frame log.
+    /// began, changed and ended, then `m` momentum events that decay by `d` (default 0.92)
+    /// each, one event per `interval` (default 1/120 s). On every tick, and for 0.4 s after,
+    /// the surface's top visible row is sampled; `out` gets "ms<TAB>row" lines, a client-side
+    /// frame log.
     private func scrollGesture(_ obj: [String: Any]) {
         guard let c = controller,
               let s = c.currentPanes.first(where: { $0.paneId == obj["pane"] as? String }),
@@ -545,6 +566,7 @@ final class TestHook {
         let dy = obj["dy"] as? Double ?? Double(obj["dy"] as? Int ?? 12)
         let steps = obj["steps"] as? Int ?? 30
         let momentum = obj["momentum"] as? Int ?? 40
+        let decay = obj["decay"] as? Double ?? 0.92
         let interval = obj["interval"] as? Double ?? 1.0 / 120
         // (scroll phase, momentum phase, delta): CGScrollPhase began 1, changed 2, ended 4;
         // CGMomentumScrollPhase begin 1, continue 2, end 3.
@@ -552,7 +574,7 @@ final class TestHook {
         events += Array(repeating: (2, 0, dy), count: max(0, steps - 2))
         events.append((4, 0, 0))
         for i in 0..<momentum {
-            events.append((0, i == 0 ? 1 : (i == momentum - 1 ? 3 : 2), dy * pow(0.92, Double(i + 1))))
+            events.append((0, i == 0 ? 1 : (i == momentum - 1 ? 3 : 2), dy * pow(decay, Double(i + 1))))
         }
         // A swipe happens with the pointer over the pane, and Ghostty sends a wheel report at
         // the pointer; with no pointer position yet it reports nothing and nothing scrolls.
@@ -841,6 +863,7 @@ final class TestHook {
             return ["pane": s.paneId, "terminal": s.terminalId, "cols": g.cols, "rows": g.rows,
                     "first_responder": c.window.firstResponder === s, "exited": s.exited,
                     "mouse_captured": s.mouseCaptured,
+                    "hovered_link": s.hoveredLink,
                     "keys_sent": s.keysSent, "last_key_sent": s.lastKeySent,
                     "frame": [s.frame.minX, s.frame.minY, s.frame.width, s.frame.height],
                     "in_host": s.superview === c.host,
@@ -889,7 +912,8 @@ final class TestHook {
                         "workflows": rows(c.model.workflows)],
             "spaces_rows": c.model.spacesRows(state: c.state).map { $0.dump },
             // What ⌘1..9 select, in order (pins first).
-            "numbered_tabs": Array(c.model.numberedTabIds.prefix(9)),
+            "numbered_tabs": Array(c.model.numberedTabIds(state: c.state).prefix(9)),
+            "agent_tabs": c.model.numberedTabIds(state: c.state).filter { c.model.isAgent($0) },
             "pin_drag": ["dragged": PinDrag.shared.dragged as Any? ?? NSNull(), "target": PinDrag.shared.target as Any? ?? NSNull()] as [String: Any],
             // Each tab row's context menu items, as a right-click shows them.
             "spaces_menus": Dictionary(c.model.spacesRows(state: c.state).filter { $0.tab != nil }
@@ -919,7 +943,7 @@ final class TestHook {
             "pane_caps": c.host.caps.map { id, cap -> [String: Any] in
                 let f = c.host.capFrames[id] ?? .zero
                 return ["id": id, "name": cap.name, "agent": cap.agent, "chat": cap.chat,
-                        "density": cap.density, "focused": cap.focused,
+                        "density": cap.density, "focused": cap.focused, "pinned": cap.pinned ?? NSNull(),
                         "frame": [f.minX, f.minY, f.width, f.height]]
             },
             "chats": c.chatDump,

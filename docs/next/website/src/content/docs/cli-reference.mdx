@@ -192,14 +192,48 @@ herdr tab create [--workspace <workspace_id>] [--cwd PATH] [--label TEXT] [--env
 herdr tab get <tab_id>
 herdr tab focus <tab_id>
 herdr tab rename <tab_id> <label>
+herdr tab pin <tab_id> [--priority N]
+herdr tab unpin <tab_id>
+herdr tab pin-move <tab_id> <pin_index>
+herdr tab set-role <tab_id> <agent|none>
 herdr tab close <tab_id>
 ```
+
+`set-role agent` pins a chat in Agents, above Pinned. `set-role none` moves it
+back to Pinned without unpinning. Pin indices start at 0; `pin-move` may reorder
+only within the chat's own section. Agents own the first Cmd+1..9 digits.
 
 A tab is another terminal layout inside a workspace. Without `--workspace`, `tab create` uses the active workspace and fails if none exists. Its JSON response exposes `.result.tab.tab_id` and `.result.root_pane.pane_id`. Closing a workspace's last tab also closes the workspace, matching the TUI close-tab action. If `confirm_close` is enabled and closing the tab would also close a whole worktree group, `tab close` returns a `confirmation_required` error instead.
 
 With `ui.confirm_close` enabled, the TUI asks for confirmation before closing a workspace's last tab from a keybinding or the tab menu. Ordinary CLI/API tab closes remain immediate.
 
 Workspace and tab creation, and pane splitting, leave focus unchanged by default. `--focus` selects the new layout; `--no-focus` states the default explicitly. Without `--cwd`, new terminals follow the configured `terminal.new_cwd` policy, which follows the source pane or workspace by default. Each `--env KEY=VALUE` adds or replaces that variable in the new root shell.
+
+## Desk
+
+```bash
+herdr desk open <path|url> [--tab T|--pane P] [--title T] [--background] [--json]
+herdr desk list [--tab T|--pane P|--all] [--json]
+herdr desk close [<item>] [--tab T|--pane P] [--json]
+herdr desk focus <item> [--tab T|--pane P] [--json]
+```
+
+Each tab owns a desk of files and HTTP(S) URLs. `open` focuses the item unless
+`--background` is set; opening the same reference again does not duplicate it.
+Local paths (including `file://` paths) are canonicalized from the CLI's current
+working directory and must exist. Other URL schemes are rejected.
+
+Target selection uses `--tab`, then `--pane`, then `$HERDR_PANE_ID`. Outside a
+Herdr pane, pass `--tab` for open, close, or focus. `list` defaults to your pane's
+tab, or all desks outside a pane; `--all` always lists all desks. Close and focus
+accept an item ID or exact reference; close without an item closes the front item.
+
+Text output from open is `<item_id> <tab_id> <ref>`. List prints
+`<* or space> <item_id> <kind> <title> <ref>`, with `*` marking the front item,
+and a tab-ID header when listing multiple desks. Close and focus print the
+resulting front ID, or nothing for an empty desk. `--json` prints the server
+result object. Server errors print `error: <code>: <message>` and exit 1.
+The TUI appends ` ▤<n>` to tab labels when their desk contains items.
 
 ## Panes
 

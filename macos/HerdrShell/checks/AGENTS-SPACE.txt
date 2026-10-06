@@ -1,0 +1,26 @@
+[PASS] app is key for mouse dispatch
+[PASS] AGENTS section and rows precede PINNED section and rows
+[PASS] no agents title row above the AGENTS section
+[PASS] Content and Frank are absent as plain space tab rows
+[PASS] initial rows
+[PASS] initial numbered tabs
+[PASS] initial server
+[PASS] server agent roles have pin_index 0 and 1
+[PASS] light appearance applied
+[PASS] dark appearance applied
+[PASS] Frank dragged up rows
+[PASS] Frank dragged up numbered tabs
+[PASS] Frank dragged up server
+[PASS] drag into PINNED leaves every row and server tab unchanged
+[PASS] cross-section drop rows
+[PASS] cross-section drop numbered tabs
+[PASS] cross-section drop server
+[PASS] Frank role cleared rows
+[PASS] Frank role cleared numbered tabs
+[PASS] Frank role cleared server
+[PASS] server omits Frank role
+[PASS] Frank restored at AGENTS end rows
+[PASS] Frank restored at AGENTS end numbered tabs
+[PASS] Frank restored at AGENTS end server
+[PASS] server restores Frank agent role
+[PASS] a press in place on Content selects its tab

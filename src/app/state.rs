@@ -9,6 +9,28 @@ use crate::layout::{PaneId, PaneInfo};
 pub(crate) type InstalledPluginRegistry =
     std::collections::HashMap<String, crate::api::schema::InstalledPluginInfo>;
 
+/// Persist the allocation counter even when all items have been closed.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+pub struct DeskState {
+    #[serde(flatten)]
+    pub info: crate::api::schema::DeskInfo,
+    #[serde(default = "desk_first_id")]
+    pub next_id: u64,
+}
+
+fn desk_first_id() -> u64 {
+    1
+}
+
+impl Default for DeskState {
+    fn default() -> Self {
+        Self {
+            info: Default::default(),
+            next_id: 1,
+        }
+    }
+}
+
 /// One pinned chat in `AppState::pinned_tabs`. The Vec order is the pin order
 /// the sidebar draws and Cmd+1..9 resolves; `priority` decides where a newly
 /// pinned chat lands (higher sorts earlier, ties keep the earlier pin first).
@@ -18,6 +40,12 @@ pub struct PinnedTab {
     pub tab_id: String,
     #[serde(default)]
     pub priority: i64,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::api::schema::deserialize_pin_role"
+    )]
+    pub role: Option<crate::api::schema::TabRole>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PluginPaneRecord {
@@ -906,6 +934,8 @@ pub struct AppState {
     /// Tree view: pinned spaces keep their header row listed even when no
     /// agent rows remain beneath them. Keyed by workspace id.
     pub tree_pinned_spaces: std::collections::HashSet<String>,
+    /// Per-tab document state, including allocation counters for empty desks.
+    pub desks: std::collections::HashMap<String, DeskState>,
     /// Chats pinned to the sidebar's pinned section, in pin order. A shared
     /// session fact (not per-client chrome): the same order drives Cmd+1..9
     /// on every attached client. Keyed by public tab id.
@@ -1017,6 +1047,7 @@ impl AppState {
             tree_collapsed_spaces: self.tree_collapsed_spaces.clone(),
             tree_collapsed_tabs: self.tree_collapsed_tabs.clone(),
             tree_pinned_spaces: self.tree_pinned_spaces.clone(),
+            desks: self.desks.clone(),
             pinned_tabs: self.pinned_tabs.clone(),
             tree_show_hidden_spaces: self.tree_show_hidden_spaces,
             hidden_spaces_expanded: self.hidden_spaces_expanded,
@@ -1037,33 +1068,106 @@ impl AppState {
     /// Pin a chat, or move it when already pinned. Higher priority lands
     /// earlier; equal priority keeps existing pins ahead of the new one.
     pub fn pin_tab(&mut self, tab_id: String, priority: i64) {
-        self.unpin_tab(&tab_id);
-        let position = self
+        let role = self
             .pinned_tabs
             .iter()
-            .position(|pin| pin.priority < priority)
-            .unwrap_or(self.pinned_tabs.len());
-        self.pinned_tabs.insert(position, PinnedTab { tab_id, priority });
+            .find(|pin| pin.tab_id == tab_id)
+            .and_then(|pin| pin.role);
+        self.unpin_tab(&tab_id);
+        let agents = self
+            .pinned_tabs
+            .iter()
+            .take_while(|pin| pin.role.is_some())
+            .count();
+        let (start, end) = if role.is_some() {
+            (0, agents)
+        } else {
+            (agents, self.pinned_tabs.len())
+        };
+        let position = (start..end)
+            .find(|&i| self.pinned_tabs[i].priority < priority)
+            .unwrap_or(end);
+        self.pinned_tabs.insert(
+            position,
+            PinnedTab {
+                tab_id,
+                priority,
+                role,
+            },
+        );
     }
 
-    /// Move a pinned chat to `index` in pin order (past the end means last).
-    /// Its priority is pulled between its new neighbours' so the order stays
-    /// sorted by priority and a later `pin_tab` still lands where its
-    /// priority says. False when the chat is not pinned.
+    /// The inclusive global index range a pin may occupy.
+    pub fn pin_role_range(&self, tab_id: &str) -> Option<std::ops::RangeInclusive<usize>> {
+        let index = self.pinned_tab_index(tab_id)?;
+        let agents = self
+            .pinned_tabs
+            .iter()
+            .take_while(|pin| pin.role.is_some())
+            .count();
+        Some(if self.pinned_tabs[index].role.is_some() {
+            0..=agents - 1
+        } else {
+            agents..=self.pinned_tabs.len() - 1
+        })
+    }
+
+    /// Move inside the role block and clamp priority against only its neighbours.
     pub fn move_pinned_tab(&mut self, tab_id: &str, index: usize) -> bool {
+        let Some(range) = self.pin_role_range(tab_id) else {
+            return false;
+        };
         let Some(from) = self.pinned_tab_index(tab_id) else {
             return false;
         };
-        let mut pin = self.pinned_tabs.remove(from);
-        let index = index.min(self.pinned_tabs.len());
-        if let Some(above) = index.checked_sub(1).and_then(|i| self.pinned_tabs.get(i)) {
+        let index = index.clamp(*range.start(), *range.end());
+        let pin = self.pinned_tabs.remove(from);
+        self.insert_pin_at(pin, index);
+        true
+    }
+
+    fn insert_pin_at(&mut self, mut pin: PinnedTab, index: usize) {
+        if let Some(above) = index
+            .checked_sub(1)
+            .and_then(|i| self.pinned_tabs.get(i))
+            .filter(|other| other.role == pin.role)
+        {
             pin.priority = pin.priority.min(above.priority);
         }
-        if let Some(below) = self.pinned_tabs.get(index) {
+        if let Some(below) = self
+            .pinned_tabs
+            .get(index)
+            .filter(|other| other.role == pin.role)
+        {
             pin.priority = pin.priority.max(below.priority);
         }
         self.pinned_tabs.insert(index, pin);
+    }
+
+    pub fn set_tab_role(&mut self, tab_id: &str, role: Option<crate::api::schema::TabRole>) -> bool {
+        let existing = self.pinned_tab_index(tab_id);
+        if existing.map_or(role.is_none(), |index| self.pinned_tabs[index].role == role) {
+            return false;
+        }
+        let mut pin = existing
+            .map(|index| self.pinned_tabs.remove(index))
+            .unwrap_or_else(|| PinnedTab {
+                tab_id: tab_id.to_owned(),
+                priority: 0,
+                role: None,
+            });
+        pin.role = role;
+        let index = self
+            .pinned_tabs
+            .iter()
+            .take_while(|pin| pin.role.is_some())
+            .count();
+        self.insert_pin_at(pin, index);
         true
+    }
+
+    pub fn normalize_pin_roles(&mut self) {
+        self.pinned_tabs.sort_by_key(|pin| pin.role.is_none());
     }
 
     pub fn unpin_tab(&mut self, tab_id: &str) -> bool {
@@ -1072,6 +1176,93 @@ impl AppState {
         };
         self.pinned_tabs.remove(index);
         true
+    }
+
+    pub fn desk_open(
+        &mut self,
+        tab_id: &str,
+        mut item: crate::api::schema::DeskItem,
+        background: bool,
+    ) -> Option<String> {
+        let desk = self.desks.entry(tab_id.into()).or_default();
+        if let Some(existing) = desk
+            .info
+            .items
+            .iter()
+            .find(|i| i.reference == item.reference)
+        {
+            let id = existing.id.clone();
+            if !background {
+                desk.info.front = Some(id.clone());
+            }
+            return Some(id);
+        }
+        let next = desk.next_id.checked_add(1)?;
+        item.id = format!("d{}", desk.next_id);
+        desk.next_id = next;
+        let id = item.id.clone();
+        if desk.info.items.len() >= 32 {
+            let oldest = desk
+                .info
+                .items
+                .iter()
+                .enumerate()
+                .filter(|(_, i)| Some(&i.id) != desk.info.front.as_ref())
+                .min_by_key(|(_, i)| i.opened_at_ms)
+                .map(|(index, _)| index)?;
+            desk.info.items.remove(oldest);
+        }
+        desk.info.items.push(item);
+        if !background {
+            desk.info.front = Some(id.clone());
+        }
+        Some(id)
+    }
+
+    pub fn desk_close(&mut self, tab_id: &str, item: Option<&str>) -> Option<String> {
+        let desk = self.desks.get_mut(tab_id)?;
+        let target = item.or(desk.info.front.as_deref())?;
+        let index = desk
+            .info
+            .items
+            .iter()
+            .position(|i| i.id == target || i.reference == target)?;
+        let removed = desk.info.items.remove(index);
+        if desk.info.front.as_ref() == Some(&removed.id) {
+            desk.info.front = desk
+                .info
+                .items
+                .get(index)
+                .or_else(|| index.checked_sub(1).and_then(|i| desk.info.items.get(i)))
+                .map(|i| i.id.clone());
+        }
+        Some(removed.id)
+    }
+
+    pub fn desk_focus(&mut self, tab_id: &str, item: &str) -> Option<String> {
+        let desk = self.desks.get_mut(tab_id)?;
+        let id = desk
+            .info
+            .items
+            .iter()
+            .find(|i| i.id == item || i.reference == item)?
+            .id
+            .clone();
+        desk.info.front = Some(id.clone());
+        Some(id)
+    }
+
+    pub fn prune_desks(&mut self) {
+        let live: std::collections::HashSet<String> = self
+            .workspaces
+            .iter()
+            .flat_map(|ws| {
+                ws.tabs
+                    .iter()
+                    .map(|tab| crate::workspace::public_tab_id_for_number(&ws.id, tab.number))
+            })
+            .collect();
+        self.desks.retain(|id, _| live.contains(id));
     }
 
     /// Drop pins whose tab no longer exists (closed chats lose their pin).
@@ -1435,6 +1626,7 @@ impl AppState {
             tree_collapsed_spaces: std::collections::HashSet::new(),
             tree_collapsed_tabs: std::collections::HashSet::new(),
             tree_pinned_spaces: std::collections::HashSet::new(),
+            desks: Default::default(),
             pinned_tabs: Vec::new(),
             tree_show_hidden_spaces: false,
             hidden_spaces_expanded: false,
@@ -1712,6 +1904,25 @@ impl AppState {
     }
 
     pub fn assert_invariants_for_test(&self) {
+        for desk in self.desks.values() {
+            assert!(desk.info.items.len() <= 32);
+            let ids: std::collections::HashSet<_> =
+                desk.info.items.iter().map(|i| &i.id).collect();
+            assert_eq!(ids.len(), desk.info.items.len());
+            assert!(desk.info.front.as_ref().is_none_or(|front| ids.contains(front)));
+            assert!(desk.info.items.iter().all(|i| i
+                .id
+                .strip_prefix('d')
+                .and_then(|id| id.parse::<u64>().ok())
+                .is_some_and(|id| id < desk.next_id)));
+        }
+        assert!(
+            !self
+                .pinned_tabs
+                .windows(2)
+                .any(|pair| pair[0].role.is_none() && pair[1].role.is_some()),
+            "agent pins must precede plain pins"
+        );
         if self.workspaces.is_empty() {
             assert!(
                 self.active.is_none(),
@@ -2172,5 +2383,92 @@ mod tests {
             KeyCode::Char('b'),
             KeyModifiers::SHIFT,
         ));
+    }
+    /// Pure partition/ranking algorithm: adversarial priorities and block boundaries
+    /// need independent edge cases; no runtime or test-only production seam.
+    #[test]
+    fn pin_roles_partition_and_clamp_priorities() {
+        use crate::api::schema::TabRole::Agent;
+        let mut state = AppState::test_with_adversarial_identity_state();
+        state.pin_tab("p".into(), 50);
+        assert!(state.set_tab_role("a", Some(Agent)));
+        state.pin_tab("b".into(), -10);
+        state.set_tab_role("b", Some(Agent));
+        state.pin_tab("p".into(), i64::MAX);
+        assert_eq!(
+            state
+                .pinned_tabs
+                .iter()
+                .map(|pin| pin.tab_id.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b", "p"]
+        );
+        state.move_pinned_tab("b", usize::MAX);
+        state.move_pinned_tab("p", 0);
+        assert_eq!(state.pinned_tab_index("b"), Some(1));
+        assert_eq!(state.pinned_tab_index("p"), Some(2));
+        state.pin_tab("a".into(), -20);
+        assert_eq!(state.pinned_tabs[1].role, Some(Agent));
+        state.set_tab_role("a", None);
+        assert_eq!(state.pinned_tab_index("a"), Some(1));
+        assert!(state.pinned_tabs[1].priority >= state.pinned_tabs[2].priority);
+        assert!(!state.set_tab_role("a", None));
+        state.pinned_tabs.swap(0, 2);
+        state.normalize_pin_roles();
+        assert_eq!(
+            state
+                .pinned_tabs
+                .iter()
+                .map(|pin| pin.tab_id.as_str())
+                .collect::<Vec<_>>(),
+            ["b", "p", "a"]
+        );
+        state.assert_invariants_for_test();
+        state.pinned_tabs.clear();
+        let workspace = &state.workspaces[0];
+        let live = workspace
+            .tabs
+            .iter()
+            .take(2)
+            .map(|tab| crate::workspace::public_tab_id_for_number(&workspace.id, tab.number))
+            .collect::<Vec<_>>();
+        assert_eq!(live.len(), 2);
+        state.set_tab_role(&live[0], Some(Agent));
+        state.set_tab_role("closed-agent", Some(Agent));
+        state.pin_tab(live[1].clone(), 5);
+        state.pin_tab("closed-plain".into(), 0);
+        state.prune_pinned_tabs();
+        assert_eq!(
+            state
+                .pinned_tabs
+                .iter()
+                .map(|pin| &pin.tab_id)
+                .collect::<Vec<_>>(),
+            live.iter().collect::<Vec<_>>()
+        );
+        state.assert_invariants_for_test();
+    }
+
+    /// Persisted JSON is an independent migration contract: absent and future
+    /// role strings must not prevent loading old/newer session snapshots.
+    #[test]
+    fn pin_role_json_tolerates_absent_and_future_roles() {
+        for (json, expected) in [
+            (r#"{"tab_id":"w1:t1"}"#, None),
+            (r#"{"tab_id":"w1:t1","role":"future"}"#, None),
+            (
+                r#"{"tab_id":"w1:t1","role":"agent"}"#,
+                Some(crate::api::schema::TabRole::Agent),
+            ),
+        ] {
+            let pin: PinnedTab = serde_json::from_str(json).unwrap();
+            assert_eq!(pin.role, expected);
+            let wire_json: serde_json::Value = serde_json::from_str(json).unwrap();
+            let mut wire_json = wire_json;
+            wire_json["workspace_id"] = "w1".into();
+            let wire: crate::protocol::ClientShellPinnedTab =
+                serde_json::from_value(wire_json).unwrap();
+            assert_eq!(wire.role, expected);
+        }
     }
 }

@@ -477,12 +477,15 @@ pub(super) fn render_expanded(
             let super::tree::AgentPanelListEntry::PinnedTab(mut row) = entry else {
                 continue;
             };
-            let slot = pins.len() + 1;
-            row.shortcut = if slot <= 9 { slot } else { 0 };
+
             row.active &= &endpoint.endpoint_id == state.active_endpoint_id;
             row.machine = machine_badge(endpoint, &config.palette);
             pins.push((endpoint.endpoint_id.clone(), row));
         }
+    }
+    pins.sort_by_key(|(endpoint, row)| (!row.agent, !endpoint.is_local()));
+    for (index, (_, row)) in pins.iter_mut().enumerate() {
+        row.shortcut = if index < 9 { index + 1 } else { 0 };
     }
     let mut y = area.y;
     hits.endpoint_pin_body = Rect::default();
@@ -490,34 +493,43 @@ pub(super) fn render_expanded(
     if !pins.is_empty() && area.height > 1 {
         // The section takes at most a third of the column and scrolls past
         // that, so the spaces list below always keeps its rows.
-        let visible = pins.len().min(usize::from((area.height / 3).max(1)));
+        let headers = usize::from(pins.iter().any(|(_, row)| row.agent))
+            + usize::from(pins.iter().any(|(_, row)| !row.agent));
+        let visible = pins
+            .len()
+            .min(usize::from((area.height / 3).max(1)))
+            .min(usize::from(area.height).saturating_sub(headers));
         let max_scroll = pins.len() - visible;
         *state.endpoint_pin_scroll = (*state.endpoint_pin_scroll).min(max_scroll);
         let first = *state.endpoint_pin_scroll;
         let width = area.width.saturating_sub(1);
-        put_text(
-            buffer,
-            area.x,
-            y,
-            width,
-            " pinned",
-            Style::default()
-                .fg(palette.overlay0)
-                .add_modifier(Modifier::BOLD),
-        );
-        if max_scroll > 0 {
-            put_right_text(
-                buffer,
-                Rect::new(area.x, y, width, 1),
-                y,
-                &format!("+{max_scroll} more "),
-                Style::default().fg(palette.overlay0),
-            );
-        }
-        y += 1;
-        hits.endpoint_pin_body = Rect::new(area.x, y, width, visible as u16);
+        let pin_top = y;
         hits.endpoint_pin_max_scroll = max_scroll;
+        let mut block = None;
         for (endpoint_id, row) in pins.into_iter().skip(first).take(visible) {
+            if block != Some(row.agent) {
+                put_text(
+                    buffer,
+                    area.x,
+                    y,
+                    width,
+                    if row.agent { " agents" } else { " pinned" },
+                    Style::default()
+                        .fg(palette.overlay0)
+                        .add_modifier(Modifier::BOLD),
+                );
+                if block.is_none() && max_scroll > 0 {
+                    put_right_text(
+                        buffer,
+                        Rect::new(area.x, y, width, 1),
+                        y,
+                        &format!("+{max_scroll} more "),
+                        Style::default().fg(palette.overlay0),
+                    );
+                }
+                block = Some(row.agent);
+                y += 1;
+            }
             let rect = Rect::new(area.x, y, width, 1);
             let hit_start = hits.tree_headers.len();
             super::agent_sidebar::render_pinned_tab_row(buffer, rect, &row, config, hits);
@@ -530,6 +542,7 @@ pub(super) fn render_expanded(
                 .push((rect, Rect::default(), endpoint_id, row.tab_id));
             y += 1;
         }
+        hits.endpoint_pin_body = Rect::new(area.x, pin_top, width, y.saturating_sub(pin_top));
     }
     let remaining = Rect::new(area.x, y, area.width, area.bottom().saturating_sub(y));
     let (workspace_area, detail_area) =

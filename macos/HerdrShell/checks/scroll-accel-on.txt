@@ -1,0 +1,15 @@
+HerdrShell trackpad scroll check  2026-10-06T21:59:36Z
+attach binary: /Users/aneyman/.local/bin/herdr
+default config: 10 wheel reports scrolled 30 rows
+[PASS] default attach keeps ui.mouse_scroll_lines (3 rows per report) -- 30
+Shell env (HERDR_ATTACH_SCROLL_LINES=1): 10 wheel reports scrolled 10 rows
+[PASS] Shell attach scrolls one row per wheel report -- 10
+Claude Code wheel acceleration: on (forced by --claude-accel)
+[PASS] Claude handler, slow swipe: one row per report (Ghostty scrollback) -- 9 reports -> 9 rows (Ghostty.app 10)
+[FAIL] Claude handler, medium swipe: one row per report (Ghostty scrollback) -- 20 reports -> 52 rows (Ghostty.app 18)
+[FAIL] Claude handler, std swipe: one row per report (Ghostty scrollback) -- 40 reports -> 177 rows (Ghostty.app 38)
+[FAIL] Claude handler, fast swipe: one row per report (Ghostty scrollback) -- 54 reports -> 251 rows (Ghostty.app 55)
+[FAIL] a Claude Code pane scrolls one row per wheel report -- 38 reports 8 ms apart -> 168 transcript rows (claude 2.1.292)
+lab down: stop: 0
+
+RESULT: FAIL Claude handler, medium swipe: one row per report (Ghostty scrollback), Claude handler, std swipe: one row per report (Ghostty scrollback), Claude handler, fast swipe: one row per report (Ghostty scrollback), a Claude Code pane scrolls one row per wheel report

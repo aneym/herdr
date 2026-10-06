@@ -1,0 +1,30 @@
+[PASS] agents title row omitted above the AGENTS section
+[PASS] AGENTS precedes PINNED (remote agent before local plain pin)
+[PASS] agent appears once, only in AGENTS
+[PASS] section shortcut hints start at their numbered slots
+[PASS] remote agent badge and space label survive
+[PASS] numbered order starts remote A, local P
+[PASS] source pin indices preserved for moves
+[PASS] all-agent pins omit PINNED; agent hint spans both machines
+[PASS] older snapshots have no AGENTS section and keep the agents title row
+[PASS] unknown roles remain plain
+[PASS] hints cap at nine and omit sections entirely beyond nine
+
+numbered|ax42/w1:t1,s1:t1,s1:t2,ax42/w2:t1,s2:t1,pc/w1:t1
+indices|s1:t1:0,ax42/w1:t1:0
+section|agentpins|0|none||mute|AGENTS|⌘1|none||||
+tab|agent:ax42/w1:t1|0|none|●|working|remote chat|rails|none||ax42/w1:t1|||@ax42
+section|pinned|0|none||mute|PINNED|⌘2|none||||
+tab|pinned:s1:t1|0|none|●|working|orchestrator|rails|none||s1:t1||
+title|spacegroup:Rails|0|none||mute|Rails||none||||
+space|space:s1|0|open||mute|rails||none||s1:t1|space:s1|
+section|section:s1:LANES|1|none||mute|LANES||none||||
+tab|tab:s1:t1|1|none|●|working|orchestrator||none||s1:t1||
+tab|tab:s1:t2|1|none|●|idle|lane||none||s1:t2||
+space|space:ax42/w2|0|open||mute|recruiting||none||ax42/w2:t1|space:ax42/w2|
+section|section:ax42/w2:LANES|1|none||mute|LANES||none||||
+tab|tab:ax42/w2:t1|1|none|■|blocked|recruiter||none||ax42/w2:t1|||@ax42
+space|space:s2|0|open||mute|poker||none||s2:t1|space:s2|
+section|section:s2:LANES|1|none||mute|LANES||none||||
+tab|tab:s2:t1|1|none|●|working|coach||none||s2:t1||
+tab|tab:pc/w1:t1|1|none|●|idle|pc chat||none||pc/w1:t1|||@pc:unreachable

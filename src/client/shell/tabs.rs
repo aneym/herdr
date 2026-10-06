@@ -592,12 +592,21 @@ fn max_tab_scroll(widths: &[u16], available: u16) -> usize {
     start
 }
 
-fn tab_label(tab: &ClientShellTab) -> String {
-    if tab.zoomed {
+pub(in crate::client::shell) fn desk_label(mut label: String, count: usize) -> String {
+    if count > 0 {
+        use std::fmt::Write;
+        let _ = write!(label, " ▤{count}");
+    }
+    label
+}
+
+pub(in crate::client::shell) fn tab_label(tab: &ClientShellTab) -> String {
+    let label = if tab.zoomed {
         format!("{} Z", tab.label)
     } else {
         tab.label.clone()
-    }
+    };
+    desk_label(label, tab.desk_count)
 }
 
 #[cfg(test)]

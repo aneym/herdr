@@ -201,6 +201,7 @@ mod tests {
             tree_collapsed_spaces: std::collections::HashSet::new(),
             tree_collapsed_tabs: std::collections::HashSet::new(),
             tree_pinned_spaces: std::collections::HashSet::new(),
+            desks: Default::default(),
             pinned_tabs: Vec::new(),
             tree_show_hidden_spaces: false,
             hidden_spaces_expanded: false,

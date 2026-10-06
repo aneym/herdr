@@ -56,6 +56,15 @@ enum ChatFont {
     }
 }
 
+private func chatText(_ text: String, _ p: Palette) -> Text {
+    var a = ChatLinks.plain(text)
+    for run in a.runs where run.link != nil {
+        a[run.range].foregroundColor = p.link
+        a[run.range].underlineStyle = nil
+    }
+    return Text(a)
+}
+
 // MARK: Markdown
 
 private enum Block {
@@ -151,13 +160,16 @@ private struct Markdown: View {
     }
 
     private func inline(_ s: String, size: CGFloat = Metric.body) -> Text {
-        var a = (try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(s)
+        var a = ChatLinks.markdown(s)
         for run in a.runs {
             if run.inlinePresentationIntent?.contains(.code) == true {
                 a[run.range].font = ChatFont.mono(codeFamily, size - 1)
                 a[run.range].backgroundColor = p.surface
             }
-            if run.link != nil { a[run.range].foregroundColor = p.link }
+            if run.link != nil {
+                a[run.range].foregroundColor = p.link
+                a[run.range].underlineStyle = nil
+            }
         }
         return Text(a)
     }
@@ -185,7 +197,7 @@ private struct Markdown: View {
             VStack(alignment: .leading, spacing: 6) {
                 if !lang.isEmpty { Text(lang).font(.system(size: Metric.caption)).foregroundStyle(p.faint) }
                 ScrollView(.horizontal, showsIndicators: false) {
-                    Text(code).font(ChatFont.mono(codeFamily, Metric.code)).lineSpacing(3).fixedSize()
+                    chatText(code, p).font(ChatFont.mono(codeFamily, Metric.code)).lineSpacing(3).fixedSize()
                 }
             }
             .padding(.horizontal, 14).padding(.vertical, 11)
@@ -274,7 +286,7 @@ private struct ToolRow: View {
                 ForEach(Array(diffLines.enumerated()), id: \.offset) { _, line in
                     HStack(alignment: .firstTextBaseline, spacing: 0) {
                         Text(line.sign).foregroundStyle(line.sign == "+" ? p.add : line.sign == "-" ? p.del : p.faint).frame(width: 18, alignment: .center)
-                        Text(line.text.isEmpty ? " " : line.text).foregroundStyle(p.ink.opacity(0.9))
+                        chatText(line.text.isEmpty ? " " : line.text, p).foregroundStyle(p.ink.opacity(0.9))
                     }
                     .font(mono)
                     .padding(.vertical, 2.5).padding(.trailing, 12)
@@ -282,15 +294,15 @@ private struct ToolRow: View {
                     .background(Rectangle().fill(line.sign == "+" ? p.addFill : line.sign == "-" ? p.delFill : Color.clear))
                 }
                 if let r = item.result, item.status == "error" {
-                    Text(r).font(mono).foregroundStyle(p.del).textSelection(.enabled).padding(12)
+                    chatText(r, p).font(mono).foregroundStyle(p.del).textSelection(.enabled).padding(12)
                 }
             } else {
                 ScrollView(.vertical) {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text(item.input ?? "").font(mono).foregroundStyle(p.ink.opacity(0.85)).textSelection(.enabled)
+                        chatText(item.input ?? "", p).font(mono).foregroundStyle(p.ink.opacity(0.85)).textSelection(.enabled)
                         if let r = item.result, !r.isEmpty {
                             Rectangle().fill(p.hair).frame(height: 1)
-                            Text(r).font(mono).foregroundStyle(item.status == "error" ? p.del : p.mute).textSelection(.enabled)
+                            chatText(r, p).font(mono).foregroundStyle(item.status == "error" ? p.del : p.mute).textSelection(.enabled)
                         }
                     }
                     .padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -302,6 +314,7 @@ private struct ToolRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(p.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .textSelection(.enabled)
     }
 
     private var diffLines: [(sign: String, text: String)] {
@@ -509,6 +522,12 @@ struct ChatView: View {
         }
         .foregroundStyle(p.ink)
         .background(p.page)
+        .environment(\.openURL, OpenURLAction { url in
+            if let scheme = url.scheme?.lowercased(), ["http", "https", "file", "mailto"].contains(scheme) {
+                shellOpen(url)
+            }
+            return .handled
+        })
         .preferredColorScheme(theme.effective == .dark ? .dark : .light)
     }
 
@@ -557,7 +576,7 @@ struct ChatView: View {
     private func youBubble(_ s: String, _ p: Palette) -> some View {
         HStack {
             Spacer(minLength: 96)
-            Text(s).font(.system(size: Metric.body)).lineSpacing(Metric.leading).textSelection(.enabled)
+            chatText(s, p).font(.system(size: Metric.body)).lineSpacing(Metric.leading).textSelection(.enabled)
                 .padding(.horizontal, 14).padding(.vertical, 9)
                 .background(p.you, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }

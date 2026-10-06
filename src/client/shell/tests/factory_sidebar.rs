@@ -16,6 +16,7 @@ fn fixture() -> (ClientShellSnapshot, FactoryOverlay) {
     .enumerate()
     {
         snapshot.tabs.push(ClientShellTab {
+            desk_count: 0,
             tab_id: label.to_string(),
             workspace_id: "ws_1".into(),
             number: index + 1,
@@ -182,6 +183,7 @@ fn focused_agent_half_pad_does_not_overlap_next_factory_space() {
         orchestrator_mode: false, tab_count: 1, visible_in_profile: true,
     });
     snapshot.tabs.push(ClientShellTab {
+        desk_count: 0,
         tab_id: "other-tab".into(), workspace_id: "ws_2".into(), number: 1,
         label: "other".into(), custom_label: true, zoomed: false, focused: false,
         agent_status: AgentStatus::Idle,
@@ -299,6 +301,7 @@ fn lab_fixture() -> (ClientShellSnapshot, FactoryOverlay) {
         orchestrator_mode: false, tab_count: 1, visible_in_profile: true,
     });
     snapshot.tabs.push(ClientShellTab {
+        desk_count: 0,
         tab_id: "poker".into(), workspace_id: "ws_2".into(), number: 1,
         label: "poker coach".into(), custom_label: true, zoomed: false,
         focused: false, agent_status: AgentStatus::Working,
@@ -1277,6 +1280,7 @@ fn pinned_lane_shows_the_live_child_rollup_its_tree_row_shows() {
     for mode in [TabMode::Active, TabMode::Parked, TabMode::Auto] {
         let (mut snapshot, mut overlay) = grouped_workflow_fixture();
         snapshot.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+            role: None,
             tab_id: "lane-a".into(),
             workspace_id: "ws_1".into(),
         }];
@@ -1340,6 +1344,7 @@ fn pinned_and_lane_rows_follow_the_endpoint_chat_status_over_a_stale_busy_overla
         lane.agent_status = other;
         lane.work_status = Some(reported);
         snapshot.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+            role: None,
             tab_id: "lane-a".into(),
             workspace_id: "ws_1".into(),
         }];
@@ -1503,6 +1508,7 @@ fn factory_grouping_ignores_cycles_and_cross_space_parents() {
     remote.pane_id = "remote-pane".into();
     snapshot.agents.push(remote);
     snapshot.tabs.push(ClientShellTab {
+        desk_count: 0,
         tab_id: "remote".into(), workspace_id: "ws_2".into(), number: 1,
         label: "remote".into(), custom_label: true, zoomed: false, focused: false,
         agent_status: AgentStatus::Idle,
