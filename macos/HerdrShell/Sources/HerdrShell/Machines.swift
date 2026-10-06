@@ -137,7 +137,8 @@ enum MachineRows {
             } else if m.problem != nil {
                 trailing = "offline" + (m.downSince.map { " since " + Self.clock.string(from: $0) } ?? "")
             } else if open {
-                let mismatch = localProtocol.map { $0 != s?.protocol } ?? false
+                // Only a known protocol on both sides is a mismatch; an unknown one says nothing.
+                let mismatch = localProtocol.flatMap { local in s?.protocol.map { $0 != local } } ?? false
                 trailing = mismatch ? "needs update" : ""
             } else {
                 trailing = agentTabs.isEmpty ? "no agents" : "\(agentTabs.count) agent" + (agentTabs.count == 1 ? "" : "s")
@@ -147,11 +148,12 @@ enum MachineRows {
                                  trailing: trailing, toggleKey: "machine:" + m.name, dim: m.problem != nil))
             guard open, let s else { continue }
             let filled = s.workspaces.filter { ws in s.tabs.contains { $0.workspace_id == ws.workspace_id } }
+            let hasLanes = s.tabs.contains { agentsByTab[$0.tab_id] != nil }
             for ws in filled.sorted(by: { $0.number < $1.number }) {
                 let tabs = s.tabs.filter { $0.workspace_id == ws.workspace_id }.sorted { $0.number < $1.number }
-                // A workspace label heads agent tabs. Over a lone "shells N" it says nothing,
-                // unless another workspace's shells row sits beside it and needs telling apart.
-                if filled.count > 1 || tabs.contains(where: { agentsByTab[$0.tab_id] != nil }) {
+                // A workspace label shows only on a machine with lanes: over agent tabs, or over a
+                // shells row that would otherwise read as part of the workspace above it.
+                if hasLanes && (filled.count > 1 || tabs.contains(where: { agentsByTab[$0.tab_id] != nil })) {
                     out.append(SpacesRow(id: "msection:" + ws.workspace_id, kind: .section, depth: 1,
                                          title: (ws.label ?? ws.workspace_id).uppercased(), dim: m.problem != nil))
                 }

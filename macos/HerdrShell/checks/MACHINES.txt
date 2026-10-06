@@ -13,7 +13,7 @@
 [PASS] host footer uses the machine names (footer ['Studio', 'pc', 'ax42', 'forge'])
 [PASS] unreachable machine says so (machine|machine:ghost|0|open||unknown|ghost|connecting|none|||machine:ghost|dim)
 [PASS] ax42 agent tabs listed (4 rows)
-[PASS] remote tab selected and attached (["MM_SHELL_61180                                                                                                                ", "jobs@ax42:~$                                                                                                                  "])
+[PASS] remote tab selected and attached (["MM_SHELL_63857                                                                                                                ", "jobs@ax42:~$                                                                                                                  "])
 [PASS] scratch tab is one focused shell ({"shown": [{"pane": "ax42/w3:p1", "rect": [0, 0, 120, 40]}], "focused": "ax42/w3:p1"})
 [PASS] typing reaches the remote pane (jobs@ax42:~$)
 [PASS] machine folds to one counted line (machine|machine:ax42|0|closed|■|blocked|ax42|4 agents|none|||machine:ax42|)

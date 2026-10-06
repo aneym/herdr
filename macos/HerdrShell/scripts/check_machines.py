@@ -68,9 +68,11 @@ def remote_snapshot(machine):
 
 
 def expected_sections(snap):
-    """Workspace labels the machine block should draw: one over agent tabs, or over a shells row
-    that another workspace's shells row sits beside. A lone shells row gets no label."""
+    """Workspace labels the machine block should draw: none on a machine without lanes; on one
+    with lanes, one over agent tabs, or over a shells row another workspace sits beside."""
     agent_tabs = {a["tab_id"] for a in snap["agents"]}
+    if not any(t["tab_id"] in agent_tabs for t in snap["tabs"]):
+        return []
     filled = [w for w in snap["workspaces"] if any(t["workspace_id"] == w["workspace_id"] for t in snap["tabs"])]
     return sorted(w["workspace_id"] for w in filled if len(filled) > 1 or any(
         t["workspace_id"] == w["workspace_id"] and t["tab_id"] in agent_tabs for t in snap["tabs"]))
@@ -131,7 +133,7 @@ def main():
         row = next((r for r in rows if r.startswith(f"machine|machine:{n}|")), "")
         snap = remote_snapshot(n)
         check(f"{n} header names no version", "|herdr " not in row, row)
-        mismatch = snap.get("protocol") != local_protocol
+        mismatch = snap.get("protocol") is not None and snap.get("protocol") != local_protocol
         check(f"{n} says needs update only on a protocol mismatch",
               ("|needs update|" in row) == mismatch, f"remote {snap.get('protocol')} local {local_protocol}: {row}")
         sections = sorted(r.split("|")[1][len(f"msection:{n}/"):] for r in rows if r.startswith(f"section|msection:{n}/"))
