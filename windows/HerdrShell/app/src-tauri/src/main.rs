@@ -41,6 +41,11 @@ fn ctl_update_result(result: serde_json::Value) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn ctl_machine_result(result: serde_json::Value) -> Result<(), String> {
+    control::deliver_result("machine", result)
+}
+
+#[tauri::command]
 fn ctl_open_result(result: serde_json::Value) -> Result<(), String> {
     control::deliver_result("open", result)
 }
@@ -94,6 +99,7 @@ fn main() {
             files::file_list,
             ctl_read_result,
             ctl_ui_result,
+            ctl_machine_result,
             ctl_open_result,
             ctl_key_result,
             ctl_action_result,

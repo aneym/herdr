@@ -18,7 +18,7 @@ function RenameInput({ label, commit, cancel }: { label: string; commit: (label:
   }} />;
 }
 interface Press { id: string; section: PinSection; x: number; y: number; ids: string[]; block: RowBox[]; active: boolean; cancelled: boolean; done: () => void }
-export default function Sidebar({ rows, selected, revealed, machine, notice, select, pin, movePin, renaming, startRename, cancelRename, commitRename }: { rows: SidebarRow[]; selected: string | null; revealed: RevealMemo; machine: MachineStatus; notice: string | null; select: (id: string) => void; pin: (id: string, pinned: boolean) => void; movePin: (ids: string[], from: number, to: number) => void; renaming: string | null; startRename: (id: string) => void; cancelRename: () => void; commitRename: (id: string, label: string) => Promise<void> }) {
+export default function Sidebar({ machines, chooseMachine, rows, selected, revealed, machine, notice, select, pin, movePin, renaming, startRename, cancelRename, commitRename }: { machines: MachineStatus[]; chooseMachine: (name: string) => void; rows: SidebarRow[]; selected: string | null; revealed: RevealMemo; machine: MachineStatus; notice: string | null; select: (id: string) => void; pin: (id: string, pinned: boolean) => void; movePin: (ids: string[], from: number, to: number) => void; renaming: string | null; startRename: (id: string) => void; cancelRename: () => void; commitRename: (id: string, label: string) => Promise<void> }) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem("herdr-space-expanded") || "{}"); } catch { return {}; } });
   const [hidden, setHidden] = useState(false);
   const toggle = (id: string, value: boolean) => setExpanded(previous => { const next = { ...previous, [id]: value }; try { localStorage.setItem("herdr-space-expanded", JSON.stringify(next)); } catch { /* Storage can be disabled by WebView policy. */ } return next; });
@@ -105,7 +105,7 @@ export default function Sidebar({ rows, selected, revealed, machine, notice, sel
     const open = children.some(r => r.id === renaming) || spaceOpen(row, rows, selected, expanded);
     return <div key={row.id}><button className="sidebar-row space-row" aria-expanded={open} onClick={() => toggle(foldKey(row), !open)}><span className="chevron">{open ? "⌄" : "›"}</span><span className="label">{row.label}</span><Status status={row.status} /></button>{open && children.map(tabRow)}</div>;
   };
-  return <aside className={`sidebar ${drag ? "pin-dragging" : ""}`}><nav ref={nav}>
+  return <aside className={`sidebar ${drag ? "pin-dragging" : ""}`}><div className="machine-row" aria-label="Machines">{machines.map(item => <button key={item.name} aria-pressed={item.name === machine.name} onClick={() => chooseMachine(item.name)}><Status status={item.state} /><span>{item.name}</span></button>)}</div><nav ref={nav}>
     {["AGENTS", "PINNED"].map(section => { const items = rows.filter(r => r.section === section); return items.length ? <section key={section}><h2>{section}</h2>{items.map(tabRow)}</section> : null; })}
     <section className="spaces">{rows.filter(r => r.kind === "space" && !r.hidden).map(spaceRow)}
     {rows.some(r => r.kind === "space" && r.hidden) && <><button className="sidebar-row muted" aria-expanded={hidden} onClick={() => setHidden(!hidden)}><span className="chevron">{hidden ? "⌄" : "›"}</span>Hidden</button>{(hidden || rows.some(r => r.hidden && r.id === renaming)) && rows.filter(r => r.kind === "space" && r.hidden).map(spaceRow)}</>}

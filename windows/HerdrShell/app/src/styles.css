@@ -122,3 +122,9 @@ footer { color: var(--shell-muted); padding: 12px 8px; font-size: 12px; overflow
 .face-disc.picture::after { content: ""; position: absolute; inset: 0; border-radius: 50%; box-shadow: inset 0 0 0 var(--shell-face-ring) var(--shell-line); }
 .face-dot { position: absolute; width: var(--shell-face-dot); height: var(--shell-face-dot); right: calc(-1 * var(--shell-face-dot-offset)); bottom: calc(-1 * var(--shell-face-dot-offset)); border-radius: 50%; }
 .face-dot.ok { background: var(--shell-ok); }.face-dot.accent { background: var(--shell-accent); }.face-dot.warn { background: var(--shell-warn); }
+
+.machine-row { display: flex; flex-wrap: wrap; gap: 4px; padding: 9px 0 5px; }
+.machine-row button { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: var(--shell-radius-control); color: var(--shell-muted); }
+.machine-row button:hover { background: var(--shell-hover); }
+.machine-row button[aria-pressed="true"] { color: var(--shell-text); background: var(--shell-selection); }
+.status.up { color: var(--shell-ok); }.status.connecting { color: var(--shell-warn); }.status.down { color: var(--shell-muted); }

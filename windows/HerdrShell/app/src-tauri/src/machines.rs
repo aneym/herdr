@@ -1,13 +1,19 @@
-use herdr_shell_core::{api::ApiClient, endpoint::Endpoint};
+use herdr_shell_core::{
+    api::ApiClient,
+    endpoint::{poll_read, prepare_polled, write_all_polled, Endpoint, ReadPoll},
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeSet, HashMap},
     fs,
-    net::{Shutdown, SocketAddr, TcpListener, TcpStream},
+    net::{SocketAddr, TcpListener, TcpStream},
     path::PathBuf,
     process::{Child, Command, Stdio},
-    sync::{mpsc, Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc, Mutex,
+    },
     time::{Duration, Instant},
 };
 use tauri::{AppHandle, Emitter};
@@ -36,9 +42,19 @@ const LIFECYCLE: &[&str] = &[
     "layout.updated",
 ];
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum MachineKind {
+    #[default]
+    Ssh,
+    Local,
+}
 #[derive(Clone, Deserialize, Serialize)]
 struct MachineConfig {
     name: String,
+    #[serde(default)]
+    kind: MachineKind,
+    #[serde(default)]
     ssh_host: String,
     herdr_dir: String,
 }
@@ -58,7 +74,7 @@ pub struct Machines {
     inner: Arc<Mutex<HashMap<String, Machine>>>,
     configs: Arc<HashMap<String, MachineConfig>>,
     logs: PathBuf,
-    job: Arc<Job>,
+    job: Option<Arc<Job>>,
 }
 
 impl Machines {
@@ -66,11 +82,8 @@ impl Machines {
         let config_dir = config_dir()?;
         fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
         let path = config_dir.join("machines.json");
-        let defaults = vec![MachineConfig {
-            name: "studio".into(),
-            ssh_host: "studio".into(),
-            herdr_dir: "/Users/aneyman/.config/herdr".into(),
-        }];
+        let local_dir = local_herdr_dir()?;
+        let defaults = default_configs(&local_dir);
         // create_new preserves a config created concurrently rather than overwriting it.
         match fs::OpenOptions::new()
             .write(true)
@@ -81,9 +94,10 @@ impl Machines {
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(e) => return Err(e.to_string()),
         }
-        let configs: Vec<MachineConfig> =
+        let mut configs: Vec<MachineConfig> =
             serde_json::from_slice(&fs::read(path).map_err(|e| e.to_string())?)
                 .map_err(|e| e.to_string())?;
+        append_local(&mut configs, &local_dir, local_dir.is_dir());
         let mut machines = HashMap::new();
         for c in &configs {
             if c.name.is_empty()
@@ -91,8 +105,8 @@ impl Machines {
                     .name
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-                || c.ssh_host.is_empty()
-                || c.ssh_host.starts_with('-')
+                || (c.kind == MachineKind::Ssh
+                    && (c.ssh_host.is_empty() || c.ssh_host.starts_with('-')))
                 || c.herdr_dir.is_empty()
             {
                 return Err("invalid machine config".into());
@@ -116,7 +130,11 @@ impl Machines {
         }
         let logs = log_dir()?.join("logs");
         fs::create_dir_all(&logs).map_err(|e| e.to_string())?;
-        let job = Arc::new(Job::new()?);
+        let job = if configs.iter().any(|c| c.kind == MachineKind::Ssh) {
+            Some(Arc::new(Job::new()?))
+        } else {
+            None
+        };
         let manager = Self {
             inner: Arc::new(Mutex::new(machines)),
             configs: Arc::new(
@@ -133,18 +151,36 @@ impl Machines {
                 (manager.clone(), app.clone(), logs.clone(), job.clone());
             std::thread::spawn(move || loop {
                 let _ = manager.change(&app, &config.name, "connecting", None, None);
-                let result = supervise(&manager, &app, &config, &logs, &job);
+                let result = if config.kind == MachineKind::Local {
+                    supervise_local(&manager, &app, &config)
+                } else {
+                    match job.as_deref() {
+                        Some(job) => supervise(&manager, &app, &config, &logs, job),
+                        None => Err("SSH job unavailable".into()),
+                    }
+                };
                 let _ = manager.change(
                     &app,
                     &config.name,
                     "down",
-                    Some(result.err().unwrap_or_else(|| "ssh exited".into())),
+                    Some(if config.kind == MachineKind::Local {
+                        LOCAL_DOWN.into()
+                    } else {
+                        result.err().unwrap_or_else(|| "ssh exited".into())
+                    }),
                     None,
                 );
-                std::thread::sleep(Duration::from_secs(3));
+                std::thread::sleep(Duration::from_secs(if config.kind == MachineKind::Local {
+                    5
+                } else {
+                    3
+                }));
             });
         }
         Ok(manager)
+    }
+    pub(crate) fn is_local(&self, name: &str) -> Result<bool, String> {
+        Ok(self.configs.get(name).ok_or("unknown machine")?.kind == MachineKind::Local)
     }
     pub(crate) fn file_helper_config(
         &self,
@@ -154,7 +190,7 @@ impl Machines {
         Ok((
             config.ssh_host.clone(),
             self.logs.join(format!("helper-{name}.log")),
-            self.job.clone(),
+            self.job.clone().ok_or("SSH job unavailable")?,
         ))
     }
     pub fn list(&self) -> Result<Vec<MachineStatus>, String> {
@@ -199,6 +235,50 @@ impl Machines {
             .map_err(|e| e.to_string())
     }
 }
+fn local_config(dir: &std::path::Path) -> MachineConfig {
+    MachineConfig {
+        name: "pc".into(),
+        kind: MachineKind::Local,
+        ssh_host: String::new(),
+        herdr_dir: dir.to_string_lossy().into_owned(),
+    }
+}
+fn default_configs(dir: &std::path::Path) -> Vec<MachineConfig> {
+    vec![
+        MachineConfig {
+            name: "studio".into(),
+            kind: MachineKind::Ssh,
+            ssh_host: "studio".into(),
+            herdr_dir: "/Users/aneyman/.config/herdr".into(),
+        },
+        local_config(dir),
+    ]
+}
+fn append_local(configs: &mut Vec<MachineConfig>, dir: &std::path::Path, exists: bool) {
+    if exists && !configs.iter().any(|c| c.kind == MachineKind::Local) {
+        let mut local = local_config(dir);
+        let mut suffix = 1;
+        while configs.iter().any(|c| c.name == local.name) {
+            local.name = format!("pc-local-{suffix}");
+            suffix += 1;
+        }
+        configs.push(local);
+    }
+}
+fn local_herdr_dir() -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("APPDATA")
+            .map(|p| PathBuf::from(p).join("herdr"))
+            .ok_or("APPDATA not set".into())
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var_os("HOME")
+            .map(|p| PathBuf::from(p).join(".config/herdr"))
+            .ok_or("HOME not set".into())
+    }
+}
 fn config_dir() -> Result<PathBuf, String> {
     #[cfg(windows)]
     {
@@ -238,7 +318,7 @@ impl Drop for Tunnel {
     }
 }
 struct Subscription {
-    socket: TcpStream,
+    stop: Arc<AtomicBool>,
     receiver: mpsc::Receiver<Result<Value, String>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
@@ -250,34 +330,74 @@ impl Subscription {
                 .iter()
                 .map(|id| json!({"type":"pane.agent_status_changed", "pane_id":id})),
         );
-        let stream = ApiClient::new(endpoint.clone())
-            .subscribe(json!(subscriptions))
-            .map_err(|e| e.to_string())?;
-        let socket = stream
-            .tcp_shutdown_handle()
-            .map_err(|e| e.to_string())?
-            .ok_or("expected TCP subscription")?;
+        let mut stream = endpoint.connect().map_err(|e| e.to_string())?;
+        prepare_polled(&mut stream).map_err(|e| e.to_string())?;
+        let mut request = serde_json::to_vec(&json!({"id":"shell-subscription", "method":"events.subscribe", "params":{"subscriptions":subscriptions}})).map_err(|e| e.to_string())?;
+        request.push(b'\n');
+        write_all_polled(&mut stream, &request).map_err(|e| e.to_string())?;
+        let stop = Arc::new(AtomicBool::new(false));
+        let cancelled = stop.clone();
         let (tx, receiver) = mpsc::channel();
+        let (ready_tx, ready) = mpsc::channel();
         let thread = std::thread::spawn(move || {
-            for event in stream {
-                let event = event.map_err(|e| e.to_string());
-                let failed = event.is_err();
-                if tx.send(event).is_err() || failed {
-                    return;
+            let mut run = || -> Result<(), String> {
+                let mut buffer = Vec::new();
+                let mut bytes = [0u8; 8192];
+                let mut acknowledged = false;
+                while !cancelled.load(Ordering::Acquire) {
+                    match poll_read(&mut stream, &mut bytes).map_err(|e| e.to_string())? {
+                        ReadPoll::Closed => return Err("event stream closed".into()),
+                        ReadPoll::Pending => {
+                            std::thread::sleep(Duration::from_millis(10));
+                            continue;
+                        }
+                        ReadPoll::Data(n) => buffer.extend_from_slice(&bytes[..n]),
+                    }
+                    while let Some(end) = buffer.iter().position(|b| *b == b'\n') {
+                        let line: Vec<_> = buffer.drain(..=end).collect();
+                        if line.iter().all(u8::is_ascii_whitespace) {
+                            continue;
+                        }
+                        let value: Value =
+                            serde_json::from_slice(&line).map_err(|e| e.to_string())?;
+                        if value.get("error").is_some() {
+                            return Err(format!("subscription rejected: {}", value["error"]));
+                        }
+                        if !acknowledged {
+                            if value["result"]["type"] != "subscription_started" {
+                                return Err("expected subscription_started".into());
+                            }
+                            acknowledged = true;
+                            let _ = ready_tx.send(Ok(()));
+                        } else if tx.send(Ok(value)).is_err() {
+                            return Ok(());
+                        }
+                    }
+                    if buffer.len() > 8 * 1024 * 1024 {
+                        return Err("event line too large".into());
+                    }
                 }
+                Ok(())
+            };
+            if let Err(e) = run() {
+                let _ = ready_tx.send(Err(e.clone()));
+                let _ = tx.send(Err(e));
             }
-            let _ = tx.send(Err("event stream closed".into()));
         });
-        Ok(Self {
-            socket,
+        let subscription = Self {
+            stop,
             receiver,
             thread: Some(thread),
-        })
+        };
+        ready
+            .recv_timeout(Duration::from_secs(5))
+            .map_err(|e| format!("subscription acknowledgement: {e}"))??;
+        Ok(subscription)
     }
 }
 impl Drop for Subscription {
     fn drop(&mut self) {
-        let _ = self.socket.shutdown(Shutdown::Both);
+        self.stop.store(true, Ordering::Release);
         if let Some(t) = self.thread.take() {
             let _ = t.join();
         }
@@ -375,15 +495,50 @@ fn supervise(
         }
         std::thread::sleep(Duration::from_millis(100));
     }
+    stream_snapshots(manager, app, config, endpoints, || {
+        if let Some(status) = child.0.try_wait().map_err(|e| e.to_string())? {
+            return Err(format!("ssh exited: {status}"));
+        }
+        Ok(())
+    })
+}
+const LOCAL_DOWN: &str = "herdr server is not running on this PC";
+fn supervise_local(
+    manager: &Machines,
+    app: &AppHandle,
+    config: &MachineConfig,
+) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let path = PathBuf::from(&config.herdr_dir).join("herdr.sock");
+        if !path.is_file() {
+            return Err(LOCAL_DOWN.into());
+        }
+        let api = Endpoint::NamedPipe(path);
+        let _ = api.connect().map_err(|_| LOCAL_DOWN)?;
+        let client = api.client_for_api().ok_or(LOCAL_DOWN)?;
+        stream_snapshots(manager, app, config, (api, client), || Ok(()))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (manager, app, config);
+        Err(LOCAL_DOWN.into())
+    }
+}
+fn stream_snapshots(
+    manager: &Machines,
+    app: &AppHandle,
+    config: &MachineConfig,
+    endpoints: (Endpoint, Endpoint),
+    mut health: impl FnMut() -> Result<(), String>,
+) -> Result<(), String> {
     let mut panes = BTreeSet::new();
     let mut subscription = Subscription::open(&endpoints.0, &panes)?;
     manager.change(app, &config.name, "up", None, Some(endpoints.clone()))?;
     let mut refresh = Instant::now();
     let mut pending = None;
     loop {
-        if let Some(status) = child.0.try_wait().map_err(|e| e.to_string())? {
-            return Err(format!("ssh exited: {status}"));
-        }
+        health()?;
         if Instant::now() >= refresh || pending.is_some_and(|t| Instant::now() >= t) {
             let snapshot = fetch(&endpoints.0)?;
             let next_panes = pane_set(&snapshot);
@@ -480,5 +635,98 @@ impl Drop for Job {
         unsafe {
             windows_sys::Win32::Foundation::CloseHandle(self.0);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // Real local-socket boundary covers subscription ack/event framing and dropping
+    // an idle stream, independently of the TCP-only predecessor and pure config tests.
+    #[cfg(unix)]
+    #[test]
+    fn local_subscription_stream_and_cancellation() -> Result<(), Box<dyn std::error::Error>> {
+        use std::io::{BufRead, BufReader, Read, Write};
+        use std::os::unix::net::UnixListener;
+        let path =
+            std::env::temp_dir().join(format!("shell-subscription-{}.sock", std::process::id()));
+        let listener = UnixListener::bind(&path)?;
+        let server = std::thread::spawn(move || -> Result<(), String> {
+            let (mut stream, _) = listener.accept().map_err(|e| e.to_string())?;
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .map_err(|e| e.to_string())?;
+            let mut line = String::new();
+            BufReader::new(&mut stream)
+                .read_line(&mut line)
+                .map_err(|e| e.to_string())?;
+            let request: Value = serde_json::from_str(&line).map_err(|e| e.to_string())?;
+            if request["method"] != "events.subscribe" {
+                return Err("wrong subscription method".into());
+            }
+            stream
+                .write_all(b"{\"result\":{\"type\":\"subscription_started\"}}\n{\"event\":\"pane.")
+                .map_err(|e| e.to_string())?;
+            stream
+                .write_all(b"created\"}\n")
+                .map_err(|e| e.to_string())?;
+            let mut byte = [0u8; 1];
+            if stream.read(&mut byte).map_err(|e| e.to_string())? != 0 {
+                return Err("subscription not closed".into());
+            }
+            Ok(())
+        });
+        let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+            let subscription = Subscription::open(&Endpoint::from_path(&path), &BTreeSet::new())?;
+            let event = subscription
+                .receiver
+                .recv_timeout(Duration::from_secs(5))??;
+            assert_eq!(event["event"], "pane.created");
+            drop(subscription);
+            server
+                .join()
+                .map_err(|_| "subscription server panicked")??;
+            Ok(())
+        })();
+        fs::remove_file(path)?;
+        result
+    }
+    // Pure migration algorithm covers legacy defaults, absent directories, and
+    // idempotence; this config contract had no existing owner-boundary coverage.
+    #[test]
+    fn defaults_and_legacy_migration() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = PathBuf::from("profile/herdr");
+        let defaults = default_configs(&dir);
+        assert_eq!(defaults.len(), 2);
+        assert_eq!(defaults[0].name, "studio");
+        assert_eq!(defaults[0].kind, MachineKind::Ssh);
+        assert_eq!(defaults[1].name, "pc");
+        assert_eq!(defaults[1].kind, MachineKind::Local);
+        assert_eq!(defaults[1].herdr_dir, dir.to_string_lossy());
+        let legacy = r#"[{"name":"studio","ssh_host":"studio","herdr_dir":"/remote"}]"#;
+        let mut configs: Vec<MachineConfig> = serde_json::from_str(legacy)?;
+        assert_eq!(configs[0].kind, MachineKind::Ssh);
+        append_local(&mut configs, &dir, false);
+        assert_eq!(configs.len(), 1);
+        append_local(&mut configs, &dir, true);
+        append_local(&mut configs, &dir, true);
+        assert_eq!(configs.len(), 2);
+        assert_eq!(configs[0].herdr_dir, "/remote");
+        let mut custom: Vec<MachineConfig> =
+            serde_json::from_str(r#"[{"name":"home","kind":"local","herdr_dir":"elsewhere"}]"#)?;
+        append_local(&mut custom, &dir, true);
+        assert_eq!(custom.len(), 1);
+        let mut collision: Vec<MachineConfig> =
+            serde_json::from_str(r#"[{"name":"pc","ssh_host":"other","herdr_dir":"/remote"}]"#)?;
+        append_local(&mut collision, &dir, true);
+        assert_eq!(collision.len(), 2);
+        assert_eq!(collision[0].kind, MachineKind::Ssh);
+        assert_eq!(collision[1].kind, MachineKind::Local);
+        assert_ne!(collision[0].name, collision[1].name);
+        assert!(serde_json::from_str::<MachineConfig>(
+            r#"{"name":"bad","kind":"other","herdr_dir":"x"}"#
+        )
+        .is_err());
+        Ok(())
     }
 }

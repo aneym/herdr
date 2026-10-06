@@ -1,10 +1,12 @@
 use crate::machines::Machines;
+use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
     fs::OpenOptions,
-    io::{BufRead, BufReader, Read, Write},
+    io::{BufRead, BufReader, Read, Seek, SeekFrom, Write},
+    path::{Component, Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{mpsc, Arc, Mutex},
     time::{Duration, Instant},
@@ -145,6 +147,12 @@ impl Files {
         machine: &str,
         mut request: Value,
     ) -> Result<Value, String> {
+        if machines.is_local(machine)? {
+            let home = std::env::var_os("USERPROFILE")
+                .map(PathBuf::from)
+                .ok_or("USERPROFILE not set")?;
+            return local_request(&home, &request);
+        }
         // Validate before allocating state for an arbitrary caller-supplied name.
         machines.file_helper_config(machine)?;
         let state = self
@@ -199,6 +207,148 @@ impl Files {
         }
         Ok(response)
     }
+}
+
+// Pure containment policy: canonical paths only, strict descendants, regular files,
+// and no hard links. Filesystem resolution and metadata stay at the request boundary.
+fn local_allowed(path: &Path, roots: &[PathBuf], regular: bool, links: Option<u64>) -> bool {
+    regular
+        && links.map_or(true, |n| n <= 1)
+        && roots
+            .iter()
+            .any(|root| path != root && path.starts_with(root))
+}
+// Resolve existing ancestors too, so missing allowed files can return exists:false
+// without permitting traversal or a symlinked parent outside the allowlist.
+fn resolve_path(path: &Path) -> Result<PathBuf, String> {
+    if !path.is_absolute() {
+        return Err("path not allowed".into());
+    }
+    let mut resolved = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::ParentDir => {
+                resolved.pop();
+            }
+            Component::CurDir => {}
+            _ => {
+                resolved.push(component.as_os_str());
+                match std::fs::canonicalize(&resolved) {
+                    Ok(real) => resolved = real,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e.to_string()),
+                }
+            }
+        }
+    }
+    Ok(resolved)
+}
+fn file_identity(file: &std::fs::File) -> Result<(u64, u64, Option<u64>), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let info = file.metadata().map_err(|e| e.to_string())?;
+        Ok((info.dev(), info.ino(), Some(info.nlink())))
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+        };
+        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+        // SAFETY: file owns the handle, and info is a valid out pointer.
+        if unsafe { GetFileInformationByHandle(file.as_raw_handle() as _, &mut info) } == 0 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        Ok((
+            u64::from(info.dwVolumeSerialNumber),
+            (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
+            Some(u64::from(info.nNumberOfLinks)),
+        ))
+    }
+}
+fn local_request(home: &Path, request: &Value) -> Result<Value, String> {
+    let op = request["op"].as_str().ok_or("unknown operation")?;
+    if op == "home" {
+        return Ok(json!({"home": home}));
+    }
+    if !matches!(op, "stat" | "read") {
+        return Err("unknown operation".into());
+    }
+    let supplied = request["path"].as_str().ok_or("path not allowed")?;
+    let path = if let Some(relative) = supplied
+        .strip_prefix("~/")
+        .or_else(|| supplied.strip_prefix("~\\"))
+    {
+        home.join(relative)
+    } else {
+        PathBuf::from(supplied)
+    };
+    let path = resolve_path(&path)?;
+    let roots = [".claude/projects", ".codex/sessions", ".agent-rails"]
+        .iter()
+        .map(|suffix| resolve_path(&home.join(suffix)))
+        .collect::<Result<Vec<_>, _>>()?;
+    if !local_allowed(&path, &roots, true, None) {
+        return Err("path not allowed".into());
+    }
+    match std::fs::metadata(&path) {
+        Ok(info) if !info.is_file() => return Err("path not allowed".into()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && op == "stat" => {
+            return Ok(json!({"exists":false,"size":0,"mtime_ms":0,"inode":0}))
+        }
+        Err(e) => return Err(e.to_string()),
+        _ => {}
+    }
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // Agent logs remain writable while we read; handle identity is revalidated below.
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        };
+        options.share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
+    }
+    let mut file = options.open(&path).map_err(|e| e.to_string())?;
+    let info = file.metadata().map_err(|e| e.to_string())?;
+    let identity = file_identity(&file)?;
+    let real = resolve_path(&path)?;
+    if real != path || !local_allowed(&real, &roots, info.is_file(), identity.2) {
+        return Err("path not allowed".into());
+    }
+    let current = options.open(&real).map_err(|e| e.to_string())?;
+    if file_identity(&current)? != identity {
+        return Err("path not allowed".into());
+    }
+    let mtime = info
+        .modified()
+        .map_err(|e| e.to_string())?
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64;
+    if op == "stat" {
+        return Ok(json!({"exists":true,"size":info.len(),"mtime_ms":mtime,"inode":identity.1}));
+    }
+    let offset = request["offset"].as_u64().ok_or("invalid read range")?;
+    let max = request["max"]
+        .as_u64()
+        .filter(|n| *n <= u64::from(u32::MAX))
+        .ok_or("invalid read range")?;
+    let mut data = Vec::new();
+    if offset < info.len() {
+        file.seek(SeekFrom::Start(offset))
+            .map_err(|e| e.to_string())?;
+        file.take(max.min(2_097_152).min(info.len() - offset))
+            .read_to_end(&mut data)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(
+        json!({"size":info.len(),"mtime_ms":mtime,"inode":identity.1,"offset":offset,"data_b64":STANDARD.encode(data)}),
+    )
 }
 
 async fn request(
@@ -278,4 +428,101 @@ pub async fn file_list(
     )
     .await?;
     serde_json::from_value(value["names"].clone()).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // Pure path policy has prefix, root, file-type and link-count edge cases.
+    // This is the allowlist owner; remote-helper tests cannot cover local Rust policy.
+    #[test]
+    fn allowlist_boundaries() {
+        let roots = vec![
+            PathBuf::from("profile/.claude/projects"),
+            PathBuf::from("profile/.codex/sessions"),
+            PathBuf::from("profile/.agent-rails"),
+        ];
+        for root in &roots {
+            assert!(local_allowed(&root.join("a.jsonl"), &roots, true, Some(1)));
+            assert!(local_allowed(&root.join("nested/a"), &roots, true, None));
+            assert!(!local_allowed(root, &roots, true, Some(1)));
+            assert!(!local_allowed(&root.join("a"), &roots, false, Some(1)));
+            assert!(!local_allowed(&root.join("a"), &roots, true, Some(2)));
+            assert!(!local_allowed(
+                &PathBuf::from(format!("{}-other/a", root.display())),
+                &roots,
+                true,
+                Some(1)
+            ));
+        }
+        assert!(!local_allowed(Path::new("outside/a"), &roots, true, None));
+    }
+    // Real filesystem boundary protects canonicalization, missing files, and range reads.
+    #[test]
+    fn local_file_boundary() -> Result<(), Box<dyn std::error::Error>> {
+        let home = std::env::temp_dir().join(format!("herdr-local-files-{}", std::process::id()));
+        std::fs::create_dir_all(home.join(".codex/sessions"))?;
+        let run = || -> Result<(), Box<dyn std::error::Error>> {
+            let path = home.join(".codex/sessions/log.jsonl");
+            std::fs::write(&path, b"hello world")?;
+            assert_eq!(
+                local_request(&home, &json!({"op":"stat","path":path}))?["exists"],
+                true
+            );
+            assert_eq!(
+                local_request(&home, &json!({"op":"read","path":path,"offset":6,"max":99}))?
+                    ["data_b64"],
+                "d29ybGQ="
+            );
+            assert_eq!(
+                local_request(
+                    &home,
+                    &json!({"op":"read","path":path,"offset":99,"max":99})
+                )?["data_b64"],
+                ""
+            );
+            assert_eq!(
+                local_request(
+                    &home,
+                    &json!({"op":"stat","path":"~/.codex/sessions/missing"})
+                )?["exists"],
+                false
+            );
+            assert!(local_request(
+                &home,
+                &json!({"op":"stat","path":"~/.codex/sessions/../../outside"})
+            )
+            .is_err());
+            assert!(local_request(&home, &json!({"op":"stat","path":"relative/log"})).is_err());
+            assert!(
+                local_request(&home, &json!({"op":"stat","path":"~/.codex/sessions"})).is_err()
+            );
+            assert!(
+                local_request(&home, &json!({"op":"read","path":path,"offset":-1,"max":1}))
+                    .is_err()
+            );
+            std::fs::hard_link(&path, home.join(".codex/sessions/alias"))?;
+            assert!(
+                local_request(&home, &json!({"op":"read","path":path,"offset":0,"max":99}))
+                    .is_err()
+            );
+            #[cfg(unix)]
+            {
+                std::fs::write(home.join("outside"), b"secret fixture")?;
+                std::os::unix::fs::symlink(
+                    home.join("outside"),
+                    home.join(".codex/sessions/escape"),
+                )?;
+                assert!(local_request(
+                    &home,
+                    &json!({"op":"stat","path":"~/.codex/sessions/escape"})
+                )
+                .is_err());
+            }
+            Ok(())
+        };
+        let result = run();
+        std::fs::remove_dir_all(&home)?;
+        result
+    }
 }

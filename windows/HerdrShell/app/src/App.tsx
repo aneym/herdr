@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { cycleMachine } from "./machines";
 import { bridge } from "./bridge";
 import type { MachineStatus } from "./bridge";
 import { buildSidebar, noteSelection, pinCount, tabOrder } from "./model";
@@ -17,14 +19,89 @@ import type { PaneController } from "./PaneTerm";
 import { installControl } from "./control";
 import { PENDING_LIFETIME_MS, pinMovePlan } from "./pinDrag";
 import type { PendingOrders } from "./pinDrag";
+import type { ControlState } from "./control";
+import type { MutableRefObject } from "react";
 import "@xterm/xterm/css/xterm.css";
 import "./tokens.css";
 import "./styles.css";
+interface ViewSelection { selected: string | null; focused: string | null }
 export default function App() {
-  const [machine, setMachine] = useState<MachineStatus>({ name: "studio", state: "connecting" });
-  const [snapshot, setSnapshot] = useState<Snapshot>({});
-  const [selected, setSelected] = useState<string | null>(null);
-  const [focused, setFocused] = useState<string | null>(null);
+  const [machines, setMachines] = useState<MachineStatus[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [active, setActive] = useState(() => { try { return localStorage.getItem("herdr-shell.machine") || "studio"; } catch { return "studio"; } });
+  const [snapshots, setSnapshots] = useState<Record<string, Snapshot>>({});
+  const selections = useRef(new Map<string, ViewSelection>());
+  const control = useRef<(() => ControlState) | null>(null);
+  useEffect(() => installControl(() => {
+    if (!control.current) throw new Error("No active machine view");
+    return control.current();
+  }), []);
+  const current = useRef({ machines, active });
+  current.current = { machines, active };
+  const chooseMachine = useCallback((name: string) => {
+    const target = current.current.machines.find(m => m.name === name);
+    if (!target) throw new Error(`Unknown machine: ${name}`);
+    if (current.current.active === name) return target;
+    try { localStorage.setItem("herdr-shell.machine", name); } catch { /* Storage can be disabled. */ }
+    flushSync(() => setActive(name));
+    return target;
+  }, []);
+  useEffect(() => {
+    let disposed = false;
+    const revisions = new Map<string, number>();
+    const statusRevisions = new Map<string, number>();
+    const requests = new Map<string, number>();
+    const unlisteners: (() => void)[] = [];
+    const track = async (promise: Promise<() => void>) => { const fn = await promise; if (disposed) fn(); else unlisteners.push(fn); };
+    const refresh = async (name: string) => {
+      const revision = revisions.get(name);
+      const request = (requests.get(name) ?? 0) + 1;
+      requests.set(name, request);
+      try {
+        const snapshot = await bridge.snapshot(name);
+        if (!disposed && revision === revisions.get(name) && request === requests.get(name)) setSnapshots(value => ({ ...value, [name]: snapshot }));
+      } catch { /* The supervisor publishes connection failures. */ }
+    };
+    void (async () => {
+      await track(bridge.machineEvents(status => {
+        if (disposed) return;
+        statusRevisions.set(status.name, (statusRevisions.get(status.name) ?? 0) + 1);
+        requests.set(status.name, (requests.get(status.name) ?? 0) + 1);
+        setMachines(value => [...value.filter(m => m.name !== status.name), status].sort((a, b) => a.name.localeCompare(b.name)));
+        if (status.state === "up") void refresh(status.name);
+      }));
+      await track(bridge.snapshots(value => {
+        if (disposed) return;
+        revisions.set(value.machine, (revisions.get(value.machine) ?? 0) + 1);
+        setSnapshots(previous => ({ ...previous, [value.machine]: value.snapshot }));
+      }));
+      const before = new Map(statusRevisions);
+      const list = await bridge.machines();
+      if (disposed) return;
+      setLoaded(true);
+      setMachines(value => list.map(status => before.get(status.name) !== statusRevisions.get(status.name) ? value.find(m => m.name === status.name) ?? status : status));
+      for (const status of list) if (status.state === "up" && before.get(status.name) === statusRevisions.get(status.name)) void refresh(status.name);
+    })().catch(error => {
+      if (!disposed) setMachines([{ name: current.current.active, state: "down", error: String(error) }]);
+    });
+    return () => { disposed = true; unlisteners.forEach(fn => fn()); };
+  }, []);
+  useEffect(() => {
+    if (loaded && machines.length && !machines.some(m => m.name === active)) {
+      const name = machines[0].name;
+      try { localStorage.setItem("herdr-shell.machine", name); } catch { /* Storage can be disabled. */ }
+      setActive(name);
+    }
+  }, [machines, active, loaded]);
+  const machine: MachineStatus = machines.find(m => m.name === active) ?? { name: active, state: loaded ? "down" : "connecting", error: loaded ? "Machine unavailable" : undefined };
+  return <MachineView key={active} machine={machine} machines={machines} snapshot={snapshots[active] ?? {}} chooseMachine={chooseMachine} selections={selections.current} control={control} />;
+}
+function MachineView({ machine, machines, snapshot, chooseMachine, selections, control }: { machine: MachineStatus; machines: MachineStatus[]; snapshot: Snapshot; chooseMachine: (name: string) => MachineStatus; selections: Map<string, ViewSelection>; control: MutableRefObject<(() => ControlState) | null> }) {
+  const [selected, setSelected] = useState<string | null>(selections.get(machine.name)?.selected ?? null);
+  const [focused, setFocused] = useState<string | null>(selections.get(machine.name)?.focused ?? null);
+  const savedSelection = useRef({ selected, focused });
+  savedSelection.current = { selected, focused };
+  useEffect(() => () => { selections.set(machine.name, savedSelection.current); }, [selections, machine.name]);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -64,8 +141,8 @@ export default function App() {
   const { items: docsItems, error: docsError } = useDocs(machine.name, selected, snapshot, docsOpen);
   const activeDoc = docsItems.find(item => item.name === docsActive[docsKey])?.name ?? docsItems[0]?.name ?? null;
   const docs: DocsState = { open: docsOpen, items: docsItems.map(item => item.name), active: activeDoc };
-  const state = useRef({ machine, snapshot, selected, focused, rows, docs, docsKey, docsShown });
-  state.current = { machine, snapshot, selected, focused, rows, docs, docsKey, docsShown };
+  const state = useRef({ machine, machines, snapshot, selected, focused, rows, docs, docsKey, docsShown });
+  state.current = { machine, machines, snapshot, selected, focused, rows, docs, docsKey, docsShown };
   const select = useCallback((id: string) => {
     if (!state.current.snapshot.tabs?.some(t => t.tab_id === id)) throw new Error(`Unknown tab: ${id}`);
     // Update the control target immediately, before React commits the new view.
@@ -80,33 +157,6 @@ export default function App() {
     state.current.selected = id;
     state.current.focused = null;
     setRenaming(null); setSelected(id); setFocused(null);
-  }, []);
-  useEffect(() => {
-    let disposed = false;
-    let snapshotRevision = 0;
-    let machineRevision = 0;
-    let requestRevision = 0;
-    const unlisteners: (() => void)[] = [];
-    const track = async (promise: Promise<() => void>) => { const fn = await promise; if (disposed) fn(); else unlisteners.push(fn); };
-    const refresh = async (name: string) => {
-      const revision = snapshotRevision;
-      const request = ++requestRevision;
-      try { const next = await bridge.snapshot(name); if (!disposed && revision === snapshotRevision && request === requestRevision) setSnapshot(next); }
-      catch (error) { if (!disposed && revision === snapshotRevision && request === requestRevision) setMachine({ name, state: "down", error: String(error) }); }
-    };
-    void (async () => {
-      try {
-        await track(bridge.machineEvents(status => { if (!disposed && status.name === "studio") { machineRevision++; requestRevision++; setMachine(status); if (status.state === "up") void refresh(status.name); } }));
-        await track(bridge.snapshots(value => { if (!disposed && value.machine === "studio") { snapshotRevision++; setSnapshot(value.snapshot); } }));
-        const revision = machineRevision;
-        const machines = await bridge.machines();
-        if (disposed || revision !== machineRevision) return;
-        const current = machines.find(m => m.name === "studio") ?? { name: "studio", state: "down" as const, error: "Machine unavailable" };
-        setMachine(current);
-        if (current.state === "up") await refresh(current.name);
-      } catch (error) { if (!disposed) setMachine({ name: "studio", state: "down", error: String(error) }); }
-    })();
-    return () => { disposed = true; unlisteners.forEach(fn => fn()); };
   }, []);
   const previousOrder = useRef<string[]>([]);
   useEffect(() => {
@@ -135,6 +185,11 @@ export default function App() {
   }, [pending, snapshot, select, focus]);
   const action = useCallback((name: string, label?: string, tabId?: string) => {
     const current = state.current;
+    if (name === "next_machine" || name === "prev_machine") {
+      const next = cycleMachine(current.machines.map(m => m.name), current.machine.name, name === "next_machine" ? 1 : -1);
+      if (next) chooseMachine(next);
+      return Promise.resolve();
+    }
     if (name === "toggle_docs") {
       if (current.selected) {
         const open = !current.docs.open;
@@ -152,14 +207,14 @@ export default function App() {
       toggleSidebar: () => { setRenaming(null); setSidebarVisible(value => !value); },
       error: showError, label, tabId,
     });
-  }, [select, focus, showError]);
+  }, [select, focus, showError, chooseMachine]);
   const closeSwitcher = () => { setSwitcherOpen(false); const id = state.current.focused; if (id) controllers.current.get(id)?.focus(); };
   const shortcut = useCallback((event: KeyboardEvent) => {
     if (event.type !== "keydown") return false;
     if (event.target instanceof Element && event.target.closest("textarea:not(.xterm-helper-textarea)") &&
         !(event.ctrlKey && !event.altKey && !event.metaKey &&
           ((!event.shiftKey && /^[1-9]$/.test(event.key)) || event.key === "Tab" ||
-           (event.shiftKey && ["p", "m"].includes(event.key.toLowerCase()))))) return false;
+           (event.shiftKey && ["p", "m", "[", "]", "{", "}"].includes(event.key.toLowerCase()))))) return false;
     const name = actionFor(event);
     if (switcherOpen && name === "switcher") { void action(name).catch(() => {}); return true; }
     if (switcherOpen || renaming) return false;
@@ -171,11 +226,11 @@ export default function App() {
   }, [action, switcherOpen, renaming]);
   useEffect(() => { const handler = (event: KeyboardEvent) => { if (shortcut(event)) { event.preventDefault(); event.stopPropagation(); } }; window.addEventListener("keydown", handler, true); return () => window.removeEventListener("keydown", handler, true); }, [shortcut]);
   const register = useCallback((id: string, value: PaneController | null) => { if (value) controllers.current.set(id, value); else controllers.current.delete(id); }, []);
-  useEffect(() => installControl(() => {
+  control.current = () => {
     const current = state.current;
     const panes = [...controllers.current.values()].filter(p => current.snapshot.panes?.some(info => info.pane_id === p.info().pane_id && info.tab_id === current.selected));
-    return { machine: current.machine, selected: current.selected, rows: current.rows, docs: current.docs, panes, focused: panes.find(p => p.info().pane_id === current.focused), open: select, action };
-  }), [select, action]);
+    return { machine: current.machine, machines: current.machines, chooseMachine, selected: current.selected, rows: current.rows, docs: current.docs, panes, focused: panes.find(p => p.info().pane_id === current.focused), open: select, action };
+  };
   // A pin lands by priority, so as the Mac's pinAtEnd it then moves to the last place, counted
   // on the owning server after the pin rather than from a snapshot that may be behind.
   const pin = (id: string, pinned: boolean) => { void (async () => {
@@ -195,5 +250,5 @@ export default function App() {
       showError(error);
     });
   }, [showError]);
-  return <div className="layout">{sidebarVisible && <Sidebar rows={rows} selected={selected} revealed={revealed} machine={machine} notice={notice?.text ?? null} select={select} pin={pin} movePin={movePin} renaming={renaming} startRename={id => { setRenaming(id); }} cancelRename={() => setRenaming(null)} commitRename={async (id, label) => { try { await action("rename_tab", label, id); setRenaming(null); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); } catch { /* runAction reports through the transient status notice. */ } }} />}<TabView snapshot={snapshot} selected={selected} machine={machine.name} focused={switcherOpen || renaming ? null : focused} onFocus={focus} shortcut={shortcut} register={register} pin={pin} />{docsOpen && docsItems.length > 0 && <DocPanel key={docsKey} machine={machine.name} items={docsItems} active={activeDoc} select={name => setDocsActive(value => ({ ...value, [docsKey]: name }))} error={docsError} />}{switcherOpen && <Switcher rows={rows} selected={selected} machine={machine.name} open={select} close={closeSwitcher} />}{!sidebarVisible && (notice || machine.state !== "up") && <div className="machine-error notice" role="status">{notice?.text ?? machine.error ?? machine.state}</div>}</div>;
+  return <div className="layout">{sidebarVisible && <Sidebar machines={machines} chooseMachine={chooseMachine} rows={rows} selected={selected} revealed={revealed} machine={machine} notice={notice?.text ?? null} select={select} pin={pin} movePin={movePin} renaming={renaming} startRename={id => { setRenaming(id); }} cancelRename={() => setRenaming(null)} commitRename={async (id, label) => { try { await action("rename_tab", label, id); setRenaming(null); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); } catch { /* runAction reports through the transient status notice. */ } }} />}<TabView snapshot={snapshot} selected={selected} machine={machine.name} focused={switcherOpen || renaming ? null : focused} onFocus={focus} shortcut={shortcut} register={register} pin={pin} />{docsOpen && docsItems.length > 0 && <DocPanel key={docsKey} machine={machine.name} items={docsItems} active={activeDoc} select={name => setDocsActive(value => ({ ...value, [docsKey]: name }))} error={docsError} />}{switcherOpen && <Switcher rows={rows} selected={selected} machine={machine.name} open={select} close={closeSwitcher} />}{!sidebarVisible && (notice || machine.state !== "up") && <div className="machine-error notice" role="status">{notice?.text ?? machine.error ?? machine.state}</div>}</div>;
 }
