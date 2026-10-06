@@ -41,6 +41,7 @@ with tempfile.TemporaryDirectory(prefix='agents-section-') as directory:
         return next((r.split('|') for r in rows if r.split('|')[1] == row_id), None)
     def at(row_id):
         return next((i for i, r in enumerate(rows) if r.split('|')[1] == row_id), -1)
+    check('agents title row omitted above the AGENTS section', at('agents') == -1 and rows[2].split('|')[1] == 'agentpins')
     check('AGENTS precedes PINNED (remote agent before local plain pin)', 0 <= at('agentpins') < at('agent:ax42/w1:t1') < at('pinned') < at('pinned:s1:t1'))
     check('agent appears once, only in AGENTS', sum('ax42/w1:t1' in r.split('|')[1] for r in rows if r.startswith('tab|')) == 1 and at('tab:ax42/w1:t1') == -1)
     check('section shortcut hints start at their numbered slots', field('agentpins')[7] == '⌘1' and field('pinned')[7] == '⌘2')
@@ -55,7 +56,7 @@ with tempfile.TemporaryDirectory(prefix='agents-section-') as directory:
         for tab in machine['tabs']:
             tab.pop('role', None)
     rows = dump(fixture)
-    check('older snapshots have no AGENTS section', at('agentpins') == -1)
+    check('older snapshots have no AGENTS section and keep the agents title row', at('agentpins') == -1 and rows[2].split('|')[1] == 'agents')
     fixture['input']['tabs'][0]['role'] = 'future-role'
     rows = dump(fixture)
     check('unknown roles remain plain', at('agentpins') == -1 and at('pinned:s1:t1') >= 0)

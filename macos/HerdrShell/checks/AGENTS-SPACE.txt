@@ -1,5 +1,6 @@
 [PASS] app is key for mouse dispatch
 [PASS] AGENTS section and rows precede PINNED section and rows
+[PASS] no agents title row above the AGENTS section
 [PASS] Content and Frank are absent as plain space tab rows
 [PASS] initial rows
 [PASS] initial numbered tabs

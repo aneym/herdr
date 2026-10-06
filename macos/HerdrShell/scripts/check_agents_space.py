@@ -107,6 +107,7 @@ def main():
     expected = ["agentpins", "agent:" + content, "agent:" + frank, "pinned", "pinned:" + lane_a, "pinned:" + lane_b]
     check("AGENTS section and rows precede PINNED section and rows",
           [row for row in ids if row in expected] == expected)
+    check("no agents title row above the AGENTS section", "agents" not in ids and ids[:1] == ["agentpins"])
     check("Content and Frank are absent as plain space tab rows", all("tab:" + t not in ids for t in (content, frank)))
     assert_order("initial", state, ws, [content, frank], pins)
     tabs = {t["tab_id"]: t for t in server_tabs(ws)}

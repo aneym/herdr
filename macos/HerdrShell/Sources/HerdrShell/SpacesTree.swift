@@ -161,7 +161,6 @@ enum SpacesTree {
         }
     }
     static func build(_ input: SpacesInput, overlay: Overlay, chrome: SpacesChrome, now: Double) -> [SpacesRow] {
-        var out = [SpacesRow(id: "agents", kind: .title, title: "agents")]
         let choices = overlay.goalChoices
         let filter = chrome.goalFilter.flatMap { choices.contains($0) ? $0 : nil }
         func hint(start: Int, count: Int) -> String {
@@ -181,6 +180,8 @@ enum SpacesTree {
         }
         let agents = pinTabs(input.tabs, agents: true)
         let pins = pinTabs(input.tabs, agents: false)
+        // The AGENTS section heads the list itself; an "agents" title above it reads twice.
+        var out = agents.isEmpty ? [SpacesRow(id: "agents", kind: .title, title: "agents")] : []
         if !agents.isEmpty {
             out.append(SpacesRow(id: "agentpins", kind: .section, title: "AGENTS", trailing: hint(start: 1, count: agents.count)))
             out += agents.map { pinRow($0, prefix: "agent:") }
