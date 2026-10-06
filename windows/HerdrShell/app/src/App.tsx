@@ -14,6 +14,7 @@ import type { DocsState } from "./docs";
 import type { PaneController } from "./PaneTerm";
 import { installControl } from "./control";
 import "@xterm/xterm/css/xterm.css";
+import "./tokens.css";
 import "./styles.css";
 export default function App() {
   const [machine, setMachine] = useState<MachineStatus>({ name: "studio", state: "connecting" });

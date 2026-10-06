@@ -99,7 +99,7 @@ def check_mode(mode, out_dir):
     if not any(p.get("mode") in ("attach", "observe") for p in panes):
         failures.append(f"{mode}: no connected terminal on the selected tab: {panes}")
     for p in panes:
-        if p.get("background") != TERMINAL_BG[mode]:
+        if str(p.get("background")).lower() != TERMINAL_BG[mode]:
             failures.append(f"{mode}: terminal {p.get('pane_id')} background {p.get('background')}")
     rpath = f"{pc.R_SHOTS}/theme-{mode}-{time.strftime('%Y%m%d-%H%M%S')}.png".replace("/", "\\")
     shot = ctl({"cmd": "shot", "out": rpath})

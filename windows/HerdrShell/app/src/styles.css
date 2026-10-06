@@ -1,21 +1,3 @@
-/* Chrome tokens for both modes; src/theme.ts sets data-theme and the terminal palette.
-   Light follows the Mac shell's light chrome (Theme.swift) over the SF Paper terminal. */
-:root, :root[data-theme="dark"] {
-  color-scheme: dark;
-  --shell-bg: #1e1e2e; --shell-surface: #181825; --shell-gap: #11111b; --shell-text: #cdd6f4; --shell-muted: #7f849c; --shell-faint: #6c7086;
-  --shell-idle: #8b8c94; --shell-hover: #232334; --shell-selection: #313244; --shell-line: #45475a; --shell-accent: #89b4fa;
-  --shell-ok: #4cd27a; --shell-warn: #f2b04c; --shell-bad: #f38ba8; --shell-scrim: #1e1e2eee; --shell-scroll: #585b70;
-}
-:root[data-theme="light"] {
-  color-scheme: light;
-  --shell-bg: #ffffff; --shell-surface: #f3f4f6; --shell-gap: #e0e0df; --shell-text: #1f2328; --shell-muted: #565c66; --shell-faint: #59636e;
-  --shell-idle: #6e7781; --shell-hover: #e9ebef; --shell-selection: #e1e6f2; --shell-line: #d5d8de; --shell-accent: #0969da;
-  --shell-ok: #17692f; --shell-warn: #8a5300; --shell-bad: #b91c26; --shell-scrim: #ffffffee; --shell-scroll: #b4b9c1;
-}
-/* Thin bars that show only while the pointer is over the scrolling area. */
-* { scrollbar-width: thin; scrollbar-color: transparent transparent; }
-*:hover { scrollbar-color: var(--shell-scroll) transparent; }
-
 html, body, #root { margin: 0; height: 100%; overflow: hidden; background: var(--shell-bg); }
 * { box-sizing: border-box; }
 body, button { font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif; font-size: 13px; color: var(--shell-text); }
@@ -24,20 +6,20 @@ button:focus-visible { outline: 1px solid var(--shell-muted); outline-offset: -1
 .layout { display: flex; width: 100vw; height: 100vh; }
 .sidebar { width: 260px; min-width: 260px; background: var(--shell-surface); padding: 0 8px; display: flex; flex-direction: column; }
 .sidebar nav { flex: 1; overflow: auto; min-height: 0; }
-h2 { font-size: 11px; font-weight: 400; text-transform: uppercase; letter-spacing: .06em; color: var(--shell-faint); margin: 14px 8px 5px; }
+h2 { font-size: 11px; font-weight: 400; text-transform: uppercase; letter-spacing: .06em; color: var(--shell-muted); margin: 14px 8px 5px; }
 .spaces { margin-top: 14px; }
 .sidebar-row { height: 26px; padding: 0 8px; border-radius: 6px; display: flex; align-items: center; gap: 7px; width: 100%; text-align: left; }
 .sidebar-row:hover { background: var(--shell-hover); }
 .sidebar-row.selected { background: var(--shell-selection); }
 .select-tab { display: flex; align-items: center; gap: 7px; width: 100%; min-width: 0; height: 100%; text-align: left; }
 .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
-.status { font-size: 10px; color: var(--shell-idle); flex-shrink: 0; }
+.status { font-size: 10px; color: var(--shell-muted); flex-shrink: 0; }
 .status.working { color: var(--shell-ok); }.status.blocked { color: var(--shell-bad); }.status.done { color: var(--shell-warn); }
 .muted { color: var(--shell-muted); }.space-label { max-width: 55px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .pin { display: none; color: var(--shell-muted); flex-shrink: 0; }.tab-row:hover .pin, .tab-row:focus-within .pin { display: block; }.pin.is-pinned { color: var(--shell-text); }
 .indented { padding-left: 24px; }.chevron { width: 10px; color: var(--shell-muted); }
 footer { color: var(--shell-muted); padding: 12px 8px; font-size: 12px; overflow-wrap: anywhere; }
-.tab-view { flex: 1; min-width: 0; position: relative; background: var(--shell-gap); }
+.tab-view { flex: 1; min-width: 0; position: relative; background: var(--shell-split); }
 .pane-box { position: absolute; overflow: hidden; }.pane { height: 100%; display: flex; flex-direction: column; position: relative; background: var(--shell-bg); }
 .pane-cap { height: 24px; min-height: 24px; display: flex; align-items: center; gap: 7px; padding: 0 8px; color: var(--shell-muted); }.pane-cap button { color: var(--shell-muted); font-size: 12px; white-space: nowrap; }.bell .pane-cap { background: var(--shell-line); }
 .term-host { flex: 1; min-height: 0; overflow: hidden; }.term-host .xterm { height: 100%; }
