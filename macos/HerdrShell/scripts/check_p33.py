@@ -18,7 +18,6 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 LAB = pathlib.Path.home() / ".cache/herdr-build/shellspike-p33"
 LAB.mkdir(parents=True, exist_ok=True)
 os.environ["FACTORY_OVERLAY"] = str(LAB / "overlay.json")
-os.environ["HERDR_CONTEXT_DIR"] = str(LAB / "context")
 import scenario as S
 
 S.OUT = str(ROOT / "checks/P33.txt")
@@ -82,12 +81,7 @@ def main():
         other: {"kind": "lane", "name": "outreach", "idle_reason": "no work"}}, "spaces": {}, "hosts": [{"name": "Studio", "summary": "load 1/16"}],
         "usage": [{"name": "claude", "summary": "2/8 · 73%"}, {"name": "codex", "summary": "5/5 · 100%"}]}
     pathlib.Path(os.environ["FACTORY_OVERLAY"]).write_text(json.dumps(overlay))
-    context = pathlib.Path(os.environ["HERDR_CONTEXT_DIR"])
-    context.mkdir(exist_ok=True)
-    document = context / "scope.md"
-    document.write_text("# Scope\nA real document for the selected tab.\n")
-    (context / (tabs["scope"].replace(":", "_") + ".json")).write_text(json.dumps({"items": [
-        {"id": "c1", "kind": "file", "title": "Scope", "ref": S.guest_path(str(document))}]}))
+    # Desk file coverage lives in check_desk_space.py; the scope lane already has docs.
     S.app("start")
     state = wait(lambda s: len(s.get("spaces_rows", [])) >= 10)
     rows = state.get("spaces_rows", [])

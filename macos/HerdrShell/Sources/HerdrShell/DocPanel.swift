@@ -177,7 +177,7 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         let same = built.map(\.key) == docs.map(\.key) && tabId == previous
         docs = built
         tabTitles = built.map(\.title)
-        let desk = model.snapshot?.tabs.first { $0.tab_id == tabId }?.desk ?? .empty
+        let desk = tabId.flatMap { model.source(for: $0) }?.tabs.first { $0.tab_id == tabId }?.desk ?? .empty
         let oldKey = tabId.flatMap { activeKeys[$0] }
         let selectedDesk = deskFront(previousFront: tabId.flatMap { fronts[$0] }, current: desk,
                                      active: oldKey.flatMap { key in built.first { $0.key == key }?.deskId })
@@ -193,7 +193,7 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         if tabTitles.isEmpty, let tabId {
             let lane = model.catalog.snapshot.lanes[tabId]
             let name = model.catalog.snapshot.displayName(tab: tabId, lane: lane, fallback: "")
-            let label = model.snapshot?.tabs.first { $0.tab_id == tabId }?.label ?? ""
+            let label = model.source(for: tabId)?.tabs.first { $0.tab_id == tabId }?.label ?? ""
             let who = !name.isEmpty ? name : (label.isEmpty ? "this row" : label)
             empty.stringValue = "No docs for \(who)"
         }
@@ -252,12 +252,14 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
     private func loadActive() {
         guard let item = docs.first(where: { $0.key == activeKey }) ?? docs.first else {
             readGeneration += 1
+            readInFlight = false
             activeItem = nil; fileData = nil; fileMtime = nil
             pageTitle = ""; pageText = ""; watchPath = nil
             web.loadHTMLString("", baseURL: nil)
             return
         }
         readGeneration += 1
+        readInFlight = false
         fileMtime = nil
         fileData = nil
         activeKey = item.key
@@ -272,7 +274,7 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         if let rowId { activeKeys[rowId] = item.key }
         if let rowId { SidebarState.store.set(item.title, forKey: "herdr.shell.docLast.\(rowId)") }
         watchPath = item.path
-        watchMtime = item.path.flatMap(Self.mtime)
+        watchMtime = item.deskId == nil ? item.path.flatMap(Self.mtime) : nil
         allowedHost = item.url.flatMap { URL(string: $0)?.host }
         if item.kind == .web { address.stringValue = item.url ?? "" }
         if item.deskId != nil, item.kind != .web {
@@ -374,17 +376,37 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         guard let item = docs.first(where: { $0.key == activeKey }) else { return }
         if item.kind == .web {
             let raw = address.stringValue.isEmpty ? item.url ?? "" : address.stringValue
-            if let url = URL(string: raw) { NSWorkspace.shared.open(url) }
+            if let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+                NSWorkspace.shared.open(url)
+            }
         } else if let path = item.path {
-            if FileManager.default.fileExists(atPath: path) { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
-            else if let data = fileData, let id = item.deskId {
-                let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("herdr-desk")
+            let generation = readGeneration, row = rowId, id = item.deskId
+            let data = fileData
+            let remote = row.map(Machines.isRemote) == true
+            DispatchQueue.global(qos: .utility).async { [weak self] in
                 do {
-                    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                    let url = dir.appendingPathComponent("\(id)-\(URL(fileURLWithPath: path).lastPathComponent)")
-                    try data.write(to: url, options: .atomic)
-                    NSWorkspace.shared.open(url)
-                } catch { pageText = error.localizedDescription }
+                    let url: URL
+                    if !remote && FileManager.default.fileExists(atPath: path) {
+                        url = URL(fileURLWithPath: path)
+                    } else if let data, let id {
+                        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("herdr-desk")
+                        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                        url = dir.appendingPathComponent("\(id)-\(URL(fileURLWithPath: path).lastPathComponent)")
+                        try data.write(to: url, options: .atomic)
+                    } else { return }
+                    DispatchQueue.main.async {
+                        guard let self, generation == self.readGeneration, self.rowId == row,
+                              self.activeKey == item.key, self.activeItem == id else { return }
+                        NSWorkspace.shared.open(url)
+                    }
+                } catch {
+                    let message = error.localizedDescription
+                    DispatchQueue.main.async {
+                        guard let self, generation == self.readGeneration, self.rowId == row,
+                              self.activeKey == item.key, self.activeItem == id else { return }
+                        self.pageText = message
+                    }
+                }
             }
         }
     }
@@ -473,7 +495,7 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         guard let tabId else { return [] }
         let snap = model.catalog.snapshot
         let lane = snap.lanes[tabId]
-        let name = snap.displayName(tab: tabId, lane: lane, fallback: model.snapshot?.tabs.first { $0.tab_id == tabId }?.label ?? "")
+        let name = snap.displayName(tab: tabId, lane: lane, fallback: model.source(for: tabId)?.tabs.first { $0.tab_id == tabId }?.label ?? "")
         var out: [DocItem] = []
         if let u = lane?.scopeURL { out.append(DocItem(title: "Scope", kind: .web, url: u, path: nil, deskId: nil)) }
         if let u = lane?.reviewURL { out.append(DocItem(title: "Review", kind: .web, url: u, path: nil, deskId: nil)) }
@@ -485,7 +507,7 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
                 }
             }
         }
-        out.append(contentsOf: (model.snapshot?.tabs.first { $0.tab_id == tabId }?.desk?.items ?? []).map(docItem))
+        out.append(contentsOf: (model.source(for: tabId)?.tabs.first { $0.tab_id == tabId }?.desk?.items ?? []).map(docItem))
         return out
     }
 
@@ -538,24 +560,31 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
 
     private func readDeskFile(_ item: DocItem) {
         guard !readInFlight, let rowId, let id = item.deskId, let cmds = windowController?.commands else { return }
+        readInFlight = true
+        let generation = readGeneration
         if id.hasPrefix("local-"), let path = item.path {
-            let mtime = Self.mtime(path)
-            if fileData == nil || mtime != watchMtime {
-                watchMtime = mtime
-                if let data = try? Data(contentsOf: URL(fileURLWithPath: path)) { renderFile(data, mime: item.mime ?? "text/plain", item: item) }
+            let previousMtime = watchMtime, needsData = fileData == nil
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                let mtime = Self.mtime(path)
+                let data = needsData || mtime != previousMtime ? try? Data(contentsOf: URL(fileURLWithPath: path)) : nil
+                DispatchQueue.main.async {
+                    guard let self, generation == self.readGeneration, self.rowId == rowId,
+                          self.activeItem == id else { return }
+                    self.readInFlight = false
+                    self.watchMtime = mtime
+                    if let data { self.renderFile(data, mime: item.mime ?? "text/plain", item: item) }
+                }
             }
             return
         }
-        readInFlight = true
-        let generation = readGeneration
         var params: [String: Any] = ["tab_id": rowId, "item": id]
         if let fileMtime { params["known_mtime_ms"] = fileMtime }
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let result = cmds.deskCall("desk.read", params: params)
             DispatchQueue.main.async {
                 guard let self else { return }
-                self.readInFlight = false
                 guard generation == self.readGeneration, self.rowId == rowId, self.activeItem == id else { return }
+                self.readInFlight = false
                 // A poll that fails while a file is already shown (the server mid-handoff) keeps it.
                 guard let result else {
                     if self.fileData == nil { self.pageText = "Unable to read desk file" }

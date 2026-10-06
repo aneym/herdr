@@ -418,7 +418,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     /// the normal snapshot path.
     func machinesChanged() {
         let remote = [state.selectedTab, pendingSelectTab].contains { $0.map(Machines.isRemote) == true }
-        guard remote else { return }
+        guard remote else { refreshDocs(); return }
         snapshotChanged()
     }
 
@@ -455,16 +455,20 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     private var seenDeskIds: [String: Set<String>]?
 
     func openOnDesk(_ url: URL, paneId: String?) {
-        let tabId = paneId.flatMap { id in model.snapshot?.panes.first { $0.pane_id == id }?.tab_id } ?? state.selectedTab
+        let tabId = paneId.flatMap { id in model.pane(id)?.tab_id } ?? state.selectedTab
         guard let tabId else { return }
         var params: [String: Any] = ["ref": url.isFileURL ? url.path : url.absoluteString, "opened_by": "user"]
         if let paneId { params["pane_id"] = paneId } else { params["tab_id"] = tabId }
         let cmds = commands
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = cmds.deskCall("desk.open", params: params)
+            let result = cmds.deskReply("desk.open", params: params)
             DispatchQueue.main.async {
                 guard let self else { return }
-                if result == nil { self.docPanel.addTransient(url, tabId: tabId) }
+                switch result {
+                case .unsupported: self.docPanel.addTransient(url, tabId: tabId)
+                case .failed: return
+                case .result: break
+                }
                 SidebarState.store.set(true, forKey: Self.docsShownKey(tabId))
                 if self.state.selectedTab == tabId { self.setDocs(open: true) }
             }
@@ -472,8 +476,9 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     private func refreshDocs() {
-        if let snapshot = model.snapshot {
-            let desks = Dictionary(uniqueKeysWithValues: snapshot.tabs.map { ($0.tab_id, $0.desk ?? .empty) })
+        let snapshots = [model.snapshot].compactMap { $0 } + model.machines.compactMap(\.snapshot)
+        if !snapshots.isEmpty {
+            let desks = Dictionary(uniqueKeysWithValues: snapshots.flatMap(\.tabs).map { ($0.tab_id, $0.desk ?? .empty) })
             let newTabs = landed(previous: seenDeskIds, current: desks)
             seenDeskIds = desks.mapValues { Set($0.items.map(\.id)) }
             for tab in newTabs { SidebarState.store.set(true, forKey: Self.docsShownKey(tab)) }

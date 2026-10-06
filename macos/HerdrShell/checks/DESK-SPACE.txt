@@ -10,7 +10,7 @@
 [PASS] Shell desk dump: url item present and front/active
 [PASS] the url item loads example.com in the docs web view
   shot DESK-SPACE-url.png
-  pane$ herdr desk open /private/var/folders/58/j110bjyx10j199g9pmv7zzhc0000gn/T/desk-proof-b7ox3efz/desk-proof.md -> rc=0 d2 w2:t1 /private/var/folders/58/j110bjyx10j199g9pmv7zzhc0000gn/T/desk-proof-b7ox3efz/desk-proof.md
+  pane$ herdr desk open /private/var/folders/58/j110bjyx10j199g9pmv7zzhc0000gn/T/desk-proof-y0_98ih7/desk-proof.md -> rc=0 d2 w2:t1 /private/var/folders/58/j110bjyx10j199g9pmv7zzhc0000gn/T/desk-proof-y0_98ih7/desk-proof.md
 [PASS] herdr desk open <md> succeeds from the pane
 [PASS] Shell desk dump: both items, md front and active
 [PASS] the docs column tabs list both desk items
@@ -19,7 +19,7 @@
   shot DESK-SPACE-md.png
   pane$ herdr desk list ->
     |   d1 url example.com https://example.com
-    | * d2 file desk-proof.md /private/var/folders/58/j110bjyx10j199g9pmv7zzhc0000gn/T/desk-proof-b7ox3efz/desk-proof.md
+    | * d2 file desk-proof.md /private/var/folders/58/j110bjyx10j199g9pmv7zzhc0000gn/T/desk-proof-y0_98ih7/desk-proof.md
 [PASS] herdr desk list prints both items, the md one marked front (*)
   lab$ herdr server live-handoff -> rc=0 live handoff complete; server log: /Users/aneyman/.cache/herdr-build/dk/h/.config/herdr/sessions/shellspike-dk/herdr-server.log
 [PASS] live handoff of the lab server completes

@@ -332,12 +332,33 @@ struct HerdrCommands {
         return machine.map { Machines.namespace(reply, machine: $0) } ?? reply
     }
 
+    enum DeskReply {
+        case result([String: Any])
+        case unsupported
+        case failed
+    }
+
+    /// Preserve method-missing separately from transport and domain errors.
+    func deskReply(_ method: String, params: [String: Any]) -> DeskReply {
+        guard let data = call(method, params),
+              let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            log("\(method): no valid response")
+            return .failed
+        }
+        if let error = envelope["error"], !(error is NSNull) {
+            let code = (error as? [String: Any])?["code"] as? String
+            if code == "unknown_method" { return .unsupported }
+            log("\(method): \(error)")
+            return .failed
+        }
+        guard let result = envelope["result"] as? [String: Any] else { return .unsupported }
+        return .result(result)
+    }
+
     /// Desk calls share the normal local/remote target routing, not link routing.
     func deskCall(_ method: String, params: [String: Any]) -> [String: Any]? {
-        guard let data = call(method, params),
-              let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              envelope["error"] == nil else { return nil }
-        return envelope["result"] as? [String: Any]
+        if case .result(let result) = deskReply(method, params: params) { return result }
+        return nil
     }
 
     /// `pane.resize`. `direction` is left|right|up|down; `amount` is a share of the split
