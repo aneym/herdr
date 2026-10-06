@@ -2,22 +2,22 @@
  agents                  
  agent-rails     3 ⚲ + ▾ 
   ORCHESTRATOR         ⌘0
-  ▸ ● orchestrator      1
+  ▸ ● orchestrator    1⚲ 
                          
   LANES             ⌘1..9
-  ▸ ● lane-a  2 workflows
+  ▸ ● lane-a          2⚲ 
                          
-    ○ lane-b         idle
+    ○ lane-b       idle⚲ 
                          
-    ● plain-a            
+    ● plain-a          ⚲ 
                          
-    ● plain-b            
+    ● plain-b          ⚲ 
                          
   ▸ background 1         
                          
  poker             ⚲ + ▾ 
   LANES             ⌘1..9
-    ● poker coach        
+    ● poker coach      ⚲ 
                          
                          
                          

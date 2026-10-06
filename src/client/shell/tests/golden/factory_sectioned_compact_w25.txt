@@ -2,19 +2,19 @@
  agents                  
  agent-rails     3 ⚲ + ▾ 
   ▾ ORCHESTRATOR     ⌘0◎ 
-  ▸ ● orchestrator      1
+  ▸ ● orchestrator    1⚲ 
   ▾ SCOPING       ⌘1..9◎ 
-  ▸ ● shared connectio… 2
+  ▸ ● shared connect… 2⚲ 
   ▾ IMPLEMENTING       ◎ 
-    ● plain-a            
-    ● plain-b            
+    ● plain-a          ⚲ 
+    ● plain-b          ⚲ 
   ▸ closed 1             
                          
   ▸ background 1         
                          
  poker             ⚲ + ▾ 
   LANES             ⌘1..9
-    ● poker coach        
+    ● poker coach      ⚲ 
                          
                          
                          

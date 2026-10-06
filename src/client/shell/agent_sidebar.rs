@@ -743,6 +743,10 @@ fn render_factory_tab(
         crate::factory_overlay::Attention::None => None,
     };
     let pin = chat_pin_rect(rect);
+    // A run row stands in for a workflow run inside its lane's tab, not a chat
+    // of its own: it keeps the pin column so its marks align with the lane's,
+    // but gets no toggle, which would pin the parent under the run's name.
+    let chat = header.tab_id.as_deref() == Some(header.key.as_str());
     let content_right = pin.x.saturating_sub(if attention_color.is_some() { 2 } else { 0 });
     let name_x = icon_x.saturating_add(2);
     let available = content_right.saturating_sub(name_x);
@@ -870,13 +874,25 @@ fn render_factory_tab(
         put_text(buffer, x, rect.y + 1, room as u16, &progress,
             Style::default().fg(palette.overlay0).add_modifier(Modifier::DIM));
     }
-    put_text(buffer, pin.x, rect.y, pin.width, "⚲ ",
-        Style::default().fg(if header.pinned { palette.accent } else { palette.overlay0 }));
+    if chat {
+        put_text(
+            buffer,
+            pin.x,
+            rect.y,
+            pin.width,
+            "⚲ ",
+            Style::default().fg(if header.pinned {
+                palette.accent
+            } else {
+                palette.overlay0
+            }),
+        );
+    }
     hits.tree_headers.push(TreeHeaderHit {
         rect,
         chevron: if header.collapsible { chevron } else { Rect::default() },
         plus: Rect::default(),
-        pin,
+        pin: if chat { pin } else { Rect::default() },
         group: None,
         workspace_id: header.workspace_id.clone(),
         tab_id: header.tab_id.clone(),

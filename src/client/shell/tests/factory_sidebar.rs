@@ -87,6 +87,17 @@ fn factory_state(snapshot: ClientShellSnapshot, overlay: FactoryOverlay) -> Clie
 }
 
 
+/// Lane rows end with their pin toggle, like every chat row (9f0d153f: pinned
+/// chats keep their toggles aligned everywhere). Their attention mark and
+/// right-aligned metadata sit just before it.
+fn before_pin(row: &str) -> &str {
+    row.strip_suffix("⚲ ")
+        .unwrap_or_else(|| panic!("lane row must end with its pin toggle: {row:?}"))
+}
+
+/// The attention mark's column at the default width 25, left of the pin toggle.
+const ATTENTION_X: u16 = 22;
+
 fn rendered_factory_rows(snapshot: &ClientShellSnapshot, overlay: &FactoryOverlay) -> (Vec<String>, ShellHitMap, Buffer) {
     rendered_factory_rows_with_tree(snapshot, overlay, &ClientTreeChrome::default())
 }
@@ -135,6 +146,21 @@ fn focused_tab(input: &ClientShellInput) -> Vec<String> {
     }).collect()
 }
 
+fn pinned_tab(input: &ClientShellInput) -> Vec<(String, bool)> {
+    input
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            ClientShellAction::Endpoint { request, .. } => match &request.method {
+                crate::api::schema::Method::TabSetPinned(params) => {
+                    Some((params.tab_id.clone(), params.pinned))
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
 
 #[test]
 fn focused_agent_half_pad_does_not_overlap_next_factory_space() {
@@ -481,6 +507,8 @@ fn factory_collapsed_frame_w25() {
     let mut tree = ClientTreeChrome::default();
     tree.factory_collapsed_lanes.insert("lane-a".into());
     let (rows, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
+    // Lane and workflow tab rows end with the chat pin toggle (9f0d153f), so their
+    // right-hand text sits two columns left; headers and footers do not move.
     assert_golden(rows, include_str!("golden/factory_default_w25.txt"));
 }
 
@@ -490,6 +518,8 @@ fn factory_expanded_frame_w27() {
     let mut tree = ClientTreeChrome::default();
     tree.factory_expanded_lanes.insert("lane-a".into());
     let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 27);
+    // Lane and workflow tab rows end with the chat pin toggle (9f0d153f), so their
+    // right-hand text sits two columns left; headers and footers do not move.
     assert_golden(rows, include_str!("golden/factory_expanded_w27.txt"));
 
     let (snapshot, mut overlay) = lab_fixture();
@@ -506,6 +536,8 @@ fn factory_collapsed_compact_frame_w25() {
     let mut tree = ClientTreeChrome::default();
     tree.factory_collapsed_lanes.insert("lane-a".into());
     let (rows, _, _) = rendered_factory_rows_with_gap(&snapshot, &overlay, &tree, 25, 0);
+    // Lane and workflow tab rows end with the chat pin toggle (9f0d153f), so their
+    // right-hand text sits two columns left; headers and footers do not move.
     assert_golden(rows, include_str!("golden/factory_compact_w25.txt"));
 }
 
@@ -594,7 +626,38 @@ fn factory_click_table() {
             assert_eq!(detail.key, "tab:lane-a", "{description}");
             assert!(!detail.focused, "{description}: detail must not steal focus");
         }
+        assert!(pinned_tab(&outcome).is_empty(), "{description}");
     }
+
+    // The lane's pin toggle (9f0d153f) pins it without focusing or folding,
+    // though the lane is collapsible.
+    let mut state = factory_state(snapshot.clone(), overlay.clone());
+    state.config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    state
+        .tree_chrome_mut()
+        .factory_expanded_lanes
+        .insert("lane-a".into());
+    state.hits = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree).1;
+    state.last_composed_size = Some((120, 60));
+    assert!(lane.pin.width > 0 && lane.pin.intersection(lane.chevron).is_empty());
+    let press = |kind| {
+        RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind,
+            column: lane.pin.x,
+            row: lane.pin.y,
+            modifiers: KeyModifiers::NONE,
+        })
+    };
+    let outcome = state.handle_raw_events(vec![
+        press(MouseEventKind::Down(MouseButton::Left)),
+        press(MouseEventKind::Up(MouseButton::Left)),
+    ]);
+    assert_eq!(pinned_tab(&outcome), [("lane-a".to_owned(), true)]);
+    assert!(focused_tab(&outcome).is_empty());
+    assert!(state
+        .tree_chrome_mut()
+        .factory_expanded_lanes
+        .contains("lane-a"));
 
     let mut state = factory_state(snapshot.clone(), overlay.clone());
     state.config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
@@ -637,8 +700,8 @@ fn factory_click_table() {
     assert!(!visible.iter().any(|row| row.contains("issues 3")), "Act child leaves lane folded");
     let hit = hits.tree_headers.iter().find(|hit| hit.tab_id.as_deref() == Some("lane-a")).unwrap();
     assert!(hit.collapsed);
-    assert!(visible[hit.rect.y as usize].ends_with('!'));
-    assert_eq!(buffer[(24, hit.rect.y)].fg, ClientShellConfig::from_config(&Config::default()).palette.red);
+    assert!(before_pin(&visible[hit.rect.y as usize]).ends_with('!'));
+    assert_eq!(buffer[(ATTENTION_X, hit.rect.y)].fg, ClientShellConfig::from_config(&Config::default()).palette.red);
     let at = (hit.chevron.x, hit.chevron.y);
     let mut alert_state = factory_state(snapshot.clone(), alert_overlay.clone());
     alert_state.config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
@@ -655,8 +718,8 @@ fn factory_click_table() {
     assert!(!folded.iter().any(|row| row.contains("issues 3")), "explicit fold must beat Act");
     let y = hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap().rect.y;
     let lane = &folded[y as usize];
-    assert!(lane.ends_with('!'), "Act workflow must mark folded lane: {lane}");
-    assert_eq!(buffer[(24, y)].fg, alert_state.config.palette.red);
+    assert!(before_pin(lane).ends_with('!'), "Act workflow must mark folded lane: {lane}");
+    assert_eq!(buffer[(ATTENTION_X, y)].fg, alert_state.config.palette.red);
 }
 
 #[test]
@@ -704,7 +767,7 @@ fn factory_parent_with_running_workflow_or_busy_tag_shows_working() {
     assert!(wide.iter().any(|row| row.contains("orchestrator") && row.contains("2 workflows · inbox 3")), "{wide:?}");
     let (narrow, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &folded);
     let orch = hits.tree_headers.iter().find(|hit| hit.key == "orch").unwrap();
-    assert!(narrow[orch.rect.y as usize].trim_end().ends_with(" 2"), "{narrow:?}");
+    assert!(before_pin(&narrow[orch.rect.y as usize]).ends_with(" 2"), "{narrow:?}");
     snapshot.tabs.retain(|tab| !matches!(tab.tab_id.as_str(), "wf-a" | "wf-b" | "orphan"));
     overlay.tabs.get_mut("lane-a").unwrap().summary = None;
     let (empty, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &folded);
@@ -987,7 +1050,7 @@ fn factory_grouped_lanes_fold_with_parent_and_roll_up_state() {
     assert!(rows[parent.rect.y as usize].contains("2 agents"), "{rows:?}");
     assert_eq!(buffer[(parent.rect.x + 4, parent.rect.y)].fg,
         ClientShellConfig::from_config(&Config::default()).palette.working);
-    assert!(rows[parent.rect.y as usize].ends_with('!'), "child Act rolls up: {rows:?}");
+    assert!(before_pin(&rows[parent.rect.y as usize]).ends_with('!'), "child Act rolls up: {rows:?}");
     tree.factory_collapsed_lanes.insert("lane-a".into());
     let (folded, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
     assert!(hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap().collapsed);
@@ -1103,8 +1166,8 @@ fn lane_run_defaults_folded_unless_user_expanded() {
         let (rows, hits, buffer) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
         let lane = hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap();
         if attention == Attention::Act {
-            assert!(rows[lane.rect.y as usize].ends_with('!'));
-            assert_eq!(buffer[(24, lane.rect.y)].fg, ClientShellConfig::from_config(&Config::default()).palette.red);
+            assert!(before_pin(&rows[lane.rect.y as usize]).ends_with('!'));
+            assert_eq!(buffer[(ATTENTION_X, lane.rect.y)].fg, ClientShellConfig::from_config(&Config::default()).palette.red);
         }
         if !done {
             assert_eq!(lane.collapsed, !visible, "done={done}, expanded={expanded}, collapsed={collapsed}: {rows:?}");
@@ -1125,7 +1188,7 @@ fn lane_run_defaults_folded_unless_user_expanded() {
     for (width, summary) in [(48, "1 agent · 1 workflow"), (25, "1 agent")] {
         let (rows, hits, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), width);
         let lane = hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap();
-        assert!(rows[lane.rect.y as usize].trim_end().ends_with(summary), "{rows:?}");
+        assert!(before_pin(&rows[lane.rect.y as usize]).ends_with(summary), "{rows:?}");
     }
 }
 
@@ -1135,7 +1198,9 @@ fn grouped_lane_draws_live_workflows_and_runs_and_rolls_up_state() {
     let mut tree = ClientTreeChrome::default();
     tree.factory_expanded_lanes.insert("lane-a".into());
     tree.factory_background_expanded.insert("ws_1".into());
-    let (rows, hits, buffer) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 35);
+    // 37, not 35: lane rows give two columns to their pin toggle (9f0d153f)
+    // and the parent still has room for both counts.
+    let (rows, hits, buffer) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 37);
     let hit = |id: &str| hits.tree_headers.iter().find(|hit| hit.key == id).unwrap();
     let parent = hit("lane-a");
     let child = hit("lane-b");
@@ -1150,6 +1215,39 @@ fn grouped_lane_draws_live_workflows_and_runs_and_rolls_up_state() {
     assert!(rows[parent.rect.y as usize].contains("1 agent · 2 workflows"), "{rows:?}");
     let palette = ClientShellConfig::from_config(&Config::default()).palette;
     assert_eq!(buffer[(parent.rect.x + 4, parent.rect.y)].fg, palette.working);
+
+    // A run row is not a chat: no pin toggle, which would pin its lane under
+    // the run's name with a stale state. Its pin column still opens the lane.
+    assert!(
+        rows[child.rect.y as usize].contains('⚲') && rows[workflow.rect.y as usize].contains('⚲')
+    );
+    assert!(
+        run.pin.is_empty() && !rows[run.rect.y as usize].contains('⚲'),
+        "{rows:?}"
+    );
+    let (column, row) = (child.pin.x, run.rect.y);
+    let mut state = factory_state(snapshot.clone(), overlay.clone());
+    state.config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    *state.tree_chrome_mut() = tree.clone();
+    state.hits = hits;
+    state.last_composed_size = Some((120, 60));
+    let press = |kind| {
+        RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        })
+    };
+    let outcome = state.handle_raw_events(vec![
+        press(MouseEventKind::Down(MouseButton::Left)),
+        press(MouseEventKind::Up(MouseButton::Left)),
+    ]);
+    assert!(
+        pinned_tab(&outcome).is_empty(),
+        "run row must not pin its lane"
+    );
+    assert_eq!(focused_tab(&outcome), ["lane-b"]);
 }
 
 #[test]
@@ -1178,8 +1276,8 @@ fn grouped_running_workflow_stays_folded_until_expanded_or_focused() {
     let (alert, hits, buffer) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
     assert!(!alert.iter().any(|row| row.contains("wf-a")));
     let parent = hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap();
-    assert!(parent.collapsed && alert[parent.rect.y as usize].ends_with('!'));
-    assert_eq!(buffer[(24, parent.rect.y)].fg, ClientShellConfig::from_config(&Config::default()).palette.red);
+    assert!(parent.collapsed && before_pin(&alert[parent.rect.y as usize]).ends_with('!'));
+    assert_eq!(buffer[(ATTENTION_X, parent.rect.y)].fg, ClientShellConfig::from_config(&Config::default()).palette.red);
     tree.factory_collapsed_lanes.insert("lane-a".into());
     let (folded, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
     assert!(!folded.iter().any(|row| row.contains("lane-b") || row.contains("wf-a") || row.contains("fold run")));
@@ -1218,7 +1316,7 @@ fn orchestrator_grouped_lane_draws_workflow_and_run_and_rolls_up_state() {
     assert!(rows[orch.rect.y as usize].contains("1 agent · 2 workflows"), "{rows:?}");
     let (trimmed, trimmed_hits, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 35);
     let header = trimmed_hits.tree_headers.iter().find(|hit| hit.key == "orch").unwrap();
-    assert!(trimmed[header.rect.y as usize].trim_end().ends_with("1 agent · 2 workflows"), "{trimmed:?}");
+    assert!(before_pin(&trimmed[header.rect.y as usize]).ends_with("1 agent · 2 workflows"), "{trimmed:?}");
     tree.factory_collapsed_lanes.insert("orch".into());
     let (folded, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
     assert!(hits.tree_headers.iter().find(|hit| hit.key == "orch").unwrap().collapsed);
@@ -1233,8 +1331,8 @@ fn orchestrator_grouped_lane_draws_workflow_and_run_and_rolls_up_state() {
     let (alert, hits, buffer) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
     assert!(!alert.iter().any(|row| row.contains("wf-a")));
     let parent = hits.tree_headers.iter().find(|hit| hit.key == "orch").unwrap();
-    assert!(parent.collapsed && alert[parent.rect.y as usize].ends_with('!'));
-    assert_eq!(buffer[(24, parent.rect.y)].fg, ClientShellConfig::from_config(&Config::default()).palette.red);
+    assert!(parent.collapsed && before_pin(&alert[parent.rect.y as usize]).ends_with('!'));
+    assert_eq!(buffer[(ATTENTION_X, parent.rect.y)].fg, ClientShellConfig::from_config(&Config::default()).palette.red);
     tree.factory_expanded_lanes.insert("orch".into());
     let (opened, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &tree);
     assert!(opened.iter().any(|row| row.contains("wf-a")));
@@ -1338,9 +1436,14 @@ fn factory_status_glyph_colors() {
         let y = hits.tree_headers.iter().find(|hit| hit.tab_id.as_deref() == Some(id)).unwrap().rect.y;
         let x = rows[y as usize].chars().position(|ch| ch == '●' || ch == '○').unwrap() as u16;
         assert_eq!(buffer[(x, y)].fg, dot, "{id}: {}", rows[y as usize]);
-        assert_eq!(mark.is_some(), rows[y as usize].ends_with('!'), "{id}: {}", rows[y as usize]);
+        assert_eq!(mark.is_some(), before_pin(&rows[y as usize]).ends_with('!'), "{id}: {}", rows[y as usize]);
         if let Some(mark) = mark {
-            assert_eq!(buffer[(24, y)].fg, mark, "{id}: {}", rows[y as usize]);
+            assert_eq!(
+                buffer[(ATTENTION_X, y)].fg,
+                mark,
+                "{id}: {}",
+                rows[y as usize]
+            );
         }
         rows[y as usize].clone()
     };
@@ -1378,8 +1481,8 @@ fn factory_status_glyph_colors() {
         let y = hit.rect.y;
         let x = rows[y as usize].chars().position(|ch| ch == '●').unwrap() as u16;
         assert_eq!(buffer[(x, y)].fg, palette.working, "folded {attention:?} child");
-        assert_eq!(rows[y as usize].chars().last(), Some('!'));
-        assert_eq!(buffer[(24, y)].fg, expected);
+        assert_eq!(before_pin(&rows[y as usize]).chars().last(), Some('!'));
+        assert_eq!(buffer[(ATTENTION_X, y)].fg, expected);
         let count_x = rows[y as usize].chars().collect::<Vec<_>>().iter().rposition(|ch| *ch == '1').unwrap();
         assert_eq!(plain.chars().collect::<Vec<_>>().iter().rposition(|ch| *ch == '1'), Some(count_x + 2),
             "count moves left by two");
@@ -1529,7 +1632,7 @@ fn scoping_lane_grouped_under_other_section_draws_flat_in_scoping() {
         assert!(scoping < child.rect.y as usize && (child.rect.y as usize) < next_section, "{rows:?}");
         assert_eq!(rows[child.rect.y as usize].find("lane-b"), rows[sibling.rect.y as usize].find("plain-a"));
         assert_eq!(parent.chevron.width, 0, "scoping child must not count in parent roll-up: {rows:?}");
-        assert!(!rows[parent.rect.y as usize].ends_with('!'), "scoping attention must not roll up: {rows:?}");
+        assert!(!before_pin(&rows[parent.rect.y as usize]).ends_with('!'), "scoping attention must not roll up: {rows:?}");
     }
 }
 
@@ -1583,6 +1686,8 @@ fn factory_sectioned_collapsed_compact_frame_w25() {
     let mut tree = ClientTreeChrome::default();
     tree.factory_collapsed_lanes.insert("lane-a".into());
     let (rows, _, _) = rendered_factory_rows_with_gap(&snapshot, &overlay, &tree, 25, 0);
+    // Lane and workflow tab rows end with the chat pin toggle (9f0d153f), so their
+    // right-hand text sits two columns left; headers and footers do not move.
     assert_golden(rows, include_str!("golden/factory_sectioned_compact_w25.txt"));
 }
 
@@ -1595,7 +1700,9 @@ fn legacy_sections_place_lanes_and_clean_implementing_labels() {
         "lane-b":{"kind":"lane","section":"idle","name":"routing · it2 · Scoping"},
         "plain-a":{"kind":"lane","section":"waiting","name":"review lane"}
     }}"#.as_bytes()).unwrap();
-    let (rows, hits, _) = rendered_factory_rows(&snapshot, &overlay);
+    // Width 27 keeps the cleaned labels whole beside the lane pin toggle (9f0d153f).
+    let (rows, hits, _) =
+        rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 27);
     let implementing = rows.iter().position(|row| row.contains("IMPLEMENTING")).unwrap();
     let reviewing = rows.iter().position(|row| row.contains("READY FOR REVIEW")).unwrap();
     let review = hits.tree_headers.iter().find(|hit| hit.key == "plain-a").unwrap();
@@ -1846,7 +1953,7 @@ fn reviewing_lane_links_render_and_open_without_focusing() {
             let (rows, hits, buffer) = rendered_factory_rows_at_width(&snapshot, &overlay, state.tree_chrome_mut(), 35);
             let row = hits.tree_headers.iter().find(|hit| hit.key == "lane-b").unwrap().rect;
             let text = &rows[row.y as usize];
-            assert!(text.ends_with('!'), "{rows:?}");
+            assert!(before_pin(text).ends_with('!'), "{rows:?}");
             state.hits = hits;
             if section == TabSection::Reviewing {
                 let label = if url.is_some() { "review ↗" } else { "no link" };
@@ -1915,7 +2022,7 @@ fn scoping_lane_links_render_and_open_without_focusing() {
             let (rows, hits, buffer) = rendered_factory_rows_at_width(&snapshot, &overlay, state.tree_chrome_mut(), 35);
             let row = hits.tree_headers.iter().find(|hit| hit.key == "lane-b").unwrap().rect;
             let text = &rows[row.y as usize];
-            assert!(text.ends_with('!'), "{rows:?}");
+            assert!(before_pin(text).ends_with('!'), "{rows:?}");
             state.hits = hits;
             if section == TabSection::Scoping && scope_url.is_some() {
                 let label = "scope ↗";
@@ -2287,7 +2394,10 @@ fn remote_shell_pane_names_its_machine_on_lane_and_plain_agent_rows() {
     snapshot.panes = vec![pane("lane-b-pane", "lane-b", Some("ax42")), pane("plain-pane", "plain-a", Some("book"))];
     let (rows, _, buffer) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 30);
     let (y, lane) = rows.iter().enumerate().find(|(_, row)| row.contains("lane-b")).unwrap();
-    assert!(lane.trim_end().ends_with("idle · ax42"), "lane row: {lane}");
+    assert!(
+        before_pin(lane).ends_with("idle · ax42"),
+        "lane row: {lane}"
+    );
     let x = lane.find("ax42").map(|byte| lane[..byte].chars().count()).unwrap() as u16;
     let palette = ClientShellConfig::from_config(&Config::default()).palette;
     assert_eq!(buffer[(x, y as u16)].fg, palette.overlay0, "machine label stays quiet");
@@ -2299,7 +2409,7 @@ fn remote_shell_pane_names_its_machine_on_lane_and_plain_agent_rows() {
     for width in [30, 26] {
         let (rows, hits, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), width);
         let lane = hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap();
-        let line = rows[lane.rect.y as usize].trim_end();
+        let line = before_pin(&rows[lane.rect.y as usize]);
         assert!(line.contains("lane-a ") && line.ends_with(" · book"), "width {width}: {line}");
     }
     snapshot.panes.pop();
