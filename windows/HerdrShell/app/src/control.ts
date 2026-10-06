@@ -1,3 +1,4 @@
+import { showUpdateError } from "./UpdatePill";
 import { bridge } from "./bridge";
 import type { DocsState } from "./docs";
 import type { MachineStatus } from "./bridge";
@@ -23,7 +24,7 @@ export function installControl(get: () => ControlState): () => void {
       if (payload.action === "apply" ? !status.available : !status.previous) return { ok: false, error: `nothing to ${payload.action}` };
       // The app exits once the updater starts, so reply first and start it just after.
       const run = payload.action === "apply" ? bridge.updateApply : bridge.updateRollback;
-      setTimeout(() => { void run().catch(() => {}); }, 300);
+      setTimeout(() => { void run().catch(showUpdateError); }, 300);
       return { ok: true, started: payload.action, status };
     }
     return bridge.updateStatus();

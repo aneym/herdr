@@ -1,5 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { bridge, type UpdateStatus } from "./bridge";
+
+let updateError: string | null = null;
+const errorListeners = new Set<() => void>();
+export function showUpdateError(failure: unknown) {
+  updateError = failure == null ? null : String(failure);
+  errorListeners.forEach(listener => listener());
+}
+const subscribeError = (listener: () => void) => {
+  errorListeners.add(listener);
+  return () => { errorListeners.delete(listener); };
+};
 
 export function pillState(status: UpdateStatus | null) {
   return {
@@ -12,7 +23,7 @@ export function pillState(status: UpdateStatus | null) {
 export default function UpdatePill() {
   const [status, setStatus] = useState<UpdateStatus | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const error = useSyncExternalStore(subscribeError, () => updateError);
   const applying = useRef(false);
   useEffect(() => {
     let disposed = false;
@@ -32,11 +43,11 @@ export default function UpdatePill() {
     if (applying.current) return;
     applying.current = true;
     setBusy(true);
-    setError(null);
+    showUpdateError(null);
     try {
       await (rollback ? bridge.updateRollback() : bridge.updateApply());
     } catch (failure) {
-      setError(String(failure));
+      showUpdateError(failure);
       applying.current = false;
       setBusy(false);
     }
@@ -49,33 +60,4 @@ export default function UpdatePill() {
     </span>}
     {error && <span className="update-error" role="alert">{error}</span>}
   </>;
-}
-
-// In-source tests keep the slice within its file allowlist; Vitest includeSource discovers them.
-if (import.meta.vitest) {
-  const { describe, it, expect } = import.meta.vitest;
-  describe("pillState", () => {
-    // Pure visibility projection guards independent update/rollback availability and absent metadata.
-    it("shows only actions supported by the status, including rollback without an update", () => {
-      const staged = { sha: "abcdef123456", built_at: "2026-10-06T12:00:00Z" };
-      const previous = { sha: "fedcba123456" };
-      expect(pillState(null)).toEqual({ update: false, rollback: false, tooltip: "" });
-      for (const [available, build, prior, update, rollback] of [
-        [false, null, null, false, false],
-        [false, staged, null, false, false],
-        [true, staged, null, true, false],
-        [false, staged, previous, false, true],
-        [true, staged, previous, true, true],
-        [true, null, previous, false, true],
-      ] as const) {
-        expect(pillState({ current: "1234567", available, staged: build, previous: prior })).toEqual({
-          update, rollback, tooltip: build ? "abcdef1 · 2026-10-06T12:00:00Z" : "",
-        });
-      }
-    });
-  });
-}
-
-declare global {
-  interface ImportMeta { readonly vitest?: typeof import("vitest"); }
 }

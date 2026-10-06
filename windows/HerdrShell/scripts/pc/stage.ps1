@@ -26,4 +26,12 @@ $temporary = Join-Path $staged 'staged.json.tmp'
 # No BOM: the app parses this with serde_json.
 [IO.File]::WriteAllText($temporary, ($metadata | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding($false)))
 Move-Item -LiteralPath $temporary -Destination $currentPath -Force
+# Prune only after publication, retaining both metadata-referenced installers.
+$keep = @($currentPath, $previousPath) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | ForEach-Object {
+    $record = Get-Content -LiteralPath $_ -Raw | ConvertFrom-Json
+    [IO.Path]::GetFullPath($record.installer)
+}
+Get-ChildItem -LiteralPath $staged -Filter 'HerdrShell-setup-*.exe' -File | Where-Object {
+    $keep -notcontains $_.FullName
+} | Remove-Item -Force
 Write-Output "STAGED: $Sha"

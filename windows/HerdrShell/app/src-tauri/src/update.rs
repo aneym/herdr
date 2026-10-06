@@ -65,6 +65,7 @@ pub fn update_status() -> UpdateStatus {
         available,
         previous: manifest("previous.json")
             .ok()
+            .filter(|build| build.installer.is_absolute() && build.installer.is_file())
             .map(|build| Previous { sha: build.sha }),
     }
 }
@@ -79,13 +80,40 @@ pub fn update_rollback(app: tauri::AppHandle) -> Result<(), String> {
     install(app, "previous.json")
 }
 
+fn install(app: tauri::AppHandle, name: &str) -> Result<(), String> {
+    let result = install_inner(app, name);
+    if let Err(error) = &result {
+        use std::io::Write;
+        let logged = (|| -> Result<(), String> {
+            let logs = winshell_dir()?.join("logs");
+            std::fs::create_dir_all(&logs)
+                .map_err(|e| format!("Create update log directory: {e}"))?;
+            let mut log = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(logs.join("update.log"))
+                .map_err(|e| format!("Open update log: {e}"))?;
+            writeln!(
+                log,
+                "{:?} {name} failed: {error}",
+                std::time::SystemTime::now()
+            )
+            .map_err(|e| format!("Write update log: {e}"))
+        })();
+        if let Err(log_error) = logged {
+            return Err(format!("{error}; {log_error}"));
+        }
+    }
+    result
+}
+
 #[cfg(not(windows))]
-fn install(_app: tauri::AppHandle, _name: &str) -> Result<(), String> {
+fn install_inner(_app: tauri::AppHandle, _name: &str) -> Result<(), String> {
     Err("Shell updates are only supported on Windows".into())
 }
 
 #[cfg(windows)]
-fn install(app: tauri::AppHandle, name: &str) -> Result<(), String> {
+fn install_inner(app: tauri::AppHandle, name: &str) -> Result<(), String> {
     use std::io::Write;
     use std::os::windows::process::CommandExt;
     use std::process::{Command, Stdio};
@@ -157,7 +185,8 @@ try {{
         return Err(format!("Write update script: {error}"));
     }
     drop(file);
-    let spawned = Command::new("powershell.exe")
+    let mut command = Command::new("powershell.exe");
+    command
         .args([
             "-NoProfile",
             "-ExecutionPolicy",
@@ -170,8 +199,13 @@ try {{
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB)
-        .spawn();
+        .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB);
+    let spawned = command.spawn().or_else(|breakaway_error| {
+        command
+            .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
+            .spawn()
+            .map_err(|error| format!("breakaway: {breakaway_error}; fallback: {error}"))
+    });
     if let Err(error) = spawned {
         let _ = std::fs::remove_file(&path);
         return Err(format!("Start update installer handoff: {error}"));

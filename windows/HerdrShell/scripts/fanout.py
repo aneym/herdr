@@ -85,7 +85,7 @@ def run_pass(state):
         log(f'unchanged {sha}')
         return 0
     status = subprocess.run([sys.executable, str(pc.HERE / 'pc.py'), 'status'],
-                            capture_output=True, text=True)
+                            capture_output=True, text=True, timeout=120)
     if status.returncode:
         raise RuntimeError(f'PC status failed ({status.returncode})')
     game = json.loads(status.stdout)['game']['game']
@@ -99,7 +99,7 @@ def run_pass(state):
     log(f'building {sha}')
     result = subprocess.run([sys.executable, str(pc.HERE / 'pc.py'),
                              'build', '--src', str(CHECKOUT)],
-                            capture_output=True, text=True)
+                            capture_output=True, text=True, timeout=3600)
     if result.returncode == 75:
         log('build deferred by game guard')
         return 75
@@ -137,6 +137,12 @@ def main():
         try:
             state = read_state()
             return run_pass(state)
+        except subprocess.TimeoutExpired as error:
+            message = f'PC call timed out after {error.timeout} seconds'
+            state['last_error'] = message
+            write_state(state)
+            log(f'failure: {message}')
+            return 75
         except Exception as error:
             # Persist only controlled error types/messages, never subprocess output.
             message = str(error) if isinstance(error, RuntimeError) else type(error).__name__
