@@ -1,0 +1,33 @@
+[PASS] no machines section
+[PASS] remote chat sits inside the space its label matches
+[PASS] remote chat follows the space's local chats
+[PASS] no second Rails space
+[PASS] remote chat carries its machine badge
+[PASS] remote chat keeps its state glyph
+[PASS] local rows carry no badge
+[PASS] unmatched remote space stands on its own
+[PASS] unmatched remote space sits in its areas group after the local member
+[PASS] chatless remote tabs and spaces show nothing
+[PASS] remote pins follow local pins
+[PASS] remote pinned row keeps the space label and gets the badge
+[PASS] pinned header counts every pin
+[PASS] unreachable machine's chat sits in its space with a dimmed badge state
+[PASS] local rows are unchanged by the merge
+
+title|agents|0|none||mute|agents||none||||
+section|pinned|0|none||mute|PINNED|⌘1..2|none||||
+tab|pinned:s1:t1|0|none|●|working|orchestrator|rails|none||s1:t1||
+tab|pinned:ax42/w1:t1|0|none|●|working|remote chat|rails|none||ax42/w1:t1|||@ax42
+title|spacegroup:Rails|0|none||mute|Rails||none||||
+space|space:s1|0|open||mute|rails||none||s1:t1|space:s1|
+section|section:s1:LANES|1|none||mute|LANES||none||||
+tab|tab:s1:t1|1|none|●|working|orchestrator||none||s1:t1||
+tab|tab:s1:t2|1|none|●|idle|lane||none||s1:t2||
+tab|tab:ax42/w1:t1|1|none|●|working|remote chat||none||ax42/w1:t1|||@ax42
+space|space:ax42/w2|0|open||mute|recruiting||none||ax42/w2:t1|space:ax42/w2|
+section|section:ax42/w2:LANES|1|none||mute|LANES||none||||
+tab|tab:ax42/w2:t1|1|none|■|blocked|recruiter||none||ax42/w2:t1|||@ax42
+space|space:s2|0|open||mute|poker||none||s2:t1|space:s2|
+section|section:s2:LANES|1|none||mute|LANES||none||||
+tab|tab:s2:t1|1|none|●|working|coach||none||s2:t1||
+tab|tab:pc/w1:t1|1|none|●|idle|pc chat||none||pc/w1:t1|||@pc:unreachable
