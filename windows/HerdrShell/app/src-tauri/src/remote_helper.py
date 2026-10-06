@@ -37,7 +37,7 @@ def request(req):
         if op == "stat":
             return {"exists": False, "size": 0, "mtime_ms": 0, "inode": 0}
         raise
-    if not stat.S_ISREG(info.st_mode):
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink > 1:
         raise ValueError("path not allowed")
     if op == "stat":
         return dict(metadata(info), exists=True)
@@ -50,7 +50,11 @@ def request(req):
     fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
     with os.fdopen(fd, "rb") as file:
         info = os.fstat(file.fileno())
-        if not stat.S_ISREG(info.st_mode) or allowed_path(path) != path:
+        realpath = allowed_path(path)
+        current = os.stat(realpath)
+        if (not stat.S_ISREG(info.st_mode) or info.st_nlink > 1 or
+                realpath != path or
+                (info.st_dev, info.st_ino) != (current.st_dev, current.st_ino)):
             raise ValueError("path not allowed")
         data = b""
         if offset < info.st_size:

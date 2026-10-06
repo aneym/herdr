@@ -95,12 +95,13 @@ class RemoteHelperTest(unittest.TestCase):
         outside.write_bytes(b"outside fixture")
         root = self.home / ".agent-rails"
         (root / "escape").symlink_to(outside)
+        os.link(outside, root / "hardlink")
         (root / "dir").mkdir()
         os.mkfifo(root / "fifo")
         sibling = self.home / ".agent-rails-other"
         sibling.mkdir()
         (sibling / "file").write_bytes(b"sibling")
-        for path in (str(root / "escape"), str(root / "../private.txt"),
+        for path in (str(root / "escape"), str(root / "hardlink"), str(root / "../private.txt"),
                      str(root / "dir"), str(root / "fifo"), str(sibling / "file"),
                      ".agent-rails/file", str(outside), "~other/.agent-rails/file"):
             for op in ("read", "stat"):

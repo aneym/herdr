@@ -31,7 +31,7 @@ R_CACHE = f"{W}/cache"
 PS = "powershell -NoProfile -ExecutionPolicy Bypass"
 
 
-def remote(cmd, input_data=None, stream=False):
+def remote(cmd, input_data=None, stream=False, timeout=None):
     """Run cmd on the PC via ssh. Returns (rc, stdout) or streams output."""
     if stream:
         return subprocess.run(["ssh", "pc", cmd]).returncode, ""
@@ -40,6 +40,7 @@ def remote(cmd, input_data=None, stream=False):
         input=input_data,
         capture_output=True,
         text=isinstance(input_data, str) or input_data is None,
+        timeout=timeout,
     )
     out = p.stdout if isinstance(p.stdout, str) else (p.stdout or b"").decode("utf-8", "replace")
     if p.returncode != 0 and p.stderr:
@@ -48,12 +49,12 @@ def remote(cmd, input_data=None, stream=False):
     return p.returncode, out
 
 
-def ps_file(name, *args, stream=False):
+def ps_file(name, *args, stream=False, timeout=None):
     argstr = " ".join(args)
     cmd = f"{PS} -File {R_SCRIPTS}/{name}"
     if argstr:
         cmd += " " + argstr
-    return remote(cmd, stream=stream)
+    return remote(cmd, stream=stream, timeout=timeout)
 
 
 def scp_to(local, remote_path):
@@ -167,12 +168,35 @@ def cmd_install(args):
     argv = ["-Sha", args.sha] if args.sha else []
     rc, out = ps_file("install.ps1", *argv)
     print(out.strip())
-    sys.exit(rc)
+    if rc != 0 or not args.relaunch:
+        sys.exit(rc)
+    rc = launch_app(argparse.Namespace(force_idle=True, test_window=False))
+    if rc != 0:
+        sys.exit(rc)
+    deadline = time.monotonic() + 20
+    summary = {"machine_state": "unavailable", "rows": 0, "panes": 0}
+    while time.monotonic() < deadline:
+        try:
+            rc, reply = ctl_send({"cmd": "ui"}, timeout=deadline - time.monotonic())
+            ui = json.loads(reply)
+            summary = {"machine_state": ui.get("machine", {}).get("state"),
+                       "rows": len(ui.get("rows", [])), "panes": len(ui.get("panes", []))}
+            if rc == 0 and ui.get("ok") is True and summary["machine_state"] == "up":
+                print(json.dumps(summary))
+                sys.exit(0)
+        except (subprocess.TimeoutExpired, ValueError, TypeError, AttributeError):
+            pass
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(1, remaining))
+    print(json.dumps(summary))
+    print("install post-check failed: UI did not report machine up within 20 s", file=sys.stderr)
+    sys.exit(1)
 
 
-def ctl_send(obj):
+def ctl_send(obj, timeout=None):
     b64 = base64.b64encode(json.dumps(obj).encode()).decode()
-    rc, out = ps_file("ctl.ps1", "-JsonB64", b64)
+    rc, out = ps_file("ctl.ps1", "-JsonB64", b64, timeout=timeout)
     return rc, out.strip()
 
 
@@ -218,6 +242,10 @@ def refresh_idle():
 
 
 def cmd_run(args):
+    sys.exit(launch_app(args))
+
+
+def launch_app(args):
     bootstrap()
     game, _ = guard()
     if game:
@@ -244,7 +272,7 @@ def cmd_run(args):
         launch.append("-TestWindow")
     rc, out = ps_file(*launch)
     print(out.strip())
-    sys.exit(rc)
+    return rc
 
 
 def cmd_status(_args):
@@ -275,6 +303,7 @@ def main():
 
     p = sub.add_parser("install", help="run the NSIS installer silently")
     p.add_argument("--sha", default="")
+    p.add_argument("--relaunch", action="store_true", help="launch and verify the UI after installation")
     p.set_defaults(fn=cmd_install)
 
     p = sub.add_parser("run", help="launch the installed app on Alex's desktop")

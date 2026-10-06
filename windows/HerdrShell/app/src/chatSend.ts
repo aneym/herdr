@@ -14,6 +14,15 @@ export class ChatSender {
   dispose() { this.disposed = true; this.generation++; }
   cancel(): string { const text = this.state.text; this.generation++; this.state = { ...this.state, text: "" }; this.publish(""); return text; }
   send(text: string, items: ChatItem[], anyway = false): boolean {
+    if (this.state.text && this.state.warning && !anyway) {
+      const notice = "A message is waiting; send or cancel it first", previous = this.state.status, generation = this.generation;
+      this.publish(notice, true);
+      // Restore the prompt warning so its Send anyway action remains available.
+      if (previous !== notice) void wait(3000).then(() => {
+        if (!this.disposed && generation === this.generation && this.state.status === notice) this.publish(previous, true);
+      });
+      return false;
+    }
     if (!text.trim() || Array.from(text).length > 20_000) { this.publish("Message must contain 1 to 20,000 characters"); return false; }
     if (this.state.text && !this.state.warning) return false;
     this.state = { text, status: "queued", warning: false, known: new Set(items.map(item => item.id)) };

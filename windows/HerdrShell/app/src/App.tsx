@@ -105,6 +105,10 @@ export default function App() {
   const closeSwitcher = () => { setSwitcherOpen(false); const id = state.current.focused; if (id) controllers.current.get(id)?.focus(); };
   const shortcut = useCallback((event: KeyboardEvent) => {
     if (event.type !== "keydown") return false;
+    if (event.target instanceof Element && event.target.closest("textarea") &&
+        !(event.ctrlKey && !event.altKey && !event.metaKey &&
+          ((!event.shiftKey && /^[1-9]$/.test(event.key)) || event.key === "Tab" ||
+           (event.shiftKey && ["p", "m"].includes(event.key.toLowerCase()))))) return false;
     const name = actionFor(event);
     if (switcherOpen && name === "switcher") { void action(name).catch(() => {}); return true; }
     if (switcherOpen || renaming) return false;

@@ -336,6 +336,8 @@ fn supervise(
             "ServerAliveCountMax=3",
             "-o",
             "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=8",
             "-L",
             &format!(
                 "127.0.0.1:{}:{}/herdr.sock",

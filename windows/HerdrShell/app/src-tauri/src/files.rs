@@ -59,6 +59,8 @@ impl Helper {
                 "-o",
                 "BatchMode=yes",
                 "-o",
+                "ConnectTimeout=8",
+                "-o",
                 "ServerAliveInterval=15",
                 "-o",
                 "ServerAliveCountMax=3",

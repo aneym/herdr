@@ -29,3 +29,34 @@ it.each([false, true])("delivers tagged API responses (held=%s) and cancels a mi
   expect(sender.state.text).toBe("");
   sender.dispose();
 });
+
+// The held-send state machine owns draft preservation across rejection, explicit
+// override, and cancellation; exercise both terminal prompt warning outcomes.
+it.each(["❯ existing draft\n────", "unrecognized prompt"])("preserves a held message when a new send is rejected (%s)", async screen => {
+  vi.useFakeTimers();
+  const sent: string[] = [];
+  vi.spyOn(bridge, "api").mockImplementation(async (_machine, method, params) => {
+    if (method === "agent.get") return { type: "agent_info", agent: { agent: "claude", agent_session: { kind: "id", value: "session" }, agent_status: "idle" } };
+    if (method === "pane.read") return { type: "pane_read", read: { text: screen } };
+    if (method === "pane.send_text") { sent.push((params as { text: string }).text); return { type: "ok" }; }
+    throw new Error(`Unexpected method ${method}`);
+  });
+  const sender = new ChatSender("studio", `warning-${screen}`, () => {});
+  expect(sender.send("held message", [])).toBe(true);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(sender.state.warning).toBe(true);
+  const warning = sender.state.status;
+  expect(sender.send("new composer text", [])).toBe(false);
+  expect(sender.state.text).toBe("held message");
+  expect(sender.state.warning).toBe(true);
+  expect(sender.state.status).toBe("A message is waiting; send or cancel it first");
+  expect(sent).toEqual([]);
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(sender.state.status).toBe(warning);
+  expect(sender.state.text).toBe("held message");
+  expect(sender.send("held message", [], true)).toBe(true);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(sent).toEqual(["held message", "\r"]);
+  expect(sender.cancel()).toBe("held message");
+  sender.dispose();
+});

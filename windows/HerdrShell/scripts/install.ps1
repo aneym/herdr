@@ -10,8 +10,23 @@ if ($Sha) {
         Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
 }
 if (!$inst -or !(Test-Path $inst)) { Write-Error "installer not found ($inst)"; exit 1 }
+$running = @(Get-Process HerdrShell -ErrorAction SilentlyContinue)
+$running | Stop-Process -Force
+$deadline = [DateTime]::UtcNow.AddSeconds(10)
+while (Get-Process HerdrShell -ErrorAction SilentlyContinue) {
+    if ([DateTime]::UtcNow -ge $deadline) {
+        Write-Error 'HerdrShell did not stop within 10 s'
+        exit 1
+    }
+    Start-Sleep -Milliseconds 100
+}
+Write-Output "stopped: $($running.Count)"
 Write-Output "installing $inst"
 $p = Start-Process -FilePath $inst -ArgumentList '/S' -Wait -PassThru
+if ($p.ExitCode -ne 0) {
+    Write-Error "installer failed: exit code $($p.ExitCode)"
+    exit 1
+}
 
 $cands = @(
     (Join-Path $env:LOCALAPPDATA 'Herdr Shell\HerdrShell.exe'),
