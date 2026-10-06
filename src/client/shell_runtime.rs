@@ -209,18 +209,16 @@ pub(crate) fn apply_client_shell_factory_overlay(
     pixel_mouse: bool,
 ) -> (Option<frame_output::ComposedFrame>, Option<ClientMessage>) {
     let previous_size = shell.surface_size_for_endpoint(endpoint_id, size.0, size.1);
-    let active_changed =
+    let redraw =
         shell.set_endpoint_factory_overlay_for_generation(endpoint_id, generation, projection);
     let resize = (previous_size != shell.surface_size_for_endpoint(endpoint_id, size.0, size.1))
         .then(|| {
-            if active_changed {
+            if redraw && shell.endpoint_is_active(endpoint_id) {
                 shell.invalidate_pane_surface();
             }
             client_shell_resize_message_for(shell, endpoint_id, size, cell_size, pixel_mouse)
         });
-    let frame = active_changed
-        .then(|| shell.compose(size.0, size.1))
-        .flatten();
+    let frame = redraw.then(|| shell.compose(size.0, size.1)).flatten();
     (frame, resize)
 }
 
@@ -355,6 +353,41 @@ pub(super) fn take_ready_command_activation(
         endpoint_id: intent.endpoint_id,
         target: intent.target,
         force,
+    })
+}
+
+/// After a snapshot, the selected machine takes the surface once it can. A held selection,
+/// Local's or one waiting on a pin's answer, already carries the user's target and runs itself.
+pub(super) fn selected_endpoint_activation_after_snapshot(
+    state: &ClientState,
+    endpoints: &endpoint::EndpointRegistry,
+    pending: Option<&endpoint::PendingEndpointActivation>,
+    selected_profile: Option<&endpoint::ProfileId>,
+) -> Option<ClientLoopEvent> {
+    if pending.is_some()
+        || state.deferred_local_activation.is_some()
+        || state.deferred_command_activation.is_some()
+    {
+        return None;
+    }
+    let selected_endpoint = selected_profile
+        .map_or(endpoint::ClientEndpointId::Local, |profile_id| {
+            endpoint::ClientEndpointId::Ssh(profile_id.clone())
+        });
+    let activation_ready = state.shell.as_ref().is_some_and(|shell| {
+        shell.endpoint_has_snapshot(&selected_endpoint)
+            && (!endpoints
+                .connection(endpoints.active_id())
+                .is_some_and(|connection| connection.surface_active)
+                || shell.endpoint_boot_id(endpoints.active_id()).is_some())
+    });
+    let needs_surface = endpoints
+        .connection(&selected_endpoint)
+        .is_some_and(|connection| !connection.surface_active);
+    (activation_ready && needs_surface).then_some(ClientLoopEvent::ActivateEndpoint {
+        endpoint_id: selected_endpoint,
+        target: None,
+        force: false,
     })
 }
 

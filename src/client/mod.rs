@@ -2162,32 +2162,13 @@ async fn run_client_loop(
                                 continue;
                             }
                         }
-                        let selected_endpoint = endpoint_catalog
-                            .selected_profile
-                            .as_ref()
-                            .map_or(endpoint::ClientEndpointId::Local, |profile_id| {
-                                endpoint::ClientEndpointId::Ssh(profile_id.clone())
-                            });
-                        let activation_ready = state.shell.as_ref().is_some_and(|shell| {
-                            shell.endpoint_has_snapshot(&selected_endpoint)
-                                && (!write_stream
-                                    .connection(write_stream.active_id())
-                                    .is_some_and(|connection| connection.surface_active)
-                                    || shell.endpoint_boot_id(write_stream.active_id()).is_some())
-                        });
-                        let needs_surface = write_stream
-                            .connection(&selected_endpoint)
-                            .is_some_and(|connection| !connection.surface_active);
-                        if activation_ready
-                            && needs_surface
-                            && pending_activation.is_none()
-                            && state.deferred_local_activation.is_none()
-                        {
-                            scheduled_activation = Some(ClientLoopEvent::ActivateEndpoint {
-                                endpoint_id: selected_endpoint,
-                                target: None,
-                                force: false,
-                            });
+                        if let Some(event) = selected_endpoint_activation_after_snapshot(
+                            &state,
+                            &write_stream,
+                            pending_activation.as_ref(),
+                            endpoint_catalog.selected_profile.as_ref(),
+                        ) {
+                            scheduled_activation = Some(event);
                         }
                     }
                     ServerMessage::Welcome { .. } => {

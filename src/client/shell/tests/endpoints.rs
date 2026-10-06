@@ -3201,3 +3201,72 @@ fn inactive_machine_pin_rolls_up_from_that_machines_factory_overlay() {
     assert!(state.activate_endpoint_projection(&remote));
     assert_eq!(remote_pin_mark(&mut state), inactive);
 }
+
+#[test]
+fn inactive_machine_overlay_change_redraws_its_pin_only_when_pinned() {
+    // Local holds the surface. An overlay-only update from the remote arrives with no snapshot
+    // behind it, so the overlay handler's own frame is the only redraw its pins get.
+    let (mut state, remote) = state_with_remote();
+    state.config.factory.enabled = true;
+    let overlay_update = |revision: u64, json: &[u8]| {
+        let overlay = crate::factory_overlay::parse(json).unwrap();
+        let crate::protocol::ServerMessage::EndpointControl { kind, data } =
+            crate::protocol::endpoint::factory_overlay_message(
+                "remote-boot",
+                revision,
+                Some(&overlay),
+            )
+            .unwrap()
+        else {
+            panic!("expected factory overlay control");
+        };
+        let crate::client::endpoint::EndpointControlMessage::FactoryOverlay(decoded) =
+            crate::client::endpoint::decode_endpoint_control(&kind, &data).unwrap()
+        else {
+            panic!("expected decoded factory overlay");
+        };
+        decoded
+    };
+    let deliver = |state: &mut ClientShellState, revision: u64, json: &[u8]| {
+        crate::client::shell_runtime::apply_client_shell_factory_overlay(
+            state,
+            &remote,
+            4,
+            overlay_update(revision, json),
+            (100, 28),
+            (8, 16),
+            false,
+        )
+        .0
+    };
+    let idle = br#"{"version":1,"tabs":{"tab_1":{"kind":"lane"}}}"#;
+    let live = br#"{"version":1,"tabs":{"tab_1":{"kind":"lane","runs":[{"id":"wf_live"}]}}}"#;
+    let mut remote_snapshot = snapshot();
+    remote_snapshot.boot_id = "remote-boot".into();
+    state.set_endpoint_snapshot_for_generation(&remote, 4, Box::new(remote_snapshot.clone()));
+
+    // Nothing of the remote's is on screen: its overlay is cached without a redraw.
+    assert!(deliver(&mut state, 1, idle).is_none());
+
+    remote_snapshot.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+        tab_id: "tab_1".into(),
+        workspace_id: "ws_1".into(),
+    }];
+    state.set_endpoint_snapshot_for_generation(&remote, 4, Box::new(remote_snapshot));
+    state.compose(100, 28).expect("aggregate frame");
+    let frame = deliver(&mut state, 2, live).expect("pinned remote redraws on its overlay");
+    let rect = state
+        .hits
+        .endpoint_pins
+        .iter()
+        .find(|(_, _, endpoint, _)| *endpoint == remote)
+        .map(|(rect, ..)| *rect)
+        .expect("remote pin row");
+    let buffer = frame.to_ratatui_buffer().expect("frame buffer");
+    assert_eq!(
+        buffer[(rect.x + 1, rect.y)].fg,
+        state.config.palette.working,
+        "the redraw shows the remote's live run on its pin"
+    );
+    assert!(state.endpoint_is_active(&ClientEndpointId::Local));
+}

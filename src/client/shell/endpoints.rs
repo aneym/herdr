@@ -455,12 +455,14 @@ impl ClientShellState {
         *slot = Some(next);
     }
 
+    /// Caches an endpoint's overlay; true when the frame must be redrawn for it.
     pub(crate) fn set_endpoint_factory_overlay_for_generation(
         &mut self,
         endpoint_id: &ClientEndpointId,
         generation: u64,
         message: crate::protocol::endpoint::EndpointFactoryOverlay,
     ) -> bool {
+        let aggregate_pins_roll_up = self.config.factory.enabled && self.endpoints.len() > 1;
         let Some(endpoint) = self
             .endpoints
             .iter_mut()
@@ -483,6 +485,7 @@ impl ClientShellState {
         }) {
             return false;
         }
+        let shown = Self::endpoint_factory_overlay(endpoint);
         endpoint.factory_overlay = Some(ClientEndpointFactoryOverlay {
             generation: Some(generation),
             boot_id: message.boot_id,
@@ -492,7 +495,14 @@ impl ClientShellState {
         if endpoint_id == &self.active_endpoint_id {
             return self.sync_active_factory_overlay();
         }
-        false
+        // The aggregate sidebar rolls an inactive machine's pins up from this overlay, and no
+        // snapshot follows an overlay-only change. Redraw only when its pins are on screen.
+        aggregate_pins_roll_up
+            && endpoint
+                .snapshot
+                .as_deref()
+                .is_some_and(|snapshot| !snapshot.pinned_tabs.is_empty())
+            && shown.as_deref() != Self::endpoint_factory_overlay(endpoint).as_deref()
     }
 
     /// The overlay an endpoint presents: only a projection from its current connection and boot.

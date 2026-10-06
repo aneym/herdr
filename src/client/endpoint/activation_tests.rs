@@ -1878,16 +1878,24 @@ fn pin_in_flight_on_inactive_machine_holds_its_handoff_until_answered() {
     // Local holds the surface. A pin from the aggregate sidebar is running on the remote when
     // the user selects one of the remote's tabs. The remote's server refuses any focus while
     // that pin runs (endpoint_busy), so the handoff's surface and focus must wait for its
-    // answer, and a pin sent during the handoff must wait for the handoff.
+    // answer, a snapshot arriving meanwhile must keep the held tab, and a pin sent during the
+    // handoff must wait for the handoff.
     use crate::api::schema::{Method, Request, TabSetPinnedParams};
     use crate::client::{
         endpoint_commands::EndpointCommands,
         shell::{ClientEndpointFocusTarget, ClientShellAction},
         shell_runtime::{
-            begin_endpoint_activation, dispatch_client_shell_actions, take_ready_command_activation,
+            begin_endpoint_activation, dispatch_client_shell_actions,
+            install_client_shell_snapshot, selected_endpoint_activation_after_snapshot,
+            take_ready_command_activation,
         },
         ClientLoopEvent, ClientState,
     };
+    struct NoInputSource;
+    impl crate::platform::PrefixInputSource for NoInputSource {
+        fn switch_to_ascii(&mut self) {}
+        fn restore(&mut self) {}
+    }
     let (shell, mut endpoints, local_sent, remote_sent) = shell_and_registry();
     let mut state = ClientState::test_new();
     state.shell = Some(shell);
@@ -1979,6 +1987,46 @@ fn pin_in_flight_on_inactive_machine_holds_its_handoff_until_answered() {
         "the handoff reached the remote while its pin was still running"
     );
     assert!(take_ready_command_activation(&mut state, &commands).is_none());
+
+    // The remote's snapshot lands before the pin answers. The snapshot path runs whatever
+    // activation it schedules, as the client loop does, and the held tab must survive it.
+    install_client_shell_snapshot(
+        &mut state,
+        &endpoint(),
+        Box::new(test_snapshot("remote-boot", 2)),
+        false,
+        &mut endpoints,
+        &mut NoInputSource,
+    )
+    .unwrap();
+    let ClientEndpointId::Ssh(profile) = endpoint() else {
+        unreachable!()
+    };
+    if let Some(ClientLoopEvent::ActivateEndpoint {
+        endpoint_id,
+        target,
+        force,
+    }) = selected_endpoint_activation_after_snapshot(
+        &state,
+        &endpoints,
+        pending.as_ref(),
+        Some(&profile),
+    ) {
+        begin_endpoint_activation(
+            &mut state,
+            &mut endpoints,
+            &mut commands,
+            &mut pending,
+            &mut serial,
+            endpoint_id,
+            target,
+            force,
+            Instant::now(),
+            &mut scheduled,
+        )
+        .unwrap();
+    }
+    assert_eq!(remote_ids(), ["pin-1"]);
 
     // The pin answers; the held selection now starts the handoff with its focus.
     let answer = serde_json::to_vec(&crate::api::schema::SuccessResponse {
