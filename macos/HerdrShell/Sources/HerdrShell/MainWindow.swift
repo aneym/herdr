@@ -423,8 +423,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     var forcedEmptyDocs = false
-    /// The last click landed in the docs column. ⌘W then closes the column even after a
-    /// doc tab click handed keyboard focus back to the pane.
+    /// The last click or scroll landed in the docs column. ⌘W then closes the column even
+    /// after a doc tab click handed keyboard focus back to the pane.
     var docsLastClicked = false
 
     func selectTab(_ tabId: String, revealDocs: Bool = false) {
@@ -969,7 +969,8 @@ final class ShellWindow: NSWindow {
         if event.type == .keyDown, let c = delegate as? MainWindowController, c.quickSwitch.sink(event) {
             return
         }
-        if event.type == .leftMouseDown, let c = delegate as? MainWindowController, let docs = c.root.docs {
+        if [.leftMouseDown, .rightMouseDown, .scrollWheel].contains(event.type),
+           let c = delegate as? MainWindowController, let docs = c.root.docs {
             c.docsLastClicked = c.root.docsOpen && docs.bounds.contains(docs.convert(event.locationInWindow, from: nil))
         }
         super.sendEvent(event)
