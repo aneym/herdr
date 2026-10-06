@@ -44,32 +44,44 @@ export function installControl(get: () => ControlState): () => void {
   // override lasts for this run only, like the Mac shell's --appearance.
   watch<{ mode?: Appearance }>("appearance", async payload => { appTheme().setOverride(payload.mode ?? "system"); return { ok: true, override: appTheme().override, mode: appTheme().mode }; });
   // {"cmd":"drag_pin","tab_id":id,"section":"pinned"|"agent","rows":n|"dy":px,"steps":8,"interval_ms":40,"esc":false}:
-  // press on the centre of a sidebar pin row, move in steps and release, as a physical mouse
-  // does: events go to the element under each point, and the release clicks the nearest
-  // element the press and release share, so the sidebar's own handlers tell a drag from a click.
-  watch<{ tab_id: string; section?: "pinned" | "agent"; rows?: number; dy?: number; steps?: number; interval_ms?: number; esc?: boolean }>("drag_pin", async payload => {
+  // drag a sidebar pin row from its centre.
+  watch<DragPayload & { tab_id: string; section?: "pinned" | "agent"; rows?: number; dy?: number }>("drag_pin", async payload => {
     const row = document.querySelector<HTMLElement>(`[data-row="${payload.section ?? "pinned"}:${CSS.escape(payload.tab_id)}"]`);
     if (!row) throw new Error(`No ${payload.section ?? "pinned"} row ${payload.tab_id}`);
-    const box = row.getBoundingClientRect();
-    const x = box.left + box.width / 2, y = box.top + box.height / 2;
-    const dy = payload.dy ?? (payload.rows ?? 0) * box.height;
-    const steps = Math.max(1, Math.min(20, payload.steps ?? 8));
-    const pause = () => new Promise(resolve => setTimeout(resolve, Math.max(0, Math.min(100, payload.interval_ms ?? 40))));
-    const at = (py: number) => document.elementFromPoint(x, py) ?? document.body;
-    const fire = (type: string, target: Element, py: number) => target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: py, pointerId: 1, pointerType: "mouse", isPrimary: true, button: 0, buttons: type === "pointerup" ? 0 : 1 }));
-    const down = at(y);
-    fire("pointerdown", down, y);
-    for (let i = 1; i <= steps; i++) { await pause(); fire("pointermove", at(y + dy * i / steps), y + dy * i / steps); }
-    if (payload.esc) { await pause(); (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); }
-    await pause();
-    const up = at(y + dy);
-    fire("pointerup", up, y + dy);
-    let shared: Element | null = down;
-    while (shared && !shared.contains(up)) shared = shared.parentElement;
-    shared?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y + dy, button: 0 }));
-    await new Promise(resolve => requestAnimationFrame(resolve));
-    return { ok: true, from: [x, y], to: [x, y + dy] };
+    return pointerDrag(row, 0, payload.dy ?? (payload.rows ?? 0) * row.getBoundingClientRect().height, payload);
+  });
+  // {"cmd":"drag_divider","split_id":id,"delta":px,"steps":8,"interval_ms":40}: drag a split
+  // divider along its axis (right or down positive).
+  watch<DragPayload & { split_id: string; delta: number }>("drag_divider", async payload => {
+    const strip = document.querySelector<HTMLElement>(`[data-split="${CSS.escape(payload.split_id)}"]`);
+    if (!strip) throw new Error(`No divider ${payload.split_id}`);
+    const vertical = strip.classList.contains("vertical");
+    return pointerDrag(strip, vertical ? payload.delta : 0, vertical ? 0 : payload.delta, payload);
   });
   watch<{ dy: number }>("wheel", async payload => { focused().wheel(payload.dy); return { ok: true }; });
   return () => { disposed = true; listeners.forEach(unlisten => unlisten()); };
+}
+interface DragPayload { steps?: number; interval_ms?: number; esc?: boolean }
+// Press on the centre of `el`, move by (dx, dy) in steps and release, as a physical mouse does:
+// events go to the element under each point, and the release clicks the nearest element the
+// press and release share, so the app's own handlers tell a drag from a click.
+async function pointerDrag(el: HTMLElement, dx: number, dy: number, payload: DragPayload) {
+  const box = el.getBoundingClientRect();
+  const x = box.left + box.width / 2, y = box.top + box.height / 2;
+  const steps = Math.max(1, Math.min(20, payload.steps ?? 8));
+  const pause = () => new Promise(resolve => setTimeout(resolve, Math.max(0, Math.min(100, payload.interval_ms ?? 40))));
+  const at = (px: number, py: number) => document.elementFromPoint(px, py) ?? document.body;
+  const fire = (type: string, target: Element, px: number, py: number) => target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, composed: true, clientX: px, clientY: py, pointerId: 1, pointerType: "mouse", isPrimary: true, button: 0, buttons: type === "pointerup" ? 0 : 1 }));
+  const down = at(x, y);
+  fire("pointerdown", down, x, y);
+  for (let i = 1; i <= steps; i++) { await pause(); fire("pointermove", at(x + dx * i / steps, y + dy * i / steps), x + dx * i / steps, y + dy * i / steps); }
+  if (payload.esc) { await pause(); (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); }
+  await pause();
+  const up = at(x + dx, y + dy);
+  fire("pointerup", up, x + dx, y + dy);
+  let shared: Element | null = down;
+  while (shared && !shared.contains(up)) shared = shared.parentElement;
+  shared?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, composed: true, clientX: x + dx, clientY: y + dy, button: 0 }));
+  await new Promise(resolve => requestAnimationFrame(resolve));
+  return { ok: true, from: [x, y], to: [x + dx, y + dy] };
 }

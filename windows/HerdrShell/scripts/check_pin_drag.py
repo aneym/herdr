@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Drag a PINNED row on the PC Shell to reorder pins, through the app's own pointer path.
+"""Drag PINNED rows and a split divider on the PC Shell, through the app's own pointer path.
 
 Runs on Studio against the installed PC app (`pc.py ctl`) and the Studio herdr server it is
 attached to. The drag_pin hook presses, moves and releases at real points in the WebView, so
@@ -10,7 +10,8 @@ macos/HerdrShell/scripts/check_pin_drag.py:
   - a drag up two rows moves the pin: the rows and Ctrl+1..9 follow at once, the server
     agrees, and the release selects nothing;
   - Esc before the release, or a release far below the section, leaves the order alone;
-  - a press and release in place still selects the row.
+  - a press and release in place still selects the row;
+  - dragging a split divider right grows the left pane's ratio on the server.
 Refuses to run while a game is running. Writes windows/HerdrShell/checks/PIN-DRAG.txt.
 """
 import json
@@ -88,8 +89,8 @@ def main():
     made = herdr("workspace", "create", "--label", "drag-check", "--no-focus")
     ws = made["workspace"]["workspace_id"]
     try:
-        tabs = [made["tab"]["tab_id"]] + [herdr("tab", "create", "--workspace", ws, "--label", name, "--no-focus")["tab"]["tab_id"]
-                                          for name in ("drag-b", "drag-c", "drag-free")]
+        created = [herdr("tab", "create", "--workspace", ws, "--label", name, "--no-focus") for name in ("drag-b", "drag-c", "drag-free")]
+        tabs = [made["tab"]["tab_id"]] + [c["tab"]["tab_id"] for c in created]
         for tab in tabs[:3]:
             herdr("tab", "pin", tab)
         pins = [t for t in server_pins() if t in tabs[:3]]
@@ -129,6 +130,21 @@ def main():
         drag(b, 0)
         state = wait(lambda s: s.get("selected_tab") == b, timeout=5)
         check("a press in place still selects the row", state.get("selected_tab") == b, str(state.get("selected_tab")))
+
+        # A split divider drags too, as on the Mac: pane.resize moves herdr's own ratio.
+        root = created[2]["root_pane"]["pane_id"]
+        herdr("pane", "split", "--pane", root, "--direction", "right", "--no-focus")
+        ctl({"cmd": "open", "tab_id": tabs[3]})
+        split = lambda: herdr("pane", "layout", "--pane", root)["layout"]["splits"][0]  # noqa: E731
+        before = split()
+        wait(lambda s: s.get("selected_tab") == tabs[3] and len(s.get("panes", [])) == 2)
+        time.sleep(0.5)
+        ctl({"cmd": "drag_divider", "split_id": before["id"], "delta": 120, "steps": 8, "interval_ms": 40})
+        deadline = time.monotonic() + 5
+        while split()["ratio"] <= before["ratio"] + 0.05 and time.monotonic() < deadline:
+            time.sleep(0.3)
+        after = split()
+        check("a divider drag right grows the left pane on the server", after["ratio"] > before["ratio"] + 0.05, f"{before['ratio']} -> {after['ratio']}")
     finally:
         herdr("workspace", "close", ws)
         if selected_before:
