@@ -49,21 +49,35 @@ final class TerminalLinks {
         set("")
     }
 
-    /// True when a Cmd-click at `cell` lands on the resolved link: the click is the
-    /// link's, it opens through the server's activation, and the pane never sees it.
-    func activate(at cell: Cell) -> Bool {
-        guard !url.isEmpty, regions.contains(where: { $0.contains(col: cell.col, row: cell.row) }) else { return false }
-        let shift = NSEvent.modifierFlags.contains(.shift)
+    /// Resolve a click independently of hover. Completion reports whether the link
+    /// claimed it; a miss lets the surface replay the buffered native gesture.
+    /// Displayed-frame guards remain blocked on ANSI attach metadata; these RPCs
+    /// currently observe server state, not a proven identity of the displayed frame.
+    func activate(at cell: Cell, shift: Bool, completion: @escaping (Bool) -> Void) {
+        let cached = !url.isEmpty && regions.contains(where: { $0.contains(col: cell.col, row: cell.row) }) ? url : nil
         let (commands, paneId) = (self.commands, self.paneId)
         DispatchQueue.global(qos: .userInitiated).async {
-            guard let answer = commands.paneLinkActivate(paneId: paneId, row: cell.row, col: cell.col) else {
-                log("link activate failed \(paneId) \(cell.row):\(cell.col)")
-                return
+            // Clicks do not depend on a hover request completing first. Resolve checks
+            // for a link; activation supplies the full (possibly clipped) target.
+            if TerminalLinkDecision.needsResolution(cachedURL: cached) {
+                guard let found = commands.paneLinkResolve(paneId: paneId, row: cell.row, col: cell.col),
+                      found.contains(where: { $0.contains(col: cell.col, row: cell.row) }) else {
+                    DispatchQueue.main.async { completion(false) }
+                    return
+                }
             }
-            guard !answer.handled, let target = answer.url, Self.webURL(target) != nil else { return }
-            DispatchQueue.main.async { GhosttyRuntime.openLink(target, paneId: paneId, shift: shift) }
+            let answer = commands.paneLinkActivate(paneId: paneId, row: cell.row, col: cell.col)
+            let target = TerminalLinkDecision.openTarget(resolved: cached, activated: answer?.url,
+                                                         handled: answer?.handled ?? false)
+            DispatchQueue.main.async {
+                if let target, Self.webURL(target) != nil {
+                    GhosttyRuntime.openLink(target, paneId: paneId, shift: shift)
+                    completion(true)
+                } else {
+                    completion(answer?.handled ?? false)
+                }
+            }
         }
-        return true
     }
 
     private func request() {

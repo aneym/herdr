@@ -488,6 +488,13 @@ final class SurfaceView: NSView {
     /// Set while a Cmd-click that opened a server-resolved link is down: its drag and
     /// release belong to the link, not to the pane.
     private var linkClickDown = false
+    /// Buffer a claimed gesture until its independent click resolution finishes.
+    /// On a miss, replay the original press/drag/release through the native path.
+    private final class LinkGesture {
+        var events: [NSEvent]
+        init(_ event: NSEvent) { events = [event] }
+    }
+    private var pendingLinkGesture: LinkGesture?
     private lazy var links: TerminalLinks = {
         let links = TerminalLinks(paneId: paneId, socketPath: clipboardSocketPath)
         links.readSpan = { [unowned self] r in self.readCells((r.start_col, r.row), (r.end_col, r.row)) }
@@ -594,15 +601,43 @@ final class SurfaceView: NSView {
         // Hand first responder to the surface on every click (agent-zero's
         // terminals never took keys because this only happened once).
         window?.makeFirstResponder(self)
-        if event.modifierFlags.contains(.command), let c = viewportCell(surfacePoint(event)), links.activate(at: c) {
-            linkClickDown = true
+        if event.modifierFlags.contains(.command), let c = viewportCell(surfacePoint(event)) {
+            let gesture = LinkGesture(event)
+            pendingLinkGesture = gesture
+            links.activate(at: c, shift: event.modifierFlags.contains(.shift)) { [weak self] opened in
+                guard let self else { return }
+                let events = gesture.events
+                let isCurrent = self.pendingLinkGesture === gesture
+                if isCurrent { self.pendingLinkGesture = nil }
+                if opened {
+                    if isCurrent { self.linkClickDown = !events.contains(where: { $0.type == .leftMouseUp }) }
+                } else {
+                    for event in events {
+                        switch event.type {
+                        case .leftMouseDown: self.mouseDownNative(event)
+                        case .leftMouseUp:
+                            self.noteRelease()
+                            _ = self.sendButton(GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, event)
+                        case .leftMouseDragged:
+                            if self.appDragStart != nil, let c = self.cell(event) { self.appDragEnd = c }
+                            self.sendPos(event)
+                        default: break
+                        }
+                    }
+                }
+            }
             return
         }
+        mouseDownNative(event)
+    }
+
+    private func mouseDownNative(_ event: NSEvent) {
         notePress(event)
         _ = sendButton(GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, event)
     }
 
     override func mouseUp(with event: NSEvent) {
+        if let gesture = pendingLinkGesture { gesture.events.append(event); return }
         if linkClickDown { linkClickDown = false; return }
         noteRelease()
         _ = sendButton(GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, event)
@@ -634,6 +669,7 @@ final class SurfaceView: NSView {
         sendPos(event)
     }
     override func mouseDragged(with event: NSEvent) {
+        if let gesture = pendingLinkGesture { gesture.events.append(event); return }
         if linkClickDown { return }
         if appDragStart != nil, let c = cell(event) { appDragEnd = c }
         sendPos(event)

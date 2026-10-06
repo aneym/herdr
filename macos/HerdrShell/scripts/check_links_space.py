@@ -149,8 +149,11 @@ def main():
             got = wait(lambda s: s.get("opened_urls", []) != before, 8 if want else 2)
             opened = got.get("opened_urls", [])
             if want:
-                check(name, opened != before and bool(opened) and opened[-1] == want,
-                      f"last opened={(opened or [''])[-1][:48]} len={len((opened or [''])[-1])}")
+                # Allow duplicate callbacks to arrive before asserting exact count.
+                time.sleep(0.5)
+                opened = S.state().get("opened_urls", [])
+                check(name, opened == before + [want],
+                      f"new opens={opened[len(before):]}")
             else:
                 check(name, opened == before, f"opened {opened[len(before):]}")
 
