@@ -2732,7 +2732,7 @@ impl ClientShellState {
         let collapsed = hit.collapsed;
         let workspace_id = hit.workspace_id.clone();
         let tab_id = hit.tab_id.clone();
-        if chevron || key.starts_with("factory-background:") {
+        if !pin && (chevron || key.starts_with("factory-background:")) {
             let tree = self.tree_chrome_mut();
             if let Some(workspace_id) = key.strip_prefix("factory-background:services:") {
                 super::tree::ClientTreeChrome::toggle(&mut tree.factory_auto_expanded, workspace_id.to_owned());

@@ -83,6 +83,33 @@ impl ClientShellState {
         point: (u16, u16),
         outcome: &mut ClientShellInput,
     ) -> bool {
+        if let Some((_, pin, endpoint_id, tab_id)) = self.hits.endpoint_pins.iter()
+            .find(|(rect, _, _, _)| super::contains(*rect, point)).cloned() {
+            if super::contains(pin, point) {
+                if !self.endpoint_is_online(&endpoint_id) { return true; }
+                let Some(snapshot) = self.endpoints.iter()
+                    .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+                    .and_then(|endpoint| endpoint.snapshot.as_deref()) else { return true; };
+                let pinned = snapshot.pinned_tabs.iter().any(|pin| pin.tab_id == tab_id);
+                let boot_id = snapshot.boot_id.clone();
+                let id = format!("client-shell:{}", self.next_request_id);
+                self.next_request_id = self.next_request_id.saturating_add(1);
+                self.pending_requests.insert(id.clone(), PendingEndpointRequest {
+                    boot_id: boot_id.clone(), method_name: "tab.set_pinned".into(),
+                    confirmation_workspace_id: None, kind: PendingEndpointKind::Generic,
+                });
+                outcome.actions.push(ClientShellAction::Endpoint { endpoint_id, boot_id,
+                    request: Box::new(crate::api::schema::Request { id,
+                        method: crate::api::schema::Method::TabSetPinned(
+                            crate::api::schema::TabSetPinnedParams { tab_id, pinned: !pinned, priority: None }),
+                    }),
+                });
+            } else {
+                self.focus_or_activate(endpoint_id, ClientEndpointFocusTarget::Tab(tab_id), outcome);
+            }
+            outcome.repaint = true;
+            return true;
+        }
         let Some((endpoint_id, pane_id)) = self
             .hits
             .endpoint_agents
@@ -108,6 +135,20 @@ impl ClientShellState {
         use crate::input::KeybindAction;
         if !self.multi_endpoint_active() {
             return false;
+        }
+        if let KeybindAction::SwitchTab(index) = action {
+            let pins = self.endpoints.iter().flat_map(|endpoint| {
+                endpoint.snapshot.as_deref().map_or_else(Vec::new, |snapshot| {
+                    snapshot.pinned_tabs.iter().filter(|pin| snapshot.tabs.iter()
+                        .any(|tab| tab.tab_id == pin.tab_id))
+                        .map(|pin| (endpoint.endpoint_id.clone(), pin.tab_id.clone())).collect()
+                })
+            }).collect::<Vec<_>>();
+            if let Some((endpoint_id, tab_id)) = pins.get(index) {
+                self.focus_or_activate(endpoint_id.clone(), ClientEndpointFocusTarget::Tab(tab_id.clone()), outcome);
+                return true;
+            }
+            if !pins.is_empty() { return true; }
         }
         if matches!(
             action,

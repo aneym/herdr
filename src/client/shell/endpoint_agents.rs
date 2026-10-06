@@ -72,7 +72,16 @@ pub(super) fn render_expanded(
         hits,
         |row| row.agent.rows.len(),
         |buffer, rect, row, hits| {
-            super::agent_sidebar::render_agent_row(buffer, rect, &row.agent, config);
+            let pin = super::agent_sidebar::chat_pin_rect(rect);
+            let text_rect = Rect::new(rect.x, rect.y, rect.width.saturating_sub(pin.width), rect.height);
+            super::agent_sidebar::render_agent_row(buffer, text_rect, &row.agent, config);
+            let pinned = endpoints.iter().find(|endpoint| endpoint.endpoint_id == row.endpoint_id)
+                .and_then(|endpoint| endpoint.snapshot.as_deref())
+                .is_some_and(|snapshot| snapshot.pinned_tabs.iter().any(|pin| pin.tab_id == row.agent.tab_id));
+            put_text(buffer, pin.x, pin.y, pin.width, "⚲ ", Style::default()
+                .fg(if pinned { config.palette.accent } else { config.palette.overlay0 }));
+            // Only the toggle intercepts the normal pane-row click.
+            hits.endpoint_pins.push((pin, pin, row.endpoint_id.clone(), row.agent.tab_id.clone()));
             if row.stale {
                 buffer.set_style(
                     rect,

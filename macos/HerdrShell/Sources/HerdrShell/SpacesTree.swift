@@ -130,7 +130,7 @@ enum SpacesTree {
         var out = [SpacesRow(id: "agents", kind: .title, title: "agents")]
         let pins = input.tabs.filter { $0.pinIndex != nil }.sorted { ($0.pinIndex ?? 0) < ($1.pinIndex ?? 0) }
         if !pins.isEmpty {
-            out.append(SpacesRow(id: "pinned", kind: .section, title: "PINNED", trailing: "⌘1..9"))
+            out.append(SpacesRow(id: "pinned", kind: .section, title: "PINNED", trailing: pins.count == 1 ? "⌘1" : "⌘1..\(min(pins.count, 9))"))
             for tab in pins {
                 let source = input.spaces.first { $0.id == tab.space }?.name ?? tab.space
                 out.append(SpacesRow(id: "pinned:" + tab.id, kind: .tab, title: tab.label,

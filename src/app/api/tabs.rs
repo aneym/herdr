@@ -328,8 +328,6 @@ impl App {
             return tab_not_found(id, &target.tab_id);
         };
         let workspace_id = self.public_workspace_id(ws_idx);
-        // A closed chat drops out of the pinned order.
-        self.state.unpin_tab(&tab_id);
         if self
             .state
             .workspaces
@@ -359,6 +357,7 @@ impl App {
                     "closing this tab would close a worktree group",
                 );
             }
+            self.state.unpin_tab(&tab_id);
             let workspace = self.workspace_info(ws_idx);
             self.state.selected = ws_idx;
             self.state.close_selected_workspace();
@@ -391,6 +390,7 @@ impl App {
                 format!("tab {} could not be closed", target.tab_id),
             );
         }
+        self.state.unpin_tab(&tab_id);
         self.state.remove_plugin_pane_records(pane_ids);
         self.state.remove_unattached_terminal_ids(terminal_ids);
         self.shutdown_detached_terminal_runtimes();

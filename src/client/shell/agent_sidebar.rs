@@ -371,8 +371,7 @@ pub(super) fn tree_header_plus_rect(rect: Rect) -> Rect {
 }
 
 /// Pin toggle on a chat row (tab header, pinned row): the last cell pair on
-/// the row, so every chat row's pin lands in the same column. Factory lane
-/// rows are too dense for it; orchestrators pin those with `herdr tab pin`.
+/// the row, so every chat row's pin lands in the same column.
 pub(super) fn chat_pin_rect(rect: Rect) -> Rect {
     if rect.width < 4 {
         return Rect::default();
@@ -389,7 +388,7 @@ pub(super) fn tree_header_pin_rect(rect: Rect) -> Rect {
     Rect::new(rect.right().saturating_sub(6), rect.y, 2, 1)
 }
 
-fn render_pinned_tab_row(
+pub(super) fn render_pinned_tab_row(
     buffer: &mut Buffer,
     rect: Rect,
     row: &super::tree::PinnedTabRow,
@@ -422,13 +421,12 @@ fn render_pinned_tab_row(
         String::new()
     };
     let hint_width = display_width(&hint) as u16;
-    let mut space_width = display_width(&row.space_label) as u16;
     let name_x = icon_x.saturating_add(2);
     let budget = pin.x.saturating_sub(name_x);
-    // Space label yields to the chat name: it needs the digit plus a gap.
-    if space_width > 0 && space_width + u16::from(space_width > 0) + hint_width + u16::from(hint_width > 0) > budget {
-        space_width = budget.saturating_sub(hint_width + u16::from(hint_width > 0) + 1);
-    }
+    // Keep at least half the text budget for the chat title. The source space
+    // is secondary context and must yield even when its name is very long.
+    let space_width = (display_width(&row.space_label) as u16)
+        .min(budget.saturating_sub(hint_width + 2) / 2);
     let label_gap = u16::from(space_width > 0 && hint_width > 0);
     let space_x = pin.x.saturating_sub(hint_width + label_gap + space_width);
     let name_width = space_x
@@ -744,7 +742,8 @@ fn render_factory_tab(
         crate::factory_overlay::Attention::Warn => Some(palette.peach),
         crate::factory_overlay::Attention::None => None,
     };
-    let content_right = rect.right().saturating_sub(if attention_color.is_some() { 2 } else { 0 });
+    let pin = chat_pin_rect(rect);
+    let content_right = pin.x.saturating_sub(if attention_color.is_some() { 2 } else { 0 });
     let name_x = icon_x.saturating_add(2);
     let available = content_right.saturating_sub(name_x);
     let metadata = if row.reviewing {
@@ -839,7 +838,7 @@ fn render_factory_tab(
         }
     }
     if let Some(attention_color) = attention_color {
-        let mark_x = rect.right().saturating_sub(1);
+        let mark_x = pin.x.saturating_sub(1);
         put_text(buffer, mark_x, rect.y, 1.min(rect.right().saturating_sub(mark_x)), "!",
             Style::default().fg(attention_color));
     }
@@ -871,16 +870,18 @@ fn render_factory_tab(
         put_text(buffer, x, rect.y + 1, room as u16, &progress,
             Style::default().fg(palette.overlay0).add_modifier(Modifier::DIM));
     }
+    put_text(buffer, pin.x, rect.y, pin.width, "⚲ ",
+        Style::default().fg(if header.pinned { palette.accent } else { palette.overlay0 }));
     hits.tree_headers.push(TreeHeaderHit {
         rect,
         chevron: if header.collapsible { chevron } else { Rect::default() },
         plus: Rect::default(),
-        pin: Rect::default(),
+        pin,
         group: None,
         workspace_id: header.workspace_id.clone(),
         tab_id: header.tab_id.clone(),
         key: header.key.clone(),
-        pinned: false,
+        pinned: header.pinned,
         collapsed: header.collapsed,
     });
 }
@@ -1090,7 +1091,7 @@ fn render_tree_header(
         // Pin toggle, the row's last cell pair — same slot as the pinned
         // section rows, so the affordance doesn't wander between rows.
         trailing.push((
-            "\u{26b2}".to_owned(),
+            "\u{26b2} ".to_owned(),
             if header.pinned {
                 Style::default().fg(palette.accent)
             } else {
@@ -1142,7 +1143,9 @@ fn render_tree_header(
     hits.tree_headers.push(TreeHeaderHit {
         rect,
         chevron: if header.collapsible {
-            tree_header_chevron_rect(rect)
+            tree_header_chevron_rect(if is_space { rect } else {
+                Rect::new(rect.x, rect.y, rect.width.saturating_sub(2), rect.height)
+            })
         } else {
             Rect::default()
         },
@@ -1159,7 +1162,9 @@ fn render_tree_header(
             Rect::default()
         },
         group: group.map(|group| AgentGroupHit {
-            rect: tree_header_group_rect(rect, group, is_space),
+            rect: tree_header_group_rect(if is_space { rect } else {
+                Rect::new(rect.x, rect.y, rect.width.saturating_sub(2), rect.height)
+            }, group, is_space),
             key: group.key.clone(),
             owner_pane_id: group.owner_pane_id.clone(),
             expanded: group.expanded,

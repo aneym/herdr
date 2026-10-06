@@ -354,10 +354,14 @@ extension HerdrModel {
         }
         if !remotePins.isEmpty {
             if !rows.contains(where: { $0.id == "pinned" }) {
-                rows.insert(SpacesRow(id: "pinned", kind: .section, title: "PINNED", trailing: "⌘1..9"), at: 1)
+                rows.insert(SpacesRow(id: "pinned", kind: .section, title: "PINNED"), at: 1)
             }
             let end = rows.lastIndex(where: { $0.id == "pinned" || $0.id.hasPrefix("pinned:") }).map { $0 + 1 } ?? 1
             rows.insert(contentsOf: remotePins, at: end)
+            let count = min(rows.filter { $0.id.hasPrefix("pinned:") }.count, 9)
+            if let header = rows.firstIndex(where: { $0.id == "pinned" }) {
+                rows[header].trailing = count == 1 ? "⌘1" : "⌘1..\(count)"
+            }
             for i in rows.indices where rows[i].id != "pinned" {
                 rows[i].trailing = rows[i].trailing.replacingOccurrences(of: "⌘1..9", with: "")
             }

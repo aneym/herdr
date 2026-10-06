@@ -3169,6 +3169,44 @@ mod tests {
     }
 
     #[test]
+    fn rejected_tab_close_keeps_the_pinned_chat_pinned() {
+        let mut app = test_app();
+        let mut parent = Workspace::test_new("api-tab-close-pin-parent");
+        parent.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            key: "repo-key".into(),
+            label: "herdr".into(),
+            repo_root: "/repo/herdr".into(),
+            checkout_path: "/repo/herdr".into(),
+            is_linked_worktree: false,
+        });
+        let mut child = Workspace::test_new("api-tab-close-pin-child");
+        child.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            key: "repo-key".into(),
+            label: "herdr".into(),
+            repo_root: "/repo/herdr".into(),
+            checkout_path: "/repo/herdr-child".into(),
+            is_linked_worktree: true,
+        });
+        app.state.workspaces = vec![parent, child];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 1;
+        let tab_id = app.public_tab_id(0, 0).expect("tab id");
+        app.state.pin_tab(tab_id.clone(), 0);
+
+        let response = app.handle_api_request(crate::api::schema::Request {
+            id: "req_tab_close_pinned_group".into(),
+            method: crate::api::schema::Method::TabClose(crate::api::schema::TabTarget {
+                tab_id: tab_id.clone(),
+            }),
+        });
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+
+        assert_eq!(response["error"]["code"], "confirmation_required");
+        assert!(app.state.is_tab_pinned(&tab_id), "rejected close dropped the pin");
+    }
+
+    #[test]
     fn session_dirty_flag_schedules_debounced_save() {
         let mut app = test_app();
         app.policy.persist_session = true;

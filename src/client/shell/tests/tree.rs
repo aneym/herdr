@@ -221,10 +221,37 @@ fn pinned_chats_top_the_tree_and_own_cmd_digits_in_pin_order() {
         .iter()
         .find(|hit| hit.pinned && hit.key == "tab_3")
         .expect("pinned row hit");
+    for header in hits.tree_headers.iter().filter(|hit| hit.tab_id.is_some()) {
+        assert!(header.pin.intersection(header.chevron).is_empty(), "pin and disclosure overlap");
+    }
     let line: String = (hit.rect.x..hit.rect.right())
         .map(|x| buffer[(x, hit.rect.y)].symbol().to_owned())
         .collect();
     assert!(line.contains("beta 1"), "pinned row reads {line:?}");
+
+    // At narrow widths even a long source-space name must leave the title
+    // visible; this exercises the actual rendered cells, not a width helper.
+    let mut narrow_snapshot = state.snapshot.as_deref().expect("snapshot").clone();
+    narrow_snapshot.workspaces[1].label = "s".repeat(40);
+    let mut narrow_hits = ShellHitMap::default();
+    let mut narrow_buffer = ratatui::buffer::Buffer::empty(area);
+    crate::client::shell::agent_sidebar::render_agent_panel_with_overlay(
+        &mut narrow_buffer, area, &narrow_snapshot, &state.config, &tree, None, &mut scroll, &mut narrow_hits,
+    );
+    let row = narrow_hits.tree_headers.iter().find(|hit| hit.key == "tab_3" && hit.pinned).expect("pin");
+    let text: String = (row.rect.x..row.rect.right()).map(|x| narrow_buffer[(x, row.rect.y)].symbol()).collect();
+    assert!(text.contains("three"), "chat title missing: {text:?}");
+
+    // Regression at the input boundary: Navigate's plain digits must use the
+    // same pinned order as Cmd digits, rather than selecting the first space.
+    state.mode = ClientShellMode::Navigate;
+    let outcome = state.handle_input_bytes(b"1");
+    assert!(outcome.actions.iter().any(|action| matches!(action,
+        ClientShellAction::Endpoint { request, .. }
+            if matches!(&request.method, crate::api::schema::Method::TabFocus(target)
+                if target.tab_id == "tab_3")
+    )));
+
 }
 
 #[test]

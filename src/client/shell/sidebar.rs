@@ -569,7 +569,8 @@ pub(in crate::client::shell) fn ordered_sidebar_sections(
             Rect::new(content.x, content.y, content.width, agents_height),
         );
     }
-    let agents_first = config.section_order[0] == crate::config::SidebarSection::Agents;
+    let agents_first = !snapshot.pinned_tabs.is_empty()
+        || config.section_order[0] == crate::config::SidebarSection::Agents;
     let spaces_height = if config.spaces.max_visible > 0 && content.height >= 6 {
         content_fit_spaces_height(content, snapshot, config, state)
     } else {

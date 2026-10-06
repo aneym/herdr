@@ -259,8 +259,35 @@ pub(super) fn render_expanded(
     } else {
         Rect::new(area.right().saturating_sub(1), area.y, 1, area.height)
     };
+    // Shared pins remain above the machine/space list, independent of which
+    // endpoint is active. Each hit retains its endpoint identity.
+    let mut y = area.y;
+    let mut slot = 0;
+    for endpoint in state.endpoints {
+        let Some(snapshot) = endpoint.snapshot.as_deref() else { continue; };
+        for entry in super::tree::pinned_tab_entries(snapshot) {
+            let super::tree::AgentPanelListEntry::PinnedTab(mut row) = entry else { continue; };
+            if slot == 0 && y < area.bottom() {
+                put_text(buffer, area.x, y, area.width.saturating_sub(1), " pinned",
+                    Style::default().fg(palette.overlay0).add_modifier(Modifier::BOLD));
+                y += 1;
+            }
+            if y >= area.bottom().saturating_sub(1) { break; }
+            slot += 1;
+            row.shortcut = if slot <= 9 { slot } else { 0 };
+            row.active &= &endpoint.endpoint_id == state.active_endpoint_id;
+            let rect = Rect::new(area.x, y, area.width.saturating_sub(1), 1);
+            let hit_start = hits.tree_headers.len();
+            super::agent_sidebar::render_pinned_tab_row(buffer, rect, &row, config, hits);
+            hits.tree_headers.truncate(hit_start);
+            hits.endpoint_pins.push((rect, super::agent_sidebar::chat_pin_rect(rect),
+                endpoint.endpoint_id.clone(), row.tab_id));
+            y += 1;
+        }
+    }
+    let remaining = Rect::new(area.x, y, area.width, area.bottom().saturating_sub(y));
     let (workspace_area, detail_area) =
-        crate::ui::expanded_sidebar_sections(area, state.sidebar_section_split);
+        crate::ui::expanded_sidebar_sections(remaining, state.sidebar_section_split);
     hits.sidebar_section_divider =
         crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split);
     put_text(

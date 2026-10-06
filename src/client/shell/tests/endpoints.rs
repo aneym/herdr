@@ -78,6 +78,35 @@ fn state_with_remote() -> (ClientShellState, ClientEndpointId) {
 }
 
 #[test]
+fn pinned_chats_survive_aggregate_sidebar_and_route_to_their_endpoint() {
+    let (mut state, remote) = state_with_remote();
+    let mut snapshot = state.endpoints.iter().find(|endpoint| endpoint.endpoint_id == remote)
+        .and_then(|endpoint| endpoint.snapshot.clone()).expect("remote snapshot");
+    snapshot.pinned_tabs.push(crate::protocol::ClientShellPinnedTab {
+        tab_id: "tab_1".into(), workspace_id: "ws_1".into(),
+    });
+    state.set_endpoint_snapshot(&remote, snapshot);
+    state.compose(100, 28).expect("aggregate frame");
+    let (rect, pin, endpoint, _) = state.hits.endpoint_pins.iter()
+        .find(|(rect, pin, endpoint, _)| *rect != *pin && *endpoint == remote)
+        .cloned().expect("remote pin at top");
+    assert_eq!(rect.y, state.hits.sidebar_divider.y + 1);
+    let mut outcome = ClientShellInput::default();
+    assert!(state.handle_endpoint_agent_click((pin.x, pin.y), &mut outcome));
+    assert!(outcome.actions.iter().any(|action| matches!(action,
+        ClientShellAction::Endpoint { endpoint_id, request, .. }
+            if *endpoint_id == endpoint && matches!(&request.method,
+                crate::api::schema::Method::TabSetPinned(params) if !params.pinned && params.tab_id == "tab_1")
+    )));
+    let mut outcome = ClientShellInput::default();
+    assert!(state.handle_endpoint_navigation(crate::input::KeybindAction::SwitchTab(0), &mut outcome));
+    assert!(outcome.actions.iter().any(|action| matches!(action,
+        ClientShellAction::ActivateEndpoint { endpoint_id, target: Some(ClientEndpointFocusTarget::Tab(tab)), .. }
+            if *endpoint_id == remote && tab == "tab_1"
+    )));
+}
+
+#[test]
 fn factory_overlay_control_updates_active_endpoint_and_ignores_stale_revisions() {
     let (mut state, remote) = state_with_remote();
     let overlay =

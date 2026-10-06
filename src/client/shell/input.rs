@@ -788,16 +788,21 @@ impl ClientShellState {
                 (KeyCode::Char(digit), KeyModifiers::empty()),
             )
         }) {
-            let valid = self.snapshot.as_deref().is_some_and(|snapshot| {
-                self.navigation_workspace_entries(snapshot)
-                    .get(index)
-                    .is_some()
-            });
+            let pins_first = self.endpoints.iter().any(|endpoint| endpoint.snapshot
+                .as_deref().is_some_and(|snapshot| !snapshot.pinned_tabs.is_empty()))
+                || self.snapshot.as_deref().is_some_and(|snapshot| !snapshot.pinned_tabs.is_empty());
+            let action = if pins_first { KeybindAction::SwitchTab(index) }
+                else { KeybindAction::SwitchWorkspace(index) };
+            let valid = if pins_first && self.multi_endpoint_active() {
+                self.endpoints.iter().filter_map(|endpoint| endpoint.snapshot.as_deref())
+                    .map(|snapshot| snapshot.pinned_tabs.iter().filter(|pin| snapshot.tabs.iter()
+                        .any(|tab| tab.tab_id == pin.tab_id)).count()).sum::<usize>() > index
+            } else { self.indexed_navigation_target_exists(&KeybindMatch::Action(action)) };
             if valid {
                 self.mode = ClientShellMode::Terminal;
                 self.navigate_workspace_id = None;
                 self.record_binding(
-                    KeybindMatch::Action(KeybindAction::SwitchWorkspace(index)),
+                    KeybindMatch::Action(action),
                     outcome,
                 );
                 outcome.repaint = true;
@@ -947,6 +952,13 @@ impl ClientShellState {
                         .get(*index)
                         .is_some()
                 })
+            }
+            KeybindMatch::Action(KeybindAction::SwitchTab(index)) if self.multi_endpoint_active()
+                && self.endpoints.iter().filter_map(|endpoint| endpoint.snapshot.as_deref())
+                    .any(|snapshot| !snapshot.pinned_tabs.is_empty()) => {
+                self.endpoints.iter().filter_map(|endpoint| endpoint.snapshot.as_deref())
+                    .map(|snapshot| snapshot.pinned_tabs.iter().filter(|pin| snapshot.tabs.iter()
+                        .any(|tab| tab.tab_id == pin.tab_id)).count()).sum::<usize>() > *index
             }
             KeybindMatch::Action(KeybindAction::SwitchTab(index)) => self
                 .snapshot
