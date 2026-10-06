@@ -255,6 +255,44 @@ fn pinned_chats_top_the_tree_and_own_cmd_digits_in_pin_order() {
 }
 
 #[test]
+fn space_groups_keep_pinned_chats_above_the_groups() {
+    let tree = ClientTreeChrome::default();
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    let mut snapshot = tree_snapshot();
+    snapshot.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+        tab_id: "tab_3".into(),
+        workspace_id: "ws_2".into(),
+    }];
+    let mut overlay = crate::factory_overlay::FactoryOverlay::default();
+    overlay
+        .apply_areas_file(br#"{"space_groups":[{"name":"Rails","spaces":["beta"]}]}"#)
+        .expect("areas file");
+    let rows = crate::client::shell::agent_sidebar::agent_rows(&snapshot, &config, None);
+    let rows = crate::client::shell::tree::arrange_agent_hierarchy_with(
+        &snapshot, &tree, rows, !tree.show_tabs,
+    );
+    let entries = crate::client::shell::tree::tree_list_entries_with_overlay(
+        &snapshot,
+        &tree,
+        rows,
+        Some(&overlay),
+    );
+    let shape: Vec<String> = entries
+        .iter()
+        .filter_map(|entry| match entry {
+            AgentPanelListEntry::PinnedChatsHeader => Some("pinned".to_owned()),
+            AgentPanelListEntry::PinnedTab(row) => Some(format!("pin:{}", row.label)),
+            AgentPanelListEntry::SpaceGroupHeader { name } => Some(format!("group:{name}")),
+            AgentPanelListEntry::SpaceHeader(header) => Some(format!("space:{}", header.label)),
+            _ => None,
+        })
+        .collect();
+    // The pinned section owns the top and the Cmd digits; groups follow it.
+    assert_eq!(shape, ["pinned", "pin:three", "group:Rails", "space:beta", "space:alpha"]);
+}
+
+#[test]
 fn tree_nests_spaces_then_tabs_then_agents_in_workspace_order() {
     let tree = ClientTreeChrome::default();
     let state = tree_state(tree.clone());

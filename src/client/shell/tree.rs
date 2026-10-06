@@ -1758,9 +1758,21 @@ fn group_spaces(
     };
     let mut groups: Vec<Vec<AgentPanelListEntry>> =
         overlay.space_groups.iter().map(|_| Vec::new()).collect();
+    let mut prefix = Vec::new();
     let mut rest = Vec::new();
     let mut current: Option<usize> = None;
     for entry in entries {
+        if matches!(
+            entry,
+            AgentPanelListEntry::FactoryGoalPicker { .. }
+                | AgentPanelListEntry::PinnedChatsHeader
+                | AgentPanelListEntry::PinnedTab(_)
+        ) {
+            // As in reorder_spaces: the goal picker and the pinned section sit
+            // above every space, so no group header may come before them.
+            prefix.push(entry);
+            continue;
+        }
         if let AgentPanelListEntry::SpaceHeader(header) = &entry {
             current = overlay.space_group(&header.workspace_id, &header.label);
         }
@@ -1769,7 +1781,7 @@ fn group_spaces(
             None => rest.push(entry),
         }
     }
-    let mut out = Vec::new();
+    let mut out = prefix;
     for (group, members) in overlay.space_groups.iter().zip(groups) {
         if members.is_empty() {
             continue;
