@@ -8,8 +8,6 @@ pub(crate) struct Rank {
 }
 
 fn glob(pattern: &str, value: &str) -> bool {
-    let pattern = pattern.to_lowercase();
-    let value = value.to_lowercase();
     let parts = pattern.split('*').collect::<Vec<_>>();
     if parts.len() == 1 {
         return pattern == value;
@@ -45,7 +43,7 @@ fn matching_rank(config: &SidebarPriorityConfig, matches: impl Fn(&str) -> bool)
 
 pub(crate) fn workspace_rank(config: &SidebarPriorityConfig, id: &str, label: &str) -> Rank {
     matching_rank(config, |rule| {
-        !rule.starts_with("tab:") && (rule == id || rule.to_lowercase() == label.to_lowercase())
+        !rule.starts_with("tab:") && (rule.eq_ignore_ascii_case(id) || rule.eq_ignore_ascii_case(label))
     })
     .unwrap_or(Rank {
         value: config.order.len() as u32,
@@ -59,15 +57,73 @@ pub(crate) fn tab_rank(
     id: &str,
     label: &str,
 ) -> Rank {
+    if config.order.is_empty() && config.last.is_empty() {
+        return workspace;
+    }
+    let label = label.to_lowercase();
     matching_rank(config, |rule| {
         rule.strip_prefix("tab:")
-            .is_some_and(|pattern| pattern == id || glob(pattern, label))
+            .is_some_and(|pattern| pattern == id || glob(pattern, &label))
     })
     .unwrap_or(workspace)
 }
 
+/// Normalize once when configuration is applied, never in pane-scaled ranking loops.
+pub(crate) fn normalized(config: &SidebarPriorityConfig) -> SidebarPriorityConfig {
+    SidebarPriorityConfig {
+        order: config.order.iter().map(|rule| rule.to_lowercase()).collect(),
+        last: config.last.iter().map(|rule| rule.to_lowercase()).collect(),
+    }
+}
+
+impl super::App {
+    pub(crate) fn priority_workspace_rank(&self, index: usize) -> Rank {
+        let config = &self.state.sidebar_priority;
+        if config.order.is_empty() && config.last.is_empty() {
+            return Rank {
+                value: 0,
+                parked: false,
+            };
+        }
+        let workspace = &self.state.workspaces[index];
+        workspace_rank(
+            config,
+            &workspace.id,
+            &workspace.display_name_from(&self.state.terminals, &self.terminal_runtimes),
+        )
+    }
+
+    pub(crate) fn priority_tab_rank(&self, wi: usize, ti: usize) -> Rank {
+        self.priority_tab_rank_with_workspace(wi, ti, self.priority_workspace_rank(wi))
+    }
+
+    pub(super) fn priority_tab_rank_with_workspace(&self, wi: usize, ti: usize, rank: Rank) -> Rank {
+        let config = &self.state.sidebar_priority;
+        if config.order.is_empty() && config.last.is_empty() {
+            return Rank {
+                value: 0,
+                parked: false,
+            };
+        }
+        let workspace = &self.state.workspaces[wi];
+        let tab = &workspace.tabs[ti];
+        tab_rank(
+            config,
+            rank,
+            &crate::workspace::public_tab_id_for_number(&workspace.id, tab.number),
+            &workspace.tab_display_name(ti).unwrap_or_default(),
+        )
+    }
+}
+
 impl super::AppState {
     pub(crate) fn priority_workspace_rank(&self, index: usize) -> Rank {
+        if self.sidebar_priority.order.is_empty() && self.sidebar_priority.last.is_empty() {
+            return Rank {
+                value: 0,
+                parked: false,
+            };
+        }
         let workspace = &self.workspaces[index];
         workspace_rank(
             &self.sidebar_priority,
@@ -77,6 +133,12 @@ impl super::AppState {
     }
 
     pub(crate) fn priority_tab_rank(&self, workspace_index: usize, tab_index: usize) -> Rank {
+        if self.sidebar_priority.order.is_empty() && self.sidebar_priority.last.is_empty() {
+            return Rank {
+                value: 0,
+                parked: false,
+            };
+        }
         let workspace = &self.workspaces[workspace_index];
         let tab = &workspace.tabs[tab_index];
         tab_rank(

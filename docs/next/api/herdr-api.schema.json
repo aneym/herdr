@@ -1215,6 +1215,12 @@
                 }
               ]
             },
+            "sort_rank": {
+              "default": 0,
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
             "tab_id": {
               "type": "string"
             },
@@ -1278,11 +1284,20 @@
               "minimum": 0,
               "type": "integer"
             },
+            "parked": {
+              "type": "boolean"
+            },
             "profiles": {
               "items": {
                 "type": "string"
               },
               "type": "array"
+            },
+            "sort_rank": {
+              "default": 0,
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
             },
             "tab_count": {
               "format": "uint",
@@ -12332,6 +12347,12 @@
                 }
               ]
             },
+            "sort_rank": {
+              "default": 0,
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
             "tab_id": {
               "type": "string"
             },
@@ -12395,11 +12416,20 @@
               "minimum": 0,
               "type": "integer"
             },
+            "parked": {
+              "type": "boolean"
+            },
             "profiles": {
               "items": {
                 "type": "string"
               },
               "type": "array"
+            },
+            "sort_rank": {
+              "default": 0,
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
             },
             "tab_count": {
               "format": "uint",

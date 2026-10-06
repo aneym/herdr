@@ -911,7 +911,7 @@ pub(super) fn tree_list_entries_with_overlay(
                 if let Some(overlay) = tagged {
                     if super::sidebar_report::recording() && snapshot.tabs.iter().any(|tab|
                         tab.workspace_id == *workspace_id && overlay.tab(&tab.tab_id).is_some_and(|tag| tag.section.is_some())) {
-                        let mut report = super::sidebar_report::WorkspaceReport::new(workspace_id, tree, None);
+                        let mut report = super::sidebar_report::WorkspaceReport::new(workspace_id, tree, snapshot, None);
                         for tab in snapshot.tabs.iter().filter(|tab| tab.workspace_id == *workspace_id) {
                             if let Some(tag) = overlay.tab(&tab.tab_id) {
                                 report.add(&tab.tab_id, tag.kind,
@@ -1202,7 +1202,6 @@ fn append_factory_space(
                 || (tag.goal.as_deref() == Some(goal) && area.is_none_or(|area| tag.goal_area.as_deref() == Some(area)))
         })))
         .collect::<Vec<_>>();
-    tabs.sort_by_key(|tab| tab.sort_rank);
     let kind = |tab: &crate::protocol::ClientShellTab| {
         overlay
             .tab(&tab.tab_id)
@@ -1213,6 +1212,10 @@ fn append_factory_space(
             .tab(&tab.tab_id)
             .is_none_or(|tag| !tag.done && tag.kind != TabKind::Advisor)
     };
+    let first_orchestrator = tabs.iter().copied()
+        .find(|tab| foreground(tab) && kind(tab) == TabKind::Orchestrator)
+        .map(|tab| tab.tab_id.as_str());
+    tabs.sort_by_key(|tab| tab.sort_rank);
     let orchestrators = tabs
         .iter()
         .copied()
@@ -1237,7 +1240,6 @@ fn append_factory_space(
         .copied()
         .filter(|tab| overlay.tab(&tab.tab_id).is_none_or(|tag| !tag.done))
         .collect::<Vec<_>>();
-    let first_orchestrator = orchestrators.first().map(|tab| tab.tab_id.as_str());
     let lane_ids = lanes
         .iter()
         .map(|tab| tab.tab_id.as_str())
@@ -1674,7 +1676,7 @@ fn append_factory_space(
         }
     }
     if sectioned && super::sidebar_report::recording() {
-        let mut report = super::sidebar_report::WorkspaceReport::new(workspace_id, tree, filter);
+        let mut report = super::sidebar_report::WorkspaceReport::new(workspace_id, tree, snapshot, filter);
         report.placements(&out[start..]);
         report.kinds(overlay);
         for tab in snapshot.tabs.iter().filter(|tab| tab.workspace_id == workspace_id) {
@@ -2793,11 +2795,16 @@ impl ClientShellState {
             return;
         };
         let workspace_id = tab.workspace_id.clone();
+        let parked = snapshot.workspaces.iter()
+            .any(|ws| ws.workspace_id == workspace_id && ws.parked);
         let parent = self.factory_overlay()
             .and_then(|overlay| overlay.tab(tab_id))
             .and_then(|tag| tag.parent.clone());
         let tree = self.tree_chrome_mut();
         tree.collapsed_spaces.remove(&workspace_id);
+        if parked {
+            tree.expanded_parked_spaces.insert(workspace_id);
+        }
         if let Some(parent) = parent {
             tree.factory_collapsed_lanes.remove(&parent);
             tree.factory_expanded_lanes.insert(parent);

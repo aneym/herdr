@@ -203,7 +203,7 @@ impl App {
         let Some((ws_idx, tab_idx)) = self.parse_tab_id(&params.tab_id) else {
             return tab_not_found(id, &params.tab_id);
         };
-        let old_rank = self.state.priority_tab_rank(ws_idx, tab_idx).value;
+        let old_rank = self.priority_tab_rank(ws_idx, tab_idx).value;
         let workspace_id = self.state.workspaces[ws_idx].id.clone();
         let tab_id = self.public_tab_id(ws_idx, tab_idx).unwrap_or_else(|| {
             crate::workspace::public_tab_id_for_number(&workspace_id, tab_idx + 1)
@@ -218,7 +218,7 @@ impl App {
         };
         tab.set_custom_name(params.label.clone());
         crate::logging::tab_renamed(&workspace_id, &tab_id);
-        if self.state.priority_tab_rank(ws_idx, tab_idx).value != old_rank {
+        if self.priority_tab_rank(ws_idx, tab_idx).value != old_rank {
             self.state.priority_renamed_pins(&[tab_id.clone()]);
         }
         self.schedule_session_save();

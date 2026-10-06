@@ -537,7 +537,7 @@ impl App {
             agent_view_override: None,
             sidebar_agents: config.ui.sidebar.agents.clone(),
             sidebar_spaces: config.ui.sidebar.spaces.clone(),
-            sidebar_priority: config.ui.sidebar.priority.clone(),
+            sidebar_priority: priority::normalized(&config.ui.sidebar.priority),
             next_agent_state_change_seq: 0,
             confirm_close: config.ui.confirm_close,
             pane_borders: config.ui.pane_borders,
@@ -991,8 +991,8 @@ impl App {
                 self.state.sidebar_agents = config.ui.sidebar.agents.clone();
                 self.state.sidebar_automations = config.ui.sidebar.automations.clone();
                 self.state.sidebar_spaces = config.ui.sidebar.spaces.clone();
-                if self.state.sidebar_priority != config.ui.sidebar.priority {
-                    self.state.sidebar_priority = config.ui.sidebar.priority.clone();
+                if self.state.sidebar_priority != priority::normalized(&config.ui.sidebar.priority) {
+                    self.state.sidebar_priority = priority::normalized(&config.ui.sidebar.priority);
                     self.state.sort_priority_pins();
                     for index in 0..self.state.workspaces.len() {
                         self.emit_event(crate::api::schema::EventEnvelope {

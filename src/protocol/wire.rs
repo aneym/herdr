@@ -989,7 +989,6 @@ pub struct ClientShellPinnedTab {
     /// ClientShellSnapshot variant is rejected by current clients.
     #[serde(
         default,
-        skip_serializing_if = "Option::is_none",
         deserialize_with = "crate::api::schema::deserialize_pin_role"
     )]
     pub role: Option<crate::api::schema::TabRole>,
@@ -1070,7 +1069,7 @@ fn default_visible_in_profile() -> bool {
 pub struct ClientShellWorkspace {
     #[serde(default)]
     pub sort_rank: u32,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default)]
     pub parked: bool,
     /// Sidebar visibility in the endpoint's active profile; older peers expose all spaces.
     #[serde(default = "default_visible_in_profile")]

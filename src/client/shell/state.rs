@@ -1626,10 +1626,15 @@ impl ClientShellState {
             && tree.show_agents
             && tab_key.as_ref().is_some_and(|key| tree.collapsed_tabs.contains(key))
             && !super::tree::pane_is_tab_header(snapshot, tree, &self.config, pane_id);
+        let parked = snapshot.workspaces.iter()
+            .any(|ws| ws.workspace_id == workspace_id && ws.parked);
         let fold_by_default = self.groups_fold_by_default();
         let tree = self.tree_chrome_mut();
         let mut changed =
             !keep_folds && tree.show_spaces && tree.collapsed_spaces.remove(&workspace_id);
+        if parked {
+            changed |= tree.expanded_parked_spaces.insert(workspace_id);
+        }
         if !keep_folds && tab_hides_pane {
             if let Some(key) = tab_key {
                 changed |= tree.collapsed_tabs.remove(&key);

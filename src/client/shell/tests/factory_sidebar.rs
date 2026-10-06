@@ -2714,3 +2714,27 @@ fn space_groups_from_areas_file_split_the_sidebar_by_label_or_id() {
     // Areas-mode assignments are not sidebar groups.
     assert!(!rows.iter().any(|row| row.trim() == "recruiter"), "{rows:?}");
 }
+
+/// Pure tree projection algorithm: display rank must not change implicit parent identity.
+#[test]
+fn priority_tree_keeps_original_workflow_parent() {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| matches!(tab.tab_id.as_str(), "orch" | "orphan" | "plain-b"));
+    overlay.tabs.insert("plain-b".into(), TabTag {
+        kind: TabKind::Orchestrator, ..TabTag::default()
+    });
+    // Server projection of a tab:plain-b priority rule puts the later leader first.
+    snapshot.tabs.iter_mut().find(|tab| tab.tab_id == "orch").unwrap().sort_rank = 1;
+    let mut tree = ClientTreeChrome::default();
+    tree.factory_expanded_lanes.extend(["orch".into(), "plain-b".into()]);
+    let rows = crate::client::shell::tree::tree_list_entries_with_overlay(
+        &snapshot, &tree, Vec::new(), Some(&overlay));
+    let keys = rows.iter().filter_map(|row| match row {
+        crate::client::shell::tree::AgentPanelListEntry::FactoryTab(row) => Some(row.header.key.as_str()),
+        _ => None,
+    }).collect::<Vec<_>>();
+    let first = keys.iter().position(|id| *id == "plain-b").unwrap();
+    let original = keys.iter().position(|id| *id == "orch").unwrap();
+    let workflow = keys.iter().position(|id| *id == "orphan").unwrap();
+    assert!(first < original && original < workflow, "{keys:?}");
+}
