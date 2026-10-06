@@ -119,6 +119,8 @@ def main():
     state = wait(lambda s: s.get("docs_visible") is True)
     check("tab with docs shows column", state.get("docs_visible") is True)
     S.cmd({"cmd": "select", "tab": other})
+    wait(lambda s: s.get("selected_tab") == other)
+    S.cmd({"cmd": "docs", "open": True})
     state = wait(lambda s: s.get("selected_tab") == other and s.get("docs_visible") is False)
     check("tab without docs takes no column", state.get("docs_visible") is False)
     S.cmd({"cmd": "goal", "value": "rails"})

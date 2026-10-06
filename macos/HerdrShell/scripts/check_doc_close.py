@@ -110,6 +110,40 @@ def main():
     check("cmd+w after a click in the column leaves the tab and its pane", panes == [pane], f"panes in tab={panes}")
     shot("after-cmd-w")
 
+    S.key("\\", ["cmd"])
+    wait(lambda s: s.get("docs_visible") is True)
+    S.cmd({"cmd": "click", "target": "doc_tab", "label": "RESUME"})
+    wait(lambda s: s.get("docs", {}).get("active") == "RESUME")
+    S.cmd({"cmd": "click", "target": "+"})
+    time.sleep(0.2)
+    S.type_("https://example.invalid/docs-close")
+    S.key("return")
+    state = wait(lambda s: "example.invalid" in s.get("docs", {}).get("tabs", []), 10)
+    S.cmd({"cmd": "click", "target": "doc_tab", "label": "example.invalid"})
+    state = wait(lambda s: s.get("docs", {}).get("active") == "example.invalid", 10)
+    check("a URL document opens beside RESUME", state.get("docs", {}).get("active") == "example.invalid"
+          and "RESUME" in state.get("docs", {}).get("tabs", []),
+          f"active={state.get('docs', {}).get('active')} tabs={state.get('docs', {}).get('tabs')}")
+
+    S.key("w", ["cmd"])
+    state = wait(lambda s: "example.invalid" not in s.get("docs", {}).get("tabs", [])
+                 and s.get("docs", {}).get("active") == "RESUME", 5)
+    panes = [p["pane_id"] for p in api("pane", "list")["panes"] if p.get("tab_id") == tab]
+    check("the first cmd+w closes the URL document but leaves RESUME visible",
+          state.get("docs_visible") is True and state.get("docs", {}).get("active") == "RESUME"
+          and "example.invalid" not in state.get("docs", {}).get("tabs", []))
+    check("the first cmd+w leaves the tab and its pane", panes == [pane], f"panes in tab={panes}")
+
+    S.key("w", ["cmd"])
+    state = wait(lambda s: s.get("docs_visible") is False, 5)
+    time.sleep(1.0)
+    panes = [p["pane_id"] for p in api("pane", "list")["panes"] if p.get("tab_id") == tab]
+    check("the second cmd+w closes the remaining docs column",
+          state.get("docs_visible") is False and state["shell"]["doc_open"] is False,
+          f"docs_visible={state.get('docs_visible')} doc_open={state['shell']['doc_open']}")
+    check("the second cmd+w leaves the tab and its pane", panes == [pane], f"panes in tab={panes}")
+    shot("after-two-cmd-w")
+
     S.app("stop")
     S.lab("down")
     pathlib.Path(S.OUT).parent.mkdir(exist_ok=True)

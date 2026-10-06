@@ -466,8 +466,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     var docsOwnClose: Bool { root.docsOpen && (docPanel.hasFocus || docsLastClicked) }
 
     func closeDocs() {
-        docsLastClicked = false
         docPanel.closeActive()
+        docsLastClicked = root.docsOpen
     }
 
     /// Areas-mode row click, ⌘1..9 and Focus next/prev: select the tab. Docs stay as that tab left them.
