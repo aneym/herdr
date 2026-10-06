@@ -1,9 +1,9 @@
 title|agents|0|none||mute|agents||none||||
 space|space:ws_1|0|open||mute|agent-rails|3|act||wf-a|space:ws_1|
 section|section:ws_1:ORCHESTRATOR|1|none||mute|ORCHESTRATOR|⌘0|none||||
-tab|tab:orch|1|closed|●|working|orchestrator|1 · inbox 3|none||orch|tab:orch|
+tab|tab:orch|1|closed|●|working|orchestrator|1 workflow · inbox 3|none||orch|tab:orch|
 section|section:ws_1:LANES|1|none||mute|LANES|⌘1..9|none||||
-tab|tab:lane-a|1|closed|●|working|lane-a|2|none||lane-a|tab:lane-a|
+tab|tab:lane-a|1|closed|●|working|lane-a|2 workflows|none||lane-a|tab:lane-a|
 tab|tab:lane-b|1|none|○|mute|lane-b|idle|none||lane-b||dim
 tab|tab:plain-a|1|none|●|working|plain-a||none||plain-a||
 tab|tab:plain-b|1|none|●|working|plain-b||none||plain-b||

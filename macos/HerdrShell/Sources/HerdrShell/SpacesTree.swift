@@ -103,6 +103,9 @@ struct SpacesRow: Identifiable, Equatable {
 }
 
 enum SpacesTree {
+    /// Whether a child that needs action unfolds its lane. Off, as Rust tree.rs ACTION_UNFOLDS_LANE;
+    /// the folded header carries the child's "!" instead.
+    static let actionUnfoldsLane = false
     static func age(_ seconds: Double) -> String { let m = Int(max(0, seconds)) / 60; return m == 0 ? "<1m" : m < 60 ? "\(m)m" : "\(m / 60)h\(m % 60)m" }
     static func build(_ input: SpacesInput, overlay: Overlay, chrome: SpacesChrome, now: Double) -> [SpacesRow] {
         var out = [SpacesRow(id: "agents", kind: .title, title: "agents")]
@@ -155,7 +158,12 @@ enum SpacesTree {
                 let rank = ["none": 0, "warn": 1, "act": 2]
                 let attention = attentions.max { (rank[$0] ?? 0) < (rank[$1] ?? 0) } ?? "none"
                 let expandable = !children.isEmpty || !runs.isEmpty || !grouped.isEmpty
-                let open = (chrome.expandedTabs.contains(tab.id) || (t.kind != "orchestrator" && (!children.isEmpty || runs.contains { !$0.done })) || children.contains { $0.id == input.focusedTab } || attention == "act") && !chrome.collapsedTabs.contains(tab.id)
+                // As Rust factory_expanded (C45/C46): a lane opens on the user's expand or while the
+                // focused tab sits inside; running work and a child that needs action leave it folded
+                // (Alex, 2026-10-05: "default collapse everything workflows so we only see talking agent").
+                let groupedWorkflows = workflows.filter { w in grouped.contains { $0.id == parent(w) } }
+                let focusedInside = (children + grouped + groupedWorkflows).contains { $0.id == input.focusedTab }
+                let open = (chrome.expandedTabs.contains(tab.id) || focusedInside || (SpacesTree.actionUnfoldsLane && attention == "act")) && !chrome.collapsedTabs.contains(tab.id)
                 let priority = ["unknown": 0, "idle": 1, "done": 2, "working": 3, "blocked": 4]
                 var status = tab.agents.max { (priority[$0.status] ?? 0) < (priority[$1.status] ?? 0) }?.status ?? tab.status
                 if t.busy && ["idle", "done"].contains(status) { status = "working" }
@@ -171,8 +179,14 @@ enum SpacesTree {
                 if t.section == "reviewing" { trailing = t.review_url == nil ? "no link" : "review ↗"; link = t.review_url }
                 else if t.section == "scoping", let url = t.scope_url { trailing = "scope ↗"; link = url }
                 if expandable {
-                    let count = children.count + runs.filter { !$0.done }.count + grouped.count
-                    trailing = count > 0 ? String(count) : (idle ? t.idle_reason ?? "idle" : "")
+                    // agent:<id> runs and grouped lanes are agents; workflow tabs and other runs are workflows.
+                    let live = (runs + grouped.flatMap { tag($0).runs }).filter { !$0.done }
+                    let agents = grouped.count + live.filter { $0.id.hasPrefix("agent:") }.count
+                    let flows = children.count + groupedWorkflows.count + live.filter { !$0.id.hasPrefix("agent:") }.count
+                    let count = agents + flows
+                    let words = [agents > 0 ? "\(agents) agent" + (agents == 1 ? "" : "s") : nil,
+                                 flows > 0 ? "\(flows) workflow" + (flows == 1 ? "" : "s") : nil].compactMap { $0 }
+                    trailing = count > 0 ? words.joined(separator: " · ") : (idle ? t.idle_reason ?? "idle" : "")
                     // The terminal golden truncates the inbox suffix at 25 columns;
                     // native rows retain the complete orchestrator hint.
                     if t.kind == "orchestrator", let summary = t.summary, !summary.isEmpty { trailing = count > 0 ? trailing + " · " + summary : summary }

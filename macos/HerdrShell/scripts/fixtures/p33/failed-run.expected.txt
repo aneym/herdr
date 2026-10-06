@@ -1,5 +1,4 @@
 title|agents|0|none||mute|agents||none||||
 space|space:ws|0|open||mute|factory||none||lane|space:ws|
 section|section:ws:IMPLEMENTING|1|open||mute|IMPLEMENTING|⌘1..9|none|||section:ws:IMPLEMENTING|
-tab|tab:lane|1|open|○|mute|lane|idle|act||lane|tab:lane|dim
-run|run:build|2|none|✗|blocked|build run||act||lane||dim
+tab|tab:lane|1|closed|○|mute|lane|idle|act||lane|tab:lane|dim
