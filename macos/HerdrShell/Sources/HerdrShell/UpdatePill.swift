@@ -45,7 +45,7 @@ final class UpdateController: NSObject {
             src.resume()
             source = src
         }
-        let t = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+        let t = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
             self?.reload(show: false)
         }
         RunLoop.main.add(t, forMode: .common)
@@ -60,6 +60,32 @@ final class UpdateController: NSObject {
         current = UpdateRestart.offer(support: Channel.appSupport, running: Channel.commit, dismissed: dismissed)
         applyPill()
         if show, current != nil { openPopover() }
+        autoApply()
+    }
+
+    /// Seconds without keyboard or mouse input before a staged release installs itself.
+    static let autoIdleSeconds: Double = 90
+    /// Set false (`defaults write com.aneyman.herdr-shell herdr.shell.autoUpdate -bool false`)
+    /// to update only by clicking.
+    static let autoUpdateKey = "herdr.shell.autoUpdate"
+    private var applying = false
+
+    /// Installs a staged release with no click: after the machine has been idle for
+    /// autoIdleSeconds, or soon after an agent creates `apply.request` in the support
+    /// directory. Never mid-typing, never a release that failed or that Later put off.
+    /// The relaunch stays in the background unless this app was the active one.
+    private func autoApply() {
+        guard let current, !current.failed, !applying else { return }
+        let request = Channel.appSupport.appendingPathComponent("apply.request")
+        let asked = FileManager.default.fileExists(atPath: request.path)
+        let auto = Channel.store.object(forKey: Self.autoUpdateKey) as? Bool ?? true
+        guard asked || auto else { return }
+        let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
+        guard idle >= (asked ? 5 : Self.autoIdleSeconds) else { return }
+        try? FileManager.default.removeItem(at: request)
+        applying = true
+        log("auto update to \(current.commit) (\(asked ? "requested" : "idle")), idle \(Int(idle)) s")
+        restartNow(background: !NSApp.isActive)
     }
 
     private func applyPill() {
@@ -90,12 +116,15 @@ final class UpdateController: NSObject {
         popover.show(relativeTo: pill.bounds, of: pill, preferredEdge: .minY)
     }
 
-    func restartNow() {
-        guard let windowController else { return }
+    func restartNow(background: Bool = false) {
+        guard let windowController else { applying = false; return }
         windowController.saveForRelaunch()
         popover.performClose(nil)
-        if UpdateRestart.detach(waitPid: getpid(), installRoot: Channel.installRoot, support: Channel.appSupport, relaunch: .open) {
+        if UpdateRestart.detach(waitPid: getpid(), installRoot: Channel.installRoot, support: Channel.appSupport,
+                                relaunch: background ? .background : .open) {
             NSApp.terminate(nil)
+        } else {
+            applying = false
         }
     }
 

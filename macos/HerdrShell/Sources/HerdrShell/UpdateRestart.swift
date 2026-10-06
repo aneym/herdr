@@ -37,7 +37,8 @@ struct UpdateOffer {
     var reason: String
 }
 
-enum Relaunch { case open, exec }
+/// `background` opens the new app without activating it, for an update nobody clicked.
+enum Relaunch { case open, background, exec }
 
 /// Swift's overlay hides `fork`. The C function is what a detached helper needs.
 private func libcFork() -> Int32 {
@@ -225,8 +226,9 @@ enum UpdateRestart {
 
     static func spawn(_ app: URL, _ how: Relaunch) {
         switch how {
-        case .open:
-            let argv = openArgv(for: app)
+        case .open, .background:
+            var argv = openArgv(for: app)
+            if how == .background { argv.insert("-g", at: 1) }
             if let sink = ProcessInfo.processInfo.environment["SHELL_OPEN_SINK"], !sink.isEmpty,
                let data = try? JSONSerialization.data(withJSONObject: argv) {
                 try? data.write(to: URL(fileURLWithPath: sink))
@@ -248,7 +250,7 @@ enum UpdateRestart {
         let wait = Int32(args["wait-pid"] ?? "0") ?? 0
         let root = URL(fileURLWithPath: (args["install-root"] ?? Channel.installRoot.path) as String)
         let support = URL(fileURLWithPath: (args["support"] ?? Channel.appSupport.path) as String)
-        let how: Relaunch = args["relaunch"] == "exec" ? .exec : .open
+        let how: Relaunch = args["relaunch"] == "exec" ? .exec : args["relaunch"] == "background" ? .background : .open
         let deadline = Date().addingTimeInterval(30)
         while wait > 0 && pidIsAlive(wait) && Date() < deadline {
             usleep(20_000)
@@ -273,7 +275,7 @@ enum UpdateRestart {
             "--wait-pid", "\(waitPid)",
             "--install-root", installRoot.path,
             "--support", support.path,
-            "--relaunch", how == .exec ? "exec" : "open",
+            "--relaunch", how == .exec ? "exec" : how == .background ? "background" : "open",
         ]
         let pid = libcFork()
         if pid < 0 {
