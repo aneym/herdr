@@ -123,6 +123,9 @@ impl App {
                 encode_error(id, "agent_session_unknown", message)
             }
             Err(InPlaceAgentResumeError::Busy(message)) => encode_error(id, "agent_busy", message),
+            Err(InPlaceAgentResumeError::ArgvUnsupported(message)) => {
+                encode_error(id, "agent_argv_unsupported", message)
+            }
             Err(InPlaceAgentResumeError::NotRunning) => encode_error(
                 id,
                 "agent_not_running",

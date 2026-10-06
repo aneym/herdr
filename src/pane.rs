@@ -2400,6 +2400,7 @@ impl PaneRuntime {
             let compression_wake = compression.notifier();
             let rt = tokio::runtime::Handle::current();
             let delay_rt = rt.clone();
+            let exit_pid = child_pid.clone();
             let on_read = Box::new(move |bytes: &[u8]| {
                 let _content_write_guard = match content_write_lock.lock() {
                     Ok(guard) => guard,
@@ -2454,6 +2455,7 @@ impl PaneRuntime {
                 // unknowable. Checkpoint conservatively; normal autosave settles clean exits.
                 let _ = rt.block_on(exit_events.send(AppEvent::PaneDied {
                     pane_id,
+                    runtime_pid: Some(exit_pid.load(Ordering::Acquire)),
                     exit_reason: crate::platform::ChildExitReason::Handoff,
                 }));
                 debug!(pane = pane_id.raw(), "handoff PTY actor exiting");
@@ -2578,6 +2580,7 @@ impl PaneRuntime {
                 // Use blocking send — PaneDied is critical, must not be dropped
                 if let Err(e) = rt.block_on(events.send(AppEvent::PaneDied {
                     pane_id,
+                    runtime_pid: Some(child_pid.load(Ordering::Acquire)),
                     exit_reason,
                 })) {
                     error!(pane = pane_id.raw(), err = %e, "failed to send PaneDied event");
@@ -3667,6 +3670,11 @@ impl PaneRuntime {
             key,
             crossterm::event::KeyModifiers::empty(),
         )))
+    }
+
+    /// Whether the runtime's child wait has completed, without probing processes.
+    pub(crate) fn process_exited(&self) -> bool {
+        self.cwd_process_exited.load(Ordering::Acquire)
     }
 
     /// Get the current working directory of the child shell process.

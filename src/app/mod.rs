@@ -144,7 +144,8 @@ pub struct App {
     pub(crate) pending_worktree_remove_runtime_restores: HashMap<crate::layout::PaneId, u64>,
     /// Exits still owed by runtimes `agent.resume` replaced; each one is
     /// swallowed instead of closing or respawning the resumed pane.
-    pub(crate) pending_agent_resume_runtime_exits: HashMap<crate::layout::PaneId, usize>,
+    pub(crate) retained_agent_resume_panes: std::collections::HashSet<crate::layout::PaneId>,
+    pub(crate) pending_agent_resume_runtime_exits: HashMap<crate::layout::PaneId, Option<u32>>,
     pub(crate) next_api_worktree_operation_id: u64,
     pub(crate) next_auto_update_check: Option<Instant>,
     pub(crate) next_agent_manifest_update_check: Option<Instant>,
@@ -692,6 +693,7 @@ impl App {
             pending_worktree_remove_runtime_exits: HashMap::new(),
             pending_worktree_remove_runtime_restores: HashMap::new(),
             pending_agent_resume_runtime_exits: HashMap::new(),
+            retained_agent_resume_panes: std::collections::HashSet::new(),
             next_api_worktree_operation_id: 1,
             next_auto_update_check: version_check_enabled
                 .then_some(Instant::now() + AUTO_UPDATE_CHECK_INTERVAL),
@@ -991,7 +993,8 @@ impl App {
                 self.state.sidebar_agents = config.ui.sidebar.agents.clone();
                 self.state.sidebar_automations = config.ui.sidebar.automations.clone();
                 self.state.sidebar_spaces = config.ui.sidebar.spaces.clone();
-                if self.state.sidebar_priority != priority::normalized(&config.ui.sidebar.priority) {
+                if self.state.sidebar_priority != priority::normalized(&config.ui.sidebar.priority)
+                {
                     self.state.sidebar_priority = priority::normalized(&config.ui.sidebar.priority);
                     self.state.sort_priority_pins();
                     for index in 0..self.state.workspaces.len() {
@@ -1244,10 +1247,13 @@ mod tests {
         });
         app.state
             .set_tab_role(&tabs[2], Some(crate::api::schema::TabRole::Agent));
-        app.handle_api_request(serde_json::from_value(serde_json::json!({
-            "id": "desk", "method": "desk.open",
-            "params": { "tab_id": tabs[0], "ref": "https://example.com/restore" }
-        })).unwrap());
+        app.handle_api_request(
+            serde_json::from_value(serde_json::json!({
+                "id": "desk", "method": "desk.open",
+                "params": { "tab_id": tabs[0], "ref": "https://example.com/restore" }
+            }))
+            .unwrap(),
+        );
         let expected_desk = app.state.desks[&tabs[0]].clone();
         // A closed tab loses its desk immediately. Even an older snapshot's
         // entry for that tab must be pruned by both restore paths.
@@ -3544,10 +3550,12 @@ mod tests {
 
         app.handle_internal_event(AppEvent::PaneDied {
             pane_id: first_pane,
+            runtime_pid: None,
             exit_reason: crate::platform::ChildExitReason::Interrupted,
         });
         app.handle_internal_event(AppEvent::PaneDied {
             pane_id: second_pane,
+            runtime_pid: None,
             exit_reason: crate::platform::ChildExitReason::Interrupted,
         });
         assert!(app.state.workspaces.is_empty());
@@ -3580,6 +3588,7 @@ mod tests {
 
         app.handle_internal_event(AppEvent::PaneDied {
             pane_id,
+            runtime_pid: None,
             exit_reason: crate::platform::ChildExitReason::Interrupted,
         });
         assert!(crate::persist::load().is_some());
@@ -3614,6 +3623,7 @@ mod tests {
 
             app.handle_internal_event(AppEvent::PaneDied {
                 pane_id,
+                runtime_pid: None,
                 exit_reason: crate::platform::ChildExitReason::Interrupted,
             });
             app.state.workspaces = vec![Workspace::test_new("newer")];
@@ -3623,6 +3633,7 @@ mod tests {
             if another_interrupted_exit {
                 app.handle_internal_event(AppEvent::PaneDied {
                     pane_id: app.state.workspaces[0].tabs[0].root_pane,
+                    runtime_pid: None,
                     exit_reason: crate::platform::ChildExitReason::Interrupted,
                 });
             }

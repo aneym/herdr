@@ -4217,6 +4217,7 @@ mod tests {
         let deadline = state.next_pending_agent_notification_deadline().unwrap();
         state.handle_app_event(AppEvent::PaneDied {
             pane_id: bg_pane_id,
+            runtime_pid: None,
             exit_reason: crate::platform::ChildExitReason::Exited,
         });
 
