@@ -6,9 +6,6 @@ rust-version = "1.85"
 publish = false
 description = "Client core for the Windows Herdr Shell: wire mirror, terminal attach and JSON API clients."
 
-# Standalone until the HerdrShell workspace exists; keeps the root herdr crate out of this build.
-[workspace]
-
 [lib]
 path = "src/lib.rs"
 

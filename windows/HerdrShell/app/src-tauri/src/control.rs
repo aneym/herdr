@@ -12,24 +12,40 @@ mod imp {
         BitBlt, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetWindowDC,
         ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, SRCCOPY,
     };
-    use windows_sys::Win32::Storage::FileSystem::{
-        ReadFile, WriteFile, PIPE_ACCESS_DUPLEX,
-    };
+    use windows_sys::Win32::Storage::FileSystem::{ReadFile, WriteFile, PIPE_ACCESS_DUPLEX};
     use windows_sys::Win32::Storage::Xps::PrintWindow;
     use windows_sys::Win32::System::Pipes::{
-        ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE,
-        PIPE_WAIT,
+        ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_BYTE,
+        PIPE_TYPE_BYTE, PIPE_WAIT,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         GetClientRect, GetForegroundWindow, IsWindowVisible, PW_RENDERFULLCONTENT,
     };
 
+    static RESULT_TX: Mutex<Option<(String, Sender<Value>)>> = Mutex::new(None);
+
     static READ_TX: Mutex<Option<Sender<String>>> = Mutex::new(None);
 
-    pub fn deliver_read(text: String) {
-        if let Some(tx) = READ_TX.lock().unwrap().take() {
+    pub fn deliver_read(text: String) -> Result<(), String> {
+        if let Some(tx) = READ_TX
+            .lock()
+            .map_err(|_| "control read lock poisoned")?
+            .take()
+        {
             let _ = tx.send(text);
         }
+        Ok(())
+    }
+    pub fn deliver_result(cmd: &str, result: Value) -> Result<(), String> {
+        let mut guard = RESULT_TX
+            .lock()
+            .map_err(|_| "control result lock poisoned")?;
+        if guard.as_ref().is_some_and(|(pending, _)| pending == cmd) {
+            if let Some((_, tx)) = guard.take() {
+                let _ = tx.send(result);
+            }
+        }
+        Ok(())
     }
 
     pub fn start(app: AppHandle) {
@@ -100,7 +116,7 @@ mod imp {
         let line = String::from_utf8_lossy(&buf);
         let req: Value = serde_json::from_str(line.trim()).unwrap_or_else(|_| json!({}));
         let resp = dispatch(app, &req);
-        let out = format!("{}\n", serde_json::to_string(&resp).unwrap());
+        let out = format!("{resp}\n");
         unsafe {
             let mut w = 0u32;
             WriteFile(
@@ -135,23 +151,57 @@ mod imp {
                 }
             }
             "read" => read_cmd(app),
+            cmd @ ("ui" | "open" | "key" | "wheel") => forward_cmd(app, cmd, req),
             _ => json!({"ok": false, "error": "unknown cmd"}),
         }
     }
 
     fn read_cmd(app: &AppHandle) -> Value {
         let (tx, rx) = channel();
-        *READ_TX.lock().unwrap() = Some(tx);
-        if app.emit("ctl-read", ()).is_err() {
-            *READ_TX.lock().unwrap() = None;
-            return json!({"ok": false, "error": "frontend not reachable"});
+        match READ_TX.lock() {
+            Ok(mut guard) => *guard = Some(tx),
+            Err(_) => return json!({"ok":false,"error":"control read lock poisoned"}),
         }
-        match rx.recv_timeout(Duration::from_secs(5)) {
-            Ok(text) => json!({"ok": true, "text": text}),
-            Err(_) => {
-                *READ_TX.lock().unwrap() = None;
-                json!({"ok": false, "error": "read timeout"})
+        let result = if app.emit("ctl-read", ()).is_err() {
+            json!({"ok":false,"error":"frontend not reachable"})
+        } else {
+            match rx.recv_timeout(Duration::from_secs(5)) {
+                Ok(text) => json!({"ok":true,"text":text}),
+                Err(_) => json!({"ok":false,"error":"read timeout"}),
             }
+        };
+        match READ_TX.lock() {
+            Ok(mut guard) => {
+                *guard = None;
+                result
+            }
+            Err(_) => json!({"ok":false,"error":"control read lock poisoned"}),
+        }
+    }
+    fn forward_cmd(app: &AppHandle, cmd: &str, req: &Value) -> Value {
+        let (tx, rx) = channel();
+        match RESULT_TX.lock() {
+            Ok(mut guard) => *guard = Some((cmd.into(), tx)),
+            Err(_) => return json!({"ok":false,"error":"control result lock poisoned"}),
+        }
+        let mut payload = req.clone();
+        if let Some(object) = payload.as_object_mut() {
+            object.remove("cmd");
+        }
+        let result = if app.emit(&format!("ctl-{cmd}"), payload).is_err() {
+            json!({"ok":false,"error":"frontend not reachable"})
+        } else {
+            match rx.recv_timeout(Duration::from_secs(3)) {
+                Ok(result) => result,
+                Err(_) => json!({"ok":false,"error":format!("{cmd} timeout")}),
+            }
+        };
+        match RESULT_TX.lock() {
+            Ok(mut guard) => {
+                *guard = None;
+                result
+            }
+            Err(_) => json!({"ok":false,"error":"control result lock poisoned"}),
         }
     }
 
@@ -199,16 +249,20 @@ mod imp {
             bmi.bmiHeader.biBitCount = 32;
             bmi.bmiHeader.biCompression = BI_RGB;
             let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
-            let dib =
-                CreateDIBSection(mem, &bmi, DIB_RGB_COLORS, &mut bits, std::ptr::null_mut(), 0);
+            let dib = CreateDIBSection(
+                mem,
+                &bmi,
+                DIB_RGB_COLORS,
+                &mut bits,
+                std::ptr::null_mut(),
+                0,
+            );
             if dib.is_null() || bits.is_null() {
                 DeleteDC(mem);
                 return Err("CreateDIBSection failed".into());
             }
             let old = SelectObject(mem, dib);
-            if PrintWindow(hwnd, mem, PW_RENDERFULLCONTENT) == 0
-                || pixels_black(bits, w, hgt)
-            {
+            if PrintWindow(hwnd, mem, PW_RENDERFULLCONTENT) == 0 || pixels_black(bits, w, hgt) {
                 let src = GetWindowDC(hwnd);
                 if !src.is_null() {
                     BitBlt(mem, 0, 0, w, hgt, src, 0, 0, SRCCOPY);
@@ -245,4 +299,11 @@ pub use imp::*;
 pub fn start(_app: tauri::AppHandle) {}
 
 #[cfg(not(windows))]
-pub fn deliver_read(_text: String) {}
+pub fn deliver_read(_text: String) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn deliver_result(_cmd: &str, _result: serde_json::Value) -> Result<(), String> {
+    Ok(())
+}

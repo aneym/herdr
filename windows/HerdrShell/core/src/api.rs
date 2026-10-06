@@ -7,11 +7,10 @@ use std::fmt;
 use std::io::{self, BufRead, BufReader, Write};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use interprocess::local_socket::Stream as LocalStream;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
-use crate::endpoint::Endpoint;
+use crate::endpoint::{Conn, Endpoint};
 
 #[derive(Debug)]
 pub enum ApiError {
@@ -105,10 +104,13 @@ impl ApiClient {
                 "expected subscription_started, got {result}"
             )));
         }
+        if let Conn::Tcp(stream) = reader.get_mut() {
+            stream.set_read_timeout(None)?;
+        }
         Ok(EventStream { reader })
     }
 
-    fn send(&self, method: &str, params: Value) -> Result<BufReader<LocalStream>, ApiError> {
+    fn send(&self, method: &str, params: Value) -> Result<BufReader<Conn>, ApiError> {
         let id = format!(
             "herdr-shell:{}",
             self.next_id.fetch_add(1, Ordering::Relaxed)
@@ -126,7 +128,17 @@ impl ApiClient {
 /// Live `events.subscribe` stream. Each item is one event envelope
 /// (`{"event": ..., "data": ...}`); a server error line ends the stream with `Err`.
 pub struct EventStream {
-    reader: BufReader<LocalStream>,
+    reader: BufReader<Conn>,
+}
+
+impl EventStream {
+    /// A clone used only to shut down a blocking TCP subscription when it is replaced.
+    pub fn tcp_shutdown_handle(&self) -> io::Result<Option<std::net::TcpStream>> {
+        match self.reader.get_ref() {
+            Conn::Tcp(s) => s.try_clone().map(Some),
+            Conn::Local(_) => Ok(None),
+        }
+    }
 }
 
 impl Iterator for EventStream {

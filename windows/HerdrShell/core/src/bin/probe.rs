@@ -33,7 +33,12 @@ fn run(args: &[String]) -> Result<(), String> {
         .ok_or_else(|| format!("{SOCKET_PATH_ENV_VAR} is not set\n{USAGE}"))?;
     match args.first().map(String::as_str) {
         Some("api") => run_api(&api_endpoint, args.get(1).map(String::as_str)),
-        Some("attach") => run_attach(&api_endpoint.client_for_api(), &args[1..]),
+        Some("attach") => run_attach(
+            &api_endpoint
+                .client_for_api()
+                .ok_or("TCP endpoints require an explicit client endpoint")?,
+            &args[1..],
+        ),
         _ => Err(USAGE.to_owned()),
     }
 }
@@ -87,7 +92,7 @@ fn run_attach(endpoint: &Endpoint, args: &[String]) -> Result<(), String> {
         .map_err(|err| {
             format!(
                 "attach to {terminal_id} via {}: {err}",
-                endpoint.path().display()
+                format!("{endpoint:?}")
             )
         })?;
     let deadline = Instant::now() + Duration::from_secs(seconds);

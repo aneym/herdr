@@ -5,14 +5,14 @@
 //! terminal bytes as-is, and mouse / keyboard mode changes rendered as the same
 //! DECSET and kitty keyboard sequences herdr's attach client writes to Ghostty.
 
+use std::collections::VecDeque;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::Arc;
-use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use interprocess::local_socket::Stream as LocalStream;
+use crate::endpoint::Conn;
 
 use crate::endpoint::{poll_read, prepare_polled, write_all_polled, Endpoint, ReadPoll};
 use crate::wire::{
@@ -164,10 +164,8 @@ enum Command {
 
 /// A live direct-terminal attach. Dropping it detaches.
 pub struct AttachClient {
-    commands: Sender<Command>,
-    events: Receiver<AttachEvent>,
-    writable: Arc<AtomicBool>,
-    thread: Option<JoinHandle<()>>,
+    handle: AttachHandle,
+    events: Option<Receiver<AttachEvent>>,
 }
 
 impl AttachClient {
@@ -204,17 +202,73 @@ impl AttachClient {
             writable: Arc::clone(&writable),
             modes: ModeTracker::default(),
         };
-        let thread = std::thread::Builder::new()
+        std::thread::Builder::new()
             .name("herdr-shell-attach".into())
             .spawn(move || worker.run())?;
         Ok(Self {
-            commands: command_tx,
-            events: event_rx,
-            writable,
-            thread: Some(thread),
+            handle: AttachHandle {
+                commands: command_tx,
+                writable,
+            },
+            events: Some(event_rx),
         })
     }
 
+    pub fn into_parts(mut self) -> (AttachHandle, Receiver<AttachEvent>) {
+        // The receiver exists until the consuming split; dropping the client now must not detach.
+        let events = self.events.take().expect("unsplit attach receiver");
+        (self.handle.clone(), events)
+    }
+
+    pub fn send_input(&self, data: &[u8]) -> io::Result<()> {
+        self.handle.send_input(data)
+    }
+    pub fn resize(&self, cols: u16, rows: u16) -> io::Result<()> {
+        self.handle.resize(cols, rows)
+    }
+    pub fn scroll(&self, direction: AttachScrollDirection, lines: u16) -> io::Result<()> {
+        self.handle.scroll(direction, lines)
+    }
+    pub fn take_control(&self) -> io::Result<()> {
+        self.handle.take_control()
+    }
+    pub fn detach(&self) -> io::Result<()> {
+        self.handle.detach()
+    }
+    pub fn is_writable(&self) -> bool {
+        self.handle.is_writable()
+    }
+    pub fn try_recv(&self) -> Option<AttachEvent> {
+        match self.events.as_ref()?.try_recv() {
+            Ok(event) => Some(event),
+            Err(TryRecvError::Empty | TryRecvError::Disconnected) => None,
+        }
+    }
+
+    /// Waits up to `timeout` for the next event. `None` on timeout or after `Closed`.
+    pub fn recv_timeout(&self, timeout: Duration) -> Option<AttachEvent> {
+        match self.events.as_ref()?.recv_timeout(timeout) {
+            Ok(event) => Some(event),
+            Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => None,
+        }
+    }
+}
+
+impl Drop for AttachClient {
+    fn drop(&mut self) {
+        if self.events.is_some() {
+            let _ = self.handle.detach();
+        }
+    }
+}
+
+/// Command half of an attach; never holds a receive lock. Last sender drop ends the worker.
+#[derive(Clone)]
+pub struct AttachHandle {
+    commands: Sender<Command>,
+    writable: Arc<AtomicBool>,
+}
+impl AttachHandle {
     /// Sends raw input bytes. Refused while observing.
     pub fn send_input(&self, data: &[u8]) -> io::Result<()> {
         if !self.writable.load(Ordering::Acquire) {
@@ -256,21 +310,6 @@ impl AttachClient {
         self.writable.load(Ordering::Acquire)
     }
 
-    pub fn try_recv(&self) -> Option<AttachEvent> {
-        match self.events.try_recv() {
-            Ok(event) => Some(event),
-            Err(TryRecvError::Empty | TryRecvError::Disconnected) => None,
-        }
-    }
-
-    /// Waits up to `timeout` for the next event. `None` on timeout or after `Closed`.
-    pub fn recv_timeout(&self, timeout: Duration) -> Option<AttachEvent> {
-        match self.events.recv_timeout(timeout) {
-            Ok(event) => Some(event),
-            Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => None,
-        }
-    }
-
     fn command(&self, command: Command) -> io::Result<()> {
         self.commands
             .send(command)
@@ -278,16 +317,9 @@ impl AttachClient {
     }
 }
 
-impl Drop for AttachClient {
-    fn drop(&mut self) {
-        let _ = self.commands.send(Command::Detach);
-        // The worker exits after writing Detach; do not block the caller on it.
-        drop(self.thread.take());
-    }
-}
-
 struct Session {
-    stream: LocalStream,
+    stream: Conn,
+    initial: VecDeque<ServerMessage>,
     reader: FrameReader,
     buf: Vec<u8>,
 }
@@ -303,6 +335,7 @@ impl Session {
         prepare_polled(&mut stream)?;
         let mut session = Self {
             stream,
+            initial: VecDeque::new(),
             reader: FrameReader::new(MAX_GRAPHICS_FRAME_SIZE),
             buf: vec![0u8; READ_CHUNK],
         };
@@ -349,6 +382,38 @@ impl Session {
             }
         }
         session.send(request)?;
+        // Welcome only accepts the protocol. The attach itself can still be refused
+        // (for example, another client owns the terminal). A first render confirms it.
+        let deadline = Instant::now() + HANDSHAKE_TIMEOUT;
+        let mut initial = VecDeque::new();
+        loop {
+            match session.next_message()? {
+                Some(ServerMessage::ServerShutdown { reason }) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::ConnectionRefused,
+                        reason.unwrap_or_else(|| "herdr refused attach".into()),
+                    ));
+                }
+                Some(ServerMessage::ClientShellError { message }) => {
+                    return Err(io::Error::new(io::ErrorKind::ConnectionRefused, message));
+                }
+                Some(message) => {
+                    let rendered = matches!(message, ServerMessage::Terminal(_));
+                    initial.push_back(message);
+                    if rendered {
+                        break;
+                    }
+                }
+                None if Instant::now() >= deadline => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "timed out waiting for initial terminal render",
+                    ));
+                }
+                None => std::thread::sleep(IDLE_POLL),
+            }
+        }
+        session.initial = initial;
         Ok(session)
     }
 
@@ -360,6 +425,9 @@ impl Session {
     /// Returns a buffered or newly read message; `Ok(None)` when nothing is ready.
     /// EOF surfaces as `UnexpectedEof`.
     fn next_message(&mut self) -> io::Result<Option<ServerMessage>> {
+        if let Some(message) = self.initial.pop_front() {
+            return Ok(Some(message));
+        }
         if let Some(message) = self.buffered_message()? {
             return Ok(Some(message));
         }

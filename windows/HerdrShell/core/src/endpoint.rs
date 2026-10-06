@@ -5,7 +5,9 @@
 //! `C:\...\herdr.sock` maps to the pipe herdr's server (or the studio relay) listens on.
 
 use std::io::{self, Read, Write};
+use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use interprocess::local_socket::Stream as LocalStream;
 
@@ -14,6 +16,7 @@ pub const SOCKET_PATH_ENV_VAR: &str = "HERDR_SOCKET_PATH";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Endpoint {
+    Tcp(SocketAddr),
     #[cfg(unix)]
     UnixSocket(PathBuf),
     #[cfg(windows)]
@@ -40,43 +43,79 @@ impl Endpoint {
             .map(Self::from_path)
     }
 
-    pub fn path(&self) -> &Path {
+    pub fn path(&self) -> Option<&Path> {
         match self {
+            Endpoint::Tcp(_) => None,
             #[cfg(unix)]
-            Endpoint::UnixSocket(path) => path,
+            Endpoint::UnixSocket(path) => Some(path),
             #[cfg(windows)]
-            Endpoint::NamedPipe(path) => path,
+            Endpoint::NamedPipe(path) => Some(path),
         }
     }
 
     /// The client-protocol endpoint beside an API endpoint: `herdr.sock` -> `herdr-client.sock`
     /// (herdr `derive_client_socket_from_api_socket`).
-    pub fn client_for_api(&self) -> Self {
-        let api = self.path();
+    pub fn client_for_api(&self) -> Option<Self> {
+        let api = self.path()?;
         let stem = api
             .file_stem()
             .and_then(|stem| stem.to_str())
             .unwrap_or("herdr");
         let parent = api.parent().unwrap_or_else(|| Path::new(""));
-        Self::from_path(parent.join(format!("{stem}-client.sock")))
+        Some(Self::from_path(parent.join(format!("{stem}-client.sock"))))
     }
 
     /// Opens a blocking stream to this endpoint.
-    pub fn connect(&self) -> io::Result<LocalStream> {
+    pub fn connect(&self) -> io::Result<Conn> {
         match self {
+            Endpoint::Tcp(addr) => {
+                let stream = TcpStream::connect_timeout(addr, Duration::from_secs(2))?;
+                stream.set_nodelay(true)?;
+                stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+                stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+                Ok(Conn::Tcp(stream))
+            }
             #[cfg(unix)]
             Endpoint::UnixSocket(path) => {
                 use interprocess::local_socket::{prelude::*, GenericFilePath};
                 let name = path.as_path().to_fs_name::<GenericFilePath>()?;
-                LocalStream::connect(name)
+                LocalStream::connect(name).map(Conn::Local)
             }
             #[cfg(windows)]
             Endpoint::NamedPipe(path) => {
                 use interprocess::local_socket::{prelude::*, GenericNamespaced};
                 let name = path.to_string_lossy().to_string();
                 let name = name.to_ns_name::<GenericNamespaced>()?;
-                LocalStream::connect(name)
+                LocalStream::connect(name).map(Conn::Local)
             }
+        }
+    }
+}
+
+/// Transport shared by the API and direct-terminal protocols.
+pub enum Conn {
+    Local(LocalStream),
+    Tcp(TcpStream),
+}
+impl Read for Conn {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Self::Local(s) => s.read(buf),
+            Self::Tcp(s) => s.read(buf),
+        }
+    }
+}
+impl Write for Conn {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            Self::Local(s) => s.write(buf),
+            Self::Tcp(s) => s.write(buf),
+        }
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Self::Local(s) => s.flush(),
+            Self::Tcp(s) => s.flush(),
         }
     }
 }
@@ -94,7 +133,13 @@ pub enum ReadPoll {
 /// Unix sockets switch to non-blocking mode. Windows synchronous pipes stay blocking:
 /// a pending `ReadFile` would serialize behind it every `WriteFile` on the same handle,
 /// so readers check `PeekNamedPipe` first (as herdr's own client does).
-pub fn prepare_polled(stream: &mut LocalStream) -> io::Result<()> {
+pub fn prepare_polled(stream: &mut Conn) -> io::Result<()> {
+    let Conn::Local(stream) = stream else {
+        if let Conn::Tcp(stream) = stream {
+            return stream.set_nonblocking(true);
+        }
+        unreachable!();
+    };
     #[cfg(unix)]
     {
         use interprocess::local_socket::traits::Stream as _;
@@ -108,7 +153,28 @@ pub fn prepare_polled(stream: &mut LocalStream) -> io::Result<()> {
 }
 
 /// Reads whatever is available without blocking.
-pub fn poll_read(stream: &mut LocalStream, buf: &mut [u8]) -> io::Result<ReadPoll> {
+pub fn poll_read(stream: &mut Conn, buf: &mut [u8]) -> io::Result<ReadPoll> {
+    if let Conn::Tcp(stream) = stream {
+        return match stream.read(buf) {
+            Ok(0) => Ok(ReadPoll::Closed),
+            Ok(n) => Ok(ReadPoll::Data(n)),
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    io::ErrorKind::WouldBlock
+                        | io::ErrorKind::Interrupted
+                        | io::ErrorKind::TimedOut
+                ) =>
+            {
+                Ok(ReadPoll::Pending)
+            }
+            Err(e) if is_connection_closed_error(&e) => Ok(ReadPoll::Closed),
+            Err(e) => Err(e),
+        };
+    }
+    let Conn::Local(stream) = stream else {
+        unreachable!()
+    };
     #[cfg(unix)]
     {
         match stream.read(buf) {
@@ -145,7 +211,7 @@ pub fn poll_read(stream: &mut LocalStream, buf: &mut [u8]) -> io::Result<ReadPol
 }
 
 /// Writes all bytes, retrying while a non-blocking socket is full.
-pub fn write_all_polled(stream: &mut LocalStream, mut data: &[u8]) -> io::Result<()> {
+pub fn write_all_polled(stream: &mut Conn, mut data: &[u8]) -> io::Result<()> {
     while !data.is_empty() {
         match stream.write(data) {
             Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
