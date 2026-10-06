@@ -33,7 +33,7 @@ export default function Chat({ machine, pane, focused, visible, onItems }: { mac
   const refresh = useRef<() => void>(() => {});
   const load = useRef<() => void>(() => {}), composer = useRef<HTMLTextAreaElement>(null), scroll = useRef<HTMLDivElement>(null), stick = useRef(true);
   useEffect(() => {
-    let disposed = false, busy = false;
+    let disposed = false, busy = false, earlierQueued = false;
     const reader = new ChatTail(machine, pane), writer = new ChatSender(machine, pane, setSend);
     tail.current = reader; sender.current = writer;
     const publish = () => {
@@ -43,9 +43,16 @@ export default function Chat({ machine, pane, focused, visible, onItems }: { mac
       setWaiting(reader.waiting); setEarlier(reader.earlier); setError("");
     };
     const run = async (earlier = false) => {
+      if (earlier) earlierQueued = true;
       if (disposed || busy || document.hidden || !active.current) return;
       busy = true;
-      try { if (earlier) await reader.loadEarlier(); else await reader.refresh(); publish(); }
+      try {
+        if (!earlierQueued) { await reader.refresh(); publish(); }
+        while (earlierQueued && !disposed && active.current && !document.hidden) {
+          earlierQueued = false;
+          await reader.loadEarlier(); publish();
+        }
+      }
       catch (error) { if (!disposed) setError(String(error)); }
       finally { busy = false; }
     };
@@ -80,9 +87,9 @@ export default function Chat({ machine, pane, focused, visible, onItems }: { mac
     </div>
     <div className="chat-bottom">
       <div className="chat-status" role="status">{name} · {status}{send.status && ` · ${send.status}`}{error && ` · ${error}`}</div>
-      {send.warning && <div className="chat-warning">{send.status}<button onClick={() => setText(sender.current?.cancel() ?? "")}>Cancel</button>{(send.status === "There's unsent text in the terminal" || send.status === "Can't see the prompt; send anyway?") && <button onClick={() => submit(true)}>Send anyway</button>}</div>}
+      {send.text && <div className="chat-warning">{send.status}<button onClick={() => { const pending = sender.current?.cancel() ?? ""; setText(current => current || pending); }}>Cancel</button>{(send.status === "There's unsent text in the terminal" || send.status === "Can't see the prompt; send anyway?") && <button onClick={() => submit(true)}>Send anyway</button>}</div>}
       <form className="chat-composer" onSubmit={event => { event.preventDefault(); submit(); }}>
-        <textarea ref={composer} value={text} onChange={event => setText(event.target.value)} aria-label="Message" placeholder={`Message ${name}`} rows={3} disabled={!!send.text} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); submit(); } }} />
+        <textarea ref={composer} value={text} onChange={event => setText(event.target.value)} aria-label="Message" placeholder={`Message ${name}`} rows={3} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); submit(); } }} />
         <div className="chat-composer-footer"><span>Enter to send · Shift+Enter for a new line</span><button type="submit" disabled={!text.trim() || !!send.text}>Send</button></div>
       </form>
     </div>

@@ -29,9 +29,9 @@ export class ChatSender {
           this.publish("Held: will send when the terminal stops asking"); await wait(3000);
         }
         if (this.disposed || generation !== this.generation) return;
-        const screen = await bridge.api(this.machine, "pane.read", { pane_id: this.pane, source: "visible", lines: 12, format: "ansi", strip_ansi: false }) as { text: string };
+        const screen = await bridge.api(this.machine, "pane.read", { pane_id: this.pane, source: "visible", lines: 12, format: "ansi", strip_ansi: false }) as { type: "pane_read"; read: { text: string } };
         if (this.disposed || generation !== this.generation) return;
-        const guard = prompt(screen.text);
+        const guard = prompt(screen.read.text);
         if (!anyway && guard !== "clear") { this.publish(guard === "draft" ? "There's unsent text in the terminal" : "Can't see the prompt; send anyway?", true); return; }
         this.publish("Sending");
         const points = Array.from(text);

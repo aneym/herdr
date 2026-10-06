@@ -3,7 +3,7 @@ import { feed, transcriptPath } from "./transcript";
 import type { ChatAgent, ChatItem } from "./transcript";
 export const BLOCK = 2 * 1024 * 1024;
 export async function getAgent(machine: string, pane: string): Promise<ChatAgent> {
-  const result = await bridge.api(machine, "agent.get", { target: pane }) as { agent: ChatAgent };
+  const result = await bridge.api(machine, "agent.get", { target: pane }) as { type: "agent_info"; agent: ChatAgent };
   return result.agent;
 }
 /** All calls are serialized by the visible chat, including backward reads. */
