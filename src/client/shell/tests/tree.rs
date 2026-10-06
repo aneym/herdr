@@ -1562,3 +1562,79 @@ fn agent_pin_section_digits_drag_boundary_and_role_menu() {
     state.set_snapshot(Box::new(snapshot));
     assert!(!shape(&state, &tree).iter().any(|entry| entry == "agents"));
 }
+
+/// Pure sidebar projection guards role filtering, empty-space retention, and
+/// layer-dependent rollups. The existing pin interaction test only checks the
+/// leading sections, so a duplicate chat under its space would go unnoticed.
+#[test]
+fn agent_pin_appears_only_in_agents_while_plain_pin_stays_in_space() {
+    let tree = ClientTreeChrome::default();
+    let mut state = tree_state(tree.clone());
+    let mut snapshot = tree_snapshot();
+    snapshot.pinned_tabs = vec![
+        crate::protocol::ClientShellPinnedTab {
+            tab_id: "tab_1".into(),
+            workspace_id: "ws_1".into(),
+            role: Some(crate::api::schema::TabRole::Agent),
+        },
+        crate::protocol::ClientShellPinnedTab {
+            tab_id: "tab_2".into(),
+            workspace_id: "ws_1".into(),
+            role: None,
+        },
+    ];
+    snapshot.agents[0].agent_status = AgentStatus::Working;
+    snapshot.agents[1].agent_status = AgentStatus::Idle;
+    state.set_snapshot(Box::new(snapshot));
+    assert_eq!(
+        shape(&state, &tree),
+        [
+            "agents",
+            "pin:1:one:alpha",
+            "pinned",
+            "pin:2:two:alpha",
+            "space:alpha",
+            "tab:two",
+            "space:beta",
+            "tab:three",
+        ]
+    );
+    let snapshot = state.snapshot.as_deref().expect("snapshot");
+    assert!(state.focused_space_numbered_tab_ids(snapshot).is_empty());
+    assert_eq!(state.numbered_tab_ids(snapshot), ["tab_1", "tab_2"]);
+
+    let mut hidden_layers = tree.clone();
+    hidden_layers.show_tabs = false;
+    hidden_layers.show_agents = false;
+    let entries = panel_entries(&state, &hidden_layers);
+    let header = entries
+        .iter()
+        .find_map(|entry| match entry {
+            AgentPanelListEntry::SpaceHeader(header) if header.workspace_id == "ws_1" => {
+                Some(header)
+            }
+            _ => None,
+        })
+        .expect("space header");
+    assert_eq!(header.child_states, [AgentStatus::Idle]);
+    assert!(entries.iter().any(|entry| matches!(entry,
+        AgentPanelListEntry::PinnedTab(row) if row.tab_id == "tab_1" && row.status == AgentStatus::Working
+    )));
+
+    // With no ordinary chats left, even an agentless agent pin keeps its space.
+    let mut snapshot = snapshot.clone();
+    snapshot.tabs.retain(|tab| tab.tab_id != "tab_2");
+    snapshot.agents.retain(|agent| agent.workspace_id != "ws_1");
+    snapshot.pinned_tabs.truncate(1);
+    state.set_snapshot(Box::new(snapshot));
+    assert_eq!(
+        shape(&state, &tree),
+        [
+            "agents",
+            "pin:1:one:alpha",
+            "space:alpha",
+            "space:beta",
+            "tab:three",
+        ]
+    );
+}

@@ -549,6 +549,7 @@ fn factory_row_states(
             &rows,
             overlay,
             0,
+            &HashSet::new(), // Pinned rows retain the full rollup, including agents.
         )
     });
     let mut states = HashMap::new();
@@ -743,6 +744,22 @@ pub(super) fn tree_list_entries_with_overlay(
     rows: Vec<AgentRow>,
     overlay: Option<&crate::factory_overlay::FactoryOverlay>,
 ) -> Vec<AgentPanelListEntry> {
+    let agent_tabs = snapshot
+        .pinned_tabs
+        .iter()
+        .filter(|pin| pin.role == Some(crate::api::schema::TabRole::Agent))
+        .map(|pin| pin.tab_id.as_str())
+        .collect::<HashSet<_>>();
+    let agent_spaces = if agent_tabs.is_empty() {
+        HashSet::new()
+    } else {
+        snapshot
+            .tabs
+            .iter()
+            .filter(|tab| agent_tabs.contains(tab.tab_id.as_str()))
+            .map(|tab| tab.workspace_id.as_str())
+            .collect::<HashSet<_>>()
+    };
     let mut workspace_order = Vec::<String>::new();
     let mut by_workspace = HashMap::<String, Vec<AgentRow>>::new();
     for row in rows {
@@ -756,7 +773,8 @@ pub(super) fn tree_list_entries_with_overlay(
             .push(row);
     }
 
-    if let Some(overlay) = overlay {
+    if overlay.is_some() || !agent_spaces.is_empty() {
+        // Include agent-only spaces even after their chats move to Agents.
         // Include agentless tagged spaces and collapsed spaces with tabs, so
         // folding an untagged space does not remove it from the hidden count.
         // Preserve the existing relative order of agent-bearing spaces.
@@ -768,13 +786,17 @@ pub(super) fn tree_list_entries_with_overlay(
                 && tree.collapsed_spaces.contains(id)
                 && snapshot.tabs.iter().any(|tab| &tab.workspace_id == id);
             if workspace_order.contains(id)
-                || !(collapsed_with_tabs || overlay.space_is_tagged(
-                    snapshot
-                        .tabs
-                        .iter()
-                        .filter(|tab| &tab.workspace_id == id)
-                        .map(|tab| tab.tab_id.as_str()),
-                ))
+                || !(workspace.visible_in_profile && agent_spaces.contains(id.as_str())
+                    || overlay.is_some_and(|overlay| {
+                        collapsed_with_tabs
+                            || overlay.space_is_tagged(
+                                snapshot
+                                    .tabs
+                                    .iter()
+                                    .filter(|tab| &tab.workspace_id == id)
+                                    .map(|tab| tab.tab_id.as_str()),
+                            )
+                    }))
             {
                 continue;
             }
@@ -805,7 +827,10 @@ pub(super) fn tree_list_entries_with_overlay(
     let mut hidden_out = Vec::<AgentPanelListEntry>::new();
     let mut hidden_spaces = HashSet::<String>::new();
     for workspace_id in &workspace_order {
-        let workspace_rows = by_workspace.remove(workspace_id).unwrap_or_default();
+        let mut workspace_rows = by_workspace.remove(workspace_id).unwrap_or_default();
+        if !agent_tabs.is_empty() {
+            workspace_rows.retain(|row| !agent_tabs.contains(row.tab_id.as_str()));
+        }
         let tagged = overlay.filter(|overlay| {
             overlay.space_is_tagged(
                 snapshot
@@ -855,7 +880,7 @@ pub(super) fn tree_list_entries_with_overlay(
                     .then(|| tree_header_group(&workspace_rows))
                     .flatten(),
                 space_attention: overlay.and_then(|overlay| {
-                    space_attention(snapshot, overlay, workspace_id)
+                    space_attention(snapshot, overlay, workspace_id, &agent_tabs)
                 }),
                 factory_space: tagged.is_some(),
             }));
@@ -887,6 +912,7 @@ pub(super) fn tree_list_entries_with_overlay(
                 &workspace_rows,
                 overlay,
                 space_indent,
+                &agent_tabs,
             );
             continue;
         }
@@ -1034,7 +1060,7 @@ pub(super) fn tree_list_entries_with_overlay(
                 active: false,
                 group: None,
                 space_attention: overlay.and_then(|overlay| {
-                    space_attention(snapshot, overlay, workspace_id)
+                    space_attention(snapshot, overlay, workspace_id, &agent_tabs)
                 }),
                 factory_space: false,
             });
@@ -1094,12 +1120,14 @@ fn space_attention(
     snapshot: &ClientShellSnapshot,
     overlay: &crate::factory_overlay::FactoryOverlay,
     workspace_id: &str,
+    agent_tabs: &HashSet<&str>,
 ) -> Option<(crate::factory_overlay::Attention, String)> {
     let tag = overlay.space(workspace_id);
     let rolled = snapshot
         .tabs
         .iter()
         .filter(|tab| tab.workspace_id == workspace_id)
+        .filter(|tab| !agent_tabs.contains(tab.tab_id.as_str()))
         .filter_map(|tab| overlay.tab(&tab.tab_id))
         .map(|tag| tag.attention)
         .max_by_key(|attention| attention.rank());
@@ -1116,6 +1144,7 @@ fn space_attention(
 }
 
 /// Group a tagged space in tab order. Only unknown/untagged tabs keep agent rows.
+#[allow(clippy::too_many_arguments)] // Space rows exclude agent pins; pinned rollups use the same renderer without exclusions.
 fn append_factory_space(
     out: &mut Vec<AgentPanelListEntry>,
     snapshot: &ClientShellSnapshot,
@@ -1124,6 +1153,7 @@ fn append_factory_space(
     rows: &[AgentRow],
     overlay: &crate::factory_overlay::FactoryOverlay,
     indent: u8,
+    agent_tabs: &HashSet<&str>,
 ) {
     use crate::factory_overlay::{TabKind, TabMode, TabSection};
     let start = out.len();
@@ -1136,6 +1166,7 @@ fn append_factory_space(
         .tabs
         .iter()
         .filter(|tab| tab.workspace_id == workspace_id)
+        .filter(|tab| !agent_tabs.contains(tab.tab_id.as_str()))
         .filter(|tab| filter.is_none_or(|filter| overlay.tab(&tab.tab_id).is_some_and(|tag| {
             let (goal, area) = filter.split_once(':').map_or((filter, None), |(goal, area)| (goal, Some(area)));
             tag.kind == TabKind::Orchestrator || tag.mode == TabMode::Auto
@@ -1630,14 +1661,25 @@ fn append_factory_space(
                     else { super::sidebar_report::section_label(tag.section) };
                 label.map(str::to_owned)
             });
-            let hidden = if !tabs.iter().any(|candidate| candidate.tab_id == tab.tab_id) { "goal_filter" }
-                else if tag.done || tag.kind == TabKind::Advisor { "background" }
-                else if tag.mode == TabMode::Parked { "parked_folded" }
-                else if tag.mode == TabMode::Auto { "auto_folded" }
-                else if tag.section == Some(TabSection::Closed) { "closed_folded" }
-                else if under.is_some() { "group_folded" }
-                else if tag.kind == TabKind::Workflow && first_orchestrator.is_none() { "services_folded" }
-                else { "unplaced" };
+            let hidden = if agent_tabs.contains(tab.tab_id.as_str()) {
+                "agents_section"
+            } else if !tabs.iter().any(|candidate| candidate.tab_id == tab.tab_id) {
+                "goal_filter"
+            } else if tag.done || tag.kind == TabKind::Advisor {
+                "background"
+            } else if tag.mode == TabMode::Parked {
+                "parked_folded"
+            } else if tag.mode == TabMode::Auto {
+                "auto_folded"
+            } else if tag.section == Some(TabSection::Closed) {
+                "closed_folded"
+            } else if under.is_some() {
+                "group_folded"
+            } else if tag.kind == TabKind::Workflow && first_orchestrator.is_none() {
+                "services_folded"
+            } else {
+                "unplaced"
+            };
             report.add(&tab.tab_id, tag.kind, section, under, hidden);
         }
         report.inherit_sections();
