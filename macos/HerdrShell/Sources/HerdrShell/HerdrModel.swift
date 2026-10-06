@@ -9,7 +9,7 @@ struct Snapshot: Decodable {
         let focused: Bool?; let active_tab_id: String?; let tokens: [String: String]?
     }
     /// `work_status` is herdr's one answer to "is this chat working" (server app/work_status.rs); older servers omit it.
-    struct Tab: Decodable { let tab_id: String; let workspace_id: String; let label: String?; let number: Int; let agent_status: String?; let pane_count: Int?; let pin_index: Int?; var work_status: String? = nil; var role: String? = nil }
+    struct Tab: Decodable { let tab_id: String; let workspace_id: String; let label: String?; let number: Int; let agent_status: String?; let pane_count: Int?; let pin_index: Int?; var work_status: String? = nil; var role: String? = nil; var desk: DeskInfo? = nil }
     struct Pane: Decodable {
         let pane_id: String; let tab_id: String; let terminal_id: String; let agent_status: String?; let focused: Bool?
         // Titles the quick switcher matches. Older snapshots omit them.

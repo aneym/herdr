@@ -1283,6 +1283,7 @@ impl AppState {
             let closing_tab_id =
                 public_tab_id_for_index(ws, ws.active_tab).unwrap_or_else(|| workspace_id.clone());
             ws.close_active_tab();
+            self.prune_desks();
             self.remove_plugin_pane_records(pane_ids);
             self.remove_unattached_terminal_ids(terminal_ids);
             crate::logging::tab_closed(&workspace_id, &closing_tab_id);
@@ -4983,6 +4984,25 @@ mod tests {
         state.close_pane();
 
         assert!(state.deferred_attention_read.is_none());
+        state.assert_invariants_for_test();
+    }
+
+    // Reviewer regression: exercise the real workspace/action/desk lifecycle together.
+    #[test]
+    fn close_tab_prunes_desk() {
+        let mut state = app_with_workspaces(&["test"]);
+        let tab_idx = state.workspaces[0].test_add_tab(Some("desk"));
+        state.workspaces[0].switch_tab(tab_idx);
+        let tab_id = public_tab_id_for_index(&state.workspaces[0], tab_idx).unwrap();
+        let kept_id = public_tab_id_for_index(&state.workspaces[0], 0).unwrap();
+        state.desks.insert(tab_id.clone(), Default::default());
+        state.desks.insert(kept_id.clone(), Default::default());
+
+        assert!(!state.close_tab());
+
+        assert!(!state.desks.contains_key(&tab_id));
+        assert!(state.desks.contains_key(&kept_id));
+        assert_eq!(state.workspaces[0].tabs.len(), 1);
         state.assert_invariants_for_test();
     }
 

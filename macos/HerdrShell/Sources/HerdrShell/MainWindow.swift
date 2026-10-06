@@ -418,7 +418,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     /// the normal snapshot path.
     func machinesChanged() {
         let remote = [state.selectedTab, pendingSelectTab].contains { $0.map(Machines.isRemote) == true }
-        guard remote else { return }
+        guard remote else { refreshDocs(); return }
         snapshotChanged()
     }
 
@@ -452,8 +452,44 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         focusPane(focusedPaneByTab[tabId] ?? host.rects.first?.0.paneId)
     }
 
+    private var seenDeskIds: [String: Set<String>]?
+
+    func openOnDesk(_ url: URL, paneId: String?) {
+        let tabId = paneId.flatMap { id in model.pane(id)?.tab_id } ?? state.selectedTab
+        guard let tabId else { return }
+        var params: [String: Any] = ["ref": url.isFileURL ? url.path : url.absoluteString, "opened_by": "user"]
+        if let paneId { params["pane_id"] = paneId } else { params["tab_id"] = tabId }
+        let cmds = commands
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = cmds.deskReply("desk.open", params: params)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .unsupported: self.docPanel.addTransient(url, tabId: tabId)
+                case .failed: return
+                case .result: break
+                }
+                SidebarState.store.set(true, forKey: Self.docsShownKey(tabId))
+                if self.state.selectedTab == tabId { self.setDocs(open: true) }
+            }
+        }
+    }
+
     private func refreshDocs() {
-        docPanel.show(model: model, tabId: state.selectedTab)
+        let snapshots = [model.snapshot].compactMap { $0 } + model.machines.compactMap(\.snapshot)
+        if !snapshots.isEmpty {
+            let desks = Dictionary(uniqueKeysWithValues: snapshots.flatMap(\.tabs).map { ($0.tab_id, $0.desk ?? .empty) })
+            let newTabs = landed(previous: seenDeskIds, current: desks)
+            seenDeskIds = desks.mapValues { Set($0.items.map(\.id)) }
+            for tab in newTabs { SidebarState.store.set(true, forKey: Self.docsShownKey(tab)) }
+            docPanel.show(model: model, tabId: state.selectedTab)
+            if let selected = state.selectedTab, newTabs.contains(selected) {
+                if let front = desks[selected]?.front { docPanel.activateDesk(front) }
+                setDocs(open: true)
+            }
+        } else {
+            docPanel.show(model: model, tabId: state.selectedTab)
+        }
         syncDocsShown()
         applyDocs()
     }
@@ -535,8 +571,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         } ?? layout.panes
         let key = tab + (zoomedPane.map { "zoom:\($0)|" } ?? "")
             + shown.map { "\($0.pane_id)@\($0.rect.x),\($0.rect.y),\($0.rect.width),\($0.rect.height)" }.joined(separator: "|")
-            // A restarted remote server keeps pane ids but hands out new terminals.
-            + (Machines.isRemote(tab) ? "|" + shown.compactMap { model.pane($0.pane_id)?.terminal_id }.joined(separator: ",") : "")
+            // A restarted remote server or a local live handoff keeps pane ids but hands out new terminals.
+            + "|" + shown.compactMap { model.pane($0.pane_id)?.terminal_id }.joined(separator: ",")
         guard key != lastLayoutKey else { applyCaps(); return }
         lastLayoutKey = key
         var items: [(SurfaceView, Snapshot.Rect)] = []

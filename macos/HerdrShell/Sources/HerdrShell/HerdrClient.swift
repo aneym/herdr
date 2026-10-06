@@ -114,7 +114,7 @@ final class HerdrClient {
         "workspace.moved", "workspace.reordered", "workspace.closed", "workspace.focused",
         "tab.created", "tab.closed", "tab.focused", "tab.renamed", "tab.moved",
         "pane.created", "pane.updated", "pane.closed", "pane.focused", "pane.moved", "pane.exited",
-        "pane.agent_detected", "layout.updated",
+        "pane.agent_detected", "layout.updated", "desk.changed",
     ]
     static let backoff: TimeInterval = 0.5
 
@@ -132,6 +132,10 @@ final class HerdrClient {
     private var stopped = false
     private var pendingEventAt: Date?
     private var requests = 0
+    /// Lifecycle events this server refused as unknown (older than the Shell, e.g. no
+    /// `desk.changed`). Cleared when a stream closes for any other reason, since the next
+    /// server (a live handoff, an update) may know them.
+    private var unknownEvents: Set<String> = []
 
     /// Set for another machine's server: snapshot ids come back with its name on them.
     let machine: String?
@@ -162,7 +166,8 @@ final class HerdrClient {
 
     private func connect() {
         guard !stopped else { return }
-        let stream = EventStream(path: socketPath, subscriptions: Self.lifecycleEvents.map { ["type": $0] })
+        let events = Self.lifecycleEvents.filter { !unknownEvents.contains($0) }
+        let stream = EventStream(path: socketPath, subscriptions: events.map { ["type": $0] })
         general = stream
         stream.onAck = { [weak self, weak stream] in
             self?.q.async {
@@ -182,11 +187,25 @@ final class HerdrClient {
                 self.general = nil
                 self.statusStream?.stop(); self.statusStream = nil
                 self.statusPanes = []
+                if let unknown = Self.unknownEvent(reason), Self.lifecycleEvents.contains(unknown),
+                   !self.unknownEvents.contains(unknown) {
+                    self.unknownEvents.insert(unknown)
+                    self.connect()
+                    return
+                }
+                self.unknownEvents = []
                 self.report("herdr events: \(reason)")
                 self.q.asyncAfter(deadline: .now() + self.retry) { self.connect() }
             }
         }
         stream.start()
+    }
+
+    /// The event name in an older server's "unknown variant `desk.changed`" subscribe error.
+    static func unknownEvent(_ reason: String) -> String? {
+        guard let start = reason.range(of: "unknown variant `"),
+              let end = reason[start.upperBound...].firstIndex(of: "`") else { return nil }
+        return String(reason[start.upperBound..<end])
     }
 
     private func syncStatusStream(panes: Set<String>) {
@@ -311,6 +330,35 @@ struct HerdrCommands {
               let json = String(data: data, encoding: .utf8),
               let reply = HerdrSocket.request(path, json, timeout: timeout) else { return nil }
         return machine.map { Machines.namespace(reply, machine: $0) } ?? reply
+    }
+
+    enum DeskReply {
+        case result([String: Any])
+        case unsupported
+        case failed
+    }
+
+    /// Preserve method-missing separately from transport and domain errors.
+    func deskReply(_ method: String, params: [String: Any]) -> DeskReply {
+        guard let data = call(method, params),
+              let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            log("\(method): no valid response")
+            return .failed
+        }
+        if let error = envelope["error"], !(error is NSNull) {
+            let code = (error as? [String: Any])?["code"] as? String
+            if code == "unknown_method" { return .unsupported }
+            log("\(method): \(error)")
+            return .failed
+        }
+        guard let result = envelope["result"] as? [String: Any] else { return .unsupported }
+        return .result(result)
+    }
+
+    /// Desk calls share the normal local/remote target routing, not link routing.
+    func deskCall(_ method: String, params: [String: Any]) -> [String: Any]? {
+        if case .result(let result) = deskReply(method, params: params) { return result }
+        return nil
     }
 
     /// `pane.resize`. `direction` is left|right|up|down; `amount` is a share of the split

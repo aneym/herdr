@@ -28,8 +28,6 @@ APP_COPY = os.path.join(LABDIR, "app", "HerdrShell")
 os.environ["HERDR_SHELL_APP"] = APP_COPY
 FIX = os.path.join(LABDIR, "fixtures")
 os.makedirs(FIX, exist_ok=True)
-CTX = os.path.join(HOME, ".agent-rails", "herdr", "context")
-CLI = os.path.join(D0, "bin", "herdr-context")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import scenario as S  # noqa: E402
 
@@ -95,7 +93,6 @@ def cli_env(pane=None):
         if "=" in line:
             k, v = line.split("=", 1)
             env[k] = v
-    env["HERDR_CONTEXT_DIR"] = CTX
     env["HERDR_LANES_PATH"] = os.path.join(FIX, "lanes.json")
     env["HERDR_SESSION"] = NAME
     bindir = env.get("PATH", "").split(":")[0]
@@ -106,8 +103,11 @@ def cli_env(pane=None):
     return env
 
 
-def context(*args, pane=None):
-    r = subprocess.run([CLI, *args], env=cli_env(pane), capture_output=True, text=True)
+def desk(*args, pane=None):
+    # The lab PATH points to the copy selected by HERDR_SHELL_BIN.
+    env = cli_env(pane)
+    binary = os.path.join(env["PATH"].split(":")[0], "herdr")
+    r = subprocess.run([binary, "--session", NAME, "desk", *args], env=env, capture_output=True, text=True)
     return r.returncode, (r.stdout or "").strip(), (r.stderr or "").strip()
 
 
@@ -154,7 +154,6 @@ def run():
     S.lab("down")
     time.sleep(0.5)
     subprocess.run(["defaults", "delete", f"herdr.shell.{NAME}"], capture_output=True)
-    shutil.rmtree(CTX, ignore_errors=True)
     srv = ThreadingHTTPServer(("127.0.0.1", 0), Page)
     port = srv.server_address[1]
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -162,7 +161,6 @@ def run():
     say(f"pages on {base}")
 
     S.lab("up")
-    os.makedirs(CTX, exist_ok=True)
     note = os.path.join(FIX, "note.md")
     with open(note, "w") as f:
         f.write("# Note\n\nA context file.\n")
@@ -206,12 +204,11 @@ def run():
         json.dump(areas, f)
     os.environ["HERDR_LANES_PATH"] = os.path.join(FIX, "lanes.json")
     os.environ["HERDR_AREAS_PATH"] = os.path.join(FIX, "areas.json")
-    os.environ["HERDR_CONTEXT_DIR"] = CTX
 
-    code, out, err = context("add", f"{base}/ref.html", "--title", "Ref", pane=pane_a)
-    check("herdr-context add from pane A's HERDR_PANE_ID", code == 0, err or out)
-    code, out, err = context("add", note, "--title", "note.md", pane=pane_a)
-    check("herdr-context add of a file from pane A", code == 0, err or out)
+    code, out, err = desk("open", f"{base}/ref.html", "--title", "Ref", pane=pane_a)
+    check("herdr desk open from pane A's HERDR_PANE_ID", code == 0, err or out)
+    code, out, err = desk("open", note, "--title", "note.md", pane=pane_a)
+    check("herdr desk open of a file from pane A", code == 0, err or out)
 
     shutil.copy2(os.path.join(D0, ".build", "release", "HerdrShell"), APP_COPY + ".new")
     os.replace(APP_COPY + ".new", APP_COPY)
@@ -249,13 +246,13 @@ def run():
     s = wait_state(lambda s: "127.0.0.1" in (s.get("docs", {}).get("tabs") or []) and s["docs"].get("title") == "cookie-yes", 12)
     docs = (s or {}).get("docs") or {}
     check("a page in row B sees the cookie set in row A", docs.get("title") == "cookie-yes", f"title={docs.get('title')!r} tabs={docs.get('tabs')}")
-    code, out, err = context("list", "--json", "--tab", tab_b)
+    code, out, err = desk("list", "--json", "--tab", tab_b)
     try:
-        items = json.loads(out) if code == 0 else []
+        items = [item for desk in json.loads(out)["result"]["desks"] for item in desk["items"]] if code == 0 else []
     except json.JSONDecodeError:
         items = []
-    check("+ writes the item with added_by you",
-          code == 0 and any(i.get("added_by") == "you" and i.get("kind") == "url" for i in items),
+    check("+ opens the desk item as user",
+          code == 0 and any(i.get("opened_by") == "user" and i.get("kind") == "url" for i in items),
           err or out)
 
     click("row", "lane A")
@@ -296,17 +293,17 @@ def run():
     time.sleep(0.3)
     click("✕")
     s = wait_state(lambda s: "127.0.0.1" not in (s.get("docs", {}).get("tabs") or []), 8)
-    code, out, err = context("list", "--json", "--tab", tab_b)
+    code, out, err = desk("list", "--json", "--tab", tab_b)
     try:
-        left = json.loads(out) if code == 0 else None
+        left = [item for desk in json.loads(out)["result"]["desks"] for item in desk["items"]] if code == 0 else None
     except json.JSONDecodeError:
         left = None
-    check("✕ removes the item from the context file",
+    check("✕ removes the item from the desk",
           left == [] and "127.0.0.1" not in ((s or {}).get("docs", {}).get("tabs") or []),
           f"file={out} tabs={(s or {}).get('docs', {}).get('tabs')}")
 
     # Put the shared page back, relaunch, and read the cookie again.
-    code, out, err = context("add", f"{base}/see.html", "--title", "See", "--tab", tab_b)
+    code, out, err = desk("open", f"{base}/see.html", "--title", "See", "--tab", tab_b)
     check("re-add the cookie page on row B before relaunch", code == 0, err or out)
     S.check_front(check)
     S.app("stop")

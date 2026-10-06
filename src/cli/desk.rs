@@ -30,14 +30,34 @@ fn resolve_target(
 }
 
 fn classify_reference(reference: &str) -> Result<String, String> {
-    if reference.starts_with("http://") || reference.starts_with("https://") {
-        return Ok(reference.into());
+    let scheme_and_rest = reference.split_once(':');
+    if let Some((scheme, rest)) = scheme_and_rest {
+        if (scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https"))
+            && rest.starts_with("//")
+        {
+            // The server expects lowercase schemes; preserve the rest of the URL exactly.
+            return Ok(format!("{}:{rest}", scheme.to_ascii_lowercase()));
+        }
     }
-    let path = if let Some(path) = reference.strip_prefix("file://") {
-        path
+    let decoded;
+    let path = if let Some((_, rest)) = scheme_and_rest
+        .filter(|(scheme, rest)| scheme.eq_ignore_ascii_case("file") && rest.starts_with("//"))
+    {
+        let path = &rest[2..];
+        let path = if path.get(..10).is_some_and(|host| host.eq_ignore_ascii_case("localhost/")) {
+            &path[9..]
+        } else {
+            path
+        };
+        decoded = decode_file_path(path)?;
+        decoded.as_str()
     } else {
-        if let Some((scheme, _)) = reference.split_once(':') {
-            if !scheme.is_empty()
+        if let Some((scheme, rest)) = scheme_and_rest {
+            let drive_path = scheme.len() == 1
+                && scheme.as_bytes()[0].is_ascii_alphabetic()
+                && rest.starts_with(['\\', '/']);
+            if !drive_path
+                && !scheme.is_empty()
                 && scheme.starts_with(|c: char| c.is_ascii_alphabetic())
                 && scheme.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
             {
@@ -49,6 +69,25 @@ fn classify_reference(reference: &str) -> Result<String, String> {
     std::fs::canonicalize(path)
         .map(|path| path.to_string_lossy().into_owned())
         .map_err(|_| format!("no such file: {path}"))
+}
+
+fn decode_file_path(path: &str) -> Result<String, String> {
+    let mut bytes = path.bytes();
+    let mut decoded = Vec::with_capacity(path.len());
+    while let Some(byte) = bytes.next() {
+        if byte == b'%' {
+            let hex = |byte: u8| (byte as char).to_digit(16).map(|digit| digit as u8);
+            let high = bytes.next().and_then(hex);
+            let low = bytes.next().and_then(hex);
+            let (Some(high), Some(low)) = (high, low) else {
+                return Err(format!("invalid file URL escape: {path}"));
+            };
+            decoded.push(high * 16 + low);
+        } else {
+            decoded.push(byte);
+        }
+    }
+    String::from_utf8(decoded).map_err(|_| format!("invalid UTF-8 file URL path: {path}"))
 }
 
 pub(super) fn run_desk_command(args: &[String]) -> std::io::Result<i32> {
@@ -240,9 +279,41 @@ mod tests {
     fn cli_desk_reference_filesystem_boundary() {
         assert_eq!(classify_reference("https://example.com").unwrap(), "https://example.com");
         assert_eq!(classify_reference("http://example.com").unwrap(), "http://example.com");
+        for (reference, expected) in [
+            ("HTTP://example.com/A", "http://example.com/A"),
+            ("Https://example.com/A", "https://example.com/A"),
+        ] {
+            assert_eq!(classify_reference(reference).unwrap(), expected);
+        }
+        // Drive paths must reach the filesystem, even on a non-Windows test host.
+        for reference in [r"C:\docs\a.md", "C:/docs/a.md", r"z:\docs\a.md", "z:/docs/a.md"] {
+            let expected = std::fs::canonicalize(reference)
+                .map(|path| path.to_string_lossy().into_owned())
+                .map_err(|_| format!("no such file: {reference}"));
+            assert_eq!(classify_reference(reference), expected);
+        }
         let path = std::fs::canonicalize("Cargo.toml").unwrap();
         assert_eq!(classify_reference("Cargo.toml").unwrap(), path.to_string_lossy());
         assert_eq!(classify_reference(&format!("file://{}", path.display())).unwrap(), path.to_string_lossy());
+        for prefix in ["file://localhost", "FILE://LOCALHOST"] {
+            assert_eq!(classify_reference(&format!("{prefix}{}", path.display())).unwrap(), path.to_string_lossy());
+        }
+        let spaced = std::env::temp_dir().join(format!("herdr desk reference {}.md", std::process::id()));
+        let _file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&spaced)
+            .unwrap();
+        let expected = std::fs::canonicalize(&spaced).unwrap();
+        let encoded = spaced.to_string_lossy().replace(' ', "%20");
+        for reference in [format!("file://{encoded}"), format!("file://localhost{encoded}")] {
+            assert_eq!(classify_reference(&reference).unwrap(), expected.to_string_lossy());
+        }
+        drop(_file);
+        std::fs::remove_file(&spaced).unwrap();
+        for reference in ["file:///bad%", "file:///bad%GG", "file:///bad%FF"] {
+            assert!(classify_reference(reference).unwrap_err().starts_with("invalid"));
+        }
         assert!(classify_reference("no-such-desk-file-123456789").unwrap_err().starts_with("no such file:"));
         assert!(classify_reference("javascript:alert(1)").is_err());
         assert!(classify_reference("ftp://example.com").is_err());

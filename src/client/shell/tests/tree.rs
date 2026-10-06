@@ -482,6 +482,140 @@ fn dragging_a_pinned_chat_moves_its_pin_and_never_clicks() {
     );
 }
 
+/// Release coordinates, not the last motion event, decide whether a pin drop
+/// stays in PINNED. Exercises the raw mouse boundary without calling drag helpers.
+#[test]
+fn pin_drag_release_outside_without_motion_cancels() {
+    let mut state = pin_drag_state();
+    let (top, bottom) = (
+        state.hits.pinned_rows[0].rect,
+        state.hits.pinned_rows[2].rect,
+    );
+    state.handle_raw_events(vec![pin_mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        bottom.x + 4,
+        bottom.y,
+    )]);
+    state.handle_raw_events(vec![pin_mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        top.x + 4,
+        top.y,
+    )]);
+    state.compose(80, 24).expect("frame");
+    assert_eq!(drawn_pins(&state), ["tab_3", "tab_1", "tab_2"]);
+
+    let release = state.handle_raw_events(vec![pin_mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        top.x + 4,
+        20,
+    )]);
+    assert!(
+        sent_methods(&release).is_empty(),
+        "{:?}",
+        sent_methods(&release)
+    );
+    state.compose(80, 24).expect("frame");
+    assert_eq!(drawn_pins(&state), ["tab_1", "tab_2", "tab_3"]);
+}
+
+fn pin_drag_state() -> ClientShellState {
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    let mut state = ClientShellState::new(config);
+    let mut snapshot = tree_snapshot();
+    snapshot.pinned_tabs = snapshot
+        .tabs
+        .iter()
+        .map(|tab| crate::protocol::ClientShellPinnedTab {
+            role: None,
+            tab_id: tab.tab_id.clone(),
+            workspace_id: tab.workspace_id.clone(),
+        })
+        .collect();
+    state.set_snapshot(Box::new(snapshot));
+    state.compose(80, 24).expect("frame");
+    state
+}
+
+/// A live snapshot during a mouse drag owns the cancel order and subsequent
+/// moves; a removed dragged pin cancels instead of being resurrected.
+#[test]
+fn pin_drag_snapshot_rebases_preview_and_cancel_order() {
+    for finish in ["escape", "drop", "unpin"] {
+        let mut state = pin_drag_state();
+        let mut live = state.snapshot.as_deref().expect("snapshot").clone();
+        let mut fourth = live.tabs[0].clone();
+        fourth.tab_id = "tab_4".into();
+        fourth.number = 4;
+        live.pinned_tabs
+            .push(crate::protocol::ClientShellPinnedTab {
+                role: None,
+                tab_id: fourth.tab_id.clone(),
+                workspace_id: fourth.workspace_id.clone(),
+            });
+        live.tabs.push(fourth);
+        let (top, bottom) = (
+            state.hits.pinned_rows[0].rect,
+            state.hits.pinned_rows[2].rect,
+        );
+        state.handle_raw_events(vec![pin_mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            bottom.x + 4,
+            bottom.y,
+        )]);
+        state.handle_raw_events(vec![pin_mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            top.x + 4,
+            top.y,
+        )]);
+        if finish == "unpin" {
+            live.pinned_tabs.retain(|pin| pin.tab_id != "tab_3");
+        }
+        state.set_snapshot(Box::new(live));
+        state.compose(80, 24).expect("frame");
+        if finish == "unpin" {
+            assert!(state.chrome_drag.is_none());
+            assert_eq!(drawn_pins(&state), ["tab_1", "tab_2", "tab_4"]);
+            continue;
+        }
+        assert_eq!(drawn_pins(&state), ["tab_3", "tab_1", "tab_2", "tab_4"]);
+        let middle = state.hits.pinned_rows[1].rect;
+        state.handle_raw_events(vec![pin_mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            middle.x + 4,
+            middle.y,
+        )]);
+        state.compose(80, 24).expect("frame");
+        assert_eq!(drawn_pins(&state), ["tab_1", "tab_3", "tab_2", "tab_4"]);
+        let outcome = if finish == "escape" {
+            state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+                crossterm::event::KeyCode::Esc,
+                KeyModifiers::empty(),
+            ))])
+        } else {
+            state.handle_raw_events(vec![pin_mouse(
+                MouseEventKind::Up(MouseButton::Left),
+                middle.x + 4,
+                middle.y,
+            )])
+        };
+        state.compose(80, 24).expect("frame");
+        let expected = if finish == "escape" {
+            assert!(sent_methods(&outcome).is_empty());
+            ["tab_1", "tab_2", "tab_3", "tab_4"]
+        } else {
+            assert!(
+                matches!(sent_methods(&outcome)[..], [crate::api::schema::Method::TabPinMove(ref params)]
+                if params.tab_id == "tab_3" && params.pin_index == 1)
+            );
+            ["tab_1", "tab_3", "tab_2", "tab_4"]
+        };
+        assert_eq!(drawn_pins(&state), expected);
+        let snapshot = state.snapshot.as_deref().expect("snapshot");
+        assert_eq!(state.numbered_tab_ids(snapshot)[..4], expected);
+    }
+}
+
 #[test]
 fn space_groups_keep_pinned_chats_above_the_groups() {
     let tree = ClientTreeChrome::default();
