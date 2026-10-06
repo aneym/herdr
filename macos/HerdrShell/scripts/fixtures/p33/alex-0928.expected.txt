@@ -1,0 +1,32 @@
+title|agents|0|none||mute|agents||none||||
+goal|goal|0|none||mute|goal All|▾|none||||
+space|space:rails|0|open||mute|agent-rails|2|none||orch|space:rails|
+section|section:rails:ORCHESTRATOR|1|open||mute|ORCHESTRATOR|⌘0|none|||section:rails:ORCHESTRATOR|
+tab|tab:orch|1|none|●|working|orchestrator|inbox 1|act||orch||
+section|section:rails:SCOPING|1|open||mute|SCOPING|⌘1..9|none|||section:rails:SCOPING|
+tab|tab:content|1|open|●|working|content writing agent|scope ↗|act|https://studio.tailf266ac.ts.net:8797/s/content|content|tab:content|
+run|run:content-run|2|none|◐|working|content-room-mock|opus-seat · 9h11m|none||content||
+tab|tab:glossary|1|none|●|working|factory glossary|scope ↗|none|https://studio.tailf266ac.ts.net:8797/s/glossary|glossary||
+tab|tab:public|1|none|●|working|build in public|scope ↗|none|https://studio.tailf266ac.ts.net:8797/s/public|public||
+tab|tab:video|1|none|●|working|video editing|scope ↗|warn|https://studio.tailf266ac.ts.net:8797/s/video|video||
+tab|tab:vpd|1|none|●|working|product map (VPD)|scope ↗|none|https://studio.tailf266ac.ts.net:8797/s/vpd|vpd||
+tab|tab:purpose|1|none|●|working|purpose and shape|scope ↗|none|https://studio.tailf266ac.ts.net:8797/s/purpose|purpose||
+section|section:rails:IMPLEMENTING|1|closed||mute|IMPLEMENTING|5|none|||section:rails:IMPLEMENTING|
+group|group:rails:parked|1|closed||mute|parked 51||none|||group:rails:parked|dim
+space|space:recruiting|0|open||mute|recruiting||none||rec-orch|space:recruiting|
+section|section:recruiting:ORCHESTRATOR|1|open||mute|ORCHESTRATOR|⌘0|none|||section:recruiting:ORCHESTRATOR|
+tab|tab:rec-orch|1|closed|■|blocked|orchestrator|1|act||rec-orch|tab:rec-orch|
+section|section:recruiting:IMPLEMENTING|1|open||mute|IMPLEMENTING|⌘1..9|none|||section:recruiting:IMPLEMENTING|
+tab|tab:outreach|1|none|○|mute|outreach|no work|none||outreach||dim
+tab|tab:email|1|none|■|blocked|email||none||email||
+tab|tab:submissions|1|none|■|blocked|submissions||none||submissions||
+tab|tab:sourcing|1|none|●|working|sourcing||none||sourcing||
+space|space:raise|0|open||mute|raise||none||raise-park|space:raise|
+group|group:raise:parked|1|closed||mute|parked 1||none|||group:raise:parked|dim
+hidden|hidden|0|closed||mute|hidden 1||none|||hidden|
+footerUsage|usage:0|0|none||mute|claude|2/8 73%|none||||
+footerUsage|usage:1|0|none||mute|codex|5/5 100%|none||||
+footerHost|host:0|0|none||mute|Studio|11/16|none||||
+footerHost|host:1|0|none||mute|PC|1/12|none||||
+footerHost|host:2|0|none||mute|ax42|1/12|none||||
+footerHost|host:3|0|none||mute|forge|0/4|none||||

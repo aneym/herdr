@@ -1,0 +1,49 @@
+HerdrShell P10 check  2026-10-02T16:38:37Z
+lab seeded: 6 spaces, 29 tabs, 24 agents
+app start: {"pids": [60442], "fifo_ready_s": 0.73}
+sidebar lines as drawn:
+  header       SPACES  ⌘⇧1..9
+  space        ▾ ◆ agent-rails  factory
+  header       ORCHESTRATOR  inbox 3
+  orchestrator ▾ ● rails orchestrator  1 wf  [Studio]
+  workflow       ◐ wf reap  [PC]
+  header       LANES  7 open
+  lane         ▸ ● recruiter  2 wf
+  lane         ▾ ● workspace embed ⟳  2 wf
+  workflow       ◐ wf embed wave-a  [PC]
+  workflow       ✓ wf devloop 1  [PC]
+  lane         ▸ ● agent blocks  2 wf
+  lane         ▸ ● factory infra  3 wf
+  lane         ▸ ● proto coach  1 wf
+  lane         ● recruiter outreach
+  lane         ○ conversation evals  idle
+  background   ▸ background  3
+  note           step back · toyo research · recruiting email ✓
+  space        ▸ ◆ agent-lb  1
+  space        ▸ ◆ homebase  ●
+  hidden       ▸ hidden  3
+[PASS] Rails space renders the mock's rows in the mock's order (current space's rows under its row; other spaces and hidden after) with the mock's fold state
+[PASS] selected rows: the current space and the selected lane -- selected=['▾ ◆ agent-rails  factory', '▸ ● recruiter  2 wf']
+[PASS] row kinds: 1 orchestrator, 7 lanes, 3 workflow rows shown (of 8 under their lanes) -- ['orchestrator', 'workflow', 'lane', 'lane', 'workflow', 'workflow', 'lane', 'lane', 'lane', 'lane', 'lane']
+[PASS] lane rows carry no host badge (all on Studio); workflow rows carry PC
+[PASS] opening a folded lane lists its workflows in order -- ['▾ ● recruiter  2 wf', '  ● wf recruiter-2320  [PC]', '  ● wf recruiter-2315  [PC]']
+[PASS] a fold closed by hand stays closed although a workflow inside asks
+[PASS] a blocked workflow opens its collapsed lane on its own, showing the asking row -- ['▾ ● factory infra  3 wf', '  ● wf infra 1  [PC]', '  ◐ wf infra 2  [PC]', '  ● wf infra 3  [PC]']
+[PASS] ...and folds again once nothing inside asks (no hand-set entry)
+[PASS] a failed workflow shows ✕ and opens its lane -- ['▾ ● agent blocks  2 wf', '  ✕ wf blocks fold 5  [PC]']
+[PASS] an advisor that asks leaves `background` and joins LANES (8 open; background 2) -- ['  toyo research · recruiting email ✓', '▸ ◆ agent-lb  1', '▸ ◆ homebase  ●', '▸ hidden  3']
+[PASS] opening background lists its three tabs in order and drops the summary line -- ['  ✓ step back', '  ○ toyo research  idle', '  ✓ recruiting email']
+[PASS] another space whose row asks shows `● 1`
+[PASS] ...and goes back to its count when nothing asks
+[PASS] opening `hidden` lists the three hidden spaces -- ['▾ hidden  3', '  ◇ archive-a  1', '  ◇ archive-b  1', '  ◇ archive-c  1']
+[PASS] cmd+shift+3 switches to the plain space: lanes only, no ORCHESTRATOR or WORKFLOWS, agent-rails shows `● 2` (wf reap, wf embed wave-a)
+[PASS] cmd+shift+1 returns to agent-rails
+[PASS] cmd+shift+9 (no ninth space) changes nothing
+[PASS] space rows carry their space id (a click is not exercised here)
+[PASS] screenshot light: checks/P10-light.png written -- /Volumes/StudioExt/repos/herdr-worktrees/native-shell-areas/macos/HerdrShell/checks/P10-light.png
+[PASS] screenshot dark: checks/P10-dark.png written -- /Volumes/StudioExt/repos/herdr-worktrees/native-shell-areas/macos/HerdrShell/checks/P10-dark.png
+[PASS] the two screenshots differ in the sidebar (light vs dark) -- {'light': (243, 244, 246), 'dark': (22, 23, 27)}
+[PASS] frontmost app unchanged -- Aside
+lab down: stop: 0
+
+RESULT: PASS

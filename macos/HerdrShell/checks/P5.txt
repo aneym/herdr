@@ -1,0 +1,118 @@
+HerdrShell P5 check  2026-10-02T16:36:48Z  lab=shellspike-p5
+host load average: 20 on 16 cores
+  contrast floor 4.5:1; terminal theme pair {'dark': 'Catppuccin Mocha', 'light': '/Users/aneyman/.config/ghostty/themes/SF Paper'}
+  [PASS] dark  ink   #E6E6EA on panel #16171B  14.39:1
+  [PASS] dark  ink   #E6E6EA on sel   #1F2230  12.69:1
+  [PASS] dark  mute  #8B8C94 on panel #16171B   5.35:1
+  [PASS] dark  mute  #8B8C94 on sel   #1F2230   4.72:1
+  [PASS] dark  orch  #5AA9FF on panel #16171B   7.30:1
+  [PASS] dark  orch  #5AA9FF on sel   #1F2230   6.43:1
+  [PASS] dark  lane  #A3AAFF on panel #16171B   8.32:1
+  [PASS] dark  lane  #A3AAFF on sel   #1F2230   7.33:1
+  [PASS] dark  wf    #5CC8C8 on panel #16171B   9.00:1
+  [PASS] dark  wf    #5CC8C8 on sel   #1F2230   7.93:1
+  [PASS] dark  ok    #4CD27A on panel #16171B   9.22:1
+  [PASS] dark  ok    #4CD27A on sel   #1F2230   8.13:1
+  [PASS] dark  warn  #F2B04C on panel #16171B   9.46:1
+  [PASS] dark  warn  #F2B04C on sel   #1F2230   8.34:1
+  [PASS] dark  terminalFg #CDD6F4 on terminalBg #1E1E2E  11.34:1
+  [PASS] light ink   #1F2328 on panel #F3F4F6  14.35:1
+  [PASS] light ink   #1F2328 on sel   #E1E6F2  12.64:1
+  [PASS] light mute  #565C66 on panel #F3F4F6   6.12:1
+  [PASS] light mute  #565C66 on sel   #E1E6F2   5.39:1
+  [PASS] light orch  #0A5FC4 on panel #F3F4F6   5.54:1
+  [PASS] light orch  #0A5FC4 on sel   #E1E6F2   4.87:1
+  [PASS] light lane  #4A4FC7 on panel #F3F4F6   5.90:1
+  [PASS] light lane  #4A4FC7 on sel   #E1E6F2   5.20:1
+  [PASS] light wf    #0B6E74 on panel #F3F4F6   5.46:1
+  [PASS] light wf    #0B6E74 on sel   #E1E6F2   4.81:1
+  [PASS] light ok    #17692F on panel #F3F4F6   6.16:1
+  [PASS] light ok    #17692F on sel   #E1E6F2   5.42:1
+  [PASS] light warn  #8A5300 on panel #F3F4F6   5.75:1
+  [PASS] light warn  #8A5300 on sel   #E1E6F2   5.06:1
+  [PASS] light terminalFg #3A3A38 on terminalBg #FFFFFF  11.40:1
+  sidebar glass on: panel scrim alpha 0.88, glass text tokens
+  [PASS] glass dark  ink   #E6E6EA on panel@black #131418  14.79:1
+  [PASS] glass dark  ink   #E6E6EA on panel@white #323336  10.15:1
+  [PASS] glass dark  ink   #E6E6EA on sel         #1F2230  12.69:1
+  [PASS] glass dark  mute  #9B9CA3 on panel@black #131418   6.73:1
+  [PASS] glass dark  mute  #9B9CA3 on panel@white #323336   4.62:1
+  [PASS] glass dark  mute  #9B9CA3 on sel         #1F2230   5.77:1
+  [PASS] glass dark  orch  #5AA9FF on panel@black #131418   7.50:1
+  [PASS] glass dark  orch  #5AA9FF on panel@white #323336   5.15:1
+  [PASS] glass dark  orch  #5AA9FF on sel         #1F2230   6.43:1
+  [PASS] glass dark  lane  #A3AAFF on panel@black #131418   8.55:1
+  [PASS] glass dark  lane  #A3AAFF on panel@white #323336   5.87:1
+  [PASS] glass dark  lane  #A3AAFF on sel         #1F2230   7.33:1
+  [PASS] glass dark  wf    #5CC8C8 on panel@black #131418   9.25:1
+  [PASS] glass dark  wf    #5CC8C8 on panel@white #323336   6.35:1
+  [PASS] glass dark  wf    #5CC8C8 on sel         #1F2230   7.93:1
+  [PASS] glass dark  ok    #4CD27A on panel@black #131418   9.47:1
+  [PASS] glass dark  ok    #4CD27A on panel@white #323336   6.50:1
+  [PASS] glass dark  ok    #4CD27A on sel         #1F2230   8.13:1
+  [PASS] glass dark  warn  #F2B04C on panel@black #131418   9.72:1
+  [PASS] glass dark  warn  #F2B04C on panel@white #323336   6.67:1
+  [PASS] glass dark  warn  #F2B04C on sel         #1F2230   8.34:1
+  [PASS] glass light ink   #1F2328 on panel@black #D6D7D8  10.96:1
+  [PASS] glass light ink   #1F2328 on panel@white #F4F5F7  14.48:1
+  [PASS] glass light ink   #1F2328 on sel         #E1E6F2  12.64:1
+  [PASS] glass light mute  #565C66 on panel@black #D6D7D8   4.67:1
+  [PASS] glass light mute  #565C66 on panel@white #F4F5F7   6.17:1
+  [PASS] glass light mute  #565C66 on sel         #E1E6F2   5.39:1
+  [PASS] glass light orch  #0959B8 on panel@black #D6D7D8   4.65:1
+  [PASS] glass light orch  #0959B8 on panel@white #F4F5F7   6.15:1
+  [PASS] glass light orch  #0959B8 on sel         #E1E6F2   5.36:1
+  [PASS] glass light lane  #484DC6 on panel@black #D6D7D8   4.62:1
+  [PASS] glass light lane  #484DC6 on panel@white #F4F5F7   6.11:1
+  [PASS] glass light lane  #484DC6 on sel         #E1E6F2   5.33:1
+  [PASS] glass light wf    #0A656B on panel@black #D6D7D8   4.72:1
+  [PASS] glass light wf    #0A656B on panel@white #F4F5F7   6.24:1
+  [PASS] glass light wf    #0A656B on sel         #E1E6F2   5.44:1
+  [PASS] glass light ok    #17692F on panel@black #D6D7D8   4.70:1
+  [PASS] glass light ok    #17692F on panel@white #F4F5F7   6.21:1
+  [PASS] glass light ok    #17692F on sel         #E1E6F2   5.42:1
+  [PASS] glass light warn  #855000 on panel@black #D6D7D8   4.63:1
+  [PASS] glass light warn  #855000 on panel@white #F4F5F7   6.12:1
+  [PASS] glass light warn  #855000 on sel         #E1E6F2   5.34:1
+  72/72 pairs at or above 4.5:1
+  CONTRAST: PASS
+[PASS] contrast: every text token at 4.5:1 in light and dark
+lab up: {"id":"cli:workspace:list","result":{"type":"workspace_list","workspaces":[]}}
+app start --appearance light: {"pids": [23579], "fifo_ready_s": 0.34}
+--- --appearance light: effective=light system=light window_appearance=NSAppearanceNameAqua terminal theme pair={'dark': 'Catppuccin Mocha', 'light': '/Users/aneyman/.config/ghostty/themes/SF Paper'}
+    sidebar pixel #F3F4F6 (token panel #F3F4F6); terminal pixel #FFFFFF (token terminalBg #FFFFFF)
+[PASS] light: override flag sets the effective mode
+[PASS] light: window uses the light native appearance -- NSAppearanceNameAqua
+[PASS] light: sidebar background matches the chrome token
+[PASS] light: terminal background matches the Ghostty theme pair
+app start --appearance dark: {"pids": [24470], "fifo_ready_s": 0.37}
+--- --appearance dark: effective=dark system=light window_appearance=NSAppearanceNameDarkAqua terminal theme pair={'dark': 'Catppuccin Mocha', 'light': '/Users/aneyman/.config/ghostty/themes/SF Paper'}
+    sidebar pixel #16171B (token panel #16171B); terminal pixel #1E1E2E (token terminalBg #1E1E2E)
+[PASS] dark: override flag sets the effective mode
+[PASS] dark: window uses the dark native appearance -- NSAppearanceNameDarkAqua
+[PASS] dark: sidebar background matches the chrome token
+[PASS] dark: terminal background matches the Ghostty theme pair
+[PASS] light and dark differ in both chrome and terminal -- chrome #F3F4F6 vs #16171B; terminal #FFFFFF vs #1E1E2E
+[PASS] glass tokens default off (sidebar, overlay); terminal panes opaque -- {"overlay": false, "sidebar": false}
+[PASS] ghostty config carries only the shell's own keybinds (Alex's are stripped) -- 3 shell keybinds, loaded 3
+--- live switch dark -> light: sidebar #F3F4F6, terminal #FFFFFF
+[PASS] live: override dark -> light without restart flips chrome and terminal together
+[PASS] live: 'system' follows the macOS appearance -- system=light
+--- sidebar glass on: view=NSGlassEffectView window_opaque=False; sidebar #333337, terminal #1E1E2E
+[PASS] glass: sidebar token installs the glass layer and a translucent window
+[PASS] glass: terminal pane stays opaque at its token color -- #1E1E2E
+    sidebar pixel RGBA (51, 51, 55, 255) -> over black #333337, over white #333337
+    ink on panel@black 10.11:1  ink on panel@white 10.11:1  ink on sel 12.69:1
+    mute on panel@black 4.60:1  mute on panel@white 4.60:1  mute on sel 5.77:1
+    orch on panel@black 5.12:1  orch on panel@white 5.12:1  orch on sel 6.43:1
+    lane on panel@black 5.84:1  lane on panel@white 5.84:1  lane on sel 7.33:1
+    wf on panel@black 6.32:1  wf on panel@white 6.32:1  wf on sel 7.93:1
+    ok on panel@black 6.47:1  ok on panel@white 6.47:1  ok on sel 8.13:1
+    warn on panel@black 6.64:1  warn on panel@white 6.64:1  warn on sel 8.34:1
+[PASS] glass: sidebar text at 4.5:1 over the captured glass background, on the darkest and lightest desktop -- worst 4.60:1 (mute on panel@black)
+[PASS] glass: sidebar carries the panel scrim (captured pixel between scrim-over-black and scrim-over-white) -- alpha 0.88, pixel #333337, range #131418..#323336
+[PASS] glass: token off restores the opaque panel -- #16171B
+[PASS] frontmost app unchanged -- Aside
+lab down: stop: 0
+
+RESULT: PASS

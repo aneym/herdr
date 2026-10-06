@@ -1,0 +1,13 @@
+HerdrShell P23 check  2026-10-02T16:33:41Z
+app start: {"pids": [92157], "fifo_ready_s": 0.33}
+[PASS] lab split is on screen
+[PASS] split right added a pane
+[PASS] 2x2 split: four panes and three dividers -- panes=4
+[PASS] light hairline contrast is at least 1.3:1 against both neighbours -- 1.33:1 /Volumes/StudioExt/repos/herdr-worktrees/native-shell-areas/macos/HerdrShell/checks/P23-light.png
+[PASS] dark hairline contrast is at least 1.3:1 against both neighbours -- 12.31:1 /Volumes/StudioExt/repos/herdr-worktrees/native-shell-areas/macos/HerdrShell/checks/P23-dark.png
+[PASS] focused cue moves with cmd+opt+right -- w1:p8 -> w1:p3 caps {'w1:p3': False, 'w1:p7': False, 'w1:p8': True, 'w1:p2': False} -> {'w1:p8': False, 'w1:p3': True, 'w1:p2': False, 'w1:p7': False}
+[PASS] divider drag resizes through herdr -- 1:p2 30->34 1:p7 30->34 1:p8 30->34 1:p3 60->52
+[PASS] frontmost app unchanged -- Aside
+lab down: stop: 0
+
+RESULT: PASS

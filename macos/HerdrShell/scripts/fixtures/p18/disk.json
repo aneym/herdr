@@ -1,0 +1,8 @@
+{
+  "studio": {"status": "ok", "held": false, "draining": false, "last_run": {"free_gib": 120.5, "at": 1790893600}},
+  "pc-wsl": {"status": "ok", "held": false, "draining": false, "last_run": {"free_gib": 40.0, "at": 1790893600}},
+  "ax42": {"status": "low", "held": false, "draining": false, "last_run": {"free_gib": 8.2, "at": 1790893600}},
+  "forge-1": {"status": "ok", "held": false, "draining": false, "last_run": {"free_gib": 10.0, "at": 1790893600}},
+  "forge-2": {"status": "ok", "held": false, "draining": false, "last_run": {"free_gib": 3.5, "at": 1790893600}},
+  "forge-3": {"status": "held", "held": true, "draining": true, "last_run": {"free_gib": 12.0, "at": 1790893600}}
+}

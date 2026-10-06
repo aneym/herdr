@@ -1,0 +1,10 @@
+{
+  "boxes": [
+    {"name": "Studio", "kind": "plain", "sessions": 3, "checks": 2, "enabled": true, "notes": []},
+    {"name": "pc-wsl", "kind": "plain", "sessions": 8, "checks": 4, "enabled": true, "notes": []},
+    {"name": "ax42", "kind": "plain", "sessions": 26, "checks": 16, "enabled": true, "notes": []},
+    {"name": "forge-1", "kind": "slot", "sessions": 1, "checks": 1, "enabled": true, "notes": ["drained"]},
+    {"name": "forge-2", "kind": "slot", "sessions": 1, "checks": 1, "enabled": false, "notes": ["disabled"]},
+    {"name": "forge-3", "kind": "slot", "sessions": 1, "checks": 1, "enabled": true, "notes": ["held"]}
+  ]
+}

@@ -1,0 +1,52 @@
+HerdrShell P15 check  2026-10-02T16:39:19Z
+app start: {"pids": [73121], "fifo_ready_s": 0.73}
+[PASS] app state readable and Areas mode is the default -- mode=areas
+[PASS] areas draw in areas[] order and an empty area is omitted -- areas=['factory', 'raise', 'recruiter']
+[PASS] sub-headers only when that group has rows -- headers=['ORCHESTRATOR', 'PROJECTS', 'PROJECTS', 'USE']
+[PASS] factory: orchestrator, then projects (blocked, scoping, the tab lanes.json lacks) -- ['rails orchestrator', 'blocked build', 'scope factory', 'stray tab']
+[PASS] raise: scoping name had [scoping] stripped, closed row is last and dimmed -- ['raise brief', 'review packet', 'raise build', 'old raise']
+[PASS] closed row is dimmed and hidden from every chip but All (asserted per chip below)
+[PASS] recruiter Use group is desk then jobs -- ['recruiting desk', 'job outreach', 'job followups']
+[PASS] tab absent from lanes.json still shows, stage none, area by goal/space rules (factory)
+[PASS] every drawn line carries kind, area, role, stage, text, selected, dim
+[PASS] a workflow stays folded under its owner, not as its own area row -- {'area': 'raise', 'chevron': None, 'depth': 2, 'dim': False, 'glyph': '●', 'host': None, 'id': 'tab:w3:t4', 'kind': 'workflow', 'role': 'project', 'selected': False, 'space': None, 'stage': None, 'tab': 'w3:t4', 'text': '    ● wf raise-1', 'title': 'wf raise-1', 'trailing': ''}
+rows per chip:
+  chip all: ['rails orchestrator', 'blocked build', 'scope factory', 'stray tab', 'raise brief', 'review packet', 'raise build', 'old raise', 'recruiting desk', 'job outreach', 'job followups']
+[PASS] All shows every top-level row, closed included -- ['rails orchestrator', 'blocked build', 'scope factory', 'stray tab', 'raise brief', 'review packet', 'raise build', 'old raise', 'recruiting desk', 'job outreach', 'job followups']
+  chip needs: ['blocked build', 'scope factory', 'raise brief', 'review packet']
+[PASS] Needs you is reviewing, scoping, or blocked -- ['blocked build', 'scope factory', 'raise brief', 'review packet']
+  chip scoping: ['scope factory', 'raise brief']
+[PASS] Scoping chip is the scoping stage only -- ['scope factory', 'raise brief']
+  chip building: ['blocked build', 'raise build', 'recruiting desk', 'job outreach', 'job followups']
+[PASS] Building chip is implementing (including the desk and jobs, and the blocked lane) -- ['blocked build', 'raise build', 'recruiting desk', 'job outreach', 'job followups']
+  chip review: ['review packet']
+[PASS] Review chip is the reviewing stage only -- ['review packet']
+  chip use: ['recruiting desk', 'job outreach', 'job followups']
+[PASS] Use chip is desk then jobs -- ['recruiting desk', 'job outreach', 'job followups']
+[PASS] Focus ranks blocked, then reviewing, then scoping (area order breaks scoping ties) -- ['blocked build', 'review packet', 'scope factory', 'raise brief']
+[PASS] cmd+] three times selects blocked, then reviewing, then the first scoping tab -- ['blocked build', 'review packet', 'scope factory']
+[PASS] Focus row shows the step as '3 of N' -- ▾ Focus  3 of 4
+[PASS] cmd+[ steps back one in that ranking -- focused=review packet
+[PASS] clicking an area header folds it
+[PASS] option-click shows only that area -- areas=['factory'] only=factory
+[PASS] the only-chip clears the area filter
+[PASS] cmd+shift+a switches to Spaces and the lines keep the P10 shape (SPACES, space, orchestrator, lanes; no area groups) -- first=['SPACES  ⌘⇧1..9', '▾ ◇ factory-space  factory', 'ORCHESTRATOR  ⌘1', '● rails orchestrator  [Studio]', 'LANES  3 open', '◐ blocked build']
+[PASS] screenshot light: checks/P15-light.png -- /Volumes/StudioExt/repos/herdr-worktrees/native-shell-areas/macos/HerdrShell/checks/P15-light.png
+[PASS] screenshot dark: checks/P15-dark.png -- /Volumes/StudioExt/repos/herdr-worktrees/native-shell-areas/macos/HerdrShell/checks/P15-dark.png
+[PASS] light and dark screenshots differ -- {'light': ((2880, 1800), (243, 244, 246)), 'dark': ((2880, 1800), (22, 23, 27))}
+saved setup: {"area_only": "raise", "chip": "review", "doc_frame_width": 510, "doc_open": true, "doc_width": 510, "factory_open": false, "focus_cursor": null, "focus_expanded": true, "folded_areas": ["factory"], "mode": "spaces", "running_commit": "", "selected_tab": "w3:t2"}
+[PASS] setup to restore is spaces / review / only raise / factory folded / focus open / docs 510 -- {'area_only': 'raise', 'chip': 'review', 'doc_frame_width': 510, 'doc_open': True, 'doc_width': 510, 'factory_open': False, 'focus_cursor': None, 'focus_expanded': True, 'folded_areas': ['factory'], 'mode': 'spaces', 'running_commit': '', 'selected_tab': 'w3:t2'}
+relaunch: {"pids": [81070], "fifo_ready_s": 0.4}
+restored setup: {"area_only": "raise", "chip": "review", "doc_frame_width": 510, "doc_open": true, "doc_width": 510, "factory_open": false, "focus_cursor": null, "focus_expanded": true, "folded_areas": ["factory"], "mode": "spaces", "running_commit": "", "selected_tab": "w3:t2"}
+[PASS] relaunch restores mode -- mode=spaces
+[PASS] relaunch restores the active chip -- chip=review
+[PASS] relaunch restores the area-only filter -- only=raise
+[PASS] relaunch restores folded areas -- folded=['factory']
+[PASS] relaunch restores Focus expanded -- focus=True
+[PASS] relaunch restores the selected tab -- tab=w3:t2
+[PASS] relaunch restores the doc panel open and its width -- open=True width=510 frame=510
+[PASS] after restore, Areas still applies the review chip and the raise-only filter -- rows=['review packet'] areas=['raise']
+[PASS] frontmost app unchanged -- Aside
+lab down: stop: 0
+
+RESULT: PASS

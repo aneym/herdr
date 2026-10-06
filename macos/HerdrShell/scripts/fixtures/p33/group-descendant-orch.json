@@ -1,0 +1,84 @@
+{
+  "_source": "src/client/shell/tests/factory_sidebar.rs:1005-1045 + tree.rs group_state ~986-1015; parked lane-a's agent parented to the orchestrator: the walk stops at a parked lane (tree.rs:958)",
+  "input": {
+    "spaces": [
+      {
+        "id": "ws",
+        "name": "factory",
+        "pinned": false,
+        "collapsed": false
+      }
+    ],
+    "focusedTab": null,
+    "tabs": [
+      {
+        "id": "orch",
+        "space": "ws",
+        "label": "orch",
+        "status": "idle",
+        "agents": [
+          {
+            "status": "idle"
+          }
+        ],
+        "focused": false
+      },
+      {
+        "id": "lane-a",
+        "space": "ws",
+        "label": "lane-a",
+        "status": "idle",
+        "agents": [
+          {
+            "status": "idle",
+            "parent": "orch"
+          }
+        ],
+        "focused": false
+      },
+      {
+        "id": "lane-b",
+        "space": "ws",
+        "label": "lane-b",
+        "status": "idle",
+        "agents": [
+          {
+            "status": "idle",
+            "parent": "lane-a"
+          }
+        ],
+        "focused": false
+      },
+      {
+        "id": "wf-b",
+        "space": "ws",
+        "label": "wf-b",
+        "status": "blocked",
+        "agents": [],
+        "focused": false
+      }
+    ]
+  },
+  "overlay": {
+    "tabs": {
+      "lane-a": {
+        "kind": "lane",
+        "mode": "parked"
+      },
+      "lane-b": {
+        "kind": "lane",
+        "section": "implementing"
+      },
+      "wf-b": {
+        "kind": "workflow",
+        "parent": "lane-b"
+      },
+      "orch": {
+        "kind": "orchestrator",
+        "name": "orchestrator"
+      }
+    }
+  },
+  "chrome": {},
+  "now": 0
+}

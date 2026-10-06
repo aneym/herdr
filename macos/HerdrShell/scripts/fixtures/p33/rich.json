@@ -1,0 +1,128 @@
+{
+  "_source": "src/client/shell/tests/factory_sidebar.rs:1592; section_controls_fixture and section assertions",
+  "input": {
+    "spaces": [
+      {
+        "id": "ws_1",
+        "name": "agent-rails",
+        "pinned": false,
+        "collapsed": false
+      }
+    ],
+    "tabs": [
+      {
+        "id": "orch",
+        "space": "ws_1",
+        "label": "orch",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "lane-a",
+        "space": "ws_1",
+        "label": "lane-a",
+        "agents": [],
+        "focused": false,
+        "status": "blocked"
+      },
+      {
+        "id": "lane-b",
+        "space": "ws_1",
+        "label": "lane-b",
+        "agents": [],
+        "focused": false,
+        "status": "idle"
+      },
+      {
+        "id": "advisor",
+        "space": "ws_1",
+        "label": "advisor",
+        "agents": [],
+        "focused": false,
+        "status": "working"
+      },
+      {
+        "id": "service",
+        "space": "ws_1",
+        "label": "service",
+        "agents": [],
+        "focused": false,
+        "status": "idle"
+      },
+      {
+        "id": "closed-lane",
+        "space": "ws_1",
+        "label": "closed-lane",
+        "agents": [],
+        "focused": false,
+        "status": "idle"
+      }
+    ],
+    "focusedTab": null
+  },
+  "overlay": {
+    "tabs": {
+      "orch": {
+        "kind": "orchestrator",
+        "summary": "inbox 3"
+      },
+      "lane-a": {
+        "kind": "lane",
+        "summary": "pending",
+        "section": "reviewing"
+      },
+      "wf-a": {
+        "kind": "workflow",
+        "parent": "lane-a",
+        "name": "issues 3",
+        "phase": "decide 59/62",
+        "started": 67750
+      },
+      "wf-b": {
+        "kind": "workflow",
+        "parent": "lane-a",
+        "name": "factory-infra",
+        "badge": "Studio",
+        "phase": "build 1/2"
+      },
+      "lane-b": {
+        "kind": "lane",
+        "section": "scoping"
+      },
+      "orphan": {
+        "kind": "workflow",
+        "parent": "missing",
+        "started": 1
+      },
+      "advisor": {
+        "kind": "advisor"
+      },
+      "done": {
+        "kind": "workflow",
+        "done": true
+      },
+      "poker": {
+        "kind": "lane"
+      },
+      "service": {
+        "kind": "lane",
+        "mode": "auto"
+      },
+      "closed-lane": {
+        "kind": "lane",
+        "mode": "active",
+        "section": "closed"
+      }
+    },
+    "spaces": {},
+    "hosts": []
+  },
+  "chrome": {
+    "collapsedTabs": [
+      "orch",
+      "lane-a"
+    ]
+  },
+  "now": 100000
+}

@@ -1,0 +1,3 @@
+title|agents|0|none||mute|agents||none||||
+space|space:ws|0|open||mute|factory||none||lane|space:ws|
+group|group:ws:services|1|closed||mute|services 1||none|||group:ws:services|dim

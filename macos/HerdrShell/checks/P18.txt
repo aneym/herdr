@@ -1,0 +1,42 @@
+HerdrShell P18 check  2026-10-01T22:58:13Z
+binary: /Volumes/StudioExt/repos/herdr-worktrees/native-shell-factory/macos/HerdrShell/.build/release/HerdrShell exists=True
+[PASS] demo stays up and writes a dump -- exit=None
+[PASS] every fixture box is shown -- Studio PC pc-wsl ax42 forge-1 forge-2 forge-3 MacBook
+[PASS] drained, down, and held state words -- {'forge-1': 'drained (disk under floor)', 'ax42': 'down until 23:33 (banner timeout)', 'forge-3': 'held', 'Studio': 'up'}
+[PASS] disabled box is dimmed -- {'attention': '', 'dimmed': True, 'disk': '3.5 GiB · ok · 30 s ago', 'kind': 'slot', 'name': 'forge-2', 'slots': '1/1', 'state': 'up', 'summary': ''}
+[PASS] attention and overlay summary -- studio=warn mac=act
+[PASS] slots and disk -- 8.2 GiB · low · 30 s ago
+[PASS] pool bars match fixture percents -- alpha=72
+[PASS] amber under 15% headroom and red at 0 usable
+[PASS] reset times rendered in ET -- 5h=72% · resets 6:49 PM expected resets 6:49 PM refill=+3 accounts 7:00 AM expected +3 accounts 7:00 AM
+[PASS] interim chains in order, not the stale classes chain -- ['grok-4.7-medium', 'composer-2.5', 'sol-medium', 'swe-2-high', 'sonnet stand-in']
+[PASS] decider line -- Decider: jev, decider.json v3
+[PASS] only the live workflow is in flight -- ['ship-factory']
+[PASS] dump stores no emails or tokens
+[PASS] light screenshot -- /Volumes/StudioExt/repos/herdr-worktrees/native-shell-factory/macos/HerdrShell/checks/P18-light.png
+[PASS] fixture file change shows within 6s
+[PASS] pools outage keeps the last data and shows its age -- stale=True age=2.9616910219192505
+[PASS] pools recover after the server restarts -- five_hour=73
+[PASS] dark screenshot -- /Volumes/StudioExt/repos/herdr-worktrees/native-shell-factory/macos/HerdrShell/checks/P18-dark.png
+[PASS] live sources do not crash -- exit=None
+[PASS] live routing ladder loaded -- interim
+[PASS] live landed today -- 1001
+[PASS] live screenshot -- /Volumes/StudioExt/repos/herdr-worktrees/native-shell-factory/macos/HerdrShell/checks/P18-live.png
+[PASS] live dump stores no emails or tokens
+idle CPU samples (ps %cpu, every 5s):
+  t=00s  0.1
+  t=05s  0.0
+  t=10s  0.1
+  t=15s  3.4
+  t=20s  0.3
+  t=25s  0.0
+  t=30s  1.5
+  t=35s  0.3
+  t=40s  4.4
+  t=45s  3.8
+  t=50s  2.1
+  t=55s  4.9
+idle CPU average: 1.74%
+[PASS] idle CPU stayed low -- n=12 avg=1.741666666666667
+
+RESULT: PASS

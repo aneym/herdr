@@ -1,0 +1,3 @@
+title|agents|0|none||mute|agents||none||||
+space|space:ws|0|open||mute|factory||none||lane-a|space:ws|
+group|group:ws:parked|1|closed||mute|parked 1||act|||group:ws:parked|dim

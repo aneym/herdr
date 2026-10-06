@@ -1,0 +1,37 @@
+[PASS] helper ping 
+[PASS] local: fixture sidebar loaded 
+[PASS] local: exact park note 
+[PASS] local: immediate modes sidebar 
+[PASS] local: resumed 
+[PASS] local: leading-dash note -wip 
+[PASS] local: resume after -wip 
+[PASS] local: leading-dash note -- 
+[PASS] local: resume after -- 
+[PASS] local: leading-dash note --by=x 
+[PASS] local: resume after --by=x 
+[PASS] local: exact approval argv it's "good" 
+[PASS] local: exact approval argv -wip 
+[PASS] local: exact approval argv -- 
+[PASS] local: exact approval argv --by=x 
+[PASS] local: direct local helper rejects bad slug 
+[PASS] local: invalid scope fixture loaded 
+[PASS] local: Swift hook rejects bad slug without tool execution 
+[PASS] local: screenshot 
+[PASS] ssh: fixture sidebar loaded 
+[PASS] ssh: exact park note 
+[PASS] ssh: immediate modes sidebar 
+[PASS] ssh: resumed 
+[PASS] ssh: leading-dash note -wip 
+[PASS] ssh: resume after -wip 
+[PASS] ssh: leading-dash note -- 
+[PASS] ssh: resume after -- 
+[PASS] ssh: leading-dash note --by=x 
+[PASS] ssh: resume after --by=x 
+[PASS] ssh: exact approval argv it's "good" 
+[PASS] ssh: exact approval argv -wip 
+[PASS] ssh: exact approval argv -- 
+[PASS] ssh: exact approval argv --by=x 
+[PASS] ssh: direct local helper rejects bad slug 
+[PASS] ssh: invalid scope fixture loaded 
+[PASS] ssh: Swift hook rejects bad slug without tool execution 
+[PASS] ssh: screenshot 

@@ -1,0 +1,8 @@
+title|agents|0|none||mute|agents||none||||
+goal|goal|0|none||mute|goal recruiter · outreach|✕|none||||
+space|space:ws_1|0|open||mute|agent-rails||none||orch|space:ws_1|
+section|section:ws_1:ORCHESTRATOR|1|open||mute|ORCHESTRATOR|⌘0|none|||section:ws_1:ORCHESTRATOR|
+tab|tab:orch|1|none|●|working|orch|inbox 3|none||orch||
+section|section:ws_1:READY FOR REVIEW|1|open||mute|READY FOR REVIEW|1|none|||section:ws_1:READY FOR REVIEW|
+tab|tab:lane-a|1|none|■|blocked|lane-a|no link|none||lane-a||
+group|group:ws_1:services|1|closed||mute|services 1||none|||group:ws_1:services|dim

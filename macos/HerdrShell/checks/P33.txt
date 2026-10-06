@@ -1,0 +1,11 @@
+[PASS] default mode is spaces
+[PASS] agents then goal All
+[PASS] sections follow Ghostty order
+[PASS] parked is folded with count
+[PASS] row selects tab without detail
+[PASS] IMPLEMENTING folds
+[PASS] fold survives relaunch
+[PASS] tab with docs shows column
+[PASS] tab without docs takes no column
+[PASS] goal retains orchestrator and matching lane
+[PASS] goal removes nonmatching lane

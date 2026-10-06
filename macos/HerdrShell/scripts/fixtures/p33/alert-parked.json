@@ -1,0 +1,36 @@
+{
+  "_source": "src/client/shell/tests/factory_sidebar.rs:830-918; tree.rs:948-1062,1157-1180",
+  "input": {
+    "spaces": [
+      {
+        "id": "ws",
+        "name": "factory",
+        "pinned": false,
+        "collapsed": false
+      }
+    ],
+    "tabs": [
+      {
+        "id": "lane",
+        "space": "ws",
+        "label": "lane",
+        "status": "blocked",
+        "agents": [],
+        "focused": false
+      }
+    ],
+    "focusedTab": null
+  },
+  "overlay": {
+    "tabs": {
+      "lane": {
+        "kind": "lane",
+        "mode": "parked",
+        "attention": "none"
+      }
+    },
+    "spaces": {}
+  },
+  "chrome": {},
+  "now": 1000
+}

@@ -1,0 +1,360 @@
+{
+  "version": 1,
+  "note": "App chords (entries) run an app action and send nothing to the pane. Chords under terminal are not claimed by the app; they are turned into bytes for the pane. Every other key goes to the terminal. Chords match the physical key (US ANSI keycode) plus the exact modifier set. Source of the entries: Alex's Ghostty herdr relay block, ~/.config/ghostty/herdr-common.conf. Diffs from it: cmd+[ and cmd+] switch panes in the app (the herdr focus-history relay is not used); the app owns cmd+shift+[ and cmd+shift+] for tabs. copy, paste and quit stay in the Edit and app menus. 'pending' names the piece that will implement the action; until then the chord is still claimed, so it never reaches the pane.",
+  "entries": [
+    {
+      "chord": "cmd+]",
+      "action": "next_pane",
+      "title": "Next Pane",
+      "menu": "Go"
+    },
+    {
+      "chord": "cmd+[",
+      "action": "prev_pane",
+      "title": "Previous Pane",
+      "menu": "Go"
+    },
+    {
+      "chord": "cmd+shift+]",
+      "action": "next_tab",
+      "title": "Next Tab",
+      "menu": "Go"
+    },
+    {
+      "chord": "cmd+shift+[",
+      "action": "prev_tab",
+      "title": "Previous Tab",
+      "menu": "Go"
+    },
+    {
+      "chord": "cmd+opt+left",
+      "action": "focus_pane_left",
+      "title": "Focus Pane Left",
+      "menu": "Go"
+    },
+    {
+      "chord": "cmd+opt+right",
+      "action": "focus_pane_right",
+      "title": "Focus Pane Right",
+      "menu": "Go"
+    },
+    {
+      "chord": "cmd+opt+up",
+      "action": "focus_pane_up",
+      "title": "Focus Pane Above",
+      "menu": "Go"
+    },
+    {
+      "chord": "cmd+opt+down",
+      "action": "focus_pane_down",
+      "title": "Focus Pane Below",
+      "menu": "Go"
+    },
+    {
+      "chord": "cmd+h",
+      "action": "focus_pane_left",
+      "title": "Focus Pane Left",
+      "menu": "Go"
+    },
+    {
+      "chord": "cmd+j",
+      "action": "focus_pane_down",
+      "title": "Focus Pane Below",
+      "menu": "Go"
+    },
+    {
+      "chord": "cmd+shift+k",
+      "action": "focus_pane_up",
+      "title": "Focus Pane Above",
+      "menu": "Go"
+    },
+    {
+      "chord": "cmd+l",
+      "action": "focus_pane_right",
+      "title": "Focus Pane Right",
+      "menu": "Go"
+    },
+    {
+      "chord": "cmd+1",
+      "action": "goto_tab_1",
+      "title": "Tab 1",
+      "menu": "Go"
+    },
+    {
+      "chord": "cmd+2",
+      "action": "goto_tab_2",
+      "title": "Tab 2",
+      "menu": "Go"
+    },
+    {
+      "chord": "cmd+3",
+      "action": "goto_tab_3",
+      "title": "Tab 3",
+      "menu": "Go"
+    },
+    {
+      "chord": "cmd+4",
+      "action": "goto_tab_4",
+      "title": "Tab 4",
+      "menu": "Go"
+    },
+    {
+      "chord": "cmd+5",
+      "action": "goto_tab_5",
+      "title": "Tab 5",
+      "menu": "Go"
+    },
+    {
+      "chord": "cmd+6",
+      "action": "goto_tab_6",
+      "title": "Tab 6",
+      "menu": "Go"
+    },
+    {
+      "chord": "cmd+7",
+      "action": "goto_tab_7",
+      "title": "Tab 7",
+      "menu": "Go"
+    },
+    {
+      "chord": "cmd+8",
+      "action": "goto_tab_8",
+      "title": "Tab 8",
+      "menu": "Go"
+    },
+    {
+      "chord": "cmd+9",
+      "action": "goto_tab_9",
+      "title": "Tab 9",
+      "menu": "Go"
+    },
+    {
+      "chord": "cmd+d",
+      "action": "split_right",
+      "title": "Split Right",
+      "menu": "Pane"
+    },
+    {
+      "chord": "cmd+shift+d",
+      "action": "split_down",
+      "title": "Split Down",
+      "menu": "Pane"
+    },
+    {
+      "chord": "cmd+t",
+      "action": "new_tab",
+      "title": "New Tab",
+      "menu": "Pane"
+    },
+    {
+      "chord": "cmd+w",
+      "action": "close_pane",
+      "title": "Close Pane",
+      "menu": "Pane"
+    },
+    {
+      "chord": "cmd+e",
+      "action": "next_attention",
+      "title": "Next Needing You",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+shift+return",
+      "action": "zoom_pane",
+      "title": "Zoom Pane",
+      "menu": "Pane"
+    },
+    {
+      "chord": "cmd+shift+r",
+      "action": "rename_tab",
+      "title": "Rename Tab…",
+      "menu": "Pane"
+    },
+    {
+      "chord": "cmd+b",
+      "action": "toggle_sidebar",
+      "title": "Toggle Sidebar",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+shift+f",
+      "action": "open_factory",
+      "title": "Factory",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+shift+a",
+      "action": "toggle_area_mode",
+      "title": "Areas or Spaces",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+\\",
+      "action": "toggle_docs",
+      "title": "Toggle Docs",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+opt+1",
+      "action": "filter_1",
+      "title": "Filter All",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+opt+2",
+      "action": "filter_2",
+      "title": "Filter Needs You",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+opt+3",
+      "action": "filter_3",
+      "title": "Filter Scoping",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+opt+4",
+      "action": "filter_4",
+      "title": "Filter Building",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+opt+5",
+      "action": "filter_5",
+      "title": "Filter Review",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+opt+6",
+      "action": "filter_6",
+      "title": "Filter Use",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+shift+1",
+      "action": "goto_space_1",
+      "title": "Space 1",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+shift+2",
+      "action": "goto_space_2",
+      "title": "Space 2",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+shift+3",
+      "action": "goto_space_3",
+      "title": "Space 3",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+shift+4",
+      "action": "goto_space_4",
+      "title": "Space 4",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+shift+5",
+      "action": "goto_space_5",
+      "title": "Space 5",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+shift+6",
+      "action": "goto_space_6",
+      "title": "Space 6",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+shift+7",
+      "action": "goto_space_7",
+      "title": "Space 7",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+shift+8",
+      "action": "goto_space_8",
+      "title": "Space 8",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+shift+9",
+      "action": "goto_space_9",
+      "title": "Space 9",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+opt+j",
+      "action": "agent_list_up",
+      "title": "Agent List Up",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+opt+k",
+      "action": "agent_list_down",
+      "title": "Agent List Down",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+o",
+      "action": "attention_jump",
+      "title": "Jump To Latest",
+      "menu": "View"
+    },
+    {
+      "chord": "opt+o",
+      "action": "overview",
+      "title": "Overview",
+      "menu": "View",
+      "pending": "P13"
+    },
+    {
+      "chord": "cmd+k",
+      "action": "search",
+      "title": "Search",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+g",
+      "action": "goto",
+      "title": "Go To",
+      "menu": "View"
+    },
+    {
+      "chord": "cmd+n",
+      "action": "spawn_agent",
+      "title": "Spawn Agent",
+      "menu": "Pane",
+      "pending": "P13"
+    },
+    {
+      "chord": "cmd+p",
+      "action": "profile_switcher",
+      "title": "Profile Switcher",
+      "menu": "View",
+      "pending": "P13"
+    },
+    {
+      "chord": "cmd+m",
+      "action": "voice_hud",
+      "title": "Voice HUD",
+      "menu": "View",
+      "pending": "P13"
+    },
+    {
+      "chord": "cmd+shift+c",
+      "action": "life_workspace",
+      "title": "Calendar And Mail Workspace",
+      "menu": "View",
+      "pending": "P13"
+    }
+  ],
+  "terminal": [
+    {
+      "chord": "cmd+backspace",
+      "send": "ctrl+u",
+      "note": "kill to line start; Ghostty sends text:\\x15 (ctrl+u) for this today"
+    }
+  ]
+}

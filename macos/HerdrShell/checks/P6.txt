@@ -1,0 +1,10 @@
+HerdrShell P6 check  2026-10-02T16:57:38Z
+config: shipped ghostty.conf sets macos-option-as-alt = false; user config sets it: False
+[PASS] dead-key run uses the shipped option setting (no override in the check or the user config)
+app start: {"pids": [69464], "fifo_ready_s": 0.5}
+[FAIL] both scenario panes attached and rendered
+[PASS] frontmost app unchanged -- Aside
+[FAIL] attach clients exit with the app -- left=['69458', '69461']
+lab down: stop: 0
+
+RESULT: FAIL both scenario panes attached and rendered, attach clients exit with the app
