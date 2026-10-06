@@ -11,7 +11,7 @@ if ($Sha) {
 }
 if (!$inst -or !(Test-Path $inst)) { Write-Error "installer not found ($inst)"; exit 1 }
 $running = @(Get-Process HerdrShell -ErrorAction SilentlyContinue)
-$running | Stop-Process -Force
+$running | Stop-Process -Force -ErrorAction SilentlyContinue
 $deadline = [DateTime]::UtcNow.AddSeconds(10)
 while (Get-Process HerdrShell -ErrorAction SilentlyContinue) {
     if ([DateTime]::UtcNow -ge $deadline) {
