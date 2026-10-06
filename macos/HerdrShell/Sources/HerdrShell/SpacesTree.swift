@@ -45,9 +45,26 @@ struct Overlay: Codable {
         var name = ""; var summary: String?; var attention = "none"; var url: String?
         init(from decoder: Decoder) throws { let c = try decoder.container(keyedBy: Field.self); name = c.value("name", ""); summary = c.optional("summary"); attention = c.value("attention", "none"); url = c.optional("url") }
     }
-    var tabs: [String: Tag] = [:]; var spaces: [String: Space] = [:]; var usage: [Host] = []; var hosts: [Host] = []
+    /// A named sidebar group of whole spaces (Rails, Open Factory). Members are workspace labels or ids.
+    /// Rust: FactoryOverlay.space_groups, read from `space_groups` in areas.json.
+    struct SpaceGroup: Codable, Equatable {
+        var name = ""; var spaces: [String] = []
+        init(name: String, spaces: [String]) { self.name = name; self.spaces = spaces }
+        init(from decoder: Decoder) throws { let c = try decoder.container(keyedBy: Field.self); name = c.value("name", ""); spaces = c.value("spaces", []) }
+    }
+    var tabs: [String: Tag] = [:]; var spaces: [String: Space] = [:]; var usage: [Host] = []; var hosts: [Host] = []; var spaceGroups: [SpaceGroup] = []
     init() {}
-    init(from decoder: Decoder) throws { let c = try decoder.container(keyedBy: Field.self); tabs = c.value("tabs", [:]); spaces = c.value("spaces", [:]); usage = c.value("usage", []); hosts = c.value("hosts", []) }
+    init(from decoder: Decoder) throws { let c = try decoder.container(keyedBy: Field.self); tabs = c.value("tabs", [:]); spaces = c.value("spaces", [:]); usage = c.value("usage", []); hosts = c.value("hosts", []); spaceGroups = c.value("space_groups", []) }
+    /// As Rust FactoryOverlay::space_group: first group naming the space by id, or by label ignoring case.
+    func spaceGroup(id: String, label: String) -> Int? {
+        let label = label.trimmingCharacters(in: .whitespaces).lowercased()
+        return spaceGroups.firstIndex { group in
+            group.spaces.contains { member in
+                let member = member.trimmingCharacters(in: .whitespaces)
+                return member == id || (!label.isEmpty && member.lowercased() == label)
+            }
+        }
+    }
     var goalChoices: [String] {
         ["recruiter", "closer", "rails"].flatMap { goal -> [String] in
             let tags = tabs.values.filter { $0.goal == goal }
@@ -273,7 +290,19 @@ enum SpacesTree {
                 out.append(SpacesRow(id: "all:" + space.id, kind: .group, depth: depth + 1, title: "show all", trailing: String(hiddenCount), toggleKey: "all:" + space.id, dim: true))
             }
         }
-        for space in ordered { appendSpace(space, depth: 0) }
+        // As Rust group_spaces: named groups in order, manual order inside each, ungrouped spaces after.
+        let groups = overlay.spaceGroups.filter { !$0.name.trimmingCharacters(in: .whitespaces).isEmpty }
+        var grouped = Overlay(); grouped.spaceGroups = groups
+        var members = groups.map { _ in [SpacesInput.Space]() }
+        var rest = [SpacesInput.Space]()
+        for space in ordered {
+            if let index = grouped.spaceGroup(id: space.id, label: space.name) { members[index].append(space) } else { rest.append(space) }
+        }
+        for (group, spaces) in zip(groups, members) where !spaces.isEmpty {
+            out.append(SpacesRow(id: "spacegroup:" + group.name, kind: .title, title: group.name))
+            for space in spaces { appendSpace(space, depth: 0) }
+        }
+        for space in rest { appendSpace(space, depth: 0) }
         if !hidden.isEmpty {
             out.append(SpacesRow(id: "hidden", kind: .hidden, chevron: chrome.hiddenExpanded ? "open" : "closed", title: "hidden \(hidden.count)", toggleKey: "hidden"))
             if chrome.hiddenExpanded { for space in hidden { appendSpace(space, depth: 1) } }

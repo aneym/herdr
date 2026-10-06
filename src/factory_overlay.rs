@@ -43,6 +43,17 @@ pub struct FactoryOverlay {
     pub spaces: BTreeMap<String, SpaceTag>,
     /// Keyed by panel key: "overview" or "tab:<tab id>".
     pub panels: BTreeMap<String, Panel>,
+    /// Named sidebar groups of whole spaces (e.g. Rails, Open Factory), in
+    /// display order. Read from `space_groups` in areas.json beside the overlay.
+    pub space_groups: Vec<SpaceGroup>,
+}
+
+/// One sidebar group. `spaces` names member workspaces by label or id.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SpaceGroup {
+    pub name: String,
+    pub spaces: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -273,7 +284,35 @@ pub fn parse(bytes: &[u8]) -> Result<FactoryOverlay, OverlayParseError> {
     Ok(overlay)
 }
 
+/// The part of areas.json the sidebar reads; the rest belongs to Areas mode.
+#[derive(Deserialize)]
+struct AreasSpaceGroups {
+    #[serde(default)]
+    space_groups: Vec<SpaceGroup>,
+}
+
 impl FactoryOverlay {
+    /// Take the space groups from an areas.json document.
+    pub fn apply_areas_file(&mut self, bytes: &[u8]) -> Result<(), serde_json::Error> {
+        let doc: AreasSpaceGroups = serde_json::from_slice(bytes)?;
+        self.space_groups = doc.space_groups.into_iter()
+            .filter(|group| !group.name.trim().is_empty())
+            .collect();
+        Ok(())
+    }
+
+    /// The group a space belongs to, matched by workspace id or label. The
+    /// first group naming the space wins.
+    pub fn space_group(&self, workspace_id: &str, label: &str) -> Option<usize> {
+        let label = label.trim();
+        self.space_groups.iter().position(|group| {
+            group.spaces.iter().any(|name| {
+                let name = name.trim();
+                name == workspace_id || (!label.is_empty() && name.eq_ignore_ascii_case(label))
+            })
+        })
+    }
+
     #[allow(dead_code)]
     pub fn tab(&self, tab_id: &str) -> Option<&TabTag> {
         self.tabs.get(tab_id)

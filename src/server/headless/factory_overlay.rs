@@ -18,6 +18,7 @@ struct FileStamp {
 #[derive(Default)]
 pub(crate) struct FactoryOverlayPoller {
     last_seen: Option<FileStamp>,
+    last_areas: Option<FileStamp>,
     pub(crate) revision: u64,
     pub(crate) current: Option<Arc<FactoryOverlay>>,
     logged_errors: HashSet<String>,
@@ -50,8 +51,15 @@ impl FactoryOverlayPoller {
                 .duration_since(time)
                 .is_ok_and(|age| age <= Duration::from_secs(2))
         });
-        let stamp_changed = self.last_seen.as_ref() != Some(&stamp);
-        if !stamp_changed && !recent {
+        let areas_path = path.with_file_name("areas.json");
+        let areas_stamp = fs::metadata(&areas_path).ok().map(|metadata| FileStamp {
+            path: areas_path.clone(), modified: metadata.modified().ok(), len: metadata.len(),
+        });
+        let areas_recent = areas_stamp.as_ref().and_then(|stamp| stamp.modified).is_some_and(|time| {
+            SystemTime::now().duration_since(time).is_ok_and(|age| age <= Duration::from_secs(2))
+        });
+        let stamp_changed = self.last_seen.as_ref() != Some(&stamp) || self.last_areas != areas_stamp;
+        if !stamp_changed && !recent && !areas_recent {
             return None;
         }
         let bytes = match fs::read(path) {
@@ -62,8 +70,16 @@ impl FactoryOverlayPoller {
             }
         };
         self.last_seen = Some(stamp);
+        self.last_areas = areas_stamp;
         match crate::factory_overlay::parse(&bytes) {
-            Ok(overlay) => self.publish(Some(Arc::new(overlay)), stamp_changed),
+            Ok(mut overlay) => {
+                if let Ok(bytes) = fs::read(&areas_path) {
+                    if let Err(error) = overlay.apply_areas_file(&bytes) {
+                        self.log_error(format!("{}: {error}", areas_path.display()));
+                    }
+                }
+                self.publish(Some(Arc::new(overlay)), stamp_changed)
+            }
             Err(error) => {
                 self.log_error(format!("{}: {error}", path.display()));
                 None

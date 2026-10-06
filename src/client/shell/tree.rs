@@ -306,6 +306,8 @@ pub(super) enum AgentPanelListEntry {
     PinnedChatsHeader,
     /// A pinned chat from any space, in pin order (the Cmd+1..9 order).
     PinnedTab(PinnedTabRow),
+    /// Title of a named group of spaces from the overlay's `space_groups`.
+    SpaceGroupHeader { name: String },
     SpaceHeader(TreeHeader),
     TabHeader(TreeHeader),
     FactorySection {
@@ -901,7 +903,7 @@ pub(super) fn tree_list_entries_with_overlay(
 
     // The manual order applies to the visible tree only; a space inside the
     // hidden section stays inside it.
-    let mut out = reorder_spaces(out, &tree.space_order);
+    let mut out = group_spaces(reorder_spaces(out, &tree.space_order), overlay);
 
     // One collapsible section carries every collapsed space, so the tree above
     // it holds only what is still meant to be seen.
@@ -1742,6 +1744,41 @@ fn factory_row(
         workflow: tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Workflow),
         done: tag.is_some_and(|tag| tag.done),
     })
+}
+
+/// Gather whole space blocks under the overlay's named space groups (Rails,
+/// Open Factory, ...), in group order, keeping the manual order inside each
+/// group. Spaces no group names stay after the groups, without a header.
+fn group_spaces(
+    entries: Vec<AgentPanelListEntry>,
+    overlay: Option<&crate::factory_overlay::FactoryOverlay>,
+) -> Vec<AgentPanelListEntry> {
+    let Some(overlay) = overlay.filter(|overlay| !overlay.space_groups.is_empty()) else {
+        return entries;
+    };
+    let mut groups: Vec<Vec<AgentPanelListEntry>> =
+        overlay.space_groups.iter().map(|_| Vec::new()).collect();
+    let mut rest = Vec::new();
+    let mut current: Option<usize> = None;
+    for entry in entries {
+        if let AgentPanelListEntry::SpaceHeader(header) = &entry {
+            current = overlay.space_group(&header.workspace_id, &header.label);
+        }
+        match current {
+            Some(index) => groups[index].push(entry),
+            None => rest.push(entry),
+        }
+    }
+    let mut out = Vec::new();
+    for (group, members) in overlay.space_groups.iter().zip(groups) {
+        if members.is_empty() {
+            continue;
+        }
+        out.push(AgentPanelListEntry::SpaceGroupHeader { name: group.name.clone() });
+        out.extend(members);
+    }
+    out.extend(rest);
+    out
 }
 
 /// Reorder whole space blocks to follow the manual drag order. Blocks not named

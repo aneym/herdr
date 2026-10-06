@@ -159,6 +159,7 @@ fn shape(state: &ClientShellState, tree: &ClientTreeChrome) -> Vec<String> {
             AgentPanelListEntry::FactoryBackground { count, .. } => format!("background:{count}"),
             AgentPanelListEntry::PinnedChatsHeader => "pinned".to_owned(),
             AgentPanelListEntry::PinnedTab(row) => format!("pin:{}:{}:{}", row.shortcut, row.label, row.space_label),
+            AgentPanelListEntry::SpaceGroupHeader { name } => format!("group:{name}"),
         })
         .collect()
 }

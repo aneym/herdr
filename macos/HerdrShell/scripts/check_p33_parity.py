@@ -67,6 +67,29 @@ if not any(r.startswith("tab|tab:lane-a|1|open|") for r in held) or not any(r.st
     failures.append("focus-held lane folds on one click")
 else:
     print("PASS a lane held open by focus folds on one click")
+# Space groups come from data (areas.json space_groups, merged into the overlay), never workspace-id code.
+# As Rust space_groups_from_areas_file_split_the_sidebar_by_label_or_id.
+fresh = json.loads((FIXTURES / "base.json").read_text())
+space = fresh["input"]["spaces"][0]
+other = dict(space, id="ws_of", name="open factory")
+fresh["input"]["spaces"].insert(0, other)
+fresh["input"]["tabs"].append(dict(fresh["input"]["tabs"][0], id="of-lane", space="ws_of", label="of-lane", focused=False))
+fixture = BUILD / "spaces-split.json"
+fixture.write_text(json.dumps(fresh))
+plain = base_rows(fixture)
+fresh["overlay"]["space_groups"] = [{"name": "Rails", "spaces": [space["name"].upper()]},
+                                    {"name": "Open Factory", "spaces": ["ws_of"]}]
+fixture.write_text(json.dumps(fresh))
+split = base_rows(fixture)
+def at(prefix):
+    return next((i for i, r in enumerate(split) if r.startswith(prefix)), None)
+order = [at("title|spacegroup:Rails|"), at("space|space:" + space["id"] + "|"),
+         at("title|spacegroup:Open Factory|"), at("space|space:ws_of|")]
+if (any(r.startswith("title|spacegroup:") for r in plain) or None in order or order != sorted(order)):
+    failures.append("spaces split")
+    print("\n".join(split))
+else:
+    print("PASS spaces split follows space_groups data")
 if failures:
     raise SystemExit("FAIL: " + ", ".join(failures))
 print("PASS P33 parity")

@@ -633,6 +633,10 @@ fn render_panel_list_entry(
         AgentPanelListEntry::TabHeader(header) => {
             render_tree_header(buffer, rect, header, false, config, hits);
         }
+        AgentPanelListEntry::SpaceGroupHeader { name } => {
+            let style = Style::default().fg(config.palette.overlay0).add_modifier(Modifier::BOLD);
+            put_text(buffer, rect.x, rect.y, rect.width, &format!(" {name}"), style);
+        }
         AgentPanelListEntry::HiddenSpacesHeader { count, collapsed } => {
             let palette = &config.palette;
             // Muted on purpose: this section names what was folded away, so it

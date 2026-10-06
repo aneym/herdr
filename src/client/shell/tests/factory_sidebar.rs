@@ -2411,3 +2411,34 @@ fn wide_and_emoji_titles_keep_counts_and_alert_in_their_columns() {
         assert!(end + 1 < count[0], "{title}: the ellipsis ends before the count: {text}");
     }
 }
+
+#[test]
+fn space_groups_from_areas_file_split_the_sidebar_by_label_or_id() {
+    let (mut snapshot, mut overlay) = fixture();
+    // A second space listed before the first, so grouping has to move it.
+    let mut factory = snapshot.workspaces[0].clone();
+    factory.workspace_id = "ws_2".into();
+    factory.label = "open factory".into();
+    factory.focused = false;
+    snapshot.workspaces.insert(0, factory);
+    let mut tab = snapshot.tabs[0].clone();
+    tab.tab_id = "of-lane".into();
+    tab.workspace_id = "ws_2".into();
+    tab.label = "of-lane".into();
+    snapshot.tabs.push(tab);
+    overlay.tabs.insert("of-lane".into(), TabTag { kind: TabKind::Lane, ..TabTag::default() });
+
+    let (plain, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &ClientTreeChrome::default());
+    assert!(!plain.iter().any(|row| row.contains("Rails")), "{plain:?}");
+
+    overlay.apply_areas_file(br#"{"areas":[{"id":"recruiter","name":"recruiter"}],"spaces":{"ws_1":"recruiter"},
+        "space_groups":[{"name":"Rails","spaces":["client-shell"]},{"name":"Open Factory","spaces":["ws_2"]}]}"#).unwrap();
+    let (rows, _, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &ClientTreeChrome::default());
+    let at = |needle: &str| rows.iter().position(|row| row.trim_start().starts_with(needle))
+        .unwrap_or_else(|| panic!("{needle} missing: {rows:?}"));
+    assert!(at("Rails") < at("client-shell"), "{rows:?}");
+    assert!(at("client-shell") < at("Open Factory"), "{rows:?}");
+    assert!(at("Open Factory") < at("open factory"), "{rows:?}");
+    // Areas-mode assignments are not sidebar groups.
+    assert!(!rows.iter().any(|row| row.trim() == "recruiter"), "{rows:?}");
+}

@@ -52,6 +52,8 @@ struct LaneSnapshot: Equatable {
     var spaces: [String: String] = [:]
     var goalArea: [String: String] = [:]
     var goal: [String: String] = [:]
+    /// `space_groups` from areas.json: sidebar groups of whole spaces, separate from Areas mode.
+    var spaceGroups: [Overlay.SpaceGroup] = []
     var parked: [String: ParkRecord] = [:]
     var hasFiles = false
 
@@ -144,6 +146,10 @@ final class LaneCatalog: ObservableObject {
             snap.spaces = Self.stringMap(obj["spaces"])
             snap.goalArea = Self.stringMap(obj["goal_area"])
             snap.goal = Self.stringMap(obj["goal"])
+            snap.spaceGroups = (obj["space_groups"] as? [[String: Any]] ?? []).compactMap { g in
+                guard let name = Self.str(g["name"]) else { return nil }
+                return Overlay.SpaceGroup(name: name, spaces: (g["spaces"] as? [Any] ?? []).compactMap { Self.str($0) })
+            }
         }
         stamp[ShellPaths.lanes] = (try? FileManager.default.attributesOfItem(atPath: ShellPaths.lanes)[.modificationDate] as? Date) ?? Date.distantPast
         stamp[ShellPaths.areas] = (try? FileManager.default.attributesOfItem(atPath: ShellPaths.areas)[.modificationDate] as? Date) ?? Date.distantPast
