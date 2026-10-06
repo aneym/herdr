@@ -13,6 +13,8 @@ import DocPanel, { useDocs } from "./DocPanel";
 import type { DocsState } from "./docs";
 import type { PaneController } from "./PaneTerm";
 import { installControl } from "./control";
+import { PENDING_LIFETIME_MS, pinMovePlan } from "./pinDrag";
+import type { PendingOrders } from "./pinDrag";
 import "@xterm/xterm/css/xterm.css";
 import "./tokens.css";
 import "./styles.css";
@@ -33,7 +35,21 @@ export default function App() {
   const showError = useCallback((error: unknown) => setNotice({ text: String(error) }), []);
   const [pending, setPending] = useState<{ tabId: string; paneId: string } | null>(null);
   const controllers = useRef(new Map<string, PaneController>());
-  const rows = useMemo(() => buildSidebar(snapshot), [snapshot]);
+  // A dropped pin order shows until the snapshot agrees or PENDING_LIFETIME_MS passes.
+  const [pendingPins, setPendingPins] = useState<PendingOrders>({});
+  const rows = useMemo(() => buildSidebar(snapshot, pendingPins), [snapshot, pendingPins]);
+  useEffect(() => {
+    const entries = Object.values(pendingPins);
+    if (!entries.length) return;
+    const shown = buildSidebar(snapshot);
+    const settled = (Object.keys(pendingPins) as (keyof PendingOrders)[]).filter(section => {
+      const entry = pendingPins[section];
+      return !entry || Date.now() - entry.at >= PENDING_LIFETIME_MS || shown.filter(r => r.kind === section).map(r => r.id).join() === entry.order.join();
+    });
+    if (settled.length) { setPendingPins(value => { const next = { ...value }; settled.forEach(section => delete next[section]); return next; }); return; }
+    const timer = setTimeout(() => setPendingPins(value => ({ ...value })), PENDING_LIFETIME_MS - (Date.now() - Math.min(...entries.map(e => e!.at))));
+    return () => clearTimeout(timer);
+  }, [snapshot, pendingPins]);
   const docsKey = `herdr-shell.docs.${machine.name}.${selected}`;
   const [docsShown, setDocsShown] = useState<Record<string, boolean>>({});
   const [docsActive, setDocsActive] = useState<Record<string, string>>({});
@@ -155,5 +171,15 @@ export default function App() {
     return { machine: current.machine, selected: current.selected, rows: current.rows, docs: current.docs, panes, focused: panes.find(p => p.info().pane_id === current.focused), open: select, action };
   }), [select, action]);
   const pin = (id: string, pinned: boolean) => { void bridge.api(machine.name, "tab.set_pinned", { tab_id: id, pinned }).catch(showError); };
-  return <div className="layout">{sidebarVisible && <Sidebar rows={rows} selected={selected} machine={machine} notice={notice?.text ?? null} select={select} pin={pin} renaming={renaming} startRename={id => { setRenaming(id); }} cancelRename={() => setRenaming(null)} commitRename={async (id, label) => { try { await action("rename_tab", label, id); setRenaming(null); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); } catch { /* runAction reports through the transient status notice. */ } }} />}<TabView snapshot={snapshot} selected={selected} machine={machine.name} focused={switcherOpen || renaming ? null : focused} onFocus={focus} shortcut={shortcut} register={register} />{docsOpen && docsItems.length > 0 && <DocPanel key={docsKey} machine={machine.name} items={docsItems} active={activeDoc} select={name => setDocsActive(value => ({ ...value, [docsKey]: name }))} error={docsError} />}{switcherOpen && <Switcher rows={rows} selected={selected} open={select} close={closeSwitcher} />}{!sidebarVisible && (notice || machine.state !== "up") && <div className="machine-error notice" role="status">{notice?.text ?? machine.error ?? machine.state}</div>}</div>;
+  const movePin = useCallback((ids: string[], from: number, to: number) => {
+    const plan = pinMovePlan(state.current.snapshot, ids, from, to);
+    if (!plan) return;
+    const at = Date.now();
+    setPendingPins(value => ({ ...value, [plan.section]: { order: plan.order, at } }));
+    void bridge.api(state.current.machine.name, "tab.pin_move", { tab_id: plan.tab, pin_index: plan.pinIndex }).catch(error => {
+      setPendingPins(value => { if (value[plan.section]?.at !== at) return value; const next = { ...value }; delete next[plan.section]; return next; });
+      showError(error);
+    });
+  }, [showError]);
+  return <div className="layout">{sidebarVisible && <Sidebar rows={rows} selected={selected} machine={machine} notice={notice?.text ?? null} select={select} pin={pin} movePin={movePin} renaming={renaming} startRename={id => { setRenaming(id); }} cancelRename={() => setRenaming(null)} commitRename={async (id, label) => { try { await action("rename_tab", label, id); setRenaming(null); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); } catch { /* runAction reports through the transient status notice. */ } }} />}<TabView snapshot={snapshot} selected={selected} machine={machine.name} focused={switcherOpen || renaming ? null : focused} onFocus={focus} shortcut={shortcut} register={register} />{docsOpen && docsItems.length > 0 && <DocPanel key={docsKey} machine={machine.name} items={docsItems} active={activeDoc} select={name => setDocsActive(value => ({ ...value, [docsKey]: name }))} error={docsError} />}{switcherOpen && <Switcher rows={rows} selected={selected} open={select} close={closeSwitcher} />}{!sidebarVisible && (notice || machine.state !== "up") && <div className="machine-error notice" role="status">{notice?.text ?? machine.error ?? machine.state}</div>}</div>;
 }

@@ -83,3 +83,8 @@ footer { color: var(--shell-muted); padding: 12px 8px; font-size: 12px; overflow
 .update-rollback { opacity: 0; pointer-events: none; }
 .sidebar footer:hover .update-rollback, .sidebar footer:focus-within .update-rollback { opacity: 1; pointer-events: auto; }
 .update-error { display: block; margin-top: 5px; }
+.sidebar.pin-dragging { user-select: none; cursor: grabbing; }
+.tab-row { position: relative; }
+.tab-row.pin-dragged { opacity: .85; z-index: 1; }
+.tab-row.drop-above::before, .tab-row.drop-below::after { content: ""; position: absolute; left: 0; right: 0; height: 1.5px; background: var(--shell-muted); opacity: .7; pointer-events: none; }
+.tab-row.drop-above::before { top: -1px; }.tab-row.drop-below::after { bottom: -1px; }

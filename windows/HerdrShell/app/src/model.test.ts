@@ -23,7 +23,8 @@ const snapshot: Snapshot = {
 describe("sidebar contract", () => {
   it("orders sections, excludes agents from spaces and numbers unique tabs at most nine", () => {
     const rows = buildSidebar(snapshot);
-    expect(rows.slice(0, 3).map(r => [r.kind, r.id, r.hotkey])).toEqual([["agent", "w1:t1", 1], ["pinned", "w2:t1", 2], ["pinned", "w1:t1", 1]]);
+    // As the Mac's pinTabs: a pinned agent is listed once, in AGENTS, never again in PINNED.
+    expect(rows.slice(0, 3).map(r => [r.kind, r.id, r.hotkey])).toEqual([["agent", "w1:t1", 1], ["pinned", "w2:t1", 2], ["space", "w2", null]]);
     expect(rows.filter(r => r.kind === "space").map(r => [r.id, r.status, !!r.hidden])).toEqual([["w2", "done", false], ["w1", "blocked", false], ["w3", "blocked", true]]);
     expect(rows.filter(r => r.kind === "tab").map(r => [r.id, r.hotkey])).toEqual([["w2:t1", 2], ["w1:t2", 3], ["w1:t3", 4], ["w1:t4", 5], ["w1:t5", 6], ["w1:t6", 7], ["w1:t7", 8], ["w1:t8", 9], ["w1:t9", null], ["w1:t10", null], ["w3:t1", null]]);
     expect(rows.find(r => r.id === "w1:t2")?.label).toBe("shell");
