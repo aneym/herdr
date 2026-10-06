@@ -225,7 +225,8 @@ def cmd_run(args):
         sys.exit(75)
     idle = refresh_idle()
     idle_s = idle.get("idle_s")
-    if idle_s is None or idle_s < 300:
+    # --test-window opens off every monitor without focus, so it may run while Alex is active.
+    if (idle_s is None or idle_s < 300) and not args.test_window:
         if not args.force_idle:
             print(f"idle_s={idle_s} (<300 or unknown); not launching (exit 75)", file=sys.stderr)
             sys.exit(75)
@@ -238,7 +239,10 @@ def cmd_run(args):
     if not exe:
         print("HerdrShell.exe not installed; run install first", file=sys.stderr)
         sys.exit(1)
-    rc, out = ps_file("launch.ps1", "-Exe", f'"{exe}"')
+    launch = ["launch.ps1", "-Exe", f'"{exe}"']
+    if args.test_window:
+        launch.append("-TestWindow")
+    rc, out = ps_file(*launch)
     print(out.strip())
     sys.exit(rc)
 
@@ -275,6 +279,7 @@ def main():
 
     p = sub.add_parser("run", help="launch the installed app on Alex's desktop")
     p.add_argument("--force-idle", action="store_true")
+    p.add_argument("--test-window", action="store_true")
     p.set_defaults(fn=cmd_run)
 
     p = sub.add_parser("ctl", help="send one JSON line to the control pipe")
