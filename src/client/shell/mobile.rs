@@ -13,9 +13,12 @@ const MOBILE_BUTTON_WIDTH: u16 = 10;
 
 // Width-only layout must not build labels for every tab.
 fn mobile_tab_width(tab: &ClientShellTab) -> u16 {
-    let suffix = if tab.desk_count == 0 { 0 } else { 3 + tab.desk_count.ilog10() as u16 };
+    let suffix = if tab.desk_count == 0 {
+        0
+    } else {
+        3 + tab.desk_count.ilog10() as u16
+    };
     display_width(&tab.label).saturating_add(2).saturating_add(suffix)
-        .saturating_add(if tab.zoomed { 2 } else { 0 })
 }
 
 struct MobileItem {
@@ -124,7 +127,11 @@ fn render_header_tabs(
     }
     let mut x = area.x;
     for tab in tabs.into_iter().skip(start) {
-        let label = format!(" {} ", super::render::tab_label(tab));
+        let label = if tab.desk_count > 0 {
+            format!(" {} ▤{} ", tab.label, tab.desk_count)
+        } else {
+            format!(" {} ", tab.label)
+        };
         let width = display_width(&label).min(area.right().saturating_sub(x));
         if width == 0 {
             break;
