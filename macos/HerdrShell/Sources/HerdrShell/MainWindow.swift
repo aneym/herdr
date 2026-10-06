@@ -452,8 +452,39 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         focusPane(focusedPaneByTab[tabId] ?? host.rects.first?.0.paneId)
     }
 
+    private var seenDeskIds: [String: Set<String>]?
+
+    func openOnDesk(_ url: URL, paneId: String?) {
+        let tabId = paneId.flatMap { id in model.snapshot?.panes.first { $0.pane_id == id }?.tab_id } ?? state.selectedTab
+        guard let tabId else { return }
+        var params: [String: Any] = ["ref": url.isFileURL ? url.path : url.absoluteString, "opened_by": "user"]
+        if let paneId { params["pane_id"] = paneId } else { params["tab_id"] = tabId }
+        let cmds = commands
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = cmds.deskCall("desk.open", params: params)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if result == nil { self.docPanel.addTransient(url, tabId: tabId) }
+                SidebarState.store.set(true, forKey: Self.docsShownKey(tabId))
+                if self.state.selectedTab == tabId { self.setDocs(open: true) }
+            }
+        }
+    }
+
     private func refreshDocs() {
-        docPanel.show(model: model, tabId: state.selectedTab)
+        if let snapshot = model.snapshot {
+            let desks = Dictionary(uniqueKeysWithValues: snapshot.tabs.map { ($0.tab_id, $0.desk ?? .empty) })
+            let newTabs = landed(previous: seenDeskIds, current: desks)
+            seenDeskIds = desks.mapValues { Set($0.items.map(\.id)) }
+            for tab in newTabs { SidebarState.store.set(true, forKey: Self.docsShownKey(tab)) }
+            docPanel.show(model: model, tabId: state.selectedTab)
+            if let selected = state.selectedTab, newTabs.contains(selected) {
+                if let front = desks[selected]?.front { docPanel.activateDesk(front) }
+                setDocs(open: true)
+            }
+        } else {
+            docPanel.show(model: model, tabId: state.selectedTab)
+        }
         syncDocsShown()
         applyDocs()
     }

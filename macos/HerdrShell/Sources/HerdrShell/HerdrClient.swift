@@ -114,7 +114,7 @@ final class HerdrClient {
         "workspace.moved", "workspace.reordered", "workspace.closed", "workspace.focused",
         "tab.created", "tab.closed", "tab.focused", "tab.renamed", "tab.moved",
         "pane.created", "pane.updated", "pane.closed", "pane.focused", "pane.moved", "pane.exited",
-        "pane.agent_detected", "layout.updated",
+        "pane.agent_detected", "layout.updated", "desk.changed",
     ]
     static let backoff: TimeInterval = 0.5
 
@@ -311,6 +311,14 @@ struct HerdrCommands {
               let json = String(data: data, encoding: .utf8),
               let reply = HerdrSocket.request(path, json, timeout: timeout) else { return nil }
         return machine.map { Machines.namespace(reply, machine: $0) } ?? reply
+    }
+
+    /// Desk calls share the normal local/remote target routing, not link routing.
+    func deskCall(_ method: String, params: [String: Any]) -> [String: Any]? {
+        guard let data = call(method, params),
+              let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              envelope["error"] == nil else { return nil }
+        return envelope["result"] as? [String: Any]
     }
 
     /// `pane.resize`. `direction` is left|right|up|down; `amount` is a share of the split

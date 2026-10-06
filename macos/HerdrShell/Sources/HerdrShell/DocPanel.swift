@@ -34,7 +34,15 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
     private var allowedHost: String?
     private var watchPath: String?
     private var watchMtime: Date?
-    private var contextMtime: Date?
+    private(set) var activeItem: String?
+    private var activeKey: String?
+    private var fronts: [String: String] = [:]
+    private var activeKeys: [String: String] = [:]
+    private var fileMtime: UInt64?
+    private var fileData: Data?
+    private var readInFlight = false
+    private var readGeneration = 0
+    private var transient: [String: [DeskItem]] = [:]
     private var timer: Timer?
     private weak var windowController: MainWindowController?
 
@@ -137,7 +145,7 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
     }
 
     var hasDocs: Bool { !docs.isEmpty }
-    var showingWeb: Bool { docs.first { $0.title == active }?.kind == .web }
+    var showingWeb: Bool { docs.first { $0.key == activeKey }?.kind == .web }
 
     func focusAddress() {
         guard showingWeb else { return }
@@ -164,14 +172,24 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
     func show(model: HerdrModel, tabId: String?) {
         let previous = rowId
         rowId = tabId
-        let built = Self.items(model: model, tabId: tabId)
+        var built = Self.items(model: model, tabId: tabId)
+        if let tabId { built += (transient[tabId] ?? []).map(Self.docItem) }
         let same = built.map(\.key) == docs.map(\.key) && tabId == previous
         docs = built
         tabTitles = built.map(\.title)
-        let saved = tabId.flatMap { SidebarState.store.string(forKey: "herdr.shell.docLast.\($0)") }
-        if active == nil || !tabTitles.contains(active ?? "") {
-            active = (saved.flatMap { tabTitles.contains($0) ? $0 : nil }) ?? tabTitles.first
+        let desk = model.snapshot?.tabs.first { $0.tab_id == tabId }?.desk ?? .empty
+        let oldKey = tabId.flatMap { activeKeys[$0] }
+        let selectedDesk = deskFront(previousFront: tabId.flatMap { fronts[$0] }, current: desk,
+                                     active: oldKey.flatMap { key in built.first { $0.key == key }?.deskId })
+        let frontChanged = tabId.flatMap { fronts[$0] } != desk.front
+        if let selectedDesk, frontChanged || oldKey == nil || !built.contains(where: { $0.key == oldKey }) {
+            activeKey = built.first { $0.deskId == selectedDesk }?.key
+        } else {
+            activeKey = oldKey.flatMap { key in built.contains { $0.key == key } ? key : nil } ?? built.first?.key
         }
+        if let tabId { fronts[tabId] = desk.front }
+        active = built.first { $0.key == activeKey }?.title
+        activeItem = built.first { $0.key == activeKey }?.deskId
         if tabTitles.isEmpty, let tabId {
             let lane = model.catalog.snapshot.lanes[tabId]
             let name = model.catalog.snapshot.displayName(tab: tabId, lane: lane, fallback: "")
@@ -183,8 +201,7 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         web.isHidden = tabTitles.isEmpty
         rebuildButtons()
         registerDocHooks()
-        if !same { loadActive() }
-        contextMtime = tabId.flatMap { ContextStore.mtime(tab: $0) }
+        if !same || oldKey != activeKey { loadActive() }
         view.needsLayout = true
     }
 
@@ -196,7 +213,7 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         let bar: CGFloat = 36
         close.frame = NSRect(x: bounds.width - 28, y: 8, width: 22, height: 22)
         add.frame = NSRect(x: bounds.width - 52, y: 6, width: 22, height: 24)
-        approve.isHidden = active != "Scope" || RemoteActions.slug(rowId.flatMap { windowController?.model.catalog.snapshot.lanes[$0]?.scopeURL }) == nil
+        approve.isHidden = activeItem != nil || active != "Scope" || RemoteActions.slug(rowId.flatMap { windowController?.model.catalog.snapshot.lanes[$0]?.scopeURL }) == nil
         approve.frame = NSRect(x: add.frame.minX - 70, y: 6, width: 66, height: 24)
         let tabLimit = approve.isHidden ? add.frame.minX : approve.frame.minX
         var x: CGFloat = 8
@@ -211,8 +228,9 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         forward.isHidden = !chrome
         reload.isHidden = !chrome
         address.isHidden = !chrome
-        openBrowser.isHidden = !chrome
+        openBrowser.isHidden = docs.isEmpty
         var y = bar
+        if !chrome { openBrowser.frame = NSRect(x: bounds.width - 52, y: y, width: 44, height: 22); y += 26 }
         if chrome {
             back.frame = NSRect(x: 8, y: y, width: 22, height: 22)
             forward.frame = NSRect(x: 30, y: y, width: 22, height: 22)
@@ -232,16 +250,37 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
     // MARK: loading
 
     private func loadActive() {
-        guard let item = docs.first(where: { $0.title == active }) ?? docs.first else {
+        guard let item = docs.first(where: { $0.key == activeKey }) ?? docs.first else {
+            readGeneration += 1
+            activeItem = nil; fileData = nil; fileMtime = nil
             pageTitle = ""; pageText = ""; watchPath = nil
+            web.loadHTMLString("", baseURL: nil)
             return
         }
+        readGeneration += 1
+        fileMtime = nil
+        fileData = nil
+        activeKey = item.key
+        activeItem = item.deskId
         active = item.title
+        pageTitle = ""; pageText = ""
+        view.needsLayout = true
+        for (index, button) in tabButtons.enumerated() {
+            button.contentTintColor = docs[index].key == activeKey ? .labelColor : .secondaryLabelColor
+            button.font = .systemFont(ofSize: 12, weight: docs[index].key == activeKey ? .semibold : .regular)
+        }
+        if let rowId { activeKeys[rowId] = item.key }
         if let rowId { SidebarState.store.set(item.title, forKey: "herdr.shell.docLast.\(rowId)") }
         watchPath = item.path
         watchMtime = item.path.flatMap(Self.mtime)
         allowedHost = item.url.flatMap { URL(string: $0)?.host }
         if item.kind == .web { address.stringValue = item.url ?? "" }
+        if item.deskId != nil, item.kind != .web {
+            watchPath = nil
+            web.loadHTMLString("", baseURL: nil)
+            readDeskFile(item)
+            return
+        }
         switch item.kind {
         case .web:
             if let url = item.url.flatMap(URL.init(string:)) { web.load(URLRequest(url: url)) }
@@ -251,17 +290,12 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         case .file:
             if let path = item.path { web.loadFileURL(URL(fileURLWithPath: path), allowingReadAccessTo: URL(fileURLWithPath: path).deletingLastPathComponent()) }
         }
-        for b in tabButtons { b.contentTintColor = (b.title == active) ? .labelColor : .secondaryLabelColor }
     }
 
     private func pollFile() {
-        if let rowId {
-            let m = ContextStore.mtime(tab: rowId)
-            if m != contextMtime, let c = windowController {
-                contextMtime = m
-                show(model: c.model, tabId: rowId)
-                return
-            }
+        if let item = docs.first(where: { $0.key == activeKey }), item.deskId != nil, item.kind != .web {
+            if !view.isHidden { readDeskFile(item) }
+            return
         }
         guard let path = watchPath else { return }
         let m = Self.mtime(path)
@@ -281,7 +315,7 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         pageTitle = webView.title ?? ""
-        if let current = webView.url?.absoluteString, docs.first(where: { $0.title == active })?.kind == .web {
+        if let current = webView.url?.absoluteString, docs.first(where: { $0.key == activeKey })?.kind == .web {
             address.stringValue = current
         }
         if !web.allowFocus { returnFocus() }
@@ -305,7 +339,7 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
     }
 
     @objc private func approveScope() {
-        guard active == "Scope", let rowId, let lane = windowController?.model.catalog.snapshot.lanes[rowId] else { return }
+        guard docs.first(where: { $0.key == activeKey })?.deskId == nil, active == "Scope", let rowId, let lane = windowController?.model.catalog.snapshot.lanes[rowId] else { return }
         RemoteActions.approve(scopeURL: lane.scopeURL, title: lane.name) { [weak self] ok, _ in
             if ok {
                 self?.approve.title = "Approved"
@@ -315,10 +349,12 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
     }
 
     @objc private func closed() {
-        if let rowId, let item = docs.first(where: { $0.title == active }), let id = item.contextId {
-            ContextStore.remove(tab: rowId, id: id)
-            active = nil
-            if let c = windowController { show(model: c.model, tabId: rowId) }
+        if let rowId, let item = docs.first(where: { $0.key == activeKey }), let id = item.deskId {
+            if id.hasPrefix("local-") {
+                transient[rowId]?.removeAll { $0.id == id }
+                activeKeys[rowId] = nil
+                if let c = windowController { show(model: c.model, tabId: rowId) }
+            } else { deskCommand("desk.close", item: id) }
             return
         }
         onClose?()
@@ -335,9 +371,22 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
     @objc private func reloadPage() { web.reload() }
 
     @objc private func openOutside() {
-        let raw = address.stringValue.isEmpty ? (docs.first { $0.title == active }?.url ?? "") : address.stringValue
-        guard let url = URL(string: raw), url.scheme == "http" || url.scheme == "https" else { return }
-        openOutsideApp(url)
+        guard let item = docs.first(where: { $0.key == activeKey }) else { return }
+        if item.kind == .web {
+            let raw = address.stringValue.isEmpty ? item.url ?? "" : address.stringValue
+            if let url = URL(string: raw) { NSWorkspace.shared.open(url) }
+        } else if let path = item.path {
+            if FileManager.default.fileExists(atPath: path) { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
+            else if let data = fileData, let id = item.deskId {
+                let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("herdr-desk")
+                do {
+                    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                    let url = dir.appendingPathComponent("\(id)-\(URL(fileURLWithPath: path).lastPathComponent)")
+                    try data.write(to: url, options: .atomic)
+                    NSWorkspace.shared.open(url)
+                } catch { pageText = error.localizedDescription }
+            }
+        }
     }
 
     private func openOutsideApp(_ url: URL) {
@@ -355,8 +404,8 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
     }
 
     @objc private func pick(_ sender: NSButton) {
-        active = sender.title
-        loadActive()
+        guard let index = tabButtons.firstIndex(of: sender) else { return }
+        activate(docs[index].key, focus: true)
         returnFocus()
     }
 
@@ -368,20 +417,12 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
 
     @objc private func commitURL() {
         let raw = urlField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty, let rowId else { return }
-        let item: DocItem
-        if raw.hasPrefix("http://") || raw.hasPrefix("https://") {
-            item = DocItem(title: URL(string: raw)?.host ?? raw, kind: .web, url: raw, path: nil, contextId: nil)
-            ContextStore.add(tab: rowId, kind: "url", title: item.title, ref: raw, addedBy: "you")
-        } else if FileManager.default.fileExists(atPath: raw) {
-            let path = URL(fileURLWithPath: raw).path
-            item = DocItem(title: URL(fileURLWithPath: path).lastPathComponent, kind: path.hasSuffix(".md") ? .markdown : .file, url: nil, path: path, contextId: nil)
-            ContextStore.add(tab: rowId, kind: "file", title: item.title, ref: path, addedBy: "you")
-        } else { return }
+        guard !raw.isEmpty, rowId != nil else { return }
+        let url = raw.hasPrefix("http://") || raw.hasPrefix("https://") ? URL(string: raw) : URL(fileURLWithPath: raw)
+        guard let url else { return }
+        windowController?.openOnDesk(url, paneId: nil)
         urlField.stringValue = ""
         urlField.isHidden = true
-        active = item.title
-        if let c = windowController { show(model: c.model, tabId: rowId) }
     }
 
     private func registerDocHooks() {
@@ -391,8 +432,7 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
             let title = item.title
             ClickRegistry.shared.set("doc_tab:\(title)") { [weak self] in
                 guard let self else { return }
-                self.active = title
-                self.loadActive()
+                self.activate(item.key, focus: true)
                 self.returnFocus()
             }
         }
@@ -423,9 +463,10 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         var kind: Kind
         var url: String?
         var path: String?
-        var contextId: String?
+        var deskId: String?
+        var mime: String? = nil
         enum Kind: String { case web, markdown, file }
-        var key: String { "\(contextId ?? "")|\(title)|\(url ?? "")|\(path ?? "")" }
+        var key: String { "\(deskId ?? "")|\(title)|\(url ?? "")|\(path ?? "")" }
     }
 
     static func items(model: HerdrModel, tabId: String?) -> [DocItem] {
@@ -434,24 +475,107 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         let lane = snap.lanes[tabId]
         let name = snap.displayName(tab: tabId, lane: lane, fallback: model.snapshot?.tabs.first { $0.tab_id == tabId }?.label ?? "")
         var out: [DocItem] = []
-        if let u = lane?.scopeURL { out.append(DocItem(title: "Scope", kind: .web, url: u, path: nil, contextId: nil)) }
-        if let u = lane?.reviewURL { out.append(DocItem(title: "Review", kind: .web, url: u, path: nil, contextId: nil)) }
+        if let u = lane?.scopeURL { out.append(DocItem(title: "Scope", kind: .web, url: u, path: nil, deskId: nil)) }
+        if let u = lane?.reviewURL { out.append(DocItem(title: "Review", kind: .web, url: u, path: nil, deskId: nil)) }
         if let folder = projectFolder(scopeURL: lane?.scopeURL, displayName: name) {
             for file in ["RESUME", "BRIEF", "DECISIONS"] {
                 let path = (folder as NSString).appendingPathComponent("\(file).md")
                 if FileManager.default.fileExists(atPath: path) {
-                    out.append(DocItem(title: file, kind: .markdown, url: nil, path: path, contextId: nil))
+                    out.append(DocItem(title: file, kind: .markdown, url: nil, path: path, deskId: nil))
                 }
             }
         }
-        out.append(contentsOf: ContextStore.load(tab: tabId).map { item in
-            if item.kind == "url" {
-                return DocItem(title: item.title, kind: .web, url: item.ref, path: nil, contextId: item.id)
-            }
-            let md = item.ref.hasSuffix(".md")
-            return DocItem(title: item.title, kind: md ? .markdown : .file, url: nil, path: item.ref, contextId: item.id)
-        })
+        out.append(contentsOf: (model.snapshot?.tabs.first { $0.tab_id == tabId }?.desk?.items ?? []).map(docItem))
         return out
+    }
+
+    private static func docItem(_ item: DeskItem) -> DocItem {
+        DocItem(title: item.title, kind: item.kind == "url" ? .web : .file,
+                url: item.kind == "url" ? item.ref : nil, path: item.kind == "file" ? item.ref : nil,
+                deskId: item.id, mime: item.mime)
+    }
+
+    func activate(_ key: String, focus: Bool = false) {
+        guard let item = docs.first(where: { $0.key == key }) else { return }
+        activeKey = key
+        loadActive()
+        if focus, let id = item.deskId, !id.hasPrefix("local-") { deskCommand("desk.focus", item: id) }
+    }
+
+    func activateDesk(_ id: String) {
+        if let item = docs.first(where: { $0.deskId == id }) { activate(item.key) }
+    }
+
+    func addTransient(_ url: URL, tabId: String) {
+        let item = DeskItem(id: "local-" + UUID().uuidString, kind: url.isFileURL ? "file" : "url",
+                            ref: url.isFileURL ? url.path : url.absoluteString, title: url.isFileURL ? url.lastPathComponent : url.host ?? url.absoluteString,
+                            mime: Self.localMime(url), opened_by: "user", opened_at_ms: 0)
+        transient[tabId, default: []].append(item)
+        if let c = windowController, c.state.selectedTab == tabId {
+            show(model: c.model, tabId: tabId)
+            activateDesk(item.id)
+        }
+    }
+
+    private static func localMime(_ url: URL) -> String {
+        switch url.pathExtension.lowercased() {
+        case "md", "markdown": return "text/markdown"
+        case "html", "htm": return "text/html"
+        case "pdf": return "application/pdf"
+        case "png": return "image/png"
+        case "jpg", "jpeg": return "image/jpeg"
+        case "gif": return "image/gif"
+        case "webp": return "image/webp"
+        case "svg": return "image/svg+xml"
+        default: return "text/plain"
+        }
+    }
+
+    private func deskCommand(_ method: String, item: String) {
+        guard let rowId, let cmds = windowController?.commands else { return }
+        DispatchQueue.global(qos: .userInitiated).async { _ = cmds.deskCall(method, params: ["tab_id": rowId, "item": item]) }
+    }
+
+    private func readDeskFile(_ item: DocItem) {
+        guard !readInFlight, let rowId, let id = item.deskId, let cmds = windowController?.commands else { return }
+        if id.hasPrefix("local-"), let path = item.path {
+            let mtime = Self.mtime(path)
+            if fileData == nil || mtime != watchMtime {
+                watchMtime = mtime
+                if let data = try? Data(contentsOf: URL(fileURLWithPath: path)) { renderFile(data, mime: item.mime ?? "text/plain", item: item) }
+            }
+            return
+        }
+        readInFlight = true
+        let generation = readGeneration
+        var params: [String: Any] = ["tab_id": rowId, "item": id]
+        if let fileMtime { params["known_mtime_ms"] = fileMtime }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let result = cmds.deskCall("desk.read", params: params)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.readInFlight = false
+                guard generation == self.readGeneration, self.rowId == rowId, self.activeItem == id else { return }
+                guard let result else { self.pageText = "Unable to read desk file"; return }
+                self.fileMtime = (result["mtime_ms"] as? NSNumber)?.uint64Value
+                guard result["unchanged"] as? Bool != true,
+                      let raw = result["data_base64"] as? String, let data = Data(base64Encoded: raw) else { return }
+                self.renderFile(data, mime: result["mime"] as? String ?? item.mime ?? "text/plain", item: item)
+            }
+        }
+    }
+
+    private func renderFile(_ data: Data, mime: String, item: DocItem) {
+        fileData = data
+        let base = item.path.map { URL(fileURLWithPath: $0).deletingLastPathComponent() }
+        if mime == "text/markdown" {
+            web.loadHTMLString(MiniMarkdown.html(String(data: data, encoding: .utf8) ?? "", title: item.title), baseURL: base)
+        } else if mime == "text/plain" {
+            let text = (String(data: data, encoding: .utf8) ?? "").replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
+            web.loadHTMLString("<pre>" + text + "</pre>", baseURL: base)
+        } else {
+            web.load(data, mimeType: mime, characterEncodingName: "utf-8", baseURL: base ?? URL(fileURLWithPath: "/"))
+        }
     }
 
     /// `route=scoping/<slug>` wins. Otherwise a lane folder named with spaces turned into hyphens, if it exists.
