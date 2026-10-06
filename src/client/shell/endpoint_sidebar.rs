@@ -87,7 +87,7 @@ pub(super) fn space_list_rows_for(
     };
     let empty = HashSet::new();
     let mut rows = Vec::new();
-    let mut by_label = HashMap::<String, usize>::new();
+    let mut local_by_label = HashMap::<String, usize>::new();
     let local = endpoints
         .iter()
         .position(|endpoint| endpoint.endpoint_id.is_local());
@@ -95,7 +95,7 @@ pub(super) fn space_list_rows_for(
     if let (Some(index), Some(snapshot)) = (local, local_snapshot) {
         for entry in entries(snapshot, collapsed_groups) {
             if let Some(workspace) = snapshot.workspaces.get(entry.index) {
-                by_label
+                local_by_label
                     .entry(space_key(&workspace.label))
                     .or_insert(rows.len());
             }
@@ -132,11 +132,26 @@ pub(super) fn space_list_rows_for(
             let Some(workspace) = snapshot.workspaces.get(entry.index) else {
                 continue;
             };
-            if !remote_workspace_has_chat(snapshot, &workspace.workspace_id) {
+            // A folded worktree group stands for its hidden members' chats too.
+            let folded = (!flat)
+                .then(|| super::sidebar::parent_group_key(snapshot, entry.index))
+                .flatten()
+                .filter(|key| collapsed.contains(key));
+            let has_chat = match folded {
+                Some(key) => snapshot.workspaces.iter().any(|member| {
+                    member
+                        .worktree
+                        .as_ref()
+                        .is_some_and(|worktree| worktree.key == key)
+                        && remote_workspace_has_chat(snapshot, &member.workspace_id)
+                }),
+                None => remote_workspace_has_chat(snapshot, &workspace.workspace_id),
+            };
+            if !has_chat {
                 continue;
             }
             let key = space_key(&workspace.label);
-            if let Some(&home) = by_label.get(&key) {
+            if let Some(&home) = local_by_label.get(&key) {
                 rows[home].merged.push((endpoint_index, entry.index));
                 continue;
             }
@@ -152,12 +167,13 @@ pub(super) fn space_list_rows_for(
                         .map(|index| index + 1)
                 })
                 .unwrap_or(rows.len());
-            for index in by_label.values_mut() {
+            // Only a local space takes remote workspaces in: two remote spaces
+            // that share a label stay two rows, each its own click target.
+            for index in local_by_label.values_mut() {
                 if *index >= at {
                     *index += 1;
                 }
             }
-            by_label.insert(key, at);
             rows.insert(at, row);
         }
     }
@@ -361,7 +377,9 @@ pub(super) fn render_collapsed(
         let number = if endpoint.endpoint_id.is_local() {
             format!(" {}", workspace.number)
         } else {
-            " ◇".to_owned()
+            let healthy = endpoint.status == ClientEndpointStatus::Online
+                && !state.machine_diagnostics.required_for(endpoint);
+            format!(" {}", if healthy { "◇" } else { "◌" })
         };
         let number_width = super::render::display_width(&number).min(rect.width);
         let dim = if stale {
@@ -369,20 +387,33 @@ pub(super) fn render_collapsed(
         } else {
             Modifier::empty()
         };
-        put_text(
-            buffer,
-            rect.x,
-            rect.y,
-            number_width,
-            &number,
-            Style::default()
-                .fg(if focused && !stale {
-                    palette.text
-                } else {
-                    palette.overlay0
-                })
-                .add_modifier(dim),
-        );
+        let number_style = Style::default()
+            .fg(if focused && !stale {
+                palette.text
+            } else {
+                palette.overlay0
+            })
+            .add_modifier(dim);
+        let number_style = if endpoint.endpoint_id.is_local() {
+            number_style
+        } else {
+            let badge = Rect::new(
+                rect.x.saturating_add(1),
+                rect.y,
+                number_width.saturating_sub(1),
+                1,
+            );
+            if badge.width > 0 {
+                hits.machines.push(MachineHit {
+                    status_badge: badge,
+                    endpoint_id: endpoint.endpoint_id.clone(),
+                });
+            }
+            state
+                .machine_diagnostics
+                .badge_style(endpoint, palette, number_style)
+        };
+        put_text(buffer, rect.x, rect.y, number_width, &number, number_style);
         put_text(
             buffer,
             rect.x.saturating_add(number_width),
@@ -479,7 +510,20 @@ pub(super) fn render_expanded(
             };
 
             row.active &= &endpoint.endpoint_id == state.active_endpoint_id;
-            row.machine = machine_badge(endpoint, &config.palette);
+            row.machine = machine_badge_with(
+                endpoint,
+                endpoint.status == ClientEndpointStatus::Online
+                    && !state.machine_diagnostics.required_for(endpoint),
+                palette,
+            )
+            .map(|(text, style)| {
+                (
+                    text,
+                    state
+                        .machine_diagnostics
+                        .badge_style(endpoint, palette, style),
+                )
+            });
             pins.push((endpoint.endpoint_id.clone(), row));
         }
     }
@@ -532,7 +576,14 @@ pub(super) fn render_expanded(
             }
             let rect = Rect::new(area.x, y, width, 1);
             let hit_start = hits.tree_headers.len();
-            super::agent_sidebar::render_pinned_tab_row(buffer, rect, &row, config, hits);
+            if let Some(status_badge) =
+                super::agent_sidebar::render_pinned_tab_row(buffer, rect, &row, config, hits)
+            {
+                hits.machines.push(MachineHit {
+                    status_badge,
+                    endpoint_id: endpoint_id.clone(),
+                });
+            }
             hits.tree_headers.truncate(hit_start);
             if let Some(hit) = hits.pinned_rows.last_mut() {
                 hit.endpoint_id = Some(endpoint_id.clone());

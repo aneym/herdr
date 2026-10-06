@@ -395,7 +395,7 @@ pub(super) fn render_pinned_tab_row(
     row: &super::tree::PinnedTabRow,
     config: &ClientShellConfig,
     hits: &mut ShellHitMap,
-) {
+) -> Option<Rect> {
     let palette = &config.palette;
     if row.active {
         buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
@@ -437,8 +437,10 @@ pub(super) fn render_pinned_tab_row(
         .as_ref()
         .map_or(0, |(text, _)| display_width(text) as u16)
         .min(content_right.saturating_sub(name_x).saturating_sub(1) / 2);
+    let mut machine_badge = None;
     let content_right = if badge_width > 0 {
         let badge_x = content_right.saturating_sub(badge_width);
+        machine_badge = Some(Rect::new(badge_x, rect.y, badge_width, 1));
         if let Some((text, style)) = &row.machine {
             put_text(
                 buffer,
@@ -514,6 +516,7 @@ pub(super) fn render_pinned_tab_row(
         tab_id: row.tab_id.clone(),
         slot: row.slot,
     });
+    machine_badge
 }
 
 fn render_panel_list_entry(
@@ -663,7 +666,7 @@ fn render_panel_list_entry(
             );
         }
         AgentPanelListEntry::PinnedTab(row) => {
-            render_pinned_tab_row(buffer, rect, row, config, hits);
+            let _ = render_pinned_tab_row(buffer, rect, row, config, hits);
         }
         AgentPanelListEntry::SpaceHeader(header) => {
             render_tree_header(buffer, rect, header, true, config, hits);
