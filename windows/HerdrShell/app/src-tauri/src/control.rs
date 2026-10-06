@@ -88,9 +88,16 @@ mod imp {
                     CloseHandle(h);
                     continue;
                 }
-                handle_conn(h, &app);
-                DisconnectNamedPipe(h);
-                CloseHandle(h);
+                // One thread per connection: a client that never reads its reply blocks
+                // only its own FlushFileBuffers, never the listener.
+                let raw = h as usize;
+                let app = app.clone();
+                std::thread::spawn(move || {
+                    let h = raw as HANDLE;
+                    handle_conn(h, &app);
+                    DisconnectNamedPipe(h);
+                    CloseHandle(h);
+                });
             }
         }
     }
@@ -119,7 +126,15 @@ mod imp {
         }
         let line = String::from_utf8_lossy(&buf);
         let req: Value = serde_json::from_str(line.trim()).unwrap_or_else(|_| json!({}));
-        let resp = dispatch(app, &req);
+        // Requests share the result slots, so dispatch one at a time; only the reply
+        // write and flush run concurrently.
+        static DISPATCH: Mutex<()> = Mutex::new(());
+        let resp = {
+            let _turn = DISPATCH
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            dispatch(app, &req)
+        };
         let out = format!("{resp}\n");
         let mut rest = out.as_bytes();
         while !rest.is_empty() {
