@@ -1,0 +1,585 @@
+#!/usr/bin/env python3
+"""herdr-lane-move: move a Claude chat (and its lane dir) to another machine.
+
+Runs on the source host. The target is an ssh alias (studio-ts, ax42, pc-wsl).
+
+  herdr-lane-move --pane w1:p2 --to ax42            move a live, idle herdr pane
+  herdr-lane-move --session <sid> --to ax42         move a finished session (no pane)
+  ... --handoff                                     skip resume; fresh chat reads HANDOFF.md
+  ... --dry-run                                     print the plan, change nothing
+
+Move: stop the source claude by signal (pane mode, idle/done only), copy
+<sid>.jsonl and <sid>/ under the project key the target cwd produces, rsync the
+lane dir, open a tab on the target's herdr and run `claude --resume <sid>`
+there, then wait for the resumed chat to answer. On success the source is
+marked: HANDOFF.md in the lane dir gets a "moved" line, the source tab is
+renamed "<label> -> <host>", ~/.agent-rails/herdr/lane-moves.jsonl gets a row.
+
+Fallback (resume failed, or --handoff): the source appends a short handoff
+(goal, state, next step, open asks, last turns) to the lane's HANDOFF.md, the
+lane dir is synced again, and a fresh chat on the target starts with "read
+HANDOFF.md". --no-fallback instead relaunches the source chat (pane mode) and
+leaves the target copy unused.
+
+Never types into a live agent: the source is stopped by signal and the target
+command goes into a new shell pane.
+"""
+import argparse
+import datetime as dt
+import hashlib
+import json
+import os
+import re
+import shlex
+import signal
+import subprocess
+import sys
+import time
+import uuid
+
+HOME = os.path.expanduser("~")
+LANES = os.path.join(HOME, ".agent-rails", "lanes")
+MOVES_LOG = os.path.join(HOME, ".agent-rails", "herdr", "lane-moves.jsonl")
+PATH_PREFIX = "export PATH=$HOME/.local/bin:$PATH; "
+KEEP_FLAGS_WITH_VALUE = ("--model", "--effort", "--permission-mode", "--agent")
+KEEP_FLAGS_BARE = ("--dangerously-skip-permissions",)
+WAIT_CAP = 260  # every wait stays under 270 s
+
+
+def default_label():
+    name = os.environ.get("HERDR_LANE_MOVE_LABEL") or os.uname().nodename.split(".")[0].lower()
+    for short in ("studio", "book", "ax42", "pc"):
+        if short in name:
+            return short
+    return name
+
+
+def die(msg, code=2):
+    print(f"herdr-lane-move: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def say(msg):
+    print(f"[{dt.datetime.now().strftime('%H:%M:%S')}] {msg}", file=sys.stderr, flush=True)
+
+
+def sh(host, cmd, input_text=None, check=True, timeout=120):
+    """Run a bash command locally (host None) or on an ssh alias."""
+    full = PATH_PREFIX + cmd
+    if host:
+        argv = ["ssh", "-o", "ConnectTimeout=20", "-o", "BatchMode=yes", host, full]
+    else:
+        argv = ["bash", "-c", full]
+    p = subprocess.run(argv, input=input_text, capture_output=True, text=True, timeout=timeout)
+    if check and p.returncode != 0:
+        die(f"command failed on {host or 'local'} ({p.returncode}): {cmd}\n{p.stderr.strip()}")
+    return p
+
+
+def herdr_json(host, args):
+    out = sh(host, "herdr " + args).stdout
+    try:
+        return json.loads(out)["result"]
+    except (ValueError, KeyError):
+        die(f"unexpected herdr output for `{args}` on {host or 'local'}: {out[:300]}")
+
+
+def project_key(path):
+    # Claude Code names a project dir after the launch cwd with every
+    # non-alphanumeric character replaced by "-".
+    return re.sub(r"[^A-Za-z0-9]", "-", path)
+
+
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def find_transcript(sid):
+    root = os.path.join(HOME, ".claude", "projects")
+    hits = [os.path.join(root, d, sid + ".jsonl") for d in os.listdir(root)
+            if os.path.isfile(os.path.join(root, d, sid + ".jsonl"))]
+    if not hits:
+        die(f"no transcript {sid}.jsonl under {root}")
+    if len(hits) > 1:
+        hits.sort(key=os.path.getmtime, reverse=True)
+        say(f"warning: {len(hits)} copies of {sid}.jsonl; using newest {hits[0]}")
+    return hits[0]
+
+
+def read_transcript(path):
+    rows = []
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            try:
+                rows.append(json.loads(line))
+            except ValueError:
+                pass
+    return rows
+
+
+def text_of(msg):
+    c = (msg or {}).get("content")
+    if isinstance(c, str):
+        return c
+    if isinstance(c, list):
+        return " ".join(b.get("text", "") for b in c if isinstance(b, dict) and b.get("type") == "text")
+    return ""
+
+
+def transcript_facts(rows):
+    facts = {"launch_cwd": None, "model": None, "first_user": "", "last_user": "", "last_assistant": ""}
+    for o in rows:
+        if facts["launch_cwd"] is None and o.get("cwd"):
+            facts["launch_cwd"] = o["cwd"]
+        if o.get("type") == "user" and not o.get("isMeta"):
+            t = user_text(text_of(o.get("message")))
+            if t:
+                facts["last_user"] = t
+                if not facts["first_user"]:
+                    facts["first_user"] = t
+        if o.get("type") == "assistant":
+            m = o.get("message") or {}
+            if m.get("model") and not m["model"].startswith("<"):
+                facts["model"] = m["model"]
+            t = text_of(m).strip()
+            if t:
+                facts["last_assistant"] = t
+    return facts
+
+
+META_PREFIXES = ("<command-", "<local-command", "<system-reminder", "<task-notification", "Caveat:")
+
+
+def user_text(t):
+    # Pasted prompts arrive wrapped in tags (<pasted_content id=..>); keep their
+    # text. Slash-command echoes and system notes are not asks.
+    t = (t or "").strip()
+    if not t or t.startswith(META_PREFIXES):
+        return ""
+    return re.sub(r"</?[A-Za-z_][^>]*>", " ", t).strip()
+
+
+def one_line(s, n):
+    s = re.sub(r"\s+", " ", s or "").strip()
+    return s if len(s) <= n else s[: n - 3] + "..."
+
+
+def is_claude(proc):
+    # macOS reports the version ("2.1.287") as the process name; argv0 stays "claude".
+    names = [proc.get("name") or "", proc.get("argv0") or "", (proc.get("argv") or [""])[0]]
+    return any(os.path.basename(n) == "claude" for n in names)
+
+
+def keep_flags(argv):
+    out, i = [], 0
+    while i < len(argv):
+        a = argv[i]
+        if a in KEEP_FLAGS_WITH_VALUE and i + 1 < len(argv):
+            out += [a, argv[i + 1]]
+            i += 2
+            continue
+        if any(a.startswith(f + "=") for f in KEEP_FLAGS_WITH_VALUE) or (a in KEEP_FLAGS_BARE and a not in out):
+            out.append(a)
+        i += 1
+    return out
+
+
+def flag_value(flags, name):
+    for i, a in enumerate(flags):
+        if a == name and i + 1 < len(flags):
+            return flags[i + 1]
+        if a.startswith(name + "="):
+            return a.split("=", 1)[1]
+    return None
+
+
+def live_holders(host, sid):
+    """Processes or herdr panes on host that hold this session."""
+    procs = sh(host, "ps -axo pid=,command= 2>/dev/null || ps -eo pid=,args=").stdout.splitlines()
+    mine = {str(os.getpid()), str(os.getppid())}
+    held = [p.strip() for p in procs if sid in p and "herdr-lane-move" not in p
+            and p.strip().split(" ", 1)[0] not in mine]
+    agents = herdr_json(host, "agent list").get("agents", [])
+    panes = [a["pane_id"] for a in agents if (a.get("agent_session") or {}).get("value") == sid]
+    return held, panes
+
+
+def wait_settled(path, timeout=30):
+    deadline = time.time() + timeout
+    last = -1
+    while time.time() < deadline:
+        size = os.path.getsize(path)
+        if size == last:
+            with open(path, "rb") as f:
+                f.seek(max(0, size - 65536))
+                tail = f.read().splitlines()
+            if tail:
+                try:
+                    json.loads(tail[-1])
+                    return size
+                except ValueError:
+                    pass
+        last = size
+        time.sleep(2)
+    die(f"transcript {path} did not settle in {timeout}s")
+
+
+def map_path(path, src_home, dst_home, dst_has_volumes):
+    ext = "/Volumes/StudioExt/repos"
+    if path.startswith(ext) and not dst_has_volumes:
+        return dst_home + "/repos" + path[len(ext):]
+    if path == src_home or path.startswith(src_home + "/"):
+        return dst_home + path[len(src_home):]
+    return path
+
+
+def ensure_trust(host, cwd):
+    # An interactive claude in an untrusted dir stops on the trust dialog, and we
+    # never type into a pane. Mark the dir trusted only if the key is missing.
+    code = r'''
+import json, os, sys, tempfile
+p = os.path.expanduser("~/.claude.json"); cwd = sys.argv[1]
+d = json.load(open(p))
+proj = d.setdefault("projects", {}).setdefault(cwd, {})
+if proj.get("hasTrustDialogAccepted"):
+    print("already"); sys.exit(0)
+proj["hasTrustDialogAccepted"] = True
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(p), prefix=".claude.json.lane-move.")
+with os.fdopen(fd, "w") as f:
+    json.dump(d, f, indent=2)
+os.chmod(tmp, os.stat(p).st_mode & 0o777)
+os.replace(tmp, p)
+print("set")
+'''
+    return sh(host, "python3 - " + shlex.quote(cwd), input_text=code).stdout.strip()
+
+
+def resolve_workspace(host, want, cwd):
+    wss = herdr_json(host, "workspace list").get("workspaces", [])
+    for w in wss:
+        if want in (w.get("workspace_id"), w.get("label")):
+            return w["workspace_id"], None, None
+    res = herdr_json(host, f"workspace create --label {shlex.quote(want)} --cwd {shlex.quote(cwd)} --no-focus")
+    return res["workspace"]["workspace_id"], res["root_pane"]["pane_id"], res["tab"]["tab_id"]
+
+
+def open_target_pane(host, workspace, cwd, label):
+    ws, root, root_tab = resolve_workspace(host, workspace, cwd)
+    if root:
+        sh(host, f"herdr tab rename {shlex.quote(root_tab)} {shlex.quote(label)}", check=False)
+        return root
+    res = herdr_json(host, f"tab create --workspace {shlex.quote(ws)} --cwd {shlex.quote(cwd)} "
+                           f"--label {shlex.quote(label)} --no-focus")
+    pane = (res.get("root_pane") or {}).get("pane_id")
+    if not pane:
+        die(f"tab create gave no root pane: {json.dumps(res)[:300]}")
+    return pane
+
+
+def remote_jsonl_rows(host, path):
+    p = sh(host, f"cat {shlex.quote(path)} 2>/dev/null", check=False, timeout=60)
+    rows = []
+    for line in p.stdout.splitlines():
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            pass
+    return rows
+
+
+def pane_text(host, pane):
+    p = sh(host, f"herdr pane read {shlex.quote(pane)} --source recent --lines 60", check=False)
+    return p.stdout
+
+
+def stop_target_claude(host, pane):
+    info = herdr_json(host, f"pane process-info --pane {shlex.quote(pane)}").get("process_info", {})
+    for proc in info.get("foreground_processes", []):
+        if is_claude(proc):
+            sh(host, f"kill -TERM {int(proc['pid'])}", check=False)
+            for _ in range(15):
+                if sh(host, f"kill -0 {int(proc['pid'])}", check=False).returncode != 0:
+                    break
+                time.sleep(1)
+
+
+def wait_answer(host, path, after_n, wait_s, pane):
+    """Resume check: a new assistant text entry in the target transcript."""
+    deadline = time.time() + min(wait_s, WAIT_CAP)
+    while time.time() < deadline:
+        rows = remote_jsonl_rows(host, path)
+        for o in rows[after_n:]:
+            if o.get("type") == "assistant" and text_of(o.get("message")).strip():
+                return text_of(o["message"]).strip()
+        screen = pane_text(host, pane)
+        if re.search(r"No conversation found|Session .* not found|command not found", screen):
+            return None
+        time.sleep(4)
+    return None
+
+
+def wait_handoff_read(host, key_dir, new_sid, handoff_path, wait_s):
+    path = f"{key_dir}/{new_sid}.jsonl"
+    deadline = time.time() + min(wait_s, WAIT_CAP)
+    while time.time() < deadline:
+        for o in remote_jsonl_rows(host, path):
+            if o.get("type") != "assistant":
+                continue
+            for b in (o.get("message") or {}).get("content") or []:
+                if isinstance(b, dict) and b.get("type") == "tool_use":
+                    inp = b.get("input") or {}
+                    target = inp.get("file_path") or inp.get("command") or ""
+                    return handoff_path in target, b.get("name"), target
+        time.sleep(4)
+    return False, None, None
+
+
+def handoff_block(src_label, sid, facts, lane_dir, dst, dst_pane):
+    state = os.path.join(lane_dir, "STATE.md")
+    lines = []
+    if os.path.isfile(state):
+        with open(state, encoding="utf-8", errors="replace") as f:
+            lines = [l.rstrip() for l in f if l.strip()][:10]
+    now = dt.datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")
+    out = [
+        f"## Handoff {now}: {src_label}:{sid} -> {dst}:{dst_pane}",
+        f"- Goal (first ask): {one_line(facts['first_user'], 300)}",
+        f"- Last ask: {one_line(facts['last_user'], 300)}",
+        f"- Where it stopped (last reply): {one_line(facts['last_assistant'], 500)}",
+        f"- Next step: continue from the last reply; STATE.md below is the lane's own record.",
+        f"- Open asks: see STATE.md; none recorded here.",
+        f"- Old transcript: {src_label}:~/.claude/projects/*/{sid}.jsonl (not resumed here).",
+    ]
+    if lines:
+        out.append("- STATE.md (first lines):")
+        out += ["  " + l for l in lines]
+    return "\n".join(out[:20]) + "\n"
+
+
+def append(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(text if text.endswith("\n") else text + "\n")
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    src = ap.add_mutually_exclusive_group(required=True)
+    src.add_argument("--pane", help="local herdr pane running an idle/done claude")
+    src.add_argument("--session", help="finished claude session id (no live process)")
+    ap.add_argument("--to", required=True, help="target ssh alias, e.g. ax42, studio-ts, pc-wsl")
+    ap.add_argument("--lane", help="lane name under ~/.agent-rails/lanes (default: from cwd)")
+    ap.add_argument("--target-cwd", help="cwd on the target (default: mapped from the source cwd)")
+    ap.add_argument("--workspace", default="lanes", help="target workspace id or label; created if missing")
+    ap.add_argument("--label", help="target tab label (default: lane or source tab label)")
+    ap.add_argument("--model")
+    ap.add_argument("--effort")
+    ap.add_argument("--prompt", help="instruction after the 'moved' preamble (default: read STATE.md, continue)")
+    ap.add_argument("--handoff", action="store_true", help="skip resume; start a fresh chat on HANDOFF.md")
+    ap.add_argument("--no-fallback", action="store_true", help="on resume failure relaunch the source instead")
+    ap.add_argument("--wait", type=int, default=180, help=f"seconds to wait for an answer (max {WAIT_CAP})")
+    ap.add_argument("--handoff-wait", type=int, default=180,
+                    help=f"seconds to wait for the handoff chat's first tool call (max {WAIT_CAP})")
+    ap.add_argument("--lane-max-mb", type=int, default=200)
+    ap.add_argument("--src-label", default=default_label())
+    ap.add_argument("--dry-run", action="store_true")
+    a = ap.parse_args()
+    dst = a.to
+
+    # 1. Source facts.
+    pid = None
+    proc = {}
+    src_tab = None
+    src_tab_label = None
+    argv_flags = []
+    if a.pane:
+        agents = herdr_json(None, "agent list").get("agents", [])
+        ag = next((x for x in agents if x["pane_id"] == a.pane), None)
+        if not ag or ag.get("agent") != "claude":
+            die(f"pane {a.pane} is not a claude agent pane")
+        if ag.get("agent_status") not in ("idle", "done"):
+            die(f"pane {a.pane} agent is {ag.get('agent_status')}; a move needs idle or done (no force flag)")
+        sid = (ag.get("agent_session") or {}).get("value")
+        if not sid:
+            die(f"pane {a.pane} has no agent_session id")
+        info = herdr_json(None, f"pane process-info --pane {shlex.quote(a.pane)}")["process_info"]
+        proc = next((p for p in info.get("foreground_processes", []) if is_claude(p)), None)
+        if not proc:
+            die(f"no claude process in pane {a.pane}")
+        pid = int(proc["pid"])
+        argv_flags = keep_flags(proc.get("argv") or [])
+        src_tab = ag.get("tab_id")
+        tab = herdr_json(None, f"tab get {shlex.quote(src_tab)}").get("tab", {})
+        src_tab_label = tab.get("label")
+    else:
+        sid = a.session
+        held, panes = live_holders(None, sid)
+        if held or panes:
+            die(f"session {sid} is live (processes: {held[:3]}, panes: {panes}); use --pane for a live chat")
+
+    jsonl = find_transcript(sid)
+    src_key_dir = os.path.dirname(jsonl)
+    facts = transcript_facts(read_transcript(jsonl))
+    src_cwd = (proc.get("cwd") if a.pane else None) or facts["launch_cwd"] or HOME
+    lane = a.lane
+    m = re.match(re.escape(LANES) + r"/([^/]+)", src_cwd)
+    if not lane and m:
+        lane = m.group(1)
+    lane_dir = os.path.join(LANES, lane) if lane else os.path.join(HOME, ".agent-rails", "lane-moves", sid[:8])
+    flags = list(argv_flags)
+    if a.model:
+        flags += ["--model", a.model]
+    elif not flag_value(flags, "--model") and facts["model"]:
+        flags += ["--model", facts["model"]]
+    if a.effort:
+        flags += ["--effort", a.effort]
+    label = a.label or lane or src_tab_label or f"moved-{sid[:8]}"
+
+    dst_home = sh(dst, "echo $HOME").stdout.strip()
+    dst_has_volumes = sh(dst, "test -d /Volumes/StudioExt/repos", check=False).returncode == 0
+    dst_cwd = a.target_cwd or map_path(src_cwd, HOME, dst_home, dst_has_volumes)
+    dst_lane_dir = map_path(lane_dir, HOME, dst_home, dst_has_volumes)
+    lane_kb = int(subprocess.run(["du", "-sk", lane_dir], capture_output=True, text=True).stdout.split()[0]) \
+        if os.path.isdir(lane_dir) else 0
+
+    plan = {
+        "sid": sid, "source": a.src_label, "pane": a.pane, "pid": pid, "transcript": jsonl,
+        "src_cwd": src_cwd, "target": dst, "dst_cwd": dst_cwd, "dst_key": project_key(dst_cwd),
+        "lane_dir": lane_dir, "dst_lane_dir": dst_lane_dir, "lane_mb": round(lane_kb / 1024, 1),
+        "flags": flags, "label": label, "workspace": a.workspace, "mode": "handoff" if a.handoff else "resume",
+    }
+    say("plan " + json.dumps(plan))
+    if a.dry_run:
+        print(json.dumps({"dry_run": True, **plan}, indent=2))
+        return
+    if lane_kb > a.lane_max_mb * 1024:
+        die(f"lane dir {lane_dir} is {lane_kb // 1024} MB (> --lane-max-mb {a.lane_max_mb})")
+
+    # Target must not already run this session.
+    held_t, panes_t = live_holders(dst, sid)
+    if held_t or panes_t:
+        die(f"{dst} already runs {sid}: {held_t[:3]} {panes_t}")
+
+    # 2-3. Stop the source by signal (pane mode), wait for the transcript to settle.
+    if pid:
+        say(f"stopping source claude pid {pid} (SIGTERM)")
+        os.kill(pid, signal.SIGTERM)
+        for _ in range(30):
+            try:
+                os.kill(pid, 0)
+                time.sleep(1)
+            except ProcessLookupError:
+                break
+        else:
+            die(f"source claude {pid} did not exit after SIGTERM; nothing moved")
+    size = wait_settled(jsonl)
+    src_sha = sha256(jsonl)
+    n_rows = len(read_transcript(jsonl))
+    say(f"source transcript settled: {size} bytes, {n_rows} rows, sha256 {src_sha[:12]}")
+
+    def relaunch_source(reason):
+        if not a.pane:
+            return
+        cmd = shlex.join(["claude", "--resume", sid] + flags)
+        sh(None, f"herdr pane run {shlex.quote(a.pane)} {shlex.quote(cmd)}", check=False)
+        say(f"relaunched source in {a.pane} ({reason})")
+
+    # 4. Copy transcript, session dir and lane dir.
+    dst_key_dir = f"{dst_home}/.claude/projects/{project_key(dst_cwd)}"
+    exists = sh(dst, f"test -e {shlex.quote(dst_key_dir + '/' + sid + '.jsonl')} && "
+                     f"sha256sum {shlex.quote(dst_key_dir + '/' + sid + '.jsonl')} || "
+                     f"shasum -a 256 {shlex.quote(dst_key_dir + '/' + sid + '.jsonl')} 2>/dev/null", check=False)
+    if exists.returncode == 0 and exists.stdout.strip() and not exists.stdout.startswith(src_sha):
+        relaunch_source("target holds a different copy")
+        die(f"{dst}:{dst_key_dir}/{sid}.jsonl exists with different content; refusing to overwrite")
+    mk = f"mkdir -p {shlex.quote(dst_key_dir)} {shlex.quote(dst_lane_dir)}"
+    if dst_cwd.startswith(dst_home + "/.agent-rails/"):
+        mk += f" {shlex.quote(dst_cwd)}"
+    sh(dst, mk)
+    if sh(dst, f"test -d {shlex.quote(dst_cwd)}", check=False).returncode != 0:
+        relaunch_source("target cwd missing")
+        die(f"target cwd {dst}:{dst_cwd} does not exist; pass --target-cwd")
+    rs = ["rsync", "-a", "-e", "ssh -o ConnectTimeout=20 -o BatchMode=yes"]
+    subprocess.run(rs + [jsonl, f"{dst}:{dst_key_dir}/"], check=True)
+    if os.path.isdir(os.path.join(src_key_dir, sid)):
+        subprocess.run(rs + [os.path.join(src_key_dir, sid), f"{dst}:{dst_key_dir}/"], check=True)
+    if os.path.isdir(lane_dir):
+        subprocess.run(rs + [lane_dir + "/", f"{dst}:{dst_lane_dir}/"], check=True)
+    say(f"copied transcript to {dst}:{dst_key_dir}/{sid}.jsonl; lane dir to {dst}:{dst_lane_dir}")
+    trust = ensure_trust(dst, dst_cwd)
+    say(f"trust for {dst_cwd} on {dst}: {trust}")
+
+    # 5. Open the target pane.
+    pane = open_target_pane(dst, a.workspace, dst_cwd, label)
+    say(f"target pane {dst}:{pane}")
+    preamble = (f"Moved from {a.src_label} to {dst} by herdr-lane-move. Path map: cwd {src_cwd} -> {dst_cwd}; "
+                f"home {HOME} -> {dst_home}; lane dir {lane_dir} -> {dst_lane_dir}.")
+    record = {"ts": dt.datetime.now(dt.timezone.utc).isoformat(), "sid": sid, "from": a.src_label,
+              "from_pane": a.pane, "to": dst, "to_pane": pane, "dst_cwd": dst_cwd, "src_sha256": src_sha}
+
+    result = None
+    if not a.handoff:
+        instr = a.prompt or f"Read {dst_lane_dir}/STATE.md if it exists, then continue."
+        cmd = shlex.join(["claude", "--resume", sid] + flags + [f"{preamble} {instr}"])
+        t0 = time.time()
+        sh(dst, f"herdr pane run {shlex.quote(pane)} {shlex.quote(cmd)}")
+        say(f"launched resume on {dst}:{pane}; waiting up to {min(a.wait, WAIT_CAP)}s for an answer")
+        answer = wait_answer(dst, f"{dst_key_dir}/{sid}.jsonl", n_rows, a.wait, pane)
+        if answer:
+            agents = herdr_json(dst, "agent list").get("agents", [])
+            seen = next(((x.get("agent_session") or {}).get("value") for x in agents if x["pane_id"] == pane), None)
+            result = {"mode": "resumed", "answer": one_line(answer, 400), "secs": round(time.time() - t0),
+                      "target_agent_sid": seen}
+        else:
+            say("resume did not answer: " + one_line(pane_text(dst, pane)[-600:], 600))
+            if a.no_fallback:
+                stop_target_claude(dst, pane)
+                relaunch_source("resume failed, --no-fallback")
+                die("resume failed; source relaunched, target copy left unused", 3)
+            stop_target_claude(dst, pane)
+
+    if result is None:
+        # Fallback / --handoff: fresh chat reads HANDOFF.md.
+        block = handoff_block(a.src_label, sid, facts, lane_dir, dst, pane)
+        append(os.path.join(lane_dir, "HANDOFF.md"), block)
+        subprocess.run(rs + [lane_dir + "/", f"{dst}:{dst_lane_dir}/"], check=True)
+        handoff_path = f"{dst_lane_dir}/HANDOFF.md"
+        new_sid = str(uuid.uuid4())
+        instr = a.prompt or "then STATE.md if it exists, then continue."
+        kick = (f"Handed off from {a.src_label}:{sid}. {preamble} Read {handoff_path} first "
+                f"(its last section is this handoff), {instr}")
+        cmd = shlex.join(["claude", "--session-id", new_sid] + flags + [kick])
+        t0 = time.time()
+        sh(dst, f"herdr pane run {shlex.quote(pane)} {shlex.quote(cmd)}")
+        say(f"launched handoff chat {new_sid} on {dst}:{pane}")
+        ok, tool, target = wait_handoff_read(dst, dst_key_dir, new_sid, handoff_path, a.handoff_wait)
+        result = {"mode": "handoff", "new_sid": new_sid, "first_tool": tool, "first_tool_target": target,
+                  "read_handoff_first": ok, "secs": round(time.time() - t0)}
+        if not ok:
+            say(f"handoff chat did not read HANDOFF.md first ({tool}: {target})")
+
+    # 7. Mark the source.
+    record.update(result)
+    now = dt.datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")
+    line = (f"- {now}: moved to {dst}:{pane} ({result['mode']}; sid {result.get('new_sid', sid)}; "
+            f"cwd {dst_cwd}) from {a.src_label}:{a.pane or 'no pane'} sid {sid}\n")
+    append(os.path.join(lane_dir, "HANDOFF.md"), line)
+    sh(dst, f"mkdir -p {shlex.quote(dst_lane_dir)} && cat >> {shlex.quote(dst_lane_dir + '/HANDOFF.md')}",
+       input_text=line)
+    append(MOVES_LOG, json.dumps(record))
+    if src_tab:
+        sh(None, f"herdr tab rename {shlex.quote(src_tab)} "
+                 f"{shlex.quote((src_tab_label or label) + ' -> ' + dst)}", check=False)
+    after_sha = sha256(jsonl)
+    record["src_unchanged"] = after_sha == src_sha
+    print(json.dumps(record, indent=2))
+    ok = result["mode"] == "resumed" or result.get("read_handoff_first")
+    sys.exit(0 if ok else 4)
+
+
+if __name__ == "__main__":
+    main()
