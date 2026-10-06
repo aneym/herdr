@@ -197,9 +197,10 @@ enum UpdateRestart {
             if corruptReason(app) != nil {
                 throw NSError(domain: "ShellUpdate", code: 2, userInfo: [NSLocalizedDescriptionKey: "staged app is corrupt"])
             }
+            // Last fallible step before the old bundle goes: a failure here still rolls back.
+            try fm.removeItem(at: staged)
             discard(incoming)
             register(app)
-            try fm.removeItem(at: staged)
             try? fm.removeItem(at: support.appendingPathComponent("update.log"))
             spawn(app, how)
             return true
