@@ -522,7 +522,10 @@ impl TerminalRuntime {
         self.0.tty_repair(dry_run)
     }
 
-    pub fn try_send_mouse_bytes(&self, bytes: Bytes) -> Result<(), mpsc::error::TrySendError<Bytes>> {
+    pub fn try_send_mouse_bytes(
+        &self,
+        bytes: Bytes,
+    ) -> Result<(), mpsc::error::TrySendError<Bytes>> {
         self.0.try_send_mouse_bytes(bytes)
     }
 
@@ -633,6 +636,10 @@ impl TerminalRuntime {
 
     pub fn foreground_machine(&self) -> Option<String> {
         self.0.foreground_machine()
+    }
+
+    pub(crate) fn process_exited(&self) -> bool {
+        self.0.process_exited()
     }
 
     pub fn child_pid(&self) -> Option<u32> {

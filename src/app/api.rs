@@ -1,8 +1,8 @@
 use std::time::{Duration, Instant};
 
 mod agent_view;
-mod desk;
 mod agents;
+mod desk;
 mod env;
 mod integrations;
 mod layouts;
@@ -103,6 +103,7 @@ impl App {
                 worktree_restore_failed = true;
                 AppEvent::PaneDied {
                     pane_id,
+                    runtime_pid: None,
                     exit_reason: crate::platform::ChildExitReason::Exited,
                 }
             }
@@ -180,7 +181,12 @@ impl App {
         }
 
         let mut worktree_restore_updates = Vec::new();
-        if let AppEvent::PaneDied { pane_id, .. } = &ev {
+        if let AppEvent::PaneDied {
+            pane_id,
+            runtime_pid,
+            ..
+        } = &ev
+        {
             if self
                 .state
                 .popup_pane
@@ -190,7 +196,19 @@ impl App {
                 self.close_popup_pane();
                 return Vec::new();
             }
-            if !worktree_restore_failed && self.take_agent_resume_runtime_exit(*pane_id) {
+            if !worktree_restore_failed
+                && self.take_agent_resume_runtime_exit(*pane_id, *runtime_pid)
+            {
+                return Vec::new();
+            }
+            if self.retained_agent_resume_panes.contains(pane_id) {
+                // Retain the exited runtime and its screen alongside the pane.
+                if let Some(update) = self
+                    .state
+                    .publish_pane_process_exit_if_agent(*pane_id, false)
+                {
+                    self.emit_pane_state_update(&update);
+                }
                 return Vec::new();
             }
             if worktree_restore_failed {
@@ -248,6 +266,7 @@ impl App {
             AppEvent::PaneDied {
                 pane_id,
                 exit_reason,
+                ..
             } if exit_reason.requires_session_checkpoint() && self.find_pane(*pane_id).is_some() && !self.overlay_panes.contains_key(pane_id)
         );
         if checkpointed_pane_exit {
@@ -1463,6 +1482,7 @@ mod tests {
 
         app.handle_internal_event(AppEvent::PaneDied {
             pane_id,
+            runtime_pid: None,
             exit_reason: crate::platform::ChildExitReason::Exited,
         });
 
@@ -1492,6 +1512,7 @@ mod tests {
 
         app.handle_internal_event(AppEvent::PaneDied {
             pane_id,
+            runtime_pid: None,
             exit_reason: crate::platform::ChildExitReason::Exited,
         });
 
@@ -2103,6 +2124,7 @@ mod tests {
 
         app.handle_internal_event(AppEvent::PaneDied {
             pane_id: overlay_pane,
+            runtime_pid: None,
             exit_reason: crate::platform::ChildExitReason::Exited,
         });
 
@@ -2132,6 +2154,7 @@ mod tests {
 
         app.handle_internal_event(AppEvent::PaneDied {
             pane_id: dead_pane,
+            runtime_pid: None,
             exit_reason: crate::platform::ChildExitReason::Exited,
         });
 
@@ -2290,6 +2313,7 @@ mod tests {
 
         app.handle_internal_event(AppEvent::PaneDied {
             pane_id: overlay_pane,
+            runtime_pid: None,
             exit_reason: crate::platform::ChildExitReason::Exited,
         });
 
@@ -2316,6 +2340,7 @@ mod tests {
 
         app.handle_internal_event(AppEvent::PaneDied {
             pane_id: overlay_pane,
+            runtime_pid: None,
             exit_reason: crate::platform::ChildExitReason::Exited,
         });
 
@@ -2336,6 +2361,7 @@ mod tests {
 
         app.handle_internal_event(AppEvent::PaneDied {
             pane_id: overlay_pane,
+            runtime_pid: None,
             exit_reason: crate::platform::ChildExitReason::Exited,
         });
 
@@ -2378,6 +2404,7 @@ mod tests {
 
         app.handle_internal_event(AppEvent::PaneDied {
             pane_id,
+            runtime_pid: None,
             exit_reason: crate::platform::ChildExitReason::Exited,
         });
 

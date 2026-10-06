@@ -21,6 +21,7 @@ pub(crate) enum InPlaceAgentResumeError {
     SessionUnknown(String),
     Busy(String),
     NotRunning,
+    ArgvUnsupported(String),
     Failed(String),
 }
 
@@ -34,8 +35,8 @@ pub(crate) struct InPlaceAgentResume {
 
 impl App {
     /// Restart the idle agent in a pane on the same session: end its process,
-    /// then relaunch through the deferred-resume path (fresh pane shell, same
-    /// pane, terminal, cwd and launch env) with the resume argv typed in.
+    /// then relaunch through the existing argv-command runtime constructor,
+    /// retaining the pane, terminal, cwd and launch environment.
     pub(crate) fn resume_agent_in_place(
         &mut self,
         ws_idx: usize,
@@ -100,7 +101,10 @@ impl App {
             .terminal_runtimes
             .get(&terminal_id)
             .ok_or(InPlaceAgentResumeError::NotRunning)?;
-        if let Some(quiet) = input_quiet {
+        let quiet = input_quiet
+            .unwrap_or_default()
+            .max(std::time::Duration::from_secs(20));
+        {
             if !runtime.human_input_quiet_for(quiet) {
                 return Err(InPlaceAgentResumeError::Busy(format!(
                     "pane {} had user input within the last {} ms",
@@ -110,20 +114,23 @@ impl App {
             }
         }
         let (rows, cols) = runtime.current_size();
-        let foreground_argv = plan
-            .argv
-            .first()
-            .and_then(|program| {
-                let job = runtime
-                    .child_pid()
-                    .and_then(crate::detect::foreground_job)?;
-                job.processes.into_iter().find_map(|process| {
-                    let argv = process.argv?;
-                    crate::agent_resume::same_executable(argv.first()?, program).then_some(argv)
-                })
+        let foreground_argv = runtime
+            .child_pid()
+            .and_then(crate::detect::foreground_job)
+            .and_then(|job| {
+                job.processes
+                    .into_iter()
+                    .filter_map(|process| process.argv)
+                    .find(|argv| {
+                        argv.first().is_some_and(|program| {
+                            crate::agent_resume::same_executable(program, &plan.argv[0])
+                                || crate::agent_resume::same_executable(program, "node")
+                        })
+                    })
             })
             .unwrap_or_default();
-        let argv = crate::agent_resume::resume_argv_preserving_flags(&foreground_argv, &plan);
+        let argv = crate::agent_resume::resume_argv_preserving_flags(&foreground_argv, &plan)
+            .map_err(InPlaceAgentResumeError::ArgvUnsupported)?;
         let cwd = pane
             .cwd
             .as_deref()
@@ -148,26 +155,60 @@ impl App {
             agent = %resumed.agent,
             "restarting idle agent in place to resume its session"
         );
-        *self
-            .pending_agent_resume_runtime_exits
-            .entry(pane_id)
-            .or_default() += 1;
+        self.pending_agent_resume_runtime_exits
+            .insert(pane_id, runtime.child_pid());
+        self.retained_agent_resume_panes.insert(pane_id);
         self.shutdown_terminal_runtime(terminal_id.clone());
         if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
             terminal.cwd = cwd;
             terminal.begin_in_place_agent_resume(persisted, plan);
         }
-        self.start_pending_agent_resume_for_terminal(&terminal_id, rows, cols, true);
+        let launch_env = self
+            .pane_launch_env(ws_idx, pane_id, Vec::new())
+            .ok_or_else(|| {
+                InPlaceAgentResumeError::Failed("pane launch environment unavailable".into())
+            })?;
+        let runtime = crate::terminal::TerminalRuntime::spawn_argv_command(
+            pane_id,
+            rows,
+            cols,
+            self.state.terminals[&terminal_id].cwd.clone(),
+            &resumed.argv,
+            &launch_env,
+            crate::pane::AgentDetection::Enabled,
+            self.state.pane_scrollback_limit_bytes,
+            self.state.host_terminal_theme,
+            self.state.host_terminal_appearance,
+            self.event_tx.clone(),
+            self.render_notify.clone(),
+            self.render_dirty.clone(),
+        )
+        .map_err(|err| {
+            if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
+                terminal.pending_agent_resume_plan = None;
+                terminal.restore_error = Some(err.to_string());
+            }
+            InPlaceAgentResumeError::Failed(err.to_string())
+        })?;
+        self.terminal_runtimes.insert(terminal_id.clone(), runtime);
+        if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
+            terminal.pending_agent_resume_plan = None;
+        }
         self.state.mark_session_dirty();
         self.emit_pane_updated(ws_idx, pane_id);
-        if self.terminal_runtimes.get(&terminal_id).is_none() {
-            let reason = self
-                .state
-                .terminals
-                .get(&terminal_id)
-                .and_then(|terminal| terminal.restore_error.clone())
-                .unwrap_or_else(|| "the pane shell did not start".into());
-            return Err(InPlaceAgentResumeError::Failed(reason));
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        let running = self
+            .terminal_runtimes
+            .get(&terminal_id)
+            .is_some_and(|runtime| !runtime.process_exited());
+        if !running {
+            if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
+                terminal.restore_error =
+                    Some("Resumed agent exited before startup completed".into());
+            }
+            return Err(InPlaceAgentResumeError::Failed(
+                "resumed agent exited before startup completed".into(),
+            ));
         }
         Ok(resumed)
     }
@@ -176,14 +217,12 @@ impl App {
     pub(crate) fn take_agent_resume_runtime_exit(
         &mut self,
         pane_id: crate::layout::PaneId,
+        runtime_pid: Option<u32>,
     ) -> bool {
-        let Some(remaining) = self.pending_agent_resume_runtime_exits.get_mut(&pane_id) else {
+        if self.pending_agent_resume_runtime_exits.get(&pane_id) != Some(&runtime_pid) {
             return false;
-        };
-        *remaining = remaining.saturating_sub(1);
-        if *remaining == 0 {
-            self.pending_agent_resume_runtime_exits.remove(&pane_id);
         }
+        self.pending_agent_resume_runtime_exits.remove(&pane_id);
         true
     }
 
@@ -1192,6 +1231,79 @@ mod tests {
         serde_json::from_str(&response).unwrap()
     }
 
+    #[test]
+    fn agent_resume_old_and_new_runtime_exits_do_not_remove_pane() {
+        let (mut app, pane_id, terminal_id, public_id) = app_with_claude_pane(
+            crate::detect::AgentState::Idle,
+            Some(claude_session("sess-1")),
+        );
+        app.pending_agent_resume_runtime_exits
+            .insert(pane_id, Some(123));
+        app.retained_agent_resume_panes.insert(pane_id);
+        // New death can arrive before the old runtime's delayed event.
+        app.handle_internal_event(crate::events::AppEvent::PaneDied {
+            pane_id,
+            runtime_pid: Some(456),
+            exit_reason: crate::platform::ChildExitReason::Exited,
+        });
+        assert_eq!(
+            app.pending_agent_resume_runtime_exits.get(&pane_id),
+            Some(&Some(123))
+        );
+        assert!(app.state.terminals.contains_key(&terminal_id));
+        app.handle_internal_event(crate::events::AppEvent::PaneDied {
+            pane_id,
+            runtime_pid: Some(123),
+            exit_reason: crate::platform::ChildExitReason::Exited,
+        });
+        assert!(app.pending_agent_resume_runtime_exits.is_empty());
+        assert_eq!(
+            app.public_pane_id(0, pane_id).as_deref(),
+            Some(public_id.as_str())
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn agent_resume_enforces_minimum_quiet_even_without_caller_value() {
+        let (mut app, pane_id, terminal_id, _) = app_with_claude_pane(
+            crate::detect::AgentState::Idle,
+            Some(claude_session("sess-1")),
+        );
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .pending_agent_resume_plan = Some(crate::agent_resume::AgentResumePlan {
+            agent: "claude".into(),
+            argv: long_running_test_argv(),
+            dedupe_key: "quiet".into(),
+        });
+        assert!(app.start_pending_agent_resume_for_terminal(&terminal_id, 24, 80, true));
+        let old_pid = app.terminal_runtimes.get(&terminal_id).unwrap().child_pid();
+        assert!(matches!(
+            app.resume_agent_in_place(0, pane_id, None),
+            Err(InPlaceAgentResumeError::ArgvUnsupported(_))
+        ));
+        assert_eq!(
+            app.terminal_runtimes.get(&terminal_id).unwrap().child_pid(),
+            old_pid
+        );
+        app.terminal_runtimes
+            .get(&terminal_id)
+            .unwrap()
+            .record_human_text();
+        for quiet in [None, Some(std::time::Duration::ZERO)] {
+            assert!(matches!(
+                app.resume_agent_in_place(0, pane_id, quiet),
+                Err(InPlaceAgentResumeError::Busy(_))
+            ));
+        }
+        for (_, runtime) in app.terminal_runtimes.drain() {
+            runtime.shutdown();
+        }
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn agent_resume_refuses_a_pane_without_a_session_reference() {
@@ -1227,6 +1339,17 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn agent_resume_restarts_an_idle_agent_in_the_same_pane_with_its_flags() {
+        exercise_agent_resume(false).await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn agent_resume_immediately_exited_replacement_keeps_pane() {
+        exercise_agent_resume(true).await;
+    }
+
+    #[cfg(unix)]
+    async fn exercise_agent_resume(exit_on_resume: bool) {
         // A process whose argv[0] basename is `claude` stands in for the agent.
         let fake_bin = std::env::temp_dir().join(format!(
             "herdr-agent-resume-{}-{}",
@@ -1237,13 +1360,24 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&fake_bin).unwrap();
-        let sleep = ["/bin/sleep", "/usr/bin/sleep"]
+        let sleep = ["/bin/sh", "/usr/bin/sh"]
             .into_iter()
             .find(|path| std::path::Path::new(path).exists())
-            .expect("sleep binary");
+            .expect("shell binary");
         let fake_claude = fake_bin.join("claude");
         std::os::unix::fs::symlink(sleep, &fake_claude).unwrap();
         let fake_claude = fake_claude.display().to_string();
+        let script = fake_bin.join("stand-in.sh");
+        std::fs::write(
+            &script,
+            if exit_on_resume {
+                "if [ \"$1\" = --resume ]; then exit 1; fi; sleep 30\n"
+            } else {
+                "echo resumed-args: \"$@\"; sleep 30\n"
+            },
+        )
+        .unwrap();
+        let script = script.display().to_string();
 
         let (mut app, pane_id, terminal_id, public_id) = app_with_claude_pane(
             crate::detect::AgentState::Idle,
@@ -1258,7 +1392,7 @@ mod tests {
         // the terminal look like the idle claude it hosts.
         let launch = crate::agent_resume::AgentResumePlan {
             agent: "claude".into(),
-            argv: vec![fake_claude.clone(), "30".into()],
+            argv: vec![fake_claude.clone(), script.clone()],
             dedupe_key: "launch".into(),
         };
         app.state
@@ -1312,6 +1446,33 @@ mod tests {
             );
 
         let response = resume_pane(&mut app, &public_id);
+        assert!(
+            !crate::platform::process_exists(old_pid.unwrap()),
+            "old shell must be gone"
+        );
+        if exit_on_resume {
+            assert_eq!(
+                response["error"]["code"], "agent_resume_failed",
+                "{response}"
+            );
+            app.handle_internal_event(crate::events::AppEvent::PaneDied {
+                pane_id,
+                runtime_pid: app
+                    .terminal_runtimes
+                    .get(&terminal_id)
+                    .and_then(|runtime| runtime.child_pid()),
+                exit_reason: crate::platform::ChildExitReason::Exited,
+            });
+            assert_eq!(
+                app.public_pane_id(0, pane_id).as_deref(),
+                Some(public_id.as_str())
+            );
+            for (_, runtime) in app.terminal_runtimes.drain() {
+                runtime.shutdown();
+            }
+            let _ = std::fs::remove_dir_all(fake_bin);
+            return;
+        }
 
         assert_eq!(response["result"]["type"], "agent_resumed", "{response}");
         assert_eq!(response["result"]["pane_id"], public_id.as_str());
@@ -1319,7 +1480,7 @@ mod tests {
         assert_eq!(response["result"]["session_id"], "sess-1");
         assert_eq!(
             response["result"]["argv"],
-            serde_json::json!([fake_claude, "30", "--resume", "sess-1"])
+            serde_json::json!([fake_claude, script, "--resume", "sess-1"])
         );
         assert_eq!(
             app.public_pane_id(0, pane_id).as_deref(),
@@ -1339,19 +1500,20 @@ mod tests {
         );
         assert_eq!(
             app.pending_agent_resume_runtime_exits.get(&pane_id),
-            Some(&1)
+            Some(&old_pid)
         );
 
         // The replaced process's exit is owed, not a pane death.
         app.handle_internal_event(crate::events::AppEvent::PaneDied {
             pane_id,
+            runtime_pid: old_pid,
             exit_reason: crate::platform::ChildExitReason::Exited,
         });
         assert!(app.find_pane(pane_id).is_some());
         assert!(app.terminal_runtimes.get(&terminal_id).is_some());
         assert!(app.pending_agent_resume_runtime_exits.is_empty());
 
-        let typed = format!("{fake_claude} 30 --resume sess-1");
+        let typed = "resumed-args: --resume sess-1".to_string();
         let mut history = String::new();
         for _ in 0..80 {
             history = app

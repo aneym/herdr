@@ -202,6 +202,7 @@ impl PoliteSend {
     }
 
     fn submit(&mut self) {
+        self.last_human_input_at = Some(Instant::now());
         self.draft = false;
         self.last_submit_at = Some(Instant::now());
     }
@@ -758,5 +759,16 @@ mod tests {
             .unwrap();
         assert_eq!(item.state, PaneSendState::Delivered);
         assert!(item.ack_timeout);
+    }
+}
+
+#[cfg(test)]
+mod agent_resume_quiet_tests {
+    use super::*;
+    #[test]
+    fn polite_send_submit_counts_as_human_input() {
+        let mut state = PoliteSend::default();
+        state.submit();
+        assert!(!state.quiet(Instant::now(), Duration::from_secs(20)));
     }
 }

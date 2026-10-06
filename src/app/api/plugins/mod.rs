@@ -159,9 +159,6 @@ impl App {
         let Some(plugin_id) = normalize_plugin_id(&params.plugin_id) else {
             return invalid_plugin_id(id);
         };
-        if let Err(err) = self.refresh_installed_plugins() {
-            return encode_error(id, "plugin_registry_load_failed", err.to_string());
-        }
         let Some(existing) = self.state.installed_plugins.get(&plugin_id).cloned() else {
             return encode_error(id, "plugin_not_found", "plugin not found");
         };
@@ -174,7 +171,7 @@ impl App {
         if fresh.plugin_id != plugin_id {
             return encode_error(
                 id,
-                "plugin_manifest_invalid",
+                "plugin_id_changed",
                 format!(
                     "manifest at {} now declares plugin id {}",
                     existing.manifest_path, fresh.plugin_id
@@ -2458,6 +2455,7 @@ command = ["sh", "-c", "printf %s ${{HERDR_PANE_ID-unset}} > '{}'; sleep 1"]
 
         app.handle_internal_event(crate::events::AppEvent::PaneDied {
             pane_id: opened_pane_id,
+            runtime_pid: None,
             exit_reason: crate::platform::ChildExitReason::Exited,
         });
         assert!(app.state.popup_pane.is_none());
@@ -3699,6 +3697,7 @@ command = ["sh", "-c", "echo ok"]
 
         app.handle_internal_event(crate::events::AppEvent::PaneDied {
             pane_id,
+            runtime_pid: None,
             exit_reason: crate::platform::ChildExitReason::Exited,
         });
 
@@ -4182,6 +4181,25 @@ command = ["sh", "reload.sh"]
         assert_eq!(installed.actions.len(), 1);
         assert_eq!(installed.actions[0].id, "reload");
 
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn plugin_reload_rejects_changed_id_without_mutating_registry() {
+        let mut app = test_app();
+        let root = unique_temp_path("plugin-reload-changed-id");
+        write_manifest_content(&root, &reload_manifest_content("0.1.0", ""));
+        link_manifest(&mut app, &root);
+        let before = app.state.installed_plugins.clone();
+        write_manifest_content(
+            &root,
+            &reload_manifest_content("0.2.0", "").replace("example.reloadable", "example.changed"),
+        );
+        assert_eq!(
+            error_code(&reload_plugin(&mut app, "example.reloadable")),
+            "plugin_id_changed"
+        );
+        assert_eq!(app.state.installed_plugins, before);
         let _ = std::fs::remove_dir_all(root);
     }
 

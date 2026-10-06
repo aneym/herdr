@@ -27,7 +27,6 @@ const PLUGIN_RELOAD_EXIT_NO_AGENT: i32 = 3;
 const PLUGIN_RELOAD_POLL: std::time::Duration = std::time::Duration::from_secs(1);
 const PLUGIN_RELOAD_INPUT_QUIET_MS: u64 = 20_000;
 const PLUGIN_RELOAD_ACTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
-const PLUGIN_RELOAD_RESUME_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
 pub(super) fn run_plugin_command(args: &[String]) -> std::io::Result<i32> {
     let Some(subcommand) = args.first().map(|arg| arg.as_str()) else {
@@ -540,6 +539,18 @@ fn plugin_reload(args: &[String]) -> std::io::Result<i32> {
         }
     };
     let record_path = plugin_reload_record_path(&args.plugin_id, &args.request);
+    std::fs::create_dir_all(
+        record_path
+            .parent()
+            .ok_or_else(|| std::io::Error::other("missing reload record directory"))?,
+    )?;
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(record_path.with_extension("lock"))?;
+    // The OS releases the exclusive lock even if the CLI crashes.
+    lock.lock()?;
     if let Some(record) = completed_plugin_reload_record(&record_path) {
         println!("{record}");
         return Ok(0);
@@ -564,13 +575,18 @@ fn run_plugin_reload(
     args: &PluginReloadArgs,
     record_path: &Path,
 ) -> Result<serde_json::Value, PluginReloadFailure> {
-    plugin_reload_step(
-        "plugin.reload",
-        Method::PluginReload(crate::api::schema::PluginReloadParams {
-            plugin_id: args.plugin_id.clone(),
-        }),
-    )?;
-    run_plugin_reload_action(args)?;
+    let prior: Option<serde_json::Value> = std::fs::read_to_string(record_path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok());
+    if !prior.is_some_and(|record| record.get("resumed") == Some(&serde_json::Value::Bool(false))) {
+        plugin_reload_step(
+            "plugin.reload",
+            Method::PluginReload(crate::api::schema::PluginReloadParams {
+                plugin_id: args.plugin_id.clone(),
+            }),
+        )?;
+        run_plugin_reload_action(args)?;
+    }
 
     let deadline = std::time::Instant::now()
         .checked_add(std::time::Duration::from_millis(args.timeout_ms))
@@ -581,7 +597,7 @@ fn run_plugin_reload(
         })) {
             Ok(agent) => agent,
             Err((code, _)) if code == "agent_not_found" => {
-                return Ok(serde_json::json!({
+                let record = serde_json::json!({
                     "plugin_id": args.plugin_id,
                     "reloaded_at": utc_now_iso(),
                     "pane": args.pane,
@@ -589,7 +605,11 @@ fn run_plugin_reload(
                     "resumed": false,
                     "request": args.request,
                     "changelog": args.changelog,
-                }));
+                });
+                write_plugin_reload_record(record_path, &record).map_err(|err| {
+                    PluginReloadFailure::failed(format!("failed to persist reload: {err}"))
+                })?;
+                return Ok(record);
             }
             Err((code, message)) => {
                 return Err(PluginReloadFailure::failed(format!(
@@ -646,8 +666,8 @@ fn run_plugin_reload(
         "resumed agent after plugin reload"
     );
 
-    wait_for_resumed_agent_idle(&args.pane)?;
-    plugin_reload_step(
+    wait_for_resumed_agent_idle(&args.pane, deadline)?;
+    let prompt = plugin_reload_step(
         "agent.prompt",
         Method::AgentPrompt(crate::api::schema::AgentPromptParams {
             if_idle: false,
@@ -656,6 +676,8 @@ fn run_plugin_reload(
             wait: None,
         }),
     )?;
+
+    wait_for_plugin_reload_prompt(&args.pane, prompt, deadline)?;
 
     let record = serde_json::json!({
         "plugin_id": args.plugin_id,
@@ -788,8 +810,14 @@ fn run_plugin_reload_action(args: &PluginReloadArgs) -> Result<(), PluginReloadF
     }
 }
 
-fn wait_for_resumed_agent_idle(pane: &str) -> Result<(), PluginReloadFailure> {
-    let deadline = std::time::Instant::now() + PLUGIN_RELOAD_RESUME_IDLE_TIMEOUT;
+fn resumed_agent_ready(status: Option<&str>) -> bool {
+    matches!(status, Some("idle" | "done"))
+}
+
+fn wait_for_resumed_agent_idle(
+    pane: &str,
+    deadline: std::time::Instant,
+) -> Result<(), PluginReloadFailure> {
     loop {
         let status = plugin_reload_call(Method::AgentGet(crate::api::schema::AgentTarget {
             target: pane.to_string(),
@@ -802,15 +830,63 @@ fn wait_for_resumed_agent_idle(pane: &str) -> Result<(), PluginReloadFailure> {
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_string)
         });
-        if status.as_deref() == Some("idle") {
+        if resumed_agent_ready(status.as_deref()) {
             return Ok(());
         }
         if std::time::Instant::now() >= deadline {
             return Err(PluginReloadFailure::failed(
-                "resumed agent did not report idle within 120 s",
+                "resumed agent did not report idle or done before --timeout",
             ));
         }
         std::thread::sleep(PLUGIN_RELOAD_POLL);
+    }
+}
+
+fn wait_for_plugin_reload_prompt(
+    pane: &str,
+    mut prompt: serde_json::Value,
+    deadline: std::time::Instant,
+) -> Result<(), PluginReloadFailure> {
+    let id = prompt
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    loop {
+        match prompt.get("state").and_then(serde_json::Value::as_str) {
+            Some("delivered" | "acked") => return Ok(()),
+            Some("queued") => {}
+            _ => {
+                return Err(PluginReloadFailure::failed(
+                    "agent.prompt was not delivered",
+                ))
+            }
+        }
+        if std::time::Instant::now() + PLUGIN_RELOAD_POLL > deadline {
+            return Err(PluginReloadFailure::failed(
+                "agent.prompt delivery timed out",
+            ));
+        }
+        let id = id
+            .as_ref()
+            .ok_or_else(|| PluginReloadFailure::failed("queued prompt has no id"))?;
+        std::thread::sleep(PLUGIN_RELOAD_POLL);
+        let queue = plugin_reload_step(
+            "pane.queue",
+            Method::PaneQueue(crate::api::schema::PaneQueueParams {
+                pane_id: pane.into(),
+                id: Some(id.clone()),
+                flush: false,
+            }),
+        )?;
+        prompt = ["sends", "recent"]
+            .into_iter()
+            .filter_map(|key| queue.get(key).and_then(serde_json::Value::as_array))
+            .flatten()
+            .find(|send| send.get("id").and_then(serde_json::Value::as_str) == Some(id))
+            .cloned()
+            .ok_or_else(|| {
+                PluginReloadFailure::failed("queued prompt disappeared before delivery")
+            })?;
     }
 }
 
@@ -2159,6 +2235,33 @@ fn print_plugin_pane_help() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plugin_reload_prompt_rejects_undelivered_outcomes() {
+        let now = std::time::Instant::now();
+        for state in ["dropped", "stale_session", "queued"] {
+            assert!(wait_for_plugin_reload_prompt(
+                "test-pane",
+                serde_json::json!({"state": state, "id": "send-1"}),
+                now
+            )
+            .is_err());
+        }
+        assert!(wait_for_plugin_reload_prompt(
+            "test-pane",
+            serde_json::json!({"state": "delivered"}),
+            now
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn plugin_reload_post_resume_accepts_idle_and_done() {
+        assert!(resumed_agent_ready(Some("idle")));
+        assert!(resumed_agent_ready(Some("done")));
+        assert!(!resumed_agent_ready(Some("working")));
+        assert!(!resumed_agent_ready(None));
+    }
 
     #[test]
     fn machine_plugin_connection_errors_never_use_local_offline_state() {

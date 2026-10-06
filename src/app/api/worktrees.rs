@@ -2501,6 +2501,7 @@ mod tests {
 
         let pane_updates = app.handle_internal_event_with_pane_updates(AppEvent::PaneDied {
             pane_id,
+            runtime_pid: None,
             exit_reason: crate::platform::ChildExitReason::Exited,
         });
         assert!(matches!(

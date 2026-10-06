@@ -166,21 +166,23 @@ impl OverlayServerHarness {
         std::mem::forget(render_rx);
         let client_id = self.next_client_id;
         self.next_client_id += 1;
-        assert!(self.server.handle_server_event(ServerEvent::ClientShellConnected {
-            surface_reuse: false,
-            surface_delta: false,
-            client_id,
-            surface_cols: 80,
-            surface_rows: 23,
-            cell_width_px: 0,
-            cell_height_px: 0,
-            pixel_mouse: false,
-            direct_graphics: false,
-            endpoint_keybindings: false,
-            mouse_capture: false,
-            surface_active: true,
-            writer,
-        }));
+        assert!(self
+            .server
+            .handle_server_event(ServerEvent::ClientShellConnected {
+                surface_reuse: false,
+                surface_delta: false,
+                client_id,
+                surface_cols: 80,
+                surface_rows: 23,
+                cell_width_px: 0,
+                cell_height_px: 0,
+                pixel_mouse: false,
+                direct_graphics: false,
+                endpoint_keybindings: false,
+                mouse_capture: false,
+                surface_active: true,
+                writer,
+            }));
         let messages = Self::drain_through(&control_rx, last_kind);
         (messages, control_rx)
     }
@@ -222,7 +224,8 @@ impl OverlayServerHarness {
 
     /// Connects a fresh client shell and returns what it received on attach.
     pub(crate) fn connect(&mut self) -> Vec<ServerMessage> {
-        self.connect_client(protocol::endpoint::FACTORY_OVERLAY_KIND).0
+        self.connect_client(protocol::endpoint::FACTORY_OVERLAY_KIND)
+            .0
     }
 }
 
@@ -4873,6 +4876,7 @@ async fn host_shutdown_preserves_panes_from_queued_and_selected_death_events() {
     server.app.state.active = Some(0);
     let event = || AppEvent::PaneDied {
         pane_id,
+        runtime_pid: None,
         exit_reason: crate::platform::ChildExitReason::Exited,
     };
     server.app.event_tx.try_send(event()).unwrap();
@@ -4931,6 +4935,7 @@ async fn pane_death_reconciles_each_client_view_and_focus() {
     assert!(
         server.handle_internal_event_with_forwarding(AppEvent::PaneDied {
             pane_id: dead_pane,
+            runtime_pid: None,
             exit_reason: crate::platform::ChildExitReason::Exited
         })
     );
@@ -5000,6 +5005,7 @@ async fn pane_death_reapplies_controller_geometry() {
     assert!(
         server.handle_internal_event_with_forwarding(AppEvent::PaneDied {
             pane_id: dead_pane,
+            runtime_pid: None,
             exit_reason: crate::platform::ChildExitReason::Exited
         })
     );
@@ -5185,6 +5191,7 @@ fn expected_worktree_runtime_exit_does_not_release_agent() {
     assert!(
         server.handle_internal_event_with_forwarding(AppEvent::PaneDied {
             pane_id,
+            runtime_pid: None,
             exit_reason: crate::platform::ChildExitReason::Exited
         })
     );

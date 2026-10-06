@@ -259,20 +259,28 @@ pub fn plan(source: &str, agent: &str, session_ref: &AgentSessionRef) -> Option<
 ///
 /// When the pane's current foreground argv runs the same claude executable as
 /// the plan, keep the user's own flags (model, settings, permissions) and only
-/// swap the session-selection flags for `--resume <id>`. Anything else resumes
-/// with the plain plan argv.
+/// swap the session-selection flags for `--resume <id>`. Resumption proceeds
+/// only when its arguments can be mapped without losing flags.
 pub fn resume_argv_preserving_flags(
     current_foreground_argv: &[String],
     plan: &AgentResumePlan,
-) -> Vec<String> {
+) -> Result<Vec<String>, String> {
     let Some((current_program, current_args)) = current_foreground_argv.split_first() else {
-        return plan.argv.clone();
+        return Err("foreground argv cannot be mapped safely".into());
     };
     let Some(plan_program) = plan.argv.first() else {
-        return plan.argv.clone();
+        return Err("foreground argv cannot be mapped safely".into());
     };
-    if plan.agent != "claude" || !same_executable(current_program, plan_program) {
-        return plan.argv.clone();
+    let node_script = current_args.first().filter(|script| {
+        same_executable(current_program, "node")
+            && (script.ends_with("/claude/cli.js")
+                || script.contains("/claude-code/") && script.ends_with("/cli.js")
+                || same_executable(script, "claude"))
+    });
+    if plan.agent != "claude"
+        || (!same_executable(current_program, plan_program) && node_script.is_none())
+    {
+        return Err("foreground argv cannot be mapped safely".into());
     }
     let Some(session_id) = plan
         .argv
@@ -280,10 +288,16 @@ pub fn resume_argv_preserving_flags(
         .position(|arg| arg == "--resume")
         .and_then(|index| plan.argv.get(index + 1))
     else {
-        return plan.argv.clone();
+        return Err("foreground argv cannot be mapped safely".into());
     };
 
     let mut argv = vec![current_program.clone()];
+    let current_args = if let Some(script) = node_script {
+        argv.push(script.clone());
+        &current_args[1..]
+    } else {
+        current_args
+    };
     let mut args = current_args.iter().peekable();
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -299,7 +313,7 @@ pub fn resume_argv_preserving_flags(
     }
     argv.push("--resume".into());
     argv.push(session_id.clone());
-    argv
+    Ok(argv)
 }
 
 /// Whether a foreground argv[0] runs the plan's program (basename match,
@@ -943,7 +957,7 @@ mod tests {
             "medium",
         ]);
         assert_eq!(
-            resume_argv_preserving_flags(&current, &claude_plan("sess-1")),
+            resume_argv_preserving_flags(&current, &claude_plan("sess-1")).unwrap(),
             argv(&[
                 "claude",
                 "--settings",
@@ -968,11 +982,13 @@ mod tests {
             resume_argv_preserving_flags(
                 &argv(&["claude", "--resume", "old", "--model", "opus"]),
                 &plan
-            ),
+            )
+            .unwrap(),
             argv(&["claude", "--model", "opus", "--resume", "new-session"])
         );
         assert_eq!(
-            resume_argv_preserving_flags(&argv(&["claude", "-c", "--model", "opus"]), &plan),
+            resume_argv_preserving_flags(&argv(&["claude", "-c", "--model", "opus"]), &plan)
+                .unwrap(),
             argv(&["claude", "--model", "opus", "--resume", "new-session"])
         );
         assert_eq!(
@@ -991,7 +1007,8 @@ mod tests {
                     "--verbose",
                 ]),
                 &plan
-            ),
+            )
+            .unwrap(),
             argv(&[
                 "/usr/local/bin/claude",
                 "--verbose",
@@ -1002,28 +1019,36 @@ mod tests {
     }
 
     #[test]
-    fn resume_argv_uses_the_plan_for_another_program() {
+    fn resume_argv_rejects_unmapped_flags_and_preserves_node_prefix() {
         let plan = claude_plan("sess-1");
         for current in [
-            argv(&["node", "/opt/claude/cli.js", "--model", "opus"]),
             argv(&["claude-wrapper", "--model", "opus"]),
             Vec::new(),
+            argv(&["node", "/other/cli.js", "--model", "opus"]),
         ] {
-            assert_eq!(resume_argv_preserving_flags(&current, &plan), plan.argv);
+            assert!(resume_argv_preserving_flags(&current, &plan).is_err());
         }
-    }
-
-    #[test]
-    fn resume_argv_uses_the_plan_for_non_claude_agents() {
-        let plan = plan(
+        assert_eq!(
+            resume_argv_preserving_flags(
+                &argv(&["node", "/opt/claude/cli.js", "--model", "opus"]),
+                &plan
+            )
+            .unwrap(),
+            argv(&[
+                "node",
+                "/opt/claude/cli.js",
+                "--model",
+                "opus",
+                "--resume",
+                "sess-1"
+            ])
+        );
+        let codex = super::plan(
             "herdr:codex",
             "codex",
             &AgentSessionRef::id("codex-session").unwrap(),
         )
         .unwrap();
-        assert_eq!(
-            resume_argv_preserving_flags(&argv(&["codex", "--model", "o4"]), &plan),
-            argv(&["codex", "resume", "codex-session"])
-        );
+        assert!(resume_argv_preserving_flags(&argv(&["codex", "--model", "o4"]), &codex).is_err());
     }
 }
