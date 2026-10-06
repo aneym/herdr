@@ -1405,9 +1405,10 @@ impl ClientShellState {
                     ClientChromeDrag::Pin {
                         endpoint_id,
                         tab_id,
-                        slot,
+                        ..
                     } => {
                         self.pin_press = None;
+                        let slot = self.pin_slot_at(&endpoint_id, &tab_id, point);
                         self.drop_pin(endpoint_id, tab_id, slot, outcome);
                     }
                     ClientChromeDrag::TreeSpace {

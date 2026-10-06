@@ -113,8 +113,10 @@ final class PinDrag: ObservableObject {
               (moving.role == "agent") == (destination.role == "agent") else { return }
         let section = moving.role == "agent" ? "agents" : "pinned"
         let key = Self.key(machine: Self.machine(of: tab), section: section)
-        // The server counts its whole pin list; the chat now in that slot names the index.
-        guard let pinIndex = model.source(for: ids[to])?.tabs.first(where: { $0.tab_id == ids[to] })?.pin_index else { return }
+        // Snapshot indices name this section's slots even when ids is a pending permutation.
+        let slots = source.tabs.filter { ($0.role == "agent") == (moving.role == "agent") }.compactMap(\.pin_index).sorted()
+        guard slots.indices.contains(to) else { return }
+        let pinIndex = slots[to]
         var order = ids
         order.remove(at: from)
         order.insert(tab, at: to)

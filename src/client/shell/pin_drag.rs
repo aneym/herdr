@@ -82,6 +82,12 @@ impl ClientShellState {
             return;
         };
         let (endpoint_id, tab_id, current) = (endpoint_id.clone(), tab_id.clone(), *slot);
+        if self.rebase_pin_preview(&endpoint_id, &tab_id, current) {
+            outcome.repaint = true;
+        }
+        if self.pin_preview.is_none() {
+            return;
+        }
         let next = self.pin_slot_at(&endpoint_id, &tab_id, point);
         if next == current {
             return;
@@ -114,6 +120,7 @@ impl ClientShellState {
         outcome: &mut ClientShellInput,
     ) {
         outcome.repaint = true;
+        self.rebase_pin_preview(&endpoint_id, &tab_id, slot);
         let Some(preview) = self.pin_preview.as_ref() else {
             return;
         };
@@ -143,21 +150,73 @@ impl ClientShellState {
     /// Esc, or a drag the shell drops: the cached order goes back to what the
     /// machine last sent.
     pub(super) fn cancel_pin_drag(&mut self) -> bool {
+        let rebased = self.rebase_active_pin_preview();
         let dragging = matches!(self.chrome_drag, Some(ClientChromeDrag::Pin { .. }));
         if dragging {
             self.chrome_drag = None;
         }
-        self.settle_pin_preview() || dragging
+        self.settle_pin_preview() || dragging || rebased
+    }
+
+    /// A fresh machine order replaces the drag's baseline, not its target.
+    fn rebase_pin_preview(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
+        tab_id: &str,
+        slot: Option<usize>,
+    ) -> bool {
+        let Some(preview) = self.pin_preview.as_ref() else {
+            return false;
+        };
+        if preview.committed || &preview.endpoint_id != endpoint_id {
+            return false;
+        }
+        let Some(original) = self.endpoint_pin_order(endpoint_id) else {
+            self.chrome_drag = None;
+            self.pin_preview = None;
+            return true;
+        };
+        if original == preview.applied {
+            return false;
+        }
+        if !original.iter().any(|pin| pin.tab_id == tab_id) {
+            self.chrome_drag = None;
+            self.pin_preview = None;
+            return true;
+        }
+        let order = match slot {
+            Some(slot) => self.pin_order_with_move(endpoint_id, &original, tab_id, slot),
+            None => original.clone(),
+        };
+        if let Some(preview) = self.pin_preview.as_mut() {
+            preview.original = original;
+        }
+        self.show_pin_order(endpoint_id, order);
+        true
+    }
+
+    fn rebase_active_pin_preview(&mut self) -> bool {
+        let Some(ClientChromeDrag::Pin {
+            endpoint_id,
+            tab_id,
+            slot,
+        }) = self.chrome_drag.as_ref()
+        else {
+            return false;
+        };
+        let (endpoint_id, tab_id, slot) = (endpoint_id.clone(), tab_id.clone(), *slot);
+        self.rebase_pin_preview(&endpoint_id, &tab_id, slot)
     }
 
     /// Restores an uncommitted preview no drag owns any more. A machine
     /// snapshot that replaced the preview wins.
     pub(super) fn settle_pin_preview(&mut self) -> bool {
+        let rebased = self.rebase_active_pin_preview();
         if matches!(self.chrome_drag, Some(ClientChromeDrag::Pin { .. })) {
-            return false;
+            return rebased;
         }
         let Some(preview) = self.pin_preview.take() else {
-            return false;
+            return rebased;
         };
         if preview.committed {
             return false;
@@ -340,7 +399,7 @@ impl ClientShellState {
     /// Which of `endpoint_id`'s slots the pointer stands for. Above or below
     /// that machine's rows clamps to its first or last; off the section (more
     /// than a row past it, or outside its columns) is `None`.
-    fn pin_slot_at(
+    pub(super) fn pin_slot_at(
         &self,
         endpoint_id: &ClientEndpointId,
         tab_id: &str,
