@@ -20,6 +20,11 @@ export function installControl(get: () => ControlState): () => void {
   watch<{ tab_id: string }>("open", async payload => { get().open(payload.tab_id); return { ok: true }; });
   watch<{ key: string }>("key", async payload => ({ ok: true, sent_b64: await focused().key(payload.key) }));
   watch<{ name: string }>("action", async payload => { await get().action(payload.name); return { ok: true }; });
+  watch<{ pane_id?: string; mode: "terminal" | "chat" }>("chat", async payload => {
+    const pane = payload.pane_id ? get().panes.find(p => p.info().pane_id === payload.pane_id) : focused();
+    if (!pane?.chat) throw new Error("Pane unavailable");
+    return pane.chat(payload.mode);
+  });
   watch<{ dy: number }>("wheel", async payload => { focused().wheel(payload.dy); return { ok: true }; });
   return () => { disposed = true; listeners.forEach(unlisten => unlisten()); };
 }

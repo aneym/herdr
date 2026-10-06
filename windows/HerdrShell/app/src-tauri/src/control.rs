@@ -153,7 +153,9 @@ mod imp {
                 }
             }
             "read" => read_cmd(app),
-            cmd @ ("ui" | "open" | "key" | "wheel" | "action") => forward_cmd(app, cmd, req),
+            cmd @ ("ui" | "open" | "key" | "wheel" | "action" | "chat") => {
+                forward_cmd(app, cmd, req)
+            }
             _ => json!({"ok": false, "error": "unknown cmd"}),
         }
     }

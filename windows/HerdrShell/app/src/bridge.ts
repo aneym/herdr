@@ -7,6 +7,9 @@ export interface Mode { mouse: boolean; sgrPixels: boolean; kittyFlags: number; 
 export type AttachEvent = { kind: "bytes"; b64: string } | ({ kind: "mode"; b64: string } & Mode)
   | { kind: "bell"; count: number } | { kind: "notice"; message: string } | { kind: "closed"; reason: string };
 export const bridge = {
+  fileStat: (machine: string, path: string) => invoke<{ exists: boolean; size: number; mtime_ms: number; inode: number }>("file_stat", { machine, path }),
+  fileRead: (machine: string, path: string, offset: number, max: number) => invoke<{ size: number; mtime_ms: number; inode: number; offset: number; data_b64: string }>("file_read", { machine, path, offset, max }),
+  remoteHome: (machine: string) => invoke<string>("remote_home", { machine }),
   machines: () => invoke<MachineStatus[]>("machines_list"),
   snapshot: (machine: string) => invoke<Snapshot>("snapshot", { machine }),
   api: (machine: string, method: string, params: unknown) => invoke<unknown>("api_request", { machine, method, params }),

@@ -1,0 +1,7 @@
+{"type": "user", "uuid": "u", "origin": {"kind": "human"}, "message": {"content": "<pasted_content id=\"p\">\nPlease check\n</pasted_content id=\"p\">"}}
+{"type": "attachment", "uuid": "q", "attachment": {"type": "queued_command", "origin": {"kind": "human"}, "prompt": "Then fix"}}
+{"type": "assistant", "uuid": "a", "message": {"content": [{"type": "thinking", "thinking": "hidden"}, {"type": "text", "text": "Checking **now**."}, {"type": "tool_use", "id": "t", "name": "Read", "input": {"file_path": "/repo/src/main.ts"}}, {"type": "tool_use", "id": "e", "name": "Edit", "input": {"file_path": "/repo/src/main.ts", "old_string": "old", "new_string": "new"}}]}}
+{"type": "user", "uuid": "r", "message": {"content": [{"type": "tool_result", "tool_use_id": "t", "is_error": true, "content": [{"type": "text", "text": "Denied"}]}]}}
+{"type": "assistant", "uuid": "side", "isSidechain": true, "message": {"content": [{"type": "text", "text": "skip"}]}}
+{"type": "system", "uuid": "d", "subtype": "turn_duration", "durationMs": 84000}
+{"type": "attachment", "uuid": "b", "attachment": {"type": "hook_additional_context", "content": ["noise", "[lane bulletin] work from alex (now): Ready"]}}

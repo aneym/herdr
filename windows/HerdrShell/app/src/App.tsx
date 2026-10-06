@@ -109,6 +109,7 @@ export default function App() {
     if (switcherOpen && name === "switcher") { void action(name).catch(() => {}); return true; }
     if (switcherOpen || renaming) return false;
     if (event.target instanceof Element && event.target.closest('input, [contenteditable="true"]')) return false;
+    if (event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === "m") { controllers.current.get(state.current.focused ?? "")?.toggleChat?.(); return true; }
     if (!name) return false;
     void action(name).catch(() => {});
     return true;
