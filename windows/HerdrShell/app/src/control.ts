@@ -2,7 +2,7 @@ import { bridge } from "./bridge";
 import type { MachineStatus } from "./bridge";
 import type { SidebarRow } from "./model";
 import type { PaneController } from "./PaneTerm";
-export interface ControlState { machine: MachineStatus; selected: string | null; rows: SidebarRow[]; panes: PaneController[]; focused: PaneController | undefined; open: (id: string) => void }
+export interface ControlState { machine: MachineStatus; selected: string | null; rows: SidebarRow[]; panes: PaneController[]; focused: PaneController | undefined; open: (id: string) => void; action: (name: string) => Promise<void> }
 export function installControl(get: () => ControlState): () => void {
   let disposed = false;
   const listeners: (() => void)[] = [];
@@ -19,6 +19,7 @@ export function installControl(get: () => ControlState): () => void {
   watch("ui", async () => { const state = get(); return { ok: true, machine: state.machine, selected_tab: state.selected, rows: state.rows.map(({ kind, id, label, status, hotkey }) => ({ kind, id, label, status, hotkey })), panes: state.panes.map(p => p.info()) }; });
   watch<{ tab_id: string }>("open", async payload => { get().open(payload.tab_id); return { ok: true }; });
   watch<{ key: string }>("key", async payload => ({ ok: true, sent_b64: await focused().key(payload.key) }));
+  watch<{ name: string }>("action", async payload => { await get().action(payload.name); return { ok: true }; });
   watch<{ dy: number }>("wheel", async payload => { focused().wheel(payload.dy); return { ok: true }; });
   return () => { disposed = true; listeners.forEach(unlisten => unlisten()); };
 }

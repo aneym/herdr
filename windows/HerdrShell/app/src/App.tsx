@@ -4,6 +4,10 @@ import type { MachineStatus } from "./bridge";
 import { buildSidebar, tabOrder } from "./model";
 import type { Snapshot } from "./model";
 import Sidebar from "./Sidebar";
+import Switcher from "./Switcher";
+import { actionFor } from "./keys";
+import type { Action } from "./keys";
+import { runAction } from "./actions";
 import TabView from "./TabView";
 import type { PaneController } from "./PaneTerm";
 import { installControl } from "./control";
@@ -14,6 +18,17 @@ export default function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>({});
   const [selected, setSelected] = useState<string | null>(null);
   const [focused, setFocused] = useState<string | null>(null);
+  const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ text: string } | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 5000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+  const showError = useCallback((error: unknown) => setNotice({ text: String(error) }), []);
+  const [pending, setPending] = useState<{ tabId: string; paneId: string } | null>(null);
   const controllers = useRef(new Map<string, PaneController>());
   const rows = useMemo(() => buildSidebar(snapshot), [snapshot]);
   const state = useRef({ machine, snapshot, selected, focused, rows });
@@ -23,7 +38,7 @@ export default function App() {
     // Update the control target immediately, before React commits the new view.
     state.current.selected = id;
     state.current.focused = null;
-    setSelected(id); setFocused(null);
+    setRenaming(null); setSelected(id); setFocused(null);
   }, []);
   useEffect(() => {
     let disposed = false;
@@ -58,6 +73,7 @@ export default function App() {
     if (!selected || !order.includes(selected)) {
       const index = selected ? previousOrder.current.indexOf(selected) : -1;
       const initial = snapshot.tabs?.find(t => t.focused)?.tab_id;
+      setRenaming(null);
       setSelected(index >= 0 ? order[Math.min(index, order.length - 1)] ?? null : initial ?? order[0] ?? null);
     }
     previousOrder.current = order;
@@ -65,25 +81,45 @@ export default function App() {
   useEffect(() => {
     const layout = snapshot.layouts?.find(l => l.tab_id === selected);
     const panes = snapshot.panes?.filter(p => p.tab_id === selected && (!layout?.zoomed || p.pane_id === layout.focused_pane_id)) ?? [];
-    if (!panes.some(p => p.pane_id === focused)) setFocused(panes.find(p => p.focused)?.pane_id ?? panes[0]?.pane_id ?? null);
+    if (!panes.some(p => p.pane_id === focused)) { setRenaming(null); setFocused(panes.find(p => p.focused)?.pane_id ?? panes[0]?.pane_id ?? null); }
   }, [snapshot, selected, focused]);
-  const shortcut = useCallback((event: KeyboardEvent) => {
-    if (event.type !== "keydown" || !event.ctrlKey || event.altKey || event.metaKey) return false;
+  const focus = useCallback((id: string) => {
+    state.current.focused = id;
+    setRenaming(null); setFocused(id);
+    controllers.current.get(id)?.focus();
+  }, []);
+  useEffect(() => {
+    if (!pending || !snapshot.tabs?.some(t => t.tab_id === pending.tabId) || !snapshot.panes?.some(p => p.pane_id === pending.paneId && p.tab_id === pending.tabId)) return;
+    select(pending.tabId); focus(pending.paneId); setPending(null);
+  }, [pending, snapshot, select, focus]);
+  const action = useCallback((name: string, label?: string, tabId?: string) => {
     const current = state.current;
-    let target: string | undefined;
-    if (/^[1-9]$/.test(event.key)) target = current.rows.find(r => r.hotkey === Number(event.key))?.id;
-    else if (event.key === "Tab") { const order = tabOrder(current.rows); const index = order.indexOf(current.selected ?? ""); target = order[(index + (event.shiftKey ? -1 : 1) + order.length) % order.length]; }
-    else return false;
-    if (target) select(target);
+    return runAction(name as Action, {
+      machine: current.machine.name, snapshot: current.snapshot, rows: current.rows, selected: current.selected, focused: current.focused,
+      api: bridge.api, select, focus, created: (tabId, paneId) => setPending({ tabId, paneId }),
+      rename: id => { setSidebarVisible(true); setRenaming(id); }, switcher: () => { setRenaming(null); setSwitcherOpen(value => !value); },
+      toggleSidebar: () => { setRenaming(null); setSidebarVisible(value => !value); },
+      error: showError, label, tabId,
+    });
+  }, [select, focus, showError]);
+  const closeSwitcher = () => { setSwitcherOpen(false); const id = state.current.focused; if (id) controllers.current.get(id)?.focus(); };
+  const shortcut = useCallback((event: KeyboardEvent) => {
+    if (event.type !== "keydown") return false;
+    const name = actionFor(event);
+    if (switcherOpen && name === "switcher") { void action(name).catch(() => {}); return true; }
+    if (switcherOpen || renaming) return false;
+    if (event.target instanceof Element && event.target.closest('input, [contenteditable="true"]')) return false;
+    if (!name) return false;
+    void action(name).catch(() => {});
     return true;
-  }, [select]);
+  }, [action, switcherOpen, renaming]);
   useEffect(() => { const handler = (event: KeyboardEvent) => { if (shortcut(event)) { event.preventDefault(); event.stopPropagation(); } }; window.addEventListener("keydown", handler, true); return () => window.removeEventListener("keydown", handler, true); }, [shortcut]);
   const register = useCallback((id: string, value: PaneController | null) => { if (value) controllers.current.set(id, value); else controllers.current.delete(id); }, []);
   useEffect(() => installControl(() => {
     const current = state.current;
     const panes = [...controllers.current.values()].filter(p => current.snapshot.panes?.some(info => info.pane_id === p.info().pane_id && info.tab_id === current.selected));
-    return { machine: current.machine, selected: current.selected, rows: current.rows, panes, focused: panes.find(p => p.info().pane_id === current.focused), open: select };
-  }), [select]);
-  const pin = (id: string, pinned: boolean) => { void bridge.api(machine.name, "tab.set_pinned", { tab_id: id, pinned }).catch(error => setMachine({ ...machine, state: "down", error: String(error) })); };
-  return <div className="layout"><Sidebar rows={rows} selected={selected} machine={machine} select={select} pin={pin} /><TabView snapshot={snapshot} selected={selected} machine={machine.name} focused={focused} onFocus={setFocused} shortcut={shortcut} register={register} /></div>;
+    return { machine: current.machine, selected: current.selected, rows: current.rows, panes, focused: panes.find(p => p.info().pane_id === current.focused), open: select, action };
+  }), [select, action]);
+  const pin = (id: string, pinned: boolean) => { void bridge.api(machine.name, "tab.set_pinned", { tab_id: id, pinned }).catch(showError); };
+  return <div className="layout">{sidebarVisible && <Sidebar rows={rows} selected={selected} machine={machine} notice={notice?.text ?? null} select={select} pin={pin} renaming={renaming} startRename={id => { setRenaming(id); }} cancelRename={() => setRenaming(null)} commitRename={async (id, label) => { try { await action("rename_tab", label, id); setRenaming(null); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); } catch { /* runAction reports through the transient status notice. */ } }} />}<TabView snapshot={snapshot} selected={selected} machine={machine.name} focused={switcherOpen || renaming ? null : focused} onFocus={focus} shortcut={shortcut} register={register} />{switcherOpen && <Switcher rows={rows} selected={selected} open={select} close={closeSwitcher} />}{!sidebarVisible && (notice || machine.state !== "up") && <div className="machine-error notice" role="status">{notice?.text ?? machine.error ?? machine.state}</div>}</div>;
 }
