@@ -9,6 +9,8 @@ import { actionFor } from "./keys";
 import type { Action } from "./keys";
 import { runAction } from "./actions";
 import TabView from "./TabView";
+import DocPanel, { useDocs } from "./DocPanel";
+import type { DocsState } from "./docs";
 import type { PaneController } from "./PaneTerm";
 import { installControl } from "./control";
 import "@xterm/xterm/css/xterm.css";
@@ -31,11 +33,27 @@ export default function App() {
   const [pending, setPending] = useState<{ tabId: string; paneId: string } | null>(null);
   const controllers = useRef(new Map<string, PaneController>());
   const rows = useMemo(() => buildSidebar(snapshot), [snapshot]);
-  const state = useRef({ machine, snapshot, selected, focused, rows });
-  state.current = { machine, snapshot, selected, focused, rows };
+  const { items: docsItems, error: docsError } = useDocs(machine.name, selected, snapshot);
+  const docsKey = `herdr-shell.docs.${machine.name}.${selected}`;
+  const [docsShown, setDocsShown] = useState<Record<string, boolean>>({});
+  const [docsActive, setDocsActive] = useState<Record<string, string>>({});
+  const storedDocs = () => { try { return localStorage.getItem(docsKey) === "true"; } catch { return false; } };
+  const docsOpen = selected !== null && (docsShown[docsKey] ?? storedDocs());
+  const activeDoc = docsItems.find(item => item.name === docsActive[docsKey])?.name ?? docsItems[0]?.name ?? null;
+  const docs: DocsState = { open: docsOpen, items: docsItems.map(item => item.name), active: activeDoc };
+  const state = useRef({ machine, snapshot, selected, focused, rows, docs, docsKey, docsShown });
+  state.current = { machine, snapshot, selected, focused, rows, docs, docsKey, docsShown };
   const select = useCallback((id: string) => {
     if (!state.current.snapshot.tabs?.some(t => t.tab_id === id)) throw new Error(`Unknown tab: ${id}`);
     // Update the control target immediately, before React commits the new view.
+    if (state.current.selected !== id) {
+      const current = state.current;
+      const key = `herdr-shell.docs.${current.machine.name}.${id}`;
+      let open = current.docsShown[key];
+      if (open === undefined) { try { open = localStorage.getItem(key) === "true"; } catch { open = false; } }
+      current.docsKey = key;
+      current.docs = { open, items: [], active: null };
+    }
     state.current.selected = id;
     state.current.focused = null;
     setRenaming(null); setSelected(id); setFocused(null);
@@ -94,6 +112,16 @@ export default function App() {
   }, [pending, snapshot, select, focus]);
   const action = useCallback((name: string, label?: string, tabId?: string) => {
     const current = state.current;
+    if (name === "toggle_docs") {
+      if (current.selected) {
+        const open = !current.docs.open;
+        current.docs = { ...current.docs, open };
+        current.docsShown = { ...current.docsShown, [current.docsKey]: open };
+        setDocsShown(value => ({ ...value, [current.docsKey]: open }));
+        try { localStorage.setItem(current.docsKey, String(open)); } catch (error) { showError(error); }
+      }
+      return Promise.resolve();
+    }
     return runAction(name as Action, {
       machine: current.machine.name, snapshot: current.snapshot, rows: current.rows, selected: current.selected, focused: current.focused,
       api: bridge.api, select, focus, created: (tabId, paneId) => setPending({ tabId, paneId }),
@@ -123,8 +151,8 @@ export default function App() {
   useEffect(() => installControl(() => {
     const current = state.current;
     const panes = [...controllers.current.values()].filter(p => current.snapshot.panes?.some(info => info.pane_id === p.info().pane_id && info.tab_id === current.selected));
-    return { machine: current.machine, selected: current.selected, rows: current.rows, panes, focused: panes.find(p => p.info().pane_id === current.focused), open: select, action };
+    return { machine: current.machine, selected: current.selected, rows: current.rows, docs: current.docs, panes, focused: panes.find(p => p.info().pane_id === current.focused), open: select, action };
   }), [select, action]);
   const pin = (id: string, pinned: boolean) => { void bridge.api(machine.name, "tab.set_pinned", { tab_id: id, pinned }).catch(showError); };
-  return <div className="layout">{sidebarVisible && <Sidebar rows={rows} selected={selected} machine={machine} notice={notice?.text ?? null} select={select} pin={pin} renaming={renaming} startRename={id => { setRenaming(id); }} cancelRename={() => setRenaming(null)} commitRename={async (id, label) => { try { await action("rename_tab", label, id); setRenaming(null); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); } catch { /* runAction reports through the transient status notice. */ } }} />}<TabView snapshot={snapshot} selected={selected} machine={machine.name} focused={switcherOpen || renaming ? null : focused} onFocus={focus} shortcut={shortcut} register={register} />{switcherOpen && <Switcher rows={rows} selected={selected} open={select} close={closeSwitcher} />}{!sidebarVisible && (notice || machine.state !== "up") && <div className="machine-error notice" role="status">{notice?.text ?? machine.error ?? machine.state}</div>}</div>;
+  return <div className="layout">{sidebarVisible && <Sidebar rows={rows} selected={selected} machine={machine} notice={notice?.text ?? null} select={select} pin={pin} renaming={renaming} startRename={id => { setRenaming(id); }} cancelRename={() => setRenaming(null)} commitRename={async (id, label) => { try { await action("rename_tab", label, id); setRenaming(null); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); } catch { /* runAction reports through the transient status notice. */ } }} />}<TabView snapshot={snapshot} selected={selected} machine={machine.name} focused={switcherOpen || renaming ? null : focused} onFocus={focus} shortcut={shortcut} register={register} />{docsOpen && docsItems.length > 0 && <DocPanel key={docsKey} machine={machine.name} items={docsItems} active={activeDoc} select={name => setDocsActive(value => ({ ...value, [docsKey]: name }))} error={docsError} />}{switcherOpen && <Switcher rows={rows} selected={selected} open={select} close={closeSwitcher} />}{!sidebarVisible && (notice || machine.state !== "up") && <div className="machine-error notice" role="status">{notice?.text ?? machine.error ?? machine.state}</div>}</div>;
 }

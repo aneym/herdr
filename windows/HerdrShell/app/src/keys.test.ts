@@ -7,7 +7,7 @@ const event = (key: string, mods: Partial<KeyEvent> = {}): KeyEvent => ({ key, c
 describe("Windows shell bindings", () => {
   const ctrl = { ctrlKey: true }, shifted = { ctrlKey: true, shiftKey: true }, alt = { altKey: true }, split = { altKey: true, shiftKey: true };
   const cases: [string, Partial<KeyEvent>, Action][] = [
-    ["T", shifted, "new_tab"], ["w", shifted, "close_pane"], ["Z", shifted, "zoom_pane"], ["P", shifted, "switcher"], ["A", shifted, "next_attention"],
+    ["T", shifted, "new_tab"], ["w", shifted, "close_pane"], ["Z", shifted, "zoom_pane"], ["P", shifted, "switcher"], ["A", shifted, "next_attention"], ["D", shifted, "toggle_docs"],
     ["=", split, "split_right"], ["+", split, "split_right"], ["-", split, "split_down"], ["_", split, "split_down"],
     ["ArrowLeft", alt, "focus_pane_left"], ["ArrowRight", alt, "focus_pane_right"], ["ArrowUp", alt, "focus_pane_up"], ["ArrowDown", alt, "focus_pane_down"],
     ["F2", {}, "rename_tab"], ["b", ctrl, "toggle_sidebar"], ["Tab", ctrl, "next_tab"], ["Tab", shifted, "prev_tab"],
@@ -25,6 +25,8 @@ describe("Windows shell bindings", () => {
     }
     for (const key of ["0", "Enter", "ArrowLeft", "F2", "1"]) expect(actionFor(event(key, shifted))).toBeNull();
     expect(actionFor(event("t", { ...shifted, altKey: true }))).toBeNull();
+    expect(actionFor(event("d", { ...shifted, altKey: true }))).toBeNull();
+    expect(actionFor(event("m", shifted))).toBeNull();
     expect(actionFor(event("=", alt))).toBeNull();
   });
 });

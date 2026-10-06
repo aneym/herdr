@@ -1,0 +1,107 @@
+import { useEffect, useMemo, useState } from "react";
+import { bridge, fromBase64 } from "./bridge";
+import { docItems, laneFor, parseCatalog, projectFolder } from "./docs";
+import type { DocItem, LaneCatalog } from "./docs";
+import type { Snapshot } from "./model";
+import { renderMarkdown } from "./markdown";
+const catalogPaths = ["~/.agent-rails/herdr/lanes.json", "~/.agent-rails/herdr/areas.json"];
+async function readWhole(machine: string, path: string): Promise<string> {
+  const decoder = new TextDecoder();
+  let offset = 0, text = "", stamp = "";
+  do {
+    const chunk = await bridge.fileRead(machine, path, offset, 2 * 1024 * 1024);
+    const next = `${chunk.mtime_ms}:${chunk.size}:${chunk.inode}`;
+    if (offset && stamp !== next) throw new Error("Document changed while reading; retrying on next poll");
+    stamp = next;
+    const bytes = fromBase64(chunk.data_b64);
+    if (!bytes.length && offset < chunk.size) throw new Error("Incomplete document read");
+    text += decoder.decode(bytes, { stream: true }); offset += bytes.length;
+    if (offset >= chunk.size) break;
+  } while (true);
+  return text + decoder.decode();
+}
+export function useDocs(machine: string, tab: string | null, snapshot: Snapshot) {
+  const [catalog, setCatalog] = useState<LaneCatalog>({ lanes: {}, names: {} });
+  const [found, setFound] = useState<{ folder: string | null; paths: Set<string> }>({ folder: null, paths: new Set() });
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let disposed = false, busy = false, stamp = "";
+    setCatalog({ lanes: {}, names: {} }); setError("");
+    const poll = async () => {
+      if (disposed || busy || document.hidden) return;
+      busy = true;
+      try {
+        const stats = await Promise.all(catalogPaths.map(path => bridge.fileStat(machine, path)));
+        const next = JSON.stringify(stats.map(s => [s.exists, s.mtime_ms]));
+        if (next !== stamp) {
+          const contents = await Promise.all(catalogPaths.map((path, i) => stats[i].exists ? readWhole(machine, path) : Promise.resolve("{}")));
+          const parsed = parseCatalog(contents[0], contents[1]);
+          if (!disposed) { setCatalog(parsed); stamp = next; setError(""); }
+        }
+      } catch (err) { if (!disposed) setError(String(err)); }
+      finally { busy = false; }
+    };
+    void poll(); const timer = setInterval(() => void poll(), 5000);
+    document.addEventListener("visibilitychange", poll);
+    return () => { disposed = true; clearInterval(timer); document.removeEventListener("visibilitychange", poll); };
+  }, [machine]);
+  const lane = useMemo(() => laneFor(tab, snapshot, catalog), [tab, snapshot, catalog]);
+  const folder = projectFolder(lane);
+  useEffect(() => {
+    let disposed = false, busy = false;
+    setFound({ folder: null, paths: new Set() });
+    const poll = async () => {
+      if (!folder || disposed || busy || document.hidden) return;
+      busy = true;
+      try {
+        const paths = ["RESUME", "BRIEF", "DECISIONS"].map(name => `${folder}/${name}.md`);
+        const stats = await Promise.all(paths.map(path => bridge.fileStat(machine, path)));
+        if (!disposed) setFound({ folder, paths: new Set(paths.filter((_, i) => stats[i].exists)) });
+      } catch (err) { if (!disposed) setError(String(err)); }
+      finally { busy = false; }
+    };
+    void poll(); const timer = setInterval(() => void poll(), 5000);
+    document.addEventListener("visibilitychange", poll);
+    return () => { disposed = true; clearInterval(timer); document.removeEventListener("visibilitychange", poll); };
+  }, [machine, folder]);
+  return { items: useMemo(() => docItems(lane, found.folder === folder ? found.paths : new Set()), [lane, found, folder]), error };
+}
+export default function DocPanel({ machine, items, active, select, error: catalogError }: { machine: string; items: DocItem[]; active: string | null; select: (name: string) => void; error: string }) {
+  const item = items.find(item => item.name === active);
+  const [content, setContent] = useState({ path: "", text: "", error: "" });
+  const path = item?.path;
+  useEffect(() => {
+    if (!path) return;
+    let disposed = false, busy = false, stamp = "";
+    setContent({ path, text: "", error: "" });
+    const poll = async () => {
+      if (disposed || busy || document.hidden) return;
+      busy = true;
+      try {
+        const stat = await bridge.fileStat(machine, path);
+        if (!stat.exists) throw new Error("Document no longer exists");
+        const next = `${stat.mtime_ms}:${stat.size}:${stat.inode}`;
+        if (next !== stamp) {
+          const text = await readWhole(machine, path);
+          if (!disposed) { stamp = next; setContent({ path, text, error: "" }); }
+        }
+      } catch (error) { stamp = ""; if (!disposed) setContent({ path, text: "", error: String(error) }); }
+      finally { busy = false; }
+    };
+    void poll(); const timer = setInterval(() => void poll(), 1000);
+    document.addEventListener("visibilitychange", poll);
+    return () => { disposed = true; clearInterval(timer); document.removeEventListener("visibilitychange", poll); };
+  }, [machine, path]);
+  const html = useMemo(() => renderMarkdown(content.path === path ? content.text : ""), [content, path]);
+  const open = (url: string) => { if (/^(https?:|mailto:)/i.test(url)) void bridge.openUrl(url).catch(error => setContent(value => ({ ...value, error: String(error) }))); };
+  return <section className="docs" aria-label="Documents">
+    <div className="docs-tabs" role="tablist" aria-label="Documents">{items.map(doc => <button key={doc.name} role="tab" aria-selected={doc.name === active} onClick={() => { select(doc.name); if (doc.url) open(doc.url); }}>{doc.name}</button>)}</div>
+    <div className="docs-body" role="tabpanel">
+      {(catalogError || content.error) && <p className="muted" role="status">{catalogError || content.error}</p>}
+      {item?.kind === "web" ? <button className="muted" onClick={() => open(item.url!)}>Open {item.name} externally</button> : <div className="chat-markdown" onAuxClick={event => { if ((event.target as HTMLElement).closest("a")) event.preventDefault(); }} onClick={event => {
+        const anchor = (event.target as HTMLElement).closest("a");
+        if (anchor) { event.preventDefault(); const url = anchor.getAttribute("href"); if (url) open(url); }
+      }} dangerouslySetInnerHTML={{ __html: html }} />}
+    </div>
+  </section>;
+}

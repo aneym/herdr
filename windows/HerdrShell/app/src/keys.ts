@@ -1,6 +1,6 @@
 export type Action = "new_tab" | "close_pane" | "split_right" | "split_down"
   | "focus_pane_left" | "focus_pane_right" | "focus_pane_up" | "focus_pane_down"
-  | "zoom_pane" | "rename_tab" | "switcher" | "toggle_sidebar" | "next_attention"
+  | "toggle_docs" | "zoom_pane" | "rename_tab" | "switcher" | "toggle_sidebar" | "next_attention"
   | "next_tab" | "prev_tab" | "next_pane" | "prev_pane" | `select_tab_${number}`;
 export interface KeyEvent { key: string; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean }
 export function actionFor(event: KeyEvent): Action | null {
@@ -13,7 +13,7 @@ export function actionFor(event: KeyEvent): Action | null {
       if (/^[1-9]$/.test(key)) return `select_tab_${Number(key)}`;
       return key === "b" ? "toggle_sidebar" : null;
     }
-    return ({ t: "new_tab", w: "close_pane", z: "zoom_pane", p: "switcher", a: "next_attention" } as const)[key as "t"] ?? null;
+    return ({ t: "new_tab", w: "close_pane", z: "zoom_pane", p: "switcher", a: "next_attention", d: "toggle_docs" } as const)[key as "t"] ?? null;
   }
   if (alt && !ctrl) {
     if (shift) return key === "=" || key === "+" ? "split_right" : key === "-" || key === "_" ? "split_down" : null;
