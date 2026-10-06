@@ -190,6 +190,9 @@ impl App {
                 self.close_popup_pane();
                 return Vec::new();
             }
+            if !worktree_restore_failed && self.take_agent_resume_runtime_exit(*pane_id) {
+                return Vec::new();
+            }
             if worktree_restore_failed {
                 worktree_restore_updates
                     .extend(self.publish_worktree_runtime_agent_release(*pane_id));
@@ -1121,6 +1124,9 @@ impl App {
                 return self.handle_agent_view_clear(request.id, params);
             }
             Method::AgentStart(params) => return self.handle_agent_start(request.id, params),
+            Method::AgentResume(params) => {
+                return self.handle_agent_resume(request.id, params);
+            }
             Method::AgentOwnerSet(params) => {
                 return self.handle_agent_owner_set(request.id, params)
             }
@@ -1256,6 +1262,9 @@ impl App {
             }
             Method::PluginDisable(params) => {
                 return self.handle_plugin_disable(request.id, params);
+            }
+            Method::PluginReload(params) => {
+                return self.handle_plugin_reload(request.id, params);
             }
             Method::PluginActionList(params) => {
                 return self.handle_plugin_action_list(request.id, params);

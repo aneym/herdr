@@ -168,6 +168,8 @@ pub enum Method {
     AgentFocus(AgentTarget),
     #[serde(rename = "agent.start")]
     AgentStart(AgentStartParams),
+    #[serde(rename = "agent.resume")]
+    AgentResume(AgentResumeParams),
     #[serde(rename = "agent.owner.set")]
     AgentOwnerSet(AgentOwnerSetParams),
     #[serde(rename = "agent.owner.clear")]
@@ -284,6 +286,8 @@ pub enum Method {
     PluginEnable(PluginSetEnabledParams),
     #[serde(rename = "plugin.disable")]
     PluginDisable(PluginSetEnabledParams),
+    #[serde(rename = "plugin.reload")]
+    PluginReload(PluginReloadParams),
     #[serde(rename = "plugin.action.list")]
     PluginActionList(PluginActionListParams),
     #[serde(rename = "plugin.action.invoke")]

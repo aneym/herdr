@@ -183,6 +183,16 @@ pub struct AgentStartParams {
     pub caller_pane_id: Option<String>,
 }
 
+/// Restart an idle agent in its own pane, resuming its reported session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentResumeParams {
+    pub pane_id: String,
+    /// Also refuse with `agent_busy` while a person typed into the pane within
+    /// this many milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_quiet_ms: Option<u64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AgentOwnerSetParams {
     pub target: String,

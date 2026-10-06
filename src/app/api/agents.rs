@@ -4,9 +4,10 @@ use bytes::Bytes;
 
 use crate::api::schema::{
     AgentGroupCollapseParams, AgentGroupSetParams, AgentOwnerSetParams, AgentPromptParams,
-    AgentRenameParams, AgentSendKeysParams, AgentStartParams, AgentTarget, PaneReadResult,
-    ResponseResult,
+    AgentRenameParams, AgentResumeParams, AgentSendKeysParams, AgentStartParams, AgentTarget,
+    PaneReadResult, ResponseResult,
 };
+use crate::app::agent_resume::InPlaceAgentResumeError;
 use crate::app::App;
 
 use super::responses::{encode_error, encode_error_body, encode_send_accepted, encode_success};
@@ -96,6 +97,41 @@ impl App {
         };
 
         encode_success(id, ResponseResult::AgentStarted { agent, argv })
+    }
+
+    pub(super) fn handle_agent_resume(&mut self, id: String, params: AgentResumeParams) -> String {
+        let Some((ws_idx, pane_id)) = self.parse_pane_id(&params.pane_id) else {
+            return encode_error(id, "pane_not_found", "pane not found");
+        };
+        let quiet = params.input_quiet_ms.map(Duration::from_millis);
+        match self.resume_agent_in_place(ws_idx, pane_id, quiet) {
+            Ok(resumed) => encode_success(
+                id,
+                ResponseResult::AgentResumed {
+                    pane_id: self
+                        .public_pane_id(ws_idx, pane_id)
+                        .unwrap_or(params.pane_id),
+                    agent: resumed.agent,
+                    session_id: resumed.session_id,
+                    argv: resumed.argv,
+                },
+            ),
+            Err(InPlaceAgentResumeError::PaneNotFound) => {
+                encode_error(id, "pane_not_found", "pane not found")
+            }
+            Err(InPlaceAgentResumeError::SessionUnknown(message)) => {
+                encode_error(id, "agent_session_unknown", message)
+            }
+            Err(InPlaceAgentResumeError::Busy(message)) => encode_error(id, "agent_busy", message),
+            Err(InPlaceAgentResumeError::NotRunning) => encode_error(
+                id,
+                "agent_not_running",
+                format!("pane {} has no running terminal", params.pane_id),
+            ),
+            Err(InPlaceAgentResumeError::Failed(message)) => {
+                encode_error(id, "agent_resume_failed", message)
+            }
+        }
     }
 
     pub(super) fn handle_agent_owner_set(

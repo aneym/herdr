@@ -141,6 +141,9 @@ pub struct App {
     pub(crate) pending_api_worktree_remove_paths: HashMap<std::path::PathBuf, u64>,
     pub(crate) pending_worktree_remove_runtime_exits: HashMap<crate::layout::PaneId, usize>,
     pub(crate) pending_worktree_remove_runtime_restores: HashMap<crate::layout::PaneId, u64>,
+    /// Exits still owed by runtimes `agent.resume` replaced; each one is
+    /// swallowed instead of closing or respawning the resumed pane.
+    pub(crate) pending_agent_resume_runtime_exits: HashMap<crate::layout::PaneId, usize>,
     pub(crate) next_api_worktree_operation_id: u64,
     pub(crate) next_auto_update_check: Option<Instant>,
     pub(crate) next_agent_manifest_update_check: Option<Instant>,
@@ -686,6 +689,7 @@ impl App {
             pending_api_worktree_remove_paths: HashMap::new(),
             pending_worktree_remove_runtime_exits: HashMap::new(),
             pending_worktree_remove_runtime_restores: HashMap::new(),
+            pending_agent_resume_runtime_exits: HashMap::new(),
             next_api_worktree_operation_id: 1,
             next_auto_update_check: version_check_enabled
                 .then_some(Instant::now() + AUTO_UPDATE_CHECK_INTERVAL),
@@ -3357,7 +3361,10 @@ mod tests {
         let response: serde_json::Value = serde_json::from_str(&response).unwrap();
 
         assert_eq!(response["error"]["code"], "confirmation_required");
-        assert!(app.state.is_tab_pinned(&tab_id), "rejected close dropped the pin");
+        assert!(
+            app.state.is_tab_pinned(&tab_id),
+            "rejected close dropped the pin"
+        );
     }
 
     #[test]

@@ -255,6 +255,64 @@ pub fn plan(source: &str, agent: &str, session_ref: &AgentSessionRef) -> Option<
     })
 }
 
+/// Resume argv for restarting a live agent in place.
+///
+/// When the pane's current foreground argv runs the same claude executable as
+/// the plan, keep the user's own flags (model, settings, permissions) and only
+/// swap the session-selection flags for `--resume <id>`. Anything else resumes
+/// with the plain plan argv.
+pub fn resume_argv_preserving_flags(
+    current_foreground_argv: &[String],
+    plan: &AgentResumePlan,
+) -> Vec<String> {
+    let Some((current_program, current_args)) = current_foreground_argv.split_first() else {
+        return plan.argv.clone();
+    };
+    let Some(plan_program) = plan.argv.first() else {
+        return plan.argv.clone();
+    };
+    if plan.agent != "claude" || !same_executable(current_program, plan_program) {
+        return plan.argv.clone();
+    }
+    let Some(session_id) = plan
+        .argv
+        .iter()
+        .position(|arg| arg == "--resume")
+        .and_then(|index| plan.argv.get(index + 1))
+    else {
+        return plan.argv.clone();
+    };
+
+    let mut argv = vec![current_program.clone()];
+    let mut args = current_args.iter().peekable();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--resume" | "-r" | "--session-id" => {
+                if args.peek().is_some_and(|value| !value.starts_with('-')) {
+                    args.next();
+                }
+            }
+            "--continue" | "-c" | "--fork-session" => {}
+            other if other.starts_with("--resume=") || other.starts_with("--session-id=") => {}
+            _ => argv.push(arg.clone()),
+        }
+    }
+    argv.push("--resume".into());
+    argv.push(session_id.clone());
+    argv
+}
+
+/// Whether a foreground argv[0] runs the plan's program (basename match,
+/// tolerating a Windows `.exe` suffix).
+pub(crate) fn same_executable(current: &str, planned: &str) -> bool {
+    let basename = current.rsplit(['/', '\\']).next().unwrap_or(current);
+    basename == planned
+        || basename
+            .strip_suffix(".exe")
+            .or_else(|| basename.strip_suffix(".EXE"))
+            .is_some_and(|stem| stem == planned)
+}
+
 pub fn dedupe_key(source: &str, agent: &str, session_ref: &AgentSessionRef) -> String {
     format!(
         "{source}\u{0}{agent}\u{0}{:?}\u{0}{}",
@@ -855,5 +913,117 @@ mod tests {
             &AgentSessionRef::path(&agy_session).unwrap()
         )
         .is_none());
+    }
+
+    fn claude_plan(session: &str) -> AgentResumePlan {
+        plan(
+            "herdr:claude",
+            "claude",
+            &AgentSessionRef::id(session).unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn argv(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|part| part.to_string()).collect()
+    }
+
+    #[test]
+    fn resume_argv_keeps_the_real_pinned_agent_flags() {
+        let current = argv(&[
+            "claude",
+            "--settings",
+            "{\"viewMode\":\"focus\"}",
+            "--autocompact",
+            "300k",
+            "--dangerously-skip-permissions",
+            "--model",
+            "opus[1m]",
+            "--effort",
+            "medium",
+        ]);
+        assert_eq!(
+            resume_argv_preserving_flags(&current, &claude_plan("sess-1")),
+            argv(&[
+                "claude",
+                "--settings",
+                "{\"viewMode\":\"focus\"}",
+                "--autocompact",
+                "300k",
+                "--dangerously-skip-permissions",
+                "--model",
+                "opus[1m]",
+                "--effort",
+                "medium",
+                "--resume",
+                "sess-1",
+            ])
+        );
+    }
+
+    #[test]
+    fn resume_argv_replaces_existing_session_selection_flags() {
+        let plan = claude_plan("new-session");
+        assert_eq!(
+            resume_argv_preserving_flags(
+                &argv(&["claude", "--resume", "old", "--model", "opus"]),
+                &plan
+            ),
+            argv(&["claude", "--model", "opus", "--resume", "new-session"])
+        );
+        assert_eq!(
+            resume_argv_preserving_flags(&argv(&["claude", "-c", "--model", "opus"]), &plan),
+            argv(&["claude", "--model", "opus", "--resume", "new-session"])
+        );
+        assert_eq!(
+            resume_argv_preserving_flags(
+                &argv(&[
+                    "/usr/local/bin/claude",
+                    "--resume=old",
+                    "-r",
+                    "older",
+                    "--continue",
+                    "--session-id",
+                    "fixed",
+                    "--session-id=other",
+                    "--fork-session",
+                    "--resume",
+                    "--verbose",
+                ]),
+                &plan
+            ),
+            argv(&[
+                "/usr/local/bin/claude",
+                "--verbose",
+                "--resume",
+                "new-session"
+            ])
+        );
+    }
+
+    #[test]
+    fn resume_argv_uses_the_plan_for_another_program() {
+        let plan = claude_plan("sess-1");
+        for current in [
+            argv(&["node", "/opt/claude/cli.js", "--model", "opus"]),
+            argv(&["claude-wrapper", "--model", "opus"]),
+            Vec::new(),
+        ] {
+            assert_eq!(resume_argv_preserving_flags(&current, &plan), plan.argv);
+        }
+    }
+
+    #[test]
+    fn resume_argv_uses_the_plan_for_non_claude_agents() {
+        let plan = plan(
+            "herdr:codex",
+            "codex",
+            &AgentSessionRef::id("codex-session").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            resume_argv_preserving_flags(&argv(&["codex", "--model", "o4"]), &plan),
+            argv(&["codex", "resume", "codex-session"])
+        );
     }
 }

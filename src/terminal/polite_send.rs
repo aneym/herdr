@@ -231,6 +231,14 @@ impl PoliteSend {
 }
 
 impl TerminalRuntime {
+    /// Whether no human keystroke reached this runtime within `quiet`.
+    pub(crate) fn human_input_quiet_for(&self, quiet: Duration) -> bool {
+        self.1
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .quiet(Instant::now(), quiet)
+    }
+
     pub(crate) fn record_human_text(&self) {
         self.1.lock().unwrap().typing(true);
     }
