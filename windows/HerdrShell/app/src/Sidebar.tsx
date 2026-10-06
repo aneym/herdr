@@ -5,13 +5,13 @@ export function Status({ status }: { status: string }) { return <span className=
 function RenameInput({ label, commit, cancel }: { label: string; commit: (label: string) => Promise<void>; cancel: () => void }) {
   const [value, setValue] = useState(label);
   const [saving, setSaving] = useState(false);
-  return <input className="rename-input" autoFocus aria-label="Rename tab" value={value} readOnly={saving} onFocus={event => event.target.select()} onChange={event => setValue(event.target.value)} onKeyDown={event => {
+  return <input className="rename-input" autoFocus aria-label="Rename tab" value={value} readOnly={saving} onFocus={event => event.target.select()} onChange={event => setValue(event.target.value)} onBlur={() => { if (!saving) cancel(); }} onKeyDown={event => {
     event.stopPropagation();
     if (event.key === "Escape") { event.preventDefault(); cancel(); }
     if (event.key === "Enter" && !saving) { event.preventDefault(); setSaving(true); void commit(value).finally(() => setSaving(false)); }
   }} />;
 }
-export default function Sidebar({ rows, selected, machine, select, pin, renaming, startRename, cancelRename, commitRename }: { rows: SidebarRow[]; selected: string | null; machine: MachineStatus; select: (id: string) => void; pin: (id: string, pinned: boolean) => void; renaming: string | null; startRename: (id: string) => void; cancelRename: () => void; commitRename: (id: string, label: string) => Promise<void> }) {
+export default function Sidebar({ rows, selected, machine, notice, select, pin, renaming, startRename, cancelRename, commitRename }: { rows: SidebarRow[]; selected: string | null; machine: MachineStatus; notice: string | null; select: (id: string) => void; pin: (id: string, pinned: boolean) => void; renaming: string | null; startRename: (id: string) => void; cancelRename: () => void; commitRename: (id: string, label: string) => Promise<void> }) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem("herdr-space-expanded") || "{}"); } catch { return {}; } });
   const [hidden, setHidden] = useState(false);
   const toggle = (id: string, value: boolean) => setExpanded(previous => { const next = { ...previous, [id]: value }; try { localStorage.setItem("herdr-space-expanded", JSON.stringify(next)); } catch { /* Storage can be disabled by WebView policy. */ } return next; });
@@ -29,5 +29,5 @@ export default function Sidebar({ rows, selected, machine, select, pin, renaming
     <section className="spaces">{rows.filter(r => r.kind === "space" && !r.hidden).map(spaceRow)}
     {rows.some(r => r.kind === "space" && r.hidden) && <><button className="sidebar-row muted" aria-expanded={hidden} onClick={() => setHidden(!hidden)}><span className="chevron">{hidden ? "⌄" : "›"}</span>Hidden</button>{(hidden || rows.some(r => r.hidden && r.id === renaming)) && rows.filter(r => r.kind === "space" && r.hidden).map(spaceRow)}</>}
     </section>
-  </nav><footer>{machine.state === "up" ? `${machine.name} · connected` : machine.state === "connecting" ? "connecting…" : `offline: ${machine.error || "disconnected"}`}</footer></aside>;
+  </nav><footer role="status">{notice ?? (machine.state === "up" ? `${machine.name} · connected` : machine.state === "connecting" ? "connecting…" : `offline: ${machine.error || "disconnected"}`)}</footer></aside>;
 }

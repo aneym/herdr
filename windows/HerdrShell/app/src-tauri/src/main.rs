@@ -44,6 +44,11 @@ fn ctl_key_result(result: serde_json::Value) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn ctl_action_result(result: serde_json::Value) -> Result<(), String> {
+    control::deliver_result("action", result)
+}
+
+#[tauri::command]
 fn ctl_wheel_result(result: serde_json::Value) -> Result<(), String> {
     control::deliver_result("wheel", result)
 }
@@ -56,6 +61,7 @@ fn main() {
             ctl_ui_result,
             ctl_open_result,
             ctl_key_result,
+            ctl_action_result,
             ctl_wheel_result,
             bridge::machines_list,
             bridge::snapshot,

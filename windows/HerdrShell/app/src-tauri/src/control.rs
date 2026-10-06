@@ -24,6 +24,8 @@ mod imp {
 
     static RESULT_TX: Mutex<Option<(String, Sender<Value>)>> = Mutex::new(None);
 
+    static ACTION_TX: Mutex<Option<(String, Sender<Value>)>> = Mutex::new(None);
+
     static READ_TX: Mutex<Option<Sender<String>>> = Mutex::new(None);
 
     pub fn deliver_read(text: String) -> Result<(), String> {
@@ -37,7 +39,7 @@ mod imp {
         Ok(())
     }
     pub fn deliver_result(cmd: &str, result: Value) -> Result<(), String> {
-        let mut guard = RESULT_TX
+        let mut guard = result_slot(cmd)
             .lock()
             .map_err(|_| "control result lock poisoned")?;
         if guard.as_ref().is_some_and(|(pending, _)| pending == cmd) {
@@ -178,12 +180,18 @@ mod imp {
             Err(_) => json!({"ok":false,"error":"control read lock poisoned"}),
         }
     }
+    fn result_slot(cmd: &str) -> &'static Mutex<Option<(String, Sender<Value>)>> {
+        if cmd == "action" {
+            &ACTION_TX
+        } else {
+            &RESULT_TX
+        }
+    }
+
     fn forward_cmd(app: &AppHandle, cmd: &str, req: &Value) -> Value {
         let (tx, rx) = channel();
-        match RESULT_TX.lock() {
-            // Reuse the registered key reply handler for actions; the pipe
-            // serializes requests, so only one result is pending at a time.
-            Ok(mut guard) => *guard = Some((if cmd == "action" { "key" } else { cmd }.into(), tx)),
+        match result_slot(cmd).lock() {
+            Ok(mut guard) => *guard = Some((cmd.into(), tx)),
             Err(_) => return json!({"ok":false,"error":"control result lock poisoned"}),
         }
         let mut payload = req.clone();
@@ -198,7 +206,7 @@ mod imp {
                 Err(_) => json!({"ok":false,"error":format!("{cmd} timeout")}),
             }
         };
-        match RESULT_TX.lock() {
+        match result_slot(cmd).lock() {
             Ok(mut guard) => {
                 *guard = None;
                 result
