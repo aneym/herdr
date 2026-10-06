@@ -1,0 +1,62 @@
+{
+  "_source": "tree.rs push_lane attention chain (grouped lanes' runs) ~1161-1190; ACTION_UNFOLDS_LANE=false",
+  "input": {
+    "spaces": [
+      {
+        "id": "ws",
+        "name": "factory",
+        "pinned": false,
+        "collapsed": false
+      }
+    ],
+    "focusedTab": null,
+    "tabs": [
+      {
+        "id": "lane-a",
+        "space": "ws",
+        "label": "lane-a",
+        "status": "working",
+        "agents": [
+          {
+            "status": "working"
+          }
+        ],
+        "focused": false
+      },
+      {
+        "id": "lane-b",
+        "space": "ws",
+        "label": "lane-b",
+        "status": "working",
+        "agents": [
+          {
+            "status": "working",
+            "parent": "lane-a"
+          }
+        ],
+        "focused": false
+      }
+    ]
+  },
+  "overlay": {
+    "tabs": {
+      "lane-a": {
+        "kind": "lane",
+        "section": "implementing"
+      },
+      "lane-b": {
+        "kind": "lane",
+        "section": "implementing",
+        "runs": [
+          {
+            "id": "wf_fold",
+            "name": "fold run",
+            "attention": "act"
+          }
+        ]
+      }
+    }
+  },
+  "chrome": {},
+  "now": 0
+}

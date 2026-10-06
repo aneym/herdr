@@ -165,7 +165,9 @@ enum SpacesTree {
                     let ct = tag(candidate)
                     return ct.kind == "workflow" && (parent(candidate) == tab.id || grouped.contains { $0.id == parent(candidate) })
                 }.map { tag($0) }
+                // As Rust push_lane: grouped lanes' runs roll up too, so a folded header carries their "!".
                 let attentions = [t.attention] + childTags.map(\.attention) + runs.map(\.attention) + grouped.map { tag($0).attention }
+                    + grouped.flatMap { tag($0).runs.map(\.attention) }
                 let rank = ["none": 0, "warn": 1, "act": 2]
                 let attention = attentions.max { (rank[$0] ?? 0) < (rank[$1] ?? 0) } ?? "none"
                 let expandable = !children.isEmpty || !runs.isEmpty || !grouped.isEmpty
@@ -186,6 +188,8 @@ enum SpacesTree {
                 let priority = ["unknown": 0, "idle": 1, "done": 2, "working": 3, "blocked": 4]
                 var status = tab.agents.max { (priority[$0.status] ?? 0) < (priority[$1.status] ?? 0) }?.status ?? tab.status
                 if t.busy && ["idle", "done"].contains(status) { status = "working" }
+                // As Rust summarize_factory_parent: a header with live children shows as working, not idle.
+                if foldable && ["idle", "done", "unknown"].contains(status) { status = "working" }
                 let idle = t.kind == "lane" && !t.busy && (t.summary ?? "").trimmingCharacters(in: .whitespaces).isEmpty && status == "idle"
                 var name = t.name ?? tab.label
                 if t.kind == "workflow", name.hasPrefix("wf ") { name = String(name.dropFirst(3)) }

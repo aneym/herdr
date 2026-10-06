@@ -1,0 +1,40 @@
+{
+  "_source": "tree.rs summarize_factory_parent (live children lift Idle/Done/Unknown to Working, clear idle) ~1531-1545",
+  "input": {
+    "spaces": [
+      {
+        "id": "ws",
+        "name": "factory",
+        "pinned": false,
+        "collapsed": false
+      }
+    ],
+    "focusedTab": null,
+    "tabs": [
+      {
+        "id": "lane",
+        "space": "ws",
+        "label": "lane",
+        "status": "idle",
+        "agents": [],
+        "focused": false
+      }
+    ]
+  },
+  "overlay": {
+    "tabs": {
+      "lane": {
+        "kind": "lane",
+        "section": "implementing",
+        "runs": [
+          {
+            "id": "wf_build",
+            "name": "build run"
+          }
+        ]
+      }
+    }
+  },
+  "chrome": {},
+  "now": 0
+}
