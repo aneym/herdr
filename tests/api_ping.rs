@@ -2621,12 +2621,13 @@ fn claude_screen_state_ignores_leftover_shells_and_keeps_workflow_waits_working(
             ),
             "working",
         ),
-        // w5S:p1: a turn blocked on its workflow stays working.
+        // w5S:p1: a turn blocked on its workflow stays working. Claude leaves
+        // a blank line between the wait line and the prompt box.
         (
             "workflow-wait-spinner-title",
             "◐ Lane brief",
             format!(
-                "✻ Waiting for 1 dynamic workflow to finish · 2 messages hidden\n{rule} ultracode ─\n❯\n{rule}\n  ⏵⏵ bypass permissions on · 1 shell · ctx 69%\n  ◯ raise-setup  ████░░░░  4/5 · 31m37s\n"
+                "✻ Waiting for 1 dynamic workflow to finish · 1 message hidden\n\n{rule}\n❯\n{rule}\n  ⏵⏵ bypass permissions on · 2 shells · ctx 70%\n\n  ◯ raise-setup  ████░░░░  4/5 · 48m23s\n"
             ),
             "working",
         ),
