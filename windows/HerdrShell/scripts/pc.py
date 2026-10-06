@@ -173,12 +173,12 @@ def cmd_install(args):
     rc = launch_app(argparse.Namespace(force_idle=True, test_window=False))
     if rc != 0:
         sys.exit(rc)
-    deadline = time.monotonic() + 20
+    deadline = time.monotonic() + 60
     summary = {"machine_state": "unavailable", "rows": 0, "panes": 0}
     while time.monotonic() < deadline:
         try:
             rc, reply = ctl_send({"cmd": "ui"}, timeout=deadline - time.monotonic())
-            ui = json.loads(reply)
+            ui = json.loads(reply, strict=False)
             summary = {"machine_state": ui.get("machine", {}).get("state"),
                        "rows": len(ui.get("rows", [])), "panes": len(ui.get("panes", []))}
             if rc == 0 and ui.get("ok") is True and summary["machine_state"] == "up":
@@ -190,7 +190,7 @@ def cmd_install(args):
         if remaining > 0:
             time.sleep(min(1, remaining))
     print(json.dumps(summary))
-    print("install post-check failed: UI did not report machine up within 20 s", file=sys.stderr)
+    print("install post-check failed: UI did not report machine up within 60 s", file=sys.stderr)
     sys.exit(1)
 
 
