@@ -80,6 +80,10 @@ struct SpacesRowView: View {
             if showResume {
                 Button("Resume") { resume() }.buttonStyle(.plain).foregroundStyle(t.accent).fixedSize()
             }
+            if row.id == "pinned" {
+                // A new chat pinned at the end of this section (HerdrModel.newPinnedTab).
+                Text("+").foregroundStyle(t.mute).fixedSize().onTapGesture { click("plus") }.clickTarget("pinned+")
+            }
             if row.kind == .section {
                 Text(focusMark ?? "").font(.system(size: 10)).foregroundStyle(t.mute)
                     .frame(width: 10).onTapGesture { if focusMark != nil { click("focus") } }

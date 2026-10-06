@@ -84,7 +84,9 @@ final class TestHook {
                 // As the sidebar: a tab row's pin is a server fact, a space row's a local preference.
                 if row.kind == .tab, let tab = row.tab { c.model.togglePin(tab) } else { c.state.spacesChrome.toggle("pin:" + String(row.id.dropFirst(6))) }
             }
-            else if part == "plus" {
+            else if part == "plus", row.id == "pinned" {
+                c.model.newPinnedTab(focused: c.state.selectedTab) { c.selectTab($0) }
+            } else if part == "plus" {
                 let commands = c.commands
                 let space = String(row.id.dropFirst(6))
                 DispatchQueue.global(qos: .userInitiated).async {
@@ -278,6 +280,10 @@ final class TestHook {
             let label = obj["label"] as? String
             guard let line = c.sidebarLines.first(where: { $0.kind == .area && $0.title == label }),
                   let f = c.state.rowFrames[line.id] else { log("hook: click: no area \(label ?? "?")"); return }
+            frame = f
+        case "pinned_plus":
+            view = c.sidebarHostView
+            guard let f = c.state.rowFrames["pinned+"] else { log("hook: click: no pinned +"); return }
             frame = f
         case "focus":
             view = c.sidebarHostView

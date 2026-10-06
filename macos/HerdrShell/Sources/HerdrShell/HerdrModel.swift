@@ -348,6 +348,22 @@ extension HerdrModel {
         DispatchQueue.global(qos: .userInitiated).async { _ = commands.tabSetPinned(tabId: tab, pinned: !pinned) }
     }
 
+    /// A new chat pinned at the end of PINNED, in the focused chat's space (a local space when
+    /// nothing is focused), then `done` with its id to focus it. Alex, 2026-10-06: "i need a
+    /// button next to pinned to make a new tab that's pinned please".
+    func newPinnedTab(focused: String?, done: @escaping (String) -> Void) {
+        let owner = focused.flatMap { id in source(for: id).flatMap { s in s.tabs.first { $0.tab_id == id }.map { (s, $0.workspace_id) } } }
+        guard let (source, workspace) = owner ?? snapshot.flatMap({ s in s.workspaces.first.map { (s, $0.workspace_id) } }) else { return }
+        // Pins keep server order; the new pin's place is after every pin its machine holds.
+        let end = source.tabs.filter { $0.pin_index != nil }.count
+        let commands = HerdrCommands(socketPath: env["HERDR_SOCKET_PATH"] ?? "")
+        DispatchQueue.global(qos: .userInitiated).async {
+            guard let made = commands.tabCreate(workspaceId: workspace, cwd: nil) else { log("new pinned tab failed"); return }
+            if commands.tabSetPinned(tabId: made.tabId, pinned: true) { _ = commands.tabPinMove(tabId: made.tabId, pinIndex: end) }
+            DispatchQueue.main.async { done(made.tabId) }
+        }
+    }
+
     func spacesRows(state: SidebarState) -> [SpacesRow] {
         guard let s = snapshot else { return [SpacesRow(id: "agents", kind: .title, title: "agents")] }
         let input = SpacesInput(spaces: s.workspaces.map {

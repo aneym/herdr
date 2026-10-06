@@ -1,0 +1,6 @@
+[PASS] pins listed before the click
+[PASS] one new chat on the server
+[PASS] it is in the focused chat's space
+[PASS] it is last in PINNED
+[PASS] server pin order ends with it
+[PASS] it is focused
