@@ -2600,6 +2600,45 @@ fn claude_screen_state_ignores_leftover_shells_and_keeps_workflow_waits_working(
             ),
             "blocked",
         ),
+        // Live captures 2026-10-06: Claude keeps its title spinner while its
+        // teammates or workflows run, after its own turn has ended. At rest
+        // with only background work, the chat reads idle (w5X:p2, w5H:pZ2).
+        (
+            "teammates-at-rest",
+            "◐ Lane brief",
+            format!(
+                "  Still waiting on you: the syspolicyd command.\n{rule} ultracode ─\n❯ done, killed it\n{rule}\n  ⏵⏵ bypass permissions on · 28 shells · ← for agents\n  ● main\n  ◯ studio-sweep-39  test sweep  1h 6m 1s\n  ◯ scope-close-lead  close scope  44m 55s\n"
+            ),
+            "idle",
+        ),
+        // w5H:p12G: a live turn with teammates keeps its spinner line and
+        // "esc to interrupt" (truncated) in the footer.
+        (
+            "live-turn-with-teammates",
+            "◐ Lane brief",
+            format!(
+                "✶ Determining… (3s · thinking with high effort)\n{rule} ultracode ─\n❯\n{rule}\n  ⏵⏵ bypass        2 shells · esc to i…\n  permissions on ·\n  ⏺ main\n  ◯ scope-doc-writer  10m 39s · ↓ 229.4k\n"
+            ),
+            "working",
+        ),
+        // w5S:p1: a turn blocked on its workflow stays working.
+        (
+            "workflow-wait-spinner-title",
+            "◐ Lane brief",
+            format!(
+                "✻ Waiting for 1 dynamic workflow to finish · 2 messages hidden\n{rule} ultracode ─\n❯\n{rule}\n  ⏵⏵ bypass permissions on · 1 shell · ctx 69%\n  ◯ raise-setup  ████░░░░  4/5 · 31m37s\n"
+            ),
+            "working",
+        ),
+        // A wait line left in the transcript does not keep a resting chat working.
+        (
+            "stale-wait-teammates-at-rest",
+            "◐ Lane brief",
+            format!(
+                "✻ Waiting for 1 background agent to finish\n  The agent reported back.\n✻ Brewed for 4s\n{rule}\n❯\n{rule}\n  ⏵⏵ bypass permissions on · ctx 33%\n  ◯ reviewer  2m 3s\n"
+            ),
+            "idle",
+        ),
     ];
     // `claude <case>` sets the case's OSC title (none when empty), draws its
     // screen, then holds the pane until the test stops it.
