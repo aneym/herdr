@@ -1,0 +1,8 @@
+[PASS] remote pinned row shows the machine row's state -- pinned ['●', 'working'] machine ['●', 'working']
+[PASS] remote pinned row menu offers Unpin -- ['Unpin']
+[PASS] remote unpinned tab menu offers Pin -- ['Pin']
+[PASS] host footer keeps machines that differ only in case apart -- ['mlab', 'MLAB', 'Mlab', 'pcx']
+[PASS] Unpin on a remote row unpins on that machine
+[PASS] unpinned remote row leaves the pinned section
+[PASS] Pin on a remote row pins on that machine
+[PASS] the local session's pins are untouched -- []

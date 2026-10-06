@@ -90,6 +90,21 @@ if (any(r.startswith("title|spacegroup:") for r in plain) or None in order or or
     print("\n".join(split))
 else:
     print("PASS spaces split follows space_groups data")
+# A pinned lane rolls up its live children as its header in the space does (H0 6b): the lane
+# below is idle with one live run, so its space row reads working and so must its pinned row.
+pinned = json.loads((FIXTURES / "live-child-working.json").read_text())
+pinned["input"]["tabs"][0]["pinIndex"] = 0
+fixture = BUILD / "pinned-live-child.json"
+fixture.write_text(json.dumps(pinned))
+rows = base_rows(fixture)
+def mark(prefix):
+    row = next((r.split("|") for r in rows if r.startswith(prefix)), None)
+    return row and (row[4], row[5])
+if mark("tab|tab:lane|") != ("●", "working") or mark("tab|pinned:lane|") != mark("tab|tab:lane|"):
+    failures.append("pinned lane rollup")
+    print("\n".join(rows))
+else:
+    print("PASS a pinned lane with live children reads working, as its space row does")
 if failures:
     raise SystemExit("FAIL: " + ", ".join(failures))
 print("PASS P33 parity")

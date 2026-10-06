@@ -259,7 +259,7 @@ struct SidebarView: View {
             row: row, t: t, firstSpaceId: firstSpaceId,
             selected: row.tab == state.selectedTab,
             focusMark: row.kind == .section && row.toggleKey != nil ? (state.spacesChrome.focusedSection[focusSpace] == row.title ? "✕" : "◎") : nil,
-            pinned: row.kind == .tab ? model.source(for: row.tab ?? "")?.tabs.first(where: { $0.tab_id == row.tab })?.pin_index != nil : row.kind == .space && state.spacesChrome.pinnedSpaces.contains(String(row.id.dropFirst(6))),
+            pinned: row.kind == .tab ? model.isPinned(row.tab ?? "") : row.kind == .space && state.spacesChrome.pinnedSpaces.contains(String(row.id.dropFirst(6))),
             hovered: hoveredSpaceRow == row.id,
             showResume: hoveredSpaceRow == row.id && row.kind == .tab && row.tab.map { model.spacesOverlay.tabs[$0]?.mode == "parked" } == true,
             goal: row.kind == .goal ? AnyView(goalMenu) : nil,
@@ -268,17 +268,19 @@ struct SidebarView: View {
         .contentShape(Rectangle()).onTapGesture { spacesClick(row, part: "body") }
         .onHover { hoveredSpaceRow = $0 ? row.id : nil }
         .contextMenu {
-            // Park, rename and info act on the local server; another machine's tab has none of them yet.
-            if let tab = row.tab, !Machines.isRemote(tab) {
-                Button("Rename…") { onRename(tab) }
-                Button("Show info") { if let r = model.allRowsInOrder.first(where: { $0.id == tab }) { openDetail?(r) } }
-                if row.id.contains(":parked") || model.spacesOverlay.tabs[tab]?.mode == "parked" { Button("Resume") { resume(tab) } }
-                else { Button("Park…") { ParkActions.run("park", tab: tab, note: nil) { _, _ in model.catalog.reload() } } }
-                if RemoteActions.slug(model.catalog.snapshot.lanes[tab]?.scopeURL) != nil { Button("Approve scope…") { approve(tab) } }
-            }
-            if row.kind == .tab, let tab = row.tab, !Machines.isRemote(tab) {
-                let pinned = model.source(for: tab)?.tabs.first(where: { $0.tab_id == tab })?.pin_index != nil
-                Button(pinned ? "Unpin" : "Pin") { spacesClick(row, part: "pin") }
+            if let tab = row.tab {
+                ForEach(RowMenu.items(for: row, model: model), id: \.self) { item in
+                    Button(item.rawValue) {
+                        switch item {
+                        case .rename: onRename(tab)
+                        case .info: if let r = model.allRowsInOrder.first(where: { $0.id == tab }) { openDetail?(r) }
+                        case .resume: resume(tab)
+                        case .park: ParkActions.run("park", tab: tab, note: nil) { _, _ in model.catalog.reload() }
+                        case .approve: approve(tab)
+                        case .pin, .unpin: spacesClick(row, part: "pin")
+                        }
+                    }
+                }
             }
         }.clickTarget(row.id)
     }
@@ -303,11 +305,7 @@ struct SidebarView: View {
             if let raw = row.link, let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") { NSWorkspace.shared.open(url) }
         } else if part == "pin" {
             if row.kind == .tab, let tab = row.tab {
-                let pinned = model.source(for: tab)?.tabs.first { $0.tab_id == tab }?.pin_index != nil
-                let commands = HerdrCommands(socketPath: model.env["HERDR_SOCKET_PATH"] ?? "")
-                DispatchQueue.global(qos: .userInitiated).async {
-                    _ = commands.tabSetPinned(tabId: tab, pinned: !pinned)
-                }
+                model.togglePin(tab)
             } else {
                 state.spacesChrome.toggle("pin:" + String(row.id.dropFirst(6))); state.saveSpacesChrome()
             }
@@ -700,5 +698,25 @@ extension Color {
         var v: UInt64 = 0
         Scanner(string: s).scanHexInt64(&v)
         self.init(red: Double((v >> 16) & 0xFF) / 255, green: Double((v >> 8) & 0xFF) / 255, blue: Double(v & 0xFF) / 255)
+    }
+}
+
+/// A spaces row's context menu, in order. The sidebar draws it and TestHook's state reads it, so a
+/// check sees the items a right-click shows.
+enum RowMenu: String {
+    case rename = "Rename…", info = "Show info", resume = "Resume", park = "Park…", approve = "Approve scope…", pin = "Pin", unpin = "Unpin"
+
+    static func items(for row: SpacesRow, model: HerdrModel) -> [RowMenu] {
+        guard let tab = row.tab else { return [] }
+        var out: [RowMenu] = []
+        // Park, rename and info act on the local server; another machine's tab has none of them yet.
+        if !Machines.isRemote(tab) {
+            out += [.rename, .info]
+            out.append(row.id.contains(":parked") || model.spacesOverlay.tabs[tab]?.mode == "parked" ? .resume : .park)
+            if RemoteActions.slug(model.catalog.snapshot.lanes[tab]?.scopeURL) != nil { out.append(.approve) }
+        }
+        // A pin is a fact on the server that owns the tab, so another machine's tab pins there.
+        if row.kind == .tab { out.append(model.isPinned(tab) ? .unpin : .pin) }
+        return out
     }
 }

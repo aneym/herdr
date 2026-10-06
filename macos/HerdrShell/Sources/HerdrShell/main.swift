@@ -113,13 +113,9 @@ if (socket == liveSocket || socket.hasSuffix("/.config/herdr/herdr.sock")) && !f
 
 // P15 fixtures. Read before HERDR_* is cleared; the lab launcher forwards these two.
 let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
-let shellLanesPath = ProcessInfo.processInfo.environment["HERDR_LANES_PATH"] ?? (home + "/.agent-rails/herdr/lanes.json")
-let shellAreasPath = ProcessInfo.processInfo.environment["HERDR_AREAS_PATH"] ?? (home + "/.agent-rails/herdr/areas.json")
-ShellPaths.lanes = shellLanesPath
-ShellPaths.areas = shellAreasPath
+ShellPaths.configure(env: ProcessInfo.processInfo.environment, home: home)
 ContextStore.directory = ProcessInfo.processInfo.environment["HERDR_CONTEXT_DIR"]
     ?? Channel.appSupport.appendingPathComponent("context").path
-ShellPaths.modes = ProcessInfo.processInfo.environment["CONTROL_MODES"] ?? (home + "/.agent-rails/herdr/modes.json")
 RemoteActions.configure(herdrBin: herdrBin)
 // Other machines: prod reads the tunnels' config; a dev or lab run only an explicit one.
 if Channel.kind == .prod || ProcessInfo.processInfo.environment["HERDR_SHELL_MACHINES"] != nil {

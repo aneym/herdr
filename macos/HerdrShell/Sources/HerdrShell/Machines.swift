@@ -117,18 +117,39 @@ struct MachineState: Identifiable, Equatable {
 /// "needs update" only when the machine's protocol differs from the local server's,
 /// which is why its tabs would not open.
 enum MachineRows {
+    private static let priority = ["unknown": 0, "idle": 1, "done": 2, "working": 3, "blocked": 4]
+    private static func glyph(_ status: String) -> String { status == "blocked" ? "■" : status == "idle" || status == "unknown" ? "○" : "●" }
+    /// A tab's state: its most urgent agent, else the tab's own status.
+    private static func status(_ tab: Snapshot.Tab, _ agentsByTab: [String: [Snapshot.Agent]]) -> String {
+        (agentsByTab[tab.tab_id] ?? []).map { $0.agent_status ?? "unknown" }
+            .max { (priority[$0] ?? 0) < (priority[$1] ?? 0) } ?? tab.agent_status ?? "unknown"
+    }
+
+    /// Other machines' pinned tabs for the PINNED section, in each machine's pin order, with the
+    /// glyph and tone their row in the machine block draws (a tab with no agent is a quiet shell).
+    static func pinned(_ machines: [MachineState]) -> [SpacesRow] {
+        machines.flatMap { machine -> [SpacesRow] in
+            guard let snapshot = machine.snapshot else { return [] }
+            let agentsByTab = Dictionary(grouping: snapshot.agents, by: \.tab_id)
+            return snapshot.tabs.filter { $0.pin_index != nil }
+                .sorted { ($0.pin_index ?? 0) < ($1.pin_index ?? 0) }.map { tab in
+                    let space = snapshot.workspaces.first { $0.workspace_id == tab.workspace_id }
+                    let st = status(tab, agentsByTab)
+                    let agent = agentsByTab[tab.tab_id] != nil
+                    return SpacesRow(id: "pinned:" + tab.tab_id, kind: .tab, glyph: agent ? glyph(st) : "○", tone: agent ? st : "mute",
+                                     title: tab.label ?? tab.tab_id,
+                                     trailing: machine.name + " · " + (space?.label ?? tab.workspace_id), tab: tab.tab_id)
+                }
+        }
+    }
+
     static func build(_ machines: [MachineState], chrome: SpacesChrome, localProtocol: Int? = nil) -> [SpacesRow] {
         var out = [SpacesRow(id: "machines", kind: .title, title: "machines")]
-        let priority = ["unknown": 0, "idle": 1, "done": 2, "working": 3, "blocked": 4]
-        func glyph(_ status: String) -> String { status == "blocked" ? "■" : status == "idle" || status == "unknown" ? "○" : "●" }
         for m in machines {
             let open = !chrome.collapsedMachines.contains(m.name)
             let s = m.snapshot
             let agentsByTab = Dictionary(grouping: s?.agents ?? [], by: \.tab_id)
-            func status(_ tab: Snapshot.Tab) -> String {
-                (agentsByTab[tab.tab_id] ?? []).map { $0.agent_status ?? "unknown" }
-                    .max { (priority[$0] ?? 0) < (priority[$1] ?? 0) } ?? tab.agent_status ?? "unknown"
-            }
+            func status(_ tab: Snapshot.Tab) -> String { Self.status(tab, agentsByTab) }
             let agentTabs = (s?.tabs ?? []).filter { agentsByTab[$0.tab_id] != nil }
             let top = agentTabs.map(status).max { (priority[$0] ?? 0) < (priority[$1] ?? 0) } ?? "unknown"
             let trailing: String
@@ -182,11 +203,17 @@ enum MachineRows {
     }
 
     /// One name per machine: a host footer row that names a machine in another case
-    /// ("PC" for "pc") takes the machine's name, so the two blocks agree.
+    /// ("PC" for "pc") takes the machine's name, so the two blocks agree. Machines are keyed by
+    /// their exact name: a row that names one exactly keeps it, and a case-only match renames
+    /// only when it is the one machine and the one row of that spelling, so `pc` and `PC` stay two.
     static func renameHosts(_ rows: [SpacesRow], machines: [String]) -> [SpacesRow] {
-        rows.map { row in
-            guard row.kind == .footerHost,
-                  let name = machines.first(where: { $0.caseInsensitiveCompare(row.title) == .orderedSame }) else { return row }
+        func folds(_ a: String, _ b: String) -> Bool { a.caseInsensitiveCompare(b) == .orderedSame }
+        let hosts = rows.filter { $0.kind == .footerHost }.map(\.title)
+        return rows.map { row in
+            guard row.kind == .footerHost, !machines.contains(row.title) else { return row }
+            let candidates = machines.filter { folds($0, row.title) }
+            guard candidates.count == 1, let name = candidates.first,
+                  !hosts.contains(name), hosts.filter({ folds($0, name) }).count == 1 else { return row }
             var r = row
             r.title = name
             return r

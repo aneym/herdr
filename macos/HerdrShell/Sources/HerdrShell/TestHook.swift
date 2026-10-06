@@ -80,7 +80,10 @@ final class TestHook {
                 let split = key.lastIndex(of: ":")!
             let space = String(key[..<split]); let label = String(key[key.index(after: split)...])
             c.state.spacesChrome.focusedSection[space] = c.state.spacesChrome.focusedSection[space] == label ? nil : label
-            } else if part == "pin" { c.state.spacesChrome.toggle("pin:" + String(row.id.dropFirst(6))) }
+            } else if part == "pin" {
+                // As the sidebar: a tab row's pin is a server fact, a space row's a local preference.
+                if row.kind == .tab, let tab = row.tab { c.model.togglePin(tab) } else { c.state.spacesChrome.toggle("pin:" + String(row.id.dropFirst(6))) }
+            }
             else if part == "plus" {
                 let commands = c.commands
                 let space = String(row.id.dropFirst(6))
@@ -751,6 +754,9 @@ final class TestHook {
             "sidebar": ["orchestrator": rows(c.model.orchestrators), "lanes": rows(c.model.lanes),
                         "workflows": rows(c.model.workflows)],
             "spaces_rows": c.model.spacesRows(state: c.state).map { $0.dump },
+            // Each tab row's context menu items, as a right-click shows them.
+            "spaces_menus": Dictionary(c.model.spacesRows(state: c.state).filter { $0.tab != nil }
+                .map { ($0.id, RowMenu.items(for: $0, model: c.model).map(\.rawValue)) }, uniquingKeysWith: { a, _ in a }),
             "spaces_chrome": (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(c.state.spacesChrome))) ?? [:],
             "docs_visible": c.root.docsOpen,
             "detail_open": c.detailPanel.model.isOpen,

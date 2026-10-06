@@ -141,18 +141,24 @@ enum SpacesTree {
     static func age(_ seconds: Double) -> String { let m = Int(max(0, seconds)) / 60; return m == 0 ? "<1m" : m < 60 ? "\(m)m" : "\(m / 60)h\(m % 60)m" }
     static func build(_ input: SpacesInput, overlay: Overlay, chrome: SpacesChrome, now: Double) -> [SpacesRow] {
         var out = [SpacesRow(id: "agents", kind: .title, title: "agents")]
+        let choices = overlay.goalChoices
+        let filter = chrome.goalFilter.flatMap { choices.contains($0) ? $0 : nil }
         let pins = input.tabs.filter { $0.pinIndex != nil }.sorted { ($0.pinIndex ?? 0) < ($1.pinIndex ?? 0) }
         if !pins.isEmpty {
             out.append(SpacesRow(id: "pinned", kind: .section, title: "PINNED", trailing: pins.count == 1 ? "⌘1" : "⌘1..\(min(pins.count, 9))"))
             for tab in pins {
-                let source = input.spaces.first { $0.id == tab.space }?.name ?? tab.space
-                let state = mark(tab, overlay.tabs[tab.id] ?? Overlay.Tag())
+                let space = input.spaces.first { $0.id == tab.space }
+                let source = space?.name ?? tab.space
+                // As its header row in the space: live children make a pinned lane read as working.
+                let header = space.map { space in
+                    let depth = space.collapsed || chrome.collapsedSpaces.contains(space.id) ? 1 : 0
+                    return SpaceScope(space, input: input, overlay: overlay, filter: filter, depth: depth).rollup(tab, nest: true).count > 0
+                } ?? false
+                let state = mark(tab, overlay.tabs[tab.id] ?? Overlay.Tag(), foldable: header)
                 out.append(SpacesRow(id: "pinned:" + tab.id, kind: .tab, glyph: state.glyph, tone: state.tone, title: tab.label,
                                      trailing: source, tab: tab.id))
             }
         }
-        let choices = overlay.goalChoices
-        let filter = chrome.goalFilter.flatMap { choices.contains($0) ? $0 : nil }
         if !choices.isEmpty { out.append(SpacesRow(id: "goal", kind: .goal, title: "goal " + (filter?.replacingOccurrences(of: ":", with: " · ") ?? "All"), trailing: filter == nil ? "▾" : "✕")) }
         let hidden = input.spaces.filter { $0.collapsed || chrome.collapsedSpaces.contains($0.id) }
         let visible = input.spaces.filter { !$0.collapsed && !chrome.collapsedSpaces.contains($0.id) }
@@ -160,38 +166,16 @@ enum SpacesTree {
         func appendSpace(_ space: SpacesInput.Space, depth: Int) {
             let meta = overlay.spaces[space.id]
             out.append(SpacesRow(id: "space:" + space.id, kind: .space, depth: depth, chevron: "open", title: space.name, trailing: meta?.summary ?? "", alert: meta?.attention ?? "none", tab: meta?.target_tab ?? input.tabs.first(where: { $0.space == space.id })?.id, toggleKey: "space:" + space.id))
-            let all = input.tabs.filter { $0.space == space.id }
-            let sectioned = all.contains { overlay.tabs[$0.id]?.section != nil }
-            let tabs = all.filter { tab in
-                guard sectioned, depth == 0, let filter else { return true }
-                guard let tag = overlay.tabs[tab.id] else { return false }
-                let bits = filter.split(separator: ":", maxSplits: 1).map(String.init)
-                return tag.kind == "orchestrator" || tag.mode == "auto" || (tag.goal == bits[0] && (bits.count == 1 || tag.goal_area == bits[1]))
-            }
-            func tag(_ tab: SpacesInput.Tab) -> Overlay.Tag { overlay.tabs[tab.id] ?? Overlay.Tag() }
-            let background = tabs.filter { let t = tag($0); return t.kind == "advisor" || (t.done && t.kind != "workflow" && !(t.kind == "lane" && t.mode != "active")) }
-            let foreground = tabs.filter { !tag($0).done && tag($0).kind != "advisor" }
-            let orch = foreground.filter { tag($0).kind == "orchestrator" }
-            let lanes = tabs.filter { tag($0).kind == "lane" && (!tag($0).done || tag($0).mode != "active") }
-            let workflows = foreground.filter { tag($0).kind == "workflow" }
-            let ordinary = foreground.filter { !["orchestrator", "lane", "workflow"].contains(tag($0).kind) }
-            func parent(_ tab: SpacesInput.Tab) -> String? { let p = tag(tab).parent; return lanes.contains { $0.id == p } ? p : orch.first?.id }
-            func root(_ tab: SpacesInput.Tab) -> String? {
-                guard tag(tab).kind == "lane", tag(tab).mode == "active", tag(tab).section != "scoping" else { return nil }
-                var seen = Set([tab.id]); var current = tab
-                // Edges exist only from active, non-scoping lanes (tree.rs direct_parent), so a parked lane ends the walk.
-                func edge(_ t: SpacesInput.Tab) -> Bool { tag(t).kind == "lane" && tag(t).mode == "active" && tag(t).section != "scoping" }
-                while edge(current), let parent = current.agents.first?.parent, let next = (lanes + orch).first(where: { $0.id == parent }) {
-                    guard seen.insert(parent).inserted else { return nil }
-                    current = next
-                }
-                return current.id == tab.id ? nil : current.id
-            }
+            let scope = SpaceScope(space, input: input, overlay: overlay, filter: filter, depth: depth)
+            let tabs = scope.tabs, sectioned = scope.sectioned, background = scope.background
+            let orch = scope.orch, lanes = scope.lanes, workflows = scope.workflows, ordinary = scope.ordinary
+            func tag(_ tab: SpacesInput.Tab) -> Overlay.Tag { scope.tag(tab) }
+            func parent(_ tab: SpacesInput.Tab) -> String? { scope.parent(tab) }
+            func root(_ tab: SpacesInput.Tab) -> String? { scope.root(tab) }
             func appendTab(_ tab: SpacesInput.Tab, _ level: Int, nest: Bool = true, inside: Bool = false) {
                 let t = tag(tab)
-                let grouped = nest ? lanes.filter { root($0) == tab.id } : []
-                let children = nest ? workflows.filter { parent($0) == tab.id } : []
-                let runs = nest ? t.runs : []
+                let rollup = scope.rollup(tab, nest: nest)
+                let grouped = rollup.grouped, children = rollup.children, runs = rollup.runs
                 let childTags = tabs.filter { candidate in
                     let ct = tag(candidate)
                     return ct.kind == "workflow" && (parent(candidate) == tab.id || grouped.contains { $0.id == parent(candidate) })
@@ -205,13 +189,8 @@ enum SpacesTree {
                 // As Rust factory_expanded (C45/C46): a lane opens on the user's expand or while the
                 // focused tab sits inside; running work and a child that needs action leave it folded
                 // (Alex, 2026-10-05: "default collapse everything workflows so we only see talking agent").
-                let groupedWorkflows = workflows.filter { w in grouped.contains { $0.id == parent(w) } }
-                let focusedInside = (children + grouped + groupedWorkflows).contains { $0.id == input.focusedTab }
-                // agent:<id> runs and grouped lanes are agents; workflow tabs and other runs are workflows.
-                let live = (runs + grouped.flatMap { tag($0).runs }).filter { !$0.done }
-                let agents = grouped.count + live.filter { $0.id.hasPrefix("agent:") }.count
-                let flows = children.count + groupedWorkflows.count + live.filter { !$0.id.hasPrefix("agent:") }.count
-                let count = agents + flows
+                let focusedInside = (children + grouped + rollup.groupedWorkflows).contains { $0.id == input.focusedTab }
+                let agents = rollup.agents, flows = rollup.flows, count = agents + flows
                 // As Rust: only live work makes a header foldable, and a grouped lane inside an open
                 // parent always shows its own workflows and runs (it has no fold of its own).
                 let foldable = !inside && count > 0
@@ -319,5 +298,65 @@ enum SpacesTree {
         for (i, host) in overlay.usage.enumerated() { out.append(SpacesRow(id: "usage:\(i)", kind: .footerUsage, title: host.name, trailing: (host.summary ?? "").replacingOccurrences(of: " · ", with: " "), alert: host.attention, link: host.url)) }
         for (i, host) in overlay.hosts.enumerated() { out.append(SpacesRow(id: "host:\(i)", kind: .footerHost, title: host.name, trailing: (host.summary ?? "").replacingOccurrences(of: "load ", with: "").replacingOccurrences(of: " live", with: ""), alert: host.attention)) }
         return out
+    }
+}
+
+/// One space's tab roles and each header's live children, shared by the space's rows and the
+/// pinned section so a pinned lane rolls up exactly what its header in the space does.
+private struct SpaceScope {
+    let overlay: Overlay
+    let tabs: [SpacesInput.Tab]; let sectioned: Bool; let background: [SpacesInput.Tab]
+    let orch: [SpacesInput.Tab]; let lanes: [SpacesInput.Tab]; let workflows: [SpacesInput.Tab]; let ordinary: [SpacesInput.Tab]
+
+    init(_ space: SpacesInput.Space, input: SpacesInput, overlay: Overlay, filter: String?, depth: Int) {
+        self.overlay = overlay
+        let all = input.tabs.filter { $0.space == space.id }
+        let sectioned = all.contains { overlay.tabs[$0.id]?.section != nil }
+        let tabs = all.filter { tab in
+            guard sectioned, depth == 0, let filter else { return true }
+            guard let tag = overlay.tabs[tab.id] else { return false }
+            let bits = filter.split(separator: ":", maxSplits: 1).map(String.init)
+            return tag.kind == "orchestrator" || tag.mode == "auto" || (tag.goal == bits[0] && (bits.count == 1 || tag.goal_area == bits[1]))
+        }
+        func tag(_ tab: SpacesInput.Tab) -> Overlay.Tag { overlay.tabs[tab.id] ?? Overlay.Tag() }
+        let foreground = tabs.filter { !tag($0).done && tag($0).kind != "advisor" }
+        self.tabs = tabs; self.sectioned = sectioned
+        background = tabs.filter { let t = tag($0); return t.kind == "advisor" || (t.done && t.kind != "workflow" && !(t.kind == "lane" && t.mode != "active")) }
+        orch = foreground.filter { tag($0).kind == "orchestrator" }
+        lanes = tabs.filter { tag($0).kind == "lane" && (!tag($0).done || tag($0).mode != "active") }
+        workflows = foreground.filter { tag($0).kind == "workflow" }
+        ordinary = foreground.filter { !["orchestrator", "lane", "workflow"].contains(tag($0).kind) }
+    }
+
+    func tag(_ tab: SpacesInput.Tab) -> Overlay.Tag { overlay.tabs[tab.id] ?? Overlay.Tag() }
+    func parent(_ tab: SpacesInput.Tab) -> String? { let p = tag(tab).parent; return lanes.contains { $0.id == p } ? p : orch.first?.id }
+    func root(_ tab: SpacesInput.Tab) -> String? {
+        guard tag(tab).kind == "lane", tag(tab).mode == "active", tag(tab).section != "scoping" else { return nil }
+        var seen = Set([tab.id]); var current = tab
+        // Edges exist only from active, non-scoping lanes (tree.rs direct_parent), so a parked lane ends the walk.
+        func edge(_ t: SpacesInput.Tab) -> Bool { tag(t).kind == "lane" && tag(t).mode == "active" && tag(t).section != "scoping" }
+        while edge(current), let parent = current.agents.first?.parent, let next = (lanes + orch).first(where: { $0.id == parent }) {
+            guard seen.insert(parent).inserted else { return nil }
+            current = next
+        }
+        return current.id == tab.id ? nil : current.id
+    }
+
+    struct Rollup {
+        var grouped: [SpacesInput.Tab]; var children: [SpacesInput.Tab]; var groupedWorkflows: [SpacesInput.Tab]
+        var runs: [Overlay.Run]; var agents: Int; var flows: Int
+        var count: Int { agents + flows }
+    }
+    /// A header's grouped lanes, child workflows and live runs; `nest` false is a row with none.
+    func rollup(_ tab: SpacesInput.Tab, nest: Bool) -> Rollup {
+        let grouped = nest ? lanes.filter { root($0) == tab.id } : []
+        let children = nest ? workflows.filter { parent($0) == tab.id } : []
+        let runs = nest ? tag(tab).runs : []
+        let groupedWorkflows = workflows.filter { w in grouped.contains { $0.id == parent(w) } }
+        // agent:<id> runs and grouped lanes are agents; workflow tabs and other runs are workflows.
+        let live = (runs + grouped.flatMap { tag($0).runs }).filter { !$0.done }
+        let agents = grouped.count + live.filter { $0.id.hasPrefix("agent:") }.count
+        let flows = children.count + groupedWorkflows.count + live.filter { !$0.id.hasPrefix("agent:") }.count
+        return Rollup(grouped: grouped, children: children, groupedWorkflows: groupedWorkflows, runs: runs, agents: agents, flows: flows)
     }
 }

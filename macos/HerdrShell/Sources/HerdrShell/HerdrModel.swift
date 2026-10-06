@@ -326,6 +326,17 @@ extension HerdrModel {
         return (pinned + remote + allRowsInOrder.map(\.id)).filter { seen.insert($0).inserted }
     }
 
+    func isPinned(_ tab: String) -> Bool {
+        source(for: tab)?.tabs.first { $0.tab_id == tab }?.pin_index != nil
+    }
+
+    /// Pins or unpins on the server that owns the tab: HerdrCommands sends a remote id to its machine.
+    func togglePin(_ tab: String) {
+        let pinned = isPinned(tab)
+        let commands = HerdrCommands(socketPath: env["HERDR_SOCKET_PATH"] ?? "")
+        DispatchQueue.global(qos: .userInitiated).async { _ = commands.tabSetPinned(tabId: tab, pinned: !pinned) }
+    }
+
     func spacesRows(state: SidebarState) -> [SpacesRow] {
         guard let s = snapshot else { return [SpacesRow(id: "agents", kind: .title, title: "agents")] }
         let input = SpacesInput(spaces: s.workspaces.map {
@@ -344,15 +355,7 @@ extension HerdrModel {
         var groupedOverlay = spacesOverlay
         if let groups = catalog.snapshot.spaceGroups { groupedOverlay.spaceGroups = groups }
         var rows = SpacesTree.build(input, overlay: groupedOverlay, chrome: state.spacesChrome, now: Date().timeIntervalSince1970)
-        let remotePins = machines.flatMap { machine -> [SpacesRow] in
-            guard let snapshot = machine.snapshot else { return [] }
-            return snapshot.tabs.filter { $0.pin_index != nil }
-                .sorted { ($0.pin_index ?? 0) < ($1.pin_index ?? 0) }.map { tab in
-                    let space = snapshot.workspaces.first { $0.workspace_id == tab.workspace_id }
-                    return SpacesRow(id: "pinned:" + tab.tab_id, kind: .tab, title: tab.label ?? tab.tab_id,
-                                     trailing: machine.name + " · " + (space?.label ?? tab.workspace_id), tab: tab.tab_id)
-                }
-        }
+        let remotePins = MachineRows.pinned(machines)
         if !remotePins.isEmpty {
             if !rows.contains(where: { $0.id == "pinned" }) {
                 rows.insert(SpacesRow(id: "pinned", kind: .section, title: "PINNED"), at: 1)

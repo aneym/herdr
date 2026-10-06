@@ -8,6 +8,19 @@ enum ShellPaths {
     /// herdr-control's modes file (`herdr-lane park|unpark` writes it). `CONTROL_MODES` overrides it,
     /// the same variable lane.js reads, so a lab and its lane tool share one file.
     static var modes = ""
+
+    /// areas.json sits beside the overlay, as the Rust server finds it (factory_overlay.rs:
+    /// `path.with_file_name("areas.json")`), so a custom `FACTORY_OVERLAY` moves both files.
+    /// `HERDR_AREAS_PATH` still names a fixture outright.
+    static func configure(env: [String: String], home: String) {
+        let overlay = env["FACTORY_OVERLAY"].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap { $0.isEmpty ? nil : ($0 as NSString).expandingTildeInPath }
+        lanes = env["HERDR_LANES_PATH"] ?? (home + "/.agent-rails/herdr/lanes.json")
+        areas = env["HERDR_AREAS_PATH"]
+            ?? overlay.map { (($0 as NSString).deletingLastPathComponent as NSString).appendingPathComponent("areas.json") }
+            ?? (home + "/.agent-rails/herdr/areas.json")
+        modes = env["CONTROL_MODES"] ?? (home + "/.agent-rails/herdr/modes.json")
+    }
     static var filesPresent: Bool {
         FileManager.default.fileExists(atPath: lanes) || FileManager.default.fileExists(atPath: areas)
     }
@@ -147,10 +160,8 @@ final class LaneCatalog: ObservableObject {
             snap.spaces = Self.stringMap(obj["spaces"])
             snap.goalArea = Self.stringMap(obj["goal_area"])
             snap.goal = Self.stringMap(obj["goal"])
-            snap.spaceGroups = (obj["space_groups"] as? [[String: Any]] ?? []).compactMap { g in
-                guard let name = Self.str(g["name"]) else { return nil }
-                return Overlay.SpaceGroup(name: name, spaces: (g["spaces"] as? [Any] ?? []).compactMap { Self.str($0) })
-            }
+            // A `space_groups` Rust cannot parse (null, a non-list, a bad group) keeps the last ones too.
+            snap.spaceGroups = Self.spaceGroups(obj) ?? snapshot.spaceGroups
         } else if FileManager.default.fileExists(atPath: ShellPaths.areas) {
             // Unreadable or half-written: keep the last parsed groups, as the Rust poller does.
             snap.spaceGroups = snapshot.spaceGroups
@@ -168,6 +179,27 @@ final class LaneCatalog: ObservableObject {
         guard !path.isEmpty, let data = FileManager.default.contents(atPath: path),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         return obj
+    }
+
+    /// As Rust apply_areas_file (serde, `#[serde(default)]`): a missing key or field takes its
+    /// default and a group with a blank name is dropped, but a present value of the wrong type,
+    /// null included, fails the whole document, which returns nil here.
+    static func spaceGroups(_ obj: [String: Any]) -> [Overlay.SpaceGroup]? {
+        guard let raw = obj["space_groups"] else { return [] }
+        guard let list = raw as? [Any] else { return nil }
+        var out: [Overlay.SpaceGroup] = []
+        for item in list {
+            guard let group = item as? [String: Any] else { return nil }
+            let name = group["name"] ?? "", spaces = group["spaces"] ?? [Any]()
+            guard let name = name as? String, let members = spaces as? [Any] else { return nil }
+            var names: [String] = []
+            for member in members {
+                guard let member = member as? String else { return nil }
+                names.append(member)
+            }
+            if !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { out.append(Overlay.SpaceGroup(name: name, spaces: names)) }
+        }
+        return out
     }
 
     private static func str(_ v: Any?) -> String? {
