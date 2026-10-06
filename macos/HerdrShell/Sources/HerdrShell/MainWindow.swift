@@ -563,6 +563,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
 
     private var factoryModel: FactoryModel?
     private var chats: [String: PaneChat] = [:]
+    /// True while any pane's chat composer, on screen or in a hidden tab, holds unsent text.
+    var hasUnsentDraft: Bool { chats.values.contains { !$0.ui.draft.isEmpty } }
 
     func toggleFactory() { setFactory(open: !state.factoryOpen) }
 

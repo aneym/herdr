@@ -86,7 +86,7 @@ final class UpdateController: NSObject {
         guard Channel.store.string(forKey: Self.autoTriedKey) != current.commit else { return }
         // Relaunch restores the frame only, and a chat draft lives only in view state.
         if let w = windowController?.window, w.isMiniaturized || w.styleMask.contains(.fullScreen) { return }
-        if ChatDrafts.any { return }
+        if windowController?.hasUnsentDraft == true { return }
         let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
         guard idle >= (asked ? 5 : Self.autoIdleSeconds) else { return }
         try? FileManager.default.removeItem(at: request)

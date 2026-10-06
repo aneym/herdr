@@ -377,6 +377,8 @@ final class ChatUI: ObservableObject {
     @Published var mode: Mode { didSet { if persist { UserDefaults.standard.set(mode.rawValue, forKey: Self.modeKey) } } }
     @Published var groupOpen: [String: Bool] = [:]
     @Published var toolOpen: [String: Bool] = [:]
+    /// Composer text not yet sent.
+    @Published var draft = ""
     /// Tool rows currently on screen (for the check's state dump).
     var rendered = Set<String>()
     private let persist: Bool
@@ -421,24 +423,18 @@ private struct ChatGroup: Identifiable {
     var id: String { items[0].id }
 }
 
-/// Composers holding text nobody has sent. The draft lives only in view state, so an
-/// update that installs itself waits until this is empty. A hidden tab's chat keeps its
-/// entry (its view and draft are kept), so only sending or clearing the text removes it.
-enum ChatDrafts {
-    private static var unsent = Set<ObjectIdentifier>()
-    static var any: Bool { !unsent.isEmpty }
-    static func set(_ id: ObjectIdentifier, unsent on: Bool) {
-        if on { unsent.insert(id) } else { unsent.remove(id) }
-    }
-}
-
 struct ChatView: View {
     @ObservedObject var transcript: Transcript
     @ObservedObject var theme: ThemeStore
     @ObservedObject var sender: ChatSender
     @ObservedObject var ui: ChatUI
     let codeFamily: String
-    @State private var text = ""
+    /// The unsent composer text lives on the pane's ChatUI, so it outlives this view
+    /// (a hidden tab) and an automatic update can see it.
+    private var text: String {
+        get { ui.draft }
+        nonmutating set { ui.draft = newValue }
+    }
     @State private var composerHeight: CGFloat = 21
     @State private var stick = true
     @State private var wheel: Any?
@@ -481,9 +477,7 @@ struct ChatView: View {
                     if stick { toBottom(proxy) }
                 }
                 .onChange(of: sender.pending) { _ in if stick { toBottom(proxy) } }
-                .onChange(of: text) { t in ChatDrafts.set(ObjectIdentifier(sender), unsent: !t.isEmpty) }
                 .onAppear {
-                    ChatDrafts.set(ObjectIdentifier(sender), unsent: !text.isEmpty)
                     toBottom(proxy)
                     wheel = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
                         if event.scrollingDeltaY > 0 { stick = false }
@@ -675,7 +669,7 @@ struct ChatView: View {
     private func composer(_ p: Palette) -> some View {
         let empty = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         return VStack(alignment: .leading, spacing: 8) {
-            ComposerField(text: $text, height: $composerHeight, ink: NSColor(hex: p.t.chrome.ink), submit: submit)
+            ComposerField(text: $ui.draft, height: $composerHeight, ink: NSColor(hex: p.t.chrome.ink), submit: submit)
                 .frame(height: min(max(composerHeight, 21), 200))
                 .overlay(alignment: .topLeading) {
                     if text.isEmpty {
