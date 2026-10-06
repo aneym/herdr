@@ -847,6 +847,7 @@ final class TestHook {
             return ["pane": s.paneId, "terminal": s.terminalId, "cols": g.cols, "rows": g.rows,
                     "first_responder": c.window.firstResponder === s, "exited": s.exited,
                     "mouse_captured": s.mouseCaptured,
+                    "hovered_link": s.hoveredLink,
                     "keys_sent": s.keysSent, "last_key_sent": s.lastKeySent,
                     "frame": [s.frame.minX, s.frame.minY, s.frame.width, s.frame.height],
                     "in_host": s.superview === c.host,

@@ -1,0 +1,8 @@
+[PASS] app is key and terminal attached
+[PASS] lab shell ready for output command
+[PASS] 260-character URL is one logical line soft-wrapped into a second physical row
+[PASS] OSC 8 label printed
+[FAIL] Cmd-hover on URL second row reports the entire URL
+[FAIL] Cmd-click on URL second row records the entire URL
+[PASS] open_url_sim records the OSC 8 target
+[PASS] Chat opens and loads the assistant's bare 260-character URL

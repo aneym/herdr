@@ -472,7 +472,7 @@ final class SurfaceView: NSView {
 
     // MARK: mouse
 
-    private var hoveredLink = ""
+    private(set) var hoveredLink = ""
     private var cursorBeforeLink: NSCursor?
     private lazy var linkPreview: LinkPreview = {
         let label = LinkPreview(labelWithString: "")
