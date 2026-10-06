@@ -19,7 +19,7 @@ pub(crate) fn truncate_end(text: &str, max_width: usize) -> String {
     format!("{prefix}…")
 }
 
-fn take_prefix_width(text: &str, max_width: usize) -> String {
+pub(crate) fn take_prefix_width(text: &str, max_width: usize) -> String {
     let mut output = String::new();
     let mut width = 0usize;
     for ch in text.chars() {

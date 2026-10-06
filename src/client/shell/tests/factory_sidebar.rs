@@ -2322,11 +2322,12 @@ fn factory_host_footer_rows_fit_and_align_at_40_44_52() {
         let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), width);
         eprintln!("width {width}:\n{}", rows[55..].iter().map(|row| row.trim_end()).collect::<Vec<_>>().join("\n"));
     }
-    for (width, studio) in [
-        // At 40 the kept note has under six columns left, so it is left out whole.
-        (40u16, "studio 2 running   2G free wait mem"),
-        (44, "studio 2 running   2G free wait mem 1 kept…"),
-        (52, "studio 2 running   2G free wait mem 1 kept: 1 secr…"),
+    for (width, studio, ax42) in [
+        // At 40 the kept note and "wait slowdown" are left out whole; a dropped
+        // field leaves a trailing "…" so the cut shows at the column.
+        (40u16, "studio 2 running   2G free wait mem …", " ax42   2 running  12G free …"),
+        (44, "studio 2 running   2G free wait mem 1 kept…", " ax42   2 running  12G free wait slowdown"),
+        (52, "studio 2 running   2G free wait mem 1 kept: 1 secr…", " ax42   2 running  12G free wait slowdown"),
     ] {
         let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), width);
         let footer: Vec<&str> = rows[55..].iter().map(|row| row.trim_end()).collect();
@@ -2334,7 +2335,7 @@ fn factory_host_footer_rows_fit_and_align_at_40_44_52() {
         assert_eq!(footer[1].trim(), studio, "width {width}");
         assert_eq!(&footer[2..], [
             " pc     3 running 3.6G free",
-            " ax42   2 running  12G free wait slow",
+            ax42,
             " forge  1 running 9.2G free wait mem",
         ], "width {width}");
         for row in &footer {
