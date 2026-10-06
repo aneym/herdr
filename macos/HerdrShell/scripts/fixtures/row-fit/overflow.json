@@ -1,0 +1,195 @@
+{
+ "_source": "synthetic: long, wide and emoji titles; long trailing summaries (shapes from the 2026-10-05 Studio overlay)",
+ "input": {
+  "spaces": [
+   {
+    "id": "ws_1",
+    "name": "agent-rails",
+    "pinned": false,
+    "collapsed": false
+   },
+   {
+    "id": "ws_2",
+    "name": "herdr shell and a space name long enough to need an ellipsis",
+    "pinned": false,
+    "collapsed": false
+   }
+  ],
+  "tabs": [
+   {
+    "id": "orch",
+    "space": "ws_1",
+    "label": "orchestrator",
+    "agents": [],
+    "focused": false,
+    "status": "working"
+   },
+   {
+    "id": "bench",
+    "space": "ws_1",
+    "label": "foundry bench",
+    "agents": [],
+    "focused": false,
+    "status": "working"
+   },
+   {
+    "id": "long",
+    "space": "ws_1",
+    "label": "[scoping] a lane title that runs well past the sidebar column width",
+    "agents": [],
+    "focused": false,
+    "status": "idle"
+   },
+   {
+    "id": "wide",
+    "space": "ws_1",
+    "label": "研究ノート 🚀🧪 emoji and wide characters in a lane title",
+    "agents": [],
+    "focused": false,
+    "status": "working"
+   },
+   {
+    "id": "short",
+    "space": "ws_1",
+    "label": "35",
+    "agents": [],
+    "focused": false,
+    "status": "working"
+   },
+   {
+    "id": "build",
+    "space": "ws_1",
+    "label": "cutover build",
+    "agents": [],
+    "focused": false,
+    "status": "working"
+   },
+   {
+    "id": "h-orch",
+    "space": "ws_2",
+    "label": "herdr ui",
+    "agents": [],
+    "focused": false,
+    "status": "working"
+   }
+  ],
+  "focusedTab": "orch"
+ },
+ "overlay": {
+  "version": 1,
+  "tabs": {
+   "orch": {
+    "kind": "orchestrator",
+    "section": "orchestrator",
+    "name": "orchestrator",
+    "attention": "act",
+    "busy": true,
+    "summary": "inbox 1 · waiting on two reviews from codex-verifier"
+   },
+   "bench": {
+    "kind": "orchestrator",
+    "section": "orchestrator",
+    "name": "foundry bench",
+    "attention": "act",
+    "busy": true
+   },
+   "long": {
+    "kind": "lane",
+    "section": "scoping",
+    "name": "[scoping] a lane title that runs well past the sidebar column width",
+    "scope_url": "https://example.invalid/scope",
+    "idle_reason": "idle"
+   },
+   "wide": {
+    "kind": "lane",
+    "section": "implementing",
+    "name": "研究ノート 🚀🧪 emoji and wide characters in a lane title",
+    "busy": true
+   },
+   "short": {
+    "kind": "lane",
+    "section": "implementing",
+    "name": "35",
+    "busy": true
+   },
+   "build": {
+    "kind": "lane",
+    "section": "implementing",
+    "name": "cutover build",
+    "busy": true,
+    "runs": [
+     {
+      "id": "r1",
+      "name": "cut2-lane-pytest-with-a-long-run-name",
+      "phase": "gpt-implementer",
+      "agents": 1,
+      "started": 1791239500
+     },
+     {
+      "id": "r2",
+      "name": "cut2-review",
+      "phase": "frontend-designer",
+      "agents": 1,
+      "started": 1791249340
+     }
+    ]
+   },
+   "h-orch": {
+    "kind": "orchestrator",
+    "section": "orchestrator",
+    "name": "herdr ui",
+    "attention": "act",
+    "busy": true
+   }
+  },
+  "spaces": {
+   "ws_1": {
+    "attention": "act",
+    "summary": "3",
+    "target_tab": "orch"
+   },
+   "ws_2": {
+    "attention": "act",
+    "summary": "12 working · 3 need you",
+    "target_tab": "h-orch"
+   }
+  },
+  "usage": [
+   {
+    "name": "claude",
+    "summary": "4/8 · 72%"
+   },
+   {
+    "name": "codex",
+    "summary": "5/5 · 97%"
+   }
+  ],
+  "hosts": [
+   {
+    "name": "Studio",
+    "summary": "2 running · -0.3G free · waiting on memory · 2 kept: 1 mac-only, 1 other"
+   },
+   {
+    "name": "PC",
+    "summary": "3 running · 2.4G free · waiting on memory"
+   },
+   {
+    "name": "ax42",
+    "summary": "11 running · 0.4G free · waiting on memory"
+   }
+  ]
+ },
+ "chrome": {
+  "collapsedSpaces": [],
+  "collapsedSections": [],
+  "expandedGroups": [],
+  "hiddenExpanded": false,
+  "focusedSection": {},
+  "expandedTabs": [
+   "build"
+  ],
+  "pinnedSpaces": [],
+  "collapsedTabs": []
+ },
+ "now": 1791250000
+}

@@ -253,80 +253,17 @@ struct SidebarView: View {
     }
 
 
-    /// Status color, as Ghostty: working green, blocked red, done peach, idle and unknown mute.
-    private func spacesTone(_ tone: String) -> Color {
-        switch tone {
-        case "working": return t.ok
-        case "blocked": return t.bad
-        case "done": return t.warn
-        default: return t.mute
-        }
-    }
-
-    /// Leading inset: sections sit under the space name, rows under the section label.
-    private func spacesIndent(_ row: SpacesRow) -> CGFloat {
-        switch row.kind {
-        case .tab, .run: return CGFloat(row.depth) * 12 + 12
-        case .section, .group: return CGFloat(row.depth) * 12
-        default: return 0
-        }
-    }
-
     private func spacesRow(_ row: SpacesRow, firstSpaceId: String?) -> some View {
-        HStack(spacing: 5) {
-            if row.chevron != "none", row.kind != .space, row.kind != .hidden {
-                Image(systemName: row.chevron == "open" ? "chevron.down" : "chevron.right").font(.system(size: 8, weight: .semibold)).foregroundStyle(t.mute)
-                    .frame(width: 9).onTapGesture { spacesClick(row, part: "chevron") }
-            } else if row.kind == .section {
-                Color.clear.frame(width: 9, height: 1)
-            }
-            if !row.glyph.isEmpty {
-                Text(row.glyph).font(.system(size: 10)).foregroundStyle(spacesTone(row.tone)).frame(width: 12)
-            }
-            if row.kind == .goal {
-                Text("goal").foregroundStyle(t.mute)
-                Menu(state.spacesChrome.goalFilter ?? "All") {
-                    Button("All") { state.spacesChrome.goalFilter = nil; state.saveSpacesChrome() }
-                    ForEach(model.spacesOverlay.goalChoices, id: \.self) { goal in
-                        Button(goal) { state.spacesChrome.goalFilter = goal; state.saveSpacesChrome() }
-                    }
-                }.menuStyle(.borderlessButton).fixedSize()
-            } else {
-                Text(row.title)
-                    .font(.system(size: row.kind == .section ? 10.5 : 12.5,
-                                  weight: row.kind == .space || row.kind == .title ? .semibold
-                                      : (row.kind == .tab && !row.dim ? .medium : .regular)))
-                    .tracking(row.kind == .section ? 0.4 : 0)
-                    .foregroundStyle(row.kind == .section || row.kind == .group || row.kind == .hidden || row.dim ? t.mute : t.ink)
-                    .lineLimit(1).truncationMode(.tail)
-            }
-            Spacer(minLength: 4)
-            if !row.trailing.isEmpty, row.kind != .goal {
-                Text(row.trailing).font(.system(size: 10.5)).foregroundStyle(row.link == nil ? t.mute : t.accent)
-                    .lineLimit(1).fixedSize()
-                    .onTapGesture { spacesClick(row, part: row.link == nil ? "body" : "link") }
-            }
-            if row.alert != "none" { Text("!").fontWeight(.bold).foregroundStyle(row.alert == "act" ? t.bad : t.warn) }
-            if hoveredSpaceRow == row.id, let tab = row.tab, row.kind == .tab, model.spacesOverlay.tabs[tab]?.mode == "parked" {
-                Button("Resume") { resume(tab) }.buttonStyle(.plain).foregroundStyle(t.accent)
-            }
-            if row.kind == .section, row.toggleKey != nil {
-                Text(state.spacesChrome.focusedSection[String(row.id.dropFirst(8)).components(separatedBy: ":").dropLast().joined(separator: ":")] == row.title ? "✕" : "◎")
-                    .font(.system(size: 10)).foregroundStyle(t.mute).onTapGesture { spacesClick(row, part: "focus") }
-            }
-            if row.kind == .space {
-                let pinned = state.spacesChrome.pinnedSpaces.contains(String(row.id.dropFirst(6)))
-                Text("⚲").foregroundStyle(pinned ? t.accent : t.mute).onTapGesture { spacesClick(row, part: "pin") }
-                Text("+").foregroundStyle(t.mute).onTapGesture { spacesClick(row, part: "plus") }
-            }
-            if row.kind == .space || row.kind == .hidden, row.chevron != "none" {
-                Image(systemName: row.chevron == "open" ? "chevron.down" : "chevron.right").font(.system(size: 8, weight: .semibold)).foregroundStyle(t.mute)
-                    .frame(width: 9).onTapGesture { spacesClick(row, part: "chevron") }
-            }
-        }
-        .padding(.top, row.kind == .space && row.id != firstSpaceId ? 10 : 0)
-        .frame(height: 23).padding(.leading, spacesIndent(row)).padding(.horizontal, 4)
-        .background(RoundedRectangle(cornerRadius: 4).fill(row.tab == state.selectedTab && row.kind == .tab ? t.sel : .clear))
+        let focusSpace = String(row.id.dropFirst(8)).components(separatedBy: ":").dropLast().joined(separator: ":")
+        return SpacesRowView(
+            row: row, t: t, firstSpaceId: firstSpaceId,
+            selected: row.tab == state.selectedTab,
+            focusMark: row.kind == .section && row.toggleKey != nil ? (state.spacesChrome.focusedSection[focusSpace] == row.title ? "✕" : "◎") : nil,
+            pinned: row.kind == .space && state.spacesChrome.pinnedSpaces.contains(String(row.id.dropFirst(6))),
+            showResume: hoveredSpaceRow == row.id && row.kind == .tab && row.tab.map { model.spacesOverlay.tabs[$0]?.mode == "parked" } == true,
+            goal: row.kind == .goal ? AnyView(goalMenu) : nil,
+            click: { spacesClick(row, part: $0) },
+            resume: { if let tab = row.tab { resume(tab) } })
         .contentShape(Rectangle()).onTapGesture { spacesClick(row, part: "body") }
         .onHover { hoveredSpaceRow = $0 ? row.id : nil }
         .contextMenu {
@@ -338,6 +275,15 @@ struct SidebarView: View {
                 if RemoteActions.slug(model.catalog.snapshot.lanes[tab]?.scopeURL) != nil { Button("Approve scope…") { approve(tab) } }
             }
         }.clickTarget(row.id)
+    }
+
+    private var goalMenu: some View {
+        Menu(state.spacesChrome.goalFilter ?? "All") {
+            Button("All") { state.spacesChrome.goalFilter = nil; state.saveSpacesChrome() }
+            ForEach(model.spacesOverlay.goalChoices, id: \.self) { goal in
+                Button(goal) { state.spacesChrome.goalFilter = goal; state.saveSpacesChrome() }
+            }
+        }.menuStyle(.borderlessButton).fixedSize()
     }
 
     private func spacesClick(_ row: SpacesRow, part: String) {
