@@ -364,7 +364,7 @@ private struct SpaceScope {
     init(_ space: SpacesInput.Space, input: SpacesInput, overlay: Overlay, filter: String?, depth: Int, includeAgents: Bool = false) {
         self.overlay = overlay
         // Priority affects display only, not the original orchestrator used for implicit parents.
-        leader = input.tabs.first { $0.space == space.id && overlay.tabs[$0.id]?.kind == "orchestrator" && overlay.tabs[$0.id]?.done != true }?.id
+        leader = input.tabs.first { $0.space == space.id && (includeAgents || $0.role != "agent") && overlay.tabs[$0.id]?.kind == "orchestrator" && overlay.tabs[$0.id]?.done != true }?.id
         let all = input.tabs.filter { $0.space == space.id }.enumerated().sorted { a, b in
             if a.element.sortRank != b.element.sortRank { return a.element.sortRank < b.element.sortRank }
             return a.offset < b.offset
