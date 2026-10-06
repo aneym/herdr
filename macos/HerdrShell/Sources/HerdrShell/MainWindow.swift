@@ -899,16 +899,31 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         }
     }
 
-    @objc func copy(_ sender: Any?) { binding("copy_to_clipboard") }
+    @objc func copy(_ sender: Any?) {
+        guard let s = focusedSurface else { return forwardEdit(#selector(NSText.copy(_:)), sender) }
+        if !s.copySelection() { NSSound.beep() }
+    }
     @objc func paste(_ sender: Any?) {
         // With the switcher up, a paste is a query, never terminal input.
         if quickSwitch.isOpen {
             quickSwitch.setQuery(quickSwitch.query + (NSPasteboard.general.string(forType: .string) ?? ""))
             return
         }
+        guard focusedSurface != nil else { return forwardEdit(#selector(NSText.paste(_:)), sender) }
         ClipboardImagePaste.userPaste = true
         defer { ClipboardImagePaste.userPaste = false }
         binding("paste_from_clipboard")
+    }
+
+    /// The Edit menu targets this controller, so without this a chat transcript, the chat
+    /// composer or a text field never saw ⌘C or ⌘V. Hand the action to the first responder
+    /// in this window that takes it (a selected transcript is an NSTextView under SwiftUI).
+    private func forwardEdit(_ action: Selector, _ sender: Any?) {
+        var responder = window.firstResponder
+        while let r = responder, r !== self {
+            if r.responds(to: action) { NSApp.sendAction(action, to: r, from: sender); return }
+            responder = r.nextResponder
+        }
     }
 
     private func binding(_ action: String) {

@@ -507,10 +507,12 @@ final class SurfaceView: NSView {
         // Hand first responder to the surface on every click (agent-zero's
         // terminals never took keys because this only happened once).
         window?.makeFirstResponder(self)
+        notePress(event)
         _ = sendButton(GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, event)
     }
 
     override func mouseUp(with event: NSEvent) {
+        noteRelease()
         _ = sendButton(GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, event)
     }
 
@@ -536,7 +538,10 @@ final class SurfaceView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) { sendPos(event) }
-    override func mouseDragged(with event: NSEvent) { sendPos(event) }
+    override func mouseDragged(with event: NSEvent) {
+        if appDragStart != nil, let c = cell(event) { appDragEnd = c }
+        sendPos(event)
+    }
     override func rightMouseDragged(with event: NSEvent) { sendPos(event) }
     override func otherMouseDragged(with event: NSEvent) { sendPos(event) }
     override func mouseEntered(with event: NSEvent) { sendPos(event) }
@@ -567,6 +572,104 @@ final class SurfaceView: NSView {
         }
         let mods = (precise ? 1 : 0) | Int32(momentum.rawValue) << 1
         ghostty_surface_mouse_scroll(surface, x, y, mods)
+    }
+
+    // MARK: copy
+
+    /// A drag that a program owning the mouse receives (Claude Code, codex) selects
+    /// nothing in Ghostty, so ⌘C had nothing to copy. As in the TUI, keep a shadow of
+    /// it: the text under the dragged cells, read at release. A double click keeps the
+    /// word, a triple click the line. Any left press clears it, so it is always newer
+    /// than Ghostty's own selection.
+    private var appDragStart: Cell?
+    private var appDragEnd: Cell?
+    private(set) var appSelection: String?
+    typealias Cell = (col: Int, row: Int)
+
+    /// ⌘C in a pane: the shadow of a drag the program received, else Ghostty's own
+    /// selection (a shift-drag, or any drag where the program does not own the mouse).
+    func copySelection() -> Bool {
+        guard let surface else { return false }
+        if let text = appSelection {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            return true
+        }
+        let action = "copy_to_clipboard"
+        return ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
+    }
+
+    private func notePress(_ event: NSEvent) {
+        appSelection = nil
+        appDragStart = nil
+        // Shift, and ⌘ through ghosttyMouseMods, make Ghostty select instead of reporting.
+        guard mouseCaptured, event.modifierFlags.isDisjoint(with: [.shift, .command]),
+              let c = cell(event) else { return }
+        switch event.clickCount {
+        case 2: appSelection = word(at: c)
+        case 3: appSelection = nonEmpty(readCells((0, c.row), (gridSize.cols - 1, c.row)))
+        default: appDragStart = c; appDragEnd = c
+        }
+    }
+
+    private func noteRelease() {
+        defer { appDragStart = nil }
+        guard let a = appDragStart, let b = appDragEnd, a != b else { return }
+        appSelection = nonEmpty(readCells(a, b))
+    }
+
+    private func nonEmpty(_ s: String) -> String? {
+        s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : s
+    }
+
+    /// The viewport cell under the pointer, clamped to the grid.
+    private func cell(_ event: NSEvent) -> Cell? {
+        let g = gridSize, c = cellPoints
+        guard g.cols > 0, g.rows > 0, c.width > 0, c.height > 0 else { return nil }
+        let p = surfacePoint(event)
+        let col = Int(((p.x - paddingPoints.x) / c.width).rounded(.down))
+        let row = Int(((p.y - paddingPoints.y) / c.height).rounded(.down))
+        return (min(max(col, 0), g.cols - 1), min(max(row, 0), g.rows - 1))
+    }
+
+    /// Text from one viewport cell to another in reading order, as a stream selection,
+    /// without the blank cells that pad each row (Ghostty's own copy drops them too).
+    private func readCells(_ a: Cell, _ b: Cell) -> String {
+        guard let surface else { return "" }
+        let (s, e) = (a.row, a.col) <= (b.row, b.col) ? (a, b) : (b, a)
+        let sel = ghostty_selection_s(
+            top_left: ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_EXACT,
+                                      x: UInt32(s.col), y: UInt32(s.row)),
+            bottom_right: ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_EXACT,
+                                          x: UInt32(e.col), y: UInt32(e.row)),
+            rectangle: false)
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_text(surface, sel, &text) else { return "" }
+        defer { ghostty_surface_free_text(surface, &text) }
+        guard let p = text.text else { return "" }
+        return String(cString: p).split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression) }
+            .joined(separator: "\n")
+    }
+
+    /// The run of non-blank cells around a cell on its row.
+    private func word(at c: Cell) -> String? {
+        let inWord = { (col: Int) in
+            !self.readCells((col, c.row), (col, c.row)).trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        guard inWord(c.col) else { return nil }
+        var lo = c.col, hi = c.col
+        while lo > 0, inWord(lo - 1) { lo -= 1 }
+        while hi < gridSize.cols - 1, inWord(hi + 1) { hi += 1 }
+        return nonEmpty(readCells((lo, c.row), (hi, c.row)))
+    }
+
+    /// Right click the program does not take: Copy and Paste, through the Edit menu's actions.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Copy", action: #selector(MainWindowController.copy(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: "Paste", action: #selector(MainWindowController.paste(_:)), keyEquivalent: "")
+        return menu
     }
 
     /// Selected text as Ghostty sees it, nil when nothing is selected (test hook).

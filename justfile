@@ -249,6 +249,10 @@ shell-clipboard-image-check socket:
 shell-clipboard-paste-check:
     python3 macos/HerdrShell/scripts/check_clipboard_paste.py
 
+# Cmd-C after a drag in a mouse-reporting pane (Claude Code) puts the text on the guest pasteboard.
+shell-copy-check:
+    python3 macos/HerdrShell/scripts/check_copy.py
+
 shell-build:
     bash macos/HerdrShell/scripts/vendor-ghostty.sh
     swift build --package-path macos/HerdrShell -c release

@@ -1,0 +1,13 @@
+HerdrShell copy check  2026-10-06T16:09:14Z
+app /private/tmp/claude-501/-Volumes-StudioExt-repos-herdr/9883b3f2-81d8-44cf-a9d0-f67141ba72f7/scratchpad/HerdrShell-rebased
+app start (Cua Space guest, lab socket forwarded from Studio): {"space": "herdr-qa", "ip": "192.168.64.5", "herdr_sha": "5cd533dc857a"}
+{"space": "herdr-qa", "app_pid": "75532", "exe": "/Users/lume/.herdr-space/bin/HerdrShe
+[PASS] the lab pane's program owns the mouse in the guest Shell -- focused=w1:p2 mouse_captured=True
+[PASS] the plain drag went to the program, not to a Ghostty selection -- reports 0->6, ghostty selection=None
+[PASS] Cmd-C after a plain drag puts the dragged text on the pasteboard -- 'COPY-ALPHA first line of agent text\nCOPY-BETA'
+[PASS] Cmd-C after a double click copies the word -- 'second'
+[PASS] Cmd-C after a shift-drag copies Ghostty's selection -- selection='OPY-ALPHA' pasteboard='OPY-ALPHA'
+screenshot: /Users/aneyman/.cache/herdr-build/shellspike-copy/copy.png
+lab down: stop: 0
+
+RESULT: PASS

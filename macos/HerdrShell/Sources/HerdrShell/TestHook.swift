@@ -371,7 +371,7 @@ final class TestHook {
     /// Mouse events built as NSEvents addressed to the app's window and dispatched with
     /// window.sendEvent, so hit-testing, the responder chain and SurfaceView's
     /// mouse handlers run as for a physical mouse. {"cmd":"mouse","pane":id,
-    /// "action":"down|up|drag|move","col":c,"row":r,"button":"left|right"}; col/row are
+    /// "action":"down|up|drag|move","col":c,"row":r,"button":"left|right","clicks":n}; col/row are
     /// 0-based grid cells of that pane's surface (cell centre), or "x"/"y" in surface points.
     private func mouse(_ obj: [String: Any]) {
         guard let c = controller, let w = Optional(c.window),
@@ -397,7 +397,7 @@ final class TestHook {
         }
         guard let ev = NSEvent.mouseEvent(with: type, location: loc, modifierFlags: mods,
                                           timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: w.windowNumber,
-                                          context: nil, eventNumber: 0, clickCount: 1, pressure: type == .mouseMoved ? 0 : 1) else { return }
+                                          context: nil, eventNumber: 0, clickCount: obj["clicks"] as? Int ?? 1, pressure: type == .mouseMoved ? 0 : 1) else { return }
         // mouseMoved never reaches a view without acceptsMouseMovedEvents; hand it over directly.
         if type == .mouseMoved { s.mouseMoved(with: ev) } else { w.sendEvent(ev) }
         if agentRun { c.inProcessKey = true }
@@ -427,7 +427,7 @@ final class TestHook {
         func post(_ type: NSEvent.EventType, _ p: NSPoint) {
             guard let ev = NSEvent.mouseEvent(with: type, location: p, modifierFlags: [],
                                               timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: c.window.windowNumber,
-                                              context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1) else { return }
+                                              context: nil, eventNumber: 0, clickCount: obj["clicks"] as? Int ?? 1, pressure: type == .leftMouseUp ? 0 : 1) else { return }
             c.window.sendEvent(ev)
         }
         dragRunning = true

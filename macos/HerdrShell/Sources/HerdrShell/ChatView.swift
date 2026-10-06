@@ -146,6 +146,7 @@ private struct Markdown: View {
         VStack(alignment: .leading, spacing: Metric.blockGap) {
             ForEach(Array(blocks(text).enumerated()), id: \.offset) { _, block in view(block) }
         }
+        .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
