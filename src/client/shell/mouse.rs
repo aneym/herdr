@@ -656,6 +656,7 @@ impl ClientShellState {
             return;
         }
         self.update_link_hover(mouse, outcome);
+        self.update_pane_scrollbar_hover(mouse, outcome);
         let point = (mouse.column, mouse.row);
         if self.detail_panel.is_some() && self.factory_overlay().is_none() {
             self.detail_panel = None;

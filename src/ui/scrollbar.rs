@@ -161,26 +161,79 @@ pub(crate) fn render_scrollbar_buffer(
     }
 }
 
+/// Overlay thumb position in half rows. `U = 2 * track.height`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct HalfRowThumb {
+    pub top_u: usize,
+    pub len_u: usize,
+}
+
+/// Minimum thumb length in half rows (1.5 rows).
+const MIN_THUMB_UNITS: usize = 3;
+
+fn div_round(numerator: usize, denominator: usize) -> usize {
+    (numerator + denominator / 2) / denominator
+}
+
+/// Half-row thumb geometry for the overlay pane scrollbar. Integer math only.
+pub(crate) fn half_row_thumb(
+    metrics: crate::pane::ScrollMetrics,
+    track_height: u16,
+) -> Option<HalfRowThumb> {
+    let max_offset = metrics.max_offset_from_bottom;
+    if max_offset == 0 || track_height == 0 {
+        return None;
+    }
+    let units = 2 * usize::from(track_height);
+    let total_rows = max_offset + metrics.viewport_rows;
+    let len_u = if units < MIN_THUMB_UNITS {
+        units
+    } else {
+        div_round(metrics.viewport_rows * units, total_rows).clamp(MIN_THUMB_UNITS, units)
+    };
+    let scrolled_from_top = max_offset.saturating_sub(metrics.offset_from_bottom);
+    let top_u = div_round(scrolled_from_top * (units - len_u), max_offset);
+    Some(HalfRowThumb { top_u, len_u })
+}
+
+/// Glyph for track row `row`: `┃` when the thumb covers both halves, `╹` for
+/// only the top half, `╻` for only the bottom half, `None` when uncovered.
+pub(crate) fn half_row_thumb_glyph(thumb: HalfRowThumb, row: usize) -> Option<&'static str> {
+    let end = thumb.top_u + thumb.len_u;
+    let covers = |unit: usize| thumb.top_u <= unit && unit < end;
+    match (covers(2 * row), covers(2 * row + 1)) {
+        (true, true) => Some("┃"),
+        (true, false) => Some("╹"),
+        (false, true) => Some("╻"),
+        (false, false) => None,
+    }
+}
+
+/// Draw the overlay thumb in `color`. Writes only thumb cells and only their
+/// symbol and foreground, so the gutter background stays transparent.
 pub(crate) fn render_pane_scrollbar_buffer(
     buffer: &mut Buffer,
     metrics: crate::pane::ScrollMetrics,
     track: Rect,
-    palette: &crate::app::state::Palette,
-    focused: bool,
+    color: Color,
 ) {
-    let (track_color, thumb_color, thumb_symbol) = if focused {
-        (palette.overlay0, palette.overlay1, "▐")
-    } else {
-        (palette.surface_dim, palette.overlay0, "▕")
+    let Some(thumb) = half_row_thumb(metrics, track.height) else {
+        return;
     };
-    render_scrollbar_buffer(
-        buffer,
-        metrics,
-        track,
-        track_color,
-        thumb_color,
-        thumb_symbol,
-    );
+    let first_row = thumb.top_u / 2;
+    let end_row = (thumb.top_u + thumb.len_u).div_ceil(2);
+    for row in first_row..end_row {
+        let Some(glyph) = half_row_thumb_glyph(thumb, row) else {
+            continue;
+        };
+        let Ok(offset) = u16::try_from(row) else {
+            break;
+        };
+        if let Some(cell) = buffer.cell_mut((track.x, track.y.saturating_add(offset))) {
+            cell.set_symbol(glyph);
+            cell.set_fg(color);
+        }
+    }
 }
 
 pub(super) fn render_pane_scrollbar(
@@ -195,11 +248,122 @@ pub(super) fn render_pane_scrollbar(
     let Some(track) = pane_scrollbar_rect(info) else {
         return;
     };
-    render_pane_scrollbar_buffer(
-        frame.buffer_mut(),
-        metrics,
-        track,
-        &app.palette,
-        info.is_focused,
-    );
+    let Some(color) = app.pane_scrollbar_color(info.id, metrics) else {
+        return;
+    };
+    render_pane_scrollbar_buffer(frame.buffer_mut(), metrics, track, color);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn metrics(offset: usize, max: usize, viewport: usize) -> crate::pane::ScrollMetrics {
+        crate::pane::ScrollMetrics {
+            offset_from_bottom: offset,
+            max_offset_from_bottom: max,
+            viewport_rows: viewport,
+        }
+    }
+
+    fn glyphs(metrics: crate::pane::ScrollMetrics, height: u16) -> Vec<&'static str> {
+        let track = Rect::new(0, 0, 1, height);
+        let mut buffer = Buffer::empty(track);
+        render_pane_scrollbar_buffer(&mut buffer, metrics, track, Color::Rgb(1, 2, 3));
+        buffer
+            .content
+            .iter()
+            .map(|cell| match cell.symbol() {
+                "┃" => "┃",
+                "╹" => "╹",
+                "╻" => "╻",
+                " " => " ",
+                _ => "?",
+            })
+            .collect()
+    }
+
+    #[test]
+    fn half_row_thumb_covers_tiny_tracks_whole() {
+        // U < 3: the thumb is the whole track.
+        assert_eq!(
+            half_row_thumb(metrics(0, 100, 1), 1),
+            Some(HalfRowThumb { top_u: 0, len_u: 2 })
+        );
+        assert_eq!(glyphs(metrics(0, 100, 1), 1), ["┃"]);
+        // U = 4 clamps to the 3-unit minimum and still moves by half rows.
+        assert_eq!(
+            half_row_thumb(metrics(100, 100, 2), 2),
+            Some(HalfRowThumb { top_u: 0, len_u: 3 })
+        );
+        assert_eq!(glyphs(metrics(100, 100, 2), 2), ["┃", "╹"]);
+        assert_eq!(
+            half_row_thumb(metrics(0, 100, 2), 2),
+            Some(HalfRowThumb { top_u: 1, len_u: 3 })
+        );
+        assert_eq!(glyphs(metrics(0, 100, 2), 2), ["╻", "┃"]);
+        // U = 6.
+        assert_eq!(glyphs(metrics(0, 100, 3), 3), [" ", "╻", "┃"]);
+    }
+
+    #[test]
+    fn half_row_thumb_handles_extremes_and_rounding() {
+        assert_eq!(half_row_thumb(metrics(0, 0, 10), 10), None);
+        assert_eq!(half_row_thumb(metrics(0, 10, 10), 0), None);
+        // max_offset 1: the thumb is half the track and sits at either end.
+        assert_eq!(
+            half_row_thumb(metrics(1, 1, 10), 10),
+            Some(HalfRowThumb {
+                top_u: 0,
+                len_u: 18
+            })
+        );
+        assert_eq!(
+            half_row_thumb(metrics(0, 1, 10), 10),
+            Some(HalfRowThumb {
+                top_u: 2,
+                len_u: 18
+            })
+        );
+        // Top of the scrollback and the live bottom pin the thumb to the ends.
+        let top = half_row_thumb(metrics(240, 240, 20), 20).expect("thumb");
+        assert_eq!(top.top_u, 0);
+        let bottom = half_row_thumb(metrics(0, 240, 20), 20).expect("thumb");
+        assert_eq!(bottom.top_u + bottom.len_u, 40);
+        // An odd top_u starts with a bottom-half cap.
+        let odd = half_row_thumb(metrics(221, 240, 20), 20).expect("thumb");
+        assert_eq!(odd, HalfRowThumb { top_u: 3, len_u: 3 });
+        let rows = glyphs(metrics(221, 240, 20), 20);
+        assert_eq!(&rows[..4], [" ", "╻", "┃", " "]);
+        // An even top_u with an odd length ends with a top-half cap.
+        let even = half_row_thumb(metrics(201, 240, 20), 20).expect("thumb");
+        assert_eq!(even, HalfRowThumb { top_u: 6, len_u: 3 });
+        assert_eq!(
+            &glyphs(metrics(201, 240, 20), 20)[..5],
+            [" ", " ", " ", "┃", "╹"]
+        );
+        // Offsets past the end clamp to the top.
+        assert_eq!(
+            half_row_thumb(metrics(999, 240, 20), 20).map(|t| t.top_u),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn overlay_thumb_writes_only_thumb_cells_and_never_a_background() {
+        let track = Rect::new(0, 0, 1, 20);
+        let mut buffer = Buffer::empty(track);
+        render_pane_scrollbar_buffer(&mut buffer, metrics(120, 240, 20), track, Color::Red);
+        let mut thumb_rows = 0;
+        for cell in &buffer.content {
+            assert_eq!(cell.bg, Color::Reset);
+            if cell.symbol() == " " {
+                assert_eq!(cell.fg, Color::Reset);
+            } else {
+                thumb_rows += 1;
+                assert_eq!(cell.fg, Color::Red);
+            }
+        }
+        assert!(thumb_rows > 0 && thumb_rows < 20);
+    }
 }

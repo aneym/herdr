@@ -25,6 +25,7 @@ impl App {
             return false;
         }
         self.state.host_terminal_theme = theme;
+        self.state.refresh_scrollbar_ramp();
         self.apply_host_terminal_theme_to_panes();
         true
     }
@@ -39,6 +40,7 @@ impl App {
         }
         self.state.theme_name = theme_name;
         self.state.palette = palette;
+        self.state.refresh_scrollbar_ramp();
         self.render_dirty.request_generic();
         self.render_notify.notify_one();
         true

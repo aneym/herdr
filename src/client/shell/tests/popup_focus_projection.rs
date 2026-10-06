@@ -885,6 +885,84 @@ fn pane_scrollbar_track_and_thumb_use_stable_endpoint_scroll_requests() {
 }
 
 #[test]
+fn pane_scrollbar_hover_and_drag_brighten_the_thumb_client_side() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    let mut pane_surface = surface();
+    pane_surface.panes[0].scrollbar_rect = Some(SurfaceRect {
+        x: 3,
+        y: 0,
+        width: 1,
+        height: 2,
+    });
+    pane_surface.panes[0].scroll = Some(crate::protocol::PaneSurfaceScrollMetrics {
+        offset_from_bottom: 0,
+        max_offset_from_bottom: 20,
+        viewport_rows: 2,
+    });
+    state.set_pane_surface(pane_surface);
+    state.compose(106, 20).expect("composed frame");
+    let track = state.hits.panes[0].scrollbar_rect.expect("scrollbar track");
+    let ramp = crate::app::scrollbar_reveal::ScrollbarRamp::derive(
+        state.host_background,
+        &state.config.palette,
+    );
+    // At the live bottom the thumb covers the bottom half of row 0 and all of row 1.
+    let thumb_cell = |state: &mut ClientShellState| {
+        let frame = state.compose(106, 20).expect("composed frame");
+        let index = usize::from(track.y + 1) * usize::from(frame.width) + usize::from(track.x);
+        let cell = &frame.cells[index];
+        (cell.symbol.clone(), cell.fg)
+    };
+    let mouse = |kind, column, row| {
+        RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::empty(),
+        })
+    };
+
+    let before = thumb_cell(&mut state);
+    assert_ne!(before.1, crate::protocol::color_to_u32(ramp.hover));
+
+    let hovered = state.handle_raw_events(vec![mouse(MouseEventKind::Moved, track.x, track.y)]);
+    assert!(hovered.repaint);
+    assert_eq!(
+        thumb_cell(&mut state),
+        ("┃".to_owned(), crate::protocol::color_to_u32(ramp.hover))
+    );
+
+    state.handle_raw_events(vec![mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        track.x,
+        track.y + 1,
+    )]);
+    assert!(matches!(
+        state.chrome_drag,
+        Some(ClientChromeDrag::PaneScrollbar { .. })
+    ));
+    assert_eq!(
+        thumb_cell(&mut state),
+        ("┃".to_owned(), crate::protocol::color_to_u32(ramp.drag))
+    );
+
+    state.handle_raw_events(vec![mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        track.x,
+        track.y + 1,
+    )]);
+    assert_eq!(
+        thumb_cell(&mut state),
+        ("┃".to_owned(), crate::protocol::color_to_u32(ramp.hover))
+    );
+    let left = state.handle_raw_events(vec![mouse(MouseEventKind::Moved, track.x - 1, track.y)]);
+    assert!(left.repaint);
+    assert!(state.pane_scrollbar_hover.is_none());
+    assert_eq!(thumb_cell(&mut state), before);
+}
+
+#[test]
 fn clear_pane_binding_targets_the_focused_endpoint_pane() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));

@@ -468,6 +468,7 @@ impl ClientShellState {
             }
             frame.replace_from_ratatui_buffer_preserving_effects(&composed, cursor);
         }
+        self.render_pane_scrollbar_emphasis(&mut frame);
         self.render_link_hover(&mut frame, &mut occlusion);
         self.render_pane_location(&mut frame, &mut occlusion);
         if self.mode == ClientShellMode::Copy {

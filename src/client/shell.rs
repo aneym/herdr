@@ -26,6 +26,7 @@ mod input_source;
 mod link_hover;
 mod mobile;
 mod mouse;
+mod pane_scrollbar;
 mod notification_policy;
 mod notifications;
 mod overlay_input;

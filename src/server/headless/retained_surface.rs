@@ -121,13 +121,20 @@ fn retained_scrollbar_patch(
     let track = Rect::new(0, 0, 1, rect.height);
     let mut buffer = ratatui::buffer::Buffer::empty(track);
     if let (Some(metrics), Some(_)) = (metrics, next_rect) {
-        crate::ui::render_pane_scrollbar_buffer(
-            &mut buffer,
-            metrics,
-            track,
-            &app.state.palette,
-            pane.focused,
-        );
+        // Only a revealed bar needs the pane identity; otherwise the color
+        // follows from the metrics alone (parked when scrolled back).
+        let color = match app.state.scrollbar_reveal {
+            Some(_) => app
+                .parse_pane_id(&pane.pane_id)
+                .and_then(|(_, pane_id)| app.state.pane_scrollbar_color(pane_id, metrics)),
+            None => app
+                .state
+                .scrollbar_ramp
+                .color_for(None, metrics.offset_from_bottom > 0),
+        };
+        if let Some(color) = color {
+            crate::ui::render_pane_scrollbar_buffer(&mut buffer, metrics, track, color);
+        }
     }
     let cells = buffer
         .content

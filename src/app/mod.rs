@@ -21,6 +21,7 @@ mod ids;
 mod polite_send;
 mod popup;
 mod runtime;
+pub(crate) mod scrollbar_reveal;
 mod session;
 pub mod state;
 mod tab_bar_status;
@@ -121,6 +122,8 @@ pub struct App {
     pub(crate) policy: AppPolicy,
     pub(crate) config_diagnostic_deadline: Option<Instant>,
     pub(crate) toast_deadline: Option<Instant>,
+    /// Last user-scroll epoch folded into the pane scrollbar reveal state.
+    pub(crate) scrollbar_scroll_epoch: u64,
     pub(crate) last_api_notification_at: Option<Instant>,
     pub(crate) last_git_remote_status_refresh: Instant,
     pub(crate) last_git_repo_discovery_refresh: Instant,
@@ -529,6 +532,8 @@ impl App {
             pane_borders: config.ui.pane_borders,
             pane_outer_borders: config.ui.pane_outer_borders,
             pane_scrollbars: config.ui.pane_scrollbars,
+            scrollbar_ramp: scrollbar_reveal::ScrollbarRamp::derive(None, &theme_palette),
+            scrollbar_reveal: None,
             pane_gaps: config.ui.pane_gaps,
             show_agent_labels_on_pane_borders: config.ui.show_agent_labels_on_pane_borders,
             tab_bar_right: Vec::new(),
@@ -650,6 +655,7 @@ impl App {
             usage_sampler: usage::UsageSampler::default(),
             config_diagnostic_deadline: None,
             toast_deadline: None,
+            scrollbar_scroll_epoch: crate::terminal::user_scroll_epoch(),
             last_api_notification_at: None,
             state,
             pixel_mouse_available: false,

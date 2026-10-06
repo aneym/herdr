@@ -1184,6 +1184,8 @@ pub(crate) struct ClientShellState {
     pub(super) pane_scroll_in_flight: HashMap<String, u64>,
     pub(super) pane_scroll_queued: HashMap<String, usize>,
     pub(super) pane_scroll_targets: HashMap<String, usize>,
+    /// Pane whose scrollbar gutter the pointer is on.
+    pub(super) pane_scrollbar_hover: Option<String>,
     pub(super) copy_feedback: Option<crate::app::state::CopyFeedback>,
     pub(super) copy_feedback_deadline: Option<std::time::Instant>,
     pub(super) host_mouse_pixels: Option<crate::input::mouse::HostPixels>,
@@ -1382,6 +1384,7 @@ impl ClientShellState {
             pane_scroll_in_flight: HashMap::new(),
             pane_scroll_queued: HashMap::new(),
             pane_scroll_targets: HashMap::new(),
+            pane_scrollbar_hover: None,
             copy_feedback: None,
             copy_feedback_deadline: None,
             host_mouse_pixels: None,

@@ -3295,6 +3295,8 @@ impl HeadlessServer {
             changed = true;
         }
 
+        changed |= self.app.tick_scrollbar_reveal(now);
+
         if self
             .app
             .state

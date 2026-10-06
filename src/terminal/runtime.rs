@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use crate::render_signal::RenderSignal;
@@ -17,7 +18,28 @@ use crate::layout::PaneId;
 pub struct TerminalRuntime(
     pub(super) crate::pane::PaneRuntime,
     pub(super) std::sync::Mutex<super::polite_send::PoliteSend>,
+    pub(super) ScrollActivity,
 );
+
+/// Bumped whenever any runtime takes a user scroll, so the server can skip
+/// scanning panes for scroll activity on every other loop iteration.
+static USER_SCROLL_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+/// Current user-scroll epoch. A change means at least one runtime has a
+/// pending [`TerminalRuntime::take_user_scrolled`].
+pub(crate) fn user_scroll_epoch() -> u64 {
+    USER_SCROLL_EPOCH.load(Ordering::Acquire)
+}
+
+/// Scroll gestures recorded for the pane scrollbar's reveal state.
+///
+/// Only the explicit viewport scroll entry points set these flags. PTY output
+/// never does, so a streaming pane at the live bottom never reveals its bar.
+#[derive(Default)]
+pub(super) struct ScrollActivity {
+    user_scrolled: AtomicBool,
+    snapped: AtomicBool,
+}
 
 impl TerminalRuntime {
     pub fn shutdown(self) {
@@ -81,7 +103,7 @@ impl TerminalRuntime {
             render_notify,
             render_dirty,
         )
-        .map(|runtime| Self(runtime, Default::default()))
+        .map(|runtime| Self(runtime, Default::default(), Default::default()))
     }
 
     // Wrapper mirrors pane runtime construction arguments.
@@ -114,7 +136,7 @@ impl TerminalRuntime {
             render_notify,
             render_dirty,
         )
-        .map(|runtime| Self(runtime, Default::default()))
+        .map(|runtime| Self(runtime, Default::default(), Default::default()))
     }
 
     // Wrapper mirrors pane runtime construction arguments.
@@ -149,7 +171,7 @@ impl TerminalRuntime {
             render_notify,
             render_dirty,
         )
-        .map(|runtime| Self(runtime, Default::default()))
+        .map(|runtime| Self(runtime, Default::default(), Default::default()))
     }
 
     // Wrapper mirrors pane runtime construction arguments.
@@ -184,7 +206,7 @@ impl TerminalRuntime {
             render_notify,
             render_dirty,
         )
-        .map(|runtime| Self(runtime, Default::default()))
+        .map(|runtime| Self(runtime, Default::default(), Default::default()))
     }
 
     // Wrapper mirrors pane runtime construction arguments, including detection policy.
@@ -219,7 +241,7 @@ impl TerminalRuntime {
             render_notify,
             render_dirty,
         )
-        .map(|runtime| Self(runtime, Default::default()))
+        .map(|runtime| Self(runtime, Default::default(), Default::default()))
     }
 
     pub fn apply_host_terminal_theme(&self, theme: crate::terminal_theme::TerminalTheme) {
@@ -263,14 +285,33 @@ impl TerminalRuntime {
 
     pub fn scroll_up(&self, lines: usize) {
         self.0.scroll_up(lines);
+        self.note_user_scroll();
     }
 
     pub fn scroll_down(&self, lines: usize) {
         self.0.scroll_down(lines);
+        self.note_user_scroll();
     }
 
     pub fn scroll_reset(&self) {
         self.0.scroll_reset();
+        self.2.snapped.store(true, Ordering::Release);
+    }
+
+    fn note_user_scroll(&self) {
+        self.2.user_scrolled.store(true, Ordering::Release);
+        USER_SCROLL_EPOCH.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// True once after a user scroll (wheel, page keys, scroll API, drag).
+    pub(crate) fn take_user_scrolled(&self) -> bool {
+        self.2.user_scrolled.swap(false, Ordering::AcqRel)
+    }
+
+    /// True once after the viewport was snapped back to the live bottom,
+    /// which input does before it reaches the program.
+    pub(crate) fn take_scroll_snapped(&self) -> bool {
+        self.2.snapped.swap(false, Ordering::AcqRel)
     }
 
     pub fn clear_screen(&self) -> Result<(), String> {
@@ -279,6 +320,7 @@ impl TerminalRuntime {
 
     pub fn set_scroll_offset_from_bottom(&self, lines: usize) {
         self.0.set_scroll_offset_from_bottom(lines);
+        self.note_user_scroll();
     }
 
     pub fn scroll_metrics(&self) -> Option<crate::pane::ScrollMetrics> {
@@ -622,7 +664,7 @@ impl TerminalRuntime {
 
     pub(crate) fn test_with_channel(cols: u16, rows: u16) -> (Self, mpsc::Receiver<Bytes>) {
         let (runtime, rx) = crate::pane::PaneRuntime::test_with_channel(cols, rows);
-        (Self(runtime, Default::default()), rx)
+        (Self(runtime, Default::default(), Default::default()), rx)
     }
 
     pub(crate) fn test_with_channel_capacity(
@@ -632,12 +674,13 @@ impl TerminalRuntime {
     ) -> (Self, mpsc::Receiver<Bytes>) {
         let (runtime, rx) =
             crate::pane::PaneRuntime::test_with_channel_capacity(cols, rows, capacity);
-        (Self(runtime, Default::default()), rx)
+        (Self(runtime, Default::default(), Default::default()), rx)
     }
 
     pub(crate) fn test_with_screen_bytes(cols: u16, rows: u16, bytes: &[u8]) -> Self {
         Self(
             crate::pane::PaneRuntime::test_with_screen_bytes(cols, rows, bytes),
+            Default::default(),
             Default::default(),
         )
     }
@@ -660,6 +703,7 @@ impl TerminalRuntime {
                 bytes,
             ),
             Default::default(),
+            Default::default(),
         )
     }
 
@@ -677,6 +721,6 @@ impl TerminalRuntime {
             bytes,
             channel_capacity,
         );
-        (Self(runtime, Default::default()), rx)
+        (Self(runtime, Default::default(), Default::default()), rx)
     }
 }

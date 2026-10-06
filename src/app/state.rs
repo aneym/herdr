@@ -920,6 +920,10 @@ pub struct AppState {
     pub pane_borders: crate::config::PaneBordersConfig,
     pub pane_outer_borders: bool,
     pub pane_scrollbars: bool,
+    /// Overlay pane scrollbar colors, derived from the palette and host background.
+    pub(crate) scrollbar_ramp: super::scrollbar_reveal::ScrollbarRamp,
+    /// The single pane whose scrollbar is revealed after a user scroll.
+    pub(crate) scrollbar_reveal: Option<super::scrollbar_reveal::ScrollbarReveal>,
     pub pane_gaps: bool,
     pub show_agent_labels_on_pane_borders: bool,
     pub hide_tab_bar_when_single_tab: bool,
@@ -1364,6 +1368,11 @@ impl AppState {
             pane_borders: crate::config::PaneBordersConfig::Auto,
             pane_outer_borders: true,
             pane_scrollbars: true,
+            scrollbar_ramp: super::scrollbar_reveal::ScrollbarRamp::derive(
+                None,
+                &Palette::catppuccin(),
+            ),
+            scrollbar_reveal: None,
             pane_gaps: false,
             show_agent_labels_on_pane_borders: false,
             hide_tab_bar_when_single_tab: false,
