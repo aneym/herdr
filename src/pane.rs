@@ -3672,11 +3672,6 @@ impl PaneRuntime {
         )))
     }
 
-    /// Whether the runtime's child wait has completed, without probing processes.
-    pub(crate) fn process_exited(&self) -> bool {
-        self.cwd_process_exited.load(Ordering::Acquire)
-    }
-
     /// Get the current working directory of the child shell process.
     pub fn cwd(&self) -> Option<std::path::PathBuf> {
         if let Some(cwd) = self

@@ -115,6 +115,7 @@ impl App {
         ) {
             return Vec::new();
         }
+        self.close_agent_resume_window_on_ready(&ev);
 
         if let AppEvent::GitStatusRefreshed {
             results,
@@ -201,8 +202,23 @@ impl App {
             {
                 return Vec::new();
             }
-            if self.retained_agent_resume_panes.contains(pane_id) {
-                // Retain the exited runtime and its screen alongside the pane.
+            if !worktree_restore_failed
+                && !self
+                    .pending_worktree_remove_runtime_exits
+                    .contains_key(pane_id)
+                && self.claim_agent_resume_replacement_exit(*pane_id, *runtime_pid, Instant::now())
+            {
+                // The replacement died inside its resume window: retain the
+                // exited runtime and its screen alongside the pane.
+                if let Some(terminal) = self
+                    .find_pane(*pane_id)
+                    .map(|(_, pane)| pane.attached_terminal_id.clone())
+                    .and_then(|terminal_id| self.state.terminals.get_mut(&terminal_id))
+                {
+                    terminal.restore_error =
+                        Some("Resumed agent exited before startup completed".into());
+                    terminal.revision = terminal.revision.saturating_add(1);
+                }
                 if let Some(update) = self
                     .state
                     .publish_pane_process_exit_if_agent(*pane_id, false)

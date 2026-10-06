@@ -5,6 +5,18 @@ use ratatui::layout::Rect;
 
 use super::App;
 
+/// How long an `agent.resume` replacement shell keeps its pane on exit when
+/// the resumed agent has not been observed yet.
+const AGENT_RESUME_REPLACEMENT_WINDOW: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// The replacement runtime `agent.resume` started for a pane and when its
+/// window ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AgentResumeReplacementWindow {
+    pub(crate) runtime_pid: Option<u32>,
+    pub(crate) until: Instant,
+}
+
 struct PendingAgentResumeCandidate {
     pane_id: crate::layout::PaneId,
     terminal_id: crate::terminal::TerminalId,
@@ -35,8 +47,10 @@ pub(crate) struct InPlaceAgentResume {
 
 impl App {
     /// Restart the idle agent in a pane on the same session: end its process,
-    /// then relaunch through the existing argv-command runtime constructor,
-    /// retaining the pane, terminal, cwd and launch environment.
+    /// then start a fresh pane shell and type the resume command into it, as
+    /// deferred resume does, retaining the pane, terminal, cwd and launch
+    /// environment. Never blocks: a replacement that dies early is caught by
+    /// its replacement window when `PaneDied` arrives.
     pub(crate) fn resume_agent_in_place(
         &mut self,
         ws_idx: usize,
@@ -149,6 +163,15 @@ impl App {
         };
         let plan = crate::agent_resume::AgentResumePlan { argv, ..plan };
 
+        let resume_command = shell_command_from_argv(&resumed.argv).ok_or_else(|| {
+            InPlaceAgentResumeError::ArgvUnsupported("resume command is empty".into())
+        })?;
+        let launch_env = self
+            .pane_launch_env(ws_idx, pane_id, Vec::new())
+            .ok_or_else(|| {
+                InPlaceAgentResumeError::Failed("pane launch environment unavailable".into())
+            })?;
+
         tracing::info!(
             pane = pane_id.raw(),
             terminal = %terminal_id,
@@ -157,28 +180,24 @@ impl App {
         );
         self.pending_agent_resume_runtime_exits
             .insert(pane_id, runtime.child_pid());
-        self.retained_agent_resume_panes.insert(pane_id);
         self.shutdown_terminal_runtime(terminal_id.clone());
         if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
-            terminal.cwd = cwd;
+            terminal.cwd = cwd.clone();
             terminal.begin_in_place_agent_resume(persisted, plan);
         }
-        let launch_env = self
-            .pane_launch_env(ws_idx, pane_id, Vec::new())
-            .ok_or_else(|| {
-                InPlaceAgentResumeError::Failed("pane launch environment unavailable".into())
-            })?;
-        let runtime = crate::terminal::TerminalRuntime::spawn_argv_command(
+        // Launch the way deferred resume does: a fresh pane shell (so the
+        // login-shell environment the agent's provider and auth come from is
+        // present) with the resume command typed into it.
+        let runtime = crate::terminal::TerminalRuntime::spawn(
             pane_id,
             rows,
             cols,
-            self.state.terminals[&terminal_id].cwd.clone(),
-            &resumed.argv,
-            &launch_env,
-            crate::pane::AgentDetection::Enabled,
+            cwd,
             self.state.pane_scrollback_limit_bytes,
             self.state.host_terminal_theme,
             self.state.host_terminal_appearance,
+            crate::pane::PaneShellConfig::new(&self.state.default_shell, self.state.shell_mode),
+            &launch_env,
             self.event_tx.clone(),
             self.render_notify.clone(),
             self.render_dirty.clone(),
@@ -186,31 +205,84 @@ impl App {
         .map_err(|err| {
             if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
                 terminal.pending_agent_resume_plan = None;
-                terminal.restore_error = Some(err.to_string());
+                terminal.restore_error = Some(format!(
+                    "Could not start the pane shell to resume the agent: {err}"
+                ));
+                terminal.revision = terminal.revision.saturating_add(1);
             }
             InPlaceAgentResumeError::Failed(err.to_string())
         })?;
+        let mut input = resume_command;
+        input.push('\r');
+        let typed = runtime.try_send_bytes(Bytes::from(input));
+        self.retained_agent_resume_panes.insert(
+            pane_id,
+            AgentResumeReplacementWindow {
+                runtime_pid: runtime.child_pid(),
+                until: Instant::now() + AGENT_RESUME_REPLACEMENT_WINDOW,
+            },
+        );
+        // The shell stays in the pane even if typing failed, so the pane is
+        // never left without a runtime.
         self.terminal_runtimes.insert(terminal_id.clone(), runtime);
         if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
             terminal.pending_agent_resume_plan = None;
+            terminal.respawn_shell_on_exit = false;
+            if let Err(err) = &typed {
+                terminal.restore_error = Some(format!("Could not type the resume command: {err}"));
+            }
         }
         self.state.mark_session_dirty();
         self.emit_pane_updated(ws_idx, pane_id);
-        std::thread::sleep(std::time::Duration::from_millis(250));
-        let running = self
-            .terminal_runtimes
-            .get(&terminal_id)
-            .is_some_and(|runtime| !runtime.process_exited());
-        if !running {
-            if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
-                terminal.restore_error =
-                    Some("Resumed agent exited before startup completed".into());
-            }
-            return Err(InPlaceAgentResumeError::Failed(
-                "resumed agent exited before startup completed".into(),
-            ));
+        if let Err(err) = typed {
+            self.retained_agent_resume_panes.remove(&pane_id);
+            return Err(InPlaceAgentResumeError::Failed(format!(
+                "could not type the resume command: {err}"
+            )));
         }
         Ok(resumed)
+    }
+
+    /// Whether `PaneDied` for `runtime_pid` is the replacement runtime dying
+    /// inside its `agent.resume` window. Claiming closes the window; an
+    /// expired or mismatched window is dropped and claims nothing.
+    pub(crate) fn claim_agent_resume_replacement_exit(
+        &mut self,
+        pane_id: crate::layout::PaneId,
+        runtime_pid: Option<u32>,
+        now: Instant,
+    ) -> bool {
+        let Some(window) = self.retained_agent_resume_panes.get(&pane_id).copied() else {
+            return false;
+        };
+        if now >= window.until {
+            self.retained_agent_resume_panes.remove(&pane_id);
+            return false;
+        }
+        if window.runtime_pid.is_none() || window.runtime_pid != runtime_pid {
+            return false;
+        }
+        self.retained_agent_resume_panes.remove(&pane_id);
+        true
+    }
+
+    /// The resumed agent was observed in its pane: the replacement window is
+    /// over and later exits are ordinary pane exits.
+    pub(crate) fn close_agent_resume_window_on_ready(&mut self, event: &crate::events::AppEvent) {
+        if self.retained_agent_resume_panes.is_empty() {
+            return;
+        }
+        let pane_id = match event {
+            crate::events::AppEvent::AgentProcessDetected { pane_id, .. }
+            | crate::events::AppEvent::StateChanged {
+                pane_id,
+                agent: Some(_),
+                ..
+            }
+            | crate::events::AppEvent::HookStateReported { pane_id, .. } => *pane_id,
+            _ => return,
+        };
+        self.retained_agent_resume_panes.remove(&pane_id);
     }
 
     /// Consume one exit owed by a runtime `agent.resume` replaced.
@@ -1231,6 +1303,7 @@ mod tests {
         serde_json::from_str(&response).unwrap()
     }
 
+    #[cfg(unix)]
     #[test]
     fn agent_resume_old_and_new_runtime_exits_do_not_remove_pane() {
         let (mut app, pane_id, terminal_id, public_id) = app_with_claude_pane(
@@ -1239,7 +1312,13 @@ mod tests {
         );
         app.pending_agent_resume_runtime_exits
             .insert(pane_id, Some(123));
-        app.retained_agent_resume_panes.insert(pane_id);
+        app.retained_agent_resume_panes.insert(
+            pane_id,
+            AgentResumeReplacementWindow {
+                runtime_pid: Some(456),
+                until: Instant::now() + std::time::Duration::from_secs(60),
+            },
+        );
         // New death can arrive before the old runtime's delayed event.
         app.handle_internal_event(crate::events::AppEvent::PaneDied {
             pane_id,
@@ -1251,6 +1330,9 @@ mod tests {
             Some(&Some(123))
         );
         assert!(app.state.terminals.contains_key(&terminal_id));
+        assert!(app.state.terminals[&terminal_id].restore_error.is_some());
+        // The window closes on that failure; it does not linger.
+        assert!(app.retained_agent_resume_panes.is_empty());
         app.handle_internal_event(crate::events::AppEvent::PaneDied {
             pane_id,
             runtime_pid: Some(123),
@@ -1261,6 +1343,32 @@ mod tests {
             app.public_pane_id(0, pane_id).as_deref(),
             Some(public_id.as_str())
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_resume_window_closes_on_readiness_and_expiry() {
+        let (mut app, pane_id, _, _) = app_with_claude_pane(
+            crate::detect::AgentState::Idle,
+            Some(claude_session("sess-1")),
+        );
+        let now = Instant::now();
+        let window = AgentResumeReplacementWindow {
+            runtime_pid: Some(456),
+            until: now + std::time::Duration::from_secs(60),
+        };
+        app.retained_agent_resume_panes.insert(pane_id, window);
+        app.handle_internal_event(crate::events::AppEvent::AgentProcessDetected {
+            pane_id,
+            agent: crate::detect::Agent::Claude,
+            observed_at: now,
+        });
+        assert!(app.retained_agent_resume_panes.is_empty());
+
+        app.retained_agent_resume_panes.insert(pane_id, window);
+        assert!(!app.claim_agent_resume_replacement_exit(pane_id, Some(789), now));
+        assert!(!app.claim_agent_resume_replacement_exit(pane_id, Some(456), window.until));
+        assert!(app.retained_agent_resume_panes.is_empty());
     }
 
     #[cfg(unix)]
@@ -1338,18 +1446,53 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn agent_resume_restarts_an_idle_agent_in_the_same_pane_with_its_flags() {
-        exercise_agent_resume(false).await;
+    async fn agent_resume_restarts_an_idle_agent_under_the_pane_shell_with_its_flags() {
+        exercise_agent_resume(ResumeScenario::Resumed).await;
     }
 
     #[cfg(unix)]
     #[tokio::test]
     async fn agent_resume_immediately_exited_replacement_keeps_pane() {
-        exercise_agent_resume(true).await;
+        exercise_agent_resume(ResumeScenario::AgentExits).await;
     }
 
     #[cfg(unix)]
-    async fn exercise_agent_resume(exit_on_resume: bool) {
+    #[tokio::test]
+    async fn agent_resume_then_worktree_remove_failure_restores_pane_shell() {
+        exercise_agent_resume(ResumeScenario::WorktreeRemoveFails).await;
+    }
+
+    #[cfg(unix)]
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum ResumeScenario {
+        Resumed,
+        AgentExits,
+        WorktreeRemoveFails,
+    }
+
+    #[cfg(unix)]
+    async fn wait_for_history(
+        app: &App,
+        terminal_id: &crate::terminal::TerminalId,
+        needle: &str,
+    ) -> String {
+        let mut history = String::new();
+        for _ in 0..120 {
+            history = app
+                .terminal_runtimes
+                .get(terminal_id)
+                .and_then(|runtime| runtime.snapshot_history())
+                .unwrap_or_default();
+            if history.contains(needle) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        history
+    }
+
+    #[cfg(unix)]
+    async fn exercise_agent_resume(scenario: ResumeScenario) {
         // A process whose argv[0] basename is `claude` stands in for the agent.
         let fake_bin = std::env::temp_dir().join(format!(
             "herdr-agent-resume-{}-{}",
@@ -1370,10 +1513,10 @@ mod tests {
         let script = fake_bin.join("stand-in.sh");
         std::fs::write(
             &script,
-            if exit_on_resume {
-                "if [ \"$1\" = --resume ]; then exit 1; fi; sleep 30\n"
+            if scenario == ResumeScenario::AgentExits {
+                "if [ \"$1\" = --resume ]; then echo stand-in-exited; exit 1; fi; sleep 30\n"
             } else {
-                "echo resumed-args: \"$@\"; sleep 30\n"
+                "echo resumed-args: \"$@\"; echo agent-parent: $PPID; sleep 30\n"
             },
         )
         .unwrap();
@@ -1383,6 +1526,8 @@ mod tests {
             crate::detect::AgentState::Idle,
             Some(claude_session("sess-1")),
         );
+        app.state.default_shell = sleep.into();
+        app.state.shell_mode = crate::config::ShellModeConfig::NonLogin;
         app.state
             .terminals
             .get_mut(&terminal_id)
@@ -1450,30 +1595,6 @@ mod tests {
             !crate::platform::process_exists(old_pid.unwrap()),
             "old shell must be gone"
         );
-        if exit_on_resume {
-            assert_eq!(
-                response["error"]["code"], "agent_resume_failed",
-                "{response}"
-            );
-            app.handle_internal_event(crate::events::AppEvent::PaneDied {
-                pane_id,
-                runtime_pid: app
-                    .terminal_runtimes
-                    .get(&terminal_id)
-                    .and_then(|runtime| runtime.child_pid()),
-                exit_reason: crate::platform::ChildExitReason::Exited,
-            });
-            assert_eq!(
-                app.public_pane_id(0, pane_id).as_deref(),
-                Some(public_id.as_str())
-            );
-            for (_, runtime) in app.terminal_runtimes.drain() {
-                runtime.shutdown();
-            }
-            let _ = std::fs::remove_dir_all(fake_bin);
-            return;
-        }
-
         assert_eq!(response["result"]["type"], "agent_resumed", "{response}");
         assert_eq!(response["result"]["pane_id"], public_id.as_str());
         assert_eq!(response["result"]["agent"], "claude");
@@ -1486,11 +1607,19 @@ mod tests {
             app.public_pane_id(0, pane_id).as_deref(),
             Some(public_id.as_str())
         );
-        let runtime = app
+        let new_pid = app
             .terminal_runtimes
             .get(&terminal_id)
-            .expect("resumed pane keeps a runtime on the same terminal");
-        assert_ne!(runtime.child_pid(), old_pid, "the pane shell was replaced");
+            .expect("resumed pane keeps a runtime on the same terminal")
+            .child_pid();
+        assert!(new_pid.is_some());
+        assert_ne!(new_pid, old_pid, "the pane shell was replaced");
+        assert_eq!(
+            app.retained_agent_resume_panes
+                .get(&pane_id)
+                .map(|window| window.runtime_pid),
+            Some(new_pid)
+        );
         let terminal = &app.state.terminals[&terminal_id];
         assert!(terminal.pending_agent_resume_plan.is_none());
         assert_eq!(terminal.agent_name.as_deref(), Some("frank"));
@@ -1513,24 +1642,94 @@ mod tests {
         assert!(app.terminal_runtimes.get(&terminal_id).is_some());
         assert!(app.pending_agent_resume_runtime_exits.is_empty());
 
-        let typed = "resumed-args: --resume sess-1".to_string();
-        let mut history = String::new();
-        for _ in 0..80 {
-            history = app
-                .terminal_runtimes
-                .get(&terminal_id)
-                .unwrap()
-                .snapshot_history()
-                .unwrap_or_default();
-            if history.contains(&typed) {
-                break;
+        match scenario {
+            ResumeScenario::Resumed => {
+                let typed = "resumed-args: --resume sess-1";
+                let history = wait_for_history(&app, &terminal_id, typed).await;
+                assert!(
+                    history.contains(typed),
+                    "resumed shell should receive the preserved argv: {history}"
+                );
+                // The agent is a child of the pane shell, so it inherits the
+                // shell's environment instead of a rebuilt one.
+                let parent = format!("agent-parent: {}", new_pid.unwrap());
+                let history = wait_for_history(&app, &terminal_id, &parent).await;
+                assert!(
+                    history.contains(&parent),
+                    "agent must run under the pane shell {new_pid:?}: {history}"
+                );
             }
-            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            ResumeScenario::AgentExits => {
+                let history = wait_for_history(&app, &terminal_id, "stand-in-exited").await;
+                assert!(history.contains("stand-in-exited"), "{history}");
+                // The agent exiting leaves the pane shell running.
+                assert!(crate::platform::process_exists(new_pid.unwrap()));
+                // The shell itself dying inside the window keeps the pane.
+                app.handle_internal_event(crate::events::AppEvent::PaneDied {
+                    pane_id,
+                    runtime_pid: new_pid,
+                    exit_reason: crate::platform::ChildExitReason::Exited,
+                });
+                assert_eq!(
+                    app.public_pane_id(0, pane_id).as_deref(),
+                    Some(public_id.as_str())
+                );
+                assert!(app.state.terminals[&terminal_id].restore_error.is_some());
+                assert!(app.retained_agent_resume_panes.is_empty());
+            }
+            ResumeScenario::WorktreeRemoveFails => {
+                let checkout = fake_bin.clone();
+                let workspace_id = app.state.workspaces[0].id.clone();
+                let shutdown_panes =
+                    app.shutdown_workspace_terminal_runtimes_for_worktree_remove(0);
+                assert_eq!(shutdown_panes, vec![pane_id]);
+                assert!(app.terminal_runtimes.get(&terminal_id).is_none());
+                let checkout_key = crate::worktree::canonical_or_original(&checkout);
+                app.pending_api_worktree_removes
+                    .insert(workspace_id.clone(), 7);
+                app.pending_api_worktree_remove_paths
+                    .insert(checkout_key.clone(), 7);
+                let (respond_to, response_rx) = std::sync::mpsc::channel();
+                let _ =
+                    app.handle_api_worktree_remove_finished(crate::events::WorktreeRemoveResult {
+                        workspace_id,
+                        path: checkout,
+                        workspace: None,
+                        worktree: None,
+                        forced: false,
+                        api_request: Some(crate::events::ApiWorktreeRemoveRequest {
+                            id: "req".into(),
+                            operation_id: 7,
+                            checkout_key,
+                            shutdown_panes,
+                            respond_to,
+                        }),
+                        result: Err("simulated remove failure".into()),
+                    });
+                let response: serde_json::Value = serde_json::from_str(
+                    &response_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap(),
+                )
+                .unwrap();
+                assert_eq!(response["error"]["code"], "worktree_remove_failed");
+                // The shut-down replacement shell's own exit drives recovery.
+                app.handle_internal_event(crate::events::AppEvent::PaneDied {
+                    pane_id,
+                    runtime_pid: new_pid,
+                    exit_reason: crate::platform::ChildExitReason::Exited,
+                });
+                let restored = app
+                    .terminal_runtimes
+                    .get(&terminal_id)
+                    .expect("worktree recovery restores the pane shell");
+                assert_ne!(restored.child_pid(), new_pid);
+                assert!(app.find_pane(pane_id).is_some());
+                assert!(app.pending_worktree_remove_runtime_exits.is_empty());
+                assert!(app.pending_worktree_remove_runtime_restores.is_empty());
+                assert!(app.retained_agent_resume_panes.is_empty());
+            }
         }
-        assert!(
-            history.contains(&typed),
-            "resumed shell should receive the preserved argv: {history}"
-        );
 
         for (_, runtime) in app.terminal_runtimes.drain() {
             runtime.shutdown();

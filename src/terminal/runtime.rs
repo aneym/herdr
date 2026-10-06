@@ -638,10 +638,6 @@ impl TerminalRuntime {
         self.0.foreground_machine()
     }
 
-    pub(crate) fn process_exited(&self) -> bool {
-        self.0.process_exited()
-    }
-
     pub fn child_pid(&self) -> Option<u32> {
         self.0.child_pid()
     }

@@ -57,6 +57,8 @@ impl App {
                 .pending_worktree_remove_runtime_exits
                 .entry(pane_id)
                 .or_default() += 1;
+            // Worktree removal owns this runtime's exit from here on.
+            self.retained_agent_resume_panes.remove(&pane_id);
             shutdown_panes.push(pane_id);
             self.shutdown_terminal_runtime(terminal_id);
         }

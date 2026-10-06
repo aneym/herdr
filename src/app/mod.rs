@@ -142,9 +142,15 @@ pub struct App {
     pub(crate) pending_api_worktree_remove_paths: HashMap<std::path::PathBuf, u64>,
     pub(crate) pending_worktree_remove_runtime_exits: HashMap<crate::layout::PaneId, usize>,
     pub(crate) pending_worktree_remove_runtime_restores: HashMap<crate::layout::PaneId, u64>,
+    /// Replacement windows opened by `agent.resume`: while one is open, an
+    /// exit of that replacement runtime keeps the pane and its screen instead
+    /// of closing it. Each window closes when the resumed agent is observed,
+    /// when that runtime exits, when a worktree removal takes the runtime, or
+    /// when it times out; every other exit is handled as before.
+    pub(crate) retained_agent_resume_panes:
+        HashMap<crate::layout::PaneId, agent_resume::AgentResumeReplacementWindow>,
     /// Exits still owed by runtimes `agent.resume` replaced; each one is
     /// swallowed instead of closing or respawning the resumed pane.
-    pub(crate) retained_agent_resume_panes: std::collections::HashSet<crate::layout::PaneId>,
     pub(crate) pending_agent_resume_runtime_exits: HashMap<crate::layout::PaneId, Option<u32>>,
     pub(crate) next_api_worktree_operation_id: u64,
     pub(crate) next_auto_update_check: Option<Instant>,
@@ -693,7 +699,7 @@ impl App {
             pending_worktree_remove_runtime_exits: HashMap::new(),
             pending_worktree_remove_runtime_restores: HashMap::new(),
             pending_agent_resume_runtime_exits: HashMap::new(),
-            retained_agent_resume_panes: std::collections::HashSet::new(),
+            retained_agent_resume_panes: HashMap::new(),
             next_api_worktree_operation_id: 1,
             next_auto_update_check: version_check_enabled
                 .then_some(Instant::now() + AUTO_UPDATE_CHECK_INTERVAL),
