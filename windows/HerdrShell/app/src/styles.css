@@ -62,3 +62,15 @@ footer { color: #7f849c; padding: 12px 8px; font-size: 12px; overflow-wrap: anyw
 .chat-composer-footer { display: flex; justify-content: space-between; gap: 8px; }.chat-composer button:disabled { color: #6c7086; cursor: default; }
 
 .chat-surface { position: absolute; inset: 0; }.chat-hidden { visibility: hidden; pointer-events: none; }
+
+.docs { flex: 0 0 38%; min-width: 360px; display: flex; flex-direction: column; background: var(--shell-surface); }
+.docs-tabs { display: flex; flex-shrink: 0; gap: 2px; padding: 5px 8px; overflow-x: auto; }
+.docs-tabs button { font-size: 12px; padding: 4px 7px; border-radius: 6px; white-space: nowrap; color: var(--shell-muted); }
+.docs-tabs button:hover { background: var(--shell-hover); }
+.docs-tabs button[aria-selected="true"] { background: var(--shell-selection); color: var(--shell-text); }
+.docs-body { flex: 1; min-height: 0; overflow: auto; padding: 16px; line-height: 1.5; overflow-wrap: anywhere; }
+.docs pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--shell-hover); padding: 10px; border-radius: 6px; font-size: 12px; }
+.docs code { font-family: "Cascadia Mono", Consolas, monospace; }
+.docs .chat-markdown a { color: #89b4fa; }
+.docs table { border-collapse: collapse; }
+.docs td, .docs th { padding: 4px 8px; border: 1px solid #45475a; }
