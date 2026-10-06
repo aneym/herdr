@@ -1538,12 +1538,13 @@ pub(super) fn render_agent_row(
     }
 }
 
+/// `width` is in cells. Wide graphemes take two and are never split, so a title with
+/// CJK or emoji can't push or overwrite the counts and "!" drawn after it.
 fn put_text(buffer: &mut Buffer, x: u16, y: u16, width: u16, text: &str, style: Style) {
-    for (offset, character) in text.chars().take(width as usize).enumerate() {
-        if let Some(cell) = buffer.cell_mut((x + offset as u16, y)) {
-            cell.set_char(character).set_style(style);
-        }
+    if width == 0 || y >= buffer.area.bottom() || x >= buffer.area.right() {
+        return;
     }
+    buffer.set_stringn(x, y, text, width as usize, style);
 }
 
 fn display_width(text: &str) -> usize {

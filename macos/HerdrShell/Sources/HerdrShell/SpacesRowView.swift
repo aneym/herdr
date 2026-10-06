@@ -23,6 +23,9 @@ struct SpacesRowView: View {
     static let chevronWidth: CGFloat = 9
     static let glyphWidth: CGFloat = 12
     static let alertWidth: CGFloat = 7
+    /// Trailing text is at least as wide as a three-digit count, so "3" and "12" rows
+    /// give their titles the same room.
+    static let countWidth: CGFloat = 20
     /// A title keeps this much before trailing text gives way.
     static let titleMinWidth: CGFloat = 96
 
@@ -60,6 +63,7 @@ struct SpacesRowView: View {
             if !row.trailing.isEmpty, row.kind != .goal {
                 Text(row.trailing).font(.system(size: 10.5)).monospacedDigit().foregroundStyle(row.link == nil ? t.mute : t.accent)
                     .lineLimit(1).truncationMode(.tail)
+                    .frame(minWidth: Self.countWidth, alignment: .trailing)
                     .layoutPriority(1)
                     .onTapGesture { click(row.link == nil ? "body" : "link") }
             }

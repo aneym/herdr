@@ -1,4 +1,5 @@
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 pub(crate) fn display_width(text: &str) -> usize {
     UnicodeWidthStr::width(text)
@@ -19,16 +20,18 @@ pub(crate) fn truncate_end(text: &str, max_width: usize) -> String {
     format!("{prefix}…")
 }
 
+/// Whole graphemes only: an emoji with its variation selector or ZWJ parts is never
+/// split, and each counts at the width the terminal draws it.
 pub(crate) fn take_prefix_width(text: &str, max_width: usize) -> String {
     let mut output = String::new();
     let mut width = 0usize;
-    for ch in text.chars() {
-        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
-        if width + ch_width > max_width {
+    for grapheme in text.graphemes(true) {
+        let grapheme_width = UnicodeWidthStr::width(grapheme);
+        if width + grapheme_width > max_width {
             break;
         }
-        output.push(ch);
-        width += ch_width;
+        output.push_str(grapheme);
+        width += grapheme_width;
     }
     output
 }

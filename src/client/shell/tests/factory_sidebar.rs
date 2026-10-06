@@ -2353,3 +2353,60 @@ fn factory_host_footer_rows_fit_and_align_at_40_44_52() {
         }
     }
 }
+
+/// What a terminal shows for row `y`, with the column each grapheme lands in. It
+/// replays the buffer diff: a cell under a wide grapheme is not sent, a cell next
+/// to the last one sent is written without a cursor move, and the cursor moves on
+/// by the grapheme's own width.
+fn terminal_row(buffer: &Buffer, y: u16) -> Vec<(u16, String)> {
+    let mut out = Vec::new();
+    let (mut skip, mut last, mut cursor) = (0u16, None::<u16>, 0u16);
+    for x in 0..buffer.area.width {
+        if skip > 0 {
+            skip -= 1;
+            continue;
+        }
+        let symbol = buffer[(x, y)].symbol();
+        let width = unicode_width::UnicodeWidthStr::width(symbol) as u16;
+        if last != Some(x.wrapping_sub(1)) {
+            cursor = x;
+        }
+        out.push((cursor, symbol.to_owned()));
+        cursor += width;
+        last = Some(x);
+        skip = width.saturating_sub(1);
+    }
+    out
+}
+
+#[test]
+fn wide_and_emoji_titles_keep_counts_and_alert_in_their_columns() {
+    // Alex, 2026-10-05: "something fucked the alignment due to text overflow".
+    // A title with CJK, a variation-selector emoji and a ZWJ emoji, long enough to
+    // truncate, must end in "…" at its column without losing or splitting a grapheme,
+    // the folded roll-up count must stay whole, and "!" must sit where it sits on a
+    // plain title.
+    let (snapshot, mut overlay) = fixture();
+    overlay.tabs.get_mut("orch").unwrap().attention = Attention::Act;
+    let (_, hits, plain) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 32);
+    let y = hits.tree_headers.iter().find(|hit| hit.key == "orch").unwrap().rect.y;
+    let columns = |row: &[(u16, String)], symbol: &str| row.iter().filter(|(_, s)| s == symbol).map(|(x, _)| *x).collect::<Vec<_>>();
+    let plain_row = terminal_row(&plain, y);
+    for title in ["研究ノート orchestrator", "⚙️ orchestrator with a long name", "👩‍💻 team 研究 and a long name"] {
+        overlay.tabs.get_mut("orch").unwrap().name = Some(title.into());
+        let (_, hits, buffer) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 32);
+        assert_eq!(hits.tree_headers.iter().find(|hit| hit.key == "orch").unwrap().rect.y, y);
+        let row = terminal_row(&buffer, y);
+        let text: String = row.iter().map(|(_, s)| s.as_str()).collect();
+        assert_eq!(columns(&row, "!"), columns(&plain_row, "!"), "{title}: {text}");
+        // The folded roll-up keeps its count; "1 workflow" may shrink to "1", never past the "!".
+        let count = columns(&row, "1");
+        assert_eq!(count.len(), 1, "{title}: {text}");
+        assert!(count[0] >= columns(&plain_row, "1")[0] && count[0] + 1 < columns(&row, "!")[0], "{title}: {text}");
+        let shown = text.trim().trim_start_matches(['▸', '▾', '●', ' ']);
+        let name = shown.split('…').next().unwrap();
+        assert!(title.starts_with(name) && shown.contains('…'), "{title}: shown {shown:?}");
+        let end = row.iter().find(|(_, s)| s == "…").map(|(x, _)| *x).unwrap();
+        assert!(end + 1 < count[0], "{title}: the ellipsis ends before the count: {text}");
+    }
+}
