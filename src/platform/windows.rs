@@ -1381,6 +1381,15 @@ pub fn detach_server_daemon_command(command: &mut std::process::Command) {
     command.creation_flags(DETACHED_PROCESS);
 }
 
+/// Spawns the helper without a console. A pane-scoped helper stays in the
+/// pane's kill-on-close job; it only needs to live long enough to deliver its
+/// API request, which is what triggers the teardown that ends it.
+pub fn detach_helper_command_from_session(command: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt;
+
+    command.creation_flags(DETACHED_PROCESS);
+}
+
 pub fn current_process_is_detached_server_daemon() -> bool {
     if !unsafe { GetConsoleWindow() }.is_null() {
         return false;

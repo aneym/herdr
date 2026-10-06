@@ -222,7 +222,7 @@ herdr pane swap --source-pane ID --target-pane ID
 herdr pane move <pane_id> --tab <tab_id> --split right|down [--target-pane ID] [--ratio FLOAT] [--focus|--no-focus]
 herdr pane move <pane_id> --new-tab [--workspace ID] [--label TEXT] [--focus|--no-focus]
 herdr pane move <pane_id> --new-workspace [--label TEXT] [--tab-label TEXT] [--focus|--no-focus]
-herdr pane close <pane_id>
+herdr pane close [<pane_id>|self|--pane ID|self|--current]
 ```
 
 For pane commands that accept `--current`, Herdr uses the calling pane's
@@ -236,6 +236,12 @@ The split response exposes the new pane ID as `.result.pane.pane_id`.
 mouse-reporting pane application. `herdr` restores the default pane menu.
 Right-clicking the pane frame still opens Herdr's menu. `pane split
 --right-click pane` applies the same policy to the new pane at creation.
+
+`pane close` may target the pane it runs in: with no argument, `self`, or
+`--current` (or an explicit id equal to `HERDR_PANE_ID`) the command delegates
+the close to a detached helper, prints an `ok` response, and exits 0 before
+the pane session is torn down. The pane then closes moments later, collapsing
+its tab or workspace when it was the last pane.
 
 After `pane move`, use `.result.move_result.pane.pane_id` for later commands. A cross-workspace move changes the workspace-qualified pane ID; the prior value remains at `.result.move_result.previous_pane_id`. The running process keeps its launch-time `HERDR_PANE_ID`, `HERDR_TAB_ID`, and `HERDR_WORKSPACE_ID`; Herdr retains the old pane ID as an alias for that terminal, so pane commands using `--current` still resolve it. A live agent name follows the terminal and continues to resolve after the move.
 

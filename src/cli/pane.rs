@@ -1003,17 +1003,111 @@ fn parse_pane_direction(value: &str) -> Result<PaneDirection, String> {
     }
 }
 
+const DEFERRED_CLOSE_DELAY_ENV_VAR: &str = "HERDR_PANE_CLOSE_DELAY_MS";
+const DEFERRED_CLOSE_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
+
 fn pane_close(args: &[String]) -> std::io::Result<i32> {
-    let Some(raw_pane_id) = args.first() else {
-        eprintln!("usage: herdr pane close <pane_id>");
-        return Ok(2);
+    let env_pane_id = super::target::caller_pane_id();
+    let pane_id = match parse_pane_close_args(args, env_pane_id.as_deref()) {
+        Ok(pane_id) => pane_id,
+        Err(message) => {
+            eprintln!("{message}");
+            return Ok(2);
+        }
     };
-    if args.len() != 1 {
-        eprintln!("usage: herdr pane close <pane_id>");
-        return Ok(2);
+    if env_pane_id.as_deref() == Some(pane_id.as_str()) {
+        return close_own_pane(&pane_id);
+    }
+    if std::env::var_os(DEFERRED_CLOSE_DELAY_ENV_VAR).is_some() {
+        std::thread::sleep(deferred_close_delay());
+    }
+    super::runtime::pane_close(pane_id)
+}
+
+fn parse_pane_close_args(args: &[String], env_pane_id: Option<&str>) -> Result<String, String> {
+    let args = super::expand_equals_args(args, &["--pane"]);
+    let mut pane_id = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--pane" => {
+                if pane_id.is_some() {
+                    return Err("provide only one pane selector".into());
+                }
+                let Some(value) = args.get(index + 1) else {
+                    return Err("missing value for --pane".into());
+                };
+                pane_id = Some(value.clone());
+                index += 2;
+            }
+            "--current" => {
+                if pane_id.is_some() {
+                    return Err("provide only one pane selector".into());
+                }
+                pane_id = Some("self".to_string());
+                index += 1;
+            }
+            option if option.starts_with('-') => {
+                return Err(format!("unknown option: {option}"));
+            }
+            positional => {
+                if pane_id.is_some() {
+                    return Err(format!("unexpected argument: {positional}"));
+                }
+                pane_id = Some(positional.to_string());
+                index += 1;
+            }
+        }
     }
 
-    super::runtime::pane_close(super::normalize_pane_id(raw_pane_id))
+    let pane_id = pane_id.unwrap_or_else(|| "self".to_string());
+    if pane_id == "self" {
+        return env_pane_id
+            .map(super::normalize_pane_id)
+            .ok_or_else(|| "self-close requires HERDR_PANE_ID".into());
+    }
+    Ok(super::normalize_pane_id(&pane_id))
+}
+
+/// Closing the pane this command runs in would kill the CLI mid-request: the
+/// server signals every process in the pane's session before it answers.
+/// Hand the close to a detached helper that outlives the teardown and ack it
+/// while the pane is still up so the caller exits 0.
+fn close_own_pane(pane_id: &str) -> std::io::Result<i32> {
+    let socket_path = super::target::api_client()?.socket_path();
+    let mut helper = std::process::Command::new(std::env::current_exe()?);
+    helper
+        .args(["pane", "close", pane_id])
+        .env(crate::api::SOCKET_PATH_ENV_VAR, socket_path)
+        .env(
+            DEFERRED_CLOSE_DELAY_ENV_VAR,
+            deferred_close_delay().as_millis().to_string(),
+        )
+        .env_remove("HERDR_PANE_ID")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    crate::platform::detach_helper_command_from_session(&mut helper);
+    helper.spawn()?;
+    println!(
+        "{}",
+        serde_json::json!({
+            "id": "cli:pane:close",
+            "result": {
+                "type": "ok",
+                "pane_id": pane_id,
+                "deferred": true
+            }
+        })
+    );
+    Ok(0)
+}
+
+fn deferred_close_delay() -> std::time::Duration {
+    std::env::var(DEFERRED_CLOSE_DELAY_ENV_VAR)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map_or(DEFERRED_CLOSE_DELAY, std::time::Duration::from_millis)
 }
 
 fn pane_send_args(args: &[String], allow_human: bool) -> (Vec<String>, bool, bool, bool) {
@@ -1725,7 +1819,7 @@ fn print_pane_help() {
     eprintln!("  herdr pane move <pane_id> --tab <tab_id> --split right|down [--target-pane ID] [--ratio FLOAT] [--focus|--no-focus]");
     eprintln!("  herdr pane move <pane_id> --new-tab [--workspace ID] [--label TEXT] [--focus|--no-focus]");
     eprintln!("  herdr pane move <pane_id> --new-workspace [--label TEXT] [--tab-label TEXT] [--focus|--no-focus]");
-    eprintln!("  herdr pane close <pane_id>");
+    eprintln!("  herdr pane close [<pane_id>|self|--pane ID|self|--current]");
     eprintln!("  herdr pane send-text <pane_id> <text> [--if-idle] [--human] [--json]");
     eprintln!("  herdr pane send-keys <pane_id> <key> [key ...] [--if-idle] [--human] [--json]");
     eprintln!("  herdr pane wait-output <pane_id> (--match TEXT | --regex PATTERN) [--source visible|recent|recent-unwrapped] [--lines N] [--timeout MS] [--raw]");
@@ -1898,6 +1992,55 @@ mod tests {
             Some("pane-b"),
         )
         .is_err());
+    }
+
+    #[test]
+    fn parse_pane_close_args_defaults_to_calling_pane() {
+        for args in [
+            args(&[]),
+            args(&["self"]),
+            args(&["--current"]),
+            args(&["--pane", "self"]),
+            args(&["--pane=self"]),
+        ] {
+            assert_eq!(
+                parse_pane_close_args(&args, Some("w1:p2")).unwrap(),
+                "w1:p2"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_pane_close_args_accepts_explicit_pane() {
+        for args in [
+            args(&["w1:p3"]),
+            args(&["--pane", "w1:p3"]),
+            args(&["--pane=w1:p3"]),
+        ] {
+            assert_eq!(
+                parse_pane_close_args(&args, Some("w1:p2")).unwrap(),
+                "w1:p3"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_pane_close_args_rejects_missing_or_conflicting_target() {
+        for args in [
+            args(&[]),
+            args(&["self"]),
+            args(&["--current"]),
+            args(&["--pane", "self"]),
+            args(&["--pane"]),
+            args(&["a", "--pane", "b"]),
+            args(&["a", "b"]),
+            args(&["--bogus"]),
+        ] {
+            assert!(
+                parse_pane_close_args(&args, None).is_err(),
+                "args: {args:?}"
+            );
+        }
     }
 
     #[test]

@@ -191,6 +191,9 @@ pub(crate) fn scrollback_editor_argv(_path: &std::path::Path) -> std::io::Result
 pub fn detach_server_daemon_command(_command: &mut Command) {}
 
 /// Unsupported platform stub.
+pub fn detach_helper_command_from_session(_command: &mut Command) {}
+
+/// Unsupported platform stub.
 pub fn current_process_is_detached_server_daemon() -> bool {
     false
 }

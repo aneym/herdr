@@ -320,6 +320,23 @@ pub fn current_process_is_detached_server_daemon() -> bool {
     unsafe { libc::getsid(0) == libc::getpid() }
 }
 
+/// Puts a spawned helper in its own session so teardown of the pane session
+/// it was launched from (which signals every process sharing the pane shell's
+/// session id) cannot kill it before it finishes its API request.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub fn detach_helper_command_from_session(command: &mut std::process::Command) {
+    use std::os::unix::process::CommandExt;
+
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+}
+
 /// Raised by the SIGWINCH handler, consumed by the host resize watcher.
 #[cfg(unix)]
 static TERMINAL_RESIZE_SIGNALLED: std::sync::atomic::AtomicBool =

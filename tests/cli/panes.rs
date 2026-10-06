@@ -98,6 +98,67 @@ fn pane_close_removes_the_workspace_when_it_closes_the_last_pane() {
 }
 
 #[test]
+fn pane_close_from_inside_the_pane_exits_zero_and_closes_the_workspace() {
+    let base = unique_test_dir();
+    let config_home = base.join("config");
+    let runtime_dir = base.join("runtime");
+    let socket_path = runtime_dir.join("herdr.sock");
+
+    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    wait_for_socket(&socket_path, Duration::from_secs(5));
+
+    let created = run_cli(
+        &socket_path,
+        &["workspace", "create", "--cwd", base.to_str().unwrap()],
+    );
+    assert!(created.status.success());
+    let created_json: serde_json::Value = serde_json::from_slice(&created.stdout).unwrap();
+    let pane_id = created_json["result"]["root_pane"]["pane_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let exit_file = base.join("self-close.exit");
+    let command = format!(
+        "HERDR_PANE_CLOSE_DELAY_MS=400 '{}' pane close; printf '%s' \"$?\" > {}",
+        env!("CARGO_BIN_EXE_herdr"),
+        exit_file.display()
+    );
+    let ran = run_cli(&socket_path, &["pane", "run", &pane_id, &command]);
+    assert!(
+        ran.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
+
+    assert!(
+        wait_until(Duration::from_secs(5), Duration::from_millis(25), || {
+            exit_file.exists()
+        }),
+        "pane close exit file was not written"
+    );
+    assert_eq!(fs::read_to_string(&exit_file).unwrap().trim(), "0");
+
+    assert!(
+        wait_until(Duration::from_secs(5), Duration::from_millis(50), || {
+            let workspaces = run_cli(&socket_path, &["workspace", "list"]);
+            workspaces.status.success()
+                && serde_json::from_slice::<serde_json::Value>(&workspaces.stdout)
+                    .ok()
+                    .and_then(|json| {
+                        json["result"]["workspaces"]
+                            .as_array()
+                            .map(|workspaces| workspaces.is_empty())
+                    })
+                    .unwrap_or(false)
+        }),
+        "workspace did not close after self pane close"
+    );
+
+    cleanup_spawned_herdr(herdr, base);
+}
+
+#[test]
 fn pane_run_read_and_wait_commands_work() {
     let base = unique_test_dir();
     let config_home = base.join("config");
