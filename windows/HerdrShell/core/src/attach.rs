@@ -17,7 +17,7 @@ use crate::endpoint::Conn;
 use crate::endpoint::{poll_read, prepare_polled, write_all_polled, Endpoint, ReadPoll};
 use crate::wire::{
     encode_client_frame, AttachScrollDirection, AttachScrollSource, ClientMessage, FrameReader,
-    RenderEncoding, ServerMessage, MAX_GRAPHICS_FRAME_SIZE, PROTOCOL_VERSION,
+    RenderEncoding, ServerMessage, MAX_FRAME_SIZE, PROTOCOL_VERSION,
 };
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -145,6 +145,24 @@ impl ModeTracker {
             keyboard: self.keyboard,
             sequence,
         }
+    }
+
+    /// Undo only modes this attach pushed, before the emulator receives Closed.
+    fn restore(&mut self) -> Option<AttachEvent> {
+        let mut sequence = Vec::new();
+        if let Some(AttachEvent::ModeChange {
+            sequence: bytes, ..
+        }) = self.keyboard_protocol(0, 0)
+        {
+            sequence.extend_from_slice(&bytes);
+        }
+        if let Some(AttachEvent::ModeChange {
+            sequence: bytes, ..
+        }) = self.mouse_capture(false, false)
+        {
+            sequence.extend_from_slice(&bytes);
+        }
+        (!sequence.is_empty()).then(|| self.event(sequence))
     }
 }
 
@@ -336,7 +354,8 @@ impl Session {
         let mut session = Self {
             stream,
             initial: VecDeque::new(),
-            reader: FrameReader::new(MAX_GRAPHICS_FRAME_SIZE),
+            // TerminalHello does not negotiate graphics, just like Unix direct attach.
+            reader: FrameReader::new(MAX_FRAME_SIZE),
             buf: vec![0u8; READ_CHUNK],
         };
         session.send(&ClientMessage::TerminalHello {
@@ -442,13 +461,24 @@ impl Session {
     }
 
     fn buffered_message(&mut self) -> io::Result<Option<ServerMessage>> {
-        while let Some(payload) = self.reader.next_payload() {
+        loop {
+            let payload = self.reader.next_payload();
+            // Unix's read_message rejects the length prefix and disconnects immediately.
+            // Do not let the generic splitter silently skip an oversized attach frame.
+            if self.reader.skipped_frames() != 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("frame payload exceeds {MAX_FRAME_SIZE} byte attach limit"),
+                ));
+            }
+            let Some(payload) = payload else {
+                return Ok(None);
+            };
             match ServerMessage::decode(&payload)? {
                 ServerMessage::Unknown { .. } => continue,
                 message => return Ok(Some(message)),
             }
         }
-        Ok(None)
     }
 }
 
@@ -491,6 +521,9 @@ impl Worker {
             }
         };
         self.writable.store(false, Ordering::Release);
+        if let Some(event) = self.modes.restore() {
+            let _ = self.events.send(event);
+        }
         let _ = self.events.send(AttachEvent::Closed { reason });
     }
 
@@ -631,12 +664,7 @@ mod tests {
         assert!(mouse.enabled && mouse.sgr_pixels);
         assert_eq!(
             sequence,
-            [
-                CLEAR_MOUSE_REPORTING,
-                ENABLE_MOUSE_CAPTURE,
-                ENABLE_SGR_PIXELS
-            ]
-            .concat()
+            b"\x1b[?1006l\x1b[?1016l\x1b[?1015l\x1b[?1005l\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?9l\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1015h\x1b[?1006h\x1b[?1016h".to_vec()
         );
         assert!(modes.mouse_capture(true, true).is_none());
         let AttachEvent::ModeChange { sequence, .. } =
@@ -646,7 +674,7 @@ mod tests {
         };
         assert_eq!(
             sequence,
-            [CLEAR_MOUSE_REPORTING, DISABLE_MOUSE_CAPTURE].concat()
+            b"\x1b[?1006l\x1b[?1016l\x1b[?1015l\x1b[?1005l\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?9l\x1b[?1006l\x1b[?1015l\x1b[?1003l\x1b[?1002l\x1b[?1000l".to_vec()
         );
     }
 }
