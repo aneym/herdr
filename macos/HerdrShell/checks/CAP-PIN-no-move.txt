@@ -1,0 +1,9 @@
+[PASS] only the right pane's header has the pin, unpinned
+[FAIL] a click pins it last in the server's pin order (['w3:t2', 'w2:t2', 'w2:t1'])
+[FAIL] it is last in PINNED (['w2:t2', 'w2:t1'])
+[PASS] the header shows it pinned
+[PASS] an unpin elsewhere reaches the header
+[PASS] a pin elsewhere reaches the header
+[PASS] a click on a pinned chat unpins it on the server
+[PASS] the header shows it unpinned
+FAIL: a click pins it last in the server's pin order, it is last in PINNED
