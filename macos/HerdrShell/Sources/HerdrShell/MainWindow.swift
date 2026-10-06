@@ -1065,7 +1065,7 @@ final class ShellWindow: NSWindow {
     /// SwiftUI sidebar claim half the window.) Docs sit to the right of the panes.
     final class RootView: NSView {
         let sidebar: NSView, host: NSView
-        static let sidebarWidth: CGFloat = 300
+        static let sidebarWidth: CGFloat = ShellSpace.sidebarWidth
         /// P11 detail panel between the sidebar and the pane host; takes no space while closed.
         var detail: NSView? {
             didSet {

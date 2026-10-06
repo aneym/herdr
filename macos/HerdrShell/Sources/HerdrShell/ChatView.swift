@@ -7,16 +7,16 @@ import SwiftUI
 
 /// Type scale and rhythm. Body is 14 pt at a 1.5 line height (21 pt).
 private enum Metric {
-    static let column: CGFloat = 760
-    static let gutter: CGFloat = 28
-    static let body: CGFloat = 14
+    static let column: CGFloat = ShellSpace.chatColumn
+    static let gutter: CGFloat = ShellSpace.chatGutter
+    static let body: CGFloat = ShellType.body
     static let leading: CGFloat = 4.5
-    static let small: CGFloat = 12.5
-    static let caption: CGFloat = 11.5
-    static let code: CGFloat = 12.5
-    static let itemGap: CGFloat = 18
-    static let blockGap: CGFloat = 12
-    static let toolRow: CGFloat = 22
+    static let small: CGFloat = ShellType.small
+    static let caption: CGFloat = ShellType.caption
+    static let code: CGFloat = ShellType.code
+    static let itemGap: CGFloat = ShellSpace.chatItemGap
+    static let blockGap: CGFloat = ShellSpace.chatBlockGap
+    static let toolRow: CGFloat = ShellSpace.toolRow
 }
 
 /// Colors for the chat, all derived from the shell's Theme tokens. Diff red/green are the
