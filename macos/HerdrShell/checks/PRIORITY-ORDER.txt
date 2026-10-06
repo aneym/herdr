@@ -1,0 +1,101 @@
+[PASS] spaces ranked stably, ties retain input order
+[PASS] client pinned-space partition precedes rank
+[PASS] explicit overlay member order wins over rank
+[PASS] tabs ranked only; pins do not reorder equal-rank ties
+[PASS] server pin order unchanged
+[PASS] real snapshot decodes optional sort_rank and parked
+[PASS] old SpacesInput defaults new fields
+[PASS] old SpacesChrome JSON decodes and preserves prior state
+[PASS] parked space collapsed in place by default
+[PASS] persisted parked expansion exposes tabs
+[PASS] parked toggle refolds without changing collapsedSpaces
+11/11 checks passed
+
+snapshot|0|false|0|4294967295|true|7
+input|0|false|0
+chrome|true|true
+rank|title|agents|0|none||mute|agents||none||||
+rank|section|pinned|0|none||mute|PINNED|⌘1..3|none||||
+rank|tab|pinned:latepin|0|none|●|unknown|Late pin|D|none||latepin||
+rank|tab|pinned:pin2|0|none|●|unknown|Pin 2|D|none||pin2||
+rank|tab|pinned:pin1|0|none|●|unknown|Pin 1|D|none||pin1||
+rank|space|space:d|0|open||mute|D||none||latepin|space:d|
+rank|section|section:d:LANES|1|none||mute|LANES||none||||
+rank|tab|tab:plain1|1|none|●|unknown|Plain 1||none||plain1||
+rank|tab|tab:pin1|1|none|●|unknown|Pin 1||none||pin1||
+rank|tab|tab:pin2|1|none|●|unknown|Pin 2||none||pin2||
+rank|tab|tab:plain2|1|none|●|unknown|Plain 2||none||plain2||
+rank|tab|tab:latepin|1|none|●|unknown|Late pin||none||latepin||
+rank|space|space:b|0|open||mute|B||none|||space:b|
+rank|space|space:c|0|open||mute|C||none|||space:c|
+rank|space|space:a|0|open||mute|A||none|||space:a|
+rank|space|space:p|0|closed||mute|Parked||none||parkedtab|parkedspace:p|
+partition|title|agents|0|none||mute|agents||none||||
+partition|section|pinned|0|none||mute|PINNED|⌘1..3|none||||
+partition|tab|pinned:latepin|0|none|●|unknown|Late pin|D|none||latepin||
+partition|tab|pinned:pin2|0|none|●|unknown|Pin 2|D|none||pin2||
+partition|tab|pinned:pin1|0|none|●|unknown|Pin 1|D|none||pin1||
+partition|space|space:b|0|open||mute|B||none|||space:b|
+partition|space|space:d|0|open||mute|D||none||latepin|space:d|
+partition|section|section:d:LANES|1|none||mute|LANES||none||||
+partition|tab|tab:plain1|1|none|●|unknown|Plain 1||none||plain1||
+partition|tab|tab:pin1|1|none|●|unknown|Pin 1||none||pin1||
+partition|tab|tab:pin2|1|none|●|unknown|Pin 2||none||pin2||
+partition|tab|tab:plain2|1|none|●|unknown|Plain 2||none||plain2||
+partition|tab|tab:latepin|1|none|●|unknown|Late pin||none||latepin||
+partition|space|space:c|0|open||mute|C||none|||space:c|
+partition|space|space:a|0|open||mute|A||none|||space:a|
+partition|space|space:p|0|closed||mute|Parked||none||parkedtab|parkedspace:p|
+overlay|title|agents|0|none||mute|agents||none||||
+overlay|section|pinned|0|none||mute|PINNED|⌘1..3|none||||
+overlay|tab|pinned:latepin|0|none|●|unknown|Late pin|D|none||latepin||
+overlay|tab|pinned:pin2|0|none|●|unknown|Pin 2|D|none||pin2||
+overlay|tab|pinned:pin1|0|none|●|unknown|Pin 1|D|none||pin1||
+overlay|title|spacegroup:Manual|0|none||mute|Manual||none||||
+overlay|space|space:a|0|open||mute|A||none|||space:a|
+overlay|space|space:c|0|open||mute|C||none|||space:c|
+overlay|space|space:d|0|open||mute|D||none||latepin|space:d|
+overlay|section|section:d:LANES|1|none||mute|LANES||none||||
+overlay|tab|tab:plain1|1|none|●|unknown|Plain 1||none||plain1||
+overlay|tab|tab:pin1|1|none|●|unknown|Pin 1||none||pin1||
+overlay|tab|tab:pin2|1|none|●|unknown|Pin 2||none||pin2||
+overlay|tab|tab:plain2|1|none|●|unknown|Plain 2||none||plain2||
+overlay|tab|tab:latepin|1|none|●|unknown|Late pin||none||latepin||
+overlay|space|space:b|0|open||mute|B||none|||space:b|
+overlay|space|space:p|0|closed||mute|Parked||none||parkedtab|parkedspace:p|
+expanded|title|agents|0|none||mute|agents||none||||
+expanded|section|pinned|0|none||mute|PINNED|⌘1..3|none||||
+expanded|tab|pinned:latepin|0|none|●|unknown|Late pin|D|none||latepin||
+expanded|tab|pinned:pin2|0|none|●|unknown|Pin 2|D|none||pin2||
+expanded|tab|pinned:pin1|0|none|●|unknown|Pin 1|D|none||pin1||
+expanded|space|space:b|0|open||mute|B||none|||space:b|
+expanded|space|space:d|0|open||mute|D||none||latepin|space:d|
+expanded|section|section:d:LANES|1|none||mute|LANES||none||||
+expanded|tab|tab:plain1|1|none|●|unknown|Plain 1||none||plain1||
+expanded|tab|tab:pin1|1|none|●|unknown|Pin 1||none||pin1||
+expanded|tab|tab:pin2|1|none|●|unknown|Pin 2||none||pin2||
+expanded|tab|tab:plain2|1|none|●|unknown|Plain 2||none||plain2||
+expanded|tab|tab:latepin|1|none|●|unknown|Late pin||none||latepin||
+expanded|space|space:c|0|open||mute|C||none|||space:c|
+expanded|space|space:a|0|open||mute|A||none|||space:a|
+expanded|space|space:p|0|open||mute|Parked||none||parkedtab|parkedspace:p|
+expanded|section|section:p:LANES|1|none||mute|LANES||none||||
+expanded|tab|tab:parkedtab|1|none|●|unknown|Parked tab||none||parkedtab||
+expandedChrome|true|true
+refolded|title|agents|0|none||mute|agents||none||||
+refolded|section|pinned|0|none||mute|PINNED|⌘1..3|none||||
+refolded|tab|pinned:latepin|0|none|●|unknown|Late pin|D|none||latepin||
+refolded|tab|pinned:pin2|0|none|●|unknown|Pin 2|D|none||pin2||
+refolded|tab|pinned:pin1|0|none|●|unknown|Pin 1|D|none||pin1||
+refolded|space|space:b|0|open||mute|B||none|||space:b|
+refolded|space|space:d|0|open||mute|D||none||latepin|space:d|
+refolded|section|section:d:LANES|1|none||mute|LANES||none||||
+refolded|tab|tab:plain1|1|none|●|unknown|Plain 1||none||plain1||
+refolded|tab|tab:pin1|1|none|●|unknown|Pin 1||none||pin1||
+refolded|tab|tab:pin2|1|none|●|unknown|Pin 2||none||pin2||
+refolded|tab|tab:plain2|1|none|●|unknown|Plain 2||none||plain2||
+refolded|tab|tab:latepin|1|none|●|unknown|Late pin||none||latepin||
+refolded|space|space:c|0|open||mute|C||none|||space:c|
+refolded|space|space:a|0|open||mute|A||none|||space:a|
+refolded|space|space:p|0|closed||mute|Parked||none||parkedtab|parkedspace:p|
+refoldedChrome|true|true
