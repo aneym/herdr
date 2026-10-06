@@ -546,7 +546,7 @@ final class TestHook {
     /// Captures this app's own window, Metal layers included, through the window
     /// server. CGWindowListCreateImage is obsoleted in the macOS 15 SDK, so it is
     /// looked up at runtime; capturing one's own window needs no Screen Recording grant.
-    private func shot(_ out: String) {
+    func shot(_ out: String) {
         // Ask every surface for a fresh frame first: a pane that is not being presented
         // (locked screen, occluded window) may otherwise hand back its last frame.
         for v in controller?.registry.byTerminal.values ?? [:].values {

@@ -144,6 +144,7 @@ app.setActivationPolicy(agentRun ? .accessory : .regular)
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var controller: MainWindowController!
     var hook: TestHook?
+    var shots: ShotRequest?
     var model: HerdrModel!
     var theme: ThemeStore!
 
@@ -175,6 +176,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             hook?.start()
         }
         controller.updates?.start()
+        shots = ShotRequest(controller: controller)
+        shots?.start()
         log(String(format: "launched in %.0f ms (window %d)", Date().timeIntervalSince(t0) * 1000, controller.window.windowNumber))
     }
 
