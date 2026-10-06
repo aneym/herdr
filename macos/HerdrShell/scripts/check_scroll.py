@@ -18,7 +18,9 @@ Lab `shellspike-scroll`; pane 1 of "shell spike" holds 3000 numbered lines.
    HERDR_SHELL_BIN) over the forwarded lab socket. A trackpad swipe with momentum
    (scroll_gesture hook) runs; the hook's client-side frame log (top visible row
    per 1/120 s tick) goes next to --out. Asserts every event was precise and no
-   frame jumped more than 2 rows.
+   frame moved more rows than wheel reports landed since the previous visible
+   frame: a fast swipe coalesces reports into one frame, the old bug moved 3
+   rows per report.
 """
 import json
 import os
@@ -148,14 +150,19 @@ def space_gesture(spike, pane, out_log):
 
 def analyse(log):
     head = log.splitlines()[0]
+    m = re.search(r"events=(\d+)", head)
+    events = int(m.group(1)) if m else 0
+    # One sample per tick; tick k delivers gesture event k while k < events.
     rows = []
-    for l in log.splitlines()[1:]:
+    for tick, l in enumerate(log.splitlines()[1:]):
         ms, _, top = l.partition("\t")
         n = re.search(r"line (\d+)", top)
         if n:
-            rows.append((float(ms), int(n.group(1))))
-    changes = [(t, prev - cur) for (_, prev), (t, cur) in zip(rows, rows[1:]) if cur != prev]
-    return head, rows, changes
+            rows.append((tick, float(ms), int(n.group(1))))
+    # (ms, rows moved, wheel reports landed since the previous visible frame)
+    changes = [(t, prev - cur, max(0, min(k, events) - min(j, events)))
+               for (j, _, prev), (k, t, cur) in zip(rows, rows[1:]) if cur != prev]
+    return head, [(t, r) for _, t, r in rows], changes
 
 
 def main():
@@ -187,17 +194,18 @@ def main():
         say(f"frame log: {out_log}  ({head})")
         say(f"screenshot: {shot}")
         say(f"server rows scrolled by the gesture: {moved}")
-        jumps = [d for _, d in changes]
+        jumps = [d for _, d, _ in changes]
         say(f"top-row changes: {len(changes)}; rows per change: {sorted(set(jumps))}; "
             f"first {rows[0][1] if rows else '?'} -> last {rows[-1][1] if rows else '?'}")
         gaps = [b[0] - a[0] for a, b in zip(changes, changes[1:])]
+        over = [(round(t), d, n) for t, d, n in changes if d > n]
         if gaps:
             say(f"ms between visible changes: median {sorted(gaps)[len(gaps) // 2]:.1f}, max {max(gaps):.1f}")
         m = re.search(r"events=(\d+) precise=(\d+)", head)
         check("every gesture event reached the surface as precise", bool(m) and m.group(1) == m.group(2), head)
         check("the pane scrolled", moved > 0, f"{moved}")
-        check("no visible frame jumped more than 2 rows", bool(jumps) and max(jumps) <= 2,
-              f"max {max(jumps) if jumps else None}")
+        check("no visible frame moved more rows than wheel reports landed in it", bool(jumps) and not over,
+              f"max {max(jumps) if jumps else None} rows; over (ms, rows, reports): {over[:5]}")
     say(f"lab down: {S.lab('down').strip()}")
     say()
     say(f"RESULT: {'PASS' if not failures else 'FAIL ' + ', '.join(failures)}")
