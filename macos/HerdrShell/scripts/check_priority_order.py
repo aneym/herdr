@@ -27,6 +27,7 @@ with tempfile.TemporaryDirectory(prefix="herdr-priority-") as scratch:
     driver = pathlib.Path(scratch) / "priority_order_dump"
     subprocess.run(["swiftc", str(ROOT / "Sources/HerdrShell/SpacesTree.swift"),
                     str(ROOT / "Sources/HerdrShell/Snapshot.swift"),
+                    str(ROOT / "Sources/HerdrShell/DeskModel.swift"),
                     str(ROOT / "scripts/priority_order_dump.swift"), "-o", str(driver)],
                    check=True, timeout=120)
     try:
