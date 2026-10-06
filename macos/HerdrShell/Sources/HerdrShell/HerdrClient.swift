@@ -132,6 +132,10 @@ final class HerdrClient {
     private var stopped = false
     private var pendingEventAt: Date?
     private var requests = 0
+    /// Lifecycle events this server refused as unknown (older than the Shell, e.g. no
+    /// `desk.changed`). Cleared when a stream closes for any other reason, since the next
+    /// server (a live handoff, an update) may know them.
+    private var unknownEvents: Set<String> = []
 
     /// Set for another machine's server: snapshot ids come back with its name on them.
     let machine: String?
@@ -162,7 +166,8 @@ final class HerdrClient {
 
     private func connect() {
         guard !stopped else { return }
-        let stream = EventStream(path: socketPath, subscriptions: Self.lifecycleEvents.map { ["type": $0] })
+        let events = Self.lifecycleEvents.filter { !unknownEvents.contains($0) }
+        let stream = EventStream(path: socketPath, subscriptions: events.map { ["type": $0] })
         general = stream
         stream.onAck = { [weak self, weak stream] in
             self?.q.async {
@@ -182,11 +187,25 @@ final class HerdrClient {
                 self.general = nil
                 self.statusStream?.stop(); self.statusStream = nil
                 self.statusPanes = []
+                if let unknown = Self.unknownEvent(reason), Self.lifecycleEvents.contains(unknown),
+                   !self.unknownEvents.contains(unknown) {
+                    self.unknownEvents.insert(unknown)
+                    self.connect()
+                    return
+                }
+                self.unknownEvents = []
                 self.report("herdr events: \(reason)")
                 self.q.asyncAfter(deadline: .now() + self.retry) { self.connect() }
             }
         }
         stream.start()
+    }
+
+    /// The event name in an older server's "unknown variant `desk.changed`" subscribe error.
+    static func unknownEvent(_ reason: String) -> String? {
+        guard let start = reason.range(of: "unknown variant `"),
+              let end = reason[start.upperBound...].firstIndex(of: "`") else { return nil }
+        return String(reason[start.upperBound..<end])
     }
 
     private func syncStatusStream(panes: Set<String>) {
