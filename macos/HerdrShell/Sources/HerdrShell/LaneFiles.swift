@@ -53,7 +53,8 @@ struct LaneSnapshot: Equatable {
     var goalArea: [String: String] = [:]
     var goal: [String: String] = [:]
     /// `space_groups` from areas.json: sidebar groups of whole spaces, separate from Areas mode.
-    var spaceGroups: [Overlay.SpaceGroup] = []
+    /// nil when areas.json does not exist, so the overlay's own groups stand (Rust apply_space_groups).
+    var spaceGroups: [Overlay.SpaceGroup]?
     var parked: [String: ParkRecord] = [:]
     var hasFiles = false
 
@@ -150,6 +151,9 @@ final class LaneCatalog: ObservableObject {
                 guard let name = Self.str(g["name"]) else { return nil }
                 return Overlay.SpaceGroup(name: name, spaces: (g["spaces"] as? [Any] ?? []).compactMap { Self.str($0) })
             }
+        } else if FileManager.default.fileExists(atPath: ShellPaths.areas) {
+            // Unreadable or half-written: keep the last parsed groups, as the Rust poller does.
+            snap.spaceGroups = snapshot.spaceGroups
         }
         stamp[ShellPaths.lanes] = (try? FileManager.default.attributesOfItem(atPath: ShellPaths.lanes)[.modificationDate] as? Date) ?? Date.distantPast
         stamp[ShellPaths.areas] = (try? FileManager.default.attributesOfItem(atPath: ShellPaths.areas)[.modificationDate] as? Date) ?? Date.distantPast

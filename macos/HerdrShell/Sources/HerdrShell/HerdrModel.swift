@@ -339,9 +339,10 @@ extension HerdrModel {
                 },
                 focused: tab.tab_id == state.selectedTab, status: tab.agent_status ?? "unknown", pinIndex: tab.pin_index)
         }, focusedTab: state.selectedTab)
-        // Space groups live in areas.json beside the overlay, as the Rust server merges them.
+        // areas.json owns the space groups whenever it exists (an empty list clears them), as the Rust
+        // server merges them; without it the overlay's own groups stand.
         var groupedOverlay = spacesOverlay
-        if groupedOverlay.spaceGroups.isEmpty { groupedOverlay.spaceGroups = catalog.snapshot.spaceGroups }
+        if let groups = catalog.snapshot.spaceGroups { groupedOverlay.spaceGroups = groups }
         var rows = SpacesTree.build(input, overlay: groupedOverlay, chrome: state.spacesChrome, now: Date().timeIntervalSince1970)
         let remotePins = machines.flatMap { machine -> [SpacesRow] in
             guard let snapshot = machine.snapshot else { return [] }

@@ -19,6 +19,9 @@ struct FileStamp {
 pub(crate) struct FactoryOverlayPoller {
     last_seen: Option<FileStamp>,
     last_areas: Option<FileStamp>,
+    /// Space groups from the last areas.json that parsed. A malformed or
+    /// half-written areas file keeps these instead of dropping the groups.
+    last_space_groups: Option<Vec<crate::factory_overlay::SpaceGroup>>,
     pub(crate) revision: u64,
     pub(crate) current: Option<Arc<FactoryOverlay>>,
     logged_errors: HashSet<String>,
@@ -73,16 +76,40 @@ impl FactoryOverlayPoller {
         self.last_areas = areas_stamp;
         match crate::factory_overlay::parse(&bytes) {
             Ok(mut overlay) => {
-                if let Ok(bytes) = fs::read(&areas_path) {
-                    if let Err(error) = overlay.apply_areas_file(&bytes) {
-                        self.log_error(format!("{}: {error}", areas_path.display()));
-                    }
-                }
+                self.apply_space_groups(&mut overlay, &areas_path);
                 self.publish(Some(Arc::new(overlay)), stamp_changed)
             }
             Err(error) => {
                 self.log_error(format!("{}: {error}", path.display()));
                 None
+            }
+        }
+    }
+
+    /// areas.json owns the space groups whenever it exists: a parsed file
+    /// replaces the overlay's own groups (an empty or missing `space_groups`
+    /// clears them), an unreadable or malformed one keeps the last parsed
+    /// groups. Without areas.json the overlay's own `space_groups` stand.
+    /// Herdr Shell's LaneCatalog applies the same rule.
+    fn apply_space_groups(&mut self, overlay: &mut FactoryOverlay, areas_path: &Path) {
+        match fs::read(areas_path) {
+            Ok(bytes) => match overlay.apply_areas_file(&bytes) {
+                Ok(()) => self.last_space_groups = Some(overlay.space_groups.clone()),
+                Err(error) => {
+                    self.log_error(format!("{}: {error}", areas_path.display()));
+                    if let Some(groups) = &self.last_space_groups {
+                        overlay.space_groups = groups.clone();
+                    }
+                }
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                self.last_space_groups = None;
+            }
+            Err(error) => {
+                self.log_error(format!("{}: {error}", areas_path.display()));
+                if let Some(groups) = &self.last_space_groups {
+                    overlay.space_groups = groups.clone();
+                }
             }
         }
     }
@@ -167,5 +194,46 @@ mod tests {
         assert!(poller.poll(Some(&path)).is_none());
         assert_eq!(poller.logged_errors.len(), 1);
         assert_eq!(poller.revision, 0);
+    }
+    #[test]
+    fn areas_file_owns_space_groups_and_a_bad_write_keeps_the_last_ones() {
+        let dir = std::env::temp_dir().join(format!(
+            "herdr-factory-groups-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&dir).unwrap();
+        let path = dir.join("overlay.json");
+        let areas = dir.join("areas.json");
+        let names = |poller: &FactoryOverlayPoller| -> Vec<String> {
+            poller.current.as_deref().map_or_else(Vec::new, |overlay| {
+                overlay.space_groups.iter().map(|group| group.name.clone()).collect()
+            })
+        };
+        let mut poller = FactoryOverlayPoller::default();
+        // No areas.json: the overlay's own groups stand.
+        fs::write(&path, br#"{"version":1,"space_groups":[{"name":"Own","spaces":["a"]}]}"#).unwrap();
+        poller.poll(Some(&path));
+        assert_eq!(names(&poller), ["Own"]);
+
+        // areas.json wins over the overlay's own groups.
+        fs::write(&areas, br#"{"space_groups":[{"name":"Rails","spaces":["a"]}]}"#).unwrap();
+        poller.poll(Some(&path));
+        assert_eq!(names(&poller), ["Rails"]);
+
+        // A half-written areas.json keeps the last parsed groups.
+        fs::write(&areas, br#"{"space_groups":[{"na"#).unwrap();
+        poller.poll(Some(&path));
+        assert_eq!(names(&poller), ["Rails"]);
+
+        // A parsed areas.json without groups clears them on purpose.
+        fs::write(&areas, br#"{"areas":[]}"#).unwrap();
+        poller.poll(Some(&path));
+        assert!(names(&poller).is_empty());
+
+        fs::remove_dir_all(&dir).unwrap();
     }
 }
