@@ -58,6 +58,24 @@ def remote_read(machine, pane):
     return r.stdout
 
 
+def remote_snapshot(machine):
+    sock = os.path.expanduser(f"~/.config/herdr-machines/{machine}")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("HERDR_")}
+    env.update(HERDR_SOCKET_PATH=sock + "/herdr.sock", HERDR_CLIENT_SOCKET_PATH=sock + "/herdr-client.sock")
+    r = subprocess.run([os.path.expanduser("~/.local/bin/herdr"), "api", "snapshot"], env=env,
+                       capture_output=True, text=True)
+    return json.loads(r.stdout)["result"]["snapshot"]
+
+
+def expected_sections(snap):
+    """Workspace labels the machine block should draw: one over agent tabs, or over a shells row
+    that another workspace's shells row sits beside. A lone shells row gets no label."""
+    agent_tabs = {a["tab_id"] for a in snap["agents"]}
+    filled = [w for w in snap["workspaces"] if any(t["workspace_id"] == w["workspace_id"] for t in snap["tabs"])]
+    return sorted(w["workspace_id"] for w in filled if len(filled) > 1 or any(
+        t["workspace_id"] == w["workspace_id"] and t["tab_id"] in agent_tabs for t in snap["tabs"]))
+
+
 def local_part(rows):
     """Rows the local session draws: everything outside the machines block. Footer rows read the
     live host overlay, which moves between runs, so only their ids count."""
@@ -108,9 +126,20 @@ def main():
     check("local rows unchanged with machines", local_part(rows) == local_part(base_rows),
           f"{len(local_part(rows))} vs {len(base_rows)}; first diff {diff[:1]}")
     check("machines block after local spaces", "title|machines|" in "\n".join(rows))
+    local_protocol = json.loads(S.lab("herdr", "api", "snapshot"))["result"]["snapshot"]["protocol"]
     for n in names:
         row = next((r for r in rows if r.startswith(f"machine|machine:{n}|")), "")
-        check(f"{n} header shows its herdr", "|herdr " in row, row)
+        snap = remote_snapshot(n)
+        check(f"{n} header names no version", "|herdr " not in row, row)
+        mismatch = snap.get("protocol") != local_protocol
+        check(f"{n} says needs update only on a protocol mismatch",
+              ("|needs update|" in row) == mismatch, f"remote {snap.get('protocol')} local {local_protocol}: {row}")
+        sections = sorted(r.split("|")[1][len(f"msection:{n}/"):] for r in rows if r.startswith(f"section|msection:{n}/"))
+        check(f"{n} labels only workspaces with lanes", sections == expected_sections(snap),
+              f"drawn {sections} expected {expected_sections(snap)}")
+    hosts = [r.split("|")[6] for r in rows if r.startswith("footerHost|")]
+    clash = [h for h in hosts if any(h.lower() == n.lower() and h != n for n in names)]
+    check("host footer uses the machine names", not clash, f"footer {hosts}")
     ghost = next((r for r in rows if r.startswith("machine|machine:ghost|")), "")
     check("unreachable machine says so", "|connecting|" in ghost or "|offline" in ghost, ghost)
     agent_tabs = [r for r in rows if r.startswith(f"tab|tab:{machine}/")]

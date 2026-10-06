@@ -34,8 +34,10 @@ struct Snapshot: Decodable {
     let panes: [Pane]
     let agents: [Agent]
     let layouts: [Layout]
-    /// The server's herdr version; shown for other machines.
     let version: String?
+    /// The server's wire protocol. Another machine whose protocol differs from the local
+    /// server's cannot attach its terminals here, so its header says "needs update".
+    let `protocol`: Int?
 }
 
 /// A sidebar row. Kind follows the mock: ORCHESTRATOR / LANES / WORKFLOWS, with
@@ -360,6 +362,7 @@ extension HerdrModel {
         guard !machines.isEmpty else { return rows }
         // Machines go after the local spaces and before the footer, so no local row moves.
         let footer = rows.firstIndex { $0.kind == .footerUsage || $0.kind == .footerHost } ?? rows.endIndex
-        return Array(rows[..<footer]) + MachineRows.build(machines, chrome: state.spacesChrome) + Array(rows[footer...])
+        let block = MachineRows.build(machines, chrome: state.spacesChrome, localProtocol: snapshot?.protocol)
+        return Array(rows[..<footer]) + block + MachineRows.renameHosts(Array(rows[footer...]), machines: machines.map(\.name))
     }
 }

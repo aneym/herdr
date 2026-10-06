@@ -113,9 +113,11 @@ struct MachineState: Identifiable, Equatable {
 ///
 /// A machine header (open by default; its fold is remembered), then each workspace
 /// with its agent tabs. Tabs with no agent fold into one quiet "shells N" row, so a
-/// machine full of job shells reads as one line.
+/// machine full of job shells reads as one line. The header names no version: it says
+/// "needs update" only when the machine's protocol differs from the local server's,
+/// which is why its tabs would not open.
 enum MachineRows {
-    static func build(_ machines: [MachineState], chrome: SpacesChrome) -> [SpacesRow] {
+    static func build(_ machines: [MachineState], chrome: SpacesChrome, localProtocol: Int? = nil) -> [SpacesRow] {
         var out = [SpacesRow(id: "machines", kind: .title, title: "machines")]
         let priority = ["unknown": 0, "idle": 1, "done": 2, "working": 3, "blocked": 4]
         func glyph(_ status: String) -> String { status == "blocked" ? "■" : status == "idle" || status == "unknown" ? "○" : "●" }
@@ -135,7 +137,8 @@ enum MachineRows {
             } else if m.problem != nil {
                 trailing = "offline" + (m.downSince.map { " since " + Self.clock.string(from: $0) } ?? "")
             } else if open {
-                trailing = s?.version.map { "herdr " + $0 } ?? ""
+                let mismatch = localProtocol.map { $0 != s?.protocol } ?? false
+                trailing = mismatch ? "needs update" : ""
             } else {
                 trailing = agentTabs.isEmpty ? "no agents" : "\(agentTabs.count) agent" + (agentTabs.count == 1 ? "" : "s")
             }
@@ -143,11 +146,15 @@ enum MachineRows {
                                  glyph: open || agentTabs.isEmpty ? "" : glyph(top), tone: top, title: m.name,
                                  trailing: trailing, toggleKey: "machine:" + m.name, dim: m.problem != nil))
             guard open, let s else { continue }
-            for ws in s.workspaces.sorted(by: { $0.number < $1.number }) {
+            let filled = s.workspaces.filter { ws in s.tabs.contains { $0.workspace_id == ws.workspace_id } }
+            for ws in filled.sorted(by: { $0.number < $1.number }) {
                 let tabs = s.tabs.filter { $0.workspace_id == ws.workspace_id }.sorted { $0.number < $1.number }
-                guard !tabs.isEmpty else { continue }
-                out.append(SpacesRow(id: "msection:" + ws.workspace_id, kind: .section, depth: 1,
-                                     title: (ws.label ?? ws.workspace_id).uppercased(), dim: m.problem != nil))
+                // A workspace label heads agent tabs. Over a lone "shells N" it says nothing,
+                // unless another workspace's shells row sits beside it and needs telling apart.
+                if filled.count > 1 || tabs.contains(where: { agentsByTab[$0.tab_id] != nil }) {
+                    out.append(SpacesRow(id: "msection:" + ws.workspace_id, kind: .section, depth: 1,
+                                         title: (ws.label ?? ws.workspace_id).uppercased(), dim: m.problem != nil))
+                }
                 for tab in tabs where agentsByTab[tab.tab_id] != nil {
                     let st = status(tab)
                     let quiet = st == "idle" || st == "unknown" || st == "done"
@@ -170,6 +177,18 @@ enum MachineRows {
             }
         }
         return out
+    }
+
+    /// One name per machine: a host footer row that names a machine in another case
+    /// ("PC" for "pc") takes the machine's name, so the two blocks agree.
+    static func renameHosts(_ rows: [SpacesRow], machines: [String]) -> [SpacesRow] {
+        rows.map { row in
+            guard row.kind == .footerHost,
+                  let name = machines.first(where: { $0.caseInsensitiveCompare(row.title) == .orderedSame }) else { return row }
+            var r = row
+            r.title = name
+            return r
+        }
     }
 
     private static let clock: DateFormatter = {
