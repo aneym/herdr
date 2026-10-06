@@ -78,6 +78,44 @@ fn claude_live_permission_overrides_working_but_not_answered_scrollback() {
     });
 }
 
+/// Review M4 (2026-10-06): an equal-version cached copy of the distributed
+/// manifest replaces the bundled one, so the distributed copy must keep the
+/// bundled blocker priorities. A permission dialog under a spinner title is
+/// blocked whichever copy is loaded.
+#[test]
+fn cached_distributed_claude_manifest_keeps_live_permission_blocked() {
+    with_manifest_dirs("claude-distributed-parity", || {
+        let path = crate::detect::manifest_update::remote_manifest_path(Agent::Claude);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            include_str!("../../../distribution/agent-detection/claude.toml"),
+        )
+        .unwrap();
+        reload_manifests();
+        let rule = "────────────────────────────────────────";
+        let screen = format!("{rule}\nDo you want to proceed?\n❯ 1. Yes\n  2. No\nEsc to cancel");
+        let result = explain_with_input(
+            Agent::Claude,
+            DetectionInput {
+                screen: &screen,
+                osc_title: "⠋ task",
+                osc_progress: "",
+            },
+        );
+        assert!(
+            matches!(result.source, Some(ManifestSource::Remote { .. })),
+            "{:?}",
+            result.source
+        );
+        assert_eq!(result.state, AgentState::Blocked);
+        assert_eq!(
+            result.matched_rule.as_ref().map(|rule| rule.id.as_str()),
+            Some("generic_permission_prompt")
+        );
+    });
+}
+
 // Codex is only a registry key here; behavior tests supply synthetic rules.
 fn remote_manifest(version: &str, state: &str, contains: &str) -> String {
     format!(

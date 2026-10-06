@@ -2563,6 +2563,43 @@ fn claude_screen_state_ignores_leftover_shells_and_keeps_workflow_waits_working(
             ),
             "working",
         ),
+        // Live capture, w5X:p2 2026-10-06: six teammates in the agents panel
+        // push the wait line past the old 12-line window.
+        (
+            "workflow-wait-many-teammates",
+            "",
+            format!(
+                "✻ Waiting for 2 background agents to finish\n{rule} ultracode ─\n❯ build the digest\n{rule}\n  ⏵⏵ bypass permissions on · 17 shells · ← for agents\n  ● main\n  ◯ review-triage-lead  Review triage  4h 8m 14s\n  ◯ fix-of-red-p18e  Repair tests  14m 28s\n  ◯ fix-ig2-8  scrub allow-list  1m 14s\n  ◯ studio-sweep-39  test sweep  5m 57s\n  ◯ studio-disk-floor  disk floor  5m 47s\n  ↓ 1 more\n"
+            ),
+            "working",
+        ),
+        // Review M1: a wait line left in the transcript above a finished turn.
+        (
+            "stale-wait-text",
+            "✳ Lane brief",
+            format!(
+                "* Waiting for 1 background agent to finish\n  The agent reported back.\n✻ Brewed for 4s\n{rule}\n❯\n{rule}\n  ⏵⏵ bypass permissions on · ctx 33%\n"
+            ),
+            "idle",
+        ),
+        // Review M2: cancellation advice in the transcript must not veto a live wait.
+        (
+            "wait-under-esc-advice",
+            "",
+            format!(
+                "  Press Esc to cancel the job if needed.\n✻ Waiting for 1 background agent to finish\n{rule}\n❯\n{rule}\n  ⏵⏵ bypass permissions on · ctx 33%\n"
+            ),
+            "working",
+        ),
+        // Review M3: a connection question that replaced the prompt box blocks.
+        (
+            "wait-then-connection-permission",
+            "",
+            format!(
+                "✻ Waiting for 1 dynamic workflow to finish\n{rule}\n Do you want to allow this connection?\n ❯ Yes\n   No\n"
+            ),
+            "blocked",
+        ),
     ];
     // `claude <case>` sets the case's OSC title (none when empty), draws its
     // screen, then holds the pane until the test stops it.
