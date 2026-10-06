@@ -24,6 +24,7 @@ fn attention_state(statuses: &[AgentStatus]) -> ClientShellState {
             zoomed: false,
             focused: index == 0,
             agent_status: status,
+            work_status: None,
         });
         projected.panes.push(ClientShellPane {
             pane_id: pane_id.clone(),

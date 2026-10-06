@@ -86,7 +86,8 @@ final class Transcript: ObservableObject {
     private func refreshSession() {
         guard let pane, let a = try? ChatCLI.agent(pane) else { return }
         let next = a["agent"] as? String == "claude" ? (a["agent_session"] as? [String: Any])?["value"] as? String ?? "" : ""
-        let status = next.trimmingCharacters(in: .whitespaces).isEmpty ? "asleep" : (a["agent_status"] as? String ?? "idle")
+        // work_status is the sidebar's fact for this chat; older servers only send agent_status.
+        let status = next.trimmingCharacters(in: .whitespaces).isEmpty ? "asleep" : (a["work_status"] as? String ?? a["agent_status"] as? String ?? "idle")
         let title = (a["terminal_title_stripped"] as? String ?? "").trimmingCharacters(in: .whitespaces)
         DispatchQueue.main.async {
             if self.state != status && status == "working" { self.workingSince = Date() }

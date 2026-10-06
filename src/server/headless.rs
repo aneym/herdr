@@ -3249,6 +3249,7 @@ impl HeadlessServer {
         if !self.app.factory_ui.enabled {
             // Drop any stale deadline so a disabled overlay never wakes the loop.
             self.next_factory_overlay_poll = None;
+            self.app.set_live_factory_tabs(Default::default());
         } else if self
             .next_factory_overlay_poll
             .is_none_or(|deadline| now >= deadline)
@@ -3267,6 +3268,14 @@ impl HeadlessServer {
                     Err(err) => warn!(err = %err, "failed to encode factory overlay"),
                 }
             }
+            // Every poll, not only on change: an overlay that stops being
+            // rewritten goes stale and must stop holding chats working.
+            let live = crate::app::live_factory_tabs(
+                self.factory_overlay_poller.current.as_deref(),
+                self.factory_overlay_poller.written(),
+                std::time::SystemTime::now(),
+            );
+            self.app.set_live_factory_tabs(live);
         }
 
         // PORT-0.9: sidebar spinner animation is client-shell chrome in 0.9.

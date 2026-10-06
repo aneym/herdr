@@ -127,6 +127,12 @@ impl FactoryOverlayPoller {
         Some(overlay)
     }
 
+    /// When the current overlay file was last written, for freshness checks.
+    pub(crate) fn written(&self) -> Option<SystemTime> {
+        self.current.as_ref()?;
+        self.last_seen.as_ref()?.modified
+    }
+
     fn log_error(&mut self, error: String) {
         if self.logged_errors.insert(error.clone()) {
             warn!(%error, "failed to load factory overlay");

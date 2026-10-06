@@ -898,6 +898,20 @@ impl FrameData {
     }
 }
 
+fn deserialize_optional_client_shell_agent_status<'de, D>(
+    deserializer: D,
+) -> Result<Option<crate::api::schema::AgentStatus>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    struct Status(
+        #[serde(deserialize_with = "deserialize_client_shell_agent_status")]
+        crate::api::schema::AgentStatus,
+    );
+    Ok(Option::<Status>::deserialize(deserializer)?.map(|Status(status)| status))
+}
+
 fn deserialize_client_shell_agent_status<'de, D>(
     deserializer: D,
 ) -> Result<crate::api::schema::AgentStatus, D::Error>
@@ -1088,6 +1102,14 @@ pub struct ClientShellTab {
     pub focused: bool,
     #[serde(deserialize_with = "deserialize_client_shell_agent_status")]
     pub agent_status: crate::api::schema::AgentStatus,
+    /// Whether this chat is working, by the server's one rule
+    /// (`app/work_status.rs`). Absent from endpoints that predate it; the
+    /// client then falls back to its own rollup.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_client_shell_agent_status"
+    )]
+    pub work_status: Option<crate::api::schema::AgentStatus>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2926,6 +2948,7 @@ mod tests {
                 zoomed: false,
                 focused: true,
                 agent_status: crate::api::schema::AgentStatus::Idle,
+                work_status: None,
             }],
             panes: vec![ClientShellPane {
                 pane_id: "w1:p1".into(),

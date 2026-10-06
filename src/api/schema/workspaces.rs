@@ -112,6 +112,10 @@ pub struct WorkspaceInfo {
     #[serde(default)]
     pub orchestrator_mode: bool,
     pub agent_status: AgentStatus,
+    /// Whether this chat is working, by the one rule every surface draws
+    /// (`app/work_status.rs`): the highest chat status among its tabs. Absent on servers that predate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_status: Option<AgentStatus>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub profiles: Vec<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]

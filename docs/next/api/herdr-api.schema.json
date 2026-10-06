@@ -1074,6 +1074,17 @@
             "tab_id": {
               "type": "string"
             },
+            "work_status": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/event/$defs/AgentStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Whether this chat is working, by the one rule every surface draws\n(`app/work_status.rs`): its agent panes' statuses, working while it owns a live factory run. Absent on servers that predate it."
+            },
             "workspace_id": {
               "type": "string"
             }
@@ -1137,6 +1148,17 @@
                 "pattern": "^[A-Za-z0-9_-]{1,32}$"
               },
               "type": "object"
+            },
+            "work_status": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/event/$defs/AgentStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Whether this chat is working, by the one rule every surface draws\n(`app/work_status.rs`): the highest chat status among its tabs. Absent on servers that predate it."
             },
             "workspace_id": {
               "type": "string"
@@ -7260,6 +7282,17 @@
               },
               "type": "object"
             },
+            "work_status": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/AgentStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Whether this chat is working, by the one rule every surface draws\n(`app/work_status.rs`): this pane's status, working while its tab owns a live factory run. Absent on servers that predate it."
+            },
             "workspace_id": {
               "type": "string"
             }
@@ -11568,6 +11601,17 @@
             "tab_id": {
               "type": "string"
             },
+            "work_status": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/AgentStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Whether this chat is working, by the one rule every surface draws\n(`app/work_status.rs`): its agent panes' statuses, working while it owns a live factory run. Absent on servers that predate it."
+            },
             "workspace_id": {
               "type": "string"
             }
@@ -11631,6 +11675,17 @@
                 "pattern": "^[A-Za-z0-9_-]{1,32}$"
               },
               "type": "object"
+            },
+            "work_status": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/AgentStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Whether this chat is working, by the one rule every surface draws\n(`app/work_status.rs`): the highest chat status among its tabs. Absent on servers that predate it."
             },
             "workspace_id": {
               "type": "string"

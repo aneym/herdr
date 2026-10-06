@@ -960,6 +960,7 @@ fn worktree_request_and_response_round_trip() {
                 active_tab_id: "w_1:1".into(),
                 orchestrator_mode: false,
                 agent_status: AgentStatus::Unknown,
+                work_status: None,
                 profiles: Vec::new(),
                 tokens: HashMap::new(),
                 worktree: Some(WorkspaceWorktreeInfo {
@@ -978,6 +979,7 @@ fn worktree_request_and_response_round_trip() {
                 focused: true,
                 pane_count: 1,
                 agent_status: AgentStatus::Unknown,
+                work_status: None,
                 pin_index: None,
             },
             root_pane: PaneInfo {
@@ -1051,6 +1053,7 @@ fn worktree_lifecycle_events_round_trip() {
         active_tab_id: "w_2:1".into(),
         orchestrator_mode: false,
         agent_status: AgentStatus::Unknown,
+        work_status: None,
         profiles: Vec::new(),
         tokens: HashMap::new(),
         worktree: Some(WorkspaceWorktreeInfo {
@@ -1411,6 +1414,7 @@ fn create_response_round_trips_with_root_pane() {
                 focused: false,
                 pane_count: 1,
                 agent_status: AgentStatus::Unknown,
+                work_status: None,
                 pin_index: None,
             },
             root_pane: PaneInfo {

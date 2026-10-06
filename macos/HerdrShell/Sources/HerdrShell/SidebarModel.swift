@@ -101,7 +101,7 @@ enum SidebarModel {
                 return nil
             }
             var f = Facts()
-            let status = agents.first?.agent_status ?? t.agent_status ?? "unknown"
+            let status = t.work_status ?? agents.first?.agent_status ?? t.agent_status ?? "unknown"
             let state = token("state")?.lowercased() ?? ""
             f.failed = ["failed", "error", "quarantined", "stalled"].contains(state)
             let ask = token("attention")?.lowercased() ?? ""
@@ -250,7 +250,7 @@ enum SidebarModel {
         let tabs = s.tabs.filter { $0.workspace_id == w.workspace_id }
         let wants = tabs.filter { facts[$0.tab_id]?.attention == true }.count
         let working = tabs.contains { t in
-            (s.agents.first { $0.tab_id == t.tab_id }?.agent_status ?? t.agent_status) == "working"
+            (t.work_status ?? s.agents.first { $0.tab_id == t.tab_id }?.agent_status ?? t.agent_status) == "working"
         }
         var l = SidebarLine(id: "space:\(w.workspace_id)", kind: .space, chevron: current,
                             glyph: flag(w.tokens?["pinned"]) ? "◆" : "◇",
@@ -609,8 +609,9 @@ extension SidebarModel {
             (orchestrators + lanes + workflows).forEach(walk)
         }
         func status(_ id: String) -> String {
+            let tab = s.tabs.first { $0.tab_id == id }
             let agent = s.agents.first { $0.tab_id == id }?.agent_status
-            return (agent ?? s.tabs.first { $0.tab_id == id }?.agent_status ?? "unknown").lowercased()
+            return (tab?.work_status ?? agent ?? tab?.agent_status ?? "unknown").lowercased()
         }
         func asks(_ id: String) -> Bool {
             for a in s.agents where a.tab_id == id {

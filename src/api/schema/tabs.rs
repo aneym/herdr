@@ -55,6 +55,10 @@ pub struct TabInfo {
     pub focused: bool,
     pub pane_count: usize,
     pub agent_status: AgentStatus,
+    /// Whether this chat is working, by the one rule every surface draws
+    /// (`app/work_status.rs`): its agent panes' statuses, working while it owns a live factory run. Absent on servers that predate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_status: Option<AgentStatus>,
     /// Position in the pinned-chats order, when pinned (Cmd+1..9 slot).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pin_index: Option<usize>,

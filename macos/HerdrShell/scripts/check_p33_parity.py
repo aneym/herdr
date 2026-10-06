@@ -105,6 +105,30 @@ if mark("tab|tab:lane|") != ("●", "working") or mark("tab|pinned:lane|") != ma
     print("\n".join(rows))
 else:
     print("PASS a pinned lane with live children reads working, as its space row does")
+# herdr's work fact wins over the overlay's busy copy (2026-10-06, w5P:t7 "submissions"): the chat
+# sat idle at its prompt (work "done") while the overlay still listed a finished teammate as a live
+# agent: run and the tab busy. Space row, pinned row and run row must all read it finished; with
+# work "working" the same overlay reads working. As Rust
+# pinned_and_lane_rows_follow_the_endpoint_chat_status_over_a_stale_busy_overlay.
+for work, want_tone, want_run in [("done", "done", "✓"), ("working", "working", "◐")]:
+    stale = json.loads((FIXTURES / "live-child-working.json").read_text())
+    stale["input"]["tabs"][0].update(pinIndex=0, status="done", work=work,
+                                     agents=[{"status": work}])
+    stale["overlay"]["tabs"]["lane"].update(busy=True, runs=[
+        {"id": "agent:agent-atrial-chase-lists-c98d7b9ae81a05d0", "name": "trial-chase-lists", "phase": "opus-seat"}])
+    stale["chrome"]["expandedTabs"] = ["lane"]
+    fixture = BUILD / f"work-{work}.json"
+    fixture.write_text(json.dumps(stale))
+    rows = base_rows(fixture)
+    def cell(prefix, field):
+        row = next((r.split("|") for r in rows if r.startswith(prefix)), None)
+        return row and row[field]
+    if (cell("tab|tab:lane|", 5) != want_tone or cell("tab|pinned:lane|", 5) != want_tone
+            or cell("tab|pinned:lane|", 4) != cell("tab|tab:lane|", 4) or cell("run|run:agent:", 4) != want_run):
+        failures.append(f"work fact {work}")
+        print("\n".join(rows))
+    else:
+        print(f"PASS a {work} chat reads {want_tone} in its space row, pinned row and run row over a busy overlay")
 if failures:
     raise SystemExit("FAIL: " + ", ".join(failures))
 print("PASS P33 parity")

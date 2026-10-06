@@ -30,6 +30,8 @@ mod terminal_titles;
 mod theme_sync;
 mod usage;
 mod window_title;
+pub(crate) mod work_status;
+pub(crate) use work_status::live_factory_tabs;
 mod worktrees;
 
 use std::collections::HashMap;
@@ -110,6 +112,8 @@ pub struct App {
     pub(crate) polite_send_quiet: Duration,
     pub(crate) polite_send_settle: Duration,
     pub(crate) factory_ui: crate::config::FactoryUiConfig,
+    /// Tabs whose factory run is live by a fresh overlay; see `work_status`.
+    pub(crate) live_factory_tabs: std::collections::HashSet<String>,
     pub(crate) pixel_mouse_available: bool,
     pub(crate) terminal_runtimes: crate::terminal::TerminalRuntimeRegistry,
     pub event_tx: mpsc::Sender<AppEvent>,
@@ -655,6 +659,7 @@ impl App {
             polite_send_quiet: Duration::from_secs(config.server.polite_send_quiet_secs),
             polite_send_settle: Duration::from_millis(config.server.polite_send_submit_settle_ms),
             factory_ui: config.ui.factory.clone(),
+            live_factory_tabs: Default::default(),
             usage_sampler: usage::UsageSampler::default(),
             config_diagnostic_deadline: None,
             toast_deadline: None,

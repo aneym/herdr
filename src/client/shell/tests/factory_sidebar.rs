@@ -24,6 +24,7 @@ fn fixture() -> (ClientShellSnapshot, FactoryOverlay) {
             zoomed: false,
             focused: false,
             agent_status: AgentStatus::Working,
+            work_status: None,
         });
     }
     snapshot.agents.push(ClientShellAgent {
@@ -184,6 +185,7 @@ fn focused_agent_half_pad_does_not_overlap_next_factory_space() {
         tab_id: "other-tab".into(), workspace_id: "ws_2".into(), number: 1,
         label: "other".into(), custom_label: true, zoomed: false, focused: false,
         agent_status: AgentStatus::Idle,
+        work_status: None,
     });
     overlay.tabs.insert("other-tab".into(), TabTag { kind: TabKind::Lane, ..TabTag::default() });
     let (rows, hits, buffer) = rendered_factory_rows(&snapshot, &overlay);
@@ -300,6 +302,7 @@ fn lab_fixture() -> (ClientShellSnapshot, FactoryOverlay) {
         tab_id: "poker".into(), workspace_id: "ws_2".into(), number: 1,
         label: "poker coach".into(), custom_label: true, zoomed: false,
         focused: false, agent_status: AgentStatus::Working,
+        work_status: None,
     });
     overlay.tabs.insert("poker".into(), TabTag { kind: TabKind::Lane, ..TabTag::default() });
     overlay.hosts.push(HostRow { name: "Studio".into(), summary: Some("3/28 live".into()), attention: Attention::None, ..HostRow::default() });
@@ -1311,6 +1314,84 @@ fn pinned_lane_shows_the_live_child_rollup_its_tree_row_shows() {
     }
 }
 
+/// 2026-10-06, w5P:t7 "submissions": Claude sat idle at its prompt (the
+/// endpoint reported done) while the overlay still listed a finished teammate
+/// as a live `agent:` run and the tab as busy. Both sidebar rows drew it
+/// working with a live run under it, so the sidebar disagreed with the chat.
+/// The endpoint's work_status is the one fact: the pinned row, the lane row
+/// and the run under it all follow it.
+#[test]
+fn pinned_and_lane_rows_follow_the_endpoint_chat_status_over_a_stale_busy_overlay() {
+    let palette = ClientShellConfig::from_config(&Config::default()).palette;
+    for (reported, working) in [(AgentStatus::Done, false), (AgentStatus::Working, true)] {
+        let (mut snapshot, mut overlay) = grouped_workflow_fixture();
+        snapshot.tabs.retain(|tab| tab.tab_id == "lane-a");
+        snapshot.agents.retain(|agent| agent.tab_id == "lane-a");
+        overlay.tabs.retain(|id, _| id == "lane-a");
+        snapshot.agents[0].agent_status = reported;
+        let lane = snapshot
+            .tabs
+            .iter_mut()
+            .find(|tab| tab.tab_id == "lane-a")
+            .unwrap();
+        lane.agent_status = reported;
+        lane.work_status = Some(reported);
+        snapshot.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+            tab_id: "lane-a".into(),
+            workspace_id: "ws_1".into(),
+        }];
+        let tag = overlay.tabs.get_mut("lane-a").unwrap();
+        tag.busy = true;
+        tag.summary = None;
+        tag.runs = vec![RunTag {
+            id: "agent:agent-atrial-chase-lists-c98d7b9ae81a05d0".into(),
+            name: Some("trial-chase-lists".into()),
+            phase: Some("opus-seat".into()),
+            ..RunTag::default()
+        }];
+        let mut tree = ClientTreeChrome::default();
+        tree.factory_expanded_lanes.insert("lane-a".into());
+        let (rows, hits, buffer) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 37);
+        let lane_hits = hits
+            .tree_headers
+            .iter()
+            .filter(|hit| hit.key == "lane-a")
+            .collect::<Vec<_>>();
+        let [pinned, lane] = lane_hits.as_slice() else {
+            panic!("{reported:?}: pinned and lane rows: {rows:?}")
+        };
+        let mark = |rect: Rect| {
+            (rect.x..rect.right())
+                .map(|x| &buffer[(x, rect.y)])
+                .find(|cell| ["●", "○", "■", "◐", "✓", "×"].contains(&cell.symbol()))
+                .map(|cell| (cell.symbol().to_owned(), cell.fg))
+                .expect("state mark")
+        };
+        assert_eq!(
+            mark(lane.rect).1 == palette.working,
+            working,
+            "{reported:?}: {rows:?}"
+        );
+        assert_eq!(
+            mark(pinned.rect),
+            mark(lane.rect),
+            "{reported:?}: pinned row disagrees: {rows:?}"
+        );
+        let run = rows
+            .iter()
+            .position(|row| row.contains("trial-chase-lists"))
+            .unwrap_or_else(|| panic!("{reported:?}: run row: {rows:?}"));
+        let run_mark = (0..buffer.area.width)
+            .map(|x| buffer[(x, run as u16)].symbol().to_owned())
+            .find(|symbol| ["◐", "✓", "✗"].contains(&symbol.as_str()));
+        assert_eq!(
+            run_mark.as_deref(),
+            Some(if working { "◐" } else { "✓" }),
+            "{reported:?}: {rows:?}"
+        );
+    }
+}
+
 #[test]
 fn grouped_running_workflow_stays_folded_until_expanded_or_focused() {
     let (mut snapshot, mut overlay) = grouped_workflow_fixture();
@@ -1422,6 +1503,7 @@ fn factory_grouping_ignores_cycles_and_cross_space_parents() {
         tab_id: "remote".into(), workspace_id: "ws_2".into(), number: 1,
         label: "remote".into(), custom_label: true, zoomed: false, focused: false,
         agent_status: AgentStatus::Idle,
+        work_status: None,
     });
     snapshot.workspaces.push(ClientShellWorkspace {
         workspace_id: "ws_2".into(), active_tab_id: "remote".into(), new_workspace_cwd: String::new(),

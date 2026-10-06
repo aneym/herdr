@@ -234,8 +234,10 @@ impl App {
             })
             .max_by_key(|(state, seen)| tab_attention_priority(*state, *seen))
             .unwrap_or((crate::detect::AgentState::Unknown, true));
+        let tab_id = self.public_tab_id(ws_idx, tab_idx)?;
         Some(crate::api::schema::TabInfo {
-            tab_id: self.public_tab_id(ws_idx, tab_idx)?,
+            work_status: Some(self.tab_work_status_for(ws_idx, tab_idx, &tab_id)),
+            tab_id,
             workspace_id: self.public_workspace_id(ws_idx),
             number: tab.number,
             label: ws.tab_display_name(tab_idx)?,
@@ -417,6 +419,7 @@ impl App {
             }),
             orchestrator_mode: ws.orchestrator_mode,
             agent_status: pane_agent_status(agg_state, seen),
+            work_status: Some(self.workspace_work_status(index)),
             profiles: ws.profiles.clone(),
             tokens: ws.metadata_tokens.values(),
             worktree: ws

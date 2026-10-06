@@ -287,6 +287,10 @@ pub struct AgentInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_agent: Option<String>,
     pub agent_status: AgentStatus,
+    /// Whether this chat is working, by the one rule every surface draws
+    /// (`app/work_status.rs`): this pane's status, working while its tab owns a live factory run. Absent on servers that predate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_status: Option<AgentStatus>,
     #[serde(default, skip_serializing_if = "super::is_false")]
     pub screen_detection_skipped: bool,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]

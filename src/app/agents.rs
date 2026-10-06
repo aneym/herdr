@@ -767,6 +767,9 @@ impl App {
         let agent_id = terminal.agent_identity.clone();
         let ownership = self.agent_ownership_info(terminal);
         let group = self.agent_group_info(ws_idx, pane_id, terminal);
+        let work_status = ws
+            .find_tab_index_for_pane(pane_id)
+            .map(|tab_idx| self.pane_work_status(ws_idx, tab_idx, pane.agent_status));
         Some(crate::api::schema::AgentInfo {
             terminal_id: pane.terminal_id,
             name: terminal.agent_name.clone(),
@@ -776,6 +779,7 @@ impl App {
             terminal_title_stripped: pane.terminal_title_stripped,
             display_agent: pane.display_agent,
             agent_status: pane.agent_status,
+            work_status,
             screen_detection_skipped: terminal.full_lifecycle_hook_authority_active(),
             state_labels: pane.state_labels,
             tokens: pane.tokens,

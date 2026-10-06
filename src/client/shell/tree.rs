@@ -438,6 +438,7 @@ pub(super) fn pinned_tab_entries(
             .unwrap_or_else(|| pin.workspace_id.clone());
         let tag = overlay.and_then(|overlay| overlay.tab(&tab.tab_id));
         let status = chat_status(
+            tab.work_status,
             snapshot.agents.iter().filter(|agent| agent.tab_id == tab.tab_id).map(|agent| agent.agent_status),
             tab.agent_status,
             tag,
@@ -446,7 +447,7 @@ pub(super) fn pinned_tab_entries(
             .get(&tab.workspace_id)
             .and_then(|states| states.get(&tab.tab_id))
             .copied()
-            .unwrap_or((status, lane_is_idle(tag, status)));
+            .unwrap_or((status, lane_is_idle(tag, status, tab.work_status.is_some())));
         out.push(AgentPanelListEntry::PinnedTab(PinnedTabRow {
             workspace_id: pin.workspace_id.clone(),
             tab_id: pin.tab_id.clone(),
@@ -1214,7 +1215,7 @@ fn append_factory_space(
             let tag = overlay.tab(&tab.tab_id);
             (alert || row_alert || tag.is_some_and(|tag| tag.runs.iter()
                     .any(|run| run.attention == crate::factory_overlay::Attention::Act)),
-                working || row_working || tag.is_some_and(|tag| tag.busy
+                working || row_working || tab.work_status.is_none() && tag.is_some_and(|tag| tag.busy
                     || tag.runs.iter().any(|run| !run.done)))
         })
     };
@@ -1260,9 +1261,9 @@ fn append_factory_space(
                 let grouped_workflows = workflows.iter().copied()
                     .filter(|workflow| parent_for(workflow).is_some_and(|id| grouped_ids.contains(id)))
                     .collect::<Vec<_>>();
-                let (run_agents, run_workflows) = split_runs(runs);
-                let (grouped_agents, grouped_runs) = grouped.iter().filter_map(|lane| overlay.tab(&lane.tab_id))
-                    .map(|tag| split_runs(&tag.runs))
+                let (run_agents, run_workflows) = split_runs(orchestrator, runs);
+                let (grouped_agents, grouped_runs) = grouped.iter()
+                    .filter_map(|lane| overlay.tab(&lane.tab_id).map(|tag| split_runs(lane, &tag.runs)))
                     .fold((0, 0), |(agents, workflows), (a, w)| (agents + a, workflows + w));
                 let attention = all_workflows.iter()
                     .filter(|workflow| parent_for(workflow).is_some_and(|id| grouped_ids.contains(id)))
@@ -1291,7 +1292,8 @@ fn append_factory_space(
                     }
                 }
                 summarize_factory_parent(&mut row, agents, workflow_count,
-                    overlay.tab(&orchestrator.tab_id).is_some_and(|tag| tag.busy), true);
+                    overlay.tab(&orchestrator.tab_id).is_some_and(|tag| tag.busy), true,
+                    orchestrator.work_status.is_some());
                 out.push(row);
                 if expanded {
                     for lane in grouped {
@@ -1350,9 +1352,9 @@ fn append_factory_space(
             let grouped_workflows = workflows.iter().copied()
                 .filter(|workflow| parent_for(workflow).is_some_and(|id| grouped_ids.contains(id)))
                 .collect::<Vec<_>>();
-            let (run_agents, run_workflows) = split_runs(runs);
-            let (grouped_agents, grouped_runs) = grouped_lanes.iter().filter_map(|child| overlay.tab(&child.tab_id))
-                .map(|tag| split_runs(&tag.runs))
+            let (run_agents, run_workflows) = split_runs(lane, runs);
+            let (grouped_agents, grouped_runs) = grouped_lanes.iter()
+                .filter_map(|child| overlay.tab(&child.tab_id).map(|tag| split_runs(child, &tag.runs)))
                 .fold((0, 0), |(agents, workflows), (a, w)| (agents + a, workflows + w));
             let agents = grouped_lanes.len() + run_agents + grouped_agents;
             let workflow_count = children.len() + grouped_workflows.len() + run_workflows + grouped_runs;
@@ -1389,7 +1391,8 @@ fn append_factory_space(
                 }
             }
             summarize_factory_parent(&mut lane_row, agents, workflow_count,
-                overlay.tab(&lane.tab_id).is_some_and(|tag| tag.busy), false);
+                overlay.tab(&lane.tab_id).is_some_and(|tag| tag.busy), false,
+                lane.work_status.is_some());
             if grouped {
                 if let AgentPanelListEntry::FactoryTab(row) = &mut lane_row {
                     row.background = lane_mode(lane) == TabMode::Parked;
@@ -1684,6 +1687,7 @@ fn factory_run_row(
     run: &crate::factory_overlay::RunTag,
     indent: u8,
 ) -> AgentPanelListEntry {
+    let done = run_done(parent, run);
     AgentPanelListEntry::FactoryTab(FactoryTabRow {
         header: TreeHeader {
             workspace_id: parent.workspace_id.clone(),
@@ -1700,7 +1704,7 @@ fn factory_run_row(
             space_attention: None,
             factory_space: false,
         },
-        status: if run.done { crate::api::schema::AgentStatus::Done } else { crate::api::schema::AgentStatus::Working },
+        status: if done { crate::api::schema::AgentStatus::Done } else { crate::api::schema::AgentStatus::Working },
         reviewing: false,
         review_url: None,
         scoping: false,
@@ -1716,7 +1720,7 @@ fn factory_run_row(
         devloop: false,
         background: false,
         workflow: true,
-        done: run.done,
+        done,
     })
 }
 
@@ -1734,20 +1738,35 @@ pub(super) fn is_factory_run_key(tab_id: &str, key: &str) -> bool {
         .is_some_and(|rest| rest.starts_with(FACTORY_RUN_KEY_MARK))
 }
 
-fn split_runs(runs: &[crate::factory_overlay::RunTag]) -> (usize, usize) {
+/// Whether a run under `parent` is over. The agent-rails overlay names the
+/// chat's own Claude subagents and teammates agent:<id>; once the endpoint
+/// reports the chat quiet, its screen has said they are over, even while the
+/// overlay still lists them (server `app/work_status.rs`).
+fn run_done(parent: &crate::protocol::ClientShellTab, run: &crate::factory_overlay::RunTag) -> bool {
+    run.done
+        || run.id.starts_with("agent:")
+            && parent.work_status.is_some_and(|status| !matches!(status,
+                crate::api::schema::AgentStatus::Working | crate::api::schema::AgentStatus::Blocked))
+}
+
+fn split_runs(parent: &crate::protocol::ClientShellTab, runs: &[crate::factory_overlay::RunTag]) -> (usize, usize) {
     // The agent-rails overlay names Agent-tool subagents agent:<id> and workflow runs wf_<id>.
-    runs.iter().filter(|run| !run.done).fold((0, 0), |(agents, workflows), run| {
+    runs.iter().filter(|run| !run_done(parent, run)).fold((0, 0), |(agents, workflows), run| {
         if run.id.starts_with("agent:") { (agents + 1, workflows) } else { (agents, workflows + 1) }
     })
 }
 
-fn summarize_factory_parent(row: &mut AgentPanelListEntry, agents: usize, workflows: usize, busy: bool, orchestrator: bool) {
+/// Count a parent's live children into its summary. `reported` is a parent
+/// whose endpoint already said whether the chat works: grouped lanes are
+/// their own chats and only its own live runs count, which the endpoint
+/// already folded in, so the counts never repaint its state.
+fn summarize_factory_parent(row: &mut AgentPanelListEntry, agents: usize, workflows: usize, busy: bool, orchestrator: bool, reported: bool) {
     if let AgentPanelListEntry::FactoryTab(row) = row {
-        if (agents + workflows > 0 && matches!(row.status, crate::api::schema::AgentStatus::Idle
+        if !reported && ((agents + workflows > 0 && matches!(row.status, crate::api::schema::AgentStatus::Idle
                 | crate::api::schema::AgentStatus::Done
                 | crate::api::schema::AgentStatus::Unknown))
             || (busy && matches!(row.status, crate::api::schema::AgentStatus::Idle
-                | crate::api::schema::AgentStatus::Done))
+                | crate::api::schema::AgentStatus::Done)))
         {
             row.status = crate::api::schema::AgentStatus::Working;
             row.idle = false;
@@ -1787,6 +1806,7 @@ fn factory_row(
 ) -> AgentPanelListEntry {
     let tag = overlay.tab(&tab.tab_id);
     let status = chat_status(
+        tab.work_status,
         rows.iter().filter(|row| row.tab_id == tab.tab_id).map(|row| row.status),
         tab.agent_status,
         tag,
@@ -1850,7 +1870,7 @@ fn factory_row(
         started: tag.and_then(|tag| tag.started),
         summary: tag.and_then(|tag| tag.summary.clone()),
         attention: tag.map_or(crate::factory_overlay::Attention::None, |tag| tag.attention),
-        idle: lane_is_idle(tag, status),
+        idle: lane_is_idle(tag, status, tab.work_status.is_some()),
         idle_reason: tag.and_then(|tag| tag.idle_reason.clone()),
         devloop: tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Lane && tag.devloop),
         background,
@@ -1859,15 +1879,21 @@ fn factory_row(
     })
 }
 
-/// One chat's state from its agents: a finished pane must not mask another
-/// pane still working, and a busy tag reads as working. Shared by the spaces
-/// tree's factory rows and the pinned section so both draw the same glyph.
-/// Leave status_priority (used by non-factory rows) unchanged.
+/// One chat's state. The endpoint's `work_status` is the one rule every
+/// surface draws (server `app/work_status.rs`); only an endpoint that predates
+/// it falls back to the agents: a finished pane must not mask another pane
+/// still working, and a busy tag reads as working. Shared by the spaces tree's
+/// factory rows and the pinned section so both draw the same glyph. Leave
+/// status_priority (used by non-factory rows) unchanged.
 fn chat_status(
+    reported: Option<crate::api::schema::AgentStatus>,
     agents: impl Iterator<Item = crate::api::schema::AgentStatus>,
     fallback: crate::api::schema::AgentStatus,
     tag: Option<&crate::factory_overlay::TabTag>,
 ) -> crate::api::schema::AgentStatus {
+    if let Some(status) = reported {
+        return status;
+    }
     let status = agents
         .max_by_key(|status| match status {
             crate::api::schema::AgentStatus::Blocked => 4,
@@ -1887,12 +1913,15 @@ fn chat_status(
 }
 
 /// A factory lane with no work and nothing to say: drawn with the idle ring.
+/// A `reported` status already weighed the lane's work, so the overlay's
+/// busy copy does not hold the ring off.
 fn lane_is_idle(
     tag: Option<&crate::factory_overlay::TabTag>,
     status: crate::api::schema::AgentStatus,
+    reported: bool,
 ) -> bool {
     tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Lane
-        && !tag.busy
+        && (reported || !tag.busy)
         && tag.summary.as_deref().is_none_or(|summary| summary.trim().is_empty()))
         && status == crate::api::schema::AgentStatus::Idle
 }

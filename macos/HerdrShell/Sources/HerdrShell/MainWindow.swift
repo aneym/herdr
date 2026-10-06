@@ -659,7 +659,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             let reported = !agents.isEmpty
             let agent = agents.first
             let named = (agent?.agent?.isEmpty == false ? agent?.agent : nil) ?? "Brief"
-            let status = agent?.agent_status ?? p.agent_status ?? ""
+            let status = agent?.work_status ?? agent?.agent_status ?? p.agent_status ?? ""
             // Chat reads the local transcript and sends through the local server: local panes only.
             let chat = reported && !Machines.isRemote(p.pane_id) && Channel.mode(for: p.pane_id) == "chat"
             if chat { ensureChat(p.pane_id) }

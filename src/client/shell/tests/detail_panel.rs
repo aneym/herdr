@@ -536,6 +536,7 @@ fn overview_task_counts_follow_live_workflows_including_orchestrator() {
         tab_id: id.into(), workspace_id: "ws_1".into(), number: index + 1,
         label: label.into(), custom_label: true, zoomed: false, focused: false,
         agent_status: AgentStatus::Working,
+        work_status: None,
     }).collect();
     snapshot.panes = [
         ("running-pane", "running"), ("done-pane", "done"), ("orch-pane", "orch-child"),

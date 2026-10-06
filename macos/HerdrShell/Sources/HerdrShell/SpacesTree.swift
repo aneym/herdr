@@ -3,7 +3,8 @@ import Foundation
 struct SpacesInput: Codable {
     struct Space: Codable { var id: String; var name: String; var pinned = false; var collapsed = false }
     struct Agent: Codable { var status: String; var parent: String? = nil }
-    struct Tab: Codable { var id: String; var space: String; var label: String; var agents: [Agent] = []; var focused = false; var status = "unknown"; var pinIndex: Int? = nil }
+    /// `work` is herdr's one answer to "is this chat working" (server app/work_status.rs); nil from older servers.
+    struct Tab: Codable { var id: String; var space: String; var label: String; var agents: [Agent] = []; var focused = false; var status = "unknown"; var pinIndex: Int? = nil; var work: String? = nil }
     var spaces: [Space]; var tabs: [Tab]; var focusedTab: String?
 }
 
@@ -128,15 +129,21 @@ enum SpacesTree {
     /// A tab's state glyph and tone, as its row in the spaces tree draws it (Rust chat_status and
     /// chat_state_mark), so the pinned section and the space agree on who is working. `foldable`
     /// is a lane header with live children, which reads as working.
+    /// herdr's `work` fact wins; only an older server falls back to this rollup.
     static func mark(_ tab: SpacesInput.Tab, _ t: Overlay.Tag, foldable: Bool = false) -> (glyph: String, tone: String, idle: Bool) {
         let priority = ["unknown": 0, "idle": 1, "done": 2, "working": 3, "blocked": 4]
-        var status = tab.agents.max { (priority[$0.status] ?? 0) < (priority[$1.status] ?? 0) }?.status ?? tab.status
-        if t.busy && ["idle", "done"].contains(status) { status = "working" }
+        var status = tab.work ?? tab.agents.max { (priority[$0.status] ?? 0) < (priority[$1.status] ?? 0) }?.status ?? tab.status
+        if tab.work == nil && t.busy && ["idle", "done"].contains(status) { status = "working" }
         // As Rust summarize_factory_parent: a header with live children shows as working, not idle.
-        if foldable && ["idle", "done", "unknown"].contains(status) { status = "working" }
-        let idle = t.kind == "lane" && !t.busy && (t.summary ?? "").trimmingCharacters(in: .whitespaces).isEmpty && status == "idle"
+        if tab.work == nil && foldable && ["idle", "done", "unknown"].contains(status) { status = "working" }
+        let idle = t.kind == "lane" && (tab.work != nil || !t.busy) && (t.summary ?? "").trimmingCharacters(in: .whitespaces).isEmpty && status == "idle"
         let glyph = t.kind == "workflow" ? (t.done ? (t.attention == "act" ? "✗" : "✓") : "◐") : idle ? "○" : status == "blocked" ? "■" : "●"
         return (glyph, idle ? "mute" : status, idle)
+    }
+    /// As Rust run_done: an agent:<id> run is the chat's own Claude subagent or teammate, over once
+    /// herdr reports the chat quiet, even while the overlay still lists it.
+    static func runDone(_ run: Overlay.Run, of tab: SpacesInput.Tab) -> Bool {
+        run.done || run.id.hasPrefix("agent:") && tab.work.map { !["working", "blocked"].contains($0) } == true
     }
     static func age(_ seconds: Double) -> String { let m = Int(max(0, seconds)) / 60; return m == 0 ? "<1m" : m < 60 ? "\(m)m" : "\(m / 60)h\(m % 60)m" }
     static func build(_ input: SpacesInput, overlay: Overlay, chrome: SpacesChrome, now: Double) -> [SpacesRow] {
@@ -351,10 +358,14 @@ private struct SpaceScope {
     func rollup(_ tab: SpacesInput.Tab, nest: Bool) -> Rollup {
         let grouped = nest ? lanes.filter { root($0) == tab.id } : []
         let children = nest ? workflows.filter { parent($0) == tab.id } : []
-        let runs = nest ? tag(tab).runs : []
+        // A run reads done once SpacesTree.runDone says so, here and in the run rows drawn from `runs`.
+        func settled(_ owner: SpacesInput.Tab) -> [Overlay.Run] {
+            tag(owner).runs.map { run in var run = run; run.done = SpacesTree.runDone(run, of: owner); return run }
+        }
+        let runs = nest ? settled(tab) : []
         let groupedWorkflows = workflows.filter { w in grouped.contains { $0.id == parent(w) } }
         // agent:<id> runs and grouped lanes are agents; workflow tabs and other runs are workflows.
-        let live = (runs + grouped.flatMap { tag($0).runs }).filter { !$0.done }
+        let live = (runs + grouped.flatMap { settled($0) }).filter { !$0.done }
         let agents = grouped.count + live.filter { $0.id.hasPrefix("agent:") }.count
         let flows = children.count + groupedWorkflows.count + live.filter { !$0.id.hasPrefix("agent:") }.count
         return Rollup(grouped: grouped, children: children, groupedWorkflows: groupedWorkflows, runs: runs, agents: agents, flows: flows)
