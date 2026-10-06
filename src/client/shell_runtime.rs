@@ -7,6 +7,7 @@ pub(super) fn dispatch_client_shell_actions(
     mut shell: Option<&mut shell::ClientShellState>,
     detached_process_children: &mut Vec<std::process::Child>,
     scheduled_activation: &mut Option<ClientLoopEvent>,
+    pending: Option<&endpoint::PendingEndpointActivation>,
 ) -> Result<(Vec<crossterm::event::MouseEvent>, bool), ClientError> {
     let mut replay_mouse = Vec::new();
     let mut repaint = false;
@@ -63,11 +64,30 @@ pub(super) fn dispatch_client_shell_actions(
             }
         }
     }
-    // A source-off-first handoff leaves the registry's committed identity pointing at a
-    // deliberately surface-inactive source. Do not drain its retained queue into a server that
-    // must reject it; completion below resumes the committed owner's lane.
+    repaint |= drain_endpoint_command_lanes(endpoint_commands, endpoints, shell, pending);
+    Ok((replay_mouse, repaint))
+}
+
+/// Send the next queued request on every lane that may take one, and return whether a
+/// cancelled request needs a repaint.
+///
+/// A source-off-first handoff leaves the registry's committed identity pointing at a
+/// deliberately surface-inactive source. Do not drain its retained queue into a server that
+/// must reject it; completion resumes the committed owner's lane. Neither side of a pending
+/// handoff takes a surface-independent request either: the target's server refuses the
+/// handoff's focus while one runs, so those requests wait for the handoff to finish.
+fn drain_endpoint_command_lanes(
+    endpoint_commands: &mut endpoint_commands::EndpointCommands,
+    endpoints: &mut endpoint::EndpointRegistry,
+    mut shell: Option<&mut shell::ClientShellState>,
+    pending: Option<&endpoint::PendingEndpointActivation>,
+) -> bool {
+    let mut repaint = false;
     let mut lanes = endpoint_commands.queued_lanes();
-    lanes.retain(|endpoint_id| endpoint_id != endpoints.active_id());
+    lanes.retain(|endpoint_id| {
+        endpoint_id != endpoints.active_id()
+            && !pending.is_some_and(|activation| activation.involves_endpoint(endpoint_id))
+    });
     if endpoints.active_surface_available() {
         lanes.push(endpoints.active_id().clone());
     }
@@ -79,7 +99,7 @@ pub(super) fn dispatch_client_shell_actions(
             }
         }
     }
-    Ok((replay_mouse, repaint))
+    repaint
 }
 
 pub(super) fn client_shell_resize_message(
@@ -321,6 +341,23 @@ pub(super) fn take_ready_local_activation(
         })
 }
 
+/// The deferred selection of a machine whose command lane is now idle.
+pub(super) fn take_ready_command_activation(
+    state: &mut ClientState,
+    endpoint_commands: &endpoint_commands::EndpointCommands,
+) -> Option<ClientLoopEvent> {
+    let (intent, _) = state.deferred_command_activation.as_ref()?;
+    if endpoint_commands.in_flight(&intent.endpoint_id) {
+        return None;
+    }
+    let (intent, force) = state.deferred_command_activation.take()?;
+    Some(ClientLoopEvent::ActivateEndpoint {
+        endpoint_id: intent.endpoint_id,
+        target: intent.target,
+        force,
+    })
+}
+
 pub(super) fn begin_endpoint_activation(
     state: &mut ClientState,
     endpoints: &mut endpoint::EndpointRegistry,
@@ -334,6 +371,7 @@ pub(super) fn begin_endpoint_activation(
     scheduled_activation: &mut Option<ClientLoopEvent>,
 ) -> Result<(), ClientError> {
     state.deferred_local_activation = None;
+    state.deferred_command_activation = None;
     if endpoint_id.is_local() && !local_activation_metadata_ready(state, endpoints) {
         state.deferred_local_activation = Some(endpoint::EndpointActivationIntent {
             endpoint_id,
@@ -385,6 +423,7 @@ pub(super) fn begin_endpoint_activation(
                 Some(shell),
                 &mut state.detached_process_children,
                 scheduled_activation,
+                pending.as_ref(),
             )?;
             if repaint {
                 if let Some(frame) = shell.compose(state.reported_size.0, state.reported_size.1) {
@@ -392,6 +431,18 @@ pub(super) fn begin_endpoint_activation(
                 }
             }
         }
+        return Ok(());
+    }
+    // A pin sent to this machine while it held no surface is still running there, and its
+    // server refuses the handoff's focus until it answers. Start once the lane is idle.
+    if endpoints.active_id() != &endpoint_id && endpoint_commands.in_flight(&endpoint_id) {
+        state.deferred_command_activation = Some((
+            endpoint::EndpointActivationIntent {
+                endpoint_id,
+                target,
+            },
+            force,
+        ));
         return Ok(());
     }
     let Some(shell) = state.shell.as_ref() else {
@@ -543,13 +594,8 @@ pub(super) fn complete_endpoint_activation(
     };
     state.unfreeze_presentation();
     if successor.is_none() {
-        let active_endpoint = endpoints.active_id().clone();
-        let cancelled = endpoint_commands.send_next(&active_endpoint, endpoints);
-        if let Some(shell) = state.shell.as_mut() {
-            for request_id in cancelled {
-                shell.cancel_endpoint_request(&request_id);
-            }
-        }
+        // The committed owner's lane resumes, and so do lanes held while the handoff ran.
+        drain_endpoint_command_lanes(endpoint_commands, endpoints, state.shell.as_mut(), None);
     }
     let (cleanup, frame) = {
         let shell = state.shell.as_mut().expect("checked client shell");
@@ -842,6 +888,7 @@ pub(super) fn finish_client_shell_input(
         state.shell.as_mut(),
         &mut state.detached_process_children,
         scheduled_activation,
+        pending_activation.as_ref(),
     )?;
     let frame = if dispatch_repaint {
         state

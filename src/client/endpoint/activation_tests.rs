@@ -1872,3 +1872,169 @@ fn resize_message_preserves_the_latest_surface_dimensions() {
         Some(crate::protocol::ClientSurfaceSize { cols: 80, rows: 24 })
     );
 }
+
+#[test]
+fn pin_in_flight_on_inactive_machine_holds_its_handoff_until_answered() {
+    // Local holds the surface. A pin from the aggregate sidebar is running on the remote when
+    // the user selects one of the remote's tabs. The remote's server refuses any focus while
+    // that pin runs (endpoint_busy), so the handoff's surface and focus must wait for its
+    // answer, and a pin sent during the handoff must wait for the handoff.
+    use crate::api::schema::{Method, Request, TabSetPinnedParams};
+    use crate::client::{
+        endpoint_commands::EndpointCommands,
+        shell::{ClientEndpointFocusTarget, ClientShellAction},
+        shell_runtime::{
+            begin_endpoint_activation, dispatch_client_shell_actions, take_ready_command_activation,
+        },
+        ClientLoopEvent, ClientState,
+    };
+    let (shell, mut endpoints, local_sent, remote_sent) = shell_and_registry();
+    let mut state = ClientState::test_new();
+    state.shell = Some(shell);
+    let mut commands = EndpointCommands::default();
+    let mut pending: Option<PendingEndpointActivation> = None;
+    let mut serial = 60;
+    let mut scheduled = None;
+    let pin = |id: &str| ClientShellAction::Endpoint {
+        endpoint_id: endpoint(),
+        boot_id: "remote-boot".into(),
+        request: Box::new(Request {
+            id: id.into(),
+            method: Method::TabSetPinned(TabSetPinnedParams {
+                tab_id: "remote-tab".into(),
+                pinned: true,
+                priority: None,
+            }),
+        }),
+    };
+    let requests = |sent: &SentMessages| {
+        sent.lock()
+            .unwrap()
+            .iter()
+            .filter_map(|message| match message {
+                crate::protocol::ClientMessage::ClientShellEndpointRequest { request, .. } => {
+                    serde_json::from_str::<Request>(request).ok()
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let remote_ids = || {
+        requests(&remote_sent)
+            .into_iter()
+            .map(|request| request.id)
+            .collect::<Vec<_>>()
+    };
+    // Answer each source release the handoff sent, as Local's server would.
+    let release_source = |pending: &mut Option<PendingEndpointActivation>,
+                          endpoints: &mut EndpointRegistry| {
+        for request in requests(&local_sent) {
+            if let (Method::ClientShellSurfaceSet(params), Some(activation)) =
+                (&request.method, pending.as_mut())
+            {
+                if !params.active {
+                    activation.receive_response(
+                        &ClientEndpointId::Local,
+                        1,
+                        &request.id,
+                        &surface_success(&request.id, false, 2),
+                        endpoints,
+                    );
+                }
+            }
+        }
+        local_sent.lock().unwrap().clear();
+    };
+
+    dispatch_client_shell_actions(
+        vec![pin("pin-1")],
+        &mut commands,
+        &mut endpoints,
+        state.shell.as_mut(),
+        &mut state.detached_process_children,
+        &mut scheduled,
+        pending.as_ref(),
+    )
+    .unwrap();
+    assert_eq!(remote_ids(), ["pin-1"]);
+
+    let focus = Some(ClientEndpointFocusTarget::Tab("remote-tab".into()));
+    begin_endpoint_activation(
+        &mut state,
+        &mut endpoints,
+        &mut commands,
+        &mut pending,
+        &mut serial,
+        endpoint(),
+        focus.clone(),
+        false,
+        Instant::now(),
+        &mut scheduled,
+    )
+    .unwrap();
+    release_source(&mut pending, &mut endpoints);
+    assert_eq!(
+        remote_ids(),
+        ["pin-1"],
+        "the handoff reached the remote while its pin was still running"
+    );
+    assert!(take_ready_command_activation(&mut state, &commands).is_none());
+
+    // The pin answers; the held selection now starts the handoff with its focus.
+    let answer = serde_json::to_vec(&crate::api::schema::SuccessResponse {
+        id: "pin-1".into(),
+        result: crate::api::schema::ResponseResult::Ok {},
+    })
+    .unwrap();
+    assert!(commands
+        .receive_chunk(&endpoint(), 7, "remote-boot", "pin-1", true, answer)
+        .unwrap()
+        .is_some());
+    let Some(ClientLoopEvent::ActivateEndpoint {
+        endpoint_id,
+        target,
+        force,
+    }) = take_ready_command_activation(&mut state, &commands)
+    else {
+        panic!("held selection resumes once the pin answers");
+    };
+    assert_eq!((&endpoint_id, &target, force), (&endpoint(), &focus, false));
+    begin_endpoint_activation(
+        &mut state,
+        &mut endpoints,
+        &mut commands,
+        &mut pending,
+        &mut serial,
+        endpoint_id,
+        target,
+        force,
+        Instant::now(),
+        &mut scheduled,
+    )
+    .unwrap();
+    release_source(&mut pending, &mut endpoints);
+    let sent = requests(&remote_sent);
+    assert!(
+        sent.iter().skip(1).any(|request| matches!(&request.method,
+            Method::ClientShellSurfaceSet(params) if params.active))
+            && sent
+                .iter()
+                .skip(1)
+                .any(|request| matches!(&request.method, Method::TabFocus(_))),
+        "handoff after the pin: {:?}",
+        sent.iter().map(|request| &request.id).collect::<Vec<_>>()
+    );
+
+    // A pin sent to the remote during its handoff waits for the handoff.
+    dispatch_client_shell_actions(
+        vec![pin("pin-2")],
+        &mut commands,
+        &mut endpoints,
+        state.shell.as_mut(),
+        &mut state.detached_process_children,
+        &mut scheduled,
+        pending.as_ref(),
+    )
+    .unwrap();
+    assert!(!remote_ids().contains(&"pin-2".to_owned()));
+}

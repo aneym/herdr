@@ -456,6 +456,7 @@ async fn run_client_loop(
         repaint_pending: false,
         presentation_frozen: false,
         deferred_local_activation: None,
+        deferred_command_activation: None,
         draw_host_cursor,
         detached_process_children: Vec::new(),
         shell: config.shell_config.map(shell::ClientShellState::new),
@@ -755,6 +756,9 @@ async fn run_client_loop(
                 shell.timer_delay(std::time::Instant::now())
             });
         let timer_deadline = client_timer.deadline(std::time::Instant::now(), timer_delay);
+        if scheduled_activation.is_none() {
+            scheduled_activation = take_ready_command_activation(&mut state, &endpoint_commands);
+        }
         let immediate_event = scheduled_activation.take();
         #[cfg(windows)]
         let event = if let Some(event) = immediate_event {
@@ -1871,6 +1875,7 @@ async fn run_client_loop(
                             state.shell.as_mut(),
                             &mut state.detached_process_children,
                             &mut scheduled_activation,
+                            pending_activation.as_ref(),
                         )?;
                         let repaint = repaint || dispatch_repaint;
                         if replay_mouse.is_empty() {

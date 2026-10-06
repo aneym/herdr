@@ -75,6 +75,10 @@ pub(super) struct ClientState {
     pub(super) presentation_frozen: bool,
     /// Latest explicit Local selection awaiting this client's replacement Local connection.
     pub(super) deferred_local_activation: Option<endpoint::EndpointActivationIntent>,
+    /// Latest selection of a machine whose command lane still has a request in flight (a pin
+    /// sent while it held no surface), with its `force` flag. The machine's server refuses a
+    /// focus while that request runs, so the handoff starts once the lane is idle.
+    pub(super) deferred_command_activation: Option<(endpoint::EndpointActivationIntent, bool)>,
     pub(super) draw_host_cursor: bool,
     pub(super) detached_process_children: Vec<std::process::Child>,
     pub(super) shell: Option<shell::ClientShellState>,
@@ -131,6 +135,7 @@ impl ClientState {
             repaint_pending: false,
             presentation_frozen: false,
             deferred_local_activation: None,
+            deferred_command_activation: None,
             draw_host_cursor: false,
             detached_process_children: Vec::new(),
             shell: Some(shell::ClientShellState::new(

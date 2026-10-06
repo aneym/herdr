@@ -144,6 +144,7 @@ fn pinned_chats_survive_aggregate_sidebar_and_route_to_their_endpoint() {
         Some(&mut state),
         &mut Vec::new(),
         &mut None,
+        None,
     )
     .unwrap();
     let sent = sent.lock().unwrap().clone();
@@ -3086,13 +3087,50 @@ fn aggregate_pins_scroll_within_their_section_and_keep_the_divider_below_them() 
         header.contains(&format!("+{} more", 30 - first.len())),
         "header: {header}"
     );
-    // The machine list keeps its rows, and its divider sits under the pins.
+    // The machine list keeps its rows, and its divider sits on the drawn
+    // machines/agents boundary under the pins.
     let last_pin = state.hits.endpoint_pins.last().expect("pin rows").0;
+    let boundary_row = |state: &mut ClientShellState| {
+        let frame = state.compose(100, 30).expect("aggregate frame");
+        let width = state.hits.sidebar_divider.x as usize;
+        let agents = frame_rows(&frame)
+            .iter()
+            .position(|row| {
+                row.chars()
+                    .take(width)
+                    .collect::<String>()
+                    .starts_with(" agents")
+            })
+            .expect("agents header drawn") as u16;
+        agents - 1
+    };
+    let boundary = boundary_row(&mut state);
     let divider = state.hits.sidebar_section_divider;
     assert!(
-        divider.height == 0 || divider.y > last_pin.y,
-        "divider {divider:?} over pin {last_pin:?}"
+        boundary > last_pin.y,
+        "boundary {boundary} over pin {last_pin:?}"
     );
+    assert_eq!(divider.y, boundary, "divider hitbox off the drawn boundary");
+    // Dragging the divider moves the drawn boundary with the pointer.
+    let target = boundary - 3;
+    for (kind, row) in [
+        (MouseEventKind::Down(MouseButton::Left), divider.y),
+        (MouseEventKind::Drag(MouseButton::Left), target),
+        (MouseEventKind::Up(MouseButton::Left), target),
+    ] {
+        state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+            kind,
+            column: divider.x + 2,
+            row,
+            modifiers: KeyModifiers::NONE,
+        })]);
+    }
+    let dragged = boundary_row(&mut state);
+    assert!(
+        dragged.abs_diff(target) <= 1,
+        "boundary {dragged} did not follow the pointer to {target}"
+    );
+    assert_eq!(state.hits.sidebar_section_divider.y, dragged);
     assert!(state
         .hits
         .machines
@@ -3113,4 +3151,53 @@ fn aggregate_pins_scroll_within_their_section_and_keep_the_divider_below_them() 
     let scrolled = shown(&state);
     assert_eq!(scrolled.last().map(String::as_str), Some("tab_30"));
     assert_eq!(scrolled.len(), first.len());
+}
+
+#[test]
+fn inactive_machine_pin_rolls_up_from_that_machines_factory_overlay() {
+    // Local holds the surface; the remote's pinned lane has a live run in the
+    // remote's own overlay. Its pin shows that work before the remote is
+    // selected, and selecting it changes nothing.
+    let (mut state, remote) = state_with_remote();
+    state.config.factory.enabled = true;
+    let mut remote_snapshot = snapshot();
+    remote_snapshot.boot_id = "remote-boot".into();
+    remote_snapshot.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+        tab_id: "tab_1".into(),
+        workspace_id: "ws_1".into(),
+    }];
+    state.set_endpoint_snapshot_for_generation(&remote, 4, Box::new(remote_snapshot));
+    let overlay = crate::factory_overlay::parse(
+        br#"{"version":1,"tabs":{"tab_1":{"kind":"lane","runs":[{"id":"wf_live"}]}}}"#,
+    )
+    .unwrap();
+    let crate::protocol::ServerMessage::EndpointControl { kind, data } =
+        crate::protocol::endpoint::factory_overlay_message("remote-boot", 2, Some(&overlay))
+            .unwrap()
+    else {
+        panic!("expected factory overlay control");
+    };
+    let crate::client::endpoint::EndpointControlMessage::FactoryOverlay(decoded) =
+        crate::client::endpoint::decode_endpoint_control(&kind, &data).unwrap()
+    else {
+        panic!("expected decoded factory overlay");
+    };
+    state.set_endpoint_factory_overlay_for_generation(&remote, 4, decoded);
+    let remote_pin_mark = |state: &mut ClientShellState| {
+        let frame = state.compose(100, 28).expect("aggregate frame");
+        let rect = state
+            .hits
+            .endpoint_pins
+            .iter()
+            .find(|(_, _, endpoint, _)| *endpoint == remote)
+            .map(|(rect, ..)| *rect)
+            .expect("remote pin row");
+        let buffer = frame.to_ratatui_buffer().expect("frame buffer");
+        let cell = &buffer[(rect.x + 1, rect.y)];
+        (cell.symbol().to_owned(), cell.fg)
+    };
+    let inactive = remote_pin_mark(&mut state);
+    assert_eq!(inactive.1, state.config.palette.working, "{inactive:?}");
+    assert!(state.activate_endpoint_projection(&remote));
+    assert_eq!(remote_pin_mark(&mut state), inactive);
 }

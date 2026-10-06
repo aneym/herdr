@@ -87,6 +87,13 @@ impl EndpointCommands {
             });
     }
 
+    /// Whether this endpoint's lane has a request awaiting its response.
+    pub(super) fn in_flight(&self, endpoint_id: &ClientEndpointId) -> bool {
+        self.lanes
+            .get(endpoint_id)
+            .is_some_and(|lane| lane.in_flight.is_some())
+    }
+
     /// Lanes with a queued request and nothing in flight.
     pub(super) fn queued_lanes(&self) -> Vec<ClientEndpointId> {
         self.lanes

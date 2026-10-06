@@ -496,7 +496,7 @@ impl ClientShellState {
     }
 
     /// The overlay an endpoint presents: only a projection from its current connection and boot.
-    fn endpoint_factory_overlay(
+    pub(super) fn endpoint_factory_overlay(
         endpoint: &ClientShellEndpoint,
     ) -> Option<std::sync::Arc<crate::factory_overlay::FactoryOverlay>> {
         let snapshot = endpoint.snapshot.as_deref()?;

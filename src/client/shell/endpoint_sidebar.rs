@@ -264,11 +264,17 @@ pub(super) fn render_expanded(
     let mut pins = Vec::new();
     for endpoint in state.endpoints {
         let Some(snapshot) = endpoint.snapshot.as_deref() else { continue; };
-        // The factory overlay belongs to the active endpoint only.
-        let overlay = state.factory_overlay
-            .filter(|_| &endpoint.endpoint_id == state.active_endpoint_id);
-        for entry in super::tree::pinned_tab_entries(snapshot, overlay) {
-            let super::tree::AgentPanelListEntry::PinnedTab(mut row) = entry else { continue; };
+        // Each machine's pins roll up from that machine's own validated
+        // overlay, whether or not it holds the surface.
+        let overlay = config
+            .factory
+            .enabled
+            .then(|| super::ClientShellState::endpoint_factory_overlay(endpoint))
+            .flatten();
+        for entry in super::tree::pinned_tab_entries(snapshot, overlay.as_deref()) {
+            let super::tree::AgentPanelListEntry::PinnedTab(mut row) = entry else {
+                continue;
+            };
             let slot = pins.len() + 1;
             row.shortcut = if slot <= 9 { slot } else { 0 };
             row.active &= &endpoint.endpoint_id == state.active_endpoint_id;

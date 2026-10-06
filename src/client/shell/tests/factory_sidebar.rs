@@ -1269,31 +1269,46 @@ fn grouped_lane_draws_live_workflows_and_runs_and_rolls_up_state() {
 
 #[test]
 fn pinned_lane_shows_the_live_child_rollup_its_tree_row_shows() {
-    let (mut snapshot, overlay) = grouped_workflow_fixture();
-    snapshot.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
-        tab_id: "lane-a".into(),
-        workspace_id: "ws_1".into(),
-    }];
-    let (rows, hits, buffer) =
-        rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 37);
-    // The pinned row comes first in the panel, the lane's own row after it.
-    let lane_hits = hits
-        .tree_headers
-        .iter()
-        .filter(|hit| hit.key == "lane-a")
-        .collect::<Vec<_>>();
-    let [pinned, lane] = lane_hits.as_slice() else {
-        panic!("pinned and lane rows: {rows:?}")
-    };
-    let palette = ClientShellConfig::from_config(&Config::default()).palette;
-    let lane_mark = &buffer[(lane.rect.x + 4, lane.rect.y)];
-    let pinned_mark = &buffer[(pinned.rect.x + 1, pinned.rect.y)];
-    assert_eq!(lane_mark.fg, palette.working, "{rows:?}");
-    assert_eq!(
-        (pinned_mark.symbol(), pinned_mark.fg),
-        (lane_mark.symbol(), lane_mark.fg),
-        "pinned row disagrees with its lane row: {rows:?}"
-    );
+    // A parked or service lane's own row sits inside a folded group by
+    // default; its pin still shows the rollup the unfolded row shows.
+    for mode in [TabMode::Active, TabMode::Parked, TabMode::Auto] {
+        let (mut snapshot, mut overlay) = grouped_workflow_fixture();
+        snapshot.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+            tab_id: "lane-a".into(),
+            workspace_id: "ws_1".into(),
+        }];
+        let lane_tag = overlay.tabs.get_mut("lane-a").unwrap();
+        lane_tag.mode = mode;
+        lane_tag.busy = false;
+        let mut tree = ClientTreeChrome::default();
+        tree.factory_parked_expanded.insert("ws_1".into());
+        tree.factory_auto_expanded.insert("ws_1".into());
+        let (rows, hits, buffer) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 37);
+        // The pinned row comes first in the panel, the lane's own row after it.
+        let lane_hits = hits
+            .tree_headers
+            .iter()
+            .filter(|hit| hit.key == "lane-a")
+            .collect::<Vec<_>>();
+        let [pinned, lane] = lane_hits.as_slice() else {
+            panic!("{mode:?}: pinned and lane rows: {rows:?}")
+        };
+        let mark = |rect: Rect| {
+            (rect.x..rect.right())
+                .map(|x| &buffer[(x, rect.y)])
+                .find(|cell| ["●", "○", "■", "◐", "×"].contains(&cell.symbol()))
+                .map(|cell| (cell.symbol().to_owned(), cell.fg))
+                .expect("state mark")
+        };
+        let palette = ClientShellConfig::from_config(&Config::default()).palette;
+        let lane_mark = mark(lane.rect);
+        assert_eq!(lane_mark.1, palette.working, "{mode:?}: {rows:?}");
+        assert_eq!(
+            mark(pinned.rect),
+            lane_mark,
+            "{mode:?}: pinned row disagrees with its lane row: {rows:?}"
+        );
+    }
 }
 
 #[test]

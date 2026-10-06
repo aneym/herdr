@@ -495,12 +495,29 @@ fn factory_row_states(
             group: AgentGroupRender::default(),
         })
         .collect::<Vec<_>>();
+    // Every fold open, so a lane inside a folded services, parked, closed or
+    // background group, or under a folded parent, still yields its row.
+    let mut unfolded = ClientTreeChrome::default();
+    for groups in [
+        &mut unfolded.factory_auto_expanded,
+        &mut unfolded.factory_parked_expanded,
+        &mut unfolded.factory_idle_expanded,
+        &mut unfolded.factory_background_expanded,
+    ] {
+        groups.insert(workspace_id.to_owned());
+    }
+    unfolded.factory_expanded_lanes = snapshot
+        .tabs
+        .iter()
+        .filter(|tab| tab.workspace_id == workspace_id)
+        .map(|tab| tab.tab_id.clone())
+        .collect();
     let mut entries = Vec::new();
     super::sidebar_report::paused(|| {
         append_factory_space(
             &mut entries,
             snapshot,
-            &ClientTreeChrome::default(),
+            &unfolded,
             workspace_id,
             &rows,
             overlay,
