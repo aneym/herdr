@@ -20,11 +20,18 @@ fn pane_close_helper_exits_when_probe_or_close_never_answers() {
         ));
         let listener = UnixListener::bind(&socket_path).unwrap();
         listener.set_nonblocking(true).unwrap();
-        let mut helper = Command::new(env!("CARGO_BIN_EXE_herdr"))
+        let mut command = Command::new(env!("CARGO_BIN_EXE_herdr"));
+        // Run the same way from inside a Herdr pane as from CI: inherited
+        // HERDR_* variables must not reroute the helper.
+        for (key, _) in std::env::vars_os() {
+            if key.to_string_lossy().starts_with("HERDR_") {
+                command.env_remove(key);
+            }
+        }
+        let mut helper = command
             .args(["pane", "close", "w1:p1"])
             .env("HERDR_SOCKET_PATH", &socket_path)
             .env("HERDR_PANE_CLOSE_DELAY_MS", "0")
-            .env_remove("HERDR_PANE_ID")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
