@@ -91,8 +91,11 @@ def main():
     check("lab pane reports a Claude session", (agent.get("agent_session") or {}).get("value") == session, str(agent))
     cwd = agent.get("cwd") or ""
     encoded = "".join(c if c.isascii() and c.isalnum() else "-" for c in cwd)
-    record = json.dumps({"uuid": "hello", "type": "assistant",
-                         "message": {"content": [{"type": "text", "text": "Lab session ready."}]}})
+    # Enough lines to scroll, so the screenshot shows whether the transcript stays below the pane's cap.
+    record = "\n".join(json.dumps({"uuid": f"m{i}", "type": "assistant",
+                                   "message": {"content": [{"type": "text", "text": f"Earlier reply {i}."}]}})
+                        for i in range(60)) + "\n" + json.dumps({"uuid": "hello", "type": "assistant",
+                                                                 "message": {"content": [{"type": "text", "text": "Lab session ready."}]}})
     # The app reads ~/.claude of the machine it runs on: the lab HOME here, the guest's in a Space.
     if S.SPACE:
         transcript = f"/Users/lume/.claude/projects/{encoded}/{session}.jsonl"
@@ -110,7 +113,17 @@ def main():
     S.cmd({"cmd": "pane_mode", "id": pane, "mode": "chat"})
     st, ok = wait_state(lambda s: chat(s, pane).get("agent_state") == "idle"
                         and "hello:0" in chat(s, pane).get("items", []), 20)
-    check("chat shows the session's state and transcript, not 'No Claude session'", ok, json.dumps(chat(st, pane)))
+    check("chat shows the session's state and transcript, not 'No Claude session'", ok,
+          json.dumps({k: v for k, v in chat(st, pane).items() if k != "items"} | {"last_item": (chat(st, pane).get("items") or [""])[-1]}))
+    png = os.path.splitext(OUT)[0] + ".png"
+    if os.path.exists(png):
+        os.unlink(png)
+    S.cmd({"cmd": "shot", "out": png})
+    for _ in range(40):
+        if os.path.exists(png) and os.path.getsize(png) > 1000:
+            break
+        time.sleep(0.1)
+    say(f"shot: {png}")
     finish()
 
 

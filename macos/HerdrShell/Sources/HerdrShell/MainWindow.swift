@@ -107,6 +107,9 @@ final class PaneHostView: NSView {
                                                    onChat: { [weak self] in self?.capAction?(paneId, "chat") },
                                                    onFocus: { [weak self] in self?.capAction?(paneId, "focus") },
                                                    onFull: { [weak self] in self?.capAction?(paneId, "full") }))
+        // The cap sits under the transparent titlebar; with the titlebar's safe area its content
+        // slid down into the body, where a chat view covered its lower half.
+        v.safeAreaRegions = []
         capHosts[paneId] = v
         addSubview(v)
         return v
