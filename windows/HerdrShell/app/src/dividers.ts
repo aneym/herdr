@@ -55,6 +55,10 @@ export class Resizer {
   private inFlight = false;
   private startRatio = .5;
   private want: { divider: Divider; ratio: number } | null = null;
+  /** Ratios herdr answered with during this drag; the shown layout may not have caught up. */
+  private answered = new Map<string, number>();
+  /** Bumped by cancel, so a reply to an abandoned drag changes nothing. */
+  private generation = 0;
   constructor(
     private request: (pane: string, direction: string, amount: number) => Promise<ResizeAnswer>,
     /** Latest ratio herdr reported for a split id. */
@@ -65,7 +69,8 @@ export class Resizer {
     private onIdle: () => void,
   ) {}
   get busy() { return this.dragging || this.inFlight; }
-  began(d: Divider) { this.dragging = true; this.startRatio = this.currentRatio(d.splitId) ?? d.ratio; this.want = { divider: d, ratio: this.startRatio }; }
+  private ratio(d: Divider) { return this.answered.get(d.splitId) ?? this.currentRatio(d.splitId) ?? d.ratio; }
+  began(d: Divider) { this.answered.clear(); this.dragging = true; this.startRatio = this.ratio(d); this.want = { divider: d, ratio: this.startRatio }; }
   moved(d: Divider, deltaPx: number, extentPx: number) {
     if (extentPx <= 0) return;
     this.want = { divider: d, ratio: Math.min(.9, Math.max(.1, this.startRatio + deltaPx / extentPx)) };
@@ -78,16 +83,22 @@ export class Resizer {
     if (!this.inFlight) this.finish();
   }
   private finish() { this.want = null; this.onIdle(); }
+  /** Drops the drag and anything queued for it, as when the tab or machine changes. */
+  cancel() { this.generation++; this.dragging = false; this.inFlight = false; this.want = null; }
   private pump() {
     if (this.inFlight || !this.want) return;
     const { divider, ratio } = this.want;
-    const delta = ratio - (this.currentRatio(divider.splitId) ?? divider.ratio);
+    const delta = ratio - this.ratio(divider);
     if (Math.abs(delta) < (this.dragging ? .004 : .0005)) return;
     const call = resizeCall(divider, delta);
     this.inFlight = true;
+    const generation = this.generation;
     void this.request(call.pane, call.direction, Math.abs(delta)).catch(() => null).then(answer => {
+      if (generation !== this.generation) return;
       this.inFlight = false;
       if (answer) {
+        const split = answer.layout.splits?.find(sp => sp.id === divider.splitId);
+        if (split) this.answered.set(split.id, split.ratio);
         this.onLayout(answer.layout);
         // A resize herdr clamped or refused would repeat forever: stop chasing it.
         if (!answer.changed) this.want = null;

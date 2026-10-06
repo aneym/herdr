@@ -18,12 +18,17 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
   const snapshotLayout = snapshot.layouts?.find(l => l.tab_id === selected);
   const layout = held?.tab_id === selected ? held : snapshotLayout;
   const shown = useRef(layout); shown.current = layout;
+  const release = useRef<ReturnType<typeof setTimeout>>();
   const resizer = useMemo(() => new Resizer(
     async (pane, direction, amount) => ((await bridge.api(machine, "pane.resize", { pane_id: pane, direction, amount })) as { resize?: ResizeAnswer } | null)?.resize ?? null,
     id => shown.current?.splits?.find(s => s.id === id)?.ratio,
     next => setHeld(next),
-    () => setTimeout(() => setHeld(null), 200),
+    // Snapshots were held back; catch up with the latest once the drag has settled.
+    () => { clearTimeout(release.current); release.current = setTimeout(() => { if (!resizer.busy) setHeld(null); }, 200); },
   ), [machine]);
+  const stop = useRef<(() => void) | null>(null);
+  // A drag belongs to one tab on one machine: switching either, or unmounting, drops it.
+  useEffect(() => () => { stop.current?.(); resizer.cancel(); clearTimeout(release.current); setHeld(null); setDragging(null); }, [selected, resizer]);
   const panes = (snapshot.panes ?? []).filter(p => p.tab_id === selected && (!layout?.zoomed || p.pane_id === layout.focused_pane_id));
   const lines = layout && !layout.zoomed ? dividers(layout) : [];
   const grab = (event: ReactPointerEvent<HTMLDivElement>, d: Divider) => {
@@ -36,11 +41,15 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
     const along = (e: PointerEvent) => (d.vertical ? e.clientX : e.clientY) - start;
     const move = (e: PointerEvent) => resizer.moved(d, along(e), extentPx);
     const up = (e: PointerEvent) => { done(); resizer.ended(d, along(e), extentPx); };
-    const done = () => { window.removeEventListener("pointermove", move, true); window.removeEventListener("pointerup", up, true); window.removeEventListener("pointercancel", cancel, true); setDragging(null); };
+    const done = () => { window.removeEventListener("pointermove", move, true); window.removeEventListener("pointerup", up, true); window.removeEventListener("pointercancel", cancel, true); stop.current = null; setDragging(null); };
     const cancel = () => { done(); resizer.ended(d, 0, 0); };
     window.addEventListener("pointermove", move, true);
     window.addEventListener("pointerup", up, true);
     window.addEventListener("pointercancel", cancel, true);
+    stop.current = done;
+    clearTimeout(release.current);
+    // Hold the layout from the press on, so no snapshot redraws the panes mid-drag.
+    setHeld(layout);
     setDragging(d.splitId);
     resizer.began(d);
   };

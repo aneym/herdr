@@ -70,6 +70,16 @@ fn ctl_wheel_result(result: serde_json::Value) -> Result<(), String> {
     control::deliver_result("wheel", result)
 }
 
+#[tauri::command]
+fn ctl_drag_pin_result(result: serde_json::Value) -> Result<(), String> {
+    control::deliver_result("drag_pin", result)
+}
+
+#[tauri::command]
+fn ctl_drag_divider_result(result: serde_json::Value) -> Result<(), String> {
+    control::deliver_result("drag_divider", result)
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -89,6 +99,8 @@ fn main() {
             ctl_chat_result,
             ctl_wheel_result,
             ctl_appearance_result,
+            ctl_drag_pin_result,
+            ctl_drag_divider_result,
             bridge::machines_list,
             bridge::snapshot,
             bridge::api_request,

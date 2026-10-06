@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Drag PINNED rows and a split divider on the PC Shell, through the app's own pointer path.
+"""Drag pinned rows and a split divider on the PC Shell, through the app's own pointer path.
 
 Runs on Studio against the installed PC app (`pc.py ctl`) and the Studio herdr server it is
 attached to. The drag_pin hook presses, moves and releases at real points in the WebView, so
 the sidebar's handlers tell a drag from a click as for a physical mouse. It works on three
-throwaway pinned tabs in a throwaway workspace and closes that workspace at the end; Alex's
-own pins are checked to hold the same order before and after. Checks, as the Mac's
+throwaway tabs in a throwaway workspace and closes that workspace at the end. They pin as
+agent chats (`tab set-role agent`), not plain pins: pinning a plain tab under a configured
+[ui.sidebar.priority] re-sorts every plain pin, which could reorder Alex's own. AGENTS and
+PINNED rows share one drag path; the slot rules of both are in app/src/pinDrag.test.ts.
+Alex's agent and plain pins are checked to keep their order. Checks, as the Mac's
 macos/HerdrShell/scripts/check_pin_drag.py:
   - a drag up two rows moves the pin: the rows and Ctrl+1..9 follow at once, the server
     agrees, and the release selects nothing;
@@ -53,13 +56,13 @@ def ctl(obj):
     return reply
 
 
-def server_pins():
+def server_pins(agent=True):
     tabs = herdr("tab", "list")["tabs"]
-    return [t["tab_id"] for t in sorted((t for t in tabs if t.get("pin_index") is not None and t.get("role") != "agent"), key=lambda t: t["pin_index"])]
+    return [t["tab_id"] for t in sorted((t for t in tabs if t.get("pin_index") is not None and (t.get("role") == "agent") == agent), key=lambda t: t["pin_index"])]
 
 
 def ui_pins(state):
-    return [r["id"] for r in state.get("rows", []) if r["kind"] == "pinned"]
+    return [r["id"] for r in state.get("rows", []) if r["kind"] == "agent"]
 
 
 def wait(predicate, timeout=10):
@@ -74,7 +77,7 @@ def wait(predicate, timeout=10):
 
 
 def drag(tab, rows, esc=False):
-    ctl({"cmd": "drag_pin", "tab_id": tab, "section": "pinned", "rows": rows, "steps": 8, "interval_ms": 40, "esc": esc})
+    ctl({"cmd": "drag_pin", "tab_id": tab, "section": "agent", "rows": rows, "steps": 8, "interval_ms": 40, "esc": esc})
     return ctl({"cmd": "ui"})
 
 
@@ -85,14 +88,14 @@ def main():
     commit = ctl({"cmd": "ping"}).get("commit")
     start = ctl({"cmd": "ui"})
     selected_before = start.get("selected_tab")
-    alex_before = server_pins()
+    alex_before = (server_pins(True), server_pins(False))
     made = herdr("workspace", "create", "--label", "drag-check", "--no-focus")
     ws = made["workspace"]["workspace_id"]
     try:
         created = [herdr("tab", "create", "--workspace", ws, "--label", name, "--no-focus") for name in ("drag-b", "drag-c", "drag-free")]
         tabs = [made["tab"]["tab_id"]] + [c["tab"]["tab_id"] for c in created]
         for tab in tabs[:3]:
-            herdr("tab", "pin", tab)
+            herdr("tab", "set-role", tab, "agent")
         pins = [t for t in server_pins() if t in tabs[:3]]
         a, b, c = pins
         state = wait(lambda s: [t for t in ui_pins(s) if t in pins] == pins)
@@ -104,16 +107,19 @@ def main():
 
         state = drag(c, -2)
         check("drag up two rows reorders at once", mine(state) == [c, a, b], str(mine(state)))
-        hot = {r["id"]: r["hotkey"] for r in state["rows"] if r["kind"] == "pinned"}
-        check("ctrl numbers follow the new order", [hot[t] for t in (c, a, b)] == sorted(hot[t] for t in (c, a, b)), str(hot))
+        # Ctrl+1..9 run out after nine rows; compare the numbers the throwaway rows did get.
+        hot = {r["id"]: r["hotkey"] for r in state["rows"] if r["kind"] == "agent" and r["id"] in pins}
+        numbered = [hot[t] for t in (c, a, b) if hot.get(t) is not None]
+        check("ctrl numbers follow the new order", numbered == sorted(numbered) and (not numbered or hot.get(c) is not None), str(hot))
         check("the drag selects nothing", state.get("selected_tab") == tabs[3], str(state.get("selected_tab")))
         deadline = time.monotonic() + 10
         while [t for t in server_pins() if t in pins] != [c, a, b] and time.monotonic() < deadline:
             time.sleep(0.3)
         order = [t for t in server_pins() if t in pins]
         check("server holds the dragged order", order == [c, a, b], str(order))
-        state = wait(lambda s: mine(s) == [c, a, b], timeout=6)
-        check("the shown order matches the server after the pending order lapses", mine(state) == [c, a, b], str(mine(state)))
+        time.sleep(4.5)  # past the 4 s a dropped order is shown without the server
+        state = ctl({"cmd": "ui"})
+        check("the order still holds once only the server shows it", mine(state) == [c, a, b], str(mine(state)))
 
         state = drag(c, 2, esc=True)
         time.sleep(0.5)
@@ -145,6 +151,8 @@ def main():
             time.sleep(0.3)
         after = split()
         check("a divider drag right grows the left pane on the server", after["ratio"] > before["ratio"] + 0.05, f"{before['ratio']} -> {after['ratio']}")
+    except BaseException as error:  # noqa: BLE001 - recorded, then the cleanup and pin check still run
+        check("the run completes", False, repr(error))
     finally:
         herdr("workspace", "close", ws)
         if selected_before:
@@ -152,8 +160,8 @@ def main():
                 ctl({"cmd": "open", "tab_id": selected_before})
             except SystemExit:
                 pass
-    alex_after = server_pins()
-    check("Alex's pins keep their order", alex_after == alex_before, f"{alex_before} -> {alex_after}")
+        alex_after = (server_pins(True), server_pins(False))
+        check("Alex's pins keep their order", alex_after == alex_before, f"{alex_before} -> {alex_after}")
     lines.insert(0, f"app commit {commit}")
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text("\n".join(lines) + "\n")
