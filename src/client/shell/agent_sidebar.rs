@@ -508,6 +508,12 @@ pub(super) fn render_pinned_tab_row(
         pinned: true,
         collapsed: false,
     });
+    hits.pinned_rows.push(PinnedRowHit {
+        rect,
+        endpoint_id: None,
+        tab_id: row.tab_id.clone(),
+        slot: row.slot,
+    });
 }
 
 fn render_panel_list_entry(

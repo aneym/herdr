@@ -314,6 +314,12 @@ fn tab_command() -> Command {
                 .arg(option("priority", "N")),
         )
         .subcommand(id_command("unpin", "tab_id", "Unpin a tab"))
+        .subcommand(
+            Command::new("pin-move")
+                .about("Move a pinned tab in the pin order (0 is the top, as pin_index)")
+                .arg(required("tab_id", "TAB_ID"))
+                .arg(required("pin_index", "INDEX")),
+        )
         .subcommand(id_command("close", "tab_id", "Close a tab"))
 }
 

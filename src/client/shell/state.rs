@@ -110,6 +110,9 @@ pub(super) struct ShellHitMap {
     pub(super) agents: Vec<(Rect, String)>,
     pub(super) endpoint_agents: Vec<(Rect, ClientEndpointId, String)>,
     pub(super) endpoint_pins: Vec<(Rect, Rect, ClientEndpointId, String)>,
+    /// Pinned-section rows in either sidebar, in screen order; a press on one
+    /// may start a reorder drag.
+    pub(super) pinned_rows: Vec<PinnedRowHit>,
     /// Rows of the multi-machine pinned section that scroll under the wheel.
     pub(super) endpoint_pin_body: Rect,
     pub(super) endpoint_pin_max_scroll: usize,
@@ -221,6 +224,37 @@ pub(super) struct ClientTreeSpacePress {
     pub(super) start_row: u16,
 }
 
+/// One row of a pinned section. `endpoint_id` is `None` on the single-machine
+/// sidebar, which shows the active machine's pins.
+#[derive(Clone, Debug)]
+pub(super) struct PinnedRowHit {
+    pub(super) rect: Rect,
+    pub(super) endpoint_id: Option<ClientEndpointId>,
+    pub(super) tab_id: String,
+    /// Position among that machine's live pins, so the slot a row stands for
+    /// stays put while a drag previews the new order.
+    pub(super) slot: usize,
+}
+
+/// A left press on a pinned row: a reorder drag once the pointer leaves the
+/// row, the row's click when released in place.
+pub(super) struct ClientPinPress {
+    pub(super) endpoint_id: ClientEndpointId,
+    pub(super) aggregate: bool,
+    pub(super) tab_id: String,
+    pub(super) down: crossterm::event::MouseEvent,
+}
+
+/// The pin order a drag shows before the owning machine answers. `original`
+/// comes back on a cancel; a committed preview stands until that machine's
+/// next snapshot replaces it.
+pub(super) struct ClientPinPreview {
+    pub(super) endpoint_id: ClientEndpointId,
+    pub(super) original: Vec<crate::protocol::ClientShellPinnedTab>,
+    pub(super) applied: Vec<crate::protocol::ClientShellPinnedTab>,
+    pub(super) committed: bool,
+}
+
 pub(super) struct ClientTabPress {
     pub(super) tab_id: String,
     pub(super) workspace_id: String,
@@ -257,6 +291,13 @@ pub(super) enum ClientChromeDrag {
     Workspace {
         source_workspace_id: String,
         target: Option<(Option<String>, u16)>,
+    },
+    /// Reordering a pinned chat within its machine's pins. `slot` is where it
+    /// would land among them, `None` while the pointer is off the section.
+    Pin {
+        endpoint_id: ClientEndpointId,
+        tab_id: String,
+        slot: Option<usize>,
     },
     /// Reordering a space header inside the unified tree. `before` is the space
     /// to land in front of, or `None` for the end of the list.
@@ -1147,6 +1188,8 @@ pub(crate) struct ClientShellState {
     pub(super) detail_panel_press: Option<(u16, u16)>,
     pub(super) tab_press: Option<ClientTabPress>,
     pub(super) tree_tab_press: Option<ClientTabPress>,
+    pub(super) pin_press: Option<ClientPinPress>,
+    pub(super) pin_preview: Option<ClientPinPreview>,
     pub(super) collapsed_groups: HashSet<String>,
     pub(super) remote_collapsed_groups: HashMap<ClientEndpointId, HashSet<String>>,
     pub(super) tree_chrome: HashMap<ClientEndpointId, super::tree::ClientTreeChrome>,
@@ -1352,6 +1395,8 @@ impl ClientShellState {
             detail_panel_press: None,
             tab_press: None,
             tree_tab_press: None,
+            pin_press: None,
+            pin_preview: None,
             collapsed_groups: preferences.collapsed_groups.into_iter().collect(),
             remote_collapsed_groups,
             tree_chrome,
@@ -1707,6 +1752,7 @@ impl ClientShellState {
         self.tree_space_press = None;
         self.tab_press = None;
         self.tree_tab_press = None;
+        self.pin_press = None;
         self.workspace_scroll = 0;
         self.agent_scroll = 0;
         self.tab_scroll = 0;

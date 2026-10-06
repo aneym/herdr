@@ -127,6 +127,8 @@ pub enum Method {
     TabMove(TabMoveParams),
     #[serde(rename = "tab.set_pinned")]
     TabSetPinned(TabSetPinnedParams),
+    #[serde(rename = "tab.pin_move")]
+    TabPinMove(TabPinMoveParams),
     #[serde(rename = "tab.close")]
     TabClose(TabTarget),
     #[serde(rename = "agent.list")]

@@ -1046,6 +1046,26 @@ impl AppState {
         self.pinned_tabs.insert(position, PinnedTab { tab_id, priority });
     }
 
+    /// Move a pinned chat to `index` in pin order (past the end means last).
+    /// Its priority is pulled between its new neighbours' so the order stays
+    /// sorted by priority and a later `pin_tab` still lands where its
+    /// priority says. False when the chat is not pinned.
+    pub fn move_pinned_tab(&mut self, tab_id: &str, index: usize) -> bool {
+        let Some(from) = self.pinned_tab_index(tab_id) else {
+            return false;
+        };
+        let mut pin = self.pinned_tabs.remove(from);
+        let index = index.min(self.pinned_tabs.len());
+        if let Some(above) = index.checked_sub(1).and_then(|i| self.pinned_tabs.get(i)) {
+            pin.priority = pin.priority.min(above.priority);
+        }
+        if let Some(below) = self.pinned_tabs.get(index) {
+            pin.priority = pin.priority.max(below.priority);
+        }
+        self.pinned_tabs.insert(index, pin);
+        true
+    }
+
     pub fn unpin_tab(&mut self, tab_id: &str) -> bool {
         let Some(index) = self.pinned_tab_index(tab_id) else {
             return false;

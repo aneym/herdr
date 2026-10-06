@@ -1173,6 +1173,108 @@ mod tests {
         assert_eq!(app.state.session_name.as_deref(), Some("work"));
     }
 
+    /// A dragged pin order is the order a cold start and a live handoff
+    /// bring back, not a re-sort by priority.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn moved_pin_order_survives_session_restore_and_live_handoff() {
+        let _guard = config_env_lock().lock().unwrap();
+        let config_home = unique_temp_path("pin-order-config");
+        let original_config_home = std::env::var_os("XDG_CONFIG_HOME");
+        std::env::set_var("XDG_CONFIG_HOME", &config_home);
+        let mut config = Config::default();
+        config.terminal.default_shell = exiting_test_command().into();
+
+        let mut app = test_app();
+        let mut other = Workspace::test_new("other");
+        other.id = "w9".to_string();
+        app.state.workspaces = vec![Workspace::test_new("tabs"), other];
+        app.state.workspaces[0].id = "w1".to_string();
+        app.state.workspaces[0].test_add_tab(Some("two"));
+        app.state.active = Some(0);
+        let tabs = [
+            app.public_tab_id(0, 0).unwrap(),
+            app.public_tab_id(0, 1).unwrap(),
+            app.public_tab_id(1, 0).unwrap(),
+        ];
+        for (tab_id, priority) in tabs.iter().zip([None, Some(5), None]) {
+            app.handle_api_request(crate::api::schema::Request {
+                id: "pin".into(),
+                method: crate::api::schema::Method::TabSetPinned(
+                    crate::api::schema::TabSetPinnedParams {
+                        tab_id: tab_id.clone(),
+                        pinned: true,
+                        priority,
+                    },
+                ),
+            });
+        }
+        // Priority puts tabs[1] first; the drag moves tabs[2] above it.
+        app.handle_api_request(crate::api::schema::Request {
+            id: "move".into(),
+            method: crate::api::schema::Method::TabPinMove(crate::api::schema::TabPinMoveParams {
+                tab_id: tabs[2].clone(),
+                pin_index: 0,
+            }),
+        });
+        let expected = vec![tabs[2].clone(), tabs[1].clone(), tabs[0].clone()];
+        let order = |app: &App| -> Vec<String> {
+            app.state
+                .pinned_tabs
+                .iter()
+                .map(|pin| pin.tab_id.clone())
+                .collect()
+        };
+        assert_eq!(order(&app), expected);
+
+        let snapshot = crate::persist::capture(
+            &app.state.workspaces,
+            &app.state.terminals,
+            &app.terminal_runtimes,
+            app.state.active,
+            app.state.active_profile.clone(),
+            app.state.selected,
+            app.state.snapshot_ui_prefs(),
+        );
+        let session = crate::session::data_dir().join("session.json");
+        std::fs::create_dir_all(session.parent().unwrap()).unwrap();
+        std::fs::write(&session, serde_json::to_string(&snapshot).unwrap()).unwrap();
+
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut restored = App::new(
+            &config,
+            AppPolicy {
+                restore_session: true,
+                ..AppPolicy::TEST
+            },
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        assert_eq!(order(&restored), expected, "cold restore");
+
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut handed_off = App::new_from_handoff(
+            &config,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+            &snapshot,
+            &mut std::collections::HashMap::new(),
+        )
+        .unwrap();
+        assert_eq!(order(&handed_off), expected, "live handoff");
+
+        for app in [&mut app, &mut restored, &mut handed_off] {
+            crate::app::api::test_support::shutdown_test_runtimes(app);
+        }
+        match original_config_home {
+            Some(value) => std::env::set_var("XDG_CONFIG_HOME", value),
+            None => std::env::remove_var("XDG_CONFIG_HOME"),
+        }
+        let _ = std::fs::remove_dir_all(&config_home);
+    }
+
     fn unique_temp_path(name: &str) -> std::path::PathBuf {
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

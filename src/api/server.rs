@@ -657,6 +657,7 @@ pub(crate) fn api_method_name(method: &Method) -> &'static str {
         Method::TabRename(_) => "tab.rename",
         Method::TabMove(_) => "tab.move",
         Method::TabSetPinned(_) => "tab.set_pinned",
+        Method::TabPinMove(_) => "tab.pin_move",
         Method::TabClose(_) => "tab.close",
         Method::AgentList(_) => "agent.list",
         Method::AgentUsage(_) => "agent.usage",

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::api::schema::{
     EventData, EventEnvelope, EventKind, ResponseResult, TabCreateParams, TabListParams,
-    TabMoveParams, TabRenameParams, TabSetPinnedParams, TabTarget,
+    TabMoveParams, TabPinMoveParams, TabRenameParams, TabSetPinnedParams, TabTarget,
 };
 use crate::app::{App, Mode};
 
@@ -266,6 +266,62 @@ impl App {
             self.schedule_session_save();
             // API clients (Herdr Shell) refresh their snapshot on workspace
             // events; the pin order is carried by each tab's `pin_index`.
+            let workspace = self.workspace_info(ws_idx);
+            self.emit_event(EventEnvelope {
+                event: EventKind::WorkspaceUpdated,
+                data: EventData::WorkspaceUpdated { workspace },
+            });
+        }
+        let Some(tab) = self.tab_info(ws_idx, tab_idx) else {
+            return tab_not_found(id, &params.tab_id);
+        };
+        encode_success(id, ResponseResult::TabInfo { tab })
+    }
+
+    /// Move a pinned chat within the shared pin order. Every client draws the
+    /// pinned section and resolves Cmd+1..9 from this order, so a drag in any
+    /// client lands here and reaches the others through the next snapshot.
+    pub(super) fn handle_tab_pin_move(&mut self, id: String, params: TabPinMoveParams) -> String {
+        let Some((ws_idx, tab_idx)) = self.parse_tab_id(&params.tab_id) else {
+            return tab_not_found(id, &params.tab_id);
+        };
+        let Some(tab_id) = self.public_tab_id(ws_idx, tab_idx) else {
+            return tab_not_found(id, &params.tab_id);
+        };
+        if !self.state.is_tab_pinned(&tab_id) {
+            return encode_error(id, "tab_not_pinned", format!("tab {tab_id} is not pinned"));
+        }
+        if params.pin_index >= self.state.pinned_tabs.len() {
+            return encode_error(
+                id,
+                "pin_index_out_of_bounds",
+                format!(
+                    "pin_index {} is out of bounds for {} pins",
+                    params.pin_index,
+                    self.state.pinned_tabs.len()
+                ),
+            );
+        }
+        let before = self.state.pinned_tabs.clone();
+        self.state.move_pinned_tab(&tab_id, params.pin_index);
+        if self.state.pinned_tabs != before {
+            self.state.mark_session_dirty();
+            self.schedule_session_save();
+            self.emit_event(EventEnvelope {
+                event: EventKind::TabPinMoved,
+                data: EventData::TabPinMoved {
+                    tab_id: tab_id.clone(),
+                    workspace_id: self.public_workspace_id(ws_idx),
+                    pin_index: params.pin_index,
+                    pinned_tab_ids: self
+                        .state
+                        .pinned_tabs
+                        .iter()
+                        .map(|pin| pin.tab_id.clone())
+                        .collect(),
+                },
+            });
+            // Herdr Shell refreshes on workspace events, as for a pin toggle.
             let workspace = self.workspace_info(ws_idx);
             self.emit_event(EventEnvelope {
                 event: EventKind::WorkspaceUpdated,
@@ -632,6 +688,175 @@ mod tests {
         assert_eq!(
             crate::worktree::canonical_or_original(created_cwd),
             crate::worktree::canonical_or_original(&cached_cwd)
+        );
+        shutdown_test_runtimes(&mut app);
+    }
+
+    fn pin_test_app() -> (App, Vec<String>, crate::api::EventHub) {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub.clone(),
+        );
+        // Four chats over two spaces, so moves cross workspace boundaries.
+        let mut other = Workspace::test_new("other");
+        other.id = "w9".to_string();
+        app.state.workspaces = vec![Workspace::test_new("tabs"), other];
+        app.state.workspaces[0].id = "w1".to_string();
+        app.state.workspaces[0].test_add_tab(Some("two"));
+        app.state.workspaces[0].test_add_tab(Some("three"));
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        let tabs = vec![
+            app.public_tab_id(0, 0).unwrap(),
+            app.public_tab_id(0, 1).unwrap(),
+            app.public_tab_id(0, 2).unwrap(),
+            app.public_tab_id(1, 0).unwrap(),
+        ];
+        (app, tabs, event_hub)
+    }
+
+    fn pin_order(app: &App) -> Vec<String> {
+        app.state
+            .pinned_tabs
+            .iter()
+            .map(|pin| pin.tab_id.clone())
+            .collect()
+    }
+
+    fn set_pinned(app: &mut App, tab_id: &str, pinned: bool, priority: Option<i64>) {
+        let response = app.handle_tab_set_pinned(
+            "req".into(),
+            TabSetPinnedParams {
+                tab_id: tab_id.to_string(),
+                pinned,
+                priority,
+            },
+        );
+        assert!(
+            serde_json::from_str::<SuccessResponse>(&response).is_ok(),
+            "{response}"
+        );
+    }
+
+    fn pin_move(app: &mut App, tab_id: &str, pin_index: usize) -> serde_json::Value {
+        let response = app.handle_tab_pin_move(
+            "req".into(),
+            TabPinMoveParams {
+                tab_id: tab_id.to_string(),
+                pin_index,
+            },
+        );
+        serde_json::from_str(&response).unwrap()
+    }
+
+    #[test]
+    fn api_tab_pin_move_reorders_the_shared_pin_order() {
+        // (moved pin, target index, order after) from pins [a, b, c, d].
+        let cases: [(usize, usize, [usize; 4]); 6] = [
+            (2, 1, [0, 2, 1, 3]), // up one
+            (0, 2, [1, 2, 0, 3]), // down two
+            (3, 0, [3, 0, 1, 2]), // to the top
+            (0, 3, [1, 2, 3, 0]), // to the bottom
+            (1, 1, [0, 1, 2, 3]), // onto itself
+            (3, 3, [0, 1, 2, 3]), // already last
+        ];
+        for (moved, index, expected) in cases {
+            let (mut app, tabs, events) = pin_test_app();
+            for tab in &tabs {
+                set_pinned(&mut app, tab, true, None);
+            }
+            let seen = events.current_sequence();
+            let response = pin_move(&mut app, &tabs[moved], index);
+            assert_eq!(response["result"]["tab"]["pin_index"], index, "{response}");
+            let expected: Vec<String> = expected.iter().map(|i| tabs[*i].clone()).collect();
+            assert_eq!(pin_order(&app), expected, "move {moved} to {index}");
+            let moved_event = events
+                .events_after(seen)
+                .into_iter()
+                .find_map(|(_, event)| match event.data {
+                    EventData::TabPinMoved {
+                        tab_id,
+                        pin_index,
+                        pinned_tab_ids,
+                        ..
+                    } => Some((tab_id, pin_index, pinned_tab_ids)),
+                    _ => None,
+                });
+            if moved == index {
+                assert_eq!(moved_event, None, "a no-op move emits nothing");
+            } else {
+                assert_eq!(moved_event, Some((tabs[moved].clone(), index, expected)));
+            }
+            shutdown_test_runtimes(&mut app);
+        }
+    }
+
+    #[test]
+    fn api_tab_pin_move_rejects_bad_targets_and_keeps_priority_order() {
+        let (mut app, tabs, _events) = pin_test_app();
+        set_pinned(&mut app, &tabs[0], true, None);
+        set_pinned(&mut app, &tabs[1], true, None);
+        set_pinned(&mut app, &tabs[2], true, Some(5));
+        assert_eq!(
+            pin_order(&app),
+            vec![tabs[2].clone(), tabs[0].clone(), tabs[1].clone()]
+        );
+
+        let response = pin_move(&mut app, &tabs[0], 3);
+        assert_eq!(
+            response["error"]["code"], "pin_index_out_of_bounds",
+            "{response}"
+        );
+        let response = pin_move(&mut app, &tabs[3], 0);
+        assert_eq!(response["error"]["code"], "tab_not_pinned", "{response}");
+        let response = pin_move(&mut app, "w1:t99", 0);
+        assert_eq!(response["error"]["code"], "tab_not_found", "{response}");
+        assert_eq!(
+            pin_order(&app),
+            vec![tabs[2].clone(), tabs[0].clone(), tabs[1].clone()]
+        );
+
+        // A priority-0 chat dragged above the priority-5 one stays there when
+        // the next prioritized pin lands by priority.
+        pin_move(&mut app, &tabs[1], 0);
+        set_pinned(&mut app, &tabs[3], true, Some(5));
+        assert_eq!(
+            pin_order(&app),
+            vec![
+                tabs[1].clone(),
+                tabs[2].clone(),
+                tabs[3].clone(),
+                tabs[0].clone()
+            ]
+        );
+
+        // An unpin between a client's read and its move: the move applies to
+        // the order that is left, and a now-unpinned chat is refused.
+        set_pinned(&mut app, &tabs[2], false, None);
+        let response = pin_move(&mut app, &tabs[2], 0);
+        assert_eq!(response["error"]["code"], "tab_not_pinned", "{response}");
+        pin_move(&mut app, &tabs[0], 0);
+        assert_eq!(
+            pin_order(&app),
+            vec![tabs[0].clone(), tabs[1].clone(), tabs[3].clone()]
+        );
+        // A pin arriving between them lands by priority and the next move
+        // counts it.
+        set_pinned(&mut app, &tabs[2], true, None);
+        pin_move(&mut app, &tabs[2], 1);
+        assert_eq!(
+            pin_order(&app),
+            vec![
+                tabs[0].clone(),
+                tabs[2].clone(),
+                tabs[1].clone(),
+                tabs[3].clone()
+            ]
         );
         shutdown_test_runtimes(&mut app);
     }

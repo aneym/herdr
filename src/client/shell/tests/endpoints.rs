@@ -3080,6 +3080,146 @@ fn navigator_foreign_workspace_heading_keeps_the_workspace_target() {
     ));
 }
 
+/// A remote machine's pins reorder in the multi-machine sidebar: the drag
+/// previews within that machine's block only, and the drop reaches that
+/// machine while Local holds the surface.
+#[test]
+fn dragging_a_remote_pin_moves_it_on_its_own_machine() {
+    let (mut state, remote) = state_with_remote();
+    let mut local = state.snapshot.as_deref().expect("local snapshot").clone();
+    local.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+        tab_id: "tab_1".into(),
+        workspace_id: "ws_1".into(),
+    }];
+    state.set_snapshot(Box::new(local));
+    let mut snapshot = state
+        .endpoints
+        .iter()
+        .find(|endpoint| endpoint.endpoint_id == remote)
+        .and_then(|endpoint| endpoint.snapshot.clone())
+        .expect("remote snapshot");
+    let template = snapshot.tabs[0].clone();
+    snapshot.tabs = (1..=3)
+        .map(|number| ClientShellTab {
+            tab_id: format!("tab_{number}"),
+            number,
+            label: format!("chat {number}"),
+            focused: number == 1,
+            ..template.clone()
+        })
+        .collect();
+    snapshot.pinned_tabs = snapshot
+        .tabs
+        .iter()
+        .map(|tab| crate::protocol::ClientShellPinnedTab {
+            tab_id: tab.tab_id.clone(),
+            workspace_id: tab.workspace_id.clone(),
+        })
+        .collect();
+    state.set_endpoint_snapshot(&remote, snapshot);
+    let drawn = |state: &ClientShellState| {
+        state
+            .hits
+            .pinned_rows
+            .iter()
+            .map(|hit| (hit.endpoint_id.clone(), hit.tab_id.clone()))
+            .collect::<Vec<_>>()
+    };
+    state.compose(100, 30).expect("aggregate frame");
+    let rows = state.hits.pinned_rows.clone();
+    assert_eq!(rows.len(), 4, "{:?}", drawn(&state));
+    assert_eq!(rows[0].endpoint_id, Some(ClientEndpointId::Local));
+    let (local_row, remote_first, remote_last) = (rows[0].rect, rows[1].rect, rows[3].rect);
+    let mouse = |kind, rect: ratatui::layout::Rect, row: u16| {
+        crate::raw_input::RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind,
+            column: rect.x + 4,
+            row,
+            modifiers: KeyModifiers::empty(),
+        })
+    };
+
+    // The remote's last pin dragged onto Local's row stops at the top of its
+    // own block.
+    state.handle_raw_events(vec![mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        remote_last,
+        remote_last.y,
+    )]);
+    state.handle_raw_events(vec![mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        local_row,
+        local_row.y,
+    )]);
+    state.compose(100, 30).expect("aggregate frame");
+    let remote_tab = |tab: &str| (Some(remote.clone()), tab.to_owned());
+    assert_eq!(
+        drawn(&state),
+        [
+            (Some(ClientEndpointId::Local), "tab_1".to_owned()),
+            remote_tab("tab_3"),
+            remote_tab("tab_1"),
+            remote_tab("tab_2"),
+        ]
+    );
+    // Cmd digits follow the preview across machines at once.
+    assert_eq!(
+        state.aggregate_numbered_tabs().expect("pins")[..4],
+        [
+            (ClientEndpointId::Local, "tab_1".to_owned()),
+            (remote.clone(), "tab_3".to_owned()),
+            (remote.clone(), "tab_1".to_owned()),
+            (remote.clone(), "tab_2".to_owned()),
+        ]
+    );
+    let drop = state.handle_raw_events(vec![mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        remote_first,
+        remote_first.y,
+    )]);
+    assert!(
+        !drop
+            .actions
+            .iter()
+            .any(|action| matches!(action, ClientShellAction::ActivateEndpoint { .. })),
+        "a drop never activates the machine"
+    );
+
+    let sent = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut endpoints = crate::client::endpoint::EndpointRegistry::new(
+        CapturingTransport(Default::default()),
+        1,
+        Default::default(),
+    );
+    endpoints.insert(
+        remote.clone(),
+        CapturingTransport(sent.clone()),
+        1,
+        Default::default(),
+        false,
+    );
+    let mut commands = crate::client::endpoint_commands::EndpointCommands::default();
+    crate::client::shell_runtime::dispatch_client_shell_actions(
+        drop.actions,
+        &mut commands,
+        &mut endpoints,
+        Some(&mut state),
+        &mut Vec::new(),
+        &mut None,
+        None,
+    )
+    .unwrap();
+    let sent = sent.lock().unwrap().clone();
+    assert!(
+        matches!(sent.as_slice(), [crate::protocol::ClientMessage::ClientShellEndpointRequest {
+            boot_id, request }] if boot_id == "remote-boot"
+                && request.contains("tab.pin_move")
+                && request.contains("\"tab_id\":\"tab_3\"")
+                && request.contains("\"pin_index\":0")),
+        "remote received {sent:?}"
+    );
+}
+
 #[test]
 fn aggregate_pins_scroll_within_their_section_and_keep_the_divider_below_them() {
     let (mut state, remote) = state_with_remote();

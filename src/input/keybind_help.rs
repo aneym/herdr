@@ -145,6 +145,8 @@ pub(crate) fn keybind_help_groups(
                 entry(binding_label(&keybinds.next_tab), "next tab"),
                 entry(binding_label(&keybinds.move_tab_previous), "move tab left"),
                 entry(binding_label(&keybinds.move_tab_next), "move tab right"),
+                entry(binding_label(&keybinds.move_pin_up), "move pin up"),
+                entry(binding_label(&keybinds.move_pin_down), "move pin down"),
                 entry(indexed_label(&keybinds.switch_tab), "switch tab 1-9"),
                 entry(binding_label(&keybinds.close_tab), "close tab"),
             ],

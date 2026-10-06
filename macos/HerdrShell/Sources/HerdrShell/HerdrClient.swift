@@ -381,6 +381,11 @@ struct HerdrCommands {
         succeeded("tab.set_pinned", ["tab_id": tabId, "pinned": pinned])
     }
 
+    /// `tab.pin_move`: the pin's new place in its machine's shared pin order (0 is ⌘1).
+    func tabPinMove(tabId: String, pinIndex: Int) -> Bool {
+        succeeded("tab.pin_move", ["tab_id": tabId, "pin_index": pinIndex])
+    }
+
     /// `tab.rename`.
     func tabRename(tabId: String, label: String) -> Bool {
         succeeded("tab.rename", ["tab_id": tabId, "label": label])

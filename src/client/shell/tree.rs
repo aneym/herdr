@@ -382,6 +382,8 @@ pub(super) struct PinnedTabRow {
     pub(super) failed: bool,
     /// Cmd+1..9 slot this row owns (pin index + 1); zero when beyond 9.
     pub(super) shortcut: usize,
+    /// Position among this machine's live pins.
+    pub(super) slot: usize,
     pub(super) active: bool,
     /// Another machine's chat: its badge text and style, drawn after the space
     /// label. `None` on this machine's pins.
@@ -462,6 +464,7 @@ pub(super) fn pinned_tab_entries(
             done: tag.is_some_and(|tag| tag.done),
             failed: tag.is_some_and(|tag| tag.done && tag.attention == crate::factory_overlay::Attention::Act),
             shortcut: if index < 9 { index + 1 } else { 0 },
+            slot: index,
             active: snapshot.focused_workspace_id.as_deref() == Some(tab.workspace_id.as_str())
                 && tab.focused,
             machine: None,

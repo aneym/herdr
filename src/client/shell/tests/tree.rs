@@ -295,6 +295,179 @@ fn pinned_chats_top_the_tree_and_own_cmd_digits_in_pin_order() {
 
 }
 
+fn pin_mouse(kind: crossterm::event::MouseEventKind, column: u16, row: u16) -> RawInputEvent {
+    RawInputEvent::Mouse(MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: crossterm::event::KeyModifiers::empty(),
+    })
+}
+
+fn drawn_pins(state: &ClientShellState) -> Vec<String> {
+    state
+        .hits
+        .pinned_rows
+        .iter()
+        .map(|hit| hit.tab_id.clone())
+        .collect()
+}
+
+fn sent_methods(outcome: &ClientShellInput) -> Vec<crate::api::schema::Method> {
+    outcome
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            ClientShellAction::Endpoint { request, .. } => Some(request.method.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Mouse-first reorder: a pinned row dragged through the real input path
+/// previews its slot, sends `tab.pin_move` on release and never focuses the
+/// chat; Esc or a release off the section leaves the order alone; a press and
+/// release in place is still the row's click.
+#[test]
+fn dragging_a_pinned_chat_moves_its_pin_and_never_clicks() {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    let mut state = ClientShellState::new(config);
+    let mut snapshot = tree_snapshot();
+    snapshot.pinned_tabs = ["tab_1", "tab_2", "tab_3"]
+        .into_iter()
+        .map(|tab_id| crate::protocol::ClientShellPinnedTab {
+            tab_id: tab_id.into(),
+            workspace_id: if tab_id == "tab_3" { "ws_2" } else { "ws_1" }.into(),
+        })
+        .collect();
+    state.set_snapshot(Box::new(snapshot));
+    state.compose(80, 24).expect("frame");
+    assert_eq!(drawn_pins(&state), ["tab_1", "tab_2", "tab_3"]);
+    let slot = |state: &ClientShellState, index: usize| state.hits.pinned_rows[index].rect;
+    let (top, bottom) = (slot(&state, 0), slot(&state, 2));
+
+    // Drag the last pin to the top: the rows and Cmd digits follow at once.
+    state.handle_raw_events(vec![pin_mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        bottom.x + 4,
+        bottom.y,
+    )]);
+    state.handle_raw_events(vec![pin_mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        bottom.x + 4,
+        top.y + 1,
+    )]);
+    let drag = state.handle_raw_events(vec![pin_mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        top.x + 4,
+        top.y,
+    )]);
+    assert!(
+        drag.actions.is_empty(),
+        "a drag sends nothing until the drop"
+    );
+    state.compose(80, 24).expect("frame");
+    assert_eq!(drawn_pins(&state), ["tab_3", "tab_1", "tab_2"]);
+    let snapshot = state.snapshot.as_deref().expect("snapshot");
+    assert_eq!(
+        state.numbered_tab_ids(snapshot)[..3],
+        ["tab_3", "tab_1", "tab_2"]
+    );
+    let drop = state.handle_raw_events(vec![pin_mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        top.x + 4,
+        top.y,
+    )]);
+    assert!(
+        matches!(sent_methods(&drop)[..], [crate::api::schema::Method::TabPinMove(ref params)]
+            if params.tab_id == "tab_3" && params.pin_index == 0),
+        "{:?}",
+        sent_methods(&drop)
+    );
+    state.compose(80, 24).expect("frame");
+    assert_eq!(
+        drawn_pins(&state),
+        ["tab_3", "tab_1", "tab_2"],
+        "the drop stands until the server answers"
+    );
+
+    // Esc mid-drag puts the order back, and the release then does nothing.
+    let (first, last) = (slot(&state, 0), slot(&state, 2));
+    state.handle_raw_events(vec![pin_mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        first.x + 4,
+        first.y,
+    )]);
+    state.handle_raw_events(vec![pin_mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        last.x + 4,
+        last.y,
+    )]);
+    state.compose(80, 24).expect("frame");
+    assert_eq!(drawn_pins(&state), ["tab_1", "tab_2", "tab_3"]);
+    let esc = state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+        crossterm::event::KeyCode::Esc,
+        crossterm::event::KeyModifiers::empty(),
+    ))]);
+    assert!(esc.actions.is_empty(), "{:?}", sent_methods(&esc));
+    let release = state.handle_raw_events(vec![pin_mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        last.x + 4,
+        last.y,
+    )]);
+    assert!(
+        sent_methods(&release).is_empty(),
+        "{:?}",
+        sent_methods(&release)
+    );
+    state.compose(80, 24).expect("frame");
+    assert_eq!(drawn_pins(&state), ["tab_3", "tab_1", "tab_2"]);
+
+    // A release well below the section is a cancel.
+    state.handle_raw_events(vec![pin_mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        first.x + 4,
+        first.y,
+    )]);
+    state.handle_raw_events(vec![pin_mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        first.x + 4,
+        20,
+    )]);
+    let release = state.handle_raw_events(vec![pin_mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        first.x + 4,
+        20,
+    )]);
+    assert!(
+        sent_methods(&release).is_empty(),
+        "{:?}",
+        sent_methods(&release)
+    );
+    state.compose(80, 24).expect("frame");
+    assert_eq!(drawn_pins(&state), ["tab_3", "tab_1", "tab_2"]);
+
+    // A press and release in place is the row's click.
+    let middle = slot(&state, 1);
+    state.handle_raw_events(vec![pin_mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        middle.x + 4,
+        middle.y,
+    )]);
+    let click = state.handle_raw_events(vec![pin_mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        middle.x + 4,
+        middle.y,
+    )]);
+    assert!(
+        matches!(sent_methods(&click)[..], [crate::api::schema::Method::TabFocus(ref target)] if target.tab_id == "tab_1"),
+        "{:?}",
+        sent_methods(&click)
+    );
+}
+
 #[test]
 fn space_groups_keep_pinned_chats_above_the_groups() {
     let tree = ClientTreeChrome::default();

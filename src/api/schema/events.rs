@@ -48,6 +48,8 @@ pub enum Subscription {
     TabRenamed {},
     #[serde(rename = "tab.moved")]
     TabMoved {},
+    #[serde(rename = "tab.pin_moved")]
+    TabPinMoved {},
     #[serde(rename = "pane.created")]
     PaneCreated {},
     #[serde(rename = "pane.closed")]
@@ -152,6 +154,9 @@ pub enum EventMatch {
     TabMoved {
         tab_id: String,
     },
+    TabPinMoved {
+        tab_id: String,
+    },
     TabFocused {
         tab_id: String,
     },
@@ -207,6 +212,7 @@ pub enum EventKind {
     TabClosed,
     TabRenamed,
     TabMoved,
+    TabPinMoved,
     TabFocused,
     PaneCreated,
     PaneClosed,
@@ -238,6 +244,7 @@ impl EventKind {
             EventKind::TabClosed => "tab.closed",
             EventKind::TabRenamed => "tab.renamed",
             EventKind::TabMoved => "tab.moved",
+            EventKind::TabPinMoved => "tab.pin_moved",
             EventKind::TabFocused => "tab.focused",
             EventKind::PaneCreated => "pane.created",
             EventKind::PaneClosed => "pane.closed",
@@ -270,6 +277,7 @@ pub const KNOWN_EVENT_KINDS: &[EventKind] = &[
     EventKind::TabClosed,
     EventKind::TabRenamed,
     EventKind::TabMoved,
+    EventKind::TabPinMoved,
     EventKind::TabFocused,
     EventKind::PaneCreated,
     EventKind::PaneClosed,
@@ -298,6 +306,7 @@ pub const PLUGIN_HOOK_EVENT_KINDS: &[EventKind] = &[
     EventKind::TabClosed,
     EventKind::TabRenamed,
     EventKind::TabMoved,
+    EventKind::TabPinMoved,
     EventKind::TabFocused,
     EventKind::PaneCreated,
     EventKind::PaneClosed,
@@ -485,6 +494,14 @@ pub enum EventData {
         workspace_id: String,
         insert_index: usize,
         tabs: Vec<TabInfo>,
+    },
+    /// A pinned chat moved in the shared pin order; `pinned_tab_ids` is the
+    /// whole order after the move.
+    TabPinMoved {
+        tab_id: String,
+        workspace_id: String,
+        pin_index: usize,
+        pinned_tab_ids: Vec<String>,
     },
     TabFocused {
         tab_id: String,

@@ -149,6 +149,7 @@ impl ActiveSubscription {
             Subscription::TabFocused {} => Ok(event_subscription(EventKind::TabFocused)),
             Subscription::TabRenamed {} => Ok(event_subscription(EventKind::TabRenamed)),
             Subscription::TabMoved {} => Ok(event_subscription(EventKind::TabMoved)),
+            Subscription::TabPinMoved {} => Ok(event_subscription(EventKind::TabPinMoved)),
             Subscription::PaneCreated {} => Ok(event_subscription(EventKind::PaneCreated)),
             Subscription::PaneClosed {} => Ok(event_subscription(EventKind::PaneClosed)),
             Subscription::PaneUpdated {} => Ok(event_subscription(EventKind::PaneUpdated)),

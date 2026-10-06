@@ -104,6 +104,17 @@ final class TestHook {
             mouse(obj)
         case "drag_divider":
             dragDivider(obj)
+        case "drag_pin":
+            dragPin(obj)
+        case "pin_move":
+            // {"cmd":"pin_move","row":"pinned:<tab>","to":slot}: what a drop on that slot does.
+            guard let c = controller, let id = obj["row"] as? String, let to = obj["to"] as? Int else { return }
+            let rows = c.model.spacesRows(state: c.state)
+            let machine = PinDrag.machine(of: String(id.dropFirst("pinned:".count)))
+            let ids = rows.filter { $0.id.hasPrefix("pinned:") && PinDrag.machine(of: $0.tab ?? "") == machine }.compactMap(\.tab)
+            if let from = ids.firstIndex(of: String(id.dropFirst("pinned:".count))) {
+                PinDrag.shared.commit(model: c.model, ids: ids, from: from, to: to)
+            }
         case "new_tab":
             controller?.newTab(nil)
         case "panel_shot":
@@ -444,6 +455,61 @@ final class TestHook {
                 post(.leftMouseDragged, p)
             } else {
                 post(.leftMouseUp, p)
+                t.invalidate()
+                self?.dragRunning = false
+            }
+        }
+    }
+
+    /// {"cmd":"drag_pin","row":"pinned:<tab>","dy":48,"steps":8,"interval":0.05,"esc":false}: press
+    /// on the centre of a sidebar row, drag `dy` points (down positive) in `steps` moves and
+    /// release; with "esc" Esc goes in before the release. Events go through NSApp.sendEvent as a
+    /// physical mouse's do, so SwiftUI's own gestures tell a drag from a click. Returns at once;
+    /// `drag_running` in the state says when it is done.
+    private func dragPin(_ obj: [String: Any]) {
+        guard let c = controller, let id = obj["row"] as? String, let frame = c.state.rowFrames[id], !dragRunning else {
+            log("hook: drag_pin: no row \(obj["row"] ?? "?")"); return
+        }
+        let view = c.sidebarHostView
+        let safe = view.safeAreaRect
+        let topInset = view.isFlipped ? safe.minY : view.bounds.height - safe.maxY
+        // As the click hook: SwiftUI's frame is top-left origin inside the safe area.
+        func point(_ dy: CGFloat) -> NSPoint {
+            let yFromTop = topInset + frame.midY + dy
+            let local = NSPoint(x: safe.minX + frame.midX, y: view.isFlipped ? yFromTop : view.bounds.height - yFromTop)
+            return view.convert(local, to: nil)
+        }
+        let dy = CGFloat(obj["dy"] as? Double ?? Double(obj["dy"] as? Int ?? 0))
+        let steps = max(1, obj["steps"] as? Int ?? 8)
+        let interval = obj["interval"] as? Double ?? 0.05
+        let esc = obj["esc"] as? Bool ?? false
+        var n = 0
+        func post(_ type: NSEvent.EventType, _ p: NSPoint) {
+            n += 1
+            guard let ev = NSEvent.mouseEvent(with: type, location: p, modifierFlags: [],
+                                              timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: c.window.windowNumber,
+                                              context: nil, eventNumber: n, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1) else { return }
+            NSApp.sendEvent(ev)
+        }
+        dragRunning = true
+        delivered.append("drag_pin \(id) dy=\(dy) esc=\(esc) via NSApp.sendEvent")
+        post(.mouseMoved, point(0))
+        post(.leftMouseDown, point(0))
+        var i = 0
+        dragTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] t in
+            i += 1
+            if i <= steps {
+                post(.leftMouseDragged, point(dy * CGFloat(i) / CGFloat(steps)))
+            } else if esc && i == steps + 1 {
+                // Queued, not sent, so the app's key monitors see it as a typed Esc.
+                if let key = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                                              timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: c.window.windowNumber,
+                                              context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}",
+                                              isARepeat: false, keyCode: 53) {
+                    NSApp.postEvent(key, atStart: false)
+                }
+            } else {
+                post(.leftMouseUp, point(dy))
                 t.invalidate()
                 self?.dragRunning = false
             }
@@ -811,6 +877,9 @@ final class TestHook {
             "sidebar": ["orchestrator": rows(c.model.orchestrators), "lanes": rows(c.model.lanes),
                         "workflows": rows(c.model.workflows)],
             "spaces_rows": c.model.spacesRows(state: c.state).map { $0.dump },
+            // What ⌘1..9 select, in order (pins first).
+            "numbered_tabs": Array(c.model.numberedTabIds.prefix(9)),
+            "pin_drag": ["dragged": PinDrag.shared.dragged as Any? ?? NSNull(), "target": PinDrag.shared.target as Any? ?? NSNull()] as [String: Any],
             // Each tab row's context menu items, as a right-click shows them.
             "spaces_menus": Dictionary(c.model.spacesRows(state: c.state).filter { $0.tab != nil }
                 .map { ($0.id, RowMenu.items(for: $0, model: c.model).map(\.rawValue)) }, uniquingKeysWith: { a, _ in a }),

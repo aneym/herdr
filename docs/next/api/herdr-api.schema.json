@@ -424,6 +424,40 @@
               "type": "object"
             },
             {
+              "description": "A pinned chat moved in the shared pin order; `pinned_tab_ids` is the\nwhole order after the move.",
+              "properties": {
+                "pin_index": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "pinned_tab_ids": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "tab_id": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "tab_pin_moved",
+                  "type": "string"
+                },
+                "workspace_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "tab_id",
+                "workspace_id",
+                "pin_index",
+                "pinned_tab_ids"
+              ],
+              "type": "object"
+            },
+            {
               "properties": {
                 "tab_id": {
                   "type": "string"
@@ -743,6 +777,7 @@
             "tab_closed",
             "tab_renamed",
             "tab_moved",
+            "tab_pin_moved",
             "tab_focused",
             "pane_created",
             "pane_closed",
@@ -2090,6 +2125,22 @@
               "properties": {
                 "event": {
                   "const": "tab_moved",
+                  "type": "string"
+                },
+                "tab_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "event",
+                "tab_id"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "event": {
+                  "const": "tab_pin_moved",
                   "type": "string"
                 },
                 "tab_id": {
@@ -4318,6 +4369,18 @@
             {
               "properties": {
                 "type": {
+                  "const": "tab.pin_moved",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
                   "const": "pane.created",
                   "type": "string"
                 }
@@ -4549,6 +4612,24 @@
           "required": [
             "tab_id",
             "insert_index"
+          ],
+          "type": "object"
+        },
+        "TabPinMoveParams": {
+          "description": "Move a pinned chat to `pin_index` in the shared pin order (0 is the top,\nthe Cmd+1 slot), the numbering `TabInfo.pin_index` reports.",
+          "properties": {
+            "pin_index": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "tab_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "tab_id",
+            "pin_index"
           ],
           "type": "object"
         },
@@ -5631,6 +5712,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/TabSetPinnedParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "tab.pin_move",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/TabPinMoveParams"
             }
           },
           "required": [
@@ -7881,6 +7978,40 @@
               "type": "object"
             },
             {
+              "description": "A pinned chat moved in the shared pin order; `pinned_tab_ids` is the\nwhole order after the move.",
+              "properties": {
+                "pin_index": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "pinned_tab_ids": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "tab_id": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "tab_pin_moved",
+                  "type": "string"
+                },
+                "workspace_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "tab_id",
+                "workspace_id",
+                "pin_index",
+                "pinned_tab_ids"
+              ],
+              "type": "object"
+            },
+            {
               "properties": {
                 "tab_id": {
                   "type": "string"
@@ -8215,6 +8346,7 @@
             "tab_closed",
             "tab_renamed",
             "tab_moved",
+            "tab_pin_moved",
             "tab_focused",
             "pane_created",
             "pane_closed",

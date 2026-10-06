@@ -183,6 +183,8 @@ impl ClientShellState {
     ) -> Option<crate::client::frame_output::ComposedFrame> {
         self.last_composed_at = Some(std::time::Instant::now());
         self.selection_repaint_deadline = None;
+        // A pin drag the shell dropped (overlay, reset) leaves no preview behind.
+        self.settle_pin_preview();
         if self.last_composed_size != Some((cols, rows)) && self.mode == ClientShellMode::Navigate {
             self.reveal_navigation_workspace = true;
             self.reveal_mobile_workspace = true;
@@ -275,6 +277,20 @@ impl ClientShellState {
             },
         );
         super::sidebar_report::finish(self.config.preferences_path.as_deref());
+        // The pin being dragged sits in its previewed slot with a quiet fill.
+        if let Some(ClientChromeDrag::Pin {
+            endpoint_id,
+            tab_id,
+            slot: Some(_),
+        }) = &self.chrome_drag
+        {
+            for hit in self.hits.pinned_rows.iter().filter(|hit| {
+                &hit.tab_id == tab_id
+                    && hit.endpoint_id.as_ref().unwrap_or(&self.active_endpoint_id) == endpoint_id
+            }) {
+                buffer.set_style(hit.rect, Style::default().bg(self.config.palette.surface1));
+            }
+        }
         if let (Some(overlay), Some(panel)) = (
             self.factory_overlay
                 .as_deref()

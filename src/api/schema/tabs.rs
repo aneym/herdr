@@ -40,6 +40,14 @@ pub struct TabSetPinnedParams {
     pub priority: Option<i64>,
 }
 
+/// Move a pinned chat to `pin_index` in the shared pin order (0 is the top,
+/// the Cmd+1 slot), the numbering `TabInfo.pin_index` reports.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TabPinMoveParams {
+    pub tab_id: String,
+    pub pin_index: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TabMoveParams {
     pub tab_id: String,

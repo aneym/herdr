@@ -20,8 +20,9 @@ final class SidebarState: ObservableObject {
     /// Draw the rows without a ScrollView: only the in-process screenshot fallback sets it,
     /// because AppKit view caching does not draw a ScrollView's content.
     @Published var flat = false
-    /// Where each row was last drawn (view-local, top-left origin), by line id. Read only by the
-    /// test hook, which turns it into a real mouse click; not observed, so it never redraws.
+    /// Where each row was last drawn (view-local, top-left origin), by line id. Read by the test
+    /// hook, which turns it into a real mouse click, and by a pin drag for its slots; not
+    /// observed, so it never redraws.
     var rowFrames: [String: CGRect] = [:]
 
     /// Areas is the default once a lanes or areas file is present. Without one, the sidebar
@@ -174,6 +175,7 @@ struct SidebarView: View {
     @State private var resuming: Set<String> = []
     @State private var approved: Set<String> = []
     @State private var hoveredSpaceRow: String?
+    @ObservedObject private var pinDrag = PinDrag.shared
 
     /// Tokens for the effective mode; the view re-renders when the store changes.
     private var t: Tokens { theme.sidebarTokens }
@@ -208,7 +210,7 @@ struct SidebarView: View {
     private func rows(_ spaces: [SpacesRow]) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             if state.mode == .spaces {
-                ForEach(spaces.filter { $0.kind != .footerUsage && $0.kind != .footerHost }) { spacesRow($0, firstSpaceId: spaces.first { $0.kind == .space }?.id) }
+                ForEach(spaces.filter { $0.kind != .footerUsage && $0.kind != .footerHost }) { spacesRow($0, firstSpaceId: spaces.first { $0.kind == .space }?.id, all: spaces) }
             } else { ForEach(lines) { line in lineView(line) } }
         }
         .padding(.horizontal, 8)
@@ -253,7 +255,7 @@ struct SidebarView: View {
     }
 
 
-    private func spacesRow(_ row: SpacesRow, firstSpaceId: String?) -> some View {
+    private func spacesRow(_ row: SpacesRow, firstSpaceId: String?, all: [SpacesRow] = []) -> some View {
         let focusSpace = String(row.id.dropFirst(8)).components(separatedBy: ":").dropLast().joined(separator: ":")
         return SpacesRowView(
             row: row, t: t, firstSpaceId: firstSpaceId,
@@ -282,7 +284,9 @@ struct SidebarView: View {
                     }
                 }
             }
-        }.clickTarget(row.id)
+        }
+        .pinDraggable(row, rows: all, frames: { state.rowFrames }, drag: pinDrag, model: model, t: t)
+        .clickTarget(row.id)
     }
 
     private var goalMenu: some View {

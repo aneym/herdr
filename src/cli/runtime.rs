@@ -1,7 +1,7 @@
 use crate::api::schema::{
     Method, PaneFocusDirectionParams, PaneInputSetParams, PaneMoveParams, PaneRenameParams,
     PaneResizeParams, PaneSplitParams, PaneSwapParams, PaneTarget, PaneZoomParams, Request,
-    TabCreateParams, TabListParams, TabMoveParams, TabRenameParams, TabSetPinnedParams, TabTarget,
+    TabCreateParams, TabListParams, TabMoveParams, TabPinMoveParams, TabRenameParams, TabSetPinnedParams, TabTarget,
     WorkspaceCloseParams,
     WorkspaceCreateParams, WorkspaceListParams, WorkspaceRenameParams, WorkspaceTarget,
     WorktreeCreateParams, WorktreeListParams, WorktreeOpenParams, WorktreeRemoveParams,
@@ -75,6 +75,10 @@ pub(super) fn tab_move(params: TabMoveParams) -> std::io::Result<i32> {
 
 pub(super) fn tab_set_pinned(params: TabSetPinnedParams) -> std::io::Result<i32> {
     print_method_response("cli:tab:set_pinned", Method::TabSetPinned(params))
+}
+
+pub(super) fn tab_pin_move(params: TabPinMoveParams) -> std::io::Result<i32> {
+    print_method_response("cli:tab:pin_move", Method::TabPinMove(params))
 }
 
 pub(super) fn tab_close(tab_id: String) -> std::io::Result<i32> {

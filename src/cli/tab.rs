@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::api::schema::{Method, Request, TabCreateParams, TabListParams, TabMoveParams, TabRenameParams, TabSetPinnedParams, TabTarget};
+use crate::api::schema::{Method, Request, TabCreateParams, TabListParams, TabMoveParams, TabPinMoveParams, TabRenameParams, TabSetPinnedParams, TabTarget};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Placement {
@@ -24,6 +24,7 @@ pub(super) fn run_tab_command(args: &[String]) -> std::io::Result<i32> {
         "move" => tab_move(&args[1..]),
         "pin" => tab_pin(&args[1..]),
         "unpin" => tab_unpin(&args[1..]),
+        "pin-move" => tab_pin_move(&args[1..]),
         "close" => tab_close(&args[1..]),
         "help" | "--help" | "-h" => {
             print_tab_help();
@@ -348,6 +349,21 @@ fn tab_unpin(args: &[String]) -> std::io::Result<i32> {
     })
 }
 
+fn tab_pin_move(args: &[String]) -> std::io::Result<i32> {
+    let [raw_tab_id, raw_index] = args else {
+        eprintln!("usage: herdr tab pin-move <tab_id> <pin_index>");
+        return Ok(2);
+    };
+    let Ok(pin_index) = raw_index.parse::<usize>() else {
+        eprintln!("pin_index must be a non-negative integer (0 is the top pin)");
+        return Ok(2);
+    };
+    super::runtime::tab_pin_move(TabPinMoveParams {
+        tab_id: super::normalize_tab_id(raw_tab_id),
+        pin_index,
+    })
+}
+
 fn tab_close(args: &[String]) -> std::io::Result<i32> {
     let Some(raw_tab_id) = args.first() else {
         eprintln!("usage: herdr tab close <tab_id>");
@@ -373,6 +389,7 @@ fn print_tab_help() {
     eprintln!("  herdr tab move <tab_id> (--before <tab_id> | --after <tab_id> | --position <N>)");
     eprintln!("  herdr tab pin <tab_id> [--priority N]");
     eprintln!("  herdr tab unpin <tab_id>");
+    eprintln!("  herdr tab pin-move <tab_id> <pin_index>");
     eprintln!("  herdr tab close <tab_id>");
 }
 

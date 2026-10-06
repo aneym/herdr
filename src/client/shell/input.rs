@@ -366,6 +366,14 @@ impl ClientShellState {
             self.copy_input_queue.push_back(key);
             return;
         }
+        // Esc drops a pin drag before the key goes anywhere else.
+        if key.kind == KeyEventKind::Press
+            && key.code == KeyCode::Esc
+            && matches!(self.chrome_drag, Some(ClientChromeDrag::Pin { .. }))
+        {
+            outcome.repaint |= self.cancel_pin_drag();
+            return;
+        }
         let lease_key = crate::input::InputLeaseKey::new(LOCAL_INPUT_SOURCE, &key);
         let key = self.input_leases.normalize_press(&lease_key, key);
         match key.kind {

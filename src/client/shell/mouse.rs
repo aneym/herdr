@@ -1313,6 +1313,10 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
+                Some(ClientChromeDrag::Pin { .. }) => {
+                    self.drag_pin(point, outcome);
+                    return;
+                }
                 Some(ClientChromeDrag::TreeSpace { .. }) => {
                     let before = self.tree_space_drop_target_at(point);
                     if let Some(ClientChromeDrag::TreeSpace {
@@ -1344,6 +1348,10 @@ impl ClientShellState {
                         }
                     }
                 }
+                return;
+            }
+            if self.pin_press.is_some() {
+                self.start_pin_drag(mouse, outcome);
                 return;
             }
             if let Some(press) = self.tree_space_press.as_ref() {
@@ -1394,6 +1402,14 @@ impl ClientShellState {
                 self.tab_press = None;
                 self.tree_tab_press = None;
                 match drag {
+                    ClientChromeDrag::Pin {
+                        endpoint_id,
+                        tab_id,
+                        slot,
+                    } => {
+                        self.pin_press = None;
+                        self.drop_pin(endpoint_id, tab_id, slot, outcome);
+                    }
                     ClientChromeDrag::TreeSpace {
                         source_workspace_id,
                         before,
@@ -1539,25 +1555,12 @@ impl ClientShellState {
                 self.focus_factory_space_target(&press.workspace_id, outcome);
                 return;
             }
+            if let Some(press) = self.pin_press.take() {
+                self.release_pin_press(press, mouse, outcome);
+                return;
+            }
             if let Some(press) = self.tree_tab_press.take() {
-                let same_item = self.hits.tree_headers.iter().any(|hit| {
-                    hit.tab_id.as_deref() == Some(press.tab_id.as_str())
-                        && hit.workspace_id == press.workspace_id
-                        && super::contains(hit.rect, point)
-                });
-                if same_item {
-                    if mouse.modifiers.contains(crossterm::event::KeyModifiers::ALT) {
-                        self.change_detail_panel(
-                            crate::factory_overlay::tab_panel_key(&press.tab_id), false, outcome,
-                        );
-                    } else {
-                        self.push_endpoint_method(
-                            crate::api::schema::Method::TabFocus(crate::api::schema::TabTarget {
-                                tab_id: press.tab_id,
-                            }), outcome,
-                        );
-                    }
-                }
+                self.finish_tree_tab_press(press, mouse, outcome);
                 return;
             }
             if let Some(press) = self.tab_press.take() {
@@ -2220,6 +2223,7 @@ impl ClientShellState {
                 self.workspace_press = None;
                 self.tab_press = None;
                 self.tree_tab_press = None;
+                self.pin_press = None;
                 self.chrome_drag = None;
                 if super::contains(self.hits.sidebar_divider, point)
                     && !super::contains(self.hits.sidebar_toggle, point)
@@ -2357,6 +2361,9 @@ impl ClientShellState {
                     outcome.repaint = true;
                     outcome.resize = true;
                     self.persist_chrome_preferences(outcome);
+                    return;
+                }
+                if self.arm_pin_press(mouse) {
                     return;
                 }
                 if self.handle_tree_header_click(point, mouse, outcome) {
@@ -2735,7 +2742,36 @@ impl ClientShellState {
 
     /// Clicks on a space or tab header row in the unified tree view. Returns
     /// true when the click was consumed here.
-    fn handle_tree_header_click(
+    /// Release of a tagged tab-header press: a click on the same row focuses
+    /// the tab, or opens its detail panel with Alt held.
+    pub(super) fn finish_tree_tab_press(
+        &mut self,
+        press: ClientTabPress,
+        mouse: crossterm::event::MouseEvent,
+        outcome: &mut ClientShellInput,
+    ) {
+        let point = (mouse.column, mouse.row);
+        let same_item = self.hits.tree_headers.iter().any(|hit| {
+            hit.tab_id.as_deref() == Some(press.tab_id.as_str())
+                && hit.workspace_id == press.workspace_id
+                && super::contains(hit.rect, point)
+        });
+        if same_item {
+            if mouse.modifiers.contains(crossterm::event::KeyModifiers::ALT) {
+                self.change_detail_panel(
+                    crate::factory_overlay::tab_panel_key(&press.tab_id), false, outcome,
+                );
+            } else {
+                self.push_endpoint_method(
+                    crate::api::schema::Method::TabFocus(crate::api::schema::TabTarget {
+                        tab_id: press.tab_id,
+                    }), outcome,
+                );
+            }
+        }
+    }
+
+    pub(super) fn handle_tree_header_click(
         &mut self,
         point: (u16, u16),
         mouse: crossterm::event::MouseEvent,

@@ -47,6 +47,7 @@ const CLIENT_SHELL_METHODS: &[&str] = &[
     "tab.create",
     "tab.focus",
     "tab.move",
+    "tab.pin_move",
     "tab.rename",
     "tab.set_pinned",
     "workspace.close",
@@ -78,7 +79,7 @@ pub(crate) fn supports_client_shell_method(method: &Method) -> bool {
 /// this server from its aggregate sidebar, with its surface handed to another
 /// machine, may still send them; they apply as the public socket request does.
 pub(crate) fn client_shell_method_is_surface_independent(method: &Method) -> bool {
-    matches!(method, Method::TabSetPinned(_))
+    matches!(method, Method::TabSetPinned(_) | Method::TabPinMove(_))
 }
 
 pub(crate) fn error_response(id: String, code: &str, message: impl Into<String>) -> String {
@@ -323,6 +324,14 @@ mod tests {
                 .map(|digest| !digest.is_empty()),
             Some(true),
             "tab.set_pinned must advertise a shape"
+        );
+        assert_eq!(
+            actual
+                .remove("tab.pin_move")
+                .as_deref()
+                .map(|digest| !digest.is_empty()),
+            Some(true),
+            "tab.pin_move must advertise a shape"
         );
         // Profile methods are newly advertised on the client shell lane. Their
         // shapes are not part of the original endpoint v1 fixture.

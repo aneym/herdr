@@ -317,11 +317,12 @@ struct TabClassifier {
 extension HerdrModel {
     /// The shared pin order owns the numbered slots on every surface.
     var numberedTabIds: [String] {
-        let pinned = (snapshot?.tabs ?? []).filter { $0.pin_index != nil }
-            .sorted { ($0.pin_index ?? 0) < ($1.pin_index ?? 0) }.map(\.tab_id)
+        // A dropped pin order counts before its machine reports it (PinDrag).
+        let pinned = PinDrag.shared.ordered((snapshot?.tabs ?? []).filter { $0.pin_index != nil }
+            .sorted { ($0.pin_index ?? 0) < ($1.pin_index ?? 0) }.map(\.tab_id))
         let remote = machines.flatMap { machine in
-            (machine.snapshot?.tabs ?? []).filter { $0.pin_index != nil }
-                .sorted { ($0.pin_index ?? 0) < ($1.pin_index ?? 0) }.map(\.tab_id)
+            PinDrag.shared.ordered((machine.snapshot?.tabs ?? []).filter { $0.pin_index != nil }
+                .sorted { ($0.pin_index ?? 0) < ($1.pin_index ?? 0) }.map(\.tab_id))
         }
         var seen = Set<String>()
         return (pinned + remote + allRowsInOrder.map(\.id)).filter { seen.insert($0).inserted }
@@ -371,6 +372,7 @@ extension HerdrModel {
                 rows[i].trailing = rows[i].trailing.replacingOccurrences(of: "⌘1..9", with: "")
             }
         }
+        rows = PinDrag.shared.reorder(rows)
         guard !machines.isEmpty else { return rows }
         // Machines go after the local spaces and before the footer, so no local row moves.
         let footer = rows.firstIndex { $0.kind == .footerUsage || $0.kind == .footerHost } ?? rows.endIndex

@@ -347,6 +347,8 @@ pub struct Keybinds {
     pub next_tab: ActionKeybinds,
     pub move_tab_previous: ActionKeybinds,
     pub move_tab_next: ActionKeybinds,
+    pub move_pin_up: ActionKeybinds,
+    pub move_pin_down: ActionKeybinds,
     pub switch_tab: Vec<IndexedKeybind>,
     pub switch_workspace: Vec<IndexedKeybind>,
     pub close_tab: ActionKeybinds,
@@ -524,6 +526,8 @@ impl Config {
             next_tab: empty_action!(),
             move_tab_previous: empty_action!(),
             move_tab_next: empty_action!(),
+            move_pin_up: empty_action!(),
+            move_pin_down: empty_action!(),
             switch_tab: Vec::new(),
             switch_workspace: Vec::new(),
             close_tab: empty_action!(),
@@ -670,6 +674,8 @@ impl Config {
             apply_action!(keybinds.next_tab, next_tab, source);
             apply_action!(keybinds.move_tab_previous, move_tab_previous, source);
             apply_action!(keybinds.move_tab_next, move_tab_next, source);
+            apply_action!(keybinds.move_pin_up, move_pin_up, source);
+            apply_action!(keybinds.move_pin_down, move_pin_down, source);
             apply_indexed!(
                 keybinds.switch_tab,
                 switch_tab,

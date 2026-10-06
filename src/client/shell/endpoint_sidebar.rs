@@ -522,6 +522,9 @@ pub(super) fn render_expanded(
             let hit_start = hits.tree_headers.len();
             super::agent_sidebar::render_pinned_tab_row(buffer, rect, &row, config, hits);
             hits.tree_headers.truncate(hit_start);
+            if let Some(hit) = hits.pinned_rows.last_mut() {
+                hit.endpoint_id = Some(endpoint_id.clone());
+            }
             // No pin toggle on pinned rows: unpinning is in the row's context menu.
             hits.endpoint_pins
                 .push((rect, Rect::default(), endpoint_id, row.tab_id));

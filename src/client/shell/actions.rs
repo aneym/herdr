@@ -300,6 +300,19 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
+                if matches!(
+                    action,
+                    crate::input::KeybindAction::MovePinUp
+                        | crate::input::KeybindAction::MovePinDown
+                ) {
+                    let delta = if action == crate::input::KeybindAction::MovePinUp {
+                        -1
+                    } else {
+                        1
+                    };
+                    self.move_focused_pin(delta, outcome);
+                    return;
+                }
                 if action == crate::input::KeybindAction::EnterResizeMode {
                     self.mode = ClientShellMode::Resize;
                     outcome.repaint = true;
