@@ -129,7 +129,32 @@ impl ClientShellState {
         let surface_available = self.snapshot.is_some() && self.pane_surface.is_some();
         let empty_collapsed_groups = HashSet::new();
         let mut targets = Vec::new();
-        for endpoint in &self.endpoints {
+        let shared_list = self.endpoints.len() > 1 && !mobile;
+        if shared_list {
+            // Several machines share one spaces list; walk it as drawn.
+            for row in super::endpoint_sidebar::space_list_rows_for(
+                &self.endpoints,
+                &self.collapsed_groups,
+                &self.remote_collapsed_groups,
+                self.config.factory.enabled,
+                self.sidebar_collapsed && surface_available,
+            ) {
+                let endpoint = &self.endpoints[row.endpoint];
+                if endpoint.status != ClientEndpointStatus::Online {
+                    continue;
+                }
+                let Some(snapshot) = endpoint.snapshot.as_deref() else {
+                    continue;
+                };
+                targets.push(WorkspaceNavigationTarget {
+                    endpoint_id: endpoint.endpoint_id.clone(),
+                    workspace_id: snapshot.workspaces[row.entry.index].workspace_id.clone(),
+                    boot_id: snapshot.boot_id.clone(),
+                    generation: endpoint.snapshot_generation,
+                });
+            }
+        }
+        for endpoint in self.endpoints.iter().filter(|_| !shared_list) {
             if endpoint.status != ClientEndpointStatus::Online {
                 continue;
             }
@@ -182,7 +207,6 @@ impl ClientShellState {
             None => 0,
         };
         let target = targets.swap_remove(next);
-        self.collapsed_endpoints.remove(&target.endpoint_id);
         if self.endpoints.len() == 1 && !mobile {
             self.reveal_workspace(&target.workspace_id);
         }

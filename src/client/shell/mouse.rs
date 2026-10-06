@@ -2300,9 +2300,6 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
-                if self.handle_endpoint_machine_click(point, outcome) {
-                    return;
-                }
                 if super::contains(self.hits.global_launcher, point) {
                     self.toggle_global_menu();
                     outcome.repaint = true;

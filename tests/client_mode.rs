@@ -777,7 +777,7 @@ fn sidebar_row_click_ignores_notice_borders() {
 fn sidebar_row_click_tracks_restored_workspace_count() {
     for restored in [false, true] {
         let screen = format!(
-            " machines                │\n                         │\n ▾ Local                 │local-returned in pane output\n{}   · local-returned      └─────────────────\n",
+            " pinned                  │\n   remote chat  ◇ remote │\n spaces                  │local-returned in pane output\n{}   · local-returned      └─────────────────\n",
             if restored { "   · restored            │\n" } else { "" }
         );
         let row = if restored { 5 } else { 4 };
@@ -962,6 +962,17 @@ fn federated_client_starts_without_local_and_survives_its_restart() {
         .to_string(),
     );
     let remote_pane = created["result"]["root_pane"]["pane_id"].as_str().unwrap();
+    // Only another machine's chats join the spaces list; a pin makes this plain
+    // shell one, so its space has a row to click back to.
+    let pinned = send_json_request(
+        &remote_api,
+        &serde_json::json!({
+            "id": "remote-pin", "method": "tab.set_pinned",
+            "params": {"tab_id": created["result"]["root_pane"]["tab_id"], "pinned": true},
+        })
+        .to_string(),
+    );
+    assert!(pinned.get("error").is_none(), "{pinned}");
     send_pane_shell_command(&remote_api, remote_pane, "printf 'REMOTE_INITIAL_FRAME\\n'");
 
     fs::create_dir_all(config_home.join(app_dir_name())).unwrap();
@@ -1169,8 +1180,10 @@ fn federated_client_starts_without_local_and_survives_its_restart() {
             "Local input must become usable while the remote bridge remains stopped"
         );
     }
+    // The remote space's row carries its machine badge, so a narrow sidebar
+    // shortens the label; its prefix still finds the row.
     input
-        .write_all(&sidebar_row_click(&screen_text(), "remote-ready"))
+        .write_all(&sidebar_row_click(&screen_text(), "remote-r"))
         .unwrap();
     assert!(wait_until(
         Duration::from_secs(10),

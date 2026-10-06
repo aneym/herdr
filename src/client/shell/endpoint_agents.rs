@@ -15,7 +15,12 @@ pub(super) fn render_collapsed(
         if row.agent.focused {
             buffer.set_style(rect, Style::default().bg(config.palette.active_row_bg));
         }
-        let initial = row.machine_label.chars().next().unwrap_or('?');
+        // Only another machine's chat names its machine; local rows have no badge.
+        let initial = if row.endpoint_id.is_local() {
+            ' '
+        } else {
+            row.machine_label.chars().next().unwrap_or('?')
+        };
         put_text(
             buffer,
             rect.x,
@@ -49,6 +54,7 @@ pub(super) fn render_expanded(
     endpoints: &[ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
     config: &ClientShellConfig,
+    diagnostics: &super::machine_diagnostics::MachineDiagnostics,
     agent_scroll: &mut usize,
     hits: &mut ShellHitMap,
 ) {
@@ -73,15 +79,55 @@ pub(super) fn render_expanded(
         |row| row.agent.rows.len(),
         |buffer, rect, row, hits| {
             let pin = super::agent_sidebar::chat_pin_rect(rect);
-            let text_rect = Rect::new(rect.x, rect.y, rect.width.saturating_sub(pin.width), rect.height);
+            let endpoint = endpoints
+                .iter()
+                .find(|endpoint| endpoint.endpoint_id == row.endpoint_id);
+            // Another machine's chat carries its badge one cell before the pin column.
+            let badge_area = rect.width.saturating_sub(pin.width).saturating_sub(1);
+            let badge = endpoint.map_or(0, |endpoint| {
+                super::endpoint_sidebar::render_machine_badge(
+                    buffer,
+                    Rect::new(rect.x, rect.y, badge_area, 1),
+                    endpoint,
+                    diagnostics,
+                    &config.palette,
+                    hits,
+                )
+            });
+            let text_rect = Rect::new(
+                rect.x,
+                rect.y,
+                if badge > 0 {
+                    badge_area.saturating_sub(badge)
+                } else {
+                    rect.width.saturating_sub(pin.width)
+                },
+                rect.height,
+            );
             super::agent_sidebar::render_agent_row(buffer, text_rect, &row.agent, config);
-            let pinned = endpoints.iter().find(|endpoint| endpoint.endpoint_id == row.endpoint_id)
+            let pinned = endpoint
                 .and_then(|endpoint| endpoint.snapshot.as_deref())
-                .is_some_and(|snapshot| snapshot.pinned_tabs.iter().any(|pin| pin.tab_id == row.agent.tab_id));
-            put_text(buffer, pin.x, pin.y, pin.width, "⚲ ", Style::default()
-                .fg(if pinned { config.palette.accent } else { config.palette.overlay0 }));
+                .is_some_and(|snapshot| {
+                    snapshot
+                        .pinned_tabs
+                        .iter()
+                        .any(|pin| pin.tab_id == row.agent.tab_id)
+                });
+            put_text(
+                buffer,
+                pin.x,
+                pin.y,
+                pin.width,
+                "⚲ ",
+                Style::default().fg(if pinned {
+                    config.palette.accent
+                } else {
+                    config.palette.overlay0
+                }),
+            );
             // Only the toggle intercepts the normal pane-row click.
-            hits.endpoint_pins.push((pin, pin, row.endpoint_id.clone(), row.agent.tab_id.clone()));
+            hits.endpoint_pins
+                .push((pin, pin, row.endpoint_id.clone(), row.agent.tab_id.clone()));
             if row.stale {
                 buffer.set_style(
                     rect,
@@ -151,12 +197,10 @@ fn agent_rows(
                     .agents
                     .iter()
                     .filter_map(|agent| {
-                        super::agent_sidebar::agent_row(
-                            snapshot,
-                            &agent.pane_id,
-                            config,
-                            Some(&endpoint.label),
-                        )
+                        // The machine is the row's badge, not a token: a remote
+                        // row names it once and a local row not at all. A pane
+                        // running a remote shell still names its own host.
+                        super::agent_sidebar::agent_row(snapshot, &agent.pane_id, config, None)
                     })
                     .map(|agent| ((endpoint.endpoint_id.clone(), agent.pane_id.clone()), agent))
                     .collect::<Vec<_>>()

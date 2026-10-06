@@ -161,7 +161,7 @@ pub(super) fn aggregate_agent_rows<'a>(
 }
 
 fn sort_aggregate_rows(
-    rows: &mut [AggregateAgentRow<'_>],
+    rows: &mut Vec<AggregateAgentRow<'_>>,
     sort: crate::config::AgentPanelSortConfig,
 ) {
     if sort == crate::config::AgentPanelSortConfig::Priority {
@@ -172,6 +172,28 @@ fn sort_aggregate_rows(
                 std::cmp::Reverse(row.recency),
             )
         });
+    } else {
+        // One spaces list across machines: another machine's chat follows the
+        // chats of the space whose label its workspace shares, as the spaces
+        // list folds that workspace into the space's row.
+        let mut first = HashMap::<String, usize>::new();
+        let keys = rows
+            .iter()
+            .enumerate()
+            .map(|(index, row)| {
+                let label = row
+                    .endpoint
+                    .snapshot
+                    .workspaces
+                    .iter()
+                    .find(|workspace| workspace.workspace_id == row.agent.workspace_id)
+                    .map_or("", |workspace| workspace.label.as_str());
+                *first.entry(label.trim().to_lowercase()).or_insert(index)
+            })
+            .collect::<Vec<_>>();
+        let mut keyed = keys.into_iter().zip(rows.drain(..)).collect::<Vec<_>>();
+        keyed.sort_by_key(|(key, _)| *key);
+        rows.extend(keyed.into_iter().map(|(_, row)| row));
     }
 }
 

@@ -33,10 +33,10 @@ pub(crate) struct ClientShellEndpoint {
     pub(crate) methods: Option<HashSet<String>>,
 }
 
+/// A machine badge on a row: hovering it shows the machine's diagnostic and a
+/// click reopens its sign-in or error notice.
 pub(super) struct MachineHit {
-    pub(super) rect: Rect,
     pub(super) status_badge: Rect,
-    pub(super) collapse_toggle: Rect,
     pub(super) endpoint_id: ClientEndpointId,
 }
 
@@ -102,10 +102,6 @@ impl ClientShellState {
         {
             self.select_unavailable_local();
         }
-        self.collapsed_endpoints.retain(|endpoint_id| {
-            next.iter()
-                .any(|endpoint| &endpoint.endpoint_id == endpoint_id)
-        });
         self.endpoints = next;
         self.sync_active_factory_overlay();
     }

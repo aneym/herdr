@@ -42,42 +42,6 @@ impl ClientShellState {
         );
     }
 
-    pub(super) fn handle_endpoint_machine_click(
-        &mut self,
-        point: (u16, u16),
-        outcome: &mut ClientShellInput,
-    ) -> bool {
-        let Some(hit) = self
-            .hits
-            .machines
-            .iter()
-            .find(|hit| super::contains(hit.rect, point))
-        else {
-            return false;
-        };
-        let endpoint_id = hit.endpoint_id.clone();
-        let collapse_toggle = super::contains(hit.collapse_toggle, point);
-        if collapse_toggle || endpoint_id == self.active_endpoint_id {
-            if !self.collapsed_endpoints.remove(&endpoint_id) {
-                self.collapsed_endpoints.insert(endpoint_id.clone());
-            }
-            outcome.repaint = true;
-            if !collapse_toggle && endpoint_id.is_local() {
-                self.activate_endpoint(endpoint_id, outcome);
-            }
-        } else if endpoint_id.is_local() || self.endpoint_is_online(&endpoint_id) {
-            outcome.actions.push(ClientShellAction::ActivateEndpoint {
-                endpoint_id,
-                target: None,
-            });
-        } else {
-            let label = self.endpoint_label(&endpoint_id).to_owned();
-            self.receive_endpoint_unavailable(format!("{label} is not ready"));
-            outcome.repaint = true;
-        }
-        true
-    }
-
     /// Pin or unpin a chat on whichever endpoint owns it; that endpoint owns
     /// the pin order, so the next snapshot redraws the section.
     pub(super) fn toggle_endpoint_chat_pin(

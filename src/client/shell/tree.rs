@@ -383,6 +383,9 @@ pub(super) struct PinnedTabRow {
     /// Cmd+1..9 slot this row owns (pin index + 1); zero when beyond 9.
     pub(super) shortcut: usize,
     pub(super) active: bool,
+    /// Another machine's chat: its badge text and style, drawn after the space
+    /// label. `None` on this machine's pins.
+    pub(super) machine: Option<(String, ratatui::style::Style)>,
 }
 
 /// The pinned section, in endpoint pin order. Pins are a shared session fact,
@@ -461,6 +464,7 @@ pub(super) fn pinned_tab_entries(
             shortcut: if index < 9 { index + 1 } else { 0 },
             active: snapshot.focused_workspace_id.as_deref() == Some(tab.workspace_id.as_str())
                 && tab.focused,
+            machine: None,
         }));
     }
     if out.len() == 1 {

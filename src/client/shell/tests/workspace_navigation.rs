@@ -123,7 +123,11 @@ fn pane_visibility_overrides_workspace_in_agent_rows_and_navigation() {
         ),
         ["pane_work"]
     );
-    assert!(state.hits.agents.iter().any(|(_, pane)| pane == "pane_work"));
+    assert!(state
+        .hits
+        .agents
+        .iter()
+        .any(|(_, pane)| pane == "pane_work"));
     assert!(state
         .hits
         .agents
@@ -169,10 +173,30 @@ fn grouped_workspaces() -> ClientShellSnapshot {
     projected
 }
 
+/// Another machine's workspaces as spaces of their own, each holding a chat, so
+/// every one keeps a row in the shared spaces list.
+fn remote_spaces(mut projected: ClientShellSnapshot) -> ClientShellSnapshot {
+    for workspace in &mut projected.workspaces {
+        workspace.label = format!("remote-{}", workspace.workspace_id);
+    }
+    projected.agents = projected
+        .workspaces
+        .iter()
+        .map(|workspace| {
+            let mut chat = agent("remote", crate::api::schema::AgentStatus::Idle, 0);
+            chat.workspace_id = workspace.workspace_id.clone();
+            chat.pane_id = format!("pane_{}", workspace.workspace_id);
+            chat
+        })
+        .collect();
+    projected
+}
+
 fn navigation_state(mut projected: ClientShellSnapshot) -> (ClientShellState, ClientEndpointId) {
     let (mut state, remote) = state_with_remote();
     state.set_snapshot(Box::new(projected.clone()));
     projected.boot_id = "remote-boot".into();
+    let projected = remote_spaces(projected);
     state.set_endpoint_snapshot(&remote, Box::new(projected));
     (state, remote)
 }
@@ -393,7 +417,7 @@ fn foreign_preview_blocks_keyboard_actions_but_keeps_active_action_context() {
         }
     }
     assert_selected(&state, &remote, "ws_1");
-    let mut remote_snapshot = workspaces(2);
+    let mut remote_snapshot = remote_spaces(workspaces(2));
     remote_snapshot.boot_id = "remote-boot".into();
     state.set_endpoint_snapshot(&remote, Box::new(remote_snapshot));
     preview_key(&mut state, b"\x1b[B");
@@ -571,7 +595,7 @@ fn foreign_preview_survives_local_updates_and_rejects_stale_enter() {
         "generation",
     ] {
         let (mut state, remote_id) = state_with_remote();
-        let mut remote = workspaces(2);
+        let mut remote = remote_spaces(workspaces(2));
         remote.boot_id = "remote-boot".into();
         state.set_endpoint_snapshot_for_generation(&remote_id, 7, Box::new(remote.clone()));
         state.compose(100, 28).unwrap();
@@ -695,11 +719,10 @@ fn active_preview_is_not_retargeted_by_deletion_or_reboot() {
 fn aggregate_navigation_reveals_overflow_and_preserves_order() {
     for (compact, cols) in [(true, 100), (false, 100), (false, 44)] {
         let (mut state, remote_id) = state_with_remote();
-        let mut remote = workspaces(15);
+        let mut remote = remote_spaces(workspaces(15));
         remote.boot_id = "remote-boot".into();
         state.set_endpoint_snapshot(&remote_id, Box::new(remote));
         state.sidebar_collapsed = compact;
-        state.collapsed_endpoints.insert(remote_id.clone());
         state.compose(cols, 18).unwrap();
         enter_navigation(&mut state);
         for number in 1..=15 {
@@ -709,7 +732,6 @@ fn aggregate_navigation_reveals_overflow_and_preserves_order() {
             state.compose(cols, 18).unwrap();
             workspace_rect(&state, &remote_id, &id);
         }
-        assert!(!state.collapsed_endpoints.contains(&remote_id));
         preview_key(&mut state, b"\x1b[B");
         if cols == 44 {
             assert_selected(&state, &remote_id, "ws_15");

@@ -430,6 +430,29 @@ pub(super) fn render_pinned_tab_row(
     } else {
         rect.right()
     };
+    // Another machine's badge sits at the right end of the label column, after
+    // the space label, and gives way only to the title's half.
+    let badge_width = row
+        .machine
+        .as_ref()
+        .map_or(0, |(text, _)| display_width(text) as u16)
+        .min(content_right.saturating_sub(name_x).saturating_sub(1) / 2);
+    let content_right = if badge_width > 0 {
+        let badge_x = content_right.saturating_sub(badge_width);
+        if let Some((text, style)) = &row.machine {
+            put_text(
+                buffer,
+                badge_x,
+                rect.y,
+                badge_width,
+                &crate::ui::truncate_end(text, badge_width as usize),
+                *style,
+            );
+        }
+        badge_x.saturating_sub(1)
+    } else {
+        content_right
+    };
     let budget = content_right.saturating_sub(name_x);
     // Keep at least half the text budget for the chat title. The source space
     // is secondary context and must yield even when its name is very long.
