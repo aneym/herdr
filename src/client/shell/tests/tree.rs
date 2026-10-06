@@ -206,6 +206,24 @@ fn pinned_chats_top_the_tree_and_own_cmd_digits_in_pin_order() {
     // then the focused space's remaining tabs.
     let snapshot = state.snapshot.as_deref().expect("snapshot");
     assert_eq!(state.numbered_tab_ids(snapshot), ["tab_3", "tab_2", "tab_1"]);
+
+    // The muted space label and the Cmd digit stay apart ("beta 1", not "beta1").
+    let area = ratatui::layout::Rect::new(0, 0, 25, 30);
+    let mut buffer = ratatui::buffer::Buffer::empty(area);
+    let mut hits = ShellHitMap::default();
+    let mut scroll = 0;
+    crate::client::shell::agent_sidebar::render_agent_panel_with_overlay(
+        &mut buffer, area, snapshot, &state.config, &tree, None, &mut scroll, &mut hits,
+    );
+    let hit = hits
+        .tree_headers
+        .iter()
+        .find(|hit| hit.pinned && hit.key == "tab_3")
+        .expect("pinned row hit");
+    let line: String = (hit.rect.x..hit.rect.right())
+        .map(|x| buffer[(x, hit.rect.y)].symbol().to_owned())
+        .collect();
+    assert!(line.contains("beta 1"), "pinned row reads {line:?}");
 }
 
 #[test]

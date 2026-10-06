@@ -429,7 +429,8 @@ fn render_pinned_tab_row(
     if space_width > 0 && space_width + u16::from(space_width > 0) + hint_width + u16::from(hint_width > 0) > budget {
         space_width = budget.saturating_sub(hint_width + u16::from(hint_width > 0) + 1);
     }
-    let space_x = pin.x.saturating_sub(hint_width + space_width);
+    let label_gap = u16::from(space_width > 0 && hint_width > 0);
+    let space_x = pin.x.saturating_sub(hint_width + label_gap + space_width);
     let name_width = space_x
         .saturating_sub(u16::from(space_width > 0))
         .saturating_sub(name_x);
