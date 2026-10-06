@@ -223,7 +223,8 @@ pub(super) struct TreeHeader {
     /// A header with nothing to hide shows no chevron.
     pub(super) collapsible: bool,
     /// Space headers: this space is pinned, so it stays listed even when no
-    /// agent rows remain beneath it. Always false on tab headers.
+    /// agent rows remain beneath it. Tab headers: this chat is pinned to the
+    /// sidebar's pinned section; the flag only colors the row's pin toggle.
     pub(super) pinned: bool,
     pub(super) indent: u8,
     /// This header's workspace or tab holds the focused pane.
@@ -301,6 +302,10 @@ pub(super) enum AgentPanelListEntry {
         count: usize,
         collapsed: bool,
     },
+    /// The `pinned` section label at the very top of the sidebar.
+    PinnedChatsHeader,
+    /// A pinned chat from any space, in pin order (the Cmd+1..9 order).
+    PinnedTab(PinnedTabRow),
     SpaceHeader(TreeHeader),
     TabHeader(TreeHeader),
     FactorySection {
@@ -355,6 +360,55 @@ impl FactoryGroupKind {
             Self::Background => "background",
         }
     }
+}
+
+/// One row in the pinned section: a chat the pin pulled out of its space.
+pub(super) struct PinnedTabRow {
+    pub(super) workspace_id: String,
+    pub(super) tab_id: String,
+    pub(super) label: String,
+    /// The chat's home space, drawn muted so cross-space pins stay legible.
+    pub(super) space_label: String,
+    pub(super) status: crate::api::schema::AgentStatus,
+    /// Cmd+1..9 slot this row owns (pin index + 1); zero when beyond 9.
+    pub(super) shortcut: usize,
+    pub(super) active: bool,
+}
+
+/// The pinned section, in endpoint pin order. Pins are a shared session fact,
+/// so the section renders straight from the snapshot — no client mirror.
+pub(super) fn pinned_tab_entries(snapshot: &ClientShellSnapshot) -> Vec<AgentPanelListEntry> {
+    if snapshot.pinned_tabs.is_empty() {
+        return Vec::new();
+    }
+    let mut out = vec![AgentPanelListEntry::PinnedChatsHeader];
+    // Count only pins that resolve to a live tab, matching `numbered_tab_ids`,
+    // so a row's digit is exactly the Cmd+N that selects it.
+    let live = snapshot.pinned_tabs.iter().filter_map(|pin| {
+        snapshot.tabs.iter().find(|tab| tab.tab_id == pin.tab_id).map(|tab| (pin, tab))
+    });
+    for (index, (pin, tab)) in live.enumerate() {
+        let space_label = snapshot
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.workspace_id == pin.workspace_id)
+            .map(|workspace| workspace.label.clone())
+            .unwrap_or_else(|| pin.workspace_id.clone());
+        out.push(AgentPanelListEntry::PinnedTab(PinnedTabRow {
+            workspace_id: pin.workspace_id.clone(),
+            tab_id: pin.tab_id.clone(),
+            label: tab.label.clone(),
+            space_label,
+            status: tab.agent_status,
+            shortcut: if index < 9 { index + 1 } else { 0 },
+            active: snapshot.focused_workspace_id.as_deref() == Some(tab.workspace_id.as_str())
+                && tab.focused,
+        }));
+    }
+    if out.len() == 1 {
+        out.clear();
+    }
+    out
 }
 
 /// A tagged tab stands in for its agents, while still following the tab-header hit path.
@@ -585,7 +639,7 @@ pub(super) fn tree_list_entries_with_overlay(
             workspace_order.insert(before, id.clone());
         }
     }
-    let mut out = Vec::new();
+    let mut out = pinned_tab_entries(snapshot);
     if let Some(overlay) = overlay.filter(|overlay| overlay.tabs.values().any(|tag| tag.section.is_some())) {
         let choices = factory_goal_choices(overlay);
         if !choices.is_empty() {
@@ -748,7 +802,10 @@ pub(super) fn tree_list_entries_with_overlay(
                         None => Vec::new(),
                     },
                     collapsible: lead.is_none() && !tab_rows.is_empty() && tree.show_agents,
-                    pinned: false,
+                    pinned: snapshot
+                        .pinned_tabs
+                        .iter()
+                        .any(|pin| pin.tab_id == *tab_id),
                     indent: space_indent,
                     active: (!tree.show_agents || lead.is_some())
                         && tab.is_some_and(|tab| tab.focused)
@@ -856,6 +913,24 @@ pub(super) fn tree_list_entries_with_overlay(
         });
         if !collapsed {
             out.append(&mut reorder_spaces(hidden_out, &tree.space_order));
+        }
+    }
+    // Pinned chats own the first Cmd slots, so a section's "⌘1..9" hint moves
+    // past them (or goes away once pins fill all nine).
+    let pins = out
+        .iter()
+        .filter(|entry| matches!(entry, AgentPanelListEntry::PinnedTab(_)))
+        .count();
+    if pins > 0 {
+        let shifted = match pins {
+            0..=7 => format!("⌘{}..9", pins + 1),
+            8 => "⌘9".to_owned(),
+            _ => String::new(),
+        };
+        for entry in &mut out {
+            if let AgentPanelListEntry::FactorySection { right, .. } = entry {
+                *right = right.replace("⌘1..9", &shifted).trim().to_string();
+            }
         }
     }
     out
@@ -1629,7 +1704,10 @@ fn factory_row(
             collapsed,
             child_states: Vec::new(),
             collapsible,
-            pinned: false,
+            pinned: snapshot
+                .pinned_tabs
+                .iter()
+                .any(|pin| pin.tab_id == tab.tab_id),
             indent,
             active: snapshot.focused_workspace_id.as_deref() == Some(tab.workspace_id.as_str())
                 && tab.focused,
@@ -1678,7 +1756,14 @@ fn reorder_spaces(
     let mut blocks = Vec::<(Option<String>, Vec<AgentPanelListEntry>)>::new();
     let mut prefix = Vec::new();
     for entry in entries {
-        if matches!(entry, AgentPanelListEntry::FactoryGoalPicker { .. }) {
+        if matches!(
+            entry,
+            AgentPanelListEntry::FactoryGoalPicker { .. }
+                | AgentPanelListEntry::PinnedChatsHeader
+                | AgentPanelListEntry::PinnedTab(_)
+        ) {
+            // The goal picker and the pinned section sit above the spaces and
+            // are never reordered with them.
             prefix.push(entry);
             continue;
         }

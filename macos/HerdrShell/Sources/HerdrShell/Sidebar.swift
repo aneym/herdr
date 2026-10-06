@@ -259,7 +259,7 @@ struct SidebarView: View {
             row: row, t: t, firstSpaceId: firstSpaceId,
             selected: row.tab == state.selectedTab,
             focusMark: row.kind == .section && row.toggleKey != nil ? (state.spacesChrome.focusedSection[focusSpace] == row.title ? "✕" : "◎") : nil,
-            pinned: row.kind == .space && state.spacesChrome.pinnedSpaces.contains(String(row.id.dropFirst(6))),
+            pinned: row.kind == .tab ? model.source(for: row.tab ?? "")?.tabs.first(where: { $0.tab_id == row.tab })?.pin_index != nil : row.kind == .space && state.spacesChrome.pinnedSpaces.contains(String(row.id.dropFirst(6))),
             showResume: hoveredSpaceRow == row.id && row.kind == .tab && row.tab.map { model.spacesOverlay.tabs[$0]?.mode == "parked" } == true,
             goal: row.kind == .goal ? AnyView(goalMenu) : nil,
             click: { spacesClick(row, part: $0) },
@@ -297,7 +297,15 @@ struct SidebarView: View {
         } else if part == "link" {
             if let raw = row.link, let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") { NSWorkspace.shared.open(url) }
         } else if part == "pin" {
-            state.spacesChrome.toggle("pin:" + String(row.id.dropFirst(6))); state.saveSpacesChrome()
+            if row.kind == .tab, let tab = row.tab {
+                let pinned = model.source(for: tab)?.tabs.first { $0.tab_id == tab }?.pin_index != nil
+                let commands = HerdrCommands(socketPath: model.env["HERDR_SOCKET_PATH"] ?? "")
+                DispatchQueue.global(qos: .userInitiated).async {
+                    _ = commands.tabSetPinned(tabId: tab, pinned: !pinned)
+                }
+            } else {
+                state.spacesChrome.toggle("pin:" + String(row.id.dropFirst(6))); state.saveSpacesChrome()
+            }
         } else if part == "focus" {
             let key = String(row.id.dropFirst(8))
             let split = key.lastIndex(of: ":")!

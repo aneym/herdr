@@ -69,6 +69,7 @@ pub(super) fn snapshot() -> ClientShellSnapshot {
         }],
         agents: Vec::new(),
         commands: Vec::new(),
+        pinned_tabs: Vec::new(),
     }
 }
 

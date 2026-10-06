@@ -960,6 +960,17 @@ pub struct ClientShellSnapshot {
     pub panes: Vec<ClientShellPane>,
     pub agents: Vec<ClientShellAgent>,
     pub commands: Vec<ClientShellCommand>,
+    /// Chats pinned to the sidebar's pinned section, in pin order. Index n is
+    /// what Cmd+n+1 selects. Absent on endpoints that predate pinned chats.
+    #[serde(default)]
+    pub pinned_tabs: Vec<ClientShellPinnedTab>,
+}
+
+/// One pinned chat in a `ClientShellSnapshot`, in pin order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientShellPinnedTab {
+    pub tab_id: String,
+    pub workspace_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2935,6 +2946,7 @@ mod tests {
                 action: ClientShellCommandAction::Shell,
                 description: Some("deploy".into()),
             }],
+            pinned_tabs: Vec::new(),
         }));
         let encoded = bincode::serde::encode_to_vec(&msg, bincode::config::standard()).unwrap();
         let (decoded, _): (ServerMessage, _) =

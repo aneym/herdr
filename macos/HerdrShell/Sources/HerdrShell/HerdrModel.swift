@@ -8,7 +8,7 @@ struct Snapshot: Decodable {
         // P10: the space list follows herdr's own focus and tokens (`pinned`, `hidden`).
         let focused: Bool?; let active_tab_id: String?; let tokens: [String: String]?
     }
-    struct Tab: Decodable { let tab_id: String; let workspace_id: String; let label: String?; let number: Int; let agent_status: String?; let pane_count: Int? }
+    struct Tab: Decodable { let tab_id: String; let workspace_id: String; let label: String?; let number: Int; let agent_status: String?; let pane_count: Int?; let pin_index: Int? }
     struct Pane: Decodable {
         let pane_id: String; let tab_id: String; let terminal_id: String; let agent_status: String?; let focused: Bool?
         // Titles the quick switcher matches. Older snapshots omit them.
@@ -312,6 +312,18 @@ struct TabClassifier {
 
 
 extension HerdrModel {
+    /// The shared pin order owns the numbered slots on every surface.
+    var numberedTabIds: [String] {
+        let pinned = (snapshot?.tabs ?? []).filter { $0.pin_index != nil }
+            .sorted { ($0.pin_index ?? 0) < ($1.pin_index ?? 0) }.map(\.tab_id)
+        let remote = machines.flatMap { machine in
+            (machine.snapshot?.tabs ?? []).filter { $0.pin_index != nil }
+                .sorted { ($0.pin_index ?? 0) < ($1.pin_index ?? 0) }.map(\.tab_id)
+        }
+        var seen = Set<String>()
+        return (pinned + remote + allRowsInOrder.map(\.id)).filter { seen.insert($0).inserted }
+    }
+
     func spacesRows(state: SidebarState) -> [SpacesRow] {
         guard let s = snapshot else { return [SpacesRow(id: "agents", kind: .title, title: "agents")] }
         let input = SpacesInput(spaces: s.workspaces.map {
@@ -323,9 +335,28 @@ extension HerdrModel {
                     let parentTab = s.agents.first { $0.pane_id == parentPane }?.tab_id
                     return SpacesInput.Agent(status: agent.agent_status ?? "unknown", parent: parentTab)
                 },
-                focused: tab.tab_id == state.selectedTab, status: tab.agent_status ?? "unknown")
+                focused: tab.tab_id == state.selectedTab, status: tab.agent_status ?? "unknown", pinIndex: tab.pin_index)
         }, focusedTab: state.selectedTab)
-        let rows = SpacesTree.build(input, overlay: spacesOverlay, chrome: state.spacesChrome, now: Date().timeIntervalSince1970)
+        var rows = SpacesTree.build(input, overlay: spacesOverlay, chrome: state.spacesChrome, now: Date().timeIntervalSince1970)
+        let remotePins = machines.flatMap { machine -> [SpacesRow] in
+            guard let snapshot = machine.snapshot else { return [] }
+            return snapshot.tabs.filter { $0.pin_index != nil }
+                .sorted { ($0.pin_index ?? 0) < ($1.pin_index ?? 0) }.map { tab in
+                    let space = snapshot.workspaces.first { $0.workspace_id == tab.workspace_id }
+                    return SpacesRow(id: "pinned:" + tab.tab_id, kind: .tab, title: tab.label ?? tab.tab_id,
+                                     trailing: machine.name + " · " + (space?.label ?? tab.workspace_id), tab: tab.tab_id)
+                }
+        }
+        if !remotePins.isEmpty {
+            if !rows.contains(where: { $0.id == "pinned" }) {
+                rows.insert(SpacesRow(id: "pinned", kind: .section, title: "PINNED", trailing: "⌘1..9"), at: 1)
+            }
+            let end = rows.lastIndex(where: { $0.id == "pinned" || $0.id.hasPrefix("pinned:") }).map { $0 + 1 } ?? 1
+            rows.insert(contentsOf: remotePins, at: end)
+            for i in rows.indices where rows[i].id != "pinned" {
+                rows[i].trailing = rows[i].trailing.replacingOccurrences(of: "⌘1..9", with: "")
+            }
+        }
         guard !machines.isEmpty else { return rows }
         // Machines go after the local spaces and before the footer, so no local row moves.
         let footer = rows.firstIndex { $0.kind == .footerUsage || $0.kind == .footerHost } ?? rows.endIndex

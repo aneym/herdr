@@ -322,6 +322,19 @@ pub(super) fn snapshot_with_completions(
         panes,
         agents,
         commands: app.client_shell_command_manifest(),
+        pinned_tabs: app
+            .state
+            .pinned_tabs
+            .iter()
+            .filter(|pin| app.parse_tab_id(&pin.tab_id).is_some())
+            .filter_map(|pin| {
+                let (ws_idx, _) = app.parse_tab_id(&pin.tab_id)?;
+                Some(protocol::ClientShellPinnedTab {
+                    tab_id: pin.tab_id.clone(),
+                    workspace_id: app.public_workspace_id(ws_idx),
+                })
+            })
+            .collect(),
     };
     (shell, completions)
 }

@@ -1,0 +1,9 @@
+{
+  "_source": "Independent contract: cross-space pin order overrides workspace order, includes hidden spaces, and labels the source space.",
+  "input": {
+    "spaces": [{"id":"a","name":"Alpha","pinned":false,"collapsed":true},{"id":"b","name":"Beta","pinned":false,"collapsed":true}],
+    "tabs": [{"id":"a:t1","space":"a","label":"First","agents":[],"focused":false,"status":"unknown","pinIndex":1},{"id":"b:t1","space":"b","label":"Priority","agents":[],"focused":true,"status":"unknown","pinIndex":0}],
+    "focusedTab":"b:t1"
+  },
+  "overlay": {}, "chrome": {}, "now": 0
+}

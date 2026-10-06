@@ -157,6 +157,8 @@ fn shape(state: &ClientShellState, tree: &ClientTreeChrome) -> Vec<String> {
             AgentPanelListEntry::FactoryTab(row) => format!("factory:{}", row.header.label),
             AgentPanelListEntry::FactoryHost { name, .. } => format!("host:{name}"),
             AgentPanelListEntry::FactoryBackground { count, .. } => format!("background:{count}"),
+            AgentPanelListEntry::PinnedChatsHeader => "pinned".to_owned(),
+            AgentPanelListEntry::PinnedTab(row) => format!("pin:{}:{}:{}", row.shortcut, row.label, row.space_label),
         })
         .collect()
 }
@@ -176,6 +178,34 @@ fn panel_entries(state: &ClientShellState, tree: &ClientTreeChrome) -> Vec<Agent
     };
     crate::client::shell::tree::append_automations(&mut entries, tree, automations);
     entries
+}
+
+#[test]
+fn pinned_chats_top_the_tree_and_own_cmd_digits_in_pin_order() {
+    let tree = ClientTreeChrome::default();
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    let mut state = ClientShellState::new(config);
+    state
+        .tree_chrome
+        .insert(crate::client::endpoint::ClientEndpointId::Local, tree.clone());
+    let mut snapshot = tree_snapshot();
+    // A cross-space pin first, a stale pin (closed tab) in the middle, then a
+    // pin from the focused space.
+    snapshot.pinned_tabs = vec![
+        crate::protocol::ClientShellPinnedTab { tab_id: "tab_3".into(), workspace_id: "ws_2".into() },
+        crate::protocol::ClientShellPinnedTab { tab_id: "gone".into(), workspace_id: "ws_2".into() },
+        crate::protocol::ClientShellPinnedTab { tab_id: "tab_2".into(), workspace_id: "ws_1".into() },
+    ];
+    state.set_snapshot(Box::new(snapshot));
+
+    // The pinned section sits above every space and each row names its space.
+    let rows = shape(&state, &tree);
+    assert_eq!(rows[..4], ["pinned", "pin:1:three:beta", "pin:2:two:alpha", "space:alpha"]);
+    // Cmd+1..9 resolve in the same order the digits are drawn: pins first,
+    // then the focused space's remaining tabs.
+    let snapshot = state.snapshot.as_deref().expect("snapshot");
+    assert_eq!(state.numbered_tab_ids(snapshot), ["tab_3", "tab_2", "tab_1"]);
 }
 
 #[test]
@@ -1113,7 +1143,7 @@ fn space_header_plus_creates_the_next_tab_without_prompting() {
 }
 
 #[test]
-fn tab_headers_carry_no_pin_or_plus() {
+fn tab_headers_carry_a_chat_pin_but_no_plus() {
     let tree = ClientTreeChrome::default();
     let mut state = tree_state(tree);
     state.set_pane_surface(surface());
@@ -1127,5 +1157,6 @@ fn tab_headers_carry_no_pin_or_plus() {
         .expect("tab header hit");
 
     assert_eq!(header.plus, Rect::default());
-    assert_eq!(header.pin, Rect::default());
+    // Every chat row carries its pin toggle in the row's last cell pair.
+    assert_eq!(header.pin, Rect::new(header.rect.right() - 2, header.rect.y, 2, 1));
 }

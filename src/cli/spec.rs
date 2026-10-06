@@ -307,6 +307,13 @@ fn tab_command() -> Command {
                         .multiple(false),
                 ),
         )
+        .subcommand(
+            Command::new("pin")
+                .about("Pin a tab to the sidebar's pinned section")
+                .arg(required("tab_id", "TAB_ID"))
+                .arg(option("priority", "N")),
+        )
+        .subcommand(id_command("unpin", "tab_id", "Unpin a tab"))
         .subcommand(id_command("close", "tab_id", "Close a tab"))
 }
 

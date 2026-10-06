@@ -2777,20 +2777,35 @@ impl ClientShellState {
             return true;
         }
         if pin {
-            let tree = self.tree_chrome_mut();
-            super::tree::ClientTreeChrome::toggle(&mut tree.pinned_spaces, workspace_id.clone());
-            self.persist_chrome_preferences(outcome);
-            // The pin is load-bearing on the endpoint too: it is what keeps a
-            // live tab in the space when its last one closes.
-            self.push_endpoint_method(
-                crate::api::schema::Method::WorkspaceSetPinned(
-                    crate::api::schema::WorkspaceSetPinnedParams {
-                        workspace_id,
-                        pinned: !pinned,
-                    },
-                ),
-                outcome,
-            );
+            if let Some(tab_id) = tab_id.clone() {
+                // Chat pin: the endpoint owns the order, so the client asks
+                // and waits for the next snapshot rather than mirroring.
+                self.push_endpoint_method(
+                    crate::api::schema::Method::TabSetPinned(
+                        crate::api::schema::TabSetPinnedParams {
+                            tab_id,
+                            pinned: !pinned,
+                            priority: None,
+                        },
+                    ),
+                    outcome,
+                );
+            } else {
+                let tree = self.tree_chrome_mut();
+                super::tree::ClientTreeChrome::toggle(&mut tree.pinned_spaces, workspace_id.clone());
+                self.persist_chrome_preferences(outcome);
+                // The pin is load-bearing on the endpoint too: it is what keeps a
+                // live tab in the space when its last one closes.
+                self.push_endpoint_method(
+                    crate::api::schema::Method::WorkspaceSetPinned(
+                        crate::api::schema::WorkspaceSetPinnedParams {
+                            workspace_id,
+                            pinned: !pinned,
+                        },
+                    ),
+                    outcome,
+                );
+            }
             outcome.repaint = true;
             return true;
         }

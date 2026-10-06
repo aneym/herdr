@@ -898,6 +898,8 @@ impl AppState {
                 // An explicit workspace close outranks the pin; drop it so
                 // the stale key doesn't linger in the session snapshot.
                 self.tree_pinned_spaces.remove(&workspace_id);
+                self.pinned_tabs
+                    .retain(|pin| !pin.tab_id.starts_with(&format!("{workspace_id}:")));
             }
         }
         let active_workspace_id = self
@@ -2299,6 +2301,7 @@ impl AppState {
             let ws = &mut self.workspaces[ws_idx];
             ws.remove_pane(pane_id)
         };
+        self.prune_pinned_tabs();
         self.mark_session_dirty();
 
         if should_close_workspace {
@@ -2308,6 +2311,7 @@ impl AppState {
                 .map(|ws| ws.id.clone());
             let selected_workspace_id = self.workspaces.get(self.selected).map(|ws| ws.id.clone());
             self.workspaces.remove(ws_idx);
+            self.prune_pinned_tabs();
             self.remove_unattached_terminal_ids(workspace_terminal_ids);
             if self.workspaces.is_empty() {
                 self.active = None;

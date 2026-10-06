@@ -242,6 +242,9 @@ impl App {
             focused: self.state.active == Some(ws_idx) && ws.active_tab == tab_idx,
             pane_count: tab.panes.len(),
             agent_status: pane_agent_status(agg_state, seen),
+            pin_index: self
+                .public_tab_id(ws_idx, tab_idx)
+                .and_then(|id| self.state.pinned_tab_index(&id)),
         })
     }
 

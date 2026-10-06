@@ -30,6 +30,16 @@ pub struct TabRenameParams {
     pub label: String,
 }
 
+/// Pin or unpin a chat in the sidebar's pinned section. `priority` sets where
+/// it lands in pin order (higher first); omitted keeps/appends at the end.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TabSetPinnedParams {
+    pub tab_id: String,
+    pub pinned: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<i64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TabMoveParams {
     pub tab_id: String,
@@ -45,4 +55,7 @@ pub struct TabInfo {
     pub focused: bool,
     pub pane_count: usize,
     pub agent_status: AgentStatus,
+    /// Position in the pinned-chats order, when pinned (Cmd+1..9 slot).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin_index: Option<usize>,
 }

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::api::schema::{
     EventData, EventEnvelope, EventKind, ResponseResult, TabCreateParams, TabListParams,
-    TabMoveParams, TabRenameParams, TabTarget,
+    TabMoveParams, TabRenameParams, TabSetPinnedParams, TabTarget,
 };
 use crate::app::{App, Mode};
 
@@ -191,7 +191,9 @@ impl App {
             return tab_not_found(id, &target.tab_id);
         };
         self.state.switch_workspace_tab(ws_idx, tab_idx);
-        let tab = self.tab_info(ws_idx, tab_idx).unwrap();
+        let Some(tab) = self.tab_info(ws_idx, tab_idx) else {
+            return tab_not_found(id, &target.tab_id);
+        };
 
         encode_success(id, ResponseResult::TabInfo { tab })
     }
@@ -223,8 +225,56 @@ impl App {
                 label: params.label,
             },
         });
-        let tab = self.tab_info(ws_idx, tab_idx).unwrap();
+        let Some(tab) = self.tab_info(ws_idx, tab_idx) else {
+            return tab_not_found(id, &params.tab_id);
+        };
 
+        encode_success(id, ResponseResult::TabInfo { tab })
+    }
+
+    /// Pin or unpin a chat in the shared pinned order. The pin lives in
+    /// session state so every client (and Cmd+1..9) sees the same order.
+    pub(super) fn handle_tab_set_pinned(
+        &mut self,
+        id: String,
+        params: TabSetPinnedParams,
+    ) -> String {
+        let Some((ws_idx, tab_idx)) = self.parse_tab_id(&params.tab_id) else {
+            return tab_not_found(id, &params.tab_id);
+        };
+        let Some(tab_id) = self.public_tab_id(ws_idx, tab_idx) else {
+            return tab_not_found(id, &params.tab_id);
+        };
+        let before = self.state.pinned_tabs.clone();
+        if params.pinned {
+            let priority = params.priority.unwrap_or_else(|| {
+                self.state
+                    .pinned_tabs
+                    .iter()
+                    .find(|pin| pin.tab_id == tab_id)
+                    .map(|pin| pin.priority)
+                    .unwrap_or(0)
+            });
+            if params.priority.is_some() || !self.state.is_tab_pinned(&tab_id) {
+                self.state.pin_tab(tab_id, priority);
+            }
+        } else {
+            self.state.unpin_tab(&tab_id);
+        }
+        if self.state.pinned_tabs != before {
+            self.state.mark_session_dirty();
+            self.schedule_session_save();
+            // API clients (Herdr Shell) refresh their snapshot on workspace
+            // events; the pin order is carried by each tab's `pin_index`.
+            let workspace = self.workspace_info(ws_idx);
+            self.emit_event(EventEnvelope {
+                event: EventKind::WorkspaceUpdated,
+                data: EventData::WorkspaceUpdated { workspace },
+            });
+        }
+        let Some(tab) = self.tab_info(ws_idx, tab_idx) else {
+            return tab_not_found(id, &params.tab_id);
+        };
         encode_success(id, ResponseResult::TabInfo { tab })
     }
 
@@ -278,6 +328,8 @@ impl App {
             return tab_not_found(id, &target.tab_id);
         };
         let workspace_id = self.public_workspace_id(ws_idx);
+        // A closed chat drops out of the pinned order.
+        self.state.unpin_tab(&tab_id);
         if self
             .state
             .workspaces
@@ -581,6 +633,81 @@ mod tests {
             crate::worktree::canonical_or_original(created_cwd),
             crate::worktree::canonical_or_original(&cached_cwd)
         );
+        shutdown_test_runtimes(&mut app);
+    }
+
+    #[test]
+    fn api_tab_set_pinned_orders_by_priority_and_drops_closed_tabs() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub,
+        );
+        // Two spaces so the pin order crosses workspace boundaries.
+        let mut second = Workspace::test_new("other");
+        second.id = "w9".to_string();
+        app.state.workspaces = vec![Workspace::test_new("tabs"), second];
+        app.state.workspaces[0].id = "w1".to_string();
+        app.state.workspaces[0].test_add_tab(Some("logs"));
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        let first = app.public_tab_id(0, 0).unwrap();
+        let second_tab = app.public_tab_id(0, 1).unwrap();
+        let cross_space = app.public_tab_id(1, 0).unwrap();
+
+        let pin_order = |app: &App| -> Vec<String> {
+            app.state.pinned_tabs.iter().map(|pin| pin.tab_id.clone()).collect()
+        };
+        let pin = |app: &mut App, tab_id: &str, priority: Option<i64>| {
+            let response = app.handle_tab_set_pinned(
+                "req".into(),
+                TabSetPinnedParams {
+                    tab_id: tab_id.to_string(),
+                    pinned: true,
+                    priority,
+                },
+            );
+            let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+            assert!(matches!(success.result, ResponseResult::TabInfo { .. }));
+        };
+        pin(&mut app, &first, None);
+        pin(&mut app, &cross_space, None);
+        pin(&mut app, &second_tab, Some(5));
+        // Priority 5 jumps the tie order; equal priorities keep pin order.
+        assert_eq!(
+            pin_order(&app),
+            vec![second_tab.clone(), first.clone(), cross_space.clone()]
+        );
+
+        let response = app.handle_tab_set_pinned(
+            "req".into(),
+            TabSetPinnedParams {
+                tab_id: cross_space.clone(),
+                pinned: false,
+                priority: None,
+            },
+        );
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert!(matches!(success.result, ResponseResult::TabInfo { .. }));
+        assert_eq!(
+            pin_order(&app),
+            vec![second_tab.clone(), first.clone()]
+        );
+
+        // Closing a pinned chat drops it from the pinned order.
+        let response = app.handle_tab_close("req".into(), TabTarget { tab_id: second_tab.clone() });
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert!(matches!(success.result, ResponseResult::Ok {}));
+        assert_eq!(pin_order(&app), vec![first.clone()]);
+
+        // Pin state survives a session snapshot round-trip.
+        let ui = app.state.snapshot_ui_prefs();
+        assert_eq!(ui.pinned_tabs.len(), 1);
+        assert_eq!(ui.pinned_tabs[0].tab_id, first);
         shutdown_test_runtimes(&mut app);
     }
 }

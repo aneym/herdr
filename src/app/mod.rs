@@ -381,6 +381,7 @@ fn restored_ui_prefs(snapshot: &crate::persist::SessionSnapshot) -> crate::persi
         tree_collapsed_spaces: snapshot.tree_collapsed_spaces.clone(),
         tree_collapsed_tabs: snapshot.tree_collapsed_tabs.clone(),
         tree_pinned_spaces: snapshot.tree_pinned_spaces.clone(),
+        pinned_tabs: snapshot.pinned_tabs.clone(),
         tree_show_hidden_spaces: snapshot.tree_show_hidden_spaces,
         hidden_spaces_expanded: snapshot.hidden_spaces_expanded,
     }
@@ -584,6 +585,8 @@ impl App {
         state.tree_collapsed_spaces = ui_prefs.tree_collapsed_spaces.clone();
         state.tree_collapsed_tabs = ui_prefs.tree_collapsed_tabs.clone();
         state.tree_pinned_spaces = ui_prefs.tree_pinned_spaces.clone();
+        state.pinned_tabs = ui_prefs.pinned_tabs.clone();
+        state.prune_pinned_tabs();
         state.tree_show_hidden_spaces = ui_prefs.tree_show_hidden_spaces;
         state.hidden_spaces_expanded = ui_prefs.hidden_spaces_expanded;
         state.agent_close_focus = config.ui.agent_close_focus;

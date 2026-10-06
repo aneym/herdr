@@ -48,6 +48,7 @@ const CLIENT_SHELL_METHODS: &[&str] = &[
     "tab.focus",
     "tab.move",
     "tab.rename",
+    "tab.set_pinned",
     "workspace.close",
     "workspace.create",
     "workspace.focus",
@@ -306,6 +307,15 @@ mod tests {
                 .map(|digest| !digest.is_empty()),
             Some(true),
             "workspace.set_pinned must advertise a shape"
+        );
+        // Fork: pinned chats (sidebar pinned section + Cmd+1..9 alignment).
+        assert_eq!(
+            actual
+                .remove("tab.set_pinned")
+                .as_deref()
+                .map(|digest| !digest.is_empty()),
+            Some(true),
+            "tab.set_pinned must advertise a shape"
         );
         // Profile methods are newly advertised on the client shell lane. Their
         // shapes are not part of the original endpoint v1 fixture.

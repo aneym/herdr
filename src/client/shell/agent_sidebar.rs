@@ -144,9 +144,14 @@ pub(super) fn render_agent_panel_with_overlay(
         if super::tree::tree_view_active(config) && snapshot.agent_view_label.is_none() {
             super::tree::tree_list_entries_with_overlay(snapshot, tree, rows, overlay)
         } else {
-            rows.into_iter()
-                .map(super::tree::AgentPanelListEntry::Agent)
-                .collect()
+            // The pinned section tops the flat list too; there is no spaces
+            // strip inside the agent panel in this mode.
+            let mut entries = super::tree::pinned_tab_entries(snapshot);
+            entries.extend(
+                rows.into_iter()
+                    .map(super::tree::AgentPanelListEntry::Agent),
+            );
+            entries
         };
     super::tree::append_automations(&mut entries, tree, automations);
     // Usage and hosts are a fixed footer, not part of the scrolling spaces list.
@@ -365,6 +370,16 @@ pub(super) fn tree_header_plus_rect(rect: Rect) -> Rect {
     Rect::new(rect.right().saturating_sub(4), rect.y, 2, 1)
 }
 
+/// Pin toggle on a chat row (tab header, pinned row): the last cell pair on
+/// the row, so every chat row's pin lands in the same column. Factory lane
+/// rows are too dense for it; orchestrators pin those with `herdr tab pin`.
+pub(super) fn chat_pin_rect(rect: Rect) -> Rect {
+    if rect.width < 4 {
+        return Rect::default();
+    }
+    Rect::new(rect.right().saturating_sub(2), rect.y, 2, 1)
+}
+
 /// Pin toggle on a space header: the cell pair two slots left of the chevron,
 /// leaving the slot between them for the new-tab plus.
 pub(super) fn tree_header_pin_rect(rect: Rect) -> Rect {
@@ -372,6 +387,98 @@ pub(super) fn tree_header_pin_rect(rect: Rect) -> Rect {
         return Rect::default();
     }
     Rect::new(rect.right().saturating_sub(6), rect.y, 2, 1)
+}
+
+fn render_pinned_tab_row(
+    buffer: &mut Buffer,
+    rect: Rect,
+    row: &super::tree::PinnedTabRow,
+    config: &ClientShellConfig,
+    hits: &mut ShellHitMap,
+) {
+    let palette = &config.palette;
+    if row.active {
+        buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
+        paint_half_pads(buffer, rect, palette.active_row_bg, config.agents.row_gap);
+    }
+    let quiet = Style::default()
+        .fg(palette.overlay0)
+        .add_modifier(Modifier::DIM);
+    let icon_x = rect.x.saturating_add(1);
+    put_text(
+        buffer,
+        icon_x,
+        rect.y,
+        1.min(rect.right().saturating_sub(icon_x)),
+        resolved_status_icon(row.status, config),
+        Style::default().fg(status_color(row.status, palette)),
+    );
+    // The right strip is, in order: the chat's home space (muted, dropped
+    // first under pressure), the Cmd+slot digit, then the pin toggle.
+    let pin = chat_pin_rect(rect);
+    let hint = if row.shortcut > 0 {
+        format!("{}", row.shortcut)
+    } else {
+        String::new()
+    };
+    let hint_width = display_width(&hint) as u16;
+    let mut space_width = display_width(&row.space_label) as u16;
+    let name_x = icon_x.saturating_add(2);
+    let budget = pin.x.saturating_sub(name_x);
+    // Space label yields to the chat name: it needs the digit plus a gap.
+    if space_width > 0 && space_width + u16::from(space_width > 0) + hint_width + u16::from(hint_width > 0) > budget {
+        space_width = budget.saturating_sub(hint_width + u16::from(hint_width > 0) + 1);
+    }
+    let space_x = pin.x.saturating_sub(hint_width + space_width);
+    let name_width = space_x
+        .saturating_sub(u16::from(space_width > 0))
+        .saturating_sub(name_x);
+    let style = if row.active {
+        Style::default().fg(palette.text).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(palette.subtext0).add_modifier(Modifier::BOLD)
+    };
+    put_text(
+        buffer,
+        name_x,
+        rect.y,
+        name_width,
+        &crate::ui::truncate_end(&row.label, name_width as usize),
+        style,
+    );
+    if space_width > 0 {
+        put_text(
+            buffer,
+            space_x,
+            rect.y,
+            space_width,
+            &crate::ui::truncate_end(&row.space_label, space_width as usize),
+            quiet,
+        );
+    }
+    if hint_width > 0 {
+        put_text(buffer, pin.x.saturating_sub(hint_width), rect.y, hint_width, &hint, quiet);
+    }
+    put_text(
+        buffer,
+        pin.x,
+        rect.y,
+        pin.width,
+        " ⚲",
+        Style::default().fg(palette.accent),
+    );
+    hits.tree_headers.push(TreeHeaderHit {
+        rect,
+        chevron: Rect::default(),
+        plus: Rect::default(),
+        pin,
+        group: None,
+        workspace_id: row.workspace_id.clone(),
+        tab_id: Some(row.tab_id.clone()),
+        key: row.tab_id.clone(),
+        pinned: true,
+        collapsed: false,
+    });
 }
 
 fn render_panel_list_entry(
@@ -503,6 +610,21 @@ fn render_panel_list_entry(
         }
         AgentPanelListEntry::FactoryBackground { kind, workspace_id, count, collapsed, indent, alert, working, shortcut } => {
             render_factory_group(buffer, rect, config, hits, workspace_id, kind.label(), *count, *collapsed, *indent, *alert, *working, *shortcut);
+        }
+        AgentPanelListEntry::PinnedChatsHeader => {
+            put_text(
+                buffer,
+                rect.x,
+                rect.y,
+                rect.width,
+                " pinned",
+                Style::default()
+                    .fg(config.palette.overlay0)
+                    .add_modifier(Modifier::BOLD),
+            );
+        }
+        AgentPanelListEntry::PinnedTab(row) => {
+            render_pinned_tab_row(buffer, rect, row, config, hits);
         }
         AgentPanelListEntry::SpaceHeader(header) => {
             render_tree_header(buffer, rect, header, true, config, hits);
@@ -853,7 +975,9 @@ fn render_tree_header(
     // group can be opened from.
     let group = header.group_chevron();
     // Space headers reserve extra cells for the pin and new-tab plus.
-    let control_width = if compact_space { 2 } else if is_space { 10 } else { 6 };
+    // Chat rows reserve two trailing cells for the pin toggle on top of the
+    // chevron/dots budget.
+    let control_width = if compact_space { 2 } else if is_space { 10 } else { 8 };
     let factory_summary_width = 3 + header.space_attention.as_ref().map_or(0, |(_, summary)| display_width(summary) as u16);
     let summary_fits = if factory_controls {
         header.space_attention.is_some() && prefix + display_width(&header.label) as u16
@@ -957,6 +1081,18 @@ fn render_tree_header(
     } else if !trailing.is_empty() {
         trailing.push((" ".to_owned(), Style::default()));
     }
+    if !is_space {
+        // Pin toggle, the row's last cell pair — same slot as the pinned
+        // section rows, so the affordance doesn't wander between rows.
+        trailing.push((
+            "\u{26b2}".to_owned(),
+            if header.pinned {
+                Style::default().fg(palette.accent)
+            } else {
+                Style::default().fg(palette.overlay0)
+            },
+        ));
+    }
     let total = trailing
         .iter()
         .map(|(text, _)| display_width(text))
@@ -1012,6 +1148,8 @@ fn render_tree_header(
         },
         pin: if is_space && !compact_space {
             tree_header_pin_rect(rect)
+        } else if !is_space {
+            chat_pin_rect(rect)
         } else {
             Rect::default()
         },

@@ -3,8 +3,16 @@ use super::*;
 impl ClientShellState {
     /// Keep the existing tab numbering, but omit rows hidden by factory chrome.
     pub(super) fn numbered_tab_ids(&self, snapshot: &ClientShellSnapshot) -> Vec<String> {
+        // Pinned chats own Cmd+1..9 first: the pinned section's order is the
+        // shortcut order, and the focused space's own tabs follow behind it.
+        let mut numbered: Vec<String> = snapshot
+            .pinned_tabs
+            .iter()
+            .filter(|pin| snapshot.tabs.iter().any(|tab| tab.tab_id == pin.tab_id))
+            .map(|pin| pin.tab_id.clone())
+            .collect();
         let Some(workspace_id) = snapshot.focused_workspace_id.as_deref() else {
-            return Vec::new();
+            return numbered;
         };
         let overlay = self.factory_overlay();
         let hidden = overlay.filter(|_| self.config.factory.enabled).map(|overlay| {
@@ -29,13 +37,21 @@ impl ClientShellState {
             unfiltered.factory_section_focus.clear();
             drawn(&unfiltered).difference(&visible).cloned().collect::<std::collections::HashSet<_>>()
         });
-        snapshot.tabs.iter()
+        let pinned: std::collections::HashSet<&str> = snapshot
+            .pinned_tabs
+            .iter()
+            .map(|pin| pin.tab_id.as_str())
+            .collect();
+        numbered.extend(
+            snapshot.tabs.iter()
             .filter(|tab| tab.workspace_id == workspace_id)
+            .filter(|tab| !pinned.contains(tab.tab_id.as_str()))
             .filter(|tab| overlay.and_then(|overlay| overlay.tab(&tab.tab_id))
                 .is_none_or(|tag| tag.kind != crate::factory_overlay::TabKind::Workflow))
             .filter(|tab| hidden.as_ref().is_none_or(|hidden| !hidden.contains(&tab.tab_id)))
-            .map(|tab| tab.tab_id.clone())
-            .collect()
+            .map(|tab| tab.tab_id.clone()),
+        );
+        numbered
     }
 
     pub(super) fn toggle_usage_overlay(&mut self, outcome: &mut ClientShellInput) {

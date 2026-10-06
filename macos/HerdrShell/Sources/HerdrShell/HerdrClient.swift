@@ -376,6 +376,11 @@ struct HerdrCommands {
         succeeded("pane.zoom", ["pane_id": paneId])
     }
 
+    /// Pins are runtime facts, not local sidebar preferences.
+    func tabSetPinned(tabId: String, pinned: Bool) -> Bool {
+        succeeded("tab.set_pinned", ["tab_id": tabId, "pinned": pinned])
+    }
+
     /// `tab.rename`.
     func tabRename(tabId: String, label: String) -> Bool {
         succeeded("tab.rename", ["tab_id": tabId, "label": label])

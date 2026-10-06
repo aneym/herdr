@@ -3,7 +3,7 @@ import Foundation
 struct SpacesInput: Codable {
     struct Space: Codable { var id: String; var name: String; var pinned = false; var collapsed = false }
     struct Agent: Codable { var status: String; var parent: String? = nil }
-    struct Tab: Codable { var id: String; var space: String; var label: String; var agents: [Agent] = []; var focused = false; var status = "unknown" }
+    struct Tab: Codable { var id: String; var space: String; var label: String; var agents: [Agent] = []; var focused = false; var status = "unknown"; var pinIndex: Int? = nil }
     var spaces: [Space]; var tabs: [Tab]; var focusedTab: String?
 }
 
@@ -111,6 +111,15 @@ enum SpacesTree {
     static func age(_ seconds: Double) -> String { let m = Int(max(0, seconds)) / 60; return m == 0 ? "<1m" : m < 60 ? "\(m)m" : "\(m / 60)h\(m % 60)m" }
     static func build(_ input: SpacesInput, overlay: Overlay, chrome: SpacesChrome, now: Double) -> [SpacesRow] {
         var out = [SpacesRow(id: "agents", kind: .title, title: "agents")]
+        let pins = input.tabs.filter { $0.pinIndex != nil }.sorted { ($0.pinIndex ?? 0) < ($1.pinIndex ?? 0) }
+        if !pins.isEmpty {
+            out.append(SpacesRow(id: "pinned", kind: .section, title: "PINNED", trailing: "⌘1..9"))
+            for tab in pins {
+                let source = input.spaces.first { $0.id == tab.space }?.name ?? tab.space
+                out.append(SpacesRow(id: "pinned:" + tab.id, kind: .tab, title: tab.label,
+                                     trailing: source, tab: tab.id))
+            }
+        }
         let choices = overlay.goalChoices
         let filter = chrome.goalFilter.flatMap { choices.contains($0) ? $0 : nil }
         if !choices.isEmpty { out.append(SpacesRow(id: "goal", kind: .goal, title: "goal " + (filter?.replacingOccurrences(of: ":", with: " · ") ?? "All"), trailing: filter == nil ? "▾" : "✕")) }
@@ -227,12 +236,12 @@ enum SpacesTree {
             if sectioned {
                 for (value, label) in [("reviewing", "READY FOR REVIEW"), ("scoping", "SCOPING"), ("implementing", "IMPLEMENTING"), ("monitoring", "MONITORING")] {
                     let members = lanes.filter { tag($0).mode == "active" && root($0) == nil && (tag($0).section ?? "implementing") == value } + (value == "implementing" ? ordinary : [])
-                    let hint = value == "reviewing" ? String(members.count) : first ? "⌘1..9" : ""
+                    let hint = value == "reviewing" ? String(members.count) : first && pins.isEmpty ? "⌘1..9" : ""
                     if !members.isEmpty && value != "reviewing" { first = false }
                     section(label, members, shortcut: hint)
                 }
             } else {
-                section("LANES", lanes.filter { tag($0).mode == "active" && root($0) == nil } + workflows.filter { parent($0) == nil } + ordinary, shortcut: "⌘1..9")
+                section("LANES", lanes.filter { tag($0).mode == "active" && root($0) == nil } + workflows.filter { parent($0) == nil } + ordinary, shortcut: pins.isEmpty ? "⌘1..9" : "")
             }
             for (group, members) in [("services", lanes.filter { tag($0).mode == "auto" } + (sectioned ? workflows.filter { parent($0) == nil } : [])), ("parked", lanes.filter { tag($0).mode == "parked" }), ("closed", sectioned ? lanes.filter { tag($0).mode == "active" && tag($0).section == "closed" } : []), ("background", background)] {
                 guard !members.isEmpty else { continue }

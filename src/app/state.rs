@@ -8,6 +8,17 @@ use crate::layout::{PaneId, PaneInfo};
 
 pub(crate) type InstalledPluginRegistry =
     std::collections::HashMap<String, crate::api::schema::InstalledPluginInfo>;
+
+/// One pinned chat in `AppState::pinned_tabs`. The Vec order is the pin order
+/// the sidebar draws and Cmd+1..9 resolves; `priority` decides where a newly
+/// pinned chat lands (higher sorts earlier, ties keep the earlier pin first).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+pub struct PinnedTab {
+    /// Public tab id (`w<space>:t<n>`), stable across reorders and restarts.
+    pub tab_id: String,
+    #[serde(default)]
+    pub priority: i64,
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PluginPaneRecord {
     pub plugin_id: String,
@@ -895,6 +906,10 @@ pub struct AppState {
     /// Tree view: pinned spaces keep their header row listed even when no
     /// agent rows remain beneath them. Keyed by workspace id.
     pub tree_pinned_spaces: std::collections::HashSet<String>,
+    /// Chats pinned to the sidebar's pinned section, in pin order. A shared
+    /// session fact (not per-client chrome): the same order drives Cmd+1..9
+    /// on every attached client. Keyed by public tab id.
+    pub pinned_tabs: Vec<PinnedTab>,
     /// Collapsed spaces move into the tree's `hidden` section instead of
     /// keeping their slot. Persisted with the other tree prefs.
     pub tree_show_hidden_spaces: bool,
@@ -1002,9 +1017,55 @@ impl AppState {
             tree_collapsed_spaces: self.tree_collapsed_spaces.clone(),
             tree_collapsed_tabs: self.tree_collapsed_tabs.clone(),
             tree_pinned_spaces: self.tree_pinned_spaces.clone(),
+            pinned_tabs: self.pinned_tabs.clone(),
             tree_show_hidden_spaces: self.tree_show_hidden_spaces,
             hidden_spaces_expanded: self.hidden_spaces_expanded,
         }
+    }
+
+    /// Position of `tab_id` in pin order, i.e. which Cmd+1..9 slot it owns.
+    pub fn pinned_tab_index(&self, tab_id: &str) -> Option<usize> {
+        self.pinned_tabs
+            .iter()
+            .position(|pin| pin.tab_id == tab_id)
+    }
+
+    pub fn is_tab_pinned(&self, tab_id: &str) -> bool {
+        self.pinned_tab_index(tab_id).is_some()
+    }
+
+    /// Pin a chat, or move it when already pinned. Higher priority lands
+    /// earlier; equal priority keeps existing pins ahead of the new one.
+    pub fn pin_tab(&mut self, tab_id: String, priority: i64) {
+        self.unpin_tab(&tab_id);
+        let position = self
+            .pinned_tabs
+            .iter()
+            .position(|pin| pin.priority < priority)
+            .unwrap_or(self.pinned_tabs.len());
+        self.pinned_tabs.insert(position, PinnedTab { tab_id, priority });
+    }
+
+    pub fn unpin_tab(&mut self, tab_id: &str) -> bool {
+        let Some(index) = self.pinned_tab_index(tab_id) else {
+            return false;
+        };
+        self.pinned_tabs.remove(index);
+        true
+    }
+
+    /// Drop pins whose tab no longer exists (closed chats lose their pin).
+    pub fn prune_pinned_tabs(&mut self) {
+        let live: std::collections::HashSet<String> = self
+            .workspaces
+            .iter()
+            .flat_map(|ws| {
+                ws.tabs
+                    .iter()
+                    .map(|tab| crate::workspace::public_tab_id_for_number(&ws.id, tab.number))
+            })
+            .collect();
+        self.pinned_tabs.retain(|pin| live.contains(&pin.tab_id));
     }
 
     pub(crate) fn profile_roster(&self) -> Vec<String> {
@@ -1354,6 +1415,7 @@ impl AppState {
             tree_collapsed_spaces: std::collections::HashSet::new(),
             tree_collapsed_tabs: std::collections::HashSet::new(),
             tree_pinned_spaces: std::collections::HashSet::new(),
+            pinned_tabs: Vec::new(),
             tree_show_hidden_spaces: false,
             hidden_spaces_expanded: false,
             next_agent_state_change_seq: 0,

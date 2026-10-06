@@ -663,8 +663,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     @objc func prevTab(_ sender: Any?) { cycleTab(-1) }
 
     @objc func gotoTab(_ sender: NSMenuItem) {
-        let rows = model.allRowsInOrder
-        if sender.tag - 1 < rows.count { selectTab(rows[sender.tag - 1].id) }
+        let rows = model.numberedTabIds
+        if sender.tag >= 1, sender.tag <= rows.count { selectTab(rows[sender.tag - 1]) }
     }
 
     // MARK: herdr commands (new tab, split)

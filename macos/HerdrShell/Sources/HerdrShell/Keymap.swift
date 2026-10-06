@@ -224,8 +224,8 @@ extension MainWindowController {
         default:
             if action.hasPrefix("goto_tab_"), let n = Int(action.dropFirst("goto_tab_".count)) {
                 if quickSwitch.isOpen { quickSwitch.pick(n); return true }
-                let rows = model.allRowsInOrder
-                if n >= 1, n <= rows.count { selectTab(rows[n - 1].id, revealDocs: state.mode == .areas) }
+                let rows = model.numberedTabIds
+                if n >= 1, n <= rows.count { selectTab(rows[n - 1], revealDocs: state.mode == .areas) }
                 return true
             }
             if action.hasPrefix("goto_space_"), let n = Int(action.dropFirst("goto_space_".count)) {

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::api::schema::{Method, Request, TabCreateParams, TabListParams, TabMoveParams, TabRenameParams, TabTarget};
+use crate::api::schema::{Method, Request, TabCreateParams, TabListParams, TabMoveParams, TabRenameParams, TabSetPinnedParams, TabTarget};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Placement {
@@ -22,6 +22,8 @@ pub(super) fn run_tab_command(args: &[String]) -> std::io::Result<i32> {
         "focus" => tab_focus(&args[1..]),
         "rename" => tab_rename(&args[1..]),
         "move" => tab_move(&args[1..]),
+        "pin" => tab_pin(&args[1..]),
+        "unpin" => tab_unpin(&args[1..]),
         "close" => tab_close(&args[1..]),
         "help" | "--help" | "-h" => {
             print_tab_help();
@@ -292,6 +294,60 @@ fn tab_move(args: &[String]) -> std::io::Result<i32> {
     super::runtime::tab_move(TabMoveParams { tab_id: source_id.to_string(), insert_index })
 }
 
+fn tab_pin(args: &[String]) -> std::io::Result<i32> {
+    let Some(raw_tab_id) = args.first() else {
+        eprintln!("usage: herdr tab pin <tab_id> [--priority N]");
+        return Ok(2);
+    };
+    let mut priority = None;
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--priority" => {
+                let Some(value) = args.get(index + 1) else {
+                    eprintln!("missing value for --priority");
+                    return Ok(2);
+                };
+                match value.parse::<i64>() {
+                    Ok(parsed) => priority = Some(parsed),
+                    Err(_) => {
+                        eprintln!("--priority must be an integer");
+                        return Ok(2);
+                    }
+                }
+                index += 2;
+            }
+            other => {
+                eprintln!("unknown option: {other}");
+                return Ok(2);
+            }
+        }
+    }
+
+    super::runtime::tab_set_pinned(TabSetPinnedParams {
+        tab_id: super::normalize_tab_id(raw_tab_id),
+        pinned: true,
+        priority,
+    })
+}
+
+fn tab_unpin(args: &[String]) -> std::io::Result<i32> {
+    let Some(raw_tab_id) = args.first() else {
+        eprintln!("usage: herdr tab unpin <tab_id>");
+        return Ok(2);
+    };
+    if args.len() != 1 {
+        eprintln!("usage: herdr tab unpin <tab_id>");
+        return Ok(2);
+    }
+
+    super::runtime::tab_set_pinned(TabSetPinnedParams {
+        tab_id: super::normalize_tab_id(raw_tab_id),
+        pinned: false,
+        priority: None,
+    })
+}
+
 fn tab_close(args: &[String]) -> std::io::Result<i32> {
     let Some(raw_tab_id) = args.first() else {
         eprintln!("usage: herdr tab close <tab_id>");
@@ -315,6 +371,8 @@ fn print_tab_help() {
     eprintln!("  herdr tab focus <tab_id>");
     eprintln!("  herdr tab rename <tab_id> <label>");
     eprintln!("  herdr tab move <tab_id> (--before <tab_id> | --after <tab_id> | --position <N>)");
+    eprintln!("  herdr tab pin <tab_id> [--priority N]");
+    eprintln!("  herdr tab unpin <tab_id>");
     eprintln!("  herdr tab close <tab_id>");
 }
 

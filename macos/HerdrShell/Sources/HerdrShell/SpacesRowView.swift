@@ -81,6 +81,9 @@ struct SpacesRowView: View {
                 Text(focusMark ?? "").font(.system(size: 10)).foregroundStyle(t.mute)
                     .frame(width: 10).onTapGesture { if focusMark != nil { click("focus") } }
             }
+            if row.kind == .tab {
+                Text("⚲").foregroundStyle(pinned ? t.accent : t.mute).fixedSize().onTapGesture { click("pin") }
+            }
             if row.kind == .space {
                 Text("⚲").foregroundStyle(pinned ? t.accent : t.mute).fixedSize().onTapGesture { click("pin") }
                 Text("+").foregroundStyle(t.mute).fixedSize().onTapGesture { click("plus") }

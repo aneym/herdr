@@ -1062,6 +1062,15 @@
               "minimum": 0,
               "type": "integer"
             },
+            "pin_index": {
+              "description": "Position in the pinned-chats order, when pinned (Cmd+1..9 slot).",
+              "format": "uint",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "tab_id": {
               "type": "string"
             },
@@ -4536,6 +4545,29 @@
           ],
           "type": "object"
         },
+        "TabSetPinnedParams": {
+          "description": "Pin or unpin a chat in the sidebar's pinned section. `priority` sets where\nit lands in pin order (higher first); omitted keeps/appends at the end.",
+          "properties": {
+            "pinned": {
+              "type": "boolean"
+            },
+            "priority": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "tab_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "tab_id",
+            "pinned"
+          ],
+          "type": "object"
+        },
         "TabTarget": {
           "properties": {
             "tab_id": {
@@ -5561,6 +5593,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/TabMoveParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "tab.set_pinned",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/TabSetPinnedParams"
             }
           },
           "required": [
@@ -11507,6 +11555,15 @@
               "format": "uint",
               "minimum": 0,
               "type": "integer"
+            },
+            "pin_index": {
+              "description": "Position in the pinned-chats order, when pinned (Cmd+1..9 slot).",
+              "format": "uint",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
             },
             "tab_id": {
               "type": "string"

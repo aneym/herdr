@@ -1099,6 +1099,9 @@ impl App {
             Method::TabFocus(target) => return self.handle_tab_focus(request.id, target),
             Method::TabRename(params) => return self.handle_tab_rename(request.id, params),
             Method::TabMove(params) => return self.handle_tab_move(request.id, params),
+            Method::TabSetPinned(params) => {
+                return self.handle_tab_set_pinned(request.id, params);
+            }
             Method::TabClose(target) => return self.handle_tab_close(request.id, target),
             Method::AgentList(_) => return self.handle_agent_list(request.id),
             Method::AgentUsage(_) => return self.handle_agent_usage(request.id),
