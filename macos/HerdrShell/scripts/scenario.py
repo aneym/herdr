@@ -128,7 +128,7 @@ def app(*a):
             keymap = os.path.join(D, "Resources", "keymap.json")
             args += ["--push", keymap + "=" + guest_path(keymap)]
             args += ["--env", "HERDR_SOCKET_PATH=/Users/lume/.herdr-space/herdr.sock",
-                     "--env", "PATH=/Users/lume/.herdr-space/node/bin:/Users/lume/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+                     "--env", "PATH=" + os.environ.get("SHELL_APP_PATH", "/Users/lume/.herdr-space/node/bin:/Users/lume/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin"),
                      "--", "--control", "/Users/lume/.herdr-space/control.fifo",
                      "--keymap", guest_path(keymap)]
             args += [x for x in a[1:] if x != "--agent-run"]

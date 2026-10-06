@@ -785,6 +785,7 @@ final class TestHook {
                         "density": cap.density, "focused": cap.focused,
                         "frame": [f.minX, f.minY, f.width, f.height]]
             },
+            "chats": c.chatDump,
             "machines": c.factoryMachines.map { ["name": $0.name, "usage": $0.usageLine, "usage_state": $0.usageState] },
             "hosts": c.model.hostsModel.rows.map { r -> [String: Any] in
                 ["host": r.host, "tabs": r.tabs, "slots_used": r.stats?.slotsUsed ?? NSNull(),

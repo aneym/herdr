@@ -4,11 +4,14 @@ import Combine
 enum PanePrompt { case clear, draft, unknown }
 
 struct ChatCLI {
+    /// The app's own herdr binary. A Finder or launchd launch has no ~/.local/bin on PATH,
+    /// so a bare `herdr` never resolves there and every pane's chat reads asleep.
+    static var herdrBin: String?
     static func run(_ args: [String]) throws -> String {
         let p = Process(), output = Pipe()
         let env = ProcessInfo.processInfo.environment
         p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        p.arguments = [env["HERDR_BIN"] ?? "herdr"] + args
+        p.arguments = [herdrBin ?? env["HERDR_BIN"] ?? "herdr"] + args
         let err = Pipe()
         p.standardOutput = output; p.standardError = err
         try p.run()

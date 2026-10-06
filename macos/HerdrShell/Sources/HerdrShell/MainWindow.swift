@@ -568,6 +568,11 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     private var chats: [String: PaneChat] = [:]
     /// True while any pane's chat composer, on screen or in a hidden tab, holds unsent text.
     var hasUnsentDraft: Bool { chats.values.contains { !$0.ui.draft.isEmpty } }
+    /// Each open chat as the view sees it: the agent state from herdr and the items read.
+    var chatDump: [[String: Any]] {
+        chats.map { id, c in ["id": id, "agent_state": c.transcript.state, "agent_name": c.transcript.name,
+                              "waiting": c.transcript.waiting, "items": c.transcript.items.map(\.id)] }
+    }
 
     func toggleFactory() { setFactory(open: !state.factoryOpen) }
 

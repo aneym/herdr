@@ -117,6 +117,7 @@ ShellPaths.configure(env: ProcessInfo.processInfo.environment, home: home)
 ContextStore.directory = ProcessInfo.processInfo.environment["HERDR_CONTEXT_DIR"]
     ?? Channel.appSupport.appendingPathComponent("context").path
 RemoteActions.configure(herdrBin: herdrBin)
+ChatCLI.herdrBin = herdrBin
 // Other machines: prod reads the tunnels' config; a dev or lab run only an explicit one.
 if Channel.kind == .prod || ProcessInfo.processInfo.environment["HERDR_SHELL_MACHINES"] != nil {
     Machines.configure(env: ProcessInfo.processInfo.environment)

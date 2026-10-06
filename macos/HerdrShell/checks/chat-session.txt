@@ -1,0 +1,8 @@
+HerdrShell chat session check  2026-10-06T15:02:00Z
+[PASS] lab pane reports a Claude session -- {'agent': 'claude', 'agent_session': {'agent': 'claude', 'kind': 'id', 'source': 'herdr:claude', 'value': 'cs-7b924048'}, 'agent_status': 'idle', 'cwd': '/private/tmp', 'focused': False, 'foreground_cwd': '/private/tmp', 'pane_id': 'w1:p2', 'revision': 0, 'state_change_seq': 5, 'tab_id': 'w1:t2', 'terminal_id': 'term_65d2d47fa282d2', 'workspace_id': 'w1'}
+pane w1:p2 session cs-7b924048 cwd /private/tmp; app PATH /usr/bin:/bin:/usr/sbin:/sbin
+app start: {"space": "herdr-qa", "ip": "192.168.64.5", "herdr_sha": "5cd533dc857a"}
+{"space": "herdr-qa", "app_pid": "71136", "exe": "/Users/lume/.herdr-space/bin/HerdrShell", "host_socket": "/Users/aneyman/.cache/herdr-build/s/d78f26/h/.config/herdr/sessions/shellspike-cs/herdr.sock", "guest_socket": "/Users/lume/.herdr-space/herdr.sock"}
+[PASS] chat shows the session's state and transcript, not 'No Claude session' -- {"agent_name": "Claude", "agent_state": "idle", "id": "w1:p2", "items": ["hello:0"], "waiting": false}
+lab down: stop: 0
+RESULT: PASS
