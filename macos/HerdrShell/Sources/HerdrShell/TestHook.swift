@@ -545,11 +545,12 @@ final class TestHook {
         delivered.append("scroll \(obj["dy"] ?? 0) on \(s.paneId)")
     }
 
-    /// {"cmd":"scroll_gesture","pane":id,"dy":px,"steps":n,"momentum":m,"interval":s,"out":path}:
+    /// {"cmd":"scroll_gesture","pane":id,"dy":px,"steps":n,"momentum":m,"decay":d,"interval":s,"out":path}:
     /// a trackpad swipe as AppKit delivers one: continuous pixel deltas with scroll phase
-    /// began, changed and ended, then `m` momentum events that decay, one event per
-    /// `interval` (default 1/120 s). On every tick, and for 0.4 s after, the surface's top
-    /// visible row is sampled; `out` gets "ms<TAB>row" lines, a client-side frame log.
+    /// began, changed and ended, then `m` momentum events that decay by `d` (default 0.92)
+    /// each, one event per `interval` (default 1/120 s). On every tick, and for 0.4 s after,
+    /// the surface's top visible row is sampled; `out` gets "ms<TAB>row" lines, a client-side
+    /// frame log.
     private func scrollGesture(_ obj: [String: Any]) {
         guard let c = controller,
               let s = c.currentPanes.first(where: { $0.paneId == obj["pane"] as? String }),
@@ -557,6 +558,7 @@ final class TestHook {
         let dy = obj["dy"] as? Double ?? Double(obj["dy"] as? Int ?? 12)
         let steps = obj["steps"] as? Int ?? 30
         let momentum = obj["momentum"] as? Int ?? 40
+        let decay = obj["decay"] as? Double ?? 0.92
         let interval = obj["interval"] as? Double ?? 1.0 / 120
         // (scroll phase, momentum phase, delta): CGScrollPhase began 1, changed 2, ended 4;
         // CGMomentumScrollPhase begin 1, continue 2, end 3.
@@ -564,7 +566,7 @@ final class TestHook {
         events += Array(repeating: (2, 0, dy), count: max(0, steps - 2))
         events.append((4, 0, 0))
         for i in 0..<momentum {
-            events.append((0, i == 0 ? 1 : (i == momentum - 1 ? 3 : 2), dy * pow(0.92, Double(i + 1))))
+            events.append((0, i == 0 ? 1 : (i == momentum - 1 ? 3 : 2), dy * pow(decay, Double(i + 1))))
         }
         // A swipe happens with the pointer over the pane, and Ghostty sends a wheel report at
         // the pointer; with no pointer position yet it reports nothing and nothing scrolls.
