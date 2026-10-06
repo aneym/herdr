@@ -5,8 +5,8 @@ import WebKit
 /// are markdown from the project folder. The web view does not take keyboard focus
 /// until it is clicked, and Esc hands focus back to the pane.
 final class DocPanelController: NSObject, WKNavigationDelegate {
-    static let defaultWidth: CGFloat = 420
-    static let minWidth: CGFloat = 320
+    static let defaultWidth: CGFloat = ShellSpace.docWidth
+    static let minWidth: CGFloat = ShellSpace.docMinWidth
 
     let view = DocPanelView()
     var onClose: (() -> Void)?

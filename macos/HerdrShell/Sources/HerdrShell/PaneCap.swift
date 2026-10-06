@@ -56,7 +56,7 @@ struct PaneCapBar: View {
             if let pinned = state.pinned { pin(pinned) }
         }
         .padding(.horizontal, PaneCapBar.trailing)
-        .frame(height: 36)
+        .frame(height: ShellSpace.paneCapHeight)
         .background(bg)
         .opacity(state.focused ? 1 : 0.92)
     }

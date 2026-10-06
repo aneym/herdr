@@ -277,7 +277,7 @@ struct QuickSwitchPanel: View {
                     }
                 }
                 .padding(12)
-                .frame(width: 560)
+                .frame(width: ShellSpace.switcherWidth)
                 .background(OverlayBackground(theme: theme, corner: 10))
                 .padding(.top, top)
             }

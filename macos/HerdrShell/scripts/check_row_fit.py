@@ -14,7 +14,7 @@ SRC = ROOT / "Sources/HerdrShell"
 BUILD = pathlib.Path.home() / ".cache/herdr-build/row-fit"
 BUILD.mkdir(parents=True, exist_ok=True)
 DRIVER = BUILD / "row_fit"
-subprocess.run(["swiftc", "-parse-as-library", str(SRC / "SpacesTree.swift"), str(SRC / "Theme.swift"),
+subprocess.run(["swiftc", "-parse-as-library", str(SRC / "SpacesTree.swift"), str(SRC / "Theme.swift"), str(SRC / "ShellTokens.swift"),
                 str(SRC / "SpacesRowView.swift"), str(ROOT / "scripts/row_fit.swift"), "-o", str(DRIVER)], check=True)
 fixtures = [ROOT / "scripts/fixtures/row-fit/overflow.json", ROOT / "scripts/fixtures/p33/alex-0928.json"]
 failures = []

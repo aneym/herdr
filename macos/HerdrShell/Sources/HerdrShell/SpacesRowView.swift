@@ -51,10 +51,10 @@ struct SpacesRowView: View {
                 goal
             } else {
                 Text(row.title)
-                    .font(.system(size: row.kind == .section ? 10.5 : 12.5,
+                    .font(.system(size: row.kind == .section ? ShellType.sectionLabel : ShellType.rowTitle,
                                   weight: row.kind == .space || row.kind == .title ? .semibold
                                       : (row.kind == .tab && !row.dim ? .medium : .regular)))
-                    .tracking(row.kind == .section ? 0.4 : 0)
+                    .tracking(row.kind == .section ? ShellType.sectionTracking : 0)
                     .foregroundStyle(row.kind == .section || row.kind == .group || row.kind == .hidden || row.dim ? t.mute : t.ink)
                     .lineLimit(1).truncationMode(.tail)
                     .frame(minWidth: isFooter ? nil : Self.titleMinWidth, alignment: .leading)
@@ -102,8 +102,8 @@ struct SpacesRowView: View {
             }
         }
         .padding(.top, row.kind == .space && row.id != firstSpaceId ? 10 : 0)
-        .frame(height: 23).padding(.leading, indent).padding(.horizontal, 4)
-        .background(RoundedRectangle(cornerRadius: 4).fill(selected && row.kind == .tab ? t.sel : .clear))
+        .frame(height: ShellSpace.rowHeight).padding(.leading, indent).padding(.horizontal, ShellSpace.rowPadX)
+        .background(RoundedRectangle(cornerRadius: ShellRadius.row).fill(selected && row.kind == .tab ? t.sel : .clear))
     }
 
     /// Host summaries shed whole trailing fields before the first field clips.

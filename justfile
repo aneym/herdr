@@ -253,6 +253,10 @@ shell-clipboard-paste-check:
 shell-copy-check:
     python3 macos/HerdrShell/scripts/check_copy.py
 
+# Mac and Windows Shell tokens both come from shell/tokens.json; fails when either client drifts.
+shell-tokens-check:
+    python3 shell/gen_tokens.py --check
+
 shell-build:
     bash macos/HerdrShell/scripts/vendor-ghostty.sh
     swift build --package-path macos/HerdrShell -c release
