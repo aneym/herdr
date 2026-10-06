@@ -3775,16 +3775,27 @@ impl PaneRuntime {
         }
     }
 
+    /// Foreground process group of the pane PTY for display reads (pane
+    /// snapshots, the sidebar host). The kernel reports it from the shell's
+    /// controlling terminal without leaving this thread; the PTY actor
+    /// round-trip is only the fallback once the shell is gone. Snapshot builds
+    /// call this per pane per attached client on the server loop, and a
+    /// blocking actor round-trip each time stalls that loop under load.
+    #[cfg(unix)]
+    fn display_foreground_process_group_id(&self, pid: u32) -> Option<u32> {
+        (pid > 0)
+            .then(|| crate::platform::foreground_process_group_id(pid))
+            .flatten()
+            .or_else(|| self.io.foreground_process_group_id())
+    }
+
     /// Short name of the machine the pane's foreground job runs on when that
     /// job is a remote shell (`ssh ax42`), e.g. "ax42"; `None` for local work.
     pub fn foreground_machine(&self) -> Option<String> {
         #[cfg(unix)]
         {
             let pid = self.child_pid.load(Ordering::Acquire);
-            let foreground_pgid = self
-                .io
-                .foreground_process_group_id()
-                .or_else(|| crate::platform::foreground_process_group_id(pid))?;
+            let foreground_pgid = self.display_foreground_process_group_id(pid)?;
             // No shortcut when the shell leads the group: `exec ssh ax42`
             // keeps the shell's pid.
             crate::remote_machine::cached(pid, foreground_pgid, || {
@@ -3808,10 +3819,7 @@ impl PaneRuntime {
         {
             let pid = self.child_pid.load(Ordering::Acquire);
             let shell_cwd = absolute_process_cwd(pid);
-            let foreground_pgid = self
-                .io
-                .foreground_process_group_id()
-                .or_else(|| crate::platform::foreground_process_group_id(pid));
+            let foreground_pgid = self.display_foreground_process_group_id(pid);
             let leader_cwd = foreground_pgid.and_then(absolute_process_cwd);
 
             // The group leader's cwd is authoritative (issue #3270): a helper

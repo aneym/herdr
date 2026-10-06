@@ -358,9 +358,14 @@ impl App {
             cwd: ws.tabs[tab_idx]
                 .cwd_for_pane(pane_id, &self.state.terminals, &self.terminal_runtimes)
                 .map(|cwd| cwd.display().to_string()),
-            foreground_cwd: ws.tabs[tab_idx]
-                .foreground_cwd_for_pane(pane_id, &self.terminal_runtimes)
-                .map(|cwd| cwd.display().to_string()),
+            foreground_cwd: {
+                let started = crate::render_prof::timer();
+                let cwd = ws.tabs[tab_idx]
+                    .foreground_cwd_for_pane(pane_id, &self.terminal_runtimes)
+                    .map(|cwd| cwd.display().to_string());
+                crate::render_prof::duration_since("pane_info.fg_cwd", started);
+                cwd
+            },
             restore_error: terminal.restore_error.clone(),
             label: terminal.manual_label.clone(),
             agent: terminal.effective_agent_label().map(str::to_string),

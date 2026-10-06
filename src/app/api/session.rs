@@ -50,9 +50,19 @@ impl App {
             focused_pane_id,
             workspaces,
             tabs,
-            panes: self.collect_panes_for_workspace(None).unwrap_or_default(),
+            panes: {
+                let started = crate::render_prof::timer();
+                let panes = self.collect_panes_for_workspace(None).unwrap_or_default();
+                crate::render_prof::duration_since("snapshot.panes", started);
+                panes
+            },
             layouts,
-            agents: self.collect_agent_infos(),
+            agents: {
+                let started = crate::render_prof::timer();
+                let agents = self.collect_agent_infos();
+                crate::render_prof::duration_since("snapshot.agents", started);
+                agents
+            },
         }
     }
 }

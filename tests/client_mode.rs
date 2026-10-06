@@ -2212,3 +2212,98 @@ fn client_receives_notify_on_agent_state_change() {
 
     cleanup_spawned_herdr(spawned, base);
 }
+
+/// An idle client shell draws a factory overlay change when it arrives. The
+/// server sends the overlay as an endpoint control message with no frame
+/// behind it, so a client that only flagged a repaint kept the old sidebar on
+/// screen until some unrelated input or pane output.
+#[test]
+fn idle_client_shell_draws_factory_overlay_change_without_input() {
+    let _lock = test_lock();
+    let base = unique_test_dir();
+    let config_home = base.join("config");
+    let runtime_dir = base.join("runtime");
+    let api_socket = runtime_dir.join("herdr.sock");
+    let client_socket = runtime_dir.join("herdr-client.sock");
+    let overlay = base.join("overlay.json");
+    fs::create_dir_all(&base).unwrap();
+    // The host footer shows only beside a tagged tab.
+    let write_overlay = |tab_id: &str, host: &str| {
+        let staged = base.join("overlay.json.tmp");
+        fs::write(
+            &staged,
+            serde_json::json!({
+                "version": 1,
+                "tabs": {tab_id: {"kind": "lane", "name": "overlay lane"}},
+                "hosts": [{"name": host, "summary": "ok"}],
+            })
+            .to_string(),
+        )
+        .unwrap();
+        fs::rename(&staged, &overlay).unwrap();
+    };
+    let config = format!(
+        "onboarding = false\n[ui.factory]\nenabled = true\noverlay_file = \"{}\"\n",
+        overlay.display()
+    );
+
+    let spawned = spawn_server_with_config(
+        &config_home,
+        &runtime_dir,
+        &api_socket,
+        &client_socket,
+        &config,
+    );
+    wait_for_socket(&api_socket, Duration::from_secs(10));
+    wait_for_socket(&client_socket, Duration::from_secs(10));
+    let created = send_json_request(
+        &api_socket,
+        &serde_json::json!({
+            "id": "overlay-workspace",
+            "method": "workspace.create",
+            "params": {"cwd": base, "focus": true, "label": "overlay-idle"},
+        })
+        .to_string(),
+    );
+    assert_eq!(created["result"]["type"], "workspace_created", "{created}");
+    let tab_id = created["result"]["root_pane"]["tab_id"]
+        .as_str()
+        .expect("root pane tab id")
+        .to_string();
+    write_overlay(&tab_id, "alpha");
+    // One server poll period, so the client receives the first overlay at attach.
+    thread::sleep(Duration::from_millis(2500));
+
+    let client = spawn_client_shell_process(&config_home, &runtime_dir, &api_socket);
+    let output = spawn_pty_drain(
+        client
+            ._master
+            .as_ref()
+            .expect("client shell PTY")
+            .try_clone_reader()
+            .expect("clone client shell reader"),
+    );
+    let screen = || terminal_screen::text(&output.lock().unwrap().bytes, 80, 24);
+    assert!(
+        wait_until(Duration::from_secs(10), Duration::from_millis(20), || {
+            screen().contains("alpha")
+        }),
+        "client shell should draw the first overlay host; screen: {}",
+        screen()
+    );
+    // Let the shell prompt and the first overlay poll settle so nothing else
+    // is due to produce a frame.
+    thread::sleep(Duration::from_secs(3));
+
+    write_overlay(&tab_id, "omega7");
+    let drawn = wait_until(Duration::from_secs(8), Duration::from_millis(50), || {
+        screen().contains("omega7")
+    });
+    let final_screen = screen();
+    drop(client);
+    cleanup_spawned_herdr(spawned, base);
+    assert!(
+        drawn,
+        "idle client shell should draw the new overlay host without input; screen: {final_screen}"
+    );
+}

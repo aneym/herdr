@@ -24,7 +24,9 @@ pub(super) fn snapshot_with_completions(
     protocol::ClientShellSnapshot,
     protocol::endpoint::EndpointAgentCompletions,
 ) {
+    let session_snapshot_started = crate::render_prof::timer();
     let snapshot = app.session_snapshot();
+    crate::render_prof::duration_since("snapshot.session", session_snapshot_started);
     let completions = protocol::endpoint::EndpointAgentCompletions {
         boot_id: boot_id.to_owned(),
         revision,
@@ -140,9 +142,11 @@ pub(super) fn snapshot_with_completions(
                 });
             let right_click_passthrough =
                 pane_state.is_some_and(|pane| pane.right_click_passthrough);
+            let machine_started = crate::render_prof::timer();
             let machine = pane_state
                 .and_then(|pane| app.terminal_runtimes.get(&pane.attached_terminal_id))
                 .and_then(|runtime| runtime.foreground_machine());
+            crate::render_prof::duration_since("pane_info.fg_machine", machine_started);
             protocol::ClientShellPane {
                 pane_id,
                 workspace_id: pane.workspace_id,
@@ -239,10 +243,12 @@ pub(super) fn snapshot_with_completions(
         .agent_view_override
         .as_ref()
         .map(|view| view.label.clone().unwrap_or_else(|| "filtered".to_owned()));
+    let agent_order_started = crate::render_prof::timer();
     let agent_order = crate::ui::agent_panel_entries_from(&app.state, &app.terminal_runtimes)
         .into_iter()
         .filter_map(|entry| app.public_pane_id(entry.ws_idx, entry.pane_id))
         .collect();
+    crate::render_prof::duration_since("snapshot.agent_order", agent_order_started);
 
     let zoomed = focused_tab_id
         .as_deref()

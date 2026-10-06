@@ -2018,14 +2018,21 @@ async fn run_client_loop(
                                 continue;
                             }
                             Ok(endpoint::EndpointControlMessage::FactoryOverlay(projection)) => {
-                                if state.shell.as_mut().is_some_and(|shell| {
-                                    shell.set_endpoint_factory_overlay_for_generation(
-                                        &endpoint_id,
-                                        generation,
-                                        projection,
-                                    )
-                                }) {
-                                    state.request_repaint();
+                                // The overlay is sidebar chrome with no server frame behind it,
+                                // so an idle client must draw it now, not on its next event.
+                                let size = state.reported_size;
+                                let frame = state.shell.as_mut().and_then(|shell| {
+                                    shell
+                                        .set_endpoint_factory_overlay_for_generation(
+                                            &endpoint_id,
+                                            generation,
+                                            projection,
+                                        )
+                                        .then(|| shell.compose(size.0, size.1))
+                                        .flatten()
+                                });
+                                if let Some(frame) = frame {
+                                    state.present_frozen_chrome(frame);
                                 }
                                 continue;
                             }

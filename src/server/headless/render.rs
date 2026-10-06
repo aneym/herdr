@@ -413,6 +413,7 @@ impl HeadlessServer {
 
         // Resize from the controlling client's geometry before drawing any observer.
         // Retained updates fall back here when a pane changes alternate screens.
+        let alt_screen_check_started = crate::render_prof::timer();
         for (client_id, (cols, rows), cell_size, _, _) in &render_targets {
             let Some(client) = self.clients.get(client_id) else {
                 continue;
@@ -486,6 +487,10 @@ impl HeadlessServer {
                 }
             }
         }
+        crate::render_prof::duration_since(
+            "full_render.alt_screen_check",
+            alt_screen_check_started,
+        );
 
         let mut broken_clients: Vec<u64> = Vec::new();
         for (client_id, (cols, rows), cell_size, _is_foreground, mode) in render_targets {
@@ -562,6 +567,7 @@ impl HeadlessServer {
                 let Some(client) = self.clients.get_mut(&client_id) else {
                     continue;
                 };
+                let snapshot_started = crate::render_prof::timer();
                 let (mut candidate, mut completions) = client_shell_snapshot(
                     &self.app,
                     &self.client_shell_boot_id,
@@ -569,6 +575,7 @@ impl HeadlessServer {
                     None,
                     location.as_ref(),
                 );
+                crate::render_prof::duration_since("full_render.snapshot_build", snapshot_started);
                 candidate.config_diagnostic = if client.shell_uses_endpoint_keybindings {
                     self.server_config_diagnostic.clone()
                 } else {
@@ -771,6 +778,7 @@ impl HeadlessServer {
                         || !graphics.retained_assets.is_empty()
                 });
             let mut next_shell_graphics_delivery = None;
+            let surface_prepare_started = crate::render_prof::timer();
             let prepared =
                 if let Some((panes, splits, popup, graphics, delivery, _)) = surface_parts {
                     next_shell_graphics_delivery = Some(delivery);
@@ -790,6 +798,10 @@ impl HeadlessServer {
                 } else {
                     client.render_state.prepare_frame(frame)
                 };
+            crate::render_prof::duration_since(
+                "full_render.surface_prepare",
+                surface_prepare_started,
+            );
             let Some(mut prepared) = prepared else {
                 client.clear_deferred_render();
                 crate::render_prof::event("full_render.skip_identical");
@@ -803,6 +815,7 @@ impl HeadlessServer {
             let mut shell_assets_deferred = false;
             let mut suppress_impossible_asset_retry = false;
             let mut stripped_assets = Vec::new();
+            let serialize_started = crate::render_prof::timer();
             let mut serialized = match Self::frame_server_message_with_max(prepared.message(), max)
             {
                 Ok(frame) => frame,
@@ -890,6 +903,7 @@ impl HeadlessServer {
                 };
                 serialized.extend_from_slice(&file_frame);
             }
+            crate::render_prof::duration_since("full_render.frame_serialize", serialize_started);
             let send = if native_upload.is_some() || self.native_graphics.is_pending(client_id) {
                 writer.render.send_ordered(serialized)
             } else {
