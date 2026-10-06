@@ -4,9 +4,10 @@
   SHELL_LAB=shellspike-areas python3 scripts/check_p16.py [--out checks/P16.txt]
 
 A local page is the scope URL. RESUME.md and BRIEF.md live in the project folder
-the scope route names. Selecting the row shows Scope, RESUME, BRIEF. Typed text
-still reaches the focused pane. Editing RESUME.md shows up within 6s. ⌘\\ hides
-and shows the column, and the pane host width changes.
+the scope route names. Selecting the row leaves the column closed; ⌘\\ opens it
+with Scope, RESUME, BRIEF. Typed text still reaches the focused pane. Editing
+RESUME.md shows up within 6s. ⌘\\ hides and shows the column, and the pane host
+width changes.
 """
 import json
 import os
@@ -182,7 +183,14 @@ def run():
 
     time.sleep(0.4)
     click("row", "doc lane")
-    s = wait_state(lambda s: s.get("docs", {}).get("tabs") == ["Scope", "RESUME", "BRIEF"] and s["docs"].get("title") == "P16 Scope", 20)
+    s = wait_state(lambda s: s.get("selected_tab") == tab and s.get("docs", {}).get("tabs") == ["Scope", "RESUME", "BRIEF"], 20)
+    time.sleep(0.5)
+    s = S.state()
+    check("selecting the row leaves the docs column closed (Alex, 2026-10-06)",
+          s["shell"]["doc_open"] is False and s.get("docs_visible") is False,
+          f"doc_open={s['shell']['doc_open']} docs_visible={s.get('docs_visible')}")
+    S.key("\\", ["cmd"])
+    s = wait_state(lambda s: s.get("docs_visible") is True and s["docs"].get("title") == "P16 Scope", 20)
     docs = (s or {}).get("docs", {})
     say(f"docs after select: tabs={docs.get('tabs')} active={docs.get('active')} title={docs.get('title')!r} text={(docs.get('text') or '')[:180]!r}")
     check("selecting the row shows tabs Scope, RESUME, BRIEF",

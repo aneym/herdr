@@ -214,6 +214,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         docPanel.onClose = { [weak self] in self?.setDocs(open: false) }
         docPanel.onWidth = { [weak self] w in self?.setDocs(width: w) }
         root.docs = docPanel.view
+        syncDocsShown()
         applyDocs()
         root.sidebarVisible = state.sidebarVisible
         Keymap.shared.addContextual(chord: "escape", action: "close_detail") { [weak self] in
@@ -419,9 +420,12 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     var forcedEmptyDocs = false
+    /// The last click landed in the docs column. ⌘W then closes the column even after a
+    /// doc tab click handed keyboard focus back to the pane.
+    var docsLastClicked = false
 
     func selectTab(_ tabId: String, revealDocs: Bool = false) {
-        if state.selectedTab != tabId { forcedEmptyDocs = false }
+        if state.selectedTab != tabId { forcedEmptyDocs = false; docsLastClicked = false }
         quickSwitch.noteSelected(tabId)
         noteLookedAt(tabId)
         let stepping = state.focusCursor != nil && revealDocs
@@ -429,7 +433,6 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         if !stepping { state.focusCursor = nil }
         state.saveSelected()
         if revealDocs, state.mode == .areas {
-            setDocs(open: true)
             focusHerdr(tabId)
         }
         lastLayoutKey = ""
@@ -440,10 +443,28 @@ final class MainWindowController: NSObject, NSWindowDelegate {
 
     private func refreshDocs() {
         docPanel.show(model: model, tabId: state.selectedTab)
+        syncDocsShown()
         applyDocs()
     }
 
-    /// Areas-mode row click, ⌘1..9 and Focus next/prev: select the tab and open its docs.
+    /// Docs are shown per tab and only once asked for (⌘\ or Toggle Docs). The key is new:
+    /// the old window-wide `docOpen` kept RESUME and BRIEF open on every lane.
+    private static func docsShownKey(_ tab: String) -> String { "herdr.shell.docsShown.\(tab)" }
+
+    private func syncDocsShown() {
+        state.docOpen = state.selectedTab.map { SidebarState.store.bool(forKey: Self.docsShownKey($0)) } ?? false
+    }
+
+    /// ⌘W follows focus: with the docs column focused or last clicked it closes what ✕
+    /// closes, never the pane.
+    var docsOwnClose: Bool { root.docsOpen && (docPanel.hasFocus || docsLastClicked) }
+
+    func closeDocs() {
+        docsLastClicked = false
+        docPanel.closeActive()
+    }
+
+    /// Areas-mode row click, ⌘1..9 and Focus next/prev: select the tab. Docs stay as that tab left them.
     func selectAreaTab(_ tabId: String) {
         selectTab(tabId, revealDocs: true)
     }
@@ -466,7 +487,11 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     func setDocs(open: Bool? = nil, width: CGFloat? = nil) {
-        if let open { state.docOpen = open }
+        if let open {
+            state.docOpen = open
+            if let tab = state.selectedTab { SidebarState.store.set(open, forKey: Self.docsShownKey(tab)) }
+            if !open { docsLastClicked = false }
+        }
         if let width { state.docWidth = max(DocPanelController.minWidth, width) }
         state.saveDocs()
         applyDocs()
@@ -925,6 +950,9 @@ final class ShellWindow: NSWindow {
         // Swallow them here so a focused pane never sees switcher typing.
         if event.type == .keyDown, let c = delegate as? MainWindowController, c.quickSwitch.sink(event) {
             return
+        }
+        if event.type == .leftMouseDown, let c = delegate as? MainWindowController, let docs = c.root.docs {
+            c.docsLastClicked = c.root.docsOpen && docs.bounds.contains(docs.convert(event.locationInWindow, from: nil))
         }
         super.sendEvent(event)
     }

@@ -1,0 +1,6 @@
+[PASS] the lane tab has RESUME and BRIEF -- tabs=['RESUME', 'BRIEF']
+[PASS] the tab opens with no docs column, though the old window-wide docOpen is on -- docs_visible=False doc_open=False
+[PASS] cmd+\ opens the column on request -- docs_visible=True text='docs close RESUME\n\nstage: Ready for review'
+[PASS] a click on the BRIEF tab shows BRIEF -- active=BRIEF
+[PASS] cmd+w after a click in the column closes the column -- docs_visible=False doc_open=False
+[PASS] cmd+w after a click in the column leaves the tab and its pane -- panes in tab=['w2:p1']

@@ -112,8 +112,10 @@ def main():
     S.app("start")
     state = wait(lambda s: ws + ":IMPLEMENTING" in s.get("spaces_chrome", {}).get("collapsedSections", []))
     check("fold survives relaunch", ws + ":IMPLEMENTING" in state.get("spaces_chrome", {}).get("collapsedSections", []))
-    S.cmd({"cmd": "docs", "open": True})
+    # Docs are shown per tab and only on request: open them on the tab that has them.
     S.cmd({"cmd": "select", "tab": tabs["scope"]})
+    wait(lambda s: s.get("selected_tab") == tabs["scope"])
+    S.cmd({"cmd": "docs", "open": True})
     state = wait(lambda s: s.get("docs_visible") is True)
     check("tab with docs shows column", state.get("docs_visible") is True)
     S.cmd({"cmd": "select", "tab": other})

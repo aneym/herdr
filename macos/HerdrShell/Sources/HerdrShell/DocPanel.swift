@@ -324,6 +324,12 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         onClose?()
     }
 
+    /// ⌘W on the column: the ✕ action, then the pane gets the keys back.
+    func closeActive() {
+        closed()
+        returnFocus()
+    }
+
     @objc private func goBack() { web.goBack() }
     @objc private func goForward() { web.goForward() }
     @objc private func reloadPage() { web.reload() }

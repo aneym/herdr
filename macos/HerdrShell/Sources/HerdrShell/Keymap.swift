@@ -201,7 +201,7 @@ extension MainWindowController {
         case "new_tab": newTab(nil)
         case "split_right": splitRight(nil)
         case "split_down": splitDown(nil)
-        case "close_pane": closePane()
+        case "close_pane": if docsOwnClose { closeDocs() } else { closePane() }
         case "zoom_pane": zoomPane()
         case "next_attention": nextAttention()
         case "attention_jump": attentionJump()
