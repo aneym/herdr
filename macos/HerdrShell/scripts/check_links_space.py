@@ -163,10 +163,11 @@ def main():
         S.cmd({"cmd": "mouse", "pane": pane, "col": 2.0, "row": float(start + 1), "action": "move"})
         state = wait(lambda s: surface(s, pane).get("hovered_link") == "", 5)
         check("moving without Cmd clears the hovered link", surface(state, pane).get("hovered_link") == "")
-        click("Cmd-click on URL second row records the entire URL", start + 1, 2, URL)
-        click("Cmd-click on URL first row records the entire URL", start, 5, URL)
+        click("Cmd-click on URL second row records the entire URL", start + 1, 2, "desk " + URL)
+        click("Cmd-click on URL first row records the entire URL", start, 5, "desk " + URL)
         if label_row is not None:
-            click("Cmd-click on OSC 8 label records its target", label_row, 2, OSC_URL)
+            click("Cmd-click on OSC 8 label records its target", label_row, 2, "desk " + OSC_URL)
+        click("Cmd-Shift-click opens the URL externally", start + 1, 2, URL, mods=("cmd", "shift"))
         click("plain click on the URL opens nothing", start + 1, 2, None, mods=())
         # This independently checks the existing hook/callback path, only after the
         # real click receipts above so simulation cannot supply them.
@@ -174,7 +175,7 @@ def main():
         S.cmd({"cmd": "open_url_sim", "url": OSC_URL})
         state = wait(lambda s: s.get("opened_urls", []) != before, 8)
         opened = state.get("opened_urls", [])
-        check("open_url_sim records the OSC 8 target", opened != before and bool(opened) and opened[-1] == OSC_URL)
+        check("open_url_sim records the OSC 8 target", opened != before and bool(opened) and opened[-1] == "desk " + OSC_URL)
     else:
         skip("wrapped-row mouse checks: physical continuation row was not established (see FAIL above)")
     chat_check(pane)

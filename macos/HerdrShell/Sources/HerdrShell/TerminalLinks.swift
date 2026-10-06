@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 /// Cmd-hover and Cmd-click links in one terminal surface, resolved by the herdr server.
 ///
@@ -53,6 +53,7 @@ final class TerminalLinks {
     /// link's, it opens through the server's activation, and the pane never sees it.
     func activate(at cell: Cell) -> Bool {
         guard !url.isEmpty, regions.contains(where: { $0.contains(col: cell.col, row: cell.row) }) else { return false }
+        let shift = NSEvent.modifierFlags.contains(.shift)
         let (commands, paneId) = (self.commands, self.paneId)
         DispatchQueue.global(qos: .userInitiated).async {
             guard let answer = commands.paneLinkActivate(paneId: paneId, row: cell.row, col: cell.col) else {
@@ -60,7 +61,7 @@ final class TerminalLinks {
                 return
             }
             guard !answer.handled, let target = answer.url, Self.webURL(target) != nil else { return }
-            DispatchQueue.main.async { GhosttyRuntime.openDetectedURL(target) }
+            DispatchQueue.main.async { GhosttyRuntime.openLink(target, paneId: paneId, shift: shift) }
         }
         return true
     }

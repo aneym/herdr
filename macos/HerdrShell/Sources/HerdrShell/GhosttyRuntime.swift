@@ -99,7 +99,14 @@ final class GhosttyRuntime {
         // even from an agent run). The bytes are only valid until this returns.
         if action.tag == GHOSTTY_ACTION_OPEN_URL {
             let raw = text(action.action.open_url.url, len: Int(action.action.open_url.len))
-            DispatchQueue.main.async { openDetectedURL(raw) }
+            let paneId: String?
+            if target.tag == GHOSTTY_TARGET_SURFACE, let ud = ghostty_surface_userdata(target.target.surface) {
+                paneId = Unmanaged<SurfaceView>.fromOpaque(ud).takeUnretainedValue().paneId
+            } else {
+                paneId = nil
+            }
+            let shift = NSEvent.modifierFlags.contains(.shift)
+            DispatchQueue.main.async { openLink(raw, paneId: paneId, shift: shift) }
             return true
         }
         if action.tag == GHOSTTY_ACTION_MOUSE_OVER_LINK, target.tag == GHOSTTY_TARGET_SURFACE,
@@ -136,20 +143,25 @@ final class GhosttyRuntime {
         return String(decoding: UnsafeRawBufferPointer(start: ptr, count: n), as: UTF8.self)
     }
 
-    /// http/https/file/mailto only, opened through `shellOpen`. Agent runs log and record,
-    /// and never call NSWorkspace.
-    static func openDetectedURL(_ raw: String) {
+    /// Capture Shift at activation, before an asynchronous server lookup can outlive
+    /// the click. Desk routes still reach the lab server in agent runs; only external
+    /// routes suppress NSWorkspace there.
+    static func openLink(_ raw: String, paneId: String?,
+                         shift: Bool = NSEvent.modifierFlags.contains(.shift)) {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(),
-              ["http", "https", "file", "mailto"].contains(scheme) else { return }
+        guard let url = URL(string: trimmed) else { return }
+        var route = LinkRoute.decide(url, shift: shift)
+        guard route != .ignore else { return }
+        let controller = (NSApp.delegate as? AppDelegate)?.controller
+        if route == .desk, controller == nil { route = .external }
         let s = url.absoluteString
-        if agentRun {
-            log("open_url \(s)")
-            Notifier.shared.recordOpened(s)
-            return
+        if agentRun { log("open_url \(s)") }
+        Notifier.shared.recordOpened(route == .desk ? "desk \(s)" : s)
+        switch route {
+        case .desk: controller?.openOnDesk(url, paneId: paneId)
+        case .external: if !agentRun { shellOpen(url) }
+        case .ignore: break
         }
-        Notifier.shared.recordOpened(s)
-        shellOpen(url)
     }
 
     static func readClipboard(

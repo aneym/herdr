@@ -523,9 +523,7 @@ struct ChatView: View {
         .foregroundStyle(p.ink)
         .background(p.page)
         .environment(\.openURL, OpenURLAction { url in
-            if let scheme = url.scheme?.lowercased(), ["http", "https", "file", "mailto"].contains(scheme) {
-                shellOpen(url)
-            }
+            GhosttyRuntime.openLink(url.absoluteString, paneId: transcript.pane)
             return .handled
         })
         .preferredColorScheme(theme.effective == .dark ? .dark : .light)

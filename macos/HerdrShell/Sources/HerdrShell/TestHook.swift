@@ -228,7 +228,7 @@ final class TestHook {
             }
         case "open_url_sim":
             // Same path as GHOSTTY_ACTION_OPEN_URL, without a surface under the pointer.
-            GhosttyRuntime.openDetectedURL(obj["url"] as? String ?? "")
+            GhosttyRuntime.openLink(obj["url"] as? String ?? "", paneId: nil)
         case "activate":
             if agentRun {
                 log("hook: activate ignored (--agent-run)")

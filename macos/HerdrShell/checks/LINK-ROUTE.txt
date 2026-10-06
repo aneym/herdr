@@ -1,0 +1,13 @@
+[PASS] http|false|desk
+[PASS] http|true|external
+[PASS] https|false|desk
+[PASS] https|true|external
+[PASS] file|false|desk
+[PASS] file|true|external
+[PASS] mailto|false|external
+[PASS] mailto|true|external
+[PASS] javascript|false|ignore
+[PASS] javascript|true|ignore
+[PASS] ftp|false|ignore
+[PASS] ftp|true|ignore
+12 passed; 0 failed/blocked
