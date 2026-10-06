@@ -196,15 +196,33 @@ S="$HOME/Library/Application Support/HerdrShell"
 i=$(/usr/libexec/PlistBuddy -c "Print :HerdrShellCommit" "$HOME/Applications/Herdr Shell.app/Contents/Info.plist" 2>/dev/null)
 s=$(/usr/bin/plutil -extract commit raw -o - "$S/staged.json" 2>/dev/null)
 a=$(/usr/libexec/PlistBuddy -c "Print :HerdrShellCommit" "$S/staged/Herdr Shell.app/Contents/Info.plist" 2>/dev/null)
-echo "installed=$i"; echo "staged=$s"; echo "staged_app=$a"
+c=$(/usr/bin/mdfind "kMDItemCFBundleIdentifier == 'com.aneyman.herdr-shell'" 2>/dev/null | wc -l | tr -d ' ')
+echo "installed=$i"; echo "staged=$s"; echo "staged_app=$a"; echo "spotlight_copies=$c"
+'''
+
+# Raycast and Spotlight list one app per bundle id, and Herdr Shell vanished from them
+# behind seven staged copies left in Application Support. Keep only the current staged
+# release, inside a .noindex folder Spotlight skips, and out of LaunchServices.
+PRUNE_STAGED = r'''
+LSR=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+R="$S/releases.noindex"
+keep=$(readlink "$S/staged" 2>/dev/null || true)
+for old in "$S"/releases/incoming.* "$R"/incoming.* "$S"/prev-*.app; do
+    [ -e "$old" ] || [ -L "$old" ] || continue
+    [ "$old" = "$keep" ] && continue
+    find "$old" -maxdepth 2 -name '*.app' -prune -exec "$LSR" -u {} \; 2>/dev/null || true
+    rm -rf "$old"
+done
+rmdir "$S/releases" 2>/dev/null || true
+[ -d "$keep" ] && { find "$keep" -maxdepth 2 -name '*.app' -prune -exec "$LSR" -u {} \; 2>/dev/null || true; }
 '''
 
 # Both files live behind one staged directory pointer, swapped only after verification.
 REMOTE_DELIVER = r'''
 set -e
 S="$HOME/Library/Application Support/HerdrShell"
-mkdir -p "$S/releases"
-IN=$(mktemp -d "$S/releases/incoming.XXXXXX")
+mkdir -p "$S/releases.noindex"
+IN=$(mktemp -d "$S/releases.noindex/incoming.XXXXXX")
 trap 'rm -rf "$IN"' EXIT
 tar -xzf - -C "$IN"
 /usr/bin/codesign --verify "$IN/Herdr Shell.app"
@@ -220,6 +238,7 @@ LINK="$IN.pointer"
 ln -s "$IN" "$LINK"
 /bin/mv -fh "$LINK" "$S/staged"
 trap - EXIT
+''' + PRUNE_STAGED + r'''
 echo delivered
 '''
 
@@ -322,7 +341,19 @@ rm -rf "$A/Herdr Shell.app.previous"
 [ -d "$A/Herdr Shell.app" ] && mv "$A/Herdr Shell.app" "$A/Herdr Shell.app.previous"
 mv "$IN/Herdr Shell.app" "$A/Herdr Shell.app"
 rm -rf "$IN" "$A/Herdr Shell.app.previous"
-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$A/Herdr Shell.app" || true
+S="$HOME/Library/Application Support/HerdrShell"
+# A staged release from the old layout moves under .noindex; the app is not running.
+cur=$(readlink "$S/staged" 2>/dev/null || true)
+case "$cur" in "$S"/releases/incoming.*)
+    mkdir -p "$S/releases.noindex"
+    new="$S/releases.noindex/${cur##*/}"
+    mv "$cur" "$new"
+    ln -s "$new" "$new.pointer"
+    /bin/mv -fh "$new.pointer" "$S/staged";;
+esac
+''' + PRUNE_STAGED + r'''
+"$LSR" -f "$A/Herdr Shell.app" || true
+/usr/bin/mdimport "$A/Herdr Shell.app" 2>/dev/null || true
 echo installed
 '''
 
