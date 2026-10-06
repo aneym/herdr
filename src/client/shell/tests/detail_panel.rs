@@ -400,11 +400,13 @@ async fn overlay_file_reaches_the_panel_through_the_server_poll_and_client_contr
         else {
             panic!("expected factory overlay control");
         };
-        state.set_endpoint_factory_overlay_for_generation(&active, 1, decoded)
+        crate::client::shell_runtime::apply_client_shell_factory_overlay(
+            state, &active, 1, decoded, (110, 30), (8, 16), true,
+        )
     };
     // Both paths carry the same document and revision.
     assert_eq!(connected, ticked);
-    assert!(apply(&mut state, &ticked[0]));
+    assert!(apply(&mut state, &ticked[0]).0.is_some());
     assert!(state.factory_overlay.is_some());
 
     // Alt-O (default binding) opens the panel with the file's contents.
@@ -424,11 +426,43 @@ async fn overlay_file_reaches_the_panel_through_the_server_poll_and_client_contr
     std::fs::write(&path, serde_json::to_string(&changed).unwrap()).unwrap();
     let updated = overlay_messages(server.poll_tick());
     assert_eq!(updated.len(), 1);
-    assert!(apply(&mut state, &updated[0]));
+    let (frame, resize) = apply(&mut state, &updated[0]);
+    assert!(frame.is_some());
+    assert!(resize.is_none(), "content-only overlay changes must not resize");
     assert_eq!(
         state.factory_overlay.as_ref().unwrap().panels["overview"].title,
         "Renamed overview"
     );
+    // Removing and restoring the real file while idle changes the pane width.
+    // The client must notify the server and retire both stale pixels and hit geometry.
+    let narrow = state.surface_size(110, 30);
+    assert_eq!(narrow.cols, 38);
+    std::fs::remove_file(&path).unwrap();
+    let removed = overlay_messages(server.poll_tick());
+    assert_eq!(removed.len(), 1);
+    let (_, resize) = apply(&mut state, &removed[0]);
+    let crate::protocol::ClientMessage::ClientShellResize {
+        surface_size: wide, cell_width_px, cell_height_px, pixel_mouse,
+    } = resize.expect("overlay removal must resize the server surface") else {
+        panic!("expected shell resize");
+    };
+    assert_eq!(wide.cols, 84);
+    assert_eq!((cell_width_px, cell_height_px, pixel_mouse), (8, 16, true));
+    assert!(state.pane_surface.is_none());
+    assert!(state.hits.panes.is_empty());
+
+    state.set_pane_surface(surface());
+    std::fs::write(&path, serde_json::to_string(&changed).unwrap()).unwrap();
+    let restored = overlay_messages(server.poll_tick());
+    assert_eq!(restored.len(), 1);
+    let (_, resize) = apply(&mut state, &restored[0]);
+    let crate::protocol::ClientMessage::ClientShellResize { surface_size, .. } =
+        resize.expect("overlay restoration must resize the server surface") else {
+        panic!("expected shell resize");
+    };
+    assert_eq!(surface_size, narrow);
+    assert!(state.pane_surface.is_none());
+    assert!(state.hits.panes.is_empty());
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

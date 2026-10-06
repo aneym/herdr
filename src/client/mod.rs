@@ -2021,16 +2021,40 @@ async fn run_client_loop(
                                 // The overlay is sidebar chrome with no server frame behind it,
                                 // so an idle client must draw it now, not on its next event.
                                 let size = state.reported_size;
-                                let frame = state.shell.as_mut().and_then(|shell| {
-                                    shell
-                                        .set_endpoint_factory_overlay_for_generation(
+                                let (frame, resize) = state
+                                    .shell
+                                    .as_mut()
+                                    .map(|shell| {
+                                        apply_client_shell_factory_overlay(
+                                            shell,
                                             &endpoint_id,
                                             generation,
                                             projection,
+                                            size,
+                                            state.reported_cell_size,
+                                            state.pixel_geometry_exact,
                                         )
-                                        .then(|| shell.compose(size.0, size.1))
-                                        .flatten()
-                                });
+                                    })
+                                    .unwrap_or((None, None));
+                                if let Some(resize) = resize {
+                                    state.request_repaint();
+                                    if let Some(activation) = pending_activation.as_mut() {
+                                        if let Err(error) =
+                                            activation.update_resize(resize, &mut write_stream)
+                                        {
+                                            rollback_endpoint_activation(
+                                                &mut state,
+                                                &mut write_stream,
+                                                &mut pending_activation,
+                                                error,
+                                                false,
+                                            );
+                                        }
+                                    } else {
+                                        write_to_server(&mut write_stream, &resize)
+                                            .map_err(ClientError::ConnectionLost)?;
+                                    }
+                                }
                                 if let Some(frame) = frame {
                                     state.present_frozen_chrome(frame);
                                 }

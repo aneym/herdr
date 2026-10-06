@@ -87,6 +87,28 @@ pub(super) fn client_shell_resize_message(
     }
 }
 
+// Overlay controls can change layout even while the endpoint is idle. Retire the
+// old surface before composing, and let the caller route the resize through activation.
+pub(crate) fn apply_client_shell_factory_overlay(
+    shell: &mut shell::ClientShellState,
+    endpoint_id: &endpoint::ClientEndpointId,
+    generation: u64,
+    projection: crate::protocol::endpoint::EndpointFactoryOverlay,
+    size: (u16, u16),
+    cell_size: (u32, u32),
+    pixel_mouse: bool,
+) -> (Option<frame_output::ComposedFrame>, Option<ClientMessage>) {
+    let previous_size = shell.surface_size(size.0, size.1);
+    if !shell.set_endpoint_factory_overlay_for_generation(endpoint_id, generation, projection) {
+        return (None, None);
+    }
+    let resize = (previous_size != shell.surface_size(size.0, size.1)).then(|| {
+        shell.invalidate_pane_surface();
+        client_shell_resize_message(shell, size.0, size.1, cell_size.0, cell_size.1, pixel_mouse)
+    });
+    (shell.compose(size.0, size.1), resize)
+}
+
 pub(super) fn sync_client_shell_keyboard_report_all(
     state: &mut ClientState,
 ) -> Result<(), ClientError> {
