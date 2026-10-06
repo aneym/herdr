@@ -1,0 +1,38 @@
+  herdr: herdr 0.9.1 from /Users/aneyman/.cache/herdr-build/deskp/herdr
+[PASS] Shell attached the agent pane on the selected tab
+[PASS] pane shell ready
+[PASS] docs column closed before any desk item
+[PASS] the command runs in the agent pane (HERDR_PANE_ID is the pane's)
+  pane$ herdr desk open https://example.com -> rc=0 d1 w2:t1 https://example.com
+[PASS] herdr desk open <url> succeeds from the pane
+[PASS] open prints '<item_id> <tab_id> <ref>' for this tab
+[PASS] the docs column opened on the tab when the url landed
+[PASS] Shell desk dump: url item present and front/active
+[PASS] the url item loads example.com in the docs web view
+  shot DESK-SPACE-url.png
+  pane$ herdr desk open /private/var/folders/58/j110bjyx10j199g9pmv7zzhc0000gn/T/desk-proof-b7ox3efz/desk-proof.md -> rc=0 d2 w2:t1 /private/var/folders/58/j110bjyx10j199g9pmv7zzhc0000gn/T/desk-proof-b7ox3efz/desk-proof.md
+[PASS] herdr desk open <md> succeeds from the pane
+[PASS] Shell desk dump: both items, md front and active
+[PASS] the docs column tabs list both desk items
+[PASS] the md item renders: heading and list text in the docs web view
+[PASS] the rendered md is html, not the raw source
+  shot DESK-SPACE-md.png
+  pane$ herdr desk list ->
+    |   d1 url example.com https://example.com
+    | * d2 file desk-proof.md /private/var/folders/58/j110bjyx10j199g9pmv7zzhc0000gn/T/desk-proof-b7ox3efz/desk-proof.md
+[PASS] herdr desk list prints both items, the md one marked front (*)
+  lab$ herdr server live-handoff -> rc=0 live handoff complete; server log: /Users/aneyman/.cache/herdr-build/dk/h/.config/herdr/sessions/shellspike-dk/herdr-server.log
+[PASS] live handoff of the lab server completes
+[PASS] a new server process took over
+[PASS] session.snapshot after handoff: same desk items, ids and front
+[PASS] the agent pane survived the handoff
+[PASS] the Shell re-attached the pane to its post-handoff terminal and shows new output
+[PASS] the Shell still shows both desk items after reconnect, md active
+  shot DESK-SPACE-handoff.png
+  pane$ herdr desk focus d1 -> rc=0 d1
+[PASS] herdr desk focus <url item> makes it the Shell's active item
+  shot DESK-SPACE-focus.png
+  pane$ herdr desk close -> rc=0 d2
+[PASS] herdr desk close drops the front item; the md item becomes active
+  shot DESK-SPACE-close.png
+RESULT: PASS

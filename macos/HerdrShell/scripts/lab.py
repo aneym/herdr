@@ -38,7 +38,12 @@ def _lab_dir(name):
     return os.path.expanduser(f"~/.cache/herdr-build/s/{tail}")
 
 
-LAB = _lab_dir(NAME)
+# SHELL_LAB_DIR picks a short lab dir by hand: a live handoff binds
+# <data dir>/herdr-handoff-<pid>.sock, which overflows sun_path under the default dirs.
+_override = os.environ.get("SHELL_LAB_DIR", "")
+assert not _override or os.path.abspath(os.path.expanduser(_override)).startswith(
+    os.path.expanduser("~/.cache/")), "SHELL_LAB_DIR must live under ~/.cache/"
+LAB = os.path.abspath(os.path.expanduser(_override)) if _override else _lab_dir(NAME)
 # Until P1 (--no-escape) ships in the herdr on PATH, the lab uses the spike binary.
 BIN_SRC = os.environ.get("HERDR_SHELL_BIN") or os.path.expanduser("~/.cache/herdr-build/target-pane-attach/release/herdr")
 BIN = os.path.join(LAB, "bin", "herdr")

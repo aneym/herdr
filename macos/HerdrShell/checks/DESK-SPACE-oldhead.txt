@@ -1,0 +1,46 @@
+  herdr: herdr 0.9.1 from /Users/aneyman/.local/bin/herdr
+[PASS] Shell attached the agent pane on the selected tab
+[PASS] pane shell ready
+[PASS] docs column closed before any desk item
+[PASS] the command runs in the agent pane (HERDR_PANE_ID is the pane's)
+  pane$ herdr desk open https://example.com -> rc=2 unknown command: desk
+run 'herdr --help' for usage
+[FAIL] herdr desk open <url> succeeds from the pane (unknown command: desk
+run 'herdr --help' for usage)
+[FAIL] open prints '<item_id> <tab_id> <ref>' for this tab (unknown command: desk
+run 'herdr --help' for usage)
+[FAIL] the docs column opened on the tab when the url landed (docs_visible=False)
+[FAIL] Shell desk dump: url item present and front/active ({"active_item": null, "front": null, "items": []})
+[FAIL] the url item loads example.com in the docs web view (url='' title='' text='')
+  shot DESK-SPACE-oldhead-url.png
+  pane$ herdr desk open /private/var/folders/58/j110bjyx10j199g9pmv7zzhc0000gn/T/desk-proof-ipmafyez/desk-proof.md -> rc=2 unknown command: desk
+run 'herdr --help' for usage
+[FAIL] herdr desk open <md> succeeds from the pane (unknown command: desk
+run 'herdr --help' for usage)
+[FAIL] Shell desk dump: both items, md front and active ({"active_item": null, "front": null, "items": []})
+[FAIL] the docs column tabs list both desk items (tabs=[])
+[FAIL] the md item renders: heading and list text in the docs web view (text='')
+[PASS] the rendered md is html, not the raw source
+  shot DESK-SPACE-oldhead-md.png
+  pane$ herdr desk list ->
+    | unknown command: desk
+    | run 'herdr --help' for usage
+[FAIL] herdr desk list prints both items, the md one marked front (*) (unknown command: desk
+run 'herdr --help' for usage)
+  lab$ herdr server live-handoff -> rc=0 live handoff complete; server log: /Users/aneyman/.cache/herdr-build/dk/h/.config/herdr/sessions/shellspike-dk/herdr-server.log
+[PASS] live handoff of the lab server completes
+[PASS] a new server process took over
+[FAIL] session.snapshot after handoff: same desk items, ids and front (before={} after={})
+[PASS] the agent pane survived the handoff
+[PASS] the Shell re-attached the pane to its post-handoff terminal and shows new output
+[FAIL] the Shell still shows both desk items after reconnect, md active ({"active_item": null, "front": null, "items": []} docs_visible=False text='')
+  shot DESK-SPACE-oldhead-handoff.png
+  pane$ herdr desk focus None -> rc=2 unknown command: desk
+run 'herdr --help' for usage
+[FAIL] herdr desk focus <url item> makes it the Shell's active item ({"active_item": null, "front": null, "items": []})
+  shot DESK-SPACE-oldhead-focus.png
+  pane$ herdr desk close -> rc=2 unknown command: desk
+run 'herdr --help' for usage
+[FAIL] herdr desk close drops the front item; the md item becomes active ({"active_item": null, "front": null, "items": []})
+  shot DESK-SPACE-oldhead-close.png
+RESULT: FAIL herdr desk open <url> succeeds from the pane, open prints '<item_id> <tab_id> <ref>' for this tab, the docs column opened on the tab when the url landed, Shell desk dump: url item present and front/active, the url item loads example.com in the docs web view, herdr desk open <md> succeeds from the pane, Shell desk dump: both items, md front and active, the docs column tabs list both desk items, the md item renders: heading and list text in the docs web view, herdr desk list prints both items, the md one marked front (*), session.snapshot after handoff: same desk items, ids and front, the Shell still shows both desk items after reconnect, md active, herdr desk focus <url item> makes it the Shell's active item, herdr desk close drops the front item; the md item becomes active
