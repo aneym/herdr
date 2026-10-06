@@ -56,6 +56,9 @@ struct Machine {
 #[derive(Clone)]
 pub struct Machines {
     inner: Arc<Mutex<HashMap<String, Machine>>>,
+    configs: Arc<HashMap<String, MachineConfig>>,
+    logs: PathBuf,
+    job: Arc<Job>,
 }
 
 impl Machines {
@@ -111,12 +114,20 @@ impl Machines {
                 return Err("duplicate machine name".into());
             }
         }
-        let manager = Self {
-            inner: Arc::new(Mutex::new(machines)),
-        };
         let logs = log_dir()?.join("logs");
         fs::create_dir_all(&logs).map_err(|e| e.to_string())?;
         let job = Arc::new(Job::new()?);
+        let manager = Self {
+            inner: Arc::new(Mutex::new(machines)),
+            configs: Arc::new(
+                configs
+                    .iter()
+                    .map(|c| (c.name.clone(), c.clone()))
+                    .collect(),
+            ),
+            logs: logs.clone(),
+            job: job.clone(),
+        };
         for config in configs {
             let (manager, app, logs, job) =
                 (manager.clone(), app.clone(), logs.clone(), job.clone());
@@ -134,6 +145,17 @@ impl Machines {
             });
         }
         Ok(manager)
+    }
+    pub(crate) fn file_helper_config(
+        &self,
+        name: &str,
+    ) -> Result<(String, PathBuf, Arc<Job>), String> {
+        let config = self.configs.get(name).ok_or("unknown machine")?;
+        Ok((
+            config.ssh_host.clone(),
+            self.logs.join(format!("helper-{name}.log")),
+            self.job.clone(),
+        ))
     }
     pub fn list(&self) -> Result<Vec<MachineStatus>, String> {
         let mut statuses: Vec<_> = self
@@ -396,18 +418,18 @@ fn supervise(
 }
 
 #[cfg(not(windows))]
-struct Job;
+pub(crate) struct Job;
 #[cfg(not(windows))]
 impl Job {
     fn new() -> Result<Self, String> {
         Ok(Self)
     }
-    fn assign(&self, _: &Child) -> Result<(), String> {
+    pub(crate) fn assign(&self, _: &Child) -> Result<(), String> {
         Ok(())
     }
 }
 #[cfg(windows)]
-struct Job(windows_sys::Win32::Foundation::HANDLE);
+pub(crate) struct Job(windows_sys::Win32::Foundation::HANDLE);
 // Windows Job handles may be assigned from multiple supervisor threads; ownership stays in Arc.
 #[cfg(windows)]
 unsafe impl Send for Job {}
@@ -436,7 +458,7 @@ impl Job {
             Ok(job)
         }
     }
-    fn assign(&self, child: &Child) -> Result<(), String> {
+    pub(crate) fn assign(&self, child: &Child) -> Result<(), String> {
         use std::os::windows::io::AsRawHandle;
         if unsafe {
             windows_sys::Win32::System::JobObjects::AssignProcessToJobObject(

@@ -2,6 +2,7 @@
 
 mod bridge;
 mod control;
+mod files;
 mod machines;
 use tauri::Manager;
 
@@ -52,6 +53,9 @@ fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             app_info,
+            files::file_stat,
+            files::file_read,
+            files::remote_home,
             ctl_read_result,
             ctl_ui_result,
             ctl_open_result,
@@ -89,6 +93,7 @@ fn main() {
             }
             window.build()?;
             app.manage(bridge::Attaches::default());
+            app.manage(files::Files::default());
             app.manage(machines::Machines::start(app.handle().clone())?);
             control::start(app.handle().clone());
             Ok(())
