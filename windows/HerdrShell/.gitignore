@@ -1,0 +1,9 @@
+node_modules/
+dist/
+target/
+out/
+*.exe
+app/src-tauri/icons/*.png
+app/src-tauri/icons/*.ico
+app/src-tauri/icons/*.icns
+app/src-tauri/icons/*.iconset/

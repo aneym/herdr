@@ -1,0 +1,69 @@
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #1e1e2e;
+}
+
+.layout {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+}
+
+.sidebar {
+  width: 240px;
+  min-width: 240px;
+  background: #181825;
+  border-right: 1px solid #313244;
+  padding: 14px 16px;
+  box-sizing: border-box;
+  color: #cdd6f4;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.brand {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.meta {
+  font-size: 11px;
+  color: #9399b2;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sha {
+  font-family: "Cascadia Mono", monospace;
+  word-break: break-all;
+}
+
+.built {
+  font-size: 10px;
+  color: #6c7086;
+}
+
+.terminal-area {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  background: #1e1e2e;
+}
+
+.term-host {
+  flex: 1;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+.term-host .xterm {
+  height: 100%;
+}
