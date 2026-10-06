@@ -2,7 +2,13 @@
 [PASS] lab shell ready for output command
 [PASS] 260-character URL is one logical line soft-wrapped into a second physical row
 [PASS] OSC 8 label printed
-[FAIL] Cmd-hover on URL second row reports the entire URL
-[FAIL] Cmd-click on URL second row records the entire URL
+[PASS] Cmd-hover on URL first row reports the entire URL
+[PASS] Cmd-hover on OSC 8 label reports its target
+[PASS] Cmd-hover on URL second row reports the entire URL
+[PASS] moving without Cmd clears the hovered link
+[PASS] Cmd-click on URL second row records the entire URL
+[PASS] Cmd-click on URL first row records the entire URL
+[PASS] Cmd-click on OSC 8 label records its target
+[PASS] plain click on the URL opens nothing
 [PASS] open_url_sim records the OSC 8 target
 [PASS] Chat opens and loads the assistant's bare 260-character URL

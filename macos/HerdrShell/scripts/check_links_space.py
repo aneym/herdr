@@ -130,21 +130,47 @@ def main():
                and visible[start + 1].rstrip() == URL[cols:2 * cols])
     check("260-character URL is one logical line soft-wrapped into a second physical row", wrapped)
     check("OSC 8 label printed", "label" in [line.strip() for line in visible])
+    label_row = next((i for i, line in enumerate(visible) if line.strip() == "label"), None)
     if wrapped:
-        pointer = {"cmd": "mouse", "pane": pane, "col": 2.0, "row": float(start + 1), "mods": ["cmd"]}
-        S.cmd({**pointer, "action": "move"})
-        state = wait(lambda s: surface(s, pane).get("hovered_link") == URL, 8)
-        check("Cmd-hover on URL second row reports the entire URL", surface(state, pane).get("hovered_link") == URL)
+        def hover(name, row, col, want):
+            S.cmd({"cmd": "mouse", "pane": pane, "col": float(col), "row": float(row), "mods": ["cmd"],
+                   "action": "move"})
+            got = wait(lambda s: surface(s, pane).get("hovered_link") == want, 8)
+            seen = surface(got, pane).get("hovered_link", "")
+            check(name, seen == want, f"hovered_link={seen[:48]}... len={len(seen)}")
+            return got
+
+        def click(name, row, col, want, mods=("cmd",)):
+            pointer = {"cmd": "mouse", "pane": pane, "col": float(col), "row": float(row), "mods": list(mods)}
+            S.cmd({**pointer, "action": "move"})
+            before = list(S.state().get("opened_urls", []))
+            S.cmd({**pointer, "action": "down"})
+            S.cmd({**pointer, "action": "up"})
+            got = wait(lambda s: s.get("opened_urls", []) != before, 8 if want else 2)
+            opened = got.get("opened_urls", [])
+            if want:
+                check(name, opened != before and bool(opened) and opened[-1] == want,
+                      f"last opened={(opened or [''])[-1][:48]} len={len((opened or [''])[-1])}")
+            else:
+                check(name, opened == before, f"opened {opened[len(before):]}")
+
+        # Hover first: the shot shows the pointer state on the wrapped continuation.
+        hover("Cmd-hover on URL first row reports the entire URL", start, 2, URL)
+        if label_row is not None:
+            hover("Cmd-hover on OSC 8 label reports its target", label_row, 2, OSC_URL)
+        hover("Cmd-hover on URL second row reports the entire URL", start + 1, 2, URL)
         shot("LINKS-hover")
-        before = list(state.get("opened_urls", []))
-        S.cmd({**pointer, "action": "down"})
-        S.cmd({**pointer, "action": "up"})
-        state = wait(lambda s: s.get("opened_urls", []) != before, 8)
-        opened = state.get("opened_urls", [])
-        check("Cmd-click on URL second row records the entire URL", opened != before and bool(opened) and opened[-1] == URL)
+        S.cmd({"cmd": "mouse", "pane": pane, "col": 2.0, "row": float(start + 1), "action": "move"})
+        state = wait(lambda s: surface(s, pane).get("hovered_link") == "", 5)
+        check("moving without Cmd clears the hovered link", surface(state, pane).get("hovered_link") == "")
+        click("Cmd-click on URL second row records the entire URL", start + 1, 2, URL)
+        click("Cmd-click on URL first row records the entire URL", start, 5, URL)
+        if label_row is not None:
+            click("Cmd-click on OSC 8 label records its target", label_row, 2, OSC_URL)
+        click("plain click on the URL opens nothing", start + 1, 2, None, mods=())
         # This independently checks the existing hook/callback path, only after the
-        # real click receipt above so simulation cannot supply that receipt.
-        before = list(opened)
+        # real click receipts above so simulation cannot supply them.
+        before = list(S.state().get("opened_urls", []))
         S.cmd({"cmd": "open_url_sim", "url": OSC_URL})
         state = wait(lambda s: s.get("opened_urls", []) != before, 8)
         opened = state.get("opened_urls", [])

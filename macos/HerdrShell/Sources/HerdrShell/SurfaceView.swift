@@ -320,6 +320,15 @@ final class SurfaceView: NSView {
         case 0x37, 0x36: bit = GHOSTTY_MODS_SUPER.rawValue
         default: return
         }
+        if bit == GHOSTTY_MODS_SUPER.rawValue, let window {
+            // Pressing or releasing Cmd over a resting pointer starts or ends link hover.
+            let p = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+            if bounds.contains(p) {
+                updateLinkHover(at: NSPoint(x: p.x, y: bounds.height - p.y), flags: event.modifierFlags)
+            } else {
+                links.hover(nil)
+            }
+        }
         // Modifier changes are not input while a preedit is showing.
         if hasMarkedText() { return }
         let mods = ghosttyMods(event.modifierFlags)
@@ -473,7 +482,18 @@ final class SurfaceView: NSView {
     // MARK: mouse
 
     private(set) var hoveredLink = ""
+    /// libghostty's own hover (OSC 8, one-row URLs); the server's answer wins over it.
+    private var ghosttyLink = ""
     private var cursorBeforeLink: NSCursor?
+    /// Set while a Cmd-click that opened a server-resolved link is down: its drag and
+    /// release belong to the link, not to the pane.
+    private var linkClickDown = false
+    private lazy var links: TerminalLinks = {
+        let links = TerminalLinks(paneId: paneId, socketPath: clipboardSocketPath)
+        links.readSpan = { [unowned self] r in self.readCells((r.start_col, r.row), (r.end_col, r.row)) }
+        links.onChange = { [unowned self] _ in self.showLink() }
+        return links
+    }()
     private lazy var linkPreview: LinkPreview = {
         let label = LinkPreview(labelWithString: "")
         label.font = .systemFont(ofSize: 11)
@@ -486,7 +506,14 @@ final class SurfaceView: NSView {
         return label
     }()
 
+    /// libghostty's MOUSE_OVER_LINK.
     func setHoveredLink(_ url: String) {
+        ghosttyLink = url
+        showLink()
+    }
+
+    private func showLink() {
+        let url = links.url.isEmpty ? ghosttyLink : links.url
         guard hoveredLink != url else { return }
         if hoveredLink.isEmpty, !url.isEmpty { cursorBeforeLink = NSCursor.current }
         hoveredLink = url
@@ -535,6 +562,24 @@ final class SurfaceView: NSView {
         ghostty_surface_mouse_pos(surface, p.x, p.y, ghosttyMouseMods(event.modifierFlags))
     }
 
+    /// The viewport cell at a surface point, nil outside the grid.
+    private func viewportCell(_ p: NSPoint) -> Cell? {
+        let g = gridSize, c = cellPoints
+        guard g.cols > 0, g.rows > 0, c.width > 0, c.height > 0 else { return nil }
+        let x = (p.x - paddingPoints.x) / c.width, y = (p.y - paddingPoints.y) / c.height
+        guard x >= 0, y >= 0, Int(x) < g.cols, Int(y) < g.rows else { return nil }
+        return (Int(x), Int(y))
+    }
+
+    /// Cmd held over the grid with no button down asks the server for the link there.
+    private func updateLinkHover(at p: NSPoint, flags: NSEvent.ModifierFlags) {
+        guard flags.contains(.command), NSEvent.pressedMouseButtons == 0 else {
+            links.hover(nil)
+            return
+        }
+        links.hover(viewportCell(p))
+    }
+
     /// Ghostty decides what a mouse event means: selection when the program has
     /// not asked for the mouse, mouse reports (through herdr's attach client, to
     /// the pane) when it has. Shift forces selection, as in Ghostty itself.
@@ -549,11 +594,16 @@ final class SurfaceView: NSView {
         // Hand first responder to the surface on every click (agent-zero's
         // terminals never took keys because this only happened once).
         window?.makeFirstResponder(self)
+        if event.modifierFlags.contains(.command), let c = viewportCell(surfacePoint(event)), links.activate(at: c) {
+            linkClickDown = true
+            return
+        }
         notePress(event)
         _ = sendButton(GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, event)
     }
 
     override func mouseUp(with event: NSEvent) {
+        if linkClickDown { linkClickDown = false; return }
         noteRelease()
         _ = sendButton(GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, event)
     }
@@ -579,16 +629,24 @@ final class SurfaceView: NSView {
         _ = sendButton(GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_MIDDLE, event)
     }
 
-    override func mouseMoved(with event: NSEvent) { sendPos(event) }
+    override func mouseMoved(with event: NSEvent) {
+        updateLinkHover(at: surfacePoint(event), flags: event.modifierFlags)
+        sendPos(event)
+    }
     override func mouseDragged(with event: NSEvent) {
+        if linkClickDown { return }
         if appDragStart != nil, let c = cell(event) { appDragEnd = c }
         sendPos(event)
     }
     override func rightMouseDragged(with event: NSEvent) { sendPos(event) }
     override func otherMouseDragged(with event: NSEvent) { sendPos(event) }
-    override func mouseEntered(with event: NSEvent) { sendPos(event) }
+    override func mouseEntered(with event: NSEvent) {
+        updateLinkHover(at: surfacePoint(event), flags: event.modifierFlags)
+        sendPos(event)
+    }
 
     override func mouseExited(with event: NSEvent) {
+        links.clear()
         setHoveredLink("")
         // Leave the position alone while a button is held: a drag selection keeps
         // extending outside the view. Otherwise park it outside so hover state clears.

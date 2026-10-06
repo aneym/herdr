@@ -290,7 +290,7 @@ struct HerdrCommands {
     struct CreatedPane { let paneId: String; let terminalId: String; let tabId: String }
     struct ResizeOutcome { let changed: Bool; let layout: Snapshot.Layout }
 
-    private func call(_ method: String, _ params: [String: Any]) -> Data? {
+    private func call(_ method: String, _ params: [String: Any], timeout: TimeInterval = 5) -> Data? {
         // An id from another machine sends the call to that machine's server, with raw ids,
         // and puts the machine name back on the ids in its answer.
         var path = socketPath, params = params, machine: String?
@@ -309,7 +309,7 @@ struct HerdrCommands {
         let body: [String: Any] = ["id": "shell:\(method)", "method": method, "params": params]
         guard let data = try? JSONSerialization.data(withJSONObject: body),
               let json = String(data: data, encoding: .utf8),
-              let reply = HerdrSocket.request(path, json) else { return nil }
+              let reply = HerdrSocket.request(path, json, timeout: timeout) else { return nil }
         return machine.map { Machines.namespace(reply, machine: $0) } ?? reply
     }
 
@@ -402,6 +402,33 @@ struct HerdrCommands {
         }
         guard let data = call("tab.list", ["tab_id": tabId]), let env = try? JSONDecoder().decode(Env.self, from: data) else { return nil }
         return env.result.tabs.filter { $0.pin_index != nil }.count
+    }
+
+    /// One viewport row span of a link, inclusive columns, as `pane.link.resolve` answers.
+    struct LinkRegion: Decodable, Equatable {
+        let row: Int
+        let start_col: Int
+        let end_col: Int
+        func contains(col: Int, row: Int) -> Bool { row == self.row && col >= start_col && col <= end_col }
+    }
+
+    /// `pane.link.resolve`: the regions of the link under one viewport cell, read by the
+    /// server on the pane's own wrap-aware state. Nil when the call fails or is refused
+    /// (stale target, older server); an empty list when there is no link there.
+    func paneLinkResolve(paneId: String, row: Int, col: Int) -> [LinkRegion]? {
+        struct Env: Decodable { struct R: Decodable { let regions: [LinkRegion] }; let result: R }
+        guard let data = call("pane.link.resolve", ["pane_id": paneId, "viewport_row": row, "col": col], timeout: 1),
+              let env = try? JSONDecoder().decode(Env.self, from: data) else { return nil }
+        return env.result.regions
+    }
+
+    /// `pane.link.activate`: the link target under one viewport cell, after the server's
+    /// link plugins had their turn (`handled` true means a plugin took it).
+    func paneLinkActivate(paneId: String, row: Int, col: Int) -> (url: String?, handled: Bool)? {
+        struct Env: Decodable { struct R: Decodable { let url: String?; let handled: Bool }; let result: R }
+        guard let data = call("pane.link.activate", ["pane_id": paneId, "viewport_row": row, "col": col]),
+              let env = try? JSONDecoder().decode(Env.self, from: data) else { return nil }
+        return (env.result.url, env.result.handled)
     }
 
     /// `tab.rename`.

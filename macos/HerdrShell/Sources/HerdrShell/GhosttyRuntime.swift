@@ -136,7 +136,8 @@ final class GhosttyRuntime {
         return String(decoding: UnsafeRawBufferPointer(start: ptr, count: n), as: UTF8.self)
     }
 
-    /// http/https/file/mailto only. Agent runs log and record, and never call NSWorkspace.
+    /// http/https/file/mailto only, opened through `shellOpen`. Agent runs log and record,
+    /// and never call NSWorkspace.
     static func openDetectedURL(_ raw: String) {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(),
@@ -148,7 +149,7 @@ final class GhosttyRuntime {
             return
         }
         Notifier.shared.recordOpened(s)
-        NSWorkspace.shared.open(url)
+        shellOpen(url)
     }
 
     static func readClipboard(
