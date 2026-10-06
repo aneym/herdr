@@ -383,6 +383,7 @@ impl FactoryGroupKind {
 
 /// One row in the pinned section: a chat the pin pulled out of its space.
 pub(super) struct PinnedTabRow {
+    pub(super) request: Option<String>,
     pub(super) agent: bool,
     pub(super) workspace_id: String,
     pub(super) tab_id: String,
@@ -454,7 +455,7 @@ pub(super) fn pinned_tab_entries(
     }
     let mut block = None;
     for (index, (pin, tab)) in live.into_iter().enumerate() {
-        let agent = pin.role.is_some();
+        let agent = pin.role == Some(crate::api::schema::TabRole::Agent);
         if block != Some(agent) {
             out.push(if agent {
                 AgentPanelListEntry::AgentChatsHeader
@@ -486,6 +487,9 @@ pub(super) fn pinned_tab_entries(
             .copied()
             .unwrap_or((status, lane_is_idle(tag, status, tab.work_status.is_some())));
         out.push(AgentPanelListEntry::PinnedTab(PinnedTabRow {
+            request: agent.then(|| snapshot.panes.iter()
+                .filter(|pane| pane.tab_id == tab.tab_id)
+                .find_map(|pane| pane.tokens.get("request").cloned())).flatten(),
             agent,
             workspace_id: pin.workspace_id.clone(),
             tab_id: pin.tab_id.clone(),

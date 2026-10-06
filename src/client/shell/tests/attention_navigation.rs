@@ -29,6 +29,7 @@ fn attention_state(statuses: &[AgentStatus]) -> ClientShellState {
             work_status: None,
         });
         projected.panes.push(ClientShellPane {
+            tokens: Default::default(),
             pane_id: pane_id.clone(),
             workspace_id: "ws_1".into(),
             tab_id: tab_id.clone(),

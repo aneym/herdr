@@ -151,6 +151,7 @@ fn overflowing_tabs_never_overwrite_the_badge() {
 fn tab_status_snapshot() -> ClientShellSnapshot {
     let mut snapshot = snapshot();
     snapshot.panes.push(ClientShellPane {
+            tokens: Default::default(),
         pane_id: "pane_2".into(),
         workspace_id: "ws_1".into(),
         tab_id: "tab_1".into(),

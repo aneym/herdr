@@ -144,6 +144,7 @@ fn mobile_switcher_tab_rows_show_per_pane_glyphs_only_when_enabled() {
     projected.tabs[0].label = "review".into();
     projected.tabs[0].custom_label = true;
     projected.panes.push(ClientShellPane {
+            tokens: Default::default(),
         pane_id: "pane_2".into(),
         workspace_id: "ws_1".into(),
         tab_id: "tab_1".into(),

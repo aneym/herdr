@@ -543,6 +543,7 @@ fn overview_task_counts_follow_live_workflows_including_orchestrator() {
     snapshot.panes = [
         ("running-pane", "running"), ("done-pane", "done"), ("orch-pane", "orch-child"),
     ].into_iter().map(|(pane_id, tab_id)| ClientShellPane {
+            tokens: Default::default(),
         pane_id: pane_id.into(), workspace_id: "ws_1".into(), tab_id: tab_id.into(),
         label: None, cwd: None, foreground_cwd: None, focused: false, right_click_passthrough: false,
         machine: None,

@@ -29,6 +29,7 @@ fn owned_snapshot() -> ClientShellSnapshot {
         ("root", None),
     ] {
         snapshot.panes.push(ClientShellPane {
+            tokens: Default::default(),
             pane_id: pane.into(),
             workspace_id: "ws_1".into(),
             tab_id: "tab_1".into(),
@@ -805,6 +806,7 @@ fn panel_next_stays_spatial_when_the_tab_keeps_siblings() {
     let mut state = close_focus_state(crate::config::AgentCloseFocusConfig::PanelNext);
     let mut snapshot = state.snapshot.as_deref().cloned().expect("snapshot");
     snapshot.panes.push(ClientShellPane {
+            tokens: Default::default(),
         pane_id: "sibling".into(),
         workspace_id: "ws_1".into(),
         tab_id: "tab_1".into(),

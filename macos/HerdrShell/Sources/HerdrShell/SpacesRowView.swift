@@ -61,6 +61,10 @@ struct SpacesRowView: View {
                     // A footer's host name stays whole; its long summary is what gives way.
                     .layoutPriority(isFooter ? 2 : 0)
             }
+            if let request = row.request {
+                Circle().fill(t.accent).frame(width: 6, height: 6)
+                    .help("request \(request)")
+            }
             if let machine = row.badge { badge(machine) }
             Spacer(minLength: 4)
             if !row.trailing.isEmpty, row.kind != .goal {

@@ -7,12 +7,12 @@ struct SpacesInput: Codable {
     }
     struct Agent: Codable { var status: String; var parent: String? = nil }
     /// `work` is herdr's one answer to "is this chat working" (server app/work_status.rs); nil from older servers.
-    struct Tab: Codable { var id: String; var space: String; var label: String; var agents: [Agent] = []; var focused = false; var status = "unknown"; var pinIndex: Int? = nil; var work: String? = nil; var role: String? = nil; var sortRank: UInt32 = 0
-        init(id: String, space: String, label: String, agents: [Agent] = [], focused: Bool = false, status: String = "unknown", pinIndex: Int? = nil, work: String? = nil, role: String? = nil, sortRank: UInt32 = 0) { self.id = id; self.space = space; self.label = label; self.agents = agents; self.focused = focused; self.status = status; self.pinIndex = pinIndex; self.work = work; self.role = role; self.sortRank = sortRank }
+    struct Tab: Codable { var id: String; var space: String; var label: String; var agents: [Agent] = []; var focused = false; var status = "unknown"; var pinIndex: Int? = nil; var work: String? = nil; var role: String? = nil; var sortRank: UInt32 = 0; var request: String? = nil
+        init(id: String, space: String, label: String, agents: [Agent] = [], focused: Bool = false, status: String = "unknown", pinIndex: Int? = nil, work: String? = nil, role: String? = nil, sortRank: UInt32 = 0, request: String? = nil) { self.id = id; self.space = space; self.label = label; self.agents = agents; self.focused = focused; self.status = status; self.pinIndex = pinIndex; self.work = work; self.role = role; self.sortRank = sortRank; self.request = request }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: Field.self)
             id = try c.decode(String.self, forKey: Field("id")); space = try c.decode(String.self, forKey: Field("space")); label = try c.decode(String.self, forKey: Field("label"))
-            agents = c.value("agents", []); focused = c.value("focused", false); status = c.value("status", "unknown"); pinIndex = c.optional("pinIndex"); work = c.optional("work"); role = c.optional("role"); sortRank = c.value("sortRank", 0)
+            agents = c.value("agents", []); focused = c.value("focused", false); status = c.value("status", "unknown"); pinIndex = c.optional("pinIndex"); work = c.optional("work"); role = c.optional("role"); sortRank = c.value("sortRank", 0); request = c.optional("request")
         }
     }
     var spaces: [Space]; var tabs: [Tab]; var focusedTab: String?
@@ -130,6 +130,7 @@ struct SpacesRow: Identifiable, Equatable {
     var badge: String?
     /// nil while that machine is healthy; "unreachable" or "needs update" otherwise.
     var badgeState: String?
+    var request: String?
     /// Semantic rather than width-dependent: native fonts do not truncate like a terminal grid.
     /// A badge adds one field, so local rows dump as they always have.
     var dump: String {
@@ -187,7 +188,8 @@ enum SpacesTree {
             } ?? false
             let state = mark(tab, overlay.tabs[tab.id] ?? Overlay.Tag(), foldable: header)
             return SpacesRow(id: prefix + tab.id, kind: .tab, glyph: state.glyph, tone: state.tone,
-                             title: tab.label, trailing: space?.name ?? tab.space, tab: tab.id)
+                             title: tab.label, trailing: space?.name ?? tab.space, tab: tab.id,
+                             request: tab.role == "agent" ? tab.request : nil)
         }
         let agents = pinTabs(input.tabs, agents: true)
         let pins = pinTabs(input.tabs, agents: false)
