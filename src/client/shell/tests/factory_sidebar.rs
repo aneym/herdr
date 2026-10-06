@@ -2294,6 +2294,16 @@ fn remote_shell_pane_names_its_machine_on_lane_and_plain_agent_rows() {
     assert!(rows.iter().any(|row| row.contains("book")), "plain agent row names its machine: {rows:#?}");
     assert!(!rows.iter().any(|row| row.contains("lane-a") && row.contains("ax42")), "local tabs stay unlabeled");
 
+    // A folded parent's counts leave room for its machine before the name truncates.
+    snapshot.panes.push(pane("lane-a-pane", "lane-a", Some("book")));
+    for width in [30, 26] {
+        let (rows, hits, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), width);
+        let lane = hits.tree_headers.iter().find(|hit| hit.key == "lane-a").unwrap();
+        let line = rows[lane.rect.y as usize].trim_end();
+        assert!(line.contains("lane-a ") && line.ends_with(" · book"), "width {width}: {line}");
+    }
+    snapshot.panes.pop();
+
     snapshot.panes = vec![pane("lane-b-pane", "lane-b", None), pane("plain-pane", "plain-a", None)];
     let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 30);
     assert!(!rows.iter().any(|row| row.contains("ax42") || row.contains("book")), "no machine for local work: {rows:#?}");

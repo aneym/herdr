@@ -632,20 +632,27 @@ fn render_factory_tab(
         row.idle_reason.as_deref().map(|reason| crate::ui::truncate_end(reason, 10))
             .unwrap_or_else(|| "idle".to_owned())
     } else { String::new() };
+    // The machine suffix appended below needs its room too.
+    let suffix = match row.machine.as_deref() {
+        Some(machine) if !row.reviewing && (!row.scoping || row.scope_url.is_none()) && row.badge.is_none() => 3 + display_width(machine),
+        _ => 0,
+    };
+    let fits = |text: &str| display_width(&header.label) + display_width(text) + suffix + 1 <= available as usize;
     let metadata = if !row.reviewing && !row.workflow && !row.background && !row.idle && row.summary.is_some()
-        && row.badge.is_none() && available > 0 && display_width(&header.label) + display_width(&metadata) + 1 > available as usize {
+        && row.badge.is_none() && available > 0 && !fits(&metadata) {
         let mut segments = metadata.split(" · ");
         let mut leading = segments.next().unwrap_or("").to_owned();
         // The name wins over the count words: "2 agents" shrinks to "2" before
         // the label truncates.
-        if display_width(&header.label) + display_width(&leading) + 1 > available as usize {
-            if let Some((count, _)) = leading.split_once(' ').filter(|(count, _)| count.bytes().all(|byte| byte.is_ascii_digit())) {
+        if !fits(&leading) {
+            if let Some((count, _)) = leading.split_once(' ')
+                .filter(|(count, _)| !count.is_empty() && count.bytes().all(|byte| byte.is_ascii_digit())) {
                 leading = count.to_owned();
             }
         } else {
             for segment in segments {
                 let candidate = format!("{leading} · {segment}");
-                if display_width(&header.label) + display_width(&candidate) + 1 > available as usize {
+                if !fits(&candidate) {
                     break;
                 }
                 leading = candidate;
