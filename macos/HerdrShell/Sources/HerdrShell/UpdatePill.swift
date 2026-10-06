@@ -25,6 +25,7 @@ final class UpdateController: NSObject {
         accessory.view = box
         controller.window.addTitlebarAccessoryViewController(accessory)
         pill.isHidden = true
+        accessory.isHidden = true
         popover.behavior = .transient
     }
 
@@ -98,11 +99,15 @@ final class UpdateController: NSObject {
     }
 
     private func applyPill() {
+        // The accessory's box spans the titlebar's right end, over the docs column's + and ✕;
+        // with no pill it must not take their clicks.
         guard let current else {
             pill.isHidden = true
+            accessory.isHidden = true
             return
         }
         pill.isHidden = false
+        accessory.isHidden = false
         if current.failed {
             pill.title = current.retry ? "Update failed — Retry" : "Update failed"
         } else {

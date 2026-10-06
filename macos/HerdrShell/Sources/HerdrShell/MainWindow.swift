@@ -6,8 +6,11 @@ import SwiftUI
 // SurfaceRegistry (retained surfaces and their attach lifecycle) lives in SurfaceRegistry.swift.
 
 /// Lays out one tab's panes using herdr's own split geometry (layouts[].panes[].rect).
+/// Sits in the titlebar band like the docs header (DocPanelView): never a window drag region.
 final class CapHostingView: NSHostingView<PaneCapBar> {
     override var acceptsFirstResponder: Bool { false }
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
 final class FactoryHostingView: NSHostingView<FactoryPage> {

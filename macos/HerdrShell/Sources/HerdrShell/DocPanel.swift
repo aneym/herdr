@@ -558,10 +558,15 @@ enum MiniMarkdown {
     }
 }
 
+/// The column's header shares the transparent titlebar's band. A view that can move the
+/// window marks that band as a drag region, and the window server then takes real clicks on
+/// the tabs, + and ✕ as window drags; so the column never moves the window.
 final class DocPanelView: NSView {
     var onLayout: ((NSRect) -> Void)?
     var onAddressChord: (() -> Bool)?
     override var isFlipped: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func layout() {
         super.layout()
         onLayout?(bounds)
@@ -577,6 +582,8 @@ final class DocPanelView: NSView {
 
 final class NoFocusButton: NSButton {
     override var acceptsFirstResponder: Bool { false }
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
 final class DocWidthHandle: NSView {
@@ -585,6 +592,7 @@ final class DocWidthHandle: NSView {
     private var origin: CGFloat = 0
     private var start: CGFloat = 0
 
+    override var mouseDownCanMoveWindow: Bool { false }
     override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
     override func mouseDown(with event: NSEvent) { origin = event.locationInWindow.x; start = current }
     override func mouseDragged(with event: NSEvent) {
