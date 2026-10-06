@@ -47,6 +47,17 @@ final class TestHook {
         case "key":
             viaPid = (obj["via"] as? String) == "pid"
             key(obj["key"] as? String ?? "", mods: obj["mods"] as? [String] ?? [])
+        case "clipboard_image":
+            // {"cmd":"clipboard_image","path":"<png>"}: later pastes read a private named
+            // board holding only this image, so a check never touches the user's clipboard.
+            guard let p = obj["path"] as? String,
+                  let png = FileManager.default.contents(atPath: p) else {
+                log("hook: clipboard_image refused"); return
+            }
+            let board = NSPasteboard(name: NSPasteboard.Name("herdr-shell-check-\(getpid())"))
+            board.clearContents()
+            board.setData(png, forType: .png)
+            ClipboardImagePaste.board = board
         case "reclaim":
             controller?.reclaimPane(nil)
         case "hidden_policy":

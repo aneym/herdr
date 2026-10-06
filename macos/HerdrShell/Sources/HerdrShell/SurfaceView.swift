@@ -10,6 +10,7 @@ import GhosttyKit
 final class SurfaceView: NSView {
     let terminalId: String
     let paneId: String
+    let clipboardSocketPath: String
     private(set) var surface: ghostty_surface_t?
     private(set) var focused = false
     var onFocus: ((SurfaceView) -> Void)?
@@ -41,6 +42,7 @@ final class SurfaceView: NSView {
 
     init(paneId: String, terminalId: String, command: String, env: [String: String], cwd: String) {
         self.paneId = paneId
+        self.clipboardSocketPath = env["HERDR_SOCKET_PATH"] ?? ""
         self.terminalId = terminalId
         super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
 

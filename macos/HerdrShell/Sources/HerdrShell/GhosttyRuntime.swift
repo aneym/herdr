@@ -151,9 +151,31 @@ final class GhosttyRuntime {
     ) -> ghostty_clipboard_read_result_e {
         guard let userdata else { return GHOSTTY_CLIPBOARD_READ_UNSUPPORTED }
         let view = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
-        guard let surface = view.surface,
-              let text = NSPasteboard.general.string(forType: .string) else {
-            return GHOSTTY_CLIPBOARD_READ_UNAVAILABLE
+        guard let surface = view.surface else { return GHOSTTY_CLIPBOARD_READ_UNAVAILABLE }
+        let board = ClipboardImagePaste.board
+        guard let text = board.string(forType: .string) else {
+            // Image-only clipboard (a screenshot, Copy Image): stage it on the server
+            // that owns this surface, so an agent on Studio or ax42 gets a path on its
+            // own host. Text wins when both exist, like the spawn composer's ^V.
+            guard ClipboardImagePaste.userPaste, let png = ClipboardImagePaste.png(from: board) else {
+                return GHOSTTY_CLIPBOARD_READ_UNAVAILABLE
+            }
+            let path = view.clipboardSocketPath
+            DispatchQueue.global(qos: .userInitiated).async { [weak view] in
+                let staged = ClipboardImagePaste.upload(png, socketPath: path)
+                DispatchQueue.main.async {
+                    guard let view, view.surface == surface else { return }
+                    if let staged {
+                        completeClipboard(surface, state: state, text: staged, mime: "text/plain")
+                    } else {
+                        // Never paste a client-local path: it does not exist on the agent's host.
+                        ghostty_surface_deny_clipboard_request(surface, state)
+                        NSSound.beep()
+                        log("clipboard image upload failed socket=\(path)")
+                    }
+                }
+            }
+            return GHOSTTY_CLIPBOARD_READ_STARTED
         }
         var mime = "text/plain"
         if let mimes {
@@ -164,11 +186,17 @@ final class GhosttyRuntime {
                 }
             }
         }
-        let bytes = Array(text.utf8)
+        completeClipboard(surface, state: state, text: text, mime: mime)
+        return GHOSTTY_CLIPBOARD_READ_STARTED
+    }
+
+    private static func completeClipboard(_ surface: ghostty_surface_t,
+        state: UnsafeMutableRawPointer?, text: String, mime: String) {
+        let bytes = Array(text.utf8) + [0]
         mime.withCString { mptr in
             bytes.withUnsafeBufferPointer { buf in
                 buf.baseAddress!.withMemoryRebound(to: CChar.self, capacity: bytes.count) { dptr in
-                    var content = ghostty_clipboard_content_s(mime: mptr, data: dptr, len: bytes.count)
+                    var content = ghostty_clipboard_content_s(mime: mptr, data: dptr, len: bytes.count - 1)
                     withUnsafePointer(to: &content) { cptr in
                         var done = ghostty_clipboard_complete_s(
                             contents: cptr, contents_len: 1,
@@ -179,7 +207,6 @@ final class GhosttyRuntime {
                 }
             }
         }
-        return GHOSTTY_CLIPBOARD_READ_STARTED
     }
 
     static func writeClipboard(content: UnsafePointer<ghostty_clipboard_content_s>?, len: Int) {

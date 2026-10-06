@@ -873,6 +873,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             quickSwitch.setQuery(quickSwitch.query + (NSPasteboard.general.string(forType: .string) ?? ""))
             return
         }
+        ClipboardImagePaste.userPaste = true
+        defer { ClipboardImagePaste.userPaste = false }
         binding("paste_from_clipboard")
     }
 

@@ -1,0 +1,16 @@
+HerdrShell cross-machine image paste check  2026-10-06T04:28:16Z
+app start (Cua Space guest, lab socket forwarded from Studio): {"space": "herdr-qa", "ip": "192.168.64.5", "herdr_sha": "affe70388bc1"}
+{"space": "herdr-qa", "app_pid": "64060", "exe": "/Users/lume/.herdr-space/bin/HerdrShe
+[PASS] guest Shell shows the lab pane -- focused=w1:p2
+[PASS] Cmd-V put a server-staged path on the agent's input line -- 0.17s after Cmd-V
+herdr pane read w1:p2 --source recent (agent pane on Studio):
+  | AGENT-GOT alexs-Mac-Studio PNG image data, 3
+  |  x 2 /var/tmp/herdr-clipboard-images-501/api
+  | -clipboard-1791261820-1791260920583034000-0.
+  | png
+[PASS] agent on Studio received a path to a PNG on its own host -- AGENT-GOT alexs-Mac-Studio PNG image data, 3 x 2 /var/tmp/herdr-clipboard-images-501/api-clipboard-1791261820-1791260920583034000-0.png
+[PASS] the path is in the server's staging dir -- /var/tmp/herdr-clipboard-images-501/api-clipboard-1791261820-1791260920583034000-0.png
+[PASS] the client machine (guest) has no such file -- absent
+lab down: stop: 0
+
+RESULT: PASS

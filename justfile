@@ -238,3 +238,17 @@ release $version $preview:
 # Print default config
 default-config:
     cargo run --release --locked -- --default-config
+
+# Native Shell image upload integration against an explicitly selected API socket.
+shell-clipboard-image-check socket:
+    mkdir -p macos/HerdrShell/.build/clipboard-check
+    swiftc macos/HerdrShell/Sources/HerdrShell/HerdrSocket.swift macos/HerdrShell/Sources/HerdrShell/ClipboardImagePaste.swift macos/HerdrShell/scripts/clipboard_image.swift -o macos/HerdrShell/.build/clipboard-check/check
+    macos/HerdrShell/.build/clipboard-check/check '{{socket}}'
+
+# Cmd-V of an image in Herdr Shell (Cua Space guest) reaches a Studio lab pane as a Studio path.
+shell-clipboard-paste-check:
+    python3 macos/HerdrShell/scripts/check_clipboard_paste.py
+
+shell-build:
+    bash macos/HerdrShell/scripts/vendor-ghostty.sh
+    swift build --package-path macos/HerdrShell -c release
