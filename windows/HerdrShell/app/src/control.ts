@@ -17,7 +17,17 @@ export function installControl(get: () => ControlState): () => void {
   const focused = () => { const pane = get().focused; if (!pane) throw new Error("No focused pane"); return pane; };
   watch<string>("type", async text => { await focused().type(text); }, false, false);
   watch("read", async () => focused().read(), true);
-  watch("update", async () => bridge.updateStatus());
+  watch<{ action?: "apply" | "rollback" } | null>("update", async payload => {
+    if (payload?.action === "apply" || payload?.action === "rollback") {
+      const status = await bridge.updateStatus();
+      if (payload.action === "apply" ? !status.available : !status.previous) return { ok: false, error: `nothing to ${payload.action}` };
+      // The app exits once the updater starts, so reply first and start it just after.
+      const run = payload.action === "apply" ? bridge.updateApply : bridge.updateRollback;
+      setTimeout(() => { void run().catch(() => {}); }, 300);
+      return { ok: true, started: payload.action, status };
+    }
+    return bridge.updateStatus();
+  });
   watch("ui", async () => { const state = get(); return { ok: true, machine: state.machine, selected_tab: state.selected, docs: state.docs, rows: state.rows.map(({ kind, id, label, status, hotkey }) => ({ kind, id, label, status, hotkey })), panes: state.panes.map(p => p.info()) }; });
   watch<{ tab_id: string }>("open", async payload => { get().open(payload.tab_id); return { ok: true }; });
   watch<{ key: string }>("key", async payload => ({ ok: true, sent_b64: await focused().key(payload.key) }));

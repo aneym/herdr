@@ -23,6 +23,7 @@ if (Test-Path -LiteralPath $currentPath) {
 Move-Item -LiteralPath $incoming -Destination $installer -Force
 $metadata = @{ sha = $Sha; installer = $installer; built_at = [DateTime]::UtcNow.ToString('o') }
 $temporary = Join-Path $staged 'staged.json.tmp'
-$metadata | ConvertTo-Json -Compress | Set-Content -LiteralPath $temporary -Encoding UTF8
+# No BOM: the app parses this with serde_json.
+[IO.File]::WriteAllText($temporary, ($metadata | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding($false)))
 Move-Item -LiteralPath $temporary -Destination $currentPath -Force
 Write-Output "STAGED: $Sha"

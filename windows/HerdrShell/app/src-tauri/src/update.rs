@@ -37,7 +37,9 @@ fn winshell_dir() -> Result<PathBuf, String> {
 fn manifest(name: &str) -> Result<Manifest, String> {
     let path = winshell_dir()?.join("staged").join(name);
     let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    serde_json::from_slice(&bytes).map_err(|e| format!("{}: {e}", path.display()))
+    // PowerShell 5.1 writes UTF-8 with a BOM by default; tolerate one.
+    let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes);
+    serde_json::from_slice(bytes).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 fn same_sha(current: &str, staged: &str) -> bool {
