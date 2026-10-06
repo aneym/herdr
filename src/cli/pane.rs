@@ -1819,7 +1819,7 @@ fn print_pane_help() {
     eprintln!("  herdr pane move <pane_id> --tab <tab_id> --split right|down [--target-pane ID] [--ratio FLOAT] [--focus|--no-focus]");
     eprintln!("  herdr pane move <pane_id> --new-tab [--workspace ID] [--label TEXT] [--focus|--no-focus]");
     eprintln!("  herdr pane move <pane_id> --new-workspace [--label TEXT] [--tab-label TEXT] [--focus|--no-focus]");
-    eprintln!("  herdr pane close [<pane_id>|self|--pane ID|self|--current]");
+    eprintln!("  herdr pane close [<pane_id>|self|--pane ID|--current]");
     eprintln!("  herdr pane send-text <pane_id> <text> [--if-idle] [--human] [--json]");
     eprintln!("  herdr pane send-keys <pane_id> <key> [key ...] [--if-idle] [--human] [--json]");
     eprintln!("  herdr pane wait-output <pane_id> (--match TEXT | --regex PATTERN) [--source visible|recent|recent-unwrapped] [--lines N] [--timeout MS] [--raw]");
