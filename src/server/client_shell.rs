@@ -76,6 +76,8 @@ pub(super) fn snapshot_with_completions(
                         (tab_workspace_index == workspace_index).then_some(tab_index)
                     });
             protocol::ClientShellWorkspace {
+                sort_rank: workspace.sort_rank,
+                parked: workspace.parked,
                 visible_in_profile: app.state.workspace_is_visible(workspace_index),
                 focused: focused_workspace_id.as_deref() == Some(workspace_id.as_str()),
                 workspace_id,
@@ -116,6 +118,7 @@ pub(super) fn snapshot_with_completions(
             let tab_id = tab.tab_id;
             protocol::ClientShellTab {
                 desk_count: app.state.desks.get(&tab_id).map_or(0, |desk| desk.info.items.len()),
+                sort_rank: tab.sort_rank,
                 focused: focused_tab_id.as_deref() == Some(tab_id.as_str()),
                 tab_id,
                 workspace_id: tab.workspace_id,

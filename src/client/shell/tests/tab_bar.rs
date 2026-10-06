@@ -120,6 +120,7 @@ fn overflowing_tabs_never_overwrite_the_badge() {
     let mut snapshot = badge_snapshot(Some("work"), "default");
     for number in 2..24 {
         snapshot.tabs.push(ClientShellTab {
+            sort_rank: 0,
             desk_count: 0,
             tab_id: format!("tab_{number}"),
             workspace_id: "ws_1".into(),

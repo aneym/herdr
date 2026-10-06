@@ -7,6 +7,7 @@ use crate::client::shell::tree::{arrange_agent_hierarchy_with, ClientTreeChrome}
 fn owned_snapshot() -> ClientShellSnapshot {
     let mut snapshot = snapshot();
     snapshot.tabs = vec![ClientShellTab {
+        sort_rank: 0,
         desk_count: 0,
         tab_id: "tab_1".into(),
         workspace_id: "ws_1".into(),
@@ -730,6 +731,7 @@ fn close_focus_state(focus: crate::config::AgentCloseFocusConfig) -> ClientShell
         .retain(|pane| pane.pane_id == "owner" || pane.pane_id == "root");
     // One pane per tab, so closing either takes its whole tab.
     snapshot.tabs.push(ClientShellTab {
+        sort_rank: 0,
         desk_count: 0,
         tab_id: "tab_2".into(),
         workspace_id: "ws_1".into(),

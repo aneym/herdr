@@ -7,6 +7,7 @@ use crate::client::shell::tree::{tree_list_entries, AgentPanelListEntry, ClientT
 
 fn tab(tab_id: &str, workspace_id: &str, number: usize, label: &str) -> ClientShellTab {
     ClientShellTab {
+        sort_rank: 0,
         desk_count: 0,
         tab_id: tab_id.into(),
         workspace_id: workspace_id.into(),
@@ -54,6 +55,8 @@ fn agent(
 pub(super) fn tree_snapshot() -> ClientShellSnapshot {
     let mut snapshot = snapshot();
     snapshot.workspaces.push(ClientShellWorkspace {
+        sort_rank: 0,
+        parked: false,
         visible_in_profile: true,
         workspace_id: "ws_2".into(),
         active_tab_id: "tab_3".into(),

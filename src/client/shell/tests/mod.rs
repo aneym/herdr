@@ -30,6 +30,8 @@ pub(super) fn snapshot() -> ClientShellSnapshot {
         active_profile: "default".into(),
         agent_order: Vec::new(),
         workspaces: vec![ClientShellWorkspace {
+            sort_rank: 0,
+            parked: false,
             visible_in_profile: true,
             workspace_id: "ws_1".into(),
             active_tab_id: "tab_1".into(),
@@ -47,6 +49,7 @@ pub(super) fn snapshot() -> ClientShellSnapshot {
             tab_count: 1,
         }],
         tabs: vec![ClientShellTab {
+            sort_rank: 0,
             desk_count: 0,
             tab_id: "tab_1".into(),
             workspace_id: "ws_1".into(),

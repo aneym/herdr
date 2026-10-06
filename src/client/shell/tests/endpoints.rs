@@ -1006,6 +1006,8 @@ fn expanded_machine_sidebar_reveals_newly_focused_workspace() {
     let template = initial.workspaces[0].clone();
     initial.workspaces = (1..=12)
         .map(|number| ClientShellWorkspace {
+            sort_rank: 0,
+            parked: false,
             visible_in_profile: true,
             workspace_id: format!("ws_{number}"),
             number,
@@ -1018,6 +1020,8 @@ fn expanded_machine_sidebar_reveals_newly_focused_workspace() {
     let mut remote = initial.clone();
     remote.boot_id = "remote-boot".into();
     remote.workspaces.push(ClientShellWorkspace {
+        sort_rank: 0,
+        parked: false,
         workspace_id: "ws_13".into(),
         number: 13,
         focused: false,
@@ -1031,6 +1035,8 @@ fn expanded_machine_sidebar_reveals_newly_focused_workspace() {
     let mut update = state.snapshot.as_deref().expect("snapshot").clone();
     update.revision = 2;
     update.workspaces.push(ClientShellWorkspace {
+        sort_rank: 0,
+        parked: false,
         workspace_id: "ws_13".into(),
         number: 13,
         label: "new-space".into(),
@@ -3103,6 +3109,7 @@ fn dragging_a_remote_pin_moves_it_on_its_own_machine() {
     let template = snapshot.tabs[0].clone();
     snapshot.tabs = (1..=3)
         .map(|number| ClientShellTab {
+            sort_rank: 0,
             desk_count: 0,
             tab_id: format!("tab_{number}"),
             number,
@@ -3236,6 +3243,7 @@ fn aggregate_pins_scroll_within_their_section_and_keep_the_divider_below_them() 
     let template = snapshot.tabs[0].clone();
     snapshot.tabs = (1..=30)
         .map(|number| ClientShellTab {
+            sort_rank: 0,
             desk_count: 0,
             tab_id: format!("tab_{number}"),
             number,

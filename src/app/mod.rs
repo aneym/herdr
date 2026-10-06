@@ -20,6 +20,7 @@ mod git_refresh;
 mod ids;
 mod polite_send;
 mod popup;
+mod priority;
 mod runtime;
 pub(crate) mod scrollbar_reveal;
 mod session;
@@ -536,6 +537,7 @@ impl App {
             agent_view_override: None,
             sidebar_agents: config.ui.sidebar.agents.clone(),
             sidebar_spaces: config.ui.sidebar.spaces.clone(),
+            sidebar_priority: config.ui.sidebar.priority.clone(),
             next_agent_state_change_seq: 0,
             confirm_close: config.ui.confirm_close,
             pane_borders: config.ui.pane_borders,
@@ -989,6 +991,18 @@ impl App {
                 self.state.sidebar_agents = config.ui.sidebar.agents.clone();
                 self.state.sidebar_automations = config.ui.sidebar.automations.clone();
                 self.state.sidebar_spaces = config.ui.sidebar.spaces.clone();
+                if self.state.sidebar_priority != config.ui.sidebar.priority {
+                    self.state.sidebar_priority = config.ui.sidebar.priority.clone();
+                    self.state.sort_priority_pins();
+                    for index in 0..self.state.workspaces.len() {
+                        self.emit_event(crate::api::schema::EventEnvelope {
+                            event: crate::api::schema::EventKind::WorkspaceUpdated,
+                            data: crate::api::schema::EventData::WorkspaceUpdated {
+                                workspace: self.workspace_info(index),
+                            },
+                        });
+                    }
+                }
                 self.state.sidebar_debug_bounds = config.ui.sidebar.debug_bounds;
                 if self.state.sound != config.ui.sound {
                     self.state.request_client_config_reload = true;
@@ -1987,6 +2001,45 @@ mod tests {
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         restore_xdg_state_home(original_xdg_state_home);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    /// Real TOML file/reload boundary: priority changes publish workspace events
+    /// for API clients and replace the shared pin order without moving session vectors.
+    #[test]
+    fn reload_config_priority_emits_sort_rank_and_parked() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("reload-priority");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            "[ui.sidebar.priority]\norder = ['tab:fast']\nlast = ['parked']\n",
+        )
+        .unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+        let mut app = test_app();
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("priority")];
+        app.state.workspaces[0].set_custom_name("parked".into());
+        app.state.workspaces[0].test_add_tab(Some("fast"));
+        let ids = (0..2)
+            .map(|index| app.public_tab_id(0, index).unwrap())
+            .collect::<Vec<_>>();
+        app.state.pin_tab(ids[0].clone(), 0);
+        app.state.pin_tab(ids[1].clone(), 0);
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.ensure_test_terminals();
+        let event_sequence = app.event_hub.current_sequence();
+        assert_eq!(
+            app.reload_config().status,
+            crate::config::ConfigReloadStatus::Applied
+        );
+        assert_eq!(app.state.pinned_tabs[0].tab_id, ids[1]);
+        assert_eq!(app.tab_info(0, 1).unwrap().sort_rank, 0);
+        assert!(app.workspace_info(0).parked);
+        assert!(app.event_hub.events_after(event_sequence).iter().any(|(_, event)| matches!(&event.data, crate::api::schema::EventData::WorkspaceUpdated { workspace } if workspace.parked && workspace.sort_rank == 2)));
+        app.state.assert_invariants_for_test();
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

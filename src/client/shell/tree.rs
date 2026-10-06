@@ -21,6 +21,7 @@ pub(super) struct ClientTreeChrome {
     pub(super) show_tabs: bool,
     pub(super) show_agents: bool,
     pub(super) collapsed_spaces: HashSet<String>,
+    pub(super) expanded_parked_spaces: HashSet<String>,
     pub(super) collapsed_tabs: HashSet<String>,
     pub(super) pinned_spaces: HashSet<String>,
     pub(super) show_hidden_spaces: bool,
@@ -48,6 +49,7 @@ impl Default for ClientTreeChrome {
             show_tabs: true,
             show_agents: true,
             collapsed_spaces: HashSet::new(),
+            expanded_parked_spaces: HashSet::new(),
             collapsed_tabs: HashSet::new(),
             pinned_spaces: HashSet::new(),
             show_hidden_spaces: true,
@@ -101,12 +103,25 @@ fn sorted(values: &HashSet<String>) -> Vec<String> {
 }
 
 impl ClientTreeChrome {
+    pub(super) fn space_collapsed(&self, snapshot: &ClientShellSnapshot, id: &str) -> bool {
+        if snapshot
+            .workspaces
+            .iter()
+            .any(|workspace| workspace.workspace_id == id && workspace.parked)
+        {
+            !self.expanded_parked_spaces.contains(id)
+        } else {
+            self.collapsed_spaces.contains(id)
+        }
+    }
+
     pub(super) fn from_preferences(saved: preferences::ClientTreeChromePreferences) -> Self {
         Self {
             show_spaces: saved.show_spaces,
             show_tabs: saved.show_tabs,
             show_agents: saved.show_agents,
             collapsed_spaces: saved.collapsed_spaces.into_iter().collect(),
+            expanded_parked_spaces: saved.expanded_parked_spaces.into_iter().collect(),
             collapsed_tabs: saved.collapsed_tabs.into_iter().collect(),
             pinned_spaces: saved.pinned_spaces.into_iter().collect(),
             show_hidden_spaces: saved.show_hidden_spaces,
@@ -139,6 +154,7 @@ impl ClientTreeChrome {
             show_tabs: self.show_tabs,
             show_agents: self.show_agents,
             collapsed_spaces: sorted(&self.collapsed_spaces),
+            expanded_parked_spaces: sorted(&self.expanded_parked_spaces),
             collapsed_tabs: sorted(&self.collapsed_tabs),
             pinned_spaces: sorted(&self.pinned_spaces),
             show_hidden_spaces: self.show_hidden_spaces,
@@ -783,7 +799,7 @@ pub(super) fn tree_list_entries_with_overlay(
             let collapsed_with_tabs = workspace.visible_in_profile
                 && tree.show_spaces
                 && tree.show_hidden_spaces
-                && tree.collapsed_spaces.contains(id)
+                && tree.space_collapsed(snapshot, id)
                 && snapshot.tabs.iter().any(|tab| &tab.workspace_id == id);
             if workspace_order.contains(id)
                 || !(workspace.visible_in_profile && agent_spaces.contains(id.as_str())
@@ -812,6 +828,13 @@ pub(super) fn tree_list_entries_with_overlay(
             workspace_order.insert(before, id.clone());
         }
     }
+    workspace_order.sort_by_key(|id| {
+        snapshot
+            .workspaces
+            .iter()
+            .find(|workspace| &workspace.workspace_id == id)
+            .map_or(0, |workspace| workspace.sort_rank)
+    });
     let mut out = pinned_tab_entries(snapshot, overlay);
     if let Some(overlay) = overlay.filter(|overlay| overlay.tabs.values().any(|tag| tag.section.is_some())) {
         let choices = factory_goal_choices(overlay);
@@ -840,7 +863,7 @@ pub(super) fn tree_list_entries_with_overlay(
                     .map(|tab| tab.tab_id.as_str()),
             )
         });
-        let space_collapsed = tree.show_spaces && tree.collapsed_spaces.contains(workspace_id);
+        let space_collapsed = tree.show_spaces && tree.space_collapsed(snapshot, workspace_id);
         let demoted = space_collapsed && tree.show_hidden_spaces;
         if demoted {
             hidden_spaces.insert(workspace_id.clone());
@@ -943,6 +966,9 @@ pub(super) fn tree_list_entries_with_overlay(
                 .push(row);
         }
 
+        tab_order.sort_by_key(|id| {
+            snapshot.tabs.iter().find(|tab| &tab.tab_id == id).map_or(0, |tab| tab.sort_rank)
+        });
         for tab_id in &tab_order {
             let Some(mut tab_rows) = by_tab.remove(tab_id) else {
                 continue;
@@ -1046,7 +1072,7 @@ pub(super) fn tree_list_entries_with_overlay(
             {
                 continue;
             }
-            let collapsed = tree.collapsed_spaces.contains(workspace_id);
+            let collapsed = tree.space_collapsed(snapshot, workspace_id);
             let header = AgentPanelListEntry::SpaceHeader(TreeHeader {
                 workspace_id: workspace_id.clone(),
                 tab_id: None,
@@ -1160,9 +1186,12 @@ fn append_factory_space(
     let sectioned = snapshot.tabs.iter().filter(|tab| tab.workspace_id == workspace_id)
         .any(|tab| overlay.tab(&tab.tab_id).is_some_and(|tag| tag.section.is_some()));
     let choices = factory_goal_choices(overlay);
-    let filter = tree.factory_goal_filter.as_deref().filter(|value| sectioned
-        && !tree.collapsed_spaces.contains(workspace_id) && choices.iter().any(|choice| choice == value));
-    let tabs = snapshot
+    let filter = tree.factory_goal_filter.as_deref().filter(|value| {
+        sectioned
+            && !tree.space_collapsed(snapshot, workspace_id)
+            && choices.iter().any(|choice| choice == value)
+    });
+    let mut tabs = snapshot
         .tabs
         .iter()
         .filter(|tab| tab.workspace_id == workspace_id)
@@ -1173,6 +1202,7 @@ fn append_factory_space(
                 || (tag.goal.as_deref() == Some(goal) && area.is_none_or(|area| tag.goal_area.as_deref() == Some(area)))
         })))
         .collect::<Vec<_>>();
+    tabs.sort_by_key(|tab| tab.sort_rank);
     let kind = |tab: &crate::protocol::ClientShellTab| {
         overlay
             .tab(&tab.tab_id)
@@ -2601,7 +2631,7 @@ impl ClientShellState {
         let skips_space = |workspace_id: &str| {
             tree_view_active(&self.config)
                 && tree.show_spaces
-                && tree.collapsed_spaces.contains(workspace_id)
+                && tree.space_collapsed(snapshot, workspace_id)
         };
         // With tab headers shown, a nested workflow's tab is not a cycling
         // destination, even when the group is expanded or needs attention.

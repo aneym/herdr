@@ -177,6 +177,12 @@ pane.
 
 Clients can treat `offset_from_bottom == 0` as at-bottom state.
 
+#### Saved priority order
+
+`WorkspaceInfo.sort_rank` and `TabInfo.sort_rank` are always serialized unsigned display ranks. Workspace responses also include `parked: true` when a workspace matches a `last` priority rule; false is omitted. Older responses default to rank `0` and `parked: false`. Client shell workspace snapshots carry `sort_rank` and `parked`, and their tab snapshots carry `sort_rank`.
+
+Ranks come from `[ui.sidebar.priority]` on the server. Clients stable-sort spaces and tabs by rank without changing session identity or the orchestrator's leader. A priority config reload emits `workspace.updated` events so clients can refresh workspace and tab data.
+
 #### Standing agent chats
 
 `tab.set_role` takes `{"tab_id": "w1:t1", "role": "agent"}` to pin a chat

@@ -349,6 +349,18 @@ status_indicators = "symbols"
 
 The symbols are static, so this option does not enable spinner animation.
 
+### Saved sidebar priority
+
+```toml
+[ui.sidebar.priority]
+order = ["recruiting", "factory", "tab:factory throughput", "herdr"]
+last = ["rails"]
+```
+
+Plain strings match a workspace label case-insensitively or its workspace id. Rules prefixed with `tab:` match a tab label case-insensitively, with `*` matching any sequence, or its tab id. The first matching rule wins: `order` entries rank before unmatched items, and `last` entries rank after them. Tab rules do not lift a workspace; a tab without a matching tab rule inherits its workspace's rank.
+
+Clients stable-sort spaces and tabs by rank; ties keep their existing order. Explicit client space groups and manual space order still take precedence. Workspaces matched by `last` start collapsed, with expansion saved per client. Plain pins follow tab ranks, while Agents keep their pin order. Empty lists preserve the existing order. Apply changes with `herdr server reload-config`.
+
 ### Sidebar row layouts
 
 The expanded desktop sidebar renders each inner array in `rows` as one line. These are the complete default layouts:

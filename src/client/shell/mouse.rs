@@ -2863,6 +2863,12 @@ impl ClientShellState {
         let workspace_id = hit.workspace_id.clone();
         let tab_id = hit.tab_id.clone();
         if !pin && (chevron || key.starts_with("factory-background:")) {
+            let parked = self.snapshot.as_ref().is_some_and(|snapshot| {
+                snapshot
+                    .workspaces
+                    .iter()
+                    .any(|workspace| workspace.workspace_id == key && workspace.parked)
+            });
             let tree = self.tree_chrome_mut();
             if let Some(workspace_id) = key.strip_prefix("factory-background:services:") {
                 super::tree::ClientTreeChrome::toggle(&mut tree.factory_auto_expanded, workspace_id.to_owned());
@@ -2881,7 +2887,11 @@ impl ClientShellState {
                     tree.factory_collapsed_lanes.insert(key);
                 }
             } else if is_space {
-                super::tree::ClientTreeChrome::toggle(&mut tree.collapsed_spaces, key);
+                if parked {
+                    super::tree::ClientTreeChrome::toggle(&mut tree.expanded_parked_spaces, key);
+                } else {
+                    super::tree::ClientTreeChrome::toggle(&mut tree.collapsed_spaces, key);
+                }
             } else {
                 super::tree::ClientTreeChrome::toggle(&mut tree.collapsed_tabs, key);
             }
