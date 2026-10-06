@@ -108,7 +108,11 @@ fn decode_endpoint_request(request: &str) -> serde_json::Result<DecodedEndpointR
             Ok(request) => DecodedEndpointRequest::Dispatch(Box::new(request)),
             Err(error) => DecodedEndpointRequest::Error {
                 request_id: head.id,
-                code: "invalid_request",
+                code: if crate::api::schema::tabs::invalid_role_request(request) {
+                    "invalid_role"
+                } else {
+                    "invalid_request"
+                },
                 message: format!("invalid endpoint request: {error}"),
             },
         },

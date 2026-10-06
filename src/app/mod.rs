@@ -591,6 +591,7 @@ impl App {
         state.tree_pinned_spaces = ui_prefs.tree_pinned_spaces.clone();
         state.pinned_tabs = ui_prefs.pinned_tabs.clone();
         state.prune_pinned_tabs();
+        state.normalize_pin_roles();
         state.tree_show_hidden_spaces = ui_prefs.tree_show_hidden_spaces;
         state.hidden_spaces_expanded = ui_prefs.hidden_spaces_expanded;
         state.agent_close_focus = config.ui.agent_close_focus;
@@ -765,6 +766,7 @@ impl App {
         // skips the session restore that applies them on a cold start).
         app.state.pinned_tabs = snapshot.pinned_tabs.clone();
         app.state.prune_pinned_tabs();
+        app.state.normalize_pin_roles();
         app.terminal_runtimes = runtimes.into();
         app.state.active = snapshot
             .active
@@ -1217,6 +1219,8 @@ mod tests {
                 pin_index: 0,
             }),
         });
+        app.state
+            .set_tab_role(&tabs[2], Some(crate::api::schema::TabRole::Agent));
         let expected = vec![tabs[2].clone(), tabs[1].clone(), tabs[0].clone()];
         let order = |app: &App| -> Vec<String> {
             app.state
@@ -1252,6 +1256,10 @@ mod tests {
             crate::api::EventHub::default(),
         );
         assert_eq!(order(&restored), expected, "cold restore");
+        assert_eq!(
+            restored.state.pinned_tabs[0].role,
+            Some(crate::api::schema::TabRole::Agent)
+        );
 
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut handed_off = App::new_from_handoff(
@@ -1264,6 +1272,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(order(&handed_off), expected, "live handoff");
+        assert_eq!(
+            handed_off.state.pinned_tabs[0].role,
+            Some(crate::api::schema::TabRole::Agent)
+        );
 
         for app in [&mut app, &mut restored, &mut handed_off] {
             crate::app::api::test_support::shutdown_test_runtimes(app);

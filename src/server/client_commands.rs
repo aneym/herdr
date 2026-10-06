@@ -50,6 +50,7 @@ const CLIENT_SHELL_METHODS: &[&str] = &[
     "tab.pin_move",
     "tab.rename",
     "tab.set_pinned",
+    "tab.set_role",
     "workspace.close",
     "workspace.create",
     "workspace.focus",
@@ -79,7 +80,7 @@ pub(crate) fn supports_client_shell_method(method: &Method) -> bool {
 /// this server from its aggregate sidebar, with its surface handed to another
 /// machine, may still send them; they apply as the public socket request does.
 pub(crate) fn client_shell_method_is_surface_independent(method: &Method) -> bool {
-    matches!(method, Method::TabSetPinned(_) | Method::TabPinMove(_))
+    matches!(method, Method::TabSetPinned(_) | Method::TabPinMove(_) | Method::TabSetRole(_))
 }
 
 pub(crate) fn error_response(id: String, code: &str, message: impl Into<String>) -> String {
@@ -335,7 +336,7 @@ mod tests {
         );
         // Profile methods are newly advertised on the client shell lane. Their
         // shapes are not part of the original endpoint v1 fixture.
-        for method in ["profile.list", "profile.switch"] {
+        for method in ["profile.list", "profile.switch", "tab.set_role"] {
             assert!(actual.remove(method).is_some(), "{method} must advertise a shape");
         }
         // Fork: sidebar agent placement (docs/fork/port-0.9/PORT.md, ledger 31).

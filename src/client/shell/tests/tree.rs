@@ -159,7 +159,10 @@ fn shape(state: &ClientShellState, tree: &ClientTreeChrome) -> Vec<String> {
             AgentPanelListEntry::FactoryHost { name, .. } => format!("host:{name}"),
             AgentPanelListEntry::FactoryBackground { count, .. } => format!("background:{count}"),
             AgentPanelListEntry::PinnedChatsHeader => "pinned".to_owned(),
-            AgentPanelListEntry::PinnedTab(row) => format!("pin:{}:{}:{}", row.shortcut, row.label, row.space_label),
+            AgentPanelListEntry::AgentChatsHeader => "agents".to_owned(),
+            AgentPanelListEntry::PinnedTab(row) => {
+                format!("pin:{}:{}:{}", row.shortcut, row.label, row.space_label)
+            }
             AgentPanelListEntry::SpaceGroupHeader { name } => format!("group:{name}"),
         })
         .collect()
@@ -198,9 +201,18 @@ fn pinned_chats_top_the_tree_and_own_cmd_digits_in_pin_order() {
     // A cross-space pin first, a stale pin (closed tab) in the middle, then a
     // pin from the focused space.
     snapshot.pinned_tabs = vec![
-        crate::protocol::ClientShellPinnedTab { tab_id: "tab_3".into(), workspace_id: "ws_2".into() },
-        crate::protocol::ClientShellPinnedTab { tab_id: "gone".into(), workspace_id: "ws_2".into() },
-        crate::protocol::ClientShellPinnedTab { tab_id: "tab_2".into(), workspace_id: "ws_1".into() },
+        crate::protocol::ClientShellPinnedTab {
+            role: None,
+            tab_id: "tab_3".into(), workspace_id: "ws_2".into(),
+        },
+        crate::protocol::ClientShellPinnedTab {
+            role: None,
+            tab_id: "gone".into(), workspace_id: "ws_2".into(),
+        },
+        crate::protocol::ClientShellPinnedTab {
+            role: None,
+            tab_id: "tab_2".into(), workspace_id: "ws_1".into(),
+        },
     ];
     // The tab-level status lags (unknown) while its agent works.
     snapshot.tabs[2].agent_status = AgentStatus::Unknown;
@@ -338,6 +350,7 @@ fn dragging_a_pinned_chat_moves_its_pin_and_never_clicks() {
     snapshot.pinned_tabs = ["tab_1", "tab_2", "tab_3"]
         .into_iter()
         .map(|tab_id| crate::protocol::ClientShellPinnedTab {
+            role: None,
             tab_id: tab_id.into(),
             workspace_id: if tab_id == "tab_3" { "ws_2" } else { "ws_1" }.into(),
         })
@@ -475,6 +488,7 @@ fn space_groups_keep_pinned_chats_above_the_groups() {
     config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
     let mut snapshot = tree_snapshot();
     snapshot.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+        role: None,
         tab_id: "tab_3".into(),
         workspace_id: "ws_2".into(),
     }];
@@ -1457,4 +1471,94 @@ fn tab_headers_carry_a_chat_pin_but_no_plus() {
     assert_eq!(header.plus, Rect::default());
     // Every chat row carries its pin toggle in the row's last cell pair.
     assert_eq!(header.pin, Rect::new(header.rect.right() - 2, header.rect.y, 2, 1));
+}
+
+/// Pure sidebar projection plus real mouse input: headers, shortcut ordering,
+/// drag bounds, and capability-gated role changes are observable client behavior.
+#[test]
+fn agent_pin_section_digits_drag_boundary_and_role_menu() {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    let mut state = ClientShellState::new(config);
+    let mut snapshot = tree_snapshot();
+    snapshot.pinned_tabs = vec![
+        crate::protocol::ClientShellPinnedTab {
+            tab_id: "tab_1".into(),
+            workspace_id: "ws_1".into(),
+            role: Some(crate::api::schema::TabRole::Agent),
+        },
+        crate::protocol::ClientShellPinnedTab {
+            tab_id: "tab_2".into(),
+            workspace_id: "ws_1".into(),
+            role: None,
+        },
+    ];
+    state.set_snapshot(Box::new(snapshot));
+    let tree = ClientTreeChrome::default();
+    assert_eq!(
+        &shape(&state, &tree)[..4],
+        ["agents", "pin:1:one:alpha", "pinned", "pin:2:two:alpha"]
+    );
+    assert_eq!(
+        &state.numbered_tab_ids(state.snapshot.as_deref().unwrap())[..2],
+        ["tab_1", "tab_2"]
+    );
+    state.compose(80, 24).unwrap();
+    let (first, last) = (
+        state.hits.pinned_rows[0].rect,
+        state.hits.pinned_rows[1].rect,
+    );
+    state.handle_raw_events(vec![pin_mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        first.x + 4,
+        first.y,
+    )]);
+    state.handle_raw_events(vec![pin_mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        last.x + 4,
+        last.y,
+    )]);
+    assert_eq!(drawn_pins(&state), ["tab_1", "tab_2"]);
+    assert_eq!(
+        state.endpoints[0].snapshot.as_deref().unwrap().pinned_tabs[0].tab_id,
+        "tab_1"
+    );
+    let drop = state.handle_raw_events(vec![pin_mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        last.x + 4,
+        last.y,
+    )]);
+    assert!(sent_methods(&drop).is_empty());
+    state.open_tab_context_menu("tab_1".into(), first.x + 4, first.y);
+    let Some(ClientShellOverlay::ContextMenu(menu)) = state.overlay.as_ref() else {
+        panic!("menu");
+    };
+    assert!(!menu
+        .items()
+        .iter()
+        .any(|item| item.label == "Remove from agents"));
+    state.endpoints[0].methods = Some(["tab.set_role".to_string()].into_iter().collect());
+    state.open_tab_context_menu("tab_1".into(), first.x + 4, first.y);
+    let Some(ClientShellOverlay::ContextMenu(menu)) = state.overlay.as_ref() else {
+        panic!("menu");
+    };
+    let index = menu
+        .items()
+        .iter()
+        .position(|item| item.label == "Remove from agents")
+        .unwrap();
+    let mut outcome = ClientShellInput::default();
+    state.activate_context_menu_item(index, &mut outcome);
+    assert!(
+        matches!(sent_methods(&outcome).as_slice(), [crate::api::schema::Method::TabSetRole(params)] if params.tab_id == "tab_1" && params.role.is_none())
+    );
+    let mut snapshot = state.snapshot.as_deref().unwrap().clone();
+    snapshot.pinned_tabs.truncate(1);
+    state.set_snapshot(Box::new(snapshot));
+    assert!(!shape(&state, &tree).iter().any(|entry| entry == "pinned"));
+    let mut snapshot = state.snapshot.as_deref().unwrap().clone();
+    snapshot.pinned_tabs[0].role = None;
+    state.set_snapshot(Box::new(snapshot));
+    assert!(!shape(&state, &tree).iter().any(|entry| entry == "agents"));
 }

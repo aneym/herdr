@@ -337,6 +337,7 @@ pub(super) fn snapshot_with_completions(
             .filter_map(|pin| {
                 let (ws_idx, _) = app.parse_tab_id(&pin.tab_id)?;
                 Some(protocol::ClientShellPinnedTab {
+                    role: pin.role,
                     tab_id: pin.tab_id.clone(),
                     workspace_id: app.public_workspace_id(ws_idx),
                 })

@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use crate::api::schema::{
     EventData, EventEnvelope, EventKind, ResponseResult, TabCreateParams, TabListParams,
-    TabMoveParams, TabPinMoveParams, TabRenameParams, TabSetPinnedParams, TabTarget,
+    TabMoveParams, TabPinMoveParams, TabRenameParams, TabSetPinnedParams, TabSetRoleParams,
+    TabTarget,
 };
 use crate::app::{App, Mode};
 
@@ -278,6 +279,42 @@ impl App {
         encode_success(id, ResponseResult::TabInfo { tab })
     }
 
+    pub(super) fn handle_tab_set_role(&mut self, id: String, params: TabSetRoleParams) -> String {
+        let Some((ws_idx, tab_idx)) = self.parse_tab_id(&params.tab_id) else {
+            return tab_not_found(id, &params.tab_id);
+        };
+        let Some(tab_id) = self.public_tab_id(ws_idx, tab_idx) else {
+            return tab_not_found(id, &params.tab_id);
+        };
+        if self.state.set_tab_role(&tab_id, params.role) {
+            self.state.mark_session_dirty();
+            self.schedule_session_save();
+            let workspace = self.workspace_info(ws_idx);
+            self.emit_event(EventEnvelope {
+                event: EventKind::WorkspaceUpdated,
+                data: EventData::WorkspaceUpdated { workspace },
+            });
+            self.emit_event(EventEnvelope {
+                event: EventKind::TabPinMoved,
+                data: EventData::TabPinMoved {
+                    tab_id: tab_id.clone(),
+                    workspace_id: self.public_workspace_id(ws_idx),
+                    pin_index: self.state.pinned_tab_index(&tab_id).unwrap_or(0),
+                    pinned_tab_ids: self
+                        .state
+                        .pinned_tabs
+                        .iter()
+                        .map(|pin| pin.tab_id.clone())
+                        .collect(),
+                },
+            });
+        }
+        let Some(tab) = self.tab_info(ws_idx, tab_idx) else {
+            return tab_not_found(id, &params.tab_id);
+        };
+        encode_success(id, ResponseResult::TabInfo { tab })
+    }
+
     /// Move a pinned chat within the shared pin order. Every client draws the
     /// pinned section and resolves Cmd+1..9 from this order, so a drag in any
     /// client lands here and reaches the others through the next snapshot.
@@ -302,6 +339,17 @@ impl App {
                 ),
             );
         }
+        if self
+            .state
+            .pin_role_range(&tab_id)
+            .is_some_and(|range| !range.contains(&params.pin_index))
+        {
+            return encode_error(
+                id,
+                "pin_index_outside_role_block",
+                "pin_index is outside this tab's role block",
+            );
+        }
         let before = self.state.pinned_tabs.clone();
         self.state.move_pinned_tab(&tab_id, params.pin_index);
         if self.state.pinned_tabs != before {
@@ -312,7 +360,7 @@ impl App {
                 data: EventData::TabPinMoved {
                     tab_id: tab_id.clone(),
                     workspace_id: self.public_workspace_id(ws_idx),
-                    pin_index: params.pin_index,
+                    pin_index: self.state.pinned_tab_index(&tab_id).unwrap_or(0),
                     pinned_tab_ids: self
                         .state
                         .pinned_tabs
@@ -933,6 +981,70 @@ mod tests {
         let ui = app.state.snapshot_ui_prefs();
         assert_eq!(ui.pinned_tabs.len(), 1);
         assert_eq!(ui.pinned_tabs[0].tab_id, first);
+        shutdown_test_runtimes(&mut app);
+    }
+    /// Public API response/event contract, exercised through JSON request decoding
+    /// and the real dispatch path rather than a mocked handler.
+    #[test]
+    fn api_tab_set_role_round_trip_and_pin_move_boundary() {
+        let (mut app, tabs, events) = pin_test_app();
+        set_pinned(&mut app, &tabs[0], true, Some(10));
+        let request: crate::api::schema::Request = serde_json::from_value(serde_json::json!({
+            "id": "role", "method": "tab.set_role", "params": {"tab_id": tabs[1], "role": "agent"}
+        }))
+        .unwrap();
+        let seen = events.current_sequence();
+        let response: serde_json::Value =
+            serde_json::from_str(&app.handle_api_request(request)).unwrap();
+        assert_eq!(response["result"]["tab"]["role"], "agent");
+        assert_eq!(response["result"]["tab"]["pin_index"], 0);
+        assert_eq!(pin_order(&app), [tabs[1].clone(), tabs[0].clone()]);
+        let emitted = events.events_after(seen);
+        assert_eq!(
+            emitted
+                .iter()
+                .map(|(_, event)| event.event)
+                .collect::<Vec<_>>(),
+            [EventKind::WorkspaceUpdated, EventKind::TabPinMoved]
+        );
+        assert!(
+            matches!(&emitted[1].1.data, EventData::TabPinMoved { pin_index: 0, pinned_tab_ids, .. } if pinned_tab_ids == &pin_order(&app))
+        );
+        assert_eq!(
+            pin_move(&mut app, &tabs[0], 0)["error"]["code"],
+            "pin_index_outside_role_block"
+        );
+        assert_eq!(
+            pin_move(&mut app, &tabs[1], 1)["error"]["code"],
+            "pin_index_outside_role_block"
+        );
+        set_pinned(&mut app, &tabs[1], true, Some(-50));
+        assert_eq!(
+            app.tab_info(0, 1).unwrap().role,
+            Some(crate::api::schema::TabRole::Agent)
+        );
+        let request = serde_json::from_value(
+            serde_json::json!({"id":"clear", "method":"tab.set_role", "params":{"tab_id":tabs[1]}}),
+        )
+        .unwrap();
+        let response: serde_json::Value =
+            serde_json::from_str(&app.handle_api_request(request)).unwrap();
+        assert!(response["result"]["tab"].get("role").is_none());
+        assert_eq!(response["result"]["tab"]["pin_index"], 0);
+        assert!(app.state.pinned_tabs[0].priority >= app.state.pinned_tabs[1].priority);
+        // Workspace-close retain must preserve the partition too.
+        app.state.ensure_test_terminals();
+        app.state
+            .set_tab_role(&tabs[0], Some(crate::api::schema::TabRole::Agent));
+        app.state
+            .set_tab_role(&tabs[3], Some(crate::api::schema::TabRole::Agent));
+        app.handle_tab_close(
+            "close".into(),
+            TabTarget {
+                tab_id: tabs[3].clone(),
+            },
+        );
+        app.state.assert_invariants_for_test();
         shutdown_test_runtimes(&mut app);
     }
 }

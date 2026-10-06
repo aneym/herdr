@@ -572,6 +572,7 @@ fn section_divider_follows_the_pinned_agents_section_and_drags_with_the_pointer(
     // must follow that drawn boundary instead of the configured order.
     let mut snapshot = snapshot();
     snapshot.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+        role: None,
         tab_id: "tab_1".into(),
         workspace_id: "ws_1".into(),
     }];

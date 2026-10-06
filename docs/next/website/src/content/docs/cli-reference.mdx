@@ -192,8 +192,16 @@ herdr tab create [--workspace <workspace_id>] [--cwd PATH] [--label TEXT] [--env
 herdr tab get <tab_id>
 herdr tab focus <tab_id>
 herdr tab rename <tab_id> <label>
+herdr tab pin <tab_id> [--priority N]
+herdr tab unpin <tab_id>
+herdr tab pin-move <tab_id> <pin_index>
+herdr tab set-role <tab_id> <agent|none>
 herdr tab close <tab_id>
 ```
+
+`set-role agent` pins a chat in Agents, above Pinned. `set-role none` moves it
+back to Pinned without unpinning. Pin indices start at 0; `pin-move` may reorder
+only within the chat's own section. Agents own the first Cmd+1..9 digits.
 
 A tab is another terminal layout inside a workspace. Without `--workspace`, `tab create` uses the active workspace and fails if none exists. Its JSON response exposes `.result.tab.tab_id` and `.result.root_pane.pane_id`. Closing a workspace's last tab also closes the workspace, matching the TUI close-tab action. If `confirm_close` is enabled and closing the tab would also close a whole worktree group, `tab close` returns a `confirmation_required` error instead.
 

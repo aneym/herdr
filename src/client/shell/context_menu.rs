@@ -159,15 +159,52 @@ impl ClientContextMenuOverlay {
                     Action::ToggleGroup,
                 ),
             ],
-            ClientContextMenuTarget::Tab { pinned, .. } => vec![
-                item("New tab", Action::NewTab),
-                item("Rename", Action::Rename),
-                item("Close", Action::Close),
-                item(if *pinned { "Unpin" } else { "Pin" }, Action::TogglePin),
-            ],
-            ClientContextMenuTarget::EndpointChat { pinned, .. } => vec![
-                item(if *pinned { "Unpin" } else { "Pin" }, Action::TogglePin),
-            ],
+            ClientContextMenuTarget::Tab {
+                pinned,
+                agent,
+                supports_role,
+                ..
+            } => {
+                let mut items = vec![
+                    item("New tab", Action::NewTab),
+                    item("Rename", Action::Rename),
+                    item("Close", Action::Close),
+                    item(if *pinned { "Unpin" } else { "Pin" }, Action::TogglePin),
+                ];
+                if *supports_role {
+                    items.push(item(
+                        if *agent {
+                            "Remove from agents"
+                        } else {
+                            "Make agent"
+                        },
+                        Action::ToggleRole,
+                    ));
+                }
+                items
+            }
+            ClientContextMenuTarget::EndpointChat {
+                pinned,
+                agent,
+                supports_role,
+                ..
+            } => {
+                let mut items = vec![item(
+                    if *pinned { "Unpin" } else { "Pin" },
+                    Action::TogglePin,
+                )];
+                if *supports_role {
+                    items.push(item(
+                        if *agent {
+                            "Remove from agents"
+                        } else {
+                            "Make agent"
+                        },
+                        Action::ToggleRole,
+                    ));
+                }
+                items
+            }
             ClientContextMenuTarget::Pane {
                 source_pane_id,
                 has_manual_label,
@@ -480,8 +517,13 @@ impl ClientShellState {
         let pinned = snapshot.pinned_tabs.iter().any(|pin| pin.tab_id == tab_id);
         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
             target: ClientContextMenuTarget::Tab {
-                tab_id,
+                tab_id: tab_id.clone(),
                 workspace_id: tab.workspace_id.clone(),
+                agent: snapshot
+                    .pinned_tabs
+                    .iter()
+                    .any(|pin| pin.tab_id == tab_id && pin.role.is_some()),
+                supports_role: self.endpoint_supports_tab_role(&self.active_endpoint_id),
                 pinned,
             },
             x,
@@ -564,23 +606,39 @@ impl ClientShellState {
                 tab_id,
                 workspace_id,
                 pinned,
+                agent,
+                supports_role,
             } => {
                 if action == ClientContextMenuAction::TogglePin {
                     // The endpoint owns the pin order; the next snapshot redraws.
                     self.push_endpoint_method(
                         crate::api::schema::Method::TabSetPinned(
-                            crate::api::schema::TabSetPinnedParams { tab_id, pinned: !pinned, priority: None },
+                            crate::api::schema::TabSetPinnedParams {
+                                tab_id,
+                                pinned: !pinned,
+                                priority: None,
+                            },
                         ),
                         outcome,
                     );
                     outcome.repaint = true;
+                } else if action == ClientContextMenuAction::ToggleRole && supports_role {
+                    self.push_tab_role(self.active_endpoint_id.clone(), tab_id, !agent, outcome);
                 } else {
                     self.activate_tab_context_action(tab_id, workspace_id, action, outcome)
                 }
             }
-            ClientContextMenuTarget::EndpointChat { endpoint_id, tab_id, .. } => {
+            ClientContextMenuTarget::EndpointChat {
+                endpoint_id,
+                tab_id,
+                agent,
+                supports_role,
+                ..
+            } => {
                 if action == ClientContextMenuAction::TogglePin {
                     self.toggle_endpoint_chat_pin(endpoint_id, tab_id, outcome);
+                } else if action == ClientContextMenuAction::ToggleRole && supports_role {
+                    self.push_tab_role(endpoint_id, tab_id, !agent, outcome);
                 }
             }
             ClientContextMenuTarget::Pane {

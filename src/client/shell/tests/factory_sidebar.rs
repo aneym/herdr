@@ -1277,6 +1277,7 @@ fn pinned_lane_shows_the_live_child_rollup_its_tree_row_shows() {
     for mode in [TabMode::Active, TabMode::Parked, TabMode::Auto] {
         let (mut snapshot, mut overlay) = grouped_workflow_fixture();
         snapshot.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+            role: None,
             tab_id: "lane-a".into(),
             workspace_id: "ws_1".into(),
         }];
@@ -1340,6 +1341,7 @@ fn pinned_and_lane_rows_follow_the_endpoint_chat_status_over_a_stale_busy_overla
         lane.agent_status = other;
         lane.work_status = Some(reported);
         snapshot.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+            role: None,
             tab_id: "lane-a".into(),
             workspace_id: "ws_1".into(),
         }];

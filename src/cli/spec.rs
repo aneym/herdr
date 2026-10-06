@@ -313,6 +313,12 @@ fn tab_command() -> Command {
                 .arg(required("tab_id", "TAB_ID"))
                 .arg(option("priority", "N")),
         )
+        .subcommand(
+            Command::new("set-role")
+                .about("Set a pinned chat's role")
+                .arg(required("tab_id", "TAB_ID"))
+                .arg(required("role", "ROLE").value_parser(["agent", "none"])),
+        )
         .subcommand(id_command("unpin", "tab_id", "Unpin a tab"))
         .subcommand(
             Command::new("pin-move")

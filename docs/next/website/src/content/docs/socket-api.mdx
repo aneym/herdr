@@ -102,7 +102,7 @@ Raw socket method names use dot notation:
 | Session | `session.snapshot` |
 | Workspace | `workspace.create`, `workspace.list`, `workspace.get`, `workspace.focus`, `workspace.rename`, `workspace.move`, `workspace.move_block`, `workspace.report_metadata`, `workspace.close` |
 | Worktree | `worktree.list`, `worktree.create`, `worktree.open`, `worktree.remove` |
-| Tab | `tab.create`, `tab.list`, `tab.get`, `tab.focus`, `tab.rename`, `tab.move`, `tab.set_pinned`, `tab.pin_move`, `tab.close` |
+| Tab | `tab.create`, `tab.list`, `tab.get`, `tab.focus`, `tab.rename`, `tab.move`, `tab.set_pinned`, `tab.set_role`, `tab.pin_move`, `tab.close` |
 | Pane | `pane.split`, `pane.swap`, `pane.move`, `pane.zoom`, `pane.layout`, `pane.process_info`, `pane.neighbor`, `pane.edges`, `pane.focus_direction`, `pane.resize`, `pane.list`, `pane.current`, `pane.get`, `pane.rename`, `pane.send_text`, `pane.send_keys`, `pane.send_input`, `pane.read`, `pane.report_agent`, `pane.report_agent_session`, `pane.report_metadata`, `pane.clear_agent_authority`, `pane.release_agent`, `pane.close`, `pane.wait_for_output` |
 | Popup | `popup.close` |
 | Layout | `layout.export`, `layout.apply`, `layout.set_split_ratio` |
@@ -176,7 +176,23 @@ pane.
 
 Clients can treat `offset_from_bottom == 0` as at-bottom state.
 
-### Pane graphics
+#### Standing agent chats
+
+`tab.set_role` takes `{"tab_id": "w1:t1", "role": "agent"}` to pin a chat
+in the Agents section. Omit `role` or pass `null` to remove it from Agents;
+the chat stays pinned at the top of Pinned. Unknown roles return `invalid_role`,
+and an unknown tab returns `tab_not_found`. The response contains `TabInfo`,
+whose optional `role` is `"agent"` for an agent pin and absent for plain chats.
+A changed role emits `workspace.updated` and `tab.pin_moved` with the full pin order.
+
+Agent pins precede plain pins; global `pin_index` and Cmd+1..9 use that order.
+`tab.pin_move` keeps its `{"tab_id", "pin_index"}` parameters, but returns
+`pin_index_outside_role_block` when the target belongs to the other section.
+Role changes append to Agents or prepend to Pinned, maintaining descending
+priority within each section. Re-pinning an agent preserves its role; unpinning
+removes the role. Older snapshots without roles load as ordinary pins.
+
+## Pane graphics
 
 Applications and plugins should emit the standard Kitty graphics protocol through
 their pane's terminal output. Herdr manages image placement, clipping, and

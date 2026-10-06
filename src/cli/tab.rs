@@ -24,6 +24,7 @@ pub(super) fn run_tab_command(args: &[String]) -> std::io::Result<i32> {
         "move" => tab_move(&args[1..]),
         "pin" => tab_pin(&args[1..]),
         "unpin" => tab_unpin(&args[1..]),
+        "set-role" => tab_set_role(&args[1..]),
         "pin-move" => tab_pin_move(&args[1..]),
         "close" => tab_close(&args[1..]),
         "help" | "--help" | "-h" => {
@@ -349,6 +350,17 @@ fn tab_unpin(args: &[String]) -> std::io::Result<i32> {
     })
 }
 
+fn tab_set_role(args: &[String]) -> std::io::Result<i32> {
+    if args.len() != 2 || !matches!(args[1].as_str(), "agent" | "none") {
+        eprintln!("usage: herdr tab set-role <tab_id> <agent|none>");
+        return Ok(2);
+    }
+    super::runtime::tab_set_role(crate::api::schema::TabSetRoleParams {
+        tab_id: super::normalize_tab_id(&args[0]),
+        role: (args[1] == "agent").then_some(crate::api::schema::TabRole::Agent),
+    })
+}
+
 fn tab_pin_move(args: &[String]) -> std::io::Result<i32> {
     let [raw_tab_id, raw_index] = args else {
         eprintln!("usage: herdr tab pin-move <tab_id> <pin_index>");
@@ -389,6 +401,7 @@ fn print_tab_help() {
     eprintln!("  herdr tab move <tab_id> (--before <tab_id> | --after <tab_id> | --position <N>)");
     eprintln!("  herdr tab pin <tab_id> [--priority N]");
     eprintln!("  herdr tab unpin <tab_id>");
+    eprintln!("  herdr tab set-role <tab_id> <agent|none>");
     eprintln!("  herdr tab pin-move <tab_id> <pin_index>");
     eprintln!("  herdr tab close <tab_id>");
 }
@@ -450,5 +463,22 @@ mod tests {
         assert!(super::super::spec::command()
             .try_get_matches_from(["herdr", "tab", "move", "w5H:tE7", "--before", "w5H:tE8"])
             .is_ok());
+    }
+    /// CLI grammar is the public invocation contract, including rejecting unknown roles.
+    #[test]
+    fn cli_tab_set_role_accepts_agent_and_none() {
+        for role in ["agent", "none"] {
+            assert!(super::super::spec::command()
+                .try_get_matches_from(["herdr", "tab", "set-role", "w1:t1", role])
+                .is_ok());
+        }
+        for args in [
+            vec!["herdr", "tab", "set-role", "w1:t1"],
+            vec!["herdr", "tab", "set-role", "w1:t1", "future"],
+        ] {
+            assert!(super::super::spec::command()
+                .try_get_matches_from(args)
+                .is_err());
+        }
     }
 }

@@ -47,6 +47,7 @@ pub(crate) fn request_changes_ui(request: &Request) -> bool {
             | Method::TabRename(_)
             | Method::TabMove(_)
             | Method::TabSetPinned(_)
+            | Method::TabSetRole(_)
             | Method::TabPinMove(_)
             | Method::TabClose(_)
             | Method::LayoutApply(_)

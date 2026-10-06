@@ -244,22 +244,33 @@ impl ClientShellState {
     /// sidebar order, then the focused space's own tabs on the active machine,
     /// as on a single endpoint. `None` when nothing is pinned anywhere.
     pub(super) fn aggregate_numbered_tabs(&self) -> Option<Vec<(ClientEndpointId, String)>> {
-        let mut numbered = self
+        let mut pins = self
             .endpoints
             .iter()
             .flat_map(|endpoint| {
                 endpoint
                     .snapshot
                     .as_deref()
-                    .map_or_else(Vec::new, |snapshot| {
+                    .into_iter()
+                    .flat_map(move |snapshot| {
                         snapshot
                             .pinned_tabs
                             .iter()
                             .filter(|pin| snapshot.tabs.iter().any(|tab| tab.tab_id == pin.tab_id))
-                            .map(|pin| (endpoint.endpoint_id.clone(), pin.tab_id.clone()))
-                            .collect()
+                            .map(move |pin| {
+                                (
+                                    pin.role.is_none(),
+                                    endpoint.endpoint_id.clone(),
+                                    pin.tab_id.clone(),
+                                )
+                            })
                     })
             })
+            .collect::<Vec<_>>();
+        pins.sort_by_key(|(plain, endpoint, _)| (*plain, !endpoint.is_local()));
+        let mut numbered = pins
+            .into_iter()
+            .map(|(_, endpoint, tab)| (endpoint, tab))
             .collect::<Vec<_>>();
         if numbered.is_empty() {
             return None;

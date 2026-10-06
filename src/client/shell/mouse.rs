@@ -2052,7 +2052,21 @@ impl ClientShellState {
                         .and_then(|endpoint| endpoint.snapshot.as_deref())
                         .is_some_and(|snapshot| snapshot.pinned_tabs.iter().any(|pin| pin.tab_id == tab_id));
                     self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
-                        target: ClientContextMenuTarget::EndpointChat { endpoint_id, tab_id, pinned },
+                        target: ClientContextMenuTarget::EndpointChat {
+                            supports_role: self.endpoint_supports_tab_role(&endpoint_id),
+                            agent: self
+                                .endpoints
+                                .iter()
+                                .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+                                .and_then(|endpoint| endpoint.snapshot.as_deref())
+                                .is_some_and(|snapshot| {
+                                    snapshot
+                                        .pinned_tabs
+                                        .iter()
+                                        .any(|pin| pin.tab_id == tab_id && pin.role.is_some())
+                                }),
+                            endpoint_id, tab_id, pinned,
+                        },
                         x: mouse.column, y: mouse.row, highlighted: 0,
                     }));
                     outcome.repaint = true;

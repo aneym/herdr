@@ -981,6 +981,7 @@ fn worktree_request_and_response_round_trip() {
                 agent_status: AgentStatus::Unknown,
                 work_status: None,
                 pin_index: None,
+                role: None,
             },
             root_pane: PaneInfo {
                 pane_id: "w_1-1".into(),
@@ -1416,6 +1417,7 @@ fn create_response_round_trips_with_root_pane() {
                 agent_status: AgentStatus::Unknown,
                 work_status: None,
                 pin_index: None,
+                role: None,
             },
             root_pane: PaneInfo {
                 pane_id: "w_1-3".into(),

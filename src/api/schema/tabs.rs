@@ -4,6 +4,32 @@ use serde::{Deserialize, Serialize};
 
 use super::common::AgentStatus;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TabRole {
+    Agent,
+}
+
+/// Snapshots tolerate roles introduced by newer servers; API input stays strict.
+pub fn deserialize_pin_role<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<TabRole>, D::Error> {
+    if !deserializer.is_human_readable() {
+        return Option::<TabRole>::deserialize(deserializer);
+    }
+    let role = Option::<String>::deserialize(deserializer)?;
+    Ok(role
+        .filter(|value| value == "agent")
+        .map(|_| TabRole::Agent))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TabSetRoleParams {
+    pub tab_id: String,
+    #[serde(default)]
+    pub role: Option<TabRole>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TabCreateParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -70,4 +96,18 @@ pub struct TabInfo {
     /// Position in the pinned-chats order, when pinned (Cmd+1..9 slot).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pin_index: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<TabRole>,
+}
+
+/// Classify strict role decoding errors consistently at both JSON front doors.
+pub(crate) fn invalid_role_request(line: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(line)
+        .ok()
+        .is_some_and(|value| {
+            value["method"] == "tab.set_role"
+                && value["params"]
+                    .get("role")
+                    .is_some_and(|role| !role.is_null() && role != "agent")
+        })
 }

@@ -304,6 +304,7 @@ pub(super) enum AgentPanelListEntry {
     },
     /// The `pinned` section label at the very top of the sidebar.
     PinnedChatsHeader,
+    AgentChatsHeader,
     /// A pinned chat from any space, in pin order (the Cmd+1..9 order).
     PinnedTab(PinnedTabRow),
     /// Title of a named group of spaces from the overlay's `space_groups`.
@@ -366,6 +367,7 @@ impl FactoryGroupKind {
 
 /// One row in the pinned section: a chat the pin pulled out of its space.
 pub(super) struct PinnedTabRow {
+    pub(super) agent: bool,
     pub(super) workspace_id: String,
     pub(super) tab_id: String,
     pub(super) label: String,
@@ -399,7 +401,7 @@ pub(super) fn pinned_tab_entries(
     if snapshot.pinned_tabs.is_empty() {
         return Vec::new();
     }
-    let mut out = vec![AgentPanelListEntry::PinnedChatsHeader];
+    let mut out = Vec::new();
     // Count only pins that resolve to a live tab, matching `numbered_tab_ids`,
     // so a row's digit is exactly the Cmd+N that selects it.
     let live = snapshot
@@ -434,7 +436,17 @@ pub(super) fn pinned_tab_entries(
             }
         }
     }
+    let mut block = None;
     for (index, (pin, tab)) in live.into_iter().enumerate() {
+        let agent = pin.role.is_some();
+        if block != Some(agent) {
+            out.push(if agent {
+                AgentPanelListEntry::AgentChatsHeader
+            } else {
+                AgentPanelListEntry::PinnedChatsHeader
+            });
+            block = Some(agent);
+        }
         let space_label = snapshot
             .workspaces
             .iter()
@@ -444,7 +456,11 @@ pub(super) fn pinned_tab_entries(
         let tag = overlay.and_then(|overlay| overlay.tab(&tab.tab_id));
         let status = chat_status(
             tab.work_status,
-            snapshot.agents.iter().filter(|agent| agent.tab_id == tab.tab_id).map(|agent| agent.agent_status),
+            snapshot
+                .agents
+                .iter()
+                .filter(|agent| agent.tab_id == tab.tab_id)
+                .map(|agent| agent.agent_status),
             tab.agent_status,
             tag,
         );
@@ -454,6 +470,7 @@ pub(super) fn pinned_tab_entries(
             .copied()
             .unwrap_or((status, lane_is_idle(tag, status, tab.work_status.is_some())));
         out.push(AgentPanelListEntry::PinnedTab(PinnedTabRow {
+            agent,
             workspace_id: pin.workspace_id.clone(),
             tab_id: pin.tab_id.clone(),
             label: tab.label.clone(),
@@ -462,7 +479,9 @@ pub(super) fn pinned_tab_entries(
             idle,
             workflow: tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Workflow),
             done: tag.is_some_and(|tag| tag.done),
-            failed: tag.is_some_and(|tag| tag.done && tag.attention == crate::factory_overlay::Attention::Act),
+            failed: tag.is_some_and(|tag| {
+                tag.done && tag.attention == crate::factory_overlay::Attention::Act
+            }),
             shortcut: if index < 9 { index + 1 } else { 0 },
             slot: index,
             active: snapshot.focused_workspace_id.as_deref() == Some(tab.workspace_id.as_str())
@@ -1952,6 +1971,7 @@ fn group_spaces(
         if matches!(
             entry,
             AgentPanelListEntry::FactoryGoalPicker { .. }
+                | AgentPanelListEntry::AgentChatsHeader
                 | AgentPanelListEntry::PinnedChatsHeader
                 | AgentPanelListEntry::PinnedTab(_)
         ) {
@@ -1995,6 +2015,7 @@ fn reorder_spaces(
         if matches!(
             entry,
             AgentPanelListEntry::FactoryGoalPicker { .. }
+                | AgentPanelListEntry::AgentChatsHeader
                 | AgentPanelListEntry::PinnedChatsHeader
                 | AgentPanelListEntry::PinnedTab(_)
         ) {

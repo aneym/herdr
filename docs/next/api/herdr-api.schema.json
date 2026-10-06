@@ -1106,6 +1106,16 @@
                 "null"
               ]
             },
+            "role": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/event/$defs/TabRole"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "tab_id": {
               "type": "string"
             },
@@ -1134,6 +1144,12 @@
             "agent_status"
           ],
           "type": "object"
+        },
+        "TabRole": {
+          "enum": [
+            "agent"
+          ],
+          "type": "string"
         },
         "WorkspaceInfo": {
           "properties": {
@@ -4648,6 +4664,12 @@
           ],
           "type": "object"
         },
+        "TabRole": {
+          "enum": [
+            "agent"
+          ],
+          "type": "string"
+        },
         "TabSetPinnedParams": {
           "description": "Pin or unpin a chat in the sidebar's pinned section. `priority` sets where\nit lands in pin order (higher first); omitted keeps/appends at the end.",
           "properties": {
@@ -4668,6 +4690,28 @@
           "required": [
             "tab_id",
             "pinned"
+          ],
+          "type": "object"
+        },
+        "TabSetRoleParams": {
+          "properties": {
+            "role": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/request/$defs/TabRole"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "tab_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "tab_id"
           ],
           "type": "object"
         },
@@ -5712,6 +5756,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/TabSetPinnedParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "tab.set_role",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/TabSetRoleParams"
             }
           },
           "required": [
@@ -11730,6 +11790,16 @@
                 "null"
               ]
             },
+            "role": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/TabRole"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "tab_id": {
               "type": "string"
             },
@@ -11758,6 +11828,12 @@
             "agent_status"
           ],
           "type": "object"
+        },
+        "TabRole": {
+          "enum": [
+            "agent"
+          ],
+          "type": "string"
         },
         "WorkspaceInfo": {
           "properties": {
