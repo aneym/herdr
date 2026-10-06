@@ -24,3 +24,14 @@ footer { color: #7f849c; padding: 12px 8px; font-size: 12px; overflow-wrap: anyw
 .pane-cap { height: 24px; min-height: 24px; display: flex; align-items: center; gap: 7px; padding: 0 8px; color: #7f849c; }.pane-cap button { color: #7f849c; font-size: 12px; white-space: nowrap; }.bell .pane-cap { background: #45475a; }
 .term-host { flex: 1; min-height: 0; overflow: hidden; }.term-host .xterm { height: 100%; }
 .disconnected { position: absolute; inset: 24px 0 0; background: #1e1e2eee; color: #7f849c; }.notice { position: absolute; bottom: 0; padding: 4px 8px; background: #313244; max-width: 100%; font-size: 12px; }
+
+:root { --shell-surface: #181825; --shell-text: #cdd6f4; --shell-muted: #7f849c; --shell-selection: #313244; --shell-hover: #232334; }
+.rename-input, .switcher input { font: inherit; color: var(--shell-text); background: var(--shell-surface); border: 1px solid var(--shell-muted); border-radius: 6px; padding: 3px 7px; min-width: 0; }
+.rename-input { width: 100%; height: 24px; }
+.switcher-backdrop { position: fixed; inset: 0; display: grid; place-items: center; z-index: 10; }
+.switcher { width: min(560px, calc(100vw - 32px)); padding: 12px; border: 1px solid var(--shell-muted); border-radius: 6px; background: var(--shell-surface); }
+.switcher input { width: 100%; margin-bottom: 8px; }
+.switcher [role="listbox"] { max-height: min(400px, 60vh); overflow: auto; }
+.switcher .sidebar-row { height: 32px; }
+.empty-results { padding: 8px; }
+.machine-error { z-index: 11; }

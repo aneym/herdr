@@ -151,7 +151,7 @@ mod imp {
                 }
             }
             "read" => read_cmd(app),
-            cmd @ ("ui" | "open" | "key" | "wheel") => forward_cmd(app, cmd, req),
+            cmd @ ("ui" | "open" | "key" | "wheel" | "action") => forward_cmd(app, cmd, req),
             _ => json!({"ok": false, "error": "unknown cmd"}),
         }
     }
@@ -181,7 +181,9 @@ mod imp {
     fn forward_cmd(app: &AppHandle, cmd: &str, req: &Value) -> Value {
         let (tx, rx) = channel();
         match RESULT_TX.lock() {
-            Ok(mut guard) => *guard = Some((cmd.into(), tx)),
+            // Reuse the registered key reply handler for actions; the pipe
+            // serializes requests, so only one result is pending at a time.
+            Ok(mut guard) => *guard = Some((if cmd == "action" { "key" } else { cmd }.into(), tx)),
             Err(_) => return json!({"ok":false,"error":"control result lock poisoned"}),
         }
         let mut payload = req.clone();

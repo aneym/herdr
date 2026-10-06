@@ -28,7 +28,7 @@ export const bridge = {
   info: () => invoke<{ version: string; commit: string; built_at: string }>("app_info"),
   controlEvent: <T,>(cmd: string, fn: (payload: T) => void) => listen<T>(`ctl-${cmd}`, e => fn(e.payload)),
   readResult: (text: string) => invoke<void>("ctl_read_result", { text }),
-  controlResult: (cmd: string, result: unknown) => invoke<void>(`ctl_${cmd}_result`, { result }),
+  controlResult: (cmd: string, result: unknown) => invoke<void>(`ctl_${cmd === "action" ? "key" : cmd}_result`, { result }),
 };
 export function toBase64(bytes: Uint8Array): string {
   let text = "";
