@@ -203,7 +203,10 @@ def main():
     check("the md item renders: heading and list text in the docs web view",
           HEADING in docs.get("text", "") and all(b in docs.get("text", "") for b in BULLETS),
           f"text={docs.get('text', '')[:120]!r}")
-    check("the rendered md is html, not the raw source", "# " + HEADING not in docs.get("text", ""))
+    check("the rendered md is html, not the raw source",
+          bool(docs.get("text", "").strip()) and HEADING in docs.get("h1", [])
+          and all(b in docs.get("li", []) for b in BULLETS)
+          and "# " + HEADING not in docs.get("text", ""), json.dumps(docs))
     shot("md")
 
     # 3. herdr desk list from the pane
@@ -215,6 +218,14 @@ def main():
     check("herdr desk list prints both items, the md one marked front (*)",
           rc == 0 and len(rows) == 2 and url_id in rows[0] and md_id in rows[1]
           and "*" in rows[1] and "*" not in rows[0], text.strip()[:200])
+
+    # Keyboard focus must survive a new terminal key, not merely attach output.
+    S.cmd({"cmd": "mouse", "pane": pane, "action": "down", "col": 2, "row": 2})
+    S.cmd({"cmd": "mouse", "pane": pane, "action": "up", "col": 2, "row": 2})
+    state = wait(lambda s: any(v.get("pane") == pane and v.get("first_responder") is True
+                             for v in s.get("surfaces", [])), 10)
+    check("the agent pane has keyboard focus before handoff",
+          any(v.get("pane") == pane and v.get("first_responder") is True for v in state.get("surfaces", [])))
 
     # 4. live handoff of the isolated server
     before = server_desk(tab)
@@ -245,7 +256,8 @@ def main():
 
     def reattached(s):
         view = next((v for v in s.get("surfaces", []) if v.get("terminal") == terminal), {})
-        return view.get("pane") == pane and any(l.strip() == "handoff-ok-42" for l in view.get("visible_nonblank", []))
+        return (view.get("pane") == pane and view.get("in_host") is True
+                and view.get("exited") is False) and any(l.strip() == "handoff-ok-42" for l in view.get("visible_nonblank", []))
 
     # Arithmetic so the typed line never matches the output line, even when it wraps.
     S.lab("herdr", "pane", "run", pane, "echo handoff-ok-$((40+2))")
@@ -253,6 +265,9 @@ def main():
     state = wait(reattached, 20)
     check("the Shell re-attached the pane to its post-handoff terminal and shows new output", reattached(state),
           f"server terminal={terminal} surfaces={[(v.get('terminal'), (v.get('visible_nonblank') or [''])[-1][:40]) for v in state.get('surfaces', [])]}")
+    check("the focused pane replacement is first responder after handoff",
+          any(v.get("pane") == pane and v.get("terminal") == terminal and v.get("in_host") is True
+              and v.get("exited") is False and v.get("first_responder") is True for v in state.get("surfaces", [])))
     state = wait(lambda s: [i.get("id") for i in desk_view(s).get("items", [])] == [url_id, md_id]
                  and desk_view(s).get("active_item") == md_id and HEADING in doc_text(s), 30)
     check("the Shell still shows both desk items after reconnect, md active",

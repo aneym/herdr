@@ -27,6 +27,10 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
     private let empty = NSTextField(labelWithString: "")
     private let urlField = DocURLField()
     private let address = DocURLField()
+    private let filePath = NSTextField(labelWithString: "")
+    private var renderedHeadings: [String] = []
+    private var renderedListItems: [String] = []
+    private var pendingOpenKey: String?
     private let web: DocWebView
     private var tabButtons: [NSButton] = []
     private var docs: [DocItem] = []
@@ -83,6 +87,13 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         urlField.target = self
         urlField.action = #selector(commitURL)
         urlField.onEscape = { [weak self] in self?.returnFocus() }
+        filePath.font = address.font
+        filePath.textColor = .secondaryLabelColor
+        filePath.lineBreakMode = .byTruncatingMiddle
+        filePath.isSelectable = true
+        filePath.isEditable = false
+        filePath.alignment = .left
+        filePath.isHidden = true
         address.isHidden = true
         address.placeholderString = "Address"
         address.target = self
@@ -113,6 +124,7 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         view.addSubview(empty)
         view.addSubview(urlField)
         view.addSubview(address)
+        view.addSubview(filePath)
         view.addSubview(back)
         view.addSubview(forward)
         view.addSubview(reload)
@@ -136,7 +148,8 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
     func dump() -> [String: Any] {
         ["tabs": tabTitles, "active": active ?? NSNull(), "title": pageTitle, "text": pageText,
          "url": address.stringValue, "address_focused": address.currentEditor() != nil,
-         "focused": hasFocus]
+         "focused": hasFocus, "file_path": filePath.stringValue,
+         "h1": renderedHeadings, "li": renderedListItems]
     }
 
     var hasFocus: Bool {
@@ -228,9 +241,19 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         forward.isHidden = !chrome
         reload.isHidden = !chrome
         address.isHidden = !chrome
+        let path = docs.first(where: { $0.key == activeKey })?.path
+        filePath.isHidden = chrome || path == nil
+        if let path {
+            let home = NSHomeDirectory()
+            filePath.stringValue = path == home ? "~" : (path.hasPrefix(home + "/") ? "~" + String(path.dropFirst(home.count)) : path)
+        }
         openBrowser.isHidden = docs.isEmpty
         var y = bar
-        if !chrome { openBrowser.frame = NSRect(x: bounds.width - 52, y: y, width: 44, height: 22); y += 26 }
+        if !chrome {
+            openBrowser.frame = NSRect(x: bounds.width - 52, y: y, width: 44, height: 22)
+            filePath.frame = NSRect(x: 78, y: y, width: max(40, openBrowser.frame.minX - 86), height: 22)
+            y += 26
+        }
         if chrome {
             back.frame = NSRect(x: 8, y: y, width: 22, height: 22)
             forward.frame = NSRect(x: 30, y: y, width: 22, height: 22)
@@ -250,6 +273,8 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
     // MARK: loading
 
     private func loadActive() {
+        pendingOpenKey = nil
+        renderedHeadings = []; renderedListItems = []
         guard let item = docs.first(where: { $0.key == activeKey }) ?? docs.first else {
             readGeneration += 1
             readInFlight = false
@@ -321,9 +346,13 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
             address.stringValue = current
         }
         if !web.allowFocus { returnFocus() }
-        webView.evaluateJavaScript("document.body ? document.body.innerText : ''") { [weak self] value, _ in
-            self?.pageText = value as? String ?? ""
-            if self?.pageTitle.isEmpty == true { self?.pageTitle = webView.title ?? "" }
+        let generation = readGeneration
+        webView.evaluateJavaScript("({text: document.body ? document.body.innerText : '', h1: Array.from(document.querySelectorAll('h1'), e => e.innerText), li: Array.from(document.querySelectorAll('li'), e => e.innerText)})") { [weak self] value, _ in
+            guard let self, generation == self.readGeneration, let facts = value as? [String: Any] else { return }
+            self.pageText = facts["text"] as? String ?? ""
+            self.renderedHeadings = facts["h1"] as? [String] ?? []
+            self.renderedListItems = facts["li"] as? [String] ?? []
+            if self.pageTitle.isEmpty { self.pageTitle = webView.title ?? "" }
         }
     }
 
@@ -383,6 +412,12 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
             let generation = readGeneration, row = rowId, id = item.deskId
             let data = fileData
             let remote = row.map(Machines.isRemote) == true
+            if data == nil && (remote || !FileManager.default.fileExists(atPath: path)), item.deskId != nil {
+                pendingOpenKey = item.key
+                readDeskFile(item)
+                return
+            }
+            pendingOpenKey = nil
             DispatchQueue.global(qos: .utility).async { [weak self] in
                 do {
                     let url: URL
@@ -600,6 +635,10 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
 
     private func renderFile(_ data: Data, mime: String, item: DocItem) {
         fileData = data
+        if pendingOpenKey == item.key {
+            pendingOpenKey = nil
+            openOutside()
+        }
         let base = item.path.map { URL(fileURLWithPath: $0).deletingLastPathComponent() }
         if mime == "text/markdown" {
             web.loadHTMLString(MiniMarkdown.html(String(data: data, encoding: .utf8) ?? "", title: item.title), baseURL: base)
