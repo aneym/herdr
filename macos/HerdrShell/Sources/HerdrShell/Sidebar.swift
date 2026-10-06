@@ -267,7 +267,8 @@ struct SidebarView: View {
         .contentShape(Rectangle()).onTapGesture { spacesClick(row, part: "body") }
         .onHover { hoveredSpaceRow = $0 ? row.id : nil }
         .contextMenu {
-            if let tab = row.tab {
+            // Park, rename and info act on the local server; another machine's tab has none of them yet.
+            if let tab = row.tab, !Machines.isRemote(tab) {
                 Button("Rename…") { onRename(tab) }
                 Button("Show info") { if let r = model.allRowsInOrder.first(where: { $0.id == tab }) { openDetail?(r) } }
                 if row.id.contains(":parked") || model.spacesOverlay.tabs[tab]?.mode == "parked" { Button("Resume") { resume(tab) } }
@@ -302,7 +303,7 @@ struct SidebarView: View {
             let split = key.lastIndex(of: ":")!
             let space = String(key[..<split]); let label = String(key[key.index(after: split)...])
             state.spacesChrome.focusedSection[space] = state.spacesChrome.focusedSection[space] == label ? nil : label; state.saveSpacesChrome()
-        } else if part == "chevron" || [.section, .group, .hidden].contains(row.kind) {
+        } else if part == "chevron" || [.section, .group, .hidden, .machine].contains(row.kind) {
             if let key = row.toggleKey { state.spacesChrome.toggle(key); state.saveSpacesChrome() }
         } else if row.kind == .footerUsage {
             spacesClick(row, part: "link")

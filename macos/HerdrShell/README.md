@@ -29,6 +29,12 @@ env PATH="/usr/bin:$PATH" CC=/usr/bin/cc RUSTFLAGS="-C linker=/usr/bin/cc" \
 
 `scripts/install-publish.sh` (run once on Studio, again after `publish.py` changes) sets it up. A push to `origin/main` (`git config herdr-shell.releaseBranch` in the herdr repo) that changes `macos/HerdrShell` fires the repo's reference-transaction hook, which runs `herdr-shell-publish auto`: `release.sh <sha>` builds the prod bundle and stages it on Studio, and the same app is copied into each target's `~/Library/Application Support/HerdrShell/staged` (targets in `~/.config/herdr-shell/targets.json`, Book over ssh). The running app's title bar then shows **Update**; one click swaps `~/Applications/Herdr Shell.app` and relaunches. A machine that was asleep is caught by the 5 min launchd fanout. By hand: `herdr-shell-publish [ref]`, `herdr-shell-publish status`, `herdr-shell-publish install <target>` (a new machine). `herdr-shell-publish data` (launchd, 20 s) copies Studio's lanes/areas/modes files to the targets so Areas and Parked draw there. Log: `~/.cache/herdr-shell-publish/publish.log`.
 
+## Other machines
+
+The Spaces sidebar lists other machines' herdr servers below the local spaces: a header per machine (fold remembered), its workspaces, agent tabs with status, and agentless tabs folded into `shells N`. Selecting a remote tab attaches its panes through that machine's sockets; layout commands (close, zoom, split, rename) go to that machine. Chat mode and the Park/Rename context menu stay local-only. herdr's own endpoint catalog is never touched, so the local tree draws exactly as without machines.
+
+Sockets come from `scripts/machine-tunnels/herdr-machine-tunnels` (launchd `com.aneyman.herdr-machine-tunnels`; `scripts/machine-tunnels/install.sh` on Studio, `install.sh --via studio` on Book), which forwards each machine's `herdr.sock` and `herdr-client.sock` to `~/.config/herdr-machines/<name>/`. The prod app reads `~/.config/herdr-machines/tunnels.json`; a dev or lab run reads machines only from `HERDR_SHELL_MACHINES`. Attach needs the server's protocol to match this herdr: a 0.8.2 server shows herdr's version error in the pane. Check: `python3 scripts/check_machines.py --scratch-tab <machine>/<tab> --scratch-pane <pane>` (offscreen host run, types only into the named scratch shell).
+
 ## Run (lab only)
 
 ```sh

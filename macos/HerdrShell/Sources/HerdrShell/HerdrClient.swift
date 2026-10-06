@@ -192,7 +192,16 @@ final class HerdrClient {
     private var pendingEventAt: Date?
     private var requests = 0
 
-    init(socketPath: String) { self.socketPath = socketPath }
+    /// Set for another machine's server: snapshot ids come back with its name on them.
+    let machine: String?
+
+    init(socketPath: String, machine: String? = nil) {
+        self.socketPath = socketPath
+        self.machine = machine
+        // A machine that is down is retried less eagerly than the local server.
+        retry = machine == nil ? Self.backoff : 3
+    }
+    private let retry: TimeInterval
 
     /// Number of `session.snapshot` requests made so far (test evidence that
     /// nothing polls while nothing changes).
@@ -233,7 +242,7 @@ final class HerdrClient {
                 self.statusStream?.stop(); self.statusStream = nil
                 self.statusPanes = []
                 self.report("herdr events: \(reason)")
-                self.q.asyncAfter(deadline: .now() + Self.backoff) { self.connect() }
+                self.q.asyncAfter(deadline: .now() + self.retry) { self.connect() }
             }
         }
         stream.start()
@@ -246,7 +255,7 @@ final class HerdrClient {
         statusPanes = panes
         guard !panes.isEmpty else { return }
         let stream = EventStream(path: socketPath, subscriptions: panes.sorted().map {
-            ["type": "pane.agent_status_changed", "pane_id": $0]
+            ["type": "pane.agent_status_changed", "pane_id": Machines.split($0).map(\.raw) ?? $0]
         })
         statusStream = stream
         // The ack closes the gap between the snapshot that named these panes and now.
@@ -290,9 +299,11 @@ final class HerdrClient {
         let eventAt = pendingEventAt
         pendingEventAt = nil
         let path = socketPath
+        let machine = self.machine
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let t0 = Date()
-            let data = HerdrSocket.request(path, #"{"id":"shell:snapshot","method":"session.snapshot","params":{}}"#)
+            var data = HerdrSocket.request(path, #"{"id":"shell:snapshot","method":"session.snapshot","params":{}}"#)
+            if let machine, let raw = data { data = Machines.namespace(raw, machine: machine) }
             let ms = Date().timeIntervalSince(t0) * 1000
             var snap: Snapshot?
             var failure = "herdr session.snapshot failed"
@@ -308,8 +319,8 @@ final class HerdrClient {
                 if let snap {
                     let applied = Applied(snapshot: snap, fetchMs: ms,
                                           eventToApplyMs: eventAt.map { Date().timeIntervalSince($0) * 1000 })
-                    log(String(format: "p3: snapshot #%d fetched in %.1f ms%@", n, ms,
-                               applied.eventToApplyMs.map { String(format: ", event->apply %.1f ms", $0) } ?? ""))
+                    if machine == nil { log(String(format: "p3: snapshot #%d fetched in %.1f ms%@", n, ms,
+                               applied.eventToApplyMs.map { String(format: ", event->apply %.1f ms", $0) } ?? "")) }
                     DispatchQueue.main.async { self.onStatus?(nil); self.onSnapshot?(applied) }
                     self.syncStatusStream(panes: Set(snap.panes.map(\.pane_id)))
                 } else {
@@ -339,11 +350,26 @@ struct HerdrCommands {
     struct ResizeOutcome { let changed: Bool; let layout: Snapshot.Layout }
 
     private func call(_ method: String, _ params: [String: Any]) -> Data? {
+        // An id from another machine sends the call to that machine's server, with raw ids,
+        // and puts the machine name back on the ids in its answer.
+        var path = socketPath, params = params, machine: String?
+        if let remote = params.first(where: { $0.key.hasSuffix("_id") && ($0.value as? String).map(Machines.isRemote) == true }),
+           let id = remote.value as? String {
+            guard let c = Machines.config(for: id) else { log("\(method): unknown machine for \(id)"); return nil }
+            path = c.socket
+            machine = c.name
+            for (k, v) in params where k.hasSuffix("_id") {
+                if let s = v as? String, let (m, raw) = Machines.split(s) {
+                    guard m == c.name else { log("\(method): ids from two machines"); return nil }
+                    params[k] = raw
+                }
+            }
+        }
         let body: [String: Any] = ["id": "shell:\(method)", "method": method, "params": params]
         guard let data = try? JSONSerialization.data(withJSONObject: body),
               let json = String(data: data, encoding: .utf8),
-              let reply = HerdrSocket.request(socketPath, json) else { return nil }
-        return reply
+              let reply = HerdrSocket.request(path, json) else { return nil }
+        return machine.map { Machines.namespace(reply, machine: $0) } ?? reply
     }
 
     /// `pane.resize`. `direction` is left|right|up|down; `amount` is a share of the split

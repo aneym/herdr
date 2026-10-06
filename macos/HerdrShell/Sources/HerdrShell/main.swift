@@ -121,6 +121,10 @@ ContextStore.directory = ProcessInfo.processInfo.environment["HERDR_CONTEXT_DIR"
     ?? Channel.appSupport.appendingPathComponent("context").path
 ShellPaths.modes = ProcessInfo.processInfo.environment["CONTROL_MODES"] ?? (home + "/.agent-rails/herdr/modes.json")
 RemoteActions.configure(herdrBin: herdrBin)
+// Other machines: prod reads the tunnels' config; a dev or lab run only an explicit one.
+if Channel.kind == .prod || ProcessInfo.processInfo.environment["HERDR_SHELL_MACHINES"] != nil {
+    Machines.configure(env: ProcessInfo.processInfo.environment)
+}
 
 // Read before HERDR_* is cleared. Flag wins, then the env, then defaults (in the delegate).
 let notifyEnv = ProcessInfo.processInfo.environment["HERDR_NOTIFY"]

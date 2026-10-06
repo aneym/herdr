@@ -1,0 +1,183 @@
+#!/usr/bin/env python3
+"""Keep each remote machine's herdr sockets forwarded to this host.
+
+For every machine in ~/.config/herdr-machines/tunnels.json, one ssh process
+forwards the remote herdr.sock and herdr-client.sock to
+~/.config/herdr-machines/<name>/. Herdr Shell reads those sockets to show the
+machine beside the local session; nothing here touches herdr's own endpoint
+catalog, so no herdr client changes how it draws.
+
+  {"machines": [{"name": "ax42", "ssh": ["ssh", "ax42"],
+                 "remote_dir": "/home/jobs/.config/herdr"}]}
+
+On a host that reaches the machines through another one (Book through Studio),
+point `ssh` at that host and `remote_dir` at its forwarded directory.
+
+Usage: herdr-machine-tunnels [run|status|check]
+"""
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+
+ROOT = os.path.expanduser(os.environ.get("HERDR_MACHINES_DIR", "~/.config/herdr-machines"))
+CONFIG = os.path.join(ROOT, "tunnels.json")
+SOCKETS = ("herdr.sock", "herdr-client.sock")
+SSH_OPTS = ["-NT", "-o", "LogLevel=ERROR", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes", "-o", "StreamLocalBindUnlink=yes",
+            "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-o", "ConnectTimeout=10",
+            "-o", "ControlMaster=no", "-o", "ControlPath=none"]
+
+
+def log(msg):
+    print(time.strftime("%Y-%m-%dT%H:%M:%S ") + msg, flush=True)
+
+
+def load():
+    try:
+        with open(CONFIG) as f:
+            machines = json.load(f).get("machines", [])
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as e:
+        log(f"config unreadable: {e}")
+        return None
+    out = {}
+    for m in machines:
+        name = str(m.get("name", ""))
+        if not name or "/" in name or name.startswith(".") or not m.get("ssh") or not m.get("remote_dir"):
+            log(f"skipping bad machine entry {m!r}")
+            continue
+        out[name] = {"ssh": list(m["ssh"]), "remote_dir": str(m["remote_dir"]).rstrip("/")}
+    return out
+
+
+def argv(name, m):
+    local = os.path.join(ROOT, name)
+    forwards = []
+    for sock in SOCKETS:
+        forwards += ["-L", f"{local}/{sock}:{m['remote_dir']}/{sock}"]
+    return m["ssh"][:1] + SSH_OPTS + forwards + m["ssh"][1:]
+
+
+def write_status(state):
+    tmp = os.path.join(ROOT, ".status.json.tmp")
+    with open(tmp, "w") as f:
+        json.dump(state, f, indent=1, sort_keys=True)
+    os.replace(tmp, os.path.join(ROOT, "status.json"))
+
+
+def run():
+    os.makedirs(ROOT, exist_ok=True)
+    procs = {}      # name -> Popen
+    backoff = {}    # name -> seconds
+    next_try = {}   # name -> monotonic time
+    status = {}
+    machines = {}
+    stamp = None
+    stopping = False
+    written = None
+
+    def stop(*_):
+        nonlocal stopping
+        stopping = True
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    while not stopping:
+        try:
+            mtime = os.stat(CONFIG).st_mtime
+        except FileNotFoundError:
+            mtime = None
+        if mtime != stamp:
+            loaded = load()
+            if loaded is not None:
+                stamp = mtime
+                for name in list(procs):
+                    if name not in loaded or loaded[name] != machines.get(name):
+                        procs.pop(name).terminate()
+                        log(f"{name}: stopped (config changed)")
+                for name in list(status):
+                    if name not in loaded:
+                        status.pop(name)
+                machines = loaded
+        now = time.monotonic()
+        for name, m in machines.items():
+            p = procs.get(name)
+            if p is not None and p.poll() is None:
+                # Up long enough to count as healthy: forget earlier failures.
+                if now - status[name]["started_mono"] > 60:
+                    backoff[name] = 2
+                continue
+            if p is not None:
+                try:
+                    err = open(os.path.join(ROOT, name, "ssh.log"), errors="replace").read().strip().splitlines()
+                except OSError:
+                    err = []
+                procs.pop(name)
+                status[name].update(up=False, down_since=time.time(), last_error=err[-1] if err else f"exit {p.returncode}")
+                log(f"{name}: ssh exited {p.returncode}: {status[name]['last_error']}")
+                next_try[name] = now + backoff.get(name, 2)
+                backoff[name] = min(60, backoff.get(name, 2) * 2)
+            if now < next_try.get(name, 0):
+                continue
+            os.makedirs(os.path.join(ROOT, name), mode=0o700, exist_ok=True)
+            # stderr goes to a file: an unread pipe fills up and stalls every forward through it.
+            with open(os.path.join(ROOT, name, "ssh.log"), "wb") as err_log:
+                procs[name] = subprocess.Popen(argv(name, m), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                               stderr=err_log)
+            prev = status.get(name, {})
+            status[name] = {"up": True, "pid": procs[name].pid, "since": time.time(), "started_mono": now,
+                            "down_since": prev.get("down_since"), "last_error": prev.get("last_error")}
+            log(f"{name}: ssh started pid {procs[name].pid}")
+        shown = {k: {kk: vv for kk, vv in v.items() if kk != "started_mono"} for k, v in status.items()}
+        if shown != written:
+            write_status(shown)
+            written = shown
+        time.sleep(1)
+    for p in procs.values():
+        p.terminate()
+    log("stopped")
+
+
+def check():
+    """Ask each forwarded server for its version; exit 1 if any machine is unreachable."""
+    import socket
+    machines = load() or {}
+    bad = 0
+    for name in sorted(machines):
+        path = os.path.join(ROOT, name, "herdr.sock")
+        try:
+            s = socket.socket(socket.AF_UNIX)
+            s.settimeout(8)
+            s.connect(path)
+            s.sendall(b'{"id":"tunnels:check","method":"session.snapshot","params":{}}\n')
+            buf = b""
+            while b"\n" not in buf:
+                chunk = s.recv(1 << 20)
+                if not chunk:
+                    break
+                buf += chunk
+            snap = json.loads(buf.split(b"\n")[0])["result"]["snapshot"]
+            print(f"{name}\tok\therdr {snap.get('version')} protocol {snap.get('protocol')}\t"
+                  f"{len(snap.get('workspaces', []))} workspaces {len(snap.get('tabs', []))} tabs")
+        except Exception as e:  # noqa: BLE001 - report every failure the same way
+            bad += 1
+            print(f"{name}\tdown\t{e}")
+    return 1 if bad else 0
+
+
+if __name__ == "__main__":
+    verb = sys.argv[1] if len(sys.argv) > 1 else "run"
+    if verb == "run":
+        run()
+    elif verb == "status":
+        try:
+            print(open(os.path.join(ROOT, "status.json")).read())
+        except FileNotFoundError:
+            print("{}")
+    elif verb == "check":
+        sys.exit(check())
+    else:
+        sys.exit(__doc__)

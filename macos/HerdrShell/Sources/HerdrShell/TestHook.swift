@@ -78,7 +78,7 @@ final class TestHook {
                 }
             } else if part == "link" {
                 if let raw = row.link, let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") { NSWorkspace.shared.open(url) }
-            } else if part == "chevron" || [.section, .group, .hidden].contains(row.kind) {
+            } else if part == "chevron" || [.section, .group, .hidden, .machine].contains(row.kind) {
                 if let key = row.toggleKey { c.state.spacesChrome.toggle(key) }
             } else if let tab = row.tab { c.selectTab(tab) }
             c.state.saveSpacesChrome()

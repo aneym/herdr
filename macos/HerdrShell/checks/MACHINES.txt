@@ -1,0 +1,12 @@
+[PASS] baseline has no machine rows
+[PASS] local rows unchanged with machines (15 vs 15; first diff [])
+[PASS] machines block after local spaces
+[PASS] ax42 header shows its herdr (machine|machine:ax42|0|open||blocked|ax42|herdr 0.9.1|none|||machine:ax42|)
+[PASS] pc header shows its herdr (machine|machine:pc|0|open||unknown|pc|herdr 0.9.1|none|||machine:pc|)
+[PASS] forge header shows its herdr (machine|machine:forge|0|open||unknown|forge|herdr 0.8.2|none|||machine:forge|)
+[PASS] unreachable machine says so (machine|machine:ghost|0|open||unknown|ghost|connecting|none|||machine:ghost|dim)
+[PASS] ax42 agent tabs listed (4 rows)
+[PASS] remote tab selected and attached (["MM_ATTACH_OK_42                                                                                                               ", "jobs@ax42:~$                                                                                                                  "])
+[PASS] typing reaches the remote pane (jobs@ax42:~$)
+[PASS] machine folds to one counted line (machine|machine:ax42|0|closed|■|blocked|ax42|4 agents|none|||machine:ax42|)
+[PASS] folded machine hides its tabs

@@ -80,10 +80,13 @@ final class SurfaceRegistry {
         let statusFile = NSTemporaryDirectory() + "herdr-shell-exit-\(UUID().uuidString)"
         // libghostty runs the command as `exec -l <command>`, so the status write has to
         // live in a script of its own.
-        let script = "'\(herdrBin)' terminal attach \(terminalId) --no-escape" + (takeover ? " --takeover" : "")
+        // Another machine's terminal attaches through its forwarded sockets, by its raw id.
+        let remote = Machines.attachTarget(terminalId)
+        let script = "'\(herdrBin)' terminal attach \(remote?.raw ?? terminalId) --no-escape" + (takeover ? " --takeover" : "")
             + "; echo $? > '\(statusFile)'"
         let cmd = "/bin/sh -c '" + script.replacingOccurrences(of: "'", with: "'\\''") + "'"
-        let s = SurfaceView(paneId: paneId, terminalId: terminalId, command: cmd, env: attachEnv, cwd: NSHomeDirectory())
+        let env = remote.map { attachEnv.merging($0.env) { _, new in new } } ?? attachEnv
+        let s = SurfaceView(paneId: paneId, terminalId: terminalId, command: cmd, env: env, cwd: NSHomeDirectory())
         s.onExit = { [weak self] v in self?.handleExit(v) }
         exitStatusFiles[ObjectIdentifier(s)] = statusFile
         return s

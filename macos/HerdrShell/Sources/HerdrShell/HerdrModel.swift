@@ -34,6 +34,8 @@ struct Snapshot: Decodable {
     let panes: [Pane]
     let agents: [Agent]
     let layouts: [Layout]
+    /// The server's herdr version; shown for other machines.
+    let version: String?
 }
 
 /// A sidebar row. Kind follows the mock: ORCHESTRATOR / LANES / WORKFLOWS, with
@@ -59,6 +61,9 @@ final class HerdrModel: ObservableObject {
     @Published private(set) var hosts: [(String, Int)] = []
     @Published private(set) var lastError: String?
     @Published private(set) var lastRefreshMs: Double = 0
+    /// Other machines, in config order. Never mixed into `snapshot`: local state stays local.
+    @Published private(set) var machines: [MachineState] = Machines.configs.map { MachineState(name: $0.name) }
+    private var machineClients: [HerdrClient] = []
 
     /// Fetch time of the latest `session.snapshot`, for the status line.
     var pollMs: Double { lastRefreshMs }
@@ -101,6 +106,7 @@ final class HerdrModel: ObservableObject {
             if let message { self?.lastError = message } else if self?.lastError != nil { self?.lastError = nil }
         }
         client.start()
+        startMachines()
         hostsModel.start()
         catalog.start()
         Timer.publish(every: 1, on: .main, in: .common).autoconnect().sink { [weak self] _ in self?.reloadSpacesOverlay() }.store(in: &bag)
@@ -182,11 +188,54 @@ final class HerdrModel: ObservableObject {
     }
 
     func layout(forTab tabId: String) -> Snapshot.Layout? {
-        snapshot?.layouts.first { $0.tab_id == tabId }
+        source(for: tabId)?.layouts.first { $0.tab_id == tabId }
     }
 
     func pane(_ paneId: String) -> Snapshot.Pane? {
-        snapshot?.panes.first { $0.pane_id == paneId }
+        source(for: paneId)?.panes.first { $0.pane_id == paneId }
+    }
+
+    /// The snapshot that owns an id: the local one, or the machine named in it.
+    func source(for id: String) -> Snapshot? {
+        guard let name = Machines.split(id)?.machine else { return snapshot }
+        return machines.first { $0.name == name }?.snapshot
+    }
+
+    func hasTab(_ tabId: String) -> Bool {
+        source(for: tabId)?.tabs.contains { $0.tab_id == tabId } == true
+    }
+
+    /// True once the machine that owns a remote id has answered at least once.
+    func machineLoaded(for id: String) -> Bool {
+        guard let name = Machines.split(id)?.machine else { return true }
+        return machines.first { $0.name == name }?.snapshot != nil
+    }
+
+    private func startMachines() {
+        for c in Machines.configs {
+            let client = HerdrClient(socketPath: c.socket, machine: c.name)
+            client.onSnapshot = { [weak self] applied in
+                self?.updateMachine(c.name) { m in
+                    m.snapshot = applied.snapshot; m.problem = nil; m.downSince = nil; m.epoch += 1
+                }
+            }
+            client.onStatus = { [weak self] message in
+                guard let message else { return }
+                self?.updateMachine(c.name) { m in
+                    if m.problem == nil { m.downSince = Date() }
+                    m.problem = message
+                }
+            }
+            client.start()
+            machineClients.append(client)
+        }
+    }
+
+    private func updateMachine(_ name: String, _ change: (inout MachineState) -> Void) {
+        guard let i = machines.firstIndex(where: { $0.name == name }) else { return }
+        var m = machines[i]
+        change(&m)
+        if m != machines[i] { machines[i] = m }
     }
 
     var allRowsInOrder: [TabRow] {
@@ -275,6 +324,10 @@ extension HerdrModel {
                 },
                 focused: tab.tab_id == state.selectedTab, status: tab.agent_status ?? "unknown")
         }, focusedTab: state.selectedTab)
-        return SpacesTree.build(input, overlay: spacesOverlay, chrome: state.spacesChrome, now: Date().timeIntervalSince1970)
+        let rows = SpacesTree.build(input, overlay: spacesOverlay, chrome: state.spacesChrome, now: Date().timeIntervalSince1970)
+        guard !machines.isEmpty else { return rows }
+        // Machines go after the local spaces and before the footer, so no local row moves.
+        let footer = rows.firstIndex { $0.kind == .footerUsage || $0.kind == .footerHost } ?? rows.endIndex
+        return Array(rows[..<footer]) + MachineRows.build(machines, chrome: state.spacesChrome) + Array(rows[footer...])
     }
 }

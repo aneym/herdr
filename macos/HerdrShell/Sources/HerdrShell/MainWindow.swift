@@ -236,6 +236,10 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             DispatchQueue.main.async { self?.applyTheme() }
         }.store(in: &bag)
         model.$snapshot.receive(on: RunLoop.main).sink { [weak self] _ in self?.snapshotChanged() }.store(in: &bag)
+        // $machines fires before the value lands; read it on the next turn.
+        model.$machines.receive(on: RunLoop.main).sink { [weak self] _ in
+            DispatchQueue.main.async { self?.machinesChanged() }
+        }.store(in: &bag)
         model.catalog.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in
             DispatchQueue.main.async {
                 self?.refreshDocs()
@@ -364,12 +368,14 @@ final class MainWindowController: NSObject, NSWindowDelegate {
            !model.allRowsInOrder.contains(where: { $0.id == id && $0.kind != .workflow }) {
             closeDetail()
         }
-        if let t = pendingSelectTab, model.snapshot?.tabs.contains(where: { $0.tab_id == t }) == true {
+        if let t = pendingSelectTab, model.hasTab(t) {
             pendingSelectTab = nil
             selectTab(t)
             return
         }
-        if let t = state.selectedTab, model.snapshot?.tabs.contains(where: { $0.tab_id == t }) == true {
+        // Another machine's tab waits for that machine's first answer instead of being dropped.
+        if let t = state.selectedTab, !model.machineLoaded(for: t) { refreshDocs(); return }
+        if let t = state.selectedTab, model.hasTab(t) {
             refreshHost()
             if !didRestoreTabFocus {
                 didRestoreTabFocus = true
@@ -395,6 +401,13 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         }
         refreshDocs()
         refreshHost()
+    }
+
+    /// A machine answered. Only a selected tab on that machine has panes to redraw; a
+    /// selection that was waiting for it goes through the normal snapshot path.
+    func machinesChanged() {
+        guard let t = state.selectedTab, Machines.isRemote(t) else { return }
+        snapshotChanged()
     }
 
     /// Blocked, or done after working, on a tab Alex is not looking at.
@@ -571,6 +584,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     func setPaneMode(_ id: String, _ mode: String) {
+        if Machines.isRemote(id), mode != "terminal" { log("pane mode \(mode): local panes only"); return }
         if mode == "focus" || mode == "full" {
             Channel.setMode("chat", for: id)
             Channel.setDensity(mode, for: id)
@@ -600,7 +614,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     func applyCaps() {
-        guard let tab = state.selectedTab, let snap = model.snapshot else { return }
+        guard let tab = state.selectedTab, let snap = model.source(for: tab) else { return }
         var next: [String: PaneCapState] = [:]
         for p in snap.panes where p.tab_id == tab {
             let agents = snap.agents.filter { $0.pane_id == p.pane_id }
@@ -608,7 +622,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             let agent = agents.first
             let named = (agent?.agent?.isEmpty == false ? agent?.agent : nil) ?? "Brief"
             let status = agent?.agent_status ?? p.agent_status ?? ""
-            let chat = reported && Channel.mode(for: p.pane_id) == "chat"
+            // Chat reads the local transcript and sends through the local server: local panes only.
+            let chat = reported && !Machines.isRemote(p.pane_id) && Channel.mode(for: p.pane_id) == "chat"
             if chat { ensureChat(p.pane_id) }
             next[p.pane_id] = PaneCapState(
                 paneId: p.pane_id, name: named.isEmpty ? "Brief" : named, agent: reported,

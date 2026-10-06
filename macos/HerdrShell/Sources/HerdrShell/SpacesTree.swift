@@ -65,11 +65,13 @@ private extension KeyedDecodingContainer where Key == Field {
 struct SpacesChrome: Codable {
     var collapsedSections: Set<String> = []; var expandedGroups: Set<String> = []; var expandedTabs: Set<String> = []; var collapsedTabs: Set<String> = []
     var pinnedSpaces: Set<String> = []; var collapsedSpaces: Set<String> = []; var hiddenExpanded = false; var goalFilter: String?; var focusedSection: [String: String] = [:]
+    var collapsedMachines: Set<String> = []
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Field.self)
         collapsedSections = c.value("collapsedSections", []); expandedGroups = c.value("expandedGroups", []); expandedTabs = c.value("expandedTabs", []); collapsedTabs = c.value("collapsedTabs", [])
         pinnedSpaces = c.value("pinnedSpaces", []); collapsedSpaces = c.value("collapsedSpaces", []); hiddenExpanded = c.value("hiddenExpanded", false); goalFilter = c.optional("goalFilter"); focusedSection = c.value("focusedSection", [:])
+        collapsedMachines = c.value("collapsedMachines", [])
         if let legacy: String = c.optional("focusedSection"), let split = legacy.lastIndex(of: ":") { focusedSection[String(legacy[..<split])] = String(legacy[legacy.index(after: split)...]) }
     }
     mutating func toggle(_ key: String) {
@@ -86,13 +88,14 @@ struct SpacesChrome: Codable {
             else { expandedTabs.remove(parts[1]); collapsedTabs.insert(parts[1]) }
         case "space": flip(&collapsedSpaces, parts[1])
         case "pin": flip(&pinnedSpaces, parts[1])
+        case "machine": flip(&collapsedMachines, parts[1])
         default: break
         }
     }
 }
 
 struct SpacesRow: Identifiable, Equatable {
-    enum Kind: String { case title, goal, space, section, group, tab, run, hidden, footerUsage, footerHost }
+    enum Kind: String { case title, goal, space, section, group, tab, run, hidden, machine, footerUsage, footerHost }
     var id: String; var kind: Kind; var depth = 0; var chevron = "none"; var glyph = ""; var tone = "mute"; var title: String; var trailing = ""
     var alert = "none"; var link: String?; var tab: String?; var toggleKey: String?; var dim = false
     /// Semantic rather than width-dependent: native fonts do not truncate like a terminal grid.

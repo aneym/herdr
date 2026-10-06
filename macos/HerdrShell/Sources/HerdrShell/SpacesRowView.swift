@@ -33,7 +33,7 @@ struct SpacesRowView: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            if row.chevron != "none", row.kind != .space, row.kind != .hidden {
+            if row.chevron != "none", row.kind != .space, row.kind != .hidden, row.kind != .machine {
                 chevron
             } else if treeRow {
                 Color.clear.frame(width: Self.chevronWidth, height: 1)
@@ -47,7 +47,7 @@ struct SpacesRowView: View {
             } else {
                 Text(row.title)
                     .font(.system(size: row.kind == .section ? 10.5 : 12.5,
-                                  weight: row.kind == .space || row.kind == .title ? .semibold
+                                  weight: row.kind == .space || row.kind == .title || row.kind == .machine ? .semibold
                                       : (row.kind == .tab && !row.dim ? .medium : .regular)))
                     .tracking(row.kind == .section ? 0.4 : 0)
                     .foregroundStyle(row.kind == .section || row.kind == .group || row.kind == .hidden || row.dim ? t.mute : t.ink)
@@ -81,11 +81,11 @@ struct SpacesRowView: View {
                 Text("⚲").foregroundStyle(pinned ? t.accent : t.mute).fixedSize().onTapGesture { click("pin") }
                 Text("+").foregroundStyle(t.mute).fixedSize().onTapGesture { click("plus") }
             }
-            if row.kind == .space || row.kind == .hidden, row.chevron != "none" {
+            if row.kind == .space || row.kind == .hidden || row.kind == .machine, row.chevron != "none" {
                 chevron
             }
         }
-        .padding(.top, row.kind == .space && row.id != firstSpaceId ? 10 : 0)
+        .padding(.top, (row.kind == .space && row.id != firstSpaceId) || row.kind == .machine || row.id == "machines" ? 10 : 0)
         .frame(height: 23).padding(.leading, indent).padding(.horizontal, 4)
         .background(RoundedRectangle(cornerRadius: 4).fill(selected && row.kind == .tab ? t.sel : .clear))
     }
