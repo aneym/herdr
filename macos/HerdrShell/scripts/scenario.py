@@ -134,7 +134,8 @@ def app(*a):
             args += [x for x in a[1:] if x != "--agent-run"]
             return space(*args)
         if a[0] == "stop":
-            return space("stop")
+            # Checks stop first to clear their own leftovers; another seat's run is not theirs.
+            return space("stop", "--if-mine")
         if a[0] == "cmd":
             return cmd(json.loads(a[1]))
     if a and a[0] == "start":

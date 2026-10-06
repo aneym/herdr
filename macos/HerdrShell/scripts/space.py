@@ -22,15 +22,24 @@ app cutover to using cua spaces immediately, so it doesnt take up my current wor
         type_text, press_key, ...), all in one MCP session: a pixel click needs a
         get_window_state snapshot taken earlier in the same call.
   herdr-shell-space exec CMD...             a shell command inside the Space (sh -c)
-  herdr-shell-space status                  VM, bridge, app pids (JSON)
-  herdr-shell-space stop                    quit the app in the Space, drop the bridge
-  herdr-shell-space down                    stop + power the VM off (disk kept)
+  herdr-shell-space status                  VM, bridge, app pids and the lock holder (JSON)
+  herdr-shell-space stop [--force|--if-mine] quit the app in the Space, drop the bridge
+  herdr-shell-space down [--force]          stop + power the VM off (disk kept)
+
+One run at a time. `start` takes the Space lock (~/.agent-rails/locks/herdr-qa-space/,
+owner file "<name> <epoch>") before touching the app. While another owner holds it,
+start prints "waiting for <owner>", polls every 10 s and exits 75 after --wait seconds
+(default 240). stop and down act only for the holder (or on a free lock) and exit 75
+otherwise; stop --if-mine exits 0 instead, for cleanup before a check. --force breaks a
+stale lock (older than 15 minutes, owner process gone). The owner name is HERDR_SPACE_OWNER, else
+this agent session's id; set HERDR_SPACE_OWNER when several agents share one session.
+exec, driver, shot, fifo and pull by the holder refresh the lock's age.
 
 The Space is `herdr-qa` (ghcr.io/trycua/macos:26-slim through Lume, storage and pull
 temp on /Volumes/StudioExt/cua, see lume-serve-ext). State: ~/.cua/herdr-space/.
 Herdr notes: ~/.config/herdr/CUSTOMIZATIONS.md "Herdr Shell in a Cua Space".
 """
-import hashlib, json, os, re, shlex, signal, stat, subprocess, sys, time, urllib.request
+import hashlib, json, os, re, shlex, shutil, signal, stat, subprocess, sys, time, urllib.request
 
 SPACE = os.environ.get("HERDR_SPACE", "herdr-qa")
 IMAGE = "macos:26-slim"
@@ -60,11 +69,141 @@ TOKEN_FILE = os.path.expanduser(f"~/.cua/vmm/lume/{SPACE}/setup/env-token")
 FWD_PID = os.path.join(STATE, "fwd.json")
 LUME_API = "http://127.0.0.1:7777/lume"
 PY = "/opt/homebrew/bin/python3"
+# The Space has one desktop, and start replaces whatever app runs there (incident
+# 2026-10-06 11:15 ET: one seat's `start --live` killed another seat's check mid-run).
+# The lock is the manual one seats take by hand: mkdir, an owner file "<name> <epoch>",
+# rm -rf after stop, stale after 15 minutes. The pid file beside it is ours: a lock whose
+# owner process still runs never goes stale.
+LOCK = os.path.expanduser(f"~/.agent-rails/locks/{SPACE}-space")
+STALE_S = 15 * 60
+EX_TEMPFAIL = 75
 
 
 def die(msg, code=1):
     print("herdr-shell-space: " + msg, file=sys.stderr)
     sys.exit(code)
+
+
+def owner_name():
+    for key, prefix in (("HERDR_SPACE_OWNER", ""), ("CLAUDE_CODE_SESSION_ID", "claude-"),
+                        ("CODEX_THREAD_ID", "codex-"), ("HERDR_PANE_ID", "pane-")):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return re.sub(r"\s+", "-", prefix + (value[:8] if prefix in ("claude-", "codex-") else value))
+    return f"pid{os.getppid()}"
+
+
+def lock_read(path=LOCK):
+    """The holder as {"owner", "epoch", "pid"}, or None when the lock is free. An owner file
+    that is missing or unreadable (mid-write, or hand-made) still counts as held."""
+    try:
+        info = {"owner": "unknown", "epoch": int(os.stat(path).st_mtime), "pid": 0}
+    except FileNotFoundError:
+        return None
+    try:
+        name, epoch = open(os.path.join(path, "owner")).readline().rsplit(None, 1)
+        info.update(owner=name, epoch=int(epoch))
+    except (OSError, ValueError):
+        pass
+    try:
+        info["pid"] = int(open(os.path.join(path, "pid")).read())
+    except (OSError, ValueError):
+        pass
+    return info
+
+
+def lock_age(info):
+    return int(time.time() - info["epoch"])
+
+
+def lock_stale(info):
+    if lock_age(info) <= STALE_S:
+        return False
+    if info["pid"] <= 0:
+        return True
+    try:
+        os.kill(info["pid"], 0)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        pass
+    return False
+
+
+def lock_write(name):
+    open(os.path.join(LOCK, "owner"), "w").write(f"{name} {int(time.time())}\n")
+    open(os.path.join(LOCK, "pid"), "w").write(str(os.getppid()))
+
+
+def lock_break(seen):
+    """Remove the stale lock `seen`. It is renamed aside first and checked, so a holder
+    that replaced it in the meantime keeps its lock."""
+    aside = f"{LOCK}.stale-{os.getpid()}"
+    try:
+        os.rename(LOCK, aside)
+    except OSError:
+        return False
+    moved = lock_read(aside) or {}
+    if (moved.get("owner"), moved.get("epoch")) != (seen["owner"], seen["epoch"]):
+        try:
+            os.rename(aside, LOCK)
+        except OSError:
+            pass
+        return False
+    shutil.rmtree(aside, ignore_errors=True)
+    return True
+
+
+def lock_take(name, wait):
+    """Hold the lock as `name`, waiting up to `wait` seconds for another holder, else exit 75.
+    True when this call took it, False when `name` already held it."""
+    os.makedirs(os.path.dirname(LOCK), exist_ok=True)
+    deadline, announced = time.time() + wait, None
+    while True:
+        try:
+            os.mkdir(LOCK)
+            lock_write(name)
+            return True
+        except FileExistsError:
+            pass
+        cur = lock_read()
+        if cur is None:
+            continue
+        if cur["owner"] == name:
+            lock_write(name)
+            return False
+        if lock_stale(cur) and lock_break(cur):
+            print(f"herdr-shell-space: broke a stale lock held by {cur['owner']} ({lock_age(cur)}s)", file=sys.stderr)
+            continue
+        left = deadline - time.time()
+        if left <= 0:
+            die(f"the Space is held by {cur['owner']} ({lock_age(cur)}s); gave up after {wait}s", EX_TEMPFAIL)
+        if announced != cur["owner"]:
+            print(f"herdr-shell-space: waiting for {cur['owner']} ({lock_age(cur)}s, up to {wait}s)", file=sys.stderr, flush=True)
+            announced = cur["owner"]
+        time.sleep(min(10, left))
+
+
+def lock_claim(name, force):
+    """Before stop or down: the caller must hold the lock, or take it while it is free, or
+    break a stale one with --force. Anything else exits 75 and leaves the run alone."""
+    cur = lock_read()
+    if cur and cur["owner"] != name:
+        if not force:
+            die(f"the Space is held by {cur['owner']} ({lock_age(cur)}s), not {name}. If that run is yours, "
+                f"set HERDR_SPACE_OWNER={cur['owner']}; if it is stale, use --force", EX_TEMPFAIL)
+        if not lock_stale(cur):
+            die(f"the lock of {cur['owner']} ({lock_age(cur)}s) is not stale: it needs {STALE_S // 60} minutes "
+                "and its owner process gone", EX_TEMPFAIL)
+        if not lock_break(cur):
+            die("the lock changed while breaking it; run status", EX_TEMPFAIL)
+    lock_take(name, 0)
+
+
+def lock_touch():
+    cur = lock_read()
+    if cur and cur["owner"] == owner_name():
+        lock_write(cur["owner"])
 
 
 def cua_env():
@@ -312,7 +451,7 @@ def stop_bridge():
 
 
 def start(argv):
-    app, sock, live, extra = PROD_APP, None, False, []
+    app, sock, live, extra, wait = PROD_APP, None, False, [], 240
     envs, pushes = [], []
     if "--" in argv:
         i = argv.index("--")
@@ -332,6 +471,8 @@ def start(argv):
             pushes.append(next(it).split("=", 1))
         elif a == "--live":
             live = True
+        elif a == "--wait":
+            wait = int(next(it))
         else:
             die("unknown arg " + a, 2)
     if live:
@@ -342,32 +483,40 @@ def start(argv):
     if live and not bundle:
         die("dev builds refuse the live server; use a lab socket, or the prod bundle with --live", 2)
     guest_sock = GUEST_SOCK if bundle and live else GUEST_LAB_SOCK
-    up()
-    bridge(sock, guest_sock)
-    stop_app()
-    for local, guest in pushes:
-        (push_tree if os.path.isdir(local) else push)(local, guest)
-    res = ["--ghostty-resources", GUEST_RES]
-    if bundle:
-        guest_app = f"{GUEST_APPS}/{os.path.basename(app)}"
-        push_tree(app, guest_app)
-        exe = f"{guest_app}/Contents/MacOS/" + os.listdir(os.path.join(app, "Contents", "MacOS"))[0]
-    else:
-        exe = GUEST_HOME + "/.herdr-space/bin/" + os.path.basename(app)
-        push(app, exe)
-        gexec(f"chmod 755 {shlex.quote(exe)}")
-    args = ["--herdr", GUEST_HERDR, "--socket", guest_sock] + res + extra
-    cmd = (f"cd ~; nohup env {' '.join(shlex.quote(e) for e in envs)} {shlex.quote(exe)} {' '.join(shlex.quote(a) for a in args)} "
-           f"> ~/.herdr-space/app.log 2>&1 < /dev/null & echo $!")
-    gexec("mkdir -p ~/.herdr-space")
-    pid = gexec(cmd).stdout.strip().splitlines()[-1]
-    open(os.path.join(STATE, "app.json"), "w").write(json.dumps({"exe": exe, "pid": pid, "socket": sock, "guest_socket": guest_sock,
-        "control": extra[extra.index("--control") + 1] if "--control" in extra else None}))
-    time.sleep(3)
-    alive = gexec(f"kill -0 {pid} 2>/dev/null && echo y", check=False).stdout.strip() == "y"
-    if not alive:
-        die("app exited at once; log:\n" + gexec("tail -20 ~/.herdr-space/app.log", check=False).stdout)
-    print(json.dumps({"space": SPACE, "app_pid": pid, "exe": exe, "host_socket": sock, "guest_socket": guest_sock}))
+    name = owner_name()
+    fresh = lock_take(name, wait)
+    try:
+        up()
+        bridge(sock, guest_sock)
+        stop_app()
+        for local, guest in pushes:
+            (push_tree if os.path.isdir(local) else push)(local, guest)
+        res = ["--ghostty-resources", GUEST_RES]
+        if bundle:
+            guest_app = f"{GUEST_APPS}/{os.path.basename(app)}"
+            push_tree(app, guest_app)
+            exe = f"{guest_app}/Contents/MacOS/" + os.listdir(os.path.join(app, "Contents", "MacOS"))[0]
+        else:
+            exe = GUEST_HOME + "/.herdr-space/bin/" + os.path.basename(app)
+            push(app, exe)
+            gexec(f"chmod 755 {shlex.quote(exe)}")
+        args = ["--herdr", GUEST_HERDR, "--socket", guest_sock] + res + extra
+        cmd = (f"cd ~; nohup env {' '.join(shlex.quote(e) for e in envs)} {shlex.quote(exe)} {' '.join(shlex.quote(a) for a in args)} "
+               f"> ~/.herdr-space/app.log 2>&1 < /dev/null & echo $!")
+        gexec("mkdir -p ~/.herdr-space")
+        pid = gexec(cmd).stdout.strip().splitlines()[-1]
+        open(os.path.join(STATE, "app.json"), "w").write(json.dumps({"exe": exe, "pid": pid, "socket": sock, "guest_socket": guest_sock,
+            "control": extra[extra.index("--control") + 1] if "--control" in extra else None}))
+        time.sleep(3)
+        alive = gexec(f"kill -0 {pid} 2>/dev/null && echo y", check=False).stdout.strip() == "y"
+        if not alive:
+            die("app exited at once; log:\n" + gexec("tail -20 ~/.herdr-space/app.log", check=False).stdout)
+        print(json.dumps({"space": SPACE, "app_pid": pid, "exe": exe, "host_socket": sock, "guest_socket": guest_sock,
+                          "owner": name}))
+    except BaseException:
+        if fresh:
+            shutil.rmtree(LOCK, ignore_errors=True)
+        raise
 
 
 def stop_app():
@@ -424,6 +573,10 @@ def driver(calls):
 def status():
     vm = lume_vm() or {}
     out = {"space": SPACE, "vm": vm.get("status"), "ip": vm.get("ipAddress"), "bridge_pid": bridge_alive()}
+    cur = lock_read()
+    out["lock"] = {"held": False} if cur is None else {
+        "held": True, "owner": cur["owner"], "age_s": lock_age(cur), "pid": cur["pid"] or None,
+        "stale": lock_stale(cur), "mine": cur["owner"] == owner_name()}
     try:
         out["app"] = json.load(open(os.path.join(STATE, "app.json")))
         if vm.get("status") == "running":
@@ -438,6 +591,8 @@ def main():
         print(__doc__)
         sys.exit(2)
     cmd, rest = sys.argv[1], sys.argv[2:]
+    if cmd in ("pull", "node", "fifo", "shot", "driver", "exec"):
+        lock_touch()
     if cmd == "up":
         up()
     elif cmd == "start":
@@ -471,18 +626,23 @@ def main():
         sys.exit(r.returncode)
     elif cmd == "status":
         status()
-    elif cmd == "stop":
-        stop_app()
-        stop_bridge()
-        print("stopped")
-    elif cmd == "down":
-        stop_app()
-        stop_bridge()
+    elif cmd in ("stop", "down"):
+        cur = lock_read()
+        if "--if-mine" in rest and cur and cur["owner"] != owner_name():
+            print(f"held by {cur['owner']}; nothing stopped")
+            return
+        lock_claim(owner_name(), "--force" in rest)
         try:
-            lume_post("stop")
-        except Exception as e:
-            print(f"lume stop: {e}", file=sys.stderr)
-        print("down")
+            stop_app()
+            stop_bridge()
+            if cmd == "down":
+                try:
+                    lume_post("stop")
+                except Exception as e:
+                    print(f"lume stop: {e}", file=sys.stderr)
+        finally:
+            shutil.rmtree(LOCK, ignore_errors=True)
+        print("stopped" if cmd == "stop" else "down")
     else:
         die("unknown command " + cmd, 2)
 

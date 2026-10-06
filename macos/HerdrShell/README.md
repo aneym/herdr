@@ -124,3 +124,12 @@ python3 scripts/space.py stop
 control FIFO, and pulls state and in-app screenshots back into `checks/`. P26 installs
 an official Node 22 runtime once in the guest and runs the real herdr-lane tree there.
 `app.py start` refuses host launches unless `--host-ok` is explicitly supplied.
+
+The Space runs one app at a time, so `space.py start` (installed as `herdr-shell-space`)
+takes the lock `~/.agent-rails/locks/herdr-qa-space/` first, the same lock seats take by
+hand (owner file `<name> <epoch>`). While another owner holds it, start waits up to
+`--wait` seconds (default 240) and exits 75; `stop` and `down` act only for the holder,
+and `stop --if-mine`, which checks use, does nothing for anyone else. `--force` breaks a
+lock older than 15 minutes whose owner process is gone. The owner is `HERDR_SPACE_OWNER`,
+else the agent session id; `status` shows the holder and its age. Check:
+`python3 scripts/check_space_lock.py` (temp HOME, no Space needed).
