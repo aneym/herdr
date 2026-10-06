@@ -404,6 +404,17 @@ struct HerdrCommands {
         return env.result.tabs.filter { $0.pin_index != nil }.count
     }
 
+    /// Pins `tabId` last in its machine's pin order. A pin lands by priority, so one dragged to
+    /// the end can still sit after it; the end is read from the owning server after the pin, not
+    /// from a snapshot that may be behind.
+    func pinAtEnd(tabId: String) -> Bool {
+        guard tabSetPinned(tabId: tabId, pinned: true) else { log("pin failed \(tabId)"); return false }
+        if let pins = pinCount(near: tabId), pins > 0, !tabPinMove(tabId: tabId, pinIndex: pins - 1) {
+            log("pin_move failed \(tabId)")
+        }
+        return true
+    }
+
     /// One viewport row span of a link, inclusive columns, as `pane.link.resolve` answers.
     struct LinkRegion: Decodable, Equatable {
         let row: Int

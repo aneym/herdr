@@ -6,7 +6,10 @@ Run only in the Cua Space: HERDR_SHELL_SPACE=1 python3 scripts/check_pinned_new_
 The click goes through NSApp.sendEvent at the + frame (the click hook, target pinned_plus).
 Checks:
   - a click adds one chat in the focused chat's space, last in PINNED and in the server's
-    pin order (whose index counts the agent pins ahead of it), and selects it.
+    pin order (whose index counts the agent pins ahead of it), and selects it;
+  - with a restored selection on another machine that has not answered yet, a click waits for
+    that machine and makes the chat in the selected chat's space there, not in a local space.
+    The machine (m1) is this lab again, through a guest socket that appears after the click.
 Writes checks/PINNED-NEW-TAB.txt and before/after shots.
 """
 import json
@@ -101,6 +104,39 @@ def main():
     S.cmd({"cmd": "shot", "out": str(ROOT / "checks/PINNED-NEW-TAB-after.png")})
 
     S.app("stop")
+    m1 = "/Users/lume/.herdr-space/m1.sock"
+    S.space("exec", f"rm -f {m1}")
+    machines = pathlib.Path(S.LAB) / "machines.json"
+    machines.write_text(json.dumps({"machines": [{"name": "m1", "socket": m1}]}))
+    os.environ["HERDR_SHELL_MACHINES"] = str(machines)
+    S.app("start")
+    S.cmd({"cmd": "activate"})
+    wait(lambda s: s.get("window_key") is True, timeout=10)
+    S.cmd({"cmd": "select", "tab": f"m1/{c}"})
+    state = wait(lambda s: s.get("selected_tab") == f"m1/{c}", timeout=10)
+    check("a selection on a machine that has not answered is kept", state.get("selected_tab") == f"m1/{c}",
+          str(state.get("selected_tab")))
+    before = {t["tab_id"] for t in server_tabs(ws, elsewhere)}
+    S.cmd({"cmd": "click", "target": "pinned_plus"})
+    time.sleep(2)
+    early = [t for t in server_tabs(ws, elsewhere) if t["tab_id"] not in before]
+    check("nothing is made before that machine answers", early == [], str(early))
+    S.space("exec", f"ln -sf /Users/lume/.herdr-space/herdr.sock {m1}")
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline and not [t for t in server_tabs(ws, elsewhere) if t["tab_id"] not in before]:
+        time.sleep(0.3)
+    made = [t for t in server_tabs(ws, elsewhere) if t["tab_id"] not in before]
+    remote = made[0]["tab_id"] if made else None
+    check("once it answers, one chat is made in the selected chat's space there",
+          len(made) == 1 and made[0]["workspace_id"] == elsewhere, str(made))
+    pins = sorted((t for t in server_tabs(ws, elsewhere) if t.get("pin_index") is not None), key=lambda t: t["pin_index"])
+    order = [t["tab_id"] for t in pins]
+    check("it is pinned last on that machine", order == [agent, a, c, new, remote], str(order))
+    state = wait(lambda s: s.get("selected_tab") == f"m1/{remote}", timeout=15)
+    check("it is focused as that machine's chat", state.get("selected_tab") == f"m1/{remote}", str(state.get("selected_tab")))
+
+    S.app("stop")
+    S.space("exec", f"rm -f {m1}")
     S.lab("down")
     pathlib.Path(S.OUT).parent.mkdir(exist_ok=True)
     pathlib.Path(S.OUT).write_text("\n".join(lines) + "\n")

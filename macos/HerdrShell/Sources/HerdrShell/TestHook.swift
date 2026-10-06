@@ -90,7 +90,7 @@ final class TestHook {
                 let commands = c.commands
                 let space = String(row.id.dropFirst(6))
                 DispatchQueue.global(qos: .userInitiated).async {
-                    if let made = commands.tabCreate(workspaceId: space, cwd: nil) { DispatchQueue.main.async { c.selectTab(made.tabId) } }
+                    if let made = commands.tabCreate(workspaceId: space, cwd: nil) { DispatchQueue.main.async { c.selectWhenListed(made.tabId) } }
                 }
             } else if part == "link" {
                 if let raw = row.link, let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") { NSWorkspace.shared.open(url) }
@@ -303,6 +303,14 @@ final class TestHook {
             }
             guard let f = c.state.rowFrames[key] else { log("hook: click: no \(key)"); return }
             frame = f
+        case "cap_pin":
+            // The pane header's pin, centred at its fixed trailing slot (PaneCapBar.pin).
+            guard let (id, _) = c.host.caps.first(where: { $0.value.pinned != nil }), let f = c.host.capFrames[id] else {
+                log("hook: click: no cap pin"); return
+            }
+            let x = f.maxX - PaneCapBar.trailing - PaneCapBar.pinWidth / 2
+            postClick(c, loc: c.host.convert(NSPoint(x: x, y: f.midY), to: nil), mods: clickMods(obj))
+            return
         case "doc_tab":
             let name = obj["label"] as? String ?? ""
             guard let b = c.docPanel.tabButton(name) else { log("hook: click: no doc tab \(name)"); return }
@@ -935,7 +943,7 @@ final class TestHook {
             "pane_caps": c.host.caps.map { id, cap -> [String: Any] in
                 let f = c.host.capFrames[id] ?? .zero
                 return ["id": id, "name": cap.name, "agent": cap.agent, "chat": cap.chat,
-                        "density": cap.density, "focused": cap.focused,
+                        "density": cap.density, "focused": cap.focused, "pinned": cap.pinned ?? NSNull(),
                         "frame": [f.minX, f.minY, f.width, f.height]]
             },
             "chats": c.chatDump,

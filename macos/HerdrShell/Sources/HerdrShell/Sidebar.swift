@@ -309,7 +309,8 @@ struct SidebarView: View {
             let id = String(row.id.dropFirst(6))
             let commands = HerdrCommands(socketPath: model.env["HERDR_SOCKET_PATH"] ?? "")
             DispatchQueue.global(qos: .userInitiated).async {
-                if let made = commands.tabCreate(workspaceId: id, cwd: nil) { DispatchQueue.main.async { select(made.tabId) } }
+                // Selected once a snapshot lists it: another machine's tab can arrive after the reply.
+                if let made = commands.tabCreate(workspaceId: id, cwd: nil) { DispatchQueue.main.async { selectNew(made.tabId) } }
             }
         } else if part == "link" {
             if let raw = row.link, let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") { NSWorkspace.shared.open(url) }

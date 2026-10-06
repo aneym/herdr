@@ -67,6 +67,8 @@ final class HerdrModel: ObservableObject {
     /// Other machines, in config order. Never mixed into `snapshot`: local state stays local.
     @Published private(set) var machines: [MachineState] = Machines.configs.map { MachineState(name: $0.name) }
     private var machineClients: [HerdrClient] = []
+    /// Actions waiting for a machine's first snapshot (whenMachineLoaded).
+    private var afterMachineLoad: [(String, () -> Void)] = []
 
     /// Fetch time of the latest `session.snapshot`, for the status line.
     var pollMs: Double { lastRefreshMs }
@@ -208,6 +210,11 @@ final class HerdrModel: ObservableObject {
         source(for: tabId)?.tabs.contains { $0.tab_id == tabId } == true
     }
 
+    /// Runs `action` once the machine that owns `id` has answered (now, when it already has).
+    func whenMachineLoaded(_ id: String, _ action: @escaping () -> Void) {
+        if machineLoaded(for: id) { action() } else { afterMachineLoad.append((id, action)) }
+    }
+
     /// True once the machine that owns a remote id has answered at least once.
     func machineLoaded(for id: String) -> Bool {
         // A machine no longer configured never answers; treat it as loaded so the selection falls back.
@@ -240,6 +247,10 @@ final class HerdrModel: ObservableObject {
         var m = machines[i]
         change(&m)
         if m != machines[i] { machines[i] = m }
+        guard !afterMachineLoad.isEmpty else { return }
+        let ready = afterMachineLoad.filter { machineLoaded(for: $0.0) }
+        afterMachineLoad.removeAll { machineLoaded(for: $0.0) }
+        ready.forEach { $0.1() }
     }
 
     var allRowsInOrder: [TabRow] {
@@ -341,6 +352,16 @@ extension HerdrModel {
         source(for: tab)?.tabs.first { $0.tab_id == tab }?.pin_index != nil
     }
 
+    /// The pane header's pin: pinning puts the chat last in PINNED (the same path as the + on the
+    /// PINNED header), unpinning drops it. Alex, 2026-10-06: "a button to pin new tabs top right
+    /// next to terminal/chat pane header".
+    func setPinnedAtEnd(_ tab: String, _ on: Bool) {
+        let commands = HerdrCommands(socketPath: env["HERDR_SOCKET_PATH"] ?? "")
+        DispatchQueue.global(qos: .userInitiated).async {
+            if on { _ = commands.pinAtEnd(tabId: tab) } else if !commands.tabSetPinned(tabId: tab, pinned: false) { log("unpin failed \(tab)") }
+        }
+    }
+
     /// Pins or unpins on the server that owns the tab: HerdrCommands sends a remote id to its machine.
     func togglePin(_ tab: String) {
         let pinned = isPinned(tab)
@@ -352,18 +373,19 @@ extension HerdrModel {
     /// nothing is focused), then `done` with its id once it is pinned. Alex, 2026-10-06: "i need
     /// a button next to pinned to make a new tab that's pinned please".
     func newPinnedTab(focused: String?, done: @escaping (String) -> Void) {
+        // A selection restored on another machine waits for that machine's first snapshot; until
+        // then its space is unknown, and a local space would be the wrong one.
+        if let focused, !machineLoaded(for: focused) {
+            whenMachineLoaded(focused) { [weak self] in self?.newPinnedTab(focused: focused, done: done) }
+            return
+        }
         let workspace = focused.flatMap { id in source(for: id)?.tabs.first { $0.tab_id == id }?.workspace_id }
             ?? snapshot?.workspaces.first?.workspace_id
         guard let workspace else { return }
         let commands = HerdrCommands(socketPath: env["HERDR_SOCKET_PATH"] ?? "")
         DispatchQueue.global(qos: .userInitiated).async {
             guard let made = commands.tabCreate(workspaceId: workspace, cwd: nil) else { log("new pinned tab failed"); return }
-            guard commands.tabSetPinned(tabId: made.tabId, pinned: true) else { log("new pinned tab: pin failed \(made.tabId)"); return }
-            // A pin lands by priority, so one dragged to the end can still sit after it. The end is
-            // read from the owning server after the pin, not from a snapshot that may be behind.
-            if let pins = commands.pinCount(near: made.tabId), pins > 0, !commands.tabPinMove(tabId: made.tabId, pinIndex: pins - 1) {
-                log("new pinned tab: pin_move failed \(made.tabId)")
-            }
+            guard commands.pinAtEnd(tabId: made.tabId) else { return }
             DispatchQueue.main.async { done(made.tabId) }
         }
     }
