@@ -1,0 +1,8 @@
+[PASS] pins listed in server order
+[PASS] drag up two rows reorders at once
+[PASS] cmd 1..3 follow the new order
+[PASS] the drag selects nothing
+[PASS] server holds the dragged order
+[PASS] esc cancels the drag
+[PASS] a release off the section moves nothing
+[PASS] a press in place still selects the row

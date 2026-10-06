@@ -128,6 +128,8 @@ def space_gesture(spike, pane, out_log):
     os.environ["HERDR_SHELL_ATTACH_BIN"] = os.path.abspath(ATTACH_BIN)  # pushed into the guest
     say(f"app start (Cua Space): {S.app('start', '--herdr', S.guest_path(ATTACH_BIN)).strip()[:160]}")
     S.cmd({"cmd": "select", "tab": spike})
+    # Synthesized events reach only a key window; the Space's desktop is the app's own.
+    S.cmd({"cmd": "activate"})
     for _ in range(150):
         st = S.state()
         if any(x["pane"] == pane for x in st.get("surfaces", [])):
@@ -135,11 +137,8 @@ def space_gesture(spike, pane, out_log):
         time.sleep(0.2)
     time.sleep(1.5)
     start = pane_info(pane)["scroll"]["offset_from_bottom"]
-    guest_log = S.guest_path(out_log)
-    S.space("exec", f"mkdir -p {os.path.dirname(guest_log)} && rm -f {guest_log}")
-    S.cmd({"cmd": "scroll_gesture", "pane": pane, "dy": 12, "steps": 30, "momentum": 40, "out": guest_log})
-    S.space("exec", f"for i in $(seq 1 100); do test -s {guest_log} && exit 0; /bin/sleep 0.1; done; exit 1")
-    S.pull(guest_log, out_log)
+    # S.cmd maps a host "out" into the guest, waits for the file and pulls it back.
+    S.cmd({"cmd": "scroll_gesture", "pane": pane, "dy": 12, "steps": 30, "momentum": 40, "out": out_log})
     moved = pane_info(pane)["scroll"]["offset_from_bottom"] - start
     shot = os.path.splitext(out_log)[0] + ".png"
     S.space("shot", shot)

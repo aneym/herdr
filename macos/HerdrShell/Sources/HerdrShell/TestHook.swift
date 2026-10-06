@@ -514,6 +514,9 @@ final class TestHook {
                 self?.dragRunning = false
             }
         }
+        // The typed Esc can leave the run loop in a tracking mode; a default-mode timer would
+        // then never post the release and every later drag_pin is refused as still running.
+        if let dragTimer { RunLoop.main.add(dragTimer, forMode: .common) }
     }
 
     /// {"cmd":"scroll","pane":id,"dy":lines}: a wheel event with line deltas
@@ -550,6 +553,14 @@ final class TestHook {
         events.append((4, 0, 0))
         for i in 0..<momentum {
             events.append((0, i == 0 ? 1 : (i == momentum - 1 ? 3 : 2), dy * pow(0.92, Double(i + 1))))
+        }
+        // A swipe happens with the pointer over the pane, and Ghostty sends a wheel report at
+        // the pointer; with no pointer position yet it reports nothing and nothing scrolls.
+        let centre = s.convert(NSPoint(x: s.bounds.midX, y: s.bounds.midY), to: nil)
+        if let move = NSEvent.mouseEvent(with: .mouseMoved, location: centre, modifierFlags: [],
+                                         timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: c.window.windowNumber,
+                                         context: nil, eventNumber: 0, clickCount: 0, pressure: 0) {
+            s.mouseMoved(with: move)
         }
         var frames = ""
         var precise = 0

@@ -18,7 +18,9 @@ import time
 
 if os.environ.get("HERDR_SHELL_SPACE") != "1":
     raise SystemExit("check_pin_drag requires HERDR_SHELL_SPACE=1; host launch is forbidden")
-os.environ["SHELL_LAB"] = "shellspike-pindrag"
+# Short name: the Space bridge forwards sessions/<name>/herdr-client.sock, and ssh refuses
+# a socket path of 104 bytes or more ("shellspike-pindrag" made it exactly 104).
+os.environ["SHELL_LAB"] = "shellspike-pd"
 os.environ.setdefault("HERDR_SHELL_BIN", os.path.expanduser("~/.local/bin/herdr"))
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 import scenario as S  # noqa: E402
@@ -81,6 +83,10 @@ def main():
         S.lab("herdr", "tab", "pin", tab)
     a, b, c = tabs[:3]
     S.app("start")
+    # SwiftUI drops synthesized mouse events on a window that is not key; the Space is
+    # the app's own desktop, so bringing it front takes nothing from anyone.
+    S.cmd({"cmd": "activate"})
+    wait(lambda s: s.get("window_key") is True, timeout=10)
     state = wait(lambda s: pinned_rows(s) == [a, b, c])
     check("pins listed in server order", pinned_rows(state) == [a, b, c], str(pinned_rows(state)))
     S.cmd({"cmd": "select", "tab": tabs[3]})
