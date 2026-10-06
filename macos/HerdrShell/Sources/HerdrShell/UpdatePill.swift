@@ -68,6 +68,7 @@ final class UpdateController: NSObject {
     /// Set false (`defaults write com.aneyman.herdr-shell herdr.shell.autoUpdate -bool false`)
     /// to update only by clicking.
     static let autoUpdateKey = "herdr.shell.autoUpdate"
+    static let autoTriedKey = "herdr.shell.autoUpdateTried"
     private var applying = false
 
     /// Installs a staged release with no click: after the machine has been idle for
@@ -80,9 +81,17 @@ final class UpdateController: NSObject {
         let asked = FileManager.default.fileExists(atPath: request.path)
         let auto = Channel.store.object(forKey: Self.autoUpdateKey) as? Bool ?? true
         guard asked || auto else { return }
+        // One automatic try per release: if it did not take (and could not record why),
+        // the relaunched old app must not try again. A click still can.
+        guard Channel.store.string(forKey: Self.autoTriedKey) != current.commit else { return }
+        // Relaunch restores the frame only, and a chat draft lives only in view state.
+        if let w = windowController?.window, w.isMiniaturized || w.styleMask.contains(.fullScreen) { return }
+        if ChatDrafts.any { return }
         let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
         guard idle >= (asked ? 5 : Self.autoIdleSeconds) else { return }
         try? FileManager.default.removeItem(at: request)
+        Channel.store.set(current.commit, forKey: Self.autoTriedKey)
+        Channel.store.synchronize()
         applying = true
         log("auto update to \(current.commit) (\(asked ? "requested" : "idle")), idle \(Int(idle)) s")
         restartNow(background: !NSApp.isActive)

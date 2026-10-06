@@ -421,6 +421,16 @@ private struct ChatGroup: Identifiable {
     var id: String { items[0].id }
 }
 
+/// Composers holding text nobody has sent. The draft lives only in view state, so an
+/// update that installs itself waits until this is empty.
+enum ChatDrafts {
+    private static var unsent = Set<ObjectIdentifier>()
+    static var any: Bool { !unsent.isEmpty }
+    static func set(_ id: ObjectIdentifier, unsent on: Bool) {
+        if on { unsent.insert(id) } else { unsent.remove(id) }
+    }
+}
+
 struct ChatView: View {
     @ObservedObject var transcript: Transcript
     @ObservedObject var theme: ThemeStore
@@ -470,6 +480,8 @@ struct ChatView: View {
                     if stick { toBottom(proxy) }
                 }
                 .onChange(of: sender.pending) { _ in if stick { toBottom(proxy) } }
+                .onChange(of: text) { t in ChatDrafts.set(ObjectIdentifier(sender), unsent: !t.isEmpty) }
+                .onDisappear { ChatDrafts.set(ObjectIdentifier(sender), unsent: false) }
                 .onAppear {
                     toBottom(proxy)
                     wheel = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
