@@ -177,24 +177,59 @@ def mac_effective():
         return json.loads(subprocess.check_output([str(exe), *CHROME], text=True))
 
 
-COLOR_LITERAL = re.compile(r"#[0-9A-Fa-f]{3,8}\b|\brgba?\(|\bhsla?\(")
+COLOR_LITERAL = re.compile(r"#[0-9A-Fa-f]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(", re.I)
+NAMED = ("aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown "
+         "burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan "
+         "darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid "
+         "darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet "
+         "deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro "
+         "ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki "
+         "lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow "
+         "lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray "
+         "lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine "
+         "mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise "
+         "mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab "
+         "orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru "
+         "pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown "
+         "seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan "
+         "teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen "
+         "canvas canvastext linktext visitedtext activetext buttonface buttontext buttonborder field fieldtext "
+         "highlight highlighttext selecteditem selecteditemtext mark marktext graytext accentcolor accentcolortext")
+NAMED_RE = r"(?<![\w-])(?:" + "|".join(NAMED.split()) + r")(?![\w-])"
+# Properties that take a color: a named color in their value is a literal.
+CSS_COLOR_DECL = re.compile(r"(?:^|[;{\s])((?:background|border|outline|text-decoration|column-rule)[\w-]*|color|fill|stroke|"
+                            r"caret-color|accent-color|scrollbar-color|box-shadow|text-shadow)\s*:([^;}]*)", re.I)
+TS_COLOR_PROP = re.compile(r"\b(?:color|background\w*|border\w*|outline\w*|fill|stroke|boxShadow|textShadow|caretColor|"
+                           r"accentColor|scrollbarColor|textDecorationColor|cursor\w*|selection\w*)\s*:\s*[\"'`]([^\"'`]*)[\"'`]")
 VAR_USE = re.compile(r"var\(\s*(--shell-[a-z0-9-]+)")
 VAR_DEF = re.compile(r"(--shell-[a-z0-9-]+)\s*:")
 
 
+def strip_comments(text, css):
+    """Blank out comments, keeping line numbers. TS line comments need a non-colon before // (not urls)."""
+    pattern = r"/\*.*?\*/" if css else r"/\*.*?\*/|(?<![:\\])//[^\n]*"
+    return re.sub(pattern, lambda m: re.sub(r"[^\n]", " ", m.group(0)), text, flags=re.S)
+
+
 def web_lint(generated_css):
-    defined = set(VAR_DEF.findall(generated_css))
+    defined = set(VAR_DEF.findall(strip_comments(generated_css, True)))
     problems = []
     for f in sorted(WEB_DIR.rglob("*")):
-        if f.suffix not in (".css", ".ts", ".tsx") or f in (CSS_OUT, TS_OUT) or f.name.endswith(".test.ts"):
+        if f.suffix not in (".css", ".ts", ".tsx") or f in (CSS_OUT, TS_OUT) or ".test." in f.name:
             continue
-        for n, line in enumerate(f.read_text().splitlines(), 1):
-            code = line.split("//")[0] if f.suffix != ".css" else line
-            for m in COLOR_LITERAL.finditer(code):
-                problems.append(f"{f.relative_to(ROOT)}:{n}: color literal {m.group(0)!r}; use a --shell-* token")
+        css = f.suffix == ".css"
+        text = strip_comments(f.read_text(), css)
+        local = set(VAR_DEF.findall(text))
+        rel = f.relative_to(ROOT)
+        for n, line in enumerate(text.splitlines(), 1):
+            found = [m.group(0) for m in COLOR_LITERAL.finditer(line)]
+            values = [m.group(2) for m in CSS_COLOR_DECL.finditer(line)] if css else TS_COLOR_PROP.findall(line)
+            found += [m.group(0) for v in values for m in re.finditer(NAMED_RE, v, re.I)]
+            for lit in found:
+                problems.append(f"{rel}:{n}: color literal {lit!r}; use a --shell-* token")
             for name in VAR_USE.findall(line):
-                if name not in defined and not re.search(re.escape(name) + r"\s*:", f.read_text()):
-                    problems.append(f"{f.relative_to(ROOT)}:{n}: {name} is not a generated token")
+                if name not in defined and name not in local:
+                    problems.append(f"{rel}:{n}: {name} is not a generated token")
     return problems
 
 
