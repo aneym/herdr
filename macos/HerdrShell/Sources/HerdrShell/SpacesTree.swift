@@ -125,6 +125,19 @@ enum SpacesTree {
     /// Whether a child that needs action unfolds its lane. Off, as Rust tree.rs ACTION_UNFOLDS_LANE;
     /// the folded header carries the child's "!" instead.
     static let actionUnfoldsLane = false
+    /// A tab's state glyph and tone, as its row in the spaces tree draws it (Rust chat_status and
+    /// chat_state_mark), so the pinned section and the space agree on who is working. `foldable`
+    /// is a lane header with live children, which reads as working.
+    static func mark(_ tab: SpacesInput.Tab, _ t: Overlay.Tag, foldable: Bool = false) -> (glyph: String, tone: String, idle: Bool) {
+        let priority = ["unknown": 0, "idle": 1, "done": 2, "working": 3, "blocked": 4]
+        var status = tab.agents.max { (priority[$0.status] ?? 0) < (priority[$1.status] ?? 0) }?.status ?? tab.status
+        if t.busy && ["idle", "done"].contains(status) { status = "working" }
+        // As Rust summarize_factory_parent: a header with live children shows as working, not idle.
+        if foldable && ["idle", "done", "unknown"].contains(status) { status = "working" }
+        let idle = t.kind == "lane" && !t.busy && (t.summary ?? "").trimmingCharacters(in: .whitespaces).isEmpty && status == "idle"
+        let glyph = t.kind == "workflow" ? (t.done ? (t.attention == "act" ? "✗" : "✓") : "◐") : idle ? "○" : status == "blocked" ? "■" : "●"
+        return (glyph, idle ? "mute" : status, idle)
+    }
     static func age(_ seconds: Double) -> String { let m = Int(max(0, seconds)) / 60; return m == 0 ? "<1m" : m < 60 ? "\(m)m" : "\(m / 60)h\(m % 60)m" }
     static func build(_ input: SpacesInput, overlay: Overlay, chrome: SpacesChrome, now: Double) -> [SpacesRow] {
         var out = [SpacesRow(id: "agents", kind: .title, title: "agents")]
@@ -133,7 +146,8 @@ enum SpacesTree {
             out.append(SpacesRow(id: "pinned", kind: .section, title: "PINNED", trailing: pins.count == 1 ? "⌘1" : "⌘1..\(min(pins.count, 9))"))
             for tab in pins {
                 let source = input.spaces.first { $0.id == tab.space }?.name ?? tab.space
-                out.append(SpacesRow(id: "pinned:" + tab.id, kind: .tab, title: tab.label,
+                let state = mark(tab, overlay.tabs[tab.id] ?? Overlay.Tag())
+                out.append(SpacesRow(id: "pinned:" + tab.id, kind: .tab, glyph: state.glyph, tone: state.tone, title: tab.label,
                                      trailing: source, tab: tab.id))
             }
         }
@@ -202,12 +216,8 @@ enum SpacesTree {
                 // parent always shows its own workflows and runs (it has no fold of its own).
                 let foldable = !inside && count > 0
                 let open = inside || ((chrome.expandedTabs.contains(tab.id) || focusedInside || (SpacesTree.actionUnfoldsLane && attention == "act")) && !chrome.collapsedTabs.contains(tab.id))
-                let priority = ["unknown": 0, "idle": 1, "done": 2, "working": 3, "blocked": 4]
-                var status = tab.agents.max { (priority[$0.status] ?? 0) < (priority[$1.status] ?? 0) }?.status ?? tab.status
-                if t.busy && ["idle", "done"].contains(status) { status = "working" }
-                // As Rust summarize_factory_parent: a header with live children shows as working, not idle.
-                if foldable && ["idle", "done", "unknown"].contains(status) { status = "working" }
-                let idle = t.kind == "lane" && !t.busy && (t.summary ?? "").trimmingCharacters(in: .whitespaces).isEmpty && status == "idle"
+                let state = SpacesTree.mark(tab, t, foldable: foldable)
+                let idle = state.idle
                 var name = t.name ?? tab.label
                 if t.kind == "workflow", name.hasPrefix("wf ") { name = String(name.dropFirst(3)) }
                 if t.kind == "lane" {
@@ -232,8 +242,7 @@ enum SpacesTree {
                     let progress = [phase.lowercased(), t.started.map { age(now - $0) }].compactMap { $0 }.joined(separator: " · ")
                     trailing = [trailing, progress].filter { !$0.isEmpty }.joined(separator: " · ")
                 }
-                let glyph = workflow ? (t.done ? (t.attention == "act" ? "✗" : "✓") : "◐") : idle ? "○" : status == "blocked" ? "■" : "●"
-                out.append(SpacesRow(id: "tab:" + tab.id, kind: .tab, depth: level, chevron: foldable ? (open ? "open" : "closed") : "none", glyph: glyph, tone: idle ? "mute" : status, title: name, trailing: trailing, alert: attention, link: link, tab: tab.id, toggleKey: foldable ? "tab:" + tab.id : nil, dim: idle || t.done || t.kind == "advisor" || t.mode == "parked"))
+                out.append(SpacesRow(id: "tab:" + tab.id, kind: .tab, depth: level, chevron: foldable ? (open ? "open" : "closed") : "none", glyph: state.glyph, tone: state.tone, title: name, trailing: trailing, alert: attention, link: link, tab: tab.id, toggleKey: foldable ? "tab:" + tab.id : nil, dim: idle || t.done || t.kind == "advisor" || t.mode == "parked"))
                 if open {
                     for child in grouped { appendTab(child, level + 1, inside: true) }
                     for child in children { appendTab(child, level + 1, nest: false) }

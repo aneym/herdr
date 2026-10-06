@@ -146,7 +146,7 @@ pub(super) fn render_agent_panel_with_overlay(
         } else {
             // The pinned section tops the flat list too; there is no spaces
             // strip inside the agent panel in this mode.
-            let mut entries = super::tree::pinned_tab_entries(snapshot);
+            let mut entries = super::tree::pinned_tab_entries(snapshot, overlay);
             entries.extend(
                 rows.into_iter()
                     .map(super::tree::AgentPanelListEntry::Agent),
@@ -370,8 +370,9 @@ pub(super) fn tree_header_plus_rect(rect: Rect) -> Rect {
     Rect::new(rect.right().saturating_sub(4), rect.y, 2, 1)
 }
 
-/// Pin toggle on a chat row (tab header, pinned row): the last cell pair on
-/// the row, so every chat row's pin lands in the same column.
+/// Pin toggle on a chat row (tab header, factory row): the last cell pair on
+/// the row, so every chat row's pin lands in the same column. Pinned rows
+/// keep the column for their Cmd digit.
 pub(super) fn chat_pin_rect(rect: Rect) -> Rect {
     if rect.width < 4 {
         return Rect::default();
@@ -400,35 +401,41 @@ pub(super) fn render_pinned_tab_row(
         buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
         paint_half_pads(buffer, rect, palette.active_row_bg, config.agents.row_gap);
     }
-    let quiet = Style::default()
-        .fg(palette.overlay0)
-        .add_modifier(Modifier::DIM);
+    // Same state glyph, in the same column, as the chat's row in its space.
     let icon_x = rect.x.saturating_add(1);
+    let (icon, color) = chat_state_mark(row.status, row.idle, row.workflow, row.done, row.failed, config);
     put_text(
         buffer,
         icon_x,
         rect.y,
         1.min(rect.right().saturating_sub(icon_x)),
-        resolved_status_icon(row.status, config),
-        Style::default().fg(status_color(row.status, palette)),
+        icon,
+        Style::default().fg(color),
     );
-    // The right strip is, in order: the chat's home space (muted, dropped
-    // first under pressure), the Cmd+slot digit, then the pin toggle.
-    let pin = chat_pin_rect(rect);
+    // No pin glyph: the section name says it, and unpinning lives in the
+    // row's context menu. The Cmd+slot digit owns the last cell pair, the
+    // column every chat row's pin toggle uses elsewhere, right-aligned and
+    // dimmer than the space label so it reads as a key, not a count.
+    let slot = chat_pin_rect(rect);
     let hint = if row.shortcut > 0 {
         format!("{}", row.shortcut)
     } else {
         String::new()
     };
-    let hint_width = display_width(&hint) as u16;
     let name_x = icon_x.saturating_add(2);
-    let budget = pin.x.saturating_sub(name_x);
+    // The label ends one cell before the slot, so two blank cells always
+    // part it from the digit.
+    let content_right = if slot.width > 0 {
+        slot.x.saturating_sub(1)
+    } else {
+        rect.right()
+    };
+    let budget = content_right.saturating_sub(name_x);
     // Keep at least half the text budget for the chat title. The source space
     // is secondary context and must yield even when its name is very long.
     let space_width = (display_width(&row.space_label) as u16)
-        .min(budget.saturating_sub(hint_width + 2) / 2);
-    let label_gap = u16::from(space_width > 0 && hint_width > 0);
-    let space_x = pin.x.saturating_sub(hint_width + label_gap + space_width);
+        .min(budget.saturating_sub(1) / 2);
+    let space_x = content_right.saturating_sub(space_width);
     let name_width = space_x
         .saturating_sub(u16::from(space_width > 0))
         .saturating_sub(name_x);
@@ -452,25 +459,25 @@ pub(super) fn render_pinned_tab_row(
             rect.y,
             space_width,
             &crate::ui::truncate_end(&row.space_label, space_width as usize),
-            quiet,
+            Style::default().fg(palette.overlay0),
         );
     }
-    if hint_width > 0 {
-        put_text(buffer, pin.x.saturating_sub(hint_width), rect.y, hint_width, &hint, quiet);
+    if slot.width > 0 && !hint.is_empty() {
+        let hint_width = display_width(&hint) as u16;
+        put_text(
+            buffer,
+            slot.right().saturating_sub(hint_width),
+            rect.y,
+            hint_width,
+            &hint,
+            Style::default().fg(palette.overlay0).add_modifier(Modifier::DIM),
+        );
     }
-    put_text(
-        buffer,
-        pin.x,
-        rect.y,
-        pin.width,
-        " ⚲",
-        Style::default().fg(palette.accent),
-    );
     hits.tree_headers.push(TreeHeaderHit {
         rect,
         chevron: Rect::default(),
         plus: Rect::default(),
-        pin,
+        pin: Rect::default(),
         group: None,
         workspace_id: row.workspace_id.clone(),
         tab_id: Some(row.tab_id.clone()),
@@ -696,6 +703,41 @@ fn render_factory_group(
     });
 }
 
+/// The state glyph at the left of a chat row, shared by the spaces tree's
+/// factory rows and the pinned section so a chat reads the same in both. A
+/// configured blank icon still draws a mark: these rows must always say
+/// whether the chat is working.
+fn chat_state_mark<'a>(
+    status: crate::api::schema::AgentStatus,
+    idle: bool,
+    workflow: bool,
+    done: bool,
+    failed: bool,
+    config: &'a ClientShellConfig,
+) -> (&'a str, ratatui::style::Color) {
+    let palette = &config.palette;
+    let icon = if workflow {
+        if failed { "✗" } else if done { "✓" } else { "◐" }
+    } else if idle {
+        "○"
+    } else {
+        let key = match status {
+            crate::api::schema::AgentStatus::Blocked => "blocked",
+            crate::api::schema::AgentStatus::Working => "working",
+            crate::api::schema::AgentStatus::Done => "idle_unseen",
+            crate::api::schema::AgentStatus::Idle => "idle",
+            crate::api::schema::AgentStatus::Unknown => "unknown",
+        };
+        match config.agents.state_icons.get(key) {
+            Some(icon) if !icon.trim().is_empty() => icon.as_str(),
+            Some(_) if status != crate::api::schema::AgentStatus::Working => "■",
+            _ => "●",
+        }
+    };
+    let color = if failed { palette.red } else if idle { palette.overlay0 } else { status_color(status, palette) };
+    (icon, color)
+}
+
 fn render_factory_tab(
     buffer: &mut Buffer,
     rect: Rect,
@@ -716,25 +758,7 @@ fn render_factory_tab(
     }
     let icon_x = start.saturating_add(2);
     let failed = row.workflow && row.done && row.attention == crate::factory_overlay::Attention::Act;
-    let icon = if row.workflow {
-        if failed { "✗" } else if row.done { "✓" } else { "◐" }
-    } else if row.idle {
-        "○"
-    } else {
-        let key = match row.status {
-            crate::api::schema::AgentStatus::Blocked => "blocked",
-            crate::api::schema::AgentStatus::Working => "working",
-            crate::api::schema::AgentStatus::Done => "idle_unseen",
-            crate::api::schema::AgentStatus::Idle => "idle",
-            crate::api::schema::AgentStatus::Unknown => "unknown",
-        };
-        match config.agents.state_icons.get(key) {
-            Some(icon) if !icon.trim().is_empty() => icon.as_str(),
-            Some(_) if row.status != crate::api::schema::AgentStatus::Working => "■",
-            _ => "●",
-        }
-    };
-    let color = if failed { palette.red } else if row.idle { palette.overlay0 } else { status_color(row.status, palette) };
+    let (icon, color) = chat_state_mark(row.status, row.idle, row.workflow, row.done, failed, config);
     put_text(buffer, icon_x, rect.y, 1.min(rect.right().saturating_sub(icon_x)), icon,
         Style::default().fg(color));
     let attention_color = match row.attention {

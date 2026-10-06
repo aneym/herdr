@@ -14,6 +14,8 @@ struct SpacesRowView: View {
     /// Section focus toggle ("◎" or "✕"); nil when the section has none.
     var focusMark: String? = nil
     var pinned = false
+    /// The pointer is over this row. Pinned-section rows show their unpin toggle only then.
+    var hovered = false
     var showResume = false
     /// The goal row's filter menu; the sidebar owns its choices.
     var goal: AnyView? = nil
@@ -81,7 +83,9 @@ struct SpacesRowView: View {
                 Text(focusMark ?? "").font(.system(size: 10)).foregroundStyle(t.mute)
                     .frame(width: 10).onTapGesture { if focusMark != nil { click("focus") } }
             }
-            if row.kind == .tab {
+            // The PINNED header already says it, so pinned rows keep no pin glyph at rest; it comes
+            // back on hover to unpin, as does the row's context menu.
+            if row.kind == .tab, !row.id.hasPrefix("pinned:") || hovered {
                 Text("⚲").foregroundStyle(pinned ? t.accent : t.mute).fixedSize().onTapGesture { click("pin") }
             }
             if row.kind == .space {

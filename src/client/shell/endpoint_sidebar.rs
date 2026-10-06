@@ -265,7 +265,10 @@ pub(super) fn render_expanded(
     let mut slot = 0;
     for endpoint in state.endpoints {
         let Some(snapshot) = endpoint.snapshot.as_deref() else { continue; };
-        for entry in super::tree::pinned_tab_entries(snapshot) {
+        // The factory overlay belongs to the active endpoint only.
+        let overlay = state.factory_overlay
+            .filter(|_| &endpoint.endpoint_id == state.active_endpoint_id);
+        for entry in super::tree::pinned_tab_entries(snapshot, overlay) {
             let super::tree::AgentPanelListEntry::PinnedTab(mut row) = entry else { continue; };
             if slot == 0 && y < area.bottom() {
                 put_text(buffer, area.x, y, area.width.saturating_sub(1), " pinned",
@@ -280,7 +283,8 @@ pub(super) fn render_expanded(
             let hit_start = hits.tree_headers.len();
             super::agent_sidebar::render_pinned_tab_row(buffer, rect, &row, config, hits);
             hits.tree_headers.truncate(hit_start);
-            hits.endpoint_pins.push((rect, super::agent_sidebar::chat_pin_rect(rect),
+            // No pin toggle on pinned rows: unpinning is in the row's context menu.
+            hits.endpoint_pins.push((rect, Rect::default(),
                 endpoint.endpoint_id.clone(), row.tab_id));
             y += 1;
         }

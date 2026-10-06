@@ -2023,6 +2023,33 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
+                // Pinned rows in the multi-machine sidebar carry no pin
+                // toggle (`pin` is empty); their menu is where they unpin.
+                let endpoint_chat = self.hits.endpoint_pins.iter()
+                    .find(|(rect, pin, _, _)| pin.is_empty() && super::contains(*rect, point))
+                    .map(|(_, _, endpoint_id, tab_id)| (endpoint_id.clone(), tab_id.clone()));
+                if let Some((endpoint_id, tab_id)) = endpoint_chat {
+                    let pinned = self.endpoints.iter()
+                        .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+                        .and_then(|endpoint| endpoint.snapshot.as_deref())
+                        .is_some_and(|snapshot| snapshot.pinned_tabs.iter().any(|pin| pin.tab_id == tab_id));
+                    self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
+                        target: ClientContextMenuTarget::EndpointChat { endpoint_id, tab_id, pinned },
+                        x: mouse.column, y: mouse.row, highlighted: 0,
+                    }));
+                    outcome.repaint = true;
+                    return;
+                }
+                // Chat rows in the tree (pinned rows included) open the tab
+                // menu, which carries Pin / Unpin.
+                let tree_tab = self.hits.tree_headers.iter()
+                    .find(|hit| super::contains(hit.rect, point))
+                    .and_then(|hit| hit.tab_id.clone());
+                if let Some(tab_id) = tree_tab {
+                    self.open_tab_context_menu(tab_id, mouse.column, mouse.row);
+                    outcome.repaint = true;
+                    return;
+                }
                 let agent_pane_id = self
                     .hits
                     .agents

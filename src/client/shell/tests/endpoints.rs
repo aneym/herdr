@@ -91,8 +91,22 @@ fn pinned_chats_survive_aggregate_sidebar_and_route_to_their_endpoint() {
         .find(|(rect, pin, endpoint, _)| *rect != *pin && *endpoint == remote)
         .cloned().expect("remote pin at top");
     assert_eq!(rect.y, state.hits.sidebar_divider.y + 1);
+    // Pinned rows carry no pin toggle; a left press anywhere opens the chat.
+    assert!(pin.is_empty());
+    // Unpin from the row's context menu, routed to the chat's own endpoint.
+    state.handle_raw_events(vec![crate::raw_input::RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Right),
+        column: rect.right() - 2,
+        row: rect.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    let Some(ClientShellOverlay::ContextMenu(menu)) = state.overlay.as_ref() else {
+        panic!("context menu open");
+    };
+    let labels = menu.items().into_iter().map(|item| item.label).collect::<Vec<_>>();
+    assert_eq!(labels, ["Unpin"]);
     let mut outcome = ClientShellInput::default();
-    assert!(state.handle_endpoint_agent_click((pin.x, pin.y), &mut outcome));
+    state.activate_context_menu_item(0, &mut outcome);
     assert!(outcome.actions.iter().any(|action| matches!(action,
         ClientShellAction::Endpoint { endpoint_id, request, .. }
             if *endpoint_id == endpoint && matches!(&request.method,

@@ -371,7 +371,15 @@ pub(super) struct PinnedTabRow {
     pub(super) label: String,
     /// The chat's home space, drawn muted so cross-space pins stay legible.
     pub(super) space_label: String,
+    /// The chat's state, worked out as its row in the spaces tree works it
+    /// out (`factory_row`), so a pinned row and its space row agree.
     pub(super) status: crate::api::schema::AgentStatus,
+    /// A factory lane with nothing to report, drawn with the idle ring.
+    pub(super) idle: bool,
+    /// A workflow tab: drawn with the workflow marks, not an agent state.
+    pub(super) workflow: bool,
+    pub(super) done: bool,
+    pub(super) failed: bool,
     /// Cmd+1..9 slot this row owns (pin index + 1); zero when beyond 9.
     pub(super) shortcut: usize,
     pub(super) active: bool,
@@ -379,7 +387,10 @@ pub(super) struct PinnedTabRow {
 
 /// The pinned section, in endpoint pin order. Pins are a shared session fact,
 /// so the section renders straight from the snapshot — no client mirror.
-pub(super) fn pinned_tab_entries(snapshot: &ClientShellSnapshot) -> Vec<AgentPanelListEntry> {
+pub(super) fn pinned_tab_entries(
+    snapshot: &ClientShellSnapshot,
+    overlay: Option<&crate::factory_overlay::FactoryOverlay>,
+) -> Vec<AgentPanelListEntry> {
     if snapshot.pinned_tabs.is_empty() {
         return Vec::new();
     }
@@ -396,12 +407,22 @@ pub(super) fn pinned_tab_entries(snapshot: &ClientShellSnapshot) -> Vec<AgentPan
             .find(|workspace| workspace.workspace_id == pin.workspace_id)
             .map(|workspace| workspace.label.clone())
             .unwrap_or_else(|| pin.workspace_id.clone());
+        let tag = overlay.and_then(|overlay| overlay.tab(&tab.tab_id));
+        let status = chat_status(
+            snapshot.agents.iter().filter(|agent| agent.tab_id == tab.tab_id).map(|agent| agent.agent_status),
+            tab.agent_status,
+            tag,
+        );
         out.push(AgentPanelListEntry::PinnedTab(PinnedTabRow {
             workspace_id: pin.workspace_id.clone(),
             tab_id: pin.tab_id.clone(),
             label: tab.label.clone(),
             space_label,
-            status: tab.agent_status,
+            status,
+            idle: lane_is_idle(tag, status),
+            workflow: tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Workflow),
+            done: tag.is_some_and(|tag| tag.done),
+            failed: tag.is_some_and(|tag| tag.done && tag.attention == crate::factory_overlay::Attention::Act),
             shortcut: if index < 9 { index + 1 } else { 0 },
             active: snapshot.focused_workspace_id.as_deref() == Some(tab.workspace_id.as_str())
                 && tab.focused,
@@ -641,7 +662,7 @@ pub(super) fn tree_list_entries_with_overlay(
             workspace_order.insert(before, id.clone());
         }
     }
-    let mut out = pinned_tab_entries(snapshot);
+    let mut out = pinned_tab_entries(snapshot, overlay);
     if let Some(overlay) = overlay.filter(|overlay| overlay.tabs.values().any(|tag| tag.section.is_some())) {
         let choices = factory_goal_choices(overlay);
         if !choices.is_empty() {
@@ -1650,31 +1671,11 @@ fn factory_row(
     collapsible: bool,
 ) -> AgentPanelListEntry {
     let tag = overlay.tab(&tab.tab_id);
-    let child_states = rows
-        .iter()
-        .filter(|row| row.tab_id == tab.tab_id)
-        .map(|row| row.status)
-        .collect::<Vec<_>>();
-    // A finished pane must not mask another pane still working in this factory row.
-    // Leave status_priority (used by non-factory rows) unchanged.
-    let status = child_states
-        .iter()
-        .copied()
-        .max_by_key(|status| match status {
-            crate::api::schema::AgentStatus::Blocked => 4,
-            crate::api::schema::AgentStatus::Working => 3,
-            crate::api::schema::AgentStatus::Done => 2,
-            crate::api::schema::AgentStatus::Idle => 1,
-            crate::api::schema::AgentStatus::Unknown => 0,
-        })
-        .unwrap_or(tab.agent_status);
-    let status = if tag.is_some_and(|tag| tag.busy)
-        && matches!(status, crate::api::schema::AgentStatus::Idle | crate::api::schema::AgentStatus::Done)
-    {
-        crate::api::schema::AgentStatus::Working
-    } else {
-        status
-    };
+    let status = chat_status(
+        rows.iter().filter(|row| row.tab_id == tab.tab_id).map(|row| row.status),
+        tab.agent_status,
+        tag,
+    );
     let background =
         tag.is_some_and(|tag| tag.done || tag.kind == crate::factory_overlay::TabKind::Advisor);
     AgentPanelListEntry::FactoryTab(FactoryTabRow {
@@ -1734,16 +1735,51 @@ fn factory_row(
         started: tag.and_then(|tag| tag.started),
         summary: tag.and_then(|tag| tag.summary.clone()),
         attention: tag.map_or(crate::factory_overlay::Attention::None, |tag| tag.attention),
-        idle: tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Lane
-            && !tag.busy
-            && tag.summary.as_deref().is_none_or(|summary| summary.trim().is_empty()))
-            && status == crate::api::schema::AgentStatus::Idle,
+        idle: lane_is_idle(tag, status),
         idle_reason: tag.and_then(|tag| tag.idle_reason.clone()),
         devloop: tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Lane && tag.devloop),
         background,
         workflow: tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Workflow),
         done: tag.is_some_and(|tag| tag.done),
     })
+}
+
+/// One chat's state from its agents: a finished pane must not mask another
+/// pane still working, and a busy tag reads as working. Shared by the spaces
+/// tree's factory rows and the pinned section so both draw the same glyph.
+/// Leave status_priority (used by non-factory rows) unchanged.
+fn chat_status(
+    agents: impl Iterator<Item = crate::api::schema::AgentStatus>,
+    fallback: crate::api::schema::AgentStatus,
+    tag: Option<&crate::factory_overlay::TabTag>,
+) -> crate::api::schema::AgentStatus {
+    let status = agents
+        .max_by_key(|status| match status {
+            crate::api::schema::AgentStatus::Blocked => 4,
+            crate::api::schema::AgentStatus::Working => 3,
+            crate::api::schema::AgentStatus::Done => 2,
+            crate::api::schema::AgentStatus::Idle => 1,
+            crate::api::schema::AgentStatus::Unknown => 0,
+        })
+        .unwrap_or(fallback);
+    if tag.is_some_and(|tag| tag.busy)
+        && matches!(status, crate::api::schema::AgentStatus::Idle | crate::api::schema::AgentStatus::Done)
+    {
+        crate::api::schema::AgentStatus::Working
+    } else {
+        status
+    }
+}
+
+/// A factory lane with no work and nothing to say: drawn with the idle ring.
+fn lane_is_idle(
+    tag: Option<&crate::factory_overlay::TabTag>,
+    status: crate::api::schema::AgentStatus,
+) -> bool {
+    tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Lane
+        && !tag.busy
+        && tag.summary.as_deref().is_none_or(|summary| summary.trim().is_empty()))
+        && status == crate::api::schema::AgentStatus::Idle
 }
 
 /// Gather whole space blocks under the overlay's named space groups (Rails,

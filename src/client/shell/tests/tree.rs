@@ -186,6 +186,9 @@ fn pinned_chats_top_the_tree_and_own_cmd_digits_in_pin_order() {
     let tree = ClientTreeChrome::default();
     let mut config = ClientShellConfig::from_config(&Config::default());
     config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
+    // Alex's config blanks the unknown icon; a pinned chat must still show
+    // its agent's state, as its row in the space does.
+    config.agents.state_icons.insert("unknown".into(), String::new());
     let mut state = ClientShellState::new(config);
     state
         .tree_chrome
@@ -198,6 +201,9 @@ fn pinned_chats_top_the_tree_and_own_cmd_digits_in_pin_order() {
         crate::protocol::ClientShellPinnedTab { tab_id: "gone".into(), workspace_id: "ws_2".into() },
         crate::protocol::ClientShellPinnedTab { tab_id: "tab_2".into(), workspace_id: "ws_1".into() },
     ];
+    // The tab-level status lags (unknown) while its agent works.
+    snapshot.tabs[2].agent_status = AgentStatus::Unknown;
+    snapshot.agents[2].agent_status = AgentStatus::Working;
     state.set_snapshot(Box::new(snapshot));
 
     // The pinned section sits above every space and each row names its space.
@@ -227,7 +233,16 @@ fn pinned_chats_top_the_tree_and_own_cmd_digits_in_pin_order() {
     let line: String = (hit.rect.x..hit.rect.right())
         .map(|x| buffer[(x, hit.rect.y)].symbol().to_owned())
         .collect();
-    assert!(line.contains("beta 1"), "pinned row reads {line:?}");
+    // State glyph at the left, in the working color.
+    let glyph = &buffer[(hit.rect.x + 1, hit.rect.y)];
+    assert_eq!(glyph.symbol(), "\u{25cf}", "pinned row reads {line:?}");
+    assert_eq!(glyph.fg, state.config.palette.working);
+    // No pin glyph and no pin hit: the section name says it.
+    assert!(!line.contains('\u{26b2}'), "pinned row reads {line:?}");
+    assert!(hit.pin.is_empty());
+    // The Cmd digit owns the last cell, two blanks clear of the space label,
+    // so it reads as a key column rather than a count after "beta".
+    assert!(line.ends_with("beta  1"), "pinned row reads {line:?}");
 
     // At narrow widths even a long source-space name must leave the title
     // visible; this exercises the actual rendered cells, not a width helper.
@@ -241,6 +256,31 @@ fn pinned_chats_top_the_tree_and_own_cmd_digits_in_pin_order() {
     let row = narrow_hits.tree_headers.iter().find(|hit| hit.key == "tab_3" && hit.pinned).expect("pin");
     let text: String = (row.rect.x..row.rect.right()).map(|x| narrow_buffer[(x, row.rect.y)].symbol()).collect();
     assert!(text.contains("three"), "chat title missing: {text:?}");
+
+    // Unpinning lives in the row's context menu: right-click, Unpin. It
+    // unpins without focusing the chat.
+    state.compose(80, 24).expect("frame");
+    let row = state.hits.tree_headers.iter()
+        .find(|hit| hit.pinned && hit.key == "tab_3").expect("pinned row").rect;
+    state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+        kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Right),
+        column: row.x + 3,
+        row: row.y,
+        modifiers: crossterm::event::KeyModifiers::empty(),
+    })]);
+    let Some(ClientShellOverlay::ContextMenu(menu)) = state.overlay.as_ref() else {
+        panic!("context menu open");
+    };
+    let labels = menu.items().into_iter().map(|item| item.label).collect::<Vec<_>>();
+    let unpin = labels.iter().position(|label| label == "Unpin").expect("Unpin in {labels:?}");
+    let mut outcome = ClientShellInput::default();
+    state.activate_context_menu_item(unpin, &mut outcome);
+    let methods = outcome.actions.iter().filter_map(|action| match action {
+        ClientShellAction::Endpoint { request, .. } => Some(&request.method),
+        _ => None,
+    }).collect::<Vec<_>>();
+    assert!(matches!(methods[..], [crate::api::schema::Method::TabSetPinned(ref params)]
+        if params.tab_id == "tab_3" && !params.pinned), "{methods:?}");
 
     // Regression at the input boundary: Navigate's plain digits must use the
     // same pinned order as Cmd digits, rather than selecting the first space.

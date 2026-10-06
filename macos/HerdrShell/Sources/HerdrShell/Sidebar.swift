@@ -260,6 +260,7 @@ struct SidebarView: View {
             selected: row.tab == state.selectedTab,
             focusMark: row.kind == .section && row.toggleKey != nil ? (state.spacesChrome.focusedSection[focusSpace] == row.title ? "✕" : "◎") : nil,
             pinned: row.kind == .tab ? model.source(for: row.tab ?? "")?.tabs.first(where: { $0.tab_id == row.tab })?.pin_index != nil : row.kind == .space && state.spacesChrome.pinnedSpaces.contains(String(row.id.dropFirst(6))),
+            hovered: hoveredSpaceRow == row.id,
             showResume: hoveredSpaceRow == row.id && row.kind == .tab && row.tab.map { model.spacesOverlay.tabs[$0]?.mode == "parked" } == true,
             goal: row.kind == .goal ? AnyView(goalMenu) : nil,
             click: { spacesClick(row, part: $0) },
@@ -274,6 +275,10 @@ struct SidebarView: View {
                 if row.id.contains(":parked") || model.spacesOverlay.tabs[tab]?.mode == "parked" { Button("Resume") { resume(tab) } }
                 else { Button("Park…") { ParkActions.run("park", tab: tab, note: nil) { _, _ in model.catalog.reload() } } }
                 if RemoteActions.slug(model.catalog.snapshot.lanes[tab]?.scopeURL) != nil { Button("Approve scope…") { approve(tab) } }
+            }
+            if row.kind == .tab, let tab = row.tab, !Machines.isRemote(tab) {
+                let pinned = model.source(for: tab)?.tabs.first(where: { $0.tab_id == tab })?.pin_index != nil
+                Button(pinned ? "Unpin" : "Pin") { spacesClick(row, part: "pin") }
             }
         }.clickTarget(row.id)
     }

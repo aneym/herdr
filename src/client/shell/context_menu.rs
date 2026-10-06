@@ -159,10 +159,14 @@ impl ClientContextMenuOverlay {
                     Action::ToggleGroup,
                 ),
             ],
-            ClientContextMenuTarget::Tab { .. } => vec![
+            ClientContextMenuTarget::Tab { pinned, .. } => vec![
                 item("New tab", Action::NewTab),
                 item("Rename", Action::Rename),
                 item("Close", Action::Close),
+                item(if *pinned { "Unpin" } else { "Pin" }, Action::TogglePin),
+            ],
+            ClientContextMenuTarget::EndpointChat { pinned, .. } => vec![
+                item(if *pinned { "Unpin" } else { "Pin" }, Action::TogglePin),
             ],
             ClientContextMenuTarget::Pane {
                 source_pane_id,
@@ -467,17 +471,18 @@ impl ClientShellState {
     }
 
     pub(super) fn open_tab_context_menu(&mut self, tab_id: String, x: u16, y: u16) {
-        let Some(tab) = self
-            .snapshot
-            .as_deref()
-            .and_then(|snapshot| snapshot.tabs.iter().find(|tab| tab.tab_id == tab_id))
-        else {
+        let Some(snapshot) = self.snapshot.as_deref() else {
             return;
         };
+        let Some(tab) = snapshot.tabs.iter().find(|tab| tab.tab_id == tab_id) else {
+            return;
+        };
+        let pinned = snapshot.pinned_tabs.iter().any(|pin| pin.tab_id == tab_id);
         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
             target: ClientContextMenuTarget::Tab {
                 tab_id,
                 workspace_id: tab.workspace_id.clone(),
+                pinned,
             },
             x,
             y,
@@ -558,7 +563,26 @@ impl ClientShellState {
             ClientContextMenuTarget::Tab {
                 tab_id,
                 workspace_id,
-            } => self.activate_tab_context_action(tab_id, workspace_id, action, outcome),
+                pinned,
+            } => {
+                if action == ClientContextMenuAction::TogglePin {
+                    // The endpoint owns the pin order; the next snapshot redraws.
+                    self.push_endpoint_method(
+                        crate::api::schema::Method::TabSetPinned(
+                            crate::api::schema::TabSetPinnedParams { tab_id, pinned: !pinned, priority: None },
+                        ),
+                        outcome,
+                    );
+                    outcome.repaint = true;
+                } else {
+                    self.activate_tab_context_action(tab_id, workspace_id, action, outcome)
+                }
+            }
+            ClientContextMenuTarget::EndpointChat { endpoint_id, tab_id, .. } => {
+                if action == ClientContextMenuAction::TogglePin {
+                    self.toggle_endpoint_chat_pin(endpoint_id, tab_id, outcome);
+                }
+            }
             ClientContextMenuTarget::Pane {
                 pane_id,
                 workspace_id,
