@@ -2519,6 +2519,145 @@ fn pane_info_and_subscriptions_expose_done_agent_status() {
     cleanup_spawned_herdr(child, base);
 }
 
+/// A Claude chat whose turn ended while a background shell kept running (a
+/// monitor, a hung grep) is idle; a live turn with the same shell is working.
+/// Screens recorded from Studio 2026-10-06 (Claude Code 2.1.291, pane idle
+/// since the previous afternoon, read as working through the API and sidebar).
+#[test]
+fn claude_background_shell_after_the_turn_reads_idle_and_a_live_turn_working() {
+    let _lock = test_lock();
+    let base = unique_test_dir();
+    let config_home = base.join("config");
+    let runtime_dir = base.join("runtime");
+    let socket_path = runtime_dir.join("herdr.sock");
+    let bin_dir = base.join("bin");
+    let stop_file = base.join("claude-stop");
+    fs::create_dir_all(&bin_dir).unwrap();
+
+    let rule = "────────────────────────────────────────";
+    let idle_screen = format!(
+        "✻ Brewed for 4m 34s · done 3:42 PM · 1 shell still running\n{rule}\n❯\n{rule}\n  ⏵⏵ bypass permissions on · 1 shell · ↓ to manage · ctx 53%\n"
+    );
+    let live_screen = format!(
+        "✻ Brewing… (12s · ↓ 1.0k tokens)\n{rule}\n❯\n{rule}\n  ⏵⏵ bypass permissions on · 1 shell · esc to interrupt\n"
+    );
+    // `claude idle` / `claude live` set Claude's OSC title, draw its screen,
+    // then hold the pane until the test stops them.
+    let fake_claude = bin_dir.join("claude");
+    fs::write(
+        &fake_claude,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = live ]; then title='◐ Lane brief'; screen='{live_screen}'; else title='✳ Lane brief'; screen='{idle_screen}'; fi\nprintf '\\033]0;%s\\007\\033[2J\\033[H%s' \"$title\" \"$screen\"\nwhile [ ! -f '{}' ]; do sleep 0.05; done\n",
+            stop_file.display()
+        ),
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&fake_claude).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&fake_claude, perms).unwrap();
+    }
+
+    // Run the fake by absolute path: a login shell can reorder PATH and start
+    // a real Claude install instead.
+    let child = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    wait_for_socket(&socket_path, Duration::from_secs(5));
+
+    let created = send_request(
+        &socket_path,
+        &format!(
+            r#"{{"id":"req_bg_shell_1","method":"workspace.create","params":{{"cwd":"{}","focus":true}}}}"#,
+            base.display()
+        ),
+    );
+    let workspace_id = created["result"]["workspace"]["workspace_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let idle_pane = created["result"]["root_pane"]["pane_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let tab_created = send_request(
+        &socket_path,
+        &format!(
+            r#"{{"id":"req_bg_shell_2","method":"tab.create","params":{{"workspace_id":"{workspace_id}","focus":true}}}}"#
+        ),
+    );
+    let live_pane = tab_created["result"]["root_pane"]["pane_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    for (pane, mode) in [(&idle_pane, "idle"), (&live_pane, "live")] {
+        let sent = send_request(
+            &socket_path,
+            &format!(
+                r#"{{"id":"req_bg_shell_send","method":"pane.send_text","params":{{"pane_id":"{pane}","text":"{} {mode}"}}}}"#,
+                fake_claude.display()
+            ),
+        );
+        assert_eq!(sent["result"]["type"], "ok");
+        let entered = send_request(
+            &socket_path,
+            &format!(
+                r#"{{"id":"req_bg_shell_enter","method":"pane.send_keys","params":{{"pane_id":"{pane}","keys":["Enter"]}}}}"#
+            ),
+        );
+        assert_eq!(entered["result"]["type"], "ok");
+    }
+
+    let pane_state = |pane: &str| {
+        let got = send_request(
+            &socket_path,
+            &format!(
+                r#"{{"id":"req_bg_shell_get","method":"pane.get","params":{{"pane_id":"{pane}"}}}}"#
+            ),
+        );
+        (
+            got["result"]["pane"]["agent"].as_str().unwrap_or("").to_owned(),
+            got["result"]["pane"]["agent_status"].as_str().unwrap_or("").to_owned(),
+        )
+    };
+    // Both panes must be identified as Claude and the live one must reach
+    // working, so the idle pane's samples below come from settled detection.
+    let deadline = Instant::now() + Duration::from_secs(12);
+    loop {
+        let (idle_agent, _) = pane_state(&idle_pane);
+        let (live_agent, live_status) = pane_state(&live_pane);
+        if idle_agent == "claude" && live_agent == "claude" && live_status == "working" {
+            break;
+        }
+        if Instant::now() >= deadline {
+            let explain = send_request(
+                &socket_path,
+                &format!(
+                    r#"{{"id":"req_bg_shell_explain","method":"agent.explain","params":{{"target":"{live_pane}"}}}}"#
+                ),
+            );
+            panic!(
+                "detection never settled: idle pane agent {idle_agent:?}, live pane {live_agent:?} {live_status:?}; live explain {explain}"
+            );
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    let settle = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < settle {
+        let (_, idle_status) = pane_state(&idle_pane);
+        assert_ne!(
+            idle_status, "working",
+            "an idle Claude prompt with a leftover background shell read as working"
+        );
+        assert_eq!(pane_state(&live_pane).1, "working");
+        thread::sleep(Duration::from_millis(100));
+    }
+    assert_eq!(pane_state(&idle_pane).1, "idle");
+
+    fs::write(&stop_file, "stop").unwrap();
+    cleanup_spawned_herdr(child, base);
+}
+
 #[test]
 fn metadata_status_subscription_filter_and_ttl_expiry_are_observable() {
     let _lock = test_lock();
