@@ -49,8 +49,14 @@ def load():
             log(f"skipping bad machine entry {m!r}")
             continue
         name = str(m.get("name", ""))
-        if (not name or "/" in name or name.startswith(".") or name in out or not isinstance(m.get("ssh"), list)
-                or not m.get("ssh") or not m.get("remote_dir")):
+        # Same eligibility as Herdr Shell (Machines.configure): disabled entries are skipped before
+        # duplicates, and the first enabled entry of a name wins, so both pick the same host.
+        if m.get("enabled") is False:
+            continue
+        ssh = m.get("ssh")
+        if (not name or "/" in name or ":" in name or name.startswith(".") or name in out
+                or not isinstance(ssh, list) or not ssh or not all(isinstance(x, str) and x for x in ssh)
+                or not isinstance(m.get("remote_dir"), str) or not m.get("remote_dir")):
             log(f"skipping bad machine entry {m!r}")
             continue
         out[name] = {"ssh": list(m["ssh"]), "remote_dir": str(m["remote_dir"]).rstrip("/")}
