@@ -4,6 +4,7 @@ mod bridge;
 mod control;
 mod files;
 mod machines;
+mod update;
 use tauri::Manager;
 
 use serde::Serialize;
@@ -35,6 +36,11 @@ fn ctl_ui_result(result: serde_json::Value) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn ctl_update_result(result: serde_json::Value) -> Result<(), String> {
+    control::deliver_result("update", result)
+}
+
+#[tauri::command]
 fn ctl_open_result(result: serde_json::Value) -> Result<(), String> {
     control::deliver_result("open", result)
 }
@@ -63,6 +69,10 @@ fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             app_info,
+            update::update_status,
+            update::update_apply,
+            update::update_rollback,
+            ctl_update_result,
             files::file_stat,
             files::file_read,
             files::remote_home,

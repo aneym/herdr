@@ -17,6 +17,7 @@ export function installControl(get: () => ControlState): () => void {
   const focused = () => { const pane = get().focused; if (!pane) throw new Error("No focused pane"); return pane; };
   watch<string>("type", async text => { await focused().type(text); }, false, false);
   watch("read", async () => focused().read(), true);
+  watch("update", async () => bridge.updateStatus());
   watch("ui", async () => { const state = get(); return { ok: true, machine: state.machine, selected_tab: state.selected, docs: state.docs, rows: state.rows.map(({ kind, id, label, status, hotkey }) => ({ kind, id, label, status, hotkey })), panes: state.panes.map(p => p.info()) }; });
   watch<{ tab_id: string }>("open", async payload => { get().open(payload.tab_id); return { ok: true }; });
   watch<{ key: string }>("key", async payload => ({ ok: true, sent_b64: await focused().key(payload.key) }));

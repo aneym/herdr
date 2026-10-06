@@ -2,11 +2,15 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Snapshot } from "./model";
 
+export interface UpdateStatus { current: string; staged: { sha: string; built_at: string } | null; available: boolean; previous: { sha: string } | null }
 export interface MachineStatus { name: string; state: "connecting" | "up" | "down"; error?: string }
 export interface Mode { mouse: boolean; sgrPixels: boolean; kittyFlags: number; modifyOtherKeys: number }
 export type AttachEvent = { kind: "bytes"; b64: string } | ({ kind: "mode"; b64: string } & Mode)
   | { kind: "bell"; count: number } | { kind: "notice"; message: string } | { kind: "closed"; reason: string };
 export const bridge = {
+  updateStatus: () => invoke<UpdateStatus>("update_status"),
+  updateApply: () => invoke<void>("update_apply"),
+  updateRollback: () => invoke<void>("update_rollback"),
   fileStat: (machine: string, path: string) => invoke<{ exists: boolean; size: number; mtime_ms: number; inode: number }>("file_stat", { machine, path }),
   fileRead: (machine: string, path: string, offset: number, max: number) => invoke<{ size: number; mtime_ms: number; inode: number; offset: number; data_b64: string }>("file_read", { machine, path, offset, max }),
   remoteHome: (machine: string) => invoke<string>("remote_home", { machine }),

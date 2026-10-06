@@ -74,3 +74,11 @@ footer { color: #7f849c; padding: 12px 8px; font-size: 12px; overflow-wrap: anyw
 .docs .chat-markdown a { color: #89b4fa; }
 .docs table { border-collapse: collapse; }
 .docs td, .docs th { padding: 4px 8px; border: 1px solid #45475a; }
+
+.update-actions { display: inline-flex; gap: 10px; margin-left: 10px; }
+.update-actions button { color: var(--shell-muted); font-size: 12px; }
+.update-actions button:hover { text-decoration: underline; }
+.update-actions button:disabled { cursor: default; opacity: .6; }
+.update-rollback { opacity: 0; pointer-events: none; }
+.sidebar footer:hover .update-rollback, .sidebar footer:focus-within .update-rollback { opacity: 1; pointer-events: auto; }
+.update-error { display: block; margin-top: 5px; }
