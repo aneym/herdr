@@ -12,7 +12,9 @@ mod imp {
         BitBlt, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetWindowDC,
         ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, SRCCOPY,
     };
-    use windows_sys::Win32::Storage::FileSystem::{ReadFile, WriteFile, PIPE_ACCESS_DUPLEX};
+    use windows_sys::Win32::Storage::FileSystem::{
+        FlushFileBuffers, ReadFile, WriteFile, PIPE_ACCESS_DUPLEX,
+    };
     use windows_sys::Win32::Storage::Xps::PrintWindow;
     use windows_sys::Win32::System::Pipes::{
         ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_BYTE,
@@ -119,15 +121,26 @@ mod imp {
         let req: Value = serde_json::from_str(line.trim()).unwrap_or_else(|_| json!({}));
         let resp = dispatch(app, &req);
         let out = format!("{resp}\n");
-        unsafe {
+        let mut rest = out.as_bytes();
+        while !rest.is_empty() {
             let mut w = 0u32;
-            WriteFile(
-                h,
-                out.as_ptr(),
-                out.len() as u32,
-                &mut w,
-                std::ptr::null_mut(),
-            );
+            let ok = unsafe {
+                WriteFile(
+                    h,
+                    rest.as_ptr(),
+                    rest.len() as u32,
+                    &mut w,
+                    std::ptr::null_mut(),
+                )
+            };
+            if ok == 0 || w == 0 {
+                return;
+            }
+            rest = &rest[w as usize..];
+        }
+        // DisconnectNamedPipe discards unread bytes; wait until the client has read the reply.
+        unsafe {
+            FlushFileBuffers(h);
         }
     }
 
