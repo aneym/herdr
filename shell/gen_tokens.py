@@ -197,12 +197,13 @@ NAMED = ("aliceblue antiquewhite aqua aquamarine azure beige bisque black blanch
          "highlight highlighttext selecteditem selecteditemtext mark marktext graytext accentcolor accentcolortext")
 NAMED_RE = r"(?<![\w-])(?:" + "|".join(NAMED.split()) + r")(?![\w-])"
 # Properties that take a color: a named color in their value is a literal.
+# Properties that take a color: a named color in their value is a literal. Declarations may span lines.
 CSS_COLOR_DECL = re.compile(r"(?:^|[;{\s])((?:background|border|outline|text-decoration|column-rule)[\w-]*|color|fill|stroke|"
-                            r"caret-color|accent-color|scrollbar-color|box-shadow|text-shadow)\s*:([^;}]*)", re.I)
-TS_COLOR_PROP = re.compile(r"\b(?:color|background\w*|border\w*|outline\w*|fill|stroke|boxShadow|textShadow|caretColor|"
-                           r"accentColor|scrollbarColor|textDecorationColor|cursor\w*|selection\w*)\s*:\s*[\"'`]([^\"'`]*)[\"'`]")
+                            r"caret-color|accent-color|scrollbar-color|box-shadow|text-shadow)\s*:([^;}]*)", re.I | re.M)
+TS_COLOR_PROP = re.compile(r"[\"']?\b(?:color|background\w*|border\w*|outline\w*|fill|stroke|boxShadow|textShadow|caretColor|"
+                           r"accentColor|scrollbarColor|textDecorationColor|cursor\w*|selection\w*)[\"']?\s*:\s*[\"'`]([^\"'`]*)[\"'`]")
 VAR_USE = re.compile(r"var\(\s*(--shell-[a-z0-9-]+)")
-VAR_DEF = re.compile(r"(--shell-[a-z0-9-]+)\s*:")
+VAR_DEF = re.compile(r"(?:^|[;{\s])(--shell-[a-z0-9-]+)\s*:", re.M)
 
 
 def strip_comments(text, css):
@@ -219,17 +220,19 @@ def web_lint(generated_css):
             continue
         css = f.suffix == ".css"
         text = strip_comments(f.read_text(), css)
-        local = set(VAR_DEF.findall(text))
+        # Only CSS declares variables; a string in TS that looks like one defines nothing.
+        local = set(VAR_DEF.findall(text)) if css else set()
         rel = f.relative_to(ROOT)
-        for n, line in enumerate(text.splitlines(), 1):
-            found = [m.group(0) for m in COLOR_LITERAL.finditer(line)]
-            values = [m.group(2) for m in CSS_COLOR_DECL.finditer(line)] if css else TS_COLOR_PROP.findall(line)
-            found += [m.group(0) for v in values for m in re.finditer(NAMED_RE, v, re.I)]
-            for lit in found:
-                problems.append(f"{rel}:{n}: color literal {lit!r}; use a --shell-* token")
-            for name in VAR_USE.findall(line):
-                if name not in defined and name not in local:
-                    problems.append(f"{rel}:{n}: {name} is not a generated token")
+        found = [(m.start(), m.group(0)) for m in COLOR_LITERAL.finditer(text)]
+        decls = CSS_COLOR_DECL if css else TS_COLOR_PROP
+        group = 2 if css else 1
+        for d in decls.finditer(text):
+            found += [(d.start(group) + m.start(), m.group(0)) for m in re.finditer(NAMED_RE, d.group(group), re.I)]
+        for pos, lit in sorted(found):
+            problems.append(f"{rel}:{text.count(chr(10), 0, pos) + 1}: color literal {lit!r}; use a --shell-* token")
+        for m in VAR_USE.finditer(text):
+            if m.group(1) not in defined and m.group(1) not in local:
+                problems.append(f"{rel}:{text.count(chr(10), 0, m.start()) + 1}: {m.group(1)} is not a generated token")
     return problems
 
 
