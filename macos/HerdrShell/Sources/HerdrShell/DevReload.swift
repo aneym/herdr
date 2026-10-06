@@ -28,6 +28,8 @@ enum DevReload {
             "factoryOpen": controller.state.factoryOpen,
             "selectedTab": controller.state.selectedTab ?? "",
             "focusedPane": controller.state.focusedPane ?? "",
+            "wasActive": NSApp.isActive,
+            "frontPid": Int(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0),
         ]
         write(obj, to: markerFile)
     }
@@ -51,12 +53,25 @@ enum DevReload {
             controller.window.toggleFullScreen(nil)
         }
         log(String(format: "dev reload %@ -> %@, window in %.2f s", mark["from"] as? String ?? "?", to, windowS))
+        // A relaunch activates the new app even with `open -g`. Hand the front back to the app
+        // Alex was in, for as long as launch activation can still arrive.
+        if mark["wasActive"] as? Bool != true, let pid = (mark["frontPid"] as? NSNumber)?.int32Value, pid > 0,
+           let front = NSRunningApplication(processIdentifier: pid) {
+            let back = { if NSApp.isActive { front.activate() } }
+            let token = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification,
+                                                               object: nil, queue: .main) { _ in back() }
+            back()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { NotificationCenter.default.removeObserver(token) }
+        }
         toast("Updated to \(to.prefix(8))", in: controller.root)
         // Panes come back with the first snapshot; time that too, up to 10 s.
         let start = Date()
+        var panesS: Double = -1
         func settle() {
+            if panesS < 0, !controller.currentPanes.isEmpty { panesS = Date().timeIntervalSince1970 - at }
             let panes = !controller.currentPanes.isEmpty
-            if !panes && Date().timeIntervalSince(start) < 10 {
+            // Report no earlier than 1.5 s in, so `active` reflects the hand-back above.
+            if (!panes && Date().timeIntervalSince(start) < 10) || Date().timeIntervalSince(start) < 1.5 {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { settle() }
                 return
             }
@@ -64,13 +79,15 @@ enum DevReload {
                 "from": mark["from"] as? String ?? "",
                 "to": to,
                 "window_s": windowS,
-                "panes_s": panes ? Date().timeIntervalSince1970 - at : -1,
+                "panes_s": panesS,
                 "selected_tab": controller.state.selectedTab ?? "",
                 "selected_tab_before": mark["selectedTab"] as? String ?? "",
                 "focused_pane": controller.state.focusedPane ?? "",
                 "focused_pane_before": mark["focusedPane"] as? String ?? "",
                 "sidebar_visible": controller.state.sidebarVisible,
                 "mode": controller.state.mode.rawValue,
+                "was_active": mark["wasActive"] as? Bool ?? false,
+                "active": NSApp.isActive,
             ]
             write(result, to: resultFile)
             log("dev reload settled: \(result)")
@@ -78,22 +95,23 @@ enum DevReload {
         settle()
     }
 
-    /// A small label at the bottom of the window that fades out by itself.
+    /// A small label under the title bar that fades out by itself. Top center, so it never
+    /// covers a prompt or the chat composer.
     static func toast(_ text: String, in view: NSView) {
         let label = NSTextField(labelWithString: text)
         label.font = .systemFont(ofSize: 12, weight: .medium)
         label.textColor = .secondaryLabelColor
         label.sizeToFit()
-        let pad = NSSize(width: 14, height: 7)
+        let pad = NSSize(width: 12, height: 5)
         let size = NSSize(width: label.frame.width + 2 * pad.width, height: label.frame.height + 2 * pad.height)
-        let box = NSVisualEffectView(frame: NSRect(x: (view.bounds.width - size.width) / 2, y: 18,
-                                                   width: size.width, height: size.height))
-        box.material = .popover
-        box.state = .active
+        let box = NSView(frame: NSRect(x: (view.bounds.width - size.width) / 2, y: view.bounds.height - 34 - size.height,
+                                       width: size.width, height: size.height))
         box.wantsLayer = true
-        box.layer?.cornerRadius = 8
-        box.layer?.masksToBounds = true
-        box.autoresizingMask = [.minXMargin, .maxXMargin, .maxYMargin]
+        box.layer?.cornerRadius = 7
+        box.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        box.layer?.borderColor = NSColor.separatorColor.cgColor
+        box.layer?.borderWidth = 1
+        box.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin]
         label.frame.origin = NSPoint(x: pad.width, y: pad.height)
         box.addSubview(label)
         view.addSubview(box, positioned: .above, relativeTo: nil)

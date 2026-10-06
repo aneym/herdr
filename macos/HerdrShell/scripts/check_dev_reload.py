@@ -8,7 +8,8 @@
                                    --live, nothing typed): build the prod bundle at HEAD,
                                    stage a copy stamped with another commit, and wait for
                                    the running app to relaunch into it by itself.
-                                   Screenshots go to --evidence DIR.
+                                   Screenshots go to --evidence DIR. --no-build bundles the
+                                   existing .build/release binary.
 """
 import json
 import os
@@ -122,7 +123,9 @@ def publish_side():
 def space(cmd, *a, check_ok=True):
     # One run at a time: start waits for the Space lock (up to 25 min) under this owner name.
     env = {**os.environ, "HERDR_SPACE_OWNER": os.environ.get("HERDR_SPACE_OWNER", "check_dev_reload")}
-    r = subprocess.run(["herdr-shell-space", cmd, *a], capture_output=True, text=True, timeout=1800, env=env)
+    # Through the interpreter: exec'ing the script waits on syspolicyd, which can stall for minutes.
+    r = subprocess.run([sys.executable, shutil.which("herdr-shell-space"), cmd, *a],
+                       capture_output=True, text=True, timeout=1800, env=env)
     if check_ok and r.returncode != 0:
         raise RuntimeError(f"herdr-shell-space {cmd}: {r.stderr.strip()[-400:]}")
     return r.stdout.strip()
@@ -138,10 +141,11 @@ def app_side(evidence):
     a_dir, b_dir = os.path.join(out, "A"), os.path.join(out, "B")
     for d in (a_dir, b_dir):
         os.makedirs(d, exist_ok=True)
-    build = subprocess.run(["nice", "-n", "10", "swift", "build", "-c", "release"], cwd=D0, capture_output=True, text=True)
-    check("swift build", build.returncode == 0, build.stderr[-300:] if build.returncode else "clean")
-    if build.returncode:
-        return
+    if "--no-build" not in sys.argv:
+        build = subprocess.run(["nice", "-n", "10", "swift", "build", "-c", "release"], cwd=D0, capture_output=True, text=True)
+        check("swift build", build.returncode == 0, build.stderr[-300:] if build.returncode else "clean")
+        if build.returncode:
+            return
     a_app = subprocess.check_output(["bash", os.path.join(D0, "scripts", "bundle.sh"), "prod", a_dir], text=True).strip().splitlines()[-1]
     b_app = os.path.join(b_dir, "Herdr Shell.app")
     shutil.rmtree(b_app, ignore_errors=True)
@@ -157,6 +161,9 @@ def app_side(evidence):
                   "defaults write com.aneyman.herdr-shell herdr.shell.devReload -bool true")
     old_pid = started["app_pid"]
     time.sleep(6)
+    # Another app in front, the way Alex works: the swap must not pull the shell forward.
+    space("exec", "open ~/Documents")
+    time.sleep(2)
     space("shot", os.path.join(evidence, "shell-dev-reload-1-before.png"))
 
     # Stage the other build the way publish delivers it: the app first, staged.json last.
@@ -194,6 +201,8 @@ def app_side(evidence):
               f"{result['selected_tab_before']} -> {result['selected_tab']}")
         check("focused pane restored", result["focused_pane"] == result["focused_pane_before"],
               f"{result['focused_pane_before']} -> {result['focused_pane']}")
+        check("the relaunch keeps the app's foreground state", result["active"] == result["was_active"],
+              f"active before {result['was_active']}, after {result['active']}")
         check("window back in under 2 s", 0 <= result["window_s"] < 2, f"{result['window_s']:.2f} s")
         say(f"swap: window {result['window_s']:.2f} s, panes {result['panes_s']:.2f} s after the old app quit")
     space("exec", "defaults delete com.aneyman.herdr-shell herdr.shell.devReload", check_ok=False)

@@ -105,7 +105,8 @@ final class UpdateController: NSObject {
         Channel.store.set(current.commit, forKey: Self.autoTriedKey)
         Channel.store.synchronize()
         applying = true
-        log("auto update to \(current.commit) (\(asked ? "requested" : dev ? "dev" : "idle")), idle \(Int(idle)) s")
+        log("auto update to \(current.commit) (\(asked ? "requested" : dev ? "dev" : "idle")), idle \(Int(idle)) s, "
+            + (NSApp.isActive ? "foreground" : "background"))
         if dev, let windowController { DevReload.noteLeaving(to: current.commit, controller: windowController) }
         restartNow(background: !NSApp.isActive)
     }
