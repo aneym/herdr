@@ -110,6 +110,9 @@ pub(super) struct ShellHitMap {
     pub(super) agents: Vec<(Rect, String)>,
     pub(super) endpoint_agents: Vec<(Rect, ClientEndpointId, String)>,
     pub(super) endpoint_pins: Vec<(Rect, Rect, ClientEndpointId, String)>,
+    /// Rows of the multi-machine pinned section that scroll under the wheel.
+    pub(super) endpoint_pin_body: Rect,
+    pub(super) endpoint_pin_max_scroll: usize,
     pub(super) agent_body: Rect,
     pub(super) agent_scrollbar: Rect,
     pub(super) agent_scroll_metrics: Option<crate::pane::ScrollMetrics>,
@@ -129,6 +132,11 @@ pub(super) struct ShellHitMap {
     pub(super) automations_header: Rect,
     pub(super) sidebar_divider: Rect,
     pub(super) sidebar_section_divider: Rect,
+    /// Rows the section split ratio is measured over; empty means the whole
+    /// sidebar column.
+    pub(super) sidebar_section_track: Rect,
+    /// The split ratio sizes the bottom section (agents drawn first).
+    pub(super) sidebar_section_inverted: bool,
     pub(super) sidebar_toggle: Rect,
     pub(super) new_workspace: Rect,
     pub(super) new_tab: Rect,
@@ -1147,6 +1155,8 @@ pub(crate) struct ClientShellState {
     pub(super) tree_chrome_default: super::tree::ClientTreeChrome,
     pub(super) workspace_scroll: usize,
     pub(super) agent_scroll: usize,
+    /// First pinned row shown in the multi-machine sidebar's pinned section.
+    pub(super) endpoint_pin_scroll: usize,
     pub(super) pending_agent_reveal: Option<(ClientEndpointId, String)>,
     pub(super) tab_scroll: usize,
     pub(super) mobile_switcher_scroll: usize,
@@ -1349,6 +1359,7 @@ impl ClientShellState {
             tree_chrome_default: super::tree::ClientTreeChrome::default(),
             workspace_scroll: 0,
             agent_scroll: 0,
+            endpoint_pin_scroll: 0,
             pending_agent_reveal: None,
             tab_scroll: 0,
             mobile_switcher_scroll: 0,

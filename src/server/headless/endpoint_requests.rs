@@ -65,7 +65,11 @@ impl HeadlessServer {
             self.send_to_client(client_id, message);
             return false;
         }
-        if !surface_active {
+        let surface_independent =
+            crate::server::client_commands::client_shell_method_is_surface_independent(
+                &request.method,
+            );
+        if !surface_active && !surface_independent {
             let message = crate::server::client_commands::error_message(
                 boot_id,
                 request_id,
@@ -119,15 +123,17 @@ impl HeadlessServer {
                 deferred_worktree.then(|| api_request_id.clone());
             client.shell_deferred_navigation_response = deferred_navigation.then(Vec::new);
         }
+        let message = api::ApiRequestMessage {
+            request: *request,
+            respond_to,
+            response_write_complete: None,
+        };
+        if !surface_active {
+            // No surface to focus or claim geometry for: apply it as the
+            // public socket request, which leaves every shell's focus alone.
+            return self.handle_api_request_with_shutdown_check(message);
+        }
         let foreground_changed = self.promote_client_to_foreground(client_id);
-        foreground_changed
-            | self.handle_client_shell_api_request(
-                client_id,
-                api::ApiRequestMessage {
-                    request: *request,
-                    respond_to,
-                    response_write_complete: None,
-                },
-            )
+        foreground_changed | self.handle_client_shell_api_request(client_id, message)
     }
 }

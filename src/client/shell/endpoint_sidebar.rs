@@ -261,8 +261,7 @@ pub(super) fn render_expanded(
     };
     // Shared pins remain above the machine/space list, independent of which
     // endpoint is active. Each hit retains its endpoint identity.
-    let mut y = area.y;
-    let mut slot = 0;
+    let mut pins = Vec::new();
     for endpoint in state.endpoints {
         let Some(snapshot) = endpoint.snapshot.as_deref() else { continue; };
         // The factory overlay belongs to the active endpoint only.
@@ -270,30 +269,64 @@ pub(super) fn render_expanded(
             .filter(|_| &endpoint.endpoint_id == state.active_endpoint_id);
         for entry in super::tree::pinned_tab_entries(snapshot, overlay) {
             let super::tree::AgentPanelListEntry::PinnedTab(mut row) = entry else { continue; };
-            if slot == 0 && y < area.bottom() {
-                put_text(buffer, area.x, y, area.width.saturating_sub(1), " pinned",
-                    Style::default().fg(palette.overlay0).add_modifier(Modifier::BOLD));
-                y += 1;
-            }
-            if y >= area.bottom().saturating_sub(1) { break; }
-            slot += 1;
+            let slot = pins.len() + 1;
             row.shortcut = if slot <= 9 { slot } else { 0 };
             row.active &= &endpoint.endpoint_id == state.active_endpoint_id;
-            let rect = Rect::new(area.x, y, area.width.saturating_sub(1), 1);
+            pins.push((endpoint.endpoint_id.clone(), row));
+        }
+    }
+    let mut y = area.y;
+    hits.endpoint_pin_body = Rect::default();
+    hits.endpoint_pin_max_scroll = 0;
+    if !pins.is_empty() && area.height > 1 {
+        // The section takes at most a third of the column and scrolls past
+        // that, so the machine list below always keeps its rows.
+        let visible = pins.len().min(usize::from((area.height / 3).max(1)));
+        let max_scroll = pins.len() - visible;
+        *state.endpoint_pin_scroll = (*state.endpoint_pin_scroll).min(max_scroll);
+        let first = *state.endpoint_pin_scroll;
+        let width = area.width.saturating_sub(1);
+        put_text(
+            buffer,
+            area.x,
+            y,
+            width,
+            " pinned",
+            Style::default()
+                .fg(palette.overlay0)
+                .add_modifier(Modifier::BOLD),
+        );
+        if max_scroll > 0 {
+            put_right_text(
+                buffer,
+                Rect::new(area.x, y, width, 1),
+                y,
+                &format!("+{max_scroll} more "),
+                Style::default().fg(palette.overlay0),
+            );
+        }
+        y += 1;
+        hits.endpoint_pin_body = Rect::new(area.x, y, width, visible as u16);
+        hits.endpoint_pin_max_scroll = max_scroll;
+        for (endpoint_id, row) in pins.into_iter().skip(first).take(visible) {
+            let rect = Rect::new(area.x, y, width, 1);
             let hit_start = hits.tree_headers.len();
             super::agent_sidebar::render_pinned_tab_row(buffer, rect, &row, config, hits);
             hits.tree_headers.truncate(hit_start);
             // No pin toggle on pinned rows: unpinning is in the row's context menu.
-            hits.endpoint_pins.push((rect, Rect::default(),
-                endpoint.endpoint_id.clone(), row.tab_id));
+            hits.endpoint_pins
+                .push((rect, Rect::default(), endpoint_id, row.tab_id));
             y += 1;
         }
     }
     let remaining = Rect::new(area.x, y, area.width, area.bottom().saturating_sub(y));
     let (workspace_area, detail_area) =
         crate::ui::expanded_sidebar_sections(remaining, state.sidebar_section_split);
+    // The divider and its drag follow the sections below the pinned rows.
     hits.sidebar_section_divider =
-        crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split);
+        crate::ui::sidebar_section_divider_rect(remaining, state.sidebar_section_split);
+    hits.sidebar_section_track = remaining;
+    hits.sidebar_section_inverted = false;
     put_text(
         buffer,
         workspace_area.x,

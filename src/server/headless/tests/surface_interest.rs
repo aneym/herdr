@@ -861,3 +861,55 @@ async fn two_headless_servers_drive_atomic_endpoint_handoff() {
     shutdown_test_runtimes(&mut source_server);
     shutdown_test_runtimes(&mut target_server);
 }
+
+#[tokio::test]
+async fn metadata_only_shell_can_pin_a_chat_without_taking_the_surface() {
+    // The aggregate sidebar pins a chat on a machine whose surface another
+    // machine holds; the pin must land without promoting that shell.
+    let mut server = test_headless_server();
+    let _input_rx = install_focused_test_runtime(&mut server, b"");
+    let tab_id = server.app.public_tab_id(0, 0).expect("first tab");
+    let (writer, control_rx, _render_rx) = test_client_writer();
+    let client_id = 61;
+    server.handle_server_event(ServerEvent::ClientShellConnected {
+        surface_reuse: false,
+        surface_delta: false,
+        client_id,
+        surface_cols: 80,
+        surface_rows: 24,
+        cell_width_px: 8,
+        cell_height_px: 16,
+        pixel_mouse: false,
+        direct_graphics: false,
+        endpoint_keybindings: true,
+        mouse_capture: true,
+        surface_active: false,
+        writer,
+    });
+    let _ = client_shell_snapshot(&control_rx);
+    let boot_id = server.client_shell_boot_id.clone();
+    server.handle_server_event(ServerEvent::ClientShellEndpointRequest {
+        client_id,
+        boot_id,
+        request: Box::new(api::schema::Request {
+            id: "inactive-pin".into(),
+            method: api::schema::Method::TabSetPinned(api::schema::TabSetPinnedParams {
+                tab_id: tab_id.clone(),
+                pinned: true,
+                priority: None,
+            }),
+        }),
+    });
+    assert_eq!(
+        server
+            .app
+            .state
+            .pinned_tabs
+            .iter()
+            .map(|pin| pin.tab_id.clone())
+            .collect::<Vec<_>>(),
+        vec![tab_id]
+    );
+    assert_eq!(server.foreground_client_id, None);
+    assert!(!server.clients[&client_id].shell_surface_active);
+}

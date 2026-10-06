@@ -74,6 +74,13 @@ pub(crate) fn supports_client_shell_method(method: &Method) -> bool {
     supports_client_shell_method_name(crate::api::api_method_name(method))
 }
 
+/// Session-wide mutations that need no presentation surface. A shell watching
+/// this server from its aggregate sidebar, with its surface handed to another
+/// machine, may still send them; they apply as the public socket request does.
+pub(crate) fn client_shell_method_is_surface_independent(method: &Method) -> bool {
+    matches!(method, Method::TabSetPinned(_))
+}
+
 pub(crate) fn error_response(id: String, code: &str, message: impl Into<String>) -> String {
     serde_json::to_string(&ErrorResponse {
         id,

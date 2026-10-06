@@ -62,6 +62,16 @@ fn current_workspace_view() -> crate::api::schema::AgentViewSetParams {
     }
 }
 
+#[derive(Clone)]
+struct CapturingTransport(std::sync::Arc<std::sync::Mutex<Vec<crate::protocol::ClientMessage>>>);
+
+impl crate::client::endpoint::EndpointTransport for CapturingTransport {
+    fn send(&mut self, message: &crate::protocol::ClientMessage) -> std::io::Result<()> {
+        self.0.lock().unwrap().push(message.clone());
+        Ok(())
+    }
+}
+
 fn state_with_remote() -> (ClientShellState, ClientEndpointId) {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     let profile = remote_profile();
@@ -112,12 +122,56 @@ fn pinned_chats_survive_aggregate_sidebar_and_route_to_their_endpoint() {
             if *endpoint_id == endpoint && matches!(&request.method,
                 crate::api::schema::Method::TabSetPinned(params) if !params.pinned && params.tab_id == "tab_1")
     )));
+    // Local holds the surface; the unpin still reaches the remote that owns it.
+    let sent = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut endpoints = crate::client::endpoint::EndpointRegistry::new(
+        CapturingTransport(Default::default()),
+        1,
+        Default::default(),
+    );
+    endpoints.insert(
+        remote.clone(),
+        CapturingTransport(sent.clone()),
+        1,
+        Default::default(),
+        false,
+    );
+    let mut commands = crate::client::endpoint_commands::EndpointCommands::default();
+    crate::client::shell_runtime::dispatch_client_shell_actions(
+        outcome.actions,
+        &mut commands,
+        &mut endpoints,
+        Some(&mut state),
+        &mut Vec::new(),
+        &mut None,
+    )
+    .unwrap();
+    let sent = sent.lock().unwrap().clone();
+    assert!(
+        matches!(sent.as_slice(), [crate::protocol::ClientMessage::ClientShellEndpointRequest {
+        boot_id, request }] if boot_id == "remote-boot" && request.contains("tab.set_pinned")),
+        "remote received {sent:?}"
+    );
     let mut outcome = ClientShellInput::default();
     assert!(state.handle_endpoint_navigation(crate::input::KeybindAction::SwitchTab(0), &mut outcome));
     assert!(outcome.actions.iter().any(|action| matches!(action,
         ClientShellAction::ActivateEndpoint { endpoint_id, target: Some(ClientEndpointFocusTarget::Tab(tab)), .. }
             if *endpoint_id == remote && tab == "tab_1"
     )));
+    // Past the last pin, the digits fall through to the focused space's tabs.
+    let mut outcome = ClientShellInput::default();
+    assert!(
+        state.indexed_navigation_target_exists(&crate::input::KeybindMatch::Action(
+            crate::input::KeybindAction::SwitchTab(1)
+        ))
+    );
+    assert!(
+        state.handle_endpoint_navigation(crate::input::KeybindAction::SwitchTab(1), &mut outcome)
+    );
+    assert!(outcome.actions.iter().any(|action| matches!(action,
+        ClientShellAction::ActivateEndpoint { endpoint_id, target: Some(ClientEndpointFocusTarget::Tab(tab)), .. }
+            if *endpoint_id == ClientEndpointId::Local && tab == "tab_1"
+    )), "actions: {:?}", outcome.actions);
 }
 
 #[test]
@@ -2982,4 +3036,81 @@ fn navigator_foreign_workspace_heading_keeps_the_workspace_target() {
             target: Some(ClientEndpointFocusTarget::Workspace(workspace_id)),
         }] if activated == &endpoint_id && workspace_id == "ws_1"
     ));
+}
+
+#[test]
+fn aggregate_pins_scroll_within_their_section_and_keep_the_divider_below_them() {
+    let (mut state, remote) = state_with_remote();
+    let mut snapshot = state
+        .endpoints
+        .iter()
+        .find(|endpoint| endpoint.endpoint_id == remote)
+        .and_then(|endpoint| endpoint.snapshot.clone())
+        .expect("remote snapshot");
+    let template = snapshot.tabs[0].clone();
+    snapshot.tabs = (1..=30)
+        .map(|number| ClientShellTab {
+            tab_id: format!("tab_{number}"),
+            number,
+            label: format!("chat {number}"),
+            focused: number == 1,
+            ..template.clone()
+        })
+        .collect();
+    snapshot.pinned_tabs = snapshot
+        .tabs
+        .iter()
+        .map(|tab| crate::protocol::ClientShellPinnedTab {
+            tab_id: tab.tab_id.clone(),
+            workspace_id: tab.workspace_id.clone(),
+        })
+        .collect();
+    state.set_endpoint_snapshot(&remote, snapshot);
+    let shown = |state: &ClientShellState| {
+        state
+            .hits
+            .endpoint_pins
+            .iter()
+            .map(|(_, _, _, tab_id)| tab_id.clone())
+            .collect::<Vec<_>>()
+    };
+
+    let frame = state.compose(100, 30).expect("aggregate frame");
+    let first = shown(&state);
+    assert!(
+        first.len() < 30 && first[0] == "tab_1",
+        "section capped: {first:?}"
+    );
+    let header = &frame_rows(&frame)[state.hits.sidebar_divider.y as usize];
+    assert!(
+        header.contains(&format!("+{} more", 30 - first.len())),
+        "header: {header}"
+    );
+    // The machine list keeps its rows, and its divider sits under the pins.
+    let last_pin = state.hits.endpoint_pins.last().expect("pin rows").0;
+    let divider = state.hits.sidebar_section_divider;
+    assert!(
+        divider.height == 0 || divider.y > last_pin.y,
+        "divider {divider:?} over pin {last_pin:?}"
+    );
+    assert!(state
+        .hits
+        .machines
+        .iter()
+        .any(|hit| hit.endpoint_id == remote));
+
+    // The wheel over the section reaches the last pin.
+    let body = state.hits.endpoint_pin_body;
+    for _ in 0..40 {
+        state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: body.x + 2,
+            row: body.y,
+            modifiers: KeyModifiers::NONE,
+        })]);
+    }
+    state.compose(100, 30).expect("scrolled frame");
+    let scrolled = shown(&state);
+    assert_eq!(scrolled.last().map(String::as_str), Some("tab_30"));
+    assert_eq!(scrolled.len(), first.len());
 }

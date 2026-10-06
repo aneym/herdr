@@ -126,6 +126,14 @@ pub(super) fn begin() {
     });
 }
 pub(super) fn end() { REPORTS.with(|reports| reports.borrow_mut().recording = false); }
+/// Run `build` without adding its tree to the report: for a side computation
+/// that rebuilds part of the tree but draws none of it.
+pub(super) fn paused<T>(build: impl FnOnce() -> T) -> T {
+    let was = REPORTS.with(|reports| std::mem::replace(&mut reports.borrow_mut().recording, false));
+    let out = build();
+    REPORTS.with(|reports| reports.borrow_mut().recording = was);
+    out
+}
 pub(super) fn record(report: WorkspaceReport) {
     REPORTS.with(|reports| {
         if let Some(pending) = &mut reports.borrow_mut().pending { pending.push(report); }

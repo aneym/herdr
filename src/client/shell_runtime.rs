@@ -17,9 +17,16 @@ pub(super) fn dispatch_client_shell_actions(
                 boot_id,
                 request,
             } => {
-                if let Some(connection) = endpoints.connection(&endpoint_id).filter(|_| {
-                    endpoints.active_id() == &endpoint_id && endpoints.active_surface_available()
-                }) {
+                // A surface-independent request (a pin toggle from the aggregate
+                // sidebar) goes to the machine that owns the chat, active or not.
+                let routable = if endpoints.active_id() == &endpoint_id {
+                    endpoints.active_surface_available()
+                } else {
+                    crate::server::client_commands::client_shell_method_is_surface_independent(
+                        &request.method,
+                    )
+                };
+                if let Some(connection) = endpoints.connection(&endpoint_id).filter(|_| routable) {
                     endpoint_commands.enqueue(endpoint_id, connection.generation, boot_id, request);
                 } else if let Some(shell) = shell.as_deref_mut() {
                     repaint |= shell.cancel_endpoint_request(&request.id);
@@ -59,10 +66,14 @@ pub(super) fn dispatch_client_shell_actions(
     // A source-off-first handoff leaves the registry's committed identity pointing at a
     // deliberately surface-inactive source. Do not drain its retained queue into a server that
     // must reject it; completion below resumes the committed owner's lane.
+    let mut lanes = endpoint_commands.queued_lanes();
+    lanes.retain(|endpoint_id| endpoint_id != endpoints.active_id());
     if endpoints.active_surface_available() {
-        let active_endpoint = endpoints.active_id().clone();
-        let cancelled = endpoint_commands.send_next(&active_endpoint, endpoints);
-        if let Some(shell) = shell {
+        lanes.push(endpoints.active_id().clone());
+    }
+    for endpoint_id in lanes {
+        let cancelled = endpoint_commands.send_next(&endpoint_id, endpoints);
+        if let Some(shell) = shell.as_deref_mut() {
             for request_id in cancelled {
                 repaint |= shell.cancel_endpoint_request(&request_id);
             }

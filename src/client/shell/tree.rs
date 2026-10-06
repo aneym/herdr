@@ -397,10 +397,39 @@ pub(super) fn pinned_tab_entries(
     let mut out = vec![AgentPanelListEntry::PinnedChatsHeader];
     // Count only pins that resolve to a live tab, matching `numbered_tab_ids`,
     // so a row's digit is exactly the Cmd+N that selects it.
-    let live = snapshot.pinned_tabs.iter().filter_map(|pin| {
-        snapshot.tabs.iter().find(|tab| tab.tab_id == pin.tab_id).map(|tab| (pin, tab))
-    });
-    for (index, (pin, tab)) in live.enumerate() {
+    let live = snapshot
+        .pinned_tabs
+        .iter()
+        .filter_map(|pin| {
+            snapshot
+                .tabs
+                .iter()
+                .find(|tab| tab.tab_id == pin.tab_id)
+                .map(|tab| (pin, tab))
+        })
+        .collect::<Vec<_>>();
+    // A pinned factory lane or orchestrator shows the state its spaces-tree row
+    // shows, live-child rollup included, so the two rows never disagree.
+    let mut rolled =
+        HashMap::<String, HashMap<String, (crate::api::schema::AgentStatus, bool)>>::new();
+    if let Some(overlay) = overlay {
+        for (_, tab) in &live {
+            let parent = overlay.tab(&tab.tab_id).is_some_and(|tag| {
+                matches!(
+                    tag.kind,
+                    crate::factory_overlay::TabKind::Lane
+                        | crate::factory_overlay::TabKind::Orchestrator
+                )
+            });
+            if parent && !rolled.contains_key(&tab.workspace_id) {
+                rolled.insert(
+                    tab.workspace_id.clone(),
+                    factory_row_states(snapshot, overlay, &tab.workspace_id),
+                );
+            }
+        }
+    }
+    for (index, (pin, tab)) in live.into_iter().enumerate() {
         let space_label = snapshot
             .workspaces
             .iter()
@@ -413,13 +442,18 @@ pub(super) fn pinned_tab_entries(
             tab.agent_status,
             tag,
         );
+        let (status, idle) = rolled
+            .get(&tab.workspace_id)
+            .and_then(|states| states.get(&tab.tab_id))
+            .copied()
+            .unwrap_or((status, lane_is_idle(tag, status)));
         out.push(AgentPanelListEntry::PinnedTab(PinnedTabRow {
             workspace_id: pin.workspace_id.clone(),
             tab_id: pin.tab_id.clone(),
             label: tab.label.clone(),
             space_label,
             status,
-            idle: lane_is_idle(tag, status),
+            idle,
             workflow: tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Workflow),
             done: tag.is_some_and(|tag| tag.done),
             failed: tag.is_some_and(|tag| tag.done && tag.attention == crate::factory_overlay::Attention::Act),
@@ -432,6 +466,56 @@ pub(super) fn pinned_tab_entries(
         out.clear();
     }
     out
+}
+
+/// Status and idle ring of every factory tab row the spaces tree builds for
+/// `workspace_id`, after the lane rollup (live runs, child workflows, grouped
+/// lanes). Built from the same `append_factory_space` the tree draws from.
+fn factory_row_states(
+    snapshot: &ClientShellSnapshot,
+    overlay: &crate::factory_overlay::FactoryOverlay,
+    workspace_id: &str,
+) -> HashMap<String, (crate::api::schema::AgentStatus, bool)> {
+    // Factory rows read only each agent's tab and status from these rows.
+    let rows = snapshot
+        .agents
+        .iter()
+        .filter(|agent| agent.workspace_id == workspace_id)
+        .map(|agent| AgentRow {
+            pane_id: agent.pane_id.clone(),
+            workspace_id: agent.workspace_id.clone(),
+            tab_id: agent.tab_id.clone(),
+            status: agent.agent_status,
+            focused: agent.focused,
+            rows: Vec::new(),
+            indent: 0,
+            owner_pane_id: agent.owner_pane_id.clone(),
+            orphaned: agent.orphaned,
+            placement: agent.group.clone(),
+            group: AgentGroupRender::default(),
+        })
+        .collect::<Vec<_>>();
+    let mut entries = Vec::new();
+    super::sidebar_report::paused(|| {
+        append_factory_space(
+            &mut entries,
+            snapshot,
+            &ClientTreeChrome::default(),
+            workspace_id,
+            &rows,
+            overlay,
+            0,
+        )
+    });
+    let mut states = HashMap::new();
+    for entry in entries {
+        if let AgentPanelListEntry::FactoryTab(row) = entry {
+            if let Some(tab_id) = row.header.tab_id.filter(|tab_id| *tab_id == row.header.key) {
+                states.entry(tab_id).or_insert((row.status, row.idle));
+            }
+        }
+    }
+    states
 }
 
 /// A tagged tab stands in for its agents, while still following the tab-header hit path.
@@ -1588,7 +1672,7 @@ fn factory_run_row(
             workspace_id: parent.workspace_id.clone(),
             tab_id: Some(parent.tab_id.clone()),
             label: run.name.clone().unwrap_or_else(|| run.id.clone()),
-            key: format!("{}#run:{}", parent.tab_id, run.id),
+            key: factory_run_key(&parent.tab_id, &run.id),
             collapsed: false,
             child_states: Vec::new(),
             collapsible: false,
@@ -1617,6 +1701,20 @@ fn factory_run_row(
         workflow: true,
         done: run.done,
     })
+}
+
+/// Collapse key of a workflow run row: the run lives inside its lane's tab, so
+/// the row carries the lane's tab id and is told apart by this key alone.
+fn factory_run_key(tab_id: &str, run_id: &str) -> String {
+    format!("{tab_id}{FACTORY_RUN_KEY_MARK}{run_id}")
+}
+
+const FACTORY_RUN_KEY_MARK: &str = "#run:";
+
+/// Whether a tree header with this tab id and key is a workflow run row.
+pub(super) fn is_factory_run_key(tab_id: &str, key: &str) -> bool {
+    key.strip_prefix(tab_id)
+        .is_some_and(|rest| rest.starts_with(FACTORY_RUN_KEY_MARK))
 }
 
 fn split_runs(runs: &[crate::factory_overlay::RunTag]) -> (usize, usize) {

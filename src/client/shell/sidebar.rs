@@ -225,7 +225,9 @@ pub(crate) fn render_sidebar(
         Rect::new(area.right().saturating_sub(1), area.y, 1, area.height)
     };
     let (workspace_area, detail_area) = ordered_sidebar_sections(area, snapshot, config, state);
-    hits.sidebar_section_divider = sidebar_section_divider_rect(area, config, state);
+    hits.sidebar_section_divider = sidebar_section_divider_rect(area, snapshot, config, state);
+    hits.sidebar_section_track = area;
+    hits.sidebar_section_inverted = agents_first(snapshot, config);
     if super::tree::tree_view_active(config) {
         // Spaces live inside the agents tree, so the spaces strip keeps only the
         // footer controls.
@@ -569,8 +571,7 @@ pub(in crate::client::shell) fn ordered_sidebar_sections(
             Rect::new(content.x, content.y, content.width, agents_height),
         );
     }
-    let agents_first = !snapshot.pinned_tabs.is_empty()
-        || config.section_order[0] == crate::config::SidebarSection::Agents;
+    let agents_first = agents_first(snapshot, config);
     let spaces_height = if config.spaces.max_visible > 0 && content.height >= 6 {
         content_fit_spaces_height(content, snapshot, config, state)
     } else {
@@ -608,6 +609,13 @@ pub(in crate::client::shell) fn ordered_sidebar_sections(
             ),
         )
     }
+}
+
+/// Pinned chats ride at the top of the agents section, so any pin puts that
+/// section first regardless of `sidebar.section_order`.
+fn agents_first(snapshot: &ClientShellSnapshot, config: &ClientShellConfig) -> bool {
+    !snapshot.pinned_tabs.is_empty()
+        || config.section_order[0] == crate::config::SidebarSection::Agents
 }
 
 /// Height the spaces section needs to show up to `spaces.max_visible` entries,
@@ -659,13 +667,16 @@ fn content_fit_spaces_height(
 /// which has only one section.
 pub(in crate::client::shell) fn sidebar_section_divider_rect(
     area: Rect,
+    snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     state: &ShellRenderState<'_>,
 ) -> Rect {
     if super::tree::tree_view_active(config) || config.spaces.max_visible > 0 {
         return Rect::default();
     }
-    let ratio = if config.section_order[0] == crate::config::SidebarSection::Agents {
+    // Same order rule as `ordered_sidebar_sections`, so the hitbox sits on the
+    // drawn boundary rather than over a pinned chat.
+    let ratio = if agents_first(snapshot, config) {
         1.0 - state.sidebar_section_split
     } else {
         state.sidebar_section_split

@@ -87,6 +87,15 @@ impl EndpointCommands {
             });
     }
 
+    /// Lanes with a queued request and nothing in flight.
+    pub(super) fn queued_lanes(&self) -> Vec<ClientEndpointId> {
+        self.lanes
+            .iter()
+            .filter(|(_, lane)| lane.in_flight.is_none() && !lane.queued.is_empty())
+            .map(|(endpoint_id, _)| endpoint_id.clone())
+            .collect()
+    }
+
     pub(super) fn send_next(
         &mut self,
         endpoint_id: &ClientEndpointId,

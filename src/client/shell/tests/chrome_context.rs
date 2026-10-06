@@ -563,3 +563,55 @@ fn workspace_menu_toggles_orchestrator_mode_through_endpoint() {
         )));
     }
 }
+
+#[test]
+fn section_divider_follows_the_pinned_agents_section_and_drags_with_the_pointer() {
+    // A pin draws the agents section first; the divider hitbox and its drag
+    // must follow that drawn boundary instead of the configured order.
+    let mut snapshot = snapshot();
+    snapshot.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+        tab_id: "tab_1".into(),
+        workspace_id: "ws_1".into(),
+    }];
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot));
+    state.set_pane_surface(surface());
+    state.sidebar_section_split = 0.3;
+    let spaces_row = |state: &mut ClientShellState| {
+        let frame = state.compose(106, 30).expect("sidebar frame");
+        let sidebar = state.hits.sidebar_divider;
+        frame_rows(&frame)
+            .iter()
+            .position(|row| {
+                row.chars()
+                    .take(sidebar.x as usize)
+                    .collect::<String>()
+                    .starts_with(" spaces")
+            })
+            .expect("spaces header drawn") as u16
+    };
+    let boundary = spaces_row(&mut state);
+    let divider = state.hits.sidebar_section_divider;
+    assert_eq!(
+        divider.y, boundary,
+        "divider sits on the drawn section boundary"
+    );
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: divider.x + 2,
+        row: divider.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column: divider.x + 2,
+        row: 12,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    let dragged = spaces_row(&mut state);
+    assert!(
+        dragged.abs_diff(12) <= 1,
+        "boundary followed the pointer to row {dragged}"
+    );
+    assert_eq!(state.hits.sidebar_section_divider.y, dragged);
+}

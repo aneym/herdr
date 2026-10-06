@@ -793,11 +793,7 @@ impl ClientShellState {
                 || self.snapshot.as_deref().is_some_and(|snapshot| !snapshot.pinned_tabs.is_empty());
             let action = if pins_first { KeybindAction::SwitchTab(index) }
                 else { KeybindAction::SwitchWorkspace(index) };
-            let valid = if pins_first && self.multi_endpoint_active() {
-                self.endpoints.iter().filter_map(|endpoint| endpoint.snapshot.as_deref())
-                    .map(|snapshot| snapshot.pinned_tabs.iter().filter(|pin| snapshot.tabs.iter()
-                        .any(|tab| tab.tab_id == pin.tab_id)).count()).sum::<usize>() > index
-            } else { self.indexed_navigation_target_exists(&KeybindMatch::Action(action)) };
+            let valid = self.indexed_navigation_target_exists(&KeybindMatch::Action(action));
             if valid {
                 self.mode = ClientShellMode::Terminal;
                 self.navigate_workspace_id = None;
@@ -953,20 +949,19 @@ impl ClientShellState {
                         .is_some()
                 })
             }
-            KeybindMatch::Action(KeybindAction::SwitchTab(index)) if self.multi_endpoint_active()
-                && self.endpoints.iter().filter_map(|endpoint| endpoint.snapshot.as_deref())
-                    .any(|snapshot| !snapshot.pinned_tabs.is_empty()) => {
-                self.endpoints.iter().filter_map(|endpoint| endpoint.snapshot.as_deref())
-                    .map(|snapshot| snapshot.pinned_tabs.iter().filter(|pin| snapshot.tabs.iter()
-                        .any(|tab| tab.tab_id == pin.tab_id)).count()).sum::<usize>() > *index
+            KeybindMatch::Action(KeybindAction::SwitchTab(index)) => {
+                match self
+                    .multi_endpoint_active()
+                    .then(|| self.aggregate_numbered_tabs())
+                    .flatten()
+                {
+                    Some(numbered) => numbered.len() > *index,
+                    None => self
+                        .snapshot
+                        .as_deref()
+                        .is_some_and(|snapshot| self.numbered_tab_ids(snapshot).len() > *index),
+                }
             }
-            KeybindMatch::Action(KeybindAction::SwitchTab(index)) => self
-                .snapshot
-                .as_deref()
-                .and_then(|snapshot| {
-                    self.numbered_tab_ids(snapshot).get(*index).cloned()
-                })
-                .is_some(),
             KeybindMatch::Action(KeybindAction::FocusAgent(index)) => {
                 super::aggregate_navigation::online_agent_targets(
                     &self.endpoints,

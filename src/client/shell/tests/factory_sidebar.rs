@@ -1226,6 +1226,7 @@ fn grouped_lane_draws_live_workflows_and_runs_and_rolls_up_state() {
         "{rows:?}"
     );
     let (column, row) = (child.pin.x, run.rect.y);
+    let (child_x, child_y, run_y) = (child.rect.x, child.rect.y, run.rect.y);
     let mut state = factory_state(snapshot.clone(), overlay.clone());
     state.config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
     *state.tree_chrome_mut() = tree.clone();
@@ -1248,6 +1249,51 @@ fn grouped_lane_draws_live_workflows_and_runs_and_rolls_up_state() {
         "run row must not pin its lane"
     );
     assert_eq!(focused_tab(&outcome), ["lane-b"]);
+    // Nor does its right-click offer the lane's tab actions (Pin, Close, Rename).
+    let right_click = |state: &mut ClientShellState, row| {
+        state.overlay = None;
+        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Right),
+            column: child_x + 4,
+            row,
+            modifiers: KeyModifiers::NONE,
+        })]);
+        state.overlay.is_some()
+    };
+    assert!(!right_click(&mut state, run_y), "run row opened a tab menu");
+    assert!(
+        right_click(&mut state, child_y),
+        "lane row keeps its tab menu"
+    );
+}
+
+#[test]
+fn pinned_lane_shows_the_live_child_rollup_its_tree_row_shows() {
+    let (mut snapshot, overlay) = grouped_workflow_fixture();
+    snapshot.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+        tab_id: "lane-a".into(),
+        workspace_id: "ws_1".into(),
+    }];
+    let (rows, hits, buffer) =
+        rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 37);
+    // The pinned row comes first in the panel, the lane's own row after it.
+    let lane_hits = hits
+        .tree_headers
+        .iter()
+        .filter(|hit| hit.key == "lane-a")
+        .collect::<Vec<_>>();
+    let [pinned, lane] = lane_hits.as_slice() else {
+        panic!("pinned and lane rows: {rows:?}")
+    };
+    let palette = ClientShellConfig::from_config(&Config::default()).palette;
+    let lane_mark = &buffer[(lane.rect.x + 4, lane.rect.y)];
+    let pinned_mark = &buffer[(pinned.rect.x + 1, pinned.rect.y)];
+    assert_eq!(lane_mark.fg, palette.working, "{rows:?}");
+    assert_eq!(
+        (pinned_mark.symbol(), pinned_mark.fg),
+        (lane_mark.symbol(), lane_mark.fg),
+        "pinned row disagrees with its lane row: {rows:?}"
+    );
 }
 
 #[test]

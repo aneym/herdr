@@ -11,6 +11,16 @@ impl ClientShellState {
             .filter(|pin| snapshot.tabs.iter().any(|tab| tab.tab_id == pin.tab_id))
             .map(|pin| pin.tab_id.clone())
             .collect();
+        numbered.extend(self.focused_space_numbered_tab_ids(snapshot));
+        numbered
+    }
+
+    /// The focused space's own tabs in Cmd+N order, after the pinned chats.
+    pub(super) fn focused_space_numbered_tab_ids(
+        &self,
+        snapshot: &ClientShellSnapshot,
+    ) -> Vec<String> {
+        let mut numbered = Vec::new();
         let Some(workspace_id) = snapshot.focused_workspace_id.as_deref() else {
             return numbered;
         };

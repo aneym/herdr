@@ -149,18 +149,16 @@ impl ClientShellState {
             return false;
         }
         if let KeybindAction::SwitchTab(index) = action {
-            let pins = self.endpoints.iter().flat_map(|endpoint| {
-                endpoint.snapshot.as_deref().map_or_else(Vec::new, |snapshot| {
-                    snapshot.pinned_tabs.iter().filter(|pin| snapshot.tabs.iter()
-                        .any(|tab| tab.tab_id == pin.tab_id))
-                        .map(|pin| (endpoint.endpoint_id.clone(), pin.tab_id.clone())).collect()
-                })
-            }).collect::<Vec<_>>();
-            if let Some((endpoint_id, tab_id)) = pins.get(index) {
-                self.focus_or_activate(endpoint_id.clone(), ClientEndpointFocusTarget::Tab(tab_id.clone()), outcome);
+            if let Some(numbered) = self.aggregate_numbered_tabs() {
+                if let Some((endpoint_id, tab_id)) = numbered.get(index).cloned() {
+                    self.focus_or_activate(
+                        endpoint_id,
+                        ClientEndpointFocusTarget::Tab(tab_id),
+                        outcome,
+                    );
+                }
                 return true;
             }
-            if !pins.is_empty() { return true; }
         }
         if matches!(
             action,
@@ -276,6 +274,40 @@ impl ClientShellState {
             return true;
         }
         false
+    }
+
+    /// Cmd+1..9 targets while any machine has a pin: every machine's pins in
+    /// sidebar order, then the focused space's own tabs on the active machine,
+    /// as on a single endpoint. `None` when nothing is pinned anywhere.
+    pub(super) fn aggregate_numbered_tabs(&self) -> Option<Vec<(ClientEndpointId, String)>> {
+        let mut numbered = self
+            .endpoints
+            .iter()
+            .flat_map(|endpoint| {
+                endpoint
+                    .snapshot
+                    .as_deref()
+                    .map_or_else(Vec::new, |snapshot| {
+                        snapshot
+                            .pinned_tabs
+                            .iter()
+                            .filter(|pin| snapshot.tabs.iter().any(|tab| tab.tab_id == pin.tab_id))
+                            .map(|pin| (endpoint.endpoint_id.clone(), pin.tab_id.clone()))
+                            .collect()
+                    })
+            })
+            .collect::<Vec<_>>();
+        if numbered.is_empty() {
+            return None;
+        }
+        if let Some(snapshot) = self.snapshot.as_deref() {
+            numbered.extend(
+                self.focused_space_numbered_tab_ids(snapshot)
+                    .into_iter()
+                    .map(|tab_id| (self.active_endpoint_id.clone(), tab_id)),
+            );
+        }
+        Some(numbered)
     }
 
     pub(super) fn activate_endpoint(

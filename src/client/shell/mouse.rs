@@ -22,11 +22,20 @@ impl ClientShellState {
     }
 
     fn set_sidebar_section_from_row(&mut self, row: u16, outcome: &mut ClientShellInput) {
-        let divider = self.hits.sidebar_divider;
-        if divider.height == 0 {
+        let track = if self.hits.sidebar_section_track.is_empty() {
+            self.hits.sidebar_divider
+        } else {
+            self.hits.sidebar_section_track
+        };
+        if track.height == 0 {
             return;
         }
-        let ratio = row.saturating_sub(divider.y) as f32 / divider.height as f32;
+        let ratio = row.saturating_sub(track.y) as f32 / track.height as f32;
+        let ratio = if self.hits.sidebar_section_inverted {
+            1.0 - ratio
+        } else {
+            ratio
+        };
         let ratio = ratio.clamp(0.1, 0.9);
         if (self.sidebar_section_split - ratio).abs() > f32::EPSILON {
             self.sidebar_section_split = ratio;
@@ -2048,12 +2057,19 @@ impl ClientShellState {
                 }
                 // Chat rows in the tree (pinned rows included) open the tab
                 // menu, which carries Pin / Unpin.
-                let tree_tab = self.hits.tree_headers.iter()
+                let tree_hit = self
+                    .hits
+                    .tree_headers
+                    .iter()
                     .find(|hit| super::contains(hit.rect, point))
-                    .and_then(|hit| hit.tab_id.clone());
-                if let Some(tab_id) = tree_tab {
-                    self.open_tab_context_menu(tab_id, mouse.column, mouse.row);
-                    outcome.repaint = true;
+                    .map(|hit| (hit.tab_id.clone(), hit.key.clone()));
+                if let Some((Some(tab_id), key)) = tree_hit {
+                    // A workflow run row is not a tab: every tab action there
+                    // (Pin, Close, Rename) would land on its parent lane.
+                    if !super::tree::is_factory_run_key(&tab_id, &key) {
+                        self.open_tab_context_menu(tab_id, mouse.column, mouse.row);
+                        outcome.repaint = true;
+                    }
                     return;
                 }
                 let agent_pane_id = self
@@ -2126,6 +2142,23 @@ impl ClientShellState {
                     crate::input::KeybindMatch::Action(crate::input::KeybindAction::NextTab),
                     outcome,
                 );
+            }
+            MouseEventKind::ScrollUp if super::contains(self.hits.endpoint_pin_body, point) => {
+                let next = self.endpoint_pin_scroll.saturating_sub(1);
+                if next != self.endpoint_pin_scroll {
+                    self.endpoint_pin_scroll = next;
+                    outcome.repaint = true;
+                }
+            }
+            MouseEventKind::ScrollDown if super::contains(self.hits.endpoint_pin_body, point) => {
+                let next = self
+                    .endpoint_pin_scroll
+                    .saturating_add(1)
+                    .min(self.hits.endpoint_pin_max_scroll);
+                if next != self.endpoint_pin_scroll {
+                    self.endpoint_pin_scroll = next;
+                    outcome.repaint = true;
+                }
             }
             MouseEventKind::ScrollUp if super::contains(self.hits.agent_body, point) => {
                 let next = self.agent_scroll.saturating_sub(1);
