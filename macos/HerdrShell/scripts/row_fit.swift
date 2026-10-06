@@ -37,7 +37,8 @@ let column = sidebarWidth - 16
             .font(.system(size: 12.5))
         let r = ImageRenderer(content: view)
         r.proposedSize = ProposedViewSize(width: column, height: nil)
-        let w = (r.cgImage.map { CGFloat($0.width) / r.scale }) ?? 0
+        guard let image = r.cgImage else { log("FAIL: \(row.id) drew no image"); return 2 }
+        let w = CGFloat(image.width) / r.scale
         if w > column + 0.5 { wide += 1 }
         print(String(format: "%6.1f %@", w, row.id))
     }

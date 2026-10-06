@@ -58,7 +58,7 @@ struct SpacesRowView: View {
             }
             Spacer(minLength: 4)
             if !row.trailing.isEmpty, row.kind != .goal {
-                Text(row.trailing).font(.system(size: 10.5)).foregroundStyle(row.link == nil ? t.mute : t.accent)
+                Text(row.trailing).font(.system(size: 10.5)).monospacedDigit().foregroundStyle(row.link == nil ? t.mute : t.accent)
                     .lineLimit(1).truncationMode(.tail)
                     .layoutPriority(1)
                     .onTapGesture { click(row.link == nil ? "body" : "link") }
