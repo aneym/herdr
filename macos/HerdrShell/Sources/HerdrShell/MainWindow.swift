@@ -499,6 +499,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         } ?? layout.panes
         let key = tab + (zoomedPane.map { "zoom:\($0)|" } ?? "")
             + shown.map { "\($0.pane_id)@\($0.rect.x),\($0.rect.y),\($0.rect.width),\($0.rect.height)" }.joined(separator: "|")
+            // A restarted remote server keeps pane ids but hands out new terminals.
+            + (Machines.isRemote(tab) ? "|" + shown.compactMap { model.pane($0.pane_id)?.terminal_id }.joined(separator: ",") : "")
         guard key != lastLayoutKey else { applyCaps(); return }
         lastLayoutKey = key
         var items: [(SurfaceView, Snapshot.Rect)] = []
@@ -508,7 +510,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             wire(s, tab: tab)
             items.append((s, lp.rect))
         }
-        host.show(items, area: layout.area, dividers: zoomedPane == nil ? PaneDivider.from(layout) : [])
+        // Splits on another machine are not dragged from here: a resize in flight could outlive the selection.
+        host.show(items, area: layout.area, dividers: zoomedPane == nil && !Machines.isRemote(tab) ? PaneDivider.from(layout) : [])
         applyPendingFocus()
         applyVisibility()
         applyCaps()
@@ -736,9 +739,12 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     /// After pane.close, the next snapshot says where focus goes: herdr's focused pane,
     /// else the tab's first pane, else the next sidebar row when the tab itself closed.
     private func reconcileClose() -> Bool {
-        guard let pending = pendingClose, let snap = model.snapshot else { return false }
+        // A remote pane's close is settled by its machine's snapshot, not the local one.
+        guard let pending = pendingClose, let snap = model.source(for: pending.pane) else { return false }
         guard !snap.panes.contains(where: { $0.pane_id == pending.pane }) else { return false }
         pendingClose = nil
+        // Selection moved on while a remote close was in flight: leave it where the user put it.
+        if Machines.isRemote(pending.pane), state.selectedTab != pending.tab { return false }
         if let tab = pending.tab, focusedPaneByTab[tab] == pending.pane { focusedPaneByTab[tab] = nil }
         if let tab = pending.tab, snap.tabs.contains(where: { $0.tab_id == tab }) {
             let layout = snap.layouts.first { $0.tab_id == tab }
@@ -760,7 +766,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         let i = pending.tab.flatMap { ids.firstIndex(of: $0) } ?? -1
         let after = i >= 0 ? Array(ids.dropFirst(i + 1)) : ids
         let before = i > 0 ? Array(ids.prefix(i)) : []
-        if let next = (after + before).first(where: { id in snap.tabs.contains { $0.tab_id == id } }) {
+        if let next = (after + before).first(where: { id in model.hasTab(id) }) {
             selectTab(next)
         }
         return true

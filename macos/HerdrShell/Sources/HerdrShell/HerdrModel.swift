@@ -207,8 +207,9 @@ final class HerdrModel: ObservableObject {
 
     /// True once the machine that owns a remote id has answered at least once.
     func machineLoaded(for id: String) -> Bool {
-        guard let name = Machines.split(id)?.machine else { return true }
-        return machines.first { $0.name == name }?.snapshot != nil
+        // A machine no longer configured never answers; treat it as loaded so the selection falls back.
+        guard let name = Machines.split(id)?.machine, let m = machines.first(where: { $0.name == name }) else { return true }
+        return m.snapshot != nil
     }
 
     private func startMachines() {

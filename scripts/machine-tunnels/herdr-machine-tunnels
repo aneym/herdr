@@ -44,9 +44,13 @@ def load():
         log(f"config unreadable: {e}")
         return None
     out = {}
-    for m in machines:
+    for m in machines if isinstance(machines, list) else []:
+        if not isinstance(m, dict):
+            log(f"skipping bad machine entry {m!r}")
+            continue
         name = str(m.get("name", ""))
-        if not name or "/" in name or name.startswith(".") or not m.get("ssh") or not m.get("remote_dir"):
+        if (not name or "/" in name or name.startswith(".") or name in out or not isinstance(m.get("ssh"), list)
+                or not m.get("ssh") or not m.get("remote_dir")):
             log(f"skipping bad machine entry {m!r}")
             continue
         out[name] = {"ssh": list(m["ssh"]), "remote_dir": str(m["remote_dir"]).rstrip("/")}
@@ -124,9 +128,16 @@ def run():
                 continue
             os.makedirs(os.path.join(ROOT, name), mode=0o700, exist_ok=True)
             # stderr goes to a file: an unread pipe fills up and stalls every forward through it.
-            with open(os.path.join(ROOT, name, "ssh.log"), "wb") as err_log:
-                procs[name] = subprocess.Popen(argv(name, m), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                               stderr=err_log)
+            try:
+                with open(os.path.join(ROOT, name, "ssh.log"), "wb") as err_log:
+                    procs[name] = subprocess.Popen(argv(name, m), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                                   stderr=err_log)
+            except OSError as e:
+                status[name] = {"up": False, "down_since": time.time(), "last_error": str(e), "started_mono": now}
+                log(f"{name}: cannot start ssh: {e}")
+                next_try[name] = now + backoff.get(name, 2)
+                backoff[name] = min(60, backoff.get(name, 2) * 2)
+                continue
             prev = status.get(name, {})
             status[name] = {"up": True, "pid": procs[name].pid, "since": time.time(), "started_mono": now,
                             "down_since": prev.get("down_since"), "last_error": prev.get("last_error")}

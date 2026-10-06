@@ -122,6 +122,16 @@ def main():
         x.get("pane") == f"{machine}/{a.scratch_pane}" and x.get("visible_nonblank") for x in s.get("surfaces", [])))
     surf = next((x for x in st.get("surfaces", []) if x.get("pane") == f"{machine}/{a.scratch_pane}"), {})
     check("remote tab selected and attached", bool(surf.get("visible_nonblank")), json.dumps(surf.get("visible_nonblank", [])[-2:]))
+    # Keys go to the focused pane. Type only when the scratch tab is that one shell and it has focus.
+    shown = (st.get("shown_layout") or {}).get("panes", [])
+    ready = (len(shown) == 1 and shown[0].get("pane") == f"{machine}/{a.scratch_pane}"
+             and st.get("focused_pane") == f"{machine}/{a.scratch_pane}" and surf.get("visible_nonblank"))
+    check("scratch tab is one focused shell", bool(ready), json.dumps({"shown": shown, "focused": st.get("focused_pane")}))
+    if not ready:
+        S.app("stop")
+        S.lab("down")
+        pathlib.Path(S.OUT).write_text("\n".join(lines) + "\n")
+        raise SystemExit("not typing: the scratch pane is not the only, focused pane of its tab")
     token = f"MM_SHELL_{int(time.time()) % 100000}"
     S.type_(f"echo {token}")
     S.key("return")
@@ -141,6 +151,14 @@ def main():
     check("machine folds to one counted line", "|closed|" in row and " agent" in row, row)
     check("folded machine hides its tabs", not any(r.startswith(f"tab|tab:{machine}/") for r in st.get("spaces_rows", [])))
     S.cmd({"cmd": "spaces_click", "row": f"machine:{machine}"})
+    # Quit on a remote tab, drop that machine from the config: the relaunch must fall back to a local tab.
+    S.cmd({"cmd": "select", "tab": a.scratch_tab})
+    wait(lambda s: s.get("selected_tab") == a.scratch_tab, timeout=10)
+    S.app("stop")
+    cfg.write_text(json.dumps({"machines": [{"name": n, "dir": f"~/.config/herdr-machines/{n}"} for n in names if n != machine]}))
+    start()
+    st = wait(lambda s: (s.get("selected_tab") or "").startswith(("w", "s")) and "/" not in (s.get("selected_tab") or "/"), timeout=20)
+    check("removed machine's tab falls back to a local tab", "/" not in (st.get("selected_tab") or "/"), str(st.get("selected_tab")))
     S.app("stop")
     S.lab("down")
     pathlib.Path(S.OUT).write_text("\n".join(lines) + "\n")

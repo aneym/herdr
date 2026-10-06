@@ -6,7 +6,9 @@
 [PASS] forge header shows its herdr (machine|machine:forge|0|open||unknown|forge|herdr 0.8.2|none|||machine:forge|)
 [PASS] unreachable machine says so (machine|machine:ghost|0|open||unknown|ghost|connecting|none|||machine:ghost|dim)
 [PASS] ax42 agent tabs listed (4 rows)
-[PASS] remote tab selected and attached (["MM_ATTACH_OK_42                                                                                                               ", "jobs@ax42:~$                                                                                                                  "])
+[PASS] remote tab selected and attached (["MM_SHELL_52406                                                                                                                ", "jobs@ax42:~$                                                                                                                  "])
+[PASS] scratch tab is one focused shell ({"shown": [{"pane": "ax42/w3:p1", "rect": [0, 0, 120, 40]}], "focused": "ax42/w3:p1"})
 [PASS] typing reaches the remote pane (jobs@ax42:~$)
 [PASS] machine folds to one counted line (machine|machine:ax42|0|closed|■|blocked|ax42|4 agents|none|||machine:ax42|)
 [PASS] folded machine hides its tabs
+[PASS] removed machine's tab falls back to a local tab (w1:t2)

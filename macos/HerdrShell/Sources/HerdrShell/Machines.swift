@@ -25,9 +25,12 @@ enum Machines {
         guard let data = FileManager.default.contents(atPath: path),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let list = obj["machines"] as? [[String: Any]] else { return }
+        var seen = Set<String>()
         configs = list.compactMap { m in
             guard let name = m["name"] as? String, !name.isEmpty, !name.contains("/"), !name.contains(":"),
                   m["enabled"] as? Bool != false else { return nil }
+            // One name, one server: ids carry only the name, so a duplicate would misroute commands.
+            guard seen.insert(name).inserted else { log("machines: duplicate \(name) ignored"); return nil }
             let dir = ((m["dir"] as? String) ?? root + "/" + name) as NSString
             let socket = (m["socket"] as? String).map { ($0 as NSString).expandingTildeInPath }
                 ?? dir.expandingTildeInPath + "/herdr.sock"
