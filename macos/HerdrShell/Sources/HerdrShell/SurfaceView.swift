@@ -126,6 +126,7 @@ final class SurfaceView: NSView {
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         pushSize()
+        layoutLinkPreview()
     }
 
     override func viewDidMoveToWindow() {
@@ -471,6 +472,47 @@ final class SurfaceView: NSView {
 
     // MARK: mouse
 
+    private var hoveredLink = ""
+    private var cursorBeforeLink: NSCursor?
+    private lazy var linkPreview: LinkPreview = {
+        let label = LinkPreview(labelWithString: "")
+        label.font = .systemFont(ofSize: 11)
+        label.textColor = .secondaryLabelColor
+        label.backgroundColor = .windowBackgroundColor
+        label.drawsBackground = true
+        label.lineBreakMode = .byTruncatingMiddle
+        label.isHidden = true
+        addSubview(label)
+        return label
+    }()
+
+    func setHoveredLink(_ url: String) {
+        guard hoveredLink != url else { return }
+        if hoveredLink.isEmpty, !url.isEmpty { cursorBeforeLink = NSCursor.current }
+        hoveredLink = url
+        linkPreview.stringValue = url
+        linkPreview.isHidden = url.isEmpty
+        layoutLinkPreview()
+        if url.isEmpty {
+            cursorBeforeLink?.set()
+            cursorBeforeLink = nil
+        } else {
+            NSCursor.pointingHand.set()
+        }
+        window?.invalidateCursorRects(for: self)
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        if !hoveredLink.isEmpty { addCursorRect(bounds, cursor: .pointingHand) }
+    }
+
+    private func layoutLinkPreview() {
+        guard !hoveredLink.isEmpty else { return }
+        let width = min(max(0, bounds.width - 12), linkPreview.intrinsicContentSize.width + 8)
+        linkPreview.frame = NSRect(x: 6, y: 4, width: width, height: 18)
+    }
+
     override func updateTrackingAreas() {
         trackingAreas.forEach { removeTrackingArea($0) }
         addTrackingArea(NSTrackingArea(
@@ -547,6 +589,7 @@ final class SurfaceView: NSView {
     override func mouseEntered(with event: NSEvent) { sendPos(event) }
 
     override func mouseExited(with event: NSEvent) {
+        setHoveredLink("")
         // Leave the position alone while a button is held: a drag selection keeps
         // extending outside the view. Otherwise park it outside so hover state clears.
         guard let surface, NSEvent.pressedMouseButtons == 0 else { return }
@@ -830,4 +873,9 @@ extension SurfaceView: NSTextInputClient {
         }
         if !chars.isEmpty { committedText(GHOSTTY_ACTION_PRESS, chars) }
     }
+}
+
+/// The preview must never intercept terminal clicks or drag selection.
+private final class LinkPreview: NSTextField {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }

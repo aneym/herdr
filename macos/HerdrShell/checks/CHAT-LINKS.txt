@@ -1,0 +1,12 @@
+[PASS] bare URL in prose
+[PASS] markdown target preserved
+[PASS] trailing period trimmed
+[PASS] unbalanced paren trimmed
+[PASS] balanced paren retained
+[PASS] trailing punctuation trimmed
+[PASS] long URL exact target and display-only breaks
+[PASS] non-http schemes not autolinked
+[PASS] no URL unchanged
+[PASS] assistant bare URL after markdown parsing
+[PASS] multiple URLs and Unicode offsets
+[PASS] long markdown label keeps its target

@@ -102,6 +102,14 @@ final class GhosttyRuntime {
             DispatchQueue.main.async { openDetectedURL(raw) }
             return true
         }
+        if action.tag == GHOSTTY_ACTION_MOUSE_OVER_LINK, target.tag == GHOSTTY_TARGET_SURFACE,
+           let ud = ghostty_surface_userdata(target.target.surface) {
+            let view = Unmanaged<SurfaceView>.fromOpaque(ud).takeUnretainedValue()
+            let link = action.action.mouse_over_link
+            let raw = text(link.url, len: Int(link.len))
+            DispatchQueue.main.async { [weak view] in view?.setHoveredLink(raw) }
+            return true
+        }
         if action.tag == GHOSTTY_ACTION_DESKTOP_NOTIFICATION {
             let n = action.action.desktop_notification
             let title = n.title.map { String(cString: $0) } ?? ""
