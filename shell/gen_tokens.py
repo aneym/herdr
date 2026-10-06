@@ -227,7 +227,10 @@ def web_lint(generated_css):
         decls = CSS_COLOR_DECL if css else TS_COLOR_PROP
         group = 2 if css else 1
         for d in decls.finditer(text):
-            found += [(d.start(group) + m.start(), m.group(0)) for m in re.finditer(NAMED_RE, d.group(group), re.I)]
+            # url(...) and quoted strings in a CSS value are names, not colors ("red.svg").
+            value = d.group(group) if not css else re.sub(r"url\([^)]*\)|\"[^\"]*\"|'[^']*'",
+                                                         lambda m: " " * len(m.group(0)), d.group(group))
+            found += [(d.start(group) + m.start(), m.group(0)) for m in re.finditer(NAMED_RE, value, re.I)]
         for pos, lit in sorted(found):
             problems.append(f"{rel}:{text.count(chr(10), 0, pos) + 1}: color literal {lit!r}; use a --shell-* token")
         for m in VAR_USE.finditer(text):
