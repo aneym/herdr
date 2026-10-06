@@ -1129,6 +1129,9 @@ pub struct ClientShellTab {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientShellPane {
+    /// Pane metadata, including reports from panes without a detected agent.
+    #[serde(default)]
+    pub tokens: std::collections::HashMap<String, String>,
     pub pane_id: String,
     pub workspace_id: String,
     pub tab_id: String,
@@ -2902,6 +2905,20 @@ mod tests {
     }
 
     #[test]
+    fn request_dot_pane_tokens_wire_compatibility() {
+        let old = r#"{"pane_id":"p","workspace_id":"w","tab_id":"t","label":null,"cwd":null,"foreground_cwd":null,"focused":false,"right_click_passthrough":false}"#;
+        let mut pane: ClientShellPane = serde_json::from_str(old).expect("older pane wire");
+        assert!(pane.tokens.is_empty());
+        pane.tokens.insert("request".into(), "req-42".into());
+        let encoded = serde_json::to_string(&pane).expect("encode pane tokens");
+        let decoded: ClientShellPane = serde_json::from_str(&encoded).expect("decode pane tokens");
+        assert_eq!(
+            decoded.tokens.get("request").map(String::as_str),
+            Some("req-42")
+        );
+    }
+
+    #[test]
     fn client_shell_snapshot_roundtrip() {
         let msg = ServerMessage::ClientShellSnapshot(Box::new(ClientShellSnapshot {
             boot_id: "boot-1".into(),
@@ -2970,6 +2987,7 @@ mod tests {
                 work_status: None,
             }],
             panes: vec![ClientShellPane {
+                tokens: Default::default(),
                 pane_id: "w1:p1".into(),
                 workspace_id: "w1".into(),
                 tab_id: "w1:t1".into(),

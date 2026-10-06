@@ -83,6 +83,7 @@ pub(super) fn tree_snapshot() -> ClientShellSnapshot {
     snapshot.tabs[0].focused = true;
     snapshot.panes = vec![
         ClientShellPane {
+            tokens: Default::default(),
             pane_id: "pane_1".into(),
             workspace_id: "ws_1".into(),
             tab_id: "tab_1".into(),
@@ -94,6 +95,7 @@ pub(super) fn tree_snapshot() -> ClientShellSnapshot {
             machine: None,
         },
         ClientShellPane {
+            tokens: Default::default(),
             pane_id: "pane_2".into(),
             workspace_id: "ws_1".into(),
             tab_id: "tab_2".into(),
@@ -105,6 +107,7 @@ pub(super) fn tree_snapshot() -> ClientShellSnapshot {
             machine: None,
         },
         ClientShellPane {
+            tokens: Default::default(),
             pane_id: "pane_3".into(),
             workspace_id: "ws_2".into(),
             tab_id: "tab_3".into(),
@@ -1850,4 +1853,61 @@ fn parked_tree_reveal_focus_and_attention() {
     assert!(!report(state.tree_chrome_mut()));
     let tree = state.tree_chrome_mut().clone();
     assert!(shape(&state, &tree).iter().any(|row| row == "tab:one"));
+}
+
+/// Golden table at the pinned-entry/buffer boundary, including an undetected pane.
+#[test]
+fn request_dot_agents_only() {
+    for (role, request, expected) in [
+        (Some("agent"), Some("req-42"), true),
+        (Some("agent"), None, false),
+        (None, Some("req-42"), false),
+    ] {
+        let mut snapshot = tree_snapshot();
+        snapshot.agents.clear();
+        snapshot.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+            role: role.map(|_| crate::api::schema::TabRole::Agent),
+            tab_id: "tab_1".into(),
+            workspace_id: "ws_1".into(),
+        }];
+        if let Some(request) = request {
+            snapshot.panes[0]
+                .tokens
+                .insert("request".into(), request.into());
+        }
+        let entries = crate::client::shell::tree::pinned_tab_entries(&snapshot, None);
+        let row = entries
+            .iter()
+            .find_map(|entry| match entry {
+                AgentPanelListEntry::PinnedTab(row) => Some(row),
+                _ => None,
+            })
+            .expect("live pin");
+        assert_eq!(
+            row.request.as_deref(),
+            if expected { request } else { None }
+        );
+        let config = ClientShellConfig::from_config(&Config::default());
+        let rect = Rect::new(0, 0, 40, 1);
+        let mut buffer = Buffer::empty(rect);
+        let mut hits = ShellHitMap::default();
+        crate::client::shell::agent_sidebar::render_pinned_tab_row(
+            &mut buffer,
+            rect,
+            row,
+            &config,
+            &mut hits,
+        );
+        let dots = (0..40)
+            .filter(|x| buffer[(*x, 0)].symbol() == "•")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            dots.len(),
+            usize::from(expected),
+            "role={role:?}, request={request:?}"
+        );
+        for x in dots {
+            assert_eq!(buffer[(x, 0)].fg, config.palette.blue);
+        }
+    }
 }

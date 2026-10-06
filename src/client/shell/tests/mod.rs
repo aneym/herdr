@@ -62,6 +62,7 @@ pub(super) fn snapshot() -> ClientShellSnapshot {
             work_status: None,
         }],
         panes: vec![ClientShellPane {
+            tokens: Default::default(),
             pane_id: "pane_1".into(),
             workspace_id: "ws_1".into(),
             tab_id: "tab_1".into(),

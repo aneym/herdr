@@ -469,14 +469,30 @@ pub(super) fn render_pinned_tab_row(
     } else {
         Style::default().fg(palette.subtext0).add_modifier(Modifier::BOLD)
     };
+    let dot_width = if row.request.is_some() && name_width >= 2 {
+        2
+    } else {
+        0
+    };
+    let label = crate::ui::truncate_end(&row.label, name_width.saturating_sub(dot_width) as usize);
     put_text(
         buffer,
         name_x,
         rect.y,
-        name_width,
-        &crate::ui::truncate_end(&row.label, name_width as usize),
+        name_width.saturating_sub(dot_width),
+        &label,
         style,
     );
+    if dot_width > 0 {
+        put_text(
+            buffer,
+            name_x + display_width(&label) as u16,
+            rect.y,
+            dot_width,
+            " •",
+            Style::default().fg(palette.blue),
+        );
+    }
     if space_width > 0 {
         put_text(
             buffer,

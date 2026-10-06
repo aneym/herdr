@@ -848,6 +848,7 @@ fn busy_lane_syncs_tab_and_sidebar_and_preserves_shell_status() {
     idle_agent.agent_status = AgentStatus::Idle;
     snapshot.agents = vec![idle_agent.clone()];
     snapshot.panes = vec![ClientShellPane {
+            tokens: Default::default(),
         pane_id: idle_agent.pane_id.clone(), workspace_id: "ws_1".into(), tab_id: "lane-b".into(),
         label: None, cwd: None, foreground_cwd: None, focused: false, right_click_passthrough: false,
         machine: None,
@@ -2549,6 +2550,7 @@ fn factory_sidebar_report_marks_scrolled_rows_offscreen_not_background() {
 fn remote_shell_pane_names_its_machine_on_lane_and_plain_agent_rows() {
     let (mut snapshot, overlay) = fixture();
     let pane = |pane_id: &str, tab_id: &str, machine: Option<&str>| ClientShellPane {
+            tokens: Default::default(),
         pane_id: pane_id.into(), workspace_id: "ws_1".into(), tab_id: tab_id.into(),
         label: None, cwd: None, foreground_cwd: None, focused: false, right_click_passthrough: false,
         machine: machine.map(str::to_owned),

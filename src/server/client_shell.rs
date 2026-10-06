@@ -153,6 +153,7 @@ pub(super) fn snapshot_with_completions(
                 .and_then(|runtime| runtime.foreground_machine());
             crate::render_prof::duration_since("pane_info.fg_machine", machine_started);
             protocol::ClientShellPane {
+                tokens: pane.tokens,
                 pane_id,
                 workspace_id: pane.workspace_id,
                 tab_id: pane.tab_id,
