@@ -175,17 +175,24 @@ def is_claude(proc):
 
 
 def keep_flags(argv):
-    out, i = [], 0
+    # A launcher wrapper adds its own --model/--effort before the user's; claude takes the last
+    # one, so keep only the last value per flag or every hop repeats the wrapper's.
+    bare, valued, i = [], {}, 0
     while i < len(argv):
         a = argv[i]
         if a in KEEP_FLAGS_WITH_VALUE and i + 1 < len(argv):
-            out += [a, argv[i + 1]]
+            valued.pop(a, None)
+            valued[a] = argv[i + 1]
             i += 2
             continue
-        if any(a.startswith(f + "=") for f in KEEP_FLAGS_WITH_VALUE) or (a in KEEP_FLAGS_BARE and a not in out):
-            out.append(a)
+        name = next((f for f in KEEP_FLAGS_WITH_VALUE if a.startswith(f + "=")), None)
+        if name:
+            valued.pop(name, None)
+            valued[name] = a.split("=", 1)[1]
+        elif a in KEEP_FLAGS_BARE and a not in bare:
+            bare.append(a)
         i += 1
-    return out
+    return bare + [x for k, v in valued.items() for x in (k, v)]
 
 
 def flag_value(flags, name):
@@ -494,8 +501,20 @@ def main():
                      f"sha256sum {shlex.quote(dst_key_dir + '/' + sid + '.jsonl')} || "
                      f"shasum -a 256 {shlex.quote(dst_key_dir + '/' + sid + '.jsonl')} 2>/dev/null", check=False)
     if exists.returncode == 0 and exists.stdout.strip() and not exists.stdout.startswith(src_sha):
-        relaunch_source("target holds a different copy")
-        die(f"{dst}:{dst_key_dir}/{sid}.jsonl exists with different content; refusing to overwrite")
+        # A chat moving back to a host it left finds the copy it left behind. That copy is safe
+        # to replace only when this transcript grew from it (it is a byte prefix of ours).
+        target = f"{dst_key_dir}/{sid}.jsonl"
+        size = sh(dst, f"wc -c < {shlex.quote(target)}", check=False).stdout.strip()
+        dst_sha = exists.stdout.split()[0]
+        with open(jsonl, "rb") as f:
+            head = f.read(int(size)) if size.isdigit() else b""
+        if size.isdigit() and len(head) == int(size) and hashlib.sha256(head).hexdigest() == dst_sha:
+            backup = f"{target}.before-move-{time.strftime('%Y%m%dT%H%M%S')}"
+            sh(dst, f"cp -p {shlex.quote(target)} {shlex.quote(backup)}")
+            say(f"target holds an older copy of this chat ({size} bytes, a prefix of ours); kept it as {backup}")
+        else:
+            relaunch_source("target holds a different copy")
+            die(f"{dst}:{target} exists with different content; refusing to overwrite")
     mk = f"mkdir -p {shlex.quote(dst_key_dir)} {shlex.quote(dst_lane_dir)}"
     if dst_cwd.startswith(dst_home + "/.agent-rails/"):
         mk += f" {shlex.quote(dst_cwd)}"
