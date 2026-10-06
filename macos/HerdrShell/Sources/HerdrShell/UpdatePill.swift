@@ -4,7 +4,7 @@ import AppKit
 final class UpdateController: NSObject {
     private weak var windowController: MainWindowController?
     private let accessory = NSTitlebarAccessoryViewController()
-    private let box = NSView(frame: NSRect(x: 0, y: 0, width: 96, height: 22))
+    private let box = PassThroughView(frame: NSRect(x: 0, y: 0, width: 96, height: 22))
     private let pill = NSButton(title: "Update", target: nil, action: nil)
     private let popover = NSPopover()
     private var source: DispatchSourceFileSystemObject?
@@ -21,7 +21,9 @@ final class UpdateController: NSObject {
         pill.setButtonType(.momentaryPushIn)
         pill.frame = NSRect(x: 0, y: 1, width: 76, height: 20)
         box.addSubview(pill)
-        accessory.layoutAttribute = .right
+        // Left, beside the window buttons, over the sidebar's empty strip. On the right it sat
+        // over the docs column's + and ✕ and took their clicks.
+        accessory.layoutAttribute = .left
         accessory.view = box
         controller.window.addTitlebarAccessoryViewController(accessory)
         pill.isHidden = true
@@ -124,8 +126,7 @@ final class UpdateController: NSObject {
     }
 
     private func applyPill() {
-        // The accessory's box spans the titlebar's right end, over the docs column's + and ✕;
-        // with no pill it must not take their clicks.
+        // With no pill the accessory takes no room and no clicks in the titlebar.
         guard let current else {
             pill.isHidden = true
             accessory.isHidden = true
@@ -142,7 +143,6 @@ final class UpdateController: NSObject {
         let width = max(pill.frame.width + 18, 72)
         pill.frame = NSRect(x: 0, y: 1, width: width, height: 20)
         box.frame = NSRect(x: 0, y: 0, width: width + 8, height: 22)
-        windowController?.root.titleReserve = pill.isHidden ? 0 : 28
     }
 
     @objc private func togglePopover() {
@@ -248,4 +248,12 @@ final class UpdatePopoverController: NSViewController {
 
     @objc private func restart() { owner?.restartNow() }
     @objc private func later() { owner?.later() }
+}
+
+/// Takes clicks only on its subviews (the pill), never on its empty area.
+final class PassThroughView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hit = super.hitTest(point)
+        return hit === self ? nil : hit
+    }
 }

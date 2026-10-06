@@ -679,7 +679,6 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         host.caps = next
         host.needsLayout = true
         host.layoutSubtreeIfNeeded()
-        root.titleReserve = (updates?.shown == true) ? 28 : 0
     }
 
     var factoryMachines: [MachineRow] { factoryModel?.snapshot.machines ?? [] }
@@ -1028,8 +1027,6 @@ final class ShellWindow: NSWindow {
         var sidebarVisible = true {
             didSet { sidebar.isHidden = !sidebarVisible; needsLayout = true }
         }
-        /// Extra top inset while the update pill is showing, so it never covers a pane cap.
-        var titleReserve: CGFloat = 0 { didSet { needsLayout = true } }
 
     func attachSwitcher(_ view: NSView) {
         switcher?.removeFromSuperview()
@@ -1066,8 +1063,7 @@ final class ShellWindow: NSWindow {
             docs.frame = NSRect(x: bounds.width - docW, y: 0, width: docW, height: bounds.height)
             docW += 1
         }
-        let top = titleReserve
-        host.frame = NSRect(x: x, y: 0, width: max(0, bounds.width - x - docW), height: max(0, bounds.height - top))
+        host.frame = NSRect(x: x, y: 0, width: max(0, bounds.width - x - docW), height: bounds.height)
         factory?.frame = host.frame
         if let switcher {
             switcher.frame = bounds
