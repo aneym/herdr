@@ -1,5 +1,6 @@
 fn main() {
     let commit = std::env::var("HERDR_SHELL_COMMIT").unwrap_or_else(|_| "dev".to_string());
+    println!("cargo:rerun-if-env-changed=HERDR_SHELL_COMMIT");
     println!("cargo:rustc-env=HERDR_SHELL_COMMIT={commit}");
     println!("cargo:rustc-env=HERDR_SHELL_BUILT_AT={}", iso_now());
     tauri_build::build()
