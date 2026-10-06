@@ -156,6 +156,8 @@ final class TestHook {
             }
         case "scroll":
             scroll(obj)
+        case "scroll_gesture":
+            scrollGesture(obj)
         case "frame":
             let w = CGFloat(obj["w"] as? Double ?? Double(obj["w"] as? Int ?? 1440))
             let h = CGFloat(obj["h"] as? Double ?? Double(obj["h"] as? Int ?? 900))
@@ -460,6 +462,61 @@ final class TestHook {
         log("hook scroll: dy=\(ev.scrollingDeltaY) precise=\(ev.hasPreciseScrollingDeltas)")
         s.scrollWheel(with: ev)
         delivered.append("scroll \(obj["dy"] ?? 0) on \(s.paneId)")
+    }
+
+    /// {"cmd":"scroll_gesture","pane":id,"dy":px,"steps":n,"momentum":m,"interval":s,"out":path}:
+    /// a trackpad swipe as AppKit delivers one: continuous pixel deltas with scroll phase
+    /// began, changed and ended, then `m` momentum events that decay, one event per
+    /// `interval` (default 1/120 s). On every tick, and for 0.4 s after, the surface's top
+    /// visible row is sampled; `out` gets "ms<TAB>row" lines, a client-side frame log.
+    private func scrollGesture(_ obj: [String: Any]) {
+        guard let c = controller,
+              let s = c.currentPanes.first(where: { $0.paneId == obj["pane"] as? String }),
+              let out = obj["out"] as? String else { log("hook: scroll_gesture refused"); return }
+        let dy = obj["dy"] as? Double ?? Double(obj["dy"] as? Int ?? 12)
+        let steps = obj["steps"] as? Int ?? 30
+        let momentum = obj["momentum"] as? Int ?? 40
+        let interval = obj["interval"] as? Double ?? 1.0 / 120
+        // (scroll phase, momentum phase, delta): CGScrollPhase began 1, changed 2, ended 4;
+        // CGMomentumScrollPhase begin 1, continue 2, end 3.
+        var events: [(Int64, Int64, Double)] = [(1, 0, dy)]
+        events += Array(repeating: (2, 0, dy), count: max(0, steps - 2))
+        events.append((4, 0, 0))
+        for i in 0..<momentum {
+            events.append((0, i == 0 ? 1 : (i == momentum - 1 ? 3 : 2), dy * pow(0.92, Double(i + 1))))
+        }
+        var frames = ""
+        var precise = 0
+        let t0 = Date()
+        let sample = { [weak s] in
+            let top = s?.visibleText().split(separator: "\n", omittingEmptySubsequences: false).first ?? ""
+            frames += String(format: "%.1f\t", Date().timeIntervalSince(t0) * 1000) + top + "\n"
+        }
+        var i = 0
+        Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak s] t in
+            if i < events.count, let s {
+                let (phase, mom, d) = events[i]
+                if let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1,
+                                    wheel1: Int32(d.rounded()), wheel2: 0, wheel3: 0) {
+                    cg.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+                    cg.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
+                    cg.setIntegerValueField(.scrollWheelEventMomentumPhase, value: mom)
+                    cg.setDoubleValueField(.scrollWheelEventPointDeltaAxis1, value: d)
+                    if let ev = NSEvent(cgEvent: cg) {
+                        if ev.hasPreciseScrollingDeltas { precise += 1 }
+                        s.scrollWheel(with: ev)
+                    }
+                }
+            }
+            i += 1
+            sample()
+            if Double(i - events.count) * interval > 0.4 {
+                t.invalidate()
+                frames = "# events=\(events.count) precise=\(precise) interval_ms=\(interval * 1000)\n" + frames
+                try? frames.write(toFile: out, atomically: true, encoding: .utf8)
+            }
+        }
+        delivered.append("scroll_gesture \(events.count) events on \(s.paneId)")
     }
 
     // US ANSI virtual keycodes.

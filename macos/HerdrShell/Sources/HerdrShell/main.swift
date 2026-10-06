@@ -157,7 +157,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let env = ProcessInfo.processInfo.environment
         let hostsProvider: HostsProvider = args["hosts-stub"].map { FileHostsProvider(path: $0) } ?? HerdrOnlyHostsProvider()
         model = HerdrModel(herdrBin: herdrBin, env: env, hostsProvider: hostsProvider)
-        let registry = SurfaceRegistry(herdrBin: herdrBin, attachEnv: ["HERDR_SOCKET_PATH": socket])
+        // Ghostty already sends one wheel report per row of trackpad travel; one row each
+        // keeps herdr's scroll as smooth as Ghostty's own (herdr's default is 3 per report).
+        let registry = SurfaceRegistry(herdrBin: herdrBin,
+                                       attachEnv: ["HERDR_SOCKET_PATH": socket, "HERDR_ATTACH_SCROLL_LINES": "1"])
         controller = MainWindowController(model: model, registry: registry, theme: theme)
         NSApp.mainMenu = buildMenu(target: controller)
         controller.show()

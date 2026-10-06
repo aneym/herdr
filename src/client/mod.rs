@@ -145,6 +145,21 @@ use crate::protocol::{self, ClientMessage, ServerMessage, MAX_GRAPHICS_FRAME_SIZ
 use crate::protocol::{AttachScrollDirection, AttachScrollSource, NotifyKind};
 use crate::server::socket_paths::client_socket_path;
 
+/// Rows one wheel report scrolls in a direct terminal attach, when the host asks.
+/// A native host that embeds Ghostty (Herdr Shell) already turns trackpad travel
+/// into one wheel report per row, as Ghostty does for its own scrollback, so it
+/// sets `HERDR_ATTACH_SCROLL_LINES=1`; `ui.mouse_scroll_lines` would multiply that
+/// again and make precise scrolling jump. An environment variable, not a flag, so
+/// a host can set it for older herdr binaries that would reject an unknown flag.
+fn attach_scroll_lines_override() -> Option<usize> {
+    std::env::var("HERDR_ATTACH_SCROLL_LINES")
+        .ok()?
+        .trim()
+        .parse::<std::num::NonZeroUsize>()
+        .ok()
+        .map(std::num::NonZeroUsize::get)
+}
+
 fn run_client_with_mode(
     attach_request: Option<(String, bool)>,
     attach_escape: Option<AttachEscapeState>,
@@ -175,7 +190,10 @@ fn run_client_with_mode(
             .with_local_endpoint(&socket_path)
     });
     let mouse_capture = loaded_config.config.ui.mouse_capture;
-    let mouse_scroll_lines = loaded_config.config.ui.mouse_scroll_lines();
+    let mouse_scroll_lines = attach_request
+        .as_ref()
+        .and_then(|_| attach_scroll_lines_override())
+        .unwrap_or_else(|| loaded_config.config.ui.mouse_scroll_lines());
     let redraw_on_focus_gained = loaded_config.config.ui.redraw_on_focus_gained;
     let host_cursor = loaded_config.config.ui.host_cursor;
     let remote_image_paste_key = client_remote_image_paste_key(&loaded_config.config);
