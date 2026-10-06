@@ -434,9 +434,10 @@ def auto():
             rel = release()
             if (rel and same(rel.get("commit", ""), sha)) or sha in tried:
                 return
-            if rel and not shell_changed(rel.get("commit", ""), sha):
-                return
             tried.add(sha)
+            if rel and not shell_changed(rel.get("commit", ""), sha):
+                # Re-read the branch: a push that lost the lock to this run is still ours.
+                continue
             publish(sha)
 
 

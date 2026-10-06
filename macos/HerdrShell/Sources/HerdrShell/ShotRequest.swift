@@ -27,7 +27,11 @@ final class ShotRequest {
         let tmp = dir.appendingPathComponent("shot.png.tmp")
         try? FileManager.default.removeItem(at: tmp)
         hook.shot(tmp.path)
-        guard FileManager.default.fileExists(atPath: tmp.path) else { return }
-        _ = try? FileManager.default.replaceItemAt(dir.appendingPathComponent("shot.png"), withItemAt: tmp)
+        guard FileManager.default.fileExists(atPath: tmp.path) else { log("shot request: no image written"); return }
+        do {
+            _ = try FileManager.default.replaceItemAt(dir.appendingPathComponent("shot.png"), withItemAt: tmp)
+        } catch {
+            log("shot request: \(error.localizedDescription)")
+        }
     }
 }
