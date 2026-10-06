@@ -33,12 +33,12 @@ export default function App() {
   const [pending, setPending] = useState<{ tabId: string; paneId: string } | null>(null);
   const controllers = useRef(new Map<string, PaneController>());
   const rows = useMemo(() => buildSidebar(snapshot), [snapshot]);
-  const { items: docsItems, error: docsError } = useDocs(machine.name, selected, snapshot);
   const docsKey = `herdr-shell.docs.${machine.name}.${selected}`;
   const [docsShown, setDocsShown] = useState<Record<string, boolean>>({});
   const [docsActive, setDocsActive] = useState<Record<string, string>>({});
   const storedDocs = () => { try { return localStorage.getItem(docsKey) === "true"; } catch { return false; } };
   const docsOpen = selected !== null && (docsShown[docsKey] ?? storedDocs());
+  const { items: docsItems, error: docsError } = useDocs(machine.name, selected, snapshot, docsOpen);
   const activeDoc = docsItems.find(item => item.name === docsActive[docsKey])?.name ?? docsItems[0]?.name ?? null;
   const docs: DocsState = { open: docsOpen, items: docsItems.map(item => item.name), active: activeDoc };
   const state = useRef({ machine, snapshot, selected, focused, rows, docs, docsKey, docsShown });

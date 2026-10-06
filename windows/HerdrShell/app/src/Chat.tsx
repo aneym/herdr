@@ -1,14 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Marked } from "marked";
-import DOMPurify from "dompurify";
+import { renderMarkdown } from "./markdown";
 import { bridge } from "./bridge";
 import { ChatTail } from "./chatTail";
 import { ChatSender } from "./chatSend";
 import type { SendState } from "./chatSend";
 import type { ChatItem } from "./transcript";
-const markdown = new Marked({ renderer: { html: () => "" } });
 function Markdown({ text }: { text: string }) {
-  const html = useMemo(() => DOMPurify.sanitize(markdown.parse(text, { async: false }), { USE_PROFILES: { html: true }, FORBID_TAGS: ["img", "video", "audio", "iframe", "form", "input", "button", "style"] }), [text]);
+  const html = useMemo(() => renderMarkdown(text), [text]);
   return <div className="chat-markdown" onAuxClick={event => { if ((event.target as HTMLElement).closest("a")) event.preventDefault(); }} onClick={event => {
     const anchor = (event.target as HTMLElement).closest("a");
     if (!anchor) return;
@@ -71,7 +69,7 @@ export default function Chat({ machine, pane, focused, visible, onItems }: { mac
   for (const item of items) { if (item.kind === "tool" && groups[groups.length - 1]?.[0].kind === "tool") groups[groups.length - 1].push(item); else groups.push([item]); }
   const submit = (anyway = false) => {
     const message = anyway ? send.text : text;
-    if (sender.current?.send(message, items, anyway)) { setText(""); stick.current = true; }
+    if (sender.current?.send(message, items, anyway)) { if (!anyway) setText(""); stick.current = true; }
   };
   return <section className="chat" aria-label={`Chat with ${name}`}>
     <div className="chat-scroll" ref={scroll} onScroll={() => { const node = scroll.current; if (node) stick.current = node.scrollHeight - node.scrollTop - node.clientHeight < 60; }}>

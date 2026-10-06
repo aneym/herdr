@@ -20,18 +20,20 @@ async function readWhole(machine: string, path: string): Promise<string> {
   } while (true);
   return text + decoder.decode();
 }
-export function useDocs(machine: string, tab: string | null, snapshot: Snapshot) {
+export function useDocs(machine: string, tab: string | null, snapshot: Snapshot, open: boolean) {
   const [catalog, setCatalog] = useState<LaneCatalog>({ lanes: {}, names: {} });
   const [found, setFound] = useState<{ folder: string | null; paths: Set<string> }>({ folder: null, paths: new Set() });
   const [error, setError] = useState("");
   useEffect(() => {
     let disposed = false, busy = false, stamp = "";
     setCatalog({ lanes: {}, names: {} }); setError("");
+    if (!open) return;
     const poll = async () => {
       if (disposed || busy || document.hidden) return;
       busy = true;
       try {
         const stats = await Promise.all(catalogPaths.map(path => bridge.fileStat(machine, path)));
+        if (disposed) return;
         const next = JSON.stringify(stats.map(s => [s.exists, s.mtime_ms]));
         if (next !== stamp) {
           const contents = await Promise.all(catalogPaths.map((path, i) => stats[i].exists ? readWhole(machine, path) : Promise.resolve("{}")));
@@ -44,12 +46,13 @@ export function useDocs(machine: string, tab: string | null, snapshot: Snapshot)
     void poll(); const timer = setInterval(() => void poll(), 5000);
     document.addEventListener("visibilitychange", poll);
     return () => { disposed = true; clearInterval(timer); document.removeEventListener("visibilitychange", poll); };
-  }, [machine]);
+  }, [machine, open]);
   const lane = useMemo(() => laneFor(tab, snapshot, catalog), [tab, snapshot, catalog]);
   const folder = projectFolder(lane);
   useEffect(() => {
     let disposed = false, busy = false;
     setFound({ folder: null, paths: new Set() });
+    if (!open) return;
     const poll = async () => {
       if (!folder || disposed || busy || document.hidden) return;
       busy = true;
@@ -63,8 +66,8 @@ export function useDocs(machine: string, tab: string | null, snapshot: Snapshot)
     void poll(); const timer = setInterval(() => void poll(), 5000);
     document.addEventListener("visibilitychange", poll);
     return () => { disposed = true; clearInterval(timer); document.removeEventListener("visibilitychange", poll); };
-  }, [machine, folder]);
-  return { items: useMemo(() => docItems(lane, found.folder === folder ? found.paths : new Set()), [lane, found, folder]), error };
+  }, [machine, folder, open]);
+  return { items: useMemo(() => open ? docItems(lane, found.folder === folder ? found.paths : new Set()) : [], [lane, found, folder, open]), error };
 }
 export default function DocPanel({ machine, items, active, select, error: catalogError }: { machine: string; items: DocItem[]; active: string | null; select: (name: string) => void; error: string }) {
   const item = items.find(item => item.name === active);

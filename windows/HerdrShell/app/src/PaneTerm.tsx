@@ -143,7 +143,7 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
     node.addEventListener("wheel", onWheel, { capture: true, passive: false });
     node.addEventListener("contextmenu", onContext);
     const observer = new ResizeObserver(() => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (disposed) return; fit.fit(); if (handle != null && (term.cols !== sentCols || term.rows !== sentRows)) { sentCols = term.cols; sentRows = term.rows; void bridge.resize(handle, sentCols, sentRows).catch(error); } }, 50); });
-    observer.observe(host.current);
+    observer.observe(node);
     void open();
     return () => { disposed = true; register(pane.pane_id, null); observer.disconnect(); clearTimeout(resizeTimer); clearTimeout(bellTimer); cancelAnimationFrame(wheelFrame); node.removeEventListener("wheel", onWheel, true); node.removeEventListener("contextmenu", onContext); data.dispose(); binary.dispose(); if (handle != null) void bridge.close(handle).catch(() => {}); term.dispose(); };
   }, [machine, pane.pane_id, pane.terminal_id, register]);
