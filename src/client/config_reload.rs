@@ -75,12 +75,26 @@ pub(super) fn apply_reload(
     };
     apply_client_shell_input_source_changes(state, prefix_input_source);
     if let Some(resize) = resize {
-        if let Some(activation) = pending_activation.as_mut() {
-            if let Err(error) = activation.update_resize(resize, endpoints) {
+        let update = match (pending_activation.as_mut(), state.shell.as_ref()) {
+            (Some(activation), Some(shell)) => {
+                Some(super::shell_runtime::update_pending_activation_resize(
+                    shell,
+                    activation,
+                    endpoints,
+                    state.reported_size,
+                    state.reported_cell_size,
+                    state.pixel_geometry_exact,
+                ))
+            }
+            (Some(activation), None) => Some(activation.update_resize(resize.clone(), endpoints)),
+            (None, _) => None,
+        };
+        match update {
+            Some(Ok(())) => {}
+            Some(Err(error)) => {
                 rollback_endpoint_activation(state, endpoints, pending_activation, error, false);
             }
-        } else {
-            write_to_server(endpoints, &resize).map_err(ClientError::ConnectionLost)?;
+            None => write_to_server(endpoints, &resize).map_err(ClientError::ConnectionLost)?,
         }
     }
     if let Some(frame) = frame {

@@ -5,8 +5,8 @@ use super::{ClientEndpointId, ClientEndpointStatus, EndpointRegistry, EndpointSe
 mod model;
 mod protocol;
 pub(crate) use model::{
-    ActivationBeginError, ActivationCompletion, ActivationRollback, EndpointActivationIntent,
-    PendingEndpointActivation, SurfaceActivationProgress,
+    ActivationBeginError, ActivationCompletion, ActivationResize, ActivationRollback,
+    EndpointActivationIntent, PendingEndpointActivation, SurfaceActivationProgress,
 };
 use model::{ActivationEvidence, ActivationPhase, EndpointLease};
 use protocol::*;
@@ -40,15 +40,18 @@ impl PendingEndpointActivation {
         endpoints: &EndpointRegistry,
         target: ClientEndpointId,
         focus: Option<crate::client::shell::ClientEndpointFocusTarget>,
-        resize: crate::protocol::ClientMessage,
+        resize: impl Into<ActivationResize>,
         serial: u64,
         now: Instant,
     ) -> Result<Self, ActivationBeginError> {
-        resize_geometry(&resize).ok_or_else(|| {
-            ActivationBeginError::Preflight(
-                "endpoint activation did not include a surface resize".to_owned(),
-            )
-        })?;
+        let resize = resize.into();
+        for message in [&resize.source, &resize.target] {
+            resize_geometry(message).ok_or_else(|| {
+                ActivationBeginError::Preflight(
+                    "endpoint activation did not include a surface resize".to_owned(),
+                )
+            })?;
+        }
         let source_id = endpoints.active_id().clone();
         let source_has_live_surface = endpoints
             .connection(&source_id)
@@ -109,7 +112,8 @@ impl PendingEndpointActivation {
             target: target_lease,
             focus,
             host_focused: shell.host_focus_baseline(),
-            resize,
+            source_resize: resize.source,
+            target_resize: resize.target,
             phase: ActivationPhase::ReleasingSource {
                 request_id: format!("client-shell-surface:{serial}:off"),
             },
@@ -146,7 +150,7 @@ impl PendingEndpointActivation {
                     format!("client-shell-surface:{}:off", self.epoch),
                 );
             }
-            return self.start_target(endpoints, self.resize.clone());
+            return self.start_target(endpoints);
         }
         // Old servers emit PTY focus loss only while the viewer is still active.
         if endpoints.send_to(
@@ -175,7 +179,7 @@ impl PendingEndpointActivation {
         endpoints: &mut EndpointRegistry,
         target: ClientEndpointId,
         focus: Option<crate::client::shell::ClientEndpointFocusTarget>,
-        resize: crate::protocol::ClientMessage,
+        resize: impl Into<ActivationResize>,
         serial: u64,
         now: Instant,
     ) -> Result<Self, ActivationBeginError> {
@@ -196,12 +200,40 @@ impl PendingEndpointActivation {
         }
     }
 
+    pub(crate) fn source(&self) -> &ClientEndpointId {
+        &self.source.endpoint_id
+    }
+
     pub(crate) fn target(&self) -> &ClientEndpointId {
         &self.target.endpoint_id
     }
 
-    fn geometry(&self) -> crate::protocol::ClientSurfaceSize {
-        resize_geometry(&self.resize).expect("activation resize was validated before construction")
+    /// The surface resize for one side of the handoff. A same-endpoint activation keeps both
+    /// slots equal, so the target slot answers for it.
+    fn resize_for(&self, endpoint_id: &ClientEndpointId) -> &crate::protocol::ClientMessage {
+        if endpoint_id == &self.target.endpoint_id {
+            &self.target_resize
+        } else {
+            &self.source_resize
+        }
+    }
+
+    fn geometry_for(&self, endpoint_id: &ClientEndpointId) -> crate::protocol::ClientSurfaceSize {
+        resize_geometry(self.resize_for(endpoint_id))
+            .expect("activation resize was validated before construction")
+    }
+
+    /// The endpoint that currently owns surface geometry writes for this transaction.
+    fn resize_destination(&self) -> Option<&ClientEndpointId> {
+        match &self.phase {
+            ActivationPhase::ActivatingTarget { .. } => Some(&self.target.endpoint_id),
+            ActivationPhase::RestoringSource { .. } => Some(&self.source.endpoint_id),
+            ActivationPhase::SynchronizingPresentation { lease, .. }
+            | ActivationPhase::AwaitingPresentationEffects { lease, .. } => {
+                Some(&lease.endpoint_id)
+            }
+            _ => None,
+        }
     }
 
     pub(crate) fn presentation_sync_endpoint(&self) -> Option<&ClientEndpointId> {
@@ -379,7 +411,7 @@ impl PendingEndpointActivation {
                         source_release_rejected: false,
                     };
                 }
-                if let Err(message) = self.start_target(endpoints, self.resize.clone()) {
+                if let Err(message) = self.start_target(endpoints) {
                     return SurfaceActivationProgress::Rejected {
                         message,
                         source_release_rejected: false,
@@ -451,7 +483,7 @@ impl PendingEndpointActivation {
                         source_release_rejected: false,
                     };
                 }
-                if let Err(message) = self.start_source_restore(endpoints, self.resize.clone()) {
+                if let Err(message) = self.start_source_restore(endpoints) {
                     return SurfaceActivationProgress::Rejected {
                         message,
                         source_release_rejected: false,
@@ -547,7 +579,7 @@ impl PendingEndpointActivation {
         if !endpoint_matches(lease, endpoint_id, generation, &surface.boot_id) {
             return SurfaceActivationProgress::Stale;
         }
-        if !surface_matches_geometry(&surface, self.geometry()) {
+        if !surface_matches_geometry(&surface, self.geometry_for(&lease.endpoint_id)) {
             return SurfaceActivationProgress::Pending;
         }
         match &mut self.phase {
@@ -607,14 +639,48 @@ impl PendingEndpointActivation {
         self.send_latest_focus(endpoints)
     }
 
+    /// A host-wide geometry change: every endpoint in the handoff gets its own new size.
     pub(crate) fn update_resize(
         &mut self,
+        resize: impl Into<ActivationResize>,
+        endpoints: &mut EndpointRegistry,
+    ) -> Result<(), String> {
+        let resize = resize.into();
+        for message in [&resize.source, &resize.target] {
+            resize_geometry(message)
+                .ok_or_else(|| "endpoint activation did not include a surface resize".to_owned())?;
+        }
+        self.source_resize = resize.source;
+        self.target_resize = resize.target;
+        self.send_current_resize(endpoints)
+    }
+
+    /// One endpoint's layout changed (for example its factory overlay). Record it for that side
+    /// only, and write it only when that endpoint currently owns the surface geometry, so the
+    /// other side never receives a size computed for a different layout.
+    pub(crate) fn update_endpoint_resize(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
         resize: crate::protocol::ClientMessage,
         endpoints: &mut EndpointRegistry,
     ) -> Result<(), String> {
         resize_geometry(&resize)
             .ok_or_else(|| "endpoint activation did not include a surface resize".to_owned())?;
-        self.resize = resize.clone();
+        let is_source = endpoint_id == &self.source.endpoint_id;
+        let is_target = endpoint_id == &self.target.endpoint_id;
+        if is_source {
+            self.source_resize = resize.clone();
+        }
+        if is_target {
+            self.target_resize = resize;
+        }
+        if (!is_source && !is_target) || self.resize_destination() != Some(endpoint_id) {
+            return Ok(());
+        }
+        self.send_current_resize(endpoints)
+    }
+
+    fn send_current_resize(&mut self, endpoints: &mut EndpointRegistry) -> Result<(), String> {
         let restart_effects_fence = match &self.phase {
             ActivationPhase::AwaitingPresentationEffects {
                 lease, completion, ..
@@ -622,6 +688,7 @@ impl PendingEndpointActivation {
             _ => None,
         };
         if let Some((lease, completion)) = restart_effects_fence {
+            let resize = self.resize_for(&lease.endpoint_id).clone();
             if endpoints.send_to(&lease.endpoint_id, &resize) != EndpointSendOutcome::Sent {
                 return Err("pending endpoint resize could not be sent".into());
             }
@@ -635,14 +702,9 @@ impl PendingEndpointActivation {
             }
             _ => {}
         }
-        let destination = match &self.phase {
-            ActivationPhase::ActivatingTarget { .. } => Some(&self.target.endpoint_id),
-            ActivationPhase::RestoringSource { .. } => Some(&self.source.endpoint_id),
-            ActivationPhase::SynchronizingPresentation { lease, .. } => Some(&lease.endpoint_id),
-            _ => None,
-        };
-        if let Some(destination) = destination {
-            if endpoints.send_to(destination, &resize) != EndpointSendOutcome::Sent {
+        if let Some(destination) = self.resize_destination().cloned() {
+            let resize = self.resize_for(&destination).clone();
+            if endpoints.send_to(&destination, &resize) != EndpointSendOutcome::Sent {
                 return Err("pending endpoint resize could not be sent".into());
             }
         }
@@ -743,7 +805,7 @@ impl PendingEndpointActivation {
         if self.target.endpoint_id == *endpoint_id && self.source.endpoint_id != *endpoint_id {
             return match self.phase {
                 ActivationPhase::RestoringSource { .. } => ActivationRollback::Pending,
-                _ => match self.start_source_restore(endpoints, self.resize.clone()) {
+                _ => match self.start_source_restore(endpoints) {
                     Ok(()) => ActivationRollback::Pending,
                     Err(restore_error) => ActivationRollback::Unavailable(format!(
                         "{error}; source endpoint could not be restored safely: {restore_error}"
@@ -758,7 +820,7 @@ impl PendingEndpointActivation {
         if self.source.endpoint_id != self.target.endpoint_id {
             match &self.phase {
                 ActivationPhase::ReleasingSource { .. } => {
-                    return match self.start_target(endpoints, self.resize.clone()) {
+                    return match self.start_target(endpoints) {
                         Ok(()) => ActivationRollback::Pending,
                         Err(message) => ActivationRollback::Unavailable(message),
                     };
@@ -813,7 +875,7 @@ impl PendingEndpointActivation {
             // Rejection proves source-off did not commit, but cached source metadata may have
             // advanced while the frame was frozen. Restore through the same coherent on/sync
             // path rather than immediately exposing a stale source projection.
-            return match self.start_source_restore(endpoints, self.resize.clone()) {
+            return match self.start_source_restore(endpoints) {
                 Ok(()) => ActivationRollback::Pending,
                 Err(restore_error) => ActivationRollback::Unavailable(format!(
                     "{error}; source endpoint could not resume: {restore_error}"
@@ -823,7 +885,7 @@ impl PendingEndpointActivation {
         let result = match self.phase {
             ActivationPhase::ReleasingSource { .. } => {
                 if self.source_available {
-                    self.start_source_restore(endpoints, self.resize.clone())
+                    self.start_source_restore(endpoints)
                 } else {
                     Err("the previous endpoint is no longer connected".into())
                 }
@@ -844,7 +906,7 @@ impl PendingEndpointActivation {
                         "{error}; the target connection was closed because no presentation owner could be proven"
                     ));
                 }
-                self.start_source_restore(endpoints, self.resize.clone())
+                self.start_source_restore(endpoints)
             }
             ActivationPhase::RestoringSource { .. } => {
                 return ActivationRollback::Unavailable(format!(
@@ -890,7 +952,7 @@ impl PendingEndpointActivation {
                 &lease,
                 evidence,
                 *acknowledged_revision,
-                self.geometry(),
+                self.geometry_for(&lease.endpoint_id),
             )?;
             if endpoints.active_id() != &lease.endpoint_id
                 || !shell.endpoint_projection_available(&lease.endpoint_id)
@@ -953,7 +1015,7 @@ impl PendingEndpointActivation {
             &lease,
             evidence,
             acknowledgement_revision,
-            self.geometry(),
+            self.geometry_for(&lease.endpoint_id),
         )?;
         endpoints.set_surface_active(&lease.endpoint_id, true);
         shell.set_endpoint_status(&lease.endpoint_id, ClientEndpointStatus::Online);
@@ -973,11 +1035,8 @@ impl PendingEndpointActivation {
         })
     }
 
-    fn start_target(
-        &mut self,
-        endpoints: &mut EndpointRegistry,
-        resize: crate::protocol::ClientMessage,
-    ) -> Result<(), String> {
+    fn start_target(&mut self, endpoints: &mut EndpointRegistry) -> Result<(), String> {
+        let resize = self.target_resize.clone();
         let request_id = format!("client-shell-surface:{}:on", self.epoch);
         self.deadline = Instant::now() + ACTIVATION_TIMEOUT;
         // A transport may fail after writing any baseline or surface message. Enter the target
@@ -1064,11 +1123,8 @@ impl PendingEndpointActivation {
         Ok(())
     }
 
-    fn start_source_restore(
-        &mut self,
-        endpoints: &mut EndpointRegistry,
-        resize: crate::protocol::ClientMessage,
-    ) -> Result<(), String> {
+    fn start_source_restore(&mut self, endpoints: &mut EndpointRegistry) -> Result<(), String> {
+        let resize = self.source_resize.clone();
         let request_id = format!("client-shell-surface:{}:rollback-source-on", self.epoch);
         // Source baseline writes can also be observed before their send reports an error.
         self.phase = ActivationPhase::RestoringSource {
@@ -1151,7 +1207,7 @@ impl PendingEndpointActivation {
             } if acknowledged_revision.is_some_and(|revision| {
                 *focus_acknowledged
                     && evidence
-                        .coherent_surface(revision, self.geometry())
+                        .coherent_surface(revision, self.geometry_for(&self.target.endpoint_id))
                         .is_some_and(|surface| self.target_matches(surface))
             }) =>
             {
@@ -1161,14 +1217,22 @@ impl PendingEndpointActivation {
                 acknowledged_revision,
                 evidence,
                 ..
+            } if acknowledged_revision.is_some_and(|revision| {
+                evidence
+                    .coherent_surface(revision, self.geometry_for(&self.source.endpoint_id))
+                    .is_some()
+            }) =>
+            {
+                SurfaceActivationProgress::Ready
             }
-            | ActivationPhase::SynchronizingPresentation {
+            ActivationPhase::SynchronizingPresentation {
+                lease,
                 acknowledged_revision,
                 evidence,
                 ..
             } if acknowledged_revision.is_some_and(|revision| {
                 evidence
-                    .coherent_surface(revision, self.geometry())
+                    .coherent_surface(revision, self.geometry_for(&lease.endpoint_id))
                     .is_some()
             }) =>
             {

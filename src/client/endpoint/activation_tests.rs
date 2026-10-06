@@ -86,9 +86,15 @@ fn shell_and_registry() -> TestFixture {
 }
 
 fn shell_and_registry_with_source_failure(source_fail_after_write: bool) -> TestFixture {
-    let mut shell = crate::client::ClientShellState::new(
-        crate::client::ClientShellConfig::from_config(&crate::config::Config::default()),
-    );
+    shell_and_registry_with_config(&crate::config::Config::default(), source_fail_after_write)
+}
+
+fn shell_and_registry_with_config(
+    config: &crate::config::Config,
+    source_fail_after_write: bool,
+) -> TestFixture {
+    let mut shell =
+        crate::client::ClientShellState::new(crate::client::ClientShellConfig::from_config(config));
     let profile = super::super::SavedSshEndpoint {
         id: super::super::ProfileId::parse("0123456789abcdef0123456789abcdef").unwrap(),
         label: "Remote".into(),
@@ -240,7 +246,8 @@ fn machine() -> PendingEndpointActivation {
         target: lease(endpoint(), 7, "remote-boot"),
         focus: None,
         host_focused: true,
-        resize: resize(),
+        source_resize: resize(),
+        target_resize: resize(),
         phase: ActivationPhase::ActivatingTarget {
             request_id: "client-shell-surface:3:on".into(),
             acknowledged_revision: Some(1),
@@ -265,7 +272,8 @@ fn source_off_request_is_distinct_and_precedes_target_on_phase() {
         target: lease(endpoint(), 7, "remote-boot"),
         focus: None,
         host_focused: true,
-        resize: resize(),
+        source_resize: resize(),
+        target_resize: resize(),
         phase: ActivationPhase::ReleasingSource {
             request_id: "client-shell-surface:9:off".into(),
         },
@@ -819,6 +827,153 @@ fn resize_during_activation_reaches_the_pending_target() {
         SurfaceActivationProgress::Pending,
         "a surface for the prior geometry cannot commit"
     );
+}
+
+fn sent_surface_widths(sent: &SentMessages) -> Vec<u16> {
+    sent.lock()
+        .unwrap()
+        .iter()
+        .filter_map(|message| match message {
+            crate::protocol::ClientMessage::ClientShellResize { surface_size, .. } => {
+                Some(surface_size.cols)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Regression: an overlay change on one endpoint during an A to B handoff was laid out with A's
+/// geometry and written to B. Each endpoint must be sized for its own overlay, and A's latest
+/// geometry must survive for rollback.
+#[test]
+fn overlay_changes_during_a_handoff_size_each_endpoint_for_its_own_layout() {
+    use crate::client::shell_runtime::{
+        apply_client_shell_factory_overlay, client_shell_activation_resize, route_endpoint_resize,
+    };
+    const SIZE: (u16, u16) = (110, 30);
+    const CELL: (u32, u32) = (8, 16);
+    // The default layout at 110x30: the open detail panel takes 46 of the pane's 84 columns.
+    const WIDE: u16 = 84;
+    const NARROW: u16 = 38;
+    let mut config = crate::config::Config::default();
+    config.ui.factory.enabled = true;
+    config.keys.toggle_factory_overview = crate::config::BindingConfig::one("alt+o");
+    let (mut shell, mut endpoints, local_sent, remote_sent) =
+        shell_and_registry_with_config(&config, false);
+    let local = ClientEndpointId::Local;
+    shell.set_endpoint_snapshot_for_generation(&local, 1, Box::new(test_snapshot("local-boot", 1)));
+    shell.set_endpoint_snapshot_for_generation(
+        &endpoint(),
+        7,
+        Box::new(test_snapshot("remote-boot", 1)),
+    );
+    let overlay = |boot_id: &str, revision: u64, present: bool| {
+        crate::protocol::endpoint::EndpointFactoryOverlay {
+            boot_id: boot_id.into(),
+            revision,
+            overlay: present.then(crate::factory_overlay::FactoryOverlay::default),
+        }
+    };
+
+    // A shows an overlay with the detail panel open; B has no overlay yet.
+    let (frame, _) = apply_client_shell_factory_overlay(
+        &mut shell,
+        &local,
+        1,
+        overlay("local-boot", 1, true),
+        SIZE,
+        CELL,
+        false,
+    );
+    assert!(frame.is_some());
+    shell.handle_raw_events(vec![crate::raw_input::RawInputEvent::Key(
+        crate::input::TerminalKey::new(
+            crossterm::event::KeyCode::Char('o'),
+            crossterm::event::KeyModifiers::ALT,
+        ),
+    )]);
+    assert_eq!(shell.surface_size(SIZE.0, SIZE.1).cols, NARROW);
+    local_sent.lock().unwrap().clear();
+
+    let resize = client_shell_activation_resize(
+        &shell,
+        endpoints.active_id(),
+        &endpoint(),
+        SIZE,
+        CELL,
+        false,
+    );
+    let mut activation = PendingEndpointActivation::begin(
+        &shell,
+        &mut endpoints,
+        endpoint(),
+        None,
+        resize,
+        30,
+        Instant::now(),
+    )
+    .unwrap();
+    let _ = activation.receive_response(
+        &local,
+        1,
+        "client-shell-surface:30:off",
+        &surface_success("client-shell-surface:30:off", false, 1),
+        &mut endpoints,
+    );
+    assert_eq!(
+        sent_surface_widths(&remote_sent),
+        vec![WIDE],
+        "B is activated at its own width, not A's panel width"
+    );
+
+    // A drops its overlay while B is activating: A widens, B's layout is unchanged.
+    let (_, resize) = apply_client_shell_factory_overlay(
+        &mut shell,
+        &local,
+        1,
+        overlay("local-boot", 2, false),
+        SIZE,
+        CELL,
+        false,
+    );
+    let resize = resize.expect("A's pane width changed");
+    assert!(route_endpoint_resize(&mut endpoints, Some(&mut activation), &local, resize).is_ok());
+    assert_eq!(
+        sent_surface_widths(&remote_sent),
+        vec![WIDE],
+        "A's geometry must not reach B"
+    );
+    assert!(sent_surface_widths(&local_sent).is_empty());
+
+    // B's own overlay arrives while it is the pending target: B narrows to its panel layout.
+    let (_, resize) = apply_client_shell_factory_overlay(
+        &mut shell,
+        &endpoint(),
+        7,
+        overlay("remote-boot", 1, true),
+        SIZE,
+        CELL,
+        false,
+    );
+    let resize = resize.expect("B's pane width changed");
+    assert!(
+        route_endpoint_resize(&mut endpoints, Some(&mut activation), &endpoint(), resize).is_ok()
+    );
+    assert_eq!(sent_surface_widths(&remote_sent), vec![WIDE, NARROW]);
+
+    // Rolling back restores A at A's latest width, not B's.
+    assert_eq!(
+        activation.rollback(&mut endpoints, "target failed".into(), false),
+        ActivationRollback::Pending
+    );
+    let _ = activation.receive_response(
+        &endpoint(),
+        7,
+        "client-shell-surface:30:rollback-target-off",
+        &surface_success("client-shell-surface:30:rollback-target-off", false, 2),
+        &mut endpoints,
+    );
+    assert_eq!(sent_surface_widths(&local_sent), vec![WIDE]);
 }
 
 #[test]

@@ -87,8 +87,87 @@ pub(super) fn client_shell_resize_message(
     }
 }
 
+/// The resize one endpoint needs for its own layout at this host size.
+pub(super) fn client_shell_resize_message_for(
+    shell: &shell::ClientShellState,
+    endpoint_id: &endpoint::ClientEndpointId,
+    size: (u16, u16),
+    cell_size: (u32, u32),
+    pixel_mouse: bool,
+) -> ClientMessage {
+    ClientMessage::ClientShellResize {
+        cell_width_px: cell_size.0,
+        cell_height_px: cell_size.1,
+        surface_size: shell.surface_size_for_endpoint(endpoint_id, size.0, size.1),
+        pixel_mouse,
+    }
+}
+
+/// Source and target resizes for a handoff, each sized for the layout that endpoint presents.
+pub(super) fn client_shell_activation_resize(
+    shell: &shell::ClientShellState,
+    source: &endpoint::ClientEndpointId,
+    target: &endpoint::ClientEndpointId,
+    size: (u16, u16),
+    cell_size: (u32, u32),
+    pixel_mouse: bool,
+) -> endpoint::ActivationResize {
+    endpoint::ActivationResize {
+        source: client_shell_resize_message_for(shell, source, size, cell_size, pixel_mouse),
+        target: client_shell_resize_message_for(shell, target, size, cell_size, pixel_mouse),
+    }
+}
+
+/// A host-wide geometry change while a handoff is pending resizes each side for its own layout.
+pub(super) fn update_pending_activation_resize(
+    shell: &shell::ClientShellState,
+    activation: &mut endpoint::PendingEndpointActivation,
+    endpoints: &mut endpoint::EndpointRegistry,
+    size: (u16, u16),
+    cell_size: (u32, u32),
+    pixel_mouse: bool,
+) -> Result<(), String> {
+    let resize = client_shell_activation_resize(
+        shell,
+        activation.source(),
+        activation.target(),
+        size,
+        cell_size,
+        pixel_mouse,
+    );
+    activation.update_resize(resize, endpoints)
+}
+
+pub(crate) enum EndpointResizeError {
+    /// The pending handoff could not deliver the resize and must roll back.
+    Activation(String),
+    ConnectionLost(io::Error),
+}
+
+/// Deliver a resize computed for one endpoint's layout. During a handoff the activation records
+/// it for that side and writes it only if that endpoint owns the surface; otherwise only the
+/// committed endpoint receives it, never another endpoint with a different layout.
+pub(crate) fn route_endpoint_resize(
+    endpoints: &mut endpoint::EndpointRegistry,
+    pending: Option<&mut endpoint::PendingEndpointActivation>,
+    endpoint_id: &endpoint::ClientEndpointId,
+    resize: ClientMessage,
+) -> Result<(), EndpointResizeError> {
+    if let Some(activation) = pending {
+        return activation
+            .update_endpoint_resize(endpoint_id, resize, endpoints)
+            .map_err(EndpointResizeError::Activation);
+    }
+    if endpoints.active_id() != endpoint_id {
+        return Ok(());
+    }
+    write_to_server(endpoints, &resize).map_err(EndpointResizeError::ConnectionLost)
+}
+
 // Overlay controls can change layout even while the endpoint is idle. Retire the
 // old surface before composing, and let the caller route the resize through activation.
+// The resize is computed for the endpoint that sent the overlay, which need not be the one
+// on screen while a handoff is pending; `route_endpoint_resize` delivers it.
 pub(crate) fn apply_client_shell_factory_overlay(
     shell: &mut shell::ClientShellState,
     endpoint_id: &endpoint::ClientEndpointId,
@@ -98,15 +177,20 @@ pub(crate) fn apply_client_shell_factory_overlay(
     cell_size: (u32, u32),
     pixel_mouse: bool,
 ) -> (Option<frame_output::ComposedFrame>, Option<ClientMessage>) {
-    let previous_size = shell.surface_size(size.0, size.1);
-    if !shell.set_endpoint_factory_overlay_for_generation(endpoint_id, generation, projection) {
-        return (None, None);
-    }
-    let resize = (previous_size != shell.surface_size(size.0, size.1)).then(|| {
-        shell.invalidate_pane_surface();
-        client_shell_resize_message(shell, size.0, size.1, cell_size.0, cell_size.1, pixel_mouse)
-    });
-    (shell.compose(size.0, size.1), resize)
+    let previous_size = shell.surface_size_for_endpoint(endpoint_id, size.0, size.1);
+    let active_changed =
+        shell.set_endpoint_factory_overlay_for_generation(endpoint_id, generation, projection);
+    let resize = (previous_size != shell.surface_size_for_endpoint(endpoint_id, size.0, size.1))
+        .then(|| {
+            if active_changed {
+                shell.invalidate_pane_surface();
+            }
+            client_shell_resize_message_for(shell, endpoint_id, size, cell_size, pixel_mouse)
+        });
+    let frame = active_changed
+        .then(|| shell.compose(size.0, size.1))
+        .flatten();
+    (frame, resize)
 }
 
 pub(super) fn sync_client_shell_keyboard_report_all(
@@ -302,12 +386,12 @@ pub(super) fn begin_endpoint_activation(
     let Some(shell) = state.shell.as_ref() else {
         return Ok(());
     };
-    let resize = client_shell_resize_message(
+    let resize = client_shell_activation_resize(
         shell,
-        state.reported_size.0,
-        state.reported_size.1,
-        state.reported_cell_size.0,
-        state.reported_cell_size.1,
+        endpoints.active_id(),
+        &endpoint_id,
+        state.reported_size,
+        state.reported_cell_size,
         state.pixel_geometry_exact,
     );
     match endpoint::PendingEndpointActivation::prepare(
@@ -709,19 +793,26 @@ pub(super) fn finish_client_shell_input(
     }
     if outcome.resize {
         let shell = state.shell.as_ref().expect("shell mode remains active");
-        let resize = client_shell_resize_message(
-            shell,
-            state.reported_size.0,
-            state.reported_size.1,
-            state.reported_cell_size.0,
-            state.reported_cell_size.1,
-            state.pixel_geometry_exact,
-        );
         if let Some(activation) = pending_activation.as_mut() {
-            if let Err(error) = activation.update_resize(resize, endpoints) {
+            if let Err(error) = update_pending_activation_resize(
+                shell,
+                activation,
+                endpoints,
+                state.reported_size,
+                state.reported_cell_size,
+                state.pixel_geometry_exact,
+            ) {
                 rollback_endpoint_activation(state, endpoints, pending_activation, error, false);
             }
         } else {
+            let resize = client_shell_resize_message(
+                shell,
+                state.reported_size.0,
+                state.reported_size.1,
+                state.reported_cell_size.0,
+                state.reported_cell_size.1,
+                state.pixel_geometry_exact,
+            );
             let _ = write_to_server(endpoints, &resize);
         }
     }

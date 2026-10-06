@@ -1219,7 +1219,18 @@ async fn run_client_loop(
                     }
                 };
                 if let Some(activation) = pending_activation.as_mut() {
-                    if let Err(error) = activation.update_resize(msg, &mut write_stream) {
+                    let update = match state.shell.as_ref() {
+                        Some(shell) => update_pending_activation_resize(
+                            shell,
+                            activation,
+                            &mut write_stream,
+                            (new_cols, new_rows),
+                            (cell_width_px, cell_height_px),
+                            pixel_geometry_exact,
+                        ),
+                        None => activation.update_resize(msg, &mut write_stream),
+                    };
+                    if let Err(error) = update {
                         rollback_endpoint_activation(
                             &mut state,
                             &mut write_stream,
@@ -2038,10 +2049,14 @@ async fn run_client_loop(
                                     .unwrap_or((None, None));
                                 if let Some(resize) = resize {
                                     state.request_repaint();
-                                    if let Some(activation) = pending_activation.as_mut() {
-                                        if let Err(error) =
-                                            activation.update_resize(resize, &mut write_stream)
-                                        {
+                                    match route_endpoint_resize(
+                                        &mut write_stream,
+                                        pending_activation.as_mut(),
+                                        &endpoint_id,
+                                        resize,
+                                    ) {
+                                        Ok(()) => {}
+                                        Err(EndpointResizeError::Activation(error)) => {
                                             rollback_endpoint_activation(
                                                 &mut state,
                                                 &mut write_stream,
@@ -2050,9 +2065,9 @@ async fn run_client_loop(
                                                 false,
                                             );
                                         }
-                                    } else {
-                                        write_to_server(&mut write_stream, &resize)
-                                            .map_err(ClientError::ConnectionLost)?;
+                                        Err(EndpointResizeError::ConnectionLost(error)) => {
+                                            return Err(ClientError::ConnectionLost(error));
+                                        }
                                     }
                                 }
                                 if let Some(frame) = frame {

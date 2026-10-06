@@ -495,19 +495,63 @@ impl ClientShellState {
         false
     }
 
+    /// The overlay an endpoint presents: only a projection from its current connection and boot.
+    fn endpoint_factory_overlay(
+        endpoint: &ClientShellEndpoint,
+    ) -> Option<std::sync::Arc<crate::factory_overlay::FactoryOverlay>> {
+        let snapshot = endpoint.snapshot.as_deref()?;
+        let projection = endpoint.factory_overlay.as_ref()?;
+        (projection.generation == endpoint.snapshot_generation
+            && projection.boot_id == snapshot.boot_id)
+            .then(|| projection.overlay.clone())
+            .flatten()
+    }
+
+    /// The pane surface an endpoint presents at this host size. The active endpoint uses the live
+    /// layout; another endpoint uses its cached tab count and factory overlay, which become the
+    /// live layout once it activates.
+    pub(crate) fn surface_size_for_endpoint(
+        &self,
+        endpoint_id: &ClientEndpointId,
+        cols: u16,
+        rows: u16,
+    ) -> super::ClientSurfaceSize {
+        if endpoint_id == &self.active_endpoint_id {
+            return self.surface_size(cols, rows);
+        }
+        let Some(endpoint) = self
+            .endpoints
+            .iter()
+            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+        else {
+            return self.surface_size(cols, rows);
+        };
+        let tab_count = endpoint.snapshot.as_deref().map_or(0, focused_tab_count_in);
+        let overlay =
+            self.config.factory.enabled && Self::endpoint_factory_overlay(endpoint).is_some();
+        let surface = self
+            .config
+            .layout(
+                cols,
+                rows,
+                self.sidebar_collapsed,
+                tab_count,
+                self.sidebar_width,
+                self.detail_panel.is_some() && overlay,
+            )
+            .pane_surface;
+        super::ClientSurfaceSize {
+            cols: surface.width.max(1),
+            rows: surface.height.max(1),
+        }
+    }
+
     fn sync_active_factory_overlay(&mut self) -> bool {
         let overlay = self
             .endpoints
             .iter()
             .find(|endpoint| endpoint.endpoint_id == self.active_endpoint_id)
-            .and_then(|endpoint| {
-                let snapshot = endpoint.snapshot.as_deref()?;
-                let projection = endpoint.factory_overlay.as_ref()?;
-                (projection.generation == endpoint.snapshot_generation
-                    && projection.boot_id == snapshot.boot_id)
-                    .then(|| projection.overlay.clone())
-                    .flatten()
-            });
+            .and_then(Self::endpoint_factory_overlay);
         if self.factory_overlay.as_deref() == overlay.as_deref() {
             return false;
         }
@@ -572,16 +616,7 @@ impl ClientShellState {
     }
 
     pub(super) fn focused_tab_count(&self) -> usize {
-        let Some(snapshot) = self.snapshot.as_deref() else {
-            return 0;
-        };
-        snapshot
-            .tabs
-            .iter()
-            .filter(|tab| {
-                Some(tab.workspace_id.as_str()) == snapshot.focused_workspace_id.as_deref()
-            })
-            .count()
+        self.snapshot.as_deref().map_or(0, focused_tab_count_in)
     }
 
     #[cfg(test)]
@@ -883,4 +918,12 @@ pub(super) fn local_endpoint() -> ClientShellEndpoint {
         factory_overlay: None,
         methods: None,
     }
+}
+
+fn focused_tab_count_in(snapshot: &ClientShellSnapshot) -> usize {
+    snapshot
+        .tabs
+        .iter()
+        .filter(|tab| Some(tab.workspace_id.as_str()) == snapshot.focused_workspace_id.as_deref())
+        .count()
 }

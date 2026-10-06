@@ -153,6 +153,23 @@ pub(crate) enum ActivationBeginError {
     },
 }
 
+/// Surface resizes for both sides of a handoff. A single message is used for both when the
+/// caller has no per-endpoint geometry.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ActivationResize {
+    pub(crate) source: crate::protocol::ClientMessage,
+    pub(crate) target: crate::protocol::ClientMessage,
+}
+
+impl From<crate::protocol::ClientMessage> for ActivationResize {
+    fn from(resize: crate::protocol::ClientMessage) -> Self {
+        Self {
+            source: resize.clone(),
+            target: resize,
+        }
+    }
+}
+
 /// The only owner of an endpoint handoff. The registry's active endpoint remains the committed
 /// endpoint until the target commits, while this object owns the uncommitted lifecycle lane.
 #[derive(Debug)]
@@ -162,7 +179,10 @@ pub(crate) struct PendingEndpointActivation {
     pub(super) target: EndpointLease,
     pub(super) focus: Option<crate::client::shell::ClientEndpointFocusTarget>,
     pub(super) host_focused: bool,
-    pub(super) resize: crate::protocol::ClientMessage,
+    /// Each endpoint lays out its own chrome (tab count, factory overlay), so the source keeps
+    /// its own geometry for rollback while the target is sized for the layout it will present.
+    pub(super) source_resize: crate::protocol::ClientMessage,
+    pub(super) target_resize: crate::protocol::ClientMessage,
     pub(super) phase: ActivationPhase,
     pub(super) deadline: Instant,
     pub(super) epoch: u64,
