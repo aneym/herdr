@@ -6,11 +6,11 @@
 //! wait reason were clipped (Alex, 2026-10-05: "text not fitting"). Here the
 //! summary is split into fields and laid out in fixed columns: host, running,
 //! free, wait reason, then anything else. Fields are kept whole or dropped,
-//! highest priority first; only the trailing extras truncate, with an ellipsis.
+//! highest priority first; only the final remaining field may truncate.
 //! A row that left fields out ends in `…` so a cut always shows at the column.
 
 use crate::factory_overlay::HostRow;
-use crate::ui::{take_prefix_width, truncate_end};
+use crate::ui::truncate_end;
 use unicode_width::UnicodeWidthStr;
 
 fn display_width(text: &str) -> usize {
@@ -19,8 +19,6 @@ fn display_width(text: &str) -> usize {
 
 /// Columns of the host name. Fits studio, pc, ax42 and forge.
 pub(super) const HOST_COLUMNS: usize = 6;
-/// The narrowest truncated extra worth drawing: five columns and the ellipsis.
-const MIN_EXTRA: usize = 6;
 
 /// One drawn row: the padded host column and the text after it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,7 +46,7 @@ pub(super) fn short_host(name: &str) -> String {
 }
 
 /// Short wait reason. Known reasons come from a fixed table so none is cut
-/// mid-word; an unknown one keeps its first word, ellipsized past six columns.
+/// mid-word; an unknown one keeps its full reason until row layout needs a cut.
 pub(super) fn wait_word(reason: &str) -> String {
     let reason = reason.trim();
     let head = reason
@@ -72,7 +70,7 @@ pub(super) fn wait_word(reason: &str) -> String {
         "hold" => Some("hold"),
         _ => None,
     };
-    known.map_or_else(|| truncate_end(&head, HOST_COLUMNS), str::to_owned)
+    known.map_or_else(|| reason.to_owned(), str::to_owned)
 }
 
 fn fields(summary: &str) -> Fields {
@@ -115,102 +113,54 @@ pub(super) fn host_lines(rows: &[HostRow], width: u16) -> Vec<HostLine> {
     // Room after the left margin, the host column and its space.
     let room = usize::from(width).saturating_sub(1 + HOST_COLUMNS + 1);
     rows.iter().zip(&parsed).map(|(row, fields)| {
-        let mut value = String::new();
-        let mut used = 0usize;
-        let push = |value: &mut String, used: &mut usize, cell: String, cell_w: usize, gap: bool| -> bool {
-            let need = cell_w + usize::from(gap && *used > 0);
-            if *used + need > room {
-                return false;
-            }
-            if gap && *used > 0 {
-                value.push(' ');
-            }
-            value.push_str(&cell);
-            *used += need;
-            true
-        };
-        // Each fixed column is padded so the next one starts at the same place
-        // on every row; a row without the field leaves the column blank.
-        let mut fits = true;
+        let mut cells = Vec::new();
         if count_w > 0 {
-            let cell = fields.running.as_ref().map_or_else(
+            cells.push(fields.running.as_ref().map_or_else(
                 || " ".repeat(count_w + " running".len()),
-                |n| format!("{n:>count_w$} running"));
-            fits = push(&mut value, &mut used, cell, count_w + " running".len(), true);
+                |n| format!("{n:>count_w$} running")));
         }
-        if fits && free_w > 0 {
-            let cell = fields.free.as_ref().map_or_else(
+        if free_w > 0 {
+            cells.push(fields.free.as_ref().map_or_else(
                 || " ".repeat(free_w + " free".len()),
-                |amount| format!("{amount:>free_w$} free"));
-            fits = push(&mut value, &mut used, cell, free_w + " free".len(), true);
+                |amount| format!("{amount:>free_w$} free")));
         }
-        if fits {
-            if let Some(wait) = fields.wait.as_deref() {
-                // Kept whole or dropped, never clipped.
-                let cell = format!("wait {wait}");
-                let cell_w = display_width(&cell);
-                fits = push(&mut value, &mut used, cell, cell_w, true);
-            }
+        if let Some(wait) = &fields.wait {
+            cells.push(format!("wait {wait}"));
         }
-        let mut extras_drawn = false;
-        if fits && !fields.extras.is_empty() {
-            let extra = fields.extras.join(" ");
-            let gap = usize::from(used > 0);
-            let left = room.saturating_sub(used + gap);
-            if left >= MIN_EXTRA.min(display_width(&extra)) && left > 0 {
-                let cell = shorten_extra(&extra, left);
-                let cell_w = display_width(&cell);
-                extras_drawn = push(&mut value, &mut used, cell, cell_w, true);
-            }
-        }
-        let value = value.trim_end().to_owned();
-        // Dropped fields are invisible unless the row marks the cut.
-        let clipped = (!fits
-            && (fields.running.is_some() || fields.free.is_some() || fields.wait.is_some()))
-            || (!fields.extras.is_empty() && !extras_drawn);
+        cells.extend(fields.extras.iter().cloned());
         HostLine {
             host: format!("{:<HOST_COLUMNS$}", short_host(&row.name)),
-            value: if clipped { clip_mark(&value, room) } else { value },
+            value: fit_fields(&cells, room),
         }
     }).collect()
 }
 
-/// Ends a row with `…` when fields were left out: spaced when two columns are
-/// free, glued at one, and when the row is already full the tail gives up whole
-/// words (then letters) until the mark fits. Never wider than `room`.
-fn clip_mark(value: &str, room: usize) -> String {
-    if room == 0 {
-        return String::new();
-    }
-    let mut head = value.trim_end().to_owned();
-    while display_width(&head) + 1 > room {
-        match head.rfind(char::is_whitespace) {
-            Some(index) => {
-                head.truncate(index);
-                head = head.trim_end().to_owned();
-            }
-            None => {
-                return format!("{}…", take_prefix_width(&head, room.saturating_sub(1)));
-            }
+/// Drop complete trailing fields to make room for the cut marker. Only a
+/// single remaining field may be ellipsized, even when it contains spaces.
+fn fit_fields(cells: &[String], room: usize) -> String {
+    let mut kept = cells.len();
+    while kept > 0 {
+        let value = cells[..kept].join(" ").trim_end().to_owned();
+        let width = display_width(&value);
+        if kept == cells.len() && width <= room {
+            return value;
         }
+        if width + 1 <= room {
+            // Only blank alignment padding is left: the mark stands alone.
+            return if width == 0 {
+                "…".to_owned()
+            } else if width + 2 <= room {
+                format!("{value} …")
+            } else {
+                format!("{value}…")
+            };
+        }
+        if kept == 1 {
+            return truncate_end(&value, room);
+        }
+        kept -= 1;
     }
-    if head.is_empty() {
-        return "…".into();
-    }
-    if display_width(&head) + 2 <= room {
-        format!("{head} …")
-    } else {
-        format!("{head}…")
-    }
-}
-
-/// `truncate_end`, minus any space or separator left hanging before the ellipsis.
-fn shorten_extra(text: &str, width: usize) -> String {
-    let cut = truncate_end(text, width);
-    match cut.strip_suffix('…') {
-        Some(head) => format!("{}…", head.trim_end_matches([' ', ':', ',', '·'])),
-        None => cut,
-    }
+    String::new()
 }
 
 #[cfg(test)]
@@ -239,6 +189,24 @@ mod tests {
             .collect()
     }
 
+    /// Golden rows exercise the pure width algorithm: a cut may remove fields,
+    /// but must not leave a number detached from its unit or shorten a fitting reason.
+    #[test]
+    fn whole_fields_at_26_32_40() {
+        let rows = vec![
+            host("ax42", "2 running · 12G free · waiting on slowdown:check"),
+            host("forge", "waiting on anthropic · 1 kept: 1 secret"),
+        ];
+        for (width, expected) in [
+            (26, vec![" ax42   2 running …", " forge  wait anthropic …"]),
+            (32, vec![" ax42   2 running 12G free …", " forge  wait anthropic …"]),
+            (40, vec![" ax42   2 running 12G free wait slowdown", " forge  wait anthropic 1 kept: 1 secret"]),
+        ] {
+            let actual: Vec<_> = rows.iter().flat_map(|row| render(std::slice::from_ref(row), width)).collect();
+            assert_eq!(actual, expected, "width {width}");
+        }
+    }
+
     #[test]
     fn narrow_rows_drop_whole_fields_from_the_lowest_priority() {
         let lines = render(&alex_hosts(), 28);
@@ -246,14 +214,14 @@ mod tests {
         let lines = render(&alex_hosts(), 18);
         assert_eq!(lines[0], " studio 2 running…");
         let lines = render(&alex_hosts(), 12);
-        assert_eq!(lines[0], " studio …");
+        assert_eq!(lines[0], " studio 2 r…");
     }
 
     #[test]
-    fn wait_reasons_come_from_the_table_and_unknown_ones_ellipsize() {
+    fn wait_reasons_come_from_the_table_and_unknown_ones_stay_whole() {
         for (reason, word) in [("memory", "mem"), ("slowdown:check", "slowdown"), ("slowdown", "slowdown"),
             ("no_box", "nobox"), ("lock", "lock"), ("CPU", "cpu"), ("stale stall", "stale"),
-            ("owner reserve", "owner"), ("anthropic", "anthr…")] {
+            ("owner reserve", "owner"), ("anthropic", "anthropic")] {
             assert_eq!(wait_word(reason), word, "{reason}");
         }
         assert_eq!(short_host("forge-lanes"), "forge");
@@ -266,13 +234,11 @@ mod tests {
         let rows = vec![host("ax42", "2 running · 12G free · waiting on slowdown:check")];
         assert_eq!(render(&rows, 40), vec![" ax42   2 running 12G free wait slowdown"]);
         assert_eq!(render(&rows, 30), vec![" ax42   2 running 12G free …"]);
-        // Every column already used: whole words give the mark room.
-        assert_eq!(clip_mark("2 running 12G free", 20), "2 running 12G free …");
-        assert_eq!(clip_mark("2 running 12G free", 19), "2 running 12G free…");
-        assert_eq!(clip_mark("2 running 12G free", 18), "2 running 12G …");
-        assert_eq!(clip_mark("down", 2), "d…");
-        assert_eq!(clip_mark("", 6), "…");
-        assert_eq!(clip_mark("2 running", 0), "");
+        // Only the last remaining field may lose letters.
+        assert_eq!(fit_fields(&["2 running".into(), "12G free".into(), "wait slowdown".into()], 18), "2 running …");
+        assert_eq!(fit_fields(&["down".into()], 2), "d…");
+        assert_eq!(fit_fields(&[], 6), "");
+        assert_eq!(fit_fields(&["2 running".into()], 0), "");
     }
 
     #[test]

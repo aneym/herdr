@@ -61,7 +61,7 @@ struct SpacesRowView: View {
             }
             Spacer(minLength: 4)
             if !row.trailing.isEmpty, row.kind != .goal {
-                Text(row.trailing).font(.system(size: 10.5)).monospacedDigit().foregroundStyle(row.link == nil ? t.mute : t.accent)
+                trailingText.font(.system(size: 10.5)).monospacedDigit().foregroundStyle(row.link == nil ? t.mute : t.accent)
                     .lineLimit(1).truncationMode(.tail)
                     .frame(minWidth: Self.countWidth, alignment: .trailing)
                     .layoutPriority(1)
@@ -95,6 +95,23 @@ struct SpacesRowView: View {
         .padding(.top, (row.kind == .space && row.id != firstSpaceId) || row.kind == .machine || row.id == "machines" ? 10 : 0)
         .frame(height: 23).padding(.leading, indent).padding(.horizontal, 4)
         .background(RoundedRectangle(cornerRadius: 4).fill(selected && row.kind == .tab ? t.sel : .clear))
+    }
+
+    /// Host summaries shed whole trailing fields before the first field clips.
+    /// Fixed-size candidates make ViewThatFits measure their untruncated width.
+    @ViewBuilder private var trailingText: some View {
+        if row.kind == .footerHost {
+            let fields = row.trailing.components(separatedBy: " · ")
+            ViewThatFits(in: .horizontal) {
+                Text(fields.joined(separator: " ")).fixedSize()
+                ForEach(Array((1..<fields.count).reversed()), id: \.self) { count in
+                    Text(fields.prefix(count).joined(separator: " ") + " …").fixedSize()
+                }
+                Text((fields.first ?? "") + (fields.count > 1 ? " …" : ""))
+            }
+        } else {
+            Text(row.trailing)
+        }
     }
 
     private var chevron: some View {

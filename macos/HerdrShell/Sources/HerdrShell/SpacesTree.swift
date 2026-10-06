@@ -279,7 +279,7 @@ enum SpacesTree {
             if chrome.hiddenExpanded { for space in hidden { appendSpace(space, depth: 1) } }
         }
         for (i, host) in overlay.usage.enumerated() { out.append(SpacesRow(id: "usage:\(i)", kind: .footerUsage, title: host.name, trailing: (host.summary ?? "").replacingOccurrences(of: " · ", with: " "), alert: host.attention, link: host.url)) }
-        for (i, host) in overlay.hosts.enumerated() { out.append(SpacesRow(id: "host:\(i)", kind: .footerHost, title: host.name, trailing: (host.summary ?? "").replacingOccurrences(of: "load ", with: "").replacingOccurrences(of: " live", with: "").replacingOccurrences(of: " · ", with: " "), alert: host.attention)) }
+        for (i, host) in overlay.hosts.enumerated() { out.append(SpacesRow(id: "host:\(i)", kind: .footerHost, title: host.name, trailing: (host.summary ?? "").replacingOccurrences(of: "load ", with: "").replacingOccurrences(of: " live", with: ""), alert: host.attention)) }
         return out
     }
 }

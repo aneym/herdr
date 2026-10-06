@@ -2336,8 +2336,9 @@ fn factory_host_footer_rows_fit_and_align_at_40_44_52() {
         // At 40 the kept note and "wait slowdown" are left out whole; a dropped
         // field leaves a trailing "…" so the cut shows at the column.
         (40u16, "studio 2 running   2G free wait mem …", " ax42   2 running  12G free …"),
-        (44, "studio 2 running   2G free wait mem 1 kept…", " ax42   2 running  12G free wait slowdown"),
-        (52, "studio 2 running   2G free wait mem 1 kept: 1 secr…", " ax42   2 running  12G free wait slowdown"),
+        // The kept note never shows half-cut: it is dropped whole until it fits.
+        (44, "studio 2 running   2G free wait mem …", " ax42   2 running  12G free wait slowdown"),
+        (52, "studio 2 running   2G free wait mem …", " ax42   2 running  12G free wait slowdown"),
     ] {
         let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), width);
         let footer: Vec<&str> = rows[55..].iter().map(|row| row.trim_end()).collect();
