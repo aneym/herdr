@@ -84,13 +84,15 @@ pub(crate) fn pane_scrollbar_thumb_grab_offset(
 
 /// Offset for an overlay thumb drag, using the same half-row geometry as the
 /// draw. The thumb moves by the pointer's row delta from the press, so a press
-/// and release on the same row keeps the offset where it was.
+/// and release on the same row with no motion keeps the offset where it was.
+/// `moved` says the pointer has moved since the press (a drag event arrived).
 pub(crate) fn pane_scrollbar_offset_from_drag_row(
     press: crate::pane::ScrollMetrics,
     current: crate::pane::ScrollMetrics,
     track: Rect,
     row: u16,
     grab_row_offset: u16,
+    moved: bool,
 ) -> usize {
     let max_offset = current.max_offset_from_bottom;
     let (Some(press_thumb), Some(thumb)) = (
@@ -102,9 +104,11 @@ pub(crate) fn pane_scrollbar_offset_from_drag_row(
     let last_row = track.y + track.height.saturating_sub(1);
     let press_row = (track.y + (press_thumb.top_u / 2) as u16 + grab_row_offset).min(last_row);
     let row = row.clamp(track.y, last_row);
-    // Moving onto a track end row reaches that end, even when the grab sits
-    // on a half-row cap that cannot travel the full track.
-    if row != press_row {
+    // A pointer on or past a track end row reaches that end, even when the
+    // grab sits on a half-row cap that cannot travel the full track, or the
+    // press itself was on that end row (pointer past the track is clamped
+    // onto the end row, so the row alone cannot show the motion).
+    if moved || row != press_row {
         if row == track.y {
             return max_offset;
         }
@@ -468,16 +472,16 @@ mod overlay_input_regression {
             // Row 9 is the top half-row cap, row 10 the body.
             let grab = pane_scrollbar_thumb_grab_offset(metrics, track, row).expect("thumb row");
             assert_eq!(
-                pane_scrollbar_offset_from_drag_row(metrics, metrics, track, row, grab),
+                pane_scrollbar_offset_from_drag_row(metrics, metrics, track, row, grab, false),
                 500,
                 "row={row}"
             );
             assert_eq!(
-                pane_scrollbar_offset_from_drag_row(metrics, metrics, track, 0, grab),
+                pane_scrollbar_offset_from_drag_row(metrics, metrics, track, 0, grab, true),
                 1000
             );
             assert_eq!(
-                pane_scrollbar_offset_from_drag_row(metrics, metrics, track, 19, grab),
+                pane_scrollbar_offset_from_drag_row(metrics, metrics, track, 19, grab, true),
                 0
             );
         }

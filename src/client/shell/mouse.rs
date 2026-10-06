@@ -35,23 +35,26 @@ impl ClientShellState {
         }
     }
 
-    /// `drag` carries the press-time hit and grab row for a thumb drag; a
-    /// track click passes `None`.
+    /// `drag` carries the press-time hit, grab row and whether the pointer
+    /// has moved since the press for a thumb drag; a track click passes `None`.
     fn pane_scrollbar_offset(
         hit: &PaneHit,
         row: u16,
-        drag: Option<(&PaneHit, u16)>,
+        drag: Option<(&PaneHit, u16, bool)>,
     ) -> Option<usize> {
         let track = hit.scrollbar_rect?;
         let metrics = hit.scroll?;
         (metrics.max_offset_from_bottom > 0).then(|| match drag {
-            Some((press, grab_row_offset)) => crate::ui::pane_scrollbar_offset_from_drag_row(
-                press.scroll.unwrap_or(metrics),
-                metrics,
-                track,
-                row,
-                grab_row_offset,
-            ),
+            Some((press, grab_row_offset, moved)) => {
+                crate::ui::pane_scrollbar_offset_from_drag_row(
+                    press.scroll.unwrap_or(metrics),
+                    metrics,
+                    track,
+                    row,
+                    grab_row_offset,
+                    moved,
+                )
+            }
             None => crate::ui::scrollbar_offset_from_row(metrics, track, row),
         })
     }
@@ -1204,7 +1207,8 @@ impl ClientShellState {
                     let Some(offset) = Self::pane_scrollbar_offset(
                         &current_hit,
                         mouse.row,
-                        Some((hit, *grab_row_offset)),
+                        // A drag event is pointer motion.
+                        Some((hit, *grab_row_offset, true)),
                     ) else {
                         self.chrome_drag = None;
                         return;
@@ -1453,7 +1457,9 @@ impl ClientShellState {
                         if let Some(offset) = Self::pane_scrollbar_offset(
                             &current_hit,
                             mouse.row,
-                            Some((&hit, grab_row_offset)),
+                            // The first drag event always sends, so a sent
+                            // offset means the pointer moved.
+                            Some((&hit, grab_row_offset, last_sent_offset.is_some())),
                         ) {
                             // A press and release with no motion leaves the offset alone.
                             let unchanged = last_sent_offset.map_or_else(

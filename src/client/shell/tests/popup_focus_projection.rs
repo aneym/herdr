@@ -881,8 +881,9 @@ fn pane_scrollbar_track_and_thumb_use_stable_endpoint_scroll_requests() {
         row: drag_row,
         modifiers: KeyModifiers::empty(),
     })]);
-    let expected =
-        crate::ui::pane_scrollbar_offset_from_drag_row(metrics, metrics, track, drag_row, grab);
+    let expected = crate::ui::pane_scrollbar_offset_from_drag_row(
+        metrics, metrics, track, drag_row, grab, true,
+    );
     assert_ne!(expected, metrics.offset_from_bottom);
     assert!(matches!(
         &drag.actions[..],
@@ -903,6 +904,124 @@ fn pane_scrollbar_track_and_thumb_use_stable_endpoint_scroll_requests() {
         })]);
     assert!(release.actions.is_empty());
     assert!(state.chrome_drag.is_none());
+}
+
+/// Finding 9 (H0 review, 2026-10-06): a thumb drag that starts on a track end
+/// row must still reach that end exactly, while a press and release with no
+/// motion leaves the offset alone.
+#[test]
+fn pane_scrollbar_drag_from_an_end_row_reaches_that_end() {
+    fn mouse(kind: MouseEventKind, column: u16, row: u16) -> Vec<RawInputEvent> {
+        vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::empty(),
+        })]
+    }
+    fn scroll_offsets(actions: &[ClientShellAction]) -> Vec<u64> {
+        actions
+            .iter()
+            .filter_map(|action| match action {
+                ClientShellAction::Endpoint { request, .. } => match &request.method {
+                    crate::api::schema::Method::PaneScroll(params) => {
+                        Some(params.offset_from_bottom)
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect()
+    }
+
+    // (start offset, press row, row to move to and back from, end offset),
+    // rows relative to the track. On a 4-row track with 20 rows of history,
+    // offset 18 parks the thumb's top cap on row 0 and offset 2 parks its
+    // bottom on row 3, neither exactly at its end.
+    for (start, press_rel, away_rel, end) in [(18u64, 0u16, 2u16, 20u64), (2, 3, 1, 0)] {
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+        state.set_snapshot(Box::new(snapshot()));
+        let mut pane_surface = surface();
+        pane_surface.frame = FrameData::from_ratatui_buffer_with_hyperlinks(
+            &Buffer::with_lines(["LIVE", "PANE", "    ", "    "]),
+            None,
+            &[],
+        );
+        pane_surface.panes[0].rect.height = 4;
+        pane_surface.panes[0].inner_rect.height = 4;
+        pane_surface.panes[0].scrollbar_rect = Some(SurfaceRect {
+            x: 3,
+            y: 0,
+            width: 1,
+            height: 4,
+        });
+        pane_surface.panes[0].scroll = Some(crate::protocol::PaneSurfaceScrollMetrics {
+            offset_from_bottom: start,
+            max_offset_from_bottom: 20,
+            viewport_rows: 4,
+        });
+        state.set_pane_surface(pane_surface);
+        state.compose(106, 20).expect("composed frame");
+        let pane = state.hits.panes[0].clone();
+        let track = pane.scrollbar_rect.expect("scrollbar track");
+        let metrics = pane.scroll.expect("scroll metrics");
+        let (press_row, away_row) = (track.y + press_rel, track.y + away_rel);
+        assert!(
+            crate::ui::pane_scrollbar_thumb_grab_offset(metrics, track, press_row).is_some(),
+            "start={start}: the thumb covers the end row"
+        );
+
+        // No motion: press and release on the end row sends nothing.
+        state.handle_raw_events(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            track.x,
+            press_row,
+        ));
+        let release = state.handle_raw_events(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            track.x,
+            press_row,
+        ));
+        assert!(scroll_offsets(&release.actions).is_empty(), "start={start}");
+
+        // Move off the end row and back: the release lands on the exact end.
+        state.handle_raw_events(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            track.x,
+            press_row,
+        ));
+        let away = state.handle_raw_events(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            track.x,
+            away_row,
+        ));
+        let [away_offset] = scroll_offsets(&away.actions)[..] else {
+            panic!("start={start}: one scroll request for the drag");
+        };
+        let away_id = away
+            .actions
+            .iter()
+            .find_map(|action| match action {
+                ClientShellAction::Endpoint { request, .. } => Some(request.id.clone()),
+                _ => None,
+            })
+            .expect("drag scroll request");
+        state.handle_endpoint_result(
+            "boot-1",
+            &away_id,
+            Ok(pane_scroll_result(away_offset, 20, 4)),
+        );
+        let release = state.handle_raw_events(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            track.x,
+            press_row,
+        ));
+        assert_eq!(
+            scroll_offsets(&release.actions),
+            vec![end],
+            "start={start} press_rel={press_rel}"
+        );
+    }
 }
 
 #[test]
