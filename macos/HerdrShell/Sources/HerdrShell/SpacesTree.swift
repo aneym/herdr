@@ -74,7 +74,9 @@ struct SpacesChrome: Codable {
         collapsedMachines = c.value("collapsedMachines", [])
         if let legacy: String = c.optional("focusedSection"), let split = legacy.lastIndex(of: ":") { focusedSection[String(legacy[..<split])] = String(legacy[legacy.index(after: split)...]) }
     }
-    mutating func toggle(_ key: String) {
+    /// `open` is the row's rendered state; a tab row needs it because lanes fold by default
+    /// yet focus can hold one open without an entry in either set.
+    mutating func toggle(_ key: String, open: Bool? = nil) {
         if key.hasPrefix("all:") { focusedSection.removeValue(forKey: String(key.dropFirst(4))); return }
         if key == "hidden" { hiddenExpanded.toggle(); return }
         let parts = key.split(separator: ":", maxSplits: 1).map(String.init)
@@ -84,8 +86,8 @@ struct SpacesChrome: Codable {
         case "section": flip(&collapsedSections, parts[1])
         case "group": flip(&expandedGroups, parts[1])
         case "tab":
-            if collapsedTabs.remove(parts[1]) != nil { expandedTabs.insert(parts[1]) }
-            else { expandedTabs.remove(parts[1]); collapsedTabs.insert(parts[1]) }
+            if open ?? expandedTabs.contains(parts[1]) { expandedTabs.remove(parts[1]); collapsedTabs.insert(parts[1]) }
+            else { collapsedTabs.remove(parts[1]); expandedTabs.insert(parts[1]) }
         case "space": flip(&collapsedSpaces, parts[1])
         case "pin": flip(&pinnedSpaces, parts[1])
         case "machine": flip(&collapsedMachines, parts[1])
@@ -145,7 +147,7 @@ enum SpacesTree {
                 }
                 return current.id == tab.id ? nil : current.id
             }
-            func appendTab(_ tab: SpacesInput.Tab, _ level: Int, nest: Bool = true) {
+            func appendTab(_ tab: SpacesInput.Tab, _ level: Int, nest: Bool = true, inside: Bool = false) {
                 let t = tag(tab)
                 let grouped = nest ? lanes.filter { root($0) == tab.id } : []
                 let children = nest ? workflows.filter { parent($0) == tab.id } : []
@@ -163,7 +165,15 @@ enum SpacesTree {
                 // (Alex, 2026-10-05: "default collapse everything workflows so we only see talking agent").
                 let groupedWorkflows = workflows.filter { w in grouped.contains { $0.id == parent(w) } }
                 let focusedInside = (children + grouped + groupedWorkflows).contains { $0.id == input.focusedTab }
-                let open = (chrome.expandedTabs.contains(tab.id) || focusedInside || (SpacesTree.actionUnfoldsLane && attention == "act")) && !chrome.collapsedTabs.contains(tab.id)
+                // agent:<id> runs and grouped lanes are agents; workflow tabs and other runs are workflows.
+                let live = (runs + grouped.flatMap { tag($0).runs }).filter { !$0.done }
+                let agents = grouped.count + live.filter { $0.id.hasPrefix("agent:") }.count
+                let flows = children.count + groupedWorkflows.count + live.filter { !$0.id.hasPrefix("agent:") }.count
+                let count = agents + flows
+                // As Rust: only live work makes a header foldable, and a grouped lane inside an open
+                // parent always shows its own workflows and runs (it has no fold of its own).
+                let foldable = !inside && count > 0
+                let open = inside || ((chrome.expandedTabs.contains(tab.id) || focusedInside || (SpacesTree.actionUnfoldsLane && attention == "act")) && !chrome.collapsedTabs.contains(tab.id))
                 let priority = ["unknown": 0, "idle": 1, "done": 2, "working": 3, "blocked": 4]
                 var status = tab.agents.max { (priority[$0.status] ?? 0) < (priority[$1.status] ?? 0) }?.status ?? tab.status
                 if t.busy && ["idle", "done"].contains(status) { status = "working" }
@@ -179,11 +189,6 @@ enum SpacesTree {
                 if t.section == "reviewing" { trailing = t.review_url == nil ? "no link" : "review ↗"; link = t.review_url }
                 else if t.section == "scoping", let url = t.scope_url { trailing = "scope ↗"; link = url }
                 if expandable {
-                    // agent:<id> runs and grouped lanes are agents; workflow tabs and other runs are workflows.
-                    let live = (runs + grouped.flatMap { tag($0).runs }).filter { !$0.done }
-                    let agents = grouped.count + live.filter { $0.id.hasPrefix("agent:") }.count
-                    let flows = children.count + groupedWorkflows.count + live.filter { !$0.id.hasPrefix("agent:") }.count
-                    let count = agents + flows
                     let words = [agents > 0 ? "\(agents) agent" + (agents == 1 ? "" : "s") : nil,
                                  flows > 0 ? "\(flows) workflow" + (flows == 1 ? "" : "s") : nil].compactMap { $0 }
                     trailing = count > 0 ? words.joined(separator: " · ") : (idle ? t.idle_reason ?? "idle" : "")
@@ -198,9 +203,9 @@ enum SpacesTree {
                     trailing = [trailing, progress].filter { !$0.isEmpty }.joined(separator: " · ")
                 }
                 let glyph = workflow ? (t.done ? (t.attention == "act" ? "✗" : "✓") : "◐") : idle ? "○" : status == "blocked" ? "■" : "●"
-                out.append(SpacesRow(id: "tab:" + tab.id, kind: .tab, depth: level, chevron: expandable ? (open ? "open" : "closed") : "none", glyph: glyph, tone: idle ? "mute" : status, title: name, trailing: trailing, alert: attention, link: link, tab: tab.id, toggleKey: expandable ? "tab:" + tab.id : nil, dim: idle || t.done || t.kind == "advisor" || t.mode == "parked"))
+                out.append(SpacesRow(id: "tab:" + tab.id, kind: .tab, depth: level, chevron: foldable ? (open ? "open" : "closed") : "none", glyph: glyph, tone: idle ? "mute" : status, title: name, trailing: trailing, alert: attention, link: link, tab: tab.id, toggleKey: foldable ? "tab:" + tab.id : nil, dim: idle || t.done || t.kind == "advisor" || t.mode == "parked"))
                 if open {
-                    for child in grouped { appendTab(child, level + 1) }
+                    for child in grouped { appendTab(child, level + 1, inside: true) }
                     for child in children { appendTab(child, level + 1, nest: false) }
                     for run in runs {
                         let progress = run.done ? "" : [run.phase?.lowercased(), run.started.map { age(now - $0) }].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")

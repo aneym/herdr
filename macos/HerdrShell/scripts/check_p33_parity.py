@@ -17,6 +17,8 @@ DRIVER = BUILD / "p33_dump"
 subprocess.run(["swiftc", str(ROOT / "Sources/HerdrShell/SpacesTree.swift"),
                 str(ROOT / "scripts/p33_dump.swift"), "-o", str(DRIVER)], check=True)
 failures = []
+def base_rows(path):
+    return subprocess.check_output([str(DRIVER), str(path)], text=True).splitlines()
 for fixture in sorted(FIXTURES.glob("*.json")):
     actual = subprocess.check_output([str(DRIVER), str(fixture)], text=True)
     expected = fixture.with_suffix(".expected.txt").read_text()
@@ -41,6 +43,21 @@ if restored != base:
     failures.append("fold round-trip")
 else:
     print("PASS fold round-trip")
+# Lanes fold by default (C46): one chevron click must open a lane that is in
+# neither set, and a second click folds it again.
+import json
+fresh = json.loads((FIXTURES / "base.json").read_text())
+fresh["chrome"]["collapsedTabs"] = ["orch"]  # lane-a sits in neither fold set
+fixture = BUILD / "base-fresh.json"
+fixture.write_text(json.dumps(fresh))
+opened = subprocess.check_output([str(DRIVER), str(fixture), "tab:lane-a"], text=True).splitlines()
+want = ["tab|tab:lane-a|1|open|", "tab|tab:wf-a|2|", "tab|tab:wf-b|2|"]
+at = [next((i for i, row in enumerate(opened) if row.startswith(prefix)), -1) for prefix in want]
+refolded = subprocess.check_output([str(DRIVER), str(fixture), "tab:lane-a", "tab:lane-a"], text=True).splitlines()
+if -1 in at or at != sorted(at) or at[1] != at[0] + 1 or refolded != base_rows(fixture):
+    failures.append("default-folded lane toggle")
+else:
+    print("PASS default-folded lane opens on one click and folds on the next")
 if failures:
     raise SystemExit("FAIL: " + ", ".join(failures))
 print("PASS P33 parity")
