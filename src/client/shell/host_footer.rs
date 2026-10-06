@@ -138,12 +138,22 @@ pub(super) fn host_lines(rows: &[HostRow], width: u16) -> Vec<HostLine> {
 /// Drop complete trailing fields to make room for the cut marker. Only a
 /// single remaining field may be ellipsized, even when it contains spaces.
 fn fit_fields(cells: &[String], room: usize) -> String {
+    // One join; each kept prefix is a slice of it ending at its field.
+    let joined = cells.join(" ");
+    let ends: Vec<usize> = cells
+        .iter()
+        .enumerate()
+        .scan(0, |end, (i, cell)| {
+            *end += usize::from(i > 0) + cell.len();
+            Some(*end)
+        })
+        .collect();
     let mut kept = cells.len();
     while kept > 0 {
-        let value = cells[..kept].join(" ").trim_end().to_owned();
-        let width = display_width(&value);
+        let value = joined[..ends[kept - 1]].trim_end();
+        let width = display_width(value);
         if kept == cells.len() && width <= room {
-            return value;
+            return value.to_owned();
         }
         if width + 1 <= room {
             // Only blank alignment padding is left: the mark stands alone.
@@ -156,7 +166,13 @@ fn fit_fields(cells: &[String], room: usize) -> String {
             };
         }
         if kept == 1 {
-            return truncate_end(&value, room);
+            // After a drop the mark counts as text, so a field that exactly
+            // fills the room gives up its last column to the `…`.
+            return if kept < cells.len() {
+                truncate_end(&format!("{value}…"), room)
+            } else {
+                truncate_end(value, room)
+            };
         }
         kept -= 1;
     }
@@ -205,6 +221,14 @@ mod tests {
             let actual: Vec<_> = rows.iter().flat_map(|row| render(std::slice::from_ref(row), width)).collect();
             assert_eq!(actual, expected, "width {width}");
         }
+    }
+
+    /// The last kept field fills the room exactly, yet a field was dropped:
+    /// the field gives up a column so the cut still shows.
+    #[test]
+    fn exact_fit_after_a_drop_still_ends_in_the_marker() {
+        let rows = vec![host("forge", "waiting on anthropic.com · 1 kept: 1 secret")];
+        assert_eq!(render(&rows, 26), vec![" forge  wait anthropic.co…"]);
     }
 
     #[test]
