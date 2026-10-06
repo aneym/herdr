@@ -38,7 +38,7 @@ struct SpacesRowView: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            if row.chevron != "none", row.kind != .space, row.kind != .hidden, row.kind != .machine {
+            if row.chevron != "none", row.kind != .space, row.kind != .hidden {
                 chevron
             } else if treeRow {
                 Color.clear.frame(width: Self.chevronWidth, height: 1)
@@ -52,7 +52,7 @@ struct SpacesRowView: View {
             } else {
                 Text(row.title)
                     .font(.system(size: row.kind == .section ? 10.5 : 12.5,
-                                  weight: row.kind == .space || row.kind == .title || row.kind == .machine ? .semibold
+                                  weight: row.kind == .space || row.kind == .title ? .semibold
                                       : (row.kind == .tab && !row.dim ? .medium : .regular)))
                     .tracking(row.kind == .section ? 0.4 : 0)
                     .foregroundStyle(row.kind == .section || row.kind == .group || row.kind == .hidden || row.dim ? t.mute : t.ink)
@@ -61,6 +61,7 @@ struct SpacesRowView: View {
                     // A footer's host name stays whole; its long summary is what gives way.
                     .layoutPriority(isFooter ? 2 : 0)
             }
+            if let machine = row.badge { badge(machine) }
             Spacer(minLength: 4)
             if !row.trailing.isEmpty, row.kind != .goal {
                 trailingText.font(.system(size: 10.5)).monospacedDigit().foregroundStyle(row.link == nil ? t.mute : t.accent)
@@ -92,11 +93,11 @@ struct SpacesRowView: View {
                 Text("⚲").foregroundStyle(pinned ? t.accent : t.mute).fixedSize().onTapGesture { click("pin") }
                 Text("+").foregroundStyle(t.mute).fixedSize().onTapGesture { click("plus") }
             }
-            if row.kind == .space || row.kind == .hidden || row.kind == .machine, row.chevron != "none" {
+            if row.kind == .space || row.kind == .hidden, row.chevron != "none" {
                 chevron
             }
         }
-        .padding(.top, (row.kind == .space && row.id != firstSpaceId) || row.kind == .machine || row.id == "machines" ? 10 : 0)
+        .padding(.top, row.kind == .space && row.id != firstSpaceId ? 10 : 0)
         .frame(height: 23).padding(.leading, indent).padding(.horizontal, 4)
         .background(RoundedRectangle(cornerRadius: 4).fill(selected && row.kind == .tab ? t.sel : .clear))
     }
@@ -116,6 +117,20 @@ struct SpacesRowView: View {
         } else {
             Text(row.trailing)
         }
+    }
+
+    /// The machine running this chat: an icon and its short name, quiet after the title. An
+    /// unreachable machine or one that needs an update dims it further and says so on hover.
+    private func badge(_ machine: String) -> some View {
+        HStack(spacing: 2) {
+            Image(systemName: "desktopcomputer").font(.system(size: 8.5))
+            Text(machine).font(.system(size: 10.5))
+        }
+        .foregroundStyle(t.mute)
+        .opacity(row.badgeState == nil ? 0.9 : 0.45)
+        .lineLimit(1).fixedSize()
+        .layoutPriority(1)
+        .help(row.badgeState.map { machine + ": " + $0 } ?? "Running on " + machine)
     }
 
     private var chevron: some View {
