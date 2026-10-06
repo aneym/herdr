@@ -556,7 +556,11 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
                 guard let self else { return }
                 self.readInFlight = false
                 guard generation == self.readGeneration, self.rowId == rowId, self.activeItem == id else { return }
-                guard let result else { self.pageText = "Unable to read desk file"; return }
+                // A poll that fails while a file is already shown (the server mid-handoff) keeps it.
+                guard let result else {
+                    if self.fileData == nil { self.pageText = "Unable to read desk file" }
+                    return
+                }
                 self.fileMtime = (result["mtime_ms"] as? NSNumber)?.uint64Value
                 guard result["unchanged"] as? Bool != true,
                       let raw = result["data_base64"] as? String, let data = Data(base64Encoded: raw) else { return }
