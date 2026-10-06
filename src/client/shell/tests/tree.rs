@@ -7,6 +7,7 @@ use crate::client::shell::tree::{tree_list_entries, AgentPanelListEntry, ClientT
 
 fn tab(tab_id: &str, workspace_id: &str, number: usize, label: &str) -> ClientShellTab {
     ClientShellTab {
+        desk_count: 0,
         tab_id: tab_id.into(),
         workspace_id: workspace_id.into(),
         number,

@@ -11,6 +11,13 @@ use super::*;
 
 const MOBILE_BUTTON_WIDTH: u16 = 10;
 
+// Width-only layout must not build labels for every tab.
+fn mobile_tab_width(tab: &ClientShellTab) -> u16 {
+    let suffix = if tab.desk_count == 0 { 0 } else { 3 + tab.desk_count.ilog10() as u16 };
+    display_width(&tab.label).saturating_add(2).saturating_add(suffix)
+        .saturating_add(if tab.zoomed { 2 } else { 0 })
+}
+
 struct MobileItem {
     lines: Vec<Line<'static>>,
     background: Color,
@@ -108,16 +115,16 @@ fn render_header_tabs(
     let mut prefix_width: u16 = tabs
         .iter()
         .take(active + 1)
-        .map(|tab| display_width(&tab.label).saturating_add(2))
+        .map(|tab| mobile_tab_width(tab))
         .fold(0, u16::saturating_add);
     while start < active && prefix_width > area.width {
         prefix_width =
-            prefix_width.saturating_sub(display_width(&tabs[start].label).saturating_add(2));
+            prefix_width.saturating_sub(mobile_tab_width(tabs[start]));
         start += 1;
     }
     let mut x = area.x;
     for tab in tabs.into_iter().skip(start) {
-        let label = format!(" {} ", tab.label);
+        let label = format!(" {} ", super::render::tab_label(tab));
         let width = display_width(&label).min(area.right().saturating_sub(x));
         if width == 0 {
             break;
@@ -1050,9 +1057,9 @@ fn mobile_items(
                 palette.panel_bg
             };
             let label = if tab.custom_label {
-                format!("{} · {}", index + 1, tab.label)
+                super::render::desk_label(format!("{} · {}", index + 1, tab.label), tab.desk_count)
             } else {
-                format!("tab {}", tab.label)
+                super::render::desk_label(format!("tab {}", tab.label), tab.desk_count)
             };
             let glyphs = super::render::tab_status_glyphs(snapshot, tab, config, false);
             let glyph_width = glyphs.iter().fold(0u16, |width, (glyph, _)| {

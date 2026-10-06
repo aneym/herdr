@@ -3103,6 +3103,7 @@ fn dragging_a_remote_pin_moves_it_on_its_own_machine() {
     let template = snapshot.tabs[0].clone();
     snapshot.tabs = (1..=3)
         .map(|number| ClientShellTab {
+            desk_count: 0,
             tab_id: format!("tab_{number}"),
             number,
             label: format!("chat {number}"),
@@ -3235,6 +3236,7 @@ fn aggregate_pins_scroll_within_their_section_and_keep_the_divider_below_them() 
     let template = snapshot.tabs[0].clone();
     snapshot.tabs = (1..=30)
         .map(|number| ClientShellTab {
+            desk_count: 0,
             tab_id: format!("tab_{number}"),
             number,
             label: format!("chat {number}"),

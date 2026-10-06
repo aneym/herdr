@@ -40,6 +40,7 @@ pub(super) fn command() -> Command {
         .subcommand(workspace_command())
         .subcommand(worktree_command())
         .subcommand(tab_command())
+        .subcommand(desk_command())
         .subcommand(notification_command())
         .subcommand(agent_command())
         .subcommand(pane_command())
@@ -327,6 +328,25 @@ fn tab_command() -> Command {
                 .arg(required("pin_index", "INDEX")),
         )
         .subcommand(id_command("close", "tab_id", "Close a tab"))
+}
+
+fn desk_command() -> Command {
+    let target = |command: Command| command
+        .arg(option("tab", "TAB_ID"))
+        .arg(option("pane", "PANE_ID"))
+        .arg(flag("json"));
+    Command::new("desk")
+        .about("Open and manage a tab's desk")
+        .subcommand(target(Command::new("open").about("Open a file or HTTP(S) URL")
+            .arg(required("reference", "PATH_OR_URL"))
+            .arg(option("title", "TITLE"))
+            .arg(flag("background"))))
+        .subcommand(target(Command::new("list").about("List desk items"))
+            .arg(flag("all").conflicts_with_all(["tab", "pane"])))
+        .subcommand(target(Command::new("close").about("Close an item or the front item")
+            .arg(Arg::new("item"))))
+        .subcommand(target(Command::new("focus").about("Focus a desk item")
+            .arg(required("item", "ITEM"))))
 }
 
 fn notification_command() -> Command {

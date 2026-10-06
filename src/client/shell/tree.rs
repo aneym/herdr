@@ -473,7 +473,7 @@ pub(super) fn pinned_tab_entries(
             agent,
             workspace_id: pin.workspace_id.clone(),
             tab_id: pin.tab_id.clone(),
-            label: tab.label.clone(),
+            label: super::render::desk_label(tab.label.clone(), tab.desk_count),
             space_label,
             status,
             idle,
@@ -969,7 +969,7 @@ pub(super) fn tree_list_entries_with_overlay(
                     workspace_id: workspace_id.clone(),
                     tab_id: Some(tab_id.clone()),
                     label: tab
-                        .map(|tab| tab.label.clone())
+                        .map(|tab| super::render::desk_label(tab.label.clone(), tab.desk_count))
                         .unwrap_or_else(|| tab_id.clone()),
                     key,
                     collapsed,
@@ -1888,7 +1888,7 @@ fn factory_row(
             label: {
                 let name = tag.and_then(|tag| tag.name.clone())
                     .unwrap_or_else(|| tab.label.clone());
-                if tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Workflow) {
+                let label = if tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Workflow) {
                     name.strip_prefix("wf ").unwrap_or(&name).to_owned()
                 } else if tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Lane) {
                     let name = if name.get(..10).is_some_and(|prefix| prefix.eq_ignore_ascii_case("[scoping] ")) {
@@ -1904,7 +1904,8 @@ fn factory_row(
                     name.to_owned()
                 } else {
                     name
-                }
+                };
+                super::render::desk_label(label, tab.desk_count)
             },
             key: tab.tab_id.clone(),
             collapsed,

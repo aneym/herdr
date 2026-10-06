@@ -1101,6 +1101,8 @@ pub struct ClientShellWorktree {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientShellTab {
+    #[serde(default)]
+    pub desk_count: usize,
     pub tab_id: String,
     pub workspace_id: String,
     pub number: usize,
@@ -2948,6 +2950,7 @@ mod tests {
                 agent_status: crate::api::schema::AgentStatus::Idle,
             }],
             tabs: vec![ClientShellTab {
+                desk_count: 0,
                 tab_id: "w1:t1".into(),
                 workspace_id: "w1".into(),
                 number: 1,

@@ -209,6 +209,32 @@ With `ui.confirm_close` enabled, the TUI asks for confirmation before closing a 
 
 Workspace and tab creation, and pane splitting, leave focus unchanged by default. `--focus` selects the new layout; `--no-focus` states the default explicitly. Without `--cwd`, new terminals follow the configured `terminal.new_cwd` policy, which follows the source pane or workspace by default. Each `--env KEY=VALUE` adds or replaces that variable in the new root shell.
 
+## Desk
+
+```bash
+herdr desk open <path|url> [--tab T|--pane P] [--title T] [--background] [--json]
+herdr desk list [--tab T|--pane P|--all] [--json]
+herdr desk close [<item>] [--tab T|--pane P] [--json]
+herdr desk focus <item> [--tab T|--pane P] [--json]
+```
+
+Each tab owns a desk of files and HTTP(S) URLs. `open` focuses the item unless
+`--background` is set; opening the same reference again does not duplicate it.
+Local paths (including `file://` paths) are canonicalized from the CLI's current
+working directory and must exist. Other URL schemes are rejected.
+
+Target selection uses `--tab`, then `--pane`, then `$HERDR_PANE_ID`. Outside a
+Herdr pane, pass `--tab` for open, close, or focus. `list` defaults to your pane's
+tab, or all desks outside a pane; `--all` always lists all desks. Close and focus
+accept an item ID or exact reference; close without an item closes the front item.
+
+Text output from open is `<item_id> <tab_id> <ref>`. List prints
+`<* or space> <item_id> <kind> <title> <ref>`, with `*` marking the front item,
+and a tab-ID header when listing multiple desks. Close and focus print the
+resulting front ID, or nothing for an empty desk. `--json` prints the server
+result object. Server errors print `error: <code>: <message>` and exit 1.
+The TUI appends ` ▤<n>` to tab labels when their desk contains items.
+
 ## Panes
 
 ```bash

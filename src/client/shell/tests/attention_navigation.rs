@@ -16,6 +16,7 @@ fn attention_state(statuses: &[AgentStatus]) -> ClientShellState {
         let pane_id = format!("pane_{index}");
         let tab_id = format!("tab_{index}");
         projected.tabs.push(ClientShellTab {
+            desk_count: 0,
             tab_id: tab_id.clone(),
             workspace_id: "ws_1".into(),
             number: index + 1,
