@@ -910,6 +910,7 @@ impl AppState {
         for idx in close_indices.iter().rev() {
             self.workspaces.remove(*idx);
         }
+        self.prune_desks();
         self.remove_unattached_terminal_ids(terminal_ids);
         if self.workspaces.is_empty() {
             self.active = None;
@@ -2302,6 +2303,7 @@ impl AppState {
             ws.remove_pane(pane_id)
         };
         self.prune_pinned_tabs();
+        self.prune_desks();
         self.mark_session_dirty();
 
         if should_close_workspace {
@@ -2312,6 +2314,7 @@ impl AppState {
             let selected_workspace_id = self.workspaces.get(self.selected).map(|ws| ws.id.clone());
             self.workspaces.remove(ws_idx);
             self.prune_pinned_tabs();
+            self.prune_desks();
             self.remove_unattached_terminal_ids(workspace_terminal_ids);
             if self.workspaces.is_empty() {
                 self.active = None;

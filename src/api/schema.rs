@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod agents;
 pub mod commands;
+pub mod desk;
 pub mod common;
 pub mod events;
 pub mod integrations;
@@ -16,6 +17,7 @@ pub mod worktrees;
 
 pub use agents::*;
 pub use commands::*;
+pub use desk::*;
 pub use common::*;
 pub use events::*;
 pub use integrations::*;
@@ -45,6 +47,17 @@ pub struct Request {
 // the simple serde shape and avoids boxing churn across every caller.
 #[allow(clippy::large_enum_variant)]
 pub enum Method {
+    #[serde(rename = "desk.open")]
+    DeskOpen(DeskOpenParams),
+    #[serde(rename = "desk.close")]
+    DeskClose(DeskCloseParams),
+    #[serde(rename = "desk.focus")]
+    DeskFocus(DeskFocusParams),
+    #[serde(rename = "desk.list")]
+    DeskList(DeskTarget),
+    #[serde(rename = "desk.read")]
+    DeskRead(DeskReadParams),
+
     #[serde(rename = "ping")]
     Ping(PingParams),
     #[serde(rename = "server.stop")]

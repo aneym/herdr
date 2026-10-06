@@ -9,6 +9,28 @@ use crate::layout::{PaneId, PaneInfo};
 pub(crate) type InstalledPluginRegistry =
     std::collections::HashMap<String, crate::api::schema::InstalledPluginInfo>;
 
+/// Persist the allocation counter even when all items have been closed.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+pub struct DeskState {
+    #[serde(flatten)]
+    pub info: crate::api::schema::DeskInfo,
+    #[serde(default = "desk_first_id")]
+    pub next_id: u64,
+}
+
+fn desk_first_id() -> u64 {
+    1
+}
+
+impl Default for DeskState {
+    fn default() -> Self {
+        Self {
+            info: Default::default(),
+            next_id: 1,
+        }
+    }
+}
+
 /// One pinned chat in `AppState::pinned_tabs`. The Vec order is the pin order
 /// the sidebar draws and Cmd+1..9 resolves; `priority` decides where a newly
 /// pinned chat lands (higher sorts earlier, ties keep the earlier pin first).
@@ -912,6 +934,8 @@ pub struct AppState {
     /// Tree view: pinned spaces keep their header row listed even when no
     /// agent rows remain beneath them. Keyed by workspace id.
     pub tree_pinned_spaces: std::collections::HashSet<String>,
+    /// Per-tab document state, including allocation counters for empty desks.
+    pub desks: std::collections::HashMap<String, DeskState>,
     /// Chats pinned to the sidebar's pinned section, in pin order. A shared
     /// session fact (not per-client chrome): the same order drives Cmd+1..9
     /// on every attached client. Keyed by public tab id.
@@ -1023,6 +1047,7 @@ impl AppState {
             tree_collapsed_spaces: self.tree_collapsed_spaces.clone(),
             tree_collapsed_tabs: self.tree_collapsed_tabs.clone(),
             tree_pinned_spaces: self.tree_pinned_spaces.clone(),
+            desks: self.desks.clone(),
             pinned_tabs: self.pinned_tabs.clone(),
             tree_show_hidden_spaces: self.tree_show_hidden_spaces,
             hidden_spaces_expanded: self.hidden_spaces_expanded,
@@ -1151,6 +1176,93 @@ impl AppState {
         };
         self.pinned_tabs.remove(index);
         true
+    }
+
+    pub fn desk_open(
+        &mut self,
+        tab_id: &str,
+        mut item: crate::api::schema::DeskItem,
+        background: bool,
+    ) -> Option<String> {
+        let desk = self.desks.entry(tab_id.into()).or_default();
+        if let Some(existing) = desk
+            .info
+            .items
+            .iter()
+            .find(|i| i.reference == item.reference)
+        {
+            let id = existing.id.clone();
+            if !background {
+                desk.info.front = Some(id.clone());
+            }
+            return Some(id);
+        }
+        let next = desk.next_id.checked_add(1)?;
+        item.id = format!("d{}", desk.next_id);
+        desk.next_id = next;
+        let id = item.id.clone();
+        if desk.info.items.len() >= 32 {
+            let oldest = desk
+                .info
+                .items
+                .iter()
+                .enumerate()
+                .filter(|(_, i)| Some(&i.id) != desk.info.front.as_ref())
+                .min_by_key(|(_, i)| i.opened_at_ms)
+                .map(|(index, _)| index)?;
+            desk.info.items.remove(oldest);
+        }
+        desk.info.items.push(item);
+        if !background {
+            desk.info.front = Some(id.clone());
+        }
+        Some(id)
+    }
+
+    pub fn desk_close(&mut self, tab_id: &str, item: Option<&str>) -> Option<String> {
+        let desk = self.desks.get_mut(tab_id)?;
+        let target = item.or(desk.info.front.as_deref())?;
+        let index = desk
+            .info
+            .items
+            .iter()
+            .position(|i| i.id == target || i.reference == target)?;
+        let removed = desk.info.items.remove(index);
+        if desk.info.front.as_ref() == Some(&removed.id) {
+            desk.info.front = desk
+                .info
+                .items
+                .get(index)
+                .or_else(|| index.checked_sub(1).and_then(|i| desk.info.items.get(i)))
+                .map(|i| i.id.clone());
+        }
+        Some(removed.id)
+    }
+
+    pub fn desk_focus(&mut self, tab_id: &str, item: &str) -> Option<String> {
+        let desk = self.desks.get_mut(tab_id)?;
+        let id = desk
+            .info
+            .items
+            .iter()
+            .find(|i| i.id == item || i.reference == item)?
+            .id
+            .clone();
+        desk.info.front = Some(id.clone());
+        Some(id)
+    }
+
+    pub fn prune_desks(&mut self) {
+        let live: std::collections::HashSet<String> = self
+            .workspaces
+            .iter()
+            .flat_map(|ws| {
+                ws.tabs
+                    .iter()
+                    .map(|tab| crate::workspace::public_tab_id_for_number(&ws.id, tab.number))
+            })
+            .collect();
+        self.desks.retain(|id, _| live.contains(id));
     }
 
     /// Drop pins whose tab no longer exists (closed chats lose their pin).
@@ -1514,6 +1626,7 @@ impl AppState {
             tree_collapsed_spaces: std::collections::HashSet::new(),
             tree_collapsed_tabs: std::collections::HashSet::new(),
             tree_pinned_spaces: std::collections::HashSet::new(),
+            desks: Default::default(),
             pinned_tabs: Vec::new(),
             tree_show_hidden_spaces: false,
             hidden_spaces_expanded: false,
@@ -1791,6 +1904,18 @@ impl AppState {
     }
 
     pub fn assert_invariants_for_test(&self) {
+        for desk in self.desks.values() {
+            assert!(desk.info.items.len() <= 32);
+            let ids: std::collections::HashSet<_> =
+                desk.info.items.iter().map(|i| &i.id).collect();
+            assert_eq!(ids.len(), desk.info.items.len());
+            assert!(desk.info.front.as_ref().is_none_or(|front| ids.contains(front)));
+            assert!(desk.info.items.iter().all(|i| i
+                .id
+                .strip_prefix('d')
+                .and_then(|id| id.parse::<u64>().ok())
+                .is_some_and(|id| id < desk.next_id)));
+        }
         assert!(
             !self
                 .pinned_tabs

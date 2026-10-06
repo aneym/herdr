@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
 mod agent_view;
+mod desk;
 mod agents;
 mod env;
 mod integrations;
@@ -1102,6 +1103,11 @@ impl App {
             Method::TabSetPinned(params) => {
                 return self.handle_tab_set_pinned(request.id, params);
             }
+            Method::DeskOpen(params) => return self.handle_desk_open(request.id, params),
+            Method::DeskClose(params) => return self.handle_desk_close(request.id, params),
+            Method::DeskFocus(params) => return self.handle_desk_focus(request.id, params),
+            Method::DeskList(params) => return self.handle_desk_list(request.id, params),
+            Method::DeskRead(params) => return self.handle_desk_read(request.id, params),
             Method::TabSetRole(params) => return self.handle_tab_set_role(request.id, params),
             Method::TabPinMove(params) => return self.handle_tab_pin_move(request.id, params),
             Method::TabClose(target) => return self.handle_tab_close(request.id, target),

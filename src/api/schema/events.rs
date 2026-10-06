@@ -16,6 +16,8 @@ pub struct EventsSubscribeParams {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type")]
 pub enum Subscription {
+    #[serde(rename = "desk.changed")]
+    DeskChanged {},
     #[serde(rename = "workspace.created")]
     WorkspaceCreated {},
     #[serde(rename = "workspace.updated")]
@@ -197,6 +199,8 @@ pub enum EventMatch {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EventKind {
+    #[serde(rename = "desk.changed")]
+    DeskChanged,
     WorkspaceCreated,
     WorkspaceUpdated,
     WorkspaceMetadataUpdated,
@@ -229,6 +233,7 @@ pub enum EventKind {
 impl EventKind {
     pub fn dot_name(self) -> &'static str {
         match self {
+            EventKind::DeskChanged => "desk.changed",
             EventKind::WorkspaceCreated => "workspace.created",
             EventKind::WorkspaceUpdated => "workspace.updated",
             EventKind::WorkspaceMetadataUpdated => "workspace.metadata_updated",
@@ -278,6 +283,7 @@ pub const KNOWN_EVENT_KINDS: &[EventKind] = &[
     EventKind::TabRenamed,
     EventKind::TabMoved,
     EventKind::TabPinMoved,
+    EventKind::DeskChanged,
     EventKind::TabFocused,
     EventKind::PaneCreated,
     EventKind::PaneClosed,
@@ -307,6 +313,7 @@ pub const PLUGIN_HOOK_EVENT_KINDS: &[EventKind] = &[
     EventKind::TabRenamed,
     EventKind::TabMoved,
     EventKind::TabPinMoved,
+    EventKind::DeskChanged,
     EventKind::TabFocused,
     EventKind::PaneCreated,
     EventKind::PaneClosed,
@@ -429,6 +436,11 @@ pub struct PaneScrollChangedEvent {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EventData {
+    DeskChanged {
+        workspace_id: String,
+        tab_id: String,
+        desk: super::desk::DeskInfo,
+    },
     WorkspaceCreated {
         workspace: WorkspaceInfo,
     },

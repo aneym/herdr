@@ -42,6 +42,21 @@ pub struct ErrorBody {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ResponseResult {
+    Desk {
+        desk: super::desk::TabDesk,
+        item_id: String,
+    },
+    DeskList {
+        desks: Vec<super::desk::TabDesk>,
+    },
+    DeskFile {
+        item_id: String,
+        mime: String,
+        size: u64,
+        mtime_ms: u64,
+        unchanged: bool,
+        data_base64: Option<String>,
+    },
     Pong {
         version: String,
         protocol: u32,

@@ -18,6 +18,11 @@ const CLIENT_SHELL_METHODS: &[&str] = &[
     "agent.usage",
     "client_shell.surface.set",
     "command.invoke",
+    "desk.close",
+    "desk.focus",
+    "desk.list",
+    "desk.open",
+    "desk.read",
     "integration.install",
     "integration.list",
     "layout.set_split_ratio",
@@ -80,7 +85,17 @@ pub(crate) fn supports_client_shell_method(method: &Method) -> bool {
 /// this server from its aggregate sidebar, with its surface handed to another
 /// machine, may still send them; they apply as the public socket request does.
 pub(crate) fn client_shell_method_is_surface_independent(method: &Method) -> bool {
-    matches!(method, Method::TabSetPinned(_) | Method::TabPinMove(_) | Method::TabSetRole(_))
+    matches!(
+        method,
+        Method::TabSetPinned(_)
+            | Method::TabPinMove(_)
+            | Method::TabSetRole(_)
+            | Method::DeskOpen(_)
+            | Method::DeskClose(_)
+            | Method::DeskFocus(_)
+            | Method::DeskList(_)
+            | Method::DeskRead(_)
+    )
 }
 
 pub(crate) fn error_response(id: String, code: &str, message: impl Into<String>) -> String {
@@ -334,9 +349,18 @@ mod tests {
             Some(true),
             "tab.pin_move must advertise a shape"
         );
-        // Profile methods are newly advertised on the client shell lane. Their
-        // shapes are not part of the original endpoint v1 fixture.
-        for method in ["profile.list", "profile.switch", "tab.set_role"] {
+        // Additive profile, role and desk methods are advertised separately;
+        // the published endpoint v1 fixture remains immutable.
+        for method in [
+            "profile.list",
+            "profile.switch",
+            "tab.set_role",
+            "desk.open",
+            "desk.close",
+            "desk.focus",
+            "desk.list",
+            "desk.read",
+        ] {
             assert!(actual.remove(method).is_some(), "{method} must advertise a shape");
         }
         // Fork: sidebar agent placement (docs/fork/port-0.9/PORT.md, ledger 31).

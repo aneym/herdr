@@ -385,6 +385,7 @@ fn restored_ui_prefs(snapshot: &crate::persist::SessionSnapshot) -> crate::persi
         tree_collapsed_spaces: snapshot.tree_collapsed_spaces.clone(),
         tree_collapsed_tabs: snapshot.tree_collapsed_tabs.clone(),
         tree_pinned_spaces: snapshot.tree_pinned_spaces.clone(),
+        desks: snapshot.desks.clone(),
         pinned_tabs: snapshot.pinned_tabs.clone(),
         tree_show_hidden_spaces: snapshot.tree_show_hidden_spaces,
         hidden_spaces_expanded: snapshot.hidden_spaces_expanded,
@@ -589,6 +590,8 @@ impl App {
         state.tree_collapsed_spaces = ui_prefs.tree_collapsed_spaces.clone();
         state.tree_collapsed_tabs = ui_prefs.tree_collapsed_tabs.clone();
         state.tree_pinned_spaces = ui_prefs.tree_pinned_spaces.clone();
+        state.desks = ui_prefs.desks.clone();
+        state.prune_desks();
         state.pinned_tabs = ui_prefs.pinned_tabs.clone();
         state.prune_pinned_tabs();
         state.normalize_pin_roles();
@@ -764,6 +767,8 @@ impl App {
         // Pins are a shared session fact; a live handoff carries them in the
         // snapshot, and the replacement must keep them (the handoff policy
         // skips the session restore that applies them on a cold start).
+        app.state.desks = snapshot.desks.clone();
+        app.state.prune_desks();
         app.state.pinned_tabs = snapshot.pinned_tabs.clone();
         app.state.prune_pinned_tabs();
         app.state.normalize_pin_roles();
@@ -1175,11 +1180,11 @@ mod tests {
         assert_eq!(app.state.session_name.as_deref(), Some("work"));
     }
 
-    /// A dragged pin order is the order a cold start and a live handoff
-    /// bring back, not a re-sort by priority.
+    /// A dragged pin order and desk survive real snapshot serialization,
+    /// cold restore and live handoff; closed-tab desks are pruned.
     #[cfg(unix)]
     #[tokio::test]
-    async fn moved_pin_order_survives_session_restore_and_live_handoff() {
+    async fn desk_and_moved_pin_order_survive_session_restore_and_live_handoff() {
         let _guard = config_env_lock().lock().unwrap();
         let config_home = unique_temp_path("pin-order-config");
         let original_config_home = std::env::var_os("XDG_CONFIG_HOME");
@@ -1221,6 +1226,32 @@ mod tests {
         });
         app.state
             .set_tab_role(&tabs[2], Some(crate::api::schema::TabRole::Agent));
+        app.handle_api_request(serde_json::from_value(serde_json::json!({
+            "id": "desk", "method": "desk.open",
+            "params": { "tab_id": tabs[0], "ref": "https://example.com/restore" }
+        })).unwrap());
+        let expected_desk = app.state.desks[&tabs[0]].clone();
+        // A closed tab loses its desk immediately. Even an older snapshot's
+        // entry for that tab must be pruned by both restore paths.
+        app.state.workspaces[0].test_add_tab(Some("closed"));
+        let closed_tab = app.public_tab_id(0, 2).unwrap();
+        app.handle_api_request(
+            serde_json::from_value(serde_json::json!({
+                "id": "closed-desk", "method": "desk.open",
+                "params": { "tab_id": closed_tab, "ref": "https://example.com/closed" }
+            }))
+            .unwrap(),
+        );
+        let closed_desk = app.state.desks[&closed_tab].clone();
+        app.handle_api_request(
+            serde_json::from_value(serde_json::json!({
+                "id": "close-tab", "method": "tab.close",
+                "params": { "tab_id": closed_tab }
+            }))
+            .unwrap(),
+        );
+        assert!(!app.state.desks.contains_key(&closed_tab));
+        app.state.desks.insert(closed_tab.clone(), closed_desk);
         let expected = vec![tabs[2].clone(), tabs[1].clone(), tabs[0].clone()];
         let order = |app: &App| -> Vec<String> {
             app.state
@@ -1256,6 +1287,8 @@ mod tests {
             crate::api::EventHub::default(),
         );
         assert_eq!(order(&restored), expected, "cold restore");
+        assert_eq!(restored.state.desks[&tabs[0]], expected_desk);
+        assert!(!restored.state.desks.contains_key(&closed_tab));
         assert_eq!(
             restored.state.pinned_tabs[0].role,
             Some(crate::api::schema::TabRole::Agent)
@@ -1272,6 +1305,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(order(&handed_off), expected, "live handoff");
+        assert_eq!(handed_off.state.desks[&tabs[0]], expected_desk);
+        assert!(!handed_off.state.desks.contains_key(&closed_tab));
         assert_eq!(
             handed_off.state.pinned_tabs[0].role,
             Some(crate::api::schema::TabRole::Agent)

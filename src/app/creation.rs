@@ -236,6 +236,12 @@ impl App {
             .unwrap_or((crate::detect::AgentState::Unknown, true));
         let tab_id = self.public_tab_id(ws_idx, tab_idx)?;
         Some(crate::api::schema::TabInfo {
+            desk: self
+                .state
+                .desks
+                .get(&tab_id)
+                .filter(|desk| !desk.info.items.is_empty())
+                .map(|desk| desk.info.clone()),
             role: self
                 .state
                 .pinned_tabs

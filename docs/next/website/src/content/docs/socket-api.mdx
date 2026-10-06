@@ -103,6 +103,7 @@ Raw socket method names use dot notation:
 | Workspace | `workspace.create`, `workspace.list`, `workspace.get`, `workspace.focus`, `workspace.rename`, `workspace.move`, `workspace.move_block`, `workspace.report_metadata`, `workspace.close` |
 | Worktree | `worktree.list`, `worktree.create`, `worktree.open`, `worktree.remove` |
 | Tab | `tab.create`, `tab.list`, `tab.get`, `tab.focus`, `tab.rename`, `tab.move`, `tab.set_pinned`, `tab.set_role`, `tab.pin_move`, `tab.close` |
+| Desk | `desk.open`, `desk.close`, `desk.focus`, `desk.list`, `desk.read` |
 | Pane | `pane.split`, `pane.swap`, `pane.move`, `pane.zoom`, `pane.layout`, `pane.process_info`, `pane.neighbor`, `pane.edges`, `pane.focus_direction`, `pane.resize`, `pane.list`, `pane.current`, `pane.get`, `pane.rename`, `pane.send_text`, `pane.send_keys`, `pane.send_input`, `pane.read`, `pane.report_agent`, `pane.report_agent_session`, `pane.report_metadata`, `pane.clear_agent_authority`, `pane.release_agent`, `pane.close`, `pane.wait_for_output` |
 | Popup | `popup.close` |
 | Layout | `layout.export`, `layout.apply`, `layout.set_split_ratio` |
@@ -959,3 +960,40 @@ The numbered binary protocol remains for same-install and internal operations,
 including direct terminal attach and live handoff. Check `ping` or `herdr status`
 before using those operations across different builds. JSON API clients should
 ignore unknown fields and handle unsupported methods as normal errors.
+
+
+## Desk documents and URLs
+
+Each tab owns a server-persisted desk, also carried in `TabInfo.desk` in
+`session.snapshot` when non-empty. All desk methods accept `tab_id` or `pane_id`;
+`tab_id` wins when both are supplied. Missing targets return `desk_target_required`,
+except `desk.list` without a target returns all non-empty desks.
+
+- `desk.open`: `{ "tab_id": "w1:t1", "ref": "https://example.com/doc" }`.
+  References must be HTTP(S) URLs or existing absolute file paths on the server.
+  Optional `title`, `opened_by` (default `api`, at most 64 characters), and
+  `background` (default false) customize the open. Reopening an exact reference
+  focuses the existing item without duplicating it, unless opening in the
+  background. At 32 items, the oldest non-front item is dropped. IDs such as
+  `d1` are never reused within a tab, even after its desk becomes empty.
+- `desk.close`: accepts optional `item` (ID or exact reference); omitted means
+  the front item. Closing the front selects its right neighbor, then left,
+  otherwise clears the front.
+- `desk.focus`: requires `item` (ID or exact reference).
+- `desk.list`: returns `{ "type": "desk_list", "desks": [...] }`. Each desk
+  contains `workspace_id`, `tab_id`, `items`, and `front`.
+- `desk.read`: requires `item` and optionally `known_mtime_ms`. File items only;
+  returns `item_id`, `mime`, `size`, `mtime_ms`, `unchanged`, and `data_base64`.
+  An equal known mtime returns `unchanged: true` with no data. Files over 20 MB
+  return `desk_file_too_large`; URL items return `desk_not_a_file`.
+
+Open, close, and focus return `{ "type": "desk", "desk": {...}, "item_id": "d1" }`
+and emit subscribable `desk.changed`, carrying `workspace_id`, `tab_id`, and
+`desk: { "items": [...], "front": "d1" }`. Subscribe with
+`{ "type": "desk.changed" }`; plugin hooks receive the tab and workspace context.
+Each item has `id`, `kind` (`url` or `file`), `ref`, `title`, `mime`, `opened_by`,
+and `opened_at_ms`. MIME is inferred from the file extension at open; URLs use
+`text/html`. Desks survive cold restore and live handoff and are pruned when
+their tabs close. Read and list do not change UI state. Unknown items return
+`desk_item_not_found`; invalid references return `desk_invalid_ref`, and missing
+files at open return `desk_file_not_found`.

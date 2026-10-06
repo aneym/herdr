@@ -495,6 +495,8 @@ impl App {
             );
         }
         self.state.unpin_tab(&tab_id);
+        self.state.prune_desks();
+        self.state.mark_session_dirty();
         self.state.remove_plugin_pane_records(pane_ids);
         self.state.remove_unattached_terminal_ids(terminal_ids);
         self.shutdown_detached_terminal_runtimes();
