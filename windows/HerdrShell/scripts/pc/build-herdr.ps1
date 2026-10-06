@@ -12,7 +12,7 @@ $ErrorActionPreference = 'Stop'
 $root = 'C:\Users\aneym\winshell'
 $install = Join-Path $env:LOCALAPPDATA 'Programs\herdr-fork'
 $env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
-$env:ZIG = "$env:USERPROFILE\.cache\zig-0.15.2\zig.exe"
+$env:ZIG = "$env:USERPROFILE\.cache\zig-x86_64-windows-0.16.0\zig.exe"  # fork main needs Zig 0.16.0
 $env:HERDR_BUILD_CHANNEL = 'fork'
 $env:HERDR_BUILD_ID = $Sha
 $env:LIBGHOSTTY_VT_OPTIMIZE = 'ReleaseFast'
@@ -46,9 +46,9 @@ function Invoke-Guarded([string]$Dir, [string[]]$CargoArgs, [string]$Log) {
 
 New-Item -ItemType Directory -Force "$root\logs" | Out-Null
 $target = 'x86_64-pc-windows-msvc'
-$env:CARGO_TARGET_DIR = "$root\target-herdr"
+$env:CARGO_TARGET_DIR = "$root\target-link"
 Invoke-Guarded $Src @('build', '--release', '--locked', '--target', $target, '-j', "$Jobs") "$root\logs\herdr-build.log"
-$herdrExe = "$root\target-herdr\$target\release\herdr.exe"
+$herdrExe = "$root\target-link\$target\release\herdr.exe"
 
 $env:CARGO_TARGET_DIR = "$root\target-relay"
 Invoke-Guarded "$Src\windows\HerdrShell\relay" @('build', '--release', '-j', "$Jobs") "$root\logs\relay-build.log"
