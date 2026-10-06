@@ -5,8 +5,9 @@
                                 release.sh (stage only), keep it as the release,
                                 then fan it out
   herdr-shell-publish auto      publish only if origin/<release branch> moved past
-                                the release; called by the repo's reference-transaction
-                                hook, so a push publishes by itself
+                                the release and changed macos/HerdrShell; called by the
+                                repo's reference-transaction hook, so a push publishes
+                                by itself
   herdr-shell-publish fanout    copy the release into each target's staged dir
                                 (launchd every 5 min; never reads the repo)
   herdr-shell-publish data      copy Studio's lanes/areas/modes files to each target's
@@ -23,7 +24,7 @@ one click swaps ~/Applications/Herdr Shell.app and relaunches. Nothing here
 installs over or launches an app.
 
 Release branch: `git config herdr-shell.releaseBranch` in the herdr repo
-(default feat/native-shell-latest). Targets: ~/.config/herdr-shell/targets.json,
+(default main). Targets: ~/.config/herdr-shell/targets.json,
   {"targets": [{"name": "book", "ssh": ["ssh", "macbook-ts"],
                 "server": {"ssh": ["ssh", "studio-ts"], "remote_bin": "~/.local/bin/herdr-shell-remote"}}]}
 A target's "server" becomes its ~/.config/herdr-shell/server.json when it has none.
@@ -90,7 +91,7 @@ def git(*a):
 
 def branch():
     r = subprocess.run(["git", "-C", REPO, "config", "herdr-shell.releaseBranch"], capture_output=True, text=True)
-    return r.stdout.strip() or "feat/native-shell-latest"
+    return r.stdout.strip() or "main"
 
 
 def release_worktree():
@@ -121,6 +122,14 @@ def targets():
 
 def same(a, b):
     return bool(a) and bool(b) and (a.startswith(b) or b.startswith(a))
+
+
+def shell_changed(old, new):
+    """True unless macos/HerdrShell is identical at both commits; an unknown commit counts
+    as changed. Most pushes to main touch only the Rust side and need no new app."""
+    r = subprocess.run(["git", "-C", REPO, "diff", "--quiet", old, new, "--", "macos/HerdrShell"],
+                       capture_output=True)
+    return r.returncode != 0
 
 
 def publish(ref):
@@ -424,6 +433,8 @@ def auto():
                 return
             rel = release()
             if (rel and same(rel.get("commit", ""), sha)) or sha in tried:
+                return
+            if rel and not shell_changed(rel.get("commit", ""), sha):
                 return
             tried.add(sha)
             publish(sha)

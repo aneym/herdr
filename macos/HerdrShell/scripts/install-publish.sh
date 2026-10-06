@@ -17,7 +17,7 @@ PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 install -m 755 "$D/publish.py" "$BIN"
 install -m 755 "$D/../bin/herdr-shell-remote" "$HOME/.local/bin/herdr-shell-remote"
 
-git -C "$REPO" config herdr-shell.releaseBranch >/dev/null || git -C "$REPO" config herdr-shell.releaseBranch feat/native-shell-latest
+git -C "$REPO" config herdr-shell.releaseBranch >/dev/null || git -C "$REPO" config herdr-shell.releaseBranch main
 
 HOOK="$HOOKS/reference-transaction"
 if [[ -e "$HOOK" ]] && ! grep -q herdr-shell-publish "$HOOK"; then
@@ -29,7 +29,7 @@ cat >"$HOOK" <<'SH'
 # herdr-shell-publish: when origin/<release branch> moves (push or fetch), build and stage
 # Herdr Shell in the background. Runs on every ref update in this repo, so it stays cheap.
 [[ "${1:-}" == committed && -z "${HERDR_SHELL_PUBLISHING:-}" ]] || exit 0
-want="refs/remotes/origin/$(git config herdr-shell.releaseBranch || echo feat/native-shell-latest)"
+want="refs/remotes/origin/$(git config herdr-shell.releaseBranch || echo main)"
 hit=0
 while read -r _old new ref; do
   [[ "$ref" == "$want" && "$new" != 0000000000000000000000000000000000000000 ]] && hit=1
