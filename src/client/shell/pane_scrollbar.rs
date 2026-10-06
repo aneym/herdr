@@ -22,9 +22,9 @@ impl ClientShellState {
             .iter()
             .find(|hit| {
                 hit.scrollbar_rect.is_some_and(|rect| contains(rect, point))
-                    && hit
-                        .scroll
-                        .is_some_and(|metrics| metrics.max_offset_from_bottom > 0)
+                    && hit.scroll.is_some_and(|metrics| {
+                        metrics.max_offset_from_bottom > 0 && metrics.offset_from_bottom > 0
+                    })
             })
             .map(|hit| &hit.pane_id);
         if hovered != self.pane_scrollbar_hover.as_ref() {
@@ -65,6 +65,9 @@ impl ClientShellState {
         let (Some(track), Some(metrics)) = (hit.scrollbar_rect, hit.scroll) else {
             return;
         };
+        if metrics.offset_from_bottom == 0 {
+            return;
+        }
         let ramp = crate::app::scrollbar_reveal::ScrollbarRamp::derive(
             self.host_background,
             &self.config.palette,

@@ -783,17 +783,25 @@ fn resize_invalidation_drops_stale_hits_but_preserves_gesture_release() {
 fn pane_scrollbar_track_and_thumb_use_stable_endpoint_scroll_requests() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
+    // Four rows, so the half-row thumb leaves track rows free to click.
     let mut pane_surface = surface();
+    pane_surface.frame = FrameData::from_ratatui_buffer_with_hyperlinks(
+        &Buffer::with_lines(["LIVE", "PANE", "    ", "    "]),
+        None,
+        &[],
+    );
+    pane_surface.panes[0].rect.height = 4;
+    pane_surface.panes[0].inner_rect.height = 4;
     pane_surface.panes[0].scrollbar_rect = Some(SurfaceRect {
         x: 3,
         y: 0,
         width: 1,
-        height: 2,
+        height: 4,
     });
     pane_surface.panes[0].scroll = Some(crate::protocol::PaneSurfaceScrollMetrics {
         offset_from_bottom: 0,
         max_offset_from_bottom: 20,
-        viewport_rows: 2,
+        viewport_rows: 4,
     });
     state.set_pane_surface(pane_surface);
     state.compose(106, 20).expect("composed frame");
@@ -832,15 +840,26 @@ fn pane_scrollbar_track_and_thumb_use_stable_endpoint_scroll_requests() {
     state.handle_endpoint_result(
         "boot-1",
         &track_scroll_id,
-        Ok(pane_scroll_result(expected as u64, 20, 2)),
+        Ok(pane_scroll_result(expected as u64, 20, 4)),
     );
+    let metrics = state.hits.panes[0].scroll.expect("scroll metrics");
 
-    let thumb = crate::ui::scrollbar_thumb(metrics, track).expect("scrollbar thumb");
+    let (thumb_row, grab) = (track.y..track.y + track.height)
+        .find_map(|row| {
+            crate::ui::pane_scrollbar_thumb_grab_offset(metrics, track, row).map(|g| (row, g))
+        })
+        .expect("scrollbar thumb");
+    // Drag toward whichever end the thumb is away from.
+    let drag_row = if metrics.offset_from_bottom > 0 {
+        track.y + track.height - 1
+    } else {
+        track.y
+    };
     let thumb_down =
         state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column: track.x,
-            row: thumb.top,
+            row: thumb_row,
             modifiers: KeyModifiers::empty(),
         })]);
     assert!(matches!(
@@ -859,10 +878,12 @@ fn pane_scrollbar_track_and_thumb_use_stable_endpoint_scroll_requests() {
     let drag = state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
         kind: MouseEventKind::Drag(MouseButton::Left),
         column: track.x,
-        row: track.y,
+        row: drag_row,
         modifiers: KeyModifiers::empty(),
     })]);
-    let expected = crate::ui::scrollbar_offset_from_drag_row(metrics, track, track.y, 0);
+    let expected =
+        crate::ui::pane_scrollbar_offset_from_drag_row(metrics, metrics, track, drag_row, grab);
+    assert_ne!(expected, metrics.offset_from_bottom);
     assert!(matches!(
         &drag.actions[..],
         [ClientShellAction::Endpoint { request, .. }]
@@ -877,7 +898,7 @@ fn pane_scrollbar_track_and_thumb_use_stable_endpoint_scroll_requests() {
         state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
             kind: MouseEventKind::Up(MouseButton::Left),
             column: 0,
-            row: 0,
+            row: drag_row,
             modifiers: KeyModifiers::empty(),
         })]);
     assert!(release.actions.is_empty());
@@ -896,7 +917,7 @@ fn pane_scrollbar_hover_and_drag_brighten_the_thumb_client_side() {
         height: 2,
     });
     pane_surface.panes[0].scroll = Some(crate::protocol::PaneSurfaceScrollMetrics {
-        offset_from_bottom: 0,
+        offset_from_bottom: 10,
         max_offset_from_bottom: 20,
         viewport_rows: 2,
     });
@@ -907,7 +928,7 @@ fn pane_scrollbar_hover_and_drag_brighten_the_thumb_client_side() {
         state.host_background,
         &state.config.palette,
     );
-    // At the live bottom the thumb covers the bottom half of row 0 and all of row 1.
+    // Scrolled back, the thumb covers the bottom half of row 0 and all of row 1.
     let thumb_cell = |state: &mut ClientShellState| {
         let frame = state.compose(106, 20).expect("composed frame");
         let index = usize::from(track.y + 1) * usize::from(frame.width) + usize::from(track.x);
@@ -947,11 +968,15 @@ fn pane_scrollbar_hover_and_drag_brighten_the_thumb_client_side() {
         ("┃".to_owned(), crate::protocol::color_to_u32(ramp.drag))
     );
 
-    state.handle_raw_events(vec![mouse(
+    // Releasing where the drag began sends nothing but must still repaint
+    // so the thumb drops from the drag color to the hover color.
+    let released = state.handle_raw_events(vec![mouse(
         MouseEventKind::Up(MouseButton::Left),
         track.x,
         track.y + 1,
     )]);
+    assert!(released.repaint);
+    assert!(released.actions.is_empty());
     assert_eq!(
         thumb_cell(&mut state),
         ("┃".to_owned(), crate::protocol::color_to_u32(ramp.hover))

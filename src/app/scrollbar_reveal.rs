@@ -147,7 +147,7 @@ impl AppState {
         pane: PaneId,
         metrics: crate::pane::ScrollMetrics,
     ) -> Option<Color> {
-        if metrics.max_offset_from_bottom == 0 {
+        if metrics.max_offset_from_bottom == 0 || metrics.offset_from_bottom == 0 {
             return None;
         }
         let step = self
@@ -200,8 +200,15 @@ impl AppState {
         true
     }
 
+    fn scrollbar_pane_visible(&self, pane: PaneId) -> bool {
+        self.active
+            .is_some_and(|ws_idx| self.pane_visible_on_active_surface(ws_idx, pane))
+    }
+
     pub(crate) fn scrollbar_reveal_deadline(&self) -> Option<Instant> {
-        self.scrollbar_reveal.map(|reveal| reveal.next_at)
+        self.scrollbar_reveal
+            .filter(|reveal| self.scrollbar_pane_visible(reveal.pane))
+            .map(|reveal| reveal.next_at)
     }
 }
 
@@ -211,6 +218,14 @@ impl super::App {
     /// one lookup of the revealed pane while a bar is showing.
     pub(crate) fn tick_scrollbar_reveal(&mut self, now: Instant) -> bool {
         let mut changed = false;
+        if self
+            .state
+            .scrollbar_reveal
+            .is_some_and(|reveal| !self.state.scrollbar_pane_visible(reveal.pane))
+        {
+            // No render request or fade deadline for an off-screen pane.
+            self.state.scrollbar_reveal = None;
+        }
         let epoch = crate::terminal::user_scroll_epoch();
         let mut scrolled = None;
         if epoch != self.scrollbar_scroll_epoch {
@@ -226,8 +241,15 @@ impl super::App {
                             continue;
                         };
                         if runtime.take_user_scrolled() {
-                            runtime.take_scroll_snapped();
-                            scrolled = Some(pane_id);
+                            // Read final metrics after the input batch: a later typing
+                            // snap must win over an earlier scroll gesture.
+                            if self.state.pane_visible_on_active_surface(ws_idx, pane_id)
+                                && runtime
+                                    .scroll_metrics()
+                                    .is_some_and(|metrics| metrics.offset_from_bottom > 0)
+                            {
+                                scrolled = Some(pane_id);
+                            }
                         }
                     }
                 }
@@ -235,7 +257,8 @@ impl super::App {
         }
         if let Some(pane_id) = scrolled {
             changed |= self.state.note_scrollbar_user_scroll(pane_id, now);
-        } else if let Some(reveal) = self.state.scrollbar_reveal {
+        }
+        if let Some(reveal) = self.state.scrollbar_reveal {
             let runtime = self.find_pane(reveal.pane).and_then(|(ws_idx, _)| {
                 self.state.runtime_for_pane_in_workspace(
                     &self.terminal_runtimes,
@@ -249,10 +272,10 @@ impl super::App {
                     changed = true;
                 }
                 Some(runtime) => {
-                    let snapped_to_bottom = runtime.take_scroll_snapped()
-                        && runtime
-                            .scroll_metrics()
-                            .is_none_or(|metrics| metrics.offset_from_bottom == 0);
+                    runtime.take_scroll_snapped();
+                    let snapped_to_bottom = runtime
+                        .scroll_metrics()
+                        .is_none_or(|metrics| metrics.offset_from_bottom == 0);
                     if snapped_to_bottom {
                         changed |= self.state.note_scrollbar_snapped_to_bottom(reveal.pane);
                     }
@@ -343,7 +366,7 @@ mod tests {
     }
 
     #[test]
-    fn scroll_holds_rest_then_fades_to_hidden_at_the_bottom() {
+    fn scroll_holds_rest_then_fades_while_scrolled_back() {
         let mut state = AppState::test_new();
         let pane = PaneId::from_raw(7);
         let start = Instant::now();
@@ -352,7 +375,7 @@ mod tests {
         assert_eq!(state.pane_scrollbar_color(pane, metrics(0, 50)), None);
         assert!(state.note_scrollbar_user_scroll(pane, start));
         assert_eq!(
-            state.pane_scrollbar_color(pane, metrics(0, 50)),
+            state.pane_scrollbar_color(pane, metrics(25, 50)),
             Some(ramp.rest)
         );
 
@@ -362,15 +385,18 @@ mod tests {
         for k in 0..3 {
             assert!(state.advance_scrollbar_reveal(now));
             assert_eq!(
-                state.pane_scrollbar_color(pane, metrics(0, 50)),
-                ramp.fade_hidden[k]
+                state.pane_scrollbar_color(pane, metrics(25, 50)),
+                Some(ramp.fade_parked[k])
             );
             now += SCROLLBAR_FADE_STEP;
         }
         assert!(state.advance_scrollbar_reveal(now));
         assert_eq!(state.scrollbar_reveal, None);
         assert_eq!(state.scrollbar_reveal_deadline(), None);
-        assert_eq!(state.pane_scrollbar_color(pane, metrics(0, 50)), None);
+        assert_eq!(
+            state.pane_scrollbar_color(pane, metrics(25, 50)),
+            Some(ramp.parked)
+        );
     }
 
     #[test]
@@ -476,6 +502,16 @@ mod tests {
         assert_eq!(app.state.scrollbar_reveal, None);
         assert_eq!(color(&app, pane), None);
 
+        // Wheel-down at the live bottom and a scroll/typing batch never reveal.
+        runtime(&app, pane).scroll_down(3);
+        assert!(!app.tick_scrollbar_reveal(start));
+        assert_eq!(color(&app, pane), None);
+        runtime(&app, pane).scroll_up(3);
+        runtime(&app, pane).scroll_reset();
+        app.tick_scrollbar_reveal(start);
+        assert_eq!(app.state.scrollbar_reveal, None);
+        assert_eq!(color(&app, pane), None);
+
         // A user scroll reveals the rest color on the next tick.
         runtime(&app, pane).scroll_up(3);
         assert!(app.tick_scrollbar_reveal(start));
@@ -501,6 +537,15 @@ mod tests {
         // Output while parked does not wake the bar.
         runtime(&app, pane).test_process_pty_bytes(b"more\n");
         assert!(!app.tick_scrollbar_reveal(now));
+        assert_eq!(app.state.scrollbar_reveal, None);
+
+        // Switching away cancels all hidden-pane fade deadlines and repaints.
+        runtime(&app, pane).scroll_up(3);
+        app.tick_scrollbar_reveal(now);
+        assert!(app.state.scrollbar_reveal_deadline().is_some());
+        app.state.active = None;
+        assert_eq!(app.state.scrollbar_reveal_deadline(), None);
+        assert!(!app.tick_scrollbar_reveal(now + Duration::from_secs(1)));
         assert_eq!(app.state.scrollbar_reveal, None);
     }
 }

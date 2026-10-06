@@ -27,6 +27,7 @@ pub(crate) use self::release_notes::{
     PRODUCT_ANNOUNCEMENT_MODAL_SIZE, RELEASE_NOTES_MODAL_SIZE,
 };
 pub(crate) use self::scrollbar::{
+    pane_scrollbar_offset_from_drag_row, pane_scrollbar_thumb_grab_offset,
     release_notes_scrollbar_rect, render_pane_scrollbar_buffer, render_scrollbar_buffer,
     scrollbar_offset_from_drag_row, scrollbar_offset_from_row, scrollbar_thumb,
     scrollbar_thumb_grab_offset,

@@ -35,17 +35,23 @@ impl ClientShellState {
         }
     }
 
+    /// `drag` carries the press-time hit and grab row for a thumb drag; a
+    /// track click passes `None`.
     fn pane_scrollbar_offset(
         hit: &PaneHit,
         row: u16,
-        grab_row_offset: Option<u16>,
+        drag: Option<(&PaneHit, u16)>,
     ) -> Option<usize> {
         let track = hit.scrollbar_rect?;
         let metrics = hit.scroll?;
-        (metrics.max_offset_from_bottom > 0).then(|| match grab_row_offset {
-            Some(grab_row_offset) => {
-                crate::ui::scrollbar_offset_from_drag_row(metrics, track, row, grab_row_offset)
-            }
+        (metrics.max_offset_from_bottom > 0).then(|| match drag {
+            Some((press, grab_row_offset)) => crate::ui::pane_scrollbar_offset_from_drag_row(
+                press.scroll.unwrap_or(metrics),
+                metrics,
+                track,
+                row,
+                grab_row_offset,
+            ),
             None => crate::ui::scrollbar_offset_from_row(metrics, track, row),
         })
     }
@@ -1198,7 +1204,7 @@ impl ClientShellState {
                     let Some(offset) = Self::pane_scrollbar_offset(
                         &current_hit,
                         mouse.row,
-                        Some(*grab_row_offset),
+                        Some((hit, *grab_row_offset)),
                     ) else {
                         self.chrome_drag = None;
                         return;
@@ -1436,19 +1442,29 @@ impl ClientShellState {
                         last_sent_offset,
                         ..
                     } => {
+                        outcome.repaint = true;
                         let current_hit = self
                             .hits
                             .panes
                             .iter()
                             .find(|current| current.pane_id == hit.pane_id)
                             .cloned()
-                            .unwrap_or(hit);
+                            .unwrap_or_else(|| hit.clone());
                         if let Some(offset) = Self::pane_scrollbar_offset(
                             &current_hit,
                             mouse.row,
-                            Some(grab_row_offset),
+                            Some((&hit, grab_row_offset)),
                         ) {
-                            if last_sent_offset != Some(offset) {
+                            // A press and release with no motion leaves the offset alone.
+                            let unchanged = last_sent_offset.map_or_else(
+                                || {
+                                    current_hit.scroll.is_some_and(|metrics| {
+                                        metrics.offset_from_bottom == offset
+                                    })
+                                },
+                                |sent| sent == offset,
+                            );
+                            if !unchanged {
                                 self.push_pane_scroll_offset(current_hit.pane_id, offset, outcome);
                             }
                         }
@@ -2388,7 +2404,7 @@ impl ClientShellState {
                         return;
                     };
                     if let Some(grab_row_offset) =
-                        crate::ui::scrollbar_thumb_grab_offset(metrics, track, mouse.row)
+                        crate::ui::pane_scrollbar_thumb_grab_offset(metrics, track, mouse.row)
                     {
                         self.chrome_drag = Some(ClientChromeDrag::PaneScrollbar {
                             hit,

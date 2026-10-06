@@ -70,6 +70,65 @@ pub(crate) fn scrollbar_thumb(
     })
 }
 
+/// Row-based input bounds derived from the exact half-row overlay geometry.
+pub(crate) fn pane_scrollbar_thumb_grab_offset(
+    metrics: crate::pane::ScrollMetrics,
+    track: Rect,
+    row: u16,
+) -> Option<u16> {
+    let thumb = half_row_thumb(metrics, track.height)?;
+    let top = track.y + (thumb.top_u / 2) as u16;
+    let end = track.y + (thumb.top_u + thumb.len_u).div_ceil(2) as u16;
+    (row >= top && row < end).then(|| row - top)
+}
+
+/// Offset for an overlay thumb drag, using the same half-row geometry as the
+/// draw. The thumb moves by the pointer's row delta from the press, so a press
+/// and release on the same row keeps the offset where it was.
+pub(crate) fn pane_scrollbar_offset_from_drag_row(
+    press: crate::pane::ScrollMetrics,
+    current: crate::pane::ScrollMetrics,
+    track: Rect,
+    row: u16,
+    grab_row_offset: u16,
+) -> usize {
+    let max_offset = current.max_offset_from_bottom;
+    let (Some(press_thumb), Some(thumb)) = (
+        half_row_thumb(press, track.height),
+        half_row_thumb(current, track.height),
+    ) else {
+        return current.offset_from_bottom.min(max_offset);
+    };
+    let last_row = track.y + track.height.saturating_sub(1);
+    let press_row = (track.y + (press_thumb.top_u / 2) as u16 + grab_row_offset).min(last_row);
+    let row = row.clamp(track.y, last_row);
+    // Moving onto a track end row reaches that end, even when the grab sits
+    // on a half-row cap that cannot travel the full track.
+    if row != press_row {
+        if row == track.y {
+            return max_offset;
+        }
+        if row == last_row {
+            return 0;
+        }
+    }
+    let press_from_top = press
+        .max_offset_from_bottom
+        .saturating_sub(press.offset_from_bottom);
+    let travel_u = 2 * usize::from(track.height) - thumb.len_u;
+    if travel_u == 0 {
+        return max_offset.saturating_sub(press_from_top.min(max_offset));
+    }
+    let delta_u = 2 * usize::from(row.abs_diff(press_row));
+    let delta = div_round(delta_u * max_offset, travel_u);
+    let from_top = if row >= press_row {
+        press_from_top.saturating_add(delta)
+    } else {
+        press_from_top.saturating_sub(delta)
+    };
+    max_offset.saturating_sub(from_top.min(max_offset))
+}
+
 pub(crate) fn scrollbar_thumb_grab_offset(
     metrics: crate::pane::ScrollMetrics,
     track: Rect,
@@ -365,5 +424,62 @@ mod tests {
             }
         }
         assert!(thumb_rows > 0 && thumb_rows < 20);
+    }
+}
+
+#[cfg(test)]
+mod overlay_input_regression {
+    use super::*;
+
+    /// Pure geometry has edge cases at half-row caps, small tracks and both ends.
+    #[test]
+    fn overlay_scrollbar_caps_are_draggable() {
+        for height in [1, 2, 20] {
+            for offset in [0, 1, 500, 999, 1000] {
+                let metrics = crate::pane::ScrollMetrics {
+                    viewport_rows: 20,
+                    max_offset_from_bottom: 1000,
+                    offset_from_bottom: offset,
+                };
+                let track = Rect::new(0, 7, 1, height);
+                let thumb = half_row_thumb(metrics, height).expect("thumb");
+                for row in 0..height {
+                    assert_eq!(
+                        pane_scrollbar_thumb_grab_offset(metrics, track, track.y + row).is_some(),
+                        half_row_thumb_glyph(thumb, usize::from(row)).is_some(),
+                        "height={height} offset={offset} row={row}",
+                    );
+                }
+            }
+        }
+    }
+
+    /// Press and release on the same row, cap or body, keeps the offset; a
+    /// move to the track ends reaches top and bottom.
+    #[test]
+    fn overlay_scrollbar_drag_starts_where_the_thumb_is() {
+        let metrics = crate::pane::ScrollMetrics {
+            viewport_rows: 20,
+            max_offset_from_bottom: 1000,
+            offset_from_bottom: 500,
+        };
+        let track = Rect::new(0, 0, 1, 20);
+        for row in [9, 10] {
+            // Row 9 is the top half-row cap, row 10 the body.
+            let grab = pane_scrollbar_thumb_grab_offset(metrics, track, row).expect("thumb row");
+            assert_eq!(
+                pane_scrollbar_offset_from_drag_row(metrics, metrics, track, row, grab),
+                500,
+                "row={row}"
+            );
+            assert_eq!(
+                pane_scrollbar_offset_from_drag_row(metrics, metrics, track, 0, grab),
+                1000
+            );
+            assert_eq!(
+                pane_scrollbar_offset_from_drag_row(metrics, metrics, track, 19, grab),
+                0
+            );
+        }
     }
 }
