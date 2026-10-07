@@ -3,7 +3,7 @@ import CoreGraphics
 
 extension ChromePalette {
     static let dark = ChromePalette(windowBg: 0x1E1E2E, panel: 0x16171B, line: 0x26272D, sel: 0x1F2230, ink: 0xE6E6EA, mute: 0x8B8C94, orch: 0x5AA9FF, lane: 0xA3AAFF, wf: 0x5CC8C8, ok: 0x4CD27A, warn: 0xF2B04C, cap: 0x181825, hover: 0x222232, split: 0x3A3B4E, field: 0x24253A, faint: 0x6C7086, accent: 0x89B4FA, bad: 0xF38BA8)
-    static let light = ChromePalette(windowBg: 0xFFFFFF, panel: 0xF3F4F6, line: 0xD5D8DE, sel: 0xE1E6F2, ink: 0x1F2328, mute: 0x565C66, orch: 0x0A5FC4, lane: 0x4A4FC7, wf: 0x0B6E74, ok: 0x17692F, warn: 0x8A5300, cap: 0xF3F3F3, hover: 0xF0F0ED, split: 0xDFDFDF, field: 0xF2F2EF, faint: 0xA3A8AF, accent: 0x0969DA, bad: 0xCF222E)
+    static let light = ChromePalette(windowBg: 0xFFFFFF, panel: 0xF3F4F6, line: 0xD5D8DE, sel: 0xE1E6F2, ink: 0x1F2328, mute: 0x565C66, orch: 0x0A5FC4, lane: 0x4A4FC7, wf: 0x0B6E74, ok: 0x17692F, warn: 0x8A5300, cap: 0xF3F3F3, hover: 0xF0F0ED, split: 0xDFDFDF, field: 0xF2F2EF, faint: 0x63666B, accent: 0x0963CE, bad: 0xC7212C)
 }
 
 extension TerminalTheme {

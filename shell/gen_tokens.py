@@ -11,7 +11,8 @@ resource loading, the web client gets CSS variables and an xterm theme module.
   - the Mac app's effective stock-theme colors, computed by compiling Theme.swift
     with the generated constants, differ from the JSON (Theme.swift overriding a token);
   - the Windows client spells a color literal outside the generated files, or uses
-    a --shell-* variable the generator does not define.
+    a --shell-* variable the generator does not define;
+  - a light-mode text color is under WCAG 4.5:1 on any light chrome surface.
 Stdlib only.
 """
 import json
@@ -254,6 +255,27 @@ def web_lint(generated_css):
     return problems
 
 
+# Text colors and the chrome surfaces they sit on (Alex's parity ask, 2026-10-06: light text at
+# least 4.5:1). Dark is not held yet: its mute and faint come from the Mocha-derived palette.
+TEXT = ("ink", "mute", "faint", "orch", "lane", "wf", "ok", "warn", "accent", "bad")
+SURFACES = ("windowBg", "panel", "sel", "hover", "cap", "field")
+
+
+def contrast(a, b):
+    def lum(v):
+        c = [int(hex6(v)[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+        c = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in c]
+        return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+    hi, lo = sorted((lum(a), lum(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def low_contrast(t):
+    c = t["color"]["light"]
+    return [f"light {fg} {c[fg]} on {bg} {c[bg]} is {contrast(c[fg], c[bg]):.2f}:1, under 4.5:1"
+            for fg in TEXT for bg in SURFACES if contrast(c[fg], c[bg]) < 4.5]
+
+
 def check(t):
     failures = []
     for path, text in outputs(t).items():
@@ -276,6 +298,11 @@ def check(t):
             failures += miss
         else:
             print("PASS mac effective stock colors equal tokens.json (dark, light)")
+    low = low_contrast(t)
+    if low:
+        failures += low
+    else:
+        print("PASS light text colors are at least 4.5:1 on every light surface")
     lint = web_lint(outputs(t)[CSS_OUT])
     if lint:
         failures += lint
