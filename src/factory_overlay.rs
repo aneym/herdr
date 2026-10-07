@@ -163,6 +163,9 @@ pub struct TabTag {
     pub started: Option<i64>,
     /// Summary shown when the row is collapsed, e.g. "2 wf" or "inbox 3".
     pub summary: Option<String>,
+    /// Reply and first-action timing shown beneath the tab label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pulse: Option<TabPulse>,
     pub attention: Attention,
     /// Legacy writer hint; the client derives lane idle from live status instead.
     pub idle: bool,
@@ -176,6 +179,13 @@ pub struct TabTag {
     pub devloop: bool,
     /// A finished tab moves to the background group.
     pub done: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TabPulse {
+    pub line: String,
+    pub drifting: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -368,6 +378,28 @@ mod tests {
             let overlay = parse(json.as_bytes()).unwrap();
             assert_eq!(overlay.tabs["lane"].section, expected, "{value}");
         }
+    }
+
+    #[test]
+    fn parses_optional_tab_pulse() {
+        let overlay = parse(
+            br#"{"version":1,"tabs":{"normal":{"pulse":{"line":"reply 18s","drifting":false}},"drift":{"pulse":{"line":"slow 3/5","drifting":true}},"legacy":{"kind":"lane"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            overlay.tabs["normal"].pulse,
+            Some(TabPulse {
+                line: "reply 18s".into(),
+                drifting: false,
+            })
+        );
+        assert!(overlay.tabs["drift"].pulse.as_ref().unwrap().drifting);
+        assert_eq!(overlay.tabs["legacy"].pulse, None);
+        let serialized = serde_json::to_value(&overlay.tabs["legacy"]).unwrap();
+        assert!(serialized.get("pulse").is_none());
+        let serialized = serde_json::to_value(&overlay.tabs["normal"]).unwrap();
+        assert_eq!(serialized["pulse"]["line"], "reply 18s");
+        assert_eq!(serialized["pulse"]["drifting"], false);
     }
 
     #[test]
