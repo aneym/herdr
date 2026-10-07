@@ -11,6 +11,8 @@ if ($Sha) {
 }
 if (!$inst -or !(Test-Path $inst)) { Write-Error "installer not found ($inst)"; exit 1 }
 $running = @(Get-Process HerdrShell -ErrorAction SilentlyContinue)
+# Read the path while the process lives; an exited process no longer reports it.
+$wasRunning = @($running | ForEach-Object { $_.Path } | Where-Object { $_ })
 $running | Stop-Process -Force -ErrorAction SilentlyContinue
 $deadline = [DateTime]::UtcNow.AddSeconds(10)
 while (Get-Process HerdrShell -ErrorAction SilentlyContinue) {
@@ -24,7 +26,7 @@ Write-Output "stopped: $($running.Count)"
 Write-Output "installing $inst"
 # A blocked or failed installer (Smart App Control refused one on 2026-10-06) must not leave
 # Alex without the app: start the copy that was running before.
-$restart = { if ($running.Count -and $running[0].Path) { & (Join-Path $PSScriptRoot 'launch.ps1') -Exe $running[0].Path } }
+$restart = { if ($wasRunning.Count) { & (Join-Path $PSScriptRoot 'launch.ps1') -Exe $wasRunning[0] } }
 try {
     $p = Start-Process -FilePath $inst -ArgumentList '/S' -Wait -PassThru -ErrorAction Stop
 } catch {
