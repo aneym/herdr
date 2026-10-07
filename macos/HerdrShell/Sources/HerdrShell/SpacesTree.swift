@@ -186,11 +186,14 @@ enum SpacesTree {
         let key = name.trimmingCharacters(in: jsTrim)
         var hash: UInt32 = 7
         for scalar in key.lowercased().unicodeScalars { hash = hash &* 31 &+ scalar.value }
+        // JS slice(0, 1) takes one UTF-16 unit; that is this first scalar except past the BMP, where
+        // Rails gets a lone surrogate it cannot draw, so the whole scalar stands in.
         let initial = key.unicodeScalars.first.map { String($0).uppercased() } ?? "?"
         return SpacesRow.Face(initial: initial, tint: Int(hash % UInt32(faceTints)), avatar: avatar)
     }
-    /// What JS `String.prototype.trim` strips: WhiteSpace (Zs, tab, VT, FF, BOM) and LineTerminator.
-    static let jsTrim = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "\t\u{0B}\u{0C}\u{FEFF}\n\r\u{2028}\u{2029}"))
+    /// Exactly what JS `String.prototype.trim` strips: WhiteSpace (tab, VT, FF, space, NBSP, BOM, the
+    /// Zs characters) and LineTerminator. Foundation's whitespace sets differ (U+200B, U+0085).
+    static let jsTrim = CharacterSet(charactersIn: "\t\u{0B}\u{0C} \u{A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{202F}\u{205F}\u{3000}\u{FEFF}\n\r\u{2028}\u{2029}")
     static func age(_ seconds: Double) -> String { let m = Int(max(0, seconds)) / 60; return m == 0 ? "<1m" : m < 60 ? "\(m)m" : "\(m / 60)h\(m % 60)m" }
     static func pinTabs(_ tabs: [SpacesInput.Tab], agents: Bool) -> [SpacesInput.Tab] {
         func machine(_ id: String) -> String { id.firstIndex(of: "/").map { String(id[..<$0]) } ?? "" }

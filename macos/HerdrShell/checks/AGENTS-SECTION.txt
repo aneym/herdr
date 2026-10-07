@@ -8,6 +8,7 @@
 [PASS] no agent cards: agent rows still get tinted initials from the label
 [PASS] plain pinned and space rows carry no face
 [PASS] initial and tint follow JS trim and slice(0, 1) on odd Unicode
+[PASS] a zero-width space survives trim, as in JS
 [PASS] agent.json name and https avatar_url give the face of the tab holding its pane
 [PASS] a non-https avatar_url falls back to tinted initials of the card name
 [PASS] a card on a plain tab, a pane-less card and a broken card add nothing

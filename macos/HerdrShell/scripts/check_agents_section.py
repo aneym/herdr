@@ -74,6 +74,10 @@ with tempfile.TemporaryDirectory(prefix='agents-section-') as directory:
     rows = dump(unicode_fixture)
     check('initial and tint follow JS trim and slice(0, 1) on odd Unicode',
           face('agent:ax42/w1:t1') == f"face:E:{tint(odd)}")
+    zwsp = '\u200bAlpha'
+    unicode_fixture['machines'][0]['tabs'][0]['label'] = zwsp
+    rows = dump(unicode_fixture)
+    check('a zero-width space survives trim, as in JS', face('agent:ax42/w1:t1') == f"face:\u200b:{tint(zwsp)}")
     agents = pathlib.Path(directory) / 'agents'
     cards = {'frank': {'name': 'frank', 'pane': 'w5H:p137', 'avatar_url': 'https://example.com/frank.png'},
              'recruiter': {'name': 'Recruiter', 'pane': 'w5P:p9', 'avatar_url': 'http://example.com/r.png'},
