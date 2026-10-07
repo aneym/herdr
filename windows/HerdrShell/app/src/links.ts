@@ -55,6 +55,8 @@ export function installLinks(term: Terminal, server: LinkServer, open: (url: str
     while (queue.length && (!queue[0].g || queue[0].g.settled)) { const entry = queue.shift()!; if (!entry.g?.hit) entry.flush(); }
   };
   const finish = async (g: Gesture, cell: { row: number; col: number }, resolved: string | null) => {
+    // Activation runs server-side link plugins; a click already replayed must not reach them.
+    if (g.settled) return false;
     const answer = await server.activate(cell.row, cell.col).catch(() => null);
     const target = openTarget(resolved, answer?.url ?? null, answer?.handled ?? false);
     if (g.settled) return false;

@@ -167,10 +167,10 @@ describe("terminal link clicks", () => {
     report("\x1b[<0;9;3m");
     expect(sent).toEqual(["\x1b[<16;5;2M", "\x1b[<16;5;2m", "\x1b[<0;9;3M", "\x1b[<0;9;3m"]);
   });
-  it("a server that never answers a link click releases its held reports at the deadline and opens nothing", async () => {
+  it("a server that never answers a link click releases its held reports at the deadline and activates nothing", async () => {
     const sent: string[] = [];
     let answer: (regions: LinkRegion[]) => void = () => {};
-    const { term, open, gate } = await pane(wrapped, { resolve: () => new Promise(resolve => { answer = resolve; }) });
+    const { term, open, gate, calls } = await pane(wrapped, { resolve: () => new Promise(resolve => { answer = resolve; }) });
     vi.useFakeTimers();
     try {
       const screen = term.element!.querySelector(".xterm-screen")!;
@@ -182,6 +182,7 @@ describe("terminal link clicks", () => {
       answer(regions);
       await vi.runAllTimersAsync();
       expect(open).not.toHaveBeenCalled();
+      expect(calls.activate).not.toHaveBeenCalled();
     } finally { vi.useRealTimers(); }
   });
 });
