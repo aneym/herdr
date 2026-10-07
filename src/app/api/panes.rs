@@ -1950,6 +1950,12 @@ impl App {
             return Err(pane_not_found(id, &target.pane_id));
         };
         let workspace_id = self.public_workspace_id(ws_idx);
+        let closing_tab = self.state.workspaces.get(ws_idx).and_then(|ws| {
+            let tab_idx = ws.find_tab_index_for_pane(pane_id)?;
+            (ws.tabs[tab_idx].layout.pane_count() <= 1).then_some(tab_idx)
+        });
+        let successor =
+            closing_tab.and_then(|tab_idx| self.pinned_close_successor(ws_idx, tab_idx));
         let layout_update_target = self.layout_update_target_after_pane_removal(ws_idx, pane_id);
         if self.state.close_pane_would_close_workspace(ws_idx, pane_id)
             && self.state.confirm_implicit_worktree_group_close(ws_idx)
@@ -1977,6 +1983,7 @@ impl App {
         if should_close_workspace {
             self.state.selected = ws_idx;
             self.state.close_selected_workspace();
+            self.focus_after_pinned_close(successor);
             self.shutdown_detached_terminal_runtimes();
             self.emit_event(EventEnvelope {
                 event: EventKind::PaneClosed,
@@ -1993,6 +2000,8 @@ impl App {
                 },
             });
         } else {
+            self.state.prune_pinned_tabs();
+            self.focus_after_pinned_close(successor);
             self.state.remove_unattached_terminal_ids(terminal_id);
             self.shutdown_detached_terminal_runtimes();
             self.schedule_session_save();

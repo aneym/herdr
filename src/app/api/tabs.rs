@@ -429,6 +429,46 @@ impl App {
         encode_success(id, ResponseResult::TabList { tabs })
     }
 
+    /// Capture a live successor before removing a focused pin. Role-bearing
+    /// pins and content pins have independent ordering, with cross-list fallback.
+    pub(super) fn pinned_close_successor(&self, ws_idx: usize, tab_idx: usize) -> Option<String> {
+        if self.state.active != Some(ws_idx)
+            || self.state.workspaces.get(ws_idx)?.active_tab != tab_idx
+        {
+            return None;
+        }
+        let tab_id = self.public_tab_id(ws_idx, tab_idx)?;
+        let position = self.state.pinned_tab_index(&tab_id)?;
+        let pins = &self.state.pinned_tabs;
+        let has_role = pins[position].role.is_some();
+        let live = |pin: &&crate::app::state::PinnedTab| {
+            pin.tab_id != tab_id && self.parse_tab_id(&pin.tab_id).is_some()
+        };
+        pins[position + 1..]
+            .iter()
+            .filter(|pin| pin.role.is_some() == has_role)
+            .find(live)
+            .or_else(|| {
+                pins[..position]
+                    .iter()
+                    .rev()
+                    .filter(|pin| pin.role.is_some() == has_role)
+                    .find(live)
+            })
+            .or_else(|| {
+                pins.iter()
+                    .filter(|pin| pin.role.is_some() != has_role)
+                    .find(live)
+            })
+            .map(|pin| pin.tab_id.clone())
+    }
+
+    pub(super) fn focus_after_pinned_close(&mut self, successor: Option<String>) {
+        if let Some((ws_idx, tab_idx)) = successor.as_deref().and_then(|id| self.parse_tab_id(id)) {
+            self.state.switch_workspace_tab(ws_idx, tab_idx);
+        }
+    }
+
     pub(super) fn handle_tab_close(&mut self, id: String, target: TabTarget) -> String {
         let Some((ws_idx, tab_idx)) = self.parse_tab_id(&target.tab_id) else {
             return tab_not_found(id, &target.tab_id);
@@ -437,6 +477,7 @@ impl App {
             return tab_not_found(id, &target.tab_id);
         };
         let workspace_id = self.public_workspace_id(ws_idx);
+        let successor = self.pinned_close_successor(ws_idx, tab_idx);
         if self
             .state
             .workspaces
@@ -470,6 +511,7 @@ impl App {
             let workspace = self.workspace_info(ws_idx);
             self.state.selected = ws_idx;
             self.state.close_selected_workspace();
+            self.focus_after_pinned_close(successor);
             self.state.remove_plugin_pane_records(pane_ids);
             self.shutdown_detached_terminal_runtimes();
             self.emit_event(EventEnvelope {
@@ -500,6 +542,7 @@ impl App {
             );
         }
         self.state.unpin_tab(&tab_id);
+        self.focus_after_pinned_close(successor);
         self.state.prune_desks();
         self.state.mark_session_dirty();
         self.state.remove_plugin_pane_records(pane_ids);
@@ -551,6 +594,95 @@ mod tests {
         config::{Config, ShellModeConfig},
         workspace::Workspace,
     };
+
+    /// The API close boundary runs without PTYs; the table covers pin-order
+    /// selection across spaces, role lists, stale pins, and legacy fallback.
+    #[test]
+    fn api_close_focused_pin_selects_live_neighbor() {
+        use crate::api::schema::{PaneTarget, TabRole};
+        use crate::app::state::PinnedTab;
+
+        for pane_close in [false, true] {
+            for (closing, pins, expected) in [
+                (1, vec![(0, false), (1, false), (2, false)], 2),
+                (2, vec![(0, false), (1, false), (2, false)], 1),
+                (1, vec![(0, true), (1, true), (2, true)], 2),
+                (1, vec![(0, false), (1, true), (2, false)], 0),
+                (1, vec![(0, false), (1, false), (99, false), (2, false)], 2),
+                (1, vec![(0, false), (2, false)], 4),
+                (1, vec![(1, false)], 4),
+            ] {
+                for last_tab in [false, true] {
+                    let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+                    let mut app = App::new(
+                        &Config::default(),
+                        crate::app::AppPolicy::TEST,
+                        None,
+                        api_rx,
+                        crate::api::EventHub::default(),
+                    );
+                    app.state.workspaces = (0..3)
+                        .map(|i| Workspace::test_new(&format!("space-{i}")))
+                        .collect();
+                    if !last_tab {
+                        for ws in &mut app.state.workspaces {
+                            ws.test_add_tab(Some("unpinned"));
+                            ws.active_tab = 1;
+                        }
+                    }
+                    let ids: Vec<_> = (0..3).map(|i| app.public_tab_id(i, 0).unwrap()).collect();
+                    // Legacy selection: the same workspace's preceding tab,
+                    // or the following workspace if its last tab is closed.
+                    let legacy = if last_tab {
+                        ids[(closing + 1).min(2)].clone()
+                    } else {
+                        app.public_tab_id(closing, 1).unwrap()
+                    };
+                    app.state.pinned_tabs = pins
+                        .iter()
+                        .copied()
+                        .map(|(i, agent)| PinnedTab {
+                            tab_id: ids.get(i).cloned().unwrap_or_else(|| "missing:t1".into()),
+                            priority: 0,
+                            role: agent.then_some(TabRole::Agent),
+                        })
+                        .collect();
+                    app.state.switch_workspace_tab(closing, 0);
+                    let response = if pane_close {
+                        let pane = app.state.workspaces[closing].tabs[0].root_pane;
+                        app.handle_pane_close(
+                            "close".into(),
+                            PaneTarget {
+                                pane_id: app.public_pane_id(closing, pane).unwrap(),
+                            },
+                        )
+                    } else {
+                        app.handle_tab_close(
+                            "close".into(),
+                            TabTarget {
+                                tab_id: ids[closing].clone(),
+                            },
+                        )
+                    };
+                    let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+                    assert_eq!(success.result, ResponseResult::Ok {});
+                    let active = app.state.active.unwrap();
+                    let actual = app
+                        .public_tab_id(active, app.state.workspaces[active].active_tab)
+                        .unwrap();
+                    let expected = if expected == 4 {
+                        &legacy
+                    } else {
+                        &ids[expected]
+                    };
+                    assert_eq!(
+                        &actual, expected,
+                        "pane_close={pane_close}, last_tab={last_tab}, closing={closing}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn api_tab_close_last_tab_closes_workspace_and_emits_both_events() {
