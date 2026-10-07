@@ -188,7 +188,7 @@ def verify_release(source, commit):
             built = plistlib.load(f).get("HerdrShellCommit")
     except (OSError, ValueError, plistlib.InvalidFileException) as e:
         sys.exit(f"release source invalid: {e}")
-    if not commit or built != commit:
+    if not same(built, commit):
         sys.exit(f"release bundle commit mismatch: expected {commit}, got {built}")
 
 
@@ -201,7 +201,8 @@ def targets():
 
 
 def same(a, b):
-    return bool(a) and bool(b) and (a.startswith(b) or b.startswith(a))
+    return (isinstance(a, str) and isinstance(b, str) and min(len(a), len(b)) >= 12
+            and (a.startswith(b) or b.startswith(a)))
 
 
 def can_deliver(installed, commit, name):
@@ -252,8 +253,15 @@ def publish(ref):
     # what it staged, so a local (Studio) fanout never swaps staged/ in between.
     with open(f"{LOGDIR}/build.log", "a") as out, studio_build_lock(), delivery_lock():
         st = probe({"local": True})
-        if st is None or not can_deliver(st.get("installed", ""), sha, "studio build"):
+        if st is None or st.get("installed_app") not in ("0", "1"):
+            log("studio build: installed app state unknown")
             return False
+        if same(st.get("installed", ""), sha):
+            log(f"studio build: already installed {sha[:12]}")
+            return True
+        if st.get("installed") or st.get("installed_app") == "1":
+            if not can_deliver(st.get("installed", ""), sha, "studio build"):
+                return False
         r = subprocess.run(["bash", script, sha], stdout=out, stderr=subprocess.STDOUT,
                            env={**os.environ, "HERDR_REPO": REPO})
         if r.returncode != 0:

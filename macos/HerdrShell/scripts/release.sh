@@ -71,7 +71,7 @@ STAGE="$HOME/Library/Application Support/HerdrShell/staged"
 INSTALLED=$(/usr/libexec/PlistBuddy -c 'Print :HerdrShellCommit' "$HOME/Applications/Herdr Shell.app/Contents/Info.plist" 2>/dev/null || true)
 BUILT_APP="$WT/macos/HerdrShell/.build/bundle-prod/Herdr Shell.app"
 BUILT_COMMIT=$(/usr/libexec/PlistBuddy -c 'Print :HerdrShellCommit' "$BUILT_APP/Contents/Info.plist")
-if [[ "$BUILT_COMMIT" != "$COMMIT" ]]; then
+if [[ ${#BUILT_COMMIT} -lt 12 || "$COMMIT" != "$BUILT_COMMIT"* ]]; then
   echo "release.sh: bundle commit mismatch: expected $COMMIT, got $BUILT_COMMIT" >&2
   exit 1
 fi
@@ -83,7 +83,11 @@ if [[ -d "$HOME/Applications/Herdr Shell.app" ]]; then
     echo "release.sh: skip $COMMIT: installed commit unknown ($INSTALLED)"
     exit 1
   fi
-  if [[ "$OLD" == "$COMMIT" ]] || ! git -C "$MAIN" merge-base --is-ancestor "$OLD" "$COMMIT"; then
+  if [[ "$OLD" == "$COMMIT" ]]; then
+    echo "release.sh: already installed $COMMIT"
+    exit 0
+  fi
+  if ! git -C "$MAIN" merge-base --is-ancestor "$OLD" "$COMMIT"; then
     echo "release.sh: skip $COMMIT: not a strict descendant of installed $INSTALLED"
     exit 1
   fi

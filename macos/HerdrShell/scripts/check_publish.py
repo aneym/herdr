@@ -104,12 +104,12 @@ with tempfile.TemporaryDirectory(prefix="publish-check-", dir=os.environ.get("TM
 
     if case in ("all", "first-install"):
         shutil.rmtree(home / "Applications/Herdr Shell.app")
-        bundle_commit(new)
+        bundle_commit(new[:12])
         result = subprocess.run([sys.executable, str(publisher), "install", "test"], env=env,
                                 capture_output=True, text=True, timeout=60)
         assert result.returncode == 0, result.stdout + result.stderr
         with plist.open("rb") as f:
-            assert plistlib.load(f)["HerdrShellCommit"] == new
+            assert plistlib.load(f)["HerdrShellCommit"] == new[:12]
         print("PASS install: first install delivers verified bundle")
     if case in ("all", "release", "release-first-install"):
         # Exercise release.sh against real worktrees; only the Swift build boundary is fake.
@@ -123,11 +123,12 @@ with tempfile.TemporaryDirectory(prefix="publish-check-", dir=os.environ.get("TM
                           "(app / 'MacOS').mkdir(parents=True, exist_ok=True)\n"
                           "shutil.copy('/usr/bin/true', app / 'MacOS/HerdrShell')\n"
                           "commit = os.environ.get('BAD_BUNDLE') or subprocess.check_output("
-                          "['git', '-C', str(app.parents[4]), 'rev-parse', 'HEAD'], text=True).strip()\n"
+                          "['git', '-C', str(app.parents[4]), 'rev-parse', '--short=12', 'HEAD'], text=True).strip()\n"
                           "with (app / 'Info.plist').open('wb') as f: "
                           "plistlib.dump({'HerdrShellCommit': commit, 'HerdrShellBuiltAt': 'test'}, f)\n"
                           "PY\n")
         bundle.chmod(0o755)
+        shutil.copyfile(release_script, scripts / "release.sh")
         git("add", ".")
         git("commit", "-qm", "bundle fixture")
         pinned = git("rev-parse", "HEAD")
@@ -150,7 +151,6 @@ with tempfile.TemporaryDirectory(prefix="publish-check-", dir=os.environ.get("TM
                 plistlib.dump({"HerdrShellCommit": old}, f)
         wt = root / "shell-release"
         # release.sh discovers its source repository from its own path.
-        shutil.copyfile(release_script, scripts / "release.sh")
         release_env = {**env, "HOME": str(release_home), "HERDR_RELEASE_WORKTREE": str(wt),
                        "HERDR_VENDOR": str(vendor), "MOVED": moved,
                        "PATH": str(edge) + os.pathsep + os.environ["PATH"]}
@@ -160,8 +160,8 @@ with tempfile.TemporaryDirectory(prefix="publish-check-", dir=os.environ.get("TM
         assert git("rev-parse", "release-test") == moved
         built_plist = release_home / "Applications/Herdr Shell.app/Contents/Info.plist"
         with built_plist.open("rb") as f:
-            assert plistlib.load(f)["HerdrShellCommit"] == pinned
-        assert json.loads((release_home / "Library/Application Support/HerdrShell/staged.json").read_text())["commit"] == pinned
+            assert plistlib.load(f)["HerdrShellCommit"] == pinned[:12]
+        assert json.loads((release_home / "Library/Application Support/HerdrShell/staged.json").read_text())["commit"] == pinned[:12]
         print("PASS release: moving REF builds pinned SHA and first-installs it")
         git("update-ref", "refs/heads/release-test", moved)
         result = subprocess.run(["bash", str(scripts / "release.sh"), "release-test"],
@@ -169,6 +169,19 @@ with tempfile.TemporaryDirectory(prefix="publish-check-", dir=os.environ.get("TM
                                 text=True, timeout=60)
         assert result.returncode != 0, result.stdout
         assert "bundle commit mismatch" in result.stderr, result.stderr
-        assert json.loads((release_home / "Library/Application Support/HerdrShell/staged.json").read_text())["commit"] == pinned
+        assert json.loads((release_home / "Library/Application Support/HerdrShell/staged.json").read_text())["commit"] == pinned[:12]
         print("PASS release: mismatched build rejected before staging")
+        targets.write_text(json.dumps({"targets": []}))
+        # The publisher build path must allow an empty Studio and treat an identical
+        # installed SHA as success, without reaching the build boundary again.
+        shutil.rmtree(release_home / "Applications/Herdr Shell.app")
+        for label in ("no installed app", "already installed"):
+            result = subprocess.run([sys.executable, str(publisher), pinned],
+                                    env=release_env, capture_output=True, text=True, timeout=60)
+            assert result.returncode == 0, result.stdout + result.stderr
+            with built_plist.open("rb") as f:
+                assert plistlib.load(f)["HerdrShellCommit"] == pinned[:12]
+            if label == "already installed":
+                assert "already installed" in result.stdout, result.stdout
+            print(f"PASS publish: {label} exits successfully")
 print("PASS publisher no-downgrade and bundle identity CLI regression")
