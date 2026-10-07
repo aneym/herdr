@@ -60,6 +60,29 @@ enum ShellRadius {
     static let bubble: CGFloat = 16
 }
 
+enum ShellMotion {
+    static let dragThresholdPx: CGFloat = 4
+    static let tabEdgePx: CGFloat = 12
+    static let edgeBandMin: CGFloat = 24
+    static let edgeBandFraction: CGFloat = 0.25
+    static let edgeBandMaxFraction: CGFloat = 0.33
+    static let springLoadMs: CGFloat = 450
+    static let zoneMorphMs: CGFloat = 140
+    static let settleMs: CGFloat = 200
+    static let cancelMs: CGFloat = 160
+    static let fadeMs: CGFloat = 120
+    static let reducedFadeMs: CGFloat = 100
+    static let springResponse: CGFloat = 0.28
+    static let springDampingFraction: CGFloat = 0.92
+    static let zoneFillAlphaDark: CGFloat = 0.16
+    static let zoneFillAlphaLight: CGFloat = 0.12
+    static let zoneStroke: CGFloat = 1.5
+    static let zoneInset: CGFloat = 4
+    static let liftOpacity: CGFloat = 0.55
+    static let chipOffset: CGFloat = 12
+    static let ease: [CGFloat] = [0.2, 0, 0, 1]
+}
+
 enum ShellFace {
     static let size: CGFloat = 16
     static let dot: CGFloat = 6

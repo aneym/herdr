@@ -10,3 +10,26 @@ export const terminalThemes: Record<TokenMode, ITheme> = {
 };
 
 export const terminalFont = { family: "\"Cascadia Mono\", Consolas, monospace", size: 13.5 };
+
+export const motion = {
+  dragThresholdPx: 4,
+  tabEdgePx: 12,
+  edgeBandMin: 24,
+  edgeBandFraction: 0.25,
+  edgeBandMaxFraction: 0.33,
+  springLoadMs: 450,
+  zoneMorphMs: 140,
+  settleMs: 200,
+  cancelMs: 160,
+  fadeMs: 120,
+  reducedFadeMs: 100,
+  springResponse: 0.28,
+  springDampingFraction: 0.92,
+  zoneFillAlphaDark: 0.16,
+  zoneFillAlphaLight: 0.12,
+  zoneStroke: 1.5,
+  zoneInset: 4,
+  liftOpacity: 0.55,
+  chipOffset: 12,
+  ease: [0.2, 0, 0, 1],
+} as const;

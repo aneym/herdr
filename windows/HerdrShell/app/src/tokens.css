@@ -109,6 +109,26 @@
   --shell-face-tint-6: #3B93F0;
   --shell-face-tint-7: #8B5CF6;
   --shell-face-tint-8: #E152B0;
+  --shell-motion-drag-threshold-px: 4px;
+  --shell-motion-tab-edge-px: 12px;
+  --shell-motion-edge-band-min: 24px;
+  --shell-motion-edge-band-fraction: 0.25;
+  --shell-motion-edge-band-max-fraction: 0.33;
+  --shell-motion-spring-load-ms: 450ms;
+  --shell-motion-zone-morph-ms: 140ms;
+  --shell-motion-settle-ms: 200ms;
+  --shell-motion-cancel-ms: 160ms;
+  --shell-motion-fade-ms: 120ms;
+  --shell-motion-reduced-fade-ms: 100ms;
+  --shell-motion-spring-response: 0.28;
+  --shell-motion-spring-damping-fraction: 0.92;
+  --shell-motion-zone-fill-alpha-dark: 0.16;
+  --shell-motion-zone-fill-alpha-light: 0.12;
+  --shell-motion-zone-stroke: 1.5px;
+  --shell-motion-zone-inset: 4px;
+  --shell-motion-lift-opacity: 0.55;
+  --shell-motion-chip-offset: 12px;
+  --shell-motion-ease: cubic-bezier(0.2, 0, 0, 1);
 }
 /* Overlay-style scrollbars, as on macOS: no track or arrows, a thin rounded thumb
    that shows while the pointer is over the scroller. */

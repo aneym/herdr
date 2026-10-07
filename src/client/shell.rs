@@ -25,6 +25,12 @@ mod input;
 mod input_source;
 mod link_hover;
 mod mobile;
+// Motion constants are consumed by the upcoming pane drag and animation slices.
+#[allow(dead_code)]
+mod motion_tokens;
+// Pure geometry is wired into pointer handling by the upcoming pane drag slice.
+#[allow(dead_code)]
+mod pane_drop;
 mod mouse;
 mod notification_policy;
 mod notifications;
