@@ -530,6 +530,19 @@ impl ClientShellState {
         }
         let snapshot = self.snapshot.as_deref()?;
         let focused_pane = snapshot.focused_pane_id.as_deref()?;
+        let focused_tab = snapshot
+            .panes
+            .iter()
+            .find(|pane| pane.pane_id == focused_pane)?;
+        // Pin ordering is runtime-owned; a legacy panel-next request must not
+        // override the successor selected by the close endpoint.
+        if snapshot
+            .pinned_tabs
+            .iter()
+            .any(|pin| pin.tab_id == focused_tab.tab_id)
+        {
+            return None;
+        }
         let takes_the_tab = match method {
             Method::PaneClose(target) if target.pane_id == focused_pane => snapshot
                 .panes

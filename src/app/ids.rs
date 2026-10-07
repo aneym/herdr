@@ -58,38 +58,11 @@ impl App {
     }
 
     pub(crate) fn parse_workspace_id(&self, id: &str) -> Option<usize> {
-        self.state
-            .workspaces
-            .iter()
-            .position(|workspace| workspace.id == id)
-            .or_else(|| id.strip_prefix("w_")?.parse::<usize>().ok()?.checked_sub(1))
-            .or_else(|| id.parse::<usize>().ok()?.checked_sub(1))
+        self.state.parse_workspace_id(id)
     }
 
     pub(crate) fn parse_tab_id(&self, id: &str) -> Option<(usize, usize)> {
-        if let Some(rest) = id.strip_prefix("t_") {
-            let (ws_raw, tab_raw) = rest.rsplit_once('_')?;
-            let ws_idx = self.parse_workspace_id(ws_raw)?;
-            let tab_idx = tab_raw.parse::<usize>().ok()?.checked_sub(1)?;
-            self.state.workspaces.get(ws_idx)?.tabs.get(tab_idx)?;
-            return Some((ws_idx, tab_idx));
-        }
-
-        let (ws_raw, tab_raw) = id.rsplit_once(':')?;
-        let ws_idx = self.parse_workspace_id(ws_raw)?;
-        let tab_idx = if let Some(encoded) = tab_raw.strip_prefix('t') {
-            let tab_number = crate::workspace::decode_public_number(encoded)?;
-            self.state
-                .workspaces
-                .get(ws_idx)?
-                .tabs
-                .iter()
-                .position(|tab| tab.number == tab_number)?
-        } else {
-            tab_raw.parse::<usize>().ok()?.checked_sub(1)?
-        };
-        self.state.workspaces.get(ws_idx)?.tabs.get(tab_idx)?;
-        Some((ws_idx, tab_idx))
+        self.state.parse_tab_id(id)
     }
 
     fn resolve_raw_pane_id(&self, raw: u32) -> Option<crate::layout::PaneId> {
@@ -148,5 +121,40 @@ impl App {
     ) -> Option<(usize, crate::layout::PaneId)> {
         let (ws_idx, pane_id) = self.parse_pane_id(id)?;
         (self.public_pane_id(ws_idx, pane_id).as_deref() == Some(id)).then_some((ws_idx, pane_id))
+    }
+}
+
+impl super::state::AppState {
+    pub(crate) fn parse_workspace_id(&self, id: &str) -> Option<usize> {
+        self.workspaces
+            .iter()
+            .position(|workspace| workspace.id == id)
+            .or_else(|| id.strip_prefix("w_")?.parse::<usize>().ok()?.checked_sub(1))
+            .or_else(|| id.parse::<usize>().ok()?.checked_sub(1))
+    }
+
+    pub(crate) fn parse_tab_id(&self, id: &str) -> Option<(usize, usize)> {
+        if let Some(rest) = id.strip_prefix("t_") {
+            let (ws_raw, tab_raw) = rest.rsplit_once('_')?;
+            let ws_idx = self.parse_workspace_id(ws_raw)?;
+            let tab_idx = tab_raw.parse::<usize>().ok()?.checked_sub(1)?;
+            self.workspaces.get(ws_idx)?.tabs.get(tab_idx)?;
+            return Some((ws_idx, tab_idx));
+        }
+
+        let (ws_raw, tab_raw) = id.rsplit_once(':')?;
+        let ws_idx = self.parse_workspace_id(ws_raw)?;
+        let tab_idx = if let Some(encoded) = tab_raw.strip_prefix('t') {
+            let tab_number = crate::workspace::decode_public_number(encoded)?;
+            self.workspaces
+                .get(ws_idx)?
+                .tabs
+                .iter()
+                .position(|tab| tab.number == tab_number)?
+        } else {
+            tab_raw.parse::<usize>().ok()?.checked_sub(1)?
+        };
+        self.workspaces.get(ws_idx)?.tabs.get(tab_idx)?;
+        Some((ws_idx, tab_idx))
     }
 }

@@ -429,44 +429,12 @@ impl App {
         encode_success(id, ResponseResult::TabList { tabs })
     }
 
-    /// Capture a live successor before removing a focused pin. Role-bearing
-    /// pins and content pins have independent ordering, with cross-list fallback.
     pub(super) fn pinned_close_successor(&self, ws_idx: usize, tab_idx: usize) -> Option<String> {
-        if self.state.active != Some(ws_idx)
-            || self.state.workspaces.get(ws_idx)?.active_tab != tab_idx
-        {
-            return None;
-        }
-        let tab_id = self.public_tab_id(ws_idx, tab_idx)?;
-        let position = self.state.pinned_tab_index(&tab_id)?;
-        let pins = &self.state.pinned_tabs;
-        let has_role = pins[position].role.is_some();
-        let live = |pin: &&crate::app::state::PinnedTab| {
-            pin.tab_id != tab_id && self.parse_tab_id(&pin.tab_id).is_some()
-        };
-        pins[position + 1..]
-            .iter()
-            .filter(|pin| pin.role.is_some() == has_role)
-            .find(live)
-            .or_else(|| {
-                pins[..position]
-                    .iter()
-                    .rev()
-                    .filter(|pin| pin.role.is_some() == has_role)
-                    .find(live)
-            })
-            .or_else(|| {
-                pins.iter()
-                    .filter(|pin| pin.role.is_some() != has_role)
-                    .find(live)
-            })
-            .map(|pin| pin.tab_id.clone())
+        self.state.pinned_close_successor(ws_idx, tab_idx)
     }
 
     pub(super) fn focus_after_pinned_close(&mut self, successor: Option<String>) {
-        if let Some((ws_idx, tab_idx)) = successor.as_deref().and_then(|id| self.parse_tab_id(id)) {
-            self.state.switch_workspace_tab(ws_idx, tab_idx);
-        }
+        self.state.focus_after_pinned_close(successor);
     }
 
     pub(super) fn handle_tab_close(&mut self, id: String, target: TabTarget) -> String {
@@ -682,6 +650,40 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn api_pane_close_multi_pane_pin_keeps_tab_focus() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = vec![Workspace::test_new("pinned"), Workspace::test_new("next")];
+        for i in 0..2 {
+            let id = app.public_tab_id(i, 0).unwrap();
+            app.state.pin_tab(id, 0);
+        }
+        let closed = app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
+        app.state.switch_workspace_tab(0, 0);
+        let tab_id = app.public_tab_id(0, 0).unwrap();
+        let response = app.handle_pane_close(
+            "close".into(),
+            crate::api::schema::PaneTarget {
+                pane_id: app.public_pane_id(0, closed).unwrap(),
+            },
+        );
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(success.result, ResponseResult::Ok {});
+        assert_eq!(app.state.active, Some(0));
+        assert_eq!(
+            app.public_tab_id(0, app.state.workspaces[0].active_tab),
+            Some(tab_id)
+        );
+        assert_eq!(app.state.workspaces[0].tabs[0].layout.pane_count(), 1);
     }
 
     #[test]

@@ -802,6 +802,48 @@ fn panel_next_focuses_the_next_agent_after_a_whole_tab_close() {
 }
 
 #[test]
+fn panel_next_close_leaves_pinned_successor_to_server() {
+    for pane_close in [false, true] {
+        let mut state = close_focus_state(crate::config::AgentCloseFocusConfig::PanelNext);
+        let mut snapshot = state.snapshot.as_deref().cloned().unwrap();
+        snapshot
+            .pinned_tabs
+            .push(crate::protocol::ClientShellPinnedTab {
+                role: Some(crate::api::schema::TabRole::Agent),
+                tab_id: "tab_1".into(),
+                workspace_id: "ws_1".into(),
+            });
+        state.set_snapshot(Box::new(snapshot));
+        let mut outcome = ClientShellInput::default();
+        state.record_binding(
+            crate::input::KeybindMatch::Action(if pane_close {
+                crate::input::KeybindAction::ClosePane
+            } else {
+                crate::input::KeybindAction::CloseTab
+            }),
+            &mut outcome,
+        );
+        let methods: Vec<_> = outcome
+            .actions
+            .iter()
+            .filter_map(|action| match action {
+                ClientShellAction::Endpoint { request, .. } => Some(&request.method),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            methods.len(),
+            1,
+            "pinned close must not override server focus"
+        );
+        assert!(matches!(
+            methods[0],
+            crate::api::schema::Method::PaneClose(_) | crate::api::schema::Method::TabClose(_)
+        ));
+    }
+}
+
+#[test]
 fn stock_close_focus_sends_only_the_close() {
     let mut state = close_focus_state(crate::config::AgentCloseFocusConfig::Stock);
 

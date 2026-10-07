@@ -1190,6 +1190,44 @@ impl AppState {
         })
     }
 
+    /// Capture a live successor before removing a focused pin. Role-bearing
+    /// pins and content pins have independent ordering, with cross-list fallback.
+    pub(crate) fn pinned_close_successor(&self, ws_idx: usize, tab_idx: usize) -> Option<String> {
+        if self.active != Some(ws_idx) || self.workspaces.get(ws_idx)?.active_tab != tab_idx {
+            return None;
+        }
+        let tab_id = public_tab_id_for_index(self.workspaces.get(ws_idx)?, tab_idx)?;
+        let position = self.pinned_tab_index(&tab_id)?;
+        let pins = &self.pinned_tabs;
+        let has_role = pins[position].role.is_some();
+        let live = |pin: &&crate::app::state::PinnedTab| {
+            pin.tab_id != tab_id && self.parse_tab_id(&pin.tab_id).is_some()
+        };
+        pins[position + 1..]
+            .iter()
+            .filter(|pin| pin.role.is_some() == has_role)
+            .find(live)
+            .or_else(|| {
+                pins[..position]
+                    .iter()
+                    .rev()
+                    .filter(|pin| pin.role.is_some() == has_role)
+                    .find(live)
+            })
+            .or_else(|| {
+                pins.iter()
+                    .filter(|pin| pin.role.is_some() != has_role)
+                    .find(live)
+            })
+            .map(|pin| pin.tab_id.clone())
+    }
+
+    pub(crate) fn focus_after_pinned_close(&mut self, successor: Option<String>) {
+        if let Some((ws_idx, tab_idx)) = successor.as_deref().and_then(|id| self.parse_tab_id(id)) {
+            self.switch_workspace_tab(ws_idx, tab_idx);
+        }
+    }
+
     #[cfg(test)]
     /// Close the focused pane. Returns true when the close was deferred to confirmation.
     pub fn close_pane(&mut self) -> bool {
@@ -1222,6 +1260,12 @@ impl AppState {
             .and_then(|i| self.workspaces.get(i).and_then(|ws| ws.focused_pane_id()))
             .into_iter()
             .collect::<Vec<_>>();
+        let successor = active.and_then(|i| {
+            let ws = self.workspaces.get(i)?;
+            (ws.tabs.get(ws.active_tab)?.layout.pane_count() <= 1)
+                .then(|| self.pinned_close_successor(i, ws.active_tab))
+                .flatten()
+        });
         let should_close_workspace = active
             .and_then(|i| self.workspaces.get_mut(i))
             .is_some_and(|ws| ws.close_focused());
@@ -1234,6 +1278,8 @@ impl AppState {
         } else {
             self.remove_unattached_terminal_ids(terminal_ids);
         }
+        self.prune_pinned_tabs();
+        self.focus_after_pinned_close(successor);
         false
     }
 
@@ -1253,6 +1299,9 @@ impl AppState {
             }
         }
 
+        let successor = self
+            .active
+            .and_then(|i| self.pinned_close_successor(i, self.workspaces.get(i)?.active_tab));
         self.mark_session_dirty();
         let should_close_workspace = self
             .active
@@ -1263,6 +1312,7 @@ impl AppState {
                 self.selected = active;
             }
             self.close_selected_workspace();
+            self.focus_after_pinned_close(successor);
             return false;
         }
         if let Some(ws_idx) = self.active {
@@ -1288,6 +1338,8 @@ impl AppState {
             self.remove_unattached_terminal_ids(terminal_ids);
             crate::logging::tab_closed(&workspace_id, &closing_tab_id);
         }
+        self.prune_pinned_tabs();
+        self.focus_after_pinned_close(successor);
         false
     }
 }
@@ -4935,6 +4987,38 @@ mod tests {
             .rect;
 
         assert!(root_rect.x > right_rect.x);
+    }
+
+    /// Pure state selection has pin-order, tab-removal and legacy fallback edge cases.
+    #[test]
+    fn close_focused_pin_keeps_list_order() {
+        for pane_close in [false, true] {
+            for (closing, pinned, expected) in [(1, true, 2), (2, true, 1), (1, false, 0)] {
+                let mut state = app_with_workspaces(&["pins"]);
+                state.workspaces[0].test_add_tab(Some("middle"));
+                state.workspaces[0].test_add_tab(Some("last"));
+                let ids: Vec<_> = (0..3)
+                    .map(|i| public_tab_id_for_index(&state.workspaces[0], i).unwrap())
+                    .collect();
+                if pinned {
+                    for id in &ids {
+                        state.pin_tab(id.clone(), 0);
+                    }
+                }
+                state.switch_workspace_tab(0, closing);
+                if pane_close {
+                    state.close_pane();
+                } else {
+                    state.close_tab();
+                }
+                let ws = &state.workspaces[state.active.unwrap()];
+                assert_eq!(
+                    public_tab_id_for_index(ws, ws.active_tab).unwrap(),
+                    ids[expected],
+                    "pane_close={pane_close}, closing={closing}, pinned={pinned}"
+                );
+            }
+        }
     }
 
     #[test]
