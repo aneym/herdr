@@ -163,3 +163,9 @@ footer { color: var(--shell-muted); padding: 12px 8px; font-size: 12px; overflow
 .restart-actions button { height: 28px; padding: 0 10px; }
 .restart-confirm .restart-primary { color: var(--shell-accent); font-weight: 500; }
 .restart-confirm button:not(.restart-primary) { color: var(--shell-muted); }
+
+.home-glyph { flex-shrink: 0; font-size: var(--shell-type-row-trailing); }
+.home-glyph.warn { color: var(--shell-warn); }
+.hidden-agents .chevron { margin-left: auto; }
+.hidden-agents-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--shell-accent); }
+.agent-menu { position: fixed; right: auto; min-width: 180px; }

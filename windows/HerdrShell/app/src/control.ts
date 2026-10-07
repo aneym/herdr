@@ -99,3 +99,12 @@ async function pointerDrag(el: HTMLElement, dx: number, dy: number, payload: Dra
   await new Promise(resolve => requestAnimationFrame(resolve));
   return { ok: true, from: [x, y], to: [x + dx, y + dy] };
 }
+
+/** Older endpoints do not advertise this additive method; the menu remains usable there. */
+export async function setAgentHidden(machine: string, tab: string, hidden: boolean): Promise<void> {
+  try { await bridge.api(machine, "tab.set_hidden", { tab_id: tab, hidden }); }
+  catch (error) {
+    const code = (error as { code?: string } | null)?.code ?? /^herdr api error ([^:]+):/.exec(String(error))?.[1];
+    if (code !== "unknown_method") throw error;
+  }
+}

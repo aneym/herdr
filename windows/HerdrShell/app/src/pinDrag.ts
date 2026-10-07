@@ -28,8 +28,8 @@ export function pinMovePlan(snapshot: Snapshot, ids: string[], from: number, to:
   const tabs = snapshot.tabs ?? [];
   const moving = tabs.find(t => t.tab_id === ids[from]);
   const destination = tabs.find(t => t.tab_id === ids[to]);
-  if (!moving || !destination || (moving.role === "agent") !== (destination.role === "agent")) return null;
-  const slots = tabs.filter(t => (t.role === "agent") === (moving.role === "agent") && t.pin_index != null).map(t => t.pin_index!).sort((a, b) => a - b);
+  if (!moving || !destination || moving.hidden || destination.hidden || (moving.role === "agent") !== (destination.role === "agent")) return null;
+  const slots = tabs.filter(t => (t.role === "agent") === (moving.role === "agent") && t.pin_index != null && !t.hidden).map(t => t.pin_index!).sort((a, b) => a - b);
   if (to >= slots.length) return null;
   const order = ids.filter((_, i) => i !== from);
   order.splice(to, 0, moving.tab_id);
