@@ -92,3 +92,25 @@ footer { color: var(--shell-muted); padding: 12px 8px; font-size: 12px; overflow
 .divider::after { content: ""; position: absolute; background: transparent; transition: background .08s; }
 .divider.vertical::after { left: 2px; width: 3px; top: 0; bottom: 0; }.divider.horizontal::after { top: 2px; height: 3px; left: 0; right: 0; }
 .divider:hover::after { background: color-mix(in srgb, var(--shell-text) 26%, transparent); }.divider.dragging::after { background: color-mix(in srgb, var(--shell-accent) 75%, transparent); }
+/* Agent faces (shell/tokens.json `face`), as the Mac's AgentFace: every tab row's glyph sits in the
+   face-sized slot so AGENTS titles line up with the rest; the state dot is cut into the face. */
+.select-tab .status { width: var(--shell-face-size); text-align: center; }
+.face { position: relative; width: var(--shell-face-size); height: var(--shell-face-size); flex-shrink: 0; --face-tint-opacity: var(--shell-face-tint-opacity-dark); }
+:root[data-theme="light"] .face { --face-tint-opacity: var(--shell-face-tint-opacity-light); }
+.face-disc { position: absolute; inset: 0; border-radius: 50%; overflow: hidden; display: grid; place-items: center; }
+.face.has-dot .face-disc {
+  --face-hole: calc(var(--shell-face-dot) / 2 + var(--shell-face-dot-gap));
+  --face-hole-at: calc(var(--shell-face-size) - var(--shell-face-dot) / 2 + var(--shell-face-dot-offset) / 2);
+  -webkit-mask-image: radial-gradient(circle var(--face-hole) at var(--face-hole-at) var(--face-hole-at), transparent var(--face-hole), currentColor var(--face-hole));
+  mask-image: radial-gradient(circle var(--face-hole) at var(--face-hole-at) var(--face-hole-at), transparent var(--face-hole), currentColor var(--face-hole));
+}
+.face-disc[class*="face-tint-"]::before { content: ""; position: absolute; inset: 0; background: var(--face-tint); opacity: var(--face-tint-opacity); }
+.face-tint-0 { --face-tint: var(--shell-face-tint-0); }.face-tint-1 { --face-tint: var(--shell-face-tint-1); }.face-tint-2 { --face-tint: var(--shell-face-tint-2); }
+.face-tint-3 { --face-tint: var(--shell-face-tint-3); }.face-tint-4 { --face-tint: var(--shell-face-tint-4); }.face-tint-5 { --face-tint: var(--shell-face-tint-5); }
+.face-tint-6 { --face-tint: var(--shell-face-tint-6); }.face-tint-7 { --face-tint: var(--shell-face-tint-7); }.face-tint-8 { --face-tint: var(--shell-face-tint-8); }
+.face-initial { position: relative; font-size: var(--shell-face-initial); font-weight: 600; line-height: 1; color: var(--shell-text); }
+.face-disc img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* A picture brings its own background; a hairline ring gives it an edge in either theme. */
+.face-disc.picture::after { content: ""; position: absolute; inset: 0; border-radius: 50%; box-shadow: inset 0 0 0 var(--shell-face-ring) var(--shell-line); }
+.face-dot { position: absolute; width: var(--shell-face-dot); height: var(--shell-face-dot); right: calc(-1 * var(--shell-face-dot-offset)); bottom: calc(-1 * var(--shell-face-dot-offset)); border-radius: 50%; }
+.face-dot.ok { background: var(--shell-ok); }.face-dot.accent { background: var(--shell-accent); }.face-dot.warn { background: var(--shell-warn); }

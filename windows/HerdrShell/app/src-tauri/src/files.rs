@@ -263,3 +263,19 @@ pub async fn remote_home(
         .map(str::to_owned)
         .ok_or("helper home missing".into())
 }
+#[tauri::command]
+pub async fn file_list(
+    files: State<'_, Files>,
+    machines: State<'_, Machines>,
+    machine: String,
+    path: String,
+) -> Result<Vec<String>, String> {
+    let value = request(
+        files.inner().clone(),
+        machines.inner().clone(),
+        machine,
+        json!({"op":"list", "path":path}),
+    )
+    .await?;
+    serde_json::from_value(value["names"].clone()).map_err(|e| e.to_string())
+}

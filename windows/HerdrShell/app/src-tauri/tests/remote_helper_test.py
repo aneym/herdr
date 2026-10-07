@@ -90,6 +90,24 @@ class RemoteHelperTest(unittest.TestCase):
             self.assertEqual(base64.b64decode(self.request("read", path=str(path),
                              offset=0, max=100)["data_b64"]), b"lane")
 
+    def test_lists_card_folders(self):
+        agents = self.home / ".agent-rails/agents"
+        for name in ("recruiter", "frank", "home"):
+            (agents / name).mkdir(parents=True)
+        self.assertEqual(self.request("list", path="~/.agent-rails/agents")["names"],
+                         ["frank", "home", "recruiter"])
+        missing = self.request("list", path="~/.agent-rails/none")
+        self.assertEqual(missing["names"], [])
+        outside = self.home / "outside"
+        outside.mkdir()
+        (outside / "secret").mkdir()
+        (self.home / ".agent-rails/escape").symlink_to(outside)
+        for path in (str(outside), "~/.agent-rails/escape", "~/.agent-rails/../outside"):
+            with self.subTest(path=path):
+                response = self.request("list", path=path)
+                self.assertFalse(response["ok"])
+                self.assertEqual(response["error"], "path not allowed")
+
     def test_security_boundary(self):
         outside = self.home / "private.txt"
         outside.write_bytes(b"outside fixture")

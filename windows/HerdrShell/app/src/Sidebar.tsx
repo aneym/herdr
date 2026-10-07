@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import UpdatePill from "./UpdatePill";
+import AgentFace from "./AgentFace";
 import { DRAG_THRESHOLD, slotAt } from "./pinDrag";
 import type { PinSection, RowBox } from "./pinDrag";
 import type { MachineStatus } from "./bridge";
@@ -90,7 +91,7 @@ export default function Sidebar({ rows, selected, machine, notice, select, pin, 
     return { className: drag.target < from ? "drop-above" : "drop-below" };
   };
   const tabRow = (row: SidebarRow) => { const dragged = dragStyle(row); const pinRow = row.kind === "agent" || row.kind === "pinned"; return <div key={`${row.kind}:${row.id}`} data-row={`${row.kind}:${row.id}`} data-pin-section={pinRow ? row.kind : undefined} data-tab={row.id} style={dragged.style} onPointerDown={pinRow ? event => startPress(event, row) : undefined} onClickCapture={event => { if (swallowClick.current) { event.stopPropagation(); event.preventDefault(); } }} className={`sidebar-row tab-row ${row.kind === "tab" ? "indented" : ""} ${selected === row.id ? "selected" : ""} ${dragged.className}`}>
-    {renaming === row.id && rows.find(r => r.kind !== "space" && r.id === row.id) === row ? <RenameInput key={row.id} label={row.label} commit={label => commitRename(row.id, label)} cancel={cancelRename} /> : <button className="select-tab" onClick={() => select(row.id)} onDoubleClick={() => startRename(row.id)}><Status status={row.status} /><span className="label">{row.label}</span>{row.kind !== "tab" && <span className="muted space-label">{row.spaceLabel}</span>}</button>}
+    {renaming === row.id && rows.find(r => r.kind !== "space" && r.id === row.id) === row ? <RenameInput key={row.id} label={row.label} commit={label => commitRename(row.id, label)} cancel={cancelRename} /> : <button className="select-tab" onClick={() => select(row.id)} onDoubleClick={() => startRename(row.id)}>{row.face ? <AgentFace face={row.face} status={row.status} request={row.request} /> : <Status status={row.status} />}<span className="label">{row.label}</span>{row.kind !== "tab" && <span className="muted space-label">{row.spaceLabel}</span>}</button>}
     <button className={`pin ${row.pinned ? "is-pinned" : ""}`} aria-label={row.pinned ? "Unpin tab" : "Pin tab"} onClick={() => pin(row.id, !row.pinned)}>⌖</button>
   </div>; };
   const spaceRow = (row: SidebarRow) => {

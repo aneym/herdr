@@ -91,6 +91,7 @@ fn main() {
             files::file_stat,
             files::file_read,
             files::remote_home,
+            files::file_list,
             ctl_read_result,
             ctl_ui_result,
             ctl_open_result,

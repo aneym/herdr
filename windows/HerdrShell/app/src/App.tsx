@@ -4,6 +4,7 @@ import type { MachineStatus } from "./bridge";
 import { buildSidebar, tabOrder } from "./model";
 import type { Snapshot } from "./model";
 import Sidebar from "./Sidebar";
+import { useAgentCards } from "./AgentFace";
 import Switcher from "./Switcher";
 import { actionFor } from "./keys";
 import type { Action } from "./keys";
@@ -37,7 +38,8 @@ export default function App() {
   const controllers = useRef(new Map<string, PaneController>());
   // A dropped pin order shows until the snapshot agrees or PENDING_LIFETIME_MS passes.
   const [pendingPins, setPendingPins] = useState<PendingOrders>({});
-  const rows = useMemo(() => buildSidebar(snapshot, pendingPins), [snapshot, pendingPins]);
+  const cards = useAgentCards(machine.name, machine.state === "up");
+  const rows = useMemo(() => buildSidebar(snapshot, pendingPins, Date.now(), cards), [snapshot, pendingPins, cards]);
   useEffect(() => {
     const entries = Object.values(pendingPins);
     if (!entries.length) return;

@@ -28,6 +28,13 @@ def request(req):
     op = req.get("op")
     if op == "home":
         return {"home": HOME}
+    if op == "list":
+        # Entry names only, for card folders such as ~/.agent-rails/agents.
+        try:
+            names = os.listdir(allowed_path(req.get("path")))
+        except FileNotFoundError:
+            names = []
+        return {"names": sorted(names)[:256]}
     if op not in ("stat", "read"):
         raise ValueError("unknown operation")
     path = allowed_path(req.get("path"))
