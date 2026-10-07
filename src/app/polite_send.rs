@@ -3,7 +3,9 @@ use std::time::{Duration, Instant};
 use crate::api::schema::{PaneQueueParams, ResponseResult};
 use crate::config::PoliteSendConfig;
 use crate::layout::PaneId;
-use crate::terminal::polite_send::{Payload, SendOptions, SendOutcome};
+use crate::terminal::polite_send::{
+    DeliveryGuard, DeliveryVerdict, Payload, SendOptions, SendOutcome,
+};
 
 use super::api::responses::{encode_error, encode_success};
 use super::App;
@@ -20,6 +22,39 @@ impl App {
                 .and_then(|ws| ws.terminal_id(pane_id))
                 .and_then(|id| self.state.terminals.get(id))
                 .is_some_and(|terminal| terminal.detected_agent.is_some()),
+        }
+    }
+
+    /// Whether a send bound to `guard` may reach the pane's agent now: the
+    /// same agent, still the foreground process, on the same session, and
+    /// idle or done.
+    pub(crate) fn agent_delivery_verdict(
+        &self,
+        ws_idx: usize,
+        pane_id: PaneId,
+        guard: &DeliveryGuard,
+    ) -> DeliveryVerdict {
+        let Some(info) = self.agent_info(ws_idx, pane_id) else {
+            return DeliveryVerdict::Stale;
+        };
+        let same_session = info
+            .agent_session
+            .as_ref()
+            .is_some_and(|session| session.value == guard.session_id);
+        let same_agent = info.agent.as_deref() == Some(crate::detect::agent_label(guard.agent));
+        let hosted = self
+            .lookup_runtime_sender(ws_idx, pane_id)
+            .is_some_and(|runtime| super::agents::runtime_hosts_agent(runtime, guard.agent));
+        if !(same_session && same_agent && hosted) {
+            return DeliveryVerdict::Stale;
+        }
+        if matches!(
+            info.agent_status,
+            crate::api::schema::AgentStatus::Idle | crate::api::schema::AgentStatus::Done
+        ) {
+            DeliveryVerdict::Ready
+        } else {
+            DeliveryVerdict::Hold
         }
     }
 
@@ -85,11 +120,12 @@ impl App {
                     continue;
                 };
                 if runtime.has_polite_queue() {
-                    if let Err(err) = runtime.flush_polite_queue(
+                    if let Err(err) = runtime.flush_polite_queue_guarded(
                         now,
                         self.polite_send_quiet,
                         self.polite_send_mode == PoliteSendConfig::Off,
                         self.polite_options(ws_idx, pane_id, false, false),
+                        &|guard| self.agent_delivery_verdict(ws_idx, pane_id, guard),
                     ) {
                         tracing::warn!(%err, "polite send flush failed");
                     }
@@ -141,11 +177,12 @@ impl App {
             return encode_error(id, "pane_not_found", "pane not found");
         };
         if params.flush {
-            if let Err(err) = runtime.flush_polite_queue(
+            if let Err(err) = runtime.flush_polite_queue_guarded(
                 Instant::now(),
                 self.polite_send_quiet,
                 true,
                 self.polite_options(ws_idx, pane_id, false, false),
+                &|guard| self.agent_delivery_verdict(ws_idx, pane_id, guard),
             ) {
                 return encode_error(id, "pane_send_failed", err.to_string());
             }

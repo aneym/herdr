@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 
@@ -199,15 +199,18 @@ impl App {
         };
         match self.queue_agent_prompt(request.id, params) {
             Ok((id, agent, completion, position)) => {
-                if position.position.is_some()
-                    || position.state == crate::api::schema::PaneSendState::Dropped
-                {
+                let dropped = matches!(
+                    position.state,
+                    crate::api::schema::PaneSendState::Dropped
+                        | crate::api::schema::PaneSendState::StaleSession
+                );
+                if position.position.is_some() || dropped {
                     let _ = respond_to.send(encode_success(
                         id,
                         ResponseResult::AgentPrompted {
                             agent,
                             queued: position.position.is_some(),
-                            dropped: position.state == crate::api::schema::PaneSendState::Dropped,
+                            dropped,
                             queue_position: position.position,
                             id: position.id,
                             state: position.state,
@@ -332,9 +335,19 @@ impl App {
         let Some(agent) = self.agent_info(resolved.ws_idx, resolved.pane_id) else {
             return Err(agent_not_found(id, &params.target));
         };
+        let guard = params.delivery.as_ref().map(|delivery| {
+            let guard = crate::terminal::polite_send::DeliveryGuard {
+                session_id: delivery.session_id.clone(),
+                agent: expected_agent,
+                input_quiet: Duration::from_millis(delivery.input_quiet_ms),
+                expires_at: Instant::now() + Duration::from_millis(delivery.expires_ms),
+            };
+            let verdict = self.agent_delivery_verdict(resolved.ws_idx, resolved.pane_id, &guard);
+            (guard, verdict)
+        });
         let (completion_tx, completion) = std::sync::mpsc::channel();
         let position = runtime
-            .polite_send(
+            .polite_send_with_guard(
                 self.polite_guarded(resolved.ws_idx, resolved.pane_id),
                 self.polite_send_quiet,
                 "agent.prompt",
@@ -347,6 +360,7 @@ impl App {
                     completion: completion_tx,
                 },
                 self.polite_options(resolved.ws_idx, resolved.pane_id, params.if_idle, false),
+                guard,
             )
             .map_err(|err| encode_error(id.clone(), "agent_prompt_failed", err.to_string()))?;
         Ok((id, agent, completion, position))
@@ -604,6 +618,7 @@ mod tests {
                 target: "reviewer".into(),
                 text: "A != B".into(),
                 wait: None,
+                delivery: None,
             },
         );
         let success: SuccessResponse = serde_json::from_str(&response).unwrap();
@@ -718,6 +733,155 @@ mod tests {
         assert_eq!(response["result"]["recent"][0]["byte_length"], 24);
     }
 
+    /// A session-bound agent.prompt goes through the real polite-send queue:
+    /// held while the human typed recently (even input that parses to no
+    /// key) or the agent works, held through a forced flush, delivered once
+    /// idle and quiet, refused or dropped when the session changes, and
+    /// expired at its deadline.
+    #[tokio::test]
+    async fn session_bound_agent_prompt_waits_for_idle_quiet_and_same_session() {
+        let mut app = app_with_agent();
+        let pane = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].terminal_id(pane).unwrap().clone();
+        let set_session = |app: &mut App, session: &str| {
+            app.state
+                .terminals
+                .get_mut(&terminal_id)
+                .unwrap()
+                .persisted_agent_session = Some(crate::agent_resume::PersistedAgentSession {
+                source: "herdr:claude".into(),
+                agent: "claude".into(),
+                session_ref: crate::agent_resume::AgentSessionRef::id(session).unwrap(),
+            });
+        };
+        let set_state = |app: &mut App, state: AgentState| {
+            app.state
+                .terminals
+                .get_mut(&terminal_id)
+                .unwrap()
+                .set_detected_state(Some(Agent::Claude), state);
+        };
+        set_state(&mut app, AgentState::Idle);
+        set_session(&mut app, "sess-1");
+        let (runtime, mut rx) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
+        // F13: complete, but parses to no key.
+        runtime.record_human_bytes(b"\x1b[25~");
+        app.state.insert_test_runtime(pane, runtime);
+        let public = app.public_pane_id(0, pane).unwrap();
+        let prompt = |text: &str, session: &str, expires_ms: u64| AgentPromptParams {
+            if_idle: false,
+            target: public.clone(),
+            text: text.into(),
+            wait: None,
+            delivery: Some(crate::api::schema::AgentPromptDelivery {
+                session_id: session.into(),
+                input_quiet_ms: 300,
+                expires_ms,
+            }),
+        };
+        let force_flush = |app: &mut App| {
+            app.handle_api_request(crate::api::schema::Request {
+                id: "flush".into(),
+                method: crate::api::schema::Method::PaneQueue(
+                    crate::api::schema::PaneQueueParams {
+                        pane_id: public.clone(),
+                        id: None,
+                        flush: true,
+                    },
+                ),
+            });
+        };
+        let state_of = |id: &str| {
+            crate::terminal::polite_send::recent_sends(None, Some(id))
+                .into_iter()
+                .next()
+                .map(|item| (item.state, item.reason))
+                .unwrap()
+        };
+        let queued = |response: String| {
+            let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+            assert_eq!(response["result"]["state"], "queued", "{response}");
+            response["result"]["id"].as_str().unwrap().to_string()
+        };
+
+        let first = queued(run_deferred_agent_prompt(
+            &mut app,
+            "p1",
+            prompt("reload-line", "sess-1", 10_000),
+        ));
+        // A human submit starts a turn: still inside the quiet interval,
+        // then working, so even a forced flush holds the line.
+        app.lookup_runtime_sender(0, pane)
+            .unwrap()
+            .record_human_bytes(b"\r");
+        set_state(&mut app, AgentState::Working);
+        force_flush(&mut app);
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        force_flush(&mut app);
+        assert!(rx.try_recv().is_err(), "held line reached a working agent");
+        assert_eq!(
+            state_of(&first).0,
+            crate::api::schema::PaneSendState::Queued
+        );
+        set_state(&mut app, AgentState::Idle);
+        force_flush(&mut app);
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while state_of(&first).0 == crate::api::schema::PaneSendState::Queued
+            && Instant::now() < deadline
+        {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let written = rx.try_recv().expect("idle, quiet agent receives the line");
+        assert!(
+            String::from_utf8_lossy(&written).contains("reload-line"),
+            "{written:?}"
+        );
+        while rx.try_recv().is_ok() {}
+
+        // The session changes while the line is held: it is never delivered.
+        set_state(&mut app, AgentState::Working);
+        let second = queued(run_deferred_agent_prompt(
+            &mut app,
+            "p2",
+            prompt("stale-line", "sess-1", 10_000),
+        ));
+        set_session(&mut app, "sess-2");
+        set_state(&mut app, AgentState::Idle);
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        force_flush(&mut app);
+        assert_eq!(
+            state_of(&second),
+            (
+                crate::api::schema::PaneSendState::StaleSession,
+                Some("agent_session_changed".into())
+            )
+        );
+        // Bound to a session the pane no longer runs: refused at once.
+        let refused = run_deferred_agent_prompt(&mut app, "p3", prompt("old", "sess-1", 10_000));
+        let refused: serde_json::Value = serde_json::from_str(&refused).unwrap();
+        assert_eq!(refused["result"]["state"], "stale_session", "{refused}");
+        assert_eq!(refused["result"]["dropped"], true);
+
+        // Held past its deadline: dropped as expired, never delivered.
+        set_state(&mut app, AgentState::Working);
+        let third = queued(run_deferred_agent_prompt(
+            &mut app,
+            "p4",
+            prompt("late-line", "sess-2", 50),
+        ));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        set_state(&mut app, AgentState::Idle);
+        force_flush(&mut app);
+        assert_eq!(
+            state_of(&third),
+            (
+                crate::api::schema::PaneSendState::Dropped,
+                Some("expired".into())
+            )
+        );
+        assert!(rx.try_recv().is_err(), "a dropped line was written");
+    }
+
     #[tokio::test]
     async fn polite_send_agent_prompt_if_idle_drops_without_waiting_for_completion() {
         let mut app = app_with_agent();
@@ -737,6 +901,7 @@ mod tests {
                 text: "wake".into(),
                 wait: None,
                 if_idle: true,
+                delivery: None,
             },
         );
         let response: serde_json::Value = serde_json::from_str(&response).unwrap();
@@ -772,6 +937,7 @@ mod tests {
                 target: public_pane_id,
                 text: "A != B".into(),
                 wait: None,
+                delivery: None,
             },
         );
         assert!(response_rx.try_recv().is_err());
@@ -802,6 +968,7 @@ mod tests {
                 target: "reviewer".into(),
                 text: "A != B".into(),
                 wait: None,
+                delivery: None,
             },
         );
         let raw: SuccessResponse = serde_json::from_str(&raw).unwrap();
@@ -818,6 +985,7 @@ mod tests {
                 target: "opencode".into(),
                 text: "wrong target".into(),
                 wait: None,
+                delivery: None,
             },
         );
         let error: crate::api::schema::ErrorResponse = serde_json::from_str(&rejected).unwrap();
@@ -846,6 +1014,7 @@ mod tests {
                 target: "reviewer".into(),
                 text: "unrelated prompt".into(),
                 wait: None,
+                delivery: None,
             },
         );
 
@@ -887,6 +1056,7 @@ mod tests {
                 target: "reviewer".into(),
                 text: "A != B".into(),
                 wait: None,
+                delivery: None,
             },
         );
         let success: SuccessResponse = serde_json::from_str(&response).unwrap();
@@ -967,6 +1137,7 @@ mod tests {
                 target: "reviewer".into(),
                 text: "A != B".into(),
                 wait: None,
+                delivery: None,
             },
         );
         let error: crate::api::schema::ErrorResponse = serde_json::from_str(&response).unwrap();

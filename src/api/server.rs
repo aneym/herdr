@@ -1168,6 +1168,7 @@ fn caller_timeout_dispatch_uses_timeout_error() {
                 target: "reviewer".into(),
                 text: "review this".into(),
                 wait: None,
+                delivery: None,
             }),
         },
         &tx,

@@ -26,6 +26,8 @@ const PLUGIN_RELOAD_EXIT_BUSY: i32 = 75;
 const PLUGIN_RELOAD_EXIT_NO_AGENT: i32 = 3;
 const PLUGIN_RELOAD_POLL: std::time::Duration = std::time::Duration::from_secs(1);
 const PLUGIN_RELOAD_INPUT_QUIET_MS: u64 = 20_000;
+/// How long past --timeout to wait for the server to expire a held prompt.
+const PLUGIN_RELOAD_EXPIRY_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
 const PLUGIN_RELOAD_ACTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
 pub(super) fn run_plugin_command(args: &[String]) -> std::io::Result<i32> {
@@ -739,6 +741,20 @@ fn run_plugin_reload(
             target: args.pane.clone(),
             text: plugin_reload_prompt(&args.changelog, &args.request),
             wait: None,
+            // The server holds the line until this session is idle and the
+            // human is quiet, drops it if the session or agent process
+            // changes, and expires it at --timeout so a retry never finds a
+            // second copy still queued.
+            delivery: Some(crate::api::schema::AgentPromptDelivery {
+                session_id: session_id.clone(),
+                input_quiet_ms: PLUGIN_RELOAD_INPUT_QUIET_MS,
+                expires_ms: u64::try_from(
+                    deadline
+                        .saturating_duration_since(std::time::Instant::now())
+                        .as_millis(),
+                )
+                .unwrap_or(u64::MAX),
+            }),
         }),
     )?;
 
@@ -949,14 +965,24 @@ fn wait_for_resumed_agent_idle(
             )));
         }
         if std::time::Instant::now() >= deadline {
-            return Err(PluginReloadFailure::failed(
-                "resumed agent did not report idle or done before --timeout",
-            ));
+            let message = "resumed agent did not report idle or done before --timeout";
+            // Seen but still busy is retryable; never seen is a failure.
+            return Err(if agent_seen {
+                PluginReloadFailure {
+                    exit_code: PLUGIN_RELOAD_EXIT_BUSY,
+                    message: message.into(),
+                }
+            } else {
+                PluginReloadFailure::failed(message)
+            });
         }
         std::thread::sleep(PLUGIN_RELOAD_POLL);
     }
 }
 
+/// Wait for the session-bound prompt to reach a final state. The server
+/// expires it at `deadline`, so after a short grace it is never still live:
+/// expiry (agent busy or human not quiet) is retryable, anything else fails.
 fn wait_for_plugin_reload_prompt(
     pane: &str,
     mut prompt: serde_json::Value,
@@ -966,19 +992,33 @@ fn wait_for_plugin_reload_prompt(
         .get("id")
         .and_then(serde_json::Value::as_str)
         .map(str::to_string);
+    let settle_by = deadline + PLUGIN_RELOAD_EXPIRY_GRACE;
     loop {
         match prompt.get("state").and_then(serde_json::Value::as_str) {
             Some("delivered" | "acked") => return Ok(()),
             Some("queued") => {}
-            _ => {
-                return Err(PluginReloadFailure::failed(
-                    "agent.prompt was not delivered",
-                ))
+            Some("dropped")
+                if prompt.get("reason").and_then(serde_json::Value::as_str) == Some("expired") =>
+            {
+                return Err(PluginReloadFailure {
+                    exit_code: PLUGIN_RELOAD_EXIT_BUSY,
+                    message: "agent busy or pane input active until --timeout; the line was not delivered".into(),
+                });
+            }
+            state => {
+                let reason = prompt
+                    .get("reason")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default();
+                return Err(PluginReloadFailure::failed(format!(
+                    "agent.prompt was not delivered: {} {reason}",
+                    state.unwrap_or("unknown")
+                )));
             }
         }
-        if std::time::Instant::now() + PLUGIN_RELOAD_POLL > deadline {
+        if std::time::Instant::now() >= settle_by {
             return Err(PluginReloadFailure::failed(
-                "agent.prompt delivery timed out",
+                "agent.prompt is still queued past its expiry; not retrying blind",
             ));
         }
         let id = id
@@ -2380,6 +2420,9 @@ mod tests {
         /// Claude was seen starting, then the pane's agent is gone (the
         /// foreground is the pane shell again).
         AgentGoneAfterStart,
+        /// Idle, but the server holds the session-bound line until it
+        /// expires (agent busy or human input until --timeout).
+        PromptExpires,
     }
 
     /// Run the real `plugin reload` flow against a scripted server and return
@@ -2416,7 +2459,14 @@ mod tests {
                     Method::AgentGet(_) => "agent.get",
                     Method::AgentResume(_) => "agent.resume",
                     Method::PaneGet(_) => "pane.get",
-                    Method::AgentPrompt(_) => "agent.prompt",
+                    Method::AgentPrompt(params) => {
+                        // Delivery is always bound to the resumed or current session.
+                        let delivery = params.delivery.as_ref().expect("session-bound prompt");
+                        assert_eq!(delivery.session_id, "sess-1");
+                        assert_eq!(delivery.input_quiet_ms, PLUGIN_RELOAD_INPUT_QUIET_MS);
+                        "agent.prompt"
+                    }
+                    Method::PaneQueue(_) => "pane.queue",
                     _ => "other",
                 };
                 log.borrow_mut().push(name);
@@ -2449,9 +2499,9 @@ mod tests {
                     "agent.get" => {
                         post_resume_agent_gets += 1;
                         Ok(match scenario {
-                            AfterResume::Ready | AfterResume::RestoreErrorWhileIdle => {
-                                claude("idle")
-                            }
+                            AfterResume::Ready
+                            | AfterResume::RestoreErrorWhileIdle
+                            | AfterResume::PromptExpires => claude("idle"),
                             AfterResume::AgentGoneAfterStart if post_resume_agent_gets == 1 => {
                                 claude("working")
                             }
@@ -2464,7 +2514,13 @@ mod tests {
                             }
                         })
                     }
+                    "agent.prompt" if matches!(scenario, AfterResume::PromptExpires) => {
+                        Ok(serde_json::json!({"id": "q1", "state": "queued", "queued": true}))
+                    }
                     "agent.prompt" => Ok(serde_json::json!({"id": "q1", "state": "delivered"})),
+                    "pane.queue" => Ok(serde_json::json!({"sends": [], "recent": [
+                        {"id": "q1", "state": "dropped", "reason": "expired"}
+                    ]})),
                     _ => Err(("unexpected".into(), name.into())),
                 }
             }));
@@ -2511,6 +2567,20 @@ mod tests {
                 "prompt typed after failure: {calls:?}"
             );
             assert!(!recorded, "completed record written after failure");
+        }
+
+        // An expired line is retryable and leaves no record behind.
+        for no_resume in [false, true] {
+            let (result, calls, recorded) =
+                run_scripted_plugin_reload_with(AfterResume::PromptExpires, no_resume);
+            let failure = result.err().expect("an expired line must not complete");
+            assert_eq!(
+                failure.exit_code, PLUGIN_RELOAD_EXIT_BUSY,
+                "{}",
+                failure.message
+            );
+            assert!(calls.contains(&"pane.queue"), "{calls:?}");
+            assert!(!recorded);
         }
     }
 

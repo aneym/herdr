@@ -1514,8 +1514,43 @@
           ],
           "type": "object"
         },
+        "AgentPromptDelivery": {
+          "description": "A prompt bound to one agent session. It is refused (`stale_session`) if\nthe pane's agent session or agent process changes before delivery, held\nuntil the agent is idle or done and the pane has had no human input for\n`input_quiet_ms`, and dropped with reason `expired` after `expires_ms`.",
+          "properties": {
+            "expires_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "input_quiet_ms": {
+              "default": 0,
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "session_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "session_id",
+            "expires_ms"
+          ],
+          "type": "object"
+        },
         "AgentPromptParams": {
           "properties": {
+            "delivery": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/request/$defs/AgentPromptDelivery"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Bind delivery to the agent's current session; see\n`AgentPromptDelivery`."
+            },
             "if_idle": {
               "default": false,
               "type": "boolean"

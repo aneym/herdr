@@ -115,10 +115,10 @@ impl App {
         ) {
             return Vec::new();
         }
+        self.close_agent_resume_window_on_ready(&ev);
         if self.is_superseded_runtime_detection(&ev) {
             return Vec::new();
         }
-        self.close_agent_resume_window_on_ready(&ev);
 
         if let AppEvent::GitStatusRefreshed {
             results,

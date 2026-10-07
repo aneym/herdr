@@ -279,6 +279,22 @@ pub struct AgentPromptParams {
     pub text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait: Option<AgentPromptWaitOptions>,
+    /// Bind delivery to the agent's current session; see
+    /// `AgentPromptDelivery`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery: Option<AgentPromptDelivery>,
+}
+
+/// A prompt bound to one agent session. It is refused (`stale_session`) if
+/// the pane's agent session or agent process changes before delivery, held
+/// until the agent is idle or done and the pane has had no human input for
+/// `input_quiet_ms`, and dropped with reason `expired` after `expires_ms`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentPromptDelivery {
+    pub session_id: String,
+    #[serde(default)]
+    pub input_quiet_ms: u64,
+    pub expires_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

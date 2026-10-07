@@ -162,12 +162,36 @@ impl Payload {
     }
 }
 
+/// Binds a held send to one agent session: the caller re-checks it at every
+/// flush, so the send reaches only that session, only once the agent is idle
+/// and the pane has had no human input for `input_quiet`, and never after
+/// `expires_at`.
+#[derive(Debug, Clone)]
+pub(crate) struct DeliveryGuard {
+    pub session_id: String,
+    pub agent: crate::detect::Agent,
+    pub input_quiet: Duration,
+    pub expires_at: Instant,
+}
+
+/// What the owner of the agent state says about a guarded send right now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DeliveryVerdict {
+    /// Same agent and session, idle or done.
+    Ready,
+    /// Same agent and session, not idle yet.
+    Hold,
+    /// The session or the agent process changed; never deliver.
+    Stale,
+}
+
 struct HeldSend {
     id: String,
     pgid: Option<u32>,
     pane_id: crate::layout::PaneId,
     method: &'static str,
     payload: Payload,
+    guard: Option<DeliveryGuard>,
 }
 
 pub(super) struct PoliteSend {
@@ -383,6 +407,20 @@ impl TerminalRuntime {
         payload: Payload,
         options: SendOptions,
     ) -> std::io::Result<SendOutcome> {
+        self.polite_send_with_guard(guarded, quiet, method, payload, options, None)
+    }
+
+    /// `polite_send` bound to a `DeliveryGuard`; `guard` carries the guard
+    /// and its verdict at enqueue time.
+    pub(crate) fn polite_send_with_guard(
+        &self,
+        guarded: bool,
+        quiet: Duration,
+        method: &'static str,
+        payload: Payload,
+        options: SendOptions,
+        guard: Option<(DeliveryGuard, DeliveryVerdict)>,
+    ) -> std::io::Result<SendOutcome> {
         let pgid = self.0.foreground_process_group_id();
         let id = receipt(
             self.1.lock().unwrap().owner,
@@ -418,10 +456,27 @@ impl TerminalRuntime {
             state.draft = false;
         }
         let now = Instant::now();
+        if let Some((_, DeliveryVerdict::Stale)) = &guard {
+            transition(
+                &id,
+                PaneSendState::StaleSession,
+                Some("agent_session_changed"),
+            );
+            return Ok(SendOutcome {
+                id,
+                state: PaneSendState::StaleSession,
+                position: None,
+            });
+        }
+        let guard_holds = guard.as_ref().is_some_and(|(guard, verdict)| {
+            *verdict == DeliveryVerdict::Hold || !state.human_input_quiet(now, guard.input_quiet)
+        });
+        let guard = guard.map(|(guard, _)| guard);
         let settling = state
             .last_submit_at
             .is_some_and(|at| now.saturating_duration_since(at) < options.settle);
         if !state.queue.is_empty()
+            || guard_holds
             || (guarded
                 && (screen_draft.unwrap_or(state.draft) || !state.quiet(now, quiet) || settling))
         {
@@ -441,6 +496,7 @@ impl TerminalRuntime {
                 pane_id: self.0.pane_id,
                 method,
                 payload,
+                guard,
             });
             tracing::info!(pane_id = ?self.0.pane_id, method, bytes = len, "polite send held");
             return Ok(SendOutcome {
@@ -575,6 +631,37 @@ impl TerminalRuntime {
         force: bool,
         options: SendOptions,
     ) -> std::io::Result<()> {
+        self.flush_polite_queue_guarded(now, quiet, force, options, &|_| DeliveryVerdict::Ready)
+    }
+
+    /// Flush held sends. A guarded send is dropped once it expires or
+    /// `verdict` calls it stale, and held (even when forced) until `verdict`
+    /// is ready and the pane has had no human input for its quiet interval.
+    pub(crate) fn flush_polite_queue_guarded(
+        &self,
+        now: Instant,
+        quiet: Duration,
+        force: bool,
+        options: SendOptions,
+        verdict: &dyn Fn(&DeliveryGuard) -> DeliveryVerdict,
+    ) -> std::io::Result<()> {
+        let mut state = self.1.lock().unwrap();
+        state.queue.retain(|item| {
+            let Some(guard) = &item.guard else {
+                return true;
+            };
+            let (drop_state, reason) = if now >= guard.expires_at {
+                (PaneSendState::Dropped, "expired")
+            } else if verdict(guard) == DeliveryVerdict::Stale {
+                (PaneSendState::StaleSession, "agent_session_changed")
+            } else {
+                return true;
+            };
+            transition(&item.id, drop_state, Some(reason));
+            tracing::info!(pane_id = ?item.pane_id, method = item.method, reason, "guarded polite send dropped");
+            false
+        });
+        drop(state);
         let screen_draft = options
             .claude
             .then(|| self.0.claude_prompt_draft())
@@ -608,6 +695,13 @@ impl TerminalRuntime {
                 );
                 state.queue.pop_front();
                 continue;
+            }
+            if let Some(guard) = &item.guard {
+                if verdict(guard) != DeliveryVerdict::Ready
+                    || !state.human_input_quiet(now, guard.input_quiet)
+                {
+                    break;
+                }
             }
             self.write_polite_payload(&item.payload, true, &item.id)?;
             tracing::info!(pane_id = ?self.0.pane_id, method = item.method, bytes = len, "polite send flushed");

@@ -896,6 +896,7 @@ fn agent_prompt(args: &[String]) -> std::io::Result<i32> {
                 timeout_ms,
                 submission_deadline: None,
             }),
+            delivery: None,
         }),
     })?;
     super::print_response(&response)

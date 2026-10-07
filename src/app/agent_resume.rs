@@ -320,9 +320,14 @@ impl App {
         else {
             return false;
         };
-        self.lookup_runtime_sender(ws_idx, pane_id)
-            .and_then(crate::terminal::TerminalRuntime::child_pid)
-            .is_some_and(|current| current != event_pid)
+        // With no runtime at all (the replacement failed to spawn), every
+        // tagged detection comes from a runtime that is gone.
+        match self.lookup_runtime_sender(ws_idx, pane_id) {
+            None => true,
+            Some(runtime) => runtime
+                .child_pid()
+                .is_some_and(|current| current != event_pid),
+        }
     }
 
     /// Consume one exit owed by a runtime `agent.resume` replaced.
@@ -1565,6 +1570,39 @@ mod tests {
         assert!(!app.claim_agent_resume_replacement_exit(pane_id, Some(789), now));
         assert!(!app.claim_agent_resume_replacement_exit(pane_id, Some(456), window.until));
         assert!(app.retained_agent_resume_panes.is_empty());
+    }
+
+    /// After a failed replacement spawn the pane has no runtime; queued
+    /// detections from the runtime it replaced must not revive its state.
+    #[cfg(unix)]
+    #[test]
+    fn superseded_detections_are_ignored_when_the_pane_has_no_runtime() {
+        let (mut app, pane_id, terminal_id, _) = app_with_claude_pane(
+            crate::detect::AgentState::Idle,
+            Some(claude_session("sess-1")),
+        );
+        assert!(app.terminal_runtimes.get(&terminal_id).is_none());
+        let working = |runtime_pid| crate::events::AppEvent::StateChanged {
+            pane_id,
+            agent: Some(crate::detect::Agent::Claude),
+            state: crate::detect::AgentState::Working,
+            visible_blocker: false,
+            visible_working: true,
+            process_exited: false,
+            observed_at: Instant::now(),
+            runtime_pid,
+        };
+        app.handle_internal_event(working(Some(123)));
+        assert_eq!(
+            app.state.terminals[&terminal_id].state,
+            crate::detect::AgentState::Idle
+        );
+        // An untagged observation still applies.
+        app.handle_internal_event(working(None));
+        assert_eq!(
+            app.state.terminals[&terminal_id].state,
+            crate::detect::AgentState::Working
+        );
     }
 
     #[cfg(unix)]
