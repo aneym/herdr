@@ -124,37 +124,14 @@ pub(super) fn render_agent_panel_with_overlay(
     agent_scroll: &mut usize,
     hits: &mut ShellHitMap,
 ) {
-    let header_fold = super::tree::tree_view_active(config)
-        && snapshot.agent_view_label.is_none()
-        && !snapshot.workspaces.is_empty()
-        && !snapshot
-            .pinned_tabs
-            .iter()
-            .any(|pin| pin.role != Some(crate::api::schema::TabRole::Agent))
-        && overlay.is_none_or(|overlay| super::tree::factory_goal_choices(overlay).is_empty());
-    let header_area = if header_fold && area.width >= 24 {
-        Rect::new(area.x, area.y, area.width.saturating_sub(3), area.height)
-    } else {
-        area
-    };
-    if !render_agent_panel_header_with_factory(
-        buffer,
-        header_area,
-        snapshot.agent_view_label.as_deref(),
-        config,
-        hits,
-        overlay.is_some_and(|overlay| {
-            snapshot.workspaces.iter().any(|space| {
-                overlay.space_is_tagged(
-                    snapshot
-                        .tabs
-                        .iter()
-                        .filter(|tab| tab.workspace_id == space.workspace_id)
-                        .map(|tab| tab.tab_id.as_str()),
-                )
-            })
-        }),
-    ) {
+    if area.height < 2 {
+        render_agent_panel_header(
+            buffer,
+            area,
+            snapshot.agent_view_label.as_deref(),
+            config,
+            hits,
+        );
         return;
     }
     super::sidebar_report::begin();
@@ -190,6 +167,27 @@ pub(super) fn render_agent_panel_with_overlay(
     let fold_on_pinned = entries
         .iter()
         .any(|entry| matches!(entry, super::tree::AgentPanelListEntry::PinnedChatsHeader));
+    if !render_agent_panel_header_with_factory(
+        buffer,
+        area,
+        snapshot.agent_view_label.as_deref(),
+        config,
+        hits,
+        overlay.is_some_and(|overlay| {
+            snapshot.workspaces.iter().any(|space| {
+                overlay.space_is_tagged(
+                    snapshot
+                        .tabs
+                        .iter()
+                        .filter(|tab| tab.workspace_id == space.workspace_id)
+                        .map(|tab| tab.tab_id.as_str()),
+                )
+            })
+        }),
+        fold_fallback && !fold_on_pinned && area.width >= 24,
+    ) {
+        return;
+    }
     let any_expanded = fold_fallback
         && snapshot.workspaces.iter().any(|space| {
             if space.parked {
@@ -1929,9 +1927,18 @@ pub(super) fn render_agent_panel_header(
     config: &ClientShellConfig,
     hits: &mut ShellHitMap,
 ) -> bool {
-    render_agent_panel_header_with_factory(buffer, area, agent_view_label, config, hits, false)
+    render_agent_panel_header_with_factory(
+        buffer,
+        area,
+        agent_view_label,
+        config,
+        hits,
+        false,
+        false,
+    )
 }
 
+#[allow(clippy::too_many_arguments)] // Header presentation flags share the existing render inputs.
 fn render_agent_panel_header_with_factory(
     buffer: &mut Buffer,
     area: Rect,
@@ -1939,6 +1946,7 @@ fn render_agent_panel_header_with_factory(
     config: &ClientShellConfig,
     hits: &mut ShellHitMap,
     factory: bool,
+    header_fold: bool,
 ) -> bool {
     if area.height == 0 {
         return false;
@@ -1954,6 +1962,12 @@ fn render_agent_panel_header_with_factory(
     if area.height < 2 {
         return false;
     }
+    // Only the label row shares space with the fold control; the divider stays full width.
+    let area = if header_fold {
+        Rect::new(area.x, area.y, area.width.saturating_sub(3), area.height)
+    } else {
+        area
+    };
     put_text(
         buffer,
         area.x,

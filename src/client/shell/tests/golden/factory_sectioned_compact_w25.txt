@@ -1,5 +1,5 @@
 ─────────────────────────
- agents                  
+ agents                 ⊟
  agent-rails     3 ⚲ + ▾ 
   ▾ ORCHESTRATOR       ◎ 
   ▸ ● orchestrator    1⚲ 

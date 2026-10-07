@@ -2241,15 +2241,45 @@ fn bulk_space_fold_scenario(goal_visible: bool) {
 #[test]
 fn bulk_space_fold_header_without_pins_respects_available_room_and_flat_view() {
     use ratatui::{buffer::Buffer, layout::Rect};
-    for (width, flat, visible) in [
-        (40, false, true),
-        (24, false, true),
-        (23, false, false),
-        (40, true, false),
+    for (width, flat, stale_pin, goal_without_section, collapsed, visible) in [
+        (40, false, false, false, false, true),
+        (24, false, false, false, false, true),
+        (23, false, false, false, false, false),
+        (40, true, false, false, false, false),
+        (40, false, true, false, false, true),
+        (40, false, false, true, false, true),
+        (40, false, false, false, true, true),
     ] {
         let mut state = tree_state(ClientTreeChrome::default());
         let mut snapshot = tree_snapshot();
         snapshot.pinned_tabs.clear();
+        if stale_pin {
+            snapshot
+                .pinned_tabs
+                .push(crate::protocol::ClientShellPinnedTab {
+                    tab_id: "missing-tab".into(),
+                    workspace_id: "ws_1".into(),
+                    role: None,
+                });
+        }
+        let mut overlay = crate::factory_overlay::FactoryOverlay::default();
+        if goal_without_section {
+            overlay.tabs.insert(
+                "tab_1".into(),
+                crate::factory_overlay::TabTag {
+                    goal: Some("rails".into()),
+                    ..Default::default()
+                },
+            );
+        }
+        let mut chrome = ClientTreeChrome::default();
+        if collapsed {
+            chrome.collapsed_spaces = snapshot
+                .workspaces
+                .iter()
+                .map(|space| space.workspace_id.clone())
+                .collect();
+        }
         snapshot.agent_view_label = flat.then(|| "all agents".to_owned());
         state.set_snapshot(Box::new(snapshot.clone()));
         let area = Rect::new(0, 0, width, 30);
@@ -2260,17 +2290,25 @@ fn bulk_space_fold_header_without_pins_respects_available_room_and_flat_view() {
             area,
             &snapshot,
             &state.config,
-            &ClientTreeChrome::default(),
-            None,
+            &chrome,
+            goal_without_section.then_some(&overlay),
             &mut 0,
             &mut hits,
         );
+        assert!((0..width).all(|x| buffer[(x, 0)].symbol() == "─"));
         assert_eq!(hits.spaces_fold_all.is_some(), visible);
         if let Some((button, _)) = hits.spaces_fold_all {
             assert_eq!(button.right(), area.right());
-            assert_eq!(buffer[(button.right() - 1, button.y)].symbol(), "⊟");
+            assert_eq!(
+                buffer[(button.right() - 1, button.y)].symbol(),
+                if collapsed { "⊞" } else { "⊟" }
+            );
             assert!(!button.intersects(hits.agent_usage));
             assert!(!button.intersects(hits.agent_sort_toggle));
+            state.tree_chrome.insert(
+                crate::client::endpoint::ClientEndpointId::Local,
+                chrome.clone(),
+            );
             state.hits = hits;
             state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
                 kind: MouseEventKind::Down(MouseButton::Left),
@@ -2285,7 +2323,7 @@ fn bulk_space_fold_header_without_pins_respects_available_room_and_flat_view() {
             assert!(snapshot
                 .workspaces
                 .iter()
-                .all(|space| tree.collapsed_spaces.contains(&space.workspace_id)));
+                .all(|space| tree.collapsed_spaces.contains(&space.workspace_id) != collapsed));
         }
     }
 }

@@ -3944,10 +3944,21 @@ fn factory_goal_filter_limits_sections_shortcuts_and_clear_restores_rows() {
         rendered_factory_rows_at_width(&snapshot, &overlay, state.tree_chrome_mut(), 40);
     assert!(focused.iter().any(|row| row.contains("show all · 2 more")));
     state.tree_chrome_mut().factory_section_focus.clear();
+    let clear = hits.factory_goal_picker.as_ref().unwrap().1;
     state.hits = hits;
     state.last_composed_size = Some((120, 60));
-    factory_click(&mut state, MouseEventKind::Down(MouseButton::Left), 39, y);
-    factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), 39, y);
+    factory_click(
+        &mut state,
+        MouseEventKind::Down(MouseButton::Left),
+        clear.right() - 1,
+        y,
+    );
+    factory_click(
+        &mut state,
+        MouseEventKind::Up(MouseButton::Left),
+        clear.right() - 1,
+        y,
+    );
     let (rows, _, _) =
         rendered_factory_rows_at_width(&snapshot, &overlay, state.tree_chrome_mut(), 40);
     assert!(rows
