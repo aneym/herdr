@@ -41,6 +41,7 @@ import fcntl
 import hashlib
 import json
 import os
+import plistlib
 import shlex
 import shutil
 import subprocess
@@ -180,6 +181,17 @@ def release():
         return None
 
 
+def verify_release(source, commit):
+    """Never ship a bundle whose identity differs from its release metadata."""
+    try:
+        with open(f"{source}/{APP}/Contents/Info.plist", "rb") as f:
+            built = plistlib.load(f).get("HerdrShellCommit")
+    except (OSError, ValueError, plistlib.InvalidFileException) as e:
+        sys.exit(f"release source invalid: {e}")
+    if not commit or built != commit:
+        sys.exit(f"release bundle commit mismatch: expected {commit}, got {built}")
+
+
 def targets():
     try:
         with open(TARGETS) as f:
@@ -297,7 +309,8 @@ i=$(/usr/libexec/PlistBuddy -c "Print :HerdrShellCommit" "$HOME/Applications/Her
 s=$(/usr/bin/plutil -extract commit raw -o - "$S/staged.json" 2>/dev/null)
 a=$(/usr/libexec/PlistBuddy -c "Print :HerdrShellCommit" "$S/staged/Herdr Shell.app/Contents/Info.plist" 2>/dev/null)
 c=$(/usr/bin/mdfind "kMDItemCFBundleIdentifier == 'com.aneyman.herdr-shell'" 2>/dev/null | wc -l | tr -d ' ')
-echo "installed=$i"; echo "staged=$s"; echo "staged_app=$a"; echo "spotlight_copies=$c"
+if [ -d "$HOME/Applications/Herdr Shell.app" ]; then e=1; else e=0; i=""; fi
+echo "installed_app=$e"; echo "installed=$i"; echo "staged=$s"; echo "staged_app=$a"; echo "spotlight_copies=$c"
 '''
 
 # Raycast and Spotlight list one app per bundle id, and Herdr Shell vanished from them
@@ -366,6 +379,7 @@ def fanout():
         return
     commit = rel["commit"]
     source = os.path.realpath(STORE)
+    verify_release(source, commit)
     for t in targets():
         name = t.get("name", "?")
         try:
@@ -465,9 +479,15 @@ def install(name):
     if not rel or not t:
         sys.exit(f"install: no release or no target {name}")
     st = probe(t)
-    if st is None or not can_deliver(st.get("installed", ""), rel["commit"], name):
-        return
+    if st is None:
+        sys.exit(f"{name}: install refused: target unreachable")
+    if st.get("installed_app") not in ("0", "1"):
+        sys.exit(f"{name}: install refused: installed app state unknown")
+    if st.get("installed") or st.get("installed_app") == "1":
+        if not can_deliver(st.get("installed", ""), rel["commit"], name):
+            sys.exit(f"{name}: install refused: release is not a known strict descendant")
     source = os.path.realpath(STORE)
+    verify_release(source, rel["commit"])
     if not os.path.isdir(f"{source}/{APP}"):
         sys.exit(f"{name}: install failed: release source missing")
     tar = subprocess.Popen(["tar", "-czf", "-", "-C", source, APP], stdout=subprocess.PIPE)

@@ -55,10 +55,11 @@ if [[ -z "$VENDOR_SRC" ]]; then
   exit 1
 fi
 
+COMMIT=$(git -C "$MAIN" rev-parse --verify "$REF^{commit}")
 if [[ ! -e "$WT/.git" ]]; then
-  git -C "$MAIN" worktree add --detach "$WT" "$REF"
+  git -C "$MAIN" worktree add --detach "$WT" "$COMMIT"
 else
-  git -C "$WT" checkout --detach "$REF"
+  git -C "$WT" checkout --detach "$COMMIT"
 fi
 if [[ ! -e "$WT/macos/HerdrShell/Vendor" ]]; then
   ln -s "$VENDOR_SRC" "$WT/macos/HerdrShell/Vendor"
@@ -68,22 +69,29 @@ nice -n 10 swift build -c release --package-path "$WT/macos/HerdrShell"
 STAGE="$HOME/Library/Application Support/HerdrShell/staged"
 # Direct release.sh callers must obey the same no-downgrade contract as fanout.
 INSTALLED=$(/usr/libexec/PlistBuddy -c 'Print :HerdrShellCommit' "$HOME/Applications/Herdr Shell.app/Contents/Info.plist" 2>/dev/null || true)
-COMMIT=$(git -C "$MAIN" rev-parse --verify "$REF^{commit}")
-if ! git -C "$MAIN" rev-parse --verify "$INSTALLED^{commit}" >/dev/null 2>&1; then
-  HERDR_SHELL_PUBLISHING=1 git -C "$MAIN" fetch -q origin || true
-fi
-if [[ -z "$INSTALLED" ]] || ! OLD=$(git -C "$MAIN" rev-parse --verify "$INSTALLED^{commit}" 2>/dev/null); then
-  echo "release.sh: skip $COMMIT: installed commit unknown ($INSTALLED)"
+BUILT_APP="$WT/macos/HerdrShell/.build/bundle-prod/Herdr Shell.app"
+BUILT_COMMIT=$(/usr/libexec/PlistBuddy -c 'Print :HerdrShellCommit' "$BUILT_APP/Contents/Info.plist")
+if [[ "$BUILT_COMMIT" != "$COMMIT" ]]; then
+  echo "release.sh: bundle commit mismatch: expected $COMMIT, got $BUILT_COMMIT" >&2
   exit 1
 fi
-if [[ "$OLD" == "$COMMIT" ]] || ! git -C "$MAIN" merge-base --is-ancestor "$OLD" "$COMMIT"; then
-  echo "release.sh: skip $COMMIT: not a strict descendant of installed $INSTALLED"
-  exit 1
+if [[ -d "$HOME/Applications/Herdr Shell.app" ]]; then
+  if ! git -C "$MAIN" rev-parse --verify "$INSTALLED^{commit}" >/dev/null 2>&1; then
+    HERDR_SHELL_PUBLISHING=1 git -C "$MAIN" fetch -q origin || true
+  fi
+  if ! OLD=$(git -C "$MAIN" rev-parse --verify "$INSTALLED^{commit}" 2>/dev/null); then
+    echo "release.sh: skip $COMMIT: installed commit unknown ($INSTALLED)"
+    exit 1
+  fi
+  if [[ "$OLD" == "$COMMIT" ]] || ! git -C "$MAIN" merge-base --is-ancestor "$OLD" "$COMMIT"; then
+    echo "release.sh: skip $COMMIT: not a strict descendant of installed $INSTALLED"
+    exit 1
+  fi
 fi
 mkdir -p "$STAGE"
 INCOMING="$STAGE/Herdr Shell.app.incoming"
 rm -rf "$INCOMING"
-ditto "$WT/macos/HerdrShell/.build/bundle-prod/Herdr Shell.app" "$INCOMING"
+ditto "$BUILT_APP" "$INCOMING"
 if [[ ! -x "$INCOMING/Contents/MacOS/HerdrShell" ]]; then
   echo "staged incoming failed verification" >&2
   exit 1
