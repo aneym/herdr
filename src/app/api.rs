@@ -1163,6 +1163,7 @@ impl App {
                 return self.handle_agent_view_clear(request.id, params);
             }
             Method::AgentStart(params) => return self.handle_agent_start(request.id, params),
+            Method::AgentRestart(params) => return self.handle_agent_restart(request.id, params),
             Method::AgentResume(params) => {
                 return self.handle_agent_resume(request.id, params);
             }

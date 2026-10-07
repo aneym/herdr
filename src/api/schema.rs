@@ -172,6 +172,8 @@ pub enum Method {
     AgentStart(AgentStartParams),
     #[serde(rename = "agent.resume")]
     AgentResume(AgentResumeParams),
+    #[serde(rename = "agent.restart")]
+    AgentRestart(AgentRestartParams),
     #[serde(rename = "agent.owner.set")]
     AgentOwnerSet(AgentOwnerSetParams),
     #[serde(rename = "agent.owner.clear")]

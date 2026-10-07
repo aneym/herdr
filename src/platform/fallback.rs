@@ -266,3 +266,13 @@ pub fn read_clipboard_image() -> Option<ClipboardImage> {
 pub fn show_desktop_notification(_title: &str, _body: Option<&str>) -> std::io::Result<bool> {
     Ok(false)
 }
+
+impl super::ProcessLaunchCapture for super::NativeProcessLaunchCapture {
+    const SUPPORTED: bool = false;
+    fn capture(_pid: u32) -> std::io::Result<super::ProcessLaunch> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "process launch capture unsupported",
+        ))
+    }
+}

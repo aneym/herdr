@@ -31,6 +31,7 @@ struct PendingAgentResumeCandidate {
 pub(crate) enum InPlaceAgentResumeError {
     PaneNotFound,
     SessionUnknown(String),
+    NotResumable(String),
     Busy(String),
     NotRunning,
     ArgvUnsupported(String),
@@ -55,6 +56,25 @@ impl App {
         &mut self,
         ws_idx: usize,
         pane_id: crate::layout::PaneId,
+        input_quiet: Option<std::time::Duration>,
+    ) -> Result<InPlaceAgentResume, InPlaceAgentResumeError> {
+        self.restart_agent_in_place(
+            ws_idx,
+            pane_id,
+            false,
+            Some(
+                input_quiet
+                    .unwrap_or_default()
+                    .max(std::time::Duration::from_secs(20)),
+            ),
+        )
+    }
+
+    pub(crate) fn restart_agent_in_place(
+        &mut self,
+        ws_idx: usize,
+        pane_id: crate::layout::PaneId,
+        force: bool,
         input_quiet: Option<std::time::Duration>,
     ) -> Result<InPlaceAgentResume, InPlaceAgentResumeError> {
         let pane = self
@@ -96,15 +116,16 @@ impl App {
         })?;
         let Some(plan) = crate::agent_resume::plan(&session.source, &session.agent, &session_ref)
         else {
-            return Err(InPlaceAgentResumeError::SessionUnknown(format!(
+            return Err(InPlaceAgentResumeError::NotResumable(format!(
                 "agent {} has no resume command",
                 session.agent
             )));
         };
-        if !matches!(
+        if !(matches!(
             pane.agent_status,
             crate::api::schema::AgentStatus::Idle | crate::api::schema::AgentStatus::Done
-        ) {
+        ) || force && pane.agent_status == crate::api::schema::AgentStatus::Working)
+        {
             return Err(InPlaceAgentResumeError::Busy(format!(
                 "agent in pane {} is {:?}",
                 pane.pane_id, pane.agent_status
@@ -115,36 +136,86 @@ impl App {
             .terminal_runtimes
             .get(&terminal_id)
             .ok_or(InPlaceAgentResumeError::NotRunning)?;
-        let quiet = input_quiet
-            .unwrap_or_default()
-            .max(std::time::Duration::from_secs(20));
-        {
+        if let Some(quiet) = input_quiet {
             if !runtime.human_input_quiet_for(quiet) {
-                return Err(InPlaceAgentResumeError::Busy(format!(
-                    "pane {} had user input within the last {} ms",
-                    pane.pane_id,
-                    quiet.as_millis()
-                )));
+                return Err(InPlaceAgentResumeError::Busy(
+                    "pane received recent input".into(),
+                ));
             }
         }
         let (rows, cols) = runtime.current_size();
-        let foreground_argv = runtime
+        let shell_pid = runtime
             .child_pid()
-            .and_then(crate::detect::foreground_job)
+            .ok_or(InPlaceAgentResumeError::NotRunning)?;
+        let process = crate::detect::foreground_job(shell_pid)
             .and_then(|job| {
-                job.processes
-                    .into_iter()
-                    .filter_map(|process| process.argv)
-                    .find(|argv| {
-                        argv.first().is_some_and(|program| {
+                job.processes.into_iter().find(|process| {
+                    process
+                        .argv
+                        .as_ref()
+                        .and_then(|argv| argv.first())
+                        .is_some_and(|program| {
                             crate::agent_resume::same_executable(program, &plan.argv[0])
                                 || crate::agent_resume::same_executable(program, "node")
                         })
-                    })
+                })
             })
-            .unwrap_or_default();
-        let argv = crate::agent_resume::resume_argv_preserving_flags(&foreground_argv, &plan)
+            .ok_or_else(|| {
+                InPlaceAgentResumeError::ArgvUnsupported("agent process unavailable".into())
+            })?;
+        let agent_argv = process.argv.unwrap_or_default();
+        let captured = match crate::platform::capture_agent_launch(shell_pid, process.pid) {
+            Ok(launch) => Some(launch),
+            Err(_) if !<crate::platform::NativeProcessLaunchCapture as crate::platform::ProcessLaunchCapture>::SUPPORTED => None,
+            Err(_) => return Err(InPlaceAgentResumeError::ArgvUnsupported("could not capture original launch environment".into())),
+        };
+        let launch_argv = captured
+            .as_ref()
+            .map(|launch| &launch.argv)
+            .filter(|argv| {
+                argv.iter()
+                    .take(2)
+                    .any(|arg| crate::agent_resume::same_executable(arg, "claude-lb-launch"))
+            })
+            .unwrap_or(&agent_argv);
+        let mut argv = crate::agent_resume::resume_argv_preserving_flags(launch_argv, &plan)
             .map_err(InPlaceAgentResumeError::ArgvUnsupported)?;
+        // Only footer evidence is used; never infer permission mode from incidental chat text.
+        if plan.agent == "claude"
+            && !argv.iter().any(|arg| {
+                arg == "--permission-mode"
+                    || arg.starts_with("--permission-mode=")
+                    || arg == "--dangerously-skip-permissions"
+            })
+        {
+            let text = runtime.detection_text();
+            let mode = text.lines().rev().take(4).find_map(|line| {
+                if line.contains("bypass permissions") {
+                    Some("bypassPermissions")
+                } else if line.contains("accept edits") {
+                    Some("acceptEdits")
+                } else if line.contains("plan mode") {
+                    Some("plan")
+                } else {
+                    None
+                }
+            });
+            if let Some(mode) = mode {
+                if std::process::Command::new("claude")
+                    .arg("--help")
+                    .output()
+                    .ok()
+                    .is_some_and(|output| {
+                        String::from_utf8_lossy(&output.stdout).contains("--permission-mode")
+                    })
+                {
+                    argv.extend(["--permission-mode".into(), mode.into()]);
+                }
+            }
+        }
+        let captured_env = captured
+            .map(|launch| crate::agent_resume::restart_launch_env(launch.env))
+            .unwrap_or_default();
         let cwd = pane
             .cwd
             .as_deref()
@@ -167,7 +238,7 @@ impl App {
         let resume_command = resume_shell_command(&resumed.argv, &shell)
             .map_err(InPlaceAgentResumeError::ArgvUnsupported)?;
         let launch_env = self
-            .pane_launch_env(ws_idx, pane_id, Vec::new())
+            .pane_launch_env(ws_idx, pane_id, captured_env)
             .ok_or_else(|| {
                 InPlaceAgentResumeError::Failed("pane launch environment unavailable".into())
             })?;
@@ -1425,7 +1496,7 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn claude_session(id: &str) -> crate::agent_resume::PersistedAgentSession {
+    pub(super) fn claude_session(id: &str) -> crate::agent_resume::PersistedAgentSession {
         crate::agent_resume::PersistedAgentSession {
             source: "herdr:claude".into(),
             agent: "claude".into(),
@@ -1436,7 +1507,7 @@ mod tests {
     #[cfg(unix)]
     /// One workspace, one pane whose terminal looks like a detected claude in
     /// `state`, optionally with a reported session.
-    fn app_with_claude_pane(
+    pub(super) fn app_with_claude_pane(
         state: crate::detect::AgentState,
         session: Option<crate::agent_resume::PersistedAgentSession>,
     ) -> (
@@ -1686,6 +1757,12 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn agent_resume_restart_force_restarts_working_agent() {
+        exercise_agent_resume(ResumeScenario::ForcedRestart).await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn agent_resume_immediately_exited_replacement_keeps_pane() {
         exercise_agent_resume(ResumeScenario::AgentExits).await;
     }
@@ -1712,6 +1789,7 @@ mod tests {
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum ResumeScenario {
         Resumed,
+        ForcedRestart,
         AgentExits,
         StaleReadinessThenDeath,
         WorktreeRemoveFails,
@@ -1804,7 +1882,13 @@ mod tests {
             .get_mut(&terminal_id)
             .unwrap()
             .pending_agent_resume_plan = Some(launch);
+        if scenario == ResumeScenario::ForcedRestart {
+            std::env::set_var("HERDR_RESUME_TEST_PROVIDER", "from-shell-rc");
+        }
         assert!(app.start_pending_agent_resume_for_terminal(&terminal_id, 24, 80, true));
+        if scenario == ResumeScenario::ForcedRestart {
+            std::env::remove_var("HERDR_RESUME_TEST_PROVIDER");
+        }
         let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
         terminal.set_detected_state(
             Some(crate::detect::Agent::Claude),
@@ -1833,7 +1917,14 @@ mod tests {
             }
             tokio::time::sleep(std::time::Duration::from_millis(25)).await;
         }
-        assert!(running, "stand-in agent never became the foreground job");
+        assert!(
+            running,
+            "stand-in agent never became the foreground job: {}",
+            app.terminal_runtimes
+                .get(&terminal_id)
+                .and_then(|runtime| runtime.snapshot_history())
+                .unwrap_or_default()
+        );
         // Process acquisition can supersede screen detection with Unknown.
         // Report idle through the same hook authority a real agent uses.
         app.state
@@ -1872,7 +1963,37 @@ mod tests {
             return;
         }
 
-        let response = resume_pane(&mut app, &public_id);
+        let response = if scenario == ResumeScenario::ForcedRestart {
+            app.state
+                .terminals
+                .get_mut(&terminal_id)
+                .unwrap()
+                .set_hook_authority_with_session_ref(
+                    "herdr:claude".into(),
+                    "claude".into(),
+                    crate::detect::AgentState::Working,
+                    None,
+                    crate::agent_resume::AgentSessionRef::id("sess-1"),
+                    Some(2),
+                );
+            let response: serde_json::Value =
+                serde_json::from_str(&app.handle_api_request(crate::api::schema::Request {
+                    id: "force-restart".into(),
+                    method: crate::api::schema::Method::AgentRestart(
+                        crate::api::schema::AgentRestartParams {
+                            pane_id: public_id.clone(),
+                            force: true,
+                        },
+                    ),
+                }))
+                .unwrap();
+            assert_eq!(response["result"]["ok"], true, "{response}");
+            assert_eq!(response["result"]["type"], "agent_restarted");
+            // The shared assertions below describe the internal resume contract.
+            serde_json::json!({"result": {"type": "agent_resumed", "pane_id": public_id, "agent": "claude", "session_id": "sess-1", "argv": [fake_claude, script, "--resume", "sess-1"]}})
+        } else {
+            resume_pane(&mut app, &public_id)
+        };
         assert!(
             !crate::platform::process_exists(old_pid.unwrap()),
             "old shell must be gone"
@@ -1925,7 +2046,7 @@ mod tests {
         assert!(app.pending_agent_resume_runtime_exits.is_empty());
 
         match scenario {
-            ResumeScenario::Resumed => {
+            ResumeScenario::Resumed | ResumeScenario::ForcedRestart => {
                 let typed = "resumed-args: --resume sess-1";
                 let history = wait_for_history(&app, &terminal_id, typed).await;
                 assert!(
@@ -1975,8 +2096,8 @@ mod tests {
                     });
                     assert!(app.retained_agent_resume_panes.contains_key(&pane_id));
                     let terminal = &app.state.terminals[&terminal_id];
-                    assert_eq!(terminal.state, crate::detect::AgentState::Unknown);
-                    assert_eq!(terminal.effective_agent_label(), None);
+                    assert_eq!(terminal.state, crate::detect::AgentState::Working);
+                    assert_eq!(terminal.effective_agent_label(), Some("claude"));
                 }
                 // The shell itself dying inside the window keeps the pane.
                 app.handle_internal_event(crate::events::AppEvent::PaneDied {
@@ -2070,5 +2191,42 @@ mod tests {
         }
         std::env::remove_var("ENV");
         let _ = std::fs::remove_dir_all(fake_bin);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod restart_api_tests {
+    use super::tests::{app_with_claude_pane, claude_session};
+    #[tokio::test]
+    async fn agent_resume_restart_api_checks_session_and_force() {
+        for (state, session, force, expected) in [
+            (
+                crate::detect::AgentState::Working,
+                Some(claude_session("session")),
+                false,
+                "busy",
+            ),
+            (
+                crate::detect::AgentState::Working,
+                Some(claude_session("session")),
+                true,
+                "not_resumable",
+            ),
+            (crate::detect::AgentState::Idle, None, false, "no_session"),
+        ] {
+            let (mut app, _, _, public_id) = app_with_claude_pane(state, session);
+            let response = app.handle_api_request(crate::api::schema::Request {
+                id: "restart-test".into(),
+                method: crate::api::schema::Method::AgentRestart(
+                    crate::api::schema::AgentRestartParams {
+                        pane_id: public_id,
+                        force,
+                    },
+                ),
+            });
+            let value: serde_json::Value = serde_json::from_str(&response).unwrap();
+            // Force passes the busy gate and reaches the real missing-runtime boundary.
+            assert_eq!(value["error"]["code"], expected);
+        }
     }
 }

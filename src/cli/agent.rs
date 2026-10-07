@@ -29,6 +29,7 @@ pub(super) fn run_agent_command(args: &[String]) -> std::io::Result<i32> {
         "wait" => agent_wait(&args[1..]),
         "attach" => agent_attach(&args[1..]),
         "start" => agent_start(&args[1..]),
+        "restart" => agent_restart(&args[1..]),
         "owner" => agent_owner(&args[1..]),
         "group" => agent_group(&args[1..]),
         "explain" => agent_explain(&args[1..]),
@@ -1131,6 +1132,7 @@ fn print_agent_help() {
     eprintln!(
         "  herdr agent start <name> --kind KIND --pane ID [--timeout MS] [--owner TARGET|--no-owner] [-- <agent-args...>]"
     );
+    eprintln!("  herdr agent restart <pane> [--force]");
     eprintln!("  herdr agent owner set <target> <owner>");
     eprintln!("  herdr agent owner clear <target>");
     eprintln!("  herdr agent group hands-on|auto|collapse|expand <target>");
@@ -1148,6 +1150,25 @@ fn parse_timeout(value: &str) -> Result<u64, i32> {
         eprintln!("{err}");
         2
     })
+}
+
+fn agent_restart(args: &[String]) -> std::io::Result<i32> {
+    let Some(pane) = args.first().filter(|arg| !arg.starts_with('-')) else {
+        eprintln!("Usage: herdr agent restart <pane> [--force]");
+        return Ok(2);
+    };
+    if args.iter().skip(1).any(|arg| arg != "--force") {
+        eprintln!("Usage: herdr agent restart <pane> [--force]");
+        return Ok(2);
+    }
+    let response = super::send_request(&Request {
+        id: "cli:agent:restart".into(),
+        method: Method::AgentRestart(crate::api::schema::AgentRestartParams {
+            pane_id: super::normalize_pane_id(pane),
+            force: args.iter().any(|arg| arg == "--force"),
+        }),
+    })?;
+    super::print_response(&response)
 }
 
 #[cfg(test)]

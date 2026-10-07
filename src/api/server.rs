@@ -683,6 +683,7 @@ pub(crate) fn api_method_name(method: &Method) -> &'static str {
         Method::AgentFocus(_) => "agent.focus",
         Method::AgentStart(_) => "agent.start",
         Method::AgentResume(_) => "agent.resume",
+        Method::AgentRestart(_) => "agent.restart",
         Method::AgentOwnerSet(_) => "agent.owner.set",
         Method::AgentOwnerClear(_) => "agent.owner.clear",
         Method::AgentGroupSet(_) => "agent.group.set",

@@ -271,14 +271,25 @@ pub fn resume_argv_preserving_flags(
     let Some(plan_program) = plan.argv.first() else {
         return Err("foreground argv cannot be mapped safely".into());
     };
+    if plan.agent == "codex" && same_executable(current_program, "codex") {
+        return codex_resume_argv(current_foreground_argv, plan);
+    }
+    if plan.agent != "claude" {
+        return Ok(plan.argv.clone());
+    }
+    let wrapper = same_executable(current_program, "claude-lb-launch");
     let node_script = current_args.first().filter(|script| {
+        if same_executable(script, "claude-lb-launch") {
+            return true;
+        }
+
         same_executable(current_program, "node")
             && (script.ends_with("/claude/cli.js")
                 || script.contains("/claude-code/") && script.ends_with("/cli.js")
                 || same_executable(script, "claude"))
     });
     if plan.agent != "claude"
-        || (!same_executable(current_program, plan_program) && node_script.is_none())
+        || (!same_executable(current_program, plan_program) && node_script.is_none() && !wrapper)
     {
         return Err("foreground argv cannot be mapped safely".into());
     }
@@ -1049,6 +1060,176 @@ mod tests {
             &AgentSessionRef::id("codex-session").unwrap(),
         )
         .unwrap();
-        assert!(resume_argv_preserving_flags(&argv(&["codex", "--model", "o4"]), &codex).is_err());
+        assert_eq!(
+            resume_argv_preserving_flags(&argv(&["codex", "--model", "o4"]), &codex).unwrap(),
+            argv(&["codex", "--model", "o4", "resume", "codex-session"])
+        );
+    }
+}
+
+/// Retain supported global options, never an old prompt or session selector.
+fn codex_resume_argv(current: &[String], plan: &AgentResumePlan) -> Result<Vec<String>, String> {
+    let mut argv = vec![current[0].clone()];
+    let mut args = current[1..].iter();
+    while let Some(arg) = args.next() {
+        let name = arg.split('=').next().unwrap_or(arg);
+        match name {
+            "-m" | "--model" | "-c" | "--config" | "-s" | "--sandbox" | "-a"
+            | "--ask-for-approval" | "-p" | "--profile" | "-C" | "--cd" => {
+                argv.push(arg.clone());
+                if !arg.contains('=') {
+                    let value = args
+                        .next()
+                        .ok_or_else(|| "missing codex option value".to_string())?;
+                    argv.push(value.clone());
+                }
+            }
+            "--dangerously-bypass-approvals-and-sandbox" => argv.push(arg.clone()),
+            _ => {}
+        }
+    }
+    argv.extend(plan.argv.iter().skip(1).cloned());
+    Ok(argv)
+}
+
+pub(crate) fn restart_launch_env(env: Vec<(String, String)>) -> Vec<(String, String)> {
+    env.into_iter()
+        .filter(|(key, _)| {
+            !matches!(
+                key.as_str(),
+                "PWD"
+                    | "OLDPWD"
+                    | "SHLVL"
+                    | "_"
+                    | "TERM_SESSION_ID"
+                    | "HERDR_PANE_ID"
+                    | "HERDR_TAB_ID"
+                    | "HERDR_WORKSPACE_ID"
+                    | "HERDR_RUNTIME_ID"
+                    | "HERDR_PANE_RUNTIME_ID"
+                    | "HERDR_PANE_RUNTIME_MARKER"
+                    | "HERDR_SOCKET_PATH"
+                    | "HERDR_CLIENT_SOCKET_PATH"
+                    | "HERDR_BIN_PATH"
+            )
+        })
+        .collect()
+}
+
+/// Summaries expose option names only; option values may contain credentials.
+pub(crate) fn restart_command_summary(argv: &[String]) -> String {
+    argv.first()
+        .into_iter()
+        .chain(argv.iter().skip(1).filter(|arg| arg.starts_with('-')))
+        .map(|arg| arg.split('=').next().unwrap_or(arg))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[cfg(test)]
+mod restart_tests {
+    use super::*;
+    fn strings(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// Pure argv/filter algorithms have multiple selector and option edge cases.
+    #[test]
+    fn agent_resume_restart_rewrite_table() {
+        let session = AgentSessionRef::id("new-session").unwrap();
+        for (agent, input, expected) in [
+            (
+                "claude",
+                vec!["claude", "--continue", "--model", "opus"],
+                vec!["claude", "--model", "opus", "--resume", "new-session"],
+            ),
+            (
+                "claude",
+                vec![
+                    "python3",
+                    "/bin/claude-lb-launch",
+                    "--resume=old",
+                    "--effort",
+                    "high",
+                ],
+                vec![
+                    "python3",
+                    "/bin/claude-lb-launch",
+                    "--effort",
+                    "high",
+                    "--resume",
+                    "new-session",
+                ],
+            ),
+            (
+                "codex",
+                vec![
+                    "codex",
+                    "-m",
+                    "sol",
+                    "-c",
+                    "key=true",
+                    "--sandbox=workspace-write",
+                    "--dangerously-bypass-approvals-and-sandbox",
+                    "old prompt",
+                ],
+                vec![
+                    "codex",
+                    "-m",
+                    "sol",
+                    "-c",
+                    "key=true",
+                    "--sandbox=workspace-write",
+                    "--dangerously-bypass-approvals-and-sandbox",
+                    "resume",
+                    "new-session",
+                ],
+            ),
+        ] {
+            let plan = plan(&format!("herdr:{agent}"), agent, &session).unwrap();
+            assert_eq!(
+                resume_argv_preserving_flags(&strings(&input), &plan).unwrap(),
+                strings(&expected)
+            );
+        }
+        assert!(plan("custom:unknown", "unknown", &session).is_none());
+    }
+
+    /// Pure environment filtering uses synthetic values exclusively.
+    #[test]
+    fn agent_resume_restart_filters_volatile_environment() {
+        let keys = [
+            "PWD",
+            "OLDPWD",
+            "SHLVL",
+            "_",
+            "TERM_SESSION_ID",
+            "HERDR_PANE_ID",
+            "HERDR_RUNTIME_ID",
+            "PATH",
+            "HERDR_RESUME_TEST_PROVIDER",
+            "SYNTHETIC_TOKEN",
+        ];
+        let filtered = restart_launch_env(
+            keys.iter()
+                .map(|key| (key.to_string(), "synthetic".into()))
+                .collect(),
+        );
+        assert_eq!(
+            filtered
+                .iter()
+                .map(|(key, _)| key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["PATH", "HERDR_RESUME_TEST_PROVIDER", "SYNTHETIC_TOKEN"]
+        );
+        assert_eq!(
+            restart_command_summary(&strings(&[
+                "claude",
+                "--settings=synthetic-secret",
+                "--resume",
+                "session"
+            ])),
+            "claude --settings --resume"
+        );
     }
 }

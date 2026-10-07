@@ -120,6 +120,10 @@ pub enum ResponseResult {
         agent: AgentInfo,
         argv: Vec<String>,
     },
+    AgentRestarted {
+        ok: bool,
+        command_summary: String,
+    },
     AgentResumed {
         pane_id: String,
         agent: String,

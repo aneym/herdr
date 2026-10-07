@@ -2213,8 +2213,8 @@ impl TerminalState {
         session: crate::agent_resume::PersistedAgentSession,
         plan: crate::agent_resume::AgentResumePlan,
     ) {
-        self.detected_agent = None;
-        self.fallback_state = AgentState::Unknown;
+        self.detected_agent = crate::detect::identify_agent(&plan.agent);
+        self.fallback_state = AgentState::Working;
         self.fallback_visible_blocker = false;
         self.fallback_observed_at = None;
         self.hook_authority = None;
@@ -2223,9 +2223,9 @@ impl TerminalState {
         self.suppressed_full_lifecycle_hook_reports.clear();
         self.stale_full_lifecycle_hook_sessions.clear();
         self.codex_prompt_ready = false;
-        self.state = AgentState::Unknown;
+        self.state = AgentState::Working;
         self.recent_agent_process_exit = None;
-        self.agent_process_acquisition_pending = false;
+        self.agent_process_acquisition_pending = true;
         self.respawn_shell_on_exit = false;
         self.restore_error = None;
         self.persisted_agent_session = Some(session);

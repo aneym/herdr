@@ -26,6 +26,25 @@ pub(crate) use super::unix_common::{
 mod bootstrap;
 pub(crate) use bootstrap::{configure_server_daemon_context, prepare_server_process};
 
+impl super::ProcessLaunchCapture for super::NativeProcessLaunchCapture {
+    const SUPPORTED: bool = true;
+    fn capture(pid: u32) -> std::io::Result<super::ProcessLaunch> {
+        let unavailable = || {
+            std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "process launch capture unavailable",
+            )
+        };
+        let buf = kern_procargs2(pid).ok_or_else(unavailable)?;
+        let info = process_bsdinfo(pid).ok_or_else(unavailable)?;
+        Ok(super::ProcessLaunch {
+            argv: procargs2_argv(&buf).ok_or_else(unavailable)?,
+            env: super::parse_launch_env(procargs2_env(&buf).ok_or_else(unavailable)?),
+            parent_pid: info.pbi_ppid,
+        })
+    }
+}
+
 #[cfg(test)]
 mod config_file_tests;
 

@@ -61,6 +61,7 @@ pub(crate) fn request_changes_ui(request: &Request) -> bool {
             | Method::AgentFocus(_)
             | Method::AgentStart(_)
             | Method::AgentResume(_)
+            | Method::AgentRestart(_)
             | Method::AgentOwnerSet(_)
             | Method::AgentOwnerClear(_)
             | Method::AgentGroupSet(_)

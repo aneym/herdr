@@ -249,6 +249,16 @@ pub(crate) fn write_existing_config(
     config_backup::write_existing(target, contents)
 }
 
+impl super::ProcessLaunchCapture for super::NativeProcessLaunchCapture {
+    const SUPPORTED: bool = false;
+    fn capture(_pid: u32) -> std::io::Result<super::ProcessLaunch> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "process launch capture unsupported",
+        ))
+    }
+}
+
 #[cfg(test)]
 fn config_security_descriptor(
     path: &std::path::Path,

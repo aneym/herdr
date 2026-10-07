@@ -411,3 +411,10 @@ pub struct PinnedAgentInfo {
     pub session_id: Option<String>,
     pub state_dir: Option<String>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentRestartParams {
+    pub pane_id: String,
+    #[serde(default)]
+    pub force: bool,
+}

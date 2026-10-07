@@ -4,8 +4,8 @@ use bytes::Bytes;
 
 use crate::api::schema::{
     AgentGroupCollapseParams, AgentGroupSetParams, AgentOwnerSetParams, AgentPromptParams,
-    AgentRenameParams, AgentResumeParams, AgentSendKeysParams, AgentStartParams, AgentTarget,
-    PaneReadResult, ResponseResult,
+    AgentRenameParams, AgentRestartParams, AgentResumeParams, AgentSendKeysParams,
+    AgentStartParams, AgentTarget, PaneReadResult, ResponseResult,
 };
 use crate::app::agent_resume::InPlaceAgentResumeError;
 use crate::app::App;
@@ -152,6 +152,40 @@ impl App {
         encode_success(id, ResponseResult::AgentStarted { agent, argv })
     }
 
+    pub(super) fn handle_agent_restart(
+        &mut self,
+        id: String,
+        params: AgentRestartParams,
+    ) -> String {
+        let Some((ws_idx, pane_id)) = self.parse_pane_id(&params.pane_id) else {
+            return encode_error(id, "not_resumable", "pane not found");
+        };
+        match self.restart_agent_in_place(ws_idx, pane_id, params.force, None) {
+            Ok(resumed) => encode_success(
+                id,
+                ResponseResult::AgentRestarted {
+                    ok: true,
+                    command_summary: crate::agent_resume::restart_command_summary(&resumed.argv),
+                },
+            ),
+            Err(error) => {
+                let (code, message) = match error {
+                    InPlaceAgentResumeError::SessionUnknown(message) => ("no_session", message),
+                    InPlaceAgentResumeError::Busy(message) => ("busy", message),
+                    InPlaceAgentResumeError::NotResumable(message) => ("not_resumable", message),
+                    InPlaceAgentResumeError::ArgvUnsupported(message) => ("unsupported", message),
+                    InPlaceAgentResumeError::PaneNotFound | InPlaceAgentResumeError::NotRunning => {
+                        ("not_resumable", "pane is not running".into())
+                    }
+                    InPlaceAgentResumeError::Failed(_) => {
+                        ("unsupported", "could not restart agent".into())
+                    }
+                };
+                encode_error(id, code, message)
+            }
+        }
+    }
+
     pub(super) fn handle_agent_resume(&mut self, id: String, params: AgentResumeParams) -> String {
         let Some((ws_idx, pane_id)) = self.parse_pane_id(&params.pane_id) else {
             return encode_error(id, "pane_not_found", "pane not found");
@@ -176,6 +210,9 @@ impl App {
                 encode_error(id, "agent_session_unknown", message)
             }
             Err(InPlaceAgentResumeError::Busy(message)) => encode_error(id, "agent_busy", message),
+            Err(InPlaceAgentResumeError::NotResumable(message)) => {
+                encode_error(id, "not_resumable", message)
+            }
             Err(InPlaceAgentResumeError::ArgvUnsupported(message)) => {
                 encode_error(id, "agent_argv_unsupported", message)
             }
