@@ -27,7 +27,8 @@ private struct Palette {
     var page: Color { Color(hex: t.terminalBg) }
     var ink: Color { t.ink }
     var mute: Color { t.mute }
-    var faint: Color { t.mute.opacity(0.75) }
+    // Captions and composer hints are real text: mute itself, held to 4.5:1 by gen_tokens.py.
+    var faint: Color { t.mute }
     var hair: Color { t.line }
     var you: Color { t.sel }
     var surface: Color { t.ink.opacity(dark ? 0.055 : 0.045) }

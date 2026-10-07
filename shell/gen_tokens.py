@@ -12,7 +12,9 @@ resource loading, the web client gets CSS variables and an xterm theme module.
     with the generated constants, differ from the JSON (Theme.swift overriding a token);
   - the Windows client spells a color literal outside the generated files, or uses
     a --shell-* variable the generator does not define;
-  - a light-mode text color is under WCAG 4.5:1 on any light chrome surface.
+  - a text color is under WCAG 4.5:1 on a chrome surface of its mode (dark faint, which
+    carries only non-essential hints, under 3:1), or the Mac chat's faint text, composited
+    as ChatView.swift draws it, is under 4.5:1 on the chat page, code block or composer.
 Stdlib only.
 """
 import json
@@ -255,10 +257,12 @@ def web_lint(generated_css):
     return problems
 
 
-# Text colors and the chrome surfaces they sit on (Alex's parity ask, 2026-10-06: light text at
-# least 4.5:1). Dark is not held yet: its mute and faint come from the Mocha-derived palette.
+# Text colors and the chrome surfaces they sit on (Alex's parity ask, 2026-10-06: text at least
+# 4.5:1 in both modes; dark faint 3:1, since it only carries non-essential hints).
 TEXT = ("ink", "mute", "faint", "orch", "lane", "wf", "ok", "warn", "accent", "bad")
 SURFACES = ("windowBg", "panel", "sel", "hover", "cap", "field")
+FLOOR = {"light": {}, "dark": {"faint": 3.0}}
+CHAT_VIEW = ROOT / "macos/HerdrShell/Sources/HerdrShell/ChatView.swift"
 
 
 def contrast(a, b):
@@ -271,9 +275,38 @@ def contrast(a, b):
 
 
 def low_contrast(t):
-    c = t["color"]["light"]
-    return [f"light {fg} {c[fg]} on {bg} {c[bg]} is {contrast(c[fg], c[bg]):.2f}:1, under 4.5:1"
-            for fg in TEXT for bg in SURFACES if contrast(c[fg], c[bg]) < 4.5]
+    out = []
+    for mode in ("light", "dark"):
+        c = t["color"][mode]
+        for fg in TEXT:
+            floor = FLOOR[mode].get(fg, 4.5)
+            out += [f"{mode} {fg} {c[fg]} on {bg} {c[bg]} is {contrast(c[fg], c[bg]):.2f}:1, under {floor}:1"
+                    for bg in SURFACES if contrast(c[fg], c[bg]) < floor]
+    return out
+
+
+def over(fg, bg, alpha):
+    a, b = hex6(fg), hex6(bg)
+    return "".join(f"{round(int(a[i:i + 2], 16) * alpha + int(b[i:i + 2], 16) * (1 - alpha)):02X}" for i in (0, 2, 4))
+
+
+def low_chat_contrast(t, source=None):
+    """The Mac chat's faint text (captions, composer hints), as its Palette composites it."""
+    text = source if source is not None else CHAT_VIEW.read_text()
+    faint = re.search(r"var faint: Color \{ t\.mute(?:\.opacity\(([\d.]+)\))? \}", text)
+    surface = re.search(r"var surface: Color \{ t\.ink\.opacity\(dark \? ([\d.]+) : ([\d.]+)\) \}", text)
+    if not faint or not surface:
+        return [f"{CHAT_VIEW.relative_to(ROOT)}: Palette.faint or Palette.surface changed shape; update the chat contrast gate"]
+    alpha = float(faint.group(1) or 1)
+    out = []
+    for mode, ink_alpha in (("dark", float(surface.group(1))), ("light", float(surface.group(2)))):
+        c, page = t["color"][mode], t["terminal"][mode]["background"]
+        field = over("FFFFFF", page, 0.035) if mode == "dark" else "FFFFFF"
+        for name, bg in (("page", page), ("code block", over(c["ink"], page, ink_alpha)), ("composer", field)):
+            ratio = contrast(over(c["mute"], bg, alpha), bg)
+            if ratio < 4.5:
+                out.append(f"{mode} chat faint (mute at {alpha}) on the {name} is {ratio:.2f}:1, under 4.5:1")
+    return out
 
 
 def check(t):
@@ -302,7 +335,12 @@ def check(t):
     if low:
         failures += low
     else:
-        print("PASS light text colors are at least 4.5:1 on every light surface")
+        print("PASS text colors are at least 4.5:1 on every surface of their mode (dark faint 3:1)")
+    low = low_chat_contrast(t)
+    if low:
+        failures += low
+    else:
+        print("PASS mac chat faint text is at least 4.5:1 on its page, code blocks and composer")
     lint = web_lint(outputs(t)[CSS_OUT])
     if lint:
         failures += lint
