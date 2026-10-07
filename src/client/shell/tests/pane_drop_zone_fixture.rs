@@ -102,7 +102,10 @@ fn every_fixture_case_gives_its_zone_and_estimate() {
             .iter()
             .map(|pane| pane["id"].as_str().expect("pane id"))
             .collect();
-        let panes: Vec<Rect> = layout_panes.iter().map(|pane| rect(&pane["rect"])).collect();
+        let panes: Vec<Rect> = layout_panes
+            .iter()
+            .map(|pane| rect(&pane["rect"]))
+            .collect();
         let source = (!case["source"].is_null()).then(|| pane_index(&ids, &case["source"]));
         let point = (number(&case["point"][0]), number(&case["point"][1]));
 

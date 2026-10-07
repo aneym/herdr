@@ -111,10 +111,12 @@ pub(crate) fn drop_zone_at(
             .max(metrics.band_min)
             .min(f32::from(dimension) * metrics.band_max_fraction)
     };
-    Some(match edge_at(rect, point, (band(rect.width), band(rect.height))) {
-        Some(side) => DropZone::PaneEdge { target, side },
-        None => DropZone::Centre { target },
-    })
+    Some(
+        match edge_at(rect, point, (band(rect.width), band(rect.height))) {
+            Some(side) => DropZone::PaneEdge { target, side },
+            None => DropZone::Centre { target },
+        },
+    )
 }
 
 /// Local preview until the server returns the exact post-removal placed rect.

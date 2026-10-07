@@ -29,12 +29,12 @@ mod mobile;
 #[allow(dead_code)]
 mod motion_tokens;
 // Pure geometry is wired into pointer handling by the upcoming pane drag slice.
-#[allow(dead_code)]
-mod pane_drop;
 mod mouse;
 mod notification_policy;
 mod notifications;
 mod overlay_input;
+#[allow(dead_code)]
+mod pane_drop;
 mod pane_location;
 mod pane_scrollbar;
 mod pin_drag;
