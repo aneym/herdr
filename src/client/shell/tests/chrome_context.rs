@@ -698,7 +698,7 @@ fn pane_title_ellipsis_opens_the_same_context_menu_without_a_pty() {
     state.set_pane_surface(title_surface);
     let frame = state.compose(106, 20).expect("pane title");
     let pane = &state.hits.panes[0];
-    let x = pane.rect.right() - 2;
+    let x = pane.rect.right() - 5;
     let y = pane.rect.y;
     assert_eq!(
         frame.cells[usize::from(y) * usize::from(frame.width) + usize::from(x)].symbol,

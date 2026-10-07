@@ -487,7 +487,7 @@ impl ClientShellState {
         // One fixed cell per pane, only when the server surface has a title row.
         for hit in &self.hits.panes {
             if hit.rect.width >= 8 && hit.inner_rect.y > hit.rect.y {
-                let x = hit.rect.right().saturating_sub(2);
+                let x = hit.rect.right().saturating_sub(5);
                 let index = usize::from(hit.rect.y) * usize::from(frame.width) + usize::from(x);
                 if let Some(cell) = frame.cells.get_mut(index) {
                     cell.symbol = "⋯".to_owned();
