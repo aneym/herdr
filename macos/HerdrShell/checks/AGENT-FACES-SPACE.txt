@@ -4,22 +4,29 @@
 [PASS] Content, with no card, takes its label initial
 [PASS] plain rows carry no face
 [PASS] Frank's picture was fetched
-[FAIL] Recruiter and Frank read working, Content done, Home blocked, Scout idle ({"w2:t1": "working", "w2:t2": "working", "w2:t3": "done", "w2:t4": "blocked", "w2:t5": "unknown"})
+[PASS] Recruiter and Frank read working, Content done, Home blocked, Scout unreported
 [PASS] light appearance applied
+[PASS] light: selected Scout
 [PASS] light: the shot is 2x
 [PASS] light: Frank draws the picture, the initials do not
-[PASS] light: working dots on Recruiter and on Frank's picture, a done dot on Content
-[PASS] light: idle Scout shows no dot
-[PASS] light: Home's request is its face's blue dot, and the only one on its row
+[PASS] light: a working dot on Frank's picture, a done dot on Content, a blue dot on blocked Home
+[PASS] light: unreported Scout shows no dot
+[PASS] light: working Recruiter's request turns its face dot blue, not green
+[PASS] light: and draws no trailing dot on Recruiter's row
+[PASS] light: selected Recruiter
 [PASS] light-selected: the shot is 2x
-[PASS] light-selected: Home's request is its face's blue dot, and the only one on its row
+[PASS] light-selected: working Recruiter's request turns its face dot blue, not green
+[PASS] light-selected: and draws no trailing dot on Recruiter's row
 [PASS] dark appearance applied
+[PASS] dark: selected Scout
 [PASS] dark: the shot is 2x
 [PASS] dark: Frank draws the picture, the initials do not
-[PASS] dark: working dots on Recruiter and on Frank's picture, a done dot on Content
-[PASS] dark: idle Scout shows no dot
-[PASS] dark: Home's request is its face's blue dot, and the only one on its row
+[PASS] dark: a working dot on Frank's picture, a done dot on Content, a blue dot on blocked Home
+[PASS] dark: unreported Scout shows no dot
+[PASS] dark: working Recruiter's request turns its face dot blue, not green
+[PASS] dark: and draws no trailing dot on Recruiter's row
+[PASS] dark: selected Recruiter
 [PASS] dark-selected: the shot is 2x
-[PASS] dark-selected: Home's request is its face's blue dot, and the only one on its row
+[PASS] dark-selected: working Recruiter's request turns its face dot blue, not green
+[PASS] dark-selected: and draws no trailing dot on Recruiter's row
 [PASS] an added card gives Content its picture; a removed one returns Frank to its initial
-# 2026-10-06 note: the one FAIL is this check's expected tone for an unreported pane (the server says unknown, not mute); the expectation is corrected in the same commit, and the pixel check that Scout shows no dot passed. Not re-run: one Space run per slice.

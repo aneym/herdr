@@ -6,8 +6,8 @@ The static section check owns the row contract; this one covers the live path it
 agent.json files on disk, matched by the server's real pane ids, reloaded when a card is added or
 removed, and drawn by the running app: the fetched picture, the initials and the status dots are
 read back from the screenshot's pixels at each face's drawn frame. The states: working on an initial
-and on a picture, done, idle, and a needs-you row whose open request folds into its one blue dot,
-shown plain and selected.
+and on a picture, done, blocked, unreported, and a working agent whose open request turns its face
+dot blue (the row's only blue dot), shown plain and selected.
 Writes checks/AGENT-FACES-SPACE.txt and 2x light/dark shots; never launch on the host.
 """
 import json
@@ -132,8 +132,9 @@ def main():
     os.environ["HERDR_AGENTS_DIR"] = str(AGENTS)
     for tab, state in ((recruiter, "working"), (frank, "working"), (content, "working"), (content, "idle"), (home, "blocked")):
         S.lab("herdr", "pane", "report-agent", pane[tab], "--source", "spike", "--agent", "claude", "--state", state)
-    # Content went idle unseen, so it reads done. Home's open request is the row's blue dot.
-    S.lab("herdr", "pane", "report-metadata", pane[home], "--source", "spike", "--token", "request=req-7")
+    # Content went idle unseen, so it reads done. Recruiter stays working, but its open request
+    # outranks that: its face dot turns from green to blue and no trailing dot is drawn.
+    S.lab("herdr", "pane", "report-metadata", pane[recruiter], "--source", "spike", "--token", "request=req-7")
     S.app("start")
     S.cmd({"cmd": "activate"})
     state = wait(lambda s: len(faces(s)) == 5 and (faces(s).get(frank) or "").endswith(PICTURE)
@@ -156,33 +157,34 @@ def main():
         S.cmd({"cmd": "appearance", "mode": mode})
         state = wait(lambda s: s.get("theme", {}).get("effective") == mode)
         check(mode + " appearance applied", state.get("theme", {}).get("effective") == mode)
-        for selected in (None, home):
-            if selected:
-                S.cmd({"cmd": "select", "tab": selected})
-                state = wait(lambda s: s.get("selected_tab") == selected)
+        # Scout holds the selection for the plain shot, so no face row sits on the selection plate.
+        for selected in (scout, recruiter):
+            S.cmd({"cmd": "select", "tab": selected})
+            wait(lambda s: s.get("selected_tab") == selected)
             time.sleep(0.5)
             state = S.state()
-            name = mode + ("-selected" if selected else "")
+            check(mode + ": selected " + ("Scout" if selected == scout else "Recruiter"), state.get("selected_tab") == selected)
+            name = mode + ("-selected" if selected == recruiter else "")
             png = str(ROOT / f"checks/AGENT-FACES-SPACE-{name}.png")
             S.cmd({"cmd": "shot", "out": png, "scale": 2})
             time.sleep(1.5)
             check(name + ": the shot is 2x", shot_scale(png, state) == 2, str(shot_scale(png, state)))
             dots = {k: rgb(v) for k, v in state["face_dots"].items()}
             px = {tab: face_pixels(png, state, tab) for tab in tabs}
-            if not selected:
+            if selected == scout:
                 check(name + ": Frank draws the picture, the initials do not",
                       # The black photo outweighs a tinted circle by a wide margin in either mode (about 0.25 measured).
                       all(dark_share(px[frank][0]) > dark_share(px[t][0]) + 0.15 for t in tabs if t != frank),
                       json.dumps({t: round(dark_share(px[t][0]), 2) for t in px}))
-                check(name + ": working dots on Recruiter and on Frank's picture, a done dot on Content",
-                      near(px[recruiter][1], dots["working"]) and near(px[frank][1], dots["working"])
-                      and near(px[content][1], dots["done"]))
-                check(name + ": idle Scout shows no dot",
+                check(name + ": a working dot on Frank's picture, a done dot on Content, a blue dot on blocked Home",
+                      near(px[frank][1], dots["working"]) and near(px[content][1], dots["done"])
+                      and near(px[home][1], dots["blocked"]))
+                check(name + ": unreported Scout shows no dot",
                       not any(near(px[scout][1], c) for c in dots.values()))
-            check(name + ": Home's request is its face's blue dot, and the only one on its row",
-                  near(px[home][1], dots["blocked"]) and not near(row_after_face(png, state, home), dots["blocked"], 24))
-        S.cmd({"cmd": "select", "tab": recruiter})
-        wait(lambda s: s.get("selected_tab") == recruiter)
+            check(name + ": working Recruiter's request turns its face dot blue, not green",
+                  near(px[recruiter][1], dots["blocked"]) and not near(px[recruiter][1], dots["working"]))
+            check(name + ": and draws no trailing dot on Recruiter's row",
+                  not near(row_after_face(png, state, recruiter), dots["blocked"], 24))
     S.cmd({"cmd": "appearance", "mode": "light"})
 
     # A card added or removed on disk reaches the row at the next poll.
