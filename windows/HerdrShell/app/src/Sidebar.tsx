@@ -3,7 +3,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { buildAreas, stageImplied, stageWord } from "./areas";
 import type { AreaChip } from "./areas";
 import { LaneSnapshot } from "./laneFiles";
-import type { Snapshot } from "./model";
+import type { Snapshot, TabPulse } from "./model";
 import { setAgentHidden } from "./control";
 import UpdatePill from "./UpdatePill";
 import AgentFace from "./AgentFace";
@@ -13,6 +13,9 @@ import type { MachineStatus } from "./bridge";
 import { foldAllSpaces, foldKey, noteSelection, revealOnSelect, spaceOpen } from "./model";
 import type { RevealMemo, SidebarRow } from "./model";
 export function Status({ status }: { status: string }) { return <span className={`status ${status}`} aria-label={status}>{status === "blocked" ? "■" : "●"}</span>; }
+function Pulse({ pulse, select }: { pulse?: TabPulse; select: () => void }) {
+  return pulse ? <button className={`tab-pulse ${pulse.drifting ? "tab-pulse-bold" : ""}`} onClick={select} title={pulse.line}>{pulse.line}</button> : null;
+}
 function RenameInput({ label, commit, cancel }: { label: string; commit: (label: string) => Promise<void>; cancel: () => void }) {
   const [value, setValue] = useState(label);
   const [saving, setSaving] = useState(false);
@@ -151,9 +154,10 @@ export default function Sidebar({ snapshot = {}, catalog = new LaneSnapshot(), m
     if (drag.target === null || mine !== drag.target || drag.target === from) return { className: "" };
     return { className: drag.target < from ? "drop-above" : "drop-below" };
   };
-  const tabRow = (row: SidebarRow) => { const dragged = dragStyle(row); const pinRow = !row.hidden && (row.kind === "agent" || row.kind === "pinned"); return <div key={`${row.kind}:${row.id}`} data-row={`${row.kind}:${row.id}`} data-pin-section={pinRow ? row.kind : undefined} data-tab={row.id} style={dragged.style} onPointerDown={pinRow ? event => startPress(event, row) : undefined} onClickCapture={event => { if (swallowClick.current) { event.stopPropagation(); event.preventDefault(); } }} className={`sidebar-row tab-row ${row.kind === "tab" ? "indented" : ""} ${selected === row.id ? "selected" : ""} ${dragged.className}`}>
+  const tabRow = (row: SidebarRow) => { const dragged = dragStyle(row); const pinRow = !row.hidden && (row.kind === "agent" || row.kind === "pinned"); return <div key={`${row.kind}:${row.id}`} data-row={`${row.kind}:${row.id}`} data-pin-section={pinRow ? row.kind : undefined} data-tab={row.id} style={dragged.style} onPointerDown={pinRow ? event => startPress(event, row) : undefined} onClickCapture={event => { if (swallowClick.current) { event.stopPropagation(); event.preventDefault(); } }} className={`sidebar-row tab-row ${(row.pulse ?? catalog.pulses[row.id]) ? "has-pulse" : ""} ${row.kind === "tab" ? "indented" : ""} ${selected === row.id ? "selected" : ""} ${dragged.className}`}>
     {renaming === row.id && rows.find(r => r.kind !== "space" && r.id === row.id) === row ? <RenameInput key={row.id} label={row.label} commit={label => commitRename(row.id, label)} cancel={cancelRename} /> : <button className="select-tab" onContextMenu={row.kind === "agent" ? event => { event.preventDefault(); setMenuError(null); setMenu({ row, x: event.clientX, y: event.clientY }); } : undefined} onClick={() => select(row.id)} onDoubleClick={() => startRename(row.id)}>{row.face ? <AgentFace face={row.face} status={row.status} request={row.request} /> : <Status status={row.status} />}<span className="label">{row.label}</span>{row.kind === "pinned" && <span className="muted space-label">{row.spaceLabel}</span>}{row.kind === "agent" && row.home && ["cloud", "local", "unsynced"].includes(row.home) && <span className={`home-glyph ${row.home === "unsynced" ? "warn" : "muted"}`} title={homeTitles[row.home]} aria-label={homeTitles[row.home]}>{homeGlyphs[row.home]}</span>}</button>}
     <button className={`pin ${row.pinned ? "is-pinned" : ""}`} aria-label={row.pinned ? "Unpin tab" : "Pin tab"} onClick={() => pin(row.id, !row.pinned)}>⌖</button>
+    <Pulse pulse={row.pulse ?? catalog.pulses[row.id]} select={() => select(row.id)} />
   </div>; };
   const spaceRow = (row: SidebarRow) => {
     const children = rows.filter(r => r.kind === "tab" && r.section === row.id);
@@ -165,7 +169,7 @@ export default function Sidebar({ snapshot = {}, catalog = new LaneSnapshot(), m
     {mode === "areas" ? <>
       <div className="areas-chips" aria-label="Area filters">{([["all", "All"], ["scoping", "Scope"], ["building", "Build"], ["review", "Review"], ["use", "Use"], ["parked", "Parked"]] as const).map(([value, title]) => <button key={value} aria-pressed={chip === value} onClick={() => changeChip(value)}>{value === "parked" && parkedCount ? `Parked ${parkedCount}` : title}</button>)}</div>
       {areaOnly && <button className="sidebar-row muted" onClick={() => { setAreaOnly(null); save("only", null); }}>Only {catalog.areaName(areaOnly)} ×</button>}
-      {areaLines.map(line => line.kind === "header" ? <h2 key={line.id}>{line.title}</h2> : <div key={line.id} data-row={line.id} className={`sidebar-row areas-line ${line.parked ? "areas-parked-row" : ""} ${line.selected ? "selected" : ""} ${line.dim ? "muted" : ""}`} style={{ paddingLeft: 8 + line.depth * 16 }}>
+      {areaLines.map(line => line.kind === "header" ? <h2 key={line.id}>{line.title}</h2> : <div key={line.id} data-row={line.id} className={`sidebar-row areas-line ${line.tab && (snapshot.overlay?.tabs?.[line.tab]?.pulse ?? catalog.pulses[line.tab]) ? "has-pulse" : ""} ${line.parked ? "areas-parked-row" : ""} ${line.selected ? "selected" : ""} ${line.dim ? "muted" : ""}`} style={{ paddingLeft: 8 + line.depth * 16 }}>
         {line.toggle && <button className="chevron" aria-label={`Fold ${line.title}`} aria-expanded={line.chevron} onClick={() => toggleAreaLine(line.toggle!, !line.chevron)}>{line.chevron ? "⌄" : "›"}</button>}
         <button className="select-tab" onClick={event => {
           if (line.kind === "focus") { changeChip("needs"); toggleAreaLine("focus", !focusExpanded); }
@@ -177,6 +181,7 @@ export default function Sidebar({ snapshot = {}, catalog = new LaneSnapshot(), m
           {line.glyph && <span className={`areas-glyph ${line.glyphTone}`} aria-label={line.status}>{line.glyph}</span>}
           <span className="label">{line.title}{line.parkNote && <small className="areas-park-note">{line.parkNote}</small>}</span>{line.badge && (chip === "all" || !stageImplied(chip, line)) && <span className={`areas-badge ${line.badge === "Ready for review" || line.stage === "reviewing" ? "is-review" : ""}`}>{stageWord(line.badge)}</span>}{line.trailing && <span className="areas-trailing">{line.trailing}</span>}
         </button>
+        <Pulse pulse={line.tab ? snapshot.overlay?.tabs?.[line.tab]?.pulse ?? catalog.pulses[line.tab] : undefined} select={() => { if (line.tab) select(line.tab); }} />
       </div>)}
     </> : <>
     {["AGENTS", "PINNED"].map(section => { const items = rows.filter(r => r.section === section); return items.length ? <section key={section}><h2>{section}</h2>{items.filter(r => !r.hidden).map(tabRow)}{section === "AGENTS" && items.some(r => r.hidden) && <>

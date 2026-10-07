@@ -1471,7 +1471,16 @@ fn render_factory_tab(
             Style::default().fg(attention_color),
         );
     }
-    if rect.height > 1 && row.workflow && !row.done {
+    if let Some(pulse) = row.pulse.as_ref().filter(|_| rect.height > 1) {
+        let line = crate::ui::truncate_end(&pulse.line, available as usize);
+        let mut style = Style::default().fg(palette.overlay0);
+        if pulse.drifting {
+            style = style.add_modifier(Modifier::BOLD);
+        }
+        put_text(buffer, name_x, rect.y + 1, available, &line, style);
+    }
+    let progress_offset = 1 + u16::from(row.pulse.is_some());
+    if rect.height > progress_offset && row.workflow && !row.done {
         let phase = row.phase.as_deref().unwrap_or("").trim().to_lowercase();
         let age = row.started.map(|started| {
             let now = std::time::SystemTime::now()
@@ -1504,7 +1513,7 @@ fn render_factory_tab(
         put_text(
             buffer,
             x,
-            rect.y + 1,
+            rect.y + progress_offset,
             room as u16,
             &progress,
             Style::default()

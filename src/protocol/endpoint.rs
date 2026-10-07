@@ -381,6 +381,22 @@ mod tests {
     }
 
     #[test]
+    fn tab_pulse_endpoint_round_trip_and_older_json_decode() {
+        let overlay = crate::factory_overlay::parse(
+            br#"{"version":1,"tabs":{"tab":{"kind":"lane","pulse":{"line":"reply 18s","drifting":true}}}}"#,
+        ).unwrap();
+        let ServerMessage::EndpointControl { data, .. } = factory_overlay_message("boot", 1, Some(&overlay)).unwrap() else {
+            panic!("expected endpoint control");
+        };
+        let decoded: EndpointFactoryOverlay = serde_json::from_str(&data).unwrap();
+        assert_eq!(decoded.overlay, Some(overlay));
+        let older: EndpointFactoryOverlay = serde_json::from_str(
+            r#"{"boot_id":"old","revision":1,"overlay":{"version":1,"tabs":{"tab":{"kind":"lane"}}}}"#,
+        ).unwrap();
+        assert!(older.overlay.unwrap().tabs["tab"].pulse.is_none());
+    }
+
+    #[test]
     fn snapshot_json_tolerates_future_fields_and_command_actions() {
         let mut snapshot = match snapshot_message(&snapshot()).unwrap() {
             ServerMessage::EndpointControl { data, .. } => {

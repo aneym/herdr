@@ -31,9 +31,13 @@ struct Overlay: Codable {
             started = c.optional("started"); done = c.value("done", false); attention = c.value("attention", "none"); badge = c.optional("badge")
         }
     }
+    struct Pulse: Codable, Equatable {
+        var line = ""; var drifting = false
+        init(from decoder: Decoder) throws { let c = try decoder.container(keyedBy: Field.self); line = c.value("line", ""); drifting = c.value("drifting", false) }
+    }
     struct Tag: Codable {
         var kind = "unknown"; var section: String?; var mode = "active"; var name: String?; var parent: String?; var goal: String?; var goal_area: String?
-        var scope_url: String?; var review_url: String?; var summary: String?; var attention = "none"; var busy = false; var idle_reason: String?
+        var scope_url: String?; var review_url: String?; var summary: String?; var pulse: Pulse?; var attention = "none"; var busy = false; var idle_reason: String?
         var runs: [Run] = []; var phase: String?; var started: Double?; var done = false; var badge: String?
         init() {}
         init(from decoder: Decoder) throws {
@@ -46,7 +50,7 @@ struct Overlay: Codable {
             if !["orchestrator", "scoping", "implementing", "reviewing", "monitoring", "closed"].contains(section ?? "") { section = nil }
              name = c.optional("name"); parent = c.optional("parent")
             goal = c.optional("goal"); goal_area = c.optional("goal_area"); scope_url = c.optional("scope_url"); review_url = c.optional("review_url")
-            summary = c.optional("summary"); attention = c.value("attention", "none"); busy = c.value("busy", false); idle_reason = c.optional("idle_reason")
+            summary = c.optional("summary"); pulse = c.optional("pulse"); attention = c.value("attention", "none"); busy = c.value("busy", false); idle_reason = c.optional("idle_reason")
             runs = c.value("runs", []); phase = c.optional("phase"); started = c.optional("started"); done = c.value("done", false); badge = c.optional("badge")
         }
     }
@@ -153,6 +157,7 @@ struct SpacesRow: Identifiable, Equatable {
     /// nil while that machine is healthy; "unreachable" or "needs update" otherwise.
     var badgeState: String?
     var request: String?
+    var pulse: Overlay.Pulse?
     /// An AGENTS row's face: the agent's picture, else its initial on a tint.
     var face: Face?
     struct Face: Equatable { var initial: String; var tint: Int; var avatar: String? }
@@ -184,7 +189,8 @@ struct SpacesRow: Identifiable, Equatable {
         var dotField: [String] = []
         if let faceDot { dotField = ["dot:" + faceDot] } else if let trailingRequest { dotField = ["request:" + trailingRequest] }
         let badgeField: [String] = badge.map { ["@" + $0 + (badgeState.map { ":" + $0 } ?? "")] } ?? []
-        return (fields + faceField + dotField + badgeField).joined(separator: "|")
+        let pulseField = pulse.map { ["pulse:" + $0.line] + ($0.drifting ? ["pulse-bold"] : []) } ?? []
+        return (fields + faceField + dotField + badgeField + pulseField).joined(separator: "|")
     }
 }
 
@@ -260,6 +266,7 @@ enum SpacesTree {
             var row = SpacesRow(id: prefix + tab.id, kind: .tab, glyph: state.glyph, tone: state.tone,
                                 title: tab.label, trailing: space?.name ?? tab.space, tab: tab.id,
                                 request: tab.role == "agent" ? tab.request : nil)
+            row.pulse = overlay.tabs[tab.id]?.pulse
             if prefix == "agent:" { row.face = face(name: tab.agentName ?? tab.label, avatar: tab.avatar) }
             return row
         }
@@ -344,6 +351,7 @@ enum SpacesTree {
                     trailing = [trailing, progress].filter { !$0.isEmpty }.joined(separator: " · ")
                 }
                 out.append(SpacesRow(id: "tab:" + tab.id, kind: .tab, depth: level, chevron: foldable ? (open ? "open" : "closed") : "none", glyph: state.glyph, tone: state.tone, title: name, trailing: trailing, alert: attention, link: link, tab: tab.id, toggleKey: foldable ? "tab:" + tab.id : nil, dim: idle || t.done || t.kind == "advisor" || t.mode == "parked"))
+                out[out.count - 1].pulse = t.pulse
                 if open {
                     for child in grouped { appendTab(child, level + 1, inside: true) }
                     for child in children { appendTab(child, level + 1, nest: false) }

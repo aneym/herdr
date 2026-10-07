@@ -39,79 +39,90 @@ struct SpacesRowView: View {
     private var treeRow: Bool { row.kind == .tab || row.kind == .section }
 
     var body: some View {
-        HStack(spacing: 5) {
-            if row.chevron != "none", row.kind != .space, row.kind != .hidden {
-                chevron
-            } else if treeRow {
-                Color.clear.frame(width: Self.chevronWidth, height: 1)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 5) {
+                if row.chevron != "none", row.kind != .space, row.kind != .hidden {
+                    chevron
+                } else if treeRow {
+                    Color.clear.frame(width: Self.chevronWidth, height: 1)
+                }
+                if let face = row.face {
+                    AgentFace(face: face, dot: row.faceDot, tone: row.tone, request: row.request, t: t).clickTarget("face:" + row.id)
+                } else if !row.glyph.isEmpty {
+                    Text(row.glyph).font(.system(size: 10)).foregroundStyle(tone).frame(width: Self.glyphWidth)
+                }
+                if row.kind == .goal {
+                    Text("goal").foregroundStyle(t.mute)
+                    goal
+                } else {
+                    Text(row.title)
+                        .font(.system(size: row.kind == .section ? ShellType.sectionLabel : ShellType.rowTitle,
+                                      weight: row.kind == .space || row.kind == .title ? .semibold
+                                          : (row.kind == .tab && !row.dim ? .medium : .regular)))
+                        .tracking(row.kind == .section ? ShellType.sectionTracking : 0)
+                        .foregroundStyle(row.kind == .section || row.kind == .group || row.kind == .hidden || row.dim ? t.mute : t.ink)
+                        .lineLimit(1).truncationMode(.tail)
+                        .frame(minWidth: isFooter ? nil : Self.titleMinWidth, alignment: .leading)
+                        // A footer's host name stays whole; its long summary is what gives way.
+                        .layoutPriority(isFooter ? 2 : 0)
+                }
+                if let request = row.trailingRequest {
+                    Circle().fill(t.accent).frame(width: ShellFace.dot, height: ShellFace.dot)
+                        .help("request \(request)")
+                }
+                if let machine = row.badge { badge(machine) }
+                Spacer(minLength: 4)
+                if row.kind == .goal { collapseSpaces }
+                if !row.trailing.isEmpty, row.kind != .goal {
+                    trailingText.font(.system(size: 10.5)).monospacedDigit().foregroundStyle(row.link == nil ? t.mute : t.accent)
+                        .lineLimit(1).truncationMode(.tail)
+                        .frame(minWidth: Self.countWidth, alignment: .trailing)
+                        .layoutPriority(1)
+                        .onTapGesture { click(row.link == nil ? "body" : "link") }
+                }
+                if row.kind != .goal, !isFooter, row.kind != .title {
+                    Text(row.alert == "none" ? "" : "!").fontWeight(.bold)
+                        .foregroundStyle(row.alert == "act" ? t.bad : t.warn)
+                        .frame(width: Self.alertWidth)
+                } else if row.alert != "none" {
+                    Text("!").fontWeight(.bold).foregroundStyle(row.alert == "act" ? t.bad : t.warn)
+                }
+                if showResume {
+                    Button("Resume") { resume() }.buttonStyle(.plain).foregroundStyle(t.accent).fixedSize()
+                }
+                if row.id == "pinned" {
+                    // A new chat pinned at the end of this section (HerdrModel.newPinnedTab).
+                    Text("+").foregroundStyle(t.mute).fixedSize().onTapGesture { click("plus") }.clickTarget("pinned+")
+                }
+                if row.kind == .section {
+                    Text(focusMark ?? "").font(.system(size: 10)).foregroundStyle(t.mute)
+                        .frame(width: 10).onTapGesture { if focusMark != nil { click("focus") } }
+                }
+                // The PINNED header already says it, so pinned rows keep no pin glyph at rest; it comes
+                // back on hover to unpin, as does the row's context menu.
+                if row.kind == .tab, (!row.id.hasPrefix("pinned:") && !row.id.hasPrefix("agent:")) || hovered {
+                    Text("⚲").foregroundStyle(pinned ? t.accent : t.mute).fixedSize().onTapGesture { click("pin") }
+                }
+                if row.kind == .space {
+                    Text("⚲").foregroundStyle(pinned ? t.accent : t.mute).fixedSize().onTapGesture { click("pin") }
+                    Text("+").foregroundStyle(t.mute).fixedSize().onTapGesture { click("plus") }
+                }
+                if row.kind == .space || row.kind == .hidden, row.chevron != "none" {
+                    chevron
+                }
             }
-            if let face = row.face {
-                AgentFace(face: face, dot: row.faceDot, tone: row.tone, request: row.request, t: t).clickTarget("face:" + row.id)
-            } else if !row.glyph.isEmpty {
-                Text(row.glyph).font(.system(size: 10)).foregroundStyle(tone).frame(width: Self.glyphWidth)
-            }
-            if row.kind == .goal {
-                Text("goal").foregroundStyle(t.mute)
-                goal
-            } else {
-                Text(row.title)
-                    .font(.system(size: row.kind == .section ? ShellType.sectionLabel : ShellType.rowTitle,
-                                  weight: row.kind == .space || row.kind == .title ? .semibold
-                                      : (row.kind == .tab && !row.dim ? .medium : .regular)))
-                    .tracking(row.kind == .section ? ShellType.sectionTracking : 0)
-                    .foregroundStyle(row.kind == .section || row.kind == .group || row.kind == .hidden || row.dim ? t.mute : t.ink)
-                    .lineLimit(1).truncationMode(.tail)
-                    .frame(minWidth: isFooter ? nil : Self.titleMinWidth, alignment: .leading)
-                    // A footer's host name stays whole; its long summary is what gives way.
-                    .layoutPriority(isFooter ? 2 : 0)
-            }
-            if let request = row.trailingRequest {
-                Circle().fill(t.accent).frame(width: ShellFace.dot, height: ShellFace.dot)
-                    .help("request \(request)")
-            }
-            if let machine = row.badge { badge(machine) }
-            Spacer(minLength: 4)
-            if row.kind == .goal { collapseSpaces }
-            if !row.trailing.isEmpty, row.kind != .goal {
-                trailingText.font(.system(size: 10.5)).monospacedDigit().foregroundStyle(row.link == nil ? t.mute : t.accent)
-                    .lineLimit(1).truncationMode(.tail)
-                    .frame(minWidth: Self.countWidth, alignment: .trailing)
-                    .layoutPriority(1)
-                    .onTapGesture { click(row.link == nil ? "body" : "link") }
-            }
-            if row.kind != .goal, !isFooter, row.kind != .title {
-                Text(row.alert == "none" ? "" : "!").fontWeight(.bold)
-                    .foregroundStyle(row.alert == "act" ? t.bad : t.warn)
-                    .frame(width: Self.alertWidth)
-            } else if row.alert != "none" {
-                Text("!").fontWeight(.bold).foregroundStyle(row.alert == "act" ? t.bad : t.warn)
-            }
-            if showResume {
-                Button("Resume") { resume() }.buttonStyle(.plain).foregroundStyle(t.accent).fixedSize()
-            }
-            if row.id == "pinned" {
-                // A new chat pinned at the end of this section (HerdrModel.newPinnedTab).
-                Text("+").foregroundStyle(t.mute).fixedSize().onTapGesture { click("plus") }.clickTarget("pinned+")
-            }
-            if row.kind == .section {
-                Text(focusMark ?? "").font(.system(size: 10)).foregroundStyle(t.mute)
-                    .frame(width: 10).onTapGesture { if focusMark != nil { click("focus") } }
-            }
-            // The PINNED header already says it, so pinned rows keep no pin glyph at rest; it comes
-            // back on hover to unpin, as does the row's context menu.
-            if row.kind == .tab, (!row.id.hasPrefix("pinned:") && !row.id.hasPrefix("agent:")) || hovered {
-                Text("⚲").foregroundStyle(pinned ? t.accent : t.mute).fixedSize().onTapGesture { click("pin") }
-            }
-            if row.kind == .space {
-                Text("⚲").foregroundStyle(pinned ? t.accent : t.mute).fixedSize().onTapGesture { click("pin") }
-                Text("+").foregroundStyle(t.mute).fixedSize().onTapGesture { click("plus") }
-            }
-            if row.kind == .space || row.kind == .hidden, row.chevron != "none" {
-                chevron
+            .frame(height: ShellSpace.rowHeight)
+            if let pulse = row.pulse {
+                Text(pulse.line).font(.system(size: ShellType.rowTitle, weight: pulse.drifting ? .bold : .regular))
+                    .foregroundStyle(t.mute).lineLimit(1).truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: ShellSpace.rowHeight)
+                    .padding(.leading, Self.chevronWidth + Self.glyphWidth + 10)
+                    .onTapGesture { click("body") }
             }
         }
         .padding(.top, row.kind == .space && row.id != firstSpaceId ? 10 : 0)
-        .frame(height: ShellSpace.rowHeight).padding(.leading, indent).padding(.horizontal, ShellSpace.rowPadX)
+        .padding(.leading, indent).padding(.horizontal, ShellSpace.rowPadX)
         .background(RoundedRectangle(cornerRadius: ShellRadius.row).fill(selected && row.kind == .tab ? t.sel : .clear))
     }
 

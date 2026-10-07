@@ -7,8 +7,9 @@ export interface Tab { tab_id: string; workspace_id: string; number: number; lab
 export interface Pane { restore_error?: string; pane_id: string; terminal_id: string; workspace_id: string; tab_id: string; focused?: boolean; agent?: string; agent_status?: string; title?: string; terminal_title_stripped?: string; cwd?: string; tokens?: Record<string, string> }
 export interface Rect { x: number; y: number; width: number; height: number }
 export interface Layout { tab_id: string; area: Rect; panes: { pane_id: string; rect: Rect }[]; splits?: { id: string; direction: string; ratio: number; rect: Rect }[]; zoomed?: boolean; focused_pane_id?: string }
-export interface Snapshot { workspaces?: Workspace[]; tabs?: Tab[]; panes?: Pane[]; agents?: { terminal_id: string; pane_id: string; tab_id: string; workspace_id: string; agent: string; agent_status: string; work_status?: string }[]; layouts?: Layout[] }
-export interface SidebarRow { kind: "agent" | "pinned" | "space" | "tab"; id: string; label: string; status: string; hotkey: number | null; section: string; spaceLabel?: string; spaceId?: string; hidden?: boolean; parked?: boolean; pinned?: boolean; face?: Face; request?: string; home?: Tab["home_location"] }
+export interface TabPulse { line: string; drifting?: boolean }
+export interface Snapshot { overlay?: { tabs?: Record<string, { pulse?: TabPulse }> }; workspaces?: Workspace[]; tabs?: Tab[]; panes?: Pane[]; agents?: { terminal_id: string; pane_id: string; tab_id: string; workspace_id: string; agent: string; agent_status: string; work_status?: string }[]; layouts?: Layout[] }
+export interface SidebarRow { pulse?: TabPulse; kind: "agent" | "pinned" | "space" | "tab"; id: string; label: string; status: string; hotkey: number | null; section: string; spaceLabel?: string; spaceId?: string; hidden?: boolean; parked?: boolean; pinned?: boolean; face?: Face; request?: string; home?: Tab["home_location"] }
 export const tabStatus = (snapshot: Snapshot, tab: Tab): string => tab.work_status ?? snapshot.agents?.find(agent => agent.tab_id === tab.tab_id)?.agent_status ?? tab.agent_status ?? "unknown";
 export const statusRank = (status: string) => ({ blocked: 3, working: 2, done: 1 }[status] ?? 0);
 export function buildSidebar(snapshot: Snapshot, pending: PendingOrders = {}, now = Date.now(), cards: Record<string, AgentCard> = {}): SidebarRow[] {
@@ -17,7 +18,7 @@ export function buildSidebar(snapshot: Snapshot, pending: PendingOrders = {}, no
   const byRank = (a: Workspace | Tab, b: Workspace | Tab) => (a.sort_rank ?? 0) - (b.sort_rank ?? 0) || a.number - b.number;
   const spaces = [...snapshot.workspaces ?? []].sort((a, b) => Number(b.tokens?.pinned === "true") - Number(a.tokens?.pinned === "true") || byRank(a, b));
   const rows: SidebarRow[] = [];
-  const row = (tab: Tab, kind: "agent" | "pinned" | "tab", section: string): SidebarRow => ({ kind, section, id: tab.tab_id, label: tab.label || snapshot.panes?.find(p => p.tab_id === tab.tab_id)?.terminal_title_stripped || `tab ${tab.number}`, status: tabStatus(snapshot, tab), hotkey: null, pinned: tab.pin_index != null, spaceId: tab.workspace_id, spaceLabel: spaces.find(s => s.workspace_id === tab.workspace_id)?.label });
+  const row = (tab: Tab, kind: "agent" | "pinned" | "tab", section: string): SidebarRow => ({ pulse: snapshot.overlay?.tabs?.[tab.tab_id]?.pulse, kind, section, id: tab.tab_id, label: tab.label || snapshot.panes?.find(p => p.tab_id === tab.tab_id)?.terminal_title_stripped || `tab ${tab.number}`, status: tabStatus(snapshot, tab), hotkey: null, pinned: tab.pin_index != null, spaceId: tab.workspace_id, spaceLabel: spaces.find(s => s.workspace_id === tab.workspace_id)?.label });
   // As the Mac's SpacesTree.pinTabs: agents and plain pins are separate blocks, each in pin order.
   const byPin = (a: Tab, b: Tab) => (a.pin_index ?? 0) - (b.pin_index ?? 0);
   const pinned = (list: Tab[], section: "agent" | "pinned") => {

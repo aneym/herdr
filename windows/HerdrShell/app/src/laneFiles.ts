@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { TabPulse } from "./model";
 import { bridge, fromBase64 } from "./bridge";
 
 export interface LaneRecord { tab: string; name: string; label: string; kind?: string; goal?: string; goalArea?: string; section?: string; scopeURL?: string; reviewURL?: string }
@@ -39,7 +40,14 @@ export function parseModes(value: unknown): Record<string, ParkRecord> {
   }
   return out;
 }
+export function parsePulses(value: unknown): Record<string, TabPulse> {
+  return Object.fromEntries(Object.entries(object(json(value).tabs)).flatMap(([id, tag]) => {
+    const pulse = object(object(tag).pulse);
+    return typeof pulse.line === "string" ? [[id, { line: pulse.line, drifting: pulse.drifting === true }]] : [];
+  }));
+}
 export class LaneSnapshot {
+  pulses: Record<string, TabPulse> = {};
   areas: AreaDef[] = [];
   lanes: Record<string, LaneRecord> = {};
   tabs: Record<string, TabAssign> = {};
@@ -70,7 +78,7 @@ export function useLaneFiles(machine: string, up: boolean): LaneSnapshot {
       busy = true;
       try {
         // A missing file is empty; any other failed read keeps the last good catalog until the next poll.
-        const read = await Promise.all(["lanes", "areas", "modes"].map(name => { const path = `~/.agent-rails/herdr/${name}.json`; return bridge.fileRead(machine, path, 0, 1 << 20).then(chunk => new TextDecoder().decode(fromBase64(chunk.data_b64)), () => bridge.fileStat(machine, path).then(info => info.exists ? undefined : null, () => undefined)); }));
+        const read = await Promise.all(["lanes", "areas", "modes", "overlay"].map(name => { const path = `~/.agent-rails/herdr/${name}.json`; return bridge.fileRead(machine, path, 0, 1 << 20).then(chunk => new TextDecoder().decode(fromBase64(chunk.data_b64)), () => bridge.fileStat(machine, path).then(info => info.exists ? undefined : null, () => undefined)); }));
         if (disposed || read.includes(undefined)) return;
         const files = read as (string | null)[];
         const nextStamp = JSON.stringify(files);
@@ -79,6 +87,7 @@ export function useLaneFiles(machine: string, up: boolean): LaneSnapshot {
         const next = Object.assign(new LaneSnapshot(), parseLanes(files[0]), parseAreas(files[1]));
         // Only a parsed modes document overrides the lanes file's one-tick-behind parking.
         if (files[2] !== null) { try { const obj: unknown = JSON.parse(files[2]); if (obj && typeof obj === "object" && !Array.isArray(obj)) next.parked = parseModes(obj); } catch { /* A half-written document keeps the lanes fallback. */ } }
+        next.pulses = parsePulses(files[3]);
         next.hasFiles = files[0] !== null || files[1] !== null;
         setSnapshot(next);
       } finally { busy = false; }
