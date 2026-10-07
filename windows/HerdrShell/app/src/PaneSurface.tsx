@@ -28,7 +28,8 @@ export default function PaneSurface(props: { pane: Pane; machine: string; focuse
       else {
         const code = value?.code ?? /^herdr api error ([^:]+):/.exec(String(error))?.[1];
         const message = code === "not_resumable" || code === "no_session" ? "This agent can't be resumed: no saved chat found."
-          : code === "unsupported" ? "Restart isn't supported for this agent yet." : value?.message ?? error;
+          : code === "unsupported" ? "Restart isn't supported for this agent yet."
+          : code === "start_failed" ? "The agent didn't come back up. Check the pane for errors." : value?.message ?? error;
         props.onError?.(message);
       }
     } finally { setRestarting(false); }

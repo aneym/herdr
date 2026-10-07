@@ -8,6 +8,7 @@ enum PaneRestart {
         switch code {
         case "not_resumable", "no_session": return "This agent can't be resumed: no saved chat found."
         case "unsupported": return "Restart isn't supported for this agent yet."
+        case "start_failed": return "The agent didn't come back up. Check the pane for errors."
         default: return fallback
         }
     }
