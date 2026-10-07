@@ -293,15 +293,26 @@ def over(fg, bg, alpha):
 def low_chat_contrast(t, source=None):
     """The Mac chat's faint text (captions, composer hints), as its Palette composites it."""
     text = source if source is not None else CHAT_VIEW.read_text()
-    faint = re.search(r"var faint: Color \{ t\.mute(?:\.opacity\(([\d.]+)\))? \}", text)
-    surface = re.search(r"var surface: Color \{ t\.ink\.opacity\(dark \? ([\d.]+) : ([\d.]+)\) \}", text)
-    if not faint or not surface:
-        return [f"{CHAT_VIEW.relative_to(ROOT)}: Palette.faint or Palette.surface changed shape; update the chat contrast gate"]
-    alpha = float(faint.group(1) or 1)
+    block = re.search(r"private struct Palette \{(.*?)\n\}", text, re.S)
+    code = re.sub(r"//[^\n]*", "", block.group(1)) if block else ""
+    shapes = {
+        "faint": r"var faint: Color \{ t\.mute(?:\.opacity\(([\d.]+)\))? \}",
+        "surface": r"var surface: Color \{ t\.ink\.opacity\(dark \? ([\d.]+) : ([\d.]+)\) \}",
+        "page": r"var page: Color \{ Color\(hex: t\.terminalBg\) \}",
+        "field": r"var field: Color \{ dark \? Color\.white\.opacity\(([\d.]+)\) : Color\.white \}",
+    }
+    found = {}
+    for name, shape in shapes.items():
+        declared = re.findall(rf"\bvar {name}\b", code)
+        match = re.search(shape, code)
+        if len(declared) != 1 or not match:
+            return [f"{CHAT_VIEW.relative_to(ROOT)}: Palette.{name} changed shape; update the chat contrast gate"]
+        found[name] = match
+    alpha = float(found["faint"].group(1) or 1)
     out = []
-    for mode, ink_alpha in (("dark", float(surface.group(1))), ("light", float(surface.group(2)))):
+    for mode, ink_alpha in (("dark", float(found["surface"].group(1))), ("light", float(found["surface"].group(2)))):
         c, page = t["color"][mode], t["terminal"][mode]["background"]
-        field = over("FFFFFF", page, 0.035) if mode == "dark" else "FFFFFF"
+        field = over("FFFFFF", page, float(found["field"].group(1))) if mode == "dark" else "FFFFFF"
         for name, bg in (("page", page), ("code block", over(c["ink"], page, ink_alpha)), ("composer", field)):
             ratio = contrast(over(c["mute"], bg, alpha), bg)
             if ratio < 4.5:
