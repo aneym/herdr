@@ -1,0 +1,42 @@
+[PASS] prebuilt Ghostty archive available
+[PASS] worktree herdr and Shell built
+[PASS] config is isolated in short lab XDG
+[PASS] API recruiting sort_rank 0
+[PASS] API factory sort_rank 1
+[PASS] API herdr sort_rank 3
+[PASS] API misc sort_rank 4
+[PASS] API rails sort_rank 5
+[PASS] API rails parked true
+[PASS] API rails tab factory throughput sort_rank 2
+[PASS] API rails tab orchestrator sort_rank 5
+[PASS] API rails tab x build sort_rank 5
+[PASS] API agent role is pinned
+[PASS] Shell spaces sorted recruiting, factory, herdr, misc, rails
+[PASS] AGENTS section shows agent-role pin
+[PASS] rails folded by default with no rails tabs shown
+[PASS] light appearance applied
+[PASS] light sorted sidebar retains folded rails
+[PASS] light screenshot written
+[PASS] dark appearance applied
+[PASS] dark sorted sidebar retains folded rails
+[PASS] dark screenshot written
+[PASS] expanded rails shows factory throughput first
+[PASS] rails refolded
+[PASS] CLI supports exact --clear-token flag
+[PASS] agent row has a face and no dot before any request
+[PASS] open request turns the agent's face dot accent
+[PASS] one blue dot: no trailing request dot beside the face
+[PASS] request dot sidebar retains sorted spaces and folded rails
+[PASS] request light appearance applied
+[PASS] request-light screenshot written
+[PASS] request light: the face dot is drawn accent
+[PASS] request dark appearance applied
+[PASS] request-dark screenshot written
+[PASS] request dark: the face dot is drawn accent
+[PASS] resolving the request removes the dot from the dump
+[PASS] resolved light appearance applied
+[PASS] resolved-light screenshot written
+[PASS] resolved light: the face dot is gone
+[PASS] resolved dark appearance applied
+[PASS] resolved-dark screenshot written
+[PASS] resolved dark: the face dot is gone

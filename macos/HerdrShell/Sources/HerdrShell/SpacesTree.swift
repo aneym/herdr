@@ -159,7 +159,8 @@ struct SpacesRow: Identifiable, Equatable {
     /// The trailing request dot, only on a row with no face to carry it.
     var trailingRequest: String? { face == nil ? request : nil }
     /// Semantic rather than width-dependent: native fonts do not truncate like a terminal grid.
-    /// A badge adds one field, so local rows dump as they always have.
+    /// A badge adds one field, so local rows dump as they always have; it stays last.
+    /// The row's one dot follows the face: "dot:<token>" set into a face, else "request:<id>" trailing.
     var dump: String {
         let fields = [kind.rawValue, id, String(depth), chevron, glyph, tone, title, trailing, alert, link ?? "", tab ?? "", toggleKey ?? "", dim ? "dim" : ""]
         var faceField: [String] = []
@@ -167,7 +168,10 @@ struct SpacesRow: Identifiable, Equatable {
             let picture: String = face.avatar.map { ":" + $0 } ?? ""
             faceField = ["face:" + face.initial + ":" + String(face.tint) + picture]
         }
-        return (fields + faceField + (badge.map { ["@" + $0 + (badgeState.map { ":" + $0 } ?? "")] } ?? [])).joined(separator: "|")
+        var dotField: [String] = []
+        if let faceDot { dotField = ["dot:" + faceDot] } else if let trailingRequest { dotField = ["request:" + trailingRequest] }
+        let badgeField: [String] = badge.map { ["@" + $0 + (badgeState.map { ":" + $0 } ?? "")] } ?? []
+        return (fields + faceField + dotField + badgeField).joined(separator: "|")
     }
 }
 

@@ -20,7 +20,7 @@
 numbered|ax42/w1:t1,s1:t1,s1:t2,ax42/w2:t1,s2:t1,pc/w1:t1
 indices|s1:t1:0,ax42/w1:t1:0
 section|agentpins|0|none||mute|AGENTS||none||||
-tab|agent:ax42/w1:t1|0|none|●|working|remote chat|rails|none||ax42/w1:t1|||face:R:0|@ax42
+tab|agent:ax42/w1:t1|0|none|●|working|remote chat|rails|none||ax42/w1:t1|||face:R:0|dot:ok|@ax42
 section|pinned|0|none||mute|PINNED||none||||
 tab|pinned:s1:t1|0|none|●|working|orchestrator|rails|none||s1:t1||
 title|spacegroup:Rails|0|none||mute|Rails||none||||
