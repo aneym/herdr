@@ -68,6 +68,15 @@ impl HeadlessServer {
         else {
             return false;
         };
+        // A live pin already exposes this tab without unfolding its home group.
+        if snapshot.tabs.iter().any(|tab| tab.tab_id == current.tab_id)
+            && snapshot
+                .pinned_tabs
+                .iter()
+                .any(|pin| pin.tab_id == current.tab_id)
+        {
+            return false;
+        }
         let mut visited = HashSet::new();
         let mut changed = false;
         loop {

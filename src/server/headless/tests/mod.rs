@@ -2213,9 +2213,9 @@ async fn client_local_navigation_does_not_emit_global_focus_transitions() {
 }
 
 #[test]
-fn focusing_a_tab_or_workspace_reveals_its_agent_group() {
+fn focusing_a_tab_or_workspace_reveals_its_agent_group_unless_pinned() {
     use crate::agent_ownership::{AgentGroupPlacement, AgentOwnerRef};
-    use api::schema::{Method, TabTarget, WorkspaceTarget};
+    use api::schema::{Method, PaneTarget, TabRole, TabTarget, WorkspaceTarget};
 
     let mut server = test_headless_server();
     let owner = crate::workspace::Workspace::test_new("owner");
@@ -2266,18 +2266,47 @@ fn focusing_a_tab_or_workspace_reveals_its_agent_group() {
             .agent_group = Some(AgentGroupPlacement::Under(parent.clone()));
     }
     let child_workspace = server.app.public_workspace_id(1);
+    let owner_tab_id = server.app.public_tab_id(0, 0).unwrap();
     let other_tab_id = server.app.public_tab_id(1, other_tab).unwrap();
+    let other_pane = server.app.state.workspaces[1].tabs[other_tab].root_pane;
+    let other_pane_id = server.app.public_pane_id(1, other_pane).unwrap();
     let (control, _) = connect_test_shell(&mut server, 51, 100, 30);
     let _ = client_shell_snapshot(&control);
 
-    for method in [
-        Method::WorkspaceFocus(WorkspaceTarget {
-            workspace_id: child_workspace,
-        }),
-        Method::TabFocus(TabTarget {
-            tab_id: other_tab_id,
-        }),
+    let tab_focus = Method::TabFocus(TabTarget {
+        tab_id: other_tab_id.clone(),
+    });
+    let pane_focus = Method::PaneFocus(PaneTarget {
+        pane_id: other_pane_id,
+    });
+    // Exercise the shell API boundary for ordinary pins and AGENTS pins alike.
+    for (method, pin_role) in [
+        (
+            Method::WorkspaceFocus(WorkspaceTarget {
+                workspace_id: child_workspace,
+            }),
+            None,
+        ),
+        (tab_focus.clone(), None),
+        (pane_focus.clone(), None),
+        (tab_focus.clone(), Some(None)),
+        (pane_focus.clone(), Some(None)),
+        (tab_focus, Some(Some(TabRole::Agent))),
+        (pane_focus, Some(Some(TabRole::Agent))),
     ] {
+        server.focus_shell_client_on_tab(51, &owner_tab_id);
+        server.app.state.pinned_tabs.clear();
+        if let Some(role) = pin_role {
+            server
+                .app
+                .state
+                .pinned_tabs
+                .push(crate::app::state::PinnedTab {
+                    tab_id: other_tab_id.clone(),
+                    priority: 0,
+                    role,
+                });
+        }
         server
             .app
             .state
@@ -2296,11 +2325,15 @@ fn focusing_a_tab_or_workspace_reveals_its_agent_group() {
             },
         );
         assert!(response_rx.recv().unwrap().contains("\"result\""));
-        assert!(!server
-            .app
-            .state
-            .collapsed_agent_group_keys
-            .contains(&owner_identity));
+        let expected_collapsed = if pin_role.is_some() {
+            HashSet::from([owner_identity.clone()])
+        } else {
+            HashSet::new()
+        };
+        assert_eq!(
+            server.app.state.collapsed_agent_group_keys, expected_collapsed,
+            "pin role: {pin_role:?}"
+        );
     }
     shutdown_test_runtimes(&mut server);
 }
