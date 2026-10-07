@@ -371,16 +371,29 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         window.setFrame(f, display: false)
     }
 
-    private var requestedRestarts: Set<String> = []
+    private var requestedRestarts = PaneRestart.Tracking()
     private var reportedRestoreErrors: [String: String] = [:]
+
+    private func restartRequestKey(_ id: String) -> String {
+        PaneRestart.requestKey(server: Machines.config(for: id)?.socket ?? commands.socketPath,
+                               pane: Machines.split(id)?.raw ?? id)
+    }
 
     private func reportRestoreErrors() {
         let panes = ([model.snapshot].compactMap { $0 } + model.machines.compactMap(\.snapshot)).flatMap(\.panes)
-        let errors = Dictionary(panes.compactMap { pane in pane.restore_error.map { (pane.pane_id, $0) } }, uniquingKeysWith: { _, next in next })
-        let changed = errors.contains { requestedRestarts.contains(PaneRestart.requestKey(server: commands.socketPath, pane: $0.key)) && reportedRestoreErrors[$0.key] != $0.value }
-        if !changed { reportedRestoreErrors = errors; return }
-        if window.attachedSheet == nil {
-            reportedRestoreErrors = errors
+        var errors: [String: String] = [:]
+        var failed = false
+        for pane in panes {
+            let key = restartRequestKey(pane.pane_id)
+            if let error = pane.restore_error { errors[key] = error }
+            let running = pane.agent_status.map { !$0.isEmpty && $0.lowercased() != "unknown" } ?? false
+            if requestedRestarts.observe(key, restoreError: pane.restore_error,
+                                         changed: reportedRestoreErrors[key] != pane.restore_error, running: running) {
+                failed = true
+            }
+        }
+        reportedRestoreErrors = errors
+        if failed {
             let alert = NSAlert()
             alert.messageText = "The agent didn't come back up."
             alert.informativeText = "Check the pane for errors."
@@ -739,17 +752,20 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     private func restartAgent(_ id: String, force: Bool = false) {
-        let key = PaneRestart.requestKey(server: commands.socketPath, pane: id)
-        requestedRestarts.insert(key)
+        let key = restartRequestKey(id)
+        requestedRestarts.request(key)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
+            self?.requestedRestarts.expire()
+        }
         let commands = self.commands
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let reply = commands.restartAgent(paneId: id, force: force)
             DispatchQueue.main.async {
                 guard let self else { return }
                 switch reply {
-                case .success: self.requestedRestarts.remove(key)
+                case .success: break // Acceptance precedes startup; observe the pane or expire tracking.
                 case .failure(let code, let message, let reason):
-                    self.requestedRestarts.remove(key)
+                    self.requestedRestarts.clear(key)
                     if PaneRestart.next(code: code, message: message, forced: force, reason: reason) == .confirm {
                         let alert = NSAlert()
                         alert.messageText = "Agent is working. Restart anyway?"
@@ -758,10 +774,10 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                         alert.addButton(withTitle: "Cancel")
                         alert.beginSheetModal(for: self.window) { [weak self] response in
                             if response == .alertFirstButtonReturn { self?.restartAgent(id, force: true) }
-                            else { self?.requestedRestarts.remove(key) }
+                            else { self?.requestedRestarts.clear(key) }
                         }
                     } else {
-                        self.requestedRestarts.remove(key)
+                        self.requestedRestarts.clear(key)
                         let alert = NSAlert()
                         alert.messageText = "Could not restart agent"
                         alert.informativeText = PaneRestart.message(code: code, fallback: message, reason: reason)

@@ -16,26 +16,39 @@ export default function PaneSurface(props: { pane: Pane; machine: string; focuse
   const restartKey = `${machine}:${pane.pane_id}`;
   const currentRestartKey = useRef(restartKey); currentRestartKey.current = restartKey;
   const requestedRestart = useRef<string | null>(null);
+  const restartTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearRestart = useCallback(() => {
+    requestedRestart.current = null;
+    if (restartTimeout.current !== null) clearTimeout(restartTimeout.current);
+    restartTimeout.current = null;
+  }, []);
   const [restartError, setRestartError] = useState<string | null>(null);
   const reportedRestoreError = useRef(pane.restore_error);
   useEffect(() => {
-    if (requestedRestart.current === restartKey && pane.restore_error && pane.restore_error !== reportedRestoreError.current) setRestartError("The agent didn't come back up. Check the pane for errors.");
+    if (requestedRestart.current === restartKey) {
+      if (pane.restore_error && pane.restore_error !== reportedRestoreError.current) {
+        clearRestart();
+        setRestartError("The agent didn't come back up. Check the pane for errors.");
+      } else if (!pane.restore_error && hasAgent && pane.agent_status && pane.agent_status !== "unknown") clearRestart();
+    }
     reportedRestoreError.current = pane.restore_error;
-  }, [pane.restore_error, restartKey]);
+  }, [pane.restore_error, pane.agent_status, hasAgent, restartKey, clearRestart]);
   const [confirmRestart, setConfirmRestart] = useState(false);
   const [restarting, setRestarting] = useState(false);
-  useEffect(() => { requestedRestart.current = null; setMenu(false); setConfirmRestart(false); setRestartError(null); setRestarting(false); }, [restartKey]);
+  useEffect(() => { clearRestart(); setMenu(false); setConfirmRestart(false); setRestartError(null); setRestarting(false); return clearRestart; }, [restartKey, clearRestart]);
   const restart = async (force = false) => {
     if (restarting) return;
     setMenu(false); setConfirmRestart(false); setRestarting(true);
+    clearRestart();
     requestedRestart.current = restartKey;
+    restartTimeout.current = setTimeout(clearRestart, 30_000);
     setRestartError(null);
     try {
       await bridge.api(machine, "agent.restart", { pane_id: pane.pane_id, ...(force ? { force: true } : {}) });
-      if (requestedRestart.current === restartKey) requestedRestart.current = null;
+      // Acceptance precedes startup; the next pane update or timeout completes tracking.
     } catch (error) {
       if (currentRestartKey.current !== restartKey) return;
-      requestedRestart.current = null;
+      clearRestart();
       // The native bridge preserves structured server errors, with legacy error text as a fallback.
       const value = error as { code?: string; message?: string; reason?: string };
       const busy = value?.code === "busy" || String(error).startsWith("herdr api error busy:");

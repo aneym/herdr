@@ -3,6 +3,19 @@ import Foundation
 /// Shared menu availability and response handling, independent of the presentation surface.
 enum PaneRestart {
     enum Next: Equatable { case done, confirm, error(String) }
+    struct Tracking {
+        private var deadlines: [String: Date] = [:]
+        mutating func request(_ key: String, now: Date = Date()) { deadlines[key] = now.addingTimeInterval(30) }
+        mutating func clear(_ key: String) { deadlines.removeValue(forKey: key) }
+        mutating func expire(now: Date = Date()) { deadlines = deadlines.filter { $0.value > now } }
+        mutating func observe(_ key: String, restoreError: String?, changed: Bool, running: Bool, now: Date = Date()) -> Bool {
+            expire(now: now)
+            guard deadlines[key] != nil else { return false }
+            if restoreError != nil && changed { clear(key); return true }
+            if restoreError == nil && running { clear(key) }
+            return false
+        }
+    }
     static func requestKey(server: String, pane: String) -> String { server + ":" + pane }
     static func enabled(hasAgent: Bool) -> Bool { hasAgent }
     static func message(code: String, fallback: String, reason: String? = nil) -> String {

@@ -16,7 +16,7 @@ afterEach(() => { dispose(); api.mockReset(); });
 function mount(hasAgent = true, restoreError?: string) {
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host); const onError = vi.fn();
-  const render = (restoreError?: string, machine = "studio") => act(() => root.render(<PaneSurface pane={{ restore_error: restoreError, pane_id: "pane_1", terminal_id: "term_1", tab_id: "tab_1", workspace_id: "ws_1" }} machine={machine} focused hasAgent={hasAgent} onFocus={() => {}} shortcut={() => false} register={() => {}} onError={onError} />));
+  const render = (restoreError?: string, machine = "studio", agentStatus?: string) => act(() => root.render(<PaneSurface pane={{ restore_error: restoreError, agent_status: agentStatus, pane_id: "pane_1", terminal_id: "term_1", tab_id: "tab_1", workspace_id: "ws_1" }} machine={machine} focused hasAgent={hasAgent} onFocus={() => {}} shortcut={() => false} register={() => {}} onError={onError} />));
   render(restoreError);
   dispose = () => { act(() => root.unmount()); host.remove(); };
   const click = async (selector: string) => { const button = host.querySelector<HTMLButtonElement>(selector); expect(button, selector).not.toBeNull(); await act(async () => { button!.click(); }); };
@@ -91,12 +91,37 @@ it.each([
   expect(api).toHaveBeenCalledTimes(1);
 });
 
-it("clears restart tracking after success and ignores later restore errors", async () => {
+it("alerts once when an accepted restart later fails to start", async () => {
   api.mockResolvedValueOnce({ ok: true });
-  const { click, render, onError } = mount();
+  const { host, click, render } = mount();
   await click('[aria-label="Pane actions"]'); await click('[role="menuitem"]');
   render("start_failed: could not resume agent");
-  expect(onError).not.toHaveBeenCalled();
+  expect(host.querySelector('[role="dialog"]')?.textContent).toContain("The agent didn't come back up.");
+  await click('[role="dialog"] button');
+  render("start_failed: another failure");
+  expect(host.querySelector('[role="dialog"]')).toBeNull();
+});
+
+it("clears accepted restart tracking when the agent is running again", async () => {
+  api.mockResolvedValueOnce({ ok: true });
+  const { host, click, render } = mount();
+  await click('[aria-label="Pane actions"]'); await click('[role="menuitem"]');
+  render(undefined, "studio", "idle");
+  expect(host.querySelector('[role="dialog"]')).toBeNull();
+  render("start_failed: unrelated later error", "studio", "idle");
+  expect(host.querySelector('[role="dialog"]')).toBeNull();
+});
+
+it("expires accepted restart tracking after 30 seconds without an error", async () => {
+  vi.useFakeTimers();
+  try {
+    api.mockResolvedValueOnce({ ok: true });
+    const { host, click, render } = mount();
+    await click('[aria-label="Pane actions"]'); await click('[role="menuitem"]');
+    await act(async () => { vi.advanceTimersByTime(30_000); });
+    render("start_failed: unrelated later error");
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+  } finally { vi.useRealTimers(); }
 });
 
 it("dismisses pane-local restart errors on OK and outside click", async () => {
