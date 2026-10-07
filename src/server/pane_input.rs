@@ -785,10 +785,9 @@ mod polite_send_tests {
                 },
                 respond_to,
             ));
-            let prompt: serde_json::Value = serde_json::from_str(
-                &response_rx.recv_timeout(Duration::from_secs(2)).unwrap(),
-            )
-            .unwrap();
+            let prompt: serde_json::Value =
+                serde_json::from_str(&response_rx.recv_timeout(Duration::from_secs(2)).unwrap())
+                    .unwrap();
             assert!(prompt.get("error").is_none(), "{prompt}");
             assert_eq!(rx.try_recv().unwrap().as_ref(), b"owned prompt");
             let runtime = app.terminal_runtimes.get(&terminal_id).unwrap();
@@ -847,14 +846,15 @@ mod polite_send_tests {
                         cancel: false,
                     }),
                 );
-                assert_eq!(queue["result"]["sends"][0]["reason"], "human_composer_draft");
+                assert_eq!(
+                    queue["result"]["sends"][0]["reason"],
+                    "human_composer_draft"
+                );
                 // An observed clear releases the held Enter, even after two minutes.
                 app.terminal_runtimes
                     .get(&terminal_id)
                     .unwrap()
-                    .test_process_pty_bytes(
-                        "\x1b[2J\x1b[H────────\r\n❯ \r\n────────".as_bytes(),
-                    );
+                    .test_process_pty_bytes("\x1b[2J\x1b[H────────\r\n❯ \r\n────────".as_bytes());
                 app.flush_polite_sends(Instant::now() + Duration::from_secs(122));
                 assert_eq!(rx.try_recv().unwrap().as_ref(), enter.as_slice());
             } else {

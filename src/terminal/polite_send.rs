@@ -1010,11 +1010,9 @@ mod tests {
             .unwrap();
         let item = wait_for(&runtime, &outcome.id, PaneSendState::Acked).await;
         assert!(item.delivered_at.is_some() && item.acked_at >= item.delivered_at);
-        assert!(
-            !serde_json::to_string(&item)
-                .unwrap()
-                .contains("private-message")
-        );
+        assert!(!serde_json::to_string(&item)
+            .unwrap()
+            .contains("private-message"));
         let second = runtime
             .polite_send(
                 false,
