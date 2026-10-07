@@ -267,7 +267,7 @@ fn local_request(home: &Path, request: &Value) -> Result<Value, String> {
     if op == "home" {
         return Ok(json!({"home": home}));
     }
-    if !matches!(op, "stat" | "read") {
+    if !matches!(op, "stat" | "read" | "list") {
         return Err("unknown operation".into());
     }
     let supplied = request["path"].as_str().ok_or("path not allowed")?;
@@ -286,6 +286,22 @@ fn local_request(home: &Path, request: &Value) -> Result<Value, String> {
         .collect::<Result<Vec<_>, _>>()?;
     if !local_allowed(&path, &roots, true, None) {
         return Err("path not allowed".into());
+    }
+    if op == "list" {
+        // Entry names only, for card folders such as ~/.agent-rails/agents, as the remote helper.
+        let entries = match std::fs::read_dir(&path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(json!({"names": []})),
+            other => other.map_err(|e| e.to_string())?,
+        };
+        if resolve_path(&path)? != path {
+            return Err("path not allowed".into());
+        }
+        let mut names = entries
+            .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+            .collect::<Vec<_>>();
+        names.sort();
+        names.truncate(256);
+        return Ok(json!({"names": names}));
     }
     match std::fs::metadata(&path) {
         Ok(info) if !info.is_file() => return Err("path not allowed".into()),
@@ -469,6 +485,19 @@ mod tests {
         let run = || -> Result<(), Box<dyn std::error::Error>> {
             let path = home.join(".codex/sessions/log.jsonl");
             std::fs::write(&path, b"hello world")?;
+            for name in ["recruiter", "frank"] {
+                std::fs::create_dir_all(home.join(".agent-rails/agents").join(name))?;
+            }
+            assert_eq!(
+                local_request(&home, &json!({"op":"list","path":"~/.agent-rails/agents"}))?["names"],
+                json!(["frank", "recruiter"])
+            );
+            assert_eq!(
+                local_request(&home, &json!({"op":"list","path":"~/.agent-rails/none"}))?["names"],
+                json!([])
+            );
+            assert!(local_request(&home, &json!({"op":"list","path":"~/.agent-rails/../outside"})).is_err());
+            assert!(local_request(&home, &json!({"op":"list","path":path})).is_err());
             assert_eq!(
                 local_request(&home, &json!({"op":"stat","path":path}))?["exists"],
                 true

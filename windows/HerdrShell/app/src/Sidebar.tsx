@@ -26,9 +26,11 @@ export function useSelectionReveal(selected: string | null): RevealMemo {
 }
 interface Press { id: string; section: PinSection; x: number; y: number; ids: string[]; block: RowBox[]; active: boolean; cancelled: boolean; done: () => void }
 export default function Sidebar({ machines, chooseMachine, rows, selected, revealed, machine, notice, select, pin, movePin, renaming, startRename, cancelRename, commitRename }: { machines: MachineStatus[]; chooseMachine: (name: string) => void; rows: SidebarRow[]; selected: string | null; revealed: RevealMemo; machine: MachineStatus; notice: string | null; select: (id: string) => void; pin: (id: string, pinned: boolean) => void; movePin: (ids: string[], from: number, to: number) => void; renaming: string | null; startRename: (id: string) => void; cancelRename: () => void; commitRename: (id: string, label: string) => Promise<void> }) {
-  const [expanded, setExpanded] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem("herdr-space-expanded") || "{}"); } catch { return {}; } });
+  // Folds are per machine: workspace ids repeat across machines. Studio keeps the pre-switcher key.
+  const foldStore = machine.name === "studio" ? "herdr-space-expanded" : `herdr-space-expanded:${machine.name}`;
+  const [expanded, setExpanded] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem(foldStore) || "{}"); } catch { return {}; } });
   const [hidden, setHidden] = useState(false);
-  const toggle = (id: string, value: boolean) => setExpanded(previous => { const next = { ...previous, [id]: value }; try { localStorage.setItem("herdr-space-expanded", JSON.stringify(next)); } catch { /* Storage can be disabled by WebView policy. */ } return next; });
+  const toggle = (id: string, value: boolean) => setExpanded(previous => { const next = { ...previous, [id]: value }; try { localStorage.setItem(foldStore, JSON.stringify(next)); } catch { /* Storage can be disabled by WebView policy. */ } return next; });
   // Drag an AGENTS or PINNED row within its section, as the Mac's PinDrag: the row follows the
   // pointer, a line marks the slot, a release on the section moves the pin, Esc or a release
   // off the section moves nothing, and a press that travels less than the threshold is a click.
