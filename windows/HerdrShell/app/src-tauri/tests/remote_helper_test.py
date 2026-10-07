@@ -98,6 +98,8 @@ class RemoteHelperTest(unittest.TestCase):
                          ["frank", "home", "recruiter"])
         missing = self.request("list", path="~/.agent-rails/none")
         self.assertEqual(missing["names"], [])
+        (agents / "frank" / "agent.json").write_bytes(b"{}")
+        self.assertFalse(self.request("list", path="~/.agent-rails/agents/frank/agent.json")["ok"])
         outside = self.home / "outside"
         outside.mkdir()
         (outside / "secret").mkdir()

@@ -29,11 +29,22 @@ def request(req):
     if op == "home":
         return {"home": HOME}
     if op == "list":
-        # Entry names only, for card folders such as ~/.agent-rails/agents.
+        # Entry names only, for card folders such as ~/.agent-rails/agents. As in read, the
+        # listing goes through the opened directory, checked to still be the allowed one.
+        path = allowed_path(req.get("path"))
         try:
-            names = os.listdir(allowed_path(req.get("path")))
+            fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
         except FileNotFoundError:
-            names = []
+            return {"names": []}
+        try:
+            info = os.fstat(fd)
+            realpath = allowed_path(path)
+            current = os.stat(realpath)
+            if realpath != path or (info.st_dev, info.st_ino) != (current.st_dev, current.st_ino):
+                raise ValueError("path not allowed")
+            names = os.listdir(fd)
+        finally:
+            os.close(fd)
         return {"names": sorted(names)[:256]}
     if op not in ("stat", "read"):
         raise ValueError("unknown operation")
