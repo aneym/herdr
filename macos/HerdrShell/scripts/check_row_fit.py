@@ -15,7 +15,7 @@ BUILD = pathlib.Path.home() / ".cache/herdr-build/row-fit"
 BUILD.mkdir(parents=True, exist_ok=True)
 DRIVER = BUILD / "row_fit"
 subprocess.run(["swiftc", "-parse-as-library", str(SRC / "SpacesTree.swift"), str(SRC / "Theme.swift"), str(SRC / "ShellTokens.swift"),
-                str(SRC / "SpacesRowView.swift"), str(SRC / "AgentFace.swift"), str(SRC / "AgentCards.swift"), str(ROOT / "scripts/row_fit.swift"), "-o", str(DRIVER)], check=True)
+                str(SRC / "SpacesRowView.swift"), str(SRC / "AgentFace.swift"), str(SRC / "AgentCards.swift"), str(ROOT / "scripts/row_fit_stubs.swift"), str(ROOT / "scripts/row_fit.swift"), "-o", str(DRIVER)], check=True)
 fixtures = [ROOT / "scripts/fixtures/row-fit/overflow.json", ROOT / "scripts/fixtures/p33/alex-0928.json"]
 failures = []
 for fixture in fixtures:

@@ -71,6 +71,16 @@
     "agents": [],
     "focused": false,
     "status": "working"
+   },
+   {
+     "id": "long-agent",
+     "space": "ws_1",
+     "label": "an agent whose name runs well past the sidebar column width",
+     "agents": [],
+     "focused": false,
+     "status": "idle",
+     "role": "agent",
+     "pinIndex": 0
    }
   ],
   "focusedTab": "orch"
