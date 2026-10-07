@@ -201,6 +201,8 @@ pub struct HeadlessServer {
     next_client_id: u64,
     /// The client currently driving session-wide host presentation and side effects.
     foreground_client_id: Option<u64>,
+    /// Client whose genuine input most recently selected the shared pane appearance.
+    appearance_authority_client_id: Option<u64>,
     /// Ephemeral shell connection controlling PTY geometry for each stable tab id.
     tab_geometry_controllers: HashMap<String, u64>,
     /// Stable tab id whose viewers may see and interact with the one terminal popup.
@@ -348,6 +350,7 @@ impl HeadlessServer {
             #[cfg(unix)]
             next_client_id: 1,
             foreground_client_id: None,
+            appearance_authority_client_id: None,
             tab_geometry_controllers: HashMap::new(),
             popup_owner_tab_id: None,
             client_shell_boot_id: format!(
@@ -805,9 +808,6 @@ impl HeadlessServer {
         } else {
             crate::kitty_graphics::HostCellSize::default()
         };
-        let host_terminal_theme = client.host_terminal_theme;
-        let host_terminal_appearance = client.host_terminal_appearance;
-        let host_terminal_appearance_explicit = client.host_terminal_appearance_explicit;
         let outer_terminal_focus = client.outer_terminal_focus;
 
         self.effective_size = terminal_size;
@@ -820,11 +820,24 @@ impl HeadlessServer {
         if outer_terminal_focus == Some(true) {
             self.app.state.read_focused_attention();
         }
-        self.app.set_host_terminal_appearance_state(
-            host_terminal_appearance,
-            host_terminal_appearance_explicit,
+    }
+
+    fn select_appearance_authority(&mut self, client_id: u64) -> bool {
+        let Some(client) = self.clients.get(&client_id) else {
+            return false;
+        };
+        if !client.is_active_shell_client()
+            && !matches!(client.mode, ClientConnectionMode::TerminalAttach { .. })
+        {
+            return false;
+        }
+        self.appearance_authority_client_id = Some(client_id);
+        let mut changed = self.app.set_host_terminal_appearance_state(
+            client.host_terminal_appearance,
+            client.host_terminal_appearance_explicit,
         );
-        self.app.set_host_terminal_theme(host_terminal_theme);
+        changed |= self.app.set_host_terminal_theme(client.host_terminal_theme);
+        changed
     }
 
     fn sync_visible_server_config_diagnostic(&mut self, uses_local_keybindings: bool) {
@@ -931,6 +944,10 @@ impl HeadlessServer {
             })
         });
         let was_foreground = self.foreground_client_id == Some(client_id);
+        if self.appearance_authority_client_id == Some(client_id) {
+            // Keep the last applied appearance until another client supplies input.
+            self.appearance_authority_client_id = None;
+        }
         let removed = self.clients.remove(&client_id);
         self.tab_geometry_controllers
             .retain(|_, controller_id| *controller_id != client_id);
@@ -1149,7 +1166,9 @@ impl HeadlessServer {
                 else {
                     return false;
                 };
-                if let Some(runtime) = self.runtime_for_terminal_id_string(terminal_id) {
+                let terminal_id = terminal_id.clone();
+                self.select_appearance_authority(client_id);
+                if let Some(runtime) = self.runtime_for_terminal_id_string(&terminal_id) {
                     runtime.record_human_text();
                     let payload = paste_payload_for_runtime(runtime, &path);
                     if let Err(err) = runtime.try_send_bytes(Bytes::from(payload)) {
@@ -1178,7 +1197,9 @@ impl HeadlessServer {
                 {
                     return false;
                 }
-                let foreground_changed = self.promote_client_to_foreground(client_id);
+                let appearance_changed = self.select_appearance_authority(client_id);
+                let foreground_changed =
+                    self.promote_client_to_foreground(client_id) | appearance_changed;
                 let geometry_changed = self.claim_shell_tab_geometry(client_id, false);
                 let Some(runtime) = self.app.state.runtime_for_pane_in_workspace(
                     &self.app.terminal_runtimes,
@@ -1218,7 +1239,9 @@ impl HeadlessServer {
                 {
                     return false;
                 }
-                let foreground_changed = self.promote_client_to_foreground(client_id);
+                let appearance_changed = self.select_appearance_authority(client_id);
+                let foreground_changed =
+                    self.promote_client_to_foreground(client_id) | appearance_changed;
                 let geometry_changed = self.claim_shell_tab_geometry(client_id, false);
                 let Some(runtime) = self.app.terminal_runtimes.get(&popup_terminal_id) else {
                     return foreground_changed | geometry_changed;
@@ -1322,7 +1345,9 @@ impl HeadlessServer {
         else {
             return false;
         };
-        let Some(runtime) = self.runtime_for_terminal_id_string(terminal_id) else {
+        let terminal_id = terminal_id.clone();
+        self.select_appearance_authority(client_id);
+        let Some(runtime) = self.runtime_for_terminal_id_string(&terminal_id) else {
             return false;
         };
 
@@ -1358,6 +1383,7 @@ impl HeadlessServer {
         let cell_size = client.cell_size;
         let pixel_mouse = client.pixel_mouse;
         let host_sgr_pixels_active = client.host_sgr_pixels_active == Some(true);
+        self.select_appearance_authority(client_id);
         let Some(runtime) = self.runtime_for_terminal_id_string(&terminal_id) else {
             return false;
         };
@@ -2078,7 +2104,23 @@ impl HeadlessServer {
                 else {
                     return false;
                 };
-                if let Some(runtime) = self.runtime_for_terminal_id_string(terminal_id) {
+                let terminal_id = terminal_id.clone();
+                if crate::raw_input::parse_raw_input_bytes_sync(&data)
+                    .iter()
+                    .any(|event| {
+                        matches!(
+                            event,
+                            crate::raw_input::RawInputEvent::Key(_)
+                                | crate::raw_input::RawInputEvent::Text(_)
+                                | crate::raw_input::RawInputEvent::Paste(_)
+                                | crate::raw_input::RawInputEvent::Mouse(_)
+                                | crate::raw_input::RawInputEvent::MouseNavButton { .. }
+                        )
+                    })
+                {
+                    self.select_appearance_authority(client_id);
+                }
+                if let Some(runtime) = self.runtime_for_terminal_id_string(&terminal_id) {
                     if let Err(err) = apply_terminal_attach_input(runtime, data) {
                         warn!(client_id, terminal_id = %terminal_id, err = %err);
                     }
@@ -2242,13 +2284,16 @@ impl HeadlessServer {
                 let Some(client) = self.clients.get_mut(&client_id) else {
                     return false;
                 };
-                if !matches!(client.mode, ClientConnectionMode::ClientShell) {
+                if !matches!(
+                    client.mode,
+                    ClientConnectionMode::ClientShell | ClientConnectionMode::TerminalAttach { .. }
+                ) {
                     return false;
                 }
                 if !client.update_host_theme(&update) {
                     return false;
                 }
-                if !client.shell_surface_active || self.foreground_client_id != Some(client_id) {
+                if self.appearance_authority_client_id != Some(client_id) {
                     return false;
                 }
                 let mut changed = self.app.set_host_terminal_appearance_state(
@@ -2428,8 +2473,9 @@ impl HeadlessServer {
                     client
                         .track_shell_input(ClientShellInputTarget::Pane(pane_id.clone()), &events);
                 }
-                let foreground_changed =
-                    interaction && self.promote_client_to_foreground(client_id);
+                let appearance_changed = interaction && self.select_appearance_authority(client_id);
+                let foreground_changed = interaction
+                    && self.promote_client_to_foreground(client_id) | appearance_changed;
                 let geometry_changed =
                     interaction && self.claim_shell_tab_geometry(client_id, false);
                 let Some(runtime) = self.app.state.runtime_for_pane_in_workspace(
@@ -2510,8 +2556,9 @@ impl HeadlessServer {
                         &events,
                     );
                 }
-                let foreground_changed =
-                    interaction && self.promote_client_to_foreground(client_id);
+                let appearance_changed = interaction && self.select_appearance_authority(client_id);
+                let foreground_changed = interaction
+                    && self.promote_client_to_foreground(client_id) | appearance_changed;
                 let geometry_changed =
                     interaction && self.claim_shell_tab_geometry(client_id, false);
                 let Some(runtime) = self.app.terminal_runtimes.get(&popup_terminal_id) else {

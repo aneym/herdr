@@ -395,22 +395,28 @@ fn write_host_terminal_appearance_query_emits_mode_2031_query() {
 }
 
 #[test]
-fn write_host_terminal_theme_query_emits_osc_queries() {
+fn attach_host_theme_startup_and_appearance_report() {
+    // Golden host-terminal protocol: direct attach uses the same startup writer and parser as TUI.
     let mut output = Vec::new();
-    write_host_terminal_theme_query(&mut output).unwrap();
+    terminal_geometry::write_host_terminal_startup_theme_query(&mut output).unwrap();
+    assert!(output.windows(8).any(|bytes| bytes == b"\x1b]10;?\x1b\\"));
+    assert!(output.windows(8).any(|bytes| bytes == b"\x1b]11;?\x1b\\"));
+    assert!(output.ends_with(b"\x1b[?996n"));
     assert_eq!(
-        output,
-        crate::terminal_theme::host_terminal_theme_query_sequence(
-            crate::platform::should_query_host_terminal_palette(),
-        )
-        .as_bytes()
+        should_enable_host_color_scheme_reports(false),
+        !cfg!(windows)
     );
-    assert!(
-        !output
-            .windows(crate::terminal_theme::HOST_COLOR_SCHEME_QUERY_SEQUENCE.len())
-            .any(|window| window
-                == crate::terminal_theme::HOST_COLOR_SCHEME_QUERY_SEQUENCE.as_bytes())
-    );
+    let events = crate::raw_input::parse_raw_input_bytes_sync(b"\x1b[?997;2n");
+    let update = terminal_geometry::host_theme_update(&events[0]).unwrap();
+    let message = ClientMessage::ClientShellHostTheme { update };
+    assert!(matches!(
+        message,
+        ClientMessage::ClientShellHostTheme {
+            update: crate::protocol::ClientHostThemeUpdate::Appearance(
+                crate::protocol::ClientHostAppearance::Light
+            )
+        }
+    ));
 }
 
 #[test]
@@ -484,12 +490,15 @@ fn reported_cell_size_is_taken_from_host_cell_size_events() {
 }
 
 #[test]
-fn color_scheme_reports_are_enabled_only_for_full_clients() {
+fn color_scheme_reports_are_enabled_for_attach_and_full_clients() {
     assert_eq!(
         should_enable_host_color_scheme_reports(true),
         !cfg!(windows)
     );
-    assert!(!should_enable_host_color_scheme_reports(false));
+    assert_eq!(
+        should_enable_host_color_scheme_reports(false),
+        !cfg!(windows)
+    );
 }
 
 #[test]

@@ -127,8 +127,8 @@ pub(super) fn setup_terminal_with_capabilities(
     Ok(terminal_guard)
 }
 
-pub(super) fn should_enable_host_color_scheme_reports(enable_client_protocols: bool) -> bool {
-    enable_client_protocols && should_query_host_terminal_theme()
+pub(super) fn should_enable_host_color_scheme_reports(_enable_client_protocols: bool) -> bool {
+    should_query_host_terminal_theme()
 }
 
 /// Guard that restores the terminal when dropped.

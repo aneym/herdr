@@ -107,6 +107,7 @@ fn test_headless_server_with_event_hub(event_hub: api::EventHub) -> HeadlessServ
         #[cfg(unix)]
         next_client_id: 1,
         foreground_client_id: None,
+        appearance_authority_client_id: None,
         tab_geometry_controllers: HashMap::new(),
         popup_owner_tab_id: None,
         client_shell_boot_id: "test-boot".into(),
@@ -3991,104 +3992,82 @@ fn server_keybinding_filter_keeps_whole_config_failures() {
     ));
 }
 
-#[test]
-fn client_shell_host_theme_follows_foreground_client() {
+#[tokio::test]
+async fn client_shell_host_theme_follows_latest_input_not_resize_or_focus() {
+    // Integration at the server event/PTY-write boundary, including mode-2031 child delivery.
     let mut server = test_headless_server();
-    server.clients.insert(
-        1,
-        ClientConnection::new(
-            (80, 24),
-            crate::kitty_graphics::HostCellSize::default(),
-            1,
-            RenderEncoding::SemanticFrame,
-            None,
-        ),
-    );
-    server.clients.insert(
-        2,
-        ClientConnection::new(
-            (80, 24),
-            crate::kitty_graphics::HostCellSize::default(),
-            2,
-            RenderEncoding::SemanticFrame,
-            None,
-        ),
-    );
-    server.foreground_client_id = Some(1);
-
-    let dark = protocol::ClientHostColor {
-        r: 20,
-        g: 30,
-        b: 40,
+    let workspace = crate::workspace::Workspace::test_new("appearance");
+    let pane = workspace.tabs[0].root_pane;
+    let terminal_id = workspace.terminal_id(pane).unwrap().clone();
+    server.app.state.workspaces = vec![workspace];
+    server.app.state.ensure_test_terminals();
+    server.app.state.active = Some(0);
+    server.app.state.selected = 0;
+    server.app.state.mode = crate::app::Mode::Terminal;
+    let (runtime, mut input_rx) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
+    runtime.test_process_pty_bytes(b"\x1b[?2031h");
+    server.app.terminal_runtimes.insert(terminal_id, runtime);
+    let (a_control, _) = connect_matching_test_shell(&mut server, 1);
+    let (b_control, _) = connect_matching_test_shell(&mut server, 2);
+    let _ = a_control.recv().unwrap();
+    let _ = b_control.recv().unwrap();
+    let pane_id = server
+        .app
+        .public_pane_id(0, server.app.state.workspaces[0].focused_pane_id().unwrap())
+        .unwrap();
+    let report = |id, appearance| ServerEvent::ClientShellHostTheme {
+        client_id: id,
+        update: protocol::ClientHostThemeUpdate::Appearance(appearance),
     };
-    let blue = protocol::ClientHostColor {
-        r: 10,
-        g: 20,
-        b: 200,
+    let key = |id| ServerEvent::ClientShellPaneInput {
+        client_id: id,
+        pane_id: pane_id.clone(),
+        events: vec![client_page_key(
+            protocol::ClientKeyCode::Char('x'),
+            crossterm::event::KeyModifiers::NONE,
+            protocol::ClientKeyKind::Press,
+        )],
     };
-    assert!(
-        server.handle_server_event(ServerEvent::ClientShellHostTheme {
-            client_id: 1,
-            update: protocol::ClientHostThemeUpdate::DefaultColor {
-                kind: protocol::ClientHostDefaultColorKind::Background,
-                color: dark,
-            },
-        })
-    );
-    assert!(
-        server.handle_server_event(ServerEvent::ClientShellHostTheme {
-            client_id: 1,
-            update: protocol::ClientHostThemeUpdate::PaletteColors(vec![(4, blue)]),
-        })
-    );
-    server.handle_server_event(ServerEvent::ClientShellHostTheme {
-        client_id: 1,
-        update: protocol::ClientHostThemeUpdate::Appearance(protocol::ClientHostAppearance::Dark),
-    });
-    assert_eq!(
-        server.app.state.host_terminal_theme.background,
-        Some(dark.into())
-    );
-    assert_eq!(
-        server.app.state.host_terminal_theme.palette[4],
-        Some(blue.into())
-    );
+    server.handle_server_event(key(1));
+    assert_eq!(input_rx.try_recv().unwrap().as_ref(), b"x");
+    server.handle_server_event(report(1, protocol::ClientHostAppearance::Dark));
+    server.handle_server_event(report(2, protocol::ClientHostAppearance::Light));
     assert_eq!(
         server.app.state.host_terminal_appearance,
         Some(crate::terminal_theme::HostAppearance::Dark)
     );
-    assert!(server.app.state.host_terminal_appearance_explicit);
-
-    let light = protocol::ClientHostColor {
-        r: 240,
-        g: 230,
-        b: 220,
-    };
-    assert!(
-        !server.handle_server_event(ServerEvent::ClientShellHostTheme {
-            client_id: 2,
-            update: protocol::ClientHostThemeUpdate::DefaultColor {
-                kind: protocol::ClientHostDefaultColorKind::Background,
-                color: light,
-            },
-        })
-    );
+    server.handle_server_event(ServerEvent::ClientShellResize {
+        client_id: 2,
+        surface_cols: 90,
+        surface_rows: 30,
+        cell_width_px: 0,
+        cell_height_px: 0,
+        pixel_mouse: false,
+    });
+    server.handle_server_event(ServerEvent::ClientShellFocus {
+        client_id: 2,
+        focused: true,
+    });
     assert_eq!(
-        server.app.state.host_terminal_theme.background,
-        Some(dark.into())
+        server.app.state.host_terminal_appearance,
+        Some(crate::terminal_theme::HostAppearance::Dark)
     );
-
-    server.foreground_client_id = Some(2);
-    server.sync_foreground_client_state();
-    assert_eq!(
-        server.app.state.host_terminal_theme.background,
-        Some(light.into())
-    );
+    assert!(input_rx.try_recv().is_err());
+    server.handle_server_event(key(2));
     assert_eq!(
         server.app.state.host_terminal_appearance,
         Some(crate::terminal_theme::HostAppearance::Light)
     );
-    assert!(!server.app.state.host_terminal_appearance_explicit);
+    assert_eq!(input_rx.try_recv().unwrap().as_ref(), b"\x1b[?997;2n");
+    assert_eq!(input_rx.try_recv().unwrap().as_ref(), b"x");
+    server.handle_server_event(report(1, protocol::ClientHostAppearance::Light));
+    assert!(input_rx.try_recv().is_err());
+    server.handle_server_event(report(2, protocol::ClientHostAppearance::Dark));
+    assert_eq!(
+        server.app.state.host_terminal_appearance,
+        Some(crate::terminal_theme::HostAppearance::Dark)
+    );
+    assert_eq!(input_rx.try_recv().unwrap().as_ref(), b"\x1b[?997;1n");
 }
 
 #[test]

@@ -66,7 +66,7 @@ use terminal_geometry::query_host_terminal_appearance;
 use terminal_geometry::{
     cell_size_fallback, current_terminal_geometry_with, ioctl_cell_size, pack_cell_size,
     resize_report_required, should_query_host_cell_size, write_host_cell_size_query,
-    write_host_terminal_appearance_query, write_host_terminal_theme_query,
+    write_host_terminal_appearance_query,
 };
 use terminal_geometry::{
     host_cell_size_query_required, initial_terminal_geometry, query_host_cell_size,
@@ -526,8 +526,7 @@ async fn run_client_loop(
     let mut endpoint_commands = endpoint_commands::EndpointCommands::default();
 
     // Spawn the stdin reader thread.
-    let will_query_host_terminal_theme =
-        state.attach_escape.is_none() && should_query_host_terminal_theme();
+    let will_query_host_terminal_theme = should_query_host_terminal_theme();
     // Terminals behind ConPTY report no pixel size through the ioctl, so ask the
     // host terminal directly instead of falling back to an assumed cell size.
     let will_query_host_cell_size = state.attach_escape.is_none()
@@ -562,11 +561,7 @@ async fn run_client_loop(
     });
 
     if will_query_host_terminal_theme {
-        query_host_terminal_theme();
-        #[cfg(not(windows))]
-        if state.shell.is_some() {
-            query_host_terminal_appearance();
-        }
+        terminal_geometry::query_host_terminal_startup_theme();
     }
 
     if will_query_host_cell_size {
@@ -892,6 +887,27 @@ async fn run_client_loop(
                         return Ok(());
                     }
                     continue;
+                }
+                let events = crate::raw_input::parse_raw_input_bytes_sync(&data);
+                let mut reported_theme = false;
+                for event in &events {
+                    if let Some(update) = terminal_geometry::host_theme_update(event) {
+                        write_to_server(
+                            &mut write_stream,
+                            &ClientMessage::ClientShellHostTheme { update },
+                        )
+                        .map_err(ClientError::ConnectionLost)?;
+                        reported_theme = true;
+                    }
+                }
+                if reported_theme {
+                    if crate::raw_input::events_require_host_terminal_theme_query(&events) {
+                        query_host_terminal_theme();
+                    }
+                    continue;
+                }
+                if crate::raw_input::events_require_host_terminal_appearance_query(&events) {
+                    query_host_terminal_appearance();
                 }
                 let data = if let Some(attach_escape) = &mut state.attach_escape {
                     match attach_escape.filter_input(

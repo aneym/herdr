@@ -184,6 +184,7 @@ pub(super) fn query_host_terminal_appearance() {
 
 #[cfg(any(not(windows), test))]
 pub(super) fn write_host_terminal_appearance_query(mut writer: impl io::Write) -> io::Result<()> {
+    #[cfg(any(not(windows), test))]
     writer.write_all(crate::terminal_theme::HOST_COLOR_SCHEME_QUERY_SEQUENCE.as_bytes())?;
     writer.flush()
 }
@@ -202,6 +203,19 @@ pub(super) fn write_host_terminal_theme_query(mut writer: impl io::Write) -> io:
     );
     writer.write_all(query.as_bytes())?;
     writer.flush()
+}
+
+pub(super) fn query_host_terminal_startup_theme() {
+    let _ = write_host_terminal_startup_theme_query(io::stdout());
+}
+
+pub(super) fn write_host_terminal_startup_theme_query(
+    mut writer: impl io::Write,
+) -> io::Result<()> {
+    write_host_terminal_theme_query(&mut writer)?;
+    #[cfg(any(not(windows), test))]
+    write_host_terminal_appearance_query(&mut writer)?;
+    Ok(())
 }
 
 const HOST_CELL_SIZE_QUERY: &[u8] = b"\x1b[16t";
@@ -246,4 +260,42 @@ pub(super) fn reported_cell_size_from_events(
         } => Some((*width_px, *height_px)),
         _ => None,
     })
+}
+
+pub(super) fn host_theme_update(
+    event: &crate::raw_input::RawInputEvent,
+) -> Option<crate::protocol::ClientHostThemeUpdate> {
+    use crate::protocol::{
+        ClientHostAppearance, ClientHostDefaultColorKind, ClientHostThemeUpdate,
+    };
+    use crate::raw_input::RawInputEvent;
+
+    match event {
+        RawInputEvent::HostDefaultColor { kind, color } => {
+            Some(ClientHostThemeUpdate::DefaultColor {
+                kind: match kind {
+                    crate::terminal_theme::DefaultColorKind::Foreground => {
+                        ClientHostDefaultColorKind::Foreground
+                    }
+                    crate::terminal_theme::DefaultColorKind::Background => {
+                        ClientHostDefaultColorKind::Background
+                    }
+                },
+                color: (*color).into(),
+            })
+        }
+        RawInputEvent::HostPaletteColors { colors } => Some(ClientHostThemeUpdate::PaletteColors(
+            colors
+                .iter()
+                .map(|(index, color)| (*index, (*color).into()))
+                .collect(),
+        )),
+        RawInputEvent::HostColorSchemeChanged(appearance) => {
+            Some(ClientHostThemeUpdate::Appearance(match appearance {
+                crate::terminal_theme::HostAppearance::Dark => ClientHostAppearance::Dark,
+                crate::terminal_theme::HostAppearance::Light => ClientHostAppearance::Light,
+            }))
+        }
+        _ => None,
+    }
 }
