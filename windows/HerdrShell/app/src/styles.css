@@ -144,3 +144,6 @@ footer { color: var(--shell-muted); padding: 12px 8px; font-size: 12px; overflow
 .areas-glyph.warn { color: var(--shell-warn); }
 .areas-park-note { display: block; overflow: hidden; text-overflow: ellipsis; font-size: var(--shell-type-row-trailing); color: var(--shell-muted); }
 .areas-parked-row { height: auto; min-height: var(--shell-space-row-height); padding-top: 4px; padding-bottom: 4px; }
+
+.areas-mode .spaces-fold-all { flex: 0 0 20px; padding: 0; background: none; border: 0; }
+.areas-mode .spaces-fold-all:hover { background: var(--shell-hover); }

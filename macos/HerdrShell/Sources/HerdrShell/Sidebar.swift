@@ -350,6 +350,10 @@ struct SidebarView: View {
                 Spacer(minLength: 0)
                 modeButton("Areas", .areas)
                 modeButton("Spaces", .spaces)
+                if state.mode == .spaces, !model.sidebarSpaces.isEmpty,
+                   !model.spacesRows(state: state).contains(where: { $0.kind == .goal }) {
+                    collapseSpacesButton
+                }
             }
             .padding(.leading, 52)
             .frame(height: 36)

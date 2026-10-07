@@ -28,6 +28,13 @@ import Foundation
         }
         var allInput = input
         allInput.tabs.append(.init(id: "leadAll", space: "a", label: "Lead", pinIndex: 4, role: "agent"))
+        var goalOverlay = Overlay()
+        var goalTag = Overlay.Tag(); goalTag.goal = "rails"; goalTag.section = "orchestrator"
+        goalOverlay.tabs["leadAll"] = goalTag
+        for (name, value) in [("goalPresent", goalOverlay), ("goalAbsent", Overlay())] {
+            let goalRows = SpacesTree.build(allInput, overlay: value, chrome: SpacesChrome(), now: 0)
+            print("\(name)|\(goalRows.contains { $0.kind == .goal })|\(!allInput.spaces.isEmpty)")
+        }
         var allChrome = SpacesChrome()
         allChrome.collapsedSections = ["d:SCOPING"]
         allChrome.expandedTabs = ["plain1"]

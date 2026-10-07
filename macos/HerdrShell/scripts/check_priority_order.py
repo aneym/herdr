@@ -65,6 +65,7 @@ check("reveal reports a change once, so a repeat select saves nothing", "reveal|
 check("remote tab homed by label reveals the local parked space", "remote|box/w1:t1|p|true" in rows and "tab:box/w1:t1" in selected("remote-box/w1:t1", "tab"))
 check("remote tab in its own parked space reveals that space", "remote|box/w2:t1|box/w2|true" in rows and "tab:box/w2:t1" in selected("remote-box/w2:t1", "tab"))
 check("remote parked tabs stay folded until selected", "tab:box/w2:t1" not in selected("remote-missing", "tab") and "remote|missing|-|false" in rows)
+check("goal-row and no-goal fallback inputs both list spaces", "goalPresent|true|true" in rows and "goalAbsent|false|true" in rows)
 check("collapse all persists folds, preserves inner state and keeps AGENTS/PINNED", "collapseAllChrome|5|false|true|true" in rows and "agent:leadAll" in selected("collapseAll", "tab") and "pinned:pin1" in selected("collapseAll", "tab") and "tab:plain1" not in selected("collapseAll", "tab"))
 check("expand all restores spaces including parked, leaving inner folds alone", "expandAllChrome|0|true|true|true" in rows and "tab:plain1" in selected("expandAll", "tab") and "tab:parkedtab" in selected("expandAll", "tab"))
 summary = f"{len(lines) - len(failures)}/{len(lines)} checks passed"

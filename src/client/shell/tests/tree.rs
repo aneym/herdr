@@ -2174,6 +2174,12 @@ fn request_dot_agents_only() {
 
 #[test]
 fn goal_row_folds_all_spaces_but_keeps_agent_and_pinned_rows() {
+    for goal_visible in [true, false] {
+        bulk_space_fold_scenario(goal_visible);
+    }
+}
+
+fn bulk_space_fold_scenario(goal_visible: bool) {
     let mut state = tree_state(ClientTreeChrome::default());
     state.config.factory.enabled = true;
     let mut overlay = crate::factory_overlay::FactoryOverlay::default();
@@ -2200,11 +2206,15 @@ fn goal_row_folds_all_spaces_but_keeps_agent_and_pinned_rows() {
         },
     ];
     state.set_snapshot(Box::new(snapshot));
-    state.factory_overlay = Some(std::sync::Arc::new(overlay));
+    state.factory_overlay = goal_visible.then(|| std::sync::Arc::new(overlay));
     state.set_pane_surface(surface());
     for collapsed in [true, false] {
         state.compose(106, 40).expect("frame");
-        let (row, _, _) = state.hits.factory_goal_picker.clone().expect("goal row");
+        assert_eq!(state.hits.factory_goal_picker.is_some(), goal_visible);
+        let (row, _) = state
+            .hits
+            .spaces_fold_all
+            .expect("bulk fold hit, even without goal row");
         state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column: row.right() - 1,

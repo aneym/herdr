@@ -57,6 +57,8 @@ describe.each([["plain", false], ["StrictMode", true]])("sidebar reveal on selec
   });
   it("collapses and expands every space without folding AGENTS or PINNED, and persists", () => {
     act(() => drive.select("a:1"));
+    expect(host.querySelector('.areas-mode [aria-label="Collapse all spaces"]')).not.toBeNull();
+    expect(host.textContent).not.toContain("goal");
     act(() => host.querySelector<HTMLButtonElement>('[aria-label="Collapse all spaces"]')!.click());
     for (const label of ["alpha", "beta", "rails"]) expect(open(label)).toBe("false");
     expect(host.querySelector('[data-row="pinned:a:2"]')).not.toBeNull();

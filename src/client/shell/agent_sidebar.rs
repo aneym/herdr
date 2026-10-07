@@ -165,6 +165,25 @@ pub(super) fn render_agent_panel_with_overlay(
             entries
         };
     super::tree::append_automations(&mut entries, tree, automations);
+    let fold_fallback = !snapshot.workspaces.is_empty()
+        && super::tree::tree_view_active(config)
+        && !entries.iter().any(|entry| {
+            matches!(
+                entry,
+                super::tree::AgentPanelListEntry::FactoryGoalPicker { .. }
+            )
+        });
+    let fold_on_pinned = entries
+        .iter()
+        .any(|entry| matches!(entry, super::tree::AgentPanelListEntry::PinnedChatsHeader));
+    let any_expanded = fold_fallback
+        && snapshot.workspaces.iter().any(|space| {
+            if space.parked {
+                tree.expanded_parked_spaces.contains(&space.workspace_id)
+            } else {
+                !tree.collapsed_spaces.contains(&space.workspace_id)
+            }
+        });
     // Usage and hosts are a fixed footer, not part of the scrolling spaces list.
     let footer_overlay = overlay.filter(|overlay| {
         snapshot.workspaces.iter().any(|space| {
@@ -235,6 +254,12 @@ pub(super) fn render_agent_panel_with_overlay(
         |buffer, rect, entry, hits| {
             super::sidebar_report::drawn(entry, rect.y.saturating_sub(list_area.y));
             render_panel_list_entry(buffer, rect, entry, config, hits);
+            if fold_fallback
+                && fold_on_pinned
+                && matches!(entry, super::tree::AgentPanelListEntry::PinnedChatsHeader)
+            {
+                render_spaces_fold_all(buffer, rect, any_expanded, config, hits);
+            }
         },
         |entry| match entry {
             super::tree::AgentPanelListEntry::FactoryTab(row) => {
@@ -245,6 +270,15 @@ pub(super) fn render_agent_panel_with_overlay(
         },
     );
     super::sidebar_report::end();
+    if fold_fallback && !fold_on_pinned && area.height >= 2 {
+        render_spaces_fold_all(
+            buffer,
+            Rect::new(area.x, area.y + 1, 10.min(area.width), 1),
+            any_expanded,
+            config,
+            hits,
+        );
+    }
     let mut y = area.bottom() - footer_height;
     for (rows, clickable) in [(&usage, true), (&hosts, false)] {
         if rows.is_empty() || y >= area.bottom() {
@@ -662,6 +696,25 @@ pub(super) fn render_pinned_tab_row(
         slot: row.slot,
     });
     machine_badge
+}
+
+fn render_spaces_fold_all(
+    buffer: &mut Buffer,
+    row: Rect,
+    expanded: bool,
+    config: &ClientShellConfig,
+    hits: &mut ShellHitMap,
+) {
+    let rect = Rect::new(row.right().saturating_sub(2), row.y, row.width.min(2), 1);
+    put_text(
+        buffer,
+        rect.x,
+        rect.y,
+        rect.width,
+        if expanded { " ▸" } else { " ▾" },
+        Style::default().fg(config.palette.subtext0),
+    );
+    hits.spaces_fold_all = Some((rect, expanded));
 }
 
 fn render_panel_list_entry(
