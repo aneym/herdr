@@ -101,7 +101,8 @@ final class TestHook {
         case "state":
             writeState(obj["out"] as? String ?? "/dev/stderr")
         case "shot":
-            shot(obj["out"] as? String ?? "/tmp/shot.png")
+            // {"cmd":"shot","out":path,"scale":2}: a scale above the display's renders in-process at that scale.
+            shot(obj["out"] as? String ?? "/tmp/shot.png", scale: obj["scale"] as? Double)
         case "mouse":
             mouse(obj)
         case "drag_divider":
@@ -728,7 +729,7 @@ final class TestHook {
     /// Captures this app's own window, Metal layers included, through the window
     /// server. CGWindowListCreateImage is obsoleted in the macOS 15 SDK, so it is
     /// looked up at runtime; capturing one's own window needs no Screen Recording grant.
-    func shot(_ out: String) {
+    func shot(_ out: String, scale: Double? = nil) {
         // Ask every surface for a fresh frame first: a pane that is not being presented
         // (locked screen, occluded window) may otherwise hand back its last frame.
         for v in controller?.registry.byTerminal.values ?? [:].values {
@@ -737,7 +738,9 @@ final class TestHook {
         RunLoop.current.run(until: Date().addingTimeInterval(0.4))
         var how = "window server"
         var img: CGImage?
-        if !agentRun, let w = controller?.window,
+        // A display at a lower scale than asked (the Cua Space is 1x) cannot give 2x pixels.
+        let rerender = scale.map { CGFloat($0) > (controller?.window.backingScaleFactor ?? 2) } ?? false
+        if !agentRun, !rerender, let w = controller?.window,
            let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGWindowListCreateImage") {
             typealias Fn = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
             let f = unsafeBitCast(sym, to: Fn.self)
@@ -754,8 +757,8 @@ final class TestHook {
             // transparent pixels. Render the window's layer tree in-process instead: it
             // has every fill and the Ghostty surfaces' IOSurface contents, but no
             // window-level blur, so glass shows as its (transparent) layer only.
-            img = renderLayers()
-            how = agentRun ? "cacheDisplay" : "layer render (window server capture was blank)"
+            img = renderLayers(scale: scale.map { CGFloat($0) })
+            how = rerender ? "layer render at \(scale ?? 0)x" : agentRun ? "cacheDisplay" : "layer render (window server capture was blank)"
         }
         guard let img else { log("shot: no image"); return }
         let rep = NSBitmapImageRep(cgImage: img)
@@ -773,15 +776,24 @@ final class TestHook {
         return px[3] == 0
     }
 
-    private func renderLayers() -> CGImage? {
+    private func renderLayers(scale asked: CGFloat? = nil) -> CGImage? {
         guard let view = controller?.window.contentView, let layer = view.layer,
               let cs = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
-        let scale = controller?.window.backingScaleFactor ?? 2
+        let scale = asked ?? controller?.window.backingScaleFactor ?? 2
         let w = Int(view.bounds.width * scale), h = Int(view.bounds.height * scale)
         guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: cs,
                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
         ctx.scaleBy(x: scale, y: scale)
-        if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+        // AppKit caches at the window's own scale; an asked-for scale needs a rep sized to it.
+        func cachingRep(_ v: NSView) -> NSBitmapImageRep? {
+            guard asked != nil else { return v.bitmapImageRepForCachingDisplay(in: v.bounds) }
+            let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(v.bounds.width * scale),
+                                       pixelsHigh: Int(v.bounds.height * scale), bitsPerSample: 8, samplesPerPixel: 4,
+                                       hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+            rep?.size = v.bounds.size
+            return rep
+        }
+        if let rep = cachingRep(view) {
             view.cacheDisplay(in: view.bounds, to: rep)
             if let cached = rep.cgImage {
                 ctx.draw(cached, in: CGRect(x: 0, y: 0, width: view.bounds.width, height: view.bounds.height))
@@ -800,7 +812,7 @@ final class TestHook {
         defer { controller?.state.flat = false }
         RunLoop.current.run(until: Date().addingTimeInterval(0.3))
         for v in hosted where !v.isHidden && v.bounds.width > 0 {
-            guard let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { continue }
+            guard let rep = cachingRep(v) else { continue }
             v.cacheDisplay(in: v.bounds, to: rep)
             guard let img = rep.cgImage else { continue }
             let f = v.convert(v.bounds, to: view)
@@ -927,7 +939,8 @@ final class TestHook {
             "face_frames": Dictionary(uniqueKeysWithValues: c.state.rowFrames.filter { $0.key.hasPrefix("face:") }
                 .map { ($0.key, windowFrame($0.value, in: c.sidebarHostView, c)) }),
             "face_pictures": FacePictures.shared.images.keys.sorted(),
-            "face_dots": ["working": ThemeStore.hex(c.theme.tokens.chrome.ok), "blocked": ThemeStore.hex(c.theme.tokens.chrome.accent)],
+            "face_dots": ["working": ThemeStore.hex(c.theme.tokens.chrome.ok), "blocked": ThemeStore.hex(c.theme.tokens.chrome.accent),
+                          "done": ThemeStore.hex(c.theme.tokens.chrome.warn)],
             // What ⌘1..9 select, in order (pins first).
             "numbered_tabs": Array(c.model.numberedTabIds(state: c.state).prefix(9)),
             "agent_tabs": c.model.numberedTabIds(state: c.state).filter { c.model.isAgent($0) },

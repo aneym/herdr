@@ -143,6 +143,21 @@ struct SpacesRow: Identifiable, Equatable {
     /// An AGENTS row's face: the agent's picture, else its initial on a tint.
     var face: Face?
     struct Face: Equatable { var initial: String; var tint: Int; var avatar: String? }
+    /// The dot set into the face, as a chrome token: an open request or a blocked agent needs you
+    /// (accent, the row's one blue dot, ahead of any other state), working is ok, done is warn,
+    /// idle shows none.
+    var faceDot: String? {
+        guard face != nil else { return nil }
+        if request != nil { return "accent" }
+        switch tone {
+        case "working": return "ok"
+        case "blocked": return "accent"
+        case "done": return "warn"
+        default: return nil
+        }
+    }
+    /// The trailing request dot, only on a row with no face to carry it.
+    var trailingRequest: String? { face == nil ? request : nil }
     /// Semantic rather than width-dependent: native fonts do not truncate like a terminal grid.
     /// A badge adds one field, so local rows dump as they always have.
     var dump: String {
@@ -187,7 +202,8 @@ enum SpacesTree {
         var hash: UInt32 = 7
         for scalar in key.lowercased().unicodeScalars { hash = hash &* 31 &+ scalar.value }
         // JS slice(0, 1) takes one UTF-16 unit; that is this first scalar except past the BMP, where
-        // Rails gets a lone surrogate it cannot draw, so the whole scalar stands in.
+        // Rails gets a lone surrogate it cannot draw; keeping the whole scalar there is deliberate, and the
+        // parity check leaves those names out.
         let initial = key.unicodeScalars.first.map { String($0).uppercased() } ?? "?"
         return SpacesRow.Face(initial: initial, tint: Int(hash % UInt32(faceTints)), avatar: avatar)
     }

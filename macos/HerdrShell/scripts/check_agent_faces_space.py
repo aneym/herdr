@@ -5,8 +5,10 @@ Run: HERDR_SHELL_SPACE=1 python3 scripts/check_agent_faces_space.py.
 The static section check owns the row contract; this one covers the live path it cannot reach:
 agent.json files on disk, matched by the server's real pane ids, reloaded when a card is added or
 removed, and drawn by the running app: the fetched picture, the initials and the status dots are
-read back from the screenshot's pixels at each face's drawn frame.
-Writes checks/AGENT-FACES-SPACE.txt and light/dark shots; never launch on the host.
+read back from the screenshot's pixels at each face's drawn frame. The states: working on an initial
+and on a picture, done, idle, and a needs-you row whose open request folds into its one blue dot,
+shown plain and selected.
+Writes checks/AGENT-FACES-SPACE.txt and 2x light/dark shots; never launch on the host.
 """
 import json
 import os
@@ -69,6 +71,23 @@ def face_pixels(png, state, tab):
     return box, quarter
 
 
+def shot_scale(png, state):
+    from PIL import Image
+    width = float(state["window_frame"].strip("{}").replace("{", "").replace("}", "").split(",")[2])
+    return round(Image.open(png).width / width, 2)
+
+
+def row_after_face(png, state, tab):
+    """The row's pixels from just past the face to the sidebar's edge, where a trailing dot would sit."""
+    from PIL import Image
+    img = Image.open(png).convert("RGB")
+    scale = shot_scale(png, state)
+    x, y, w, h = state["face_frames"]["face:agent:" + tab]
+    right = float(state["theme"]["sidebar_frame"].strip("{}").replace("{", "").replace("}", "").split(",")[2])
+    return [img.getpixel((int(px), int(py))) for px in range(int((x + w + 3) * scale), int(right * scale))
+            for py in range(int(y * scale), int((y + h) * scale))]
+
+
 def near(pixels, color, tolerance=40):
     return any(sum(abs(a - b) for a, b in zip(p, color)) <= tolerance for p in pixels)
 
@@ -97,9 +116,10 @@ def main():
     ws = made["workspace"]["workspace_id"]
     recruiter = made["tab"]["tab_id"]
     S.lab("herdr", "tab", "rename", recruiter, "Recruiter")
-    frank, content, home = [api("tab", "create", "--workspace", ws, "--label", name, "--no-focus")["tab"]["tab_id"]
-                            for name in ("Frank", "Content", "Home")]
-    for tab in (recruiter, frank, content, home):
+    frank, content, home, scout = [api("tab", "create", "--workspace", ws, "--label", name, "--no-focus")["tab"]["tab_id"]
+                                   for name in ("Frank", "Content", "Home", "Scout")]
+    tabs = (recruiter, frank, content, home, scout)
+    for tab in tabs:
         S.lab("herdr", "tab", "set-role", tab, "agent")
     pane = {p["tab_id"]: p["pane_id"] for p in api("pane", "list")["panes"]}
     shutil.rmtree(AGENTS, ignore_errors=True)
@@ -110,14 +130,16 @@ def main():
         (AGENTS / name).mkdir(parents=True)
         (AGENTS / name / "agent.json").write_text(json.dumps(card))
     os.environ["HERDR_AGENTS_DIR"] = str(AGENTS)
-    S.lab("herdr", "pane", "report-agent", pane[recruiter], "--source", "spike", "--agent", "claude", "--state", "working")
-    S.lab("herdr", "pane", "report-agent", pane[home], "--source", "spike", "--agent", "claude", "--state", "blocked")
+    for tab, state in ((recruiter, "working"), (frank, "working"), (content, "working"), (content, "idle"), (home, "blocked")):
+        S.lab("herdr", "pane", "report-agent", pane[tab], "--source", "spike", "--agent", "claude", "--state", state)
+    # Content went idle unseen, so it reads done. Home's open request is the row's blue dot.
+    S.lab("herdr", "pane", "report-metadata", pane[home], "--source", "spike", "--token", "request=req-7")
     S.app("start")
     S.cmd({"cmd": "activate"})
-    state = wait(lambda s: len(faces(s)) == 4 and (faces(s).get(frank) or "").endswith(PICTURE)
-                 and PICTURE in s.get("face_pictures", []) and len(s.get("face_frames", {})) == 4, 30)
+    state = wait(lambda s: len(faces(s)) == 5 and (faces(s).get(frank) or "").endswith(PICTURE)
+                 and PICTURE in s.get("face_pictures", []) and len(s.get("face_frames", {})) == 5, 30)
     got = faces(state)
-    check("every AGENTS row has a face", len(got) == 4 and all(got.values()), json.dumps(got))
+    check("every AGENTS row has a face", len(got) == 5 and all(got.values()), json.dumps(got))
     check("Frank's face carries its agent.json picture",
           (got.get(frank) or "").startswith("face:F:") and got[frank].endswith(":" + PICTURE), str(got.get(frank)))
     check("Recruiter and Home take their card initials, with no picture",
@@ -128,26 +150,39 @@ def main():
           not any("face:" in r for r in state.get("spaces_rows", []) if not r.split("|")[1].startswith("agent:")))
     check("Frank's picture was fetched", PICTURE in state.get("face_pictures", []))
     tones = {row.split("|")[1][len("agent:"):]: row.split("|")[5] for row in state.get("spaces_rows", []) if row.split("|")[1].startswith("agent:")}
-    check("Recruiter reads working and Home blocked", tones.get(recruiter) == "working" and tones.get(home) == "blocked", json.dumps(tones))
+    check("Recruiter and Frank read working, Content done, Home blocked, Scout unreported",
+          [tones.get(t) for t in tabs] == ["working", "working", "done", "blocked", "unknown"], json.dumps(tones))
     for mode in ("light", "dark"):
         S.cmd({"cmd": "appearance", "mode": mode})
         state = wait(lambda s: s.get("theme", {}).get("effective") == mode)
         check(mode + " appearance applied", state.get("theme", {}).get("effective") == mode)
-        time.sleep(0.5)
-        state = S.state()
-        png = str(ROOT / f"checks/AGENT-FACES-SPACE-{mode}.png")
-        S.cmd({"cmd": "shot", "out": png})
-        time.sleep(1)
-        dots = {k: rgb(v) for k, v in state["face_dots"].items()}
-        px = {tab: face_pixels(png, state, tab) for tab in (recruiter, frank, content, home)}
-        check(mode + ": Frank draws the picture, the initials do not",
-              # The black photo outweighs a tinted circle by a wide margin in either mode (about 0.25 measured).
-              all(dark_share(px[frank][0]) > dark_share(px[t][0]) + 0.15 for t in (recruiter, content, home)),
-              json.dumps({t: round(dark_share(px[t][0]), 2) for t in px}))
-        check(mode + ": a working dot on Recruiter, a blue needs-you dot on Home",
-              near(px[recruiter][1], dots["working"]) and near(px[home][1], dots["blocked"]))
-        check(mode + ": idle Frank and Content show no dot",
-              not any(near(px[t][1], c) for t in (frank, content) for c in dots.values()))
+        for selected in (None, home):
+            if selected:
+                S.cmd({"cmd": "select", "tab": selected})
+                state = wait(lambda s: s.get("selected_tab") == selected)
+            time.sleep(0.5)
+            state = S.state()
+            name = mode + ("-selected" if selected else "")
+            png = str(ROOT / f"checks/AGENT-FACES-SPACE-{name}.png")
+            S.cmd({"cmd": "shot", "out": png, "scale": 2})
+            time.sleep(1.5)
+            check(name + ": the shot is 2x", shot_scale(png, state) == 2, str(shot_scale(png, state)))
+            dots = {k: rgb(v) for k, v in state["face_dots"].items()}
+            px = {tab: face_pixels(png, state, tab) for tab in tabs}
+            if not selected:
+                check(name + ": Frank draws the picture, the initials do not",
+                      # The black photo outweighs a tinted circle by a wide margin in either mode (about 0.25 measured).
+                      all(dark_share(px[frank][0]) > dark_share(px[t][0]) + 0.15 for t in tabs if t != frank),
+                      json.dumps({t: round(dark_share(px[t][0]), 2) for t in px}))
+                check(name + ": working dots on Recruiter and on Frank's picture, a done dot on Content",
+                      near(px[recruiter][1], dots["working"]) and near(px[frank][1], dots["working"])
+                      and near(px[content][1], dots["done"]))
+                check(name + ": idle Scout shows no dot",
+                      not any(near(px[scout][1], c) for c in dots.values()))
+            check(name + ": Home's request is its face's blue dot, and the only one on its row",
+                  near(px[home][1], dots["blocked"]) and not near(row_after_face(png, state, home), dots["blocked"], 24))
+        S.cmd({"cmd": "select", "tab": recruiter})
+        wait(lambda s: s.get("selected_tab") == recruiter)
     S.cmd({"cmd": "appearance", "mode": "light"})
 
     # A card added or removed on disk reaches the row at the next poll.

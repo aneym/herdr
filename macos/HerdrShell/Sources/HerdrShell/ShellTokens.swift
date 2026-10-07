@@ -53,3 +53,15 @@ enum ShellRadius {
     static let composer: CGFloat = 14
     static let bubble: CGFloat = 16
 }
+
+enum ShellFace {
+    static let size: CGFloat = 16
+    static let dot: CGFloat = 6
+    static let dotGap: CGFloat = 1.5
+    static let dotOffset: CGFloat = 1
+    static let ring: CGFloat = 0.5
+    static let initial: CGFloat = 9.5
+    static let tintOpacityLight: CGFloat = 0.24
+    static let tintOpacityDark: CGFloat = 0.32
+    static let tints: [UInt32] = [0x8B5E3C, 0xE8483F, 0xF08A24, 0xF0B429, 0x3ECF8E, 0x2FBFA0, 0x3B93F0, 0x8B5CF6, 0xE152B0]
+}

@@ -2,69 +2,75 @@ import AppKit
 import SwiftUI
 
 /// An AGENTS row's face in place of its state glyph: the agent's picture, else its initial on a tint
-/// (Rails PersonFace). The state stays a small dot set into the lower right of the circle; an idle
-/// agent shows none, and nothing here is a filled count or a red badge.
+/// (Rails PersonFace). The state stays a small dot set into the lower right of the circle
+/// (SpacesRow.faceDot); an idle agent shows none, and nothing here is a filled count or a red badge.
+/// Sizes, tints and opacities are shell/tokens.json `face`, shared with the Windows client.
 struct AgentFace: View {
     let face: SpacesRow.Face
-    /// The row's tone (SpacesTree.mark): working, blocked, done, else quiet.
+    /// The dot's chrome token (ok, accent, warn), or nil for none.
+    let dot: String?
+    /// The row's tone (SpacesTree.mark), named on hover.
     let tone: String
+    /// An open request id; it owns the dot and the hover.
+    let request: String?
     let t: Tokens
     @ObservedObject private var pictures = FacePictures.shared
 
-    static let size: CGFloat = 16
-    static let dot: CGFloat = 6
-    /// Rails `TILE.wire` fills in personTint order: brun, rouge, orange, ambre, vert, turquoise, bleu, violet, rose.
-    static let tints: [UInt32] = [0x8B5E3C, 0xE8483F, 0xF08A24, 0xF0B429, 0x3ECF8E, 0x2FBFA0, 0x3B93F0, 0x8B5CF6, 0xE152B0]
-
     var body: some View {
+        let size = ShellFace.size, dot = ShellFace.dot, hole = ShellFace.dot + 2 * ShellFace.dotGap
         circle
-            .frame(width: Self.size, height: Self.size)
+            .frame(width: size, height: size)
             .mask {
                 // Cut a gap around the dot so it reads on any sidebar, glass or selection plate.
                 ZStack {
                     Circle()
                     if dotColor != nil {
-                        Circle().frame(width: Self.dot + 3, height: Self.dot + 3)
-                            .offset(x: (Self.size - Self.dot) / 2 + 0.5, y: (Self.size - Self.dot) / 2 + 0.5)
+                        let shift = (size - dot) / 2 + ShellFace.dotOffset / 2
+                        Circle().frame(width: hole, height: hole).offset(x: shift, y: shift)
                             .blendMode(.destinationOut)
                     }
                 }.compositingGroup()
             }
             .overlay(alignment: .bottomTrailing) {
                 if let dotColor {
-                    Circle().fill(dotColor).frame(width: Self.dot, height: Self.dot).offset(x: 1, y: 1)
+                    Circle().fill(dotColor).frame(width: dot, height: dot)
+                        .offset(x: ShellFace.dotOffset, y: ShellFace.dotOffset)
                 }
             }
             .task(id: face.avatar) { if let url = face.avatar { pictures.load(url) } }
-            .help(word.map { $0.prefix(1).uppercased() + $0.dropFirst() } ?? "")
+            .help(hover)
     }
 
     @ViewBuilder private var circle: some View {
         if let url = face.avatar, let image = pictures.images[url] {
+            // A picture brings its own background; a hairline ring gives it an edge in either theme.
             Image(nsImage: image).resizable().interpolation(.high).aspectRatio(contentMode: .fill)
+                .overlay(Circle().strokeBorder(t.line, lineWidth: ShellFace.ring))
         } else {
+            let tint = Color(hex: ShellFace.tints[face.tint % ShellFace.tints.count])
             ZStack {
-                Circle().fill(Color(hex: Self.tints[face.tint % Self.tints.count]).opacity(t.mode == .dark ? 0.32 : 0.24))
-                Text(face.initial).font(.system(size: 9.5, weight: .semibold)).foregroundStyle(t.ink)
+                Circle().fill(tint.opacity(t.mode == .dark ? ShellFace.tintOpacityDark : ShellFace.tintOpacityLight))
+                Text(face.initial).font(.system(size: ShellFace.initial, weight: .semibold)).foregroundStyle(t.ink)
             }
         }
     }
 
-    private var word: String? {
+    private var hover: String {
+        if let request { return "Needs you, request \(request)" }
         switch tone {
-        case "working": return "working"
-        case "blocked": return "needs you"
-        case "done": return "done"
-        default: return nil
+        case "working": return "Working"
+        case "blocked": return "Needs you"
+        case "done": return "Done"
+        default: return ""
         }
     }
 
-    /// Green while it works, blue when it needs you (the quiet "for you" dot), peach once done.
+    /// Green while it works, blue when it needs you (the one quiet "for you" dot), peach once done.
     private var dotColor: Color? {
-        switch tone {
-        case "working": return t.ok
-        case "blocked": return t.accent
-        case "done": return t.warn
+        switch dot {
+        case "ok": return t.ok
+        case "accent": return t.accent
+        case "warn": return t.warn
         default: return nil
         }
     }

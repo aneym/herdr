@@ -80,6 +80,14 @@ def swift(t):
             if not k.startswith("_"):
                 out.append(f"    static let {k}: CGFloat = {num(v)}")
         out.append("}")
+    face = t["face"]
+    out += ["", "enum ShellFace {"]
+    for k, v in face.items():
+        if k.startswith("_") or k == "tints":
+            continue
+        out.append(f"    static let {k}: CGFloat = {num(v)}")
+    out.append("    static let tints: [UInt32] = [" + ", ".join(f"0x{hex6(c)}" for c in face["tints"]) + "]")
+    out.append("}")
     return "\n".join(out) + "\n"
 
 
@@ -106,6 +114,13 @@ def css(t):
                 continue
             unit = "px"
             metrics.append(f"  --shell-{group}-{kebab(k)}: {num(v)}{unit};")
+    for k, v in t["face"].items():
+        if k.startswith("_"):
+            continue
+        if k == "tints":
+            metrics += [f"  --shell-face-tint-{i}: #{hex6(c)};" for i, c in enumerate(v)]
+        else:
+            metrics.append(f"  --shell-face-{kebab(k)}: {num(v)}{'' if k.startswith('tintOpacity') else 'px'};")
     out = [f"/* {HEADER} */",
            "/* Dark is the default; src/theme.ts sets data-theme from the Windows app theme. */",
            ':root, :root[data-theme="dark"] {', "  color-scheme: dark;", *css_colors(t, "dark"), "}",

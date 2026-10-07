@@ -23,7 +23,8 @@ struct SpacesRowView: View {
     var resume: () -> Void = {}
 
     static let chevronWidth: CGFloat = 9
-    static let glyphWidth: CGFloat = 12
+    /// One slot for a state glyph or an agent face, so AGENTS and PINNED titles line up.
+    static let glyphWidth: CGFloat = ShellFace.size
     static let alertWidth: CGFloat = 7
     /// Trailing text is at least as wide as a three-digit count, so "3" and "12" rows
     /// give their titles the same room.
@@ -44,7 +45,7 @@ struct SpacesRowView: View {
                 Color.clear.frame(width: Self.chevronWidth, height: 1)
             }
             if let face = row.face {
-                AgentFace(face: face, tone: row.tone, t: t).clickTarget("face:" + row.id)
+                AgentFace(face: face, dot: row.faceDot, tone: row.tone, request: row.request, t: t).clickTarget("face:" + row.id)
             } else if !row.glyph.isEmpty {
                 Text(row.glyph).font(.system(size: 10)).foregroundStyle(tone).frame(width: Self.glyphWidth)
             }
@@ -63,8 +64,8 @@ struct SpacesRowView: View {
                     // A footer's host name stays whole; its long summary is what gives way.
                     .layoutPriority(isFooter ? 2 : 0)
             }
-            if let request = row.request {
-                Circle().fill(t.accent).frame(width: 6, height: 6)
+            if let request = row.trailingRequest {
+                Circle().fill(t.accent).frame(width: ShellFace.dot, height: ShellFace.dot)
                     .help("request \(request)")
             }
             if let machine = row.badge { badge(machine) }

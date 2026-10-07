@@ -89,6 +89,23 @@
   --shell-radius-overlay: 10px;
   --shell-radius-composer: 14px;
   --shell-radius-bubble: 16px;
+  --shell-face-size: 16px;
+  --shell-face-dot: 6px;
+  --shell-face-dot-gap: 1.5px;
+  --shell-face-dot-offset: 1px;
+  --shell-face-ring: 0.5px;
+  --shell-face-initial: 9.5px;
+  --shell-face-tint-opacity-light: 0.24;
+  --shell-face-tint-opacity-dark: 0.32;
+  --shell-face-tint-0: #8B5E3C;
+  --shell-face-tint-1: #E8483F;
+  --shell-face-tint-2: #F08A24;
+  --shell-face-tint-3: #F0B429;
+  --shell-face-tint-4: #3ECF8E;
+  --shell-face-tint-5: #2FBFA0;
+  --shell-face-tint-6: #3B93F0;
+  --shell-face-tint-7: #8B5CF6;
+  --shell-face-tint-8: #E152B0;
 }
 /* Overlay-style scrollbars, as on macOS: no track or arrows, a thin rounded thumb
    that shows while the pointer is over the scroller. */
