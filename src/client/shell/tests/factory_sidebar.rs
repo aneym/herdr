@@ -4746,8 +4746,11 @@ fn priority_tree_keeps_original_workflow_parent() {
 
 #[test]
 fn tab_pulse_renders_one_muted_row_and_retains_tab_hit_target() {
+    let render = |snapshot: &ClientShellSnapshot, overlay: &FactoryOverlay| {
+        rendered_factory_rows_with_gap(snapshot, overlay, &ClientTreeChrome::default(), 25, 0)
+    };
     let (snapshot, mut overlay) = fixture();
-    let (_, base_hits, _) = rendered_factory_rows(&snapshot, &overlay);
+    let (_, base_hits, _) = render(&snapshot, &overlay);
     let base = base_hits
         .tree_headers
         .iter()
@@ -4759,7 +4762,7 @@ fn tab_pulse_renders_one_muted_row_and_retains_tab_hit_target() {
             line: line.into(),
             drifting: false,
         });
-        let (_, hits, _) = rendered_factory_rows(&snapshot, &overlay);
+        let (_, hits, _) = render(&snapshot, &overlay);
         assert_eq!(
             hits.tree_headers
                 .iter()
@@ -4775,7 +4778,7 @@ fn tab_pulse_renders_one_muted_row_and_retains_tab_hit_target() {
             line: "reply 18s · first act 9s · 140k · inline 0/5".into(),
             drifting,
         });
-        let (rows, hits, buffer) = rendered_factory_rows(&snapshot, &overlay);
+        let (rows, hits, buffer) = render(&snapshot, &overlay);
         let hit = hits
             .tree_headers
             .iter()

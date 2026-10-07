@@ -697,7 +697,7 @@ pub(super) struct FactoryTabRow {
     pub(super) phase: Option<String>,
     pub(super) started: Option<i64>,
     pub(super) summary: Option<String>,
-    pub(super) pulse: Option<crate::factory_overlay::TabPulse>,
+    pub(super) pulse: Option<Box<crate::factory_overlay::TabPulse>>,
     pub(super) attention: crate::factory_overlay::Attention,
     /// Derived from this client's live lane status, not the overlay's delayed idle hint.
     pub(super) idle: bool,
@@ -2540,7 +2540,8 @@ fn factory_row(
         summary: tag.and_then(|tag| tag.summary.clone()),
         pulse: tag
             .and_then(|tag| tag.pulse.clone())
-            .filter(|pulse| !pulse.line.trim().is_empty()),
+            .filter(|pulse| !pulse.line.trim().is_empty())
+            .map(Box::new),
         attention: tag.map_or(crate::factory_overlay::Attention::None, |tag| tag.attention),
         idle: lane_is_idle(tag, status, tab.work_status.is_some()),
         idle_reason: tag.and_then(|tag| tag.idle_reason.clone()),
