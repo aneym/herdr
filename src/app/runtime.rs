@@ -161,8 +161,8 @@ impl App {
                 .map(|last_render_at| last_render_at + MIN_RENDER_INTERVAL)
                 .into_iter()
                 .chain(scroll_deadline)
-                .min()
                 .filter(|deadline| *deadline > now)
+                .min()
         } else {
             None
         };
@@ -257,6 +257,12 @@ mod tests {
         assert_eq!(
             app.next_headless_loop_deadline_with_git_refresh(presented, true, false),
             Some(half_frame)
+        );
+
+        // Hidden-only work past the scroll deadline still wakes at the render cadence.
+        assert_eq!(
+            app.next_headless_loop_deadline_with_git_refresh(half_frame, true, false),
+            Some(presented + MIN_RENDER_INTERVAL)
         );
 
         let after_window = presented + SCROLL_PRESENT_WINDOW;

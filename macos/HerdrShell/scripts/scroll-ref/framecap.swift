@@ -5,6 +5,7 @@
 // "ms<TAB>shift_px<TAB>err<TAB>status": the vertical move of the content against the frame
 // before it (best match of per-row luminance sums; content moving down is positive) and
 // the match error per pixel (0 = an exact move). Idle reports (no change) are listed too.
+// OUT.ready appears once the stream runs; OUT ends with "# complete" only after a full capture.
 // Built and run inside the Cua Space (swiftc -O framecap.swift -o framecap).
 import CoreMedia
 import Foundation
@@ -66,6 +67,7 @@ Task {
         let stream = SCStream(filter: SCContentFilter(display: display, excludingWindows: []), configuration: config, delegate: nil)
         try stream.addStreamOutput(sink, type: .screen, sampleHandlerQueue: DispatchQueue(label: "cap"))
         try await stream.startCapture()
+        FileManager.default.createFile(atPath: out + ".ready", contents: nil)
         print("capturing \(rect) for \(seconds)s")
         try await Task.sleep(nanoseconds: UInt64(seconds * 1e9))
         try await stream.stopCapture()
@@ -89,5 +91,6 @@ for (t, sig) in frames {
     }
     prev = sig
 }
+lines.append("# complete")
 try! (lines.joined(separator: "\n") + "\n").write(toFile: out, atomically: true, encoding: .utf8)
 print("wrote \(frames.count) frames to \(out)")

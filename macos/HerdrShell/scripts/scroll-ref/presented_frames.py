@@ -11,7 +11,9 @@ the terminal (300x300 pt) through ScreenCaptureKit: one entry per frame the wind
 with how far the content moved. Raw logs go to OUT_DIR; the summary to OUT_DIR/summary.txt.
 Ghostty is confirmed gone before the Shell starts; the lock is kept if it is not.
 HERDR_SHELL_BIN picks the herdr server and attach binary (default ~/.local/bin/herdr).
-Exits 1 when any run captured no motion or fewer than MIN_MOVING moving frames.
+Each swipe waits for framecap's stream to run before injecting, and a capture must end
+with framecap's "# complete" line, or the run stops. Exits 1 when any run has fewer than
+MIN_MOVING moving frames or still moves within SETTLED_MS of the last reported frame.
 """
 import json
 import os
@@ -33,6 +35,7 @@ STD = (12, 30, 40, 0.92)  # check_scroll.PROFILES["std"]
 CAPTURE_S = 2.0
 W, H = 300, 300
 MIN_MOVING = 10  # a std swipe moves the content on about 20 presented frames
+SETTLED_MS = 200  # the swipe must come to rest this long before the capture stops
 GHOSTTY_ARGS = ("--font-family='SF Mono' --font-size=13.5 --adjust-cell-height=8% --window-position-x=80 "
                 "--window-position-y=60 --window-width=100 --window-height=36 --confirm-close-surface=false")
 
@@ -46,20 +49,28 @@ def swipe(x, y, label, out, log):
     """framecap in the background, then one std swipe at x,y; pulls the frame log."""
     guest = f"{G}/{label}.tsv"
     dy, steps, momentum, decay = STD
-    SP.gexec(f"rm -f {guest}; cd {G} && (nohup ./framecap {x - W // 2} {y - H // 2} {W} {H} {CAPTURE_S} {guest} "
-             f"> {G}/{label}.cap.log 2>&1 &) ; sleep 0.4; ./inject 0 {x} {y} {dy} {steps} {momentum} {decay} 8.3333 hid; "
-             f"sleep {CAPTURE_S}; for i in 1 2 3 4 5 6 7 8 9 10; do [ -s {guest} ] && break; sleep 0.3; done")
+    r = SP.gexec(f"rm -f {guest} {guest}.ready; cd {G} && (nohup ./framecap {x - W // 2} {y - H // 2} {W} {H} "
+                 f"{CAPTURE_S} {guest} > {G}/{label}.cap.log 2>&1 &) ; "
+                 f"for i in $(seq 50); do [ -e {guest}.ready ] && break; sleep 0.1; done; "
+                 f"[ -e {guest}.ready ] || {{ echo NOT-READY; cat {G}/{label}.cap.log; exit 0; }}; "
+                 f"./inject 0 {x} {y} {dy} {steps} {momentum} {decay} 8.3333 hid; sleep {CAPTURE_S}; "
+                 f"for i in $(seq 20); do tail -1 {guest} 2>/dev/null | grep -qx '# complete' && break; sleep 0.3; done; "
+                 f"tail -1 {guest} 2>/dev/null | grep -qx '# complete' || {{ echo NOT-COMPLETE; cat {G}/{label}.cap.log; }}",
+                 check=False)
+    if "NOT-READY" in r.stdout or "NOT-COMPLETE" in r.stdout:
+        raise SystemExit(f"{label}: framecap capture failed:\n{r.stdout.strip()}")
     local = os.path.join(out, f"{label}.tsv")
     SP.pull(guest, local)
     say(f"{label}: {open(local).readline().strip()}", log)
 
 
 def summarize(path):
-    rows = [line.split("\t") for line in open(path).read().splitlines()[1:]]
+    rows = [line.split("\t") for line in open(path).read().splitlines() if not line.startswith("#")]
     frames = [(float(t), int(s), float(e), kind) for t, s, e, kind in rows]
     moving = [f for f in frames if f[3] == "frame" and f[1] != 0]
     if not moving:
         return None
+    captured = frames[-1][0] - frames[0][0]
     start, end = moving[0][0], moving[-1][0]
     steps = [abs(f[1]) for f in moving]
     gaps = [b[0] - a[0] for a, b in zip(moving, moving[1:])]
@@ -67,7 +78,8 @@ def summarize(path):
     return {"moving_frames": len(moving), "span_ms": round(end - start, 1), "px_total": sum(steps),
             "px_per_frame": {n: steps.count(n) for n in sorted(set(steps))}, "max_px": max(steps),
             "longest_gap_ms": round(max(gaps), 1) if gaps else 0,
-            "refreshes_without_motion": len(still), "max_err": round(max(f[2] for f in moving), 3)}
+            "refreshes_without_motion": len(still), "max_err": round(max(f[2] for f in moving), 3),
+            "captured_ms": round(captured, 1), "settled_ms": round(frames[-1][0] - end, 1)}
 
 
 def ghostty_gone():
@@ -159,7 +171,7 @@ def main():
     for label in [f"{app}-{i + 1}" for app in ("ghostty", "shell") for i in range(runs)]:
         summary = summarize(os.path.join(out, label + ".tsv"))
         say(f"{label}: {json.dumps(summary)}", log)
-        if not summary or summary["moving_frames"] < MIN_MOVING:
+        if not summary or summary["moving_frames"] < MIN_MOVING or summary["settled_ms"] < SETTLED_MS:
             incomplete.append(label)
     if incomplete:
         say(f"INCOMPLETE capture: {', '.join(incomplete)}", log)
