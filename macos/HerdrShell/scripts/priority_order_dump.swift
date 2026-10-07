@@ -47,6 +47,14 @@ import Foundation
         let persistedFold = try JSONDecoder().decode(SpacesChrome.self, from: JSONEncoder().encode(folded))
         print("pinnedReveal|\(pinRevealed)|\(persistedFold.collapsedSpaces.contains("d"))")
         dump("revealPinned", chrome: persistedFold)
+        var agentInput = input
+        agentInput.tabs.append(.init(id: "lead", space: "d", label: "Lead", pinIndex: 3, role: "agent"))
+        var agentFold = persistedFold
+        let agentRows = SpacesTree.build(agentInput, overlay: Overlay(), chrome: agentFold, now: 0)
+        let agentRevealed = agentFold.reveal(space: "d", parked: false, selected: "lead", rows: agentRows)
+        let persistedAgentFold = try JSONDecoder().decode(SpacesChrome.self, from: JSONEncoder().encode(agentFold))
+        print("agentReveal|\(agentRevealed)|\(persistedAgentFold.collapsedSpaces.contains("d"))")
+        for row in SpacesTree.build(agentInput, overlay: Overlay(), chrome: persistedAgentFold, now: 0) { print("revealAgent|" + row.dump) }
         let unfolded = folded.reveal(space: "d", parked: false, selected: "plain1", rows: pinnedRows)
         dump("revealFolded", chrome: folded)
         var unparked = SpacesChrome()
