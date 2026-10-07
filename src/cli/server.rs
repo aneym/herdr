@@ -39,7 +39,8 @@ fn server_stop(args: &[String]) -> std::io::Result<i32> {
     }
 
     let socket = crate::session::active_api_socket_path();
-    if !crate::session::explicit_session_requested()
+    if std::env::var(crate::integration::HERDR_PANE_ID_ENV_VAR).is_ok_and(|pane| !pane.is_empty())
+        && !crate::session::explicit_session_requested()
         && std::env::var_os("XDG_CONFIG_HOME").is_some()
         && std::env::var_os(crate::api::SOCKET_PATH_ENV_VAR).is_some()
     {
@@ -73,11 +74,12 @@ pub(super) fn guard_self_stop(socket: &std::path::Path, force_self: bool) -> Res
     {
         return Ok(());
     }
-    let hosting_socket = std::env::var_os(crate::api::SOCKET_PATH_ENV_VAR)
+    let Some(hosting_socket) = std::env::var_os(crate::integration::HERDR_HOST_SOCKET_PATH_ENV_VAR)
+        .filter(|path| !path.is_empty())
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            crate::session::api_socket_path_for(crate::session::active_name().as_deref())
-        });
+    else {
+        return Ok(());
+    };
     let same_socket = socket == hosting_socket
         || std::fs::canonicalize(socket)
             .ok()

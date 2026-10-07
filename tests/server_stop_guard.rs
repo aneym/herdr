@@ -7,24 +7,55 @@ fn server_stop_guard_cli() {
     let root = std::env::temp_dir().join(format!("herdr-stop-guard-{}", std::process::id()));
     std::fs::create_dir_all(&root).expect("config directory");
     let host = root.join("host.sock");
-    let cases: &[(&[&str], bool, bool)] = &[
-        (&["server", "stop"], true, true),
-        (&["server", "stop", "--session", "other"], true, false),
-        (&["server", "stop"], false, false),
-        (&["server", "stop", "--force-self"], true, false),
-        (&["session", "stop", "other"], true, false),
+    let lab = root.join("lab.sock");
+    // args, pane identity, host marker, target override, expected refusal
+    type StopCase<'a> = (&'a [&'a str], bool, bool, Option<&'a std::path::Path>, bool);
+    let cases: &[StopCase<'_>] = &[
+        (&["server", "stop"], true, true, Some(&host), true),
+        (&["server", "stop"], true, true, Some(&lab), false),
+        (&["server", "stop"], true, true, None, false),
+        (&["server", "stop"], true, false, Some(&host), false),
+        (&["server", "stop"], false, false, Some(&host), false),
+        (
+            &["server", "stop", "--force-self"],
+            true,
+            true,
+            Some(&host),
+            false,
+        ),
+        (
+            &["server", "stop", "--session", "other"],
+            true,
+            true,
+            Some(&host),
+            false,
+        ),
+        (
+            &["session", "stop", "other"],
+            true,
+            true,
+            Some(&host),
+            false,
+        ),
     ];
-    for (args, inside, refused) in cases {
+    for (args, inside, marker, target, refused) in cases {
         let mut command = Command::new(env!("CARGO_BIN_EXE_herdr"));
         command
             .args(*args)
             .env("XDG_CONFIG_HOME", &root)
-            .env("HERDR_SOCKET_PATH", &host)
+            .env_remove("HERDR_SOCKET_PATH")
+            .env_remove("HERDR_HOST_SOCKET_PATH")
             .env_remove("HERDR_SESSION")
             .env_remove("HERDR_CLIENT_SOCKET_PATH")
             .env_remove("HERDR_PANE_ID");
         if *inside {
             command.env("HERDR_PANE_ID", "w1:p1");
+        }
+        if *marker {
+            command.env("HERDR_HOST_SOCKET_PATH", &host);
+        }
+        if let Some(target) = target {
+            command.env("HERDR_SOCKET_PATH", target);
         }
         let output = command.output().expect("run CLI");
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -42,13 +73,13 @@ fn server_stop_guard_cli() {
                 "{args:?}: {stderr}"
             );
         }
-        if args[0] == "server" && !args.contains(&"--session") {
-            assert!(
-                stderr.contains("HERDR_SOCKET_PATH takes precedence over XDG_CONFIG_HOME"),
-                "{stderr}"
-            );
-            assert!(stderr.contains(&host.display().to_string()), "{stderr}");
-        }
+        let warning =
+            *inside && target.is_some() && args[0] == "server" && !args.contains(&"--session");
+        assert_eq!(
+            stderr.contains("HERDR_SOCKET_PATH takes precedence over XDG_CONFIG_HOME"),
+            warning,
+            "{args:?}: {stderr}"
+        );
     }
     // Session stop must also protect the hosting session, including its explicit override.
     let app = if cfg!(debug_assertions) {
@@ -62,7 +93,8 @@ fn server_stop_guard_cli() {
         command
             .args(["session", "stop", "other"])
             .env("XDG_CONFIG_HOME", &root)
-            .env("HERDR_SOCKET_PATH", &session_socket)
+            .env("HERDR_SOCKET_PATH", &lab)
+            .env("HERDR_HOST_SOCKET_PATH", &session_socket)
             .env("HERDR_PANE_ID", "w1:p1")
             .env_remove("HERDR_SESSION")
             .env_remove("HERDR_CLIENT_SOCKET_PATH");

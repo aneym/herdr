@@ -5,6 +5,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use portable_pty::CommandBuilder;
 
+pub(crate) const HERDR_HOST_SOCKET_PATH_ENV_VAR: &str = "HERDR_HOST_SOCKET_PATH";
 pub(crate) const HERDR_PANE_ID_ENV_VAR: &str = "HERDR_PANE_ID";
 pub(crate) const HERDR_TAB_ID_ENV_VAR: &str = "HERDR_TAB_ID";
 pub(crate) const HERDR_WORKSPACE_ID_ENV_VAR: &str = "HERDR_WORKSPACE_ID";
@@ -26,7 +27,9 @@ pub(crate) const GROK_HOME_ENV_VAR: &str = "GROK_HOME";
 pub(crate) const HERMES_HOME_ENV_VAR: &str = "HERMES_HOME";
 
 pub(crate) fn apply_pane_base_env(cmd: &mut CommandBuilder) {
-    cmd.env(crate::api::SOCKET_PATH_ENV_VAR, crate::api::socket_path());
+    let socket = crate::api::socket_path();
+    cmd.env(crate::api::SOCKET_PATH_ENV_VAR, &socket);
+    cmd.env(HERDR_HOST_SOCKET_PATH_ENV_VAR, &socket);
     if let Ok(executable) = crate::platform::launch_executable() {
         cmd.env("HERDR_BIN_PATH", executable);
     }
