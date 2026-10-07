@@ -371,12 +371,13 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         window.setFrame(f, display: false)
     }
 
+    private var requestedRestarts: Set<String> = []
     private var reportedRestoreErrors: [String: String] = [:]
 
     private func reportRestoreErrors() {
         let panes = ([model.snapshot].compactMap { $0 } + model.machines.compactMap(\.snapshot)).flatMap(\.panes)
         let errors = Dictionary(panes.compactMap { pane in pane.restore_error.map { (pane.pane_id, $0) } }, uniquingKeysWith: { _, next in next })
-        let changed = errors.contains { reportedRestoreErrors[$0.key] != $0.value }
+        let changed = errors.contains { requestedRestarts.contains($0.key) && reportedRestoreErrors[$0.key] != $0.value }
         if !changed { reportedRestoreErrors = errors; return }
         if window.attachedSheet == nil {
             reportedRestoreErrors = errors
@@ -738,6 +739,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     private func restartAgent(_ id: String, force: Bool = false) {
+        requestedRestarts.insert(id)
         let commands = self.commands
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let reply = commands.restartAgent(paneId: id, force: force)
@@ -754,8 +756,10 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                         alert.addButton(withTitle: "Cancel")
                         alert.beginSheetModal(for: self.window) { [weak self] response in
                             if response == .alertFirstButtonReturn { self?.restartAgent(id, force: true) }
+                            else { self?.requestedRestarts.remove(id) }
                         }
                     } else {
+                        self.requestedRestarts.remove(id)
                         let alert = NSAlert()
                         alert.messageText = "Could not restart agent"
                         alert.informativeText = PaneRestart.message(code: code, fallback: message)

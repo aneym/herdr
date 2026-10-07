@@ -838,18 +838,49 @@ impl ClientShellState {
             force: false,
         } = &pending.kind
         {
-            if result
-                .as_ref()
-                .is_err_and(|error| error.code.as_deref() == Some("busy"))
-            {
+            if result.as_ref().is_err_and(|error| {
+                error.code.as_deref() == Some("busy") && error.message.ends_with(" is Working")
+            }) {
                 self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
                     target: ClientContextMenuTarget::RestartAgentConfirm {
                         pane_id: pane_id.clone(),
                     },
-                    x: 2,
-                    y: 2,
+                    x: self
+                        .hits
+                        .panes
+                        .iter()
+                        .find(|hit| hit.pane_id == *pane_id)
+                        .map_or(2, |hit| hit.rect.x),
+                    y: self
+                        .hits
+                        .panes
+                        .iter()
+                        .find(|hit| hit.pane_id == *pane_id)
+                        .map_or(2, |hit| hit.rect.y),
                     highlighted: 0,
                 }));
+                return (true, Vec::new());
+            }
+        }
+        if matches!(pending.kind, PendingEndpointKind::AgentRestart { .. }) {
+            if let Err(error) = &result {
+                let message = match error.code.as_deref() {
+                    Some("not_resumable" | "no_session") => {
+                        "This agent can't be resumed: no saved chat found."
+                    }
+                    Some("unsupported") => "Restart isn't supported for this agent yet.",
+                    Some("busy") if error.message.contains("previous restart") => {
+                        "This agent is already restarting. Wait for it to finish."
+                    }
+                    Some("busy") => "This agent is blocked. Resolve its prompt before restarting.",
+                    _ => "Could not restart the agent. Check the pane for errors.",
+                };
+                self.push_endpoint_notice(
+                    ClientEndpointNoticeKind::Rejected,
+                    "agent.restart",
+                    "Restart agent",
+                    message,
+                );
                 return (true, Vec::new());
             }
         }

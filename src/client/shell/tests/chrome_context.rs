@@ -629,7 +629,9 @@ fn section_divider_follows_the_pinned_agents_section_and_drags_with_the_pointer(
 fn pane_context_restart_routes_same_pane_and_requires_busy_confirmation() {
     // No PTY: drive the real context-menu input and endpoint response boundary.
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    state.set_snapshot(Box::new(snapshot()));
+    let mut snap = super::tree::tree_snapshot();
+    snap.agents[0].agent = Some("claude".into());
+    state.set_snapshot(Box::new(snap));
     state.set_pane_surface(surface());
     state.compose(106, 20).expect("pane frame");
     let pane = state.hits.panes[0].rect;
@@ -662,14 +664,14 @@ fn pane_context_restart_routes_same_pane_and_requires_busy_confirmation() {
         &request_id,
         Err(ClientShellEndpointError {
             code: Some("busy".into()),
-            message: "Agent is working".into(),
+            message: "agent in pane pane_1 is Working".into(),
         }),
     );
     let force_index = match state.overlay.as_ref() {
         Some(ClientShellOverlay::ContextMenu(menu)) => menu
             .items()
             .iter()
-            .position(|item| item.label == "Restart anyway")
+            .position(|item| item.label.starts_with("Restart anyway"))
             .expect("confirmation"),
         _ => panic!("restart confirmation"),
     };
@@ -684,35 +686,15 @@ fn pane_context_restart_routes_same_pane_and_requires_busy_confirmation() {
 }
 
 #[test]
-fn pane_title_ellipsis_opens_the_same_context_menu_without_a_pty() {
+fn pane_without_detected_agent_does_not_offer_restart() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
-    let mut title_surface = surface();
-    let mut buffer = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 12, 3));
-    buffer.set_string(0, 0, " Agent title", ratatui::style::Style::default());
-    title_surface.frame = FrameData::from_ratatui_buffer_with_hyperlinks(&buffer, None, &[]);
-    title_surface.panes[0].rect.width = 12;
-    title_surface.panes[0].rect.height = 3;
-    title_surface.panes[0].inner_rect.y = 1;
-    title_surface.panes[0].inner_rect.width = 12;
-    state.set_pane_surface(title_surface);
-    let frame = state.compose(106, 20).expect("pane title");
-    let pane = &state.hits.panes[0];
-    let x = pane.rect.right() - 5;
-    let y = pane.rect.y;
-    assert_eq!(
-        frame.cells[usize::from(y) * usize::from(frame.width) + usize::from(x)].symbol,
-        "⋯"
-    );
-    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
-        kind: MouseEventKind::Down(MouseButton::Left),
-        column: x,
-        row: y,
-        modifiers: KeyModifiers::empty(),
-    })]);
-    assert!(
-        matches!(state.overlay, Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
-        target: ClientContextMenuTarget::Pane { ref pane_id, .. }, ..
-    })) if pane_id == "pane_1")
-    );
+    state.open_pane_context_menu("pane_1".into(), 2, 2);
+    let Some(ClientShellOverlay::ContextMenu(menu)) = state.overlay else {
+        panic!("pane menu");
+    };
+    assert!(!menu
+        .items()
+        .iter()
+        .any(|item| item.action == ClientContextMenuAction::RestartAgent));
 }

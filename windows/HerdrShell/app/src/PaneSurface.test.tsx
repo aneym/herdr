@@ -16,10 +16,11 @@ afterEach(() => { dispose(); api.mockReset(); });
 function mount(hasAgent = true, restoreError?: string) {
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host); const onError = vi.fn();
-  act(() => root.render(<PaneSurface pane={{ restore_error: restoreError, pane_id: "pane_1", terminal_id: "term_1", tab_id: "tab_1", workspace_id: "ws_1" }} machine="studio" focused hasAgent={hasAgent} onFocus={() => {}} shortcut={() => false} register={() => {}} onError={onError} />));
+  const render = (restoreError?: string) => act(() => root.render(<PaneSurface pane={{ restore_error: restoreError, pane_id: "pane_1", terminal_id: "term_1", tab_id: "tab_1", workspace_id: "ws_1" }} machine="studio" focused hasAgent={hasAgent} onFocus={() => {}} shortcut={() => false} register={() => {}} onError={onError} />));
+  render(restoreError);
   dispose = () => { act(() => root.unmount()); host.remove(); };
   const click = async (selector: string) => { const button = host.querySelector<HTMLButtonElement>(selector); expect(button, selector).not.toBeNull(); await act(async () => { button!.click(); }); };
-  return { host, click, onError };
+  return { host, click, onError, render };
 }
 it("opens the pane menu and disables restart without an agent", async () => {
   const { host, click } = mount(false);
@@ -29,7 +30,7 @@ it("opens the pane menu and disables restart without an agent", async () => {
   expect(api).not.toHaveBeenCalled();
 });
 it("restarts the same pane and only forces after busy confirmation", async () => {
-  api.mockRejectedValueOnce("herdr api error busy: Agent is working").mockResolvedValueOnce({ ok: true });
+  api.mockRejectedValueOnce("herdr api error busy: agent in pane pane_1 is Working").mockResolvedValueOnce({ ok: true });
   const { host, click } = mount();
   await click('[aria-label="Pane actions"]'); await click('[role="menuitem"]');
   expect(api.mock.calls).toEqual([["studio", "agent.restart", { pane_id: "pane_1" }]]);
@@ -45,7 +46,7 @@ it("reports non-busy errors through the existing shell notice", async () => {
   expect(onError).toHaveBeenCalledWith("This agent can't be resumed: no saved chat found.");
 });
 it("canceling busy confirmation never sends a forced restart", async () => {
-  api.mockRejectedValueOnce({ code: "busy", message: "Working" });
+  api.mockRejectedValueOnce({ code: "busy", message: "agent in pane pane_1 is Working" });
   const { host, click } = mount();
   await click('[aria-label="Pane actions"]'); await click('[role="menuitem"]');
   await click('[role="dialog"] button:last-child');
@@ -54,20 +55,37 @@ it("canceling busy confirmation never sends a forced restart", async () => {
 });
 
 it("busy confirmation uses Enter to restart and Escape to cancel", async () => {
-  api.mockRejectedValueOnce({ code: "busy", message: "Working" }).mockResolvedValueOnce({ ok: true });
+  api.mockRejectedValueOnce({ code: "busy", message: "agent in pane pane_1 is Working" }).mockResolvedValueOnce({ ok: true });
   const { host, click } = mount();
   await click('[aria-label="Pane actions"]'); await click('[role="menuitem"]');
   await act(async () => { host.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
   expect(api).toHaveBeenCalledTimes(1);
   expect(host.querySelector('[role="dialog"]')).toBeNull();
   // Reopen with another busy reply, then confirm through the focused primary action.
-  api.mockReset(); api.mockRejectedValueOnce({ code: "busy", message: "Working" }).mockResolvedValueOnce({ ok: true });
+  api.mockReset(); api.mockRejectedValueOnce({ code: "busy", message: "agent in pane pane_1 is Working" }).mockResolvedValueOnce({ ok: true });
   await click('[aria-label="Pane actions"]'); await click('[role="menuitem"]');
   await act(async () => { host.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
   expect(api.mock.calls[1]).toEqual(["studio", "agent.restart", { pane_id: "pane_1", force: true }]);
 });
 
-it("shows asynchronous restart failure from pane.updated snapshot metadata", () => {
+it("does not alert on a pre-existing restore failure at mount", () => {
   const { onError } = mount(true, "start_failed: could not resume agent");
+  expect(onError).not.toHaveBeenCalled();
+});
+
+it.each(["agent in pane pane_1 is Blocked", "previous restart is still completing"])("does not offer force for non-working busy: %s", async message => {
+  api.mockRejectedValueOnce({ code: "busy", message });
+  const { host, click, onError } = mount();
+  await click('[aria-label="Pane actions"]'); await click('[role="menuitem"]');
+  expect(host.querySelector('[role="dialog"]')).toBeNull();
+  expect(onError).toHaveBeenCalled();
+  expect(api).toHaveBeenCalledTimes(1);
+});
+
+it("alerts on restore_error arriving after this pane restart was accepted", async () => {
+  api.mockResolvedValueOnce({ ok: true });
+  const { click, render, onError } = mount();
+  await click('[aria-label="Pane actions"]'); await click('[role="menuitem"]');
+  render("start_failed: could not resume agent");
   expect(onError).toHaveBeenCalledWith("The agent didn't come back up. Check the pane for errors.");
 });

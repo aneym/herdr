@@ -10,7 +10,10 @@ impl ClientContextMenuOverlay {
         };
         match &self.target {
             ClientContextMenuTarget::RestartAgentConfirm { .. } => vec![
-                item("Restart anyway", Action::RestartAgentForce),
+                item(
+                    "Restart anyway — it will resume the same chat",
+                    Action::RestartAgentForce,
+                ),
                 item("Cancel", Action::CancelRestart),
             ],
             ClientContextMenuTarget::FactoryGoalPicker(choices) => {
@@ -229,14 +232,16 @@ impl ClientContextMenuOverlay {
             }
             ClientContextMenuTarget::Pane {
                 source_pane_id,
+                has_agent,
                 has_manual_label,
                 right_click_passthrough,
                 ..
             } => {
-                let mut items = vec![
-                    item("Restart agent", Action::RestartAgent),
-                    item("Rename pane", Action::RenamePane),
-                ];
+                let mut items = Vec::new();
+                if *has_agent {
+                    items.push(item("Restart agent", Action::RestartAgent));
+                }
+                items.push(item("Rename pane", Action::RenamePane));
                 items.push(item("Send to profile", Action::SendToProfile));
                 items.push(item("Share profiles", Action::ShareProfiles));
                 if *has_manual_label {
@@ -586,9 +591,13 @@ impl ClientShellState {
             .filter(|focused| focused != &pane_id);
         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
             target: ClientContextMenuTarget::Pane {
-                pane_id,
+                pane_id: pane_id.clone(),
                 workspace_id: pane.workspace_id.clone(),
                 source_pane_id,
+                has_agent: snapshot
+                    .agents
+                    .iter()
+                    .any(|agent| agent.pane_id == pane_id && agent.agent.is_some()),
                 has_manual_label: pane.label.is_some(),
                 right_click_passthrough: pane.right_click_passthrough,
             },

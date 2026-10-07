@@ -13,8 +13,11 @@ with tempfile.TemporaryDirectory(prefix="pane-restart-", dir=os.environ.get("TMP
 precondition(!PaneRestart.enabled(hasAgent: false))
 precondition(PaneRestart.enabled(hasAgent: true))
 precondition(PaneRestart.next(code: nil, message: "", forced: false) == .done)
-precondition(PaneRestart.next(code: "busy", message: "working", forced: false) == .confirm)
-precondition(PaneRestart.next(code: "busy", message: "working", forced: true) == .error("working"))
+precondition(PaneRestart.next(code: "busy", message: "agent in pane pane_1 is Working", forced: false) == .confirm)
+precondition(PaneRestart.next(code: "busy", message: "agent in pane pane_1 is Working", forced: true) == .error("agent in pane pane_1 is Working"))
+for message in ["agent in pane pane_1 is Blocked", "previous restart is still completing"] {
+    precondition(PaneRestart.next(code: "busy", message: message, forced: false) == .error(message))
+}
 for code in ["not_resumable", "no_session", "unsupported", "transport"] {
     precondition(PaneRestart.next(code: code, message: "server message", forced: false) == .error("server message"))
 }
@@ -44,7 +47,7 @@ with tempfile.TemporaryDirectory(prefix="restart-api-", dir=os.environ.get("TMPD
             with conn:
                 line = conn.makefile("rb").readline()
                 calls.append(json.loads(line))
-                reply = {"error": {"code": code, "message": "working"}} if code else {"result": {"ok": True, "command_summary": "resume"}}
+                reply = {"error": {"code": code, "message": "agent in pane pane_1 is Working"}} if code else {"result": {"ok": True, "command_summary": "resume"}}
                 conn.sendall((json.dumps(reply) + "\n").encode())
     worker = threading.Thread(target=serve, daemon=True)
     worker.start()

@@ -670,24 +670,6 @@ impl ClientShellState {
     }
 
     pub(super) fn handle_mouse(&mut self, mouse: MouseEvent, outcome: &mut ClientShellInput) {
-        if mouse.kind == MouseEventKind::Down(MouseButton::Left) && self.overlay.is_none() {
-            let pane_id = self
-                .hits
-                .panes
-                .iter()
-                .find(|hit| {
-                    hit.rect.width >= 8
-                        && hit.inner_rect.y > hit.rect.y
-                        && mouse.row == hit.rect.y
-                        && mouse.column == hit.rect.right().saturating_sub(5)
-                })
-                .map(|hit| hit.pane_id.clone());
-            if let Some(pane_id) = pane_id {
-                self.open_pane_context_menu(pane_id, mouse.column, mouse.row);
-                outcome.repaint = true;
-                return;
-            }
-        }
         if self.handle_pane_location_mouse(mouse, outcome) {
             return;
         }
