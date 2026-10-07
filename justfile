@@ -65,6 +65,10 @@ setup-windows-cross *args:
 windows-lint:
     {{python}} scripts/windows_cross.py lint
 
+# Compile the Tauri shell on Windows MSVC when installed, otherwise on the host
+win-tauri-check:
+    {{python}} scripts/win_tauri_check.py
+
 # Check formatting + run unit tests + Windows target lint + documentation contract tests
 [unix]
 check: ci windows-lint
