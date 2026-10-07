@@ -32,7 +32,8 @@ Lab `shellspike-scroll`; pane 1 of "shell spike" holds 3000 numbered lines.
    HERDR_SHELL_BIN) over the forwarded lab socket. Four trackpad swipes (scroll_gesture
    hook: slow, medium, std, fast; see PROFILES) run; each must scroll Ghostty.app's rows
    for the same swipe within GHOSTTY_TOLERANCE. The std swipe's client-side frame log
-   (top visible row per 1/120 s tick) goes next to --out, with its cadence logged.
+   (top visible row per 1/120 s tick) goes next to --out; no visible change may jump more
+   rows or wait longer than Ghostty.app's own frames for that swipe (GHOSTTY_STD_*).
 """
 import json
 import os
@@ -78,6 +79,13 @@ PROFILES = {"slow": (2, 60, 0, 0.92), "medium": (6, 30, 40, 0.92),
 # 2026-10-06: slow 10/10/10, medium 18/18/17, std 38/38/39, fast 54/56/56.
 GHOSTTY_ROWS = {"slow": 10, "medium": 18, "std": 38, "fast": 55}
 GHOSTTY_TOLERANCE = 0.15
+# Ghostty.app's own frames for the std swipe, same Space and font (60 fps display), from
+# wheellog arrival times bucketed per frame by scripts/scroll-ref/ghostty_ref.py. Three runs,
+# 2026-10-06: 23/23/21 frames with rows, at most 2/2/3 rows in one frame, longest gap
+# between rows 51/65/52 ms (all in the momentum tail). Ghostty takes the 120 Hz events in
+# pairs, so 2 rows a frame is its steady state and 3 happens.
+GHOSTTY_STD_FRAME_ROWS = 3
+GHOSTTY_STD_GAP_MS = 65.2
 
 
 def say(s=""):
@@ -398,10 +406,20 @@ def main():
         jumps = [d for _, d in changes]
         gaps = [b[0] - a[0] for a, b in zip(changes, changes[1:])]
         if jumps and gaps:
-            say(f"std cadence: {len(changes)} visible changes, rows per change {sorted(set(jumps))}, "
+            say(f"std cadence: {len(changes)} visible changes, rows per change "
+                f"{ {n: jumps.count(n) for n in sorted(set(jumps))} }, "
                 f"ms between changes median {sorted(gaps)[len(gaps) // 2]:.1f} max {max(gaps):.1f}")
         m = re.search(r"events=(\d+) precise=(\d+)", head)
         check("every gesture event reached the surface as precise", bool(m) and m.group(1) == m.group(2), head)
+        # Smoothness (Alex 17:10, "not smooth"): no visible change of the std swipe jumps
+        # further, or waits longer, than Ghostty.app's own frames do for the same swipe.
+        check("std swipe moves no more rows in one visible change than a Ghostty.app frame",
+              bool(jumps) and max(jumps) <= GHOSTTY_STD_FRAME_ROWS,
+              f"Shell max {max(jumps) if jumps else None}, Ghostty max {GHOSTTY_STD_FRAME_ROWS}")
+        check("std swipe pauses between visible changes no longer than Ghostty.app's frames",
+              bool(gaps) and max(gaps) <= GHOSTTY_STD_GAP_MS * (1 + GHOSTTY_TOLERANCE),
+              f"Shell max {max(gaps) if gaps else 0:.1f} ms, Ghostty max {GHOSTTY_STD_GAP_MS} ms "
+              f"+{GHOSTTY_TOLERANCE:.0%}")
     say(f"lab down: {S.lab('down').strip()}")
     say()
     say(f"RESULT: {'PASS' if not failures else 'FAIL ' + ', '.join(failures)}")
