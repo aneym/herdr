@@ -19,11 +19,17 @@ def allowed_path(path):
     return path
 
 
+ROOT_FDS = {}
+
+
 def open_beneath(path, flags):
     """Opens a canonical allowed path one component at a time from its root, never following a
     symlink, so a component swapped for one after allowed_path cannot lead outside the roots."""
     root = next(root for root in ROOTS if path.startswith(root + os.sep))
-    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    if root not in ROOT_FDS:
+        # Held for the session: a root renamed or replaced later cannot redirect the walk.
+        ROOT_FDS[root] = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    fd = os.dup(ROOT_FDS[root])
     try:
         parts = path[len(root) + 1:].split(os.sep)
         for part in parts[:-1]:
