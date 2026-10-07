@@ -6,6 +6,7 @@ use super::{model::LoadedConfig, Config, CONFIG_PATH_ENV_VAR};
 
 const KNOWN_TOP_LEVEL_CONFIG_KEYS: &[&str] = &[
     "advanced",
+    "agent_restart",
     "experimental",
     "keys",
     "onboarding",
@@ -891,6 +892,36 @@ mod tests {
 
         std::env::remove_var(CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn config_loaders_accept_agent_restart_launchers_without_warning() {
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "herdr-config-agent-restart-{}.toml",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            "[agent_restart.launchers]\nclaude = \"claude-lb-launch\"\n",
+        )
+        .unwrap();
+        std::env::set_var(CONFIG_PATH_ENV_VAR, &path);
+
+        let startup = Config::load();
+        let reload = load_live_config();
+
+        std::env::remove_var(CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_file(path);
+
+        for loaded in [startup, reload.unwrap()] {
+            assert!(loaded.diagnostics.is_empty(), "{:?}", loaded.diagnostics);
+            assert!(loaded.invalid_sections.is_empty());
+            assert_eq!(
+                loaded.config.agent_restart.launchers["claude"],
+                "claude-lb-launch"
+            );
+        }
     }
 
     #[test]
