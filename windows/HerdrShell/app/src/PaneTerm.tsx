@@ -5,6 +5,7 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { bridge, fromBase64, toBase64 } from "./bridge";
 import { installLinks } from "./links";
+import type { LinkRegion } from "./links";
 import type { Mode } from "./bridge";
 import type { Pane } from "./model";
 import { copy, paste, controlKey, handleKey } from "./keys";
@@ -34,8 +35,11 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
     term.loadAddon(fit);
     term.loadAddon(new Unicode11Addon());
     term.unicode.activeVersion = "11";
-    installLinks(term, uri => { void bridge.openUrl(uri).catch(error => setNotice(String(error))); });
     term.open(host.current);
+    installLinks(term, {
+      resolve: async (viewport_row, col) => (await bridge.api(machine, "pane.link.resolve", { pane_id: pane.pane_id, viewport_row, col }) as { regions: LinkRegion[] }).regions,
+      activate: async (viewport_row, col) => await bridge.api(machine, "pane.link.activate", { pane_id: pane.pane_id, viewport_row, col }) as { url?: string; handled: boolean },
+    }, uri => { void bridge.openUrl(uri).catch(error => setNotice(String(error))); });
     const unsubscribeTheme = appTheme().subscribe(mode => { term.options.theme = terminalThemes[mode]; });
     try { const webgl = new WebglAddon(); webgl.onContextLoss(() => webgl.dispose()); term.loadAddon(webgl); } catch { /* DOM renderer remains available without WebGL. */ }
     let disposed = false;
