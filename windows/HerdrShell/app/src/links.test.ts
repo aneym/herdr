@@ -121,12 +121,17 @@ describe("terminal link clicks", () => {
     expect(open).not.toHaveBeenCalled();
     expect(sent).toEqual(["\x1b[<16;11;1M", "\x1b[<16;13;1m"]);
   });
-  it("a window that loses focus mid-click replays the held press and holds nothing after", async () => {
+  it.each([
+    ["the window loses focus", () => window.dispatchEvent(new Event("blur"))],
+    ["the window is hidden", () => document.dispatchEvent(new Event("visibilitychange"))],
+    ["the pointer is cancelled", (screen: Element) => screen.dispatchEvent(new Event("pointercancel", { bubbles: true }))],
+  ] as const)("a click cut off because %s replays the held press and holds nothing after", async (_name, cut) => {
     const sent: string[] = [];
     const { term, gate } = await pane(wrapped);
-    term.element!.querySelector(".xterm-screen")!.dispatchEvent(at("mousedown", 1, 4));
+    const screen = term.element!.querySelector(".xterm-screen")!;
+    screen.dispatchEvent(at("mousedown", 1, 4));
     expect(gate.hold("\x1b[<16;5;2M", () => sent.push("press"))).toBe(true);
-    window.dispatchEvent(new Event("blur"));
+    cut(screen);
     expect(sent).toEqual(["press"]);
     expect(gate.hold("\x1b[<35;6;2M", () => {})).toBe(false);
   });

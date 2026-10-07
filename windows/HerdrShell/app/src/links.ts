@@ -90,15 +90,17 @@ export function installLinks(term: Terminal, server: LinkServer, open: (url: str
     void (uri != null ? finish(g, cell, uri) : resolve(g, cell)).then(hit => settle(g, hit), () => settle(g, false));
   };
   // A release outside the grid ends the gesture before xterm reports it from the document; a
-  // window that loses focus may never see the release at all.
+  // window that loses focus or is hidden, or a cancelled pointer, may never see the release at all.
   const away = (event: Event) => { if (gesture && !(screen && event.target instanceof Node && screen.contains(event.target))) settle(gesture, false); };
-  const blur = () => { if (gesture) settle(gesture, false); };
+  const cancel = () => { if (gesture) settle(gesture, false); };
   screen?.addEventListener("mousedown", down);
   screen?.addEventListener("mouseup", up);
   window.addEventListener("mouseup", away, true);
-  window.addEventListener("blur", blur);
+  window.addEventListener("blur", cancel);
+  window.addEventListener("pointercancel", cancel, true);
+  document.addEventListener("visibilitychange", cancel);
   return {
     hold: (data, flush) => { if (!mouseReport(data) || (!gesture && !queue.length)) return false; queue.push({ g: gesture, flush }); return true; },
-    dispose: () => { screen?.removeEventListener("mousedown", down); screen?.removeEventListener("mouseup", up); window.removeEventListener("mouseup", away, true); window.removeEventListener("blur", blur); },
+    dispose: () => { screen?.removeEventListener("mousedown", down); screen?.removeEventListener("mouseup", up); window.removeEventListener("mouseup", away, true); window.removeEventListener("blur", cancel); window.removeEventListener("pointercancel", cancel, true); document.removeEventListener("visibilitychange", cancel); },
   };
 }
