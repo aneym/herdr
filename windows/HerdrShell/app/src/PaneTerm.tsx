@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { bridge, fromBase64, toBase64 } from "./bridge";
+import { installLinks } from "./links";
 import type { Mode } from "./bridge";
 import type { Pane } from "./model";
 import { copy, paste, controlKey, handleKey } from "./keys";
@@ -34,7 +34,7 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
     term.loadAddon(fit);
     term.loadAddon(new Unicode11Addon());
     term.unicode.activeVersion = "11";
-    term.loadAddon(new WebLinksAddon((event, uri) => { if (event.ctrlKey) void bridge.openUrl(uri).catch(error => setNotice(String(error))); }));
+    installLinks(term, uri => { void bridge.openUrl(uri).catch(error => setNotice(String(error))); });
     term.open(host.current);
     const unsubscribeTheme = appTheme().subscribe(mode => { term.options.theme = terminalThemes[mode]; });
     try { const webgl = new WebglAddon(); webgl.onContextLoss(() => webgl.dispose()); term.loadAddon(webgl); } catch { /* DOM renderer remains available without WebGL. */ }
