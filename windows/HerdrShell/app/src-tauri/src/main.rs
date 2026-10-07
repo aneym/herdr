@@ -85,6 +85,16 @@ fn ctl_drag_divider_result(result: serde_json::Value) -> Result<(), String> {
     control::deliver_result("drag_divider", result)
 }
 
+#[tauri::command]
+fn ctl_link_click_result(result: serde_json::Value) -> Result<(), String> {
+    control::deliver_result("link_click", result)
+}
+
+#[tauri::command]
+fn ctl_copy_selection_result(result: serde_json::Value) -> Result<(), String> {
+    control::deliver_result("copy_selection", result)
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -108,6 +118,8 @@ fn main() {
             ctl_appearance_result,
             ctl_drag_pin_result,
             ctl_drag_divider_result,
+            ctl_link_click_result,
+            ctl_copy_selection_result,
             bridge::machines_list,
             bridge::snapshot,
             bridge::api_request,
