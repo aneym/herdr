@@ -19,6 +19,22 @@ def allowed_path(path):
     return path
 
 
+def open_beneath(path, flags):
+    """Opens a canonical allowed path one component at a time from its root, never following a
+    symlink, so a component swapped for one after allowed_path cannot lead outside the roots."""
+    root = next(root for root in ROOTS if path.startswith(root + os.sep))
+    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        parts = path[len(root) + 1:].split(os.sep)
+        for part in parts[:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        return os.open(parts[-1], flags | os.O_NOFOLLOW, dir_fd=fd)
+    finally:
+        os.close(fd)
+
+
 def metadata(info):
     return {"size": info.st_size, "mtime_ms": max(0, info.st_mtime_ns // 1000000),
             "inode": info.st_ino}
@@ -30,10 +46,10 @@ def request(req):
         return {"home": HOME}
     if op == "list":
         # Entry names only, for card folders such as ~/.agent-rails/agents. As in read, the
-        # listing goes through the opened directory, checked to still be the allowed one.
+        # listing goes through the directory opened beneath its root, checked to still be the allowed one.
         path = allowed_path(req.get("path"))
         try:
-            fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+            fd = open_beneath(path, os.O_RDONLY | os.O_DIRECTORY)
         except FileNotFoundError:
             return {"names": []}
         try:
@@ -65,7 +81,7 @@ def request(req):
             type(maximum) is not int or not 0 <= maximum <= 2**32 - 1):
         raise ValueError("invalid read range")
     # Nonblocking open prevents a swapped-in FIFO from hanging the helper.
-    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    fd = open_beneath(path, os.O_RDONLY | os.O_NONBLOCK)
     with os.fdopen(fd, "rb") as file:
         info = os.fstat(file.fileno())
         realpath = allowed_path(path)
