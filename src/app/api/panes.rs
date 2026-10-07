@@ -2311,6 +2311,9 @@ fn invalid_agent(id: String) -> String {
 }
 
 #[cfg(test)]
+mod pane_place_scenario;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
