@@ -1,4 +1,4 @@
 title|agents|0|none||mute|agents||none||||
 space|space:ws|0|open||mute|factory||none||lane|space:ws|
-section|section:ws:IMPLEMENTING|1|open||mute|IMPLEMENTING|⌘1..9|none|||section:ws:IMPLEMENTING|
+section|section:ws:IMPLEMENTING|1|open||mute|IMPLEMENTING||none|||section:ws:IMPLEMENTING|
 tab|tab:lane|1|closed|●|working|lane|1 workflow|warn||lane|tab:lane|

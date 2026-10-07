@@ -175,11 +175,6 @@ enum SpacesTree {
     static func build(_ input: SpacesInput, overlay: Overlay, chrome: SpacesChrome, now: Double) -> [SpacesRow] {
         let choices = overlay.goalChoices
         let filter = chrome.goalFilter.flatMap { choices.contains($0) ? $0 : nil }
-        func hint(start: Int, count: Int) -> String {
-            guard count > 0, start <= 9 else { return "" }
-            let end = min(start + count - 1, 9)
-            return start == end ? "⌘\(start)" : "⌘\(start)..\(end)"
-        }
         func pinRow(_ tab: SpacesInput.Tab, prefix: String) -> SpacesRow {
             let space = input.spaces.first { $0.id == tab.space }
             let header = space.map { space in
@@ -196,11 +191,11 @@ enum SpacesTree {
         // The AGENTS section heads the list itself; an "agents" title above it reads twice.
         var out = agents.isEmpty ? [SpacesRow(id: "agents", kind: .title, title: "agents")] : []
         if !agents.isEmpty {
-            out.append(SpacesRow(id: "agentpins", kind: .section, title: "AGENTS", trailing: hint(start: 1, count: agents.count)))
+            out.append(SpacesRow(id: "agentpins", kind: .section, title: "AGENTS"))
             out += agents.map { pinRow($0, prefix: "agent:") }
         }
         if !pins.isEmpty {
-            out.append(SpacesRow(id: "pinned", kind: .section, title: "PINNED", trailing: hint(start: agents.count + 1, count: pins.count)))
+            out.append(SpacesRow(id: "pinned", kind: .section, title: "PINNED"))
             out += pins.map { pinRow($0, prefix: "pinned:") }
         }
         if !choices.isEmpty { out.append(SpacesRow(id: "goal", kind: .goal, title: "goal " + (filter?.replacingOccurrences(of: ":", with: " · ") ?? "All"), trailing: filter == nil ? "▾" : "✕")) }
@@ -281,26 +276,24 @@ enum SpacesTree {
                     }
                 }
             }
-            var first = true
             var hiddenCount = 0
-            func section(_ label: String, _ members: [SpacesInput.Tab], shortcut: String) {
+            // Section headers carry no key hints (Alex, 2026-10-06), as Rust tree.rs.
+            func section(_ label: String, _ members: [SpacesInput.Tab], count: String = "") {
                 guard !members.isEmpty else { return }
                 let key = space.id + ":" + label
                 if let focus = chrome.focusedSection[space.id], focus != label && label != "ORCHESTRATOR" { hiddenCount += members.count; return }
                 let closed = chrome.collapsedSections.contains(key) && chrome.focusedSection[space.id] == nil
-                out.append(SpacesRow(id: "section:" + key, kind: .section, depth: depth + 1, chevron: sectioned ? (closed ? "closed" : "open") : "none", title: label, trailing: closed ? String(members.count) + (shortcut.contains("⌘") ? " " + shortcut : "") : shortcut, alert: closed && members.contains { tag($0).attention == "act" || $0.status == "blocked" } ? "act" : "none", toggleKey: sectioned ? "section:" + key : nil))
+                out.append(SpacesRow(id: "section:" + key, kind: .section, depth: depth + 1, chevron: sectioned ? (closed ? "closed" : "open") : "none", title: label, trailing: closed ? String(members.count) : count, alert: closed && members.contains { tag($0).attention == "act" || $0.status == "blocked" } ? "act" : "none", toggleKey: sectioned ? "section:" + key : nil))
                 if !closed { for tab in members { appendTab(tab, depth + 1) } }
             }
-            section("ORCHESTRATOR", orch + lanes.filter { tag($0).section == "orchestrator" && tag($0).mode == "active" && root($0) == nil }, shortcut: "⌘0")
+            section("ORCHESTRATOR", orch + lanes.filter { tag($0).section == "orchestrator" && tag($0).mode == "active" && root($0) == nil })
             if sectioned {
                 for (value, label) in [("reviewing", "READY FOR REVIEW"), ("scoping", "SCOPING"), ("implementing", "IMPLEMENTING"), ("monitoring", "MONITORING")] {
                     let members = lanes.filter { tag($0).mode == "active" && root($0) == nil && (tag($0).section ?? "implementing") == value } + (value == "implementing" ? ordinary : [])
-                    let hint = value == "reviewing" ? String(members.count) : first && pins.isEmpty && agents.isEmpty ? "⌘1..9" : ""
-                    if !members.isEmpty && value != "reviewing" { first = false }
-                    section(label, members, shortcut: hint)
+                    section(label, members, count: value == "reviewing" ? String(members.count) : "")
                 }
             } else {
-                section("LANES", lanes.filter { tag($0).mode == "active" && root($0) == nil } + workflows.filter { parent($0) == nil } + ordinary, shortcut: pins.isEmpty && agents.isEmpty ? "⌘1..9" : "")
+                section("LANES", lanes.filter { tag($0).mode == "active" && root($0) == nil } + workflows.filter { parent($0) == nil } + ordinary)
             }
             for (group, members) in [("services", lanes.filter { tag($0).mode == "auto" } + (sectioned ? workflows.filter { parent($0) == nil } : [])), ("parked", lanes.filter { tag($0).mode == "parked" }), ("closed", sectioned ? lanes.filter { tag($0).mode == "active" && tag($0).section == "closed" } : []), ("background", background)] {
                 guard !members.isEmpty else { continue }

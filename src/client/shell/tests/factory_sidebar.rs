@@ -1684,8 +1684,7 @@ fn factory_sections_render_and_idle_click_persists() {
     assert!(find("IMPLEMENTING") < find("MONITORING"));
     assert!(find("monitor-lane") < find("closed 1"));
     assert!(rows[find("READY FOR REVIEW")].contains("2◎"));
-    assert!(!rows[find("READY FOR REVIEW")].contains("⌘1..9"));
-    assert!(rows[find("SCOPING")].contains("⌘1..9"));
+    assert!(!rows.iter().any(|row| row.contains('⌘')), "section headers carry no key hints");
     assert!(!rows.iter().any(|row| row.contains("idle-lane") || row.contains("[Scoping]")));
     let hit = hits.tree_headers.iter().find(|hit| hit.key == "factory-background:closed:ws_1").unwrap();
     assert!(hit.collapsed);

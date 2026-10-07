@@ -1,5 +1,5 @@
 title|agents|0|none||mute|agents||none||||
 space|space:ws|0|open||mute|factory||none||target|space:ws|
-section|section:ws:LANES|1|none||mute|LANES|⌘1..9|none||||
+section|section:ws:LANES|1|none||mute|LANES||none||||
 tab|tab:lane|1|none|●|working|lane||none||lane||
 tab|tab:target|1|none|●|working|target||none||target||

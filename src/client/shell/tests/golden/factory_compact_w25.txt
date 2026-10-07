@@ -1,9 +1,9 @@
 ─────────────────────────
  agents                  
  agent-rails     3 ⚲ + ▾ 
-  ORCHESTRATOR         ⌘0
+  ORCHESTRATOR           
   ▸ ● orchestrator    1⚲ 
-  LANES             ⌘1..9
+  LANES                  
   ▸ ● lane-a          2⚲ 
     ○ lane-b       idle⚲ 
     ● plain-a          ⚲ 
@@ -12,7 +12,7 @@
   ▸ background 1         
                          
  poker             ⚲ + ▾ 
-  LANES             ⌘1..9
+  LANES                  
     ● poker coach      ⚲ 
                          
                          

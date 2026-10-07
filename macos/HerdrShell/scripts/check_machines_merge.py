@@ -68,7 +68,6 @@ pins = [r.split("|")[1] for r in rows if r.startswith("tab|pinned:")]
 check("remote pins follow local pins", pins == ["pinned:s1:t1", "pinned:ax42/w1:t1"], str(pins))
 pinned = fields("pinned:ax42/w1:t1")
 check("remote pinned row keeps the space label and gets the badge", pinned is not None and pinned[7] == "rails" and pinned[-1] == "@ax42", str(pinned))
-check("pinned header counts every pin", (fields("pinned") or [""] * 8)[7] == "⌘1..2", str(fields("pinned")))
 pc = fields("tab:pc/w1:t1")
 check("unreachable machine's chat sits in its space with a dimmed badge state",
       "tab:pc/w1:t1" in block("s2") and pc is not None and pc[-1] == "@pc:unreachable", str(pc))

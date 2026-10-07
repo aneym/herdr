@@ -171,7 +171,7 @@ def seed():
 def expected(sel_lane_open=None):
     """Text of every line the Rails space shows at rest. Fold state is the chevron."""
     return [
-        "SPACES  ⌘⇧1..9",
+        "SPACES",
         "▾ ◆ agent-rails  factory",
         "ORCHESTRATOR  inbox 3",
         "▾ ● rails orchestrator  1 wf  [Studio]",
@@ -343,7 +343,7 @@ def main():
     # Space chord: cmd+shift+3 is homebase (plain: lanes only), cmd+shift+2 agent-lb, cmd+shift+1 back.
     S.key("3", ["cmd", "shift"])
     s2 = wait_lines(lambda s: "▾ ◆ homebase  plain" in texts(s))
-    want_hb = ["SPACES  ⌘⇧1..9", "▸ ◆ agent-rails  ● 2", "▸ ◆ agent-lb  1", "▾ ◆ homebase  plain",
+    want_hb = ["SPACES", "▸ ◆ agent-rails  ● 2", "▸ ◆ agent-lb  1", "▾ ◆ homebase  plain",
                "LANES  3 open", "● aside hls playback", "· dev server", "· notes", "▸ hidden  3"]
     check("cmd+shift+3 switches to the plain space: lanes only, no ORCHESTRATOR or WORKFLOWS, agent-rails shows `● 2` (wf reap, wf embed wave-a)",
           s2 is not None and texts(s2) == want_hb, diff(want_hb, texts(s2) if s2 else []))

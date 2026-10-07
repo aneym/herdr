@@ -263,7 +263,7 @@ struct QuickSwitchPanel: View {
                             ScrollView(.vertical) {
                                 VStack(spacing: 0) {
                                     ForEach(Array(rows.enumerated()), id: \.element.id) { i, row in
-                                        rowView(row, index: i, on: i == model.cursor, tokens: t)
+                                        rowView(row, on: i == model.cursor, tokens: t)
                                             .id(i)
                                             .contentShape(Rectangle())
                                             .onTapGesture { model.pick(i + 1) }
@@ -305,7 +305,7 @@ struct QuickSwitchPanel: View {
         .padding(.bottom, 10)
     }
 
-    private func rowView(_ row: QuickSwitch.Row, index: Int, on: Bool, tokens t: Tokens) -> some View {
+    private func rowView(_ row: QuickSwitch.Row, on: Bool, tokens t: Tokens) -> some View {
         let state = row.parked ? "parked" : row.badge
         let meta = [row.workspace, state, row.host].filter { !$0.isEmpty }.joined(separator: " · ")
         return HStack(spacing: 8) {
@@ -320,10 +320,6 @@ struct QuickSwitchPanel: View {
                 .font(.system(size: ShellType.switcherMeta))
                 .foregroundStyle(t.mute)
                 .lineLimit(1)
-            Text("⌘\(index + 1)")
-                .font(.system(size: 11).monospacedDigit())
-                .foregroundStyle(t.mute.opacity(on ? 1 : 0.6))
-                .frame(width: 22, alignment: .trailing)
         }
         .padding(.horizontal, 8)
         .frame(height: 32)

@@ -1,5 +1,5 @@
 title|agents|0|none||mute|agents||none||||
-section|pinned|0|none||mute|PINNED|⌘1..2|none||||
+section|pinned|0|none||mute|PINNED||none||||
 tab|pinned:b:t1|0|none|●|unknown|Priority|Beta|none||b:t1||
 tab|pinned:a:t1|0|none|●|unknown|First|Alpha|none||a:t1||
 hidden|hidden|0|closed||mute|hidden 2||none|||hidden|

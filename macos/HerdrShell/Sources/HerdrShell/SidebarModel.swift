@@ -77,7 +77,6 @@ struct SidebarLine: Identifiable, Equatable {
 enum SidebarModel {
     /// The chord in Resources/keymap.json (Alex's Ghostty chords), not the mock's ⌘⇧1..9,
     /// which macOS keeps for screenshots.
-    static let spaceChord = "⌘⇧1..9"
 
     /// Facts about one tab that the row classifier does not carry.
     struct Facts {
@@ -168,7 +167,7 @@ enum SidebarModel {
         // current space's row, `tail` is the remaining spaces and `hidden`; `out` (below) is the
         // current space's content and sits between them.
         var head: [SidebarLine] = [], tail: [SidebarLine] = []
-        head.append(SidebarLine(id: "hdr:spaces", kind: .header, title: "SPACES", trailing: spaceChord))
+        head.append(SidebarLine(id: "hdr:spaces", kind: .header, title: "SPACES"))
         let sp = spaces(s)
         var passedCurrent = false
         for w in sp.visible {
@@ -214,7 +213,7 @@ enum SidebarModel {
         if !orch.isEmpty {
             let inbox = f(orch[0]).inbox
             out.append(SidebarLine(id: "hdr:orchestrator", kind: .header, title: "ORCHESTRATOR",
-                                   trailing: inbox.map { "inbox \($0)" } ?? "⌘1"))
+                                   trailing: inbox.map { "inbox \($0)" } ?? ""))
             for r in orch { group(r, depth: 0) }
         }
         if !foreground.isEmpty {

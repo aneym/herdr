@@ -1122,24 +1122,6 @@ pub(super) fn tree_list_entries_with_overlay(
             out.append(&mut reorder_spaces(hidden_out, &tree.space_order));
         }
     }
-    // Pinned chats own the first Cmd slots, so a section's "⌘1..9" hint moves
-    // past them (or goes away once pins fill all nine).
-    let pins = out
-        .iter()
-        .filter(|entry| matches!(entry, AgentPanelListEntry::PinnedTab(_)))
-        .count();
-    if pins > 0 {
-        let shifted = match pins {
-            0..=7 => format!("⌘{}..9", pins + 1),
-            8 => "⌘9".to_owned(),
-            _ => String::new(),
-        };
-        for entry in &mut out {
-            if let AgentPanelListEntry::FactorySection { right, .. } = entry {
-                *right = right.replace("⌘1..9", &shifted).trim().to_string();
-            }
-        }
-    }
     out
 }
 
@@ -1322,7 +1304,7 @@ fn append_factory_space(
     if !orchestrators.is_empty() || !orchestrator_lanes.is_empty() {
         out.push(AgentPanelListEntry::FactorySection {
             label: "ORCHESTRATOR",
-            right: "⌘0".to_owned(),
+            right: String::new(),
             indent,
             controls: sectioned.then(|| {
                 let mut members = orchestrators.clone();
@@ -1551,7 +1533,6 @@ fn append_factory_space(
         push_lane(out, lane, indent, false);
     }
     if sectioned {
-        let mut first = true;
         for (section, label) in [
             (TabSection::Reviewing, "READY FOR REVIEW"),
             (TabSection::Scoping, "SCOPING"),
@@ -1564,11 +1545,10 @@ fn append_factory_space(
             if members.is_empty() && (section != TabSection::Implementing || ordinary.is_empty()) {
                 continue;
             }
+            // Section headers carry no key hints (Alex, 2026-10-06); the
+            // review count is the only right-hand text.
             let right = if section == TabSection::Reviewing {
                 members.len().to_string()
-            } else if first {
-                first = false;
-                "⌘1..9".to_owned()
             } else {
                 String::new()
             };
@@ -1590,7 +1570,7 @@ fn append_factory_space(
         || !root_workflows.is_empty() || !ordinary.is_empty() {
         out.push(AgentPanelListEntry::FactorySection {
             label: "LANES",
-            right: "⌘1..9".to_owned(),
+            right: String::new(),
             indent,
             controls: None,
         });
@@ -1734,7 +1714,6 @@ fn apply_factory_sections(out: &mut Vec<AgentPanelListEntry>, start: usize, tree
     let mut entries = entries.into_iter().peekable();
     let mut hidden = 0;
     let mut hidden_alert = false;
-    let mut shortcut = true;
     while let Some(mut entry) = entries.next() {
         let mut children = Vec::new();
         while entries.peek().is_some_and(|entry| !matches!(entry,
@@ -1767,13 +1746,8 @@ fn apply_factory_sections(out: &mut Vec<AgentPanelListEntry>, start: usize, tree
         let mut collapsed = false;
         if let AgentPanelListEntry::FactorySection { label, right, controls, .. } = &mut entry {
             collapsed = focus.is_none() && tree.factory_sections_collapsed.contains(&format!("{workspace_id}:{label}"));
-            if focus.is_some() && *label != "ORCHESTRATOR" && *label != "READY FOR REVIEW" && shortcut {
-                *right = "⌘1..9".to_owned();
-                shortcut = false;
-            }
             if collapsed {
-                let hint = if right.contains("⌘") { format!(" {right}") } else { String::new() };
-                *right = format!("{count}{}{hint}", if alert { "!" } else { "" });
+                *right = format!("{count}{}", if alert { "!" } else { "" });
             }
             *controls = Some(FactorySectionControls { workspace_id: workspace_id.to_owned(), collapsed,
                 focused: focus.is_some_and(|focused| focused == label), alert: collapsed && alert, count });

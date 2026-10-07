@@ -398,7 +398,7 @@ def main():
     s = wait_state(lambda s: s["shell"]["mode"] == "spaces")
     kinds = [l["kind"] for l in s["sidebar_lines"]] if s else []
     check("cmd+shift+a switches to Spaces and the lines keep the P10 shape (SPACES, space, orchestrator, lanes; no area groups)",
-          s is not None and texts(s)[:1] == ["SPACES  ⌘⇧1..9"] and "area" not in kinds and "focus" not in kinds
+          s is not None and texts(s)[:1] == ["SPACES"] and "area" not in kinds and "focus" not in kinds
           and any(t.startswith("ORCHESTRATOR") for t in texts(s)) and any(l["kind"] == "space" for l in s["sidebar_lines"])
           and any(l["kind"] == "lane" for l in s["sidebar_lines"]),
           f"first={texts(s)[:6] if s else None}")

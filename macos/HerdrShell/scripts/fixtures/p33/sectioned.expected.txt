@@ -1,8 +1,8 @@
 title|agents|0|none||mute|agents||none||||
 space|space:ws_1|0|open||mute|agent-rails|3|act||wf-a|space:ws_1|
-section|section:ws_1:ORCHESTRATOR|1|open||mute|ORCHESTRATOR|⌘0|none|||section:ws_1:ORCHESTRATOR|
+section|section:ws_1:ORCHESTRATOR|1|open||mute|ORCHESTRATOR||none|||section:ws_1:ORCHESTRATOR|
 tab|tab:orch|1|closed|●|working|orchestrator|1 workflow · inbox 3|none||orch|tab:orch|
-section|section:ws_1:SCOPING|1|open||mute|SCOPING|⌘1..9|none|||section:ws_1:SCOPING|
+section|section:ws_1:SCOPING|1|open||mute|SCOPING||none|||section:ws_1:SCOPING|
 tab|tab:lane-a|1|closed|●|working|shared connections|2 workflows|none||lane-a|tab:lane-a|
 section|section:ws_1:IMPLEMENTING|1|open||mute|IMPLEMENTING||none|||section:ws_1:IMPLEMENTING|
 tab|tab:plain-a|1|none|●|working|plain-a||none||plain-a||
@@ -10,6 +10,6 @@ tab|tab:plain-b|1|none|●|working|plain-b||none||plain-b||
 group|group:ws_1:closed|1|closed||mute|closed 1||none|||group:ws_1:closed|dim
 group|group:ws_1:background|1|closed||mute|background 1||none|||group:ws_1:background|dim
 space|space:ws_2|0|open||mute|poker||none||poker|space:ws_2|
-section|section:ws_2:LANES|1|none||mute|LANES|⌘1..9|none||||
+section|section:ws_2:LANES|1|none||mute|LANES||none||||
 tab|tab:poker|1|none|●|working|poker coach||none||poker||
 footerHost|host:0|0|none||mute|Studio|3/28|none||||

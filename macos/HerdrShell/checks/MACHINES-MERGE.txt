@@ -10,12 +10,11 @@
 [PASS] chatless remote tabs and spaces show nothing
 [PASS] remote pins follow local pins
 [PASS] remote pinned row keeps the space label and gets the badge
-[PASS] pinned header counts every pin
 [PASS] unreachable machine's chat sits in its space with a dimmed badge state
 [PASS] local rows are unchanged by the merge
 
 title|agents|0|none||mute|agents||none||||
-section|pinned|0|none||mute|PINNED|⌘1..2|none||||
+section|pinned|0|none||mute|PINNED||none||||
 tab|pinned:s1:t1|0|none|●|working|orchestrator|rails|none||s1:t1||
 tab|pinned:ax42/w1:t1|0|none|●|working|remote chat|rails|none||ax42/w1:t1|||@ax42
 title|spacegroup:Rails|0|none||mute|Rails||none||||
