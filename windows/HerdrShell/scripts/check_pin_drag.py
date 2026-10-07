@@ -48,7 +48,7 @@ def herdr(*args):
 def ctl(obj):
     rc, out = pc.ctl_send(obj, timeout=60)
     try:
-        reply = json.loads(out.splitlines()[-1]) if out else {}
+        reply = json.loads(out.splitlines()[-1], strict=False) if out else {}
     except json.JSONDecodeError:
         reply = {}
     if rc != 0 or reply.get("ok") is False:

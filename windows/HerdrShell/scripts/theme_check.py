@@ -78,7 +78,7 @@ def regions(w, h):
 def ctl(obj):
     rc, out = pc.ctl_send(obj, timeout=30)
     try:
-        return json.loads(out) if rc == 0 else {"ok": False, "error": out or f"rc {rc}"}
+        return json.loads(out, strict=False) if rc == 0 else {"ok": False, "error": out or f"rc {rc}"}
     except json.JSONDecodeError:
         return {"ok": False, "error": out}
 

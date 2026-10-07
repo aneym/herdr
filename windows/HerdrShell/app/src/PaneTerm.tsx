@@ -171,7 +171,8 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
           const event = { bubbles: true, cancelable: true, button: 0, ctrlKey: ctrl, clientX: box.left + (col + 0.5) * box.width / term.cols, clientY: box.top + (row + 0.5) * box.height / term.rows };
           // Populate xterm's hover link, just as moving the physical pointer to the cell does.
           screen.dispatchEvent(new MouseEvent("mousemove", event));
-          await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+          // A hidden or occluded WebView pauses frames; never wait on one for longer than 50 ms.
+          await new Promise<void>(resolve => { requestAnimationFrame(() => resolve()); setTimeout(resolve, 50); });
           screen.dispatchEvent(new MouseEvent("mousedown", { ...event, buttons: 1, detail: 1 }));
           screen.dispatchEvent(new MouseEvent("mouseup", { ...event, buttons: 0, detail: 1 }));
           if (ctrl) await Promise.race([settled, new Promise<void>(resolve => { deadline = setTimeout(resolve, 1500); })]);
