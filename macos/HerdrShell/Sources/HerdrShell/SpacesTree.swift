@@ -50,7 +50,7 @@ struct Overlay: Codable {
             if !["orchestrator", "scoping", "implementing", "reviewing", "monitoring", "closed"].contains(section ?? "") { section = nil }
              name = c.optional("name"); parent = c.optional("parent")
             goal = c.optional("goal"); goal_area = c.optional("goal_area"); scope_url = c.optional("scope_url"); review_url = c.optional("review_url")
-            summary = c.optional("summary"); pulse = c.optional("pulse"); attention = c.value("attention", "none"); busy = c.value("busy", false); idle_reason = c.optional("idle_reason")
+            summary = c.optional("summary"); pulse = c.optional("pulse"); if pulse?.line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true { pulse = nil }; attention = c.value("attention", "none"); busy = c.value("busy", false); idle_reason = c.optional("idle_reason")
             runs = c.value("runs", []); phase = c.optional("phase"); started = c.optional("started"); done = c.value("done", false); badge = c.optional("badge")
         }
     }

@@ -77,8 +77,9 @@ export function useLaneFiles(machine: string, up: boolean): LaneSnapshot {
       if (disposed || busy || document.hidden) return;
       busy = true;
       try {
-        // A missing file is empty; any other failed read keeps the last good catalog until the next poll.
-        const read = await Promise.all(["lanes", "areas", "modes", "overlay"].map(name => { const path = `~/.agent-rails/herdr/${name}.json`; return bridge.fileRead(machine, path, 0, 1 << 20).then(chunk => new TextDecoder().decode(fromBase64(chunk.data_b64)), () => bridge.fileStat(machine, path).then(info => info.exists ? undefined : null, () => undefined)); }));
+        // A failed optional overlay read must not hold the lanes/areas/modes catalog.
+        // Other failed reads keep the last good catalog until the next poll.
+        const read = await Promise.all(["lanes", "areas", "modes", "overlay"].map(name => { const path = `~/.agent-rails/herdr/${name}.json`; return bridge.fileRead(machine, path, 0, 1 << 20).then(chunk => new TextDecoder().decode(fromBase64(chunk.data_b64)), () => name === "overlay" ? null : bridge.fileStat(machine, path).then(info => info.exists ? undefined : null, () => undefined)); }));
         if (disposed || read.includes(undefined)) return;
         const files = read as (string | null)[];
         const nextStamp = JSON.stringify(files);

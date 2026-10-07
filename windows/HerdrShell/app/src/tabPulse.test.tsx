@@ -30,10 +30,13 @@ it.each([false, true])("tab_pulse displays a single plain row and selects its ta
   expect(pulse.children.length).toBe(0);
   act(() => pulse.click()); expect(select).toHaveBeenCalledWith("lead");
 });
-it("tab_pulse older snapshot displays no timing row", () => {
+it.each([undefined, "", " \t\n"])("tab_pulse absent or blank line displays no timing row (%s)", line => {
+  const catalog = new LaneSnapshot();
+  if (line !== undefined) catalog.pulses = { lead: { line, drifting: false } };
   const noop = () => {};
   document.body.append(host); root = createRoot(host);
-  act(() => root!.render(<Sidebar snapshot={snapshot} machines={[]} chooseMachine={noop} rows={buildSidebar(snapshot)} selected="lead" revealed={{ last: "lead", pending: null }} machine={{ name: "studio", state: "up" }} notice={null} select={noop} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} />));
+  act(() => root!.render(<Sidebar snapshot={snapshot} catalog={catalog} machines={[]} chooseMachine={noop} rows={buildSidebar(snapshot)} selected="lead" revealed={{ last: "lead", pending: null }} machine={{ name: "studio", state: "up" }} notice={null} select={noop} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} />));
   expect(host.querySelector(".tab-pulse")).toBeNull();
+  expect(host.querySelector(".has-pulse")).toBeNull();
   expect(host.querySelector('[data-row="pinned:lead"] .label')?.textContent).toBe("Lead");
 });

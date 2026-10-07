@@ -2538,7 +2538,9 @@ fn factory_row(
         phase: tag.and_then(|tag| tag.phase.clone()),
         started: tag.and_then(|tag| tag.started),
         summary: tag.and_then(|tag| tag.summary.clone()),
-        pulse: tag.and_then(|tag| tag.pulse.clone()),
+        pulse: tag
+            .and_then(|tag| tag.pulse.clone())
+            .filter(|pulse| !pulse.line.trim().is_empty()),
         attention: tag.map_or(crate::factory_overlay::Attention::None, |tag| tag.attention),
         idle: lane_is_idle(tag, status, tab.work_status.is_some()),
         idle_reason: tag.and_then(|tag| tag.idle_reason.clone()),

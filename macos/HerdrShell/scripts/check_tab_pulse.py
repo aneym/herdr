@@ -18,6 +18,10 @@ with tempfile.TemporaryDirectory(prefix="herdr-tab-pulse-") as scratch:
     baseline = rows()
     assert all("pulse:" not in row and "pulse-bold" not in row for row in baseline)
     print("PASS tab_pulse_older_overlay_has_no_extra_row")
+    for line in ("", " \t\n"):
+        fixture["overlay"]["tabs"]["orch"]["pulse"] = {"line": line, "drifting": False}
+        assert rows() == baseline
+    print("PASS tab_pulse_blank_has_no_extra_row")
     for drifting in (False, True):
         fixture["overlay"]["tabs"]["orch"]["pulse"] = {"line": "reply 18s · first act 9s · 140k · inline 0/5", "drifting": drifting}
         actual = rows()

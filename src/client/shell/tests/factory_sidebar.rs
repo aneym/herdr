@@ -4754,6 +4754,22 @@ fn tab_pulse_renders_one_muted_row_and_retains_tab_hit_target() {
         .find(|hit| hit.key == "orch")
         .unwrap();
     assert_eq!(base.rect.height, 1);
+    for line in ["", " \t\n"] {
+        overlay.tabs.get_mut("orch").unwrap().pulse = Some(crate::factory_overlay::TabPulse {
+            line: line.into(),
+            drifting: false,
+        });
+        let (_, hits, _) = rendered_factory_rows(&snapshot, &overlay);
+        assert_eq!(
+            hits.tree_headers
+                .iter()
+                .find(|hit| hit.key == "orch")
+                .unwrap()
+                .rect
+                .height,
+            1
+        );
+    }
     for drifting in [false, true] {
         overlay.tabs.get_mut("orch").unwrap().pulse = Some(crate::factory_overlay::TabPulse {
             line: "reply 18s · first act 9s · 140k · inline 0/5".into(),
