@@ -578,6 +578,8 @@ extension SidebarModel {
         guard let s else { return [] }
         let facts = Self.facts(s)
         let parked = Set(catalog.parked.keys)
+        // Hidden agents remain selectable in their fold, but never join Cmd+E rotation.
+        let hiddenAgents = Set(s.tabs.filter { $0.role == "agent" && ($0.hidden ?? false) }.map(\.tab_id))
         var visual: [String] = []
         if areas {
             let items = areaItems(snapshot: s, orchestrators: orchestrators, lanes: lanes, workflows: workflows, catalog: catalog)
@@ -617,7 +619,7 @@ extension SidebarModel {
             return false
         }
         func rank(_ id: String) -> Int? {
-            if parked.contains(id) { return nil }
+            if parked.contains(id) || hiddenAgents.contains(id) { return nil }
             if status(id) == "blocked" { return 0 }
             if facts[id]?.finished == true && !lookedAt.contains(id) { return 1 }
             if asks(id) { return 2 }
