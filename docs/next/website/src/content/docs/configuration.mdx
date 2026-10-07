@@ -565,6 +565,25 @@ Automatic restores start one agent at a time, 100 milliseconds apart by default,
 
 Only panes with a valid native session reference from an official integration can resume; other panes restore as normal shells. See [Session state and restore](/docs/session-state/) for supported Agents and persistence behavior.
 
+## Agent restart
+
+`herdr agent restart <pane>`, and the **Restart agent** item in a pane's menu, close the Agent in that pane and start it again on the same conversation. If the Agent is mid-turn, Herdr refuses unless you pass `--force` or confirm in the menu.
+
+Herdr picks the restart command in this order:
+
+1. If Herdr started the Agent itself as the pane's command, it reruns that command with the resume arguments. Commands typed into a shell, including `herdr pane run`, don't count. Herdr doesn't record those.
+2. Otherwise, if `[agent_restart.launchers]` names a launcher for the Agent, Herdr runs that launcher in place of the Agent's binary.
+3. Otherwise, Herdr runs the Agent's binary directly with the pane's normal environment.
+
+```toml
+[agent_restart.launchers]
+claude = "claude-lb-launch"
+```
+
+Set a launcher when you start an Agent through a wrapper script that replaces itself with the Agent (for example with `exec`). Once the wrapper has exited, Herdr can no longer see it in the process tree, so without this setting a restart would skip it. The launcher receives the same arguments the Agent would, so it must pass them through.
+
+Herdr never reads or stores the Agent's environment variables, so a wrapper that sets credentials or routing variables must set them again on each launch. The restart reports which path it used (`recorded`, `configured` or `direct`) and fails with `start_failed` if the Agent has not started within a few seconds.
+
 ## IME cursor tracking
 
 On macOS, AI Agent TUIs that hide the hardware cursor can prevent native input-method candidate windows from following the focused pane. Reveal a cursor anchor for those panes with:
