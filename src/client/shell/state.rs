@@ -1624,9 +1624,13 @@ impl ClientShellState {
         // Only hidden rows require unfolding; the header is already visible.
         let tab_hides_pane = tree.show_tabs
             && tree.show_agents
-            && tab_key.as_ref().is_some_and(|key| tree.collapsed_tabs.contains(key))
+            && tab_key
+                .as_ref()
+                .is_some_and(|key| tree.collapsed_tabs.contains(key))
             && !super::tree::pane_is_tab_header(snapshot, tree, &self.config, pane_id);
-        let parked = snapshot.workspaces.iter()
+        let parked = snapshot
+            .workspaces
+            .iter()
             .any(|ws| ws.workspace_id == workspace_id && ws.parked);
         let fold_by_default = self.groups_fold_by_default();
         let tree = self.tree_chrome_mut();
@@ -2290,9 +2294,15 @@ impl ClientShellState {
             if let Some(gesture) = self.word_selection_gesture.as_mut() {
                 if let (Some(previous), Some(next)) = (
                     self.pane_surface.as_ref().and_then(|surface| {
-                        surface.panes.iter().find(|pane| pane.pane_id == gesture.pane_id)
+                        surface
+                            .panes
+                            .iter()
+                            .find(|pane| pane.pane_id == gesture.pane_id)
                     }),
-                    surface.panes.iter().find(|pane| pane.pane_id == gesture.pane_id),
+                    surface
+                        .panes
+                        .iter()
+                        .find(|pane| pane.pane_id == gesture.pane_id),
                 ) {
                     if previous.content_revision != next.content_revision {
                         gesture.cached_row = None;

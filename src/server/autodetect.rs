@@ -291,22 +291,25 @@ pub fn wait_for_server_socket(socket_path: &Path, timeout: Duration) -> io::Resu
 
 #[cfg(unix)]
 fn live_handoff_file(data_dir: &Path, suffix: &str) -> Option<(libc::pid_t, PathBuf)> {
-    std::fs::read_dir(data_dir).ok()?.flatten().find_map(|entry| {
-        let name = entry.file_name();
-        let pid = name
-            .to_str()?
-            .strip_prefix("herdr-handoff-")?
-            .strip_suffix(suffix)?
-            .parse::<libc::pid_t>()
-            .ok()
-            .filter(|pid| *pid > 0)?;
-        let alive = unsafe { libc::kill(pid, 0) } == 0;
-        if alive || io::Error::last_os_error().raw_os_error() == Some(libc::EPERM) {
-            Some((pid, entry.path()))
-        } else {
-            None
-        }
-    })
+    std::fs::read_dir(data_dir)
+        .ok()?
+        .flatten()
+        .find_map(|entry| {
+            let name = entry.file_name();
+            let pid = name
+                .to_str()?
+                .strip_prefix("herdr-handoff-")?
+                .strip_suffix(suffix)?
+                .parse::<libc::pid_t>()
+                .ok()
+                .filter(|pid| *pid > 0)?;
+            let alive = unsafe { libc::kill(pid, 0) } == 0;
+            if alive || io::Error::last_os_error().raw_os_error() == Some(libc::EPERM) {
+                Some((pid, entry.path()))
+            } else {
+                None
+            }
+        })
 }
 
 #[cfg(unix)]
@@ -477,7 +480,8 @@ mod tests {
         )
         .unwrap();
         assert!(handoff_in_progress(&dir));
-        std::fs::remove_file(dir.join(format!("herdr-handoff-{}.sock", std::process::id()))).unwrap();
+        std::fs::remove_file(dir.join(format!("herdr-handoff-{}.sock", std::process::id())))
+            .unwrap();
         std::fs::write(dir.join(format!("herdr-handoff-{dead_pid}.active")), b"").unwrap();
         assert!(!handoff_in_progress(&dir));
         let marker = dir.join(format!("herdr-handoff-{}.active", std::process::id()));

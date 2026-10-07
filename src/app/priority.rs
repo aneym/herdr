@@ -43,7 +43,8 @@ fn matching_rank(config: &SidebarPriorityConfig, matches: impl Fn(&str) -> bool)
 
 pub(crate) fn workspace_rank(config: &SidebarPriorityConfig, id: &str, label: &str) -> Rank {
     matching_rank(config, |rule| {
-        !rule.starts_with("tab:") && (rule.eq_ignore_ascii_case(id) || rule.eq_ignore_ascii_case(label))
+        !rule.starts_with("tab:")
+            && (rule.eq_ignore_ascii_case(id) || rule.eq_ignore_ascii_case(label))
     })
     .unwrap_or(Rank {
         value: config.order.len() as u32,
@@ -61,7 +62,10 @@ pub(crate) fn tab_rank(
         return workspace;
     }
     // Rules are lowercased once at config time; most labels already are.
-    let label = if label.chars().any(|ch| ch.to_lowercase().ne(std::iter::once(ch))) {
+    let label = if label
+        .chars()
+        .any(|ch| ch.to_lowercase().ne(std::iter::once(ch)))
+    {
         std::borrow::Cow::Owned(label.to_lowercase())
     } else {
         std::borrow::Cow::Borrowed(label)
@@ -76,7 +80,11 @@ pub(crate) fn tab_rank(
 /// Normalize once when configuration is applied, never in pane-scaled ranking loops.
 pub(crate) fn normalized(config: &SidebarPriorityConfig) -> SidebarPriorityConfig {
     SidebarPriorityConfig {
-        order: config.order.iter().map(|rule| rule.to_lowercase()).collect(),
+        order: config
+            .order
+            .iter()
+            .map(|rule| rule.to_lowercase())
+            .collect(),
         last: config.last.iter().map(|rule| rule.to_lowercase()).collect(),
     }
 }

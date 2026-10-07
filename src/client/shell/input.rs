@@ -796,19 +796,25 @@ impl ClientShellState {
                 (KeyCode::Char(digit), KeyModifiers::empty()),
             )
         }) {
-            let pins_first = self.endpoints.iter().any(|endpoint| endpoint.snapshot
-                .as_deref().is_some_and(|snapshot| !snapshot.pinned_tabs.is_empty()))
-                || self.snapshot.as_deref().is_some_and(|snapshot| !snapshot.pinned_tabs.is_empty());
-            let action = if pins_first { KeybindAction::SwitchTab(index) }
-                else { KeybindAction::SwitchWorkspace(index) };
+            let pins_first = self.endpoints.iter().any(|endpoint| {
+                endpoint
+                    .snapshot
+                    .as_deref()
+                    .is_some_and(|snapshot| !snapshot.pinned_tabs.is_empty())
+            }) || self
+                .snapshot
+                .as_deref()
+                .is_some_and(|snapshot| !snapshot.pinned_tabs.is_empty());
+            let action = if pins_first {
+                KeybindAction::SwitchTab(index)
+            } else {
+                KeybindAction::SwitchWorkspace(index)
+            };
             let valid = self.indexed_navigation_target_exists(&KeybindMatch::Action(action));
             if valid {
                 self.mode = ClientShellMode::Terminal;
                 self.navigate_workspace_id = None;
-                self.record_binding(
-                    KeybindMatch::Action(action),
-                    outcome,
-                );
+                self.record_binding(KeybindMatch::Action(action), outcome);
                 outcome.repaint = true;
             }
             return;

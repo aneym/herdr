@@ -531,9 +531,9 @@ fn agent_attach(args: &[String]) -> std::io::Result<i32> {
         args,
         "usage: herdr agent attach <target> [--takeover] [--no-escape]",
     ) {
-            Ok(parsed) => parsed,
-            Err(code) => return Ok(code),
-        };
+        Ok(parsed) => parsed,
+        Err(code) => return Ok(code),
+    };
 
     let response = resolve_agent_target(&target, "cli:agent:attach:resolve")?;
     if response.get("error").is_some() {

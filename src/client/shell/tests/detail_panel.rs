@@ -278,7 +278,9 @@ fn alt_o_leaves_typing_with_the_live_pane() {
     assert!(!state.detail_panel.as_ref().unwrap().focused);
     let typed = key(&mut state, KeyCode::Char('x'), KeyModifiers::NONE);
     assert!(!typed.requests.is_empty());
-    let text = state.handle_raw_events(vec![RawInputEvent::Text(crate::input::TextCommit::new("x"))]);
+    let text = state.handle_raw_events(vec![RawInputEvent::Text(crate::input::TextCommit::new(
+        "x",
+    ))]);
     assert!(!text.requests.is_empty());
     assert!(state.detail_panel.is_some());
 }
@@ -365,7 +367,10 @@ async fn overlay_file_reaches_the_panel_through_the_server_poll_and_client_contr
         KeyCode::Char('o'),
         KeyModifiers::ALT,
     ))]);
-    assert!(state.detail_panel.is_none(), "no overlay yet, Alt-O passes through");
+    assert!(
+        state.detail_panel.is_none(),
+        "no overlay yet, Alt-O passes through"
+    );
 
     // Server side: the real headless loop. A poll tick reaches the attached client shell
     // through send_to_client_shells, and a client connecting later is seeded through
@@ -390,9 +395,17 @@ async fn overlay_file_reaches_the_panel_through_the_server_poll_and_client_contr
             .collect::<Vec<_>>()
     };
     let ticked = overlay_messages(server.poll_tick());
-    assert_eq!(ticked.len(), 1, "poll tick must deliver the overlay to the client shell");
+    assert_eq!(
+        ticked.len(),
+        1,
+        "poll tick must deliver the overlay to the client shell"
+    );
     let connected = overlay_messages(server.connect());
-    assert_eq!(connected.len(), 1, "a connecting client must be seeded with the overlay");
+    assert_eq!(
+        connected.len(),
+        1,
+        "a connecting client must be seeded with the overlay"
+    );
     // Client side: decode and apply exactly as the attach loop does.
     let apply = |state: &mut ClientShellState, (kind, data): &(String, String)| {
         let crate::client::endpoint::EndpointControlMessage::FactoryOverlay(decoded) =
@@ -401,7 +414,13 @@ async fn overlay_file_reaches_the_panel_through_the_server_poll_and_client_contr
             panic!("expected factory overlay control");
         };
         crate::client::shell_runtime::apply_client_shell_factory_overlay(
-            state, &active, 1, decoded, (110, 30), (8, 16), true,
+            state,
+            &active,
+            1,
+            decoded,
+            (110, 30),
+            (8, 16),
+            true,
         )
     };
     // Both paths carry the same document and revision.
@@ -428,7 +447,10 @@ async fn overlay_file_reaches_the_panel_through_the_server_poll_and_client_contr
     assert_eq!(updated.len(), 1);
     let (frame, resize) = apply(&mut state, &updated[0]);
     assert!(frame.is_some());
-    assert!(resize.is_none(), "content-only overlay changes must not resize");
+    assert!(
+        resize.is_none(),
+        "content-only overlay changes must not resize"
+    );
     assert_eq!(
         state.factory_overlay.as_ref().unwrap().panels["overview"].title,
         "Renamed overview"
@@ -442,8 +464,12 @@ async fn overlay_file_reaches_the_panel_through_the_server_poll_and_client_contr
     assert_eq!(removed.len(), 1);
     let (_, resize) = apply(&mut state, &removed[0]);
     let crate::protocol::ClientMessage::ClientShellResize {
-        surface_size: wide, cell_width_px, cell_height_px, pixel_mouse,
-    } = resize.expect("overlay removal must resize the server surface") else {
+        surface_size: wide,
+        cell_width_px,
+        cell_height_px,
+        pixel_mouse,
+    } = resize.expect("overlay removal must resize the server surface")
+    else {
         panic!("expected shell resize");
     };
     assert_eq!(wide.cols, 84);
@@ -457,7 +483,8 @@ async fn overlay_file_reaches_the_panel_through_the_server_poll_and_client_contr
     assert_eq!(restored.len(), 1);
     let (_, resize) = apply(&mut state, &restored[0]);
     let crate::protocol::ClientMessage::ClientShellResize { surface_size, .. } =
-        resize.expect("overlay restoration must resize the server surface") else {
+        resize.expect("overlay restoration must resize the server surface")
+    else {
         panic!("expected shell resize");
     };
     assert_eq!(surface_size, narrow);
@@ -485,11 +512,12 @@ fn blank_panel_click_keeps_a_selection_so_enter_acts() {
     state.compose(110, 30).expect("composed shell");
     let panel = state.layout(110, 30).detail_panel;
     assert!(!state.hits.detail_rows.is_empty());
-    let covered = |state: &ClientShellState, x: u16, y: u16| {
-        state.hits.detail_rows.iter().any(|(rect, _)| {
-            x >= rect.x && x < rect.right() && y >= rect.y && y < rect.bottom()
-        })
-    };
+    let covered =
+        |state: &ClientShellState, x: u16, y: u16| {
+            state.hits.detail_rows.iter().any(|(rect, _)| {
+                x >= rect.x && x < rect.right() && y >= rect.y && y < rect.bottom()
+            })
+        };
     // Pick the lowest interior cell (inside the border) that no row or action covers.
     let x = panel.x + 3;
     let blank = (panel.y + 1..panel.bottom() - 1)
@@ -532,45 +560,137 @@ fn overview_task_counts_follow_live_workflows_including_orchestrator() {
         ("running", "review"),
         ("done", "completed"),
         ("orch-child", "child"),
-    ].into_iter().enumerate().map(|(index, (id, label))| ClientShellTab {
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, (id, label))| ClientShellTab {
         sort_rank: 0,
         desk_count: 0,
-        tab_id: id.into(), workspace_id: "ws_1".into(), number: index + 1,
-        label: label.into(), custom_label: true, zoomed: false, focused: false,
+        tab_id: id.into(),
+        workspace_id: "ws_1".into(),
+        number: index + 1,
+        label: label.into(),
+        custom_label: true,
+        zoomed: false,
+        focused: false,
         agent_status: AgentStatus::Working,
         work_status: None,
-    }).collect();
+    })
+    .collect();
     snapshot.panes = [
-        ("running-pane", "running"), ("done-pane", "done"), ("orch-pane", "orch-child"),
-    ].into_iter().map(|(pane_id, tab_id)| ClientShellPane {
-            tokens: Default::default(),
-        pane_id: pane_id.into(), workspace_id: "ws_1".into(), tab_id: tab_id.into(),
-        label: None, cwd: None, foreground_cwd: None, focused: false, right_click_passthrough: false,
+        ("running-pane", "running"),
+        ("done-pane", "done"),
+        ("orch-pane", "orch-child"),
+    ]
+    .into_iter()
+    .map(|(pane_id, tab_id)| ClientShellPane {
+        tokens: Default::default(),
+        pane_id: pane_id.into(),
+        workspace_id: "ws_1".into(),
+        tab_id: tab_id.into(),
+        label: None,
+        cwd: None,
+        foreground_cwd: None,
+        focused: false,
+        right_click_passthrough: false,
         machine: None,
-    }).collect();
+    })
+    .collect();
     state.set_snapshot(Box::new(snapshot));
     let mut overlay = FactoryOverlay::default();
-    overlay.tabs.insert("orch".into(), TabTag { kind: TabKind::Orchestrator, ..Default::default() });
-    overlay.tabs.insert("lane".into(), TabTag { kind: TabKind::Lane, ..Default::default() });
-    overlay.tabs.insert("running".into(), TabTag { kind: TabKind::Workflow, parent: Some("lane".into()), attention: crate::factory_overlay::Attention::Act, ..Default::default() });
-    overlay.tabs.insert("done".into(), TabTag { kind: TabKind::Workflow, parent: Some("lane".into()), done: true, attention: crate::factory_overlay::Attention::Act, ..Default::default() });
-    overlay.tabs.insert("orch-child".into(), TabTag { kind: TabKind::Workflow, parent: Some("orch".into()), ..Default::default() });
+    overlay.tabs.insert(
+        "orch".into(),
+        TabTag {
+            kind: TabKind::Orchestrator,
+            ..Default::default()
+        },
+    );
+    overlay.tabs.insert(
+        "lane".into(),
+        TabTag {
+            kind: TabKind::Lane,
+            ..Default::default()
+        },
+    );
+    overlay.tabs.insert(
+        "running".into(),
+        TabTag {
+            kind: TabKind::Workflow,
+            parent: Some("lane".into()),
+            attention: crate::factory_overlay::Attention::Act,
+            ..Default::default()
+        },
+    );
+    overlay.tabs.insert(
+        "done".into(),
+        TabTag {
+            kind: TabKind::Workflow,
+            parent: Some("lane".into()),
+            done: true,
+            attention: crate::factory_overlay::Attention::Act,
+            ..Default::default()
+        },
+    );
+    overlay.tabs.insert(
+        "orch-child".into(),
+        TabTag {
+            kind: TabKind::Workflow,
+            parent: Some("orch".into()),
+            ..Default::default()
+        },
+    );
     let space = &state.snapshot.as_ref().unwrap().workspaces[0].label;
-    overlay.panels.insert("overview".into(), Panel {
-        title: "Factory overview".into(),
-        sections: vec![
-            PanelSection { title: format!("{space} · issues"), right: Some("2 tasks · 2 wants you".into()),
-                rows: vec![
-                    PanelRow { text: "live".into(), target: Some("running-pane".into()), ..Default::default() },
-                    PanelRow { text: "finished".into(), target: Some("done-pane".into()), ..Default::default() },
-                ] },
-            PanelSection { title: format!("{space} · rails orchestrator"), right: Some("0 tasks".into()),
-                rows: vec![PanelRow { text: "no tasks".into(), style: RowStyle::Dim, ..Default::default() }] },
-        ], ..Default::default()
-    });
-    let panel = super::super::detail_panel::panel_for(&overlay, "overview", state.snapshot.as_ref().unwrap());
-    assert_eq!(panel.sections[0].right.as_deref(), Some("1 task · 1 wants you"));
-    assert_eq!(panel.sections[0].rows.iter().map(|row| row.text.as_str()).collect::<Vec<_>>(), ["live"]);
+    overlay.panels.insert(
+        "overview".into(),
+        Panel {
+            title: "Factory overview".into(),
+            sections: vec![
+                PanelSection {
+                    title: format!("{space} · issues"),
+                    right: Some("2 tasks · 2 wants you".into()),
+                    rows: vec![
+                        PanelRow {
+                            text: "live".into(),
+                            target: Some("running-pane".into()),
+                            ..Default::default()
+                        },
+                        PanelRow {
+                            text: "finished".into(),
+                            target: Some("done-pane".into()),
+                            ..Default::default()
+                        },
+                    ],
+                },
+                PanelSection {
+                    title: format!("{space} · rails orchestrator"),
+                    right: Some("0 tasks".into()),
+                    rows: vec![PanelRow {
+                        text: "no tasks".into(),
+                        style: RowStyle::Dim,
+                        ..Default::default()
+                    }],
+                },
+            ],
+            ..Default::default()
+        },
+    );
+    let panel = super::super::detail_panel::panel_for(
+        &overlay,
+        "overview",
+        state.snapshot.as_ref().unwrap(),
+    );
+    assert_eq!(
+        panel.sections[0].right.as_deref(),
+        Some("1 task · 1 wants you")
+    );
+    assert_eq!(
+        panel.sections[0]
+            .rows
+            .iter()
+            .map(|row| row.text.as_str())
+            .collect::<Vec<_>>(),
+        ["live"]
+    );
     assert_eq!(panel.sections[1].right.as_deref(), Some("1 task"));
     assert!(panel.sections[1].rows.is_empty());
 }

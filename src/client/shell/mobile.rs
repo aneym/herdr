@@ -18,7 +18,9 @@ fn mobile_tab_width(tab: &ClientShellTab) -> u16 {
     } else {
         3 + tab.desk_count.ilog10() as u16
     };
-    display_width(&tab.label).saturating_add(2).saturating_add(suffix)
+    display_width(&tab.label)
+        .saturating_add(2)
+        .saturating_add(suffix)
 }
 
 struct MobileItem {
@@ -121,8 +123,7 @@ fn render_header_tabs(
         .map(|tab| mobile_tab_width(tab))
         .fold(0, u16::saturating_add);
     while start < active && prefix_width > area.width {
-        prefix_width =
-            prefix_width.saturating_sub(mobile_tab_width(tabs[start]));
+        prefix_width = prefix_width.saturating_sub(mobile_tab_width(tabs[start]));
         start += 1;
     }
     let mut x = area.x;
@@ -215,7 +216,11 @@ fn render_header_status(
     let name_width = area
         .width
         .saturating_sub(display_width(&prefix))
-        .saturating_sub(if show_profile { display_width(&profile) } else { 0 });
+        .saturating_sub(if show_profile {
+            display_width(&profile)
+        } else {
+            0
+        });
     let mut x = put_segment(
         buffer,
         area.x,

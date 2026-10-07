@@ -219,7 +219,9 @@ impl App {
         let Some(index) = self.parse_workspace_id(&params.workspace_id) else {
             return workspace_not_found(id, &params.workspace_id);
         };
-        let old_ranks = (0..self.state.workspaces[index].tabs.len()).map(|ti| self.priority_tab_rank(index, ti).value).collect::<Vec<_>>();
+        let old_ranks = (0..self.state.workspaces[index].tabs.len())
+            .map(|ti| self.priority_tab_rank(index, ti).value)
+            .collect::<Vec<_>>();
         let Some(ws) = self.state.workspaces.get_mut(index) else {
             return workspace_not_found(id, &params.workspace_id);
         };

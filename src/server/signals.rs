@@ -215,8 +215,7 @@ fn decisions_for_coalesced(
     queued.sort_by_key(|event| (event.arrival_ns, event.signal));
     let mut last_ignored = None;
     let mut decisions = Vec::new();
-    while let Some((_, _, decision, _)) = consume_one(&mut queued, &mut last_ignored, escape_quit)
-    {
+    while let Some((_, _, decision, _)) = consume_one(&mut queued, &mut last_ignored, escape_quit) {
         decisions.push(decision);
     }
     decisions
@@ -305,7 +304,9 @@ fn ingest(policy: &mut Policy) {
         return;
     }
     policy.queued.extend(fresh);
-    policy.queued.sort_by_key(|event| (event.arrival_ns, event.signal));
+    policy
+        .queued
+        .sort_by_key(|event| (event.arrival_ns, event.signal));
 }
 
 #[cfg(unix)]
@@ -546,10 +547,7 @@ mod tests {
     #[test]
     fn hup_then_term_coalesced_before_poll_are_ignored() {
         let decisions = decisions_for_coalesced(
-            &[
-                (HUP, 4242, 0, 1, 0, 1_000),
-                (TERM, 4242, 0, 1, 0, 2_000),
-            ],
+            &[(HUP, 4242, 0, 1, 0, 1_000), (TERM, 4242, 0, 1, 0, 2_000)],
             false,
         );
         assert_eq!(decisions, vec![Decision::Ignore, Decision::Ignore]);
@@ -558,8 +556,7 @@ mod tests {
     #[test]
     fn repeated_term_coalesced_before_poll_quits() {
         let t0 = 1_000_000_000_u64;
-        let decisions =
-            decisions_for_coalesced(&[(TERM, 4242, 0, 2, t0, t0 + 1_000_000)], false);
+        let decisions = decisions_for_coalesced(&[(TERM, 4242, 0, 2, t0, t0 + 1_000_000)], false);
         assert_eq!(decisions, vec![Decision::Ignore, Decision::Quit]);
     }
 

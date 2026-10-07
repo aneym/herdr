@@ -75,15 +75,25 @@ pub(super) fn wait_word(reason: &str) -> String {
 
 fn fields(summary: &str) -> Fields {
     let mut out = Fields::default();
-    for part in summary.split(" · ").map(str::trim).filter(|part| !part.is_empty()) {
+    for part in summary
+        .split(" · ")
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+    {
         if out.running.is_none() {
-            if let Some(count) = part.strip_suffix(" running").filter(|n| n.chars().all(|c| c.is_ascii_digit()) && !n.is_empty()) {
+            if let Some(count) = part
+                .strip_suffix(" running")
+                .filter(|n| n.chars().all(|c| c.is_ascii_digit()) && !n.is_empty())
+            {
                 out.running = Some(count.to_owned());
                 continue;
             }
         }
         if out.free.is_none() {
-            if let Some(amount) = part.strip_suffix(" free").filter(|amount| !amount.contains(' ')) {
+            if let Some(amount) = part
+                .strip_suffix(" free")
+                .filter(|amount| !amount.contains(' '))
+            {
                 out.free = Some(amount.to_owned());
                 continue;
             }
@@ -95,7 +105,10 @@ fn fields(summary: &str) -> Fields {
             }
         }
         // The same trims the one-line footer applies: "load 150/16" and "3 live" read as "150/16" and "3".
-        let part = part.strip_prefix("load ").unwrap_or(part).replace(" live", "");
+        let part = part
+            .strip_prefix("load ")
+            .unwrap_or(part)
+            .replace(" live", "");
         out.extras.push(part);
     }
     out
@@ -104,35 +117,47 @@ fn fields(summary: &str) -> Fields {
 /// Lay out every host as one row of `width` columns (the sidebar's full width,
 /// including the one-column left margin). Columns align across rows.
 pub(super) fn host_lines(rows: &[HostRow], width: u16) -> Vec<HostLine> {
-    let parsed: Vec<Fields> = rows.iter().map(|row| fields(row.summary.as_deref().unwrap_or(""))).collect();
+    let parsed: Vec<Fields> = rows
+        .iter()
+        .map(|row| fields(row.summary.as_deref().unwrap_or("")))
+        .collect();
     let column = |get: fn(&Fields) -> Option<&String>| {
-        parsed.iter().filter_map(|f| get(f).map(|v| display_width(v))).max().unwrap_or(0)
+        parsed
+            .iter()
+            .filter_map(|f| get(f).map(|v| display_width(v)))
+            .max()
+            .unwrap_or(0)
     };
     let count_w = column(|f| f.running.as_ref());
     let free_w = column(|f| f.free.as_ref());
     // Room after the left margin, the host column and its space.
     let room = usize::from(width).saturating_sub(1 + HOST_COLUMNS + 1);
-    rows.iter().zip(&parsed).map(|(row, fields)| {
-        let mut cells = Vec::new();
-        if count_w > 0 {
-            cells.push(fields.running.as_ref().map_or_else(
-                || " ".repeat(count_w + " running".len()),
-                |n| format!("{n:>count_w$} running")));
-        }
-        if free_w > 0 {
-            cells.push(fields.free.as_ref().map_or_else(
-                || " ".repeat(free_w + " free".len()),
-                |amount| format!("{amount:>free_w$} free")));
-        }
-        if let Some(wait) = &fields.wait {
-            cells.push(format!("wait {wait}"));
-        }
-        cells.extend(fields.extras.iter().cloned());
-        HostLine {
-            host: format!("{:<HOST_COLUMNS$}", short_host(&row.name)),
-            value: fit_fields(&cells, room),
-        }
-    }).collect()
+    rows.iter()
+        .zip(&parsed)
+        .map(|(row, fields)| {
+            let mut cells = Vec::new();
+            if count_w > 0 {
+                cells.push(fields.running.as_ref().map_or_else(
+                    || " ".repeat(count_w + " running".len()),
+                    |n| format!("{n:>count_w$} running"),
+                ));
+            }
+            if free_w > 0 {
+                cells.push(fields.free.as_ref().map_or_else(
+                    || " ".repeat(free_w + " free".len()),
+                    |amount| format!("{amount:>free_w$} free"),
+                ));
+            }
+            if let Some(wait) = &fields.wait {
+                cells.push(format!("wait {wait}"));
+            }
+            cells.extend(fields.extras.iter().cloned());
+            HostLine {
+                host: format!("{:<HOST_COLUMNS$}", short_host(&row.name)),
+                value: fit_fields(&cells, room),
+            }
+        })
+        .collect()
 }
 
 /// Drop complete trailing fields to make room for the cut marker. Only a
@@ -186,13 +211,20 @@ mod tests {
     use super::*;
 
     fn host(name: &str, summary: &str) -> HostRow {
-        HostRow { name: name.into(), summary: Some(summary.into()), ..HostRow::default() }
+        HostRow {
+            name: name.into(),
+            summary: Some(summary.into()),
+            ..HostRow::default()
+        }
     }
 
     /// The four hosts as Alex saw them on 2026-10-05 ~20:50 ET.
     fn alex_hosts() -> Vec<HostRow> {
         vec![
-            host("Studio", "2 running · 2G free · waiting on memory · 1 kept: 1 secret"),
+            host(
+                "Studio",
+                "2 running · 2G free · waiting on memory · 1 kept: 1 secret",
+            ),
             host("PC", "3 running · 3.6G free"),
             host("ax42", "2 running · 12G free · waiting on slowdown:check"),
             host("forge", "1 running · 9.2G free · waiting on memory"),
@@ -200,8 +232,13 @@ mod tests {
     }
 
     fn render(rows: &[HostRow], width: u16) -> Vec<String> {
-        host_lines(rows, width).into_iter()
-            .map(|line| format!(" {} {}", line.host, line.value).trim_end().to_owned())
+        host_lines(rows, width)
+            .into_iter()
+            .map(|line| {
+                format!(" {} {}", line.host, line.value)
+                    .trim_end()
+                    .to_owned()
+            })
             .collect()
     }
 
@@ -215,10 +252,22 @@ mod tests {
         ];
         for (width, expected) in [
             (26, vec![" ax42   2 running …", " forge  wait anthropic …"]),
-            (32, vec![" ax42   2 running 12G free …", " forge  wait anthropic …"]),
-            (40, vec![" ax42   2 running 12G free wait slowdown", " forge  wait anthropic 1 kept: 1 secret"]),
+            (
+                32,
+                vec![" ax42   2 running 12G free …", " forge  wait anthropic …"],
+            ),
+            (
+                40,
+                vec![
+                    " ax42   2 running 12G free wait slowdown",
+                    " forge  wait anthropic 1 kept: 1 secret",
+                ],
+            ),
         ] {
-            let actual: Vec<_> = rows.iter().flat_map(|row| render(std::slice::from_ref(row), width)).collect();
+            let actual: Vec<_> = rows
+                .iter()
+                .flat_map(|row| render(std::slice::from_ref(row), width))
+                .collect();
             assert_eq!(actual, expected, "width {width}");
         }
     }
@@ -243,9 +292,17 @@ mod tests {
 
     #[test]
     fn wait_reasons_come_from_the_table_and_unknown_ones_stay_whole() {
-        for (reason, word) in [("memory", "mem"), ("slowdown:check", "slowdown"), ("slowdown", "slowdown"),
-            ("no_box", "nobox"), ("lock", "lock"), ("CPU", "cpu"), ("stale stall", "stale"),
-            ("owner reserve", "owner"), ("anthropic", "anthropic")] {
+        for (reason, word) in [
+            ("memory", "mem"),
+            ("slowdown:check", "slowdown"),
+            ("slowdown", "slowdown"),
+            ("no_box", "nobox"),
+            ("lock", "lock"),
+            ("CPU", "cpu"),
+            ("stale stall", "stale"),
+            ("owner reserve", "owner"),
+            ("anthropic", "anthropic"),
+        ] {
             assert_eq!(wait_word(reason), word, "{reason}");
         }
         assert_eq!(short_host("forge-lanes"), "forge");
@@ -255,11 +312,27 @@ mod tests {
     #[test]
     fn dropped_fields_leave_an_ellipsis_at_the_column() {
         // The wait cell alone no longer fits once "slowdown" keeps its noun.
-        let rows = [host("ax42", "2 running · 12G free · waiting on slowdown:check")];
-        assert_eq!(render(&rows, 40), vec![" ax42   2 running 12G free wait slowdown"]);
+        let rows = [host(
+            "ax42",
+            "2 running · 12G free · waiting on slowdown:check",
+        )];
+        assert_eq!(
+            render(&rows, 40),
+            vec![" ax42   2 running 12G free wait slowdown"]
+        );
         assert_eq!(render(&rows, 30), vec![" ax42   2 running 12G free …"]);
         // Only the last remaining field may lose letters.
-        assert_eq!(fit_fields(&["2 running".into(), "12G free".into(), "wait slowdown".into()], 18), "2 running …");
+        assert_eq!(
+            fit_fields(
+                &[
+                    "2 running".into(),
+                    "12G free".into(),
+                    "wait slowdown".into()
+                ],
+                18
+            ),
+            "2 running …"
+        );
         assert_eq!(fit_fields(&["down".into()], 2), "d…");
         assert_eq!(fit_fields(&[], 6), "");
         assert_eq!(fit_fields(&["2 running".into()], 0), "");

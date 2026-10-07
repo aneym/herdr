@@ -24,10 +24,7 @@ impl App {
         } else {
             return Err("desk_target_required");
         };
-        Ok((
-            ws,
-            self.public_tab_id(ws, tab).ok_or("tab_not_found")?,
-        ))
+        Ok((ws, self.public_tab_id(ws, tab).ok_or("tab_not_found")?))
     }
 
     fn tab_desk(&self, ws: usize, tab_id: String) -> TabDesk {
@@ -44,13 +41,7 @@ impl App {
         }
     }
 
-    fn desk_mutated(
-        &mut self,
-        id: String,
-        ws: usize,
-        tab_id: String,
-        item_id: String,
-    ) -> String {
+    fn desk_mutated(&mut self, id: String, ws: usize, tab_id: String, item_id: String) -> String {
         self.state.mark_session_dirty();
         self.schedule_session_save();
         let desk = self.tab_desk(ws, tab_id);
@@ -85,9 +76,15 @@ impl App {
         {
             let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
             if authority.is_empty()
-                || reference.chars().any(|c| c.is_whitespace() || c.is_control())
+                || reference
+                    .chars()
+                    .any(|c| c.is_whitespace() || c.is_control())
             {
-                return encode_error(id, "desk_invalid_ref", "expected an http(s) URL with a host");
+                return encode_error(
+                    id,
+                    "desk_invalid_ref",
+                    "expected an http(s) URL with a host",
+                );
             }
             let host = authority.rsplit('@').next().unwrap_or(authority);
             if host.is_empty() || host.starts_with(':') {
@@ -109,7 +106,11 @@ impl App {
                 );
             }
             if !path.is_file() {
-                return encode_error(id, "desk_file_not_found", "file does not exist on the server");
+                return encode_error(
+                    id,
+                    "desk_file_not_found",
+                    "file does not exist on the server",
+                );
             }
             let title = path
                 .file_name()
@@ -279,7 +280,8 @@ mod tests {
 
     fn request(app: &mut App, method: &str, params: Value) -> Value {
         let before = app.event_hub.current_sequence();
-        let request = serde_json::from_value(json!({"id":"desk", "method":method, "params":params})).unwrap();
+        let request =
+            serde_json::from_value(json!({"id":"desk", "method":method, "params":params})).unwrap();
         let response: Value = serde_json::from_str(&app.handle_api_request(request)).unwrap();
         if method.starts_with("desk.") {
             let events = app.event_hub.events_after(before);
@@ -291,7 +293,10 @@ mod tests {
                 let wire = serde_json::to_value(&events[0].1).unwrap();
                 assert_eq!(wire["event"], "desk.changed");
                 assert_eq!(wire["data"]["tab_id"], response["result"]["desk"]["tab_id"]);
-                assert_eq!(wire["data"]["desk"]["front"], response["result"]["desk"]["front"]);
+                assert_eq!(
+                    wire["data"]["desk"]["front"],
+                    response["result"]["desk"]["front"]
+                );
             }
         }
         response
@@ -304,8 +309,13 @@ mod tests {
     fn desk_api_round_trip() {
         let events = crate::api::EventHub::default();
         let (_, rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&crate::config::Config::default(), crate::app::AppPolicy::TEST,
-            None, rx, events.clone());
+        let mut app = App::new(
+            &crate::config::Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            rx,
+            events.clone(),
+        );
         app.state.workspaces = vec![crate::workspace::Workspace::test_new("desk")];
         app.state.workspaces[0].id = "w1".into();
         app.state.workspaces[0].test_add_tab(Some("other"));
@@ -313,72 +323,210 @@ mod tests {
         app.state.ensure_test_terminals();
         let tab = app.public_tab_id(0, 0).unwrap();
         let other = app.public_tab_id(0, 1).unwrap();
-        let pane = app.state.workspaces[0].tabs[1].panes.keys().next().copied().unwrap();
+        let pane = app.state.workspaces[0].tabs[1]
+            .panes
+            .keys()
+            .next()
+            .copied()
+            .unwrap();
         let pane_id = app.public_pane_id(0, pane).unwrap();
         let temp = std::env::temp_dir().join(format!(
             "herdr-desk-{}-{}",
             std::process::id(),
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         std::fs::create_dir(&temp).unwrap();
         let file = temp.join("doc.md");
         std::fs::write(&file, "# Desk\n").unwrap();
         let path = file.to_str().unwrap();
-        let url = request(&mut app, "desk.open", json!({"tab_id":tab, "ref":"https://example.com/doc"}));
+        let url = request(
+            &mut app,
+            "desk.open",
+            json!({"tab_id":tab, "ref":"https://example.com/doc"}),
+        );
         assert_eq!(url["result"]["item_id"], "d1");
-        assert_eq!(url["result"]["desk"]["items"][0]["title"], "example.com/doc");
+        assert_eq!(
+            url["result"]["desk"]["items"][0]["title"],
+            "example.com/doc"
+        );
         let md = request(&mut app, "desk.open", json!({"tab_id":tab, "ref":path}));
         assert_eq!(md["result"]["item_id"], "d2");
         assert_eq!(md["result"]["desk"]["front"], "d2");
-        let duplicate = request(&mut app, "desk.open", json!({"tab_id":tab, "ref":"https://example.com/doc"}));
+        let duplicate = request(
+            &mut app,
+            "desk.open",
+            json!({"tab_id":tab, "ref":"https://example.com/doc"}),
+        );
         assert_eq!(duplicate["result"]["desk"]["front"], "d1");
-        assert_eq!(duplicate["result"]["desk"]["items"].as_array().unwrap().len(), 2);
-        let background = request(&mut app, "desk.open", json!({"tab_id":tab, "ref":"https://example.com/background", "background":true}));
+        assert_eq!(
+            duplicate["result"]["desk"]["items"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        let background = request(
+            &mut app,
+            "desk.open",
+            json!({"tab_id":tab, "ref":"https://example.com/background", "background":true}),
+        );
         assert_eq!(background["result"]["desk"]["front"], "d1");
-        let duplicate_background = request(&mut app, "desk.open", json!({"tab_id":tab,"ref":path,"background":true}));
+        let duplicate_background = request(
+            &mut app,
+            "desk.open",
+            json!({"tab_id":tab,"ref":path,"background":true}),
+        );
         assert_eq!(duplicate_background["result"]["desk"]["front"], "d1");
-        assert_eq!(duplicate_background["result"]["desk"]["items"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            duplicate_background["result"]["desk"]["items"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
         let read = request(&mut app, "desk.read", json!({"tab_id":tab, "item":"d2"}));
         assert_eq!(read["result"]["mime"], "text/markdown");
         assert_eq!(read["result"]["size"], 7);
         assert_eq!(read["result"]["data_base64"], "IyBEZXNrCg==");
-        let unchanged = request(&mut app, "desk.read", json!({"tab_id":tab, "item":path, "known_mtime_ms":read["result"]["mtime_ms"]}));
+        let unchanged = request(
+            &mut app,
+            "desk.read",
+            json!({"tab_id":tab, "item":path, "known_mtime_ms":read["result"]["mtime_ms"]}),
+        );
         assert_eq!(unchanged["result"]["unchanged"], true);
         assert!(unchanged["result"]["data_base64"].is_null());
-        assert_eq!(request(&mut app, "desk.read", json!({"tab_id":tab,"item":"d1"}))["error"]["code"], "desk_not_a_file");
-        assert_eq!(request(&mut app, "desk.close", json!({"tab_id":tab}))["result"]["desk"]["front"], "d2");
-        assert_eq!(request(&mut app, "desk.focus", json!({"tab_id":tab,"item":"d3"}))["result"]["desk"]["front"], "d3");
-        assert_eq!(request(&mut app, "desk.close", json!({"tab_id":tab}))["result"]["desk"]["front"], "d2");
-        assert_eq!(request(&mut app, "desk.focus", json!({"tab_id":tab,"item":path}))["result"]["item_id"], "d2");
-        let via_pane = request(&mut app, "desk.open", json!({"pane_id":pane_id,"ref":"https://example.com/pane"}));
+        assert_eq!(
+            request(&mut app, "desk.read", json!({"tab_id":tab,"item":"d1"}))["error"]["code"],
+            "desk_not_a_file"
+        );
+        assert_eq!(
+            request(&mut app, "desk.close", json!({"tab_id":tab}))["result"]["desk"]["front"],
+            "d2"
+        );
+        assert_eq!(
+            request(&mut app, "desk.focus", json!({"tab_id":tab,"item":"d3"}))["result"]["desk"]
+                ["front"],
+            "d3"
+        );
+        assert_eq!(
+            request(&mut app, "desk.close", json!({"tab_id":tab}))["result"]["desk"]["front"],
+            "d2"
+        );
+        assert_eq!(
+            request(&mut app, "desk.focus", json!({"tab_id":tab,"item":path}))["result"]["item_id"],
+            "d2"
+        );
+        let via_pane = request(
+            &mut app,
+            "desk.open",
+            json!({"pane_id":pane_id,"ref":"https://example.com/pane"}),
+        );
         assert_eq!(via_pane["result"]["desk"]["tab_id"], other);
-        assert_eq!(request(&mut app,"desk.open",json!({"ref":"https://example.com"}))["error"]["code"], "desk_target_required");
-        assert_eq!(request(&mut app,"desk.open",json!({"tab_id":tab,"ref":"relative.md"}))["error"]["code"], "desk_invalid_ref");
-        assert_eq!(request(&mut app,"desk.focus",json!({"tab_id":tab,"item":"missing"}))["error"]["code"], "desk_item_not_found");
-        assert_eq!(request(&mut app,"desk.open",json!({"tab_id":tab,"ref":"ftp://example.com"}))["error"]["code"], "desk_invalid_ref");
-        assert_eq!(request(&mut app,"desk.open",json!({"tab_id":tab,"ref":temp.join("missing.md")}))["error"]["code"], "desk_file_not_found");
-        assert_eq!(request(&mut app,"desk.open",json!({"tab_id":tab,"ref":"https://example.com", "opened_by":"a".repeat(65)}))["error"]["code"], "desk_invalid_opened_by");
-        assert_eq!(request(&mut app,"desk.list",json!({"tab_id":tab,"pane_id":"not-a-pane"}))["result"]["desks"][0]["tab_id"], tab);
-        assert_eq!(request(&mut app,"desk.list",json!({}))["result"]["desks"].as_array().unwrap().len(), 2);
-        assert_eq!(app.tab_info(0,0).unwrap().desk.unwrap().front.as_deref(), Some("d2"));
+        assert_eq!(
+            request(&mut app, "desk.open", json!({"ref":"https://example.com"}))["error"]["code"],
+            "desk_target_required"
+        );
+        assert_eq!(
+            request(
+                &mut app,
+                "desk.open",
+                json!({"tab_id":tab,"ref":"relative.md"})
+            )["error"]["code"],
+            "desk_invalid_ref"
+        );
+        assert_eq!(
+            request(
+                &mut app,
+                "desk.focus",
+                json!({"tab_id":tab,"item":"missing"})
+            )["error"]["code"],
+            "desk_item_not_found"
+        );
+        assert_eq!(
+            request(
+                &mut app,
+                "desk.open",
+                json!({"tab_id":tab,"ref":"ftp://example.com"})
+            )["error"]["code"],
+            "desk_invalid_ref"
+        );
+        assert_eq!(
+            request(
+                &mut app,
+                "desk.open",
+                json!({"tab_id":tab,"ref":temp.join("missing.md")})
+            )["error"]["code"],
+            "desk_file_not_found"
+        );
+        assert_eq!(
+            request(
+                &mut app,
+                "desk.open",
+                json!({"tab_id":tab,"ref":"https://example.com", "opened_by":"a".repeat(65)})
+            )["error"]["code"],
+            "desk_invalid_opened_by"
+        );
+        assert_eq!(
+            request(
+                &mut app,
+                "desk.list",
+                json!({"tab_id":tab,"pane_id":"not-a-pane"})
+            )["result"]["desks"][0]["tab_id"],
+            tab
+        );
+        assert_eq!(
+            request(&mut app, "desk.list", json!({}))["result"]["desks"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            app.tab_info(0, 0).unwrap().desk.unwrap().front.as_deref(),
+            Some("d2")
+        );
         // Closing through the actual tab API must prune the desk immediately.
         request(&mut app, "tab.close", json!({"tab_id":other}));
         assert!(!app.state.desks.contains_key(&other));
         // Allocation counters survive clearing; capacity preserves the front.
         request(&mut app, "desk.close", json!({"tab_id":tab}));
-        assert!(app.tab_info(0,0).unwrap().desk.is_none());
-        assert_eq!(request(&mut app, "desk.open", json!({"tab_id":tab,"ref":"https://example.com/next"}))["result"]["item_id"], "d4");
+        assert!(app.tab_info(0, 0).unwrap().desk.is_none());
+        assert_eq!(
+            request(
+                &mut app,
+                "desk.open",
+                json!({"tab_id":tab,"ref":"https://example.com/next"})
+            )["result"]["item_id"],
+            "d4"
+        );
         for n in 0..33 {
-            request(&mut app, "desk.open", json!({"tab_id":tab,"ref":format!("https://example.com/{n}"),"background":true}));
+            request(
+                &mut app,
+                "desk.open",
+                json!({"tab_id":tab,"ref":format!("https://example.com/{n}"),"background":true}),
+            );
         }
         let desk = &app.state.desks[&tab].info;
         assert_eq!(desk.items.len(), 32);
         assert_eq!(desk.front.as_deref(), Some("d4"));
         assert!(!desk.items.iter().any(|i| i.id == "d5"));
         let oversized = temp.join("large.bin");
-        std::fs::File::create(&oversized).unwrap().set_len(MAX_FILE_SIZE + 1).unwrap();
+        std::fs::File::create(&oversized)
+            .unwrap()
+            .set_len(MAX_FILE_SIZE + 1)
+            .unwrap();
         let opened = request(&mut app, "desk.open", json!({"tab_id":tab,"ref":oversized}));
-        assert_eq!(request(&mut app, "desk.read", json!({"tab_id":tab,"item":opened["result"]["item_id"]}))["error"]["code"], "desk_file_too_large");
+        assert_eq!(
+            request(
+                &mut app,
+                "desk.read",
+                json!({"tab_id":tab,"item":opened["result"]["item_id"]})
+            )["error"]["code"],
+            "desk_file_too_large"
+        );
         app.state.assert_invariants_for_test();
         crate::app::api::test_support::shutdown_test_runtimes(&mut app);
         std::fs::remove_dir_all(temp).unwrap();

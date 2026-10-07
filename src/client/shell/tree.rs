@@ -71,17 +71,30 @@ impl Default for ClientTreeChrome {
 }
 
 fn valid_factory_goal(value: &str) -> bool {
-    let (goal, area) = value.split_once(':').map_or((value, None), |(goal, area)| (goal, Some(area)));
+    let (goal, area) = value
+        .split_once(':')
+        .map_or((value, None), |(goal, area)| (goal, Some(area)));
     matches!(goal, "recruiter" | "closer" | "rails") && area.is_none_or(|area| !area.is_empty())
 }
 
-pub(super) fn factory_goal_choices(overlay: &crate::factory_overlay::FactoryOverlay) -> Vec<String> {
+pub(super) fn factory_goal_choices(
+    overlay: &crate::factory_overlay::FactoryOverlay,
+) -> Vec<String> {
     let mut choices = Vec::new();
     for goal in ["recruiter", "closer", "rails"] {
-        let tags = overlay.tabs.values().filter(|tag| tag.goal.as_deref() == Some(goal)).collect::<Vec<_>>();
-        if tags.is_empty() { continue; }
+        let tags = overlay
+            .tabs
+            .values()
+            .filter(|tag| tag.goal.as_deref() == Some(goal))
+            .collect::<Vec<_>>();
+        if tags.is_empty() {
+            continue;
+        }
         choices.push(goal.to_owned());
-        let areas = tags.iter().filter_map(|tag| tag.goal_area.as_deref()).filter(|area| !area.is_empty())
+        let areas = tags
+            .iter()
+            .filter_map(|tag| tag.goal_area.as_deref())
+            .filter(|area| !area.is_empty())
             .collect::<std::collections::BTreeSet<_>>();
         choices.extend(areas.into_iter().map(|area| format!("{goal}:{area}")));
     }
@@ -89,11 +102,18 @@ pub(super) fn factory_goal_choices(overlay: &crate::factory_overlay::FactoryOver
 }
 
 fn canonical_factory_section(section: &str) -> &str {
-    if section == "REVIEWING" { "READY FOR REVIEW" } else { section }
+    if section == "REVIEWING" {
+        "READY FOR REVIEW"
+    } else {
+        section
+    }
 }
 
 fn valid_factory_section(section: &str) -> bool {
-    matches!(section, "ORCHESTRATOR" | "READY FOR REVIEW" | "SCOPING" | "IMPLEMENTING" | "MONITORING")
+    matches!(
+        section,
+        "ORCHESTRATOR" | "READY FOR REVIEW" | "SCOPING" | "IMPLEMENTING" | "MONITORING"
+    )
 }
 
 fn sorted(values: &HashSet<String>) -> Vec<String> {
@@ -177,16 +197,30 @@ impl ClientTreeChrome {
             factory_auto_expanded: saved.factory_auto_expanded.into_iter().collect(),
             factory_parked_expanded: saved.factory_parked_expanded.into_iter().collect(),
             factory_idle_expanded: saved.factory_idle_expanded.into_iter().collect(),
-            factory_sections_collapsed: saved.factory_sections_collapsed.into_iter()
+            factory_sections_collapsed: saved
+                .factory_sections_collapsed
+                .into_iter()
                 .map(|key| match key.rsplit_once(':') {
-                    Some((space, section)) => format!("{space}:{}", canonical_factory_section(section)),
+                    Some((space, section)) => {
+                        format!("{space}:{}", canonical_factory_section(section))
+                    }
                     None => key,
                 })
-                .filter(|key| key.rsplit_once(':').is_some_and(|(space, section)| !space.is_empty() && valid_factory_section(section))).collect(),
-            factory_goal_filter: saved.factory_goal_filter.filter(|value| valid_factory_goal(value)),
-            factory_section_focus: saved.factory_section_focus.into_iter()
+                .filter(|key| {
+                    key.rsplit_once(':').is_some_and(|(space, section)| {
+                        !space.is_empty() && valid_factory_section(section)
+                    })
+                })
+                .collect(),
+            factory_goal_filter: saved
+                .factory_goal_filter
+                .filter(|value| valid_factory_goal(value)),
+            factory_section_focus: saved
+                .factory_section_focus
+                .into_iter()
                 .map(|(space, section)| (space, canonical_factory_section(&section).to_owned()))
-                .filter(|(space, section)| !space.is_empty() && valid_factory_section(section)).collect(),
+                .filter(|(space, section)| !space.is_empty() && valid_factory_section(section))
+                .collect(),
         }
     }
 
@@ -223,7 +257,9 @@ impl ClientTreeChrome {
         if self.factory_collapsed_lanes.contains(tab_id) {
             false
         } else {
-            self.factory_expanded_lanes.contains(tab_id) || focused || (ACTION_UNFOLDS_LANE && needs_action)
+            self.factory_expanded_lanes.contains(tab_id)
+                || focused
+                || (ACTION_UNFOLDS_LANE && needs_action)
         }
     }
 
@@ -351,7 +387,10 @@ pub(super) enum AgentPanelListEntry {
     Agent(AgentRow),
     /// The header of the automations section, carrying its activity summary.
     AutomationsHeader(AutomationSummary),
-    QuietSections { hidden: usize, automations: AutomationSummary },
+    QuietSections {
+        hidden: usize,
+        automations: AutomationSummary,
+    },
     /// An agent in a workspace named by `ui.sidebar.automations.workspaces`.
     Automation(AgentRow),
     /// The collapsible section collecting spaces that were folded away. Only
@@ -366,7 +405,9 @@ pub(super) enum AgentPanelListEntry {
     /// A pinned chat from any space, in pin order (the Cmd+1..9 order).
     PinnedTab(PinnedTabRow),
     /// Title of a named group of spaces from the overlay's `space_groups`.
-    SpaceGroupHeader { name: String },
+    SpaceGroupHeader {
+        name: String,
+    },
     SpaceHeader(TreeHeader),
     TabHeader(TreeHeader),
     FactorySection {
@@ -375,8 +416,16 @@ pub(super) enum AgentPanelListEntry {
         indent: u8,
         controls: Option<FactorySectionControls>,
     },
-    FactoryGoalPicker { filter: Option<String>, choices: Vec<String> },
-    FactoryShowAll { workspace_id: String, count: usize, alert: bool, indent: u8 },
+    FactoryGoalPicker {
+        filter: Option<String>,
+        choices: Vec<String>,
+    },
+    FactoryShowAll {
+        workspace_id: String,
+        count: usize,
+        alert: bool,
+        indent: u8,
+    },
     FactoryTab(FactoryTabRow),
     FactoryHost {
         name: String,
@@ -529,9 +578,15 @@ pub(super) fn pinned_tab_entries(
             .copied()
             .unwrap_or((status, lane_is_idle(tag, status, tab.work_status.is_some())));
         out.push(AgentPanelListEntry::PinnedTab(PinnedTabRow {
-            request: agent.then(|| snapshot.panes.iter()
-                .filter(|pane| pane.tab_id == tab.tab_id)
-                .find_map(|pane| pane.tokens.get("request").cloned())).flatten(),
+            request: agent
+                .then(|| {
+                    snapshot
+                        .panes
+                        .iter()
+                        .filter(|pane| pane.tab_id == tab.tab_id)
+                        .find_map(|pane| pane.tokens.get("request").cloned())
+                })
+                .flatten(),
             agent,
             workspace_id: pin.workspace_id.clone(),
             tab_id: pin.tab_id.clone(),
@@ -655,8 +710,16 @@ impl AgentPanelListEntry {
     pub(super) fn line_count(&self) -> usize {
         match self {
             Self::Agent(row) | Self::Automation(row) => row.rows.len().max(1),
-            Self::FactoryTab(row) if row.workflow && !row.done
-                && row.phase.as_ref().is_some_and(|phase| !phase.trim().is_empty()) => 2,
+            Self::FactoryTab(row)
+                if row.workflow
+                    && !row.done
+                    && row
+                        .phase
+                        .as_ref()
+                        .is_some_and(|phase| !phase.trim().is_empty()) =>
+            {
+                2
+            }
             _ => 1,
         }
     }
@@ -747,10 +810,17 @@ pub(super) fn append_automations(
     }
     let summary = AutomationSummary::of(&automations);
     if !tree.automations_expanded {
-        if let Some(AgentPanelListEntry::HiddenSpacesHeader { count, collapsed: true }) = entries.last() {
+        if let Some(AgentPanelListEntry::HiddenSpacesHeader {
+            count,
+            collapsed: true,
+        }) = entries.last()
+        {
             let hidden = *count;
             entries.pop();
-            entries.push(AgentPanelListEntry::QuietSections { hidden, automations: summary });
+            entries.push(AgentPanelListEntry::QuietSections {
+                hidden,
+                automations: summary,
+            });
             return;
         }
     }
@@ -881,11 +951,17 @@ pub(super) fn tree_list_entries_with_overlay(
         workspace_order.sort_by_key(|id| priority.space_rank(id));
     }
     let mut out = pinned_tab_entries(snapshot, overlay);
-    if let Some(overlay) = overlay.filter(|overlay| overlay.tabs.values().any(|tag| tag.section.is_some())) {
+    if let Some(overlay) =
+        overlay.filter(|overlay| overlay.tabs.values().any(|tag| tag.section.is_some()))
+    {
         let choices = factory_goal_choices(overlay);
         if !choices.is_empty() {
             out.push(AgentPanelListEntry::FactoryGoalPicker {
-                filter: tree.factory_goal_filter.clone().filter(|value| choices.contains(value)), choices,
+                filter: tree
+                    .factory_goal_filter
+                    .clone()
+                    .filter(|value| choices.contains(value)),
+                choices,
             });
         }
     }
@@ -954,14 +1030,34 @@ pub(super) fn tree_list_entries_with_overlay(
             }));
             if space_collapsed {
                 if let Some(overlay) = tagged {
-                    if super::sidebar_report::recording() && snapshot.tabs.iter().any(|tab|
-                        tab.workspace_id == *workspace_id && overlay.tab(&tab.tab_id).is_some_and(|tag| tag.section.is_some())) {
-                        let mut report = super::sidebar_report::WorkspaceReport::new(workspace_id, tree, &priority, None);
-                        for tab in snapshot.tabs.iter().filter(|tab| tab.workspace_id == *workspace_id) {
+                    if super::sidebar_report::recording()
+                        && snapshot.tabs.iter().any(|tab| {
+                            tab.workspace_id == *workspace_id
+                                && overlay
+                                    .tab(&tab.tab_id)
+                                    .is_some_and(|tag| tag.section.is_some())
+                        })
+                    {
+                        let mut report = super::sidebar_report::WorkspaceReport::new(
+                            workspace_id,
+                            tree,
+                            &priority,
+                            None,
+                        );
+                        for tab in snapshot
+                            .tabs
+                            .iter()
+                            .filter(|tab| tab.workspace_id == *workspace_id)
+                        {
                             if let Some(tag) = overlay.tab(&tab.tab_id) {
-                                report.add(&tab.tab_id, tag.kind,
-                                    super::sidebar_report::section_label(tag.section).map(str::to_owned),
-                                    tag.parent.clone(), "space_collapsed");
+                                report.add(
+                                    &tab.tab_id,
+                                    tag.kind,
+                                    super::sidebar_report::section_label(tag.section)
+                                        .map(str::to_owned),
+                                    tag.parent.clone(),
+                                    "space_collapsed",
+                                );
                             }
                         }
                         super::sidebar_report::record(report);
@@ -1051,10 +1147,7 @@ pub(super) fn tree_list_entries_with_overlay(
                         None => Vec::new(),
                     },
                     collapsible: lead.is_none() && !tab_rows.is_empty() && tree.show_agents,
-                    pinned: snapshot
-                        .pinned_tabs
-                        .iter()
-                        .any(|pin| pin.tab_id == *tab_id),
+                    pinned: snapshot.pinned_tabs.iter().any(|pin| pin.tab_id == *tab_id),
                     indent: space_indent,
                     active: (!tree.show_agents || lead.is_some())
                         && tab.is_some_and(|tab| tab.focused)
@@ -1212,8 +1305,15 @@ fn append_factory_space(
 ) {
     use crate::factory_overlay::{TabKind, TabMode, TabSection};
     let start = out.len();
-    let sectioned = snapshot.tabs.iter().filter(|tab| tab.workspace_id == workspace_id)
-        .any(|tab| overlay.tab(&tab.tab_id).is_some_and(|tag| tag.section.is_some()));
+    let sectioned = snapshot
+        .tabs
+        .iter()
+        .filter(|tab| tab.workspace_id == workspace_id)
+        .any(|tab| {
+            overlay
+                .tab(&tab.tab_id)
+                .is_some_and(|tag| tag.section.is_some())
+        });
     let choices = factory_goal_choices(overlay);
     let filter = tree.factory_goal_filter.as_deref().filter(|value| {
         sectioned
@@ -1225,11 +1325,19 @@ fn append_factory_space(
         .iter()
         .filter(|tab| tab.workspace_id == workspace_id)
         .filter(|tab| !agent_tabs.contains(tab.tab_id.as_str()))
-        .filter(|tab| filter.is_none_or(|filter| overlay.tab(&tab.tab_id).is_some_and(|tag| {
-            let (goal, area) = filter.split_once(':').map_or((filter, None), |(goal, area)| (goal, Some(area)));
-            tag.kind == TabKind::Orchestrator || tag.mode == TabMode::Auto
-                || (tag.goal.as_deref() == Some(goal) && area.is_none_or(|area| tag.goal_area.as_deref() == Some(area)))
-        })))
+        .filter(|tab| {
+            filter.is_none_or(|filter| {
+                overlay.tab(&tab.tab_id).is_some_and(|tag| {
+                    let (goal, area) = filter
+                        .split_once(':')
+                        .map_or((filter, None), |(goal, area)| (goal, Some(area)));
+                    tag.kind == TabKind::Orchestrator
+                        || tag.mode == TabMode::Auto
+                        || (tag.goal.as_deref() == Some(goal)
+                            && area.is_none_or(|area| tag.goal_area.as_deref() == Some(area)))
+                })
+            })
+        })
         .collect::<Vec<_>>();
     let kind = |tab: &crate::protocol::ClientShellTab| {
         overlay
@@ -1241,7 +1349,9 @@ fn append_factory_space(
             .tab(&tab.tab_id)
             .is_none_or(|tag| !tag.done && tag.kind != TabKind::Advisor)
     };
-    let first_orchestrator = tabs.iter().copied()
+    let first_orchestrator = tabs
+        .iter()
+        .copied()
         .find(|tab| foreground(tab) && kind(tab) == TabKind::Orchestrator)
         .map(|tab| tab.tab_id.as_str());
     if priority.ranked() {
@@ -1255,11 +1365,18 @@ fn append_factory_space(
     let lanes = tabs
         .iter()
         .copied()
-        .filter(|tab| kind(tab) == TabKind::Lane && (foreground(tab)
-            || overlay.tab(&tab.tab_id).is_some_and(|tag| tag.mode != TabMode::Active)))
+        .filter(|tab| {
+            kind(tab) == TabKind::Lane
+                && (foreground(tab)
+                    || overlay
+                        .tab(&tab.tab_id)
+                        .is_some_and(|tag| tag.mode != TabMode::Active))
+        })
         .collect::<Vec<_>>();
     let lane_mode = |tab: &crate::protocol::ClientShellTab| {
-        overlay.tab(&tab.tab_id).map_or(TabMode::Active, |tag| tag.mode)
+        overlay
+            .tab(&tab.tab_id)
+            .map_or(TabMode::Active, |tag| tag.mode)
     };
     let all_workflows = tabs
         .iter()
@@ -1285,17 +1402,28 @@ fn append_factory_space(
     };
     // Only a tab's first agent pane determines its explicit sidebar placement.
     // Resolve chains to their top row so the factory tree never grows past one level.
-    let direct_parent = lanes.iter().filter(|lane| lane_mode(lane) == TabMode::Active)
-        .filter(|lane| overlay.tab(&lane.tab_id).and_then(|tag| tag.section) != Some(TabSection::Scoping))
+    let direct_parent = lanes
+        .iter()
+        .filter(|lane| lane_mode(lane) == TabMode::Active)
+        .filter(|lane| {
+            overlay.tab(&lane.tab_id).and_then(|tag| tag.section) != Some(TabSection::Scoping)
+        })
         .filter_map(|lane| {
-            let primary = snapshot.agents.iter().find(|agent| agent.tab_id == lane.tab_id)?;
+            let primary = snapshot
+                .agents
+                .iter()
+                .find(|agent| agent.tab_id == lane.tab_id)?;
             let pane = primary.group.parent_pane_id.as_deref()?;
             let parent = snapshot.agents.iter().find(|agent| agent.pane_id == pane)?;
             if parent.workspace_id != workspace_id || parent.tab_id == lane.tab_id {
                 return None;
             }
-            let valid = lanes.iter().any(|candidate| candidate.tab_id == parent.tab_id)
-                || orchestrators.iter().any(|candidate| candidate.tab_id == parent.tab_id);
+            let valid = lanes
+                .iter()
+                .any(|candidate| candidate.tab_id == parent.tab_id)
+                || orchestrators
+                    .iter()
+                    .any(|candidate| candidate.tab_id == parent.tab_id);
             valid.then_some((lane.tab_id.as_str(), parent.tab_id.as_str()))
         })
         .collect::<std::collections::HashMap<_, _>>();
@@ -1311,37 +1439,79 @@ fn append_factory_space(
         (current != tab_id).then(|| current.to_owned())
     };
     let lane_section = |lane: &crate::protocol::ClientShellTab| {
-        overlay.tab(&lane.tab_id).and_then(|tag| tag.section).unwrap_or(TabSection::Implementing)
+        overlay
+            .tab(&lane.tab_id)
+            .and_then(|tag| tag.section)
+            .unwrap_or(TabSection::Implementing)
     };
     let group_state = |members: &[&crate::protocol::ClientShellTab]| {
-        let member_ids = members.iter().map(|lane| lane.tab_id.as_str()).collect::<HashSet<_>>();
-        let group_lanes = lanes.iter().copied().filter(|lane| {
-            member_ids.contains(lane.tab_id.as_str())
-                || grouped_root(&lane.tab_id).is_some_and(|id| member_ids.contains(id.as_str()))
-        }).collect::<Vec<_>>();
-        let group_ids = group_lanes.iter().map(|lane| lane.tab_id.as_str()).collect::<HashSet<_>>();
-        group_lanes.iter().copied().chain(members.iter().copied().filter(|tab| !group_ids.contains(tab.tab_id.as_str()))).chain(all_workflows.iter().copied().filter(|workflow| {
-            parent_for(workflow).is_some_and(|id| group_ids.contains(id))
-        })).fold((false, false), |(alert, working), tab| {
-            let row = factory_row(snapshot, rows, overlay, tab, indent, false, false);
-            let (row_alert, row_working) = match row {
-                AgentPanelListEntry::FactoryTab(row) => (
-                    row.status == crate::api::schema::AgentStatus::Blocked
-                        || row.attention == crate::factory_overlay::Attention::Act,
-                    row.status == crate::api::schema::AgentStatus::Working,
-                ),
-                _ => (false, false),
-            };
-            let tag = overlay.tab(&tab.tab_id);
-            (alert || row_alert || tag.is_some_and(|tag| tag.runs.iter()
-                    .any(|run| run.attention == crate::factory_overlay::Attention::Act)),
-                working || row_working || tab.work_status.is_none() && tag.is_some_and(|tag| tag.busy
-                    || tag.runs.iter().any(|run| !run.done)))
-        })
+        let member_ids = members
+            .iter()
+            .map(|lane| lane.tab_id.as_str())
+            .collect::<HashSet<_>>();
+        let group_lanes = lanes
+            .iter()
+            .copied()
+            .filter(|lane| {
+                member_ids.contains(lane.tab_id.as_str())
+                    || grouped_root(&lane.tab_id).is_some_and(|id| member_ids.contains(id.as_str()))
+            })
+            .collect::<Vec<_>>();
+        let group_ids = group_lanes
+            .iter()
+            .map(|lane| lane.tab_id.as_str())
+            .collect::<HashSet<_>>();
+        group_lanes
+            .iter()
+            .copied()
+            .chain(
+                members
+                    .iter()
+                    .copied()
+                    .filter(|tab| !group_ids.contains(tab.tab_id.as_str())),
+            )
+            .chain(
+                all_workflows.iter().copied().filter(|workflow| {
+                    parent_for(workflow).is_some_and(|id| group_ids.contains(id))
+                }),
+            )
+            .fold((false, false), |(alert, working), tab| {
+                let row = factory_row(snapshot, rows, overlay, tab, indent, false, false);
+                let (row_alert, row_working) = match row {
+                    AgentPanelListEntry::FactoryTab(row) => (
+                        row.status == crate::api::schema::AgentStatus::Blocked
+                            || row.attention == crate::factory_overlay::Attention::Act,
+                        row.status == crate::api::schema::AgentStatus::Working,
+                    ),
+                    _ => (false, false),
+                };
+                let tag = overlay.tab(&tab.tab_id);
+                (
+                    alert
+                        || row_alert
+                        || tag.is_some_and(|tag| {
+                            tag.runs
+                                .iter()
+                                .any(|run| run.attention == crate::factory_overlay::Attention::Act)
+                        }),
+                    working
+                        || row_working
+                        || tab.work_status.is_none()
+                            && tag.is_some_and(|tag| {
+                                tag.busy || tag.runs.iter().any(|run| !run.done)
+                            }),
+                )
+            })
     };
     let orchestrator_lanes = if sectioned {
-        lanes.iter().copied().filter(|lane| lane_mode(lane) == TabMode::Active
-            && grouped_root(&lane.tab_id).is_none() && lane_section(lane) == TabSection::Orchestrator)
+        lanes
+            .iter()
+            .copied()
+            .filter(|lane| {
+                lane_mode(lane) == TabMode::Active
+                    && grouped_root(&lane.tab_id).is_none()
+                    && lane_section(lane) == TabSection::Orchestrator
+            })
             .collect::<Vec<_>>()
     } else {
         Vec::new()
@@ -1354,75 +1524,156 @@ fn append_factory_space(
             controls: sectioned.then(|| {
                 let mut members = orchestrators.clone();
                 members.extend_from_slice(&orchestrator_lanes);
-                FactorySectionControls { workspace_id: workspace_id.to_owned(), collapsed: false, focused: false,
-                    alert: group_state(&members).0, count: members.len() }
+                FactorySectionControls {
+                    workspace_id: workspace_id.to_owned(),
+                    collapsed: false,
+                    focused: false,
+                    alert: group_state(&members).0,
+                    count: members.len(),
+                }
             }),
         });
         for orchestrator in &orchestrators {
             if first_orchestrator == Some(orchestrator.tab_id.as_str())
-                || lanes.iter().any(|lane| grouped_root(&lane.tab_id).as_deref() == Some(orchestrator.tab_id.as_str())) {
-                let children = workflows.iter().copied()
+                || lanes.iter().any(|lane| {
+                    grouped_root(&lane.tab_id).as_deref() == Some(orchestrator.tab_id.as_str())
+                })
+            {
+                let children = workflows
+                    .iter()
+                    .copied()
                     .filter(|workflow| parent_for(workflow) == Some(orchestrator.tab_id.as_str()))
                     .collect::<Vec<_>>();
                 let focused = snapshot.focused_workspace_id.as_deref() == Some(workspace_id)
-                    && children.iter().any(|tab| {
-                        snapshot.focused_tab_id.as_deref() == Some(tab.tab_id.as_str())
-                    });
-                let attention = all_workflows.iter()
+                    && children
+                        .iter()
+                        .any(|tab| snapshot.focused_tab_id.as_deref() == Some(tab.tab_id.as_str()));
+                let attention = all_workflows
+                    .iter()
                     .filter(|workflow| parent_for(workflow) == Some(orchestrator.tab_id.as_str()))
                     .filter_map(|workflow| overlay.tab(&workflow.tab_id))
                     .map(|tag| tag.attention)
                     .max_by_key(|attention| attention.rank());
-                let runs = overlay.tab(&orchestrator.tab_id).map_or(&[][..], |tag| tag.runs.as_slice());
-                let grouped = lanes.iter().copied()
-                    .filter(|lane| grouped_root(&lane.tab_id).as_deref() == Some(orchestrator.tab_id.as_str()))
+                let runs = overlay
+                    .tab(&orchestrator.tab_id)
+                    .map_or(&[][..], |tag| tag.runs.as_slice());
+                let grouped = lanes
+                    .iter()
+                    .copied()
+                    .filter(|lane| {
+                        grouped_root(&lane.tab_id).as_deref() == Some(orchestrator.tab_id.as_str())
+                    })
                     .collect::<Vec<_>>();
-                let grouped_ids = grouped.iter().map(|lane| lane.tab_id.as_str()).collect::<HashSet<_>>();
-                let grouped_workflows = workflows.iter().copied()
-                    .filter(|workflow| parent_for(workflow).is_some_and(|id| grouped_ids.contains(id)))
+                let grouped_ids = grouped
+                    .iter()
+                    .map(|lane| lane.tab_id.as_str())
+                    .collect::<HashSet<_>>();
+                let grouped_workflows = workflows
+                    .iter()
+                    .copied()
+                    .filter(|workflow| {
+                        parent_for(workflow).is_some_and(|id| grouped_ids.contains(id))
+                    })
                     .collect::<Vec<_>>();
                 let (run_agents, run_workflows) = split_runs(orchestrator, runs);
-                let (grouped_agents, grouped_runs) = grouped.iter()
-                    .filter_map(|lane| overlay.tab(&lane.tab_id).map(|tag| split_runs(lane, &tag.runs)))
-                    .fold((0, 0), |(agents, workflows), (a, w)| (agents + a, workflows + w));
-                let attention = all_workflows.iter()
-                    .filter(|workflow| parent_for(workflow).is_some_and(|id| grouped_ids.contains(id)))
+                let (grouped_agents, grouped_runs) = grouped
+                    .iter()
+                    .filter_map(|lane| {
+                        overlay
+                            .tab(&lane.tab_id)
+                            .map(|tag| split_runs(lane, &tag.runs))
+                    })
+                    .fold((0, 0), |(agents, workflows), (a, w)| {
+                        (agents + a, workflows + w)
+                    });
+                let attention = all_workflows
+                    .iter()
+                    .filter(|workflow| {
+                        parent_for(workflow).is_some_and(|id| grouped_ids.contains(id))
+                    })
                     .filter_map(|workflow| overlay.tab(&workflow.tab_id))
                     .map(|tag| tag.attention)
-                    .chain(grouped.iter().filter_map(|lane| overlay.tab(&lane.tab_id))
-                        .map(|tag| tag.attention))
+                    .chain(
+                        grouped
+                            .iter()
+                            .filter_map(|lane| overlay.tab(&lane.tab_id))
+                            .map(|tag| tag.attention),
+                    )
                     .chain(runs.iter().map(|run| run.attention))
-                    .chain(grouped.iter().filter_map(|lane| overlay.tab(&lane.tab_id))
-                        .flat_map(|tag| tag.runs.iter().map(|run| run.attention)))
-                    .chain(attention).max_by_key(|value| value.rank());
-                let focused = focused || snapshot.focused_workspace_id.as_deref() == Some(workspace_id)
-                    && grouped.iter().chain(grouped_workflows.iter()).any(|tab| {
-                        snapshot.focused_tab_id.as_deref() == Some(tab.tab_id.as_str())
-                    });
+                    .chain(
+                        grouped
+                            .iter()
+                            .filter_map(|lane| overlay.tab(&lane.tab_id))
+                            .flat_map(|tag| tag.runs.iter().map(|run| run.attention)),
+                    )
+                    .chain(attention)
+                    .max_by_key(|value| value.rank());
+                let focused = focused
+                    || snapshot.focused_workspace_id.as_deref() == Some(workspace_id)
+                        && grouped.iter().chain(grouped_workflows.iter()).any(|tab| {
+                            snapshot.focused_tab_id.as_deref() == Some(tab.tab_id.as_str())
+                        });
                 let agents = grouped.len() + run_agents + grouped_agents;
-                let workflow_count = children.len() + grouped_workflows.len() + run_workflows + grouped_runs;
+                let workflow_count =
+                    children.len() + grouped_workflows.len() + run_workflows + grouped_runs;
                 let running = agents + workflow_count;
-                let expanded = tree.factory_expanded(&orchestrator.tab_id, focused,
-                    attention == Some(crate::factory_overlay::Attention::Act));
-                let mut row = factory_row(snapshot, rows, overlay, orchestrator, indent,
-                    !expanded && running > 0, running > 0);
+                let expanded = tree.factory_expanded(
+                    &orchestrator.tab_id,
+                    focused,
+                    attention == Some(crate::factory_overlay::Attention::Act),
+                );
+                let mut row = factory_row(
+                    snapshot,
+                    rows,
+                    overlay,
+                    orchestrator,
+                    indent,
+                    !expanded && running > 0,
+                    running > 0,
+                );
                 if let AgentPanelListEntry::FactoryTab(tab) = &mut row {
-                    if let Some(attention) = attention.filter(|child| child.rank() > tab.attention.rank()) {
+                    if let Some(attention) =
+                        attention.filter(|child| child.rank() > tab.attention.rank())
+                    {
                         tab.attention = attention;
                     }
                 }
-                summarize_factory_parent(&mut row, agents, workflow_count,
-                    overlay.tab(&orchestrator.tab_id).is_some_and(|tag| tag.busy), true,
-                    orchestrator.work_status.is_some());
+                summarize_factory_parent(
+                    &mut row,
+                    agents,
+                    workflow_count,
+                    overlay
+                        .tab(&orchestrator.tab_id)
+                        .is_some_and(|tag| tag.busy),
+                    true,
+                    orchestrator.work_status.is_some(),
+                );
                 out.push(row);
                 if expanded {
                     for lane in grouped {
-                        out.push(factory_row(snapshot, rows, overlay, lane,
-                            indent.saturating_add(1), false, false));
-                        for workflow in workflows.iter().copied()
-                            .filter(|workflow| parent_for(workflow) == Some(lane.tab_id.as_str())) {
-                            out.push(factory_row(snapshot, rows, overlay, workflow,
-                                indent.saturating_add(2), false, false));
+                        out.push(factory_row(
+                            snapshot,
+                            rows,
+                            overlay,
+                            lane,
+                            indent.saturating_add(1),
+                            false,
+                            false,
+                        ));
+                        for workflow in workflows
+                            .iter()
+                            .copied()
+                            .filter(|workflow| parent_for(workflow) == Some(lane.tab_id.as_str()))
+                        {
+                            out.push(factory_row(
+                                snapshot,
+                                rows,
+                                overlay,
+                                workflow,
+                                indent.saturating_add(2),
+                                false,
+                                false,
+                            ));
                         }
                         if let Some(tag) = overlay.tab(&lane.tab_id) {
                             for run in &tag.runs {
@@ -1431,15 +1682,30 @@ fn append_factory_space(
                         }
                     }
                     for child in children {
-                        out.push(factory_row(snapshot, rows, overlay, child,
-                            indent.saturating_add(1), false, false));
+                        out.push(factory_row(
+                            snapshot,
+                            rows,
+                            overlay,
+                            child,
+                            indent.saturating_add(1),
+                            false,
+                            false,
+                        ));
                     }
                     for run in runs {
                         out.push(factory_run_row(orchestrator, run, indent.saturating_add(1)));
                     }
                 }
             } else {
-                out.push(factory_row(snapshot, rows, overlay, orchestrator, indent, false, false));
+                out.push(factory_row(
+                    snapshot,
+                    rows,
+                    overlay,
+                    orchestrator,
+                    indent,
+                    false,
+                    false,
+                ));
             }
         }
     }
@@ -1457,83 +1723,153 @@ fn append_factory_space(
         .copied()
         .filter(|tab| foreground(tab) && kind(tab) == TabKind::Unknown)
         .collect::<Vec<_>>();
-    let push_lane = |out: &mut Vec<AgentPanelListEntry>, lane: &crate::protocol::ClientShellTab, indent: u8, grouped: bool| {
-            let children = workflows
-                .iter()
-                .copied()
-                .filter(|workflow| parent_for(workflow) == Some(lane.tab_id.as_str()))
-                .collect::<Vec<_>>();
-            let grouped_lanes = lanes.iter().copied()
-                .filter(|child| grouped_root(&child.tab_id).as_deref() == Some(lane.tab_id.as_str()))
-                .collect::<Vec<_>>();
-            let runs = overlay.tab(&lane.tab_id).map_or(&[][..], |tag| tag.runs.as_slice());
-            let grouped_ids = grouped_lanes.iter().map(|child| child.tab_id.as_str())
-                .collect::<HashSet<_>>();
-            let grouped_workflows = workflows.iter().copied()
-                .filter(|workflow| parent_for(workflow).is_some_and(|id| grouped_ids.contains(id)))
-                .collect::<Vec<_>>();
-            let (run_agents, run_workflows) = split_runs(lane, runs);
-            let (grouped_agents, grouped_runs) = grouped_lanes.iter()
-                .filter_map(|child| overlay.tab(&child.tab_id).map(|tag| split_runs(child, &tag.runs)))
-                .fold((0, 0), |(agents, workflows), (a, w)| (agents + a, workflows + w));
-            let agents = grouped_lanes.len() + run_agents + grouped_agents;
-            let workflow_count = children.len() + grouped_workflows.len() + run_workflows + grouped_runs;
-            let running = agents + workflow_count;
-            let attention = all_workflows.iter().filter(|workflow| {
+    let push_lane = |out: &mut Vec<AgentPanelListEntry>,
+                     lane: &crate::protocol::ClientShellTab,
+                     indent: u8,
+                     grouped: bool| {
+        let children = workflows
+            .iter()
+            .copied()
+            .filter(|workflow| parent_for(workflow) == Some(lane.tab_id.as_str()))
+            .collect::<Vec<_>>();
+        let grouped_lanes = lanes
+            .iter()
+            .copied()
+            .filter(|child| grouped_root(&child.tab_id).as_deref() == Some(lane.tab_id.as_str()))
+            .collect::<Vec<_>>();
+        let runs = overlay
+            .tab(&lane.tab_id)
+            .map_or(&[][..], |tag| tag.runs.as_slice());
+        let grouped_ids = grouped_lanes
+            .iter()
+            .map(|child| child.tab_id.as_str())
+            .collect::<HashSet<_>>();
+        let grouped_workflows = workflows
+            .iter()
+            .copied()
+            .filter(|workflow| parent_for(workflow).is_some_and(|id| grouped_ids.contains(id)))
+            .collect::<Vec<_>>();
+        let (run_agents, run_workflows) = split_runs(lane, runs);
+        let (grouped_agents, grouped_runs) = grouped_lanes
+            .iter()
+            .filter_map(|child| {
+                overlay
+                    .tab(&child.tab_id)
+                    .map(|tag| split_runs(child, &tag.runs))
+            })
+            .fold((0, 0), |(agents, workflows), (a, w)| {
+                (agents + a, workflows + w)
+            });
+        let agents = grouped_lanes.len() + run_agents + grouped_agents;
+        let workflow_count =
+            children.len() + grouped_workflows.len() + run_workflows + grouped_runs;
+        let running = agents + workflow_count;
+        let attention = all_workflows
+            .iter()
+            .filter(|workflow| {
                 parent_for(workflow) == Some(lane.tab_id.as_str())
                     || parent_for(workflow).is_some_and(|id| grouped_ids.contains(id))
-            }).map(|tab| tab.tab_id.as_str())
-                .chain(grouped_lanes.iter().map(|tab| tab.tab_id.as_str()))
-                .filter_map(|id| overlay.tab(id))
-                .map(|tag| tag.attention)
-                .chain(runs.iter().map(|run| run.attention))
-                .chain(grouped_lanes.iter().filter_map(|lane| overlay.tab(&lane.tab_id))
-                    .flat_map(|tag| tag.runs.iter().map(|run| run.attention)))
-                .max_by_key(|attention| attention.rank());
-            let focused = snapshot.focused_workspace_id.as_deref() == Some(workspace_id)
-                && children.iter().chain(grouped_lanes.iter()).chain(grouped_workflows.iter())
-                    .any(|tab| snapshot.focused_tab_id.as_deref() == Some(tab.tab_id.as_str()));
-            // Running workflows and runs no longer unfold their lane (Alex,
-            // 2026-10-05: "workflows show expanded rather than collapsed within
-            // agents by default"); the lane row carries their count instead.
-            let expanded = tree.factory_expanded(&lane.tab_id, focused,
-                attention == Some(crate::factory_overlay::Attention::Act));
-            let mut lane_row = factory_row(
-                snapshot, rows, overlay, lane, indent,
-                !expanded && running > 0, running > 0,
-            );
+            })
+            .map(|tab| tab.tab_id.as_str())
+            .chain(grouped_lanes.iter().map(|tab| tab.tab_id.as_str()))
+            .filter_map(|id| overlay.tab(id))
+            .map(|tag| tag.attention)
+            .chain(runs.iter().map(|run| run.attention))
+            .chain(
+                grouped_lanes
+                    .iter()
+                    .filter_map(|lane| overlay.tab(&lane.tab_id))
+                    .flat_map(|tag| tag.runs.iter().map(|run| run.attention)),
+            )
+            .max_by_key(|attention| attention.rank());
+        let focused = snapshot.focused_workspace_id.as_deref() == Some(workspace_id)
+            && children
+                .iter()
+                .chain(grouped_lanes.iter())
+                .chain(grouped_workflows.iter())
+                .any(|tab| snapshot.focused_tab_id.as_deref() == Some(tab.tab_id.as_str()));
+        // Running workflows and runs no longer unfold their lane (Alex,
+        // 2026-10-05: "workflows show expanded rather than collapsed within
+        // agents by default"); the lane row carries their count instead.
+        let expanded = tree.factory_expanded(
+            &lane.tab_id,
+            focused,
+            attention == Some(crate::factory_overlay::Attention::Act),
+        );
+        let mut lane_row = factory_row(
+            snapshot,
+            rows,
+            overlay,
+            lane,
+            indent,
+            !expanded && running > 0,
+            running > 0,
+        );
+        if let AgentPanelListEntry::FactoryTab(row) = &mut lane_row {
+            if attention == Some(crate::factory_overlay::Attention::Act) {
+                row.attention = crate::factory_overlay::Attention::Act;
+            } else if attention == Some(crate::factory_overlay::Attention::Warn)
+                && row.attention == crate::factory_overlay::Attention::None
+            {
+                row.attention = crate::factory_overlay::Attention::Warn;
+            }
+        }
+        summarize_factory_parent(
+            &mut lane_row,
+            agents,
+            workflow_count,
+            overlay.tab(&lane.tab_id).is_some_and(|tag| tag.busy),
+            false,
+            lane.work_status.is_some(),
+        );
+        if grouped {
             if let AgentPanelListEntry::FactoryTab(row) = &mut lane_row {
-                if attention == Some(crate::factory_overlay::Attention::Act) {
-                    row.attention = crate::factory_overlay::Attention::Act;
-                } else if attention == Some(crate::factory_overlay::Attention::Warn)
-                    && row.attention == crate::factory_overlay::Attention::None {
-                    row.attention = crate::factory_overlay::Attention::Warn;
-                }
+                row.background = lane_mode(lane) == TabMode::Parked;
             }
-            summarize_factory_parent(&mut lane_row, agents, workflow_count,
-                overlay.tab(&lane.tab_id).is_some_and(|tag| tag.busy), false,
-                lane.work_status.is_some());
-            if grouped {
-                if let AgentPanelListEntry::FactoryTab(row) = &mut lane_row {
-                    row.background = lane_mode(lane) == TabMode::Parked;
+        }
+        out.push(lane_row);
+        if expanded {
+            // Grouped lanes precede workflow runs, both in snapshot tab order.
+            for child in grouped_lanes {
+                let mut row = factory_row(
+                    snapshot,
+                    rows,
+                    overlay,
+                    child,
+                    indent.saturating_add(1),
+                    false,
+                    false,
+                );
+                if grouped && lane_mode(lane) == TabMode::Parked {
+                    if let AgentPanelListEntry::FactoryTab(tab) = &mut row {
+                        tab.background = true;
+                    }
                 }
-            }
-            out.push(lane_row);
-            if expanded {
-                // Grouped lanes precede workflow runs, both in snapshot tab order.
-                for child in grouped_lanes {
-                    let mut row = factory_row(snapshot, rows, overlay, child,
-                        indent.saturating_add(1), false, false);
+                out.push(row);
+                for workflow in workflows
+                    .iter()
+                    .copied()
+                    .filter(|workflow| parent_for(workflow) == Some(child.tab_id.as_str()))
+                {
+                    let mut row = factory_row(
+                        snapshot,
+                        rows,
+                        overlay,
+                        workflow,
+                        indent.saturating_add(1),
+                        false,
+                        false,
+                    );
                     if grouped && lane_mode(lane) == TabMode::Parked {
                         if let AgentPanelListEntry::FactoryTab(tab) = &mut row {
                             tab.background = true;
                         }
                     }
                     out.push(row);
-                    for workflow in workflows.iter().copied()
-                        .filter(|workflow| parent_for(workflow) == Some(child.tab_id.as_str())) {
-                        let mut row = factory_row(snapshot, rows, overlay, workflow,
-                            indent.saturating_add(1), false, false);
+                }
+                if let Some(tag) = overlay.tab(&child.tab_id) {
+                    for run in &tag.runs {
+                        let mut row = factory_run_row(child, run, indent.saturating_add(1));
                         if grouped && lane_mode(lane) == TabMode::Parked {
                             if let AgentPanelListEntry::FactoryTab(tab) = &mut row {
                                 tab.background = true;
@@ -1541,38 +1877,35 @@ fn append_factory_space(
                         }
                         out.push(row);
                     }
-                    if let Some(tag) = overlay.tab(&child.tab_id) {
-                        for run in &tag.runs {
-                            let mut row = factory_run_row(child, run, indent.saturating_add(1));
-                            if grouped && lane_mode(lane) == TabMode::Parked {
-                                if let AgentPanelListEntry::FactoryTab(tab) = &mut row {
-                                    tab.background = true;
-                                }
-                            }
-                            out.push(row);
-                        }
-                    }
-                }
-                for child in children {
-                    let mut row = factory_row(snapshot, rows, overlay, child,
-                        indent.saturating_add(1), false, false);
-                    if grouped && lane_mode(lane) == TabMode::Parked {
-                        if let AgentPanelListEntry::FactoryTab(tab) = &mut row {
-                            tab.background = true;
-                        }
-                    }
-                    out.push(row);
-                }
-                for run in runs {
-                    let mut row = factory_run_row(lane, run, indent.saturating_add(1));
-                    if grouped && lane_mode(lane) == TabMode::Parked {
-                        if let AgentPanelListEntry::FactoryTab(tab) = &mut row {
-                            tab.background = true;
-                        }
-                    }
-                    out.push(row);
                 }
             }
+            for child in children {
+                let mut row = factory_row(
+                    snapshot,
+                    rows,
+                    overlay,
+                    child,
+                    indent.saturating_add(1),
+                    false,
+                    false,
+                );
+                if grouped && lane_mode(lane) == TabMode::Parked {
+                    if let AgentPanelListEntry::FactoryTab(tab) = &mut row {
+                        tab.background = true;
+                    }
+                }
+                out.push(row);
+            }
+            for run in runs {
+                let mut row = factory_run_row(lane, run, indent.saturating_add(1));
+                if grouped && lane_mode(lane) == TabMode::Parked {
+                    if let AgentPanelListEntry::FactoryTab(tab) = &mut row {
+                        tab.background = true;
+                    }
+                }
+                out.push(row);
+            }
+        }
     };
     for lane in orchestrator_lanes {
         push_lane(out, lane, indent, false);
@@ -1584,8 +1917,14 @@ fn append_factory_space(
             (TabSection::Implementing, "IMPLEMENTING"),
             (TabSection::Monitoring, "MONITORING"),
         ] {
-            let members = lanes.iter().copied().filter(|lane| lane_mode(lane) == TabMode::Active
-                && grouped_root(&lane.tab_id).is_none() && lane_section(lane) == section)
+            let members = lanes
+                .iter()
+                .copied()
+                .filter(|lane| {
+                    lane_mode(lane) == TabMode::Active
+                        && grouped_root(&lane.tab_id).is_none()
+                        && lane_section(lane) == section
+                })
                 .collect::<Vec<_>>();
             if members.is_empty() && (section != TabSection::Implementing || ordinary.is_empty()) {
                 continue;
@@ -1597,22 +1936,41 @@ fn append_factory_space(
             } else {
                 String::new()
             };
-            out.push(AgentPanelListEntry::FactorySection { label, right, indent,
-                controls: Some(FactorySectionControls { workspace_id: workspace_id.to_owned(), collapsed: false, focused: false,
-                    alert: group_state(&members).0 || (section == TabSection::Implementing && group_state(&ordinary).0),
-                    count: members.len() + if section == TabSection::Implementing { ordinary.len() } else { 0 } }),
+            out.push(AgentPanelListEntry::FactorySection {
+                label,
+                right,
+                indent,
+                controls: Some(FactorySectionControls {
+                    workspace_id: workspace_id.to_owned(),
+                    collapsed: false,
+                    focused: false,
+                    alert: group_state(&members).0
+                        || (section == TabSection::Implementing && group_state(&ordinary).0),
+                    count: members.len()
+                        + if section == TabSection::Implementing {
+                            ordinary.len()
+                        } else {
+                            0
+                        },
+                }),
             });
             for lane in members {
                 push_lane(out, lane, indent, false);
             }
             if section == TabSection::Implementing {
                 for tab in &ordinary {
-                    out.push(factory_row(snapshot, rows, overlay, tab, indent, false, false));
+                    out.push(factory_row(
+                        snapshot, rows, overlay, tab, indent, false, false,
+                    ));
                 }
             }
         }
-    } else if lanes.iter().any(|lane| lane_mode(lane) == TabMode::Active && grouped_root(&lane.tab_id).is_none())
-        || !root_workflows.is_empty() || !ordinary.is_empty() {
+    } else if lanes
+        .iter()
+        .any(|lane| lane_mode(lane) == TabMode::Active && grouped_root(&lane.tab_id).is_none())
+        || !root_workflows.is_empty()
+        || !ordinary.is_empty()
+    {
         out.push(AgentPanelListEntry::FactorySection {
             label: "LANES",
             right: String::new(),
@@ -1625,20 +1983,43 @@ fn append_factory_space(
             }
         }
         for workflow in &root_workflows {
-            out.push(factory_row(snapshot, rows, overlay, workflow, indent, false, false));
+            out.push(factory_row(
+                snapshot, rows, overlay, workflow, indent, false, false,
+            ));
         }
         for tab in ordinary {
-            out.push(factory_row(snapshot, rows, overlay, tab, indent, false, false));
+            out.push(factory_row(
+                snapshot, rows, overlay, tab, indent, false, false,
+            ));
         }
     }
     for (mode, group, expanded) in [
-        (TabMode::Auto, FactoryGroupKind::Automations, &tree.factory_auto_expanded),
-        (TabMode::Parked, FactoryGroupKind::Parked, &tree.factory_parked_expanded),
-        (TabMode::Active, FactoryGroupKind::Closed, &tree.factory_idle_expanded),
+        (
+            TabMode::Auto,
+            FactoryGroupKind::Automations,
+            &tree.factory_auto_expanded,
+        ),
+        (
+            TabMode::Parked,
+            FactoryGroupKind::Parked,
+            &tree.factory_parked_expanded,
+        ),
+        (
+            TabMode::Active,
+            FactoryGroupKind::Closed,
+            &tree.factory_idle_expanded,
+        ),
     ] {
-        let members = lanes.iter().copied().filter(|lane| lane_mode(lane) == mode
-            && (group != FactoryGroupKind::Closed || (sectioned
-                && grouped_root(&lane.tab_id).is_none() && lane_section(lane) == TabSection::Closed)))
+        let members = lanes
+            .iter()
+            .copied()
+            .filter(|lane| {
+                lane_mode(lane) == mode
+                    && (group != FactoryGroupKind::Closed
+                        || (sectioned
+                            && grouped_root(&lane.tab_id).is_none()
+                            && lane_section(lane) == TabSection::Closed))
+            })
             .collect::<Vec<_>>();
         let roots = if sectioned && group == FactoryGroupKind::Automations {
             root_workflows.as_slice()
@@ -1654,15 +2035,29 @@ fn append_factory_space(
         let working = group == FactoryGroupKind::Automations && working;
         let collapsed = !expanded.contains(workspace_id);
         out.push(AgentPanelListEntry::FactoryBackground {
-            kind: group, workspace_id: workspace_id.to_owned(), count: members.len() + roots.len(),
-            collapsed, indent, alert, working, shortcut: false,
+            kind: group,
+            workspace_id: workspace_id.to_owned(),
+            count: members.len() + roots.len(),
+            collapsed,
+            indent,
+            alert,
+            working,
+            shortcut: false,
         });
         if !collapsed {
             for lane in members {
                 push_lane(out, lane, indent.saturating_add(1), true);
             }
             for workflow in roots {
-                out.push(factory_row(snapshot, rows, overlay, workflow, indent.saturating_add(1), false, false));
+                out.push(factory_row(
+                    snapshot,
+                    rows,
+                    overlay,
+                    workflow,
+                    indent.saturating_add(1),
+                    false,
+                    false,
+                ));
             }
         }
     }
@@ -1670,12 +2065,16 @@ fn append_factory_space(
         .iter()
         .copied()
         .filter(|tab| {
-            overlay.tab(&tab.tab_id)
-                .is_some_and(|tag| (tag.done
+            overlay.tab(&tab.tab_id).is_some_and(|tag| {
+                (tag.done
                     && !(tag.kind == TabKind::Lane && tag.mode != TabMode::Active)
-                    && (tag.kind != TabKind::Workflow || tag.parent.as_deref().is_some_and(|id| {
-                        grouped_root(id).is_some()
-                    }))) || tag.kind == TabKind::Advisor)
+                    && (tag.kind != TabKind::Workflow
+                        || tag
+                            .parent
+                            .as_deref()
+                            .is_some_and(|id| grouped_root(id).is_some())))
+                    || tag.kind == TabKind::Advisor
+            })
         })
         .collect::<Vec<_>>();
     if !background.is_empty() {
@@ -1705,21 +2104,41 @@ fn append_factory_space(
         }
     }
     if sectioned && super::sidebar_report::recording() {
-        let mut report = super::sidebar_report::WorkspaceReport::new(workspace_id, tree, priority, filter);
+        let mut report =
+            super::sidebar_report::WorkspaceReport::new(workspace_id, tree, priority, filter);
         report.placements(&out[start..]);
         report.kinds(overlay);
-        for tab in snapshot.tabs.iter().filter(|tab| tab.workspace_id == workspace_id) {
-            let Some(tag) = overlay.tab(&tab.tab_id) else { continue };
-            if report.tabs.iter().any(|entry| entry.tab == tab.tab_id) { continue; }
+        for tab in snapshot
+            .tabs
+            .iter()
+            .filter(|tab| tab.workspace_id == workspace_id)
+        {
+            let Some(tag) = overlay.tab(&tab.tab_id) else {
+                continue;
+            };
+            if report.tabs.iter().any(|entry| entry.tab == tab.tab_id) {
+                continue;
+            }
             let under = if tag.kind == TabKind::Workflow {
                 parent_for(tab).map(str::to_owned)
-            } else { grouped_root(&tab.tab_id) };
-            let parent = under.as_deref().and_then(|id| report.tabs.iter().find(|entry| entry.tab == id));
+            } else {
+                grouped_root(&tab.tab_id)
+            };
+            let parent = under
+                .as_deref()
+                .and_then(|id| report.tabs.iter().find(|entry| entry.tab == id));
             let section = parent.and_then(|entry| entry.section.clone()).or_else(|| {
-                let label = if tag.done || tag.kind == TabKind::Advisor { Some("background") }
-                    else if tag.mode == TabMode::Parked { Some("parked") }
-                    else if tag.mode == TabMode::Auto || (tag.kind == TabKind::Workflow && under.is_none()) { Some("services") }
-                    else { super::sidebar_report::section_label(tag.section) };
+                let label = if tag.done || tag.kind == TabKind::Advisor {
+                    Some("background")
+                } else if tag.mode == TabMode::Parked {
+                    Some("parked")
+                } else if tag.mode == TabMode::Auto
+                    || (tag.kind == TabKind::Workflow && under.is_none())
+                {
+                    Some("services")
+                } else {
+                    super::sidebar_report::section_label(tag.section)
+                };
                 label.map(str::to_owned)
             });
             let hidden = if agent_tabs.contains(tab.tab_id.as_str()) {
@@ -1753,7 +2172,13 @@ fn append_factory_space(
 }
 
 /// Apply client-only visibility after grouping, preserving all existing row semantics.
-fn apply_factory_sections(out: &mut Vec<AgentPanelListEntry>, start: usize, tree: &ClientTreeChrome, workspace_id: &str, indent: u8) {
+fn apply_factory_sections(
+    out: &mut Vec<AgentPanelListEntry>,
+    start: usize,
+    tree: &ClientTreeChrome,
+    workspace_id: &str,
+    indent: u8,
+) {
     let entries = out.drain(start..).collect::<Vec<_>>();
     let focus = tree.factory_section_focus.get(workspace_id);
     let mut entries = entries.into_iter().peekable();
@@ -1761,26 +2186,44 @@ fn apply_factory_sections(out: &mut Vec<AgentPanelListEntry>, start: usize, tree
     let mut hidden_alert = false;
     while let Some(mut entry) = entries.next() {
         let mut children = Vec::new();
-        while entries.peek().is_some_and(|entry| !matches!(entry,
-            AgentPanelListEntry::FactorySection { .. } | AgentPanelListEntry::FactoryBackground { .. })) {
-            if let Some(child) = entries.next() { children.push(child); }
+        while entries.peek().is_some_and(|entry| {
+            !matches!(
+                entry,
+                AgentPanelListEntry::FactorySection { .. }
+                    | AgentPanelListEntry::FactoryBackground { .. }
+            )
+        }) {
+            if let Some(child) = entries.next() {
+                children.push(child);
+            }
         }
         let row_alert = |entry: &AgentPanelListEntry| match entry {
-            AgentPanelListEntry::FactoryTab(row) => row.status == crate::api::schema::AgentStatus::Blocked
-                || row.attention == crate::factory_overlay::Attention::Act
-                || row.header.child_states.contains(&crate::api::schema::AgentStatus::Blocked),
+            AgentPanelListEntry::FactoryTab(row) => {
+                row.status == crate::api::schema::AgentStatus::Blocked
+                    || row.attention == crate::factory_overlay::Attention::Act
+                    || row
+                        .header
+                        .child_states
+                        .contains(&crate::api::schema::AgentStatus::Blocked)
+            }
             AgentPanelListEntry::FactoryBackground { alert, .. } => *alert,
             _ => false,
         };
-        let alert = row_alert(&entry) || children.iter().any(row_alert)
+        let alert = row_alert(&entry)
+            || children.iter().any(row_alert)
             || matches!(&entry, AgentPanelListEntry::FactorySection { controls: Some(controls), .. } if controls.alert);
         let count = match &entry {
             AgentPanelListEntry::FactoryBackground { count, .. } => *count,
-            AgentPanelListEntry::FactorySection { controls: Some(controls), .. } => controls.count,
+            AgentPanelListEntry::FactorySection {
+                controls: Some(controls),
+                ..
+            } => controls.count,
             _ => children.len(),
         };
         let visible = match &entry {
-            AgentPanelListEntry::FactorySection { label, .. } => focus.is_none_or(|focused| *label == "ORCHESTRATOR" || focused == label),
+            AgentPanelListEntry::FactorySection { label, .. } => {
+                focus.is_none_or(|focused| *label == "ORCHESTRATOR" || focused == label)
+            }
             _ => focus.is_none(),
         };
         if !visible {
@@ -1789,19 +2232,40 @@ fn apply_factory_sections(out: &mut Vec<AgentPanelListEntry>, start: usize, tree
             continue;
         }
         let mut collapsed = false;
-        if let AgentPanelListEntry::FactorySection { label, right, controls, .. } = &mut entry {
-            collapsed = focus.is_none() && tree.factory_sections_collapsed.contains(&format!("{workspace_id}:{label}"));
+        if let AgentPanelListEntry::FactorySection {
+            label,
+            right,
+            controls,
+            ..
+        } = &mut entry
+        {
+            collapsed = focus.is_none()
+                && tree
+                    .factory_sections_collapsed
+                    .contains(&format!("{workspace_id}:{label}"));
             if collapsed {
                 *right = format!("{count}{}", if alert { "!" } else { "" });
             }
-            *controls = Some(FactorySectionControls { workspace_id: workspace_id.to_owned(), collapsed,
-                focused: focus.is_some_and(|focused| focused == label), alert: collapsed && alert, count });
+            *controls = Some(FactorySectionControls {
+                workspace_id: workspace_id.to_owned(),
+                collapsed,
+                focused: focus.is_some_and(|focused| focused == label),
+                alert: collapsed && alert,
+                count,
+            });
         }
         out.push(entry);
-        if !collapsed { out.extend(children); }
+        if !collapsed {
+            out.extend(children);
+        }
     }
     if focus.is_some() {
-        out.push(AgentPanelListEntry::FactoryShowAll { workspace_id: workspace_id.to_owned(), count: hidden, alert: hidden_alert, indent });
+        out.push(AgentPanelListEntry::FactoryShowAll {
+            workspace_id: workspace_id.to_owned(),
+            count: hidden,
+            alert: hidden_alert,
+            indent,
+        });
     }
 }
 
@@ -1827,7 +2291,11 @@ fn factory_run_row(
             space_attention: None,
             factory_space: false,
         },
-        status: if done { crate::api::schema::AgentStatus::Done } else { crate::api::schema::AgentStatus::Working },
+        status: if done {
+            crate::api::schema::AgentStatus::Done
+        } else {
+            crate::api::schema::AgentStatus::Working
+        },
         reviewing: false,
         review_url: None,
         scoping: false,
@@ -1865,44 +2333,88 @@ pub(super) fn is_factory_run_key(tab_id: &str, key: &str) -> bool {
 /// chat's own Claude subagents and teammates agent:<id>; once the endpoint
 /// reports the chat quiet, its screen has said they are over, even while the
 /// overlay still lists them (server `app/work_status.rs`).
-fn run_done(parent: &crate::protocol::ClientShellTab, run: &crate::factory_overlay::RunTag) -> bool {
+fn run_done(
+    parent: &crate::protocol::ClientShellTab,
+    run: &crate::factory_overlay::RunTag,
+) -> bool {
     run.done
         || run.id.starts_with("agent:")
-            && parent.work_status.is_some_and(|status| !matches!(status,
-                crate::api::schema::AgentStatus::Working | crate::api::schema::AgentStatus::Blocked))
+            && parent.work_status.is_some_and(|status| {
+                !matches!(
+                    status,
+                    crate::api::schema::AgentStatus::Working
+                        | crate::api::schema::AgentStatus::Blocked
+                )
+            })
 }
 
-fn split_runs(parent: &crate::protocol::ClientShellTab, runs: &[crate::factory_overlay::RunTag]) -> (usize, usize) {
+fn split_runs(
+    parent: &crate::protocol::ClientShellTab,
+    runs: &[crate::factory_overlay::RunTag],
+) -> (usize, usize) {
     // The agent-rails overlay names Agent-tool subagents agent:<id> and workflow runs wf_<id>.
-    runs.iter().filter(|run| !run_done(parent, run)).fold((0, 0), |(agents, workflows), run| {
-        if run.id.starts_with("agent:") { (agents + 1, workflows) } else { (agents, workflows + 1) }
-    })
+    runs.iter()
+        .filter(|run| !run_done(parent, run))
+        .fold((0, 0), |(agents, workflows), run| {
+            if run.id.starts_with("agent:") {
+                (agents + 1, workflows)
+            } else {
+                (agents, workflows + 1)
+            }
+        })
 }
 
 /// Count a parent's live children into its summary. `reported` is a parent
 /// whose endpoint already said whether the chat works: grouped lanes are
 /// their own chats and only its own live runs count, which the endpoint
 /// already folded in, so the counts never repaint its state.
-fn summarize_factory_parent(row: &mut AgentPanelListEntry, agents: usize, workflows: usize, busy: bool, orchestrator: bool, reported: bool) {
+fn summarize_factory_parent(
+    row: &mut AgentPanelListEntry,
+    agents: usize,
+    workflows: usize,
+    busy: bool,
+    orchestrator: bool,
+    reported: bool,
+) {
     if let AgentPanelListEntry::FactoryTab(row) = row {
-        if !reported && ((agents + workflows > 0 && matches!(row.status, crate::api::schema::AgentStatus::Idle
-                | crate::api::schema::AgentStatus::Done
-                | crate::api::schema::AgentStatus::Unknown))
-            || (busy && matches!(row.status, crate::api::schema::AgentStatus::Idle
-                | crate::api::schema::AgentStatus::Done)))
+        if !reported
+            && ((agents + workflows > 0
+                && matches!(
+                    row.status,
+                    crate::api::schema::AgentStatus::Idle
+                        | crate::api::schema::AgentStatus::Done
+                        | crate::api::schema::AgentStatus::Unknown
+                ))
+                || (busy
+                    && matches!(
+                        row.status,
+                        crate::api::schema::AgentStatus::Idle
+                            | crate::api::schema::AgentStatus::Done
+                    )))
         {
             row.status = crate::api::schema::AgentStatus::Working;
             row.idle = false;
         }
-        let tag_summary = orchestrator.then(|| row.summary.as_deref().unwrap_or("").trim())
+        let tag_summary = orchestrator
+            .then(|| row.summary.as_deref().unwrap_or("").trim())
             .filter(|summary| !summary.is_empty());
         row.summary = Some(if agents + workflows > 0 {
             let mut parts = Vec::new();
             if agents > 0 {
-                parts.push(format!("{agents} {}", if agents == 1 { "agent" } else { "agents" }));
+                parts.push(format!(
+                    "{agents} {}",
+                    if agents == 1 { "agent" } else { "agents" }
+                ));
             }
             if workflows > 0 {
-                parts.push(format!("{workflows} {}", if workflows == 1 { "workflow" } else { "workflows" }));
+                parts.push(format!(
+                    "{workflows} {}",
+                    if workflows == 1 {
+                        "workflow"
+                    } else {
+                        "workflows"
+                    }
+                ));
             }
             if let Some(summary) = tag_summary {
                 parts.push(summary.to_owned());
@@ -1930,7 +2442,9 @@ fn factory_row(
     let tag = overlay.tab(&tab.tab_id);
     let status = chat_status(
         tab.work_status,
-        rows.iter().filter(|row| row.tab_id == tab.tab_id).map(|row| row.status),
+        rows.iter()
+            .filter(|row| row.tab_id == tab.tab_id)
+            .map(|row| row.status),
         tab.agent_status,
         tag,
     );
@@ -1941,19 +2455,36 @@ fn factory_row(
             workspace_id: tab.workspace_id.clone(),
             tab_id: Some(tab.tab_id.clone()),
             label: {
-                let name = tag.and_then(|tag| tag.name.clone())
+                let name = tag
+                    .and_then(|tag| tag.name.clone())
                     .unwrap_or_else(|| tab.label.clone());
-                let label = if tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Workflow) {
+                let label = if tag
+                    .is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Workflow)
+                {
                     name.strip_prefix("wf ").unwrap_or(&name).to_owned()
                 } else if tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Lane) {
-                    let name = if name.get(..10).is_some_and(|prefix| prefix.eq_ignore_ascii_case("[scoping] ")) {
+                    let name = if name
+                        .get(..10)
+                        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("[scoping] "))
+                    {
                         &name[10..]
                     } else {
                         &name
                     };
                     let name = match name.rsplit_once(" · ") {
-                        Some((label, stage)) if ["scoping", "implementing", "reviewing", "monitoring", "closed"]
-                            .iter().any(|candidate| stage.eq_ignore_ascii_case(candidate)) => label,
+                        Some((label, stage))
+                            if [
+                                "scoping",
+                                "implementing",
+                                "reviewing",
+                                "monitoring",
+                                "closed",
+                            ]
+                            .iter()
+                            .any(|candidate| stage.eq_ignore_ascii_case(candidate)) =>
+                        {
+                            label
+                        }
                         _ => name,
                     };
                     name.to_owned()
@@ -1978,11 +2509,17 @@ fn factory_row(
             factory_space: false,
         },
         status,
-        reviewing: !background && tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Lane
-            && tag.section == Some(crate::factory_overlay::TabSection::Reviewing)),
+        reviewing: !background
+            && tag.is_some_and(|tag| {
+                tag.kind == crate::factory_overlay::TabKind::Lane
+                    && tag.section == Some(crate::factory_overlay::TabSection::Reviewing)
+            }),
         review_url: tag.and_then(|tag| tag.review_url.clone()),
-        scoping: !background && tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Lane
-            && tag.section == Some(crate::factory_overlay::TabSection::Scoping)),
+        scoping: !background
+            && tag.is_some_and(|tag| {
+                tag.kind == crate::factory_overlay::TabKind::Lane
+                    && tag.section == Some(crate::factory_overlay::TabSection::Scoping)
+            }),
         scope_url: tag.and_then(|tag| tag.scope_url.clone()),
         badge: tag.and_then(|tag| tag.badge.clone()),
         machine: snapshot
@@ -1996,7 +2533,8 @@ fn factory_row(
         attention: tag.map_or(crate::factory_overlay::Attention::None, |tag| tag.attention),
         idle: lane_is_idle(tag, status, tab.work_status.is_some()),
         idle_reason: tag.and_then(|tag| tag.idle_reason.clone()),
-        devloop: tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Lane && tag.devloop),
+        devloop: tag
+            .is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Lane && tag.devloop),
         background,
         workflow: tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Workflow),
         done: tag.is_some_and(|tag| tag.done),
@@ -2028,7 +2566,10 @@ fn chat_status(
         })
         .unwrap_or(fallback);
     if tag.is_some_and(|tag| tag.busy)
-        && matches!(status, crate::api::schema::AgentStatus::Idle | crate::api::schema::AgentStatus::Done)
+        && matches!(
+            status,
+            crate::api::schema::AgentStatus::Idle | crate::api::schema::AgentStatus::Done
+        )
     {
         crate::api::schema::AgentStatus::Working
     } else {
@@ -2044,10 +2585,14 @@ fn lane_is_idle(
     status: crate::api::schema::AgentStatus,
     reported: bool,
 ) -> bool {
-    tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Lane
-        && (reported || !tag.busy)
-        && tag.summary.as_deref().is_none_or(|summary| summary.trim().is_empty()))
-        && status == crate::api::schema::AgentStatus::Idle
+    tag.is_some_and(|tag| {
+        tag.kind == crate::factory_overlay::TabKind::Lane
+            && (reported || !tag.busy)
+            && tag
+                .summary
+                .as_deref()
+                .is_none_or(|summary| summary.trim().is_empty())
+    }) && status == crate::api::schema::AgentStatus::Idle
 }
 
 /// Gather whole space blocks under the overlay's named space groups (Rails,
@@ -2091,7 +2636,9 @@ fn group_spaces(
         if members.is_empty() {
             continue;
         }
-        out.push(AgentPanelListEntry::SpaceGroupHeader { name: group.name.clone() });
+        out.push(AgentPanelListEntry::SpaceGroupHeader {
+            name: group.name.clone(),
+        });
         out.extend(members);
     }
     out.extend(rest);
@@ -2140,7 +2687,10 @@ fn reorder_spaces(
     };
     let mut ordered = blocks.into_iter().enumerate().collect::<Vec<_>>();
     ordered.sort_by_key(|(index, (workspace_id, _))| (rank(workspace_id), *index));
-    prefix.into_iter().chain(ordered.into_iter().flat_map(|(_, (_, block))| block)).collect()
+    prefix
+        .into_iter()
+        .chain(ordered.into_iter().flat_map(|(_, (_, block))| block))
+        .collect()
 }
 
 fn workspace_label(snapshot: &ClientShellSnapshot, workspace_id: &str) -> String {
@@ -2819,9 +3369,12 @@ impl ClientShellState {
             return;
         };
         let workspace_id = tab.workspace_id.clone();
-        let parked = snapshot.workspaces.iter()
+        let parked = snapshot
+            .workspaces
+            .iter()
             .any(|ws| ws.workspace_id == workspace_id && ws.parked);
-        let parent = self.factory_overlay()
+        let parent = self
+            .factory_overlay()
             .and_then(|overlay| overlay.tab(tab_id))
             .and_then(|tag| tag.parent.clone());
         let tree = self.tree_chrome_mut();
@@ -2847,20 +3400,34 @@ impl ClientShellState {
         let overlay = self.factory_overlay();
         let mut entries = Vec::<(Option<String>, String, u8)>::new();
         for workspace in &snapshot.workspaces {
-            for tab in snapshot.tabs.iter().filter(|tab| tab.workspace_id == workspace.workspace_id) {
+            for tab in snapshot
+                .tabs
+                .iter()
+                .filter(|tab| tab.workspace_id == workspace.workspace_id)
+            {
                 let tag = overlay.and_then(|overlay| overlay.tab(&tab.tab_id));
                 let mode = tag.map_or(TabMode::Active, |tag| tag.mode);
-                let parent_mode = tag.and_then(|tag| tag.parent.as_deref())
+                let parent_mode = tag
+                    .and_then(|tag| tag.parent.as_deref())
                     .and_then(|id| overlay.and_then(|overlay| overlay.tab(id)))
                     .map_or(TabMode::Active, |parent| parent.mode);
                 let auto = mode == TabMode::Auto;
                 let background = tag.is_some_and(|tag| tag.done || tag.kind == TabKind::Advisor)
-                    || mode == TabMode::Parked || parent_mode != TabMode::Active;
-                let ask = !background && !auto && tag.is_some_and(|tag| tag.attention == Attention::Act);
+                    || mode == TabMode::Parked
+                    || parent_mode != TabMode::Active;
+                let ask =
+                    !background && !auto && tag.is_some_and(|tag| tag.attention == Attention::Act);
                 let busy = tag.is_some_and(|tag| tag.busy);
                 let mut has_agent = false;
-                for pane in snapshot.panes.iter().filter(|pane| pane.tab_id == tab.tab_id) {
-                    let agent = snapshot.agents.iter().find(|agent| agent.pane_id == pane.pane_id);
+                for pane in snapshot
+                    .panes
+                    .iter()
+                    .filter(|pane| pane.tab_id == tab.tab_id)
+                {
+                    let agent = snapshot
+                        .agents
+                        .iter()
+                        .find(|agent| agent.pane_id == pane.pane_id);
                     let rank = match agent.map(|agent| agent.agent_status) {
                         Some(AgentStatus::Blocked) => 3,
                         Some(AgentStatus::Done) if !busy => 2,
@@ -2871,9 +3438,13 @@ impl ClientShellState {
                     entries.push((
                         Some(pane.pane_id.clone()),
                         tab.tab_id.clone(),
-                        if auto && parent_mode == TabMode::Active && rank == 3 { 3 }
-                        else if background || auto { 0 }
-                        else { rank.max(u8::from(ask && first_agent)) },
+                        if auto && parent_mode == TabMode::Active && rank == 3 {
+                            3
+                        } else if background || auto {
+                            0
+                        } else {
+                            rank.max(u8::from(ask && first_agent))
+                        },
                     ));
                 }
                 if !has_agent && ask {
@@ -2883,7 +3454,8 @@ impl ClientShellState {
         }
         let focused = snapshot.focused_pane_id.as_deref();
         let current = entries.iter().position(|(pane_id, tab_id, _)| {
-            pane_id.as_deref() == focused && (pane_id.is_some() || snapshot.focused_tab_id.as_deref() == Some(tab_id))
+            pane_id.as_deref() == focused
+                && (pane_id.is_some() || snapshot.focused_tab_id.as_deref() == Some(tab_id))
         });
         let order: Vec<_> = rotation(entries.len(), current, true)
             .into_iter()
@@ -2892,7 +3464,11 @@ impl ClientShellState {
                 pane_id.is_some() || snapshot.focused_tab_id.as_deref() != Some(tab_id)
             })
             .collect();
-        let best = order.iter().map(|index| entries[*index].2).max().unwrap_or(0);
+        let best = order
+            .iter()
+            .map(|index| entries[*index].2)
+            .max()
+            .unwrap_or(0);
         if best == 0 {
             return None;
         }

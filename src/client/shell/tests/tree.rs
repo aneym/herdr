@@ -157,7 +157,10 @@ fn shape(state: &ClientShellState, tree: &ClientTreeChrome) -> Vec<String> {
             AgentPanelListEntry::AutomationsHeader(summary) => {
                 format!("automations:{}", summary.label())
             }
-            AgentPanelListEntry::QuietSections { hidden, automations } => format!("quiet:{hidden}:{}", automations.label()),
+            AgentPanelListEntry::QuietSections {
+                hidden,
+                automations,
+            } => format!("quiet:{hidden}:{}", automations.label()),
             AgentPanelListEntry::Automation(row) => format!("automation:{}", row.pane_id),
             AgentPanelListEntry::FactorySection { label, .. } => format!("section:{label}"),
             AgentPanelListEntry::FactoryGoalPicker { filter, .. } => format!("goal:{filter:?}"),
@@ -181,7 +184,10 @@ fn panel_entries(state: &ClientShellState, tree: &ClientTreeChrome) -> Vec<Agent
     let (rows, automations) =
         crate::client::shell::tree::partition_automations(snapshot, &state.config, rows);
     let rows = crate::client::shell::tree::arrange_agent_hierarchy_with(
-        snapshot, tree, rows, !tree.show_tabs,
+        snapshot,
+        tree,
+        rows,
+        !tree.show_tabs,
     );
     let mut entries = if crate::client::shell::tree::tree_view_active(&state.config) {
         tree_list_entries(snapshot, tree, rows)
@@ -199,26 +205,33 @@ fn pinned_chats_top_the_tree_and_own_cmd_digits_in_pin_order() {
     config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
     // Alex's config blanks the unknown icon; a pinned chat must still show
     // its agent's state, as its row in the space does.
-    config.agents.state_icons.insert("unknown".into(), String::new());
+    config
+        .agents
+        .state_icons
+        .insert("unknown".into(), String::new());
     let mut state = ClientShellState::new(config);
-    state
-        .tree_chrome
-        .insert(crate::client::endpoint::ClientEndpointId::Local, tree.clone());
+    state.tree_chrome.insert(
+        crate::client::endpoint::ClientEndpointId::Local,
+        tree.clone(),
+    );
     let mut snapshot = tree_snapshot();
     // A cross-space pin first, a stale pin (closed tab) in the middle, then a
     // pin from the focused space.
     snapshot.pinned_tabs = vec![
         crate::protocol::ClientShellPinnedTab {
             role: None,
-            tab_id: "tab_3".into(), workspace_id: "ws_2".into(),
+            tab_id: "tab_3".into(),
+            workspace_id: "ws_2".into(),
         },
         crate::protocol::ClientShellPinnedTab {
             role: None,
-            tab_id: "gone".into(), workspace_id: "ws_2".into(),
+            tab_id: "gone".into(),
+            workspace_id: "ws_2".into(),
         },
         crate::protocol::ClientShellPinnedTab {
             role: None,
-            tab_id: "tab_2".into(), workspace_id: "ws_1".into(),
+            tab_id: "tab_2".into(),
+            workspace_id: "ws_1".into(),
         },
     ];
     // The tab-level status lags (unknown) while its agent works.
@@ -228,11 +241,22 @@ fn pinned_chats_top_the_tree_and_own_cmd_digits_in_pin_order() {
 
     // The pinned section sits above every space and each row names its space.
     let rows = shape(&state, &tree);
-    assert_eq!(rows[..4], ["pinned", "pin:1:three:beta", "pin:2:two:alpha", "space:alpha"]);
+    assert_eq!(
+        rows[..4],
+        [
+            "pinned",
+            "pin:1:three:beta",
+            "pin:2:two:alpha",
+            "space:alpha"
+        ]
+    );
     // Cmd+1..9 resolve in the same order the digits are drawn: pins first,
     // then the focused space's remaining tabs.
     let snapshot = state.snapshot.as_deref().expect("snapshot");
-    assert_eq!(state.numbered_tab_ids(snapshot), ["tab_3", "tab_2", "tab_1"]);
+    assert_eq!(
+        state.numbered_tab_ids(snapshot),
+        ["tab_3", "tab_2", "tab_1"]
+    );
 
     // The muted space label and the Cmd digit stay apart ("beta 1", not "beta1").
     let area = ratatui::layout::Rect::new(0, 0, 25, 30);
@@ -240,7 +264,14 @@ fn pinned_chats_top_the_tree_and_own_cmd_digits_in_pin_order() {
     let mut hits = ShellHitMap::default();
     let mut scroll = 0;
     crate::client::shell::agent_sidebar::render_agent_panel_with_overlay(
-        &mut buffer, area, snapshot, &state.config, &tree, None, &mut scroll, &mut hits,
+        &mut buffer,
+        area,
+        snapshot,
+        &state.config,
+        &tree,
+        None,
+        &mut scroll,
+        &mut hits,
     );
     let hit = hits
         .tree_headers
@@ -248,7 +279,10 @@ fn pinned_chats_top_the_tree_and_own_cmd_digits_in_pin_order() {
         .find(|hit| hit.pinned && hit.key == "tab_3")
         .expect("pinned row hit");
     for header in hits.tree_headers.iter().filter(|hit| hit.tab_id.is_some()) {
-        assert!(header.pin.intersection(header.chevron).is_empty(), "pin and disclosure overlap");
+        assert!(
+            header.pin.intersection(header.chevron).is_empty(),
+            "pin and disclosure overlap"
+        );
     }
     let line: String = (hit.rect.x..hit.rect.right())
         .map(|x| buffer[(x, hit.rect.y)].symbol().to_owned())
@@ -271,17 +305,35 @@ fn pinned_chats_top_the_tree_and_own_cmd_digits_in_pin_order() {
     let mut narrow_hits = ShellHitMap::default();
     let mut narrow_buffer = ratatui::buffer::Buffer::empty(area);
     crate::client::shell::agent_sidebar::render_agent_panel_with_overlay(
-        &mut narrow_buffer, area, &narrow_snapshot, &state.config, &tree, None, &mut scroll, &mut narrow_hits,
+        &mut narrow_buffer,
+        area,
+        &narrow_snapshot,
+        &state.config,
+        &tree,
+        None,
+        &mut scroll,
+        &mut narrow_hits,
     );
-    let row = narrow_hits.tree_headers.iter().find(|hit| hit.key == "tab_3" && hit.pinned).expect("pin");
-    let text: String = (row.rect.x..row.rect.right()).map(|x| narrow_buffer[(x, row.rect.y)].symbol()).collect();
+    let row = narrow_hits
+        .tree_headers
+        .iter()
+        .find(|hit| hit.key == "tab_3" && hit.pinned)
+        .expect("pin");
+    let text: String = (row.rect.x..row.rect.right())
+        .map(|x| narrow_buffer[(x, row.rect.y)].symbol())
+        .collect();
     assert!(text.contains("three"), "chat title missing: {text:?}");
 
     // Unpinning lives in the row's context menu: right-click, Unpin. It
     // unpins without focusing the chat.
     state.compose(80, 24).expect("frame");
-    let row = state.hits.tree_headers.iter()
-        .find(|hit| hit.pinned && hit.key == "tab_3").expect("pinned row").rect;
+    let row = state
+        .hits
+        .tree_headers
+        .iter()
+        .find(|hit| hit.pinned && hit.key == "tab_3")
+        .expect("pinned row")
+        .rect;
     state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
         kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Right),
         column: row.x + 3,
@@ -291,16 +343,30 @@ fn pinned_chats_top_the_tree_and_own_cmd_digits_in_pin_order() {
     let Some(ClientShellOverlay::ContextMenu(menu)) = state.overlay.as_ref() else {
         panic!("context menu open");
     };
-    let labels = menu.items().into_iter().map(|item| item.label).collect::<Vec<_>>();
-    let unpin = labels.iter().position(|label| label == "Unpin").expect("Unpin in {labels:?}");
+    let labels = menu
+        .items()
+        .into_iter()
+        .map(|item| item.label)
+        .collect::<Vec<_>>();
+    let unpin = labels
+        .iter()
+        .position(|label| label == "Unpin")
+        .expect("Unpin in {labels:?}");
     let mut outcome = ClientShellInput::default();
     state.activate_context_menu_item(unpin, &mut outcome);
-    let methods = outcome.actions.iter().filter_map(|action| match action {
-        ClientShellAction::Endpoint { request, .. } => Some(&request.method),
-        _ => None,
-    }).collect::<Vec<_>>();
-    assert!(matches!(methods[..], [crate::api::schema::Method::TabSetPinned(ref params)]
-        if params.tab_id == "tab_3" && !params.pinned), "{methods:?}");
+    let methods = outcome
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            ClientShellAction::Endpoint { request, .. } => Some(&request.method),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        matches!(methods[..], [crate::api::schema::Method::TabSetPinned(ref params)]
+        if params.tab_id == "tab_3" && !params.pinned),
+        "{methods:?}"
+    );
 
     // Regression at the input boundary: Navigate's plain digits must use the
     // same pinned order as Cmd digits, rather than selecting the first space.
@@ -311,7 +377,6 @@ fn pinned_chats_top_the_tree_and_own_cmd_digits_in_pin_order() {
             if matches!(&request.method, crate::api::schema::Method::TabFocus(target)
                 if target.tab_id == "tab_3")
     )));
-
 }
 
 fn pin_mouse(kind: crossterm::event::MouseEventKind, column: u16, row: u16) -> RawInputEvent {
@@ -639,7 +704,10 @@ fn space_groups_keep_pinned_chats_above_the_groups() {
         .expect("areas file");
     let rows = crate::client::shell::agent_sidebar::agent_rows(&snapshot, &config, None);
     let rows = crate::client::shell::tree::arrange_agent_hierarchy_with(
-        &snapshot, &tree, rows, !tree.show_tabs,
+        &snapshot,
+        &tree,
+        rows,
+        !tree.show_tabs,
     );
     let entries = crate::client::shell::tree::tree_list_entries_with_overlay(
         &snapshot,
@@ -658,7 +726,16 @@ fn space_groups_keep_pinned_chats_above_the_groups() {
         })
         .collect();
     // The pinned section owns the top and the Cmd digits; groups follow it.
-    assert_eq!(shape, ["pinned", "pin:three", "group:Rails", "space:beta", "space:alpha"]);
+    assert_eq!(
+        shape,
+        [
+            "pinned",
+            "pin:three",
+            "group:Rails",
+            "space:beta",
+            "space:alpha"
+        ]
+    );
 }
 
 #[test]
@@ -680,9 +757,8 @@ fn tree_nests_spaces_then_tabs_then_agents_in_workspace_order() {
     // set_snapshot marks the non-focused workspace's done state as viewed (idle).
     let snapshot = state.snapshot.as_deref().expect("snapshot");
     let rows = crate::client::shell::agent_sidebar::agent_rows(snapshot, &state.config, None);
-    let rows = crate::client::shell::tree::arrange_agent_hierarchy_with(
-        snapshot, &tree, rows, false,
-    );
+    let rows =
+        crate::client::shell::tree::arrange_agent_hierarchy_with(snapshot, &tree, rows, false);
     let headers = tree_list_entries(snapshot, &tree, rows)
         .into_iter()
         .filter_map(|entry| match entry {
@@ -718,7 +794,9 @@ fn collapsed_tab_hides_only_that_tabs_agents() {
     tree.collapsed_tabs.insert("ws_1#1".into());
     let mut state = tree_state(tree.clone());
     let mut snapshot = tree_snapshot();
-    snapshot.agents.push(agent("pane_4", "ws_1", "tab_1", AgentStatus::Idle, 4));
+    snapshot
+        .agents
+        .push(agent("pane_4", "ws_1", "tab_1", AgentStatus::Idle, 4));
     state.set_snapshot(Box::new(snapshot));
 
     let mut open = tree.clone();
@@ -777,14 +855,7 @@ fn tree_layer_toggles_drop_their_header_rows() {
 
     tree.show_tabs = true;
     tree.show_spaces = false;
-    assert_eq!(
-        shape(&state, &tree),
-        [
-            "tab:one",
-            "tab:two",
-            "tab:three",
-        ]
-    );
+    assert_eq!(shape(&state, &tree), ["tab:one", "tab:two", "tab:three",]);
 }
 
 #[test]
@@ -825,14 +896,15 @@ fn tree_rows_drop_the_labels_their_headers_already_carry() {
     let tree = ClientTreeChrome::default();
     let mut state = tree_state(tree.clone());
     let mut snapshot = tree_snapshot();
-    snapshot.agents.push(agent("pane_4", "ws_1", "tab_1", AgentStatus::Idle, 4));
+    snapshot
+        .agents
+        .push(agent("pane_4", "ws_1", "tab_1", AgentStatus::Idle, 4));
     state.set_snapshot(Box::new(snapshot));
     let snapshot = state.snapshot.as_deref().expect("snapshot");
     let rows = crate::client::shell::agent_sidebar::agent_rows(snapshot, &state.config, None);
 
-    let rows = crate::client::shell::tree::arrange_agent_hierarchy_with(
-        snapshot, &tree, rows, false,
-    );
+    let rows =
+        crate::client::shell::tree::arrange_agent_hierarchy_with(snapshot, &tree, rows, false);
     let row = tree_list_entries(snapshot, &tree, rows)
         .into_iter()
         .find_map(|entry| match entry {
@@ -1034,12 +1106,7 @@ fn pinned_space_keeps_its_header_without_any_agents() {
 
     assert_eq!(
         shape(&state, &tree),
-        [
-            "space:alpha",
-            "tab:one",
-            "tab:two",
-            "space:beta",
-        ]
+        ["space:alpha", "tab:one", "tab:two", "space:beta",]
     );
 }
 
@@ -1081,12 +1148,7 @@ fn expanding_the_hidden_section_lists_the_folded_spaces() {
 
     assert_eq!(
         shape(&state, &tree),
-        [
-            "space:beta",
-            "tab:three",
-            "hidden:1:open",
-            "space:alpha",
-        ]
+        ["space:beta", "tab:three", "hidden:1:open", "space:alpha",]
     );
 }
 
@@ -1363,12 +1425,7 @@ fn automation_entries_are_partitioned_and_expand_after_the_header() {
 
     assert_eq!(
         shape(&state, &tree),
-        [
-            "space:alpha",
-            "tab:one",
-            "tab:two",
-            "automations:1",
-        ]
+        ["space:alpha", "tab:one", "tab:two", "automations:1",]
     );
 
     tree.automations_expanded = true;
@@ -1611,7 +1668,10 @@ fn tab_headers_carry_a_chat_pin_but_no_plus() {
 
     assert_eq!(header.plus, Rect::default());
     // Every chat row carries its pin toggle in the row's last cell pair.
-    assert_eq!(header.pin, Rect::new(header.rect.right() - 2, header.rect.y, 2, 1));
+    assert_eq!(
+        header.pin,
+        Rect::new(header.rect.right() - 2, header.rect.y, 2, 1)
+    );
 }
 
 /// Pure sidebar projection plus real mouse input: headers, shortcut ordering,
@@ -1790,7 +1850,10 @@ fn priority_sort_rank_and_parked_preferences() {
     snapshot.tabs[1].sort_rank = 1;
     let mut state = tree_state(ClientTreeChrome::default());
     state.set_snapshot(Box::new(snapshot.clone()));
-    let mut tree = ClientTreeChrome { show_hidden_spaces: false, ..ClientTreeChrome::default() };
+    let mut tree = ClientTreeChrome {
+        show_hidden_spaces: false,
+        ..ClientTreeChrome::default()
+    };
     let headers = |state: &ClientShellState, tree: &ClientTreeChrome| {
         shape(state, tree)
             .into_iter()
@@ -1811,7 +1874,16 @@ fn priority_sort_rank_and_parked_preferences() {
     tied.workspaces[0].sort_rank = 0;
     tied.tabs[0].sort_rank = 1;
     state.set_snapshot(Box::new(tied));
-    assert_eq!(headers(&state, &tree), ["space:alpha", "tab:one", "tab:two", "space:beta", "tab:three"]);
+    assert_eq!(
+        headers(&state, &tree),
+        [
+            "space:alpha",
+            "tab:one",
+            "tab:two",
+            "space:beta",
+            "tab:three"
+        ]
+    );
     snapshot.workspaces[1].parked = true;
     state.set_snapshot(Box::new(snapshot));
     assert_eq!(
@@ -1840,14 +1912,17 @@ fn parked_tree_reveal_focus_and_attention() {
     snapshot.workspaces[0].parked = true;
     let mut state = tree_state(ClientTreeChrome::default());
     state.set_snapshot(Box::new(snapshot.clone()));
-    let report = |tree: &ClientTreeChrome| serde_json::to_value(
-        crate::client::shell::sidebar_report::WorkspaceReport::new(
+    let report = |tree: &ClientTreeChrome| {
+        serde_json::to_value(crate::client::shell::sidebar_report::WorkspaceReport::new(
             "ws_1",
             tree,
             &crate::client::shell::tree::PriorityIndex::new(&snapshot),
             None,
-        )
-    ).unwrap()["space_collapsed"].as_bool().unwrap();
+        ))
+        .unwrap()["space_collapsed"]
+            .as_bool()
+            .unwrap()
+    };
     assert!(report(state.tree_chrome_mut()));
     assert!(state.reveal_tree_ancestors_for_pane("pane_1"));
     assert!(!report(state.tree_chrome_mut()));

@@ -2553,8 +2553,7 @@ mod tests {
             AfterResume::AgentGoneAfterStart,
         ] {
             let (result, calls, recorded) = run_scripted_plugin_reload(scenario);
-            let failure = result
-                .expect_err("post-resume failure must fail the reload");
+            let failure = result.expect_err("post-resume failure must fail the reload");
             assert_eq!(failure.exit_code, 1);
             assert!(
                 failure.message.starts_with("resumed agent failed"),

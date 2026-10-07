@@ -219,7 +219,8 @@ impl App {
         tab.set_custom_name(params.label.clone());
         crate::logging::tab_renamed(&workspace_id, &tab_id);
         if self.priority_tab_rank(ws_idx, tab_idx).value != old_rank {
-            self.state.priority_renamed_pins(std::slice::from_ref(&tab_id));
+            self.state
+                .priority_renamed_pins(std::slice::from_ref(&tab_id));
         }
         self.schedule_session_save();
         self.emit_event(EventEnvelope {
@@ -939,7 +940,11 @@ mod tests {
         let cross_space = app.public_tab_id(1, 0).unwrap();
 
         let pin_order = |app: &App| -> Vec<String> {
-            app.state.pinned_tabs.iter().map(|pin| pin.tab_id.clone()).collect()
+            app.state
+                .pinned_tabs
+                .iter()
+                .map(|pin| pin.tab_id.clone())
+                .collect()
         };
         let pin = |app: &mut App, tab_id: &str, priority: Option<i64>| {
             let response = app.handle_tab_set_pinned(
@@ -972,13 +977,15 @@ mod tests {
         );
         let success: SuccessResponse = serde_json::from_str(&response).unwrap();
         assert!(matches!(success.result, ResponseResult::TabInfo { .. }));
-        assert_eq!(
-            pin_order(&app),
-            vec![second_tab.clone(), first.clone()]
-        );
+        assert_eq!(pin_order(&app), vec![second_tab.clone(), first.clone()]);
 
         // Closing a pinned chat drops it from the pinned order.
-        let response = app.handle_tab_close("req".into(), TabTarget { tab_id: second_tab.clone() });
+        let response = app.handle_tab_close(
+            "req".into(),
+            TabTarget {
+                tab_id: second_tab.clone(),
+            },
+        );
         let success: SuccessResponse = serde_json::from_str(&response).unwrap();
         assert!(matches!(success.result, ResponseResult::Ok {}));
         assert_eq!(pin_order(&app), vec![first.clone()]);
@@ -1096,7 +1103,13 @@ mod tests {
         app.state.assert_invariants_for_test();
         // A label change within the same rank must not reshuffle tied pins.
         let before = pin_order(&app);
-        let response = app.handle_tab_rename("same-group".into(), TabRenameParams { tab_id: tabs[1].clone(), label: "TWO".into() });
+        let response = app.handle_tab_rename(
+            "same-group".into(),
+            TabRenameParams {
+                tab_id: tabs[1].clone(),
+                label: "TWO".into(),
+            },
+        );
         assert!(serde_json::from_str::<SuccessResponse>(&response).is_ok());
         assert_eq!(pin_order(&app), before);
         app.state.assert_invariants_for_test();

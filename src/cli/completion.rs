@@ -120,9 +120,20 @@ mod desk_tests {
 
     #[test]
     fn cli_desk_completion_generated_for_each_shell() {
-        for shell in [Shell::Bash, Shell::Elvish, Shell::Fish, Shell::PowerShell, Shell::Zsh] {
+        for shell in [
+            Shell::Bash,
+            Shell::Elvish,
+            Shell::Fish,
+            Shell::PowerShell,
+            Shell::Zsh,
+        ] {
             let mut output = Vec::new();
-            generate(shell, &mut super::super::spec::command(), "herdr", &mut output);
+            generate(
+                shell,
+                &mut super::super::spec::command(),
+                "herdr",
+                &mut output,
+            );
             let script = String::from_utf8(output).expect("completion text");
             assert!(script.contains("desk"));
             assert!(script.contains("background"));

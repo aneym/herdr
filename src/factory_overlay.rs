@@ -295,7 +295,9 @@ impl FactoryOverlay {
     /// Take the space groups from an areas.json document.
     pub fn apply_areas_file(&mut self, bytes: &[u8]) -> Result<(), serde_json::Error> {
         let doc: AreasSpaceGroups = serde_json::from_slice(bytes)?;
-        self.space_groups = doc.space_groups.into_iter()
+        self.space_groups = doc
+            .space_groups
+            .into_iter()
             .filter(|group| !group.name.trim().is_empty())
             .collect();
         Ok(())
@@ -360,7 +362,9 @@ mod tests {
             ("idle", Some(TabSection::Implementing)),
             ("bogus", None),
         ] {
-            let json = format!(r#"{{"version":1,"tabs":{{"lane":{{"kind":"lane","section":"{value}"}}}}}}"#);
+            let json = format!(
+                r#"{{"version":1,"tabs":{{"lane":{{"kind":"lane","section":"{value}"}}}}}}"#
+            );
             let overlay = parse(json.as_bytes()).unwrap();
             assert_eq!(overlay.tabs["lane"].section, expected, "{value}");
         }
@@ -376,7 +380,10 @@ mod tests {
         let legacy = parse(br#"{"version":1,"tabs":{"lane":{"kind":"lane"}}}"#).unwrap();
         assert!(!legacy.tabs["lane"].devloop);
         assert!(legacy.tabs["lane"].runs.is_empty());
-        let legacy_run = parse(br#"{"version":1,"tabs":{"lane":{"kind":"lane","runs":[{"id":"old","agents":2}]}}}"#).unwrap();
+        let legacy_run = parse(
+            br#"{"version":1,"tabs":{"lane":{"kind":"lane","runs":[{"id":"old","agents":2}]}}}"#,
+        )
+        .unwrap();
         let run = &legacy_run.tabs["lane"].runs[0];
         assert_eq!(run.id, "old");
         assert_eq!(run.agents, 2);
@@ -385,7 +392,8 @@ mod tests {
         assert_eq!(run.attention, Attention::None);
         assert_eq!(run.badge, None);
         assert_eq!(legacy.tabs["lane"].mode, TabMode::Active);
-        let modes = parse(br#"{"version":1,"tabs":{"p":{"mode":"parked"},"x":{"mode":"weird"}}}"#).unwrap();
+        let modes =
+            parse(br#"{"version":1,"tabs":{"p":{"mode":"parked"},"x":{"mode":"weird"}}}"#).unwrap();
         assert_eq!(modes.tabs["p"].mode, TabMode::Parked);
         assert_eq!(modes.tabs["x"].mode, TabMode::Active);
         assert!(legacy.hosts.is_empty());
@@ -448,13 +456,22 @@ mod tests {
         let json = br#"{"version":1,"tabs":{"lane":{"kind":"lane","devloop":true,"goal":"rails","goal_area":"workspace ui"}},"hosts":[{"name":"PC","summary":"3/28 live","attention":"warn"}],"usage":[{"name":"claude","summary":"3/8 - 26%","url":"https://studio.tailf266ac.ts.net:2455/"}]}"#;
         let parsed = parse(json).unwrap();
         assert!(parsed.tabs["lane"].devloop);
-        assert_eq!(serde_json::to_value(&parsed.tabs["lane"]).unwrap()["goal"], "rails");
-        assert_eq!(serde_json::to_value(&parsed.tabs["lane"]).unwrap()["goal_area"], "workspace ui");
+        assert_eq!(
+            serde_json::to_value(&parsed.tabs["lane"]).unwrap()["goal"],
+            "rails"
+        );
+        assert_eq!(
+            serde_json::to_value(&parsed.tabs["lane"]).unwrap()["goal_area"],
+            "workspace ui"
+        );
         assert_eq!(parsed.hosts[0].summary.as_deref(), Some("3/28 live"));
         assert_eq!(parsed.hosts[0].attention, Attention::Warn);
         assert_eq!(parsed.hosts[0].url, None);
         assert_eq!(parsed.usage[0].summary.as_deref(), Some("3/8 - 26%"));
-        assert_eq!(parsed.usage[0].url.as_deref(), Some("https://studio.tailf266ac.ts.net:2455/"));
+        assert_eq!(
+            parsed.usage[0].url.as_deref(),
+            Some("https://studio.tailf266ac.ts.net:2455/")
+        );
         let encoded = serde_json::to_vec(&parsed).unwrap();
         assert_eq!(parse(&encoded).unwrap(), parsed);
     }
@@ -462,7 +479,10 @@ mod tests {
     #[test]
     fn rejects_bad_json_and_unknown_versions() {
         assert!(matches!(parse(b"{"), Err(OverlayParseError::Json(_))));
-        assert_eq!(parse(br#"{"version":2}"#), Err(OverlayParseError::Version(2)));
+        assert_eq!(
+            parse(br#"{"version":2}"#),
+            Err(OverlayParseError::Version(2))
+        );
         assert_eq!(parse(br#"{}"#), Err(OverlayParseError::Version(0)));
     }
 }

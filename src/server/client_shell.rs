@@ -117,7 +117,11 @@ pub(super) fn snapshot_with_completions(
         .map(|(tab, state)| {
             let tab_id = tab.tab_id;
             protocol::ClientShellTab {
-                desk_count: app.state.desks.get(&tab_id).map_or(0, |desk| desk.info.items.len()),
+                desk_count: app
+                    .state
+                    .desks
+                    .get(&tab_id)
+                    .map_or(0, |desk| desk.info.items.len()),
                 sort_rank: tab.sort_rank,
                 focused: focused_tab_id.as_deref() == Some(tab_id.as_str()),
                 tab_id,

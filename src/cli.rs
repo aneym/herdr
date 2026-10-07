@@ -25,6 +25,7 @@ macro_rules! println {
 mod agent;
 mod api;
 mod completion;
+mod desk;
 mod integration;
 mod machine;
 mod notification;
@@ -37,7 +38,6 @@ mod server_not_running;
 mod spec;
 mod status;
 mod tab;
-mod desk;
 mod target;
 mod workspace;
 mod worktree;

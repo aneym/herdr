@@ -432,7 +432,8 @@ fn a_server_fold_hides_the_group_and_colors_plus_n_by_the_most_demanding_child()
     let config = ClientShellConfig::from_config(&Config::default());
     let rows = crate::client::shell::agent_sidebar::agent_rows(&snapshot, &config, None);
 
-    let arranged = arrange_agent_hierarchy_with(&snapshot, &ClientTreeChrome::default(), rows, true);
+    let arranged =
+        arrange_agent_hierarchy_with(&snapshot, &ClientTreeChrome::default(), rows, true);
 
     assert_eq!(
         arranged
@@ -595,7 +596,15 @@ fn right_clicking_an_agent_row_pins_it_hands_on_through_the_endpoint() {
     let labels = menu_labels(&state);
     assert_eq!(
         labels[..7],
-        ["Focus", "Rename", "Send to profile...", "Share with profiles...", "Close", "Pin hands-on", "Nest under..."]
+        [
+            "Focus",
+            "Rename",
+            "Send to profile...",
+            "Share with profiles...",
+            "Close",
+            "Pin hands-on",
+            "Nest under..."
+        ]
     );
     let pin = labels
         .iter()
@@ -806,7 +815,7 @@ fn panel_next_stays_spatial_when_the_tab_keeps_siblings() {
     let mut state = close_focus_state(crate::config::AgentCloseFocusConfig::PanelNext);
     let mut snapshot = state.snapshot.as_deref().cloned().expect("snapshot");
     snapshot.panes.push(ClientShellPane {
-            tokens: Default::default(),
+        tokens: Default::default(),
         pane_id: "sibling".into(),
         workspace_id: "ws_1".into(),
         tab_id: "tab_1".into(),
