@@ -943,9 +943,24 @@ fn raw_command_shell(comspec: Option<std::ffi::OsString>) -> std::ffi::OsString 
 }
 
 pub(crate) fn interactive_shell_command(argv: &[String], shell_name: &str) -> Option<String> {
+    interactive_shell_command_quoted_with(argv, shell_name, super::quote_powershell_arg)
+}
+
+/// The `agent.resume` line for the pane shell: the same launcher with every
+/// PowerShell token quoted. cmd receives it base64-encoded, so cmd expands
+/// nothing either.
+pub(crate) fn resume_shell_command(argv: &[String], shell_name: &str) -> Option<String> {
+    interactive_shell_command_quoted_with(argv, shell_name, super::quote_powershell_arg_always)
+}
+
+fn interactive_shell_command_quoted_with(
+    argv: &[String],
+    shell_name: &str,
+    quote: fn(&str) -> String,
+) -> Option<String> {
     let shell_name = shell_name.to_ascii_lowercase();
     let powershell = shell_name.contains("powershell") || shell_name.contains("pwsh");
-    let script = powershell_agent_script(argv)?;
+    let script = powershell_agent_script(argv, quote)?;
     if powershell {
         Some(script)
     } else {
@@ -953,15 +968,15 @@ pub(crate) fn interactive_shell_command(argv: &[String], shell_name: &str) -> Op
     }
 }
 
-fn powershell_agent_script(argv: &[String]) -> Option<String> {
+fn powershell_agent_script(argv: &[String], quote: fn(&str) -> String) -> Option<String> {
     let (program, args) = argv.split_first()?;
     if args.is_empty() {
-        return Some(format!("& {}", super::quote_powershell_arg(program)));
+        return Some(format!("& {}", quote(program)));
     }
 
     let powershell_args = args
         .iter()
-        .map(|arg| super::quote_powershell_arg(arg))
+        .map(|arg| quote(arg))
         .collect::<Vec<_>>()
         .join(" ");
     let command_line = args
@@ -971,11 +986,11 @@ fn powershell_agent_script(argv: &[String]) -> Option<String> {
         .join(" ");
     Some(format!(
         "if((Get-Command {} -ErrorAction SilentlyContinue).CommandType -eq 'ExternalScript'){{& {} {}}}else{{Start-Process -FilePath {} -ArgumentList {} -NoNewWindow -Wait}}",
-        super::quote_powershell_arg(program),
-        super::quote_powershell_arg(program),
+        quote(program),
+        quote(program),
         powershell_args,
-        super::quote_powershell_arg(program),
-        super::quote_powershell_arg(&command_line),
+        quote(program),
+        quote(&command_line),
     ))
 }
 

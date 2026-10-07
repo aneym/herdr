@@ -293,6 +293,38 @@ impl App {
         }
     }
 
+    /// Whether `event` is a detection from a runtime the pane no longer runs
+    /// (one `agent.resume` or a respawn replaced). Its agent or state must
+    /// not overwrite what the replacement reports.
+    pub(crate) fn is_superseded_runtime_detection(&self, event: &crate::events::AppEvent) -> bool {
+        let (pane_id, Some(event_pid)) = (match event {
+            crate::events::AppEvent::AgentProcessDetected {
+                pane_id,
+                runtime_pid,
+                ..
+            }
+            | crate::events::AppEvent::StateChanged {
+                pane_id,
+                runtime_pid,
+                ..
+            } => (*pane_id, *runtime_pid),
+            _ => return false,
+        }) else {
+            return false;
+        };
+        let Some(ws_idx) = self
+            .state
+            .workspaces
+            .iter()
+            .position(|workspace| workspace.pane_state(pane_id).is_some())
+        else {
+            return false;
+        };
+        self.lookup_runtime_sender(ws_idx, pane_id)
+            .and_then(crate::terminal::TerminalRuntime::child_pid)
+            .is_some_and(|current| current != event_pid)
+    }
+
     /// Consume one exit owed by a runtime `agent.resume` replaced.
     pub(crate) fn take_agent_resume_runtime_exit(
         &mut self,
@@ -660,7 +692,7 @@ fn resume_shell_command(argv: &[String], shell: &str) -> Result<String, String> 
     if !crate::platform::is_quotable_interactive_shell(shell) {
         return Err(format!("cannot type a resume command into shell {shell:?}"));
     }
-    crate::platform::interactive_shell_command(argv, shell)
+    crate::platform::resume_shell_command(argv, shell)
         .ok_or_else(|| format!("cannot type a resume command into shell {shell:?}"))
 }
 
@@ -1322,12 +1354,48 @@ mod tests {
         ];
         assert_eq!(
             resume_shell_command(&argv, "/bin/zsh").as_deref(),
-            Ok("'/opt/my tools/claude' --settings '{\"viewMode\":\"focus\"}' --resume sess-1")
+            Ok("'/opt/my tools/claude' '--settings' '{\"viewMode\":\"focus\"}' '--resume' 'sess-1'")
         );
         assert_eq!(
             resume_shell_command(&argv, "pwsh").as_deref(),
-            Ok("& '/opt/my tools/claude' '--settings' '{\"viewMode\":\"focus\"}' '--resume' sess-1")
+            Ok("& '/opt/my tools/claude' '--settings' '{\"viewMode\":\"focus\"}' '--resume' 'sess-1'")
         );
+        assert_eq!(
+            resume_shell_command(&["claude".into(), "it\u{2019}s".into()], "pwsh").as_deref(),
+            Ok("& 'claude' 'it\u{2019}\u{2019}s'")
+        );
+    }
+
+    /// Tokens the shell would otherwise expand (zsh `=cmd`, `~`, globs,
+    /// parameters) reach the program verbatim.
+    #[cfg(unix)]
+    #[test]
+    fn resume_shell_command_quotes_every_token_so_the_shell_expands_nothing() {
+        let args = ["=ls", "~", "~/x", "*", "a'b", "$HOME", "x=~", "!!"];
+        let mut argv = vec!["printf".to_string(), "%s\\n".into()];
+        argv.extend(args.iter().map(|arg| arg.to_string()));
+        assert_eq!(
+            resume_shell_command(&argv[..3], "zsh").as_deref(),
+            Ok("'printf' '%s\\n' '=ls'")
+        );
+        for shell in ["/bin/sh", "/bin/zsh", "/bin/bash"] {
+            if !std::path::Path::new(shell).exists() {
+                continue;
+            }
+            let command = resume_shell_command(&argv, shell).unwrap();
+            let output = std::process::Command::new(shell)
+                .arg("-c")
+                .arg(&command)
+                .output()
+                .unwrap();
+            assert_eq!(
+                String::from_utf8_lossy(&output.stdout),
+                args.iter()
+                    .map(|arg| format!("{arg}\n"))
+                    .collect::<String>(),
+                "{shell}: {command}"
+            );
+        }
     }
 
     #[cfg(windows)]
@@ -1341,6 +1409,10 @@ mod tests {
         let powershell = resume_shell_command(&argv, "powershell.exe").unwrap();
         assert!(
             powershell.contains(r"& 'C:\Program Files\claude\claude.exe'"),
+            "{powershell}"
+        );
+        assert!(
+            powershell.contains("& 'C:\\Program Files\\claude\\claude.exe' '--resume' 'sess-1'"),
             "{powershell}"
         );
         let cmd = resume_shell_command(&argv, r"C:\Windows\System32\cmd.exe").unwrap();
@@ -1475,6 +1547,7 @@ mod tests {
                 visible_working: false,
                 process_exited: false,
                 observed_at: now,
+                runtime_pid: None,
             },
         ] {
             app.handle_internal_event(stale);
@@ -1844,7 +1917,8 @@ mod tests {
                     assert!(crate::platform::process_exists(new_pid.unwrap()));
                 } else {
                     // The replaced runtime's detector reports late, after the
-                    // replacement started; it must not end the window.
+                    // replacement started; it must not end the window or
+                    // overwrite the replacement's agent and state.
                     app.handle_internal_event(crate::events::AppEvent::AgentProcessDetected {
                         pane_id,
                         agent: crate::detect::Agent::Claude,
@@ -1859,8 +1933,12 @@ mod tests {
                         visible_working: false,
                         process_exited: false,
                         observed_at: Instant::now(),
+                        runtime_pid: old_pid,
                     });
                     assert!(app.retained_agent_resume_panes.contains_key(&pane_id));
+                    let terminal = &app.state.terminals[&terminal_id];
+                    assert_eq!(terminal.state, crate::detect::AgentState::Unknown);
+                    assert_eq!(terminal.effective_agent_label(), None);
                 }
                 // The shell itself dying inside the window keeps the pane.
                 app.handle_internal_event(crate::events::AppEvent::PaneDied {

@@ -652,6 +652,7 @@ mod tests {
             visible_working: false,
             process_exited: true,
             observed_at,
+            runtime_pid: None,
         });
         app.handle_internal_event(crate::events::AppEvent::AgentProcessDetected {
             pane_id,

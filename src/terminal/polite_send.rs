@@ -173,10 +173,11 @@ struct HeldSend {
 pub(super) struct PoliteSend {
     owner: u64,
     last_human_input_at: Option<Instant>,
-    /// Last time a partial sequence (a standalone Escape, a split CSI) was
-    /// held back. Only the `agent.resume` quiet gate reads it; polite sends
-    /// keep treating a possibly split report as not yet a keystroke.
-    last_buffered_input_at: Option<Instant>,
+    /// Last time any raw byte batch arrived from a human client, whether or
+    /// not it parses as a key (a standalone Escape, a split CSI, F13). Only
+    /// the `agent.resume` quiet gate reads it; polite sends keep their own
+    /// keystroke classification.
+    last_raw_input_at: Option<Instant>,
     last_submit_at: Option<Instant>,
     draft: bool,
     queue: VecDeque<HeldSend>,
@@ -190,7 +191,7 @@ impl Default for PoliteSend {
         Self {
             owner: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             last_human_input_at: None,
-            last_buffered_input_at: None,
+            last_raw_input_at: None,
             last_submit_at: None,
             draft: false,
             queue: VecDeque::new(),
@@ -231,11 +232,11 @@ impl PoliteSend {
         }
     }
     /// The `agent.resume` gate: no human input at all within `quiet`,
-    /// counting buffered partial keys too.
+    /// counting every raw byte batch too.
     fn human_input_quiet(&self, now: Instant, quiet: Duration) -> bool {
         self.quiet(now, quiet)
             && self
-                .last_buffered_input_at
+                .last_raw_input_at
                 .is_none_or(|at| now.saturating_duration_since(at) >= quiet)
     }
 
@@ -269,11 +270,12 @@ impl TerminalRuntime {
 
 impl PoliteSend {
     /// Classify raw human input bytes. For the `agent.resume` quiet gate
-    /// every keystroke counts, including a standalone Escape or any other
-    /// partial sequence held back until its remaining bytes arrive; complete
-    /// focus and mouse reports do not.
+    /// every batch counts, whatever it parses as (or fails to).
     fn raw_bytes(&mut self, bytes: &[u8]) {
         let state = self;
+        if !bytes.is_empty() {
+            state.last_raw_input_at = Some(Instant::now());
+        }
         let mut input = std::mem::take(&mut state.raw_pending);
         input.extend_from_slice(bytes);
         let mut offset = 0;
@@ -367,10 +369,6 @@ impl PoliteSend {
                 }
             }
             offset += 1;
-        }
-        if offset < input.len() {
-            // A buffered key (lone Escape, split CSI) is human input now.
-            state.last_buffered_input_at = Some(Instant::now());
         }
         state.raw_pending.extend_from_slice(&input[offset..]);
     }
@@ -818,9 +816,13 @@ mod agent_resume_quiet_tests {
         key.raw_bytes(b"x");
         assert!(!key.human_input_quiet(Instant::now(), quiet));
 
-        // Complete focus reports are still not keystrokes.
-        let mut focus = PoliteSend::default();
-        focus.raw_bytes(b"\x1b[I");
-        assert!(focus.human_input_quiet(Instant::now(), quiet));
+        // A complete key with no parsed meaning (F13) still counts.
+        let mut unparsed = PoliteSend::default();
+        unparsed.raw_bytes(b"\x1b[25~");
+        assert!(unparsed.raw_pending.is_empty());
+        assert!(unparsed.quiet(Instant::now(), quiet));
+        assert!(!unparsed.human_input_quiet(Instant::now(), quiet));
+
+        assert!(PoliteSend::default().human_input_quiet(Instant::now(), quiet));
     }
 }

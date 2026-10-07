@@ -105,6 +105,8 @@ pub enum AppEvent {
         visible_working: bool,
         process_exited: bool,
         observed_at: Instant,
+        /// Pid of the runtime the detection came from, when known.
+        runtime_pid: Option<u32>,
     },
     /// Hook-authoritative agent state was reported for a pane.
     HookStateReported {

@@ -115,6 +115,9 @@ impl App {
         ) {
             return Vec::new();
         }
+        if self.is_superseded_runtime_detection(&ev) {
+            return Vec::new();
+        }
         self.close_agent_resume_window_on_ready(&ev);
 
         if let AppEvent::GitStatusRefreshed {
@@ -2002,6 +2005,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
         app.handle_internal_event(AppEvent::StateChanged {
             pane_id: root,
@@ -2011,6 +2015,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
 
         assert_eq!(
@@ -2095,6 +2100,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
         app.handle_internal_event(AppEvent::StateChanged {
             pane_id: root,
@@ -2104,6 +2110,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
 
         let notification_deadline = app
@@ -2222,6 +2229,7 @@ mod tests {
                 visible_working: false,
                 process_exited: true,
                 observed_at: std::time::Instant::now(),
+                runtime_pid: None,
             });
 
             // The release event is this test's subject; the name outliving the
@@ -2282,6 +2290,7 @@ mod tests {
             visible_working: false,
             process_exited: true,
             observed_at,
+            runtime_pid: None,
         });
 
         let terminal = &app.state.terminals[&terminal_id];
@@ -2468,6 +2477,7 @@ mod tests {
             visible_working: false,
             process_exited: true,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
 
         assert_eq!(
@@ -2592,6 +2602,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
         app.state.toast = Some(crate::app::state::ToastNotification {
             kind: ToastKind::Finished,
@@ -2612,6 +2623,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
 
         assert_eq!(

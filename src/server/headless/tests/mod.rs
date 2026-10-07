@@ -880,6 +880,7 @@ async fn completion_guard_endpoint_pairs_runtime_completions_with_snapshots() {
                 visible_working: state == crate::detect::AgentState::Working,
                 process_exited: false,
                 observed_at: Instant::now(),
+                runtime_pid: None,
             });
         }
         server.render_and_stream();
@@ -7675,6 +7676,7 @@ fn startup_idle_does_not_forward_completion() {
             visible_working: false,
             process_exited: false,
             observed_at: Instant::now(),
+            runtime_pid: None,
         })
     );
     assert!(

@@ -1726,6 +1726,7 @@ impl AppState {
                 visible_working,
                 process_exited,
                 observed_at,
+                runtime_pid: _,
             } => self
                 .update_terminal_state(pane_id, |terminal| {
                     Some(terminal.set_detected_state_with_screen_signals_at(
@@ -3558,6 +3559,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
 
         let terminal_id = state.workspaces[0]
@@ -3596,6 +3598,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
 
         let pane = state.workspaces[1].panes.get(&bg_pane_id).unwrap();
@@ -3630,6 +3633,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
 
         let terminal = state.terminals.get(&terminal_id).unwrap();
@@ -3668,6 +3672,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
 
         assert!(state.workspaces[0].panes[&pane_id].seen);
@@ -3687,6 +3692,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
 
         let pane = state.workspaces[1].panes.get(&bg_pane_id).unwrap();
@@ -3720,6 +3726,7 @@ mod tests {
                 visible_working: state == AgentState::Working,
                 process_exited: false,
                 observed_at: Instant::now(),
+                runtime_pid: None,
             });
         }
         let finished = app
@@ -3800,6 +3807,7 @@ mod tests {
                     visible_working: state == AgentState::Working,
                     process_exited: false,
                     observed_at: Instant::now(),
+                    runtime_pid: None,
                 });
             }
             let terminal = &app.terminals[&terminal_id];
@@ -3840,6 +3848,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: Instant::now(),
+            runtime_pid: None,
         });
         app.handle_app_event(AppEvent::CodexPromptObserved {
             pane_id,
@@ -3908,6 +3917,7 @@ mod tests {
                         visible_working: state == AgentState::Working,
                         process_exited: false,
                         observed_at: Instant::now(),
+                        runtime_pid: None,
                     });
                 }
                 assert!(!app.workspaces[1].panes[&pane_id].seen);
@@ -3965,6 +3975,7 @@ mod tests {
                 visible_working: false,
                 process_exited: false,
                 observed_at: Instant::now(),
+                runtime_pid: None,
             })
             .pop()
             .expect("direct idle state update");
@@ -3985,6 +3996,7 @@ mod tests {
                 visible_working: agent_state == AgentState::Working,
                 process_exited: false,
                 observed_at: Instant::now(),
+                runtime_pid: None,
             });
         }
         let update = state
@@ -3996,6 +4008,7 @@ mod tests {
                 visible_working: false,
                 process_exited: false,
                 observed_at: Instant::now(),
+                runtime_pid: None,
             })
             .pop()
             .expect("idle state update");
@@ -4021,6 +4034,7 @@ mod tests {
             visible_working: true,
             process_exited: false,
             observed_at: Instant::now(),
+            runtime_pid: None,
         });
         let exit_update = state
             .handle_app_event(AppEvent::StateChanged {
@@ -4031,6 +4045,7 @@ mod tests {
                 visible_working: false,
                 process_exited: true,
                 observed_at: Instant::now(),
+                runtime_pid: None,
             })
             .pop()
             .expect("process exit update");
@@ -4076,6 +4091,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
 
         let toast = state.toast.as_ref().unwrap();
@@ -4100,6 +4116,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
 
         assert!(state.toast.is_none());
@@ -4132,6 +4149,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
         let deadline = state.next_pending_agent_notification_deadline().unwrap();
 
@@ -4143,6 +4161,7 @@ mod tests {
             visible_working: true,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
 
         assert!(state.pending_agent_notifications.is_empty());
@@ -4166,6 +4185,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
         let deadline = state.next_pending_agent_notification_deadline().unwrap();
         state.active = Some(1);
@@ -4191,6 +4211,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
 
         let deadline = state.next_pending_agent_notification_deadline().unwrap();
@@ -4218,6 +4239,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
         let deadline = state.next_pending_agent_notification_deadline().unwrap();
         state.handle_app_event(AppEvent::PaneDied {
@@ -4275,6 +4297,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
         state.handle_app_event(AppEvent::HookStateReported {
             pane_id: bg_pane_id,
@@ -4293,6 +4316,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
 
         let terminal = state.terminals.get(&bg_terminal_id).unwrap();
@@ -4323,6 +4347,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
         state.handle_app_event(AppEvent::HookStateReported {
             pane_id,
@@ -4346,6 +4371,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
 
         let terminal = state.terminals.get(&terminal_id).unwrap();
@@ -4372,6 +4398,7 @@ mod tests {
             visible_working: true,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
         let terminal = state.terminals.get_mut(&terminal_id).unwrap();
         terminal.set_persisted_agent_session(crate::agent_resume::PersistedAgentSession {
@@ -4432,6 +4459,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
         state.handle_app_event(AppEvent::HookStateReported {
             pane_id,
@@ -4564,6 +4592,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
 
         let toast = state.toast.as_ref().unwrap();
@@ -4593,6 +4622,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
 
         let toast = state.toast.as_ref().unwrap();
@@ -4619,6 +4649,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
 
         let toast = state.toast.as_ref().unwrap();
@@ -4642,6 +4673,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
 
         assert!(state.toast.is_none());
@@ -4663,6 +4695,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
 
         assert!(state.toast.is_none());

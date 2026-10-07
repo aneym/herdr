@@ -3679,6 +3679,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
         assert_eq!(
             app.state.terminals.get(&terminal_id).unwrap().state,
@@ -3703,6 +3704,7 @@ mod tests {
             visible_working: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
+            runtime_pid: None,
         });
         tokio::pin!(send);
 

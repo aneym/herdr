@@ -633,6 +633,49 @@ pub(crate) fn interactive_unix_shell_command(
     Some(command)
 }
 
+/// Every token of `argv` quoted for a POSIX or PowerShell pane shell, so the
+/// shell expands nothing (`=cmd`, `~`, globs, `$`, history), even in tokens
+/// the shorter `interactive_unix_shell_command` quoting leaves bare.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn fully_quoted_unix_shell_command(argv: &[String], shell_name: &str) -> Option<String> {
+    let powershell = is_powershell_process_name(shell_name);
+    let quote = |arg: &String| {
+        if powershell {
+            quote_powershell_arg_always(arg)
+        } else {
+            format!("'{}'", arg.replace('\'', "'\\''"))
+        }
+    };
+    let mut parts = argv.iter();
+    let mut command = quote(parts.next()?);
+    if powershell {
+        // PowerShell reads a quoted first token as a string, not a command.
+        command.insert_str(0, "& ");
+    }
+    for part in parts {
+        command.push(' ');
+        command.push_str(&quote(part));
+    }
+    Some(command)
+}
+
+/// A PowerShell verbatim string for `value`, even when it would be safe bare.
+/// PowerShell also ends single-quoted strings at the typographic single
+/// quotes, so those are doubled too.
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+pub(crate) fn quote_powershell_arg_always(value: &str) -> String {
+    let mut quoted = String::with_capacity(value.len() + 2);
+    quoted.push('\'');
+    for ch in value.chars() {
+        if matches!(ch, '\'' | '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{201b}') {
+            quoted.push(ch);
+        }
+        quoted.push(ch);
+    }
+    quoted.push('\'');
+    quoted
+}
+
 pub(crate) fn quote_powershell_arg(value: &str) -> String {
     if !value.is_empty()
         && !value.starts_with('-')

@@ -245,6 +245,7 @@ async fn publish_state_changed_event(
     visible_working: bool,
     process_exited: bool,
     observed_at: std::time::Instant,
+    runtime_pid: Option<u32>,
 ) {
     // This runs on the async detector task, not the PTY reader thread.
     // Waiting for queue space here preserves correctness-critical state transitions
@@ -258,6 +259,7 @@ async fn publish_state_changed_event(
             visible_working,
             process_exited,
             observed_at,
+            runtime_pid,
         })
         .await
     {
@@ -325,6 +327,9 @@ struct AgentDetectionPublishUpdate {
     visible_blocker: bool,
     visible_working: bool,
     process_exited: bool,
+    /// The runtime the detection came from, so a superseded runtime's
+    /// detections can be ignored.
+    runtime_pid: Option<u32>,
 }
 
 async fn apply_agent_detection_publish_update(
@@ -361,6 +366,7 @@ async fn apply_agent_detection_publish_update(
         update.visible_working,
         update.process_exited,
         observed_at,
+        update.runtime_pid,
     )
     .await;
 }
@@ -1060,6 +1066,8 @@ fn spawn_basic_detection_task(
                             visible_blocker,
                             visible_working,
                             process_exited: publish_process_exited,
+                            runtime_pid: Some(child_pid.load(Ordering::Acquire))
+                                .filter(|pid| *pid > 0),
                         },
                         now,
                         &mut state,
@@ -3052,6 +3060,8 @@ impl PaneRuntime {
                                     visible_blocker,
                                     visible_working,
                                     process_exited: publish_process_exited,
+                                    runtime_pid: Some(child_pid.load(Ordering::Acquire))
+                                        .filter(|pid| *pid > 0),
                                 },
                                 now,
                                 &mut state,
@@ -6052,6 +6062,7 @@ mod tests {
             false,
             false,
             std::time::Instant::now(),
+            None,
         );
         tokio::pin!(publish);
 
@@ -6090,6 +6101,7 @@ mod tests {
                 visible_working: false,
                 process_exited: false,
                 observed_at: _,
+                runtime_pid: _,
             } if delivered_pane == pane_id
         ));
     }

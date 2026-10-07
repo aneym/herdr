@@ -224,6 +224,11 @@ pub(crate) fn interactive_shell_command(argv: &[String], shell_name: &str) -> Op
     super::interactive_unix_shell_command(argv, shell_name, shell_quote)
 }
 
+/// The `agent.resume` line for the pane shell, every token quoted.
+pub(crate) fn resume_shell_command(argv: &[String], shell_name: &str) -> Option<String> {
+    super::fully_quoted_unix_shell_command(argv, shell_name)
+}
+
 fn shell_quote(value: &str) -> String {
     if !value.is_empty()
         && value.chars().all(|ch| {

@@ -498,8 +498,24 @@ impl PluginReloadFailure {
     }
 }
 
+#[cfg(test)]
+type PluginReloadTestCall = Box<dyn FnMut(&Method) -> Result<serde_json::Value, (String, String)>>;
+
+#[cfg(test)]
+thread_local! {
+    /// Scripted server for `plugin reload` flow tests.
+    static PLUGIN_RELOAD_TEST_CALL: std::cell::RefCell<Option<PluginReloadTestCall>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 /// One API call; `Err` carries the error code and message.
 fn plugin_reload_call(method: Method) -> Result<serde_json::Value, (String, String)> {
+    #[cfg(test)]
+    if let Some(result) =
+        PLUGIN_RELOAD_TEST_CALL.with(|call| call.borrow_mut().as_mut().map(|call| call(&method)))
+    {
+        return result;
+    }
     let response = super::send_request(&Request {
         id: "cli:plugin:reload".into(),
         method,
@@ -666,7 +682,18 @@ fn run_plugin_reload(
         "resumed agent after plugin reload"
     );
 
-    wait_for_resumed_agent_idle(&args.pane, deadline)?;
+    let resumed_agent = resumed
+        .get("agent")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    wait_for_resumed_agent_idle(
+        &ResumedAgent {
+            pane: &args.pane,
+            agent: resumed_agent,
+            session_id: &session_id,
+        },
+        deadline,
+    )?;
     let prompt = plugin_reload_step(
         "agent.prompt",
         Method::AgentPrompt(crate::api::schema::AgentPromptParams {
@@ -819,36 +846,65 @@ fn resumed_pane_failure(pane: &serde_json::Value) -> Option<String> {
         .map(str::to_string)
 }
 
-fn resumed_agent_ready(status: Option<&str>) -> bool {
-    matches!(status, Some("idle" | "done"))
+/// The agent `agent.resume` restarted, as the post-resume wait must see it in
+/// the pane before anything is typed there.
+struct ResumedAgent<'a> {
+    pane: &'a str,
+    agent: &'a str,
+    session_id: &'a str,
 }
 
+/// Poll until the resumed agent itself is the pane's agent, on the resumed
+/// session, and idle or done. Fails at once when the pane reports a restore
+/// error, is gone, or loses the agent after it was seen, so the caller never
+/// types the prompt into whatever replaced it.
 fn wait_for_resumed_agent_idle(
-    pane: &str,
+    resumed: &ResumedAgent<'_>,
     deadline: std::time::Instant,
 ) -> Result<(), PluginReloadFailure> {
+    let mut agent_seen = false;
     loop {
-        let status = plugin_reload_call(Method::AgentGet(crate::api::schema::AgentTarget {
-            target: pane.to_string(),
-        }))
-        .ok()
-        .and_then(|result| {
-            result
-                .get("agent")
-                .and_then(|agent| agent.get("agent_status"))
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string)
-        });
-        if resumed_agent_ready(status.as_deref()) {
-            return Ok(());
+        match plugin_reload_call(Method::PaneGet(crate::api::schema::PaneTarget {
+            pane_id: resumed.pane.to_string(),
+        })) {
+            Ok(pane) => {
+                if let Some(error) = resumed_pane_failure(&pane) {
+                    return Err(PluginReloadFailure::failed(format!(
+                        "resumed agent failed: {error}"
+                    )));
+                }
+            }
+            Err((code, message)) if code == "pane_not_found" => {
+                return Err(PluginReloadFailure::failed(format!(
+                    "resumed agent failed: {code}: {message}"
+                )));
+            }
+            Err(_) => {}
         }
-        let pane = plugin_reload_call(Method::PaneGet(crate::api::schema::PaneTarget {
-            pane_id: pane.to_string(),
+        let agent = plugin_reload_call(Method::AgentGet(crate::api::schema::AgentTarget {
+            target: resumed.pane.to_string(),
         }))
         .ok();
-        if let Some(error) = pane.as_ref().and_then(resumed_pane_failure) {
+        let info = agent.as_ref().and_then(|result| result.get("agent"));
+        let field = |name: &str| {
+            info.and_then(|info| info.get(name))
+                .and_then(serde_json::Value::as_str)
+        };
+        let is_resumed_agent = field("agent") == Some(resumed.agent)
+            && info
+                .and_then(|info| info.get("agent_session"))
+                .and_then(|session| session.get("value"))
+                .and_then(serde_json::Value::as_str)
+                == Some(resumed.session_id);
+        if is_resumed_agent && matches!(field("agent_status"), Some("idle" | "done")) {
+            return Ok(());
+        }
+        if is_resumed_agent {
+            agent_seen = true;
+        } else if agent_seen {
             return Err(PluginReloadFailure::failed(format!(
-                "resumed agent failed: {error}"
+                "resumed agent failed: {} is no longer the agent in pane {}",
+                resumed.agent, resumed.pane
             )));
         }
         if std::time::Instant::now() >= deadline {
@@ -2273,28 +2329,143 @@ mod tests {
         .is_ok());
     }
 
-    #[test]
-    fn plugin_reload_post_resume_accepts_idle_and_done() {
-        assert!(resumed_agent_ready(Some("idle")));
-        assert!(resumed_agent_ready(Some("done")));
-        assert!(!resumed_agent_ready(Some("working")));
-        assert!(!resumed_agent_ready(None));
+    /// What the scripted server reports after `agent.resume` succeeded.
+    #[derive(Clone, Copy)]
+    enum AfterResume {
+        /// The resumed claude is idle on its session.
+        Ready,
+        /// The pane reports a restore error while agent.get still says idle.
+        RestoreErrorWhileIdle,
+        /// Claude was seen starting, then the pane's agent is gone (the
+        /// foreground is the pane shell again).
+        AgentGoneAfterStart,
+    }
+
+    /// Run the real `plugin reload` flow against a scripted server and return
+    /// the outcome, the API calls made, and whether a record was written.
+    fn run_scripted_plugin_reload(
+        scenario: AfterResume,
+    ) -> (
+        Result<serde_json::Value, PluginReloadFailure>,
+        Vec<&'static str>,
+        bool,
+    ) {
+        let dir = std::env::temp_dir().join(format!(
+            "herdr-plugin-reload-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_nanos())
+                .unwrap_or_default()
+        ));
+        let record_path = dir.join("record.json");
+        let calls = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let log = calls.clone();
+        let mut resumed = false;
+        let mut post_resume_agent_gets = 0;
+        PLUGIN_RELOAD_TEST_CALL.with(|call| {
+            *call.borrow_mut() = Some(Box::new(move |method: &Method| {
+                let name = match method {
+                    Method::PluginReload(_) => "plugin.reload",
+                    Method::PluginActionList(_) => "plugin.action.list",
+                    Method::AgentGet(_) => "agent.get",
+                    Method::AgentResume(_) => "agent.resume",
+                    Method::PaneGet(_) => "pane.get",
+                    Method::AgentPrompt(_) => "agent.prompt",
+                    _ => "other",
+                };
+                log.borrow_mut().push(name);
+                let claude = |status: &str| {
+                    serde_json::json!({"type": "agent_info", "agent": {
+                        "agent": "claude",
+                        "agent_status": status,
+                        "agent_session": {"source": "claude", "agent": "claude",
+                            "kind": "id", "value": "sess-1"},
+                    }})
+                };
+                match name {
+                    "plugin.reload" => Ok(serde_json::json!({"type": "ok"})),
+                    "plugin.action.list" => Ok(serde_json::json!({"actions": []})),
+                    "agent.get" if !resumed => Ok(claude("idle")),
+                    "agent.resume" => {
+                        resumed = true;
+                        Ok(
+                            serde_json::json!({"type": "agent_resumed", "pane_id": "w1:p1",
+                            "agent": "claude", "session_id": "sess-1", "argv": []}),
+                        )
+                    }
+                    "pane.get" => Ok(match scenario {
+                        AfterResume::RestoreErrorWhileIdle => serde_json::json!({"pane": {
+                            "pane_id": "w1:p1",
+                            "restore_error": "Resumed agent exited before startup completed",
+                        }}),
+                        _ => serde_json::json!({"pane": {"pane_id": "w1:p1"}}),
+                    }),
+                    "agent.get" => {
+                        post_resume_agent_gets += 1;
+                        Ok(match scenario {
+                            AfterResume::Ready | AfterResume::RestoreErrorWhileIdle => {
+                                claude("idle")
+                            }
+                            AfterResume::AgentGoneAfterStart if post_resume_agent_gets == 1 => {
+                                claude("working")
+                            }
+                            AfterResume::AgentGoneAfterStart => {
+                                serde_json::json!({"type": "agent_info", "agent": {
+                                    "agent_status": "unknown",
+                                    "agent_session": {"source": "claude", "agent": "claude",
+                                        "kind": "id", "value": "sess-1"},
+                                }})
+                            }
+                        })
+                    }
+                    "agent.prompt" => Ok(serde_json::json!({"id": "q1", "state": "delivered"})),
+                    _ => Err(("unexpected".into(), name.into())),
+                }
+            }));
+        });
+        let args = PluginReloadArgs {
+            plugin_id: "example.reload".into(),
+            pane: "w1:p1".into(),
+            request: "ar-1".into(),
+            changelog: "run `agent-request confirm ar-1`".into(),
+            timeout_ms: 30_000,
+        };
+        let result = run_plugin_reload(&args, &record_path);
+        PLUGIN_RELOAD_TEST_CALL.with(|call| *call.borrow_mut() = None);
+        let recorded = record_path.exists();
+        let _ = std::fs::remove_dir_all(&dir);
+        let calls = calls.borrow().clone();
+        (result, calls, recorded)
     }
 
     #[test]
-    fn plugin_reload_post_resume_fails_on_pane_restore_error() {
-        assert_eq!(
-            resumed_pane_failure(&serde_json::json!({
-                "type": "pane_info",
-                "pane": {"restore_error": "Resumed agent exited before startup completed"}
-            }))
-            .as_deref(),
-            Some("Resumed agent exited before startup completed")
-        );
-        assert_eq!(
-            resumed_pane_failure(&serde_json::json!({"pane": {"pane_id": "w1:p1"}})),
-            None
-        );
+    fn plugin_reload_post_resume_prompts_only_the_resumed_idle_agent() {
+        let (result, calls, recorded) = run_scripted_plugin_reload(AfterResume::Ready);
+        assert!(result.is_ok());
+        assert!(calls.contains(&"agent.prompt"));
+        assert!(recorded);
+
+        for scenario in [
+            AfterResume::RestoreErrorWhileIdle,
+            AfterResume::AgentGoneAfterStart,
+        ] {
+            let (result, calls, recorded) = run_scripted_plugin_reload(scenario);
+            let failure = result
+                .err()
+                .expect("post-resume failure must fail the reload");
+            assert_eq!(failure.exit_code, 1);
+            assert!(
+                failure.message.starts_with("resumed agent failed"),
+                "{}",
+                failure.message
+            );
+            assert!(
+                !calls.contains(&"agent.prompt"),
+                "prompt typed after failure: {calls:?}"
+            );
+            assert!(!recorded, "completed record written after failure");
+        }
     }
 
     #[test]
