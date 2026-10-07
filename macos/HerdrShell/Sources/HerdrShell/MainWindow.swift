@@ -740,7 +740,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                     } else {
                         let alert = NSAlert()
                         alert.messageText = "Could not restart agent"
-                        alert.informativeText = message
+                        alert.informativeText = PaneRestart.message(code: code, fallback: message)
                         alert.addButton(withTitle: "OK")
                         alert.beginSheetModal(for: self.window)
                     }

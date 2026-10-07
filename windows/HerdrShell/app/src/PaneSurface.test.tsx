@@ -42,7 +42,7 @@ it("reports non-busy errors through the existing shell notice", async () => {
   api.mockRejectedValueOnce("herdr api error not_resumable: No resumable session");
   const { click, onError } = mount();
   await click('[aria-label="Pane actions"]'); await click('[role="menuitem"]');
-  expect(onError).toHaveBeenCalledWith("herdr api error not_resumable: No resumable session");
+  expect(onError).toHaveBeenCalledWith("This agent can't be resumed: no saved chat found.");
 });
 it("canceling busy confirmation never sends a forced restart", async () => {
   api.mockRejectedValueOnce({ code: "busy", message: "Working" });
