@@ -5,6 +5,7 @@
 
 pub(crate) mod actions;
 mod agent_resume;
+pub(crate) use agent_resume::AgentRestartAfterShutdown;
 pub(crate) mod agent_view;
 mod agents;
 pub(crate) use agents::{AGENT_START_SETTLE_DELAY, MAX_AGENT_START_TIMEOUT};
@@ -158,6 +159,7 @@ pub struct App {
         HashMap<crate::layout::PaneId, agent_resume::AgentResumeReplacementWindow>,
     /// Exits still owed by runtimes `agent.resume` replaced; each one is
     /// swallowed instead of closing or respawning the resumed pane.
+    pub(crate) pending_agent_restart_shutdowns: HashMap<crate::layout::PaneId, Option<u32>>,
     pub(crate) pending_agent_resume_runtime_exits: HashMap<crate::layout::PaneId, Option<u32>>,
     pub(crate) next_api_worktree_operation_id: u64,
     pub(crate) next_auto_update_check: Option<Instant>,
@@ -708,6 +710,7 @@ impl App {
             pending_api_worktree_remove_paths: HashMap::new(),
             pending_worktree_remove_runtime_exits: HashMap::new(),
             pending_worktree_remove_runtime_restores: HashMap::new(),
+            pending_agent_restart_shutdowns: HashMap::new(),
             pending_agent_resume_runtime_exits: HashMap::new(),
             retained_agent_resume_panes: HashMap::new(),
             next_api_worktree_operation_id: 1,

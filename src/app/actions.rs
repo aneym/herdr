@@ -1699,6 +1699,7 @@ impl AppState {
                 Vec::new()
             }
             AppEvent::WorktreeRuntimeRestoreFailed { .. }
+            | AppEvent::AgentRestartShutdownFinished(_)
             | AppEvent::AgentRestartStartupFinished { .. } => Vec::new(),
             AppEvent::UpdateReady {
                 version,

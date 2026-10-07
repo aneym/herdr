@@ -1165,10 +1165,12 @@ pub(crate) fn restart_launch_argv(
             ]
             .iter()
             .any(|shell| same_executable(program, shell))
-        }) && argv
-            .iter()
-            .skip(1)
-            .any(|arg| matches!(arg.as_str(), "-c" | "-lc" | "/c" | "-Command"));
+        }) && argv.iter().skip(1).any(|arg| {
+            matches!(arg.as_str(), "/c" | "-Command")
+                || arg
+                    .strip_prefix('-')
+                    .is_some_and(|flags| !flags.starts_with('-') && flags.contains('c'))
+        });
         !argv.is_empty() && !shell_command
     }) {
         if recorded
@@ -1385,7 +1387,7 @@ mod restart_tests {
                 "session"
             ])
         );
-        let shell = strings(&["sh", "-c", "claude --model opus"]);
+        let shell = strings(&["sh", "-lic", "claude --model opus"]);
         let (argv, source) =
             restart_launch_argv(&leaf, Some(&shell), Some("claude-lb-launch"), &plan).unwrap();
         assert_eq!(source, "configured");

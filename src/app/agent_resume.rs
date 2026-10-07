@@ -17,6 +17,18 @@ pub(crate) struct AgentResumeReplacementWindow {
     pub(crate) until: Instant,
 }
 
+#[derive(Debug)]
+pub(crate) struct AgentRestartAfterShutdown {
+    pub(crate) pane_id: crate::layout::PaneId,
+    pub(crate) terminal_id: crate::terminal::TerminalId,
+    pub(crate) replaced_pid: Option<u32>,
+    cwd: std::path::PathBuf,
+    resumed: InPlaceAgentResume,
+    launch_env: crate::pane::PaneLaunchEnv,
+    rows: u16,
+    cols: u16,
+}
+
 struct PendingAgentResumeCandidate {
     pane_id: crate::layout::PaneId,
     terminal_id: crate::terminal::TerminalId,
@@ -78,6 +90,15 @@ impl App {
         force: bool,
         input_quiet: Option<std::time::Duration>,
     ) -> Result<InPlaceAgentResume, InPlaceAgentResumeError> {
+        if self.pending_agent_restart_shutdowns.contains_key(&pane_id)
+            || self
+                .pending_agent_resume_runtime_exits
+                .contains_key(&pane_id)
+        {
+            return Err(InPlaceAgentResumeError::Busy(
+                "previous restart is still completing".into(),
+            ));
+        }
         let pane = self
             .pane_info(ws_idx, pane_id)
             .ok_or(InPlaceAgentResumeError::PaneNotFound)?;
@@ -232,7 +253,6 @@ impl App {
             session_ref,
         };
         let plan = crate::agent_resume::AgentResumePlan { argv, ..plan };
-        let expected_agent = plan.agent.clone();
 
         let launch_env = self
             .pane_launch_env(ws_idx, pane_id, launch_env_overrides)
@@ -249,17 +269,76 @@ impl App {
         let replaced_pid = runtime.child_pid();
         self.pending_agent_resume_runtime_exits
             .insert(pane_id, replaced_pid);
-        if let Some(old_runtime) = self.terminal_runtimes.remove(&terminal_id) {
-            // Shutdown has a bounded signal/grace loop; it must not stall API dispatch.
-            std::thread::spawn(move || old_runtime.shutdown());
-        }
+        let old_runtime = self
+            .terminal_runtimes
+            .remove(&terminal_id)
+            .ok_or(InPlaceAgentResumeError::NotRunning)?;
+        self.pending_agent_restart_shutdowns
+            .insert(pane_id, replaced_pid);
         if let Some(mut terminal) = self.state.terminals.remove(&terminal_id) {
             terminal.cwd = cwd.clone();
             terminal.begin_in_place_agent_resume(persisted, plan);
+            // The shutdown event owns launch; deferred restore must not race it.
+            terminal.pending_agent_resume_plan = None;
             self.state
                 .terminals
                 .insert(terminal_id.clone(), terminal.with_respawn_shell_on_exit());
         }
+        let restart = AgentRestartAfterShutdown {
+            pane_id,
+            terminal_id,
+            replaced_pid,
+            cwd,
+            resumed: resumed.clone(),
+            launch_env,
+            rows,
+            cols,
+        };
+        let event_tx = self.event_tx.clone();
+        std::thread::spawn(move || {
+            old_runtime.shutdown();
+            let _ = event_tx.blocking_send(crate::events::AppEvent::AgentRestartShutdownFinished(
+                Box::new(restart),
+            ));
+        });
+        self.state.mark_session_dirty();
+        self.emit_pane_updated(ws_idx, pane_id);
+        Ok(resumed)
+    }
+
+    pub(crate) fn finish_agent_restart_shutdown(&mut self, restart: AgentRestartAfterShutdown) {
+        let AgentRestartAfterShutdown {
+            pane_id,
+            terminal_id,
+            replaced_pid,
+            cwd,
+            resumed,
+            launch_env,
+            rows,
+            cols,
+        } = restart;
+        if self.pending_agent_restart_shutdowns.get(&pane_id) != Some(&replaced_pid) {
+            return;
+        }
+        self.pending_agent_restart_shutdowns.remove(&pane_id);
+        let Some((ws_idx, pane)) = self.find_pane(pane_id) else {
+            return;
+        };
+        if pane.attached_terminal_id != terminal_id
+            || self.terminal_runtimes.get(&terminal_id).is_some()
+        {
+            return;
+        }
+        if replaced_pid.is_some_and(crate::platform::process_exists) {
+            if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
+                terminal.restore_error =
+                    Some("start_failed: old agent runtime did not exit".into());
+                terminal.revision = terminal.revision.saturating_add(1);
+            }
+            self.emit_pane_updated(ws_idx, pane_id);
+            return;
+        }
+        let expected_agent = resumed.agent.clone();
         // Direct argv execution avoids terminal canonical-input limits and shell quoting.
         let runtime = crate::terminal::TerminalRuntime::spawn_argv_command(
             pane_id,
@@ -275,17 +354,19 @@ impl App {
             self.event_tx.clone(),
             self.render_notify.clone(),
             self.render_dirty.clone(),
-        )
-        .map_err(|err| {
-            if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
-                terminal.pending_agent_resume_plan = None;
-                terminal.restore_error = Some(format!(
-                    "Could not start the pane shell to resume the agent: {err}"
-                ));
-                terminal.revision = terminal.revision.saturating_add(1);
+        );
+        let runtime = match runtime {
+            Ok(runtime) => runtime,
+            Err(err) => {
+                if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
+                    terminal.restore_error =
+                        Some(format!("start_failed: could not resume agent: {err}"));
+                    terminal.revision = terminal.revision.saturating_add(1);
+                }
+                self.emit_pane_updated(ws_idx, pane_id);
+                return;
             }
-            InPlaceAgentResumeError::Failed(err.to_string())
-        })?;
+        };
         let runtime_pid = runtime.child_pid();
         let event_tx = self.event_tx.clone();
         let launcher = resumed.launcher.clone();
@@ -351,7 +432,6 @@ impl App {
         }
         self.state.mark_session_dirty();
         self.emit_pane_updated(ws_idx, pane_id);
-        Ok(resumed)
     }
 
     /// Whether `PaneDied` for `runtime_pid` is the replacement runtime dying
@@ -2074,6 +2154,45 @@ mod tests {
         } else {
             resume_pane(&mut app, &public_id)
         };
+        assert!(
+            app.terminal_runtimes.get(&terminal_id).is_none(),
+            "replacement must not spawn before shutdown completion"
+        );
+        let second: serde_json::Value = serde_json::from_str(
+            &app.handle_api_request_after_internal_events_drained(crate::api::schema::Request {
+                id: "second-restart".into(),
+                method: crate::api::schema::Method::AgentRestart(
+                    crate::api::schema::AgentRestartParams {
+                        pane_id: public_id.clone(),
+                        force: true,
+                    },
+                ),
+            }),
+        )
+        .unwrap();
+        assert_eq!(second["error"]["code"], "busy", "{second}");
+        for _ in 0..200 {
+            let mut completed = false;
+            while let Ok(event) = app.event_rx.try_recv() {
+                if matches!(
+                    &event,
+                    crate::events::AppEvent::AgentRestartShutdownFinished(_)
+                ) {
+                    assert!(
+                        !crate::platform::process_exists(old_pid.unwrap()),
+                        "old runtime must exit before replacement spawn"
+                    );
+                    app.handle_internal_event(event);
+                    completed = true;
+                    break;
+                }
+                app.handle_internal_event(event);
+            }
+            if completed {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
         for _ in 0..200 {
             if !crate::platform::process_exists(old_pid.unwrap()) {
                 break;
@@ -2114,21 +2233,24 @@ mod tests {
             terminal.persisted_agent_session.as_ref(),
             Some(&claude_session("sess-1"))
         );
-        assert_eq!(
-            app.pending_agent_resume_runtime_exits.get(&pane_id),
-            Some(&old_pid)
-        );
-
-        if scenario != ResumeScenario::AgentExits {
-            // The replaced process's exit is owed, not a pane death.
-            app.handle_internal_event(crate::events::AppEvent::PaneDied {
-                pane_id,
-                runtime_pid: old_pid,
-                exit_reason: crate::platform::ChildExitReason::Exited,
-            });
-            assert!(app.find_pane(pane_id).is_some());
-            assert!(app.terminal_runtimes.get(&terminal_id).is_some());
-            assert!(app.pending_agent_resume_runtime_exits.is_empty());
+        // Even if shutdown-complete raced ahead of PaneDied, consume the
+        // original exit exactly once before any subsequent restart.
+        if app
+            .pending_agent_resume_runtime_exits
+            .contains_key(&pane_id)
+        {
+            for _ in 0..200 {
+                if let Ok(event) = app.event_rx.try_recv() {
+                    app.handle_internal_event(event);
+                }
+                if !app
+                    .pending_agent_resume_runtime_exits
+                    .contains_key(&pane_id)
+                {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
         }
 
         match scenario {

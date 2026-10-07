@@ -91,6 +91,10 @@ impl App {
         &mut self,
         ev: AppEvent,
     ) -> Vec<crate::app::actions::PaneStateUpdate> {
+        if let AppEvent::AgentRestartShutdownFinished(restart) = ev {
+            self.finish_agent_restart_shutdown(*restart);
+            return Vec::new();
+        }
         if let AppEvent::AgentRestartStartupFinished {
             pane_id,
             runtime_pid,
