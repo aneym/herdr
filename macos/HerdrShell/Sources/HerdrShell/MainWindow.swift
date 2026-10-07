@@ -440,6 +440,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         quickSwitch.noteSelected(tabId)
         noteLookedAt(tabId)
         let stepping = state.focusCursor != nil && revealDocs
+        revealSpace(of: tabId)
         state.selectedTab = tabId
         if !stepping { state.focusCursor = nil }
         state.saveSelected()
@@ -450,6 +451,13 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         refreshHost()
         refreshDocs()
         focusPane(focusedPaneByTab[tabId] ?? host.rects.first?.0.paneId)
+    }
+
+    /// Quick switch, attention jumps and header clicks land on tabs the tree may hide.
+    private func revealSpace(of tabId: String) {
+        guard let s = model.snapshot, let space = s.tabs.first(where: { $0.tab_id == tabId })?.workspace_id else { return }
+        let parked = s.workspaces.first(where: { $0.workspace_id == space })?.parked == true
+        if state.spacesChrome.reveal(space: space, parked: parked) { state.saveSpacesChrome() }
     }
 
     private var seenDeskIds: [String: Set<String>]?

@@ -45,8 +45,8 @@ pub(super) fn section_label(section: Option<TabSection>) -> Option<&'static str>
     })
 }
 impl WorkspaceReport {
-    pub(super) fn new(id: &str, tree: &ClientTreeChrome, snapshot: &crate::protocol::ClientShellSnapshot, filter: Option<&str>) -> Self {
-        Self { id: id.to_owned(), space_collapsed: tree.space_collapsed(snapshot, id),
+    pub(super) fn new(id: &str, tree: &ClientTreeChrome, priority: &super::tree::PriorityIndex, filter: Option<&str>) -> Self {
+        Self { id: id.to_owned(), space_collapsed: tree.space_collapsed(priority, id),
             goal_filter: filter.map(str::to_owned), sections: Vec::new(), tabs: Vec::new() }
     }
     pub(super) fn add(&mut self, tab: &str, kind: TabKind, section: Option<String>, under: Option<String>, hidden: &str) {

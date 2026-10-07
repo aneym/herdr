@@ -56,6 +56,9 @@ check("old SpacesChrome JSON decodes and preserves prior state", "chrome|true|tr
 check("parked space collapsed in place by default", space("rank", "p")[4] == "closed" and "tab:parkedtab" not in selected("rank", "tab"))
 check("persisted parked expansion exposes tabs", space("expanded", "p")[4] == "open" and "tab:parkedtab" in selected("expanded", "tab") and "expandedChrome|true|true" in rows)
 check("parked toggle refolds without changing collapsedSpaces", space("refolded", "p")[4] == "closed" and "tab:parkedtab" not in selected("refolded", "tab") and "refoldedChrome|true|true" in rows)
+check("selecting a tab opens its parked space", space("revealParked", "p")[4] == "open" and "tab:parkedtab" in selected("revealParked", "tab"))
+check("selecting a tab unfolds its collapsed space", "tab:plain1" not in selected("folded", "tab") and "tab:plain1" in selected("revealFolded", "tab"))
+check("reveal reports a change once, so a repeat select saves nothing", "reveal|true|true|false" in rows)
 summary = f"{len(lines) - len(failures)}/{len(lines)} checks passed"
 print(summary)
 REPORT.write_text("\n".join(lines + [summary, ""] + rows) + "\n")

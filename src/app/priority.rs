@@ -1,27 +1,27 @@
 //! Saved display ranks. Session vectors and their positional identities never move.
 use crate::config::SidebarPriorityConfig;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Rank {
     pub value: u32,
     pub parked: bool,
 }
 
 fn glob(pattern: &str, value: &str) -> bool {
-    let parts = pattern.split('*').collect::<Vec<_>>();
-    if parts.len() == 1 {
+    let Some((first, tail)) = pattern.split_once('*') else {
         return pattern == value;
-    }
-    let Some(mut rest) = value.strip_prefix(parts[0]) else {
+    };
+    let Some(mut rest) = value.strip_prefix(first) else {
         return false;
     };
-    for part in &parts[1..parts.len() - 1] {
+    let (middle, last) = tail.rsplit_once('*').unwrap_or(("", tail));
+    for part in middle.split('*') {
         let Some(index) = rest.find(part) else {
             return false;
         };
         rest = &rest[index + part.len()..];
     }
-    rest.ends_with(parts[parts.len() - 1])
+    rest.ends_with(last)
 }
 
 fn matching_rank(config: &SidebarPriorityConfig, matches: impl Fn(&str) -> bool) -> Option<Rank> {
@@ -57,10 +57,15 @@ pub(crate) fn tab_rank(
     id: &str,
     label: &str,
 ) -> Rank {
-    if config.order.is_empty() && config.last.is_empty() {
+    if config.is_empty() {
         return workspace;
     }
-    let label = label.to_lowercase();
+    // Rules are lowercased once at config time; most labels already are.
+    let label = if label.chars().any(char::is_uppercase) {
+        std::borrow::Cow::Owned(label.to_lowercase())
+    } else {
+        std::borrow::Cow::Borrowed(label)
+    };
     matching_rank(config, |rule| {
         rule.strip_prefix("tab:")
             .is_some_and(|pattern| pattern == id || glob(pattern, &label))
@@ -77,52 +82,60 @@ pub(crate) fn normalized(config: &SidebarPriorityConfig) -> SidebarPriorityConfi
 }
 
 impl super::App {
-    pub(crate) fn priority_workspace_rank(&self, index: usize) -> Rank {
+    /// Ranks a workspace whose display label the caller already resolved.
+    pub(crate) fn priority_workspace_rank_for_label(&self, index: usize, label: &str) -> Rank {
         let config = &self.state.sidebar_priority;
-        if config.order.is_empty() && config.last.is_empty() {
-            return Rank {
-                value: 0,
-                parked: false,
-            };
+        if config.is_empty() {
+            return Rank::default();
+        }
+        workspace_rank(config, &self.state.workspaces[index].id, label)
+    }
+
+    pub(crate) fn priority_workspace_rank(&self, index: usize) -> Rank {
+        if self.state.sidebar_priority.is_empty() {
+            return Rank::default();
         }
         let workspace = &self.state.workspaces[index];
-        workspace_rank(
-            config,
-            &workspace.id,
+        self.priority_workspace_rank_for_label(
+            index,
             &workspace.display_name_from(&self.state.terminals, &self.terminal_runtimes),
         )
     }
 
     pub(crate) fn priority_tab_rank(&self, wi: usize, ti: usize) -> Rank {
-        self.priority_tab_rank_with_workspace(wi, ti, self.priority_workspace_rank(wi))
-    }
-
-    pub(super) fn priority_tab_rank_with_workspace(&self, wi: usize, ti: usize, rank: Rank) -> Rank {
-        let config = &self.state.sidebar_priority;
-        if config.order.is_empty() && config.last.is_empty() {
-            return Rank {
-                value: 0,
-                parked: false,
-            };
+        if self.state.sidebar_priority.is_empty() {
+            return Rank::default();
         }
         let workspace = &self.state.workspaces[wi];
-        let tab = &workspace.tabs[ti];
-        tab_rank(
-            config,
-            rank,
-            &crate::workspace::public_tab_id_for_number(&workspace.id, tab.number),
-            &workspace.tab_display_name(ti).unwrap_or_default(),
-        )
+        let tab_id =
+            crate::workspace::public_tab_id_for_number(&workspace.id, workspace.tabs[ti].number);
+        self.priority_tab_rank_with_workspace(wi, ti, &tab_id, self.priority_workspace_rank(wi))
+    }
+
+    /// Snapshot path: the caller supplies the public tab id and workspace rank it
+    /// already holds, so ranking adds no label resolution or id formatting.
+    pub(super) fn priority_tab_rank_with_workspace(
+        &self,
+        wi: usize,
+        ti: usize,
+        tab_id: &str,
+        rank: Rank,
+    ) -> Rank {
+        let config = &self.state.sidebar_priority;
+        if config.is_empty() {
+            return Rank::default();
+        }
+        match self.state.workspaces[wi].tabs[ti].custom_name.as_deref() {
+            Some(label) => tab_rank(config, rank, tab_id, label),
+            None => tab_rank(config, rank, tab_id, &(ti + 1).to_string()),
+        }
     }
 }
 
 impl super::AppState {
     pub(crate) fn priority_workspace_rank(&self, index: usize) -> Rank {
-        if self.sidebar_priority.order.is_empty() && self.sidebar_priority.last.is_empty() {
-            return Rank {
-                value: 0,
-                parked: false,
-            };
+        if self.sidebar_priority.is_empty() {
+            return Rank::default();
         }
         let workspace = &self.workspaces[index];
         workspace_rank(
@@ -133,11 +146,8 @@ impl super::AppState {
     }
 
     pub(crate) fn priority_tab_rank(&self, workspace_index: usize, tab_index: usize) -> Rank {
-        if self.sidebar_priority.order.is_empty() && self.sidebar_priority.last.is_empty() {
-            return Rank {
-                value: 0,
-                parked: false,
-            };
+        if self.sidebar_priority.is_empty() {
+            return Rank::default();
         }
         let workspace = &self.workspaces[workspace_index];
         let tab = &workspace.tabs[tab_index];
@@ -151,7 +161,7 @@ impl super::AppState {
 
     /// Stable-sort only the plain block; agents and workspace/tab identities stay put.
     pub(crate) fn sort_priority_pins(&mut self) {
-        if self.sidebar_priority.order.is_empty() && self.sidebar_priority.last.is_empty() {
+        if self.sidebar_priority.is_empty() {
             return;
         }
         let mut ranks = std::collections::HashMap::new();
@@ -178,7 +188,7 @@ impl super::AppState {
 
     /// A renamed plain pin joins the end of its new group, preserving peer order.
     pub(crate) fn priority_renamed_pins(&mut self, ids: &[String]) {
-        if self.sidebar_priority.order.is_empty() && self.sidebar_priority.last.is_empty() {
+        if self.sidebar_priority.is_empty() {
             return;
         }
         let mut moved = Vec::new();

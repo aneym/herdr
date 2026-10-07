@@ -102,13 +102,55 @@ fn sorted(values: &HashSet<String>) -> Vec<String> {
     values
 }
 
-impl ClientTreeChrome {
-    pub(super) fn space_collapsed(&self, snapshot: &ClientShellSnapshot, id: &str) -> bool {
+/// Saved priority ranks and parked spaces from one snapshot, indexed once per
+/// tree pass. With no priority config every rank is zero and nothing is
+/// parked, so the index stays empty: no allocation, no sorting, no lookups.
+#[derive(Default)]
+pub(super) struct PriorityIndex<'a> {
+    spaces: HashMap<&'a str, u32>,
+    tabs: HashMap<&'a str, u32>,
+    parked: HashSet<&'a str>,
+}
+
+impl<'a> PriorityIndex<'a> {
+    pub(super) fn new(snapshot: &'a ClientShellSnapshot) -> Self {
+        let mut index = Self::default();
         if snapshot
             .workspaces
             .iter()
-            .any(|workspace| workspace.workspace_id == id && workspace.parked)
+            .all(|ws| ws.sort_rank == 0 && !ws.parked)
+            && snapshot.tabs.iter().all(|tab| tab.sort_rank == 0)
         {
+            return index;
+        }
+        for ws in &snapshot.workspaces {
+            index.spaces.insert(&ws.workspace_id, ws.sort_rank);
+            if ws.parked {
+                index.parked.insert(&ws.workspace_id);
+            }
+        }
+        for tab in &snapshot.tabs {
+            index.tabs.insert(&tab.tab_id, tab.sort_rank);
+        }
+        index
+    }
+
+    fn ranked(&self) -> bool {
+        !self.spaces.is_empty()
+    }
+
+    fn space_rank(&self, id: &str) -> u32 {
+        self.spaces.get(id).copied().unwrap_or(0)
+    }
+
+    fn tab_rank(&self, id: &str) -> u32 {
+        self.tabs.get(id).copied().unwrap_or(0)
+    }
+}
+
+impl ClientTreeChrome {
+    pub(super) fn space_collapsed(&self, priority: &PriorityIndex, id: &str) -> bool {
+        if priority.parked.contains(id) {
             !self.expanded_parked_spaces.contains(id)
         } else {
             self.collapsed_spaces.contains(id)
@@ -564,6 +606,8 @@ fn factory_row_states(
         append_factory_space(
             &mut entries,
             snapshot,
+            // Every fold is open here, so parked spaces need no index either.
+            &PriorityIndex::default(),
             &unfolded,
             workspace_id,
             &rows,
@@ -764,6 +808,7 @@ pub(super) fn tree_list_entries_with_overlay(
     rows: Vec<AgentRow>,
     overlay: Option<&crate::factory_overlay::FactoryOverlay>,
 ) -> Vec<AgentPanelListEntry> {
+    let priority = PriorityIndex::new(snapshot);
     let agent_tabs = snapshot
         .pinned_tabs
         .iter()
@@ -803,7 +848,7 @@ pub(super) fn tree_list_entries_with_overlay(
             let collapsed_with_tabs = workspace.visible_in_profile
                 && tree.show_spaces
                 && tree.show_hidden_spaces
-                && tree.space_collapsed(snapshot, id)
+                && tree.space_collapsed(&priority, id)
                 && snapshot.tabs.iter().any(|tab| &tab.workspace_id == id);
             if workspace_order.contains(id)
                 || !(workspace.visible_in_profile && agent_spaces.contains(id.as_str())
@@ -832,13 +877,9 @@ pub(super) fn tree_list_entries_with_overlay(
             workspace_order.insert(before, id.clone());
         }
     }
-    workspace_order.sort_by_key(|id| {
-        snapshot
-            .workspaces
-            .iter()
-            .find(|workspace| &workspace.workspace_id == id)
-            .map_or(0, |workspace| workspace.sort_rank)
-    });
+    if priority.ranked() {
+        workspace_order.sort_by_key(|id| priority.space_rank(id));
+    }
     let mut out = pinned_tab_entries(snapshot, overlay);
     if let Some(overlay) = overlay.filter(|overlay| overlay.tabs.values().any(|tag| tag.section.is_some())) {
         let choices = factory_goal_choices(overlay);
@@ -867,7 +908,7 @@ pub(super) fn tree_list_entries_with_overlay(
                     .map(|tab| tab.tab_id.as_str()),
             )
         });
-        let space_collapsed = tree.show_spaces && tree.space_collapsed(snapshot, workspace_id);
+        let space_collapsed = tree.show_spaces && tree.space_collapsed(&priority, workspace_id);
         let demoted = space_collapsed && tree.show_hidden_spaces;
         if demoted {
             hidden_spaces.insert(workspace_id.clone());
@@ -915,7 +956,7 @@ pub(super) fn tree_list_entries_with_overlay(
                 if let Some(overlay) = tagged {
                     if super::sidebar_report::recording() && snapshot.tabs.iter().any(|tab|
                         tab.workspace_id == *workspace_id && overlay.tab(&tab.tab_id).is_some_and(|tag| tag.section.is_some())) {
-                        let mut report = super::sidebar_report::WorkspaceReport::new(workspace_id, tree, snapshot, None);
+                        let mut report = super::sidebar_report::WorkspaceReport::new(workspace_id, tree, &priority, None);
                         for tab in snapshot.tabs.iter().filter(|tab| tab.workspace_id == *workspace_id) {
                             if let Some(tag) = overlay.tab(&tab.tab_id) {
                                 report.add(&tab.tab_id, tag.kind,
@@ -934,6 +975,7 @@ pub(super) fn tree_list_entries_with_overlay(
             append_factory_space(
                 out,
                 snapshot,
+                &priority,
                 tree,
                 workspace_id,
                 &workspace_rows,
@@ -970,9 +1012,9 @@ pub(super) fn tree_list_entries_with_overlay(
                 .push(row);
         }
 
-        tab_order.sort_by_key(|id| {
-            snapshot.tabs.iter().find(|tab| &tab.tab_id == id).map_or(0, |tab| tab.sort_rank)
-        });
+        if priority.ranked() {
+            tab_order.sort_by_key(|id| priority.tab_rank(id));
+        }
         for tab_id in &tab_order {
             let Some(mut tab_rows) = by_tab.remove(tab_id) else {
                 continue;
@@ -1076,7 +1118,7 @@ pub(super) fn tree_list_entries_with_overlay(
             {
                 continue;
             }
-            let collapsed = tree.space_collapsed(snapshot, workspace_id);
+            let collapsed = tree.space_collapsed(&priority, workspace_id);
             let header = AgentPanelListEntry::SpaceHeader(TreeHeader {
                 workspace_id: workspace_id.clone(),
                 tab_id: None,
@@ -1160,6 +1202,7 @@ fn space_attention(
 fn append_factory_space(
     out: &mut Vec<AgentPanelListEntry>,
     snapshot: &ClientShellSnapshot,
+    priority: &PriorityIndex,
     tree: &ClientTreeChrome,
     workspace_id: &str,
     rows: &[AgentRow],
@@ -1174,7 +1217,7 @@ fn append_factory_space(
     let choices = factory_goal_choices(overlay);
     let filter = tree.factory_goal_filter.as_deref().filter(|value| {
         sectioned
-            && !tree.space_collapsed(snapshot, workspace_id)
+            && !tree.space_collapsed(priority, workspace_id)
             && choices.iter().any(|choice| choice == value)
     });
     let mut tabs = snapshot
@@ -1201,7 +1244,9 @@ fn append_factory_space(
     let first_orchestrator = tabs.iter().copied()
         .find(|tab| foreground(tab) && kind(tab) == TabKind::Orchestrator)
         .map(|tab| tab.tab_id.as_str());
-    tabs.sort_by_key(|tab| tab.sort_rank);
+    if priority.ranked() {
+        tabs.sort_by_key(|tab| tab.sort_rank);
+    }
     let orchestrators = tabs
         .iter()
         .copied()
@@ -1660,7 +1705,7 @@ fn append_factory_space(
         }
     }
     if sectioned && super::sidebar_report::recording() {
-        let mut report = super::sidebar_report::WorkspaceReport::new(workspace_id, tree, snapshot, filter);
+        let mut report = super::sidebar_report::WorkspaceReport::new(workspace_id, tree, priority, filter);
         report.placements(&out[start..]);
         report.kinds(overlay);
         for tab in snapshot.tabs.iter().filter(|tab| tab.workspace_id == workspace_id) {
@@ -2608,10 +2653,11 @@ impl ClientShellState {
             .tree_chrome
             .get(&self.active_endpoint_id)
             .unwrap_or(&self.tree_chrome_default);
+        let priority = PriorityIndex::new(snapshot);
         let skips_space = |workspace_id: &str| {
             tree_view_active(&self.config)
                 && tree.show_spaces
-                && tree.space_collapsed(snapshot, workspace_id)
+                && tree.space_collapsed(&priority, workspace_id)
         };
         // With tab headers shown, a nested workflow's tab is not a cycling
         // destination, even when the group is expanded or needs attention.

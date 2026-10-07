@@ -102,6 +102,13 @@ struct SpacesChrome: Codable {
         pinnedSpaces = c.value("pinnedSpaces", []); collapsedSpaces = c.value("collapsedSpaces", []); expandedParkedSpaces = c.value("expandedParkedSpaces", []); hiddenExpanded = c.value("hiddenExpanded", false); goalFilter = c.optional("goalFilter"); focusedSection = c.value("focusedSection", [:])
         if let legacy: String = c.optional("focusedSection"), let split = legacy.lastIndex(of: ":") { focusedSection[String(legacy[..<split])] = String(legacy[legacy.index(after: split)...]) }
     }
+    /// Opens a selected tab's space, parked or folded, as the TUI's reveal does
+    /// (client/shell/tree.rs). True when the chrome changed and needs saving.
+    mutating func reveal(space: String, parked: Bool) -> Bool {
+        let unfolded = collapsedSpaces.remove(space) != nil
+        let unparked = parked && expandedParkedSpaces.insert(space).inserted
+        return unfolded || unparked
+    }
     /// `open` is the row's rendered state; a tab row needs it because lanes fold by default
     /// yet focus can hold one open without an entry in either set.
     mutating func toggle(_ key: String, open: Bool? = nil) {

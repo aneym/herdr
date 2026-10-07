@@ -9,13 +9,16 @@
 [PASS] parked space collapsed in place by default
 [PASS] persisted parked expansion exposes tabs
 [PASS] parked toggle refolds without changing collapsedSpaces
-11/11 checks passed
+[PASS] selecting a tab opens its parked space
+[PASS] selecting a tab unfolds its collapsed space
+[PASS] reveal reports a change once, so a repeat select saves nothing
+14/14 checks passed
 
 snapshot|0|false|0|4294967295|true|7
 input|0|false|0
 chrome|true|true
 rank|title|agents|0|none||mute|agents||none||||
-rank|section|pinned|0|none||mute|PINNED|⌘1..3|none||||
+rank|section|pinned|0|none||mute|PINNED||none||||
 rank|tab|pinned:latepin|0|none|●|unknown|Late pin|D|none||latepin||
 rank|tab|pinned:pin2|0|none|●|unknown|Pin 2|D|none||pin2||
 rank|tab|pinned:pin1|0|none|●|unknown|Pin 1|D|none||pin1||
@@ -31,7 +34,7 @@ rank|space|space:c|0|open||mute|C||none|||space:c|
 rank|space|space:a|0|open||mute|A||none|||space:a|
 rank|space|space:p|0|closed||mute|Parked||none||parkedtab|parkedspace:p|
 partition|title|agents|0|none||mute|agents||none||||
-partition|section|pinned|0|none||mute|PINNED|⌘1..3|none||||
+partition|section|pinned|0|none||mute|PINNED||none||||
 partition|tab|pinned:latepin|0|none|●|unknown|Late pin|D|none||latepin||
 partition|tab|pinned:pin2|0|none|●|unknown|Pin 2|D|none||pin2||
 partition|tab|pinned:pin1|0|none|●|unknown|Pin 1|D|none||pin1||
@@ -47,7 +50,7 @@ partition|space|space:c|0|open||mute|C||none|||space:c|
 partition|space|space:a|0|open||mute|A||none|||space:a|
 partition|space|space:p|0|closed||mute|Parked||none||parkedtab|parkedspace:p|
 overlay|title|agents|0|none||mute|agents||none||||
-overlay|section|pinned|0|none||mute|PINNED|⌘1..3|none||||
+overlay|section|pinned|0|none||mute|PINNED||none||||
 overlay|tab|pinned:latepin|0|none|●|unknown|Late pin|D|none||latepin||
 overlay|tab|pinned:pin2|0|none|●|unknown|Pin 2|D|none||pin2||
 overlay|tab|pinned:pin1|0|none|●|unknown|Pin 1|D|none||pin1||
@@ -64,7 +67,7 @@ overlay|tab|tab:latepin|1|none|●|unknown|Late pin||none||latepin||
 overlay|space|space:b|0|open||mute|B||none|||space:b|
 overlay|space|space:p|0|closed||mute|Parked||none||parkedtab|parkedspace:p|
 expanded|title|agents|0|none||mute|agents||none||||
-expanded|section|pinned|0|none||mute|PINNED|⌘1..3|none||||
+expanded|section|pinned|0|none||mute|PINNED||none||||
 expanded|tab|pinned:latepin|0|none|●|unknown|Late pin|D|none||latepin||
 expanded|tab|pinned:pin2|0|none|●|unknown|Pin 2|D|none||pin2||
 expanded|tab|pinned:pin1|0|none|●|unknown|Pin 1|D|none||pin1||
@@ -83,7 +86,7 @@ expanded|section|section:p:LANES|1|none||mute|LANES||none||||
 expanded|tab|tab:parkedtab|1|none|●|unknown|Parked tab||none||parkedtab||
 expandedChrome|true|true
 refolded|title|agents|0|none||mute|agents||none||||
-refolded|section|pinned|0|none||mute|PINNED|⌘1..3|none||||
+refolded|section|pinned|0|none||mute|PINNED||none||||
 refolded|tab|pinned:latepin|0|none|●|unknown|Late pin|D|none||latepin||
 refolded|tab|pinned:pin2|0|none|●|unknown|Pin 2|D|none||pin2||
 refolded|tab|pinned:pin1|0|none|●|unknown|Pin 1|D|none||pin1||
@@ -99,3 +102,48 @@ refolded|space|space:c|0|open||mute|C||none|||space:c|
 refolded|space|space:a|0|open||mute|A||none|||space:a|
 refolded|space|space:p|0|closed||mute|Parked||none||parkedtab|parkedspace:p|
 refoldedChrome|true|true
+folded|title|agents|0|none||mute|agents||none||||
+folded|section|pinned|0|none||mute|PINNED||none||||
+folded|tab|pinned:latepin|0|none|●|unknown|Late pin|D|none||latepin||
+folded|tab|pinned:pin2|0|none|●|unknown|Pin 2|D|none||pin2||
+folded|tab|pinned:pin1|0|none|●|unknown|Pin 1|D|none||pin1||
+folded|space|space:b|0|open||mute|B||none|||space:b|
+folded|space|space:c|0|open||mute|C||none|||space:c|
+folded|space|space:a|0|open||mute|A||none|||space:a|
+folded|space|space:p|0|closed||mute|Parked||none||parkedtab|parkedspace:p|
+folded|hidden|hidden|0|closed||mute|hidden 1||none|||hidden|
+revealFolded|title|agents|0|none||mute|agents||none||||
+revealFolded|section|pinned|0|none||mute|PINNED||none||||
+revealFolded|tab|pinned:latepin|0|none|●|unknown|Late pin|D|none||latepin||
+revealFolded|tab|pinned:pin2|0|none|●|unknown|Pin 2|D|none||pin2||
+revealFolded|tab|pinned:pin1|0|none|●|unknown|Pin 1|D|none||pin1||
+revealFolded|space|space:d|0|open||mute|D||none||latepin|space:d|
+revealFolded|section|section:d:LANES|1|none||mute|LANES||none||||
+revealFolded|tab|tab:plain1|1|none|●|unknown|Plain 1||none||plain1||
+revealFolded|tab|tab:pin1|1|none|●|unknown|Pin 1||none||pin1||
+revealFolded|tab|tab:pin2|1|none|●|unknown|Pin 2||none||pin2||
+revealFolded|tab|tab:plain2|1|none|●|unknown|Plain 2||none||plain2||
+revealFolded|tab|tab:latepin|1|none|●|unknown|Late pin||none||latepin||
+revealFolded|space|space:b|0|open||mute|B||none|||space:b|
+revealFolded|space|space:c|0|open||mute|C||none|||space:c|
+revealFolded|space|space:a|0|open||mute|A||none|||space:a|
+revealFolded|space|space:p|0|closed||mute|Parked||none||parkedtab|parkedspace:p|
+revealParked|title|agents|0|none||mute|agents||none||||
+revealParked|section|pinned|0|none||mute|PINNED||none||||
+revealParked|tab|pinned:latepin|0|none|●|unknown|Late pin|D|none||latepin||
+revealParked|tab|pinned:pin2|0|none|●|unknown|Pin 2|D|none||pin2||
+revealParked|tab|pinned:pin1|0|none|●|unknown|Pin 1|D|none||pin1||
+revealParked|space|space:d|0|open||mute|D||none||latepin|space:d|
+revealParked|section|section:d:LANES|1|none||mute|LANES||none||||
+revealParked|tab|tab:plain1|1|none|●|unknown|Plain 1||none||plain1||
+revealParked|tab|tab:pin1|1|none|●|unknown|Pin 1||none||pin1||
+revealParked|tab|tab:pin2|1|none|●|unknown|Pin 2||none||pin2||
+revealParked|tab|tab:plain2|1|none|●|unknown|Plain 2||none||plain2||
+revealParked|tab|tab:latepin|1|none|●|unknown|Late pin||none||latepin||
+revealParked|space|space:b|0|open||mute|B||none|||space:b|
+revealParked|space|space:c|0|open||mute|C||none|||space:c|
+revealParked|space|space:a|0|open||mute|A||none|||space:a|
+revealParked|space|space:p|0|open||mute|Parked||none||parkedtab|parkedspace:p|
+revealParked|section|section:p:LANES|1|none||mute|LANES||none||||
+revealParked|tab|tab:parkedtab|1|none|●|unknown|Parked tab||none||parkedtab||
+reveal|true|true|false

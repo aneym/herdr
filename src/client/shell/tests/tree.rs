@@ -1842,7 +1842,12 @@ fn parked_tree_reveal_focus_and_attention() {
     let mut state = tree_state(ClientTreeChrome::default());
     state.set_snapshot(Box::new(snapshot.clone()));
     let report = |tree: &ClientTreeChrome| serde_json::to_value(
-        crate::client::shell::sidebar_report::WorkspaceReport::new("ws_1", tree, &snapshot, None)
+        crate::client::shell::sidebar_report::WorkspaceReport::new(
+            "ws_1",
+            tree,
+            &crate::client::shell::tree::PriorityIndex::new(&snapshot),
+            None,
+        )
     ).unwrap()["space_collapsed"].as_bool().unwrap();
     assert!(report(state.tree_chrome_mut()));
     assert!(state.reveal_tree_ancestors_for_pane("pane_1"));

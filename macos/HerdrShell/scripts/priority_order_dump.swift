@@ -39,5 +39,14 @@ import Foundation
         chrome.toggle("parkedspace:p", open: true)
         dump("refolded", chrome: chrome)
         print("refoldedChrome|\(chrome.expandedParkedSpaces.isEmpty)|\(chrome.collapsedSpaces == oldChrome.collapsedSpaces)")
+        // Selecting a tab (quick switch, attention jump, header click) reveals its space.
+        var folded = SpacesChrome(); folded.collapsedSpaces = ["d"]
+        dump("folded", chrome: folded)
+        let unfolded = folded.reveal(space: "d", parked: false)
+        dump("revealFolded", chrome: folded)
+        var unparked = SpacesChrome()
+        let opened = unparked.reveal(space: "p", parked: true)
+        dump("revealParked", chrome: unparked)
+        print("reveal|\(unfolded)|\(opened)|\(unparked.reveal(space: "p", parked: true))")
     }
 }

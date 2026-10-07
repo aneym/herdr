@@ -246,7 +246,9 @@ impl App {
             .unwrap_or((crate::detect::AgentState::Unknown, true));
         let tab_id = self.public_tab_id(ws_idx, tab_idx)?;
         Some(crate::api::schema::TabInfo {
-            sort_rank: self.priority_tab_rank_with_workspace(ws_idx, tab_idx, workspace_rank).value,
+            sort_rank: self
+                .priority_tab_rank_with_workspace(ws_idx, tab_idx, &tab_id, workspace_rank)
+                .value,
             desk: self
                 .state
                 .desks
@@ -430,13 +432,14 @@ impl App {
     pub(super) fn workspace_info(&self, index: usize) -> crate::api::schema::WorkspaceInfo {
         let ws = &self.state.workspaces[index];
         let (agg_state, seen) = ws.aggregate_state(&self.state.terminals);
-        let rank = self.priority_workspace_rank(index);
+        let label = ws.display_name_from(&self.state.terminals, &self.terminal_runtimes);
+        let rank = self.priority_workspace_rank_for_label(index, &label);
         crate::api::schema::WorkspaceInfo {
             sort_rank: rank.value,
             parked: rank.parked,
             workspace_id: self.public_workspace_id(index),
             number: index + 1,
-            label: ws.display_name_from(&self.state.terminals, &self.terminal_runtimes),
+            label,
             focused: self.state.active == Some(index),
             pane_count: ws.public_pane_numbers.len(),
             tab_count: ws.tabs.len(),

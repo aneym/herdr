@@ -1096,9 +1096,7 @@ impl AppState {
                 role,
             },
         );
-        if role.is_none()
-            && !(self.sidebar_priority.order.is_empty() && self.sidebar_priority.last.is_empty())
-        {
+        if role.is_none() && !self.sidebar_priority.is_empty() {
             self.priority_renamed_pins(&[self.pinned_tabs[position].tab_id.clone()]);
         }
     }

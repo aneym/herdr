@@ -1069,10 +1069,24 @@ mod tests {
         assert_eq!(workspace["parked"], true);
         let tab = serde_json::to_value(app.tab_info(0, 1).unwrap()).unwrap();
         assert_eq!(tab["sort_rank"], 0);
+        // Leaving the "two" group ties both pins on the parked workspace rank;
+        // the renamed pin joins the end of that group, so the order flips.
         let response = app.handle_tab_rename(
             "rename".into(),
             TabRenameParams {
-                tab_id: tabs[0].clone(),
+                tab_id: tabs[1].clone(),
+                label: "plain".into(),
+            },
+        );
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["result"]["tab"]["sort_rank"], 2);
+        assert_eq!(pin_order(&app), [tabs[0].clone(), tabs[1].clone()]);
+        app.state.assert_invariants_for_test();
+        // Joining the "two" group moves the renamed pin ahead of its old peer.
+        let response = app.handle_tab_rename(
+            "rename-back".into(),
+            TabRenameParams {
+                tab_id: tabs[1].clone(),
                 label: "two".into(),
             },
         );

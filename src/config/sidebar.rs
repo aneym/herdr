@@ -587,6 +587,12 @@ pub struct SidebarPriorityConfig {
     pub last: Vec<String>,
 }
 
+impl SidebarPriorityConfig {
+    pub fn is_empty(&self) -> bool {
+        self.order.is_empty() && self.last.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct SidebarConfig {
