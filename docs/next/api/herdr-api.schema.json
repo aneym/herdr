@@ -6232,6 +6232,22 @@
         {
           "properties": {
             "method": {
+              "const": "agents.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "agent.list",
               "type": "string"
             },
@@ -10258,6 +10274,58 @@
           ],
           "type": "object"
         },
+        "PinnedAgentInfo": {
+          "description": "A pinned agent tab, with its runtime binding when present.",
+          "properties": {
+            "agent_status": {
+              "$ref": "#/schemas/success_response/$defs/AgentStatus"
+            },
+            "label": {
+              "type": "string"
+            },
+            "pane_id": {
+              "type": "string"
+            },
+            "pin_index": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "plugin_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "session_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "state_dir": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tab_id": {
+              "type": "string"
+            },
+            "workspace_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "tab_id",
+            "workspace_id",
+            "label",
+            "pin_index",
+            "pane_id",
+            "agent_status"
+          ],
+          "type": "object"
+        },
         "PluginActionContext": {
           "enum": [
             "global",
@@ -11340,6 +11408,25 @@
                 "agent",
                 "id",
                 "state"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "agents": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/PinnedAgentInfo"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "agents_list",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "agents"
               ],
               "type": "object"
             },

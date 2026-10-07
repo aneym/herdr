@@ -372,6 +372,7 @@ For the pane-versus-agent model and complete orchestration examples, see [Agent 
 
 ```bash
 herdr agent list
+herdr agent pinned
 herdr agent get <target>
 herdr agent read <target> [--source visible|recent|recent-unwrapped|detection] [--lines N] [--format text|ansi] [--ansi]
 herdr agent send-keys <target> <key> [key ...]
@@ -391,6 +392,10 @@ herdr agent group expand <target>
 herdr agent explain <target> [--json|--verbose]
 herdr agent explain --file PATH --agent LABEL [--json|--verbose]
 ```
+
+### herdr agent pinned
+
+Prints the pinned agents as JSON, in pin order, using the `agents.list` API. Use `herdr agent list` to see every detected agent process instead.
 
 Agent targets are either a unique live agent name or the pane ID that currently hosts the agent. Terminal IDs and bare agent-kind labels are not agent targets. Agents started through `agent start` require a name; manually launched agents remain unnamed and use their pane ID.
 

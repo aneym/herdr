@@ -480,8 +480,8 @@ fn agent_list(args: &[String]) -> std::io::Result<i32> {
 }
 
 fn agent_pinned(args: &[String]) -> std::io::Result<i32> {
-    if !args.is_empty() && args != ["--json"] {
-        eprintln!("usage: herdr agent pinned [--json]");
+    if !args.is_empty() {
+        eprintln!("usage: herdr agent pinned");
         return Ok(2);
     }
 
@@ -1118,7 +1118,7 @@ fn parse_agent_group(args: &[String]) -> Result<(&'static str, Method), i32> {
 fn print_agent_help() {
     eprintln!("herdr agent commands:");
     eprintln!("  herdr agent list");
-    eprintln!("  herdr agent pinned [--json]");
+    eprintln!("  herdr agent pinned");
     eprintln!("  herdr agent usage");
     eprintln!("  herdr agent get <target>");
     eprintln!("  herdr agent read <target> [--source visible|recent|recent-unwrapped|detection] [--lines N] [--format text|ansi] [--ansi]");

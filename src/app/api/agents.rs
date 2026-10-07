@@ -44,54 +44,54 @@ type QueuedAgentPrompt = (
 
 impl App {
     pub(super) fn handle_agents_list(&mut self, id: String) -> String {
-        let agents = self
-            .state
-            .pinned_tabs
-            .iter()
-            .enumerate()
-            .filter(|(_, pin)| pin.role == Some(crate::api::schema::TabRole::Agent))
-            .filter_map(|(pin_index, pin)| {
-                let (ws_idx, tab_idx) = self.parse_tab_id(&pin.tab_id)?;
-                let info = self.tab_info(ws_idx, tab_idx)?;
-                let tab = self.state.workspaces.get(ws_idx)?.tabs.get(tab_idx)?;
-                let pane_id = tab
-                    .panes
-                    .get_key_value(&tab.layout.focused())
-                    .map(|(id, _)| *id)
-                    .or_else(|| tab.layout.pane_ids().first().copied())?;
-                let plugin_id = tab.layout.pane_ids().iter().find_map(|id| {
-                    self.state
-                        .plugin_panes
-                        .get(id)
-                        .map(|record| record.plugin_id.clone())
-                });
-                let state_dir = plugin_id.as_deref().map(|id| {
-                    crate::plugin_paths::plugin_state_dir(id)
-                        .to_string_lossy()
-                        .into_owned()
-                });
-                let session_id = tab
-                    .panes
-                    .get(&pane_id)
-                    .and_then(|pane| self.state.terminals.get(&pane.attached_terminal_id))
-                    .and_then(|terminal| terminal.current_agent_session())
-                    .filter(|session| {
-                        session.session_ref.kind == crate::agent_resume::AgentSessionRefKind::Id
+        let agents =
+            self.state
+                .pinned_tabs
+                .iter()
+                .enumerate()
+                .filter(|(_, pin)| pin.role == Some(crate::api::schema::TabRole::Agent))
+                .filter_map(|(pin_index, pin)| {
+                    let (ws_idx, tab_idx) = self.parse_tab_id(&pin.tab_id)?;
+                    let info = self.tab_info(ws_idx, tab_idx)?;
+                    let tab = self.state.workspaces.get(ws_idx)?.tabs.get(tab_idx)?;
+                    let plugin_pane =
+                        tab.layout.pane_ids().into_iter().find_map(|id| {
+                            self.state.plugin_panes.get(&id).map(|record| (id, record))
+                        });
+                    let pane_id = plugin_pane.map(|(id, _)| id).or_else(|| {
+                        tab.panes
+                            .get_key_value(&tab.layout.focused())
+                            .map(|(id, _)| *id)
+                            .or_else(|| tab.layout.pane_ids().first().copied())
+                    })?;
+                    let plugin_id = plugin_pane.map(|(_, record)| record.plugin_id.clone());
+                    let state_dir = plugin_id.as_deref().map(|id| {
+                        crate::plugin_paths::plugin_state_dir(id)
+                            .to_string_lossy()
+                            .into_owned()
+                    });
+                    let session_id = tab
+                        .panes
+                        .get(&pane_id)
+                        .and_then(|pane| self.state.terminals.get(&pane.attached_terminal_id))
+                        .and_then(|terminal| terminal.current_agent_session())
+                        .filter(|session| {
+                            session.session_ref.kind == crate::agent_resume::AgentSessionRefKind::Id
+                        })
+                        .map(|session| session.session_ref.value);
+                    Some(crate::api::schema::PinnedAgentInfo {
+                        tab_id: info.tab_id,
+                        workspace_id: info.workspace_id,
+                        label: info.label,
+                        pin_index,
+                        pane_id: self.public_pane_id(ws_idx, pane_id)?,
+                        agent_status: info.agent_status,
+                        plugin_id,
+                        session_id,
+                        state_dir,
                     })
-                    .map(|session| session.session_ref.value);
-                Some(crate::api::schema::PinnedAgentInfo {
-                    tab_id: info.tab_id,
-                    workspace_id: info.workspace_id,
-                    label: info.label,
-                    pin_index,
-                    pane_id: self.public_pane_id(ws_idx, pane_id)?,
-                    agent_status: info.agent_status,
-                    plugin_id,
-                    session_id,
-                    state_dir,
                 })
-            })
-            .collect();
+                .collect();
         encode_success(id, ResponseResult::AgentsList { agents })
     }
 
@@ -659,6 +659,22 @@ mod tests {
             },
         ];
         let pane = app.state.workspaces[0].tabs[1].root_pane;
+        app.state.workspaces[0].active_tab = 1;
+        let focused = app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
+        assert_ne!(focused, pane);
+        app.state.ensure_test_terminals();
+        for (id, session_id) in [(pane, "plugin-session"), (focused, "focused-session")] {
+            let terminal_id = app.state.workspaces[0].terminal_id(id).unwrap().clone();
+            app.state
+                .terminals
+                .get_mut(&terminal_id)
+                .unwrap()
+                .persisted_agent_session = Some(crate::agent_resume::PersistedAgentSession {
+                source: "herdr:claude".into(),
+                agent: "claude".into(),
+                session_ref: crate::agent_resume::AgentSessionRef::id(session_id).unwrap(),
+            });
+        }
         app.state.plugin_panes.insert(
             pane,
             crate::app::state::PluginPaneRecord {
@@ -679,6 +695,7 @@ mod tests {
         assert_eq!(agents[0]["pin_index"], 0);
         assert_eq!(agents[0]["pane_id"], app.public_pane_id(0, pane).unwrap());
         assert_eq!(agents[0]["plugin_id"], "test-agent");
+        assert_eq!(agents[0]["session_id"], "plugin-session");
         assert_eq!(
             agents[0]["state_dir"],
             crate::plugin_paths::plugin_state_dir("test-agent")
