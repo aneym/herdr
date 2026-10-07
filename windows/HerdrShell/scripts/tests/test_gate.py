@@ -100,6 +100,8 @@ def herdr_reply(args):
         return {'workspace': {'workspace_id': 'w'}, 'tab': {'tab_id': 't0'}}
     if args[:2] == ['tab', 'create']:
         return {'tab': {'tab_id': args[-2]}, 'root_pane': {'pane_id': 'p'}}
+    if args[:2] == ['pane', 'layout']:
+        return {'layout': {'splits': [{'id': 's', 'ratio': 0.5}]}}
     if args[:2] == ['tab', 'list']:
         return {'tabs': [{'tab_id': t, 'pin_index': i, 'role': 'agent'} for i, t in enumerate(('t0', 'drag-b', 'drag-c'))]}
     return {}
