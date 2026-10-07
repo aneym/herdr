@@ -906,10 +906,10 @@ async fn run_client_loop(
                     }
                     continue;
                 }
-                if crate::raw_input::events_require_host_terminal_appearance_query(&events) {
-                    query_host_terminal_appearance();
-                }
                 let data = if let Some(attach_escape) = &mut state.attach_escape {
+                    if crate::raw_input::events_require_host_terminal_appearance_query(&events) {
+                        query_host_terminal_appearance();
+                    }
                     match attach_escape.filter_input(
                         data,
                         state.reported_size.1,

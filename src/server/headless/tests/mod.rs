@@ -4028,6 +4028,12 @@ async fn client_shell_host_theme_follows_latest_input_not_resize_or_focus() {
             protocol::ClientKeyKind::Press,
         )],
     };
+    server.handle_server_event(report(1, protocol::ClientHostAppearance::Dark));
+    assert_eq!(server.appearance_authority_client_id, Some(1));
+    assert_eq!(
+        server.app.state.host_terminal_appearance,
+        Some(crate::terminal_theme::HostAppearance::Dark)
+    );
     server.handle_server_event(key(1));
     assert_eq!(input_rx.try_recv().unwrap().as_ref(), b"x");
     server.handle_server_event(report(1, protocol::ClientHostAppearance::Dark));
@@ -4053,12 +4059,33 @@ async fn client_shell_host_theme_follows_latest_input_not_resize_or_focus() {
         Some(crate::terminal_theme::HostAppearance::Dark)
     );
     assert!(input_rx.try_recv().is_err());
+    let mouse = |kind| ServerEvent::ClientShellPaneInput {
+        client_id: 2,
+        pane_id: pane_id.clone(),
+        events: vec![protocol::ClientPaneInputEvent::Mouse {
+            kind,
+            position: protocol::ClientMousePosition::Cell { column: 1, row: 1 },
+            geometry: None,
+            modifiers: 0,
+            lines: 1,
+        }],
+    };
+    server.handle_server_event(mouse(protocol::ClientMouseKind::Moved));
+    assert_eq!(server.appearance_authority_client_id, Some(1));
+    assert_eq!(
+        server.app.state.host_terminal_appearance,
+        Some(crate::terminal_theme::HostAppearance::Dark)
+    );
+    server.handle_server_event(mouse(protocol::ClientMouseKind::Down(
+        protocol::ClientMouseButton::Left,
+    )));
+    assert_eq!(server.appearance_authority_client_id, Some(2));
+    assert_eq!(input_rx.try_recv().unwrap().as_ref(), b"\x1b[?997;2n");
     server.handle_server_event(key(2));
     assert_eq!(
         server.app.state.host_terminal_appearance,
         Some(crate::terminal_theme::HostAppearance::Light)
     );
-    assert_eq!(input_rx.try_recv().unwrap().as_ref(), b"\x1b[?997;2n");
     assert_eq!(input_rx.try_recv().unwrap().as_ref(), b"x");
     server.handle_server_event(report(1, protocol::ClientHostAppearance::Light));
     assert!(input_rx.try_recv().is_err());
@@ -4068,6 +4095,41 @@ async fn client_shell_host_theme_follows_latest_input_not_resize_or_focus() {
         Some(crate::terminal_theme::HostAppearance::Dark)
     );
     assert_eq!(input_rx.try_recv().unwrap().as_ref(), b"\x1b[?997;1n");
+    let color = protocol::ClientHostColor {
+        r: 20,
+        g: 30,
+        b: 40,
+    };
+    let colors = |id| ServerEvent::ClientShellHostTheme {
+        client_id: id,
+        update: protocol::ClientHostThemeUpdate::DefaultColor {
+            kind: protocol::ClientHostDefaultColorKind::Background,
+            color,
+        },
+    };
+    server.handle_server_event(colors(1));
+    assert_ne!(
+        server.app.state.host_terminal_theme.background,
+        Some(color.into())
+    );
+    server.handle_server_event(colors(2));
+    assert_eq!(
+        server.app.state.host_terminal_theme.background,
+        Some(color.into())
+    );
+    let blue = protocol::ClientHostColor {
+        r: 10,
+        g: 20,
+        b: 200,
+    };
+    server.handle_server_event(ServerEvent::ClientShellHostTheme {
+        client_id: 2,
+        update: protocol::ClientHostThemeUpdate::PaletteColors(vec![(4, blue)]),
+    });
+    assert_eq!(
+        server.app.state.host_terminal_theme.palette[4],
+        Some(blue.into())
+    );
 }
 
 #[test]

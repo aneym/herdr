@@ -490,15 +490,28 @@ fn reported_cell_size_is_taken_from_host_cell_size_events() {
 }
 
 #[test]
-fn color_scheme_reports_are_enabled_for_attach_and_full_clients() {
-    assert_eq!(
-        should_enable_host_color_scheme_reports(true),
-        !cfg!(windows)
-    );
-    assert_eq!(
+fn attach_host_theme_modes_and_live_report() {
+    // Golden terminal boundary: attach subscribes to host OS changes, then forwards the reply.
+    let mut output = Vec::new();
+    terminal_setup::write_host_input_report_modes(
+        &mut output,
         should_enable_host_color_scheme_reports(false),
-        !cfg!(windows)
-    );
+    )
+    .unwrap();
+    if !cfg!(windows) {
+        assert!(output.windows(8).any(|bytes| bytes == b"\x1b[?2031h"));
+    }
+    assert!(output.windows(8).any(|bytes| bytes == b"\x1b[?1004h"));
+    let events = crate::raw_input::parse_raw_input_bytes_sync(b"\x1b[?997;1n");
+    assert!(matches!(
+        terminal_geometry::host_theme_update(&events[0]),
+        Some(crate::protocol::ClientHostThemeUpdate::Appearance(
+            crate::protocol::ClientHostAppearance::Dark
+        ))
+    ));
+    output.clear();
+    write_terminal_restore_postlude(&mut output, true).unwrap();
+    assert!(output.starts_with(b"\x1b[?2031l"));
 }
 
 #[test]

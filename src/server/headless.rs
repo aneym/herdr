@@ -1383,7 +1383,9 @@ impl HeadlessServer {
         let cell_size = client.cell_size;
         let pixel_mouse = client.pixel_mouse;
         let host_sgr_pixels_active = client.host_sgr_pixels_active == Some(true);
-        self.select_appearance_authority(client_id);
+        if kind != protocol::ClientMouseKind::Moved {
+            self.select_appearance_authority(client_id);
+        }
         let Some(runtime) = self.runtime_for_terminal_id_string(&terminal_id) else {
             return false;
         };
@@ -2105,7 +2107,8 @@ impl HeadlessServer {
                     return false;
                 };
                 let terminal_id = terminal_id.clone();
-                if crate::raw_input::parse_raw_input_bytes_sync(&data)
+                if self.appearance_authority_client_id != Some(client_id)
+                    && crate::raw_input::parse_raw_input_bytes_sync(&data)
                     .iter()
                     .any(|event| {
                         matches!(
@@ -2113,8 +2116,8 @@ impl HeadlessServer {
                             crate::raw_input::RawInputEvent::Key(_)
                                 | crate::raw_input::RawInputEvent::Text(_)
                                 | crate::raw_input::RawInputEvent::Paste(_)
-                                | crate::raw_input::RawInputEvent::Mouse(_)
                                 | crate::raw_input::RawInputEvent::MouseNavButton { .. }
+                        ) || matches!(event, crate::raw_input::RawInputEvent::Mouse(mouse) if mouse.kind != crossterm::event::MouseEventKind::Moved
                         )
                     })
                 {
@@ -2292,6 +2295,11 @@ impl HeadlessServer {
                 }
                 if !client.update_host_theme(&update) {
                     return false;
+                }
+                if self.appearance_authority_client_id.is_none()
+                    && client.host_terminal_appearance.is_some()
+                {
+                    self.appearance_authority_client_id = Some(client_id);
                 }
                 if self.appearance_authority_client_id != Some(client_id) {
                     return false;
@@ -2473,7 +2481,8 @@ impl HeadlessServer {
                     client
                         .track_shell_input(ClientShellInputTarget::Pane(pane_id.clone()), &events);
                 }
-                let appearance_changed = interaction && self.select_appearance_authority(client_id);
+                let appearance_changed = client_pane_input_has_appearance_interaction(&events)
+                    && self.select_appearance_authority(client_id);
                 let foreground_changed = interaction
                     && self.promote_client_to_foreground(client_id) | appearance_changed;
                 let geometry_changed =
@@ -2556,7 +2565,8 @@ impl HeadlessServer {
                         &events,
                     );
                 }
-                let appearance_changed = interaction && self.select_appearance_authority(client_id);
+                let appearance_changed = client_pane_input_has_appearance_interaction(&events)
+                    && self.select_appearance_authority(client_id);
                 let foreground_changed = interaction
                     && self.promote_client_to_foreground(client_id) | appearance_changed;
                 let geometry_changed =
@@ -3441,6 +3451,19 @@ fn client_pane_input_has_interaction(events: &[protocol::ClientPaneInputEvent]) 
     events
         .iter()
         .any(|event| !client_pane_input_releases_press(event))
+}
+
+fn client_pane_input_has_appearance_interaction(events: &[protocol::ClientPaneInputEvent]) -> bool {
+    events.iter().any(|event| {
+        !client_pane_input_releases_press(event)
+            && !matches!(
+                event,
+                protocol::ClientPaneInputEvent::Mouse {
+                    kind: protocol::ClientMouseKind::Moved,
+                    ..
+                }
+            )
+    })
 }
 
 impl Drop for HeadlessServer {

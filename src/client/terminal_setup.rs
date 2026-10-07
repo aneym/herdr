@@ -79,18 +79,11 @@ pub(super) fn setup_terminal_with_capabilities(
         push_keyboard_enhancement_flags()?;
         let (active, buffered_input) = query_host_escape_disambiguation();
         set_mouse_capture(mouse_capture, false)?;
-        execute!(io::stdout(), EnableBracketedPaste, EnableFocusChange)?;
-        if host_color_scheme_reports {
-            terminal_guard.reset_host_color_scheme_reports = true;
-            write_host_color_scheme_report_mode(&mut io::stdout(), true)?;
-        }
+        write_host_input_report_modes(&mut io::stdout(), host_color_scheme_reports)?;
         (active, buffered_input)
     } else {
-        if should_query_host_terminal_theme() {
-            write_host_color_scheme_report_mode(&mut io::stdout(), false)?;
-        }
         set_mouse_capture(mouse_capture, false)?;
-        execute!(io::stdout(), EnableBracketedPaste)?;
+        write_host_input_report_modes(&mut io::stdout(), host_color_scheme_reports)?;
         (false, Vec::new())
     };
 
@@ -122,9 +115,21 @@ pub(super) fn setup_terminal_with_capabilities(
 
     execute!(io::stdout(), DisableLineWrap)?;
 
+    terminal_guard.reset_host_color_scheme_reports = host_color_scheme_reports;
     terminal_guard.host_escape_disambiguation_active = host_escape_disambiguation_active;
     terminal_guard.buffered_host_input = buffered_host_input;
     Ok(terminal_guard)
+}
+
+pub(super) fn write_host_input_report_modes(
+    mut writer: impl io::Write,
+    color_scheme: bool,
+) -> io::Result<()> {
+    execute!(writer, EnableBracketedPaste, EnableFocusChange)?;
+    if color_scheme {
+        write_host_color_scheme_report_mode(&mut writer, true)?;
+    }
+    Ok(())
 }
 
 pub(super) fn should_enable_host_color_scheme_reports(_enable_client_protocols: bool) -> bool {
