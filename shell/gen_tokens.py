@@ -358,6 +358,11 @@ def low_chat_contrast(t, source=None):
     # then comments go, so a commented-out declaration is never read either.
     if len(re.findall(r"\bstruct Palette\b", text)) != 1:
         return [f"{CHAT_VIEW.relative_to(ROOT)}: expected one Palette; update the chat contrast gate"]
+    # Palette holds only colors. A literal there is refused rather than lexed, so no string or
+    # regex form the lexer below gets wrong can hide a declaration inside it.
+    raw = text[text.index("struct Palette"):]
+    if re.search(r'"|#/', raw[:raw.find("\n}") + 2]):
+        return [f"{CHAT_VIEW.relative_to(ROOT)}: Palette holds a string or regex literal; update the chat contrast gate"]
     text = swift_code(text)
     blocks = re.findall(r"private struct Palette \{(.*?)\n\}", text, re.S)
     code = blocks[0] if len(blocks) == 1 else ""

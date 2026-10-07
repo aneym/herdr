@@ -41,17 +41,31 @@ class ChatGateTests(unittest.TestCase):
             "an interpolation's string nests": (f'let s = "\\("{SAFE} /*")"\n    {LOW}\n    let e = "*/"', True),
             "a nested comment beside the live safe faint": (f"/* a /* b */ c */ {SAFE}", False),
         }
+        # Outside Palette the lexer must keep string forms from swallowing the code after them.
+        outside = {
+            "multi-line string": 'let s = """\n    " /* \\(1)\n    """',
+            "raw string with a hash escape": 'let s = #"a \\#("/*") \\" b"#',
+        }
+        for name, literal in outside.items():
+            with self.subTest(name):
+                source = CHAT.replace(SAFE, LOW, 1).replace("private struct Palette {", f"{literal}\nprivate struct Palette {{", 1)
+                self.assertTrue(contrast_failures(gen.low_chat_contrast(gen.load(), source)))
         for name, (body, low) in cases.items():
             with self.subTest(name):
                 out = gen.low_chat_contrast(gen.load(), CHAT.replace(SAFE, body, 1))
-                if low:
-                    self.assertTrue(contrast_failures(out), out)
+                if low:  # reported or refused, never passed
+                    self.assertTrue(out)
                 else:
                     self.assertEqual(out, [])
 
-    def test_a_live_declaration_the_gate_cannot_read_is_refused(self):
-        split = CHAT.replace(SAFE, f'let s = "{SAFE}"\n    ' + LOW.replace("var faint", "var\n    faint"), 1)
-        self.assertTrue(gen.low_chat_contrast(gen.load(), split))
+    def test_a_palette_the_gate_cannot_read_is_refused(self):
+        cases = {
+            "split live declaration": LOW.replace("var faint", "var\n    faint"),
+            "regex literal holding quotes": f'let r = #/{SAFE} """/#\n    {LOW}\n    let e = #/"""/#',
+        }
+        for name, body in cases.items():
+            with self.subTest(name):
+                self.assertTrue(gen.low_chat_contrast(gen.load(), CHAT.replace(SAFE, body, 1)))
 
     def test_a_commented_palette_beside_a_live_one_is_refused(self):
         palette = CHAT[CHAT.index("private struct Palette {"):]
