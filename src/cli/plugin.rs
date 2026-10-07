@@ -589,6 +589,15 @@ fn plugin_reload(args: &[String]) -> std::io::Result<i32> {
     // The OS releases the exclusive lock even if the CLI crashes.
     lock.lock()?;
     if let Some(record) = completed_plugin_reload_record(&record_path) {
+        if record.get("pane").and_then(serde_json::Value::as_str) != Some(args.pane.as_str()) {
+            eprintln!(
+                "reload request {} belongs to pane {}, expected {}",
+                args.request,
+                record.get("pane").unwrap_or(&serde_json::Value::Null),
+                args.pane
+            );
+            return Ok(1);
+        }
         println!("{record}");
         return Ok(0);
     }
@@ -2965,6 +2974,20 @@ mod tests {
         );
         let code = crate::cli::target::with_test_client(client, || plugin_reload(&args)).unwrap();
         assert_eq!(code, 0);
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+        // Reusing the same request for another pane must fail without replaying
+        // the first pane's success or prompting either agent again.
+        let mut wrong_pane_args = args.clone();
+        wrong_pane_args[2] = "w1:p2".into();
+        let client = crate::api::client::ApiClient::for_target(
+            crate::api::client::ConnectionTarget::SocketPath(socket_path.clone()),
+        );
+        let code =
+            crate::cli::target::with_test_client(client, || plugin_reload(&wrong_pane_args)).unwrap();
+        assert_eq!(code, 1);
         assert_eq!(
             listener.accept().unwrap_err().kind(),
             std::io::ErrorKind::WouldBlock
