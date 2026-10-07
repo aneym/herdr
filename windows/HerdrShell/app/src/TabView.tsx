@@ -7,7 +7,7 @@ import type { PaneController } from "./PaneTerm";
 import { bridge } from "./bridge";
 import { dividers, extent, Resizer } from "./dividers";
 import type { Divider, ResizeAnswer } from "./dividers";
-export default function TabView({ snapshot, selected, machine, focused, onFocus, shortcut, register, pin }: { snapshot: Snapshot; selected: string | null; machine: string; focused: string | null; onFocus: (id: string) => void; shortcut: (event: KeyboardEvent) => boolean; register: (id: string, value: PaneController | null) => void; pin: (id: string, pinned: boolean) => void }) {
+export default function TabView({ snapshot, selected, machine, focused, onFocus, shortcut, register, pin, onError }: { snapshot: Snapshot; selected: string | null; machine: string; focused: string | null; onFocus: (id: string) => void; shortcut: (event: KeyboardEvent) => boolean; register: (id: string, value: PaneController | null) => void; pin: (id: string, pinned: boolean) => void; onError?: (error: unknown) => void }) {
   const host = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   useEffect(() => { if (!host.current) return; const observer = new ResizeObserver(([entry]) => setSize({ width: entry.contentRect.width, height: entry.contentRect.height })); observer.observe(host.current); return () => observer.disconnect(); }, []);
@@ -62,7 +62,7 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
   const tab = snapshot.tabs?.find(t => t.tab_id === selected);
   return <main ref={host} className="tab-view">{panes.map((pane, index) => {
     const box = boxes[index];
-    return <div key={`${selected}:${pane.terminal_id}`} className="pane-box" style={{ left: box.x, top: box.y, width: Math.max(0, box.width - (box.x + box.width < size.width - .5 ? 1 : 0)), height: Math.max(0, box.height - (box.y + box.height < size.height - .5 ? 1 : 0)) }}><PaneSurface hasAgent={!!pane.agent || !!snapshot.agents?.some(a => a.pane_id === pane.pane_id && a.agent)} pane={pane} machine={machine} focused={focused === pane.pane_id} onFocus={onFocus} shortcut={shortcut} register={register} {...(index === corner && tab ? { pinned: tab.pin_index != null, onPin: () => pin(tab.tab_id, tab.pin_index == null) } : {})} /></div>;
+    return <div key={`${selected}:${pane.terminal_id}`} className="pane-box" style={{ left: box.x, top: box.y, width: Math.max(0, box.width - (box.x + box.width < size.width - .5 ? 1 : 0)), height: Math.max(0, box.height - (box.y + box.height < size.height - .5 ? 1 : 0)) }}><PaneSurface onError={onError} hasAgent={!!pane.agent || !!snapshot.agents?.some(a => a.pane_id === pane.pane_id && a.agent)} pane={pane} machine={machine} focused={focused === pane.pane_id} onFocus={onFocus} shortcut={shortcut} register={register} {...(index === corner && tab ? { pinned: tab.pin_index != null, onPin: () => pin(tab.tab_id, tab.pin_index == null) } : {})} /></div>;
   })}{layout && lines.map(d => {
     const r = scaleRect({ x: d.vertical ? d.pos : d.splitRect.x, y: d.vertical ? d.splitRect.y : d.pos, width: d.vertical ? 0 : d.splitRect.width, height: d.vertical ? d.splitRect.height : 0 }, layout.area, size.width, size.height);
     // The 1 px gap between panes sits just before the line; the grab strip centres on it.

@@ -332,6 +332,28 @@ struct HerdrCommands {
         return machine.map { Machines.namespace(reply, machine: $0) } ?? reply
     }
 
+    enum RestartReply {
+        case success
+        case failure(code: String, message: String)
+    }
+
+    func restartAgent(paneId: String, force: Bool = false) -> RestartReply {
+        var params: [String: Any] = ["pane_id": paneId]
+        if force { params["force"] = true }
+        guard let data = call("agent.restart", params),
+              let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return .failure(code: "transport", message: "Could not reach the agent server.")
+        }
+        if let error = envelope["error"] as? [String: Any] {
+            return .failure(code: error["code"] as? String ?? "unknown",
+                            message: error["message"] as? String ?? "Could not restart the agent.")
+        }
+        guard let result = envelope["result"] as? [String: Any], result["ok"] as? Bool == true else {
+            return .failure(code: "invalid_response", message: "The server did not confirm the restart.")
+        }
+        return .success
+    }
+
     enum DeskReply {
         case result([String: Any])
         case unsupported

@@ -9,6 +9,10 @@ impl ClientContextMenuOverlay {
             action,
         };
         match &self.target {
+            ClientContextMenuTarget::RestartAgentConfirm { .. } => vec![
+                item("Restart anyway", Action::RestartAgentForce),
+                item("Cancel", Action::CancelRestart),
+            ],
             ClientContextMenuTarget::FactoryGoalPicker(choices) => {
                 std::iter::once(item("All", Action::SetFactoryGoalFilter(0)))
                     .chain(choices.iter().enumerate().map(|(index, value)| {
@@ -229,7 +233,10 @@ impl ClientContextMenuOverlay {
                 right_click_passthrough,
                 ..
             } => {
-                let mut items = vec![item("Rename pane", Action::RenamePane)];
+                let mut items = vec![
+                    item("Restart agent", Action::RestartAgent),
+                    item("Rename pane", Action::RenamePane),
+                ];
                 items.push(item("Send to profile", Action::SendToProfile));
                 items.push(item("Share profiles", Action::ShareProfiles));
                 if *has_manual_label {
@@ -550,6 +557,22 @@ impl ClientShellState {
         }));
     }
 
+    pub(super) fn queue_agent_restart(
+        &mut self,
+        pane_id: String,
+        force: bool,
+        outcome: &mut ClientShellInput,
+    ) {
+        self.push_endpoint_method_with_kind(
+            crate::api::schema::Method::AgentRestart(crate::api::schema::AgentRestartParams {
+                pane_id: pane_id.clone(),
+                force,
+            }),
+            PendingEndpointKind::AgentRestart { pane_id, force },
+            outcome,
+        );
+    }
+
     pub(super) fn open_pane_context_menu(&mut self, pane_id: String, x: u16, y: u16) {
         let Some(snapshot) = self.snapshot.as_deref() else {
             return;
@@ -663,6 +686,11 @@ impl ClientShellState {
                     self.toggle_endpoint_chat_pin(endpoint_id, tab_id, outcome);
                 } else if action == ClientContextMenuAction::ToggleRole && supports_role {
                     self.push_tab_role(endpoint_id, tab_id, !agent, outcome);
+                }
+            }
+            ClientContextMenuTarget::RestartAgentConfirm { pane_id } => {
+                if action == ClientContextMenuAction::RestartAgentForce {
+                    self.queue_agent_restart(pane_id, true, outcome);
                 }
             }
             ClientContextMenuTarget::Pane {
@@ -1171,6 +1199,9 @@ impl ClientShellState {
         };
 
         match action {
+            ClientContextMenuAction::RestartAgent => {
+                self.queue_agent_restart(pane_id, false, outcome)
+            }
             ClientContextMenuAction::SendToProfile | ClientContextMenuAction::ShareProfiles => {
                 self.open_profile_context_menu(
                     workspace_id,

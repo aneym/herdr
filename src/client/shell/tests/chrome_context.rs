@@ -624,3 +624,95 @@ fn section_divider_follows_the_pinned_agents_section_and_drags_with_the_pointer(
     );
     assert_eq!(state.hits.sidebar_section_divider.y, dragged);
 }
+
+#[test]
+fn pane_context_restart_routes_same_pane_and_requires_busy_confirmation() {
+    // No PTY: drive the real context-menu input and endpoint response boundary.
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.compose(106, 20).expect("pane frame");
+    let pane = state.hits.panes[0].rect;
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Right),
+        column: pane.x + 1,
+        row: pane.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    let index = match state.overlay.as_ref() {
+        Some(ClientShellOverlay::ContextMenu(menu)) => menu
+            .items()
+            .iter()
+            .position(|item| item.label == "Restart agent")
+            .expect("restart menu item"),
+        _ => panic!("pane menu"),
+    };
+    let mut input = ClientShellInput::default();
+    state.activate_context_menu_item(index, &mut input);
+    let [ClientShellAction::Endpoint { request, .. }] = &input.actions[..] else {
+        panic!("restart request");
+    };
+    assert!(
+        matches!(&request.method, crate::api::schema::Method::AgentRestart(params) if params.pane_id == "pane_1" && !params.force)
+    );
+    let request_id = request.id.clone();
+    let boot_id = state.snapshot.as_deref().expect("snapshot").boot_id.clone();
+    state.handle_endpoint_result(
+        &boot_id,
+        &request_id,
+        Err(ClientShellEndpointError {
+            code: Some("busy".into()),
+            message: "Agent is working".into(),
+        }),
+    );
+    let force_index = match state.overlay.as_ref() {
+        Some(ClientShellOverlay::ContextMenu(menu)) => menu
+            .items()
+            .iter()
+            .position(|item| item.label == "Restart anyway")
+            .expect("confirmation"),
+        _ => panic!("restart confirmation"),
+    };
+    let mut forced = ClientShellInput::default();
+    state.activate_context_menu_item(force_index, &mut forced);
+    let [ClientShellAction::Endpoint { request, .. }] = &forced.actions[..] else {
+        panic!("forced restart request");
+    };
+    assert!(
+        matches!(&request.method, crate::api::schema::Method::AgentRestart(params) if params.pane_id == "pane_1" && params.force)
+    );
+}
+
+#[test]
+fn pane_title_ellipsis_opens_the_same_context_menu_without_a_pty() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    let mut title_surface = surface();
+    let mut buffer = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 12, 3));
+    buffer.set_string(0, 0, " Agent title", ratatui::style::Style::default());
+    title_surface.frame = FrameData::from_ratatui_buffer_with_hyperlinks(&buffer, None, &[]);
+    title_surface.panes[0].rect.width = 12;
+    title_surface.panes[0].rect.height = 3;
+    title_surface.panes[0].inner_rect.y = 1;
+    title_surface.panes[0].inner_rect.width = 12;
+    state.set_pane_surface(title_surface);
+    let frame = state.compose(106, 20).expect("pane title");
+    let pane = &state.hits.panes[0];
+    let x = pane.rect.right() - 2;
+    let y = pane.rect.y;
+    assert_eq!(
+        frame.cells[usize::from(y) * usize::from(frame.width) + usize::from(x)].symbol,
+        "⋯"
+    );
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: x,
+        row: y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert!(
+        matches!(state.overlay, Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
+        target: ClientContextMenuTarget::Pane { ref pane_id, .. }, ..
+    })) if pane_id == "pane_1")
+    );
+}

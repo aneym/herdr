@@ -526,7 +526,8 @@ impl ClientShellState {
                 true
             }
             (
-                PendingEndpointKind::Generic
+                PendingEndpointKind::AgentRestart { .. }
+                | PendingEndpointKind::Generic
                 | PendingEndpointKind::Focus { .. }
                 | PendingEndpointKind::ProductAnnouncementDismiss { .. }
                 | PendingEndpointKind::ReleaseNotesDismiss

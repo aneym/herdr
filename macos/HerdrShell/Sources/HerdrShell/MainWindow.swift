@@ -101,7 +101,8 @@ final class PaneHostView: NSView {
                                         onChat: { [weak self] in self?.capAction?(paneId, "chat") },
                                         onFocus: { [weak self] in self?.capAction?(paneId, "focus") },
                                         onFull: { [weak self] in self?.capAction?(paneId, "full") },
-                                        onPin: { [weak self] in self?.capAction?(paneId, "pin") })
+                                        onPin: { [weak self] in self?.capAction?(paneId, "pin") },
+                                        onRestart: { [weak self] in self?.capAction?(paneId, "restart") })
             }
             return v
         }
@@ -111,7 +112,8 @@ final class PaneHostView: NSView {
                                                    onChat: { [weak self] in self?.capAction?(paneId, "chat") },
                                                    onFocus: { [weak self] in self?.capAction?(paneId, "focus") },
                                                    onFull: { [weak self] in self?.capAction?(paneId, "full") },
-                                                   onPin: { [weak self] in self?.capAction?(paneId, "pin") }))
+                                                   onPin: { [weak self] in self?.capAction?(paneId, "pin") },
+                                                   onRestart: { [weak self] in self?.capAction?(paneId, "restart") }))
         // The cap sits under the transparent titlebar; with the titlebar's safe area its content
         // slid down into the body, where a chat view covered its lower half.
         v.safeAreaRegions = []
@@ -692,6 +694,10 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     func setPaneMode(_ id: String, _ mode: String) {
+        if mode == "restart" {
+            restartAgent(id)
+            return
+        }
         if mode == "pin" {
             // The pin belongs to the tab the cap's pane is in; the icon follows the next snapshot.
             guard let tab = state.selectedTab else { return }
@@ -711,6 +717,36 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             Channel.setMode("terminal", for: id)
         }
         applyCaps()
+    }
+
+    private func restartAgent(_ id: String, force: Bool = false) {
+        let commands = self.commands
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let reply = commands.restartAgent(paneId: id, force: force)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch reply {
+                case .success: break
+                case .failure(let code, let message):
+                    if PaneRestart.next(code: code, message: message, forced: force) == .confirm {
+                        let alert = NSAlert()
+                        alert.messageText = "Agent is working. Restart anyway?"
+                        alert.informativeText = "It will resume the same chat."
+                        alert.addButton(withTitle: "Restart")
+                        alert.addButton(withTitle: "Cancel")
+                        alert.beginSheetModal(for: self.window) { [weak self] response in
+                            if response == .alertFirstButtonReturn { self?.restartAgent(id, force: true) }
+                        }
+                    } else {
+                        let alert = NSAlert()
+                        alert.messageText = "Could not restart agent"
+                        alert.informativeText = message
+                        alert.addButton(withTitle: "OK")
+                        alert.beginSheetModal(for: self.window)
+                    }
+                }
+            }
+        }
     }
 
     private func ensureChat(_ id: String) {

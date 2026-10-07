@@ -675,6 +675,9 @@ pub(super) enum ClientContextMenuAction {
     Zoom,
     ToggleRightClickPassthrough,
     ClosePane,
+    RestartAgent,
+    RestartAgentForce,
+    CancelRestart,
     SendToProfile,
     ShareProfiles,
     ProfileSelect(usize),
@@ -691,6 +694,9 @@ pub(super) enum ClientContextMenuAction {
 
 #[derive(Debug)]
 pub(super) enum ClientContextMenuTarget {
+    RestartAgentConfirm {
+        pane_id: String,
+    },
     FactoryGoalPicker(Vec<String>),
     FactorySection(FactorySectionHit),
     /// The agents-panel view picker: sort, tree layers, and hidden spaces.
@@ -864,6 +870,10 @@ impl ClientShellOverlay {
 
 #[derive(Debug)]
 pub(super) enum PendingEndpointKind {
+    AgentRestart {
+        pane_id: String,
+        force: bool,
+    },
     Generic,
     Focus {
         history_navigation: bool,

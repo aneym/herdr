@@ -34,6 +34,7 @@ struct PaneCapBar: View {
     var onFocus: () -> Void
     var onFull: () -> Void
     var onPin: () -> Void = {}
+    var onRestart: () -> Void = {}
 
     var body: some View {
         let bg = state.focused ? Color(hex: tokens.terminalBg) : tokens.cap
@@ -54,6 +55,20 @@ struct PaneCapBar: View {
                 segment
             }
             if let pinned = state.pinned { pin(pinned) }
+            Menu {
+                Button("Restart agent", systemImage: "arrow.clockwise", action: onRestart)
+                    .disabled(!PaneRestart.enabled(hasAgent: state.agent))
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(tokens.mute)
+                    .frame(width: Self.pinWidth, height: 20)
+                    .opacity(state.focused ? 1 : 0.55)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Pane actions")
         }
         .padding(.horizontal, PaneCapBar.trailing)
         .frame(height: ShellSpace.paneCapHeight)

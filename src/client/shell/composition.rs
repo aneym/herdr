@@ -484,6 +484,18 @@ impl ClientShellState {
             }
             frame.replace_from_ratatui_buffer_preserving_effects(&composed, cursor);
         }
+        // One fixed cell per pane, only when the server surface has a title row.
+        for hit in &self.hits.panes {
+            if hit.rect.width >= 8 && hit.inner_rect.y > hit.rect.y {
+                let x = hit.rect.right().saturating_sub(2);
+                let index = usize::from(hit.rect.y) * usize::from(frame.width) + usize::from(x);
+                if let Some(cell) = frame.cells.get_mut(index) {
+                    cell.symbol = "⋯".to_owned();
+                    cell.hyperlink = None;
+                    cell.skip = false;
+                }
+            }
+        }
         self.render_pane_scrollbar_emphasis(&mut frame);
         self.render_link_hover(&mut frame, &mut occlusion);
         self.render_pane_location(&mut frame, &mut occlusion);

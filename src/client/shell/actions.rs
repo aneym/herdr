@@ -833,6 +833,26 @@ impl ClientShellState {
         if let PendingEndpointKind::PaneLinkResolve { target } = pending.kind {
             return self.complete_link_hover(target, result);
         }
+        if let PendingEndpointKind::AgentRestart {
+            pane_id,
+            force: false,
+        } = &pending.kind
+        {
+            if result
+                .as_ref()
+                .is_err_and(|error| error.code.as_deref() == Some("busy"))
+            {
+                self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
+                    target: ClientContextMenuTarget::RestartAgentConfirm {
+                        pane_id: pane_id.clone(),
+                    },
+                    x: 2,
+                    y: 2,
+                    highlighted: 0,
+                }));
+                return (true, Vec::new());
+            }
+        }
         if result.is_ok() {
             let timeout_key = ClientEndpointNoticeKey {
                 boot_id: boot_id.to_owned(),
@@ -893,7 +913,7 @@ impl ClientShellState {
             }
         }
         match pending.kind {
-            PendingEndpointKind::Generic => {}
+            PendingEndpointKind::AgentRestart { .. } | PendingEndpointKind::Generic => {}
             PendingEndpointKind::Focus { .. } => {
                 if result.is_ok() {
                     let focused = self

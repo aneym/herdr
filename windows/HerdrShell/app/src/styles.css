@@ -44,7 +44,7 @@ footer { color: var(--shell-muted); padding: 12px 8px; font-size: 12px; overflow
 .pane-pin { width: 24px; height: 20px; display: grid; place-items: center; border-radius: var(--shell-radius-control); color: var(--shell-muted); }
 .pane-pin svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
 .pane-pin.is-pinned { color: var(--shell-text); background: color-mix(in srgb, var(--shell-text) 5%, transparent); }
-/* The cap's label and Take control end before the tools: one is Chat or Terminal, two add the pin. */
+/* Reserve the cap tools: menu, mode toggle and optional pin. */
 .pane-surface.tools-1 .pane-cap { padding-right: 84px; }
 .pane-surface.tools-2 .pane-cap { padding-right: 116px; }
 .chat { height: 100%; display: flex; flex-direction: column; padding-top: var(--shell-space-pane-cap-height); background: var(--shell-bg); }
@@ -147,3 +147,13 @@ footer { color: var(--shell-muted); padding: 12px 8px; font-size: 12px; overflow
 
 .areas-mode .spaces-fold-all { flex: 0 0 20px; padding: 0; background: none; border: 0; }
 .areas-mode .spaces-fold-all:hover { background: var(--shell-hover); }
+
+.pane-surface.tools-3 .pane-cap { padding-right: 148px; }
+.pane-menu { position: absolute; top: var(--shell-space-pane-cap-height); right: 0; min-width: 150px; padding: 4px; background: var(--shell-selection); color: var(--shell-text); border: 1px solid var(--shell-line); border-radius: var(--shell-radius-control); z-index: 12; }
+.pane-menu button { padding: 6px 8px; text-align: left; }
+.pane-menu [role="menuitem"] { display: flex; align-items: center; gap: 8px; width: 100%; }
+.pane-menu svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.pane-menu button:hover:not(:disabled) { background: color-mix(in srgb, var(--shell-text) 8%, transparent); }
+.pane-menu button:disabled { opacity: .5; }
+.restart-confirm { right: 10px; max-width: 280px; }
+.restart-confirm p { padding: 4px 8px; margin: 0; }

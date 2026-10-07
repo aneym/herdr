@@ -311,7 +311,7 @@ final class TestHook {
             guard let (id, _) = c.host.caps.first(where: { $0.value.pinned != nil }), let f = c.host.capFrames[id] else {
                 log("hook: click: no cap pin"); return
             }
-            let x = f.maxX - PaneCapBar.trailing - PaneCapBar.pinWidth / 2
+            let x = f.maxX - PaneCapBar.trailing - PaneCapBar.pinWidth - 8 - PaneCapBar.pinWidth / 2
             postClick(c, loc: c.host.convert(NSPoint(x: x, y: f.midY), to: nil), mods: clickMods(obj))
             return
         case "doc_tab":
