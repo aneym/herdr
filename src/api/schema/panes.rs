@@ -728,6 +728,11 @@ pub struct PaneQueueParams {
     pub id: Option<String>,
     #[serde(default)]
     pub flush: bool,
+    /// With `id`: remove that held send before it reaches the pane (state
+    /// `dropped`, reason `cancelled`). A send already handed to the writer or
+    /// delivered is reported unchanged.
+    #[serde(default, skip_serializing_if = "super::is_false")]
+    pub cancel: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

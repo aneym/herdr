@@ -352,6 +352,9 @@ fn agent_prompt_success(
             queued: false,
             dropped: false,
             queue_position: None,
+            reason: None,
+            // Keep the guarded-delivery ack of a session-bound prompt.
+            delivery: serde_json::from_value(metadata["result"]["delivery"].clone()).ok(),
         },
     })
     .map_err(std::io::Error::other)

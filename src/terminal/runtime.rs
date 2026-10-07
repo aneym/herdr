@@ -17,7 +17,7 @@ use crate::layout::PaneId;
 /// type instead of the pane module's implementation detail.
 pub struct TerminalRuntime(
     pub(super) crate::pane::PaneRuntime,
-    pub(super) std::sync::Mutex<super::polite_send::PoliteSend>,
+    pub(super) super::polite_send::PoliteSendCell,
     pub(super) ScrollActivity,
 );
 

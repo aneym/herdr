@@ -503,6 +503,8 @@ fn utc_now_iso() -> String {
         .unwrap_or_else(|_| now.unix_timestamp().to_string())
 }
 
+const NO_RUNTIME_ID: &str = "the herdr server does not report the agent runtime_id, so it cannot guard the reload prompt; upgrade the herdr server";
+
 struct PluginReloadFailure {
     exit_code: i32,
     message: String,
@@ -667,6 +669,16 @@ fn run_plugin_reload(
             std::thread::sleep(PLUGIN_RELOAD_POLL);
             continue;
         }
+        // Fail closed before restarting or prompting anything: a server that
+        // does not report runtime identity cannot bind the prompt to it.
+        if agent
+            .get("agent")
+            .and_then(|agent| agent.get("runtime_id"))
+            .and_then(serde_json::Value::as_str)
+            .is_none()
+        {
+            return Err(PluginReloadFailure::failed(NO_RUNTIME_ID));
+        }
         if args.no_resume {
             // Prompt the running agent as is; agent.prompt's polite send
             // holds the line until the human is quiet.
@@ -725,8 +737,10 @@ fn run_plugin_reload(
         }
     };
     // Re-verify right before typing: the pane still runs this agent on this
-    // session, idle or done, with no restore error.
-    wait_for_resumed_agent_idle(
+    // session, idle or done, with no restore error. The prompt is bound to
+    // the runtime seen here, so a later resume of the same session (a new
+    // runtime) never receives it.
+    let runtime_id = wait_for_resumed_agent_idle(
         &ResumedAgent {
             pane: &args.pane,
             agent: &agent_label,
@@ -747,6 +761,7 @@ fn run_plugin_reload(
             // second copy still queued.
             delivery: Some(crate::api::schema::AgentPromptDelivery {
                 session_id: session_id.clone(),
+                runtime_id: Some(runtime_id.clone()),
                 input_quiet_ms: PLUGIN_RELOAD_INPUT_QUIET_MS,
                 expires_ms: u64::try_from(
                     deadline
@@ -758,7 +773,24 @@ fn run_plugin_reload(
         }),
     )?;
 
-    wait_for_plugin_reload_prompt(&args.pane, prompt, deadline)?;
+    // A server that ignores `delivery` would type the line unguarded; the
+    // runtime_id check above refuses such servers before anything is sent,
+    // and the ack proves this one applied the binding.
+    let acked = prompt.get("delivery");
+    let acked_field = |name: &str| {
+        acked
+            .and_then(|ack| ack.get(name))
+            .and_then(serde_json::Value::as_str)
+    };
+    if acked_field("session_id") != Some(session_id.as_str())
+        || acked_field("runtime_id") != Some(runtime_id.as_str())
+    {
+        return Err(PluginReloadFailure::failed(
+            "agent.prompt: the herdr server did not acknowledge the session-bound delivery; upgrade the herdr server",
+        ));
+    }
+
+    let delivery = wait_for_plugin_reload_prompt(&args.pane, prompt, deadline)?;
 
     let mut record = serde_json::json!({
         "plugin_id": args.plugin_id,
@@ -768,6 +800,7 @@ fn run_plugin_reload(
         "resumed": resumed,
         "request": args.request,
         "changelog": args.changelog,
+        "delivery": delivery,
     });
     if !resumed {
         record["prompted"] = serde_json::Value::Bool(true);
@@ -914,11 +947,12 @@ struct ResumedAgent<'a> {
 /// Poll until the resumed agent itself is the pane's agent, on the resumed
 /// session, and idle or done. Fails at once when the pane reports a restore
 /// error, is gone, or loses the agent after it was seen, so the caller never
-/// types the prompt into whatever replaced it.
+/// types the prompt into whatever replaced it. Returns the runtime_id the
+/// agent was seen ready on.
 fn wait_for_resumed_agent_idle(
     resumed: &ResumedAgent<'_>,
     deadline: std::time::Instant,
-) -> Result<(), PluginReloadFailure> {
+) -> Result<String, PluginReloadFailure> {
     let mut agent_seen = false;
     loop {
         match plugin_reload_call(Method::PaneGet(crate::api::schema::PaneTarget {
@@ -954,7 +988,11 @@ fn wait_for_resumed_agent_idle(
                 .and_then(serde_json::Value::as_str)
                 == Some(resumed.session_id);
         if is_resumed_agent && matches!(field("agent_status"), Some("idle" | "done")) {
-            return Ok(());
+            // Fail closed: a server without runtime identity cannot bind the
+            // prompt to this runtime, and may ignore the binding entirely.
+            return field("runtime_id")
+                .map(str::to_string)
+                .ok_or_else(|| PluginReloadFailure::failed(NO_RUNTIME_ID));
         }
         if is_resumed_agent {
             agent_seen = true;
@@ -980,64 +1018,83 @@ fn wait_for_resumed_agent_idle(
     }
 }
 
+/// How a session-bound prompt left the server: written to the pane, or handed
+/// to the PTY writer and possibly still landing (never treated as undelivered,
+/// so a retry cannot type it twice).
+const PROMPT_DELIVERED: &str = "delivered";
+const PROMPT_HANDED_TO_WRITER: &str = "handed_to_writer";
+
 /// Wait for the session-bound prompt to reach a final state. The server
-/// expires it at `deadline`, so after a short grace it is never still live:
-/// expiry (agent busy or human not quiet) is retryable, anything else fails.
+/// expires it at `deadline`; if it is somehow still held after a short grace,
+/// the CLI cancels it. Expiry or cancellation (agent busy or human not quiet)
+/// is retryable; anything else fails.
 fn wait_for_plugin_reload_prompt(
     pane: &str,
     mut prompt: serde_json::Value,
     deadline: std::time::Instant,
-) -> Result<(), PluginReloadFailure> {
+) -> Result<&'static str, PluginReloadFailure> {
     let id = prompt
         .get("id")
         .and_then(serde_json::Value::as_str)
         .map(str::to_string);
     let settle_by = deadline + PLUGIN_RELOAD_EXPIRY_GRACE;
+    let mut cancelled = false;
     loop {
+        let reason = prompt
+            .get("reason")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
         match prompt.get("state").and_then(serde_json::Value::as_str) {
-            Some("delivered" | "acked") => return Ok(()),
-            Some("queued") => {}
-            Some("dropped")
-                if prompt.get("reason").and_then(serde_json::Value::as_str) == Some("expired") =>
-            {
+            Some("delivered" | "acked") => return Ok(PROMPT_DELIVERED),
+            Some("queued") if reason == PROMPT_HANDED_TO_WRITER && cancelled => {
+                return Ok(PROMPT_HANDED_TO_WRITER);
+            }
+            Some("queued") if !cancelled => {}
+            Some("queued") => {
+                return Err(PluginReloadFailure::failed(
+                    "agent.prompt is still queued past its expiry and could not be cancelled; not retrying blind",
+                ));
+            }
+            Some("dropped") if matches!(reason, "expired" | "cancelled") => {
                 return Err(PluginReloadFailure {
                     exit_code: PLUGIN_RELOAD_EXIT_BUSY,
                     message: "agent busy or pane input active until --timeout; the line was not delivered".into(),
                 });
             }
             state => {
-                let reason = prompt
-                    .get("reason")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or_default();
                 return Err(PluginReloadFailure::failed(format!(
                     "agent.prompt was not delivered: {} {reason}",
                     state.unwrap_or("unknown")
                 )));
             }
         }
-        if std::time::Instant::now() >= settle_by {
-            return Err(PluginReloadFailure::failed(
-                "agent.prompt is still queued past its expiry; not retrying blind",
-            ));
+        let past_grace = std::time::Instant::now() >= settle_by;
+        if past_grace && reason == PROMPT_HANDED_TO_WRITER {
+            return Ok(PROMPT_HANDED_TO_WRITER);
         }
+        if !past_grace {
+            std::thread::sleep(PLUGIN_RELOAD_POLL);
+        }
+        // Past the grace the server should have expired it; cancel it so a
+        // retry never finds a second copy, then report what the cancel saw.
+        cancelled = past_grace;
         let id = id
             .as_ref()
             .ok_or_else(|| PluginReloadFailure::failed("queued prompt has no id"))?;
-        std::thread::sleep(PLUGIN_RELOAD_POLL);
         let queue = plugin_reload_step(
             "pane.queue",
             Method::PaneQueue(crate::api::schema::PaneQueueParams {
                 pane_id: pane.into(),
                 id: Some(id.clone()),
                 flush: false,
+                cancel: cancelled,
             }),
         )?;
         prompt = ["sends", "recent"]
             .into_iter()
             .filter_map(|key| queue.get(key).and_then(serde_json::Value::as_array))
             .flatten()
-            .find(|send| send.get("id").and_then(serde_json::Value::as_str) == Some(id))
+            .find(|send| send.get("id").and_then(serde_json::Value::as_str) == Some(id.as_str()))
             .cloned()
             .ok_or_else(|| {
                 PluginReloadFailure::failed("queued prompt disappeared before delivery")
@@ -2394,13 +2451,25 @@ mod tests {
     #[test]
     fn plugin_reload_prompt_rejects_undelivered_outcomes() {
         let now = std::time::Instant::now();
-        for state in ["dropped", "stale_session", "queued"] {
-            assert!(wait_for_plugin_reload_prompt(
+        for state in ["dropped", "stale_session"] {
+            let failure = wait_for_plugin_reload_prompt(
                 "test-pane",
                 serde_json::json!({"state": state, "id": "send-1"}),
-                now
+                now,
             )
-            .is_err());
+            .err()
+            .expect("undelivered");
+            assert_eq!(failure.exit_code, 1);
+        }
+        for reason in ["expired", "cancelled"] {
+            let failure = wait_for_plugin_reload_prompt(
+                "test-pane",
+                serde_json::json!({"state": "dropped", "reason": reason, "id": "send-1"}),
+                now,
+            )
+            .err()
+            .expect("undelivered");
+            assert_eq!(failure.exit_code, PLUGIN_RELOAD_EXIT_BUSY);
         }
         assert!(wait_for_plugin_reload_prompt(
             "test-pane",
@@ -2423,6 +2492,15 @@ mod tests {
         /// Idle, but the server holds the session-bound line until it
         /// expires (agent busy or human input until --timeout).
         PromptExpires,
+        /// The server never expires the held line; only a cancel removes it.
+        StuckQueued,
+        /// The line left the queue for a backpressured PTY writer and has
+        /// not finished by the grace.
+        HandedToWriter,
+        /// An older server: agent.get has no runtime_id.
+        NoRuntimeId,
+        /// The server accepts agent.prompt but echoes no delivery ack.
+        NoAck,
     }
 
     /// Run the real `plugin reload` flow against a scripted server and return
@@ -2460,23 +2538,39 @@ mod tests {
                     Method::AgentResume(_) => "agent.resume",
                     Method::PaneGet(_) => "pane.get",
                     Method::AgentPrompt(params) => {
-                        // Delivery is always bound to the resumed or current session.
+                        // Delivery is always bound to the resumed or current
+                        // session, on the runtime seen ready.
                         let delivery = params.delivery.as_ref().expect("session-bound prompt");
                         assert_eq!(delivery.session_id, "sess-1");
+                        assert_eq!(delivery.runtime_id.as_deref(), Some("rt-a"));
                         assert_eq!(delivery.input_quiet_ms, PLUGIN_RELOAD_INPUT_QUIET_MS);
                         "agent.prompt"
                     }
+                    Method::PaneQueue(params) if params.cancel => "pane.queue.cancel",
                     Method::PaneQueue(_) => "pane.queue",
                     _ => "other",
                 };
                 log.borrow_mut().push(name);
                 let claude = |status: &str| {
-                    serde_json::json!({"type": "agent_info", "agent": {
+                    let mut agent = serde_json::json!({"type": "agent_info", "agent": {
                         "agent": "claude",
                         "agent_status": status,
                         "agent_session": {"source": "claude", "agent": "claude",
                             "kind": "id", "value": "sess-1"},
-                    }})
+                        "runtime_id": "rt-a",
+                    }});
+                    if matches!(scenario, AfterResume::NoRuntimeId) {
+                        if let Some(info) = agent["agent"].as_object_mut() {
+                            info.remove("runtime_id");
+                        }
+                    }
+                    agent
+                };
+                let ack = serde_json::json!({"session_id": "sess-1", "runtime_id": "rt-a"});
+                let send = |state: &str, reason: Option<&str>| {
+                    serde_json::json!({"sends": [], "recent": [
+                        {"id": "q1", "state": state, "reason": reason}
+                    ]})
                 };
                 match name {
                     "plugin.reload" => Ok(serde_json::json!({"type": "ok"})),
@@ -2499,9 +2593,6 @@ mod tests {
                     "agent.get" => {
                         post_resume_agent_gets += 1;
                         Ok(match scenario {
-                            AfterResume::Ready
-                            | AfterResume::RestoreErrorWhileIdle
-                            | AfterResume::PromptExpires => claude("idle"),
                             AfterResume::AgentGoneAfterStart if post_resume_agent_gets == 1 => {
                                 claude("working")
                             }
@@ -2512,15 +2603,28 @@ mod tests {
                                         "kind": "id", "value": "sess-1"},
                                 }})
                             }
+                            _ => claude("idle"),
                         })
                     }
-                    "agent.prompt" if matches!(scenario, AfterResume::PromptExpires) => {
-                        Ok(serde_json::json!({"id": "q1", "state": "queued", "queued": true}))
-                    }
-                    "agent.prompt" => Ok(serde_json::json!({"id": "q1", "state": "delivered"})),
-                    "pane.queue" => Ok(serde_json::json!({"sends": [], "recent": [
-                        {"id": "q1", "state": "dropped", "reason": "expired"}
-                    ]})),
+                    "agent.prompt" => Ok(match scenario {
+                        AfterResume::NoAck => serde_json::json!({"id": "q1", "state": "delivered"}),
+                        AfterResume::PromptExpires | AfterResume::StuckQueued => {
+                            serde_json::json!({"id": "q1", "state": "queued", "queued": true,
+                                "delivery": ack})
+                        }
+                        AfterResume::HandedToWriter => serde_json::json!({"id": "q1",
+                            "state": "queued", "reason": "handed_to_writer", "delivery": ack}),
+                        _ => serde_json::json!({"id": "q1", "state": "delivered", "delivery": ack}),
+                    }),
+                    "pane.queue" => Ok(match scenario {
+                        AfterResume::StuckQueued => send("queued", None),
+                        AfterResume::HandedToWriter => send("queued", Some("handed_to_writer")),
+                        _ => send("dropped", Some("expired")),
+                    }),
+                    "pane.queue.cancel" => Ok(match scenario {
+                        AfterResume::HandedToWriter => send("queued", Some("handed_to_writer")),
+                        _ => send("dropped", Some("cancelled")),
+                    }),
                     _ => Err(("unexpected".into(), name.into())),
                 }
             }));
@@ -2530,7 +2634,11 @@ mod tests {
             pane: "w1:p1".into(),
             request: "ar-1".into(),
             changelog: "run `agent-request confirm ar-1`".into(),
-            timeout_ms: 30_000,
+            // The held-line scenarios run to --timeout and its grace.
+            timeout_ms: match scenario {
+                AfterResume::StuckQueued | AfterResume::HandedToWriter => 0,
+                _ => 30_000,
+            },
             no_resume,
         };
         let result = run_plugin_reload(&args, &record_path);
@@ -2544,7 +2652,8 @@ mod tests {
     #[test]
     fn plugin_reload_post_resume_prompts_only_the_resumed_idle_agent() {
         let (result, calls, recorded) = run_scripted_plugin_reload(AfterResume::Ready);
-        assert!(result.is_ok());
+        let record = result.ok().expect("resumed idle agent is prompted");
+        assert_eq!(record["delivery"], "delivered");
         assert!(calls.contains(&"agent.prompt"));
         assert!(recorded);
 
@@ -2580,6 +2689,57 @@ mod tests {
             assert!(calls.contains(&"pane.queue"), "{calls:?}");
             assert!(!recorded);
         }
+    }
+
+    /// A server that cannot report the runtime it would bind to never gets
+    /// the prompt; one that takes it without acknowledging the binding fails
+    /// the reload instead of recording it.
+    #[test]
+    fn plugin_reload_fails_closed_without_runtime_identity_or_delivery_ack() {
+        let (result, calls, recorded) = run_scripted_plugin_reload(AfterResume::NoRuntimeId);
+        let failure = result.err().expect("no runtime identity must fail");
+        assert_eq!(failure.exit_code, 1);
+        assert!(
+            failure.message.contains("runtime_id"),
+            "{}",
+            failure.message
+        );
+        assert!(!calls.contains(&"agent.resume"), "{calls:?}");
+        assert!(!calls.contains(&"agent.prompt"), "{calls:?}");
+        assert!(!recorded);
+
+        let (result, calls, recorded) = run_scripted_plugin_reload(AfterResume::NoAck);
+        let failure = result.err().expect("no delivery ack must fail");
+        assert_eq!(failure.exit_code, 1);
+        assert!(
+            failure.message.contains("did not acknowledge"),
+            "{}",
+            failure.message
+        );
+        assert!(calls.contains(&"agent.prompt"), "{calls:?}");
+        assert!(!recorded);
+    }
+
+    /// Past --timeout and its grace, a line still held is cancelled and the
+    /// reload is retryable (75); a line already handed to the writer may
+    /// still land, so it is recorded and never cancelled or retried.
+    #[test]
+    fn plugin_reload_cancels_a_line_still_held_past_its_grace() {
+        let (result, calls, recorded) = run_scripted_plugin_reload(AfterResume::StuckQueued);
+        let failure = result.err().expect("a held line must not complete");
+        assert_eq!(
+            failure.exit_code, PLUGIN_RELOAD_EXIT_BUSY,
+            "{}",
+            failure.message
+        );
+        assert_eq!(calls.last(), Some(&"pane.queue.cancel"), "{calls:?}");
+        assert!(!recorded);
+
+        let (result, calls, recorded) = run_scripted_plugin_reload(AfterResume::HandedToWriter);
+        let record = result.ok().expect("a handed line is not a failure");
+        assert_eq!(record["delivery"], "handed_to_writer");
+        assert!(!calls.contains(&"pane.queue.cancel"), "{calls:?}");
+        assert!(recorded);
     }
 
     /// `--no-resume` prompts the running agent on its current session and

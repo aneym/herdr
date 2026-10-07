@@ -286,15 +286,28 @@ pub struct AgentPromptParams {
 }
 
 /// A prompt bound to one agent session. It is refused (`stale_session`) if
-/// the pane's agent session or agent process changes before delivery, held
-/// until the agent is idle or done and the pane has had no human input for
-/// `input_quiet_ms`, and dropped with reason `expired` after `expires_ms`.
+/// the pane's agent session, agent process or runtime (`runtime_id`, from
+/// `AgentInfo`) changes before delivery, held until the agent is idle or done
+/// and the pane has had no human input for `input_quiet_ms`, and dropped with
+/// reason `expired` after `expires_ms`; an expired prompt never reaches the
+/// pane. A server that honors it echoes `AgentPromptDeliveryAck`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AgentPromptDelivery {
     pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_id: Option<String>,
     #[serde(default)]
     pub input_quiet_ms: u64,
     pub expires_ms: u64,
+}
+
+/// The binding a server applied to a guarded `agent.prompt`. Its absence
+/// means the server ignored `delivery`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentPromptDeliveryAck {
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -326,6 +339,11 @@ pub struct AgentInfo {
     pub tokens: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_session: Option<AgentSessionInfo>,
+    /// Identity of the pane's current terminal runtime. It changes whenever
+    /// the runtime is replaced (`agent.resume`, respawn), even on the same
+    /// agent session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_id: Option<String>,
     /// Durable identity of this agent occupancy (never a pane id).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,

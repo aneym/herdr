@@ -157,6 +157,19 @@ impl App {
 
     pub(super) fn handle_pane_queue(&self, id: String, params: PaneQueueParams) -> String {
         if let Some(qid) = &params.id {
+            if params.cancel {
+                // Only the runtime holding the send can remove it: the named
+                // pane's first, else any.
+                let named = self
+                    .parse_pane_id(&params.pane_id)
+                    .and_then(|(ws_idx, pane_id)| self.lookup_runtime_sender(ws_idx, pane_id));
+                if !named.is_some_and(|runtime| runtime.cancel_polite_send(qid)) {
+                    let _ = self
+                        .terminal_runtimes
+                        .values()
+                        .any(|runtime| runtime.cancel_polite_send(qid));
+                }
+            }
             let recent = self
                 .public_queue_receipts(crate::terminal::polite_send::recent_sends(None, Some(qid)));
             if recent.is_empty() {

@@ -39,6 +39,7 @@ type QueuedAgentPrompt = (
     crate::api::schema::AgentInfo,
     std::sync::mpsc::Receiver<std::io::Result<()>>,
     crate::terminal::polite_send::SendOutcome,
+    Option<crate::api::schema::AgentPromptDeliveryAck>,
 );
 
 impl App {
@@ -198,13 +199,21 @@ impl App {
             return false;
         };
         match self.queue_agent_prompt(request.id, params) {
-            Ok((id, agent, completion, position)) => {
+            Ok((id, agent, completion, position, delivery)) => {
                 let dropped = matches!(
                     position.state,
                     crate::api::schema::PaneSendState::Dropped
                         | crate::api::schema::PaneSendState::StaleSession
                 );
-                if position.position.is_some() || dropped {
+                // A guarded prompt answers at once with its receipt (possibly
+                // `handed_to_writer`); the caller polls it, so a writer held
+                // up by backpressure never blocks the request.
+                if position.position.is_some() || dropped || delivery.is_some() {
+                    let (state, reason) =
+                        crate::terminal::polite_send::recent_sends(None, Some(&position.id))
+                            .into_iter()
+                            .next()
+                            .map_or((position.state, None), |item| (item.state, item.reason));
                     let _ = respond_to.send(encode_success(
                         id,
                         ResponseResult::AgentPrompted {
@@ -213,7 +222,9 @@ impl App {
                             dropped,
                             queue_position: position.position,
                             id: position.id,
-                            state: position.state,
+                            state,
+                            reason,
+                            delivery,
                         },
                     ));
                     return true;
@@ -229,6 +240,8 @@ impl App {
                                 queue_position: None,
                                 id: position.id,
                                 state: crate::api::schema::PaneSendState::Delivered,
+                                reason: None,
+                                delivery: None,
                             },
                         ),
                         Ok(Err(err)) if err.kind() == std::io::ErrorKind::TimedOut => {
@@ -335,9 +348,18 @@ impl App {
         let Some(agent) = self.agent_info(resolved.ws_idx, resolved.pane_id) else {
             return Err(agent_not_found(id, &params.target));
         };
+        let ack =
+            params
+                .delivery
+                .as_ref()
+                .map(|delivery| crate::api::schema::AgentPromptDeliveryAck {
+                    session_id: delivery.session_id.clone(),
+                    runtime_id: delivery.runtime_id.clone(),
+                });
         let guard = params.delivery.as_ref().map(|delivery| {
             let guard = crate::terminal::polite_send::DeliveryGuard {
                 session_id: delivery.session_id.clone(),
+                runtime_id: delivery.runtime_id.clone(),
                 agent: expected_agent,
                 input_quiet: Duration::from_millis(delivery.input_quiet_ms),
                 expires_at: Instant::now() + Duration::from_millis(delivery.expires_ms),
@@ -363,7 +385,7 @@ impl App {
                 guard,
             )
             .map_err(|err| encode_error(id.clone(), "agent_prompt_failed", err.to_string()))?;
-        Ok((id, agent, completion, position))
+        Ok((id, agent, completion, position, ack))
     }
 
     pub(super) fn handle_agent_read(
@@ -724,6 +746,7 @@ mod tests {
                 pane_id: String::new(),
                 id: Some(qid.into()),
                 flush: false,
+                cancel: false,
             }),
         });
         assert!(!response.contains("never-store-this-payload"));
@@ -775,6 +798,7 @@ mod tests {
             wait: None,
             delivery: Some(crate::api::schema::AgentPromptDelivery {
                 session_id: session.into(),
+                runtime_id: None,
                 input_quiet_ms: 300,
                 expires_ms,
             }),
@@ -787,6 +811,7 @@ mod tests {
                         pane_id: public.clone(),
                         id: None,
                         flush: true,
+                        cancel: false,
                     },
                 ),
             });
@@ -880,6 +905,162 @@ mod tests {
             )
         );
         assert!(rx.try_recv().is_err(), "a dropped line was written");
+    }
+
+    /// A session-bound agent.prompt through the real queue is bound to the
+    /// runtime the caller saw (a replacement runtime on the same session is
+    /// refused), never written once expired even when it could go out at
+    /// once, acknowledged in the response, and cancellable while held.
+    #[tokio::test]
+    async fn session_bound_agent_prompt_binds_the_runtime_expiry_ack_and_cancel() {
+        let mut app = app_with_agent();
+        let pane = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].terminal_id(pane).unwrap().clone();
+        let set_state = |app: &mut App, state: AgentState| {
+            app.state
+                .terminals
+                .get_mut(&terminal_id)
+                .unwrap()
+                .set_detected_state(Some(Agent::Claude), state);
+        };
+        set_state(&mut app, AgentState::Idle);
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .persisted_agent_session = Some(crate::agent_resume::PersistedAgentSession {
+            source: "herdr:claude".into(),
+            agent: "claude".into(),
+            session_ref: crate::agent_resume::AgentSessionRef::id("sess-1").unwrap(),
+        });
+        let (runtime, mut rx_a) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
+        app.state.insert_test_runtime(pane, runtime);
+        let public = app.public_pane_id(0, pane).unwrap();
+        let runtime_id = |app: &mut App| {
+            let response = app.handle_api_request(crate::api::schema::Request {
+                id: "get".into(),
+                method: crate::api::schema::Method::AgentGet(AgentTarget {
+                    target: public.clone(),
+                }),
+            });
+            let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+            response["result"]["agent"]["runtime_id"]
+                .as_str()
+                .expect("agent.get reports the runtime id")
+                .to_string()
+        };
+        let prompt = |text: &str, runtime_id: &str, expires_ms: u64| AgentPromptParams {
+            if_idle: false,
+            target: public.clone(),
+            text: text.into(),
+            wait: None,
+            delivery: Some(crate::api::schema::AgentPromptDelivery {
+                session_id: "sess-1".into(),
+                runtime_id: Some(runtime_id.into()),
+                input_quiet_ms: 300,
+                expires_ms,
+            }),
+        };
+        let json =
+            |response: String| -> serde_json::Value { serde_json::from_str(&response).unwrap() };
+        let state_of = |id: &str| {
+            crate::terminal::polite_send::recent_sends(None, Some(id))
+                .into_iter()
+                .next()
+                .map(|item| (item.state, item.reason))
+                .unwrap()
+        };
+        let runtime_a = runtime_id(&mut app);
+
+        // Idle and quiet, so it could go out at once, but already expired.
+        let expired = json(run_deferred_agent_prompt(
+            &mut app,
+            "p1",
+            prompt("expired-line", &runtime_a, 0),
+        ));
+        assert_eq!(expired["result"]["state"], "dropped", "{expired}");
+        assert_eq!(expired["result"]["reason"], "expired", "{expired}");
+        assert!(rx_a.try_recv().is_err(), "an expired line was written");
+
+        // Delivered on the bound runtime, with the binding echoed back.
+        let delivered = json(run_deferred_agent_prompt(
+            &mut app,
+            "p2",
+            prompt("live-line", &runtime_a, 10_000),
+        ));
+        assert_eq!(delivered["result"]["delivery"]["session_id"], "sess-1");
+        assert_eq!(
+            delivered["result"]["delivery"]["runtime_id"],
+            runtime_a.as_str()
+        );
+        let id = delivered["result"]["id"].as_str().unwrap().to_string();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while state_of(&id).0 == crate::api::schema::PaneSendState::Queued
+            && Instant::now() < deadline
+        {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(
+            state_of(&id).0,
+            crate::api::schema::PaneSendState::Delivered
+        );
+        let written = rx_a
+            .try_recv()
+            .expect("the bound runtime receives the line");
+        assert!(String::from_utf8_lossy(&written).contains("live-line"));
+
+        // A second resume: a new runtime on the same session and agent.
+        let (runtime, mut rx_b) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
+        app.state.insert_test_runtime(pane, runtime);
+        let runtime_b = runtime_id(&mut app);
+        assert_ne!(runtime_a, runtime_b);
+        let refused = json(run_deferred_agent_prompt(
+            &mut app,
+            "p3",
+            prompt("old-runtime-line", &runtime_a, 10_000),
+        ));
+        assert_eq!(refused["result"]["state"], "stale_session", "{refused}");
+        assert_eq!(refused["result"]["reason"], "runtime_changed", "{refused}");
+
+        // Held on the new runtime, then cancelled: never written.
+        set_state(&mut app, AgentState::Working);
+        let held = json(run_deferred_agent_prompt(
+            &mut app,
+            "p4",
+            prompt("cancelled-line", &runtime_b, 10_000),
+        ));
+        assert_eq!(held["result"]["state"], "queued", "{held}");
+        let held_id = held["result"]["id"].as_str().unwrap().to_string();
+        let cancel = json(app.handle_api_request(crate::api::schema::Request {
+            id: "cancel".into(),
+            method: crate::api::schema::Method::PaneQueue(crate::api::schema::PaneQueueParams {
+                pane_id: public.clone(),
+                id: Some(held_id.clone()),
+                flush: false,
+                cancel: true,
+            }),
+        }));
+        assert_eq!(
+            cancel["result"]["recent"][0]["state"], "dropped",
+            "{cancel}"
+        );
+        assert_eq!(cancel["result"]["recent"][0]["reason"], "cancelled");
+        set_state(&mut app, AgentState::Idle);
+        tokio::time::sleep(Duration::from_millis(350)).await;
+        app.handle_api_request(crate::api::schema::Request {
+            id: "flush".into(),
+            method: crate::api::schema::Method::PaneQueue(crate::api::schema::PaneQueueParams {
+                pane_id: public.clone(),
+                id: None,
+                flush: true,
+                cancel: false,
+            }),
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            rx_b.try_recv().is_err(),
+            "a refused or cancelled line was written"
+        );
     }
 
     #[tokio::test]

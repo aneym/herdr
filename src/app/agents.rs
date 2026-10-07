@@ -784,6 +784,9 @@ impl App {
             state_labels: pane.state_labels,
             tokens: pane.tokens,
             agent_session: pane.agent_session,
+            runtime_id: self
+                .lookup_runtime_sender(ws_idx, pane_id)
+                .map(crate::terminal::TerminalRuntime::runtime_id),
             agent_id,
             ownership,
             group,

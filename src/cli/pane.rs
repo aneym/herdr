@@ -1881,6 +1881,7 @@ fn pane_queue_params(args: &[String]) -> Option<crate::api::schema::PaneQueuePar
             .unwrap_or_default(),
         id,
         flush,
+        cancel: false,
     })
 }
 

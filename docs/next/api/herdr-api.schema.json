@@ -1515,7 +1515,7 @@
           "type": "object"
         },
         "AgentPromptDelivery": {
-          "description": "A prompt bound to one agent session. It is refused (`stale_session`) if\nthe pane's agent session or agent process changes before delivery, held\nuntil the agent is idle or done and the pane has had no human input for\n`input_quiet_ms`, and dropped with reason `expired` after `expires_ms`.",
+          "description": "A prompt bound to one agent session. It is refused (`stale_session`) if\nthe pane's agent session, agent process or runtime (`runtime_id`, from\n`AgentInfo`) changes before delivery, held until the agent is idle or done\nand the pane has had no human input for `input_quiet_ms`, and dropped with\nreason `expired` after `expires_ms`; an expired prompt never reaches the\npane. A server that honors it echoes `AgentPromptDeliveryAck`.",
           "properties": {
             "expires_ms": {
               "format": "uint64",
@@ -1527,6 +1527,12 @@
               "format": "uint64",
               "minimum": 0,
               "type": "integer"
+            },
+            "runtime_id": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "session_id": {
               "type": "string"
@@ -3336,6 +3342,10 @@
         },
         "PaneQueueParams": {
           "properties": {
+            "cancel": {
+              "description": "With `id`: remove that held send before it reaches the pane (state\n`dropped`, reason `cancelled`). A send already handed to the writer or\ndelivered is reported unchanged.",
+              "type": "boolean"
+            },
             "flush": {
               "default": false,
               "type": "boolean"
@@ -7829,6 +7839,13 @@
               "minimum": 0,
               "type": "integer"
             },
+            "runtime_id": {
+              "description": "Identity of the pane's current terminal runtime. It changes whenever\nthe runtime is replaced (`agent.resume`, respawn), even on the same\nagent session.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "screen_detection_skipped": {
               "type": "boolean"
             },
@@ -8025,6 +8042,24 @@
           },
           "required": [
             "origin"
+          ],
+          "type": "object"
+        },
+        "AgentPromptDeliveryAck": {
+          "description": "The binding a server applied to a guarded `agent.prompt`. Its absence\nmeans the server ignored `delivery`.",
+          "properties": {
+            "runtime_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "session_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "session_id"
           ],
           "type": "object"
         },
@@ -11246,6 +11281,17 @@
                 "agent": {
                   "$ref": "#/schemas/success_response/$defs/AgentInfo"
                 },
+                "delivery": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/schemas/success_response/$defs/AgentPromptDeliveryAck"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Present only when the server bound the prompt to `delivery`."
+                },
                 "dropped": {
                   "default": false,
                   "type": "boolean"
@@ -11264,6 +11310,12 @@
                 "queued": {
                   "default": false,
                   "type": "boolean"
+                },
+                "reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "state": {
                   "$ref": "#/schemas/success_response/$defs/PaneSendState"

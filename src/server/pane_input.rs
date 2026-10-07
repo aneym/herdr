@@ -696,6 +696,7 @@ mod polite_send_tests {
                     id: None,
                     pane_id: public.clone(),
                     flush: false,
+                    cancel: false,
                 }),
             );
             assert_eq!(queue["result"]["sends"][0]["byte_length"], 5);
@@ -764,6 +765,7 @@ mod polite_send_tests {
                         id: None,
                         pane_id: public,
                         flush: true,
+                        cancel: false,
                     }),
                 );
                 assert_eq!(response["result"]["sends"], serde_json::json!([]));

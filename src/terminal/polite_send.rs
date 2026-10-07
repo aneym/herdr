@@ -21,7 +21,7 @@ pub(crate) struct SendOutcome {
 }
 
 use crate::api::schema::{PaneQueuedSend, PaneSendState};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
 struct Receipt {
     owner: u64,
@@ -41,6 +41,11 @@ fn history() -> &'static Mutex<History> {
     HISTORY.get_or_init(Mutex::default)
 }
 
+/// Receipts are plain data, so a panic elsewhere never takes them down.
+fn history_lock() -> MutexGuard<'static, History> {
+    history().lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 fn timestamp() -> f64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -55,7 +60,7 @@ fn receipt(
     method: &str,
     bytes: usize,
 ) -> String {
-    let mut history = history().lock().unwrap();
+    let mut history = history_lock();
     history.next += 1;
     let id = format!("q{}", history.next);
     history.recent.push_back(Receipt {
@@ -84,7 +89,7 @@ fn receipt(
 }
 
 fn transition(id: &str, state: PaneSendState, reason: Option<&str>) {
-    let mut history = history().lock().unwrap();
+    let mut history = history_lock();
     if let Some(receipt) = history.recent.iter_mut().find(|r| r.item.id == id) {
         if state == PaneSendState::Delivered {
             receipt.delivered = Some(Instant::now());
@@ -96,7 +101,7 @@ fn transition(id: &str, state: PaneSendState, reason: Option<&str>) {
 }
 
 pub(crate) fn observe_output(pane: u32, pgid: Option<u32>, now: Instant) {
-    let mut history = history().lock().unwrap();
+    let mut history = history_lock();
     for receipt in &mut history.recent {
         if receipt.item.pane == format!("p{pane}")
             && receipt.item.pgid == pgid
@@ -112,7 +117,7 @@ pub(crate) fn observe_output(pane: u32, pgid: Option<u32>, now: Instant) {
 }
 
 pub(crate) fn recent_sends(owner: Option<u64>, id: Option<&str>) -> Vec<PaneQueuedSend> {
-    let mut history = history().lock().unwrap();
+    let mut history = history_lock();
     let now = Instant::now();
     history
         .recent
@@ -169,6 +174,10 @@ impl Payload {
 #[derive(Debug, Clone)]
 pub(crate) struct DeliveryGuard {
     pub session_id: String,
+    /// The runtime instance (`TerminalRuntime::runtime_id`) the caller saw
+    /// the agent ready on; a replacement runtime for the same session, such
+    /// as a second `agent.resume`, never matches it.
+    pub runtime_id: Option<String>,
     pub agent: crate::detect::Agent,
     pub input_quiet: Duration,
     pub expires_at: Instant,
@@ -207,6 +216,40 @@ pub(super) struct PoliteSend {
     queue: VecDeque<HeldSend>,
     raw_pending: Vec<u8>,
     raw_paste: bool,
+}
+
+/// Reason a guarded receipt carries while it is still `queued` but has left
+/// the polite queue for the PTY writer: it can no longer be cancelled and may
+/// still land, so a caller must not treat it as undelivered.
+pub(crate) const HANDED_TO_WRITER: &str = "handed_to_writer";
+
+/// The polite-send state plus the identity of the runtime that owns it, which
+/// is readable without the lock (verdict callbacks run under it).
+pub(super) struct PoliteSendCell {
+    owner: u64,
+    state: Mutex<PoliteSend>,
+}
+
+impl Default for PoliteSendCell {
+    fn default() -> Self {
+        let state = PoliteSend::default();
+        Self {
+            owner: state.owner,
+            state: Mutex::new(state),
+        }
+    }
+}
+
+impl PoliteSendCell {
+    /// The state is plain data, so a panic while it was held never takes
+    /// polite sends down with it.
+    fn lock(&self) -> MutexGuard<'_, PoliteSend> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+fn runtime_token(owner: u64) -> String {
+    format!("rt{}-{owner}", std::process::id())
 }
 
 impl Default for PoliteSend {
@@ -271,24 +314,63 @@ impl PoliteSend {
 }
 
 impl TerminalRuntime {
+    /// Identity of this runtime instance. A replacement runtime for the same
+    /// pane (`agent.resume`, respawn) never shares it.
+    pub(crate) fn runtime_id(&self) -> String {
+        runtime_token(self.1.owner)
+    }
+
+    /// Why a guarded send must not go out now, if it must not.
+    fn guard_refusal(
+        &self,
+        guard: &DeliveryGuard,
+        verdict: DeliveryVerdict,
+        now: Instant,
+    ) -> Option<(PaneSendState, &'static str)> {
+        if now >= guard.expires_at {
+            Some((PaneSendState::Dropped, "expired"))
+        } else if guard
+            .runtime_id
+            .as_deref()
+            .is_some_and(|id| id != self.runtime_id())
+        {
+            Some((PaneSendState::StaleSession, "runtime_changed"))
+        } else if verdict == DeliveryVerdict::Stale {
+            Some((PaneSendState::StaleSession, "agent_session_changed"))
+        } else {
+            None
+        }
+    }
+
+    /// Remove a held send before it reaches the writer. False when it is not
+    /// held here (already handed to the writer, delivered, or elsewhere).
+    pub(crate) fn cancel_polite_send(&self, id: &str) -> bool {
+        let mut state = self.1.lock();
+        let Some(index) = state.queue.iter().position(|item| item.id == id) else {
+            return false;
+        };
+        if let Some(item) = state.queue.remove(index) {
+            transition(&item.id, PaneSendState::Dropped, Some("cancelled"));
+            tracing::info!(pane_id = ?item.pane_id, method = item.method, "polite send cancelled");
+        }
+        true
+    }
+
     /// Whether no human keystroke reached this runtime within `quiet`.
     pub(crate) fn human_input_quiet_for(&self, quiet: Duration) -> bool {
-        self.1
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .human_input_quiet(Instant::now(), quiet)
+        self.1.lock().human_input_quiet(Instant::now(), quiet)
     }
 
     pub(crate) fn record_human_text(&self) {
-        self.1.lock().unwrap().typing(true);
+        self.1.lock().typing(true);
     }
 
     pub(crate) fn record_human_key(&self, key: &crate::input::TerminalKey) {
-        self.1.lock().unwrap().key(key);
+        self.1.lock().key(key);
     }
 
     pub(crate) fn record_human_bytes(&self, bytes: &[u8]) {
-        self.1.lock().unwrap().raw_bytes(bytes);
+        self.1.lock().raw_bytes(bytes);
     }
 }
 
@@ -423,7 +505,7 @@ impl TerminalRuntime {
     ) -> std::io::Result<SendOutcome> {
         let pgid = self.0.foreground_process_group_id();
         let id = receipt(
-            self.1.lock().unwrap().owner,
+            self.1.lock().owner,
             self.0.pane_id,
             pgid,
             method,
@@ -433,7 +515,7 @@ impl TerminalRuntime {
             .claude
             .then(|| self.0.claude_prompt_draft())
             .flatten();
-        let mut state = self.1.lock().unwrap();
+        let mut state = self.1.lock();
         if options.human {
             drop(state);
             match &payload {
@@ -456,15 +538,15 @@ impl TerminalRuntime {
             state.draft = false;
         }
         let now = Instant::now();
-        if let Some((_, DeliveryVerdict::Stale)) = &guard {
-            transition(
-                &id,
-                PaneSendState::StaleSession,
-                Some("agent_session_changed"),
-            );
+        if let Some((refused, reason)) = guard
+            .as_ref()
+            .and_then(|(guard, verdict)| self.guard_refusal(guard, *verdict, now))
+        {
+            transition(&id, refused.clone(), Some(reason));
+            tracing::info!(pane_id = ?self.0.pane_id, method, reason, "guarded polite send refused");
             return Ok(SendOutcome {
                 id,
-                state: PaneSendState::StaleSession,
+                state: refused,
                 position: None,
             });
         }
@@ -504,6 +586,9 @@ impl TerminalRuntime {
                 state: PaneSendState::Queued,
                 position: Some(state.queue.len()),
             });
+        }
+        if guard.is_some() {
+            transition(&id, PaneSendState::Queued, Some(HANDED_TO_WRITER));
         }
         self.write_polite_payload(&payload, false, &id)?;
         Ok(SendOutcome {
@@ -609,11 +694,11 @@ impl TerminalRuntime {
     }
 
     pub(crate) fn polite_queue(&self) -> Vec<crate::api::schema::PaneQueuedSend> {
-        recent_sends(Some(self.1.lock().unwrap().owner), None)
+        recent_sends(Some(self.1.lock().owner), None)
     }
 
     pub(crate) fn held_polite_sends(&self) -> Vec<PaneQueuedSend> {
-        let state = self.1.lock().unwrap();
+        let state = self.1.lock();
         recent_sends(Some(state.owner), None)
             .into_iter()
             .filter(|receipt| state.queue.iter().any(|item| item.id == receipt.id))
@@ -621,7 +706,7 @@ impl TerminalRuntime {
     }
 
     pub(crate) fn has_polite_queue(&self) -> bool {
-        !self.1.lock().unwrap().queue.is_empty()
+        !self.1.lock().queue.is_empty()
     }
 
     #[cfg(test)]
@@ -646,16 +731,12 @@ impl TerminalRuntime {
         options: SendOptions,
         verdict: &dyn Fn(&DeliveryGuard) -> DeliveryVerdict,
     ) -> std::io::Result<()> {
-        let mut state = self.1.lock().unwrap();
+        let mut state = self.1.lock();
         state.queue.retain(|item| {
             let Some(guard) = &item.guard else {
                 return true;
             };
-            let (drop_state, reason) = if now >= guard.expires_at {
-                (PaneSendState::Dropped, "expired")
-            } else if verdict(guard) == DeliveryVerdict::Stale {
-                (PaneSendState::StaleSession, "agent_session_changed")
-            } else {
+            let Some((drop_state, reason)) = self.guard_refusal(guard, verdict(guard), now) else {
                 return true;
             };
             transition(&item.id, drop_state, Some(reason));
@@ -667,7 +748,7 @@ impl TerminalRuntime {
             .claude
             .then(|| self.0.claude_prompt_draft())
             .flatten();
-        let mut state = self.1.lock().unwrap();
+        let mut state = self.1.lock();
         if screen_draft == Some(false) {
             state.draft = false;
         }
@@ -703,6 +784,7 @@ impl TerminalRuntime {
                 {
                     break;
                 }
+                transition(&item.id, PaneSendState::Queued, Some(HANDED_TO_WRITER));
             }
             self.write_polite_payload(&item.payload, true, &item.id)?;
             tracing::info!(pane_id = ?self.0.pane_id, method = item.method, bytes = len, "polite send flushed");
@@ -858,6 +940,84 @@ mod tests {
         assert!(item.delivered_at.is_none());
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert!(!runtime.visible_text().contains("must-not-write"));
+    }
+
+    /// A guarded send that left the queue for a writer still busy with it
+    /// reports `handed_to_writer`: no longer cancellable, possibly landing.
+    #[tokio::test]
+    async fn guarded_send_reports_handed_to_writer_until_the_writer_finishes() {
+        let runtime = child("stty -echo; while IFS= read -r line; do :; done");
+        ready(&runtime).await;
+        let (tx, completion) = std::sync::mpsc::channel();
+        let guard = DeliveryGuard {
+            session_id: "sess-1".into(),
+            runtime_id: Some(runtime.runtime_id()),
+            agent: crate::detect::Agent::Claude,
+            input_quiet: Duration::ZERO,
+            expires_at: Instant::now() + Duration::from_secs(10),
+        };
+        let outcome = runtime
+            .polite_send_with_guard(
+                false,
+                Duration::ZERO,
+                "agent.prompt",
+                Payload::Submission {
+                    focus: Bytes::new(),
+                    text: Bytes::from_static(b"handed-line"),
+                    enter: Bytes::from_static(b"\r"),
+                    delay: Duration::from_millis(500),
+                    deadline: None,
+                    completion: tx,
+                },
+                SendOptions::default(),
+                Some((guard, DeliveryVerdict::Ready)),
+            )
+            .unwrap();
+        let item = runtime
+            .polite_queue()
+            .into_iter()
+            .find(|item| item.id == outcome.id)
+            .unwrap();
+        assert_eq!(item.state, PaneSendState::Queued);
+        assert_eq!(item.reason.as_deref(), Some(HANDED_TO_WRITER));
+        assert!(!runtime.cancel_polite_send(&outcome.id));
+        completion
+            .recv_timeout(Duration::from_secs(3))
+            .unwrap()
+            .unwrap();
+        let item = wait_for(&runtime, &outcome.id, PaneSendState::Delivered).await;
+        assert_eq!(item.reason, None);
+    }
+
+    /// A panic while the polite-send state was locked must not turn every
+    /// later send, flush or input record on that pane into a panic.
+    #[tokio::test]
+    async fn poisoned_polite_state_keeps_serving_sends() {
+        let (runtime, mut rx) = TerminalRuntime::test_with_channel(80, 24);
+        let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _held = runtime.1.state.lock();
+            panic!("poison the polite-send state");
+        }));
+        assert!(poisoned.is_err());
+        assert!(runtime.1.state.is_poisoned());
+        runtime.record_human_bytes(b"x");
+        assert!(!runtime.human_input_quiet_for(Duration::from_secs(20)));
+        let outcome = runtime
+            .polite_send(
+                false,
+                Duration::ZERO,
+                "pane.send",
+                Payload::Bytes(Bytes::from_static(b"after-poison")),
+                SendOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(outcome.state, PaneSendState::Delivered);
+        assert_eq!(rx.try_recv().unwrap(), Bytes::from_static(b"after-poison"));
+        runtime
+            .flush_polite_queue(Instant::now(), Duration::ZERO, true, SendOptions::default())
+            .unwrap();
+        assert!(!runtime.has_polite_queue());
+        assert!(!runtime.cancel_polite_send(&outcome.id));
     }
 
     #[tokio::test]

@@ -136,6 +136,11 @@ pub enum ResponseResult {
         dropped: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         queue_position: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+        /// Present only when the server bound the prompt to `delivery`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        delivery: Option<super::agents::AgentPromptDeliveryAck>,
     },
     AgentList {
         agents: Vec<AgentInfo>,
