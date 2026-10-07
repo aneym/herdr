@@ -156,6 +156,10 @@ pub(crate) enum Payload {
 }
 
 impl Payload {
+    fn is_submit(&self) -> bool {
+        matches!(self, Self::Keys(keys) if keys.len() == 1 && keys[0].as_ref() == b"\r")
+    }
+
     fn len(&self) -> usize {
         match self {
             Self::Bytes(bytes) => bytes.len(),
@@ -201,6 +205,7 @@ struct HeldSend {
     method: &'static str,
     payload: Payload,
     guard: Option<DeliveryGuard>,
+    expires_at: Instant,
 }
 
 pub(super) struct PoliteSend {
@@ -213,6 +218,8 @@ pub(super) struct PoliteSend {
     last_raw_input_at: Option<Instant>,
     last_submit_at: Option<Instant>,
     draft: bool,
+    /// An agent.prompt handoff owns the composer until human input or another send.
+    agent_prompt_composer: bool,
     queue: VecDeque<HeldSend>,
     raw_pending: Vec<u8>,
     raw_paste: bool,
@@ -261,6 +268,7 @@ impl Default for PoliteSend {
             last_raw_input_at: None,
             last_submit_at: None,
             draft: false,
+            agent_prompt_composer: false,
             queue: VecDeque::new(),
             raw_pending: Vec::new(),
             raw_paste: false,
@@ -270,11 +278,13 @@ impl Default for PoliteSend {
 
 impl PoliteSend {
     fn typing(&mut self, draft: bool) {
+        self.agent_prompt_composer = false;
         self.last_human_input_at = Some(Instant::now());
         self.draft |= draft;
     }
 
     fn submit(&mut self) {
+        self.agent_prompt_composer = false;
         self.last_human_input_at = Some(Instant::now());
         self.draft = false;
         self.last_submit_at = Some(Instant::now());
@@ -394,6 +404,7 @@ impl PoliteSend {
     fn raw_bytes(&mut self, bytes: &[u8]) {
         let state = self;
         if !bytes.is_empty() {
+            state.agent_prompt_composer = false;
             state.last_raw_input_at = Some(Instant::now());
         }
         let mut input = std::mem::take(&mut state.raw_pending);
@@ -571,10 +582,13 @@ impl TerminalRuntime {
         let settling = state
             .last_submit_at
             .is_some_and(|at| now.saturating_duration_since(at) < options.settle);
+        let owned_submit = state.agent_prompt_composer && payload.is_submit();
         if !state.queue.is_empty()
             || guard_holds
             || (guarded
-                && (screen_draft.unwrap_or(state.draft) || !state.quiet(now, quiet) || settling))
+                && ((screen_draft.unwrap_or(state.draft) && !owned_submit)
+                    || !state.quiet(now, quiet)
+                    || settling))
         {
             if options.if_idle {
                 tracing::info!(pane_id = ?self.0.pane_id, method, bytes = payload.len(), "polite send dropped");
@@ -585,6 +599,18 @@ impl TerminalRuntime {
                     position: None,
                 });
             }
+            let reason = if !state.queue.is_empty() {
+                "predecessor_queued"
+            } else if guard_holds {
+                "delivery_guard"
+            } else if screen_draft.unwrap_or(state.draft) && !owned_submit {
+                "human_composer_draft"
+            } else if settling {
+                "submit_settling"
+            } else {
+                "human_input_quiet"
+            };
+            transition(&id, PaneSendState::Queued, Some(reason));
             let len = payload.len();
             state.queue.push_back(HeldSend {
                 id: id.clone(),
@@ -593,6 +619,7 @@ impl TerminalRuntime {
                 method,
                 payload,
                 guard,
+                expires_at: now + Duration::from_secs(120),
             });
             tracing::info!(pane_id = ?self.0.pane_id, method, bytes = len, "polite send held");
             return Ok(SendOutcome {
@@ -605,6 +632,7 @@ impl TerminalRuntime {
             transition(&id, PaneSendState::Queued, Some(HANDED_TO_WRITER));
         }
         self.write_polite_payload(&payload, false, &id)?;
+        state.agent_prompt_composer = method == "agent.prompt";
         Ok(SendOutcome {
             state: self.polite_receipt_state(&id),
             id,
@@ -747,6 +775,10 @@ impl TerminalRuntime {
     ) -> std::io::Result<()> {
         let mut state = self.1.lock();
         state.queue.retain(|item| {
+            if now >= item.expires_at {
+                transition(&item.id, PaneSendState::Dropped, Some("hold_expired"));
+                return false;
+            }
             let Some(guard) = &item.guard else {
                 return true;
             };
@@ -774,14 +806,23 @@ impl TerminalRuntime {
                 .last_human_input_at
                 .is_none_or(|input| submit >= input)
         });
-        if !force
-            && (screen_draft.unwrap_or(state.draft)
-                || !settled
-                || (!state.quiet(now, quiet) && !submitted))
-        {
-            return Ok(());
-        }
         while let Some(item) = state.queue.front() {
+            let owned_submit = state.agent_prompt_composer && item.payload.is_submit();
+            let reason = if screen_draft.unwrap_or(state.draft) && !owned_submit {
+                Some("human_composer_draft")
+            } else if !settled {
+                Some("submit_settling")
+            } else if !state.quiet(now, quiet) && !submitted {
+                Some("human_input_quiet")
+            } else {
+                None
+            };
+            if !force {
+                if let Some(reason) = reason {
+                    transition(&item.id, PaneSendState::Queued, Some(reason));
+                    break;
+                }
+            }
             let len = item.payload.len();
             if self.0.foreground_process_group_id() != item.pgid {
                 transition(
@@ -807,12 +848,14 @@ impl TerminalRuntime {
                 if ready != DeliveryVerdict::Ready
                     || !state.human_input_quiet(handoff, guard.input_quiet)
                 {
+                    transition(&item.id, PaneSendState::Queued, Some("delivery_guard"));
                     break;
                 }
                 transition(&item.id, PaneSendState::Queued, Some(HANDED_TO_WRITER));
             }
             self.write_polite_payload(&item.payload, true, &item.id)?;
             tracing::info!(pane_id = ?self.0.pane_id, method = item.method, bytes = len, "polite send flushed");
+            state.agent_prompt_composer = item.method == "agent.prompt";
             state.queue.pop_front();
         }
         Ok(())
@@ -920,9 +963,11 @@ mod tests {
             .unwrap();
         let item = wait_for(&runtime, &outcome.id, PaneSendState::Acked).await;
         assert!(item.delivered_at.is_some() && item.acked_at >= item.delivered_at);
-        assert!(!serde_json::to_string(&item)
-            .unwrap()
-            .contains("private-message"));
+        assert!(
+            !serde_json::to_string(&item)
+                .unwrap()
+                .contains("private-message")
+        );
         let second = runtime
             .polite_send(
                 false,

@@ -157,6 +157,30 @@ impl App {
 
     pub(super) fn handle_pane_queue(&self, id: String, params: PaneQueueParams) -> String {
         if let Some(qid) = &params.id {
+            if params.flush {
+                for (ws_idx, ws) in self.state.workspaces.iter().enumerate() {
+                    for pane_id in ws.tabs.iter().flat_map(|tab| tab.panes.keys().copied()) {
+                        let Some(runtime) = self.lookup_runtime_sender(ws_idx, pane_id) else {
+                            continue;
+                        };
+                        if runtime
+                            .held_polite_sends()
+                            .iter()
+                            .any(|item| item.id == *qid)
+                        {
+                            if let Err(err) = runtime.flush_polite_queue_guarded(
+                                Instant::now(),
+                                self.polite_send_quiet,
+                                true,
+                                self.polite_options(ws_idx, pane_id, false, false),
+                                &|guard| self.agent_delivery_verdict(ws_idx, pane_id, guard),
+                            ) {
+                                return encode_error(id, "pane_send_failed", err.to_string());
+                            }
+                        }
+                    }
+                }
+            }
             if params.cancel {
                 // Only the runtime holding the send can remove it: the named
                 // pane's first, else any.
@@ -187,7 +211,13 @@ impl App {
             return encode_error(id, "pane_not_found", "pane not found");
         };
         let Some(runtime) = self.lookup_runtime_sender(ws_idx, pane_id) else {
-            return encode_error(id, "pane_not_found", "pane not found");
+            return encode_success(
+                id,
+                ResponseResult::PaneQueue {
+                    sends: vec![],
+                    recent: vec![],
+                },
+            );
         };
         if params.flush {
             if let Err(err) = runtime.flush_polite_queue_guarded(

@@ -1872,7 +1872,7 @@ fn pane_queue_params(args: &[String]) -> Option<crate::api::schema::PaneQueuePar
             _ => return None,
         }
     }
-    if pane_id.is_none() && (id.is_none() || flush) {
+    if pane_id.is_none() && id.is_none() {
         return None;
     }
     Some(crate::api::schema::PaneQueueParams {
@@ -1926,9 +1926,10 @@ mod tests {
         assert!(params.pane_id.is_empty());
         let params = super::pane_queue_params(&["--pane".into(), "p7".into()]).unwrap();
         assert_eq!(params.pane_id, "p7");
-        assert!(
-            super::pane_queue_params(&["--id".into(), "q42".into(), "--flush".into()]).is_none()
-        );
+        let params =
+            super::pane_queue_params(&["--id".into(), "q42".into(), "--flush".into()]).unwrap();
+        assert_eq!(params.id.as_deref(), Some("q42"));
+        assert!(params.flush);
     }
 
     #[test]

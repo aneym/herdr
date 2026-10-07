@@ -740,6 +740,114 @@ mod polite_send_tests {
         }
     }
 
+    /// Exercises the input API and terminal writer boundary: an agent-owned
+    /// composer permits its submit, but subsequent human input revokes ownership.
+    #[tokio::test]
+    async fn polite_send_agent_prompt_submit_and_human_takeover() {
+        for human_takeover in [false, true] {
+            let (mut app, pane, public, mut rx) = fixture(PoliteSendConfig::All);
+            let terminal_id = app.state.workspaces[0].terminal_id(pane).unwrap().clone();
+            app.state
+                .terminals
+                .get_mut(&terminal_id)
+                .unwrap()
+                .set_detected_state(
+                    Some(crate::detect::Agent::Claude),
+                    crate::detect::AgentState::Idle,
+                );
+            let runtime = app.terminal_runtimes.get(&terminal_id).unwrap();
+            runtime.test_process_pty_bytes("────────\r\n❯ \r\n────────".as_bytes());
+            let prompt = app
+                .send_polite_bytes(
+                    0,
+                    pane,
+                    "agent.prompt",
+                    bytes::Bytes::from_static(b"owned prompt"),
+                    false,
+                    false,
+                )
+                .unwrap();
+            assert_eq!(rx.try_recv().unwrap().as_ref(), b"owned prompt");
+            runtime.test_process_pty_bytes(
+                "\x1b[2J\x1b[H────────\r\n❯ owned prompt\r\n────────".as_bytes(),
+            );
+            if human_takeover {
+                apply_terminal_attach_input(runtime, b" human".to_vec()).unwrap();
+                assert_eq!(rx.try_recv().unwrap().as_ref(), b" human");
+            }
+            let submit = request(
+                &mut app,
+                Method::PaneSendKeys(PaneSendKeysParams {
+                    pane_id: public.clone(),
+                    keys: vec!["Enter".into()],
+                    if_idle: false,
+                    human: false,
+                }),
+            );
+            app.flush_polite_sends(Instant::now() + Duration::from_secs(2));
+            if human_takeover {
+                assert_eq!(submit["result"]["queued"], true);
+                assert!(rx.try_recv().is_err());
+                let queue = request(
+                    &mut app,
+                    Method::PaneQueue(PaneQueueParams {
+                        pane_id: public,
+                        id: None,
+                        flush: false,
+                        cancel: false,
+                    }),
+                );
+                assert_eq!(
+                    queue["result"]["sends"][0]["reason"],
+                    "human_composer_draft"
+                );
+                app.flush_polite_sends(Instant::now() + Duration::from_secs(121));
+                assert!(rx.try_recv().is_err());
+                assert!(
+                    !app.terminal_runtimes
+                        .get(&terminal_id)
+                        .unwrap()
+                        .has_polite_queue()
+                );
+            } else {
+                assert_ne!(prompt.state, crate::api::schema::PaneSendState::Queued);
+                assert_eq!(rx.try_recv().unwrap().as_ref(), b"\r");
+                assert!(rx.try_recv().is_err());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn polite_queue_flush_by_receipt_delivers_held_input() {
+        let (mut app, pane, public, mut rx) = fixture(PoliteSendConfig::All);
+        let runtime = app
+            .state
+            .runtime_for_pane_in_workspace(&app.terminal_runtimes, 0, pane)
+            .unwrap();
+        apply_terminal_attach_input(runtime, b"draft".to_vec()).unwrap();
+        assert_eq!(rx.try_recv().unwrap().as_ref(), b"draft");
+        let send = request(
+            &mut app,
+            Method::PaneSendText(PaneSendTextParams {
+                pane_id: public,
+                text: "queued".into(),
+                if_idle: false,
+                human: false,
+            }),
+        );
+        let queue_id = send["result"]["id"].as_str().unwrap().to_owned();
+        request(
+            &mut app,
+            Method::PaneQueue(PaneQueueParams {
+                pane_id: String::new(),
+                id: Some(queue_id),
+                flush: true,
+                cancel: false,
+            }),
+        );
+        assert_eq!(rx.try_recv().unwrap().as_ref(), b"queued");
+    }
+
     #[tokio::test]
     async fn polite_send_modes_and_explicit_flush() {
         for (mode, human, queued) in [
