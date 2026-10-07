@@ -1,6 +1,18 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Snapshot } from "./model";
+import { appTheme, terminalThemes } from "./theme";
+import type { Mode as ThemeMode } from "./theme";
+
+const themeSubscriptions = new Map<number, () => void>();
+const rgb = (hex: string | undefined): [number, number, number] => {
+  if (!hex || !/^#[0-9a-f]{6}$/i.test(hex)) throw new Error("Terminal default color must be #RRGGBB");
+  return [1, 3, 5].map(offset => parseInt(hex.slice(offset, offset + 2), 16)) as [number, number, number];
+};
+function reportTheme(handle: number, mode: ThemeMode): Promise<void> {
+  const palette = terminalThemes[mode];
+  return invoke<void>("attach_theme", { handle, dark: mode === "dark", foreground: rgb(palette.foreground), background: rgb(palette.background) });
+}
 
 export interface UpdateStatus { current: string; staged: { sha: string; built_at: string } | null; available: boolean; previous: { sha: string } | null }
 export interface MachineStatus { name: string; state: "connecting" | "up" | "down"; error?: string }
@@ -23,13 +35,24 @@ export const bridge = {
   attach: (machine: string, terminalId: string, cols: number, rows: number, mode: "attach" | "observe", fn: (event: AttachEvent) => void) => {
     const onEvent = new Channel<AttachEvent>();
     onEvent.onmessage = fn;
-    return invoke<number>("attach_open", { machine, terminalId, cols, rows, mode, onEvent });
+    return invoke<number>("attach_open", { machine, terminalId, cols, rows, mode, onEvent }).then(async handle => {
+      const theme = appTheme();
+      const unsubscribe = theme.subscribe(current => { void reportTheme(handle, current).catch(error => console.error("Host theme report failed", error)); });
+      themeSubscriptions.set(handle, unsubscribe);
+      try { await reportTheme(handle, theme.mode); }
+      catch (error) { unsubscribe(); themeSubscriptions.delete(handle); await invoke<void>("attach_close", { handle }); throw error; }
+      return handle;
+    });
   },
   input: (handle: number, data: string) => invoke<void>("attach_input", { handle, data }),
   resize: (handle: number, cols: number, rows: number) => invoke<void>("attach_resize", { handle, cols, rows }),
   scroll: (handle: number, up: boolean, lines: number) => invoke<void>("attach_scroll", { handle, up, lines }),
   takeControl: (handle: number) => invoke<void>("attach_take_control", { handle }),
-  close: (handle: number) => invoke<void>("attach_close", { handle }),
+  close: (handle: number) => {
+    themeSubscriptions.get(handle)?.();
+    themeSubscriptions.delete(handle);
+    return invoke<void>("attach_close", { handle });
+  },
   openUrl: (url: string) => invoke<void>("open_url", { url }),
   clipboardRead: () => invoke<string>("clipboard_read"),
   clipboardWrite: (text: string) => invoke<void>("clipboard_write", { text }),

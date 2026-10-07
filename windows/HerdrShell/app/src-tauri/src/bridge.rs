@@ -177,6 +177,37 @@ pub fn attach_resize(
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
+pub fn attach_theme(
+    attaches: State<'_, Attaches>,
+    handle: u32,
+    dark: bool,
+    foreground: [u8; 3],
+    background: [u8; 3],
+) -> Result<(), String> {
+    use herdr_shell_core::wire::{
+        ClientHostAppearance, ClientHostColor, ClientHostDefaultColorKind, ClientHostThemeUpdate,
+    };
+    let color = |[r, g, b]| ClientHostColor { r, g, b };
+    attaches
+        .get(handle)?
+        .host_theme(vec![
+            ClientHostThemeUpdate::DefaultColor {
+                kind: ClientHostDefaultColorKind::Foreground,
+                color: color(foreground),
+            },
+            ClientHostThemeUpdate::DefaultColor {
+                kind: ClientHostDefaultColorKind::Background,
+                color: color(background),
+            },
+            ClientHostThemeUpdate::Appearance(if dark {
+                ClientHostAppearance::Dark
+            } else {
+                ClientHostAppearance::Light
+            }),
+        ])
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 pub fn attach_scroll(
     attaches: State<'_, Attaches>,
     handle: u32,

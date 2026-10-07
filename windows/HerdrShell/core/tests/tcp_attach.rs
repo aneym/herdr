@@ -140,3 +140,23 @@ fn oversized_terminal_frame_closes_attach_from_prefix() {
     assert!(!client.is_writable());
     server.join().unwrap();
 }
+
+#[test]
+fn host_theme_is_sent_on_the_existing_attach_connection() {
+    use herdr_shell_core::wire::{ClientHostAppearance, ClientHostThemeUpdate};
+    let (client, server) = attach_server(|stream| {
+        let mut prefix = [0; 4];
+        stream.read_exact(&mut prefix).unwrap();
+        let mut payload = vec![0; u32::from_le_bytes(prefix) as usize];
+        stream.read_exact(&mut payload).unwrap();
+        assert_eq!(payload, vec![17, 2, 1]);
+    });
+    let (handle, events) = client.into_parts();
+    handle
+        .host_theme(vec![ClientHostThemeUpdate::Appearance(
+            ClientHostAppearance::Light,
+        )])
+        .unwrap();
+    server.join().unwrap();
+    drop(events);
+}

@@ -180,6 +180,7 @@ enum Command {
         direction: AttachScrollDirection,
         lines: u16,
     },
+    HostTheme(Vec<crate::wire::ClientHostThemeUpdate>),
     TakeControl,
     Detach,
 }
@@ -223,6 +224,7 @@ impl AttachClient {
             events: event_tx,
             writable: Arc::clone(&writable),
             modes: ModeTracker::default(),
+            host_theme: Vec::new(),
         };
         std::thread::Builder::new()
             .name("herdr-shell-attach".into())
@@ -300,6 +302,11 @@ impl AttachHandle {
             ));
         }
         self.command(Command::Input(data.to_vec()))
+    }
+
+    /// Reports host appearance and colors even while observing. Replayed on takeover.
+    pub fn host_theme(&self, updates: Vec<crate::wire::ClientHostThemeUpdate>) -> io::Result<()> {
+        self.command(Command::HostTheme(updates))
     }
 
     pub fn resize(&self, cols: u16, rows: u16) -> io::Result<()> {
@@ -496,6 +503,7 @@ struct Worker {
     events: Sender<AttachEvent>,
     writable: Arc<AtomicBool>,
     modes: ModeTracker,
+    host_theme: Vec<crate::wire::ClientHostThemeUpdate>,
 }
 
 enum Flow {
@@ -570,6 +578,14 @@ impl Worker {
                         })?;
                     }
                 }
+                Command::HostTheme(updates) => {
+                    for update in &updates {
+                        self.session.send(&ClientMessage::ClientShellHostTheme {
+                            update: update.clone(),
+                        })?;
+                    }
+                    self.host_theme = updates;
+                }
                 Command::TakeControl => {
                     let request = ClientMessage::ControlTerminal {
                         target: self.terminal_id.clone(),
@@ -579,6 +595,11 @@ impl Worker {
                         Ok(session) => {
                             let mut old = std::mem::replace(&mut self.session, session);
                             let _ = old.send(&ClientMessage::Detach);
+                            for update in &self.host_theme {
+                                self.session.send(&ClientMessage::ClientShellHostTheme {
+                                    update: update.clone(),
+                                })?;
+                            }
                             self.writable.store(true, Ordering::Release);
                         }
                         Err(err) => {

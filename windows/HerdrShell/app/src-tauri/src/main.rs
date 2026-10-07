@@ -126,6 +126,7 @@ fn main() {
             bridge::attach_open,
             bridge::attach_input,
             bridge::attach_resize,
+            bridge::attach_theme,
             bridge::attach_scroll,
             bridge::attach_take_control,
             bridge::attach_close,

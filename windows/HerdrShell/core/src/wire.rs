@@ -37,6 +37,7 @@ pub mod client_tag {
     pub const ATTACH_SCROLL: u32 = 6;
     pub const OBSERVE_TERMINAL: u32 = 7;
     pub const CONTROL_TERMINAL: u32 = 8;
+    pub const CLIENT_SHELL_HOST_THEME: u32 = 17;
 }
 
 /// herdr `ServerMessage` variant indices for the mirrored variants.
@@ -72,6 +73,33 @@ pub enum AttachScrollSource {
     PageKey { input: Vec<u8> },
 }
 
+/// Mirrors of herdr's host theme types; variant order is part of the wire protocol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ClientHostAppearance {
+    Dark,
+    Light,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ClientHostDefaultColorKind {
+    Foreground,
+    Background,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientHostColor {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ClientHostThemeUpdate {
+    DefaultColor {
+        kind: ClientHostDefaultColorKind,
+        color: ClientHostColor,
+    },
+    PaletteColors(Vec<(u8, ClientHostColor)>),
+    Appearance(ClientHostAppearance),
+}
+
 /// Mirror of herdr `TerminalFrame`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TerminalFrame {
@@ -102,6 +130,9 @@ pub enum ClientMessage {
         cell_width_px: u32,
         cell_height_px: u32,
         pixel_mouse: bool,
+    },
+    ClientShellHostTheme {
+        update: ClientHostThemeUpdate,
     },
     Detach,
     AttachTerminal {
@@ -240,6 +271,7 @@ impl ClientMessage {
             ClientMessage::TerminalHello { .. } => client_tag::TERMINAL_HELLO,
             ClientMessage::Input { .. } => client_tag::INPUT,
             ClientMessage::Resize { .. } => client_tag::RESIZE,
+            ClientMessage::ClientShellHostTheme { .. } => client_tag::CLIENT_SHELL_HOST_THEME,
             ClientMessage::Detach => client_tag::DETACH,
             ClientMessage::AttachTerminal { .. } => client_tag::ATTACH_TERMINAL,
             ClientMessage::AttachScroll { .. } => client_tag::ATTACH_SCROLL,
@@ -281,6 +313,7 @@ impl ClientMessage {
                 tag,
                 &(cols, rows, cell_width_px, cell_height_px, pixel_mouse),
             ),
+            ClientMessage::ClientShellHostTheme { update } => encode_variant(tag, &(update,)),
             ClientMessage::Detach => encode_variant(tag, &()),
             ClientMessage::AttachTerminal {
                 terminal_id,
@@ -338,6 +371,10 @@ impl ClientMessage {
                     },
                     used,
                 )
+            }
+            client_tag::CLIENT_SHELL_HOST_THEME => {
+                let ((update,), used) = decode_body::<(ClientHostThemeUpdate,)>(body)?;
+                (ClientMessage::ClientShellHostTheme { update }, used)
             }
             client_tag::DETACH => (ClientMessage::Detach, 0),
             client_tag::ATTACH_TERMINAL => {
@@ -623,5 +660,59 @@ mod tests {
             ServerMessage::decode(&payload),
             Err(WireError::TrailingBytes { tag: 9, .. })
         ));
+    }
+}
+
+#[cfg(test)]
+mod host_theme_goldens {
+    use super::*;
+
+    // Golden frames cross-checked against src/protocol/wire.rs and 54473887's
+    // attach encoder: ClientMessage tag 17, update tags DefaultColor=0 / Appearance=2,
+    // appearance Dark=0 / Light=1. The prefix is the little-endian payload length.
+    #[test]
+    fn host_theme_frames_match_server_protocol() {
+        for (update, golden) in [
+            (
+                ClientHostThemeUpdate::Appearance(ClientHostAppearance::Dark),
+                vec![3, 0, 0, 0, 17, 2, 0],
+            ),
+            (
+                ClientHostThemeUpdate::Appearance(ClientHostAppearance::Light),
+                vec![3, 0, 0, 0, 17, 2, 1],
+            ),
+            (
+                ClientHostThemeUpdate::DefaultColor {
+                    kind: ClientHostDefaultColorKind::Foreground,
+                    color: ClientHostColor {
+                        r: 205,
+                        g: 214,
+                        b: 244,
+                    },
+                },
+                vec![6, 0, 0, 0, 17, 0, 0, 205, 214, 244],
+            ),
+            (
+                ClientHostThemeUpdate::DefaultColor {
+                    kind: ClientHostDefaultColorKind::Background,
+                    color: ClientHostColor {
+                        r: 255,
+                        g: 255,
+                        b: 255,
+                    },
+                },
+                vec![6, 0, 0, 0, 17, 0, 1, 255, 255, 255],
+            ),
+        ] {
+            let message = ClientMessage::ClientShellHostTheme { update };
+            assert_eq!(
+                frame(&message.encode().expect("encode theme")).expect("frame theme"),
+                golden
+            );
+            assert_eq!(
+                ClientMessage::decode(&golden[4..]).expect("decode theme"),
+                message
+            );
+        }
     }
 }
