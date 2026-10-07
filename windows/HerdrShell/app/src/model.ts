@@ -56,6 +56,12 @@ export function spaceOpen(space: SidebarRow, rows: SidebarRow[], selected: strin
   if (space.parked) return false;
   return rows.some(r => r.id === selected && r.spaceId === space.id) || space.status === "working" || space.status === "blocked" || space.status === "done";
 }
+/** Bulk folds share the manual space keys; tab/section state is not rewritten. */
+export function foldAllSpaces(rows: SidebarRow[], expanded: Record<string, boolean>, open: boolean): Record<string, boolean> {
+  const next = { ...expanded };
+  for (const space of rows.filter(row => row.kind === "space")) next[foldKey(space)] = open;
+  return next;
+}
 /** Reveal on select, as the Mac's SpacesChrome.reveal: the fold key to open so the selected tab's
  *  space shows its tabs, or null when it already does. Hidden spaces stay in the Hidden group. */
 export function revealFold(rows: SidebarRow[], selected: string | null, expanded: Record<string, boolean>): string | null {

@@ -363,6 +363,12 @@ extension HerdrModel {
         return MachineMerge.space(of: tabId, local: local, machines: MachineRows.inputs(machines, localProtocol: s.protocol))
     }
 
+    var sidebarSpaces: [SpacesInput.Space] {
+        guard let snapshot else { return [] }
+        let local = SpacesInput(spaces: Self.spaces(snapshot), tabs: [], focusedTab: nil)
+        return MachineMerge.merge(local, machines: MachineRows.inputs(machines, localProtocol: snapshot.protocol)).spaces
+    }
+
     func spacesRows(state: SidebarState) -> [SpacesRow] {
         guard let s = snapshot else { return [SpacesRow(id: "agents", kind: .title, title: "agents")] }
         var input = SpacesInput(spaces: Self.spaces(s), tabs: s.tabs.map { tab in

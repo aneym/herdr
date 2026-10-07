@@ -2171,3 +2171,58 @@ fn request_dot_agents_only() {
         }
     }
 }
+
+#[test]
+fn goal_row_folds_all_spaces_but_keeps_agent_and_pinned_rows() {
+    let mut state = tree_state(ClientTreeChrome::default());
+    state.config.factory.enabled = true;
+    let mut overlay = crate::factory_overlay::FactoryOverlay::default();
+    overlay.tabs.insert(
+        "tab_1".into(),
+        crate::factory_overlay::TabTag {
+            goal: Some("rails".into()),
+            section: Some(crate::factory_overlay::TabSection::Orchestrator),
+            ..Default::default()
+        },
+    );
+    let mut snapshot = tree_snapshot();
+    snapshot.workspaces[1].parked = true;
+    snapshot.pinned_tabs = vec![
+        crate::protocol::ClientShellPinnedTab {
+            tab_id: "tab_1".into(),
+            workspace_id: "ws_1".into(),
+            role: Some(crate::api::schema::TabRole::Agent),
+        },
+        crate::protocol::ClientShellPinnedTab {
+            tab_id: "tab_2".into(),
+            workspace_id: "ws_1".into(),
+            role: None,
+        },
+    ];
+    state.set_snapshot(Box::new(snapshot));
+    state.factory_overlay = Some(std::sync::Arc::new(overlay));
+    state.set_pane_surface(surface());
+    for collapsed in [true, false] {
+        state.compose(106, 40).expect("frame");
+        let (row, _, _) = state.hits.factory_goal_picker.clone().expect("goal row");
+        state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: row.right() - 1,
+            row: row.y,
+            modifiers: KeyModifiers::empty(),
+        })]);
+        let tree = state
+            .tree_chrome
+            .get(&crate::client::endpoint::ClientEndpointId::Local)
+            .expect("chrome");
+        for id in ["ws_1", "ws_2"] {
+            assert_eq!(tree.collapsed_spaces.contains(id), collapsed);
+        }
+        assert_eq!(tree.expanded_parked_spaces.contains("ws_2"), !collapsed);
+        let rows = shape(&state, tree);
+        assert!(rows.contains(&"agents".into()));
+        assert!(rows.contains(&"pinned".into()));
+        state.compose(106, 40).expect("folded frame");
+        assert_eq!(state.hits.pinned_rows.len(), 2);
+    }
+}

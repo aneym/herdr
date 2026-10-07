@@ -419,6 +419,7 @@ pub(super) enum AgentPanelListEntry {
     FactoryGoalPicker {
         filter: Option<String>,
         choices: Vec<String>,
+        any_expanded: bool,
     },
     FactoryShowAll {
         workspace_id: String,
@@ -962,6 +963,10 @@ pub(super) fn tree_list_entries_with_overlay(
                     .clone()
                     .filter(|value| choices.contains(value)),
                 choices,
+                any_expanded: snapshot
+                    .workspaces
+                    .iter()
+                    .any(|space| !tree.space_collapsed(&priority, &space.workspace_id)),
             });
         }
     }

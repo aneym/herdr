@@ -19,6 +19,7 @@ struct SpacesRowView: View {
     var showResume = false
     /// The goal row's filter menu; the sidebar owns its choices.
     var goal: AnyView? = nil
+    var collapseSpaces: AnyView? = nil
     var click: (String) -> Void = { _ in }
     var resume: () -> Void = {}
 
@@ -70,6 +71,7 @@ struct SpacesRowView: View {
             }
             if let machine = row.badge { badge(machine) }
             Spacer(minLength: 4)
+            if row.kind == .goal { collapseSpaces }
             if !row.trailing.isEmpty, row.kind != .goal {
                 trailingText.font(.system(size: 10.5)).monospacedDigit().foregroundStyle(row.link == nil ? t.mute : t.accent)
                     .lineLimit(1).truncationMode(.tail)

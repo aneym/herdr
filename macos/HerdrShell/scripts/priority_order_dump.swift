@@ -26,6 +26,17 @@ import Foundation
         func dump(_ scenario: String, overlay: Overlay = Overlay(), chrome: SpacesChrome = SpacesChrome()) {
             for row in SpacesTree.build(input, overlay: overlay, chrome: chrome, now: 0) { print(scenario + "|" + row.dump) }
         }
+        var allInput = input
+        allInput.tabs.append(.init(id: "leadAll", space: "a", label: "Lead", pinIndex: 4, role: "agent"))
+        var allChrome = SpacesChrome()
+        allChrome.collapsedSections = ["d:SCOPING"]
+        allChrome.expandedTabs = ["plain1"]
+        for scenario in ["collapseAll", "expandAll"] {
+            allChrome.toggleAllSpaces(allInput.spaces)
+            allChrome = try JSONDecoder().decode(SpacesChrome.self, from: JSONEncoder().encode(allChrome))
+            print("\(scenario)Chrome|\(allChrome.collapsedSpaces.count)|\(allChrome.expandedParkedSpaces.contains("p"))|\(allChrome.collapsedSections.contains("d:SCOPING"))|\(allChrome.expandedTabs.contains("plain1"))")
+            for row in SpacesTree.build(allInput, overlay: Overlay(), chrome: allChrome, now: 0) { print(scenario + "|" + row.dump) }
+        }
         dump("rank")
         dump("partition", chrome: oldChrome)
         var overlay = Overlay(); overlay.spaceGroups = [.init(name: "Manual", spaces: ["a", "c", "d"])]

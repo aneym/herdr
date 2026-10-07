@@ -267,6 +267,7 @@ struct SidebarView: View {
             hovered: hoveredSpaceRow == row.id,
             showResume: hoveredSpaceRow == row.id && row.kind == .tab && row.tab.map { model.spacesOverlay.tabs[$0]?.mode == "parked" } == true,
             goal: row.kind == .goal ? AnyView(goalMenu) : nil,
+            collapseSpaces: row.kind == .goal ? AnyView(collapseSpacesButton) : nil,
             click: { spacesClick(row, part: $0) },
             resume: { if let tab = row.tab { resume(tab) } })
         .contentShape(Rectangle()).onTapGesture { spacesClick(row, part: "body") }
@@ -291,6 +292,17 @@ struct SidebarView: View {
         }
         .pinDraggable(row, rows: all, frames: { state.rowFrames }, drag: pinDrag, model: model, t: t)
         .clickTarget(row.id)
+    }
+
+    private var collapseSpacesButton: some View {
+        let expanded = state.spacesChrome.anySpaceExpanded(model.sidebarSpaces)
+        return Button {
+            state.spacesChrome.toggleAllSpaces(model.sidebarSpaces)
+            state.saveSpacesChrome()
+        } label: {
+            Image(systemName: expanded ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
+                .font(.system(size: 10)).foregroundStyle(t.mute)
+        }.buttonStyle(.plain).help(expanded ? "Collapse all spaces" : "Expand all spaces")
     }
 
     private var goalMenu: some View {

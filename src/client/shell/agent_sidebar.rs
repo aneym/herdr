@@ -739,7 +739,11 @@ fn render_panel_list_entry(
             );
             hits.automations_header = rect;
         }
-        AgentPanelListEntry::FactoryGoalPicker { filter, choices } => {
+        AgentPanelListEntry::FactoryGoalPicker {
+            filter,
+            choices,
+            any_expanded,
+        } => {
             put_text(
                 buffer,
                 rect.x,
@@ -750,8 +754,9 @@ fn render_panel_list_entry(
                     .fg(config.palette.overlay0)
                     .add_modifier(Modifier::DIM),
             );
+            let fold = Rect::new(rect.right().saturating_sub(2), rect.y, 2.min(rect.width), 1);
             let clear = if filter.is_some() {
-                Rect::new(rect.right().saturating_sub(2), rect.y, 2.min(rect.width), 1)
+                Rect::new(fold.x.saturating_sub(2), rect.y, 2.min(rect.width), 1)
             } else {
                 Rect::default()
             };
@@ -762,7 +767,7 @@ fn render_panel_list_entry(
                 buffer,
                 rect.x + 7,
                 rect.y,
-                rect.width.saturating_sub(7 + clear.width),
+                rect.width.saturating_sub(7 + clear.width + fold.width),
                 &format!("{value} ▾"),
                 Style::default().fg(if filter.is_some() {
                     config.palette.blue
@@ -780,6 +785,15 @@ fn render_panel_list_entry(
                     Style::default().fg(config.palette.blue),
                 );
             }
+            put_text(
+                buffer,
+                fold.x,
+                fold.y,
+                fold.width,
+                if *any_expanded { " ▸" } else { " ▾" },
+                Style::default().fg(config.palette.subtext0),
+            );
+            hits.spaces_fold_all = Some((fold, *any_expanded));
             hits.factory_goal_picker = Some((rect, clear, choices.clone()));
         }
         AgentPanelListEntry::FactorySection {

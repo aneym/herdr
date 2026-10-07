@@ -102,6 +102,18 @@ struct SpacesChrome: Codable {
         pinnedSpaces = c.value("pinnedSpaces", []); collapsedSpaces = c.value("collapsedSpaces", []); expandedParkedSpaces = c.value("expandedParkedSpaces", []); hiddenExpanded = c.value("hiddenExpanded", false); goalFilter = c.optional("goalFilter"); focusedSection = c.value("focusedSection", [:])
         if let legacy: String = c.optional("focusedSection"), let split = legacy.lastIndex(of: ":") { focusedSection[String(legacy[..<split])] = String(legacy[legacy.index(after: split)...]) }
     }
+    func anySpaceExpanded(_ spaces: [SpacesInput.Space]) -> Bool {
+        spaces.contains { !$0.collapsed && !collapsedSpaces.contains($0.id) && (!$0.parked || expandedParkedSpaces.contains($0.id)) }
+    }
+    mutating func toggleAllSpaces(_ spaces: [SpacesInput.Space]) {
+        if anySpaceExpanded(spaces) {
+            collapsedSpaces.formUnion(spaces.map(\.id))
+            expandedParkedSpaces.removeAll()
+        } else {
+            collapsedSpaces.subtract(spaces.map(\.id))
+            expandedParkedSpaces.formUnion(spaces.filter(\.parked).map(\.id))
+        }
+    }
     /// Opens a selected tab's space, parked or folded, as the TUI's reveal does
     /// (client/shell/tree.rs). True when the chrome changed and needs saving.
     mutating func reveal(space: String, parked: Bool, selected: String? = nil, rows: [SpacesRow] = []) -> Bool {

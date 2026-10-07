@@ -127,6 +127,7 @@ pub(super) struct ShellHitMap {
     pub(super) factory_scope_urls: Vec<(Rect, String)>,
     pub(super) factory_sections: Vec<FactorySectionHit>,
     pub(super) factory_goal_picker: Option<(Rect, Rect, Vec<String>)>,
+    pub(super) spaces_fold_all: Option<(Rect, bool)>,
     pub(super) factory_show_all: Vec<(Rect, String)>,
     /// Disclosure regions for collapsible ownership / orchestrator groups.
     pub(super) agent_groups: Vec<AgentGroupHit>,

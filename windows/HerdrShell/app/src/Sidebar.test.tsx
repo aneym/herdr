@@ -15,7 +15,7 @@ const stored = new Map<string, string>();
 Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: (k: string) => stored.get(k) ?? null, setItem: (k: string, v: string) => void stored.set(k, v), clear: () => stored.clear() } });
 const snapshot: Snapshot = {
   workspaces: [{ workspace_id: "a", number: 1, label: "alpha" }, { workspace_id: "b", number: 2, label: "beta" }, { workspace_id: "r", number: 3, label: "rails", parked: true }],
-  tabs: [{ tab_id: "a:1", workspace_id: "a", number: 1 }, { tab_id: "b:1", workspace_id: "b", number: 1 }, { tab_id: "r:1", workspace_id: "r", number: 1 }, { tab_id: "a:2", workspace_id: "a", number: 2, pin_index: 0, label: "pinned chat" }],
+  tabs: [{ tab_id: "a:1", workspace_id: "a", number: 1 }, { tab_id: "b:1", workspace_id: "b", number: 1 }, { tab_id: "r:1", workspace_id: "r", number: 1 }, { tab_id: "a:2", workspace_id: "a", number: 2, pin_index: 0, label: "pinned chat" }, { tab_id: "b:2", workspace_id: "b", number: 2, pin_index: 1, role: "agent", label: "lead" }],
 };
 let drive: { select: (id: string) => void; show: (visible: boolean) => void } = { select: () => {}, show: () => {} };
 function Shell() {
@@ -54,6 +54,19 @@ describe.each([["plain", false], ["StrictMode", true]])("sidebar reveal on selec
     expect(open("alpha")).toBe("false");
     act(() => drive.select("a:1"));
     expect(open("alpha")).toBe("true");
+  });
+  it("collapses and expands every space without folding AGENTS or PINNED, and persists", () => {
+    act(() => drive.select("a:1"));
+    act(() => host.querySelector<HTMLButtonElement>('[aria-label="Collapse all spaces"]')!.click());
+    for (const label of ["alpha", "beta", "rails"]) expect(open(label)).toBe("false");
+    expect(host.querySelector('[data-row="pinned:a:2"]')).not.toBeNull();
+    expect(host.querySelector('[data-row="agent:b:2"]')).not.toBeNull();
+    act(() => drive.show(false)); act(() => drive.show(true));
+    for (const label of ["alpha", "beta", "rails"]) expect(open(label)).toBe("false");
+    act(() => host.querySelector<HTMLButtonElement>('[aria-label="Expand all spaces"]')!.click());
+    for (const label of ["alpha", "beta", "rails"]) expect(open(label)).toBe("true");
+    expect(host.querySelector('[data-row="pinned:a:2"]')).not.toBeNull();
+    expect(host.querySelector('[data-row="agent:b:2"]')).not.toBeNull();
   });
   it("opens a parked space for its selected tab, once", () => {
     expect(open("rails")).toBe("false");

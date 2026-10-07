@@ -2843,6 +2843,36 @@ impl ClientShellState {
         mouse: crossterm::event::MouseEvent,
         outcome: &mut ClientShellInput,
     ) -> bool {
+        if let Some((_, expanded)) = self
+            .hits
+            .spaces_fold_all
+            .filter(|(rect, _)| super::contains(*rect, point))
+        {
+            if let Some(snapshot) = self.snapshot.as_ref() {
+                let spaces: Vec<_> = snapshot
+                    .workspaces
+                    .iter()
+                    .map(|space| (space.workspace_id.clone(), space.parked))
+                    .collect();
+                let tree = self.tree_chrome_mut();
+                if expanded {
+                    tree.collapsed_spaces
+                        .extend(spaces.into_iter().map(|(id, _)| id));
+                    tree.expanded_parked_spaces.clear();
+                } else {
+                    for (id, parked) in spaces {
+                        tree.collapsed_spaces.remove(&id);
+                        if parked {
+                            tree.expanded_parked_spaces.insert(id);
+                        }
+                    }
+                }
+                self.agent_scroll = 0;
+                self.persist_chrome_preferences(outcome);
+                outcome.repaint = true;
+            }
+            return true;
+        }
         if let Some((rect, clear, choices)) = self
             .hits
             .factory_goal_picker

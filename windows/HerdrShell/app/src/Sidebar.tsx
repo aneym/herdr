@@ -9,7 +9,7 @@ import AgentFace from "./AgentFace";
 import { DRAG_THRESHOLD, slotAt } from "./pinDrag";
 import type { PinSection, RowBox } from "./pinDrag";
 import type { MachineStatus } from "./bridge";
-import { foldKey, noteSelection, revealOnSelect, spaceOpen } from "./model";
+import { foldAllSpaces, foldKey, noteSelection, revealOnSelect, spaceOpen } from "./model";
 import type { RevealMemo, SidebarRow } from "./model";
 export function Status({ status }: { status: string }) { return <span className={`status ${status}`} aria-label={status}>{status === "blocked" ? "■" : "●"}</span>; }
 function RenameInput({ label, commit, cancel }: { label: string; commit: (label: string) => Promise<void>; cancel: () => void }) {
@@ -53,6 +53,12 @@ export default function Sidebar({ snapshot = {}, catalog = new LaneSnapshot(), m
     else setManualOpen(previous => ({ ...previous, [id]: open }));
   };
 
+  const anySpaceExpanded = rows.some(row => row.kind === "space" && spaceOpen(row, rows, selected, expanded));
+  const toggleAllSpaces = () => setExpanded(previous => {
+    const next = foldAllSpaces(rows, previous, !anySpaceExpanded);
+    try { localStorage.setItem(foldStore, JSON.stringify(next)); } catch { /* Storage can be disabled by WebView policy. */ }
+    return next;
+  });
   const toggle = (id: string, value: boolean) => setExpanded(previous => { const next = { ...previous, [id]: value }; try { localStorage.setItem(foldStore, JSON.stringify(next)); } catch { /* Storage can be disabled by WebView policy. */ } return next; });
   // Drag an AGENTS or PINNED row within its section, as the Mac's PinDrag: the row follows the
   // pointer, a line marks the slot, a release on the section moves the pin, Esc or a release
@@ -156,6 +162,7 @@ export default function Sidebar({ snapshot = {}, catalog = new LaneSnapshot(), m
       </div>)}
     </> : <>
     {["AGENTS", "PINNED"].map(section => { const items = rows.filter(r => r.section === section); return items.length ? <section key={section}><h2>{section}</h2>{items.map(tabRow)}</section> : null; })}
+    <div className="sidebar-row muted"><span>goal</span><span className="label">All ▾</span><button className="chevron" aria-label={anySpaceExpanded ? "Collapse all spaces" : "Expand all spaces"} title={anySpaceExpanded ? "Collapse all spaces" : "Expand all spaces"} onClick={toggleAllSpaces}><svg width="12" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={anySpaceExpanded ? "m8 4 4 4 4-4M12 2v6m-4 12 4-4 4 4M12 16v6M4 12h16" : "m8 6 4-4 4 4M12 2v6m-4 10 4 4 4-4M12 16v6M4 12h16"} /></svg></button></div>
     <section className="spaces">{rows.filter(r => r.kind === "space" && !r.hidden).map(spaceRow)}
     {rows.some(r => r.kind === "space" && r.hidden) && <><button className="sidebar-row muted" aria-expanded={hidden} onClick={() => setHidden(!hidden)}><span className="chevron">{hidden ? "⌄" : "›"}</span>Hidden</button>{(hidden || rows.some(r => r.hidden && r.id === renaming)) && rows.filter(r => r.kind === "space" && r.hidden).map(spaceRow)}</>}
     </section>
