@@ -74,6 +74,7 @@ herdr pane layout --current
 herdr pane neighbor --direction right --current
 herdr pane resize --direction right --amount 0.1 --current
 herdr pane swap --direction right --current
+herdr pane place w1:p3 --beside w1:p1 --side left --dry-run
 herdr pane zoom --on --current
 herdr pane split w1:p1 --direction right --ratio 0.333
 ```
@@ -104,7 +105,7 @@ Raw socket method names use dot notation:
 | Worktree | `worktree.list`, `worktree.create`, `worktree.open`, `worktree.remove` |
 | Tab | `tab.create`, `tab.list`, `tab.get`, `tab.focus`, `tab.rename`, `tab.move`, `tab.set_pinned`, `tab.set_role`, `tab.pin_move`, `tab.close` |
 | Desk | `desk.open`, `desk.close`, `desk.focus`, `desk.list`, `desk.read` |
-| Pane | `pane.split`, `pane.swap`, `pane.move`, `pane.zoom`, `pane.layout`, `pane.process_info`, `pane.neighbor`, `pane.edges`, `pane.focus_direction`, `pane.resize`, `pane.list`, `pane.current`, `pane.get`, `pane.rename`, `pane.send_text`, `pane.send_keys`, `pane.send_input`, `pane.read`, `pane.report_agent`, `pane.report_agent_session`, `pane.report_metadata`, `pane.clear_agent_authority`, `pane.release_agent`, `pane.close`, `pane.wait_for_output` |
+| Pane | `pane.split`, `pane.swap`, `pane.move`, `pane.place`, `pane.zoom`, `pane.layout`, `pane.process_info`, `pane.neighbor`, `pane.edges`, `pane.focus_direction`, `pane.resize`, `pane.list`, `pane.current`, `pane.get`, `pane.rename`, `pane.send_text`, `pane.send_keys`, `pane.send_input`, `pane.read`, `pane.report_agent`, `pane.report_agent_session`, `pane.report_metadata`, `pane.clear_agent_authority`, `pane.release_agent`, `pane.close`, `pane.wait_for_output` |
 | Popup | `popup.close` |
 | Layout | `layout.export`, `layout.apply`, `layout.set_split_ratio` |
 | Agent | `agent.list`, `agents.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send_keys`, `agent.prompt`, `agent.wait`, `agent.rename`, `agent.focus`, `agent.start`, `agent.owner.set`, `agent.owner.clear`, `agent.group.set`, `agent.group.collapse`, `agent.view.set`, `agent.view.clear` |
@@ -137,7 +138,7 @@ as JSON for clients and agents that want a simple bootstrap command.
 
 Pane control methods use public pane ids such as `w1:p1`. Methods whose
 schema makes `pane_id` optional use the server's active focused pane when it is
-omitted. `pane.move` always requires the source `pane_id`.
+omitted. `pane.move` and `pane.place` always require the source `pane_id`.
 
 `pane.send_keys` and `pane.send_input.keys` accept Herdr key-combo strings:
 plain printable keys, special keys like `enter` and `esc`, modifier chords
@@ -320,6 +321,45 @@ Cross-workspace moves keep the internal pane and terminal alive but assign a new
 public pane id in the destination workspace. Subscribers can listen for
 `pane.moved`; Herdr does not emit fake pane close/create events for the moved
 terminal process.
+
+`pane.place` puts a running pane on one side of another pane, or at the outer
+edge of a tab. The target can be in the same tab, another tab, or another
+workspace:
+
+```json
+{"id":"req_place_beside","method":"pane.place","params":{"pane_id":"w1:p3","target":{"type":"pane","pane_id":"w1:p1"},"side":"left","focus":true}}
+{"id":"req_place_edge","method":"pane.place","params":{"pane_id":"w1:p3","target":{"type":"tab","tab_id":"w1:t2"},"side":"right","size":0.25}}
+{"id":"req_place_preview","method":"pane.place","params":{"pane_id":"w1:p3","target":{"type":"pane","pane_id":"w1:p1"},"side":"left","dry_run":true}}
+```
+
+`target` is `{"type": "pane", "pane_id"}` to split beside that pane, or
+`{"type": "tab", "tab_id"}` to split the whole tab at its outer edge. `side` is
+`left`, `right`, `up`, or `down`; `left` and `up` put the placed pane before the
+target. `size` is the placed pane's share of the new split, clamped to
+`0.1`..`0.9`. It defaults to `0.5` beside a pane and to one third at a tab edge.
+`focus` defaults to `false`.
+
+With `dry_run: true`, Herdr computes the result on a copy and returns it without
+changing the session or emitting events. The response has the same fields as the
+real call would return, so a client can preview where the pane will land.
+
+The response is `type: "pane_place"` with a `place` object: `changed`,
+`dry_run`, optional `reason`, `pane_id`, `previous_pane_id`, `placed_rect`,
+`target_layout`, optional `source_layout`, optional `closed_tab_id` and
+`closed_workspace_id`, and `focused_pane_id`. `placed_rect` is where the pane is,
+or would be, in the target tab's layout. `source_layout` is present for moves
+out of another tab that stays open. `pane_id` is the pane's id after the move; it
+differs from `previous_pane_id` only for cross-workspace moves, and a dry run
+reports the id the move would assign. Moving a tab's last pane out closes that
+tab, and the last tab of a workspace closes the workspace.
+
+Reason values are `same_pane` (the target is the placed pane), `zoomed_tab`
+(the source or target tab is zoomed), `no_change` (the layout would not
+change), and `not_tiled` (the placement cannot be computed, such as a tab's
+only pane placed at that tab's own edge). Unchanged calls return the current
+layout. Errors are `pane_not_found` for an unknown source or target pane,
+`tab_not_found` for an unknown target tab, and `pane_layout_unavailable`.
+A changed placement emits `pane.moved` and `layout.updated`.
 
 `pane.zoom` toggles, enables, or disables zoom for the target pane's tab:
 
