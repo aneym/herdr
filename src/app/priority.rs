@@ -68,7 +68,7 @@ pub(crate) fn tab_rank(
     };
     matching_rank(config, |rule| {
         rule.strip_prefix("tab:")
-            .is_some_and(|pattern| pattern == id || glob(pattern, &label))
+            .is_some_and(|pattern| pattern.eq_ignore_ascii_case(id) || glob(pattern, &label))
     })
     .unwrap_or(workspace)
 }
@@ -208,6 +208,21 @@ impl super::AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Config rules are lowercased on load, so a tab-id rule must still match a
+    /// mixed-case public id such as "w5H:t01".
+    #[test]
+    fn priority_tab_id_rule_matches_after_normalization() {
+        let config = normalized(&SidebarPriorityConfig {
+            order: vec!["tab:w5H:t01".into()],
+            last: vec![],
+        });
+        let rest = Rank {
+            value: 1,
+            parked: false,
+        };
+        assert_eq!(tab_rank(&config, rest, "w5H:t01", "other").value, 0);
+        assert_eq!(tab_rank(&config, rest, "w5H:t02", "other").value, 1);
+    }
     /// Pure state ranking/partition algorithm guards stable ties, agent isolation,
     /// rename insertion and unchanged positional identity under adversarial state.
     #[test]
