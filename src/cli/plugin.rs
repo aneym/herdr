@@ -2985,8 +2985,8 @@ mod tests {
         let client = crate::api::client::ApiClient::for_target(
             crate::api::client::ConnectionTarget::SocketPath(socket_path.clone()),
         );
-        let code =
-            crate::cli::target::with_test_client(client, || plugin_reload(&wrong_pane_args)).unwrap();
+        let code = crate::cli::target::with_test_client(client, || plugin_reload(&wrong_pane_args))
+            .unwrap();
         assert_eq!(code, 1);
         assert_eq!(
             listener.accept().unwrap_err().kind(),
