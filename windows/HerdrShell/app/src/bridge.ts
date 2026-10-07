@@ -40,7 +40,7 @@ export const bridge = {
       const unsubscribe = theme.subscribe(current => { void reportTheme(handle, current).catch(error => console.error("Host theme report failed", error)); });
       themeSubscriptions.set(handle, unsubscribe);
       try { await reportTheme(handle, theme.mode); }
-      catch (error) { unsubscribe(); themeSubscriptions.delete(handle); await invoke<void>("attach_close", { handle }); throw error; }
+      catch (error) { console.error("Host theme report failed", error); }
       return handle;
     });
   },

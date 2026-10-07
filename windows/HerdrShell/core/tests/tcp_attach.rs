@@ -16,11 +16,12 @@ fn send(stream: &mut TcpStream, message: ServerMessage) {
         .unwrap();
 }
 
-fn read_client_frame(stream: &mut TcpStream) {
+fn read_client_frame(stream: &mut TcpStream) -> Vec<u8> {
     let mut prefix = [0; 4];
     stream.read_exact(&mut prefix).unwrap();
     let mut payload = vec![0; u32::from_le_bytes(prefix) as usize];
     stream.read_exact(&mut payload).unwrap();
+    payload
 }
 
 fn attach_server(
@@ -157,6 +158,111 @@ fn host_theme_is_sent_on_the_existing_attach_connection() {
             ClientHostAppearance::Light,
         )])
         .unwrap();
+    server.join().unwrap();
+    drop(events);
+}
+
+/// Observe reports belong to the new controller connection after takeover, not just
+/// the old observer socket. The existing theme test never changes connections.
+#[test]
+fn takeover_replays_host_theme_after_control_terminal() {
+    use herdr_shell_core::wire::{
+        ClientHostAppearance, ClientHostColor, ClientHostDefaultColorKind, ClientHostThemeUpdate,
+        ClientMessage,
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let expected = vec![
+        vec![17, 2, 1],
+        vec![17, 0, 0, 58, 58, 56],
+        vec![17, 0, 1, 255, 255, 255],
+    ];
+    let server = std::thread::spawn(move || {
+        let mut observer = None;
+        for controlling in [false, true] {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(TIMEOUT)).unwrap();
+            stream.set_write_timeout(Some(TIMEOUT)).unwrap();
+            read_client_frame(&mut stream);
+            send(
+                &mut stream,
+                ServerMessage::Welcome {
+                    version: PROTOCOL_VERSION,
+                    encoding: RenderEncoding::TerminalAnsi,
+                    error: None,
+                },
+            );
+            let request = ClientMessage::decode(&read_client_frame(&mut stream)).unwrap();
+            if controlling {
+                assert_eq!(
+                    request,
+                    ClientMessage::ControlTerminal {
+                        target: "term-test".into(),
+                        takeover: true,
+                    }
+                );
+            } else {
+                assert_eq!(
+                    request,
+                    ClientMessage::ObserveTerminal {
+                        target: "term-test".into()
+                    }
+                );
+            }
+            send(
+                &mut stream,
+                ServerMessage::Terminal(TerminalFrame {
+                    seq: 1,
+                    width: 120,
+                    height: 40,
+                    full: true,
+                    bytes: b"ready".to_vec(),
+                }),
+            );
+            for payload in &expected {
+                assert_eq!(&read_client_frame(&mut stream), payload);
+            }
+            if !controlling {
+                observer = Some(stream);
+            } else {
+                assert_eq!(
+                    ClientMessage::decode(&read_client_frame(observer.as_mut().unwrap())).unwrap(),
+                    ClientMessage::Detach
+                );
+            }
+        }
+    });
+    let client = AttachClient::connect(
+        &Endpoint::Tcp(addr),
+        "term-test",
+        120,
+        40,
+        AttachMode::Observe,
+    )
+    .unwrap();
+    let (handle, events) = client.into_parts();
+    handle
+        .host_theme(vec![
+            ClientHostThemeUpdate::Appearance(ClientHostAppearance::Light),
+            ClientHostThemeUpdate::DefaultColor {
+                kind: ClientHostDefaultColorKind::Foreground,
+                color: ClientHostColor {
+                    r: 58,
+                    g: 58,
+                    b: 56,
+                },
+            },
+            ClientHostThemeUpdate::DefaultColor {
+                kind: ClientHostDefaultColorKind::Background,
+                color: ClientHostColor {
+                    r: 255,
+                    g: 255,
+                    b: 255,
+                },
+            },
+        ])
+        .unwrap();
+    handle.take_control().unwrap();
     server.join().unwrap();
     drop(events);
 }
