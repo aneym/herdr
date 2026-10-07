@@ -351,6 +351,10 @@ mod tests {
             Some(true),
             "tab.pin_move must advertise a shape"
         );
+        assert!(
+            actual.remove("pane.place").is_some(),
+            "pane.place must advertise a shape"
+        );
         // Additive profile, role and desk methods are advertised separately;
         // the published endpoint v1 fixture remains immutable.
         for method in [
