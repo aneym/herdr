@@ -172,6 +172,7 @@ fn failure(id: &str, message: &str) -> Vec<u8> {
     serde_json::to_vec(&crate::api::schema::ErrorResponse {
         id: id.into(),
         error: crate::api::schema::ErrorBody {
+            reason: None,
             code: "surface_rejected".into(),
             message: message.into(),
         },

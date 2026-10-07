@@ -334,7 +334,7 @@ struct HerdrCommands {
 
     enum RestartReply {
         case success
-        case failure(code: String, message: String)
+        case failure(code: String, message: String, reason: String?)
     }
 
     func restartAgent(paneId: String, force: Bool = false) -> RestartReply {
@@ -342,14 +342,14 @@ struct HerdrCommands {
         if force { params["force"] = true }
         guard let data = call("agent.restart", params),
               let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return .failure(code: "transport", message: "Could not reach the agent server.")
+            return .failure(code: "transport", message: "Could not reach the agent server.", reason: nil)
         }
         if let error = envelope["error"] as? [String: Any] {
             return .failure(code: error["code"] as? String ?? "unknown",
-                            message: error["message"] as? String ?? "Could not restart the agent.")
+                            message: error["message"] as? String ?? "Could not restart the agent.", reason: error["reason"] as? String)
         }
         guard let result = envelope["result"] as? [String: Any], result["ok"] as? Bool == true else {
-            return .failure(code: "invalid_response", message: "The server did not confirm the restart.")
+            return .failure(code: "invalid_response", message: "The server did not confirm the restart.", reason: nil)
         }
         return .success
     }

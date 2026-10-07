@@ -591,6 +591,7 @@ fn popup_command_blocks_underlying_input_until_surface_or_error() {
         "boot-1",
         &request_id,
         Err(ClientShellEndpointError {
+            reason: None,
             code: Some("command_failed".into()),
             message: "popup failed".into(),
         }),

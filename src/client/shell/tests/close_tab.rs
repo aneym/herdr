@@ -225,6 +225,7 @@ fn last_tab_close_preserves_parent_group_and_linked_workspace_scope() {
                 "boot-1",
                 &request.id,
                 Err(ClientShellEndpointError {
+                    reason: None,
                     code: Some("confirmation_required".into()),
                     message: "closing this tab would close a worktree group".into(),
                 }),

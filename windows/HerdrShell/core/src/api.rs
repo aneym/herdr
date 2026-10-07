@@ -19,6 +19,7 @@ pub enum ApiError {
     InvalidResponse(String),
     /// herdr answered with `{"error": {"code", "message"}}`.
     Server {
+        reason: Option<String>,
         code: String,
         message: String,
     },
@@ -29,7 +30,9 @@ impl fmt::Display for ApiError {
         match self {
             ApiError::Io(err) => write!(f, "api i/o: {err}"),
             ApiError::InvalidResponse(detail) => write!(f, "invalid api response: {detail}"),
-            ApiError::Server { code, message } => write!(f, "herdr api error {code}: {message}"),
+            ApiError::Server { code, message, .. } => {
+                write!(f, "herdr api error {code}: {message}")
+            }
         }
     }
 }
@@ -173,6 +176,10 @@ fn read_json_line(reader: &mut impl BufRead) -> Result<Option<Value>, ApiError> 
 fn into_result(mut response: Value) -> Result<Value, ApiError> {
     if let Some(error) = response.get("error") {
         return Err(ApiError::Server {
+            reason: error
+                .get("reason")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
             code: error
                 .get("code")
                 .and_then(Value::as_str)

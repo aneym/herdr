@@ -1189,6 +1189,7 @@ fn worktree_prepare_rejection_notice_expires() {
         "boot-1",
         &request_id,
         Err(ClientShellEndpointError {
+            reason: None,
             code: Some("not_git_worktree".into()),
             message: "Herdr worktree actions require a workspace inside a Git work tree".into(),
         }),
@@ -1300,6 +1301,7 @@ fn worktree_remove_escalates_recoverable_failure_to_force_confirmation() {
             "boot-1",
             &request_id,
             Err(ClientShellEndpointError {
+                reason: None,
                 code: Some(code.into()),
                 message: message.into(),
             }),
@@ -1342,6 +1344,7 @@ fn worktree_remove_escalates_recoverable_failure_to_force_confirmation() {
             "boot-1",
             &request_id,
             Err(ClientShellEndpointError {
+                reason: None,
                 code: Some("worktree_remove_failed".into()),
                 message: "fatal: '/repo-feature' is not a working tree".into(),
             }),

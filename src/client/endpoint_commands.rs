@@ -204,6 +204,7 @@ impl EndpointCommands {
                     boot_id: command.boot_id,
                     request_id: command.request_id,
                     result: Err(ClientShellEndpointError {
+                        reason: None,
                         code: Some("endpoint_timeout".into()),
                         message: "this server did not respond to the action".into(),
                     }),
@@ -280,12 +281,14 @@ pub(super) fn parse_response(
     response: &[u8],
 ) -> Result<ResponseResult, ClientShellEndpointError> {
     let value = serde_json::from_slice(response).map_err(|error| ClientShellEndpointError {
+        reason: None,
         code: None,
         message: format!("invalid endpoint response: {error}"),
     })?;
     match crate::api::client::parse_response_value(value) {
         Ok(response) if response.id == expected_id => Ok(response.result),
         Ok(response) => Err(ClientShellEndpointError {
+            reason: None,
             code: None,
             message: format!(
                 "endpoint response id {:?} did not match {expected_id:?}",
@@ -294,11 +297,13 @@ pub(super) fn parse_response(
         }),
         Err(ApiClientError::ErrorResponse(response)) if response.id == expected_id => {
             Err(ClientShellEndpointError {
+                reason: response.error.reason,
                 code: Some(response.error.code),
                 message: response.error.message,
             })
         }
         Err(ApiClientError::ErrorResponse(response)) => Err(ClientShellEndpointError {
+            reason: None,
             code: None,
             message: format!(
                 "endpoint error id {:?} did not match {expected_id:?}",
@@ -306,6 +311,7 @@ pub(super) fn parse_response(
             ),
         }),
         Err(error) => Err(ClientShellEndpointError {
+            reason: None,
             code: None,
             message: error.to_string(),
         }),
@@ -434,6 +440,7 @@ mod tests {
         assert!(matches!(
             expired.result,
             Err(ClientShellEndpointError {
+                reason: None,
                 code: Some(code),
                 ..
             }) if code == "endpoint_timeout"

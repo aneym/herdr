@@ -862,6 +862,7 @@ fn failed_local_navigation_releases_only_its_own_highlight() {
                 "boot-1",
                 &request_id,
                 Err(ClientShellEndpointError {
+                    reason: None,
                     code: Some(failure.into()),
                     message: "focus failed".into(),
                 }),
@@ -1019,6 +1020,7 @@ fn directional_pane_focus_releases_an_accepted_workspace_highlight() {
             assert_local_highlight(&mut state, "ws_1");
             let result = if rejected {
                 Err(ClientShellEndpointError {
+                    reason: None,
                     code: Some("rejected".into()),
                     message: "focus rejected".into(),
                 })

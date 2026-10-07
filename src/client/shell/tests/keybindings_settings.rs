@@ -573,6 +573,7 @@ fn generic_endpoint_failures_and_control_errors_are_visible() {
         "boot-1",
         &request_id,
         Err(ClientShellEndpointError {
+            reason: None,
             code: Some("not_found".into()),
             message: "workspace no longer exists".into(),
         }),
@@ -629,6 +630,7 @@ fn endpoint_timeout_is_a_deduplicated_server_notice() {
         "boot-1",
         &request_id,
         Err(ClientShellEndpointError {
+            reason: None,
             code: Some("endpoint_timeout".into()),
             message: "transport timeout".into(),
         }),

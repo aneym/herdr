@@ -175,6 +175,7 @@ impl ActiveSubscription {
                             return Err(ErrorResponse {
                                 id: request_id.to_string(),
                                 error: ErrorBody {
+                                    reason: None,
                                     code: "invalid_regex".into(),
                                     message: err.to_string(),
                                 },
@@ -331,10 +332,12 @@ fn subscription_events_after(
 ) -> Result<Vec<(u64, crate::api::schema::EventEnvelope)>, ErrorBody> {
     event_hub.events_after_checked(sequence).map_err(|error| match error {
         EventHistoryError::Lost => ErrorBody {
+            reason: None,
             code: "events_lost".into(),
             message: "event subscription fell behind retained history; resubscribe and resync with session.snapshot".into(),
         },
         EventHistoryError::Unavailable => ErrorBody {
+            reason: None,
             code: "server_unavailable".into(),
             message: "event history is unavailable".into(),
         },
@@ -343,6 +346,7 @@ fn subscription_events_after(
 
 fn event_encoding_error(error: serde_json::Error) -> ErrorBody {
     ErrorBody {
+        reason: None,
         code: "internal_error".into(),
         message: format!("failed to encode subscription event: {error}"),
     }
@@ -599,6 +603,7 @@ fn pane_read(
     let value: serde_json::Value = serde_json::from_str(&response).map_err(|_| ErrorResponse {
         id: request_id.clone(),
         error: ErrorBody {
+            reason: None,
             code: "internal_error".into(),
             message: "failed to decode pane read response".into(),
         },
@@ -607,6 +612,7 @@ fn pane_read(
         return serde_json::from_value(value).map_err(|_| ErrorResponse {
             id: request_id,
             error: ErrorBody {
+                reason: None,
                 code: "internal_error".into(),
                 message: "failed to decode pane read error".into(),
             },
@@ -615,6 +621,7 @@ fn pane_read(
     serde_json::from_value(value["result"]["read"].clone()).map_err(|_| ErrorResponse {
         id: request_id,
         error: ErrorBody {
+            reason: None,
             code: "internal_error".into(),
             message: "failed to decode pane read result".into(),
         },
@@ -639,6 +646,7 @@ fn pane_get(
     let value: serde_json::Value = serde_json::from_str(&response).map_err(|_| ErrorResponse {
         id: request_id.clone(),
         error: ErrorBody {
+            reason: None,
             code: "internal_error".into(),
             message: "failed to decode pane get response".into(),
         },
@@ -648,6 +656,7 @@ fn pane_get(
             serde_json::from_value::<ErrorResponse>(value).map_err(|_| ErrorResponse {
                 id: request_id,
                 error: ErrorBody {
+                    reason: None,
                     code: "internal_error".into(),
                     message: "failed to decode pane get error".into(),
                 },
@@ -657,6 +666,7 @@ fn pane_get(
     serde_json::from_value(value["result"]["pane"].clone()).map_err(|_| ErrorResponse {
         id: request_id,
         error: ErrorBody {
+            reason: None,
             code: "internal_error".into(),
             message: "failed to decode pane get result".into(),
         },

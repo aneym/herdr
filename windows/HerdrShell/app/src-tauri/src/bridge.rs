@@ -1,7 +1,7 @@
 use crate::machines::{MachineStatus, Machines};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use herdr_shell_core::{
-    api::ApiClient,
+    api::{ApiClient, ApiError},
     attach::{AttachClient, AttachEvent, AttachHandle, AttachMode},
     wire::AttachScrollDirection,
 };
@@ -88,15 +88,22 @@ pub async fn api_request(
     machine: String,
     method: String,
     params: Value,
-) -> Result<Value, String> {
-    let (endpoint, _) = machines.endpoints(&machine)?;
+) -> Result<Value, Value> {
+    let (endpoint, _) = machines.endpoints(&machine).map_err(Value::String)?;
     tauri::async_runtime::spawn_blocking(move || {
         ApiClient::new(endpoint)
             .request(&method, params)
-            .map_err(|e| e.to_string())
+            .map_err(|e| match e {
+                ApiError::Server {
+                    code,
+                    message,
+                    reason,
+                } => serde_json::json!({"code": code, "message": message, "reason": reason}),
+                other => Value::String(other.to_string()),
+            })
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| Value::String(e.to_string()))?
 }
 #[tauri::command]
 pub async fn snapshot(machines: State<'_, Machines>, machine: String) -> Result<Value, String> {
@@ -106,7 +113,13 @@ pub async fn snapshot(machines: State<'_, Machines>, machine: String) -> Result<
         "session.snapshot".into(),
         serde_json::json!({}),
     )
-    .await?;
+    .await
+    .map_err(|error| {
+        error
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| error.to_string())
+    })?;
     result
         .get("snapshot")
         .cloned()

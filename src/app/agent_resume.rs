@@ -44,7 +44,10 @@ pub(crate) enum InPlaceAgentResumeError {
     PaneNotFound,
     SessionUnknown(String),
     NotResumable(String),
-    Busy(String),
+    Busy {
+        message: String,
+        reason: &'static str,
+    },
     NotRunning,
     ArgvUnsupported(String),
     Failed(String),
@@ -95,9 +98,10 @@ impl App {
                 .pending_agent_resume_runtime_exits
                 .contains_key(&pane_id)
         {
-            return Err(InPlaceAgentResumeError::Busy(
-                "previous restart is still completing".into(),
-            ));
+            return Err(InPlaceAgentResumeError::Busy {
+                message: "previous restart is still completing".into(),
+                reason: "restart_pending",
+            });
         }
         let pane = self
             .pane_info(ws_idx, pane_id)
@@ -148,10 +152,14 @@ impl App {
             crate::api::schema::AgentStatus::Idle | crate::api::schema::AgentStatus::Done
         ) || force && pane.agent_status == crate::api::schema::AgentStatus::Working)
         {
-            return Err(InPlaceAgentResumeError::Busy(format!(
-                "agent in pane {} is {:?}",
-                pane.pane_id, pane.agent_status
-            )));
+            return Err(InPlaceAgentResumeError::Busy {
+                message: format!("agent in pane {} is {:?}", pane.pane_id, pane.agent_status),
+                reason: if pane.agent_status == crate::api::schema::AgentStatus::Working {
+                    "working"
+                } else {
+                    "blocked"
+                },
+            });
         }
 
         let runtime = self
@@ -160,9 +168,10 @@ impl App {
             .ok_or(InPlaceAgentResumeError::NotRunning)?;
         if let Some(quiet) = input_quiet {
             if !runtime.human_input_quiet_for(quiet) {
-                return Err(InPlaceAgentResumeError::Busy(
-                    "pane received recent input".into(),
-                ));
+                return Err(InPlaceAgentResumeError::Busy {
+                    message: "pane received recent input".into(),
+                    reason: "blocked",
+                });
             }
         }
         let (rows, cols) = runtime.current_size();
@@ -1830,7 +1839,7 @@ mod tests {
         for quiet in [None, Some(std::time::Duration::ZERO)] {
             assert!(matches!(
                 app.resume_agent_in_place(0, pane_id, quiet),
-                Err(InPlaceAgentResumeError::Busy(_))
+                Err(InPlaceAgentResumeError::Busy { .. })
             ));
         }
         for (_, runtime) in app.terminal_runtimes.drain() {
@@ -2171,6 +2180,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(second["error"]["code"], "busy", "{second}");
+        assert_eq!(second["error"]["reason"], "restart_pending", "{second}");
         for _ in 0..200 {
             let mut completed = false;
             while let Ok(event) = app.event_rx.try_recv() {
@@ -2423,20 +2433,35 @@ mod restart_api_tests {
     use super::tests::{app_with_claude_pane, claude_session};
     #[tokio::test]
     async fn agent_resume_restart_api_checks_session_and_force() {
-        for (state, session, force, expected) in [
+        for (state, session, force, expected, reason) in [
             (
                 crate::detect::AgentState::Working,
                 Some(claude_session("session")),
                 false,
                 "busy",
+                Some("working"),
+            ),
+            (
+                crate::detect::AgentState::Blocked,
+                Some(claude_session("session")),
+                false,
+                "busy",
+                Some("blocked"),
             ),
             (
                 crate::detect::AgentState::Working,
                 Some(claude_session("session")),
                 true,
                 "not_resumable",
+                None,
             ),
-            (crate::detect::AgentState::Idle, None, false, "no_session"),
+            (
+                crate::detect::AgentState::Idle,
+                None,
+                false,
+                "no_session",
+                None,
+            ),
         ] {
             let (mut app, _, _, public_id) = app_with_claude_pane(state, session);
             let response = app.handle_api_request(crate::api::schema::Request {
@@ -2451,6 +2476,7 @@ mod restart_api_tests {
             let value: serde_json::Value = serde_json::from_str(&response).unwrap();
             // Force passes the busy gate and reaches the real missing-runtime boundary.
             assert_eq!(value["error"]["code"], expected);
+            assert_eq!(value["error"]["reason"].as_str(), reason);
         }
     }
 }

@@ -8,6 +8,7 @@ pub(crate) fn encode_error(id: String, code: &str, message: impl Into<String>) -
     encode_error_body(
         id,
         ErrorBody {
+            reason: None,
             code: code.into(),
             message: message.into(),
         },

@@ -801,6 +801,7 @@ impl ClientShellState {
             &boot_id,
             request_id,
             Err(ClientShellEndpointError {
+                reason: None,
                 code: Some("endpoint_cancelled".into()),
                 message: "This server action was interrupted. Check its state before retrying."
                     .into(),
@@ -839,7 +840,11 @@ impl ClientShellState {
         } = &pending.kind
         {
             if result.as_ref().is_err_and(|error| {
-                error.code.as_deref() == Some("busy") && error.message.ends_with(" is Working")
+                error.code.as_deref() == Some("busy")
+                    && error.reason.as_deref().map_or_else(
+                        || error.message.ends_with(" is Working"),
+                        |reason| reason == "working",
+                    )
             }) {
                 self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
                     target: ClientContextMenuTarget::RestartAgentConfirm {
@@ -869,7 +874,12 @@ impl ClientShellState {
                         "This agent can't be resumed: no saved chat found."
                     }
                     Some("unsupported") => "Restart isn't supported for this agent yet.",
-                    Some("busy") if error.message.contains("previous restart") => {
+                    Some("busy")
+                        if error.reason.as_deref().map_or_else(
+                            || error.message.contains("previous restart"),
+                            |reason| reason == "restart_pending",
+                        ) =>
+                    {
                         "This agent is already restarting. Wait for it to finish."
                     }
                     Some("busy") => "This agent is blocked. Resolve its prompt before restarting.",

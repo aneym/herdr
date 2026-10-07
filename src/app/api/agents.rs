@@ -175,7 +175,16 @@ impl App {
             Err(error) => {
                 let (code, message) = match error {
                     InPlaceAgentResumeError::SessionUnknown(message) => ("no_session", message),
-                    InPlaceAgentResumeError::Busy(message) => ("busy", message),
+                    InPlaceAgentResumeError::Busy { message, reason } => {
+                        return encode_error_body(
+                            id,
+                            crate::api::schema::ErrorBody {
+                                code: "busy".into(),
+                                message,
+                                reason: Some(reason.into()),
+                            },
+                        );
+                    }
                     InPlaceAgentResumeError::NotResumable(message) => ("not_resumable", message),
                     InPlaceAgentResumeError::ArgvUnsupported(message) => ("unsupported", message),
                     InPlaceAgentResumeError::PaneNotFound | InPlaceAgentResumeError::NotRunning => {
@@ -213,7 +222,9 @@ impl App {
             Err(InPlaceAgentResumeError::SessionUnknown(message)) => {
                 encode_error(id, "agent_session_unknown", message)
             }
-            Err(InPlaceAgentResumeError::Busy(message)) => encode_error(id, "agent_busy", message),
+            Err(InPlaceAgentResumeError::Busy { message, .. }) => {
+                encode_error(id, "agent_busy", message)
+            }
             Err(InPlaceAgentResumeError::NotResumable(message)) => {
                 encode_error(id, "not_resumable", message)
             }

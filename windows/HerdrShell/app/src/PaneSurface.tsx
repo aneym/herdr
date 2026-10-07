@@ -28,17 +28,17 @@ export default function PaneSurface(props: { pane: Pane; machine: string; focuse
     try {
       await bridge.api(machine, "agent.restart", { pane_id: pane.pane_id, ...(force ? { force: true } : {}) });
     } catch (error) {
-      // The native bridge preserves server codes in its error text.
-      const value = error as { code?: string; message?: string };
+      // The native bridge preserves structured server errors, with legacy error text as a fallback.
+      const value = error as { code?: string; message?: string; reason?: string };
       const busy = value?.code === "busy" || String(error).startsWith("herdr api error busy:");
-      const working = (value?.message ?? String(error)).endsWith(" is Working");
+      const working = value?.reason == null ? (value?.message ?? String(error)).endsWith(" is Working") : value.reason === "working";
       if (busy && working && !force) setConfirmRestart(true);
       else {
         requestedRestart.current = false;
         const code = value?.code ?? /^herdr api error ([^:]+):/.exec(String(error))?.[1];
         const message = code === "not_resumable" || code === "no_session" ? "This agent can't be resumed: no saved chat found."
           : code === "unsupported" ? "Restart isn't supported for this agent yet."
-          : code === "busy" ? ((value?.message ?? String(error)).includes("previous restart") ? "This agent is already restarting. Wait for it to finish." : "This agent is blocked. Resolve its prompt before restarting.")
+          : code === "busy" ? ((value?.reason == null ? (value?.message ?? String(error)).includes("previous restart") : value.reason === "restart_pending") ? "This agent is already restarting. Wait for it to finish." : "This agent is blocked. Resolve its prompt before restarting.")
           : code === "start_failed" ? "The agent didn't come back up. Check the pane for errors." : value?.message ?? error;
         props.onError?.(message);
       }

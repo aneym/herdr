@@ -505,6 +505,7 @@ fn close_confirmation_error_becomes_client_owned_overlay_and_stable_group_close(
                 "boot-1",
                 &request_id,
                 Err(ClientShellEndpointError {
+                    reason: None,
                     code: Some("confirmation_required".into()),
                     message: "confirmation required".into(),
                 }),
@@ -627,62 +628,98 @@ fn section_divider_follows_the_pinned_agents_section_and_drags_with_the_pointer(
 
 #[test]
 fn pane_context_restart_routes_same_pane_and_requires_busy_confirmation() {
-    // No PTY: drive the real context-menu input and endpoint response boundary.
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    let mut snap = super::tree::tree_snapshot();
-    snap.agents[0].agent = Some("claude".into());
-    state.set_snapshot(Box::new(snap));
-    state.set_pane_surface(surface());
-    state.compose(106, 20).expect("pane frame");
-    let pane = state.hits.panes[0].rect;
-    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
-        kind: MouseEventKind::Down(MouseButton::Right),
-        column: pane.x + 1,
-        row: pane.y,
-        modifiers: KeyModifiers::empty(),
-    })]);
-    let index = match state.overlay.as_ref() {
-        Some(ClientShellOverlay::ContextMenu(menu)) => menu
-            .items()
-            .iter()
-            .position(|item| item.label == "Restart agent")
-            .expect("restart menu item"),
-        _ => panic!("pane menu"),
-    };
-    let mut input = ClientShellInput::default();
-    state.activate_context_menu_item(index, &mut input);
-    let [ClientShellAction::Endpoint { request, .. }] = &input.actions[..] else {
-        panic!("restart request");
-    };
-    assert!(
-        matches!(&request.method, crate::api::schema::Method::AgentRestart(params) if params.pane_id == "pane_1" && !params.force)
-    );
-    let request_id = request.id.clone();
-    let boot_id = state.snapshot.as_deref().expect("snapshot").boot_id.clone();
-    state.handle_endpoint_result(
-        &boot_id,
-        &request_id,
-        Err(ClientShellEndpointError {
-            code: Some("busy".into()),
-            message: "agent in pane pane_1 is Working".into(),
-        }),
-    );
-    let force_index = match state.overlay.as_ref() {
-        Some(ClientShellOverlay::ContextMenu(menu)) => menu
-            .items()
-            .iter()
-            .position(|item| item.label.starts_with("Restart anyway"))
-            .expect("confirmation"),
-        _ => panic!("restart confirmation"),
-    };
-    let mut forced = ClientShellInput::default();
-    state.activate_context_menu_item(force_index, &mut forced);
-    let [ClientShellAction::Endpoint { request, .. }] = &forced.actions[..] else {
-        panic!("forced restart request");
-    };
-    assert!(
-        matches!(&request.method, crate::api::schema::Method::AgentRestart(params) if params.pane_id == "pane_1" && params.force)
-    );
+    for (reason, message, notice) in [
+        (Some("working"), "server wording changed", None),
+        (None, "agent in pane pane_1 is Working", None),
+        (
+            Some("blocked"),
+            "agent in pane pane_1 is Working",
+            Some("This agent is blocked. Resolve its prompt before restarting."),
+        ),
+        (
+            Some("restart_pending"),
+            "server wording changed",
+            Some("This agent is already restarting. Wait for it to finish."),
+        ),
+        (
+            None,
+            "previous restart is still completing",
+            Some("This agent is already restarting. Wait for it to finish."),
+        ),
+    ] {
+        // No PTY: drive the real context-menu input and endpoint response boundary.
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+        let mut snap = super::tree::tree_snapshot();
+        snap.agents[0].agent = Some("claude".into());
+        state.set_snapshot(Box::new(snap));
+        state.set_pane_surface(surface());
+        state.compose(106, 20).expect("pane frame");
+        let pane = state.hits.panes[0].rect;
+        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Right),
+            column: pane.x + 1,
+            row: pane.y,
+            modifiers: KeyModifiers::empty(),
+        })]);
+        let index = match state.overlay.as_ref() {
+            Some(ClientShellOverlay::ContextMenu(menu)) => menu
+                .items()
+                .iter()
+                .position(|item| item.label == "Restart agent")
+                .expect("restart menu item"),
+            _ => panic!("pane menu"),
+        };
+        let mut input = ClientShellInput::default();
+        state.activate_context_menu_item(index, &mut input);
+        let [ClientShellAction::Endpoint { request, .. }] = &input.actions[..] else {
+            panic!("restart request");
+        };
+        assert!(
+            matches!(&request.method, crate::api::schema::Method::AgentRestart(params) if params.pane_id == "pane_1" && !params.force)
+        );
+        let request_id = request.id.clone();
+        let boot_id = state.snapshot.as_deref().expect("snapshot").boot_id.clone();
+        state.handle_endpoint_result(
+            &boot_id,
+            &request_id,
+            Err(ClientShellEndpointError {
+                reason: reason.map(str::to_owned),
+                code: Some("busy".into()),
+                message: message.into(),
+            }),
+        );
+        if let Some(notice) = notice {
+            assert_eq!(
+                state
+                    .visible_endpoint_notice
+                    .as_ref()
+                    .expect("restart notice")
+                    .body,
+                notice
+            );
+            assert!(!matches!(
+                state.overlay,
+                Some(ClientShellOverlay::ContextMenu(_))
+            ));
+            continue;
+        }
+        let force_index = match state.overlay.as_ref() {
+            Some(ClientShellOverlay::ContextMenu(menu)) => menu
+                .items()
+                .iter()
+                .position(|item| item.label.starts_with("Restart anyway"))
+                .expect("confirmation"),
+            _ => panic!("restart confirmation"),
+        };
+        let mut forced = ClientShellInput::default();
+        state.activate_context_menu_item(force_index, &mut forced);
+        let [ClientShellAction::Endpoint { request, .. }] = &forced.actions[..] else {
+            panic!("forced restart request");
+        };
+        assert!(
+            matches!(&request.method, crate::api::schema::Method::AgentRestart(params) if params.pane_id == "pane_1" && params.force)
+        );
+    }
 }
 
 #[test]

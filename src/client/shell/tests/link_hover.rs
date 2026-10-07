@@ -295,6 +295,7 @@ fn ctrl_hover_is_silent_when_unsupported_or_rejected() {
         "boot-1",
         &id,
         Err(ClientShellEndpointError {
+            reason: None,
             code: Some("endpoint_timeout".into()),
             message: "timeout".into(),
         }),

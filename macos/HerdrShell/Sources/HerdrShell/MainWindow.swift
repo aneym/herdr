@@ -747,8 +747,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                 guard let self else { return }
                 switch reply {
                 case .success: break
-                case .failure(let code, let message):
-                    if PaneRestart.next(code: code, message: message, forced: force) == .confirm {
+                case .failure(let code, let message, let reason):
+                    if PaneRestart.next(code: code, message: message, forced: force, reason: reason) == .confirm {
                         let alert = NSAlert()
                         alert.messageText = "Agent is working. Restart anyway?"
                         alert.informativeText = "It will resume the same chat."
@@ -762,7 +762,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                         self.requestedRestarts.remove(id)
                         let alert = NSAlert()
                         alert.messageText = "Could not restart agent"
-                        alert.informativeText = PaneRestart.message(code: code, fallback: message)
+                        alert.informativeText = PaneRestart.message(code: code, fallback: message, reason: reason)
                         alert.addButton(withTitle: "OK")
                         alert.beginSheetModal(for: self.window)
                     }

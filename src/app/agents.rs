@@ -514,6 +514,7 @@ impl App {
     ) -> crate::api::schema::ErrorBody {
         match err {
             AgentOwnerError::ParentMissing => crate::api::schema::ErrorBody {
+                reason: None,
                 code: "agent_group_parent_required".into(),
                 message: "placement `under` requires a parent agent target".into(),
             },
@@ -521,18 +522,22 @@ impl App {
                 self.agent_target_error_body(err)
             }
             AgentOwnerError::SelfOwned => crate::api::schema::ErrorBody {
+                reason: None,
                 code: "agent_owner_invalid".into(),
                 message: "an agent cannot own itself".into(),
             },
             AgentOwnerError::Cycle => crate::api::schema::ErrorBody {
+                reason: None,
                 code: "agent_owner_cycle".into(),
                 message: "ownership change would create a cycle".into(),
             },
             AgentOwnerError::NotAgent { target } => crate::api::schema::ErrorBody {
+                reason: None,
                 code: "agent_not_ready".into(),
                 message: format!("agent target {target} is not an active agent"),
             },
             AgentOwnerError::OwnerNotAgent { target } => crate::api::schema::ErrorBody {
+                reason: None,
                 code: "agent_owner_not_agent".into(),
                 message: format!("owner target {target} is not an active agent"),
             },
@@ -622,42 +627,52 @@ impl App {
     ) -> crate::api::schema::ErrorBody {
         match err {
             AgentStartError::InvalidName => crate::api::schema::ErrorBody {
+                reason: None,
                 code: "invalid_agent_name".into(),
                 message: INVALID_AGENT_NAME_MESSAGE.into(),
             },
             AgentStartError::UnsupportedKind(kind) => crate::api::schema::ErrorBody {
+                reason: None,
                 code: "unsupported_agent_kind".into(),
                 message: format!("unsupported interactive agent kind {kind}"),
             },
             AgentStartError::InvalidArgument => crate::api::schema::ErrorBody {
+                reason: None,
                 code: "invalid_agent_argument".into(),
                 message: "agent arguments cannot be encoded safely for the target shell".into(),
             },
             AgentStartError::InvalidTimeout => crate::api::schema::ErrorBody {
+                reason: None,
                 code: "invalid_agent_timeout".into(),
                 message: INVALID_AGENT_TIMEOUT_MESSAGE.into(),
             },
             AgentStartError::TargetNotFound(target) => crate::api::schema::ErrorBody {
+                reason: None,
                 code: "agent_pane_not_found".into(),
                 message: format!("agent target pane {target} not found"),
             },
             AgentStartError::TargetBusy(target) => crate::api::schema::ErrorBody {
+                reason: None,
                 code: "agent_pane_busy".into(),
                 message: format!("agent target pane {target} is not an available shell"),
             },
             AgentStartError::TargetUnavailable(target) => crate::api::schema::ErrorBody {
+                reason: None,
                 code: "agent_pane_unavailable".into(),
                 message: format!("agent target pane {target} has no live terminal"),
             },
             AgentStartError::OwnerNotFound(target) => crate::api::schema::ErrorBody {
+                reason: None,
                 code: "agent_owner_not_agent".into(),
                 message: format!("owner target {target} is not an active agent"),
             },
             AgentStartError::InputFailed(message) => crate::api::schema::ErrorBody {
+                reason: None,
                 code: "agent_start_input_failed".into(),
                 message,
             },
             AgentStartError::DuplicateName { name, candidates } => crate::api::schema::ErrorBody {
+                reason: None,
                 code: "agent_name_taken".into(),
                 message: format!(
                     "agent name {name} is already used; candidates: {}",
@@ -685,11 +700,13 @@ impl App {
     ) -> crate::api::schema::ErrorBody {
         match err {
             TerminalTargetError::NotFound { target } => crate::api::schema::ErrorBody {
+                reason: None,
                 code: "agent_not_found".into(),
                 message: format!("agent target {target} not found"),
             },
             TerminalTargetError::Ambiguous { target, candidates } => {
                 crate::api::schema::ErrorBody {
+                    reason: None,
                     code: "agent_target_ambiguous".into(),
                     message: format!(
                         "agent target {target} is ambiguous; candidates: {}",
@@ -719,18 +736,22 @@ impl App {
         match err {
             AgentRenameError::Target(err) => self.agent_target_error_body(err),
             AgentRenameError::InvalidName => crate::api::schema::ErrorBody {
+                reason: None,
                 code: "invalid_agent_name".into(),
                 message: INVALID_AGENT_NAME_MESSAGE.into(),
             },
             AgentRenameError::NotAgent => crate::api::schema::ErrorBody {
+                reason: None,
                 code: "agent_not_found".into(),
                 message: "agent target does not currently host an agent".into(),
             },
             AgentRenameError::PendingLaunch => crate::api::schema::ErrorBody {
+                reason: None,
                 code: "agent_launch_pending".into(),
                 message: "agent name cannot change while startup is pending".into(),
             },
             AgentRenameError::DuplicateName { name, candidates } => crate::api::schema::ErrorBody {
+                reason: None,
                 code: "agent_name_taken".into(),
                 message: format!(
                     "agent name {name} is already used; candidates: {}",

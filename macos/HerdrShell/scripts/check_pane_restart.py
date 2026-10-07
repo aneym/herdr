@@ -21,6 +21,11 @@ for message in ["agent in pane pane_1 is Blocked", "previous restart is still co
 for code in ["not_resumable", "no_session", "unsupported", "transport"] {
     precondition(PaneRestart.next(code: code, message: "server message", forced: false) == .error("server message"))
 }
+precondition(PaneRestart.next(code: "busy", message: "new wording", forced: false, reason: "working") == .confirm)
+precondition(PaneRestart.next(code: "busy", message: "agent is Working", forced: false, reason: "blocked") == .error("agent is Working"))
+precondition(PaneRestart.next(code: "busy", message: "new wording", forced: false, reason: "restart_pending") == .error("new wording"))
+precondition(PaneRestart.message(code: "busy", fallback: "new wording", reason: "restart_pending") == "This agent is already restarting. Wait for it to finish.")
+precondition(PaneRestart.message(code: "busy", fallback: "previous restart", reason: "blocked") == "This agent is blocked. Resolve its prompt before restarting.")
 print("PASS pane menu availability; busy confirmation; forced busy and domain errors")
 ''')
     subprocess.run(["swift", "-module-cache-path", str(pathlib.Path(tmp) / "modules"), str(source)], check=True, timeout=120)
@@ -47,7 +52,7 @@ with tempfile.TemporaryDirectory(prefix="restart-api-", dir=os.environ.get("TMPD
             with conn:
                 line = conn.makefile("rb").readline()
                 calls.append(json.loads(line))
-                reply = {"error": {"code": code, "message": "agent in pane pane_1 is Working"}} if code else {"result": {"ok": True, "command_summary": "resume"}}
+                reply = {"error": {"code": code, "message": "new wording", "reason": "working"}} if code else {"result": {"ok": True, "command_summary": "resume"}}
                 conn.sendall((json.dumps(reply) + "\n").encode())
     worker = threading.Thread(target=serve, daemon=True)
     worker.start()
@@ -57,7 +62,7 @@ with tempfile.TemporaryDirectory(prefix="restart-api-", dir=os.environ.get("TMPD
     text += "\nlet commands = HerdrCommands(socketPath: " + json.dumps(path) + ")\n"
     text += '''
 switch commands.restartAgent(paneId: "pane_1") {
-case .failure(let code, let message): precondition(PaneRestart.next(code: code, message: message, forced: false) == .confirm)
+case .failure(let code, let message, let reason): precondition(PaneRestart.next(code: code, message: message, forced: false, reason: reason) == .confirm)
 case .success: preconditionFailure("busy must confirm")
 }
 switch commands.restartAgent(paneId: "pane_1", force: true) {

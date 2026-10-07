@@ -102,6 +102,7 @@ pub(crate) fn error_response(id: String, code: &str, message: impl Into<String>)
     serde_json::to_string(&ErrorResponse {
         id,
         error: ErrorBody {
+            reason: None,
             code: code.into(),
             message: message.into(),
         },

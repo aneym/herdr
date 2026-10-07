@@ -46,7 +46,7 @@ it("reports non-busy errors through the existing shell notice", async () => {
   expect(onError).toHaveBeenCalledWith("This agent can't be resumed: no saved chat found.");
 });
 it("canceling busy confirmation never sends a forced restart", async () => {
-  api.mockRejectedValueOnce({ code: "busy", message: "agent in pane pane_1 is Working" });
+  api.mockRejectedValueOnce({ code: "busy", reason: "working", message: "server wording changed" });
   const { host, click } = mount();
   await click('[aria-label="Pane actions"]'); await click('[role="menuitem"]');
   await click('[role="dialog"] button:last-child');
@@ -55,14 +55,14 @@ it("canceling busy confirmation never sends a forced restart", async () => {
 });
 
 it("busy confirmation uses Enter to restart and Escape to cancel", async () => {
-  api.mockRejectedValueOnce({ code: "busy", message: "agent in pane pane_1 is Working" }).mockResolvedValueOnce({ ok: true });
+  api.mockRejectedValueOnce({ code: "busy", reason: "working", message: "server wording changed" }).mockResolvedValueOnce({ ok: true });
   const { host, click } = mount();
   await click('[aria-label="Pane actions"]'); await click('[role="menuitem"]');
   await act(async () => { host.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
   expect(api).toHaveBeenCalledTimes(1);
   expect(host.querySelector('[role="dialog"]')).toBeNull();
   // Reopen with another busy reply, then confirm through the focused primary action.
-  api.mockReset(); api.mockRejectedValueOnce({ code: "busy", message: "agent in pane pane_1 is Working" }).mockResolvedValueOnce({ ok: true });
+  api.mockReset(); api.mockRejectedValueOnce({ code: "busy", reason: "working", message: "server wording changed" }).mockResolvedValueOnce({ ok: true });
   await click('[aria-label="Pane actions"]'); await click('[role="menuitem"]');
   await act(async () => { host.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
   expect(api.mock.calls[1]).toEqual(["studio", "agent.restart", { pane_id: "pane_1", force: true }]);
@@ -73,12 +73,17 @@ it("does not alert on a pre-existing restore failure at mount", () => {
   expect(onError).not.toHaveBeenCalled();
 });
 
-it.each(["agent in pane pane_1 is Blocked", "previous restart is still completing"])("does not offer force for non-working busy: %s", async message => {
-  api.mockRejectedValueOnce({ code: "busy", message });
+it.each([
+  ["blocked", "agent in pane pane_1 is Working", "This agent is blocked. Resolve its prompt before restarting."],
+  ["restart_pending", "server wording changed", "This agent is already restarting. Wait for it to finish."],
+  [undefined, "agent in pane pane_1 is Blocked", "This agent is blocked. Resolve its prompt before restarting."],
+  [undefined, "previous restart is still completing", "This agent is already restarting. Wait for it to finish."],
+])("does not offer force for non-working busy: %s", async (reason, message, notice) => {
+  api.mockRejectedValueOnce({ code: "busy", reason, message });
   const { host, click, onError } = mount();
   await click('[aria-label="Pane actions"]'); await click('[role="menuitem"]');
   expect(host.querySelector('[role="dialog"]')).toBeNull();
-  expect(onError).toHaveBeenCalled();
+  expect(onError).toHaveBeenCalledWith(notice);
   expect(api).toHaveBeenCalledTimes(1);
 });
 

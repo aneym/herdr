@@ -118,6 +118,7 @@ fn failed_product_announcement_dismiss_reopens_authoritative_snapshot() {
         "boot-1",
         &request_id,
         Err(ClientShellEndpointError {
+            reason: None,
             code: Some("stale_announcement".into()),
             message: "dismiss failed".into(),
         }),
@@ -173,6 +174,7 @@ fn release_notes_reconcile_and_failed_dismiss_reopens_authoritative_snapshot() {
         "boot-1",
         &request_id,
         Err(ClientShellEndpointError {
+            reason: None,
             code: Some("stale_release_notes".into()),
             message: "dismiss failed".into(),
         }),

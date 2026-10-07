@@ -195,6 +195,7 @@ fn worktree_create_cancelled_or_failed_request_never_focuses() {
                 "boot-1",
                 id,
                 Err(ClientShellEndpointError {
+                    reason: None,
                     code: Some("worktree_failed".into()),
                     message: "creation failed".into(),
                 }),
@@ -418,10 +419,12 @@ fn failed_selection_copy_does_not_send_terminal_input() {
             text: String::new(),
         }),
         Err(ClientShellEndpointError {
+            reason: None,
             code: Some("endpoint_cancelled".into()),
             message: "cancelled".into(),
         }),
         Err(ClientShellEndpointError {
+            reason: None,
             code: Some("selection_unavailable".into()),
             message: "selection text is unavailable".into(),
         }),
@@ -468,6 +471,7 @@ fn cancelled_link_activation_does_not_replay_mouse_input() {
         "boot-1",
         request_id(&outcome.actions),
         Err(ClientShellEndpointError {
+            reason: None,
             code: Some("endpoint_cancelled".into()),
             message: "cancelled".into(),
         }),

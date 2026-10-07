@@ -73,6 +73,7 @@ fn failed_focus_history_request_restores_the_target() {
         "boot-1",
         &request_id,
         Err(ClientShellEndpointError {
+            reason: None,
             code: Some("stale_target".into()),
             message: "target changed".into(),
         }),

@@ -224,6 +224,7 @@ fn retired_pane_graphics_method_error(line: &str, id: &str) -> Option<ErrorRespo
     Some(ErrorResponse {
         id: id.into(),
         error: ErrorBody {
+            reason: None,
             code: "unknown_method".into(),
             message: format!("unknown method: {method}"),
         },
@@ -305,6 +306,7 @@ fn handle_connection_with_stop(
                 retired_pane_graphics_method_error(line, &id).unwrap_or_else(|| ErrorResponse {
                     id,
                     error: ErrorBody {
+                        reason: None,
                         code: if crate::api::schema::tabs::invalid_role_request(line) {
                             "invalid_role"
                         } else {
@@ -1184,6 +1186,7 @@ fn error_response_json(id: String, code: &str, message: String) -> String {
     serde_json::to_string(&ErrorResponse {
         id,
         error: ErrorBody {
+            reason: None,
             code: code.into(),
             message,
         },

@@ -1467,6 +1467,7 @@ fn error_response_round_trips() {
     let response = ErrorResponse {
         id: "req_1".into(),
         error: ErrorBody {
+            reason: None,
             code: "pane_not_found".into(),
             message: "pane p_1 not found".into(),
         },

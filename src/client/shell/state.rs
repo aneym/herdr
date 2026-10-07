@@ -1007,6 +1007,7 @@ pub(super) struct ClientVisibleEndpointNotice {
 }
 
 pub(crate) struct ClientShellEndpointError {
+    pub reason: Option<String>,
     pub code: Option<String>,
     pub message: String,
 }

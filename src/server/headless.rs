@@ -1527,6 +1527,7 @@ impl HeadlessServer {
                     return serde_json::to_string(&api::schema::ErrorResponse {
                         id,
                         error: api::schema::ErrorBody {
+                            reason: None,
                             code: "invalid_params".into(),
                             message: "window title is empty".into(),
                         },
@@ -2757,6 +2758,7 @@ impl HeadlessServer {
         }
         let status = crate::detect::manifest::agent_state_label(terminal.state);
         Some(api::schema::ErrorBody {
+            reason: None,
             code: "agent_not_idle".into(),
             message: format!(
                 "cannot read {requested} lines while {} is {status}: its alternate-screen history can only be captured by scrolling while idle. Wait and retry, or use --source visible",
@@ -2938,6 +2940,7 @@ impl HeadlessServer {
             let response = serde_json::to_string(&api::schema::ErrorResponse {
                 id: msg.request.id,
                 error: api::schema::ErrorBody {
+                    reason: None,
                     code: "server_unavailable".into(),
                     message: "server is shutting down".into(),
                 },
@@ -2971,6 +2974,7 @@ impl HeadlessServer {
                 Err(err) => serde_json::to_string(&api::schema::ErrorResponse {
                     id: msg.request.id,
                     error: api::schema::ErrorBody {
+                        reason: None,
                         code: "handoff_failed".into(),
                         message: err.to_string(),
                     },
@@ -3108,6 +3112,7 @@ impl HeadlessServer {
                 serde_json::to_string(&api::schema::ErrorResponse {
                     id: String::new(),
                     error: api::schema::ErrorBody {
+                        reason: None,
                         code: "serialization_error".into(),
                         message: err.to_string(),
                     },

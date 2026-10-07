@@ -260,6 +260,7 @@ fn stale_word_row_reply_retries_once_without_revision() {
         "boot-1",
         &first.id,
         Err(ClientShellEndpointError {
+            reason: None,
             code: Some("stale_content".into()),
             message: "stale".into(),
         }),
