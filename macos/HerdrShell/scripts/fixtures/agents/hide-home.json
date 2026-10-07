@@ -1,0 +1,48 @@
+{
+  "_about": "Agent pins alpha (A, cloud), bravo (B, hidden, local) and charlie (C, unsynced), then plain pin papa (P, cloud, which a plain pin never draws), and an unpinned chat in poker. remote is ax42's raw session.snapshot: a visible agent (unsynced), a hidden agent with a home_location this Shell does not know, and an agent from an older server with neither field.",
+  "input": {
+    "spaces": [
+      {"id": "s1", "name": "rails", "pinned": false, "collapsed": false},
+      {"id": "s2", "name": "poker", "pinned": false, "collapsed": false}
+    ],
+    "tabs": [
+      {"id": "s1:t1", "space": "s1", "label": "alpha", "agents": [{"status": "working"}], "status": "working", "work": "working", "pinIndex": 0, "role": "agent", "homeLocation": "cloud"},
+      {"id": "s1:t2", "space": "s1", "label": "bravo", "agents": [{"status": "idle"}], "status": "idle", "work": "idle", "pinIndex": 1, "role": "agent", "hidden": true, "homeLocation": "local"},
+      {"id": "s2:t1", "space": "s2", "label": "charlie", "agents": [{"status": "working"}], "status": "working", "work": "working", "pinIndex": 2, "role": "agent", "homeLocation": "unsynced"},
+      {"id": "s1:t3", "space": "s1", "label": "papa", "agents": [{"status": "idle"}], "status": "idle", "work": "idle", "pinIndex": 3, "role": "plain", "homeLocation": "cloud"},
+      {"id": "s2:t2", "space": "s2", "label": "coach", "agents": [{"status": "working"}], "status": "working", "work": "working"}
+    ],
+    "focusedTab": null
+  },
+  "overlay": {},
+  "chrome": {},
+  "now": 0,
+  "remote": [
+    {
+      "name": "ax42",
+      "snapshot": {
+        "workspaces": [
+          {"workspace_id": "w1", "label": "rails", "number": 1}
+        ],
+        "tabs": [
+          {"tab_id": "w1:t1", "workspace_id": "w1", "label": "remote chat", "number": 1, "agent_status": "working", "pane_count": 1, "pin_index": 0, "work_status": "working", "role": "agent", "home_location": "unsynced"},
+          {"tab_id": "w1:t2", "workspace_id": "w1", "label": "remote hidden", "number": 2, "agent_status": "idle", "pane_count": 1, "pin_index": 1, "work_status": "idle", "role": "agent", "hidden": true, "home_location": "orbit"},
+          {"tab_id": "w1:t3", "workspace_id": "w1", "label": "remote old", "number": 3, "agent_status": "idle", "pane_count": 1, "pin_index": 2, "work_status": "idle", "role": "agent"}
+        ],
+        "panes": [
+          {"pane_id": "p1", "tab_id": "w1:t1", "terminal_id": "term1", "agent_status": "working", "focused": false},
+          {"pane_id": "p2", "tab_id": "w1:t2", "terminal_id": "term2", "agent_status": "idle", "focused": false},
+          {"pane_id": "p3", "tab_id": "w1:t3", "terminal_id": "term3", "agent_status": "idle", "focused": false}
+        ],
+        "agents": [
+          {"pane_id": "p1", "tab_id": "w1:t1", "agent": "claude", "agent_status": "working"},
+          {"pane_id": "p2", "tab_id": "w1:t2", "agent": "claude", "agent_status": "idle"},
+          {"pane_id": "p3", "tab_id": "w1:t3", "agent": "claude", "agent_status": "idle"}
+        ],
+        "layouts": [],
+        "version": "0.0.0-fixture",
+        "protocol": 1
+      }
+    }
+  ]
+}
