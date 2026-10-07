@@ -187,7 +187,7 @@ pub fn attach_theme(
     use herdr_shell_core::wire::{
         ClientHostAppearance, ClientHostColor, ClientHostDefaultColorKind, ClientHostThemeUpdate,
     };
-    let color = |[r, g, b]| ClientHostColor { r, g, b };
+    let color = |[r, g, b]: [u8; 3]| ClientHostColor { r, g, b };
     attaches
         .get(handle)?
         .host_theme(vec![
