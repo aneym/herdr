@@ -1039,11 +1039,16 @@ fn wait_for_plugin_reload_prompt(
         .map(str::to_string);
     let settle_by = deadline + PLUGIN_RELOAD_EXPIRY_GRACE;
     let mut cancelled = false;
+    // Once the line was handed to the writer it may still land, so losing
+    // its receipt later (history eviction under backpressure) means handed,
+    // never undelivered: a retry must not type it twice.
+    let mut handed_seen = false;
     loop {
         let reason = prompt
             .get("reason")
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default();
+        handed_seen |= reason == PROMPT_HANDED_TO_WRITER;
         match prompt.get("state").and_then(serde_json::Value::as_str) {
             Some("delivered" | "acked") => return Ok(PROMPT_DELIVERED),
             Some("queued") if reason == PROMPT_HANDED_TO_WRITER && cancelled => {
@@ -1081,24 +1086,40 @@ fn wait_for_plugin_reload_prompt(
         let id = id
             .as_ref()
             .ok_or_else(|| PluginReloadFailure::failed("queued prompt has no id"))?;
-        let queue = plugin_reload_step(
-            "pane.queue",
-            Method::PaneQueue(crate::api::schema::PaneQueueParams {
+        let queue =
+            match plugin_reload_call(Method::PaneQueue(crate::api::schema::PaneQueueParams {
                 pane_id: pane.into(),
                 id: Some(id.clone()),
                 flush: false,
                 cancel: cancelled,
-            }),
-        )?;
-        prompt = ["sends", "recent"]
-            .into_iter()
-            .filter_map(|key| queue.get(key).and_then(serde_json::Value::as_array))
-            .flatten()
-            .find(|send| send.get("id").and_then(serde_json::Value::as_str) == Some(id.as_str()))
-            .cloned()
-            .ok_or_else(|| {
-                PluginReloadFailure::failed("queued prompt disappeared before delivery")
-            })?;
+            })) {
+                Ok(queue) => Some(queue),
+                Err((code, _)) if code == "queue_item_not_found" => None,
+                Err((code, message)) => {
+                    return Err(PluginReloadFailure::failed(format!(
+                        "pane.queue: {code}: {message}"
+                    )));
+                }
+            };
+        let found = queue.as_ref().and_then(|queue| {
+            ["sends", "recent"]
+                .into_iter()
+                .filter_map(|key| queue.get(key).and_then(serde_json::Value::as_array))
+                .flatten()
+                .find(|send| {
+                    send.get("id").and_then(serde_json::Value::as_str) == Some(id.as_str())
+                })
+                .cloned()
+        });
+        prompt = match found {
+            Some(send) => send,
+            None if handed_seen => return Ok(PROMPT_HANDED_TO_WRITER),
+            None => {
+                return Err(PluginReloadFailure::failed(
+                    "queued prompt disappeared before delivery",
+                ));
+            }
+        };
     }
 }
 
@@ -2497,6 +2518,9 @@ mod tests {
         /// The line left the queue for a backpressured PTY writer and has
         /// not finished by the grace.
         HandedToWriter,
+        /// Handed to the writer, then its receipt is evicted from the
+        /// server's history before the writer confirms it.
+        HandedThenEvicted,
         /// An older server: agent.get has no runtime_id.
         NoRuntimeId,
         /// The server accepts agent.prompt but echoes no delivery ack.
@@ -2612,10 +2636,15 @@ mod tests {
                             serde_json::json!({"id": "q1", "state": "queued", "queued": true,
                                 "delivery": ack})
                         }
-                        AfterResume::HandedToWriter => serde_json::json!({"id": "q1",
-                            "state": "queued", "reason": "handed_to_writer", "delivery": ack}),
+                        AfterResume::HandedToWriter | AfterResume::HandedThenEvicted => {
+                            serde_json::json!({"id": "q1", "state": "queued",
+                                "reason": "handed_to_writer", "delivery": ack})
+                        }
                         _ => serde_json::json!({"id": "q1", "state": "delivered", "delivery": ack}),
                     }),
+                    "pane.queue" if matches!(scenario, AfterResume::HandedThenEvicted) => {
+                        Err(("queue_item_not_found".into(), "queue item not found".into()))
+                    }
                     "pane.queue" => Ok(match scenario {
                         AfterResume::StuckQueued => send("queued", None),
                         AfterResume::HandedToWriter => send("queued", Some("handed_to_writer")),
@@ -2740,6 +2769,29 @@ mod tests {
         assert_eq!(record["delivery"], "handed_to_writer");
         assert!(!calls.contains(&"pane.queue.cancel"), "{calls:?}");
         assert!(recorded);
+    }
+
+    /// A line seen handed to the writer may still land, so when the server
+    /// later loses its receipt (history eviction) the reload is recorded as
+    /// handed instead of failing into a retry that could type it twice.
+    #[test]
+    fn plugin_reload_records_a_handed_line_whose_receipt_was_evicted() {
+        for no_resume in [false, true] {
+            let (result, calls, recorded) =
+                run_scripted_plugin_reload_with(AfterResume::HandedThenEvicted, no_resume);
+            let record = result
+                .ok()
+                .expect("an evicted handed line is not a failure");
+            assert_eq!(record["delivery"], "handed_to_writer");
+            if no_resume {
+                assert_eq!(record["prompted"], true);
+            } else {
+                assert_eq!(record["resumed"], true);
+            }
+            assert!(calls.contains(&"pane.queue"), "{calls:?}");
+            assert!(!calls.contains(&"pane.queue.cancel"), "{calls:?}");
+            assert!(recorded);
+        }
     }
 
     /// `--no-resume` prompts the running agent on its current session and

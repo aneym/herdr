@@ -779,8 +779,18 @@ impl TerminalRuntime {
                 continue;
             }
             if let Some(guard) = &item.guard {
-                if verdict(guard) != DeliveryVerdict::Ready
-                    || !state.human_input_quiet(now, guard.input_quiet)
+                // Recheck at the handoff itself: `now` was taken before the
+                // foreground lookup above, which can block.
+                let handoff = Instant::now();
+                let ready = verdict(guard);
+                if let Some((drop_state, reason)) = self.guard_refusal(guard, ready, handoff) {
+                    transition(&item.id, drop_state, Some(reason));
+                    tracing::info!(pane_id = ?item.pane_id, method = item.method, reason, "guarded polite send dropped at handoff");
+                    state.queue.pop_front();
+                    continue;
+                }
+                if ready != DeliveryVerdict::Ready
+                    || !state.human_input_quiet(handoff, guard.input_quiet)
                 {
                     break;
                 }
@@ -987,6 +997,53 @@ mod tests {
             .unwrap();
         let item = wait_for(&runtime, &outcome.id, PaneSendState::Delivered).await;
         assert_eq!(item.reason, None);
+    }
+
+    /// A flush whose timestamp predates the guard's expiry still drops the
+    /// line once it has expired by the time of the writer handoff.
+    #[tokio::test]
+    async fn guarded_flush_rechecks_expiry_at_the_writer_handoff() {
+        let (runtime, mut rx) = TerminalRuntime::test_with_channel(80, 24);
+        let flush_started = Instant::now();
+        let guard = DeliveryGuard {
+            session_id: "sess-1".into(),
+            runtime_id: Some(runtime.runtime_id()),
+            agent: crate::detect::Agent::Claude,
+            input_quiet: Duration::ZERO,
+            expires_at: flush_started + Duration::from_millis(50),
+        };
+        let outcome = runtime
+            .polite_send_with_guard(
+                false,
+                Duration::ZERO,
+                "agent.prompt",
+                Payload::Bytes(Bytes::from_static(b"late-line")),
+                SendOptions::default(),
+                Some((guard, DeliveryVerdict::Hold)),
+            )
+            .unwrap();
+        assert_eq!(outcome.state, PaneSendState::Queued);
+        // The flush began before expiry, but reaches the handoff after it
+        // (as when the foreground lookup blocks).
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        runtime
+            .flush_polite_queue_guarded(
+                flush_started,
+                Duration::ZERO,
+                true,
+                SendOptions::default(),
+                &|_| DeliveryVerdict::Ready,
+            )
+            .unwrap();
+        let item = runtime
+            .polite_queue()
+            .into_iter()
+            .find(|item| item.id == outcome.id)
+            .unwrap();
+        assert_eq!(item.state, PaneSendState::Dropped);
+        assert_eq!(item.reason.as_deref(), Some("expired"));
+        assert!(!runtime.has_polite_queue());
+        assert!(rx.try_recv().is_err(), "an expired line reached the writer");
     }
 
     /// A panic while the polite-send state was locked must not turn every
