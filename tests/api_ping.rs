@@ -2381,10 +2381,12 @@ fn pane_info_and_subscriptions_expose_done_agent_status() {
     fs::create_dir_all(&bin_dir).unwrap();
     let fake_pi = bin_dir.join("pi");
     let stop_file = base.join("pi-stop");
+    let finish_file = base.join("pi-finish");
     fs::write(
         &fake_pi,
         format!(
-            "#!/bin/sh\nprintf 'starting\\n'\nsleep 4\nprintf 'Working...\\n'\nsleep 1\nprintf '\\033[2J\\033[Hdone\\n'\nwhile [ ! -f '{}' ]; do sleep 0.05; done\n",
+            "#!/bin/sh\nprintf 'Working...\\n'\nwhile [ ! -f '{}' ]; do sleep 0.05; done\nprintf '\\033[2J\\033[Hdone\\n'\nwhile [ ! -f '{}' ]; do sleep 0.05; done\n",
+            finish_file.display(),
             stop_file.display()
         ),
     )
@@ -2446,8 +2448,9 @@ fn pane_info_and_subscriptions_expose_done_agent_status() {
     let send_pi = send_request(
         &socket_path,
         &format!(
-            r#"{{"id":"req_status_3","method":"pane.send_text","params":{{"pane_id":"{}","text":"pi"}}}}"#,
-            background_pane_id
+            r#"{{"id":"req_status_3","method":"pane.send_text","params":{{"pane_id":"{}","text":"{}"}}}}"#,
+            background_pane_id,
+            fake_pi.display()
         ),
     );
     assert_eq!(send_pi["result"]["type"], "ok");
@@ -2459,6 +2462,28 @@ fn pane_info_and_subscriptions_expose_done_agent_status() {
         ),
     );
     assert_eq!(send_enter["result"]["type"], "ok");
+
+    // Acquisition has a startup grace period. Keep the working screen visible
+    // until the API observes it instead of racing that period with a short sleep.
+    let working_deadline = Instant::now() + Duration::from_secs(12);
+    loop {
+        let pane = send_request(
+            &socket_path,
+            &format!(
+                r#"{{"id":"req_status_working","method":"pane.get","params":{{"pane_id":"{}"}}}}"#,
+                background_pane_id
+            ),
+        );
+        if pane["result"]["pane"]["agent_status"] == "working" {
+            break;
+        }
+        assert!(
+            Instant::now() < working_deadline,
+            "agent never became working: {pane}"
+        );
+        thread::sleep(Duration::from_millis(50));
+    }
+    fs::write(&finish_file, "finish").unwrap();
 
     let status_event = reader.read_json_line(Duration::from_secs(12));
     assert_eq!(status_event["event"], "pane.agent_status_changed");
