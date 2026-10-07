@@ -8,8 +8,19 @@ interface Facts { attention: boolean; failed: boolean; finished: boolean; devLoo
 export interface AreaItem { id: string; kind: RowKind; status: string; area: string; role: string; stage?: string; name: string; color: string; number: number; park?: ParkRecord; children: AreaItem[]; facts: Facts }
 export interface AreaLine { id: string; kind: RowKind | "header" | "area" | "focus" | "parked"; title: string; trailing: string; depth: number; tab?: string; toggle?: string; chevron?: boolean; selected?: boolean; dim?: boolean; area?: string; color?: string; badge?: string; status?: string; role?: string; stage?: string; glyph?: string; glyphTone?: string; parked?: boolean; parkNote?: string }
 export interface AreaOptions { chip?: AreaChip; areaOnly?: string | null; folded?: Set<string>; focusExpanded?: boolean; focusCursor?: number | null; selectedTab?: string | null; manualOpen?: Record<string, boolean> }
+/** Swift's String `<` on these ASCII ids: code-point order, never locale collation. */
+export function codePointOrder(a: string, b: string): number { return a < b ? -1 : a > b ? 1 : 0; }
+/** The Mac sidebar's short stage words (Sidebar.swift stageWord). */
+export function stageWord(badge: string): string {
+  return ({ Scoping: "Scope", Building: "Build", "Ready for review": "Review", Monitoring: "Live", "In use": "desk" } as Record<string, string>)[badge] ?? badge;
+}
+/** A badge the active chip already says (Sidebar.swift stageImplied). */
+export function stageImplied(chip: AreaChip, line: { stage?: string; role?: string }): boolean {
+  const use = line.role === "desk" || line.role === "job";
+  return chip === "scoping" ? line.stage === "scoping" : chip === "building" ? line.stage === "implementing" || use : chip === "review" ? line.stage === "reviewing" : chip === "use" ? use : false;
+}
 function areaItems(s: Snapshot, catalog: LaneSnapshot): AreaItem[] {
-  const tabs = [...s.tabs ?? []].sort((a, b) => a.workspace_id.localeCompare(b.workspace_id) || a.number - b.number);
+  const tabs = [...s.tabs ?? []].sort((a, b) => codePointOrder(a.workspace_id, b.workspace_id) || a.number - b.number);
   const agents = (s.agents ?? []) as Agent[];
   const byTab = new Map<string, Agent[]>();
   for (const agent of agents) byTab.set(agent.tab_id, [...byTab.get(agent.tab_id) ?? [], agent]);
@@ -44,7 +55,7 @@ function focusForItems(roots: AreaItem[], catalog: LaneSnapshot): string[] {
   const items = roots.flatMap(flat).filter(i => !i.park);
   const order = catalog.orderedAreaIds(new Set(items.map(i => i.area)));
   const bucket = (i: AreaItem) => i.stage === "closed" ? null : i.status === "blocked" ? 0 : i.stage === "reviewing" ? 1 : i.stage === "scoping" ? 2 : null;
-  return items.filter(i => bucket(i) !== null).sort((a, b) => bucket(a)! - bucket(b)! || order.indexOf(a.area) - order.indexOf(b.area) || a.number - b.number || a.id.localeCompare(b.id)).map(i => i.id);
+  return items.filter(i => bucket(i) !== null).sort((a, b) => bucket(a)! - bucket(b)! || order.indexOf(a.area) - order.indexOf(b.area) || a.number - b.number || codePointOrder(a.id, b.id)).map(i => i.id);
 }
 export function passes(i: AreaItem, chip: AreaChip): boolean {
   if (chip === "parked") return !!i.park;
@@ -83,7 +94,7 @@ export function buildAreas(s: Snapshot | null, catalog: LaneSnapshot, opts: Area
     out.push({ id: `area:${area}`, kind: "area", depth: 0, title: catalog.areaName(area), trailing: `${rows.length}`, toggle: `area:${area}`, chevron: !folded.has(area), area, color: catalog.areaColor(area) });
     if (folded.has(area)) continue;
     for (const [title, roles] of [["ORCHESTRATOR", ["top", "orchestrator"]], ["PROJECTS", ["project"]], ["USE", ["desk", "job"]]] as const) {
-      const group = rows.filter(i => (roles as readonly string[]).includes(i.role)).sort((a, b) => (title === "USE" ? Number(a.role !== "desk") - Number(b.role !== "desk") : 0) || Number(a.stage === "closed") - Number(b.stage === "closed") || a.number - b.number || a.id.localeCompare(b.id));
+      const group = rows.filter(i => (roles as readonly string[]).includes(i.role)).sort((a, b) => (title === "USE" ? Number(a.role !== "desk") - Number(b.role !== "desk") : 0) || Number(a.stage === "closed") - Number(b.stage === "closed") || a.number - b.number || codePointOrder(a.id, b.id));
       if (!group.length) continue;
       out.push({ id: `sub:${area}:${title}`, kind: "header", depth: 0, title, trailing: "", area });
       for (const i of group) {

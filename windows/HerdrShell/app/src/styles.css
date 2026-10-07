@@ -135,7 +135,9 @@ footer { color: var(--shell-muted); padding: 12px 8px; font-size: 12px; overflow
 .areas-chips { display: flex; gap: 2px; padding: 4px 8px; }
 .areas-chips button { flex: 1; font-size: 12px; padding: 2px 0; border-radius: var(--shell-radius-control); color: var(--shell-muted); }
 .areas-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-.areas-trailing { font-size: var(--shell-type-row-trailing); color: var(--shell-muted); white-space: nowrap; }
+.areas-trailing, .areas-badge { font-size: var(--shell-type-row-trailing); color: var(--shell-muted); white-space: nowrap; }
+.areas-badge.is-review { color: var(--shell-text); }
+.areas-badge + .areas-trailing { margin-left: 6px; }
 .areas-line .chevron { flex-shrink: 0; }
 .areas-glyph { flex-shrink: 0; color: var(--shell-muted); }
 .areas-glyph.ok { color: var(--shell-ok); }

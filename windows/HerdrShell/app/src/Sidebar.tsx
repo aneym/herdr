@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import { buildAreas } from "./areas";
+import { buildAreas, stageImplied, stageWord } from "./areas";
 import type { AreaChip } from "./areas";
 import { LaneSnapshot } from "./laneFiles";
 import type { Snapshot } from "./model";
@@ -37,7 +37,8 @@ export default function Sidebar({ snapshot = {}, catalog = new LaneSnapshot(), m
   const read = <T,>(key: string, fallback: T): T => { try { return JSON.parse(localStorage.getItem(`herdr-shell.areas.${key}`) ?? "null") ?? fallback; } catch { return fallback; } };
   const save = (key: string, value: unknown) => { try { localStorage.setItem(`herdr-shell.areas.${key}`, JSON.stringify(value)); } catch { /* Storage can be disabled by WebView policy. */ } };
   const [savedMode, setMode] = useState<"areas" | "spaces" | null>(() => read("mode", null));
-  const mode = savedMode ?? (catalog.hasFiles ? "areas" : "spaces");
+  // Spaces until the user picks Areas, as the Mac (P33).
+  const mode = savedMode ?? "spaces";
   const [chip, setChip] = useState<AreaChip>(() => read("chip", "all"));
   const [folded, setFolded] = useState<string[]>(() => read("folded", []));
   const [focusExpanded, setFocusExpanded] = useState(() => read("focusExpanded", false));
@@ -150,7 +151,7 @@ export default function Sidebar({ snapshot = {}, catalog = new LaneSnapshot(), m
         }}>
           {line.kind === "area" && <span className="areas-dot" style={{ backgroundColor: line.color }} />}
           {line.glyph && <span className={`areas-glyph ${line.glyphTone}`} aria-label={line.status}>{line.glyph}</span>}
-          <span className="label">{line.title}{line.parkNote && <small className="areas-park-note">{line.parkNote}</small>}</span><span className="areas-trailing">{line.trailing || line.badge}</span>
+          <span className="label">{line.title}{line.parkNote && <small className="areas-park-note">{line.parkNote}</small>}</span>{line.badge && (chip === "all" || !stageImplied(chip, line)) && <span className={`areas-badge ${line.badge === "Ready for review" || line.stage === "reviewing" ? "is-review" : ""}`}>{stageWord(line.badge)}</span>}{line.trailing && <span className="areas-trailing">{line.trailing}</span>}
         </button>
       </div>)}
     </> : <>

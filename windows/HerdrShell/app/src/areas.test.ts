@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildAreas, focusTabs } from "./areas";
+import { buildAreas, codePointOrder, focusTabs, stageImplied, stageWord } from "./areas";
 import type { AreaOptions } from "./areas";
 import { LaneSnapshot, parseAreas, parseLanes, parseModes } from "./laneFiles";
 import type { Snapshot } from "./model";
@@ -309,5 +309,13 @@ describe("Mac P15 area-line golden contract", () => {
       ["tab:build", "lane", "raise build", "", 1],
       ["parked", "parked", "Parked", "2", 0],
     ]);
+  });
+  it("breaks ties in code-point order and shows the Mac's stage words", () => {
+    // Swift compares ids with String <: "w10" sorts before "w1:" by code point, unlike locale collation.
+    expect(["w1:t1", "w10:t1", "W2:t1"].sort(codePointOrder)).toEqual(["W2:t1", "w10:t1", "w1:t1"]);
+    expect(["Scoping", "Building", "Ready for review", "Monitoring", "In use", ""].map(stageWord)).toEqual(["Scope", "Build", "Review", "Live", "desk", ""]);
+    expect(stageImplied("building", { role: "job" })).toBe(true);
+    expect(stageImplied("review", { stage: "reviewing" })).toBe(true);
+    expect(stageImplied("all", { stage: "reviewing" })).toBe(false);
   });
 });
