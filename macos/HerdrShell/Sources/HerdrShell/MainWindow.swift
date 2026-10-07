@@ -176,7 +176,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     private(set) var shownLayout: Snapshot.Layout?
     private var pendingSelectTab: String?
     private var pendingFocusPane: String?
-    private var pendingClose: (pane: String, tab: String?, order: [String])?
+    private var pendingClose: (pane: String, tab: String?, order: [String], pins: [String])?
     /// Finished tabs the user has selected. They drop out of Next Needing You until they finish again.
     private var lookedAtFinished: Set<String> = []
     private var didRestoreTabFocus = false
@@ -880,6 +880,10 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             refreshDocs()
             return true
         }
+        if let next = pending.pins.first(where: { model.hasTab($0) }) {
+            selectTab(next)
+            return true
+        }
         let ids = pending.order
         let i = pending.tab.flatMap { ids.firstIndex(of: $0) } ?? -1
         let after = i >= 0 ? Array(ids.dropFirst(i + 1)) : ids
@@ -894,11 +898,12 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         guard let pane = focusedSurface?.paneId ?? state.focusedPane else { log("close pane: no focused pane"); return }
         let tab = state.selectedTab
         let order = visibleAgentTabs()
+        let pins = SpacesTree.closePinOrder(model.spacesRows(state: state), selected: tab)
         let cmds = commands
         DispatchQueue.global(qos: .userInitiated).async {
             guard cmds.paneClose(paneId: pane) else { return }
             DispatchQueue.main.async { [self] in
-                pendingClose = (pane, tab, order)
+                pendingClose = (pane, tab, order, pins)
                 lastLayoutKey = ""
                 snapshotChanged()
             }

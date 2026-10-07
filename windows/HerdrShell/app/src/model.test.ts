@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSidebar, noteSelection, pinCount, revealFold, revealOnSelect, spaceOpen, tabStatus } from "./model";
+import { buildSidebar, noteSelection, pinCount, selectionAfterClose, revealFold, revealOnSelect, spaceOpen, tabStatus } from "./model";
 import type { Snapshot } from "./model";
 import { encodeShiftEnter } from "./keys";
 // Pure ranking/deduplication has interacting edge cases: this inline contract table
@@ -106,3 +106,30 @@ it.each([
   [{ kittyFlags: 0, modifyOtherKeys: 2 }, "\x1b[27;2;13~"],
   [{ kittyFlags: 0, modifyOtherKeys: 1 }, "\x1b\r"],
 ])("encodes Shift+Enter for %j", (mode, expected) => { expect(encodeShiftEnter(mode)).toBe(expected); });
+
+// Pure close ranking has interacting pin partitions, duplicates, vanished candidates,
+// and positional fallback. Exercise the real sidebar builder, not a second ordering.
+describe("close selection in drawn pin order", () => {
+  const source: Snapshot = {
+    workspaces: [{ workspace_id: "w", number: 1 }],
+    tabs: [
+      ...["p1", "p2", "p3"].map((tab_id, number) => ({ tab_id, number, workspace_id: "w", pin_index: number })),
+      ...["a1", "a2", "a3"].map((tab_id, number) => ({ tab_id, number: number + 3, workspace_id: "w", role: "agent", pin_index: number + 3 })),
+      { tab_id: "u1", number: 6, workspace_id: "w" },
+      { tab_id: "u2", number: 7, workspace_id: "w" },
+    ],
+  };
+  it.each([
+    ["middle pin", "p2", ["p2"], "p3"],
+    ["last pin", "p3", ["p3"], "p2"],
+    ["middle agent", "a2", ["a2"], "a3"],
+    ["last agent", "a3", ["a3"], "a2"],
+    ["unpinned fallback", "u1", ["u1"], "u2"],
+    ["other block", "p2", ["p1", "p2", "p3"], "a1"],
+    ["vanished neighbor", "p2", ["p2", "p3"], "p1"],
+    ["no remaining pins", "p2", ["p1", "p2", "p3", "a1", "a2", "a3"], "u2"],
+  ])("%s", (_, selected, removed, expected) => {
+    const after = { ...source, tabs: source.tabs!.filter(t => !removed.includes(t.tab_id)) };
+    expect(selectionAfterClose(buildSidebar(source), buildSidebar(after), selected)).toBe(expected);
+  });
+});

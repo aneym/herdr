@@ -3,8 +3,8 @@ import { flushSync } from "react-dom";
 import { cycleMachine } from "./machines";
 import { bridge } from "./bridge";
 import type { MachineStatus } from "./bridge";
-import { buildSidebar, pinCount, tabOrder } from "./model";
-import type { Snapshot } from "./model";
+import { buildSidebar, pinCount, selectionAfterClose, tabOrder } from "./model";
+import type { SidebarRow, Snapshot } from "./model";
 import Sidebar, { useSelectionReveal } from "./Sidebar";
 import { useLaneFiles } from "./laneFiles";
 import { useAgentCards } from "./AgentFace";
@@ -157,16 +157,15 @@ function MachineView({ machine, machines, snapshot, chooseMachine, selections, c
     state.current.focused = null;
     setRenaming(null); setSelected(id); setFocused(null);
   }, []);
-  const previousOrder = useRef<string[]>([]);
+  const previousRows = useRef<SidebarRow[]>([]);
   useEffect(() => {
     const order = tabOrder(rows);
     if (!selected || !order.includes(selected)) {
-      const index = selected ? previousOrder.current.indexOf(selected) : -1;
       const initial = snapshot.tabs?.find(t => t.focused)?.tab_id;
       setRenaming(null);
-      setSelected(index >= 0 ? order[Math.min(index, order.length - 1)] ?? null : initial ?? order[0] ?? null);
+      setSelected(selectionAfterClose(previousRows.current, rows, selected, initial));
     }
-    previousOrder.current = order;
+    previousRows.current = rows;
   }, [rows, selected, snapshot]);
   useEffect(() => {
     const layout = snapshot.layouts?.find(l => l.tab_id === selected);

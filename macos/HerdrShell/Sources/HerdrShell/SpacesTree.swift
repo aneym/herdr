@@ -237,6 +237,16 @@ enum SpacesTree {
                 .sorted { ($0.pinIndex ?? 0) < ($1.pinIndex ?? 0) }
         }
     }
+    /// Close follows the drawn pin block, below first, then above, then the other block.
+    static func closePinOrder(_ rows: [SpacesRow], selected: String?) -> [String] {
+        let agents = rows.filter { $0.id.hasPrefix("agent:") }.compactMap(\.tab)
+        let pins = rows.filter { $0.id.hasPrefix("pinned:") }.compactMap(\.tab)
+        guard let selected else { return [] }
+        let own = agents.contains(selected) ? agents : pins
+        let other = agents.contains(selected) ? pins : agents
+        guard let index = own.firstIndex(of: selected) else { return [] }
+        return Array(own.dropFirst(index + 1)) + Array(own.prefix(index).reversed()) + other
+    }
     static func build(_ input: SpacesInput, overlay: Overlay, chrome: SpacesChrome, now: Double) -> [SpacesRow] {
         let choices = overlay.goalChoices
         let filter = chrome.goalFilter.flatMap { choices.contains($0) ? $0 : nil }

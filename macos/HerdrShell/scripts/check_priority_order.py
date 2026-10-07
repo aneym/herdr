@@ -68,6 +68,14 @@ check("remote parked tabs stay folded until selected", "tab:box/w2:t1" not in se
 check("goal-row and no-goal fallback inputs both list spaces", "goalPresent|true|true" in rows and "goalAbsent|false|true" in rows)
 check("collapse all persists folds, preserves inner state and keeps AGENTS/PINNED", "collapseAllChrome|5|false|true|true" in rows and "agent:leadAll" in selected("collapseAll", "tab") and "pinned:pin1" in selected("collapseAll", "tab") and "tab:plain1" not in selected("collapseAll", "tab"))
 check("expand all restores spaces including parked, leaving inner folds alone", "expandAllChrome|0|true|true|true" in rows and "tab:plain1" in selected("expandAll", "tab") and "tab:parkedtab" in selected("expandAll", "tab"))
+for selected_tab, removed, expected in [
+    ("p2", "p2", "p3"), ("p3", "p3", "p2"),
+    ("a2", "a2", "a3"), ("a3", "a3", "a2"),
+    ("u1", "u1", "u2"), ("p2", "p1,p2,p3", "a1"),
+    ("p2", "p2,p3", "p1"),
+]:
+    check(f"close {selected_tab} removing {removed} focuses {expected}",
+          f"close|{selected_tab}|{removed}|{expected}" in rows)
 summary = f"{len(lines) - len(failures)}/{len(lines)} checks passed"
 print(summary)
 REPORT.write_text("\n".join(lines + [summary, ""] + rows) + "\n")

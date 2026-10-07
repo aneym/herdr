@@ -91,3 +91,21 @@ export function tabOrder(rows: SidebarRow[]): string[] { return [...new Set(rows
 export function scaleRect(rect: Rect, area: Rect, width: number, height: number): Rect {
   return { x: (rect.x - area.x) / Math.max(1, area.width) * width, y: (rect.y - area.y) / Math.max(1, area.height) * height, width: rect.width / Math.max(1, area.width) * width, height: rect.height / Math.max(1, area.height) * height };
 }
+
+// A removed selection follows its previous drawn pin block; unpinned selection
+// retains the old index-based fallback, including the server's initial focus.
+export function selectionAfterClose(previous: SidebarRow[], rows: SidebarRow[], selected: string | null, initial?: string): string | null {
+  const order = tabOrder(rows);
+  if (selected) {
+    const pin = previous.find(r => r.id === selected && (r.kind === "agent" || r.kind === "pinned"));
+    if (pin) {
+      const own = previous.filter(r => r.kind === pin.kind).map(r => r.id);
+      const other = previous.filter(r => r.kind === (pin.kind === "agent" ? "pinned" : "agent")).map(r => r.id);
+      const index = own.indexOf(selected);
+      const next = [...own.slice(index + 1), ...own.slice(0, index).reverse(), ...other].find(id => order.includes(id));
+      if (next) return next;
+    }
+  }
+  const index = selected ? tabOrder(previous).indexOf(selected) : -1;
+  return index >= 0 ? order[Math.min(index, order.length - 1)] ?? null : initial ?? order[0] ?? null;
+}
