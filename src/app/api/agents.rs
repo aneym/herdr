@@ -181,9 +181,6 @@ impl App {
                     InPlaceAgentResumeError::PaneNotFound | InPlaceAgentResumeError::NotRunning => {
                         ("not_resumable", "pane is not running".into())
                     }
-                    InPlaceAgentResumeError::StartFailed => {
-                        ("start_failed", "agent startup deadline expired".into())
-                    }
                     InPlaceAgentResumeError::Failed(_) => {
                         ("unsupported", "could not restart agent".into())
                     }
@@ -228,9 +225,6 @@ impl App {
                 "agent_not_running",
                 format!("pane {} has no running terminal", params.pane_id),
             ),
-            Err(InPlaceAgentResumeError::StartFailed) => {
-                encode_error(id, "start_failed", "agent startup deadline expired")
-            }
             Err(InPlaceAgentResumeError::Failed(message)) => {
                 encode_error(id, "agent_resume_failed", message)
             }

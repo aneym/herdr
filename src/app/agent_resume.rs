@@ -36,7 +36,6 @@ pub(crate) enum InPlaceAgentResumeError {
     NotRunning,
     ArgvUnsupported(String),
     Failed(String),
-    StartFailed,
 }
 
 /// What `agent.resume` restarted.
@@ -212,16 +211,7 @@ impl App {
                 }
             });
             if let Some(mode) = mode {
-                if std::process::Command::new("claude")
-                    .arg("--help")
-                    .output()
-                    .ok()
-                    .is_some_and(|output| {
-                        String::from_utf8_lossy(&output.stdout).contains("--permission-mode")
-                    })
-                {
-                    argv.extend(["--permission-mode".into(), mode.into()]);
-                }
+                argv.extend(["--permission-mode".into(), mode.into()]);
             }
         }
         let cwd = pane
@@ -256,12 +246,19 @@ impl App {
             agent = %resumed.agent,
             "restarting idle agent in place to resume its session"
         );
+        let replaced_pid = runtime.child_pid();
         self.pending_agent_resume_runtime_exits
-            .insert(pane_id, runtime.child_pid());
-        self.shutdown_terminal_runtime(terminal_id.clone());
-        if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
+            .insert(pane_id, replaced_pid);
+        if let Some(old_runtime) = self.terminal_runtimes.remove(&terminal_id) {
+            // Shutdown has a bounded signal/grace loop; it must not stall API dispatch.
+            std::thread::spawn(move || old_runtime.shutdown());
+        }
+        if let Some(mut terminal) = self.state.terminals.remove(&terminal_id) {
             terminal.cwd = cwd.clone();
             terminal.begin_in_place_agent_resume(persisted, plan);
+            self.state
+                .terminals
+                .insert(terminal_id.clone(), terminal.with_respawn_shell_on_exit());
         }
         // Direct argv execution avoids terminal canonical-input limits and shell quoting.
         let runtime = crate::terminal::TerminalRuntime::spawn_argv_command(
@@ -289,42 +286,55 @@ impl App {
             }
             InPlaceAgentResumeError::Failed(err.to_string())
         })?;
-        let started = runtime.child_pid().is_some_and(|pid| {
-            let deadline = Instant::now() + std::time::Duration::from_secs(5);
-            let settle = Instant::now() + std::time::Duration::from_millis(150);
-            while Instant::now() < deadline {
-                let is_agent = |argv: &[String]| {
-                    argv.first().is_some_and(|program| {
-                        crate::agent_resume::same_executable(program, &expected_agent)
-                    })
-                };
-                let process_started =
-                    crate::platform::process_launch_argv(pid).is_some_and(|argv| is_agent(&argv));
-                let descendant_started = crate::detect::foreground_job(pid).is_some_and(|job| {
-                    job.processes
-                        .iter()
-                        .any(|process| process.argv.as_ref().is_some_and(|argv| is_agent(argv)))
-                });
-                let recorded_launcher_started = resumed.launcher == "recorded"
-                    && !resumed.argv.iter().take(2).any(|program| {
-                        crate::agent_resume::same_executable(program, "claude-lb-launch")
-                    })
-                    && crate::platform::process_launch_argv(pid).is_some_and(|argv| {
+        let runtime_pid = runtime.child_pid();
+        let event_tx = self.event_tx.clone();
+        let launcher = resumed.launcher.clone();
+        let startup_argv = resumed.argv.clone();
+        // Process discovery can be slow; only the worker polls, never the server loop.
+        std::thread::spawn(move || {
+            let started = runtime_pid.is_some_and(|pid| {
+                let deadline = Instant::now() + std::time::Duration::from_secs(5);
+                let settle = Instant::now() + std::time::Duration::from_millis(150);
+                while Instant::now() < deadline {
+                    let is_agent = |argv: &[String]| {
                         argv.first().is_some_and(|program| {
-                            crate::agent_resume::same_executable(program, &resumed.argv[0])
+                            crate::agent_resume::same_executable(program, &expected_agent)
                         })
-                    });
-                if Instant::now() >= settle
-                    && (process_started || descendant_started || recorded_launcher_started)
-                {
-                    return true;
+                    };
+                    let process_started = crate::platform::process_launch_argv(pid)
+                        .is_some_and(|argv| is_agent(&argv));
+                    let descendant_started =
+                        crate::detect::foreground_job(pid).is_some_and(|job| {
+                            job.processes.iter().any(|process| {
+                                process.argv.as_ref().is_some_and(|argv| is_agent(argv))
+                            })
+                        });
+                    let recorded_launcher_started = launcher == "recorded"
+                        && !startup_argv.iter().take(2).any(|program| {
+                            crate::agent_resume::same_executable(program, "claude-lb-launch")
+                        })
+                        && crate::platform::process_launch_argv(pid).is_some_and(|argv| {
+                            argv.first().is_some_and(|program| {
+                                crate::agent_resume::same_executable(program, &startup_argv[0])
+                            })
+                        });
+                    if Instant::now() >= settle
+                        && (process_started || descendant_started || recorded_launcher_started)
+                    {
+                        return true;
+                    }
+                    if !crate::platform::process_exists(pid) {
+                        return false;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(25));
                 }
-                if !crate::platform::process_exists(pid) {
-                    return false;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(25));
-            }
-            false
+                false
+            });
+            let _ = event_tx.blocking_send(crate::events::AppEvent::AgentRestartStartupFinished {
+                pane_id,
+                runtime_pid,
+                started,
+            });
         });
         self.retained_agent_resume_panes.insert(
             pane_id,
@@ -337,18 +347,10 @@ impl App {
         self.terminal_runtimes.insert(terminal_id.clone(), runtime);
         if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
             terminal.pending_agent_resume_plan = None;
-            terminal.respawn_shell_on_exit = false;
-            if !started {
-                terminal.restore_error =
-                    Some("Agent did not start before the restart deadline".into());
-            }
+            terminal.respawn_shell_on_exit = true;
         }
         self.state.mark_session_dirty();
         self.emit_pane_updated(ws_idx, pane_id);
-        if !started {
-            self.retained_agent_resume_panes.remove(&pane_id);
-            return Err(InPlaceAgentResumeError::StartFailed);
-        }
         Ok(resumed)
     }
 
@@ -1994,6 +1996,19 @@ mod tests {
         terminal.launch_argv = Some(vec![sleep.into(), script.clone()]);
         terminal.launch_env_overrides =
             vec![("HERDR_RESUME_TEST_PROVIDER".into(), "from-shell-rc".into())];
+        if scenario == ResumeScenario::ForcedRestart {
+            let delayed = fake_bin.join("claude-lb-launch");
+            std::fs::write(
+                &delayed,
+                format!("sleep 2; exec '{}' '{}' \"$@\"\n", fake_claude, script),
+            )
+            .unwrap();
+            app.state
+                .terminals
+                .get_mut(&terminal_id)
+                .unwrap()
+                .launch_argv = Some(vec![sleep.into(), delayed.display().to_string()]);
+        }
         let long_value = "x".repeat(4096);
         if scenario == ResumeScenario::LongArgv {
             app.state
@@ -2015,7 +2030,12 @@ mod tests {
                 "sess-1"
             ])
         } else {
-            serde_json::json!([sleep, script, "--resume", "sess-1"])
+            let launch_script = if scenario == ResumeScenario::ForcedRestart {
+                fake_bin.join("claude-lb-launch").display().to_string()
+            } else {
+                script.clone()
+            };
+            serde_json::json!([sleep, launch_script, "--resume", "sess-1"])
         };
         let response = if scenario == ResumeScenario::ForcedRestart {
             app.state
@@ -2030,6 +2050,7 @@ mod tests {
                     crate::agent_resume::AgentSessionRef::id("sess-1"),
                     Some(2),
                 );
+            let request_started = Instant::now();
             let response: serde_json::Value =
                 serde_json::from_str(&app.handle_api_request(crate::api::schema::Request {
                     id: "force-restart".into(),
@@ -2041,6 +2062,11 @@ mod tests {
                     ),
                 }))
                 .unwrap();
+            assert!(
+                request_started.elapsed() < std::time::Duration::from_secs(1),
+                "restart handler must not wait for startup: {:?}",
+                request_started.elapsed()
+            );
             assert_eq!(response["result"]["ok"], true, "{response}");
             assert_eq!(response["result"]["type"], "agent_restarted");
             // The shared assertions below describe the internal resume contract.
@@ -2048,19 +2074,16 @@ mod tests {
         } else {
             resume_pane(&mut app, &public_id)
         };
-        if scenario == ResumeScenario::AgentExits {
-            assert_eq!(response["error"]["code"], "start_failed");
-            assert!(app.find_pane(pane_id).is_some());
-            for (_, runtime) in app.terminal_runtimes.drain() {
-                runtime.shutdown();
+        for _ in 0..200 {
+            if !crate::platform::process_exists(old_pid.unwrap()) {
+                break;
             }
-            std::env::remove_var("ENV");
-            let _ = std::fs::remove_dir_all(fake_bin);
-            return;
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
         }
         assert!(
             !crate::platform::process_exists(old_pid.unwrap()),
-            "old shell must be gone"
+            "old shell must be gone: pid={old_pid:?}, argv={:?}",
+            old_pid.and_then(crate::platform::process_launch_argv)
         );
         assert_eq!(response["result"]["type"], "agent_resumed", "{response}");
         assert_eq!(response["result"]["pane_id"], public_id.as_str());
@@ -2096,15 +2119,17 @@ mod tests {
             Some(&old_pid)
         );
 
-        // The replaced process's exit is owed, not a pane death.
-        app.handle_internal_event(crate::events::AppEvent::PaneDied {
-            pane_id,
-            runtime_pid: old_pid,
-            exit_reason: crate::platform::ChildExitReason::Exited,
-        });
-        assert!(app.find_pane(pane_id).is_some());
-        assert!(app.terminal_runtimes.get(&terminal_id).is_some());
-        assert!(app.pending_agent_resume_runtime_exits.is_empty());
+        if scenario != ResumeScenario::AgentExits {
+            // The replaced process's exit is owed, not a pane death.
+            app.handle_internal_event(crate::events::AppEvent::PaneDied {
+                pane_id,
+                runtime_pid: old_pid,
+                exit_reason: crate::platform::ChildExitReason::Exited,
+            });
+            assert!(app.find_pane(pane_id).is_some());
+            assert!(app.terminal_runtimes.get(&terminal_id).is_some());
+            assert!(app.pending_agent_resume_runtime_exits.is_empty());
+        }
 
         match scenario {
             ResumeScenario::Resumed
@@ -2133,8 +2158,25 @@ mod tests {
                 if scenario == ResumeScenario::AgentExits {
                     let history = wait_for_history(&app, &terminal_id, "stand-in-exited").await;
                     assert!(history.contains("stand-in-exited"), "{history}");
-                    // The agent exiting leaves the pane shell running.
-                    assert!(crate::platform::process_exists(new_pid.unwrap()));
+                    for _ in 0..200 {
+                        while let Ok(event) = app.event_rx.try_recv() {
+                            app.handle_internal_event(event);
+                        }
+                        if app.terminal_runtimes.get(&terminal_id).unwrap().child_pid() != new_pid {
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                    }
+                    let shell_pid = app.terminal_runtimes.get(&terminal_id).unwrap().child_pid();
+                    assert_ne!(shell_pid, new_pid, "agent exit must respawn the shell");
+                    assert!(shell_pid.is_some_and(crate::platform::process_exists));
+                    assert!(app.find_pane(pane_id).is_some());
+                    for (_, runtime) in app.terminal_runtimes.drain() {
+                        runtime.shutdown();
+                    }
+                    std::env::remove_var("ENV");
+                    let _ = std::fs::remove_dir_all(fake_bin);
+                    return;
                 } else {
                     // The replaced runtime's detector reports late, after the
                     // replacement started; it must not end the window or

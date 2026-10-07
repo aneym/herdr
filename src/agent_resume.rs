@@ -322,12 +322,19 @@ pub fn resume_argv_preserving_flags(
             _ if arg.starts_with('-') => {
                 argv.push(arg.clone());
                 if !arg.contains('=') && claude_option_takes_value(arg) {
-                    if let Some(value) = args.next() {
-                        argv.push(value.clone());
-                    }
+                    let value = args
+                        .peek()
+                        .filter(|value| !value.starts_with('-'))
+                        .ok_or_else(|| format!("missing claude option value: {arg}"))?;
+                    argv.push((*value).clone());
+                    args.next();
                 }
             }
-            _ => {} // The original positional prompt is already in the resumed session.
+            _ => {
+                // An unknown flag may take this value. Refuse rather than silently
+                // dropping it as a prompt or replaying a prompt into the session.
+                return Err("unclassified positional argument in claude argv".into());
+            }
         }
     }
     argv.push("--resume".into());
@@ -1084,7 +1091,7 @@ fn codex_resume_argv(current: &[String], plan: &AgentResumePlan) -> Result<Vec<S
         let name = arg.split('=').next().unwrap_or(arg);
         match name {
             "-m" | "--model" | "-c" | "--config" | "-s" | "--sandbox" | "-a"
-            | "--ask-for-approval" | "-p" | "--profile" | "-C" | "--cd" => {
+            | "--ask-for-approval" | "-p" | "--profile" | "-C" | "--cd" | "-i" | "--image" => {
                 argv.push(arg.clone());
                 if !arg.contains('=') {
                     let value = args
@@ -1093,7 +1100,9 @@ fn codex_resume_argv(current: &[String], plan: &AgentResumePlan) -> Result<Vec<S
                     argv.push(value.clone());
                 }
             }
-            "--dangerously-bypass-approvals-and-sandbox" => argv.push(arg.clone()),
+            "--dangerously-bypass-approvals-and-sandbox" | "--full-auto" | "--search" => {
+                argv.push(arg.clone())
+            }
             _ => {}
         }
     }
@@ -1105,6 +1114,7 @@ fn claude_option_takes_value(arg: &str) -> bool {
     matches!(
         arg,
         "--model"
+            | "--name"
             | "-m"
             | "--effort"
             | "--settings"
@@ -1140,7 +1150,27 @@ pub(crate) fn restart_launch_argv(
     configured: Option<&str>,
     plan: &AgentResumePlan,
 ) -> Result<(Vec<String>, &'static str), String> {
-    if let Some(recorded) = recorded.filter(|argv| !argv.is_empty()) {
+    if let Some(recorded) = recorded.filter(|argv| {
+        let shell_command = argv.first().is_some_and(|program| {
+            [
+                "sh",
+                "bash",
+                "zsh",
+                "fish",
+                "dash",
+                "ksh",
+                "cmd",
+                "powershell",
+                "pwsh",
+            ]
+            .iter()
+            .any(|shell| same_executable(program, shell))
+        }) && argv
+            .iter()
+            .skip(1)
+            .any(|arg| matches!(arg.as_str(), "-c" | "-lc" | "/c" | "-Command"));
+        !argv.is_empty() && !shell_command
+    }) {
         if recorded
             .first()
             .is_some_and(|program| same_executable(program, &plan.agent))
@@ -1152,9 +1182,18 @@ pub(crate) fn restart_launch_argv(
             return resume_argv_preserving_flags(recorded, plan).map(|argv| (argv, "recorded"));
         }
         let mut argv = recorded.to_vec();
+        // An interpreter launcher already owns its script argument; do not
+        // classify that same script as an agent prompt.
+        let mut forwarded_leaf = leaf.to_vec();
+        if leaf
+            .get(1)
+            .is_some_and(|script| recorded.get(1) == Some(script))
+        {
+            forwarded_leaf.remove(1);
+        }
         // Recorded generic launchers forward the agent's arguments.
         argv.extend(
-            resume_argv_preserving_flags(leaf, plan)?
+            resume_argv_preserving_flags(&forwarded_leaf, plan)?
                 .into_iter()
                 .skip(1),
         );
@@ -1170,12 +1209,38 @@ pub(crate) fn restart_launch_argv(
 
 /// Summaries expose option names only; option values may contain credentials.
 pub(crate) fn restart_command_summary(argv: &[String]) -> String {
-    argv.first()
-        .into_iter()
-        .chain(argv.iter().skip(1).filter(|arg| arg.starts_with('-')))
-        .map(|arg| arg.split('=').next().unwrap_or(arg))
-        .collect::<Vec<_>>()
-        .join(" ")
+    let mut summary = argv.first().cloned().into_iter().collect::<Vec<_>>();
+    let mut args = argv.iter().skip(1);
+    while let Some(arg) = args.next() {
+        if !arg.starts_with('-') {
+            continue;
+        }
+        let name = arg.split('=').next().unwrap_or(arg);
+        summary.push(name.to_string());
+        if !arg.contains('=')
+            && (claude_option_takes_value(name)
+                || matches!(
+                    name,
+                    "--resume"
+                        | "-r"
+                        | "--session-id"
+                        | "--config"
+                        | "-s"
+                        | "--sandbox"
+                        | "-a"
+                        | "--ask-for-approval"
+                        | "-p"
+                        | "--profile"
+                        | "-C"
+                        | "--cd"
+                        | "-i"
+                        | "--image"
+                ))
+        {
+            args.next();
+        }
+    }
+    summary.join(" ")
 }
 
 #[cfg(test)]
@@ -1210,6 +1275,31 @@ mod restart_tests {
                     "--effort",
                     "high",
                     "--resume",
+                    "new-session",
+                ],
+            ),
+            (
+                "claude",
+                vec!["claude", "--name", "worker", "--unknown"],
+                vec![
+                    "claude",
+                    "--name",
+                    "worker",
+                    "--unknown",
+                    "--resume",
+                    "new-session",
+                ],
+            ),
+            (
+                "codex",
+                vec!["codex", "--full-auto", "--search", "-i", "picture.png"],
+                vec![
+                    "codex",
+                    "--full-auto",
+                    "--search",
+                    "-i",
+                    "picture.png",
+                    "resume",
                     "new-session",
                 ],
             ),
@@ -1256,7 +1346,24 @@ mod restart_tests {
             &AgentSessionRef::id("session").unwrap(),
         )
         .unwrap();
-        let leaf = strings(&["claude", "--model", "opus", "original prompt"]);
+        assert!(resume_argv_preserving_flags(
+            &strings(&["claude", "--future-flag", "value"]),
+            &plan
+        )
+        .is_err());
+        assert!(resume_argv_preserving_flags(&strings(&["claude", "old prompt"]), &plan).is_err());
+        assert_eq!(
+            restart_command_summary(&strings(&[
+                "claude",
+                "--name",
+                "--private-name",
+                "--settings=private",
+                "--resume",
+                "private-session"
+            ])),
+            "claude --name --settings --resume"
+        );
+        let leaf = strings(&["claude", "--model", "opus"]);
         let (configured, source) =
             restart_launch_argv(&leaf, None, Some("claude-lb-launch"), &plan).unwrap();
         assert_eq!(source, "configured");
@@ -1264,7 +1371,7 @@ mod restart_tests {
             configured,
             strings(&["claude-lb-launch", "--model", "opus", "--resume", "session"])
         );
-        let recorded = strings(&["claude-lb-launch", "--effort", "high", "old prompt"]);
+        let recorded = strings(&["claude-lb-launch", "--effort", "high"]);
         let (argv, source) =
             restart_launch_argv(&leaf, Some(&recorded), Some("ignored"), &plan).unwrap();
         assert_eq!(source, "recorded");
@@ -1278,6 +1385,11 @@ mod restart_tests {
                 "session"
             ])
         );
+        let shell = strings(&["sh", "-c", "claude --model opus"]);
+        let (argv, source) =
+            restart_launch_argv(&leaf, Some(&shell), Some("claude-lb-launch"), &plan).unwrap();
+        assert_eq!(source, "configured");
+        assert_eq!(argv, configured);
         let (argv, source) = restart_launch_argv(&leaf, None, None, &plan).unwrap();
         assert_eq!(source, "direct");
         assert_eq!(

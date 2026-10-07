@@ -91,6 +91,41 @@ impl App {
         &mut self,
         ev: AppEvent,
     ) -> Vec<crate::app::actions::PaneStateUpdate> {
+        if let AppEvent::AgentRestartStartupFinished {
+            pane_id,
+            runtime_pid,
+            started,
+        } = ev
+        {
+            let Some((ws_idx, pane)) = self.find_pane(pane_id) else {
+                return Vec::new();
+            };
+            let terminal_id = pane.attached_terminal_id.clone();
+            if runtime_pid.is_none()
+                || self
+                    .terminal_runtimes
+                    .get(&terminal_id)
+                    .and_then(|runtime| runtime.child_pid())
+                    != runtime_pid
+            {
+                return Vec::new();
+            }
+            if !started
+                && self
+                    .retained_agent_resume_panes
+                    .get(&pane_id)
+                    .is_some_and(|window| window.runtime_pid == runtime_pid)
+            {
+                if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
+                    terminal.restore_error =
+                        Some("start_failed: agent startup deadline expired".into());
+                    terminal.revision = terminal.revision.saturating_add(1);
+                }
+                self.retained_agent_resume_panes.remove(&pane_id);
+                self.emit_pane_updated(ws_idx, pane_id);
+            }
+            return Vec::new();
+        }
         let mut worktree_restore_failed = false;
         let ev = match ev {
             AppEvent::WorktreeRuntimeRestoreFailed {
@@ -227,6 +262,21 @@ impl App {
                     .publish_pane_process_exit_if_agent(*pane_id, false)
                 {
                     self.emit_pane_state_update(&update);
+                }
+                let error = "start_failed: resumed agent exited before startup completed";
+                if self.runtime_exit_action(*pane_id) == RuntimeExitAction::RespawnShell
+                    && self.respawn_shell_for_launch_pane(*pane_id, false)
+                {
+                    if let Some(terminal) = self
+                        .find_pane(*pane_id)
+                        .map(|(_, pane)| pane.attached_terminal_id.clone())
+                        .and_then(|id| self.state.terminals.get_mut(&id))
+                    {
+                        terminal.restore_error = Some(error.into());
+                    }
+                }
+                if let Some((ws_idx, _)) = self.find_pane(*pane_id) {
+                    self.emit_pane_updated(ws_idx, *pane_id);
                 }
                 return Vec::new();
             }

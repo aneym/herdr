@@ -76,6 +76,12 @@ pub(crate) struct WorktreeReadData {
 /// An event from a background task to the main loop.
 #[derive(Debug)]
 pub enum AppEvent {
+    /// A background startup check completed for one replacement runtime.
+    AgentRestartStartupFinished {
+        pane_id: PaneId,
+        runtime_pid: Option<u32>,
+        started: bool,
+    },
     /// A pane's child process exited.
     PaneDied {
         pane_id: PaneId,
