@@ -160,7 +160,14 @@ fn channel_command() -> Command {
 fn server_command() -> Command {
     Command::new("server")
         .about("Run or control the headless server")
-        .subcommand(Command::new("stop").about("Stop the running server"))
+        .subcommand(
+            Command::new("stop").about("Stop the running server").arg(
+                Arg::new("force-self")
+                    .long("force-self")
+                    .action(ArgAction::SetTrue)
+                    .help("Allow stopping the server hosting this pane"),
+            ),
+        )
         .subcommand(Command::new("reload-config").about("Reload config in the running server"))
         .subcommand(
             Command::new("agent-manifests")
@@ -887,7 +894,13 @@ fn session_command() -> Command {
             Command::new("stop")
                 .about("Stop a session")
                 .arg(required("name", "NAME"))
-                .arg(json_flag()),
+                .arg(json_flag())
+                .arg(
+                    Arg::new("force-self")
+                        .long("force-self")
+                        .action(ArgAction::SetTrue)
+                        .help("Allow stopping the server hosting this pane"),
+                ),
         )
         .subcommand(
             Command::new("delete")

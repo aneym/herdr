@@ -479,11 +479,19 @@ fn session_list(args: &[String]) -> std::io::Result<i32> {
 }
 
 fn session_stop(args: &[String]) -> std::io::Result<i32> {
-    let (name, json) =
-        match parse_session_name_and_json(args, "usage: herdr session stop <name> [--json]") {
-            Ok(parsed) => parsed,
-            Err(code) => return Ok(code),
-        };
+    let force_self = args.iter().any(|arg| arg == "--force-self");
+    let args: Vec<String> = args
+        .iter()
+        .filter(|arg| *arg != "--force-self")
+        .cloned()
+        .collect();
+    let (name, json) = match parse_session_name_and_json(
+        &args,
+        "usage: herdr session stop <name> [--json] [--force-self]",
+    ) {
+        Ok(parsed) => parsed,
+        Err(code) => return Ok(code),
+    };
 
     let target = match crate::session::parse_target_name(&name) {
         Ok(target) => target,
@@ -492,6 +500,13 @@ fn session_stop(args: &[String]) -> std::io::Result<i32> {
             return Ok(1);
         }
     };
+    if let Err(message) = server::guard_self_stop(
+        &crate::session::api_socket_path_for(target.as_deref()),
+        force_self,
+    ) {
+        print_session_error("session_stop_failed", &message);
+        return Ok(1);
+    }
     match crate::session::stop_session(target.as_deref()) {
         Ok(session) => {
             if json {

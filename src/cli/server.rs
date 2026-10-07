@@ -25,13 +25,36 @@ pub(super) fn run_server_command(args: &[String]) -> std::io::Result<Option<i32>
 }
 
 fn server_stop(args: &[String]) -> std::io::Result<i32> {
-    if !args.is_empty() {
-        eprintln!("usage: herdr server stop");
-        return Ok(2);
-    }
+    let force_self = match args {
+        [] => false,
+        [flag] if flag == "--force-self" => true,
+        _ => {
+            eprintln!("usage: herdr server stop [--force-self]");
+            return Ok(2);
+        }
+    };
 
     if super::target::is_remote() {
         return super::send_ok_request(Method::ServerStop(EmptyParams::default()));
+    }
+
+    let socket = crate::session::active_api_socket_path();
+    if !crate::session::explicit_session_requested()
+        && std::env::var_os("XDG_CONFIG_HOME").is_some()
+        && std::env::var_os(crate::api::SOCKET_PATH_ENV_VAR).is_some()
+    {
+        let configured =
+            crate::session::api_socket_path_for(crate::session::active_name().as_deref());
+        if configured != socket {
+            eprintln!(
+                "server stop targets {}; HERDR_SOCKET_PATH takes precedence over XDG_CONFIG_HOME ({}). Use --session to select a session or unset HERDR_SOCKET_PATH to use XDG_CONFIG_HOME.",
+                socket.display(), configured.display()
+            );
+        }
+    }
+    if let Err(message) = guard_self_stop(&socket, force_self) {
+        eprintln!("{message}");
+        return Ok(1);
     }
 
     match crate::session::stop_active_server() {
@@ -41,6 +64,32 @@ fn server_stop(args: &[String]) -> std::io::Result<i32> {
             Ok(1)
         }
     }
+}
+
+pub(super) fn guard_self_stop(socket: &std::path::Path, force_self: bool) -> Result<(), String> {
+    if force_self
+        || !std::env::var(crate::integration::HERDR_PANE_ID_ENV_VAR)
+            .is_ok_and(|pane| !pane.is_empty())
+    {
+        return Ok(());
+    }
+    let hosting_socket = std::env::var_os(crate::api::SOCKET_PATH_ENV_VAR)
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            crate::session::api_socket_path_for(crate::session::active_name().as_deref())
+        });
+    let same_socket = socket == hosting_socket
+        || std::fs::canonicalize(socket)
+            .ok()
+            .zip(std::fs::canonicalize(&hosting_socket).ok())
+            .is_some_and(|(target, host)| target == host);
+    if same_socket {
+        return Err(format!(
+            "refusing to stop the server hosting the calling pane at {}; stopping it kills this pane and its peers. Run outside Herdr or pass --force-self to explicitly allow this.",
+            socket.display()
+        ));
+    }
+    Ok(())
 }
 
 fn server_reload_config(args: &[String]) -> std::io::Result<i32> {
@@ -259,7 +308,7 @@ fn parse_live_handoff_params(args: &[String]) -> Option<ServerLiveHandoffParams>
 fn print_server_help() {
     eprintln!("herdr server commands:");
     eprintln!("  herdr server                run as headless server");
-    eprintln!("  herdr server stop           stop the running server via the API socket");
+    eprintln!("  herdr server stop [--force-self]  stop the running server via the API socket");
     eprintln!("  herdr server live-handoff   hand off live panes to a new local server");
     eprintln!("  herdr server reload-config  reload config.toml in the running server");
     eprintln!("  herdr server agent-manifests [--json]  show agent detection manifest status");
