@@ -6,12 +6,12 @@ button:focus-visible { outline: 1px solid var(--shell-muted); outline-offset: -1
 .layout { display: flex; width: 100vw; height: 100vh; }
 .sidebar { width: var(--shell-space-sidebar-width); min-width: var(--shell-space-sidebar-width); background: var(--shell-surface); padding: 0 8px; display: flex; flex-direction: column; }
 .sidebar nav { flex: 1; overflow: auto; min-height: 0; }
-h2 { font-size: var(--shell-type-section-label); font-weight: 600; text-transform: uppercase; letter-spacing: var(--shell-type-section-tracking); color: var(--shell-muted); margin: 14px 8px 5px; }
+.sidebar h2 { font-size: var(--shell-type-section-label); font-weight: 600; text-transform: uppercase; letter-spacing: var(--shell-type-section-tracking); color: var(--shell-muted); margin: 14px 8px 5px; }
 .spaces { margin-top: 14px; }
 .sidebar-row { height: var(--shell-space-row-height); padding: 0 8px; border-radius: var(--shell-radius-row); font-size: var(--shell-type-row-title); font-weight: 500; display: flex; align-items: center; gap: 7px; width: 100%; text-align: left; }
 .sidebar-row:hover { background: var(--shell-hover); }
 .sidebar-row.selected { background: var(--shell-selection); }
-.select-tab { display: flex; align-items: center; gap: 7px; width: 100%; min-width: 0; height: 100%; text-align: left; }
+.select-tab { font: inherit; display: flex; align-items: center; gap: 7px; width: 100%; min-width: 0; height: 100%; text-align: left; }
 .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 .status { font-size: var(--shell-type-glyph); color: var(--shell-muted); flex-shrink: 0; }
 .status.working { color: var(--shell-ok); }.status.blocked { color: var(--shell-bad); }.status.done { color: var(--shell-warn); }
@@ -51,6 +51,7 @@ footer { color: var(--shell-muted); padding: 12px 8px; font-size: 12px; overflow
 .chat-tool { padding: 4px 8px; }
 .chat pre { white-space: pre-wrap; overflow-wrap: anywhere; background: color-mix(in srgb, var(--shell-text) 5.5%, transparent); padding: 11px 14px; border-radius: var(--shell-radius-code); font-size: var(--shell-type-code); }
 .chat code { font-family: var(--shell-font-mono); background: color-mix(in srgb, var(--shell-text) 5.5%, transparent); }
+.chat pre code { background: none; }
 .chat-markdown p:first-child { margin-top: 0; }.chat-markdown p:last-child { margin-bottom: 0; }
 .chat-markdown a { color: var(--shell-accent); }.chat-markdown table { border-collapse: collapse; }.chat-markdown td, .chat-markdown th { padding: 4px 8px; border: 1px solid var(--shell-line); }
 .chat-bottom { flex-shrink: 0; padding-top: 0; }
