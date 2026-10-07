@@ -2478,8 +2478,7 @@ mod tests {
                 serde_json::json!({"state": state, "id": "send-1"}),
                 now,
             )
-            .err()
-            .expect("undelivered");
+            .expect_err("undelivered");
             assert_eq!(failure.exit_code, 1);
         }
         for reason in ["expired", "cancelled"] {
@@ -2488,8 +2487,7 @@ mod tests {
                 serde_json::json!({"state": "dropped", "reason": reason, "id": "send-1"}),
                 now,
             )
-            .err()
-            .expect("undelivered");
+            .expect_err("undelivered");
             assert_eq!(failure.exit_code, PLUGIN_RELOAD_EXIT_BUSY);
         }
         assert!(wait_for_plugin_reload_prompt(
@@ -2748,7 +2746,7 @@ mod tests {
     #[test]
     fn plugin_reload_fails_closed_without_runtime_identity_or_delivery_ack() {
         let (result, calls, recorded) = run_scripted_plugin_reload(AfterResume::NoRuntimeId);
-        let failure = result.err().expect("no runtime identity must fail");
+        let failure = result.expect_err("no runtime identity must fail");
         assert_eq!(failure.exit_code, 1);
         assert!(
             failure.message.contains("runtime_id"),
@@ -2760,7 +2758,7 @@ mod tests {
         assert!(!recorded);
 
         let (result, calls, recorded) = run_scripted_plugin_reload(AfterResume::NoAck);
-        let failure = result.err().expect("no delivery ack must fail");
+        let failure = result.expect_err("no delivery ack must fail");
         assert_eq!(failure.exit_code, 1);
         assert!(
             failure.message.contains("did not acknowledge"),
@@ -2777,7 +2775,7 @@ mod tests {
     #[test]
     fn plugin_reload_cancels_a_line_still_held_past_its_grace() {
         let (result, calls, recorded) = run_scripted_plugin_reload(AfterResume::StuckQueued);
-        let failure = result.err().expect("a held line must not complete");
+        let failure = result.expect_err("a held line must not complete");
         assert_eq!(
             failure.exit_code, PLUGIN_RELOAD_EXIT_BUSY,
             "{}",
