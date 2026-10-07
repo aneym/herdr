@@ -179,6 +179,7 @@ pub(crate) fn interactive_shell_command(_argv: &[String], _shell_name: &str) -> 
     None
 }
 
+#[cfg(test)]
 pub(crate) fn resume_shell_command(_argv: &[String], _shell_name: &str) -> Option<String> {
     None
 }
@@ -267,12 +268,6 @@ pub fn show_desktop_notification(_title: &str, _body: Option<&str>) -> std::io::
     Ok(false)
 }
 
-impl super::ProcessLaunchCapture for super::NativeProcessLaunchCapture {
-    const SUPPORTED: bool = false;
-    fn capture(_pid: u32) -> std::io::Result<super::ProcessLaunch> {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "process launch capture unsupported",
-        ))
-    }
+pub(crate) fn process_launch_argv(_pid: u32) -> Option<Vec<String>> {
+    None
 }

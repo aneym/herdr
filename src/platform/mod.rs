@@ -637,6 +637,7 @@ pub(crate) fn interactive_unix_shell_command(
 /// shell expands nothing (`=cmd`, `~`, globs, `$`, history), even in tokens
 /// the shorter `interactive_unix_shell_command` quoting leaves bare.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(test)]
 pub(crate) fn fully_quoted_unix_shell_command(argv: &[String], shell_name: &str) -> Option<String> {
     let powershell = is_powershell_process_name(shell_name);
     let quote = |arg: &String| {
@@ -663,6 +664,7 @@ pub(crate) fn fully_quoted_unix_shell_command(argv: &[String], shell_name: &str)
 /// PowerShell also ends single-quoted strings at the typographic single
 /// quotes, so those are doubled too.
 #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+#[cfg(test)]
 pub(crate) fn quote_powershell_arg_always(value: &str) -> String {
     let mut quoted = String::with_capacity(value.len() + 2);
     quoted.push('\'');
@@ -722,6 +724,7 @@ pub(crate) fn quote_windows_command_line_arg(value: &str) -> String {
 /// argv for without changing its meaning: the POSIX sh family, PowerShell,
 /// and cmd (which runs the agent through an encoded PowerShell command).
 /// fish, csh, nu and other shells parse quotes differently and are refused.
+#[cfg(test)]
 pub(crate) fn is_quotable_interactive_shell(name: &str) -> bool {
     matches!(
         normalized_process_name(name).as_str(),
@@ -1024,89 +1027,19 @@ pub(crate) fn process_is_stopped(_pid: u32) -> Option<bool> {
     None
 }
 
-/// Process launch data deliberately has no Debug implementation: env can contain secrets.
-pub(crate) struct ProcessLaunch {
-    pub(crate) argv: Vec<String>,
-    pub(crate) env: Vec<(String, String)>,
-    pub(crate) parent_pid: u32,
-}
-
-pub(crate) trait ProcessLaunchCapture {
-    const SUPPORTED: bool;
-    fn capture(pid: u32) -> std::io::Result<ProcessLaunch>;
-}
-
-pub(crate) struct NativeProcessLaunchCapture;
-
-pub(crate) fn capture_agent_launch(shell: u32, agent: u32) -> std::io::Result<ProcessLaunch> {
-    let mut launch = NativeProcessLaunchCapture::capture(agent)?;
-    let mut parent = launch.parent_pid;
-    // Bound the ancestry walk, including protection against PID reuse/cycles.
+/// Read argv only; process environments are never captured or replayed.
+pub(crate) fn agent_launch_argv(shell: u32, agent: u32) -> Option<Vec<String>> {
+    let snapshot = process_snapshot().ok()?;
+    let mut pid = agent;
     for _ in 0..128 {
+        let parent = snapshot.iter().find(|entry| entry.pid == pid)?.parent_pid;
         if parent == shell {
-            return Ok(launch);
+            return process_launch_argv(pid);
         }
-        if parent == 0 || parent == agent {
-            break;
+        if parent == 0 || parent == pid {
+            return None;
         }
-        let outer = NativeProcessLaunchCapture::capture(parent)?;
-        parent = outer.parent_pid;
-        launch.argv = outer.argv;
-        launch.parent_pid = parent;
+        pid = parent;
     }
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "agent ancestry does not reach pane shell",
-    ))
-}
-
-pub(crate) fn parse_launch_env(bytes: &[u8]) -> Vec<(String, String)> {
-    bytes
-        .split(|byte| *byte == 0)
-        .filter_map(|entry| {
-            let entry = std::str::from_utf8(entry).ok()?;
-            let (key, value) = entry.split_once('=')?;
-            Some((key.to_owned(), value.to_owned()))
-        })
-        .collect()
-}
-
-#[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
-mod launch_capture_tests {
-    use super::*;
-    #[test]
-    fn agent_resume_platform_captures_synthetic_child_environment() {
-        let python = [
-            "/opt/homebrew/bin/python3",
-            "/usr/local/bin/python3",
-            "/usr/bin/python3",
-        ]
-        .into_iter()
-        .find(|path| std::path::Path::new(path).exists())
-        .expect("installed Python interpreter");
-        let mut child = std::process::Command::new(python)
-            .args(["-I", "-c", "import time; time.sleep(30)"])
-            .env("SYNTHETIC_CAPTURE_TEST", "synthetic")
-            .spawn()
-            .unwrap();
-        let result = NativeProcessLaunchCapture::capture(child.id());
-        let _ = child.kill();
-        let _ = child.wait();
-        let launch = result.expect("capture child process");
-        assert!(launch
-            .env
-            .iter()
-            .any(|(key, value)| key == "SYNTHETIC_CAPTURE_TEST" && value == "synthetic"));
-        assert!(crate::agent_resume::restart_launch_env(launch.env)
-            .iter()
-            .any(|(key, value)| key == "SYNTHETIC_CAPTURE_TEST" && value == "synthetic"));
-    }
-
-    #[test]
-    fn agent_resume_platform_captures_current_process_argv() {
-        let launch = NativeProcessLaunchCapture::capture(std::process::id())
-            .expect("capture current process");
-        assert!(!launch.argv.is_empty());
-        assert_eq!(launch.argv, std::env::args().collect::<Vec<_>>());
-    }
+    None
 }

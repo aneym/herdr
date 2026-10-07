@@ -26,28 +26,8 @@ pub(crate) use super::unix_common::{
     ClientStreamReader, StatusCommandGuard,
 };
 
-impl super::ProcessLaunchCapture for super::NativeProcessLaunchCapture {
-    const SUPPORTED: bool = true;
-    fn capture(pid: u32) -> std::io::Result<super::ProcessLaunch> {
-        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat"))?;
-        let parent_pid = stat
-            .rsplit_once(')')
-            .and_then(|(_, fields)| fields.split_whitespace().nth(1))
-            .and_then(|pid| pid.parse().ok())
-            .ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::Unsupported,
-                    "process ancestry unavailable",
-                )
-            })?;
-        Ok(super::ProcessLaunch {
-            argv: process_argv(pid).ok_or_else(|| {
-                std::io::Error::new(std::io::ErrorKind::Unsupported, "process argv unavailable")
-            })?,
-            env: super::parse_launch_env(&std::fs::read(format!("/proc/{pid}/environ"))?),
-            parent_pid,
-        })
-    }
+pub(crate) fn process_launch_argv(pid: u32) -> Option<Vec<String>> {
+    process_argv(pid)
 }
 
 #[cfg(test)]
@@ -368,6 +348,7 @@ pub(crate) fn interactive_shell_command(argv: &[String], shell_name: &str) -> Op
 }
 
 /// The `agent.resume` line for the pane shell, every token quoted.
+#[cfg(test)]
 pub(crate) fn resume_shell_command(argv: &[String], shell_name: &str) -> Option<String> {
     super::fully_quoted_unix_shell_command(argv, shell_name)
 }

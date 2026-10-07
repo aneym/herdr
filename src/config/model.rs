@@ -373,6 +373,7 @@ pub fn validated_sidebar_bounds(min: u16, max: u16) -> Option<(u16, u16)> {
 #[serde(default)]
 pub struct Config {
     pub onboarding: Option<bool>,
+    pub agent_restart: AgentRestartConfig,
     pub theme: ThemeConfig,
     pub terminal: TerminalConfig,
     pub session: SessionConfig,
@@ -2285,4 +2286,10 @@ scrollback_lines = 12345
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.advanced.scrollback_limit_bytes, 12345);
     }
+}
+
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct AgentRestartConfig {
+    pub launchers: std::collections::BTreeMap<String, String>,
 }

@@ -319,7 +319,15 @@ pub fn resume_argv_preserving_flags(
             }
             "--continue" | "-c" | "--fork-session" => {}
             other if other.starts_with("--resume=") || other.starts_with("--session-id=") => {}
-            _ => argv.push(arg.clone()),
+            _ if arg.starts_with('-') => {
+                argv.push(arg.clone());
+                if !arg.contains('=') && claude_option_takes_value(arg) {
+                    if let Some(value) = args.next() {
+                        argv.push(value.clone());
+                    }
+                }
+            }
+            _ => {} // The original positional prompt is already in the resumed session.
         }
     }
     argv.push("--resume".into());
@@ -331,6 +339,7 @@ pub fn resume_argv_preserving_flags(
 /// tolerating a Windows `.exe` suffix).
 pub(crate) fn same_executable(current: &str, planned: &str) -> bool {
     let basename = current.rsplit(['/', '\\']).next().unwrap_or(current);
+    let planned = planned.rsplit(['/', '\\']).next().unwrap_or(planned);
     basename == planned
         || basename
             .strip_suffix(".exe")
@@ -1092,28 +1101,71 @@ fn codex_resume_argv(current: &[String], plan: &AgentResumePlan) -> Result<Vec<S
     Ok(argv)
 }
 
-pub(crate) fn restart_launch_env(env: Vec<(String, String)>) -> Vec<(String, String)> {
-    env.into_iter()
-        .filter(|(key, _)| {
-            !matches!(
-                key.as_str(),
-                "PWD"
-                    | "OLDPWD"
-                    | "SHLVL"
-                    | "_"
-                    | "TERM_SESSION_ID"
-                    | "HERDR_PANE_ID"
-                    | "HERDR_TAB_ID"
-                    | "HERDR_WORKSPACE_ID"
-                    | "HERDR_RUNTIME_ID"
-                    | "HERDR_PANE_RUNTIME_ID"
-                    | "HERDR_PANE_RUNTIME_MARKER"
-                    | "HERDR_SOCKET_PATH"
-                    | "HERDR_CLIENT_SOCKET_PATH"
-                    | "HERDR_BIN_PATH"
-            )
-        })
-        .collect()
+fn claude_option_takes_value(arg: &str) -> bool {
+    matches!(
+        arg,
+        "--model"
+            | "-m"
+            | "--effort"
+            | "--settings"
+            | "--settings-sources"
+            | "--permission-mode"
+            | "--system-prompt"
+            | "--append-system-prompt"
+            | "--system-prompt-file"
+            | "--append-system-prompt-file"
+            | "--mcp-config"
+            | "--agents"
+            | "--agent"
+            | "--tools"
+            | "--allowedTools"
+            | "--allowed-tools"
+            | "--disallowedTools"
+            | "--disallowed-tools"
+            | "--add-dir"
+            | "--plugin-dir"
+            | "--output-format"
+            | "--input-format"
+            | "--max-budget-usd"
+            | "--max-turns"
+            | "--fallback-model"
+            | "--betas"
+            | "--autocompact"
+    )
+}
+
+pub(crate) fn restart_launch_argv(
+    leaf: &[String],
+    recorded: Option<&[String]>,
+    configured: Option<&str>,
+    plan: &AgentResumePlan,
+) -> Result<(Vec<String>, &'static str), String> {
+    if let Some(recorded) = recorded.filter(|argv| !argv.is_empty()) {
+        if recorded
+            .first()
+            .is_some_and(|program| same_executable(program, &plan.agent))
+            || recorded
+                .iter()
+                .take(2)
+                .any(|program| same_executable(program, "claude-lb-launch"))
+        {
+            return resume_argv_preserving_flags(recorded, plan).map(|argv| (argv, "recorded"));
+        }
+        let mut argv = recorded.to_vec();
+        // Recorded generic launchers forward the agent's arguments.
+        argv.extend(
+            resume_argv_preserving_flags(leaf, plan)?
+                .into_iter()
+                .skip(1),
+        );
+        return Ok((argv, "recorded"));
+    }
+    let mut argv = resume_argv_preserving_flags(leaf, plan)?;
+    if let Some(launcher) = configured.filter(|launcher| !launcher.trim().is_empty()) {
+        argv[0] = launcher.to_string();
+        return Ok((argv, "configured"));
+    }
+    Ok((argv, "direct"))
 }
 
 /// Summaries expose option names only; option values may contain credentials.
@@ -1195,41 +1247,42 @@ mod restart_tests {
         assert!(plan("custom:unknown", "unknown", &session).is_none());
     }
 
-    /// Pure environment filtering uses synthetic values exclusively.
+    /// Pure launcher precedence and prompt stripping algorithms have multiple edge cases.
     #[test]
-    fn agent_resume_restart_filters_volatile_environment() {
-        let keys = [
-            "PWD",
-            "OLDPWD",
-            "SHLVL",
-            "_",
-            "TERM_SESSION_ID",
-            "HERDR_PANE_ID",
-            "HERDR_RUNTIME_ID",
-            "PATH",
-            "HERDR_RESUME_TEST_PROVIDER",
-            "SYNTHETIC_TOKEN",
-        ];
-        let filtered = restart_launch_env(
-            keys.iter()
-                .map(|key| (key.to_string(), "synthetic".into()))
-                .collect(),
-        );
+    fn agent_resume_restart_launcher_precedence_and_prompt_removal() {
+        let plan = plan(
+            "herdr:claude",
+            "claude",
+            &AgentSessionRef::id("session").unwrap(),
+        )
+        .unwrap();
+        let leaf = strings(&["claude", "--model", "opus", "original prompt"]);
+        let (configured, source) =
+            restart_launch_argv(&leaf, None, Some("claude-lb-launch"), &plan).unwrap();
+        assert_eq!(source, "configured");
         assert_eq!(
-            filtered
-                .iter()
-                .map(|(key, _)| key.as_str())
-                .collect::<Vec<_>>(),
-            vec!["PATH", "HERDR_RESUME_TEST_PROVIDER", "SYNTHETIC_TOKEN"]
+            configured,
+            strings(&["claude-lb-launch", "--model", "opus", "--resume", "session"])
         );
+        let recorded = strings(&["claude-lb-launch", "--effort", "high", "old prompt"]);
+        let (argv, source) =
+            restart_launch_argv(&leaf, Some(&recorded), Some("ignored"), &plan).unwrap();
+        assert_eq!(source, "recorded");
         assert_eq!(
-            restart_command_summary(&strings(&[
-                "claude",
-                "--settings=synthetic-secret",
+            argv,
+            strings(&[
+                "claude-lb-launch",
+                "--effort",
+                "high",
                 "--resume",
                 "session"
-            ])),
-            "claude --settings --resume"
+            ])
+        );
+        let (argv, source) = restart_launch_argv(&leaf, None, None, &plan).unwrap();
+        assert_eq!(source, "direct");
+        assert_eq!(
+            argv,
+            strings(&["claude", "--model", "opus", "--resume", "session"])
         );
     }
 }

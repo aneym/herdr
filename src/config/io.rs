@@ -376,6 +376,14 @@ fn load_live_config_from_str(content: &str) -> Result<LoadedConfig, Vec<String>>
         |section| config.remote = section,
     );
 
+    load_live_section(
+        table,
+        "agent_restart",
+        "agent restart config",
+        &mut diagnostics,
+        &mut invalid_sections,
+        |section| config.agent_restart = section,
+    );
     diagnostics.extend(config.theme.diagnostics());
 
     Ok(LoadedConfig {

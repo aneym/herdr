@@ -118,6 +118,7 @@ pub struct App {
     pub(crate) polite_send_mode: crate::config::PoliteSendConfig,
     pub(crate) polite_send_quiet: Duration,
     pub(crate) polite_send_settle: Duration,
+    pub(crate) agent_restart: crate::config::AgentRestartConfig,
     pub(crate) factory_ui: crate::config::FactoryUiConfig,
     /// Tabs whose factory run is live by a fresh overlay; see `work_status`.
     pub(crate) live_factory_tabs: std::collections::HashSet<String>,
@@ -682,6 +683,7 @@ impl App {
             polite_send_mode: config.server.polite_send,
             polite_send_quiet: Duration::from_secs(config.server.polite_send_quiet_secs),
             polite_send_settle: Duration::from_millis(config.server.polite_send_submit_settle_ms),
+            agent_restart: config.agent_restart.clone(),
             factory_ui: config.ui.factory.clone(),
             live_factory_tabs: Default::default(),
             usage_sampler: usage::UsageSampler::default(),
@@ -968,6 +970,7 @@ impl App {
                     &config.ui.window_title,
                 ));
 
+                self.agent_restart = config.agent_restart.clone();
                 self.factory_ui = config.ui.factory.clone();
                 self.polite_send_mode = config.server.polite_send;
                 self.polite_send_quiet = Duration::from_secs(config.server.polite_send_quiet_secs);

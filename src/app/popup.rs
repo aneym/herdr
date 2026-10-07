@@ -154,7 +154,9 @@ impl App {
         let cols = resolved_geometry.inner.width;
         let (runtime, launch_argv) = spawn(pane_id, rows, cols, cwd.clone(), &launch_env, self)?;
         let terminal = match launch_argv {
-            Some(argv) => TerminalState::new(terminal_id.clone(), cwd).with_launch_argv(argv),
+            Some(argv) => TerminalState::new(terminal_id.clone(), cwd)
+                .with_launch_argv(argv)
+                .with_launch_env_overrides(&launch_env),
             None => TerminalState::new(terminal_id.clone(), cwd),
         };
         self.terminal_runtimes.insert(terminal_id.clone(), runtime);

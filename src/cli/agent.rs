@@ -1153,6 +1153,13 @@ fn parse_timeout(value: &str) -> Result<u64, i32> {
 }
 
 fn agent_restart(args: &[String]) -> std::io::Result<i32> {
+    if args
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "--help" | "-h"))
+    {
+        println!("Usage: herdr agent restart <pane> [--force]");
+        return Ok(0);
+    }
     let Some(pane) = args.first().filter(|arg| !arg.starts_with('-')) else {
         eprintln!("Usage: herdr agent restart <pane> [--force]");
         return Ok(2);
@@ -1173,6 +1180,11 @@ fn agent_restart(args: &[String]) -> std::io::Result<i32> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn agent_restart_help_exits_successfully() {
+        assert_eq!(super::agent_restart(&["--help".into()]).unwrap(), 0);
+    }
+
     use super::*;
 
     fn parse(args: &[&str]) -> Result<(&'static str, Method), i32> {

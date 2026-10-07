@@ -249,14 +249,8 @@ pub(crate) fn write_existing_config(
     config_backup::write_existing(target, contents)
 }
 
-impl super::ProcessLaunchCapture for super::NativeProcessLaunchCapture {
-    const SUPPORTED: bool = false;
-    fn capture(_pid: u32) -> std::io::Result<super::ProcessLaunch> {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "process launch capture unsupported",
-        ))
-    }
+pub(crate) fn process_launch_argv(_pid: u32) -> Option<Vec<String>> {
+    None
 }
 
 #[cfg(test)]
@@ -959,6 +953,7 @@ pub(crate) fn interactive_shell_command(argv: &[String], shell_name: &str) -> Op
 /// The `agent.resume` line for the pane shell: the same launcher with every
 /// PowerShell token quoted. cmd receives it base64-encoded, so cmd expands
 /// nothing either.
+#[cfg(test)]
 pub(crate) fn resume_shell_command(argv: &[String], shell_name: &str) -> Option<String> {
     interactive_shell_command_quoted_with(argv, shell_name, super::quote_powershell_arg_always)
 }

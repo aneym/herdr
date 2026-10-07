@@ -155,6 +155,7 @@ pub struct TerminalState {
     pub last_agent_completion_seq: Option<u64>,
     pub revision: u64,
     pub launch_argv: Option<Vec<String>>,
+    pub(crate) launch_env_overrides: Vec<(String, String)>,
     pub respawn_shell_on_exit: bool,
     recent_agent_process_exit: Option<RecentAgentProcessExit>,
     agent_process_acquisition_pending: bool,
@@ -203,6 +204,7 @@ impl TerminalState {
             last_agent_completion_seq: None,
             revision: 0,
             launch_argv: None,
+            launch_env_overrides: Vec::new(),
             respawn_shell_on_exit: false,
             recent_agent_process_exit: None,
             agent_process_acquisition_pending: false,
@@ -297,6 +299,11 @@ impl TerminalState {
 
     pub fn with_launch_argv(mut self, argv: Vec<String>) -> Self {
         self.launch_argv = Some(argv);
+        self
+    }
+
+    pub(crate) fn with_launch_env_overrides(mut self, env: &crate::pane::PaneLaunchEnv) -> Self {
+        self.launch_env_overrides = env.extra.clone();
         self
     }
 

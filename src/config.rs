@@ -24,8 +24,8 @@ pub use self::{
         IndexedKeybind, Keybinds, LiveKeybindConfig,
     },
     model::{
-        validated_sidebar_bounds, AgentCloseFocusConfig, AgentPanelSortConfig, AttentionReadConfig,
-        Config, ConfigReloadReport, ConfigReloadStatus, HostCursorModeConfig,
+        validated_sidebar_bounds, AgentCloseFocusConfig, AgentPanelSortConfig, AgentRestartConfig,
+        AttentionReadConfig, Config, ConfigReloadReport, ConfigReloadStatus, HostCursorModeConfig,
         MouseNavButtonActionConfig, NewTerminalCwdConfig, PaneBordersConfig, PoliteSendConfig,
         ShellModeConfig, ShowTabStatusConfig, SidebarCollapsedModeConfig, StatusIndicatorStyle,
         TabBarPositionConfig, ToastClipboardPosition, ToastConfig, ToastDelivery,

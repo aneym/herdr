@@ -36,6 +36,7 @@ pub(crate) enum InPlaceAgentResumeError {
     NotRunning,
     ArgvUnsupported(String),
     Failed(String),
+    StartFailed,
 }
 
 /// What `agent.resume` restarted.
@@ -44,6 +45,7 @@ pub(crate) struct InPlaceAgentResume {
     pub(crate) agent: String,
     pub(crate) session_id: String,
     pub(crate) argv: Vec<String>,
+    pub(crate) launcher: String,
 }
 
 impl App {
@@ -164,22 +166,31 @@ impl App {
                 InPlaceAgentResumeError::ArgvUnsupported("agent process unavailable".into())
             })?;
         let agent_argv = process.argv.unwrap_or_default();
-        let captured = match crate::platform::capture_agent_launch(shell_pid, process.pid) {
-            Ok(launch) => Some(launch),
-            Err(_) if !<crate::platform::NativeProcessLaunchCapture as crate::platform::ProcessLaunchCapture>::SUPPORTED => None,
-            Err(_) => return Err(InPlaceAgentResumeError::ArgvUnsupported("could not capture original launch environment".into())),
-        };
-        let launch_argv = captured
-            .as_ref()
-            .map(|launch| &launch.argv)
-            .filter(|argv| {
-                argv.iter()
-                    .take(2)
-                    .any(|arg| crate::agent_resume::same_executable(arg, "claude-lb-launch"))
-            })
-            .unwrap_or(&agent_argv);
-        let mut argv = crate::agent_resume::resume_argv_preserving_flags(launch_argv, &plan)
-            .map_err(InPlaceAgentResumeError::ArgvUnsupported)?;
+        let terminal = self
+            .state
+            .terminals
+            .get(&terminal_id)
+            .ok_or(InPlaceAgentResumeError::PaneNotFound)?;
+        let recorded = terminal.launch_argv.clone();
+        let launch_env_overrides = terminal.launch_env_overrides.clone();
+        let outer = crate::platform::agent_launch_argv(shell_pid, process.pid);
+        let known_outer = outer.as_ref().filter(|argv| {
+            argv.iter()
+                .take(2)
+                .any(|arg| crate::agent_resume::same_executable(arg, "claude-lb-launch"))
+        });
+        let (mut argv, launcher) = crate::agent_resume::restart_launch_argv(
+            &agent_argv,
+            recorded
+                .as_deref()
+                .or_else(|| known_outer.map(Vec::as_slice)),
+            self.agent_restart
+                .launchers
+                .get(&plan.agent)
+                .map(String::as_str),
+            &plan,
+        )
+        .map_err(InPlaceAgentResumeError::ArgvUnsupported)?;
         // Only footer evidence is used; never infer permission mode from incidental chat text.
         if plan.agent == "claude"
             && !argv.iter().any(|arg| {
@@ -213,9 +224,6 @@ impl App {
                 }
             }
         }
-        let captured_env = captured
-            .map(|launch| crate::agent_resume::restart_launch_env(launch.env))
-            .unwrap_or_default();
         let cwd = pane
             .cwd
             .as_deref()
@@ -226,6 +234,7 @@ impl App {
             agent: plan.agent.clone(),
             session_id: session_ref.value.clone(),
             argv: argv.clone(),
+            launcher: launcher.into(),
         };
         let persisted = crate::agent_resume::PersistedAgentSession {
             source: session.source,
@@ -233,12 +242,10 @@ impl App {
             session_ref,
         };
         let plan = crate::agent_resume::AgentResumePlan { argv, ..plan };
+        let expected_agent = plan.agent.clone();
 
-        let shell = crate::pane::pane_shell(&self.state.default_shell);
-        let resume_command = resume_shell_command(&resumed.argv, &shell)
-            .map_err(InPlaceAgentResumeError::ArgvUnsupported)?;
         let launch_env = self
-            .pane_launch_env(ws_idx, pane_id, captured_env)
+            .pane_launch_env(ws_idx, pane_id, launch_env_overrides)
             .ok_or_else(|| {
                 InPlaceAgentResumeError::Failed("pane launch environment unavailable".into())
             })?;
@@ -256,19 +263,18 @@ impl App {
             terminal.cwd = cwd.clone();
             terminal.begin_in_place_agent_resume(persisted, plan);
         }
-        // Launch the way deferred resume does: a fresh pane shell (so the
-        // login-shell environment the agent's provider and auth come from is
-        // present) with the resume command typed into it.
-        let runtime = crate::terminal::TerminalRuntime::spawn(
+        // Direct argv execution avoids terminal canonical-input limits and shell quoting.
+        let runtime = crate::terminal::TerminalRuntime::spawn_argv_command(
             pane_id,
             rows,
             cols,
             cwd,
+            &resumed.argv,
+            &launch_env,
+            crate::pane::AgentDetection::Enabled,
             self.state.pane_scrollback_limit_bytes,
             self.state.host_terminal_theme,
             self.state.host_terminal_appearance,
-            crate::pane::PaneShellConfig::new(&self.state.default_shell, self.state.shell_mode),
-            &launch_env,
             self.event_tx.clone(),
             self.render_notify.clone(),
             self.render_dirty.clone(),
@@ -283,9 +289,43 @@ impl App {
             }
             InPlaceAgentResumeError::Failed(err.to_string())
         })?;
-        let mut input = resume_command;
-        input.push('\r');
-        let typed = runtime.try_send_bytes(Bytes::from(input));
+        let started = runtime.child_pid().is_some_and(|pid| {
+            let deadline = Instant::now() + std::time::Duration::from_secs(5);
+            let settle = Instant::now() + std::time::Duration::from_millis(150);
+            while Instant::now() < deadline {
+                let is_agent = |argv: &[String]| {
+                    argv.first().is_some_and(|program| {
+                        crate::agent_resume::same_executable(program, &expected_agent)
+                    })
+                };
+                let process_started =
+                    crate::platform::process_launch_argv(pid).is_some_and(|argv| is_agent(&argv));
+                let descendant_started = crate::detect::foreground_job(pid).is_some_and(|job| {
+                    job.processes
+                        .iter()
+                        .any(|process| process.argv.as_ref().is_some_and(|argv| is_agent(argv)))
+                });
+                let recorded_launcher_started = resumed.launcher == "recorded"
+                    && !resumed.argv.iter().take(2).any(|program| {
+                        crate::agent_resume::same_executable(program, "claude-lb-launch")
+                    })
+                    && crate::platform::process_launch_argv(pid).is_some_and(|argv| {
+                        argv.first().is_some_and(|program| {
+                            crate::agent_resume::same_executable(program, &resumed.argv[0])
+                        })
+                    });
+                if Instant::now() >= settle
+                    && (process_started || descendant_started || recorded_launcher_started)
+                {
+                    return true;
+                }
+                if !crate::platform::process_exists(pid) {
+                    return false;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            false
+        });
         self.retained_agent_resume_panes.insert(
             pane_id,
             AgentResumeReplacementWindow {
@@ -293,23 +333,21 @@ impl App {
                 until: Instant::now() + AGENT_RESUME_REPLACEMENT_WINDOW,
             },
         );
-        // The shell stays in the pane even if typing failed, so the pane is
-        // never left without a runtime.
+        // Keep the replacement runtime attached even when startup times out.
         self.terminal_runtimes.insert(terminal_id.clone(), runtime);
         if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
             terminal.pending_agent_resume_plan = None;
             terminal.respawn_shell_on_exit = false;
-            if let Err(err) = &typed {
-                terminal.restore_error = Some(format!("Could not type the resume command: {err}"));
+            if !started {
+                terminal.restore_error =
+                    Some("Agent did not start before the restart deadline".into());
             }
         }
         self.state.mark_session_dirty();
         self.emit_pane_updated(ws_idx, pane_id);
-        if let Err(err) = typed {
+        if !started {
             self.retained_agent_resume_panes.remove(&pane_id);
-            return Err(InPlaceAgentResumeError::Failed(format!(
-                "could not type the resume command: {err}"
-            )));
+            return Err(InPlaceAgentResumeError::StartFailed);
         }
         Ok(resumed)
     }
@@ -758,6 +796,7 @@ fn stable_terminal_inner_rect(pane_inner: Rect) -> Rect {
 /// serialized for that shell. Refuses argv that the terminal's line editor
 /// could reinterpret (any control character, even inside quotes) and shells
 /// herdr cannot quote for, so nothing is typed that differs from the argv.
+#[cfg(test)]
 fn resume_shell_command(argv: &[String], shell: &str) -> Result<String, String> {
     if argv.is_empty() {
         return Err("resume command is empty".into());
@@ -1763,13 +1802,19 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn agent_resume_restart_launches_long_argv_intact() {
+        exercise_agent_resume(ResumeScenario::LongArgv).await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn agent_resume_immediately_exited_replacement_keeps_pane() {
         exercise_agent_resume(ResumeScenario::AgentExits).await;
     }
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn agent_resume_refuses_unquotable_shell_before_stopping_the_agent() {
+    async fn agent_resume_direct_launch_is_independent_of_pane_shell() {
         exercise_agent_resume(ResumeScenario::UnquotableShell).await;
     }
 
@@ -1790,6 +1835,7 @@ mod tests {
     enum ResumeScenario {
         Resumed,
         ForcedRestart,
+        LongArgv,
         AgentExits,
         StaleReadinessThenDeath,
         WorktreeRemoveFails,
@@ -1941,28 +1987,36 @@ mod tests {
             );
 
         if scenario == ResumeScenario::UnquotableShell {
-            // Refused before the old runtime is touched.
             app.state.default_shell = "fish".into();
-            let response = resume_pane(&mut app, &public_id);
-            assert_eq!(
-                response["error"]["code"], "agent_argv_unsupported",
-                "{response}"
-            );
-            assert!(crate::platform::process_exists(old_pid.unwrap()));
-            assert_eq!(
-                app.terminal_runtimes.get(&terminal_id).unwrap().child_pid(),
-                old_pid
-            );
-            assert!(app.pending_agent_resume_runtime_exits.is_empty());
-            assert!(app.retained_agent_resume_panes.is_empty());
-            for (_, runtime) in app.terminal_runtimes.drain() {
-                runtime.shutdown();
-            }
-            std::env::remove_var("ENV");
-            let _ = std::fs::remove_dir_all(fake_bin);
-            return;
         }
-
+        // Explicitly recorded shell launcher; no process environment is captured.
+        let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.launch_argv = Some(vec![sleep.into(), script.clone()]);
+        terminal.launch_env_overrides =
+            vec![("HERDR_RESUME_TEST_PROVIDER".into(), "from-shell-rc".into())];
+        let long_value = "x".repeat(4096);
+        if scenario == ResumeScenario::LongArgv {
+            app.state
+                .terminals
+                .get_mut(&terminal_id)
+                .unwrap()
+                .launch_argv
+                .as_mut()
+                .unwrap()
+                .extend(["--settings".into(), long_value.clone()]);
+        }
+        let expected_argv = if scenario == ResumeScenario::LongArgv {
+            serde_json::json!([
+                sleep,
+                script,
+                "--settings",
+                long_value,
+                "--resume",
+                "sess-1"
+            ])
+        } else {
+            serde_json::json!([sleep, script, "--resume", "sess-1"])
+        };
         let response = if scenario == ResumeScenario::ForcedRestart {
             app.state
                 .terminals
@@ -1990,10 +2044,20 @@ mod tests {
             assert_eq!(response["result"]["ok"], true, "{response}");
             assert_eq!(response["result"]["type"], "agent_restarted");
             // The shared assertions below describe the internal resume contract.
-            serde_json::json!({"result": {"type": "agent_resumed", "pane_id": public_id, "agent": "claude", "session_id": "sess-1", "argv": [fake_claude, script, "--resume", "sess-1"]}})
+            serde_json::json!({"result": {"type": "agent_resumed", "pane_id": public_id, "agent": "claude", "session_id": "sess-1", "argv": expected_argv}})
         } else {
             resume_pane(&mut app, &public_id)
         };
+        if scenario == ResumeScenario::AgentExits {
+            assert_eq!(response["error"]["code"], "start_failed");
+            assert!(app.find_pane(pane_id).is_some());
+            for (_, runtime) in app.terminal_runtimes.drain() {
+                runtime.shutdown();
+            }
+            std::env::remove_var("ENV");
+            let _ = std::fs::remove_dir_all(fake_bin);
+            return;
+        }
         assert!(
             !crate::platform::process_exists(old_pid.unwrap()),
             "old shell must be gone"
@@ -2002,10 +2066,7 @@ mod tests {
         assert_eq!(response["result"]["pane_id"], public_id.as_str());
         assert_eq!(response["result"]["agent"], "claude");
         assert_eq!(response["result"]["session_id"], "sess-1");
-        assert_eq!(
-            response["result"]["argv"],
-            serde_json::json!([fake_claude, script, "--resume", "sess-1"])
-        );
+        assert_eq!(response["result"]["argv"], expected_argv);
         assert_eq!(
             app.public_pane_id(0, pane_id).as_deref(),
             Some(public_id.as_str())
@@ -2046,20 +2107,20 @@ mod tests {
         assert!(app.pending_agent_resume_runtime_exits.is_empty());
 
         match scenario {
-            ResumeScenario::Resumed | ResumeScenario::ForcedRestart => {
-                let typed = "resumed-args: --resume sess-1";
+            ResumeScenario::Resumed
+            | ResumeScenario::ForcedRestart
+            | ResumeScenario::UnquotableShell
+            | ResumeScenario::LongArgv => {
+                let expected_text = if scenario == ResumeScenario::LongArgv {
+                    format!("resumed-args: --settings {long_value} --resume sess-1")
+                } else {
+                    "resumed-args: --resume sess-1".into()
+                };
+                let typed = expected_text.as_str();
                 let history = wait_for_history(&app, &terminal_id, typed).await;
                 assert!(
                     history.contains(typed),
                     "resumed shell should receive the preserved argv: {history}"
-                );
-                // The agent is a child of the pane shell, so it inherits the
-                // shell's environment instead of a rebuilt one.
-                let parent = format!("agent-parent: {}", new_pid.unwrap());
-                let history = wait_for_history(&app, &terminal_id, &parent).await;
-                assert!(
-                    history.contains(&parent),
-                    "agent must run under the pane shell {new_pid:?}: {history}"
                 );
                 let provider = "agent-provider: from-shell-rc";
                 let history = wait_for_history(&app, &terminal_id, provider).await;
@@ -2131,7 +2192,6 @@ mod tests {
                     "{pane}"
                 );
             }
-            ResumeScenario::UnquotableShell => unreachable!("refused before resume"),
             ResumeScenario::WorktreeRemoveFails => {
                 let checkout = fake_bin.clone();
                 let workspace_id = app.state.workspaces[0].id.clone();

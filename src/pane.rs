@@ -120,7 +120,7 @@ fn apply_pane_terminal_env(cmd: &mut CommandBuilder) {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct PaneLaunchEnv {
-    extra: Vec<(String, String)>,
+    pub(crate) extra: Vec<(String, String)>,
     identity: PaneLaunchIdentity,
 }
 

@@ -170,9 +170,9 @@ impl Tab {
 
         let terminal_id = TerminalId::alloc();
         let terminal = match argv {
-            Some(argv) => {
-                TerminalState::new(terminal_id.clone(), initial_cwd).with_launch_argv(argv.to_vec())
-            }
+            Some(argv) => TerminalState::new(terminal_id.clone(), initial_cwd)
+                .with_launch_argv(argv.to_vec())
+                .with_launch_env_overrides(launch_env),
             None => TerminalState::new(terminal_id.clone(), initial_cwd),
         };
         let mut panes = HashMap::new();
@@ -400,9 +400,9 @@ impl Tab {
         };
         let terminal_id = TerminalId::alloc();
         let terminal = match launch_argv {
-            Some(argv) => {
-                TerminalState::new(terminal_id.clone(), actual_cwd).with_launch_argv(argv)
-            }
+            Some(argv) => TerminalState::new(terminal_id.clone(), actual_cwd)
+                .with_launch_argv(argv)
+                .with_launch_env_overrides(launch_env),
             None => TerminalState::new(terminal_id.clone(), actual_cwd),
         };
         if focus_new_pane {

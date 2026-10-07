@@ -165,7 +165,11 @@ impl App {
                 id,
                 ResponseResult::AgentRestarted {
                     ok: true,
-                    command_summary: crate::agent_resume::restart_command_summary(&resumed.argv),
+                    command_summary: format!(
+                        "{} (launcher: {})",
+                        crate::agent_resume::restart_command_summary(&resumed.argv),
+                        resumed.launcher
+                    ),
                 },
             ),
             Err(error) => {
@@ -176,6 +180,9 @@ impl App {
                     InPlaceAgentResumeError::ArgvUnsupported(message) => ("unsupported", message),
                     InPlaceAgentResumeError::PaneNotFound | InPlaceAgentResumeError::NotRunning => {
                         ("not_resumable", "pane is not running".into())
+                    }
+                    InPlaceAgentResumeError::StartFailed => {
+                        ("start_failed", "agent startup deadline expired".into())
                     }
                     InPlaceAgentResumeError::Failed(_) => {
                         ("unsupported", "could not restart agent".into())
@@ -221,6 +228,9 @@ impl App {
                 "agent_not_running",
                 format!("pane {} has no running terminal", params.pane_id),
             ),
+            Err(InPlaceAgentResumeError::StartFailed) => {
+                encode_error(id, "start_failed", "agent startup deadline expired")
+            }
             Err(InPlaceAgentResumeError::Failed(message)) => {
                 encode_error(id, "agent_resume_failed", message)
             }
