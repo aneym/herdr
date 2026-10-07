@@ -81,15 +81,15 @@ PROFILES = {"slow": (2, 60, 0, 0.92), "medium": (6, 30, 40, 0.92),
 GHOSTTY_ROWS = {"slow": 10, "medium": 18, "std": 38, "fast": 55}
 GHOSTTY_TOLERANCE = 0.15
 # Ghostty.app's report cadence for the std swipe, same Space and font (60 fps display):
-# wheellog arrival times bucketed per frame by scripts/scroll-ref/ghostty_ref.py. Six runs,
-# 2026-10-06: 21-23 frames with rows, at most 2 rows in one frame in five runs and 3 in one,
-# longest gap between reports 50-67 ms (all in the momentum tail). Ghostty takes the 120 Hz events in
+# wheellog arrival times bucketed per frame by scripts/scroll-ref/ghostty_ref.py. Nine runs,
+# 2026-10-06: 21-23 frames with rows, at most 2 rows in one frame in seven runs and 3 in two,
+# longest gap between reports 49-81 ms (all in the momentum tail). Ghostty takes the 120 Hz events in
 # pairs, so 2 rows a frame is its steady state and 3 happens. Both sides are proxies: the
 # Shell's side samples terminal text per 1/120 s tick, Ghostty's is report arrival, and
 # neither records presented frames. They bound bursts and stalls in what reaches the
 # screen, not what the display showed.
 GHOSTTY_STD_FRAME_ROWS = 3
-GHOSTTY_STD_GAP_MS = 66.6
+GHOSTTY_STD_GAP_MS = 80.9
 
 
 def say(s=""):

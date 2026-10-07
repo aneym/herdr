@@ -78,12 +78,14 @@ def main():
     try:
         fps, version = capture(out)
     finally:
-        try:
-            SP.gexec(f"touch {G}/log.tsv.stop; pkill -x ghostty", check=False)
-            SP.stop_app()
-        finally:
-            if fresh:
-                shutil.rmtree(SP.LOCK, ignore_errors=True)
+        # The lock goes back only once Ghostty is gone; a failed cleanup keeps it, and
+        # space.py's stale-lock rule frees it after its owner exits.
+        SP.gexec(f"touch {G}/log.tsv.stop; pkill -x ghostty; sleep 0.5", check=False)
+        SP.stop_app()
+        if SP.gexec("pgrep -x ghostty", check=False).returncode == 0:
+            raise SystemExit("Ghostty still runs in the Space; the lock is kept")
+        if fresh:
+            shutil.rmtree(SP.LOCK, ignore_errors=True)
     text = cadence(os.path.join(out, "ghostty-wheel.tsv"), fps, version)
     open(os.path.join(out, "ghostty-cadence.txt"), "w").write(text + "\n")
     print(text)
