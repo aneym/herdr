@@ -197,7 +197,10 @@ fn a_pane_from_another_layout_is_inserted_without_a_removal() {
         .expect("placement");
     assert_eq!(
         rects(&beside),
-        vec![(1, Rect::new(0, 20, 120, 20)), (9, Rect::new(0, 0, 120, 20))]
+        vec![
+            (1, Rect::new(0, 20, 120, 20)),
+            (9, Rect::new(0, 0, 120, 20))
+        ]
     );
 
     let edge = single()

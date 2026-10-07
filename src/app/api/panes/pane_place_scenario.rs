@@ -199,7 +199,10 @@ fn run_pane_place_scenario(mut app: App) {
         "a dry run must leave the layout byte-equal"
     );
     assert_eq!(layout_of(&mut app, &ids.x), tab2_before);
-    assert!(events_since(&app, mark).is_empty(), "a dry run emits nothing");
+    assert!(
+        events_since(&app, mark).is_empty(),
+        "a dry run emits nothing"
+    );
     app.state.assert_invariants_for_test();
 
     // 2. The same call applied gives `(C | A) | B`, focuses C and lands
@@ -228,9 +231,9 @@ fn run_pane_place_scenario(mut app: App) {
     assert_eq!(rect_of(&after, &ids.a), rect(30, 0, 30, 40));
     assert_eq!(rect_of(&after, &ids.b), rect(60, 0, 60, 40));
     assert!(
-        after["splits"]
-            .as_array()
-            .is_some_and(|splits| splits.iter().any(|split| split["rect"] == rect(0, 0, 60, 40))),
+        after["splits"].as_array().is_some_and(|splits| splits
+            .iter()
+            .any(|split| split["rect"] == rect(0, 0, 60, 40))),
         "C and A must share one split inside the left half: {after}"
     );
     assert_eq!(after["focused_pane_id"], ids.c);
@@ -282,7 +285,11 @@ fn run_pane_place_scenario(mut app: App) {
     app.state.assert_invariants_for_test();
 
     // 6. A zoomed tab refuses the move.
-    let zoom = call(&mut app, "pane.zoom", json!({ "pane_id": ids.a, "mode": "on" }));
+    let zoom = call(
+        &mut app,
+        "pane.zoom",
+        json!({ "pane_id": ids.a, "mode": "on" })
+    );
     assert_eq!(zoom["result"]["zoom"]["zoomed"], true, "zoom: {zoom}");
     let mark = event_mark(&app);
     let zoomed = place(
@@ -296,8 +303,15 @@ fn run_pane_place_scenario(mut app: App) {
     assert_eq!(zoomed["changed"], false);
     assert_eq!(zoomed["reason"], "zoomed_tab");
     assert!(events_since(&app, mark).is_empty());
-    let unzoom = call(&mut app, "pane.zoom", json!({ "pane_id": ids.a, "mode": "off" }));
-    assert_eq!(unzoom["result"]["zoom"]["zoomed"], false, "unzoom: {unzoom}");
+    let unzoom = call(
+        &mut app,
+        "pane.zoom",
+        json!({ "pane_id": ids.a, "mode": "off" })
+    );
+    assert_eq!(
+        unzoom["result"]["zoom"]["zoomed"], false,
+        "unzoom: {unzoom}"
+    );
     app.state.assert_invariants_for_test();
 
     // 7. Across tabs: B goes above X in tab 2 and tab 1 reflows to `A | C`.
@@ -319,12 +333,21 @@ fn run_pane_place_scenario(mut app: App) {
     );
     assert_eq!(cross["placed_rect"], rect(0, 0, 120, 20));
     assert_eq!(cross["target_layout"]["tab_id"], ids.tab2);
-    assert_eq!(rect_of(&cross["target_layout"], &ids.b), rect(0, 0, 120, 20));
-    assert_eq!(rect_of(&cross["target_layout"], &ids.x), rect(0, 20, 120, 20));
+    assert_eq!(
+        rect_of(&cross["target_layout"], &ids.b),
+        rect(0, 0, 120, 20)
+    );
+    assert_eq!(
+        rect_of(&cross["target_layout"], &ids.x),
+        rect(0, 20, 120, 20)
+    );
     assert_eq!(cross["source_layout"]["tab_id"], ids.tab1);
     assert_eq!(pane_count(&cross["source_layout"]), 2);
     assert_eq!(rect_of(&cross["source_layout"], &ids.a), rect(0, 0, 80, 40));
-    assert_eq!(rect_of(&cross["source_layout"], &ids.c), rect(80, 0, 40, 40));
+    assert_eq!(
+        rect_of(&cross["source_layout"], &ids.c),
+        rect(80, 0, 40, 40)
+    );
     assert!(cross["closed_tab_id"].is_null());
     assert_eq!(pane_tab(&mut app, &ids.b), ids.tab2);
     assert_eq!(pane_moved_count(&events_since(&app, mark)), 1);
