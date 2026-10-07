@@ -36,7 +36,7 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
     term.loadAddon(new Unicode11Addon());
     term.unicode.activeVersion = "11";
     term.open(host.current);
-    installLinks(term, {
+    const links = installLinks(term, {
       resolve: async (viewport_row, col) => (await bridge.api(machine, "pane.link.resolve", { pane_id: pane.pane_id, viewport_row, col }) as { regions: LinkRegion[] }).regions,
       activate: async (viewport_row, col) => await bridge.api(machine, "pane.link.activate", { pane_id: pane.pane_id, viewport_row, col }) as { url?: string; handled: boolean },
     }, uri => { void bridge.openUrl(uri).catch(error => setNotice(String(error))); });
@@ -69,8 +69,8 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
       if (result.handled) { event.preventDefault(); result.work?.catch(error); return false; }
       return true;
     });
-    const data = term.onData(text => { void send(text).catch(error); });
-    const binary = term.onBinary(text => { void sendBytes(Uint8Array.from(text, ch => ch.charCodeAt(0))).catch(error); });
+    const data = term.onData(text => { const flush = () => { void send(text).catch(error); }; if (!links.hold(text, flush)) flush(); });
+    const binary = term.onBinary(text => { const flush = () => { void sendBytes(Uint8Array.from(text, ch => ch.charCodeAt(0))).catch(error); }; if (!links.hold(text, flush)) flush(); });
     const open = async () => {
       if (opening || disposed) return;
       opening = true;
@@ -147,7 +147,7 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
     const observer = new ResizeObserver(() => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (disposed) return; fit.fit(); if (handle != null && (term.cols !== sentCols || term.rows !== sentRows)) { sentCols = term.cols; sentRows = term.rows; void bridge.resize(handle, sentCols, sentRows).catch(error); } }, 50); });
     observer.observe(node);
     void open();
-    return () => { disposed = true; unsubscribeTheme(); register(pane.pane_id, null); observer.disconnect(); clearTimeout(resizeTimer); clearTimeout(bellTimer); cancelAnimationFrame(wheelFrame); node.removeEventListener("wheel", onWheel, true); node.removeEventListener("contextmenu", onContext); data.dispose(); binary.dispose(); if (handle != null) void bridge.close(handle).catch(() => {}); term.dispose(); };
+    return () => { disposed = true; unsubscribeTheme(); register(pane.pane_id, null); observer.disconnect(); clearTimeout(resizeTimer); clearTimeout(bellTimer); cancelAnimationFrame(wheelFrame); node.removeEventListener("wheel", onWheel, true); node.removeEventListener("contextmenu", onContext); data.dispose(); binary.dispose(); links.dispose(); if (handle != null) void bridge.close(handle).catch(() => {}); term.dispose(); };
   }, [machine, pane.pane_id, pane.terminal_id, register]);
   useEffect(() => { if (focused) host.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }, [focused]);
   return <div ref={element} className={`pane ${bell ? "bell" : ""}`} onMouseDown={() => { live.current.onFocus(pane.pane_id); host.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }}>

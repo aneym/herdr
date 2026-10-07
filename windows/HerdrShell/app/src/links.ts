@@ -30,27 +30,52 @@ export function cellAt(term: Terminal, event: MouseEvent): { row: number; col: n
 }
 const spanText = (term: Terminal, regions: LinkRegion[]) => [...regions].sort((a, b) => a.row - b.row || a.start_col - b.start_col)
   .map(r => term.buffer.active.getLine(term.buffer.active.viewportY + r.row)?.translateToString(false, r.start_col, r.end_col + 1) ?? "").join("");
-// Call after term.open: a click xterm does not link (a wrapped URL's continuation rows) is
-// resolved from the terminal element.
-export function installLinks(term: Terminal, server: LinkServer, open: (url: string) => void): void {
-  const claimed = new WeakSet<MouseEvent>();
+// One Ctrl+left press and its release on the same cell. Mouse reports the program would get
+// for it are held until the link settles: a hit consumes them, a miss or a drag replays them,
+// as the Mac buffers a native gesture and replays it only on a miss.
+interface Gesture { cell: { row: number; col: number }; held: (() => void)[] }
+export interface LinkGate { hold: (data: string, flush: () => void) => boolean; dispose: () => void }
+const mouseReport = (data: string) => data.startsWith("\x1b[<") || data.startsWith("\x1b[M");
+// Call after term.open. A click xterm does not link (a wrapped URL's continuation rows) is
+// resolved through the server from the terminal's own mouseup.
+export function installLinks(term: Terminal, server: LinkServer, open: (url: string) => void): LinkGate {
+  const linked = new WeakMap<MouseEvent, Promise<boolean>>();
+  let gesture: Gesture | null = null;
+  const settle = (g: Gesture, hit: boolean) => { if (gesture === g) gesture = null; if (!hit) g.held.forEach(flush => flush()); };
   const finish = async (cell: { row: number; col: number } | null, resolved: string | null) => {
     const answer = cell ? await server.activate(cell.row, cell.col).catch(() => null) : null;
     const target = openTarget(resolved, answer?.url ?? null, answer?.handled ?? false);
-    if (target && webUrl(target)) open(target);
+    if (target && webUrl(target)) { open(target); return true; }
+    return answer?.handled ?? false;
   };
-  const activate = (event: MouseEvent, uri: string) => { if (!event.ctrlKey) return; claimed.add(event); void finish(cellAt(term, event), uri); };
+  const resolve = async (cell: { row: number; col: number }) => {
+    const regions = await server.resolve(cell.row, cell.col).catch(() => null);
+    if (!regions?.some(r => r.row === cell.row && r.start_col <= cell.col && cell.col <= r.end_col)) return false;
+    const text = spanText(term, regions);
+    return finish(cell, webUrl(text) ? text : null);
+  };
+  const activate = (event: MouseEvent, uri: string) => { if (event.ctrlKey) linked.set(event, finish(cellAt(term, event), uri)); };
   term.options.linkHandler = { activate };
   term.loadAddon(new WebLinksAddon(activate));
-  term.element?.addEventListener("mouseup", event => {
-    if (!event.ctrlKey || event.button !== 0 || claimed.has(event)) return;
-    const cell = cellAt(term, event);
-    if (!cell) return;
-    void (async () => {
-      const regions = await server.resolve(cell.row, cell.col).catch(() => null);
-      if (!regions?.some(r => r.row === cell.row && r.start_col <= cell.col && cell.col <= r.end_col)) return;
-      const text = spanText(term, regions);
-      await finish(cell, webUrl(text) ? text : null);
-    })();
-  });
+  const screen = term.element?.querySelector(".xterm-screen");
+  // Registered after xterm's Linkifier on the same element, so its activation is already known.
+  const down = (event: Event) => {
+    const mouse = event as MouseEvent, cell = mouse.ctrlKey && mouse.button === 0 ? cellAt(term, mouse) : null;
+    if (cell) gesture = { cell, held: [] };
+  };
+  const up = (event: Event) => {
+    const g = gesture, mouse = event as MouseEvent, cell = cellAt(term, mouse);
+    if (!g || mouse.button !== 0) return;
+    if (!mouse.ctrlKey || !cell || cell.row !== g.cell.row || cell.col !== g.cell.col) { settle(g, false); return; }
+    void (linked.get(mouse) ?? resolve(cell)).then(hit => settle(g, hit), () => settle(g, false));
+  };
+  // A release outside the grid ends the gesture before xterm reports it from the document.
+  const away = (event: Event) => { if (gesture && !(screen && event.target instanceof Node && screen.contains(event.target))) settle(gesture, false); };
+  screen?.addEventListener("mousedown", down);
+  screen?.addEventListener("mouseup", up);
+  window.addEventListener("mouseup", away, true);
+  return {
+    hold: (data, flush) => { if (!gesture || !mouseReport(data)) return false; gesture.held.push(flush); return true; },
+    dispose: () => { screen?.removeEventListener("mousedown", down); screen?.removeEventListener("mouseup", up); window.removeEventListener("mouseup", away, true); },
+  };
 }

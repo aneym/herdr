@@ -20,11 +20,11 @@ async function pane(bytes: string, server: Partial<LinkServer> = {}) {
   vi.spyOn(term.element!.querySelector(".xterm-screen")!, "getBoundingClientRect").mockReturnValue({ left: 0, top: 0, width: COLS * 10, height: ROWS * 20, right: COLS * 10, bottom: ROWS * 20, x: 0, y: 0, toJSON: () => ({}) });
   const calls = { resolve: vi.fn(server.resolve ?? (async () => null)), activate: vi.fn(server.activate ?? (async () => null)) };
   const open = vi.fn();
-  installLinks(term, calls, open);
+  const gate = installLinks(term, calls, open);
   await new Promise<void>(resolve => term.write(bytes, resolve));
-  return { term, open, calls };
+  return { term, open, calls, gate };
 }
-const at = (row: number, col: number, ctrlKey = true) => new MouseEvent("mouseup", { ctrlKey, clientX: col * 10 + 5, clientY: row * 20 + 10, bubbles: true });
+const at = (type: string, row: number, col: number, ctrlKey = true) => new MouseEvent(type, { ctrlKey, button: 0, clientX: col * 10 + 5, clientY: row * 20 + 10, bubbles: true });
 // xterm keeps its provider list (OSC 8 first, then addons) off the public API; its Linkifier
 // hands the click to the first provider with a link under the pointer.
 async function xtermLink(term: Terminal, row: number, col: number): Promise<ILink | undefined> {
@@ -34,11 +34,17 @@ async function xtermLink(term: Terminal, row: number, col: number): Promise<ILin
   const under = ({ range: { start, end } }: ILink) => (y > start.y || (y === start.y && x >= start.x)) && (y < end.y || (y === end.y && x <= end.x));
   return replies.map(links => links?.find(under)).find(Boolean);
 }
-async function click(term: Terminal, row: number, col: number, ctrlKey = true) {
-  const event = at(row, col, ctrlKey), link = await xtermLink(term, row, col);
+const flushed = () => new Promise(resolve => setTimeout(resolve, 0));
+// Press, then release as xterm's Linkifier sees it (activation first) and the shell after it.
+async function click(term: Terminal, row: number, col: number, ctrlKey = true, to = { row, col }, report?: (phase: "down" | "up") => void) {
+  const screen = term.element!.querySelector(".xterm-screen")!;
+  screen.dispatchEvent(at("mousedown", row, col, ctrlKey));
+  report?.("down");
+  const event = at("mouseup", to.row, to.col, ctrlKey), link = to.row === row && to.col === col ? await xtermLink(term, row, col) : undefined;
   link?.activate(event, link.text);
-  term.element!.querySelector(".xterm-screen")!.dispatchEvent(event);
-  await new Promise(resolve => setTimeout(resolve, 0));
+  screen.dispatchEvent(event);
+  report?.("up");
+  await flushed();
   return link;
 }
 describe("terminal link clicks", () => {
@@ -85,6 +91,27 @@ describe("terminal link clicks", () => {
     const { term, open } = await pane(wrapped, { resolve: async () => [] });
     await click(term, 1, 4);
     expect(open).not.toHaveBeenCalled();
+  });
+  it("a Ctrl-drag that ends on a link opens nothing", async () => {
+    const { term, open, calls } = await pane(wrapped, { resolve: async () => regions });
+    await click(term, 2, 4, true, { row: 1, col: 4 });
+    expect(calls.resolve).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+  });
+  it("a program that owns the mouse gets no report for a link click, and the whole click on a miss", async () => {
+    const sent: string[] = [];
+    const press = "\x1b[<16;5;2M", release = "\x1b[<16;5;2m";
+    let run = await pane(wrapped, { resolve: async () => regions });
+    // xterm reports the press on mousedown and the release from the document after the shell's mouseup.
+    const report = (gate: typeof run.gate) => (phase: "down" | "up") => { const data = phase === "down" ? press : release; if (!gate.hold(data, () => sent.push(data))) sent.push(data); };
+    await click(run.term, 1, 4, true, undefined, report(run.gate));
+    expect(run.open).toHaveBeenCalledWith(long);
+    expect(sent).toEqual([]);
+    run = await pane(wrapped, { resolve: async () => [] });
+    await click(run.term, 1, 4, true, undefined, report(run.gate));
+    expect(run.open).not.toHaveBeenCalled();
+    expect(sent).toEqual([press, release]);
+    expect(run.gate.hold("x", () => {})).toBe(false);
   });
 });
 // Golden policy table: the same cases as macos/HerdrShell/scripts/check_terminal_links.py.
