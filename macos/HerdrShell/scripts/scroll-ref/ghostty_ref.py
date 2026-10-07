@@ -82,8 +82,9 @@ def main():
         # space.py's stale-lock rule frees it after its owner exits.
         SP.gexec(f"touch {G}/log.tsv.stop; pkill -x ghostty; sleep 0.5", check=False)
         SP.stop_app()
-        if SP.gexec("pgrep -x ghostty", check=False).returncode == 0:
-            raise SystemExit("Ghostty still runs in the Space; the lock is kept")
+        # pgrep exits 1 only when nothing matched; a match or any error keeps the lock.
+        if SP.gexec("pgrep -x ghostty", check=False).returncode != 1:
+            raise SystemExit("Ghostty may still run in the Space; the lock is kept")
         if fresh:
             shutil.rmtree(SP.LOCK, ignore_errors=True)
     text = cadence(os.path.join(out, "ghostty-wheel.tsv"), fps, version)
