@@ -385,7 +385,9 @@ mod tests {
         let overlay = crate::factory_overlay::parse(
             br#"{"version":1,"tabs":{"tab":{"kind":"lane","pulse":{"line":"reply 18s","drifting":true}}}}"#,
         ).unwrap();
-        let ServerMessage::EndpointControl { data, .. } = factory_overlay_message("boot", 1, Some(&overlay)).unwrap() else {
+        let ServerMessage::EndpointControl { data, .. } =
+            factory_overlay_message("boot", 1, Some(&overlay)).unwrap()
+        else {
             panic!("expected endpoint control");
         };
         let decoded: EndpointFactoryOverlay = serde_json::from_str(&data).unwrap();

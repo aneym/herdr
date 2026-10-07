@@ -111,6 +111,8 @@ struct SpacesRowView: View {
                     chevron
                 }
             }
+            // Inside the row frame, as before the pulse row: the header stays one row tall.
+            .padding(.top, row.kind == .space && row.id != firstSpaceId ? 10 : 0)
             .frame(height: ShellSpace.rowHeight)
             if let pulse = row.pulse {
                 Text(pulse.line).font(.system(size: ShellType.rowTitle, weight: pulse.drifting ? .bold : .regular))
@@ -121,7 +123,6 @@ struct SpacesRowView: View {
                     .onTapGesture { click("body") }
             }
         }
-        .padding(.top, row.kind == .space && row.id != firstSpaceId ? 10 : 0)
         .padding(.leading, indent).padding(.horizontal, ShellSpace.rowPadX)
         .background(RoundedRectangle(cornerRadius: ShellRadius.row).fill(selected && row.kind == .tab ? t.sel : .clear))
     }

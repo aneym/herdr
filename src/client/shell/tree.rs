@@ -717,7 +717,10 @@ impl AgentPanelListEntry {
                     + usize::from(
                         row.workflow
                             && !row.done
-                            && row.phase.as_ref().is_some_and(|phase| !phase.trim().is_empty()),
+                            && row
+                                .phase
+                                .as_ref()
+                                .is_some_and(|phase| !phase.trim().is_empty()),
                     )
             }
             _ => 1,
