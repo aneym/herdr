@@ -291,28 +291,63 @@ def over(fg, bg, alpha):
 
 
 def swift_code(text):
-    """Swift source without comments. Block comments nest in Swift, so a depth count, not a
-    regex, finds where one ends; comment markers inside string literals are text."""
-    out, i, depth, quoted = [], 0, 0, False
-    while i < len(text):
-        pair = text[i:i + 2]
-        if depth:
-            depth += pair == "/*"
-            depth -= pair == "*/"
-            i += 2 if pair in ("/*", "*/") else 1
-        elif quoted:
-            out.append(text[i:i + 2] if pair[0] == "\\" else text[i])
-            quoted = text[i] != '"' and text[i] != "\n"
-            i += 2 if pair[0] == "\\" else 1
-        elif pair == "/*":
-            depth, i = 1, i + 2
-        elif pair == "//":
-            while i < len(text) and text[i] != "\n":
+    """Swift source with comments removed and every string literal emptied to "", so neither
+    can carry a declaration the gate would read. Block comments nest; raw strings (#"..."#),
+    multi-line strings and interpolations (whose own strings nest) follow Swift's lexer."""
+    out = []
+
+    def code(i, sink, interpolation=False):
+        parens = 0
+        while i < len(text):
+            c, pair = text[i], text[i:i + 2]
+            if pair == "//":
+                while i < len(text) and text[i] not in "\r\n":
+                    i += 1
+            elif pair == "/*":
+                depth = 0
+                while i < len(text):
+                    if text.startswith("/*", i):
+                        depth, i = depth + 1, i + 2
+                    elif text.startswith("*/", i):
+                        depth, i = depth - 1, i + 2
+                        if not depth:
+                            break
+                    else:
+                        i += 1
+            elif re.match(r'#*"', text[i:i + 64]):
+                i = string(i, sink)
+            elif interpolation and c in "()":
+                parens += 1 if c == "(" else -1
+                if parens < 0:
+                    return i + 1
+                sink.append(c)
                 i += 1
-        else:
-            quoted = text[i] == '"'
-            out.append(text[i])
-            i += 1
+            else:
+                sink.append(c)
+                i += 1
+        return i
+
+    def string(i, sink):
+        hashes = len(text[i:]) - len(text[i:].lstrip("#"))
+        i += hashes
+        quote = '"""' if text.startswith('"""', i) else '"'
+        i += len(quote)
+        close, escape = quote + "#" * hashes, "\\" + "#" * hashes
+        sink.append('""')
+        while i < len(text):
+            if text.startswith(close, i):
+                return i + len(close)
+            if text.startswith(escape + "(", i):
+                i = code(i + len(escape) + 1, [], interpolation=True)
+            elif text.startswith(escape, i):
+                i += len(escape) + 1
+            elif quote == '"' and text[i] in "\r\n":
+                return i
+            else:
+                i += 1
+        return i
+
+    code(0, out)
     return "".join(out)
 
 
@@ -334,7 +369,7 @@ def low_chat_contrast(t, source=None):
     }
     found = {}
     for name, shape in shapes.items():
-        declared = re.findall(rf"\bvar {name}\b", code)
+        declared = re.findall(rf"\bvar\s+{name}\b", code)
         match = re.search(shape, code)
         if len(declared) != 1 or not match:
             return [f"{CHAT_VIEW.relative_to(ROOT)}: Palette.{name} changed shape; update the chat contrast gate"]

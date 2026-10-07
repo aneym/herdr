@@ -34,8 +34,12 @@ class ChatGateTests(unittest.TestCase):
         cases = {
             "nested block comment hides the old faint": (nested, True),
             "line comment hides the old faint": (f"// {SAFE}\n    {LOW}", True),
-            "comment markers in a string stay text": (f'let s = "/* */ //"\n    {LOW}', True),
-            "a nested comment around a live safe faint's neighbour": (f"/* a /* b */ c */ {SAFE}", False),
+            "a CR ends a line comment": (f"// old\r    {LOW}", True),
+            "a declaration inside a string is text": (f'let s = "{SAFE}"\n    {LOW}', True),
+            "escaped quotes stay inside the string": (f'let s = "a \\" {SAFE} \\\\"\n    {LOW}', True),
+            "a raw string hides a comment opener": (f'let s = #"{SAFE} " /*"#\n    {LOW}\n    let e = "*/"', True),
+            "an interpolation's string nests": (f'let s = "\\("{SAFE} /*")"\n    {LOW}\n    let e = "*/"', True),
+            "a nested comment beside the live safe faint": (f"/* a /* b */ c */ {SAFE}", False),
         }
         for name, (body, low) in cases.items():
             with self.subTest(name):
@@ -44,6 +48,10 @@ class ChatGateTests(unittest.TestCase):
                     self.assertTrue(contrast_failures(out), out)
                 else:
                     self.assertEqual(out, [])
+
+    def test_a_live_declaration_the_gate_cannot_read_is_refused(self):
+        split = CHAT.replace(SAFE, f'let s = "{SAFE}"\n    ' + LOW.replace("var faint", "var\n    faint"), 1)
+        self.assertTrue(gen.low_chat_contrast(gen.load(), split))
 
     def test_a_commented_palette_beside_a_live_one_is_refused(self):
         palette = CHAT[CHAT.index("private struct Palette {"):]
