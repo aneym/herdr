@@ -2236,3 +2236,56 @@ fn bulk_space_fold_scenario(goal_visible: bool) {
         assert_eq!(state.hits.pinned_rows.len(), 2);
     }
 }
+
+/// Exercises the rendered header and mouse boundary without pins, including narrow and flat views.
+#[test]
+fn bulk_space_fold_header_without_pins_respects_available_room_and_flat_view() {
+    use ratatui::{buffer::Buffer, layout::Rect};
+    for (width, flat, visible) in [
+        (40, false, true),
+        (24, false, true),
+        (23, false, false),
+        (40, true, false),
+    ] {
+        let mut state = tree_state(ClientTreeChrome::default());
+        let mut snapshot = tree_snapshot();
+        snapshot.pinned_tabs.clear();
+        snapshot.agent_view_label = flat.then(|| "all agents".to_owned());
+        state.set_snapshot(Box::new(snapshot.clone()));
+        let area = Rect::new(0, 0, width, 30);
+        let mut buffer = Buffer::empty(area);
+        let mut hits = ShellHitMap::default();
+        crate::client::shell::agent_sidebar::render_agent_panel_with_overlay(
+            &mut buffer,
+            area,
+            &snapshot,
+            &state.config,
+            &ClientTreeChrome::default(),
+            None,
+            &mut 0,
+            &mut hits,
+        );
+        assert_eq!(hits.spaces_fold_all.is_some(), visible);
+        if let Some((button, _)) = hits.spaces_fold_all {
+            assert_eq!(button.right(), area.right());
+            assert_eq!(buffer[(button.right() - 1, button.y)].symbol(), "⊟");
+            assert!(!button.intersects(hits.agent_usage));
+            assert!(!button.intersects(hits.agent_sort_toggle));
+            state.hits = hits;
+            state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: button.right() - 1,
+                row: button.y,
+                modifiers: KeyModifiers::empty(),
+            })]);
+            let tree = state
+                .tree_chrome
+                .get(&crate::client::endpoint::ClientEndpointId::Local)
+                .expect("chrome");
+            assert!(snapshot
+                .workspaces
+                .iter()
+                .all(|space| tree.collapsed_spaces.contains(&space.workspace_id)));
+        }
+    }
+}

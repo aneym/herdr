@@ -124,9 +124,22 @@ pub(super) fn render_agent_panel_with_overlay(
     agent_scroll: &mut usize,
     hits: &mut ShellHitMap,
 ) {
+    let header_fold = super::tree::tree_view_active(config)
+        && snapshot.agent_view_label.is_none()
+        && !snapshot.workspaces.is_empty()
+        && !snapshot
+            .pinned_tabs
+            .iter()
+            .any(|pin| pin.role != Some(crate::api::schema::TabRole::Agent))
+        && overlay.is_none_or(|overlay| super::tree::factory_goal_choices(overlay).is_empty());
+    let header_area = if header_fold && area.width >= 24 {
+        Rect::new(area.x, area.y, area.width.saturating_sub(3), area.height)
+    } else {
+        area
+    };
     if !render_agent_panel_header_with_factory(
         buffer,
-        area,
+        header_area,
         snapshot.agent_view_label.as_deref(),
         config,
         hits,
@@ -165,7 +178,8 @@ pub(super) fn render_agent_panel_with_overlay(
             entries
         };
     super::tree::append_automations(&mut entries, tree, automations);
-    let fold_fallback = !snapshot.workspaces.is_empty()
+    let fold_fallback = snapshot.agent_view_label.is_none()
+        && !snapshot.workspaces.is_empty()
         && super::tree::tree_view_active(config)
         && !entries.iter().any(|entry| {
             matches!(
@@ -270,10 +284,10 @@ pub(super) fn render_agent_panel_with_overlay(
         },
     );
     super::sidebar_report::end();
-    if fold_fallback && !fold_on_pinned && area.height >= 2 {
+    if fold_fallback && !fold_on_pinned && area.height >= 2 && area.width >= 24 {
         render_spaces_fold_all(
             buffer,
-            Rect::new(area.x, area.y + 1, 10.min(area.width), 1),
+            Rect::new(area.x, area.y + 1, area.width, 1),
             any_expanded,
             config,
             hits,
@@ -711,7 +725,7 @@ fn render_spaces_fold_all(
         rect.x,
         rect.y,
         rect.width,
-        if expanded { " ▸" } else { " ▾" },
+        if expanded { " ⊟" } else { " ⊞" },
         Style::default().fg(config.palette.subtext0),
     );
     hits.spaces_fold_all = Some((rect, expanded));
@@ -843,7 +857,7 @@ fn render_panel_list_entry(
                 fold.x,
                 fold.y,
                 fold.width,
-                if *any_expanded { " ▸" } else { " ▾" },
+                if *any_expanded { " ⊟" } else { " ⊞" },
                 Style::default().fg(config.palette.subtext0),
             );
             hits.spaces_fold_all = Some((fold, *any_expanded));

@@ -163,7 +163,6 @@ export default function Sidebar({ snapshot = {}, catalog = new LaneSnapshot(), m
       </div>)}
     </> : <>
     {["AGENTS", "PINNED"].map(section => { const items = rows.filter(r => r.section === section); return items.length ? <section key={section}><h2>{section}</h2>{items.map(tabRow)}</section> : null; })}
-
     <section className="spaces">{rows.filter(r => r.kind === "space" && !r.hidden).map(spaceRow)}
     {rows.some(r => r.kind === "space" && r.hidden) && <><button className="sidebar-row muted" aria-expanded={hidden} onClick={() => setHidden(!hidden)}><span className="chevron">{hidden ? "⌄" : "›"}</span>Hidden</button>{(hidden || rows.some(r => r.hidden && r.id === renaming)) && rows.filter(r => r.kind === "space" && r.hidden).map(spaceRow)}</>}
     </section>

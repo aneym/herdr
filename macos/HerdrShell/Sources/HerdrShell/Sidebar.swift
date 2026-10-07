@@ -351,7 +351,7 @@ struct SidebarView: View {
                 modeButton("Areas", .areas)
                 modeButton("Spaces", .spaces)
                 if state.mode == .spaces, !model.sidebarSpaces.isEmpty,
-                   !model.spacesRows(state: state).contains(where: { $0.kind == .goal }) {
+                   model.spacesOverlay.goalChoices.isEmpty {
                     collapseSpacesButton
                 }
             }
