@@ -52,3 +52,17 @@ it("canceling busy confirmation never sends a forced restart", async () => {
   expect(api).toHaveBeenCalledTimes(1);
   expect(host.querySelector('[role="dialog"]')).toBeNull();
 });
+
+it("busy confirmation uses Enter to restart and Escape to cancel", async () => {
+  api.mockRejectedValueOnce({ code: "busy", message: "Working" }).mockResolvedValueOnce({ ok: true });
+  const { host, click } = mount();
+  await click('[aria-label="Pane actions"]'); await click('[role="menuitem"]');
+  await act(async () => { host.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  expect(api).toHaveBeenCalledTimes(1);
+  expect(host.querySelector('[role="dialog"]')).toBeNull();
+  // Reopen with another busy reply, then confirm through the focused primary action.
+  api.mockReset(); api.mockRejectedValueOnce({ code: "busy", message: "Working" }).mockResolvedValueOnce({ ok: true });
+  await click('[aria-label="Pane actions"]'); await click('[role="menuitem"]');
+  await act(async () => { host.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+  expect(api.mock.calls[1]).toEqual(["studio", "agent.restart", { pane_id: "pane_1", force: true }]);
+});

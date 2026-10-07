@@ -76,6 +76,9 @@ export default function PaneSurface(props: { pane: Pane; machine: string; focuse
       <button className="pane-pin" aria-label="Pane actions" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(value => !value)} onKeyDown={event => { if (event.key === "Escape") setMenu(false); }}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="3" cy="8" r=".7" /><circle cx="8" cy="8" r=".7" /><circle cx="13" cy="8" r=".7" /></svg></button>
       {menu && <div className="pane-menu" role="menu" onKeyDown={event => { if (event.key === "Escape") setMenu(false); }}><button role="menuitem" disabled={!hasAgent || restarting} onClick={() => void restart()}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12.5 5.5A5 5 0 1 0 13 9M12.5 2v3.5H9" /></svg>Restart agent</button></div>}
     </div>
-    {confirmRestart && <div className="pane-menu restart-confirm" role="dialog" aria-label="Restart agent"><p>Agent is working. Restart anyway? It will resume the same chat.</p><button onClick={() => void restart(true)}>Restart</button><button onClick={() => setConfirmRestart(false)}>Cancel</button></div>}
+    {confirmRestart && <div className="pane-menu restart-confirm" role="dialog" aria-label="Restart agent" onKeyDown={event => {
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setConfirmRestart(false); }
+      else if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); void restart(true); }
+    }}><p>Agent is working. Restart anyway? It will resume the same chat.</p><button className="restart-primary" autoFocus onClick={() => void restart(true)}>Restart</button><button onClick={() => setConfirmRestart(false)}>Cancel</button></div>}
   </div>;
 }
