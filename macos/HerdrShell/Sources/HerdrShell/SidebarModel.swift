@@ -7,7 +7,7 @@ import Foundation
 /// rows, order and fold state on screen. The shape follows the mock,
 /// ~/.claude/pretty-docs/factory-devenv-mock-2026-09-28.html:
 ///
-///     SPACES                 ⌘⇧1..9     one line per space; the current one open
+///     SPACES                            one line per space; the current one open
 ///     ▾ ◆ agent-rails        factory    (`plain` when it has no orchestrator)
 ///     ORCHESTRATOR           inbox 3    the current space's rows sit right under its row
 ///     ● rails orchestrator   [Studio]
@@ -75,9 +75,6 @@ struct SidebarLine: Identifiable, Equatable {
 }
 
 enum SidebarModel {
-    /// The chord in Resources/keymap.json (Alex's Ghostty chords), not the mock's ⌘⇧1..9,
-    /// which macOS keeps for screenshots.
-
     /// Facts about one tab that the row classifier does not carry.
     struct Facts {
         var attention = false     // asks (blocked) or failed: the row comes forward
