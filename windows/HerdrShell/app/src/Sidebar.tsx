@@ -145,7 +145,7 @@ export default function Sidebar({ snapshot = {}, catalog = new LaneSnapshot(), m
         {line.toggle && <button className="chevron" aria-label={`Fold ${line.title}`} aria-expanded={line.chevron} onClick={() => toggleAreaLine(line.toggle!, !line.chevron)}>{line.chevron ? "⌄" : "›"}</button>}
         <button className="select-tab" onClick={event => {
           if (line.kind === "focus") { changeChip("needs"); toggleAreaLine("focus", !focusExpanded); }
-          else if (line.kind === "area" && event.altKey) { const next = areaOnly === line.area ? null : line.area!; setAreaOnly(next); save("only", next); }
+          else if (line.kind === "area" && event.altKey) { setAreaOnly(line.area!); save("only", line.area!); }
           else if (line.tab) select(line.tab);
           else if (line.toggle) toggleAreaLine(line.toggle, !line.chevron);
         }}>
