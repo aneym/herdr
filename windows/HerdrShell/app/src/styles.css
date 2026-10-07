@@ -91,4 +91,4 @@ footer { color: var(--shell-muted); padding: 12px 8px; font-size: 12px; overflow
 .divider { position: absolute; z-index: 3; }.divider.vertical { cursor: ew-resize; }.divider.horizontal { cursor: ns-resize; }
 .divider::after { content: ""; position: absolute; background: transparent; transition: background .08s; }
 .divider.vertical::after { left: 2px; width: 3px; top: 0; bottom: 0; }.divider.horizontal::after { top: 2px; height: 3px; left: 0; right: 0; }
-.divider:hover::after { background: rgb(205 214 244 / .26); }.divider.dragging::after { background: var(--shell-accent, rgb(137 180 250 / .75)); }
+.divider:hover::after { background: color-mix(in srgb, var(--shell-text) 26%, transparent); }.divider.dragging::after { background: color-mix(in srgb, var(--shell-accent) 75%, transparent); }
