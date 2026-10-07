@@ -17,6 +17,7 @@ CASES = [
     ('click with completed hover', 'TerminalLinkDecision.needsResolution(cachedURL: "https://example.com/a")', 'false'),
     ('refused activation retains resolved URL', 'TerminalLinkDecision.openTarget(resolved: "https://example.com/a", activated: nil, handled: false) ?? "none"', 'https://example.com/a'),
     ('activation cannot replace resolved URL', 'TerminalLinkDecision.openTarget(resolved: "https://example.com/a", activated: "https://example.com/b", handled: false) ?? "none"', 'https://example.com/a'),
+    ('activation continuing a viewport-clipped URL supplies the full URL', 'TerminalLinkDecision.openTarget(resolved: "https://example.com/abcdefghijklmnopqrst", activated: "https://example.com/abcdefghijklmnopqrstuv", handled: false) ?? "none"', 'https://example.com/abcdefghijklmnopqrstuv'),
     ('uncached activation supplies full URL', 'TerminalLinkDecision.openTarget(resolved: nil, activated: "https://example.com/full", handled: false) ?? "none"', 'https://example.com/full'),
     ('plugin handled opens nothing twice', 'TerminalLinkDecision.openTarget(resolved: "https://example.com/a", activated: "https://example.com/a", handled: true) ?? "none"', 'none'),
     ('no resolved target and refusal is native miss', 'TerminalLinkDecision.openTarget(resolved: nil, activated: nil, handled: false) ?? "none"', 'none'),

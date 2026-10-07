@@ -170,6 +170,10 @@ def main():
         click("Cmd-click on URL first row records the entire URL", start, 5, "desk " + URL)
         if label_row is not None:
             click("Cmd-click on OSC 8 label records its target", label_row, 2, "desk " + OSC_URL)
+        # The receipt is recorded before the open; the server's desk proves the open itself.
+        desk = json.loads(S.lab("herdr", "desk", "list", "--tab", tab, "--json"))
+        refs = json.dumps(desk)
+        check("the Cmd-clicked URLs landed on the pane's desk", URL in refs and OSC_URL in refs, refs[:300])
         click("Cmd-Shift-click opens the URL externally", start + 1, 2, URL, mods=("cmd", "shift"))
         click("plain click on the URL opens nothing", start + 1, 2, None, mods=())
         # This independently checks the existing hook/callback path, only after the
@@ -179,6 +183,13 @@ def main():
         state = wait(lambda s: s.get("opened_urls", []) != before, 8)
         opened = state.get("opened_urls", [])
         check("open_url_sim records the OSC 8 target", opened != before and bool(opened) and opened[-1] == "desk " + OSC_URL)
+        # A desk refusal still opens: a file the lab server cannot see goes to the browser.
+        missing = "file:///nonexistent-herdr-links-proof/" + uuid.uuid4().hex + ".md"
+        before = list(S.state().get("opened_urls", []))
+        S.cmd({"cmd": "open_url_sim", "url": missing})
+        state = wait(lambda s: len(s.get("opened_urls", [])) >= len(before) + 2, 8)
+        opened = state.get("opened_urls", [])[len(before):]
+        check("a refused desk open falls back to the browser", opened == ["desk " + missing, missing], json.dumps(opened))
     else:
         skip("wrapped-row mouse checks: physical continuation row was not established (see FAIL above)")
     chat_check(pane)

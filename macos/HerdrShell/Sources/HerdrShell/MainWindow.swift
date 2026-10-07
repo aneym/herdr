@@ -473,7 +473,11 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                 guard let self else { return }
                 switch result {
                 case .unsupported: self.docPanel.addTransient(url, tabId: tabId)
-                case .failed: return
+                case .failed:
+                    // A refused open (say a file the pane's server cannot see) still opens, in the browser.
+                    Notifier.shared.recordOpened(url.absoluteString)
+                    shellOpen(url)
+                    return
                 case .result: break
                 }
                 SidebarState.store.set(true, forKey: Self.docsShownKey(tabId))
