@@ -271,6 +271,7 @@ mod endpoints;
 mod factory_sidebar;
 mod graphics;
 mod hidden_agents;
+mod home_location;
 #[path = "input.rs"]
 mod input_domain;
 mod keybindings_settings;
