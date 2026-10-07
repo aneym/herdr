@@ -4,7 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { bridge, fromBase64, toBase64 } from "./bridge";
-import { installLinks } from "./links";
+import { installLinks, RESOLVE_MS } from "./links";
 import type { LinkRegion } from "./links";
 import type { Mode } from "./bridge";
 import type { Pane } from "./model";
@@ -40,11 +40,13 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
     term.loadAddon(new Unicode11Addon());
     term.unicode.activeVersion = "11";
     term.open(host.current);
-    let openTarget = (uri: string) => { void bridge.openUrl(uri).catch(error => setNotice(String(error))); };
+    const hookOpeners = new WeakMap<MouseEvent, (uri: string) => void>();
+    let hookDispatch = false;
+    const openTarget = (uri: string) => { void bridge.openUrl(uri).catch(error => setNotice(String(error))); };
     const links = installLinks(term, {
       resolve: async (viewport_row, col) => (await bridge.api(machine, "pane.link.resolve", { pane_id: pane.pane_id, viewport_row, col }) as { regions: LinkRegion[] }).regions,
       activate: async (viewport_row, col) => await bridge.api(machine, "pane.link.activate", { pane_id: pane.pane_id, viewport_row, col }) as { url?: string; handled: boolean },
-    }, uri => openTarget(uri));
+    }, openTarget, event => hookOpeners.get(event) ?? openTarget);
     const unsubscribeTheme = appTheme().subscribe(mode => { term.options.theme = terminalThemes[mode]; });
     try { const webgl = new WebglAddon(); webgl.onContextLoss(() => webgl.dispose()); term.loadAddon(webgl); } catch { /* DOM renderer remains available without WebGL. */ }
     let disposed = false;
@@ -68,16 +70,15 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
       await pending;
     };
     const send = (text: string) => sendBytes(new TextEncoder().encode(text));
-    let writeTarget = (text: string) => bridge.clipboardWrite(text);
-    const copier = new PaneCopy(term, (method, params) => bridge.api(machine, method, params), () => pane.pane_id, text => writeTarget(text));
+    const copier = new PaneCopy(term, (method, params) => bridge.api(machine, method, params), () => pane.pane_id, text => bridge.clipboardWrite(text));
     const keyTarget = () => ({ term, mode, send, copier, shortcut: (event: KeyboardEvent) => live.current.shortcut(event) });
     term.attachCustomKeyEventHandler(event => {
       const result = handleKey(event, keyTarget());
       if (result.handled) { event.preventDefault(); result.work?.catch(error); return false; }
       return true;
     });
-    const data = term.onData(text => { const flush = () => { void send(text).catch(error); }; if (!links.hold(text, flush)) flush(); });
-    const binary = term.onBinary(text => { const flush = () => { void sendBytes(Uint8Array.from(text, ch => ch.charCodeAt(0))).catch(error); }; if (!links.hold(text, flush)) flush(); });
+    const data = term.onData(text => { if (hookDispatch) return; const flush = () => { void send(text).catch(error); }; if (!links.hold(text, flush)) flush(); });
+    const binary = term.onBinary(text => { if (hookDispatch) return; const flush = () => { void sendBytes(Uint8Array.from(text, ch => ch.charCodeAt(0))).catch(error); }; if (!links.hold(text, flush)) flush(); });
     const open = async () => {
       if (opening || disposed) return;
       opening = true;
@@ -161,39 +162,45 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
         const screen = term.element?.querySelector(".xterm-screen");
         const box = screen?.getBoundingClientRect();
         if (!screen || !box?.width || !box.height) throw new Error("Terminal screen unavailable");
-        const normal = openTarget;
         let opened: string | null = null;
         let hit: () => void = () => {};
         const settled = new Promise<void>(resolve => { hit = resolve; });
-        openTarget = uri => { opened = uri; hit(); };
+        let active = true;
+        const captureOpen = (uri: string) => { if (active && !disposed) { opened = uri; hit(); } };
+        const dispatch = (type: string, init: MouseEventInit) => {
+          const event = new MouseEvent(type, init);
+          hookOpeners.set(event, captureOpen);
+          hookDispatch = true;
+          try { screen.dispatchEvent(event); } finally { hookDispatch = false; }
+        };
         let deadline: ReturnType<typeof setTimeout> | undefined;
         try {
           const event = { bubbles: true, cancelable: true, button: 0, ctrlKey: ctrl, clientX: box.left + (col + 0.5) * box.width / term.cols, clientY: box.top + (row + 0.5) * box.height / term.rows };
           // Populate xterm's hover link, just as moving the physical pointer to the cell does.
-          screen.dispatchEvent(new MouseEvent("mousemove", event));
+          dispatch("mousemove", event);
           // A hidden or occluded WebView pauses frames; never wait on one for longer than 50 ms.
           await new Promise<void>(resolve => { requestAnimationFrame(() => resolve()); setTimeout(resolve, 50); });
-          screen.dispatchEvent(new MouseEvent("mousedown", { ...event, buttons: 1, detail: 1 }));
-          screen.dispatchEvent(new MouseEvent("mouseup", { ...event, buttons: 0, detail: 1 }));
-          if (ctrl) await Promise.race([settled, new Promise<void>(resolve => { deadline = setTimeout(resolve, 1500); })]);
+          if (disposed) throw new Error("Pane unavailable");
+          dispatch("mousedown", { ...event, buttons: 1, detail: 1 });
+          dispatch("mouseup", { ...event, buttons: 0, detail: 1 });
+          if (ctrl) await Promise.race([settled, new Promise<void>(resolve => { deadline = setTimeout(resolve, RESOLVE_MS); })]);
           return opened;
-        } finally { clearTimeout(deadline); openTarget = normal; }
+        } finally { active = false; clearTimeout(deadline); }
       }),
       copySelection: (from, to) => runHook(async () => {
         validateCell(from); validateCell(to);
-        const normal = writeTarget;
         let text = "";
-        writeTarget = async value => { text = value; };
-        term.clearSelection(); copier.clear();
+        const hookCopier = new PaneCopy(term, (method, params) => bridge.api(machine, method, params), () => pane.pane_id, async value => { text = value; });
         try {
-          if (mode.mouse) { copier.press(from, 1, true); copier.move(to); copier.release(to); }
+          term.clearSelection(); hookCopier.clear();
+          if (mode.mouse) { hookCopier.press(from, 1, true); hookCopier.move(to); hookCopier.release(to); }
           else {
             const { start, end } = ordered(from, to);
             term.select(start.col, term.buffer.active.viewportY + start.row, (end.row - start.row) * term.cols + end.col - start.col + 1);
           }
-          const copied = await copier.copy();
+          const copied = await hookCopier.copy();
           return { text, copied };
-        } finally { writeTarget = normal; term.clearSelection(); copier.clear(); }
+        } finally { try { term.clearSelection(); } finally { hookCopier.clear(); } }
       }),
       type: send,
       read: () => Array.from({ length: term.rows }, (_, i) => term.buffer.active.getLine(term.buffer.active.viewportY + i)?.translateToString(true) ?? "").join("\n"),

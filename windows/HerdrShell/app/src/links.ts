@@ -34,13 +34,14 @@ const spanText = (term: Terminal, regions: LinkRegion[]) => [...regions].sort((a
 // for it are held until the link settles: a hit consumes them, a miss or a drag replays them,
 // as the Mac buffers a native gesture and replays it only on a miss. Reports that arrive while
 // an earlier click resolves queue behind it, so the program sees them in order.
-interface Gesture { cell: { row: number; col: number }; settled?: boolean; hit?: boolean }
+interface Gesture { cell: { row: number; col: number }; open: (url: string) => void; settled?: boolean; hit?: boolean }
 export interface LinkGate { hold: (data: string, flush: () => void) => boolean; dispose: () => void }
-const RESOLVE_MS = 1500;
+export const RESOLVE_MS = 1500;
 const mouseReport = (data: string) => data.startsWith("\x1b[<") || data.startsWith("\x1b[M");
 // Call after term.open. A click xterm does not link (a wrapped URL's continuation rows) is
 // resolved through the server from the terminal's own mouseup.
-export function installLinks(term: Terminal, server: LinkServer, open: (url: string) => void): LinkGate {
+export function installLinks(term: Terminal, server: LinkServer, open: (url: string) => void, gestureOpen: (event: MouseEvent) => ((url: string) => void) = () => open): LinkGate {
+  let disposed = false;
   const linked = new WeakMap<MouseEvent, string>();
   // The open gesture: pressed, or released this event turn. Only it holds reports and only it
   // can be cancelled; a released click is settled once, by its resolution or, if the server is
@@ -56,11 +57,11 @@ export function installLinks(term: Terminal, server: LinkServer, open: (url: str
   };
   const finish = async (g: Gesture, cell: { row: number; col: number }, resolved: string | null) => {
     // Activation runs server-side link plugins; a click already replayed must not reach them.
-    if (g.settled) return false;
+    if (disposed || g.settled) return false;
     const answer = await server.activate(cell.row, cell.col).catch(() => null);
     const target = openTarget(resolved, answer?.url ?? null, answer?.handled ?? false);
-    if (g.settled) return false;
-    if (target && webUrl(target)) { open(target); return true; }
+    if (disposed || g.settled) return false;
+    if (target && webUrl(target)) { g.open(target); return true; }
     return answer?.handled ?? false;
   };
   const resolve = async (g: Gesture, cell: { row: number; col: number }) => {
@@ -77,7 +78,7 @@ export function installLinks(term: Terminal, server: LinkServer, open: (url: str
   // Registered after xterm's Linkifier on the same element, so its activation is already known.
   const down = (event: Event) => {
     const mouse = event as MouseEvent, cell = mouse.ctrlKey && mouse.button === 0 ? cellAt(term, mouse) : null;
-    if (cell) gesture = { cell };
+    if (cell) gesture = { cell, open: gestureOpen(mouse) };
   };
   const up = (event: Event) => {
     const g = gesture, mouse = event as MouseEvent, cell = cellAt(term, mouse);
@@ -101,6 +102,6 @@ export function installLinks(term: Terminal, server: LinkServer, open: (url: str
   document.addEventListener("visibilitychange", cancel);
   return {
     hold: (data, flush) => { if (!mouseReport(data) || (!gesture && !queue.length)) return false; queue.push({ g: gesture, flush }); return true; },
-    dispose: () => { screen?.removeEventListener("mousedown", down); screen?.removeEventListener("mouseup", up); window.removeEventListener("mouseup", away, true); window.removeEventListener("blur", cancel); window.removeEventListener("pointercancel", cancel, true); document.removeEventListener("visibilitychange", cancel); },
+    dispose: () => { disposed = true; screen?.removeEventListener("mousedown", down); screen?.removeEventListener("mouseup", up); window.removeEventListener("mouseup", away, true); window.removeEventListener("blur", cancel); window.removeEventListener("pointercancel", cancel, true); document.removeEventListener("visibilitychange", cancel); },
   };
 }
