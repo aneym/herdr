@@ -624,6 +624,7 @@ impl TerminalRuntime {
         !self.1.lock().unwrap().queue.is_empty()
     }
 
+    #[cfg(test)]
     pub(crate) fn flush_polite_queue(
         &self,
         now: Instant,
