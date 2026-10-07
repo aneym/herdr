@@ -49,12 +49,23 @@ def remote(cmd, input_data=None, stream=False, timeout=None):
     return p.returncode, out
 
 
+# Read-only probes; every other helper can touch the app or the PC's load.
+UNGATED = {"game_guard.ps1", "status.ps1", "idle_refresh.ps1"}
+GATED = 75
+
+
 def ps_file(name, *args, stream=False, timeout=None):
-    argstr = " ".join(args)
-    cmd = f"{PS} -File {R_SCRIPTS}/{name}"
-    if argstr:
-        cmd += " " + argstr
-    return remote(cmd, stream=stream, timeout=timeout)
+    """Run one helper on the PC; all but UNGATED go through gated.ps1, which
+    checks for a game in the same process and exits 75 before acting."""
+    if name in UNGATED:
+        cmd = " ".join([f"{PS} -File {R_SCRIPTS}/{name}", *args])
+    else:
+        b64 = base64.b64encode(json.dumps(list(args)).encode()).decode()
+        cmd = f"{PS} -File {R_SCRIPTS}/gated.ps1 -Script {name} -ArgsB64 {b64}"
+    rc, out = remote(cmd, stream=stream, timeout=timeout)
+    if rc == GATED:
+        print(f"game running; {name} not run (exit 75)", file=sys.stderr)
+    return rc, out
 
 
 def scp_to(local, remote_path):
@@ -268,7 +279,7 @@ def launch_app(args):
     if not exe:
         print("HerdrShell.exe not installed; run install first", file=sys.stderr)
         sys.exit(1)
-    launch = ["launch.ps1", "-Exe", f'"{exe}"']
+    launch = ["launch.ps1", "-Exe", exe]
     if args.test_window:
         launch.append("-TestWindow")
     rc, out = ps_file(*launch)
