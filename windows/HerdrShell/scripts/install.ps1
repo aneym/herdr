@@ -22,8 +22,18 @@ while (Get-Process HerdrShell -ErrorAction SilentlyContinue) {
 }
 Write-Output "stopped: $($running.Count)"
 Write-Output "installing $inst"
-$p = Start-Process -FilePath $inst -ArgumentList '/S' -Wait -PassThru
+# A blocked or failed installer (Smart App Control refused one on 2026-10-06) must not leave
+# Alex without the app: start the copy that was running before.
+$restart = { if ($running.Count -and $running[0].Path) { & (Join-Path $PSScriptRoot 'launch.ps1') -Exe $running[0].Path } }
+try {
+    $p = Start-Process -FilePath $inst -ArgumentList '/S' -Wait -PassThru -ErrorAction Stop
+} catch {
+    & $restart
+    Write-Error "installer did not start: $($_.Exception.Message)"
+    exit 1
+}
 if ($p.ExitCode -ne 0) {
+    & $restart
     Write-Error "installer failed: exit code $($p.ExitCode)"
     exit 1
 }
