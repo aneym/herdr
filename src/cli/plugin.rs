@@ -2572,7 +2572,7 @@ mod tests {
         for no_resume in [false, true] {
             let (result, calls, recorded) =
                 run_scripted_plugin_reload_with(AfterResume::PromptExpires, no_resume);
-            let failure = result.err().expect("an expired line must not complete");
+            let failure = result.expect_err("an expired line must not complete");
             assert_eq!(
                 failure.exit_code, PLUGIN_RELOAD_EXIT_BUSY,
                 "{}",
