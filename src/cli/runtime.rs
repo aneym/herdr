@@ -1,5 +1,6 @@
 use crate::api::schema::{
-    Method, PaneFocusDirectionParams, PaneInputSetParams, PaneMoveParams, PaneRenameParams,
+    Method, PaneFocusDirectionParams, PaneInputSetParams, PaneMoveParams, PanePlaceParams,
+    PaneRenameParams,
     PaneResizeParams, PaneSplitParams, PaneSwapParams, PaneTarget, PaneZoomParams, Request,
     TabCreateParams, TabListParams, TabMoveParams, TabPinMoveParams, TabRenameParams,
     TabSetPinnedParams, TabTarget, WorkspaceCloseParams, WorkspaceCreateParams,
@@ -131,6 +132,10 @@ pub(super) fn pane_split(params: PaneSplitParams) -> std::io::Result<i32> {
 
 pub(super) fn pane_swap(params: PaneSwapParams) -> std::io::Result<i32> {
     print_method_response("cli:pane:swap", Method::PaneSwap(params))
+}
+
+pub(super) fn pane_place(params: PanePlaceParams) -> std::io::Result<i32> {
+    print_method_response("cli:pane:place", Method::PanePlace(params))
 }
 
 pub(super) fn pane_move(params: PaneMoveParams) -> std::io::Result<i32> {
