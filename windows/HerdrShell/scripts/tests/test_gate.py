@@ -44,7 +44,8 @@ class FakePC:
         self.helpers.append((script, inner.group(1) if inner else None))
         out = {'game_guard.ps1': '{"game":false,"procs":[],"idle_s":999}',
                'idle_refresh.ps1': '{"idle_s":999}',
-               'status.ps1': '{"exe":"C:\\\\Herdr Shell\\\\HerdrShell.exe"}'}.get(script, '{}')
+               'status.ps1': '{"exe":"C:\\\\Herdr Shell\\\\HerdrShell.exe"}'}.get(
+                   script, '{"ok":true,"machine":{"state":"up"},"rows":[],"panes":[]}')
         rc = self.gated_rc if script == 'gated.ps1' else 0
         return subprocess.CompletedProcess(argv, rc, out if rc == 0 else 'GATED', '')
 

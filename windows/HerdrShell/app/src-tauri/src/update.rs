@@ -185,26 +185,62 @@ try {{
         return Err(format!("Write update script: {error}"));
     }
     drop(file);
-    let mut command = Command::new("powershell.exe");
-    command
+    // A shell launched by a scheduled task lives in that task's job, which ends
+    // a child helper together with the app. A task of its own outlives both.
+    let register = r#"$ErrorActionPreference = 'Stop'
+$arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $env:HERDR_SHELL_UPDATE_SCRIPT + '"'
+$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arguments
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances Parallel
+Register-ScheduledTask -TaskName HerdrShellUpdate -Action $action -Principal $principal -Settings $settings -Force | Out-Null
+Start-ScheduledTask -TaskName HerdrShellUpdate"#;
+    let scheduled = Command::new("powershell.exe")
         .args([
             "-NoProfile",
+            "-NonInteractive",
             "-ExecutionPolicy",
             "Bypass",
-            "-WindowStyle",
-            "Hidden",
-            "-File",
+            "-Command",
+            register,
         ])
-        .arg(&path)
+        .env("HERDR_SHELL_UPDATE_SCRIPT", &path)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB);
-    let spawned = command.spawn().or_else(|breakaway_error| {
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|error| error.to_string())
+        .and_then(|output| {
+            if output.status.success() {
+                Ok(())
+            } else {
+                Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+            }
+        });
+    let spawned = scheduled.or_else(|task_error| {
+        let mut command = Command::new("powershell.exe");
         command
-            .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
+            .args([
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-WindowStyle",
+                "Hidden",
+                "-File",
+            ])
+            .arg(&path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB);
+        command
             .spawn()
-            .map_err(|error| format!("breakaway: {breakaway_error}; fallback: {error}"))
+            .or_else(|breakaway_error| {
+                command
+                    .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
+                    .spawn()
+                    .map_err(|error| format!("breakaway: {breakaway_error}; fallback: {error}"))
+            })
+            .map(|_| ())
+            .map_err(|error| format!("scheduled task: {task_error}; {error}"))
     });
     if let Err(error) = spawned {
         let _ = std::fs::remove_file(&path);
