@@ -42,7 +42,12 @@ import Foundation
         // Selecting a tab (quick switch, attention jump, header click) reveals its space.
         var folded = SpacesChrome(); folded.collapsedSpaces = ["d"]
         dump("folded", chrome: folded)
-        let unfolded = folded.reveal(space: "d", parked: false)
+        let pinnedRows = SpacesTree.build(input, overlay: Overlay(), chrome: folded, now: 0)
+        let pinRevealed = folded.reveal(space: "d", parked: false, selected: "pin1", rows: pinnedRows)
+        let persistedFold = try JSONDecoder().decode(SpacesChrome.self, from: JSONEncoder().encode(folded))
+        print("pinnedReveal|\(pinRevealed)|\(persistedFold.collapsedSpaces.contains("d"))")
+        dump("revealPinned", chrome: persistedFold)
+        let unfolded = folded.reveal(space: "d", parked: false, selected: "plain1", rows: pinnedRows)
         dump("revealFolded", chrome: folded)
         var unparked = SpacesChrome()
         let opened = unparked.reveal(space: "p", parked: true)

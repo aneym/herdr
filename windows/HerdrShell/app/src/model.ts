@@ -59,6 +59,7 @@ export function spaceOpen(space: SidebarRow, rows: SidebarRow[], selected: strin
 /** Reveal on select, as the Mac's SpacesChrome.reveal: the fold key to open so the selected tab's
  *  space shows its tabs, or null when it already does. Hidden spaces stay in the Hidden group. */
 export function revealFold(rows: SidebarRow[], selected: string | null, expanded: Record<string, boolean>): string | null {
+  if (rows.some(r => r.kind === "pinned" && r.id === selected)) return null;
   const tab = rows.find(r => r.kind === "tab" && r.id === selected);
   const space = tab && rows.find(r => r.kind === "space" && r.id === tab.spaceId);
   return space && !spaceOpen(space, rows, selected, expanded) ? foldKey(space) : null;

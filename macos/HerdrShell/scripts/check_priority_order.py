@@ -58,6 +58,7 @@ check("parked space collapsed in place by default", space("rank", "p")[4] == "cl
 check("persisted parked expansion exposes tabs", space("expanded", "p")[4] == "open" and "tab:parkedtab" in selected("expanded", "tab") and "expandedChrome|true|true" in rows)
 check("parked toggle refolds without changing collapsedSpaces", space("refolded", "p")[4] == "closed" and "tab:parkedtab" not in selected("refolded", "tab") and "refoldedChrome|true|true" in rows)
 check("selecting a tab opens its parked space", space("revealParked", "p")[4] == "open" and "tab:parkedtab" in selected("revealParked", "tab"))
+check("selecting a PINNED row preserves its persisted home fold", "pinnedReveal|false|true" in rows and "pinned:pin1" in selected("revealPinned", "tab") and "tab:plain1" not in selected("revealPinned", "tab"))
 check("selecting a tab unfolds its collapsed space", "tab:plain1" not in selected("folded", "tab") and "tab:plain1" in selected("revealFolded", "tab"))
 check("reveal reports a change once, so a repeat select saves nothing", "reveal|true|true|false" in rows)
 check("remote tab homed by label reveals the local parked space", "remote|box/w1:t1|p|true" in rows and "tab:box/w1:t1" in selected("remote-box/w1:t1", "tab"))

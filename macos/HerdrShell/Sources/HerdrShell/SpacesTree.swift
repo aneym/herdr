@@ -104,7 +104,8 @@ struct SpacesChrome: Codable {
     }
     /// Opens a selected tab's space, parked or folded, as the TUI's reveal does
     /// (client/shell/tree.rs). True when the chrome changed and needs saving.
-    mutating func reveal(space: String, parked: Bool) -> Bool {
+    mutating func reveal(space: String, parked: Bool, selected: String? = nil, rows: [SpacesRow] = []) -> Bool {
+        if let selected, rows.contains(where: { $0.id == "pinned:" + selected }) { return false }
         let unfolded = collapsedSpaces.remove(space) != nil
         let unparked = parked && expandedParkedSpaces.insert(space).inserted
         return unfolded || unparked

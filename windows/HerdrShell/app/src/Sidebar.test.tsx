@@ -15,7 +15,7 @@ const stored = new Map<string, string>();
 Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: (k: string) => stored.get(k) ?? null, setItem: (k: string, v: string) => void stored.set(k, v), clear: () => stored.clear() } });
 const snapshot: Snapshot = {
   workspaces: [{ workspace_id: "a", number: 1, label: "alpha" }, { workspace_id: "b", number: 2, label: "beta" }, { workspace_id: "r", number: 3, label: "rails", parked: true }],
-  tabs: [{ tab_id: "a:1", workspace_id: "a", number: 1 }, { tab_id: "b:1", workspace_id: "b", number: 1 }, { tab_id: "r:1", workspace_id: "r", number: 1 }],
+  tabs: [{ tab_id: "a:1", workspace_id: "a", number: 1 }, { tab_id: "b:1", workspace_id: "b", number: 1 }, { tab_id: "r:1", workspace_id: "r", number: 1 }, { tab_id: "a:2", workspace_id: "a", number: 2, pin_index: 0, label: "pinned chat" }],
 };
 let drive: { select: (id: string) => void; show: (visible: boolean) => void } = { select: () => {}, show: () => {} };
 function Shell() {
@@ -43,6 +43,16 @@ describe.each([["plain", false], ["StrictMode", true]])("sidebar reveal on selec
     expect(open("alpha")).toBe("false");
     // Hidden, select b then a again: showing the sidebar reveals a.
     act(() => drive.show(false)); act(() => drive.select("b:1")); act(() => drive.select("a:1")); act(() => drive.show(true));
+    expect(open("alpha")).toBe("true");
+  });
+  it("selects a pinned row without reopening its home, while a non-pinned selection reveals", () => {
+    act(() => drive.select("a:1"));
+    fold("alpha");
+    expect(open("alpha")).toBe("false");
+    act(() => host.querySelector<HTMLButtonElement>('[data-row="pinned:a:2"] .select-tab')!.click());
+    expect(host.querySelector('[data-row="pinned:a:2"]')?.classList.contains("selected")).toBe(true);
+    expect(open("alpha")).toBe("false");
+    act(() => drive.select("a:1"));
     expect(open("alpha")).toBe("true");
   });
   it("opens a parked space for its selected tab, once", () => {
