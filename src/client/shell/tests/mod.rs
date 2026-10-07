@@ -277,6 +277,7 @@ mod link_hover;
 mod mobile;
 mod mouse_selection;
 mod navigation_history;
+mod pane_drop_zone_fixture;
 mod popup_focus_projection;
 mod profile_usage;
 mod startup_overlays;

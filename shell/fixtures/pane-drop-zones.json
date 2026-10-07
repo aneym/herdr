@@ -1,0 +1,109 @@
+{
+  "_comment": "Owner-written drop-zone fixture for pane drag (spec pane-drag-rearrange-2026-10-07, slice S2). The TUI (src/client/shell/pane_drop.rs), the Mac (PaneDrop.swift) and Windows (paneDrop.ts) each run every case; implementers may not edit this file. Units are layout cells; rects are [x, y, width, height]; points are fractional cells (the TUI passes a cell's centre, col + 0.5). Panes are listed in layout order and that order breaks gap ties.",
+  "rules": [
+    "Outside the area: no zone.",
+    "Tab edge first: when the layout has 2 or more panes and the point is less than metrics.tabEdge from an outer edge of the area, the zone is that tab edge. The smallest distance wins; ties go left, right, up, down.",
+    "Pane under the point: the pane whose rect contains it; otherwise the pane nearest to it within 1 cell (Chebyshev distance; ties go to the earlier pane), with the point clamped into that rect.",
+    "That pane is the source: no zone.",
+    "Band per axis: min(max(dimension * bandFraction, bandMin), dimension * bandMaxFraction). An edge whose distance is less than its band is a candidate; the smallest distance / band wins; ties go left, right, up, down. No candidate: centre.",
+    "Estimate: centre is the target rect. A pane edge splits the target, a tab edge splits the area, as the layout splits a node: the placed pane's share is 0.5 beside a pane and 1/3 at a tab edge; left and up put it first with length round(length * share); right and down put it second after round(length * (1 - share)). round is half away from zero."
+  ],
+  "metrics": { "tabEdge": 1, "bandMin": 2, "bandFraction": 0.25, "bandMaxFraction": 0.33 },
+  "layouts": {
+    "three": {
+      "area": [0, 0, 120, 40],
+      "panes": [
+        { "id": "A", "rect": [0, 0, 60, 40] },
+        { "id": "B", "rect": [60, 0, 60, 20] },
+        { "id": "C", "rect": [60, 20, 60, 20] }
+      ]
+    },
+    "tiny": {
+      "area": [0, 0, 40, 20],
+      "panes": [
+        { "id": "A", "rect": [0, 0, 33, 20] },
+        { "id": "T", "rect": [33, 0, 7, 20] }
+      ]
+    },
+    "sliver": {
+      "area": [0, 0, 40, 20],
+      "panes": [
+        { "id": "A", "rect": [0, 0, 36, 20] },
+        { "id": "S", "rect": [36, 0, 4, 20] }
+      ]
+    },
+    "wide": {
+      "area": [0, 0, 120, 40],
+      "panes": [
+        { "id": "A", "rect": [0, 0, 120, 10] },
+        { "id": "W", "rect": [0, 10, 120, 30] }
+      ]
+    },
+    "lone": {
+      "area": [0, 0, 120, 40],
+      "panes": [
+        { "id": "X", "rect": [0, 0, 120, 40] }
+      ]
+    },
+    "gaps": {
+      "area": [0, 0, 120, 40],
+      "panes": [
+        { "id": "G1", "rect": [0, 0, 60, 40] },
+        { "id": "G2", "rect": [61, 0, 59, 20] },
+        { "id": "G3", "rect": [61, 21, 59, 19] }
+      ]
+    }
+  },
+  "cases": [
+    { "name": "centre of another pane swaps", "layout": "three", "source": "A", "point": [90.5, 10.5],
+      "zone": { "kind": "centre", "target": "B" }, "estimate": [60, 0, 60, 20] },
+    { "name": "left edge band", "layout": "three", "source": "A", "point": [62.5, 10.5],
+      "zone": { "kind": "pane_edge", "target": "B", "side": "left" }, "estimate": [60, 0, 30, 20] },
+    { "name": "right edge band", "layout": "three", "source": "A", "point": [117.5, 10.5],
+      "zone": { "kind": "pane_edge", "target": "B", "side": "right" }, "estimate": [90, 0, 30, 20] },
+    { "name": "top edge band", "layout": "three", "source": "A", "point": [90.5, 2.5],
+      "zone": { "kind": "pane_edge", "target": "B", "side": "up" }, "estimate": [60, 0, 60, 10] },
+    { "name": "bottom edge band", "layout": "three", "source": "A", "point": [90.5, 17.5],
+      "zone": { "kind": "pane_edge", "target": "B", "side": "down" }, "estimate": [60, 10, 60, 10] },
+    { "name": "corner tie goes left", "layout": "three", "source": "A", "point": [67.5, 2.5],
+      "zone": { "kind": "pane_edge", "target": "B", "side": "left" }, "estimate": [60, 0, 30, 20] },
+    { "name": "corner picks the smaller distance over band", "layout": "three", "source": "A", "point": [70.5, 21.5],
+      "zone": { "kind": "pane_edge", "target": "C", "side": "up" }, "estimate": [60, 20, 60, 10] },
+    { "name": "narrow pane uses the minimum band", "layout": "tiny", "source": "A", "point": [34.9, 10.5],
+      "zone": { "kind": "pane_edge", "target": "T", "side": "left" }, "estimate": [33, 0, 4, 20] },
+    { "name": "narrow pane keeps a centre", "layout": "tiny", "source": "A", "point": [36.5, 10.5],
+      "zone": { "kind": "centre", "target": "T" }, "estimate": [33, 0, 7, 20] },
+    { "name": "sliver caps the band at its max fraction", "layout": "sliver", "source": "A", "point": [37.5, 10.5],
+      "zone": { "kind": "centre", "target": "S" }, "estimate": [36, 0, 4, 20] },
+    { "name": "wide pane bands per axis: left", "layout": "wide", "source": "A", "point": [25.5, 25.5],
+      "zone": { "kind": "pane_edge", "target": "W", "side": "left" }, "estimate": [0, 10, 60, 30] },
+    { "name": "wide pane bands per axis: up", "layout": "wide", "source": "A", "point": [60.5, 12.5],
+      "zone": { "kind": "pane_edge", "target": "W", "side": "up" }, "estimate": [0, 10, 120, 15] },
+    { "name": "source centre has no zone", "layout": "three", "source": "A", "point": [30.5, 20.5],
+      "zone": null },
+    { "name": "source edge has no zone", "layout": "three", "source": "A", "point": [2.5, 20.5],
+      "zone": null },
+    { "name": "tab left edge wins over the source", "layout": "three", "source": "A", "point": [0.5, 20.5],
+      "zone": { "kind": "tab_edge", "side": "left" }, "estimate": [0, 0, 40, 40] },
+    { "name": "tab right edge", "layout": "three", "source": "A", "point": [119.5, 20.5],
+      "zone": { "kind": "tab_edge", "side": "right" }, "estimate": [80, 0, 40, 40] },
+    { "name": "tab top edge", "layout": "three", "source": "A", "point": [90.5, 0.5],
+      "zone": { "kind": "tab_edge", "side": "up" }, "estimate": [0, 0, 120, 13] },
+    { "name": "tab bottom edge", "layout": "three", "source": "A", "point": [90.5, 39.5],
+      "zone": { "kind": "tab_edge", "side": "down" }, "estimate": [0, 27, 120, 13] },
+    { "name": "tab corner tie goes left", "layout": "three", "source": "A", "point": [0.5, 0.5],
+      "zone": { "kind": "tab_edge", "side": "left" }, "estimate": [0, 0, 40, 40] },
+    { "name": "one-pane tab has no tab edge; its own pane is the source", "layout": "lone", "source": "X", "point": [0.5, 20.5],
+      "zone": null },
+    { "name": "one-pane tab has no tab edge; a pane from another tab gets the pane edge", "layout": "lone", "source": null, "point": [0.5, 20.5],
+      "zone": { "kind": "pane_edge", "target": "X", "side": "left" }, "estimate": [0, 0, 60, 40] },
+    { "name": "gap cell belongs to the nearest pane", "layout": "gaps", "source": "G3", "point": [60.3, 10.5],
+      "zone": { "kind": "pane_edge", "target": "G1", "side": "right" }, "estimate": [30, 0, 30, 40] },
+    { "name": "gap cell tie goes to the earlier pane", "layout": "gaps", "source": "G3", "point": [90.5, 20.5],
+      "zone": { "kind": "pane_edge", "target": "G2", "side": "down" }, "estimate": [61, 10, 59, 10] },
+    { "name": "right of the area has no zone", "layout": "three", "source": "A", "point": [130.5, 20.5],
+      "zone": null },
+    { "name": "left of the area has no zone", "layout": "three", "source": "A", "point": [-0.5, 20.5],
+      "zone": null }
+  ]
+}
