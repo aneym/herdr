@@ -710,6 +710,9 @@ fn split_rect(area: Rect, direction: Direction, ratio: f32) -> (Rect, Rect) {
 }
 
 #[cfg(test)]
+mod pane_place_scenario;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
