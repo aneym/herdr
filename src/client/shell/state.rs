@@ -1594,6 +1594,16 @@ impl ClientShellState {
         let Some(pane) = snapshot.panes.iter().find(|pane| pane.pane_id == pane_id) else {
             return false;
         };
+        // A live pin already exposes this tab outside its home space and tab
+        // folds. Focusing it must not unfold those independent tree groups.
+        if snapshot.tabs.iter().any(|tab| tab.tab_id == pane.tab_id)
+            && snapshot
+                .pinned_tabs
+                .iter()
+                .any(|pin| pin.tab_id == pane.tab_id)
+        {
+            return false;
+        }
         let workspace_id = pane.workspace_id.clone();
         let tab_key = snapshot
             .tabs

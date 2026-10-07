@@ -379,6 +379,96 @@ fn pinned_chats_top_the_tree_and_own_cmd_digits_in_pin_order() {
     )));
 }
 
+/// No-PTY regression across rendered mouse input, focus response, and snapshot
+/// projection: a visible pin preserves folds; an unpinned hidden pane reveals.
+#[test]
+fn pinned_chat_focus_preserves_home_folds_and_unpinned_focus_reveals() {
+    use crate::api::schema::{Method, PaneTarget, ResponseResult};
+    use crossterm::event::{MouseButton, MouseEventKind};
+
+    let mut tree = ClientTreeChrome::default();
+    tree.collapsed_spaces.insert("ws_2".into());
+    tree.collapsed_tabs.insert("ws_2#1".into());
+    // Two roots ensure the focused pane is hidden by the tab fold rather than
+    // promoted to its header, so both space and tab reveal are exercised.
+    let mut snapshot = tree_snapshot();
+    let mut split = snapshot.panes[2].clone();
+    split.pane_id = "pane_4".into();
+    snapshot.panes.push(split);
+    snapshot
+        .agents
+        .push(agent("pane_4", "ws_2", "tab_3", AgentStatus::Idle, 4));
+    snapshot
+        .pinned_tabs
+        .push(crate::protocol::ClientShellPinnedTab {
+            role: None,
+            tab_id: "tab_3".into(),
+            workspace_id: "ws_2".into(),
+        });
+    let mut state = tree_state(tree.clone());
+    state.set_snapshot(Box::new(snapshot.clone()));
+    state.compose(100, 30).expect("frame");
+    let row = state
+        .hits
+        .tree_headers
+        .iter()
+        .find(|hit| hit.pinned && hit.key == "tab_3")
+        .expect("visible pinned chat")
+        .rect;
+    let outcome = state.handle_raw_events(vec![
+        pin_mouse(MouseEventKind::Down(MouseButton::Left), row.x + 3, row.y),
+        pin_mouse(MouseEventKind::Up(MouseButton::Left), row.x + 3, row.y),
+    ]);
+    let request_id = outcome
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            ClientShellAction::Endpoint { request, .. }
+                if matches!(&request.method, Method::TabFocus(target) if target.tab_id == "tab_3") =>
+            {
+                Some(request.id.clone())
+            }
+            _ => None,
+        })
+        .expect("pin click focuses its tab");
+    // Response-before-snapshot exercises the asynchronous completion path.
+    state.handle_endpoint_result(&snapshot.boot_id, &request_id, Ok(ResponseResult::Ok {}));
+    snapshot.revision += 1;
+    snapshot.focused_workspace_id = Some("ws_2".into());
+    snapshot.focused_tab_id = Some("tab_3".into());
+    snapshot.focused_pane_id = Some("pane_3".into());
+    state.set_snapshot(Box::new(snapshot.clone()));
+    assert_eq!(
+        state.tree_chrome_mut().collapsed_spaces,
+        tree.collapsed_spaces
+    );
+    assert_eq!(state.tree_chrome_mut().collapsed_tabs, tree.collapsed_tabs);
+    assert!(state.pending_focus_reveals.is_empty());
+
+    // Without a pin, ordinary explicit focus still opens hidden ancestors.
+    snapshot.pinned_tabs.clear();
+    snapshot.revision += 1;
+    state.set_snapshot(Box::new(snapshot.clone()));
+    let mut outcome = ClientShellInput::default();
+    state.push_endpoint_method(
+        Method::PaneFocus(PaneTarget {
+            pane_id: "pane_3".into(),
+        }),
+        &mut outcome,
+    );
+    let request_id = outcome
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            ClientShellAction::Endpoint { request, .. } => Some(request.id.clone()),
+            _ => None,
+        })
+        .expect("focus request");
+    state.handle_endpoint_result(&snapshot.boot_id, &request_id, Ok(ResponseResult::Ok {}));
+    assert!(!state.tree_chrome_mut().collapsed_spaces.contains("ws_2"));
+    assert!(!state.tree_chrome_mut().collapsed_tabs.contains("ws_2#1"));
+}
+
 fn pin_mouse(kind: crossterm::event::MouseEventKind, column: u16, row: u16) -> RawInputEvent {
     RawInputEvent::Mouse(MouseEvent {
         kind,
