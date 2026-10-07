@@ -2521,6 +2521,12 @@ mod tests {
         /// Handed to the writer, then its receipt is evicted from the
         /// server's history before the writer confirms it.
         HandedThenEvicted,
+        /// Handed to the writer, then pane.queue succeeds but no longer
+        /// lists the receipt.
+        HandedThenEmpty,
+        /// Queued at first; the first poll sees it handed to the writer and
+        /// the next finds its receipt evicted.
+        HandedDuringPoll,
         /// An older server: agent.get has no runtime_id.
         NoRuntimeId,
         /// The server accepts agent.prompt but echoes no delivery ack.
@@ -2553,6 +2559,7 @@ mod tests {
         let log = calls.clone();
         let mut resumed = false;
         let mut post_resume_agent_gets = 0;
+        let mut queue_polls = 0;
         PLUGIN_RELOAD_TEST_CALL.with(|call| {
             *call.borrow_mut() = Some(Box::new(move |method: &Method| {
                 let name = match method {
@@ -2632,11 +2639,15 @@ mod tests {
                     }
                     "agent.prompt" => Ok(match scenario {
                         AfterResume::NoAck => serde_json::json!({"id": "q1", "state": "delivered"}),
-                        AfterResume::PromptExpires | AfterResume::StuckQueued => {
+                        AfterResume::PromptExpires
+                        | AfterResume::StuckQueued
+                        | AfterResume::HandedDuringPoll => {
                             serde_json::json!({"id": "q1", "state": "queued", "queued": true,
                                 "delivery": ack})
                         }
-                        AfterResume::HandedToWriter | AfterResume::HandedThenEvicted => {
+                        AfterResume::HandedToWriter
+                        | AfterResume::HandedThenEvicted
+                        | AfterResume::HandedThenEmpty => {
                             serde_json::json!({"id": "q1", "state": "queued",
                                 "reason": "handed_to_writer", "delivery": ack})
                         }
@@ -2645,7 +2656,18 @@ mod tests {
                     "pane.queue" if matches!(scenario, AfterResume::HandedThenEvicted) => {
                         Err(("queue_item_not_found".into(), "queue item not found".into()))
                     }
+                    "pane.queue" if matches!(scenario, AfterResume::HandedDuringPoll) => {
+                        queue_polls += 1;
+                        if queue_polls == 1 {
+                            Ok(send("queued", Some("handed_to_writer")))
+                        } else {
+                            Err(("queue_item_not_found".into(), "queue item not found".into()))
+                        }
+                    }
                     "pane.queue" => Ok(match scenario {
+                        AfterResume::HandedThenEmpty => {
+                            serde_json::json!({"sends": [], "recent": []})
+                        }
                         AfterResume::StuckQueued => send("queued", None),
                         AfterResume::HandedToWriter => send("queued", Some("handed_to_writer")),
                         _ => send("dropped", Some("expired")),
@@ -2789,6 +2811,17 @@ mod tests {
                 assert_eq!(record["resumed"], true);
             }
             assert!(calls.contains(&"pane.queue"), "{calls:?}");
+            assert!(!calls.contains(&"pane.queue.cancel"), "{calls:?}");
+            assert!(recorded);
+        }
+        // The receipt is simply absent from a successful response, or the
+        // handoff is first seen while polling: still handed, never retried.
+        for scenario in [AfterResume::HandedThenEmpty, AfterResume::HandedDuringPoll] {
+            let (result, calls, recorded) = run_scripted_plugin_reload(scenario);
+            let record = result
+                .ok()
+                .expect("a handed line whose receipt is gone is not a failure");
+            assert_eq!(record["delivery"], "handed_to_writer");
             assert!(!calls.contains(&"pane.queue.cancel"), "{calls:?}");
             assert!(recorded);
         }

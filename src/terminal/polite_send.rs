@@ -779,10 +779,11 @@ impl TerminalRuntime {
                 continue;
             }
             if let Some(guard) = &item.guard {
-                // Recheck at the handoff itself: `now` was taken before the
-                // foreground lookup above, which can block.
-                let handoff = Instant::now();
+                // Recheck at the handoff itself: `now` predates the
+                // foreground lookup above and the verdict callback, both of
+                // which can block, so sample the clock after them.
                 let ready = verdict(guard);
+                let handoff = Instant::now();
                 if let Some((drop_state, reason)) = self.guard_refusal(guard, ready, handoff) {
                     transition(&item.id, drop_state, Some(reason));
                     tracing::info!(pane_id = ?item.pane_id, method = item.method, reason, "guarded polite send dropped at handoff");
@@ -1043,6 +1044,59 @@ mod tests {
         assert_eq!(item.state, PaneSendState::Dropped);
         assert_eq!(item.reason.as_deref(), Some("expired"));
         assert!(!runtime.has_polite_queue());
+        assert!(rx.try_recv().is_err(), "an expired line reached the writer");
+    }
+
+    /// The readiness verdict can block (it reads agent state behind the
+    /// terminal lock); a line that expires while it runs is never written.
+    #[tokio::test]
+    async fn guarded_flush_samples_expiry_after_the_readiness_verdict() {
+        let (runtime, mut rx) = TerminalRuntime::test_with_channel(80, 24);
+        let guard = DeliveryGuard {
+            session_id: "sess-1".into(),
+            runtime_id: Some(runtime.runtime_id()),
+            agent: crate::detect::Agent::Claude,
+            input_quiet: Duration::ZERO,
+            expires_at: Instant::now() + Duration::from_millis(200),
+        };
+        let outcome = runtime
+            .polite_send_with_guard(
+                false,
+                Duration::ZERO,
+                "agent.prompt",
+                Payload::Bytes(Bytes::from_static(b"late-line")),
+                SendOptions::default(),
+                Some((guard, DeliveryVerdict::Hold)),
+            )
+            .unwrap();
+        assert_eq!(outcome.state, PaneSendState::Queued);
+        // Ready at once for the pre-pass; the handoff verdict blocks until
+        // after expiry.
+        let calls = std::cell::Cell::new(0);
+        let verdict = |_: &DeliveryGuard| {
+            calls.set(calls.get() + 1);
+            if calls.get() == 2 {
+                std::thread::sleep(Duration::from_millis(300));
+            }
+            DeliveryVerdict::Ready
+        };
+        runtime
+            .flush_polite_queue_guarded(
+                Instant::now(),
+                Duration::ZERO,
+                true,
+                SendOptions::default(),
+                &verdict,
+            )
+            .unwrap();
+        assert_eq!(calls.get(), 2, "pre-pass and handoff each ask once");
+        let item = runtime
+            .polite_queue()
+            .into_iter()
+            .find(|item| item.id == outcome.id)
+            .unwrap();
+        assert_eq!(item.state, PaneSendState::Dropped);
+        assert_eq!(item.reason.as_deref(), Some("expired"));
         assert!(rx.try_recv().is_err(), "an expired line reached the writer");
     }
 
