@@ -1705,6 +1705,7 @@ impl AppState {
                 pane_id,
                 agent,
                 observed_at,
+                ..
             } => self
                 .update_terminal_state(pane_id, |terminal| {
                     Some(terminal.set_detected_agent_process_at(agent, observed_at))
@@ -3707,6 +3708,7 @@ mod tests {
                 pane_id,
                 agent: Agent::Pi,
                 observed_at: Instant::now(),
+                runtime_pid: None,
             });
         }
         for &state in states {
@@ -3952,6 +3954,7 @@ mod tests {
             pane_id,
             agent: Agent::Pi,
             observed_at: Instant::now(),
+            runtime_pid: None,
         });
         let direct_idle = state
             .handle_app_event(AppEvent::StateChanged {
@@ -3971,6 +3974,7 @@ mod tests {
             pane_id,
             agent: Agent::Pi,
             observed_at: Instant::now(),
+            runtime_pid: None,
         });
         for agent_state in [AgentState::Working, AgentState::Blocked] {
             state.handle_app_event(AppEvent::StateChanged {
@@ -4007,6 +4011,7 @@ mod tests {
             pane_id,
             agent: Agent::Codex,
             observed_at: Instant::now(),
+            runtime_pid: None,
         });
         state.handle_app_event(AppEvent::StateChanged {
             pane_id,

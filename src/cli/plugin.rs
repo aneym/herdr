@@ -810,6 +810,15 @@ fn run_plugin_reload_action(args: &PluginReloadArgs) -> Result<(), PluginReloadF
     }
 }
 
+/// The restore error a `pane.get` result reports for the resumed pane, set
+/// when its replacement runtime failed (`agent.resume` clears it on start).
+fn resumed_pane_failure(pane: &serde_json::Value) -> Option<String> {
+    pane.get("pane")
+        .and_then(|pane| pane.get("restore_error"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+}
+
 fn resumed_agent_ready(status: Option<&str>) -> bool {
     matches!(status, Some("idle" | "done"))
 }
@@ -832,6 +841,15 @@ fn wait_for_resumed_agent_idle(
         });
         if resumed_agent_ready(status.as_deref()) {
             return Ok(());
+        }
+        let pane = plugin_reload_call(Method::PaneGet(crate::api::schema::PaneTarget {
+            pane_id: pane.to_string(),
+        }))
+        .ok();
+        if let Some(error) = pane.as_ref().and_then(resumed_pane_failure) {
+            return Err(PluginReloadFailure::failed(format!(
+                "resumed agent failed: {error}"
+            )));
         }
         if std::time::Instant::now() >= deadline {
             return Err(PluginReloadFailure::failed(
@@ -2261,6 +2279,22 @@ mod tests {
         assert!(resumed_agent_ready(Some("done")));
         assert!(!resumed_agent_ready(Some("working")));
         assert!(!resumed_agent_ready(None));
+    }
+
+    #[test]
+    fn plugin_reload_post_resume_fails_on_pane_restore_error() {
+        assert_eq!(
+            resumed_pane_failure(&serde_json::json!({
+                "type": "pane_info",
+                "pane": {"restore_error": "Resumed agent exited before startup completed"}
+            }))
+            .as_deref(),
+            Some("Resumed agent exited before startup completed")
+        );
+        assert_eq!(
+            resumed_pane_failure(&serde_json::json!({"pane": {"pane_id": "w1:p1"}})),
+            None
+        );
     }
 
     #[test]

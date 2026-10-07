@@ -274,12 +274,14 @@ async fn publish_agent_process_detected_event(
     pane_id: PaneId,
     agent: Agent,
     observed_at: std::time::Instant,
+    runtime_pid: Option<u32>,
 ) {
     if let Err(e) = state_events
         .send(AppEvent::AgentProcessDetected {
             pane_id,
             agent,
             observed_at,
+            runtime_pid,
         })
         .await
     {
@@ -937,6 +939,7 @@ fn spawn_basic_detection_task(
                                 pane_id,
                                 agent,
                                 now,
+                                Some(child_pid.load(Ordering::Acquire)).filter(|pid| *pid > 0),
                             )
                             .await;
                         } else {
@@ -1646,7 +1649,7 @@ fn truncate_handoff_history(history: String, max_bytes: usize) -> String {
     history[start..].to_owned()
 }
 
-fn pane_shell(configured_shell: &str) -> String {
+pub(crate) fn pane_shell(configured_shell: &str) -> String {
     pane_shell_from(configured_shell, std::env::var("SHELL").ok())
 }
 
@@ -2898,6 +2901,8 @@ impl PaneRuntime {
                                             pane_id,
                                             agent,
                                             now,
+                                            Some(child_pid.load(Ordering::Acquire))
+                                                .filter(|pid| *pid > 0),
                                         )
                                         .await;
                                     } else {

@@ -2879,6 +2879,7 @@ async fn public_agent_focus_replaces_a_diverged_client_shell_projection() {
             pane_id: first_pane,
             agent: crate::detect::Agent::Claude,
             observed_at: Instant::now(),
+            runtime_pid: None,
         })
         .unwrap();
     let (respond_to, response_rx) = std::sync::mpsc::channel();
@@ -7483,6 +7484,7 @@ fn completion_guard_api_startup_blocker_respects_suppression() {
         pane_id,
         agent: crate::detect::Agent::Pi,
         observed_at: Instant::now(),
+        runtime_pid: None,
     });
     let public_pane_id = server.app.public_pane_id(0, pane_id).unwrap();
     for (seq, state) in [
@@ -7642,6 +7644,7 @@ fn startup_idle_does_not_forward_completion() {
             pane_id,
             agent: crate::detect::Agent::Pi,
             observed_at: Instant::now(),
+            runtime_pid: None,
         })
     );
 

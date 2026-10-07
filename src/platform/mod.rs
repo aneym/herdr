@@ -622,6 +622,10 @@ pub(crate) fn interactive_unix_shell_command(
     };
     let mut parts = argv.iter();
     let mut command = quote(parts.next()?);
+    if is_powershell_process_name(shell_name) && command.starts_with('\'') {
+        // PowerShell reads a quoted first token as a string, not a command.
+        command.insert_str(0, "& ");
+    }
     for part in parts {
         command.push(' ');
         command.push_str(&quote(part));
@@ -669,6 +673,17 @@ pub(crate) fn quote_windows_command_line_arg(value: &str) -> String {
     quoted.push_str(&"\\".repeat(backslashes * 2));
     quoted.push('"');
     quoted
+}
+
+/// Shells whose command line `interactive_shell_command` can serialize an
+/// argv for without changing its meaning: the POSIX sh family, PowerShell,
+/// and cmd (which runs the agent through an encoded PowerShell command).
+/// fish, csh, nu and other shells parse quotes differently and are refused.
+pub(crate) fn is_quotable_interactive_shell(name: &str) -> bool {
+    matches!(
+        normalized_process_name(name).as_str(),
+        "sh" | "bash" | "dash" | "zsh" | "ksh" | "mksh" | "pwsh" | "powershell" | "cmd"
+    )
 }
 
 pub(crate) fn is_pane_shell_process_name(name: &str) -> bool {
@@ -865,6 +880,11 @@ mod tests {
         assert_eq!(
             interactive_shell_command(&argv, "pwsh").as_deref(),
             Some("pi '' 'two words' 'a''b' '$HOME' 'semi;colon' '@options'")
+        );
+        assert_eq!(
+            interactive_shell_command(&["/opt/my tools/claude".into(), "-c".into()], "pwsh")
+                .as_deref(),
+            Some("& '/opt/my tools/claude' '-c'")
         );
     }
 

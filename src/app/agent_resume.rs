@@ -163,9 +163,9 @@ impl App {
         };
         let plan = crate::agent_resume::AgentResumePlan { argv, ..plan };
 
-        let resume_command = shell_command_from_argv(&resumed.argv).ok_or_else(|| {
-            InPlaceAgentResumeError::ArgvUnsupported("resume command is empty".into())
-        })?;
+        let shell = crate::pane::pane_shell(&self.state.default_shell);
+        let resume_command = resume_shell_command(&resumed.argv, &shell)
+            .map_err(InPlaceAgentResumeError::ArgvUnsupported)?;
         let launch_env = self
             .pane_launch_env(ws_idx, pane_id, Vec::new())
             .ok_or_else(|| {
@@ -266,23 +266,31 @@ impl App {
         true
     }
 
-    /// The resumed agent was observed in its pane: the replacement window is
-    /// over and later exits are ordinary pane exits.
+    /// The resumed agent was observed under the replacement runtime: the
+    /// replacement window is over and later exits are ordinary pane exits.
+    /// Only a process detection tagged with the replacement's own pid counts;
+    /// observations queued by the replaced runtime (or untagged screen and
+    /// hook reports, which cannot say which runtime they came from) leave the
+    /// window open.
     pub(crate) fn close_agent_resume_window_on_ready(&mut self, event: &crate::events::AppEvent) {
         if self.retained_agent_resume_panes.is_empty() {
             return;
         }
-        let pane_id = match event {
-            crate::events::AppEvent::AgentProcessDetected { pane_id, .. }
-            | crate::events::AppEvent::StateChanged {
-                pane_id,
-                agent: Some(_),
-                ..
-            }
-            | crate::events::AppEvent::HookStateReported { pane_id, .. } => *pane_id,
-            _ => return,
+        let crate::events::AppEvent::AgentProcessDetected {
+            pane_id,
+            runtime_pid: Some(runtime_pid),
+            ..
+        } = event
+        else {
+            return;
         };
-        self.retained_agent_resume_panes.remove(&pane_id);
+        if self
+            .retained_agent_resume_panes
+            .get(pane_id)
+            .is_some_and(|window| window.runtime_pid == Some(*runtime_pid))
+        {
+            self.retained_agent_resume_panes.remove(pane_id);
+        }
     }
 
     /// Consume one exit owed by a runtime `agent.resume` replaced.
@@ -636,6 +644,24 @@ fn stable_terminal_inner_rect(pane_inner: Rect) -> Rect {
         pane_inner.width.saturating_sub(1),
         pane_inner.height,
     )
+}
+
+/// The line typed into the replacement pane shell for `agent.resume`,
+/// serialized for that shell. Refuses argv that the terminal's line editor
+/// could reinterpret (any control character, even inside quotes) and shells
+/// herdr cannot quote for, so nothing is typed that differs from the argv.
+fn resume_shell_command(argv: &[String], shell: &str) -> Result<String, String> {
+    if argv.is_empty() {
+        return Err("resume command is empty".into());
+    }
+    if argv.iter().any(|arg| arg.chars().any(|ch| ch.is_control())) {
+        return Err("resume argv contains terminal control characters".into());
+    }
+    if !crate::platform::is_quotable_interactive_shell(shell) {
+        return Err(format!("cannot type a resume command into shell {shell:?}"));
+    }
+    crate::platform::interactive_shell_command(argv, shell)
+        .ok_or_else(|| format!("cannot type a resume command into shell {shell:?}"))
 }
 
 fn shell_command_from_argv(argv: &[String]) -> Option<String> {
@@ -1253,6 +1279,74 @@ mod tests {
         assert_eq!(shell_command_from_argv(&[]), None);
     }
 
+    #[test]
+    fn resume_shell_command_rejects_terminal_control_characters() {
+        for bad in [
+            "\u{15}echo INJECTED\r",
+            "line\nbreak",
+            "tab\there",
+            "esc\u{1b}[A",
+            "del\u{7f}",
+            "c1\u{9b}",
+        ] {
+            let argv = vec!["claude".to_string(), "--resume".into(), bad.into()];
+            for shell in ["bash", "/bin/zsh", "pwsh", "cmd.exe", "powershell.exe"] {
+                assert!(
+                    resume_shell_command(&argv, shell)
+                        .unwrap_err()
+                        .contains("control characters"),
+                    "{bad:?} in {shell}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn resume_shell_command_refuses_shells_it_cannot_quote_for() {
+        let argv = vec!["claude".to_string(), "--resume".into(), "s 1".into()];
+        for shell in ["fish", "/usr/bin/nu", "tcsh", "xonsh", ""] {
+            assert!(resume_shell_command(&argv, shell).is_err(), "{shell}");
+        }
+        assert!(resume_shell_command(&[], "bash").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resume_shell_command_serializes_for_the_pane_shell() {
+        let argv = vec![
+            "/opt/my tools/claude".to_string(),
+            "--settings".into(),
+            "{\"viewMode\":\"focus\"}".into(),
+            "--resume".into(),
+            "sess-1".into(),
+        ];
+        assert_eq!(
+            resume_shell_command(&argv, "/bin/zsh").as_deref(),
+            Ok("'/opt/my tools/claude' --settings '{\"viewMode\":\"focus\"}' --resume sess-1")
+        );
+        assert_eq!(
+            resume_shell_command(&argv, "pwsh").as_deref(),
+            Ok("& '/opt/my tools/claude' '--settings' '{\"viewMode\":\"focus\"}' '--resume' sess-1")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn resume_shell_command_serializes_for_windows_shells() {
+        let argv = vec![
+            r"C:\Program Files\claude\claude.exe".to_string(),
+            "--resume".into(),
+            "sess-1".into(),
+        ];
+        let powershell = resume_shell_command(&argv, "powershell.exe").unwrap();
+        assert!(
+            powershell.contains(r"& 'C:\Program Files\claude\claude.exe'"),
+            "{powershell}"
+        );
+        let cmd = resume_shell_command(&argv, r"C:\Windows\System32\cmd.exe").unwrap();
+        assert!(cmd.starts_with("powershell.exe -NoLogo -NoProfile -EncodedCommand "));
+    }
+
     #[cfg(unix)]
     fn claude_session(id: &str) -> crate::agent_resume::PersistedAgentSession {
         crate::agent_resume::PersistedAgentSession {
@@ -1358,10 +1452,39 @@ mod tests {
             until: now + std::time::Duration::from_secs(60),
         };
         app.retained_agent_resume_panes.insert(pane_id, window);
+        // Observations from the replaced runtime, or untagged ones, do not
+        // count as the replacement's readiness.
+        for stale in [
+            crate::events::AppEvent::AgentProcessDetected {
+                pane_id,
+                agent: crate::detect::Agent::Claude,
+                observed_at: now,
+                runtime_pid: Some(123),
+            },
+            crate::events::AppEvent::AgentProcessDetected {
+                pane_id,
+                agent: crate::detect::Agent::Claude,
+                observed_at: now,
+                runtime_pid: None,
+            },
+            crate::events::AppEvent::StateChanged {
+                pane_id,
+                agent: Some(crate::detect::Agent::Claude),
+                state: crate::detect::AgentState::Idle,
+                visible_blocker: false,
+                visible_working: false,
+                process_exited: false,
+                observed_at: now,
+            },
+        ] {
+            app.handle_internal_event(stale);
+            assert_eq!(app.retained_agent_resume_panes.get(&pane_id), Some(&window));
+        }
         app.handle_internal_event(crate::events::AppEvent::AgentProcessDetected {
             pane_id,
             agent: crate::detect::Agent::Claude,
             observed_at: now,
+            runtime_pid: Some(456),
         });
         assert!(app.retained_agent_resume_panes.is_empty());
 
@@ -1458,6 +1581,18 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn agent_resume_refuses_unquotable_shell_before_stopping_the_agent() {
+        exercise_agent_resume(ResumeScenario::UnquotableShell).await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn agent_resume_stale_readiness_then_replacement_death_keeps_pane() {
+        exercise_agent_resume(ResumeScenario::StaleReadinessThenDeath).await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn agent_resume_then_worktree_remove_failure_restores_pane_shell() {
         exercise_agent_resume(ResumeScenario::WorktreeRemoveFails).await;
     }
@@ -1467,7 +1602,9 @@ mod tests {
     enum ResumeScenario {
         Resumed,
         AgentExits,
+        StaleReadinessThenDeath,
         WorktreeRemoveFails,
+        UnquotableShell,
     }
 
     #[cfg(unix)]
@@ -1516,11 +1653,22 @@ mod tests {
             if scenario == ResumeScenario::AgentExits {
                 "if [ \"$1\" = --resume ]; then echo stand-in-exited; exit 1; fi; sleep 30\n"
             } else {
-                "echo resumed-args: \"$@\"; echo agent-parent: $PPID; sleep 30\n"
+                "echo resumed-args: \"$@\"; echo agent-parent: $PPID; \
+                 echo agent-provider: \"$HERDR_RESUME_TEST_PROVIDER\"; sleep 30\n"
             },
         )
         .unwrap();
         let script = script.display().to_string();
+        // A provider/auth-style variable that only the interactive shell's rc
+        // file sets. nextest runs each test in its own process, so pointing
+        // the POSIX `ENV` rc at it does not leak into other tests.
+        let shell_rc = fake_bin.join("shell-rc");
+        std::fs::write(
+            &shell_rc,
+            "export HERDR_RESUME_TEST_PROVIDER=from-shell-rc\n",
+        )
+        .unwrap();
+        std::env::set_var("ENV", &shell_rc);
 
         let (mut app, pane_id, terminal_id, public_id) = app_with_claude_pane(
             crate::detect::AgentState::Idle,
@@ -1590,6 +1738,29 @@ mod tests {
                 Some(1),
             );
 
+        if scenario == ResumeScenario::UnquotableShell {
+            // Refused before the old runtime is touched.
+            app.state.default_shell = "fish".into();
+            let response = resume_pane(&mut app, &public_id);
+            assert_eq!(
+                response["error"]["code"], "agent_argv_unsupported",
+                "{response}"
+            );
+            assert!(crate::platform::process_exists(old_pid.unwrap()));
+            assert_eq!(
+                app.terminal_runtimes.get(&terminal_id).unwrap().child_pid(),
+                old_pid
+            );
+            assert!(app.pending_agent_resume_runtime_exits.is_empty());
+            assert!(app.retained_agent_resume_panes.is_empty());
+            for (_, runtime) in app.terminal_runtimes.drain() {
+                runtime.shutdown();
+            }
+            std::env::remove_var("ENV");
+            let _ = std::fs::remove_dir_all(fake_bin);
+            return;
+        }
+
         let response = resume_pane(&mut app, &public_id);
         assert!(
             !crate::platform::process_exists(old_pid.unwrap()),
@@ -1658,12 +1829,39 @@ mod tests {
                     history.contains(&parent),
                     "agent must run under the pane shell {new_pid:?}: {history}"
                 );
+                let provider = "agent-provider: from-shell-rc";
+                let history = wait_for_history(&app, &terminal_id, provider).await;
+                assert!(
+                    history.contains(provider),
+                    "resumed agent must inherit the shell rc environment: {history}"
+                );
             }
-            ResumeScenario::AgentExits => {
-                let history = wait_for_history(&app, &terminal_id, "stand-in-exited").await;
-                assert!(history.contains("stand-in-exited"), "{history}");
-                // The agent exiting leaves the pane shell running.
-                assert!(crate::platform::process_exists(new_pid.unwrap()));
+            ResumeScenario::AgentExits | ResumeScenario::StaleReadinessThenDeath => {
+                if scenario == ResumeScenario::AgentExits {
+                    let history = wait_for_history(&app, &terminal_id, "stand-in-exited").await;
+                    assert!(history.contains("stand-in-exited"), "{history}");
+                    // The agent exiting leaves the pane shell running.
+                    assert!(crate::platform::process_exists(new_pid.unwrap()));
+                } else {
+                    // The replaced runtime's detector reports late, after the
+                    // replacement started; it must not end the window.
+                    app.handle_internal_event(crate::events::AppEvent::AgentProcessDetected {
+                        pane_id,
+                        agent: crate::detect::Agent::Claude,
+                        observed_at: Instant::now(),
+                        runtime_pid: old_pid,
+                    });
+                    app.handle_internal_event(crate::events::AppEvent::StateChanged {
+                        pane_id,
+                        agent: Some(crate::detect::Agent::Claude),
+                        state: crate::detect::AgentState::Idle,
+                        visible_blocker: false,
+                        visible_working: false,
+                        process_exited: false,
+                        observed_at: Instant::now(),
+                    });
+                    assert!(app.retained_agent_resume_panes.contains_key(&pane_id));
+                }
                 // The shell itself dying inside the window keeps the pane.
                 app.handle_internal_event(crate::events::AppEvent::PaneDied {
                     pane_id,
@@ -1676,7 +1874,27 @@ mod tests {
                 );
                 assert!(app.state.terminals[&terminal_id].restore_error.is_some());
                 assert!(app.retained_agent_resume_panes.is_empty());
+                // The failure is visible through the API the CLI polls. The
+                // test already delivered the old runtime's exit by hand, so do
+                // not drain the real copy of it still queued in the channel.
+                let pane: serde_json::Value =
+                    serde_json::from_str(&app.handle_api_request_after_internal_events_drained(
+                        crate::api::schema::Request {
+                            id: "pane".into(),
+                            method: crate::api::schema::Method::PaneGet(
+                                crate::api::schema::PaneTarget {
+                                    pane_id: public_id.clone(),
+                                },
+                            ),
+                        },
+                    ))
+                    .unwrap();
+                assert!(
+                    pane["result"]["pane"]["restore_error"].is_string(),
+                    "{pane}"
+                );
             }
+            ResumeScenario::UnquotableShell => unreachable!("refused before resume"),
             ResumeScenario::WorktreeRemoveFails => {
                 let checkout = fake_bin.clone();
                 let workspace_id = app.state.workspaces[0].id.clone();
@@ -1734,6 +1952,7 @@ mod tests {
         for (_, runtime) in app.terminal_runtimes.drain() {
             runtime.shutdown();
         }
+        std::env::remove_var("ENV");
         let _ = std::fs::remove_dir_all(fake_bin);
     }
 }

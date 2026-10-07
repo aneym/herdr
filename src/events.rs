@@ -89,6 +89,10 @@ pub enum AppEvent {
         pane_id: PaneId,
         agent: Agent,
         observed_at: Instant,
+        /// Child pid of the pane runtime whose detector saw the agent, so a
+        /// queued observation from a replaced runtime is not mistaken for
+        /// its replacement's.
+        runtime_pid: Option<u32>,
     },
     /// The current Codex input screen is visible during managed startup.
     CodexPromptObserved { pane_id: PaneId, ready: bool },

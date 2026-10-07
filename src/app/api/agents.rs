@@ -657,6 +657,7 @@ mod tests {
             pane_id,
             agent: Agent::Pi,
             observed_at: observed_at + std::time::Duration::from_secs(1),
+            runtime_pid: None,
         });
 
         let terminal = &app.state.terminals[&terminal_id];
