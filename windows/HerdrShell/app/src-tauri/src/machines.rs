@@ -150,7 +150,10 @@ impl Machines {
             let (manager, app, logs, job) =
                 (manager.clone(), app.clone(), logs.clone(), job.clone());
             std::thread::spawn(move || loop {
-                let _ = manager.change(&app, &config.name, "connecting", None, None);
+                // Local machines start connecting, then stay down during silent retries.
+                if config.kind != MachineKind::Local {
+                    let _ = manager.change(&app, &config.name, "connecting", None, None);
+                }
                 let result = if config.kind == MachineKind::Local {
                     supervise_local(&manager, &app, &config)
                 } else {
@@ -163,11 +166,7 @@ impl Machines {
                     &app,
                     &config.name,
                     "down",
-                    Some(if config.kind == MachineKind::Local {
-                        LOCAL_DOWN.into()
-                    } else {
-                        result.err().unwrap_or_else(|| "ssh exited".into())
-                    }),
+                    Some(result.err().unwrap_or_else(|| "connection closed".into())),
                     None,
                 );
                 std::thread::sleep(Duration::from_secs(if config.kind == MachineKind::Local {
@@ -360,10 +359,10 @@ impl Subscription {
                         }
                         let value: Value =
                             serde_json::from_slice(&line).map_err(|e| e.to_string())?;
-                        if value.get("error").is_some() {
-                            return Err(format!("subscription rejected: {}", value["error"]));
-                        }
                         if !acknowledged {
+                            if value.get("error").is_some() {
+                                return Err(format!("subscription rejected: {}", value["error"]));
+                            }
                             if value["result"]["type"] != "subscription_started" {
                                 return Err("expected subscription_started".into());
                             }
@@ -502,6 +501,7 @@ fn supervise(
         Ok(())
     })
 }
+#[cfg(windows)]
 const LOCAL_DOWN: &str = "herdr server is not running on this PC";
 fn supervise_local(
     manager: &Machines,
@@ -511,18 +511,23 @@ fn supervise_local(
     #[cfg(windows)]
     {
         let path = PathBuf::from(&config.herdr_dir).join("herdr.sock");
-        if !path.is_file() {
-            return Err(LOCAL_DOWN.into());
+        match fs::metadata(&path) {
+            Ok(info) if !info.is_file() => return Err("local marker is not a file".into()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(LOCAL_DOWN.into()),
+            Err(e) => return Err(e.to_string()),
+            Ok(_) => {}
         }
         let api = Endpoint::NamedPipe(path);
         let _ = api.connect().map_err(|_| LOCAL_DOWN)?;
-        let client = api.client_for_api().ok_or(LOCAL_DOWN)?;
+        let client = api
+            .client_for_api()
+            .ok_or("local client endpoint unavailable")?;
         stream_snapshots(manager, app, config, (api, client), || Ok(()))
     }
     #[cfg(not(windows))]
     {
         let _ = (manager, app, config);
-        Err(LOCAL_DOWN.into())
+        Err("local machines require Windows".into())
     }
 }
 fn stream_snapshots(

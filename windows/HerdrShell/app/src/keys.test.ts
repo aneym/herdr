@@ -8,6 +8,7 @@ describe("Windows shell bindings", () => {
   const ctrl = { ctrlKey: true }, shifted = { ctrlKey: true, shiftKey: true }, alt = { altKey: true }, split = { altKey: true, shiftKey: true };
   const cases: [string, Partial<KeyEvent>, Action][] = [
     ["[", shifted, "prev_machine"], ["{", shifted, "prev_machine"], ["]", shifted, "next_machine"], ["}", shifted, "next_machine"],
+    ["å", { ...shifted, code: "BracketLeft" }, "prev_machine"], ["¨", { ...shifted, code: "BracketRight" }, "next_machine"],
     ["T", shifted, "new_tab"], ["w", shifted, "close_pane"], ["Z", shifted, "zoom_pane"], ["P", shifted, "switcher"], ["A", shifted, "next_attention"], ["D", shifted, "toggle_docs"],
     ["=", split, "split_right"], ["+", split, "split_right"], ["-", split, "split_down"], ["_", split, "split_down"],
     ["ArrowLeft", alt, "focus_pane_left"], ["ArrowRight", alt, "focus_pane_right"], ["ArrowUp", alt, "focus_pane_up"], ["ArrowDown", alt, "focus_pane_down"],
@@ -31,6 +32,10 @@ describe("Windows shell bindings", () => {
     for (const key of ["[", "]", "{", "}"]) {
       expect(actionFor(event(key, ctrl))).toBeNull();
       expect(actionFor(event(key, { ...shifted, altKey: true }))).toBeNull();
+    }
+    for (const code of ["BracketLeft", "BracketRight"]) {
+      expect(actionFor(event("å", { ...ctrl, code }))).toBeNull();
+      expect(actionFor(event("å", { ...shifted, altKey: true, code }))).toBeNull();
     }
     expect(actionFor(event("=", alt))).toBeNull();
   });

@@ -147,12 +147,6 @@ impl Files {
         machine: &str,
         mut request: Value,
     ) -> Result<Value, String> {
-        if machines.is_local(machine)? {
-            let home = std::env::var_os("USERPROFILE")
-                .map(PathBuf::from)
-                .ok_or("USERPROFILE not set")?;
-            return local_request(&home, &request);
-        }
         // Validate before allocating state for an arbitrary caller-supplied name.
         machines.file_helper_config(machine)?;
         let state = self
@@ -357,6 +351,16 @@ async fn request(
     machine: String,
     args: Value,
 ) -> Result<Value, String> {
+    if machines.is_local(&machine)? {
+        return tauri::async_runtime::spawn_blocking(move || {
+            let home = std::env::var_os("USERPROFILE")
+                .map(PathBuf::from)
+                .ok_or("USERPROFILE not set")?;
+            local_request(&home, &args)
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    }
     tauri::async_runtime::spawn_blocking(move || files.request(&machines, &machine, args))
         .await
         .map_err(|e| e.to_string())?
