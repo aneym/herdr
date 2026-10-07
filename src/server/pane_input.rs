@@ -599,7 +599,11 @@ mod polite_send_tests {
                 .runtime_for_pane_in_workspace(&app.terminal_runtimes, 0, pane)
                 .unwrap();
             apply_terminal_attach_input(runtime, report.to_vec()).unwrap();
-            rx.try_recv().unwrap();
+            if report == b"\x1b[I" || report == b"\x1b[O" {
+                assert!(rx.try_recv().is_err());
+            } else {
+                rx.try_recv().unwrap();
+            }
             let response = request(
                 &mut app,
                 Method::PaneSendText(PaneSendTextParams {
@@ -799,7 +803,11 @@ mod polite_send_tests {
             // Focus and mouse traffic must not take the composer's ownership.
             for report in [b"\x1b[I".as_slice(), b"\x1b[O", b"\x1b[<0;10;5M"] {
                 apply_terminal_attach_input(runtime, report.to_vec()).unwrap();
-                assert_eq!(rx.try_recv().unwrap().as_ref(), report);
+                if report == b"\x1b[I" || report == b"\x1b[O" {
+                    assert!(rx.try_recv().is_err());
+                } else {
+                    assert_eq!(rx.try_recv().unwrap().as_ref(), report);
+                }
             }
             if human_takeover {
                 apply_terminal_attach_input(runtime, b" human".to_vec()).unwrap();
