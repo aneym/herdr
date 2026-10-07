@@ -352,7 +352,7 @@ extension HerdrModel {
 
     func spacesRows(state: SidebarState) -> [SpacesRow] {
         guard let s = snapshot else { return [SpacesRow(id: "agents", kind: .title, title: "agents")] }
-        let input = SpacesInput(spaces: s.workspaces.map {
+        var input = SpacesInput(spaces: s.workspaces.map {
             SpacesInput.Space(id: $0.workspace_id, name: $0.label ?? $0.workspace_id, pinned: $0.tokens?["pinned"] == "true", collapsed: $0.tokens?["hidden"] == "true", sortRank: $0.sort_rank ?? 0, parked: $0.parked ?? false)
         }, tabs: s.tabs.map { tab in
             SpacesInput.Tab(id: tab.tab_id, space: tab.workspace_id, label: tab.label ?? tab.tab_id,
@@ -364,6 +364,7 @@ extension HerdrModel {
                 focused: tab.tab_id == state.selectedTab, status: tab.agent_status ?? "unknown", pinIndex: tab.pin_index, work: tab.work_status, role: tab.role, sortRank: tab.sort_rank ?? 0,
 request: s.panes.filter { $0.tab_id == tab.tab_id }.compactMap { $0.tokens?["request"] }.first)
         }, focusedTab: state.selectedTab)
+        input = AgentCards.attach(input, panes: s.panes.map { ($0.pane_id, $0.tab_id) }, cards: catalog.snapshot.agents)
         // areas.json owns the space groups whenever it exists (an empty list clears them), as the Rust
         // server merges them; without it the overlay's own groups stand.
         var groupedOverlay = spacesOverlay

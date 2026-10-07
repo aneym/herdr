@@ -8,6 +8,8 @@ enum ShellPaths {
     /// herdr-control's modes file (`herdr-lane park|unpark` writes it). `CONTROL_MODES` overrides it,
     /// the same variable lane.js reads, so a lab and its lane tool share one file.
     static var modes = ""
+    /// The standing agents' cards, one `<name>/agent.json` each (AgentCards). `HERDR_AGENTS_DIR` overrides it.
+    static var agents = ""
 
     /// areas.json sits beside the overlay, as the Rust server finds it (factory_overlay.rs:
     /// `path.with_file_name("areas.json")`), so a custom `FACTORY_OVERLAY` moves both files.
@@ -20,6 +22,7 @@ enum ShellPaths {
             ?? overlay.map { (($0 as NSString).deletingLastPathComponent as NSString).appendingPathComponent("areas.json") }
             ?? (home + "/.agent-rails/herdr/areas.json")
         modes = env["CONTROL_MODES"] ?? (home + "/.agent-rails/herdr/modes.json")
+        agents = env["HERDR_AGENTS_DIR"] ?? (home + "/.agent-rails/agents")
     }
     static var filesPresent: Bool {
         FileManager.default.fileExists(atPath: lanes) || FileManager.default.fileExists(atPath: areas)
@@ -69,6 +72,8 @@ struct LaneSnapshot: Equatable {
     /// nil when areas.json does not exist, so the overlay's own groups stand (Rust apply_space_groups).
     var spaceGroups: [Overlay.SpaceGroup]?
     var parked: [String: ParkRecord] = [:]
+    /// Agent cards by pane.
+    var agents: [String: AgentCard] = [:]
     var hasFiles = false
 
     static let empty = LaneSnapshot()
@@ -135,15 +140,25 @@ final class LaneCatalog: ObservableObject {
     private func reloadIfChanged() {
         var next: [String: Date] = [:]
         var changed = false
-        for path in [ShellPaths.lanes, ShellPaths.areas, ShellPaths.modes] where !path.isEmpty {
+        for path in watched where !path.isEmpty {
             let date = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date) ?? Date.distantPast
             next[path] = date
             if stamp[path] != date { changed = true }
         }
-        if changed { reload() }
+        if changed || Set(next.keys) != Set(stamp.keys) { reload() }
+    }
+
+    /// The files whose mtimes trigger a reload; an agent card added or removed changes the set.
+    private var watched: [String] {
+        [ShellPaths.lanes, ShellPaths.areas, ShellPaths.modes] + AgentCards.files(dir: ShellPaths.agents)
     }
 
     func reload() {
+        // Stamp before reading: a file written mid-read differs from its stamp at the next poll.
+        var stamped: [String: Date] = [:]
+        for path in watched where !path.isEmpty {
+            stamped[path] = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date) ?? Date.distantPast
+        }
         var snap = LaneSnapshot.empty
         snap.hasFiles = ShellPaths.filesPresent
         if let obj = Self.json(ShellPaths.lanes) {
@@ -166,12 +181,11 @@ final class LaneCatalog: ObservableObject {
             // Unreadable or half-written: keep the last parsed groups, as the Rust poller does.
             snap.spaceGroups = snapshot.spaceGroups
         }
-        stamp[ShellPaths.lanes] = (try? FileManager.default.attributesOfItem(atPath: ShellPaths.lanes)[.modificationDate] as? Date) ?? Date.distantPast
-        stamp[ShellPaths.areas] = (try? FileManager.default.attributesOfItem(atPath: ShellPaths.areas)[.modificationDate] as? Date) ?? Date.distantPast
-        stamp[ShellPaths.modes] = (try? FileManager.default.attributesOfItem(atPath: ShellPaths.modes)[.modificationDate] as? Date) ?? Date.distantPast
+        snap.agents = AgentCards.load(dir: ShellPaths.agents)
+        stamp = stamped
         if snap != snapshot {
             snapshot = snap
-            log("lanes: \(snap.lanes.count) areas: \(snap.areas.count) parked: \(snap.parked.count)")
+            log("lanes: \(snap.lanes.count) areas: \(snap.areas.count) parked: \(snap.parked.count) agents: \(snap.agents.count)")
         }
     }
 

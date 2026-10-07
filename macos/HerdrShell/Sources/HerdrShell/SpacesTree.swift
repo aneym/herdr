@@ -8,6 +8,8 @@ struct SpacesInput: Codable {
     struct Agent: Codable { var status: String; var parent: String? = nil }
     /// `work` is herdr's one answer to "is this chat working" (server app/work_status.rs); nil from older servers.
     struct Tab: Codable { var id: String; var space: String; var label: String; var agents: [Agent] = []; var focused = false; var status = "unknown"; var pinIndex: Int? = nil; var work: String? = nil; var role: String? = nil; var sortRank: UInt32 = 0; var request: String? = nil
+        /// The agent card this tab runs (AgentCards): its name and https picture.
+        var agentName: String? = nil; var avatar: String? = nil
         init(id: String, space: String, label: String, agents: [Agent] = [], focused: Bool = false, status: String = "unknown", pinIndex: Int? = nil, work: String? = nil, role: String? = nil, sortRank: UInt32 = 0, request: String? = nil) { self.id = id; self.space = space; self.label = label; self.agents = agents; self.focused = focused; self.status = status; self.pinIndex = pinIndex; self.work = work; self.role = role; self.sortRank = sortRank; self.request = request }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: Field.self)
@@ -131,11 +133,19 @@ struct SpacesRow: Identifiable, Equatable {
     /// nil while that machine is healthy; "unreachable" or "needs update" otherwise.
     var badgeState: String?
     var request: String?
+    /// An AGENTS row's face: the agent's picture, else its initial on a tint.
+    var face: Face?
+    struct Face: Equatable { var initial: String; var tint: Int; var avatar: String? }
     /// Semantic rather than width-dependent: native fonts do not truncate like a terminal grid.
     /// A badge adds one field, so local rows dump as they always have.
     var dump: String {
         let fields = [kind.rawValue, id, String(depth), chevron, glyph, tone, title, trailing, alert, link ?? "", tab ?? "", toggleKey ?? "", dim ? "dim" : ""]
-        return (fields + (badge.map { ["@" + $0 + (badgeState.map { ":" + $0 } ?? "")] } ?? [])).joined(separator: "|")
+        var faceField: [String] = []
+        if let face {
+            let picture: String = face.avatar.map { ":" + $0 } ?? ""
+            faceField = ["face:" + face.initial + ":" + String(face.tint) + picture]
+        }
+        return (fields + faceField + (badge.map { ["@" + $0 + (badgeState.map { ":" + $0 } ?? "")] } ?? [])).joined(separator: "|")
     }
 }
 
@@ -162,6 +172,18 @@ enum SpacesTree {
     static func runDone(_ run: Overlay.Run, of tab: SpacesInput.Tab) -> Bool {
         run.done || run.id.hasPrefix("agent:") && tab.work.map { !["working", "blocked"].contains($0) } == true
     }
+    /// Rails personTint and PersonFace (agent-rails apps/workspace/src/ui/person-face.tsx): the first
+    /// letter, on one of nine tints picked by a hash of the lowercased name, so a face matches across apps.
+    static let faceTints = 9
+    static func face(name: String, avatar: String?) -> SpacesRow.Face {
+        let key = name.trimmingCharacters(in: jsTrim)
+        var hash: UInt32 = 7
+        for scalar in key.lowercased().unicodeScalars { hash = hash &* 31 &+ scalar.value }
+        let initial = key.unicodeScalars.first.map { String($0).uppercased() } ?? "?"
+        return SpacesRow.Face(initial: initial, tint: Int(hash % UInt32(faceTints)), avatar: avatar)
+    }
+    /// What JS `String.prototype.trim` strips: WhiteSpace (Zs, tab, VT, FF, BOM) and LineTerminator.
+    static let jsTrim = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "\t\u{0B}\u{0C}\u{FEFF}\n\r\u{2028}\u{2029}"))
     static func age(_ seconds: Double) -> String { let m = Int(max(0, seconds)) / 60; return m == 0 ? "<1m" : m < 60 ? "\(m)m" : "\(m / 60)h\(m % 60)m" }
     static func pinTabs(_ tabs: [SpacesInput.Tab], agents: Bool) -> [SpacesInput.Tab] {
         func machine(_ id: String) -> String { id.firstIndex(of: "/").map { String(id[..<$0]) } ?? "" }
@@ -182,9 +204,11 @@ enum SpacesTree {
                 return SpaceScope(space, input: input, overlay: overlay, filter: filter, depth: depth, includeAgents: true).rollup(tab, nest: true).count > 0
             } ?? false
             let state = mark(tab, overlay.tabs[tab.id] ?? Overlay.Tag(), foldable: header)
-            return SpacesRow(id: prefix + tab.id, kind: .tab, glyph: state.glyph, tone: state.tone,
-                             title: tab.label, trailing: space?.name ?? tab.space, tab: tab.id,
-                             request: tab.role == "agent" ? tab.request : nil)
+            var row = SpacesRow(id: prefix + tab.id, kind: .tab, glyph: state.glyph, tone: state.tone,
+                                title: tab.label, trailing: space?.name ?? tab.space, tab: tab.id,
+                                request: tab.role == "agent" ? tab.request : nil)
+            if prefix == "agent:" { row.face = face(name: tab.agentName ?? tab.label, avatar: tab.avatar) }
+            return row
         }
         let agents = pinTabs(input.tabs, agents: true)
         let pins = pinTabs(input.tabs, agents: false)

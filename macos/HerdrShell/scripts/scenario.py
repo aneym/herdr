@@ -109,7 +109,7 @@ def app(*a):
                     "--socket", env["HERDR_SOCKET_PATH"]]
             forwarded = {"HERDR_LANES_PATH", "HERDR_AREAS_PATH", "HERDR_CONTEXT_DIR", "SHELL_LAB",
                          "FACTORY_OVERLAY", "CONTROL_MODES", "CONTROL_WORKFLOWS", "HERDR_KIND_BIN",
-                         "HERDR_LANE_BIN", "UNBLOCK_BIN"}
+                         "HERDR_LANE_BIN", "UNBLOCK_BIN", "HERDR_AGENTS_DIR"}
             pushes = {}
             for k, value in os.environ.items():
                 if k not in forwarded and not k.startswith("HERDR_SHELL_"):

@@ -5,6 +5,13 @@
 [PASS] remote agent badge and space label survive
 [PASS] numbered order starts remote A, local P
 [PASS] source pin indices preserved for moves
+[PASS] no agent cards: agent rows still get tinted initials from the label
+[PASS] plain pinned and space rows carry no face
+[PASS] initial and tint follow JS trim and slice(0, 1) on odd Unicode
+[PASS] agent.json name and https avatar_url give the face of the tab holding its pane
+[PASS] a non-https avatar_url falls back to tinted initials of the card name
+[PASS] a card on a plain tab, a pane-less card and a broken card add nothing
+[PASS] the status glyph and tone still ride the agent row
 [PASS] all-agent pins omit PINNED
 [PASS] older snapshots have no AGENTS section and keep the agents title row
 [PASS] unknown roles remain plain
@@ -12,7 +19,7 @@
 numbered|ax42/w1:t1,s1:t1,s1:t2,ax42/w2:t1,s2:t1,pc/w1:t1
 indices|s1:t1:0,ax42/w1:t1:0
 section|agentpins|0|none||mute|AGENTS||none||||
-tab|agent:ax42/w1:t1|0|none|●|working|remote chat|rails|none||ax42/w1:t1|||@ax42
+tab|agent:ax42/w1:t1|0|none|●|working|remote chat|rails|none||ax42/w1:t1|||face:R:0|@ax42
 section|pinned|0|none||mute|PINNED||none||||
 tab|pinned:s1:t1|0|none|●|working|orchestrator|rails|none||s1:t1||
 title|spacegroup:Rails|0|none||mute|Rails||none||||

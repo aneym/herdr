@@ -355,6 +355,18 @@ final class TestHook {
         log("hook: click \(obj["target"] ?? "row") \(obj["label"] ?? "") frame=\(NSStringFromRect(frame)) window=\(NSStringFromPoint(loc)) key=\(c.window.isKeyWindow)")
     }
 
+    /// A sidebar click-space frame in window points from the top left, as a screenshot lays it out;
+    /// the same conversion a hook click makes.
+    private func windowFrame(_ frame: CGRect, in view: NSView, _ c: MainWindowController) -> [CGFloat] {
+        let safe = view.safeAreaRect
+        let topInset = view.isFlipped ? safe.minY : view.bounds.height - safe.maxY
+        let yFromTop = topInset + frame.minY
+        let local = NSPoint(x: safe.minX + frame.minX, y: view.isFlipped ? yFromTop : view.bounds.height - yFromTop)
+        let loc = view.convert(local, to: nil)
+        let height = c.window.contentView?.bounds.height ?? c.window.frame.height
+        return [loc.x, height - loc.y, frame.width, frame.height]
+    }
+
     /// Same action the control runs. No mouse event: SwiftUI drops clicks unless the app is active.
     private func clickAction(_ obj: [String: Any], _ c: MainWindowController) {
         let target = obj["target"] as? String ?? "row"
@@ -911,6 +923,11 @@ final class TestHook {
             "sidebar": ["orchestrator": rows(c.model.orchestrators), "lanes": rows(c.model.lanes),
                         "workflows": rows(c.model.workflows)],
             "spaces_rows": c.model.spacesRows(state: c.state).map { $0.dump },
+            // Each drawn agent face in window points from the top left, the pictures fetched, and the dot colors.
+            "face_frames": Dictionary(uniqueKeysWithValues: c.state.rowFrames.filter { $0.key.hasPrefix("face:") }
+                .map { ($0.key, windowFrame($0.value, in: c.sidebarHostView, c)) }),
+            "face_pictures": FacePictures.shared.images.keys.sorted(),
+            "face_dots": ["working": ThemeStore.hex(c.theme.tokens.chrome.ok), "blocked": ThemeStore.hex(c.theme.tokens.chrome.accent)],
             // What ⌘1..9 select, in order (pins first).
             "numbered_tabs": Array(c.model.numberedTabIds(state: c.state).prefix(9)),
             "agent_tabs": c.model.numberedTabIds(state: c.state).filter { c.model.isAgent($0) },

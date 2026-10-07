@@ -43,7 +43,9 @@ struct SpacesRowView: View {
             } else if treeRow {
                 Color.clear.frame(width: Self.chevronWidth, height: 1)
             }
-            if !row.glyph.isEmpty {
+            if let face = row.face {
+                AgentFace(face: face, tone: row.tone, t: t).clickTarget("face:" + row.id)
+            } else if !row.glyph.isEmpty {
                 Text(row.glyph).font(.system(size: 10)).foregroundStyle(tone).frame(width: Self.glyphWidth)
             }
             if row.kind == .goal {

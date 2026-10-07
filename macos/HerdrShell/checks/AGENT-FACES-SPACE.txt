@@ -1,0 +1,16 @@
+[PASS] every AGENTS row has a face
+[PASS] Frank's face carries its agent.json picture
+[PASS] Recruiter and Home take their card initials, with no picture
+[PASS] Content, with no card, takes its label initial
+[PASS] plain rows carry no face
+[PASS] Frank's picture was fetched
+[PASS] Recruiter reads working and Home blocked
+[PASS] light appearance applied
+[PASS] light: Frank draws the picture, the initials do not
+[PASS] light: a working dot on Recruiter, a blue needs-you dot on Home
+[PASS] light: idle Frank and Content show no dot
+[PASS] dark appearance applied
+[PASS] dark: Frank draws the picture, the initials do not
+[PASS] dark: a working dot on Recruiter, a blue needs-you dot on Home
+[PASS] dark: idle Frank and Content show no dot
+[PASS] an added card gives Content its picture; a removed one returns Frank to its initial
