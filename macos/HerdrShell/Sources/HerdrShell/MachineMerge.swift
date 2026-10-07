@@ -44,6 +44,14 @@ enum MachineMerge {
         return out
     }
 
+    /// The space a tab is drawn under once merged: a remote tab homed in a local space by label
+    /// reveals that local space, and a remote space of its own carries its machine's parked flag.
+    static func space(of tab: String, local: SpacesInput, machines: [Machine]) -> SpacesInput.Space? {
+        let merged = merge(local, machines: machines)
+        guard let id = merged.tabs.first(where: { $0.id == tab })?.space else { return nil }
+        return merged.spaces.first { $0.id == id }
+    }
+
     /// Puts the owning machine's badge on every row that stands for one of its chats: tab rows in
     /// a space and pinned rows. Local rows are untouched.
     static func badge(_ rows: [SpacesRow], machines: [Machine]) -> [SpacesRow] {

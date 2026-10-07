@@ -28,6 +28,7 @@ with tempfile.TemporaryDirectory(prefix="herdr-priority-") as scratch:
     subprocess.run(["swiftc", str(ROOT / "Sources/HerdrShell/SpacesTree.swift"),
                     str(ROOT / "Sources/HerdrShell/Snapshot.swift"),
                     str(ROOT / "Sources/HerdrShell/DeskModel.swift"),
+                    str(ROOT / "Sources/HerdrShell/MachineMerge.swift"),
                     str(ROOT / "scripts/priority_order_dump.swift"), "-o", str(driver)],
                    check=True, timeout=120)
     try:
@@ -59,6 +60,9 @@ check("parked toggle refolds without changing collapsedSpaces", space("refolded"
 check("selecting a tab opens its parked space", space("revealParked", "p")[4] == "open" and "tab:parkedtab" in selected("revealParked", "tab"))
 check("selecting a tab unfolds its collapsed space", "tab:plain1" not in selected("folded", "tab") and "tab:plain1" in selected("revealFolded", "tab"))
 check("reveal reports a change once, so a repeat select saves nothing", "reveal|true|true|false" in rows)
+check("remote tab homed by label reveals the local parked space", "remote|box/w1:t1|p|true" in rows and "tab:box/w1:t1" in selected("remote-box/w1:t1", "tab"))
+check("remote tab in its own parked space reveals that space", "remote|box/w2:t1|box/w2|true" in rows and "tab:box/w2:t1" in selected("remote-box/w2:t1", "tab"))
+check("remote parked tabs stay folded until selected", "tab:box/w2:t1" not in selected("remote-missing", "tab") and "remote|missing|-|false" in rows)
 summary = f"{len(lines) - len(failures)}/{len(lines)} checks passed"
 print(summary)
 REPORT.write_text("\n".join(lines + [summary, ""] + rows) + "\n")

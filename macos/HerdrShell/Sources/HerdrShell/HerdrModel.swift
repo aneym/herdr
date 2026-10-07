@@ -350,11 +350,22 @@ extension HerdrModel {
         }
     }
 
+    private static func spaces(_ s: Snapshot) -> [SpacesInput.Space] {
+        s.workspaces.map {
+            SpacesInput.Space(id: $0.workspace_id, name: $0.label ?? $0.workspace_id, pinned: $0.tokens?["pinned"] == "true", collapsed: $0.tokens?["hidden"] == "true", sortRank: $0.sort_rank ?? 0, parked: $0.parked ?? false)
+        }
+    }
+
+    /// The space the tree draws `tabId` under, this machine's or another's (MachineMerge).
+    func displayedSpace(of tabId: String) -> SpacesInput.Space? {
+        guard let s = snapshot else { return nil }
+        let local = SpacesInput(spaces: Self.spaces(s), tabs: s.tabs.map { SpacesInput.Tab(id: $0.tab_id, space: $0.workspace_id, label: $0.label ?? $0.tab_id) }, focusedTab: nil)
+        return MachineMerge.space(of: tabId, local: local, machines: MachineRows.inputs(machines, localProtocol: s.protocol))
+    }
+
     func spacesRows(state: SidebarState) -> [SpacesRow] {
         guard let s = snapshot else { return [SpacesRow(id: "agents", kind: .title, title: "agents")] }
-        var input = SpacesInput(spaces: s.workspaces.map {
-            SpacesInput.Space(id: $0.workspace_id, name: $0.label ?? $0.workspace_id, pinned: $0.tokens?["pinned"] == "true", collapsed: $0.tokens?["hidden"] == "true", sortRank: $0.sort_rank ?? 0, parked: $0.parked ?? false)
-        }, tabs: s.tabs.map { tab in
+        var input = SpacesInput(spaces: Self.spaces(s), tabs: s.tabs.map { tab in
             SpacesInput.Tab(id: tab.tab_id, space: tab.workspace_id, label: tab.label ?? tab.tab_id,
                 agents: s.agents.filter { $0.tab_id == tab.tab_id }.map { agent in
                     let parentPane = agent.tokens?["parent_pane_id"] ?? agent.ownership?.current?.pane_id

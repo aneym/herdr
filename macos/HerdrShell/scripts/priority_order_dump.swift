@@ -48,5 +48,20 @@ import Foundation
         let opened = unparked.reveal(space: "p", parked: true)
         dump("revealParked", chrome: unparked)
         print("reveal|\(unfolded)|\(opened)|\(unparked.reveal(space: "p", parked: true))")
+        // Another machine's chats: one homed in the local parked space by label, one in a parked space of its own.
+        let box = MachineMerge.Machine(name: "box", health: nil, spaces: [
+            .init(id: "box/w1", name: "parked", parked: false), .init(id: "box/w2", name: "Remote", parked: true)
+        ], tabs: [
+            .init(id: "box/w1:t1", space: "box/w1", label: "Homed", agents: [.init(status: "idle", parent: nil)]),
+            .init(id: "box/w2:t1", space: "box/w2", label: "Away", agents: [.init(status: "idle", parent: nil)])
+        ])
+        let merged = MachineMerge.merge(input, machines: [box])
+        for tab in ["box/w1:t1", "box/w2:t1", "missing"] {
+            let space = MachineMerge.space(of: tab, local: input, machines: [box])
+            var chrome = SpacesChrome()
+            if let space { _ = chrome.reveal(space: space.id, parked: space.parked) }
+            print("remote|\(tab)|\(space?.id ?? "-")|\(space?.parked ?? false)")
+            for row in SpacesTree.build(merged, overlay: Overlay(), chrome: chrome, now: 0) { print("remote-" + tab + "|" + row.dump) }
+        }
     }
 }
