@@ -12,6 +12,12 @@
             },
             "message": {
               "type": "string"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -1648,6 +1654,21 @@
           },
           "required": [
             "target"
+          ],
+          "type": "object"
+        },
+        "AgentRestartParams": {
+          "properties": {
+            "force": {
+              "default": false,
+              "type": "boolean"
+            },
+            "pane_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane_id"
           ],
           "type": "object"
         },
@@ -3328,6 +3349,76 @@
             "direction"
           ],
           "type": "object"
+        },
+        "PanePlaceParams": {
+          "properties": {
+            "dry_run": {
+              "default": false,
+              "type": "boolean"
+            },
+            "focus": {
+              "default": false,
+              "type": "boolean"
+            },
+            "pane_id": {
+              "type": "string"
+            },
+            "side": {
+              "$ref": "#/schemas/request/$defs/PaneDirection"
+            },
+            "size": {
+              "format": "float",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "target": {
+              "$ref": "#/schemas/request/$defs/PanePlaceTarget"
+            }
+          },
+          "required": [
+            "pane_id",
+            "target",
+            "side"
+          ],
+          "type": "object"
+        },
+        "PanePlaceTarget": {
+          "oneOf": [
+            {
+              "properties": {
+                "pane_id": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "pane",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "pane_id"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "tab_id": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "tab",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "tab_id"
+              ],
+              "type": "object"
+            }
+          ]
         },
         "PaneProcessInfoParams": {
           "properties": {
@@ -6440,6 +6531,22 @@
         {
           "properties": {
             "method": {
+              "const": "agent.restart",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentRestartParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "agent.owner.set",
               "type": "string"
             },
@@ -6573,6 +6680,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/PaneMoveParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "pane.place",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PanePlaceParams"
             }
           },
           "required": [
@@ -9780,6 +9903,82 @@
           ],
           "type": "object"
         },
+        "PanePlaceReason": {
+          "enum": [
+            "no_change",
+            "same_pane",
+            "zoomed_tab",
+            "not_tiled"
+          ],
+          "type": "string"
+        },
+        "PanePlaceResult": {
+          "properties": {
+            "changed": {
+              "type": "boolean"
+            },
+            "closed_tab_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "closed_workspace_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "dry_run": {
+              "type": "boolean"
+            },
+            "focused_pane_id": {
+              "type": "string"
+            },
+            "pane_id": {
+              "type": "string"
+            },
+            "placed_rect": {
+              "$ref": "#/schemas/success_response/$defs/PaneLayoutRect"
+            },
+            "previous_pane_id": {
+              "type": "string"
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/PanePlaceReason"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "source_layout": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/PaneLayoutSnapshot"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target_layout": {
+              "$ref": "#/schemas/success_response/$defs/PaneLayoutSnapshot"
+            }
+          },
+          "required": [
+            "changed",
+            "dry_run",
+            "pane_id",
+            "previous_pane_id",
+            "placed_rect",
+            "target_layout",
+            "focused_pane_id"
+          ],
+          "type": "object"
+        },
         "PaneProcessInfo": {
           "properties": {
             "canonical": {
@@ -11325,6 +11524,26 @@
             },
             {
               "properties": {
+                "command_summary": {
+                  "type": "string"
+                },
+                "ok": {
+                  "type": "boolean"
+                },
+                "type": {
+                  "const": "agent_restarted",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "ok",
+                "command_summary"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
                 "agent": {
                   "type": "string"
                 },
@@ -11592,6 +11811,22 @@
               "required": [
                 "type",
                 "zoom"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "place": {
+                  "$ref": "#/schemas/success_response/$defs/PanePlaceResult"
+                },
+                "type": {
+                  "const": "pane_place",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "place"
               ],
               "type": "object"
             },
