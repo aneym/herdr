@@ -288,7 +288,7 @@ fn run_pane_place_scenario(mut app: App) {
     let zoom = call(
         &mut app,
         "pane.zoom",
-        json!({ "pane_id": ids.a, "mode": "on" })
+        json!({ "pane_id": ids.a, "mode": "on" }),
     );
     assert_eq!(zoom["result"]["zoom"]["zoomed"], true, "zoom: {zoom}");
     let mark = event_mark(&app);
@@ -306,7 +306,7 @@ fn run_pane_place_scenario(mut app: App) {
     let unzoom = call(
         &mut app,
         "pane.zoom",
-        json!({ "pane_id": ids.a, "mode": "off" })
+        json!({ "pane_id": ids.a, "mode": "off" }),
     );
     assert_eq!(
         unzoom["result"]["zoom"]["zoomed"], false,
