@@ -8,8 +8,9 @@
 [PASS] moving without Cmd clears the hovered link
 [PASS] Cmd-click on URL second row records the entire URL
 [PASS] Cmd-click on URL first row records the entire URL
-[FAIL] Cmd-click on OSC 8 label records its target (new opens=['desk https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'])
-[FAIL] the Cmd-clicked URLs landed on the pane's desk ({"desks": [{"front": "d1", "items": [{"id": "d1", "kind": "url", "mime": "text/html", "opened_at_ms": 1791337504026, "opened_by": "user", "ref": "https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)
+[PASS] rows found again after the desk narrowed the terminal
+[PASS] Cmd-click on OSC 8 label records its target
+[PASS] the Cmd-clicked URLs landed on the pane's desk
 [PASS] Cmd-Shift-click opens the URL externally
 [PASS] plain click on the URL opens nothing
 [PASS] open_url_sim records the OSC 8 target

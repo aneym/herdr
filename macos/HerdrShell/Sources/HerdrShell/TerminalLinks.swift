@@ -59,17 +59,22 @@ final class TerminalLinks {
         DispatchQueue.global(qos: .userInitiated).async {
             // Clicks do not depend on a hover request completing first. Resolve checks
             // for a link; activation supplies the full (possibly clipped) target.
+            var clicked: [HerdrCommands.LinkRegion] = []
             if TerminalLinkDecision.needsResolution(cachedURL: cached) {
                 guard let found = commands.paneLinkResolve(paneId: paneId, row: cell.row, col: cell.col),
                       found.contains(where: { $0.contains(col: cell.col, row: cell.row) }) else {
                     DispatchQueue.main.async { completion(false) }
                     return
                 }
+                clicked = found
             }
             let answer = commands.paneLinkActivate(paneId: paneId, row: cell.row, col: cell.col)
-            let target = TerminalLinkDecision.openTarget(resolved: cached, activated: answer?.url,
-                                                         handled: answer?.handled ?? false)
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
+                // The click's own regions stand in for a hover that never finished, so a
+                // refused activation still opens what the click resolved.
+                let resolved = TerminalLinkDecision.resolvedTarget(cached: cached, clicked: self?.text(of: clicked))
+                let target = TerminalLinkDecision.openTarget(resolved: resolved, activated: answer?.url,
+                                                             handled: answer?.handled ?? false)
                 if let target, Self.webURL(target) != nil {
                     GhosttyRuntime.openLink(target, paneId: paneId, shift: shift)
                     completion(true)
@@ -101,20 +106,20 @@ final class TerminalLinks {
     }
 
     private func apply(_ found: [HerdrCommands.LinkRegion], at cell: Cell) {
-        let spans = found.sorted { ($0.row, $0.start_col) < ($1.row, $1.start_col) }
-        guard spans.contains(where: { $0.contains(col: cell.col, row: cell.row) }), let readSpan else {
+        guard found.contains(where: { $0.contains(col: cell.col, row: cell.row) }), let text = text(of: found) else {
             regions = []
             set("")
             return
         }
-        let text = spans.map(readSpan).joined()
-        guard Self.webURL(text) != nil else {
-            regions = []
-            set("")
-            return
-        }
-        regions = spans
+        regions = found.sorted { ($0.row, $0.start_col) < ($1.row, $1.start_col) }
         set(text)
+    }
+
+    /// The http(s) URL the regions spell on this surface, or nil (main thread).
+    private func text(of found: [HerdrCommands.LinkRegion]) -> String? {
+        guard !found.isEmpty, let readSpan else { return nil }
+        let text = found.sorted { ($0.row, $0.start_col) < ($1.row, $1.start_col) }.map(readSpan).joined()
+        return Self.webURL(text) != nil ? text : nil
     }
 
     private func set(_ value: String) {

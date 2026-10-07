@@ -6,6 +6,9 @@ import Foundation
 enum TerminalLinkDecision {
     static func needsResolution(cachedURL: String?) -> Bool { cachedURL == nil }
 
+    /// The client's own target for a click: the hover's text, else what the click resolved.
+    static func resolvedTarget(cached: String?, clicked: String?) -> String? { cached ?? clicked }
+
     static func openTarget(resolved: String?, activated: String?, handled: Bool) -> String? {
         if handled { return nil }
         guard let resolved else { return activated }

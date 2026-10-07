@@ -168,6 +168,26 @@ def main():
         check("moving without Cmd clears the hovered link", surface(state, pane).get("hovered_link") == "")
         click("Cmd-click on URL second row records the entire URL", start + 1, 2, "desk " + URL)
         click("Cmd-click on URL first row records the entire URL", start, 5, "desk " + URL)
+
+        def relocate(timeout=10):
+            """The URL and label rows once the pane's width settles; the desk opened by the
+            first click narrows the terminal, so the URL rewraps and the label moves."""
+            deadline, found, last = time.monotonic() + timeout, (None, None), None
+            while time.monotonic() < deadline:
+                cols = surface(S.state(), pane).get("cols", 0)
+                rows = S.lab("herdr", "pane", "read", pane, "--source", "visible").splitlines()
+                url_row = next((i for i, line in enumerate(rows) if line.startswith(PREFIX)), None)
+                label = next((i for i, line in enumerate(rows) if line.strip() == "label"), None)
+                found = (url_row, label)
+                if cols and url_row is not None and label == url_row + -(-len(URL) // cols) and cols == last:
+                    break
+                last = cols
+                time.sleep(0.3)
+            return found
+
+        start, label_row = relocate()
+        check("rows found again after the desk narrowed the terminal", start is not None and label_row is not None,
+              f"start={start} label_row={label_row}")
         if label_row is not None:
             click("Cmd-click on OSC 8 label records its target", label_row, 2, "desk " + OSC_URL)
         # The receipt is recorded before the open; the server's desk proves the open itself.
