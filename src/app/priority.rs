@@ -61,7 +61,7 @@ pub(crate) fn tab_rank(
         return workspace;
     }
     // Rules are lowercased once at config time; most labels already are.
-    let label = if label.chars().any(char::is_uppercase) {
+    let label = if label.chars().any(|ch| ch.to_lowercase().ne(std::iter::once(ch))) {
         std::borrow::Cow::Owned(label.to_lowercase())
     } else {
         std::borrow::Cow::Borrowed(label)
@@ -222,6 +222,12 @@ mod tests {
         };
         assert_eq!(tab_rank(&config, rest, "w5H:t01", "other").value, 0);
         assert_eq!(tab_rank(&config, rest, "w5H:t02", "other").value, 1);
+        // Titlecase letters such as U+01C5 are not uppercase but still lowercase.
+        let titlecase = normalized(&SidebarPriorityConfig {
+            order: vec!["tab:\u{01C5}elta".into()],
+            last: vec![],
+        });
+        assert_eq!(tab_rank(&titlecase, rest, "w1:t1", "\u{01C5}elta").value, 0);
     }
     /// Pure state ranking/partition algorithm guards stable ties, agent isolation,
     /// rename insertion and unchanged positional identity under adversarial state.
