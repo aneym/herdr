@@ -490,7 +490,8 @@ impl ClientShellState {
                 let x = hit.rect.right().saturating_sub(5);
                 let index = usize::from(hit.rect.y) * usize::from(frame.width) + usize::from(x);
                 if let Some(cell) = frame.cells.get_mut(index) {
-                    cell.symbol = "⋯".to_owned();
+                    cell.symbol.clear();
+                    cell.symbol.push('⋯');
                     cell.hyperlink = None;
                     cell.skip = false;
                 }
