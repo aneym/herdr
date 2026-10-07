@@ -167,6 +167,23 @@ describe("terminal link clicks", () => {
     report("\x1b[<0;9;3m");
     expect(sent).toEqual(["\x1b[<16;5;2M", "\x1b[<16;5;2m", "\x1b[<0;9;3M", "\x1b[<0;9;3m"]);
   });
+  it("a server that never answers a link click releases its held reports at the deadline and opens nothing", async () => {
+    const sent: string[] = [];
+    let answer: (regions: LinkRegion[]) => void = () => {};
+    const { term, open, gate } = await pane(wrapped, { resolve: () => new Promise(resolve => { answer = resolve; }) });
+    vi.useFakeTimers();
+    try {
+      const screen = term.element!.querySelector(".xterm-screen")!;
+      screen.dispatchEvent(at("mousedown", 1, 4));
+      gate.hold("\x1b[<16;5;2M", () => sent.push("press"));
+      screen.dispatchEvent(at("mouseup", 1, 4));
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(sent).toEqual(["press"]);
+      answer(regions);
+      await vi.runAllTimersAsync();
+      expect(open).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
 });
 // Golden policy table: the same cases as macos/HerdrShell/scripts/check_terminal_links.py.
 describe("open target policy", () => {

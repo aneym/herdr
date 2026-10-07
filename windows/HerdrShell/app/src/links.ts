@@ -36,13 +36,15 @@ const spanText = (term: Terminal, regions: LinkRegion[]) => [...regions].sort((a
 // an earlier click resolves queue behind it, so the program sees them in order.
 interface Gesture { cell: { row: number; col: number }; settled?: boolean; hit?: boolean }
 export interface LinkGate { hold: (data: string, flush: () => void) => boolean; dispose: () => void }
+const RESOLVE_MS = 1500;
 const mouseReport = (data: string) => data.startsWith("\x1b[<") || data.startsWith("\x1b[M");
 // Call after term.open. A click xterm does not link (a wrapped URL's continuation rows) is
 // resolved through the server from the terminal's own mouseup.
 export function installLinks(term: Terminal, server: LinkServer, open: (url: string) => void): LinkGate {
   const linked = new WeakMap<MouseEvent, string>();
   // The open gesture: pressed, or released this event turn. Only it holds reports and only it
-  // can be cancelled; a released click is settled once, by its own resolution.
+  // can be cancelled; a released click is settled once, by its resolution or, if the server is
+  // slow, as a miss at the deadline so the reports queued behind it are not held.
   let gesture: Gesture | null = null;
   const queue: { g: Gesture | null; flush: () => void }[] = [];
   const settle = (g: Gesture, hit: boolean) => {
@@ -52,17 +54,18 @@ export function installLinks(term: Terminal, server: LinkServer, open: (url: str
     g.hit = hit;
     while (queue.length && (!queue[0].g || queue[0].g.settled)) { const entry = queue.shift()!; if (!entry.g?.hit) entry.flush(); }
   };
-  const finish = async (cell: { row: number; col: number } | null, resolved: string | null) => {
-    const answer = cell ? await server.activate(cell.row, cell.col).catch(() => null) : null;
+  const finish = async (g: Gesture, cell: { row: number; col: number }, resolved: string | null) => {
+    const answer = await server.activate(cell.row, cell.col).catch(() => null);
     const target = openTarget(resolved, answer?.url ?? null, answer?.handled ?? false);
+    if (g.settled) return false;
     if (target && webUrl(target)) { open(target); return true; }
     return answer?.handled ?? false;
   };
-  const resolve = async (cell: { row: number; col: number }) => {
+  const resolve = async (g: Gesture, cell: { row: number; col: number }) => {
     const regions = await server.resolve(cell.row, cell.col).catch(() => null);
     if (!regions?.some(r => r.row === cell.row && r.start_col <= cell.col && cell.col <= r.end_col)) return false;
     const text = spanText(term, regions);
-    return finish(cell, webUrl(text) ? text : null);
+    return finish(g, cell, webUrl(text) ? text : null);
   };
   // xterm activates on a release anywhere in the pressed link; the gesture decides in `up`.
   const activate = (event: MouseEvent, uri: string) => { if (event.ctrlKey) linked.set(event, uri); };
@@ -81,7 +84,8 @@ export function installLinks(term: Terminal, server: LinkServer, open: (url: str
     // xterm reports the release from the document after this listener; close the hold after it.
     setTimeout(() => { if (gesture === g) gesture = null; }, 0);
     const uri = linked.get(mouse);
-    void (uri != null ? finish(cell, uri) : resolve(cell)).then(hit => settle(g, hit), () => settle(g, false));
+    setTimeout(() => settle(g, false), RESOLVE_MS);
+    void (uri != null ? finish(g, cell, uri) : resolve(g, cell)).then(hit => settle(g, hit), () => settle(g, false));
   };
   // A release outside the grid ends the gesture before xterm reports it from the document; a
   // window that loses focus may never see the release at all.
