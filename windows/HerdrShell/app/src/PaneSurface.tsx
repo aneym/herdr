@@ -13,44 +13,52 @@ export default function PaneSurface(props: { pane: Pane; machine: string; focuse
   const { pane, machine, hasAgent, register, pinned, onPin } = props;
   const toolsRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState(false);
-  const requestedRestart = useRef(false);
+  const restartKey = `${machine}:${pane.pane_id}`;
+  const currentRestartKey = useRef(restartKey); currentRestartKey.current = restartKey;
+  const requestedRestart = useRef<string | null>(null);
+  const [restartError, setRestartError] = useState<string | null>(null);
   const reportedRestoreError = useRef(pane.restore_error);
   useEffect(() => {
-    if (requestedRestart.current && pane.restore_error && pane.restore_error !== reportedRestoreError.current) props.onError?.("The agent didn't come back up. Check the pane for errors.");
+    if (requestedRestart.current === restartKey && pane.restore_error && pane.restore_error !== reportedRestoreError.current) setRestartError("The agent didn't come back up. Check the pane for errors.");
     reportedRestoreError.current = pane.restore_error;
-  }, [pane.restore_error, props.onError]);
+  }, [pane.restore_error, restartKey]);
   const [confirmRestart, setConfirmRestart] = useState(false);
   const [restarting, setRestarting] = useState(false);
+  useEffect(() => { requestedRestart.current = null; setMenu(false); setConfirmRestart(false); setRestartError(null); setRestarting(false); }, [restartKey]);
   const restart = async (force = false) => {
     if (restarting) return;
     setMenu(false); setConfirmRestart(false); setRestarting(true);
-    requestedRestart.current = true;
+    requestedRestart.current = restartKey;
+    setRestartError(null);
     try {
       await bridge.api(machine, "agent.restart", { pane_id: pane.pane_id, ...(force ? { force: true } : {}) });
+      if (requestedRestart.current === restartKey) requestedRestart.current = null;
     } catch (error) {
+      if (currentRestartKey.current !== restartKey) return;
+      requestedRestart.current = null;
       // The native bridge preserves structured server errors, with legacy error text as a fallback.
       const value = error as { code?: string; message?: string; reason?: string };
       const busy = value?.code === "busy" || String(error).startsWith("herdr api error busy:");
       const working = value?.reason == null ? (value?.message ?? String(error)).endsWith(" is Working") : value.reason === "working";
       if (busy && working && !force) setConfirmRestart(true);
       else {
-        requestedRestart.current = false;
+        requestedRestart.current = null;
         const code = value?.code ?? /^herdr api error ([^:]+):/.exec(String(error))?.[1];
         const message = code === "not_resumable" || code === "no_session" ? "This agent can't be resumed: no saved chat found."
           : code === "unsupported" ? "Restart isn't supported for this agent yet."
-          : code === "busy" ? ((value?.reason == null ? (value?.message ?? String(error)).includes("previous restart") : value.reason === "restart_pending") ? "This agent is already restarting. Wait for it to finish." : "This agent is blocked. Resolve its prompt before restarting.")
+          : code === "busy" ? ((value?.reason == null ? (value?.message ?? String(error)).includes("previous restart") : value.reason === "restart_pending") ? "This agent is already restarting. Wait for it to finish." : (value?.reason === "blocked" || value?.reason == null && (value?.message ?? String(error)).endsWith(" is Blocked")) ? "This agent is blocked. Resolve its prompt before restarting." : "This agent can't restart right now")
           : code === "start_failed" ? "The agent didn't come back up. Check the pane for errors." : value?.message ?? error;
-        props.onError?.(message);
+        setRestartError(String(message));
       }
     } finally { setRestarting(false); }
   };
   useEffect(() => {
-    if (!menu) return;
-    const close = (event: MouseEvent) => { if (!toolsRef.current?.contains(event.target as Node)) setMenu(false); };
+    if (!menu && !confirmRestart && !restartError) return;
+    const close = (event: MouseEvent) => { if (!toolsRef.current?.contains(event.target as Node)) { setMenu(false); setConfirmRestart(false); setRestartError(null); } };
     document.addEventListener("mousedown", close);
     toolsRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
     return () => document.removeEventListener("mousedown", close);
-  }, [menu]);
+  }, [menu, confirmRestart, restartError]);
   const storageKey = `herdr-shell.mode.${machine}.${pane.pane_id}`;
   const [mode, setMode] = useState<PaneMode>(() => { try { return localStorage.getItem(storageKey) === "chat" ? "chat" : "terminal"; } catch { return "terminal"; } });
   const [mounted, setMounted] = useState(mode === "chat");
@@ -84,11 +92,12 @@ export default function PaneSurface(props: { pane: Pane; machine: string; focuse
       {hasAgent && <button className="pane-mode" title="Toggle chat" onClick={() => set(chat ? "terminal" : "chat")}>{chat ? "Terminal" : "Chat"}</button>}
       {pinned !== undefined && <button className={`pane-pin ${pinned ? "is-pinned" : ""}`} aria-pressed={pinned} aria-label={pinned ? "Unpin this tab" : "Pin this tab"} title={pinned ? "Unpin this chat" : "Pin this chat to the end of Pinned"} onClick={onPin}><PinGlyph pinned={pinned} /></button>}
       <button className="pane-pin" aria-label="Pane actions" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(value => !value)} onKeyDown={event => { if (event.key === "Escape") setMenu(false); }}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="3" cy="8" r=".7" /><circle cx="8" cy="8" r=".7" /><circle cx="13" cy="8" r=".7" /></svg></button>
-      {menu && <div className="pane-menu" role="menu" onKeyDown={event => { if (event.key === "Escape") setMenu(false); }}><button role="menuitem" disabled={!hasAgent || restarting} onClick={() => void restart()}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12.5 5.5A5 5 0 1 0 13 9M12.5 2v3.5H9" /></svg>Restart agent</button></div>}
-    </div>
+      {menu && <div className="pane-menu" role="menu" onKeyDown={event => { if (event.key === "Escape") setMenu(false); }}><button role="menuitem" disabled={!hasAgent || restarting} onClick={() => void restart()}>Restart agent</button></div>}
+    {restartError && <div className="pane-menu restart-confirm" role="dialog" aria-label="Restart agent" onKeyDown={event => { if (event.key === "Escape" || event.key === "Enter") { event.preventDefault(); event.stopPropagation(); setRestartError(null); } }}><p>{restartError}</p><button autoFocus onClick={() => setRestartError(null)}>OK</button></div>}
     {confirmRestart && <div className="pane-menu restart-confirm" role="dialog" aria-label="Restart agent" onKeyDown={event => {
-      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); requestedRestart.current = false; setConfirmRestart(false); }
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); requestedRestart.current = null; setConfirmRestart(false); }
       else if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); void restart(true); }
-    }}><p>Agent is working. Restart anyway? It will resume the same chat.</p><button className="restart-primary" autoFocus onClick={() => void restart(true)}>Restart</button><button onClick={() => { requestedRestart.current = false; setConfirmRestart(false); }}>Cancel</button></div>}
+    }}><p>Agent is working. Restart anyway? It will resume the same chat.</p><button className="restart-primary" autoFocus onClick={() => void restart(true)}>Restart</button><button onClick={() => { requestedRestart.current = null; setConfirmRestart(false); }}>Cancel</button></div>}
+    </div>
   </div>;
 }

@@ -632,6 +632,16 @@ fn pane_context_restart_routes_same_pane_and_requires_busy_confirmation() {
         (Some("working"), "server wording changed", None),
         (None, "agent in pane pane_1 is Working", None),
         (
+            Some("unknown"),
+            "agent in pane pane_1 is Working",
+            Some("This agent can't restart right now"),
+        ),
+        (
+            None,
+            "agent in pane pane_1 is Unknown",
+            Some("This agent can't restart right now"),
+        ),
+        (
             Some("blocked"),
             "agent in pane pane_1 is Working",
             Some("This agent is blocked. Resolve its prompt before restarting."),

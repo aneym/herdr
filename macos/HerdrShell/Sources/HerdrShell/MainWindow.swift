@@ -377,7 +377,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     private func reportRestoreErrors() {
         let panes = ([model.snapshot].compactMap { $0 } + model.machines.compactMap(\.snapshot)).flatMap(\.panes)
         let errors = Dictionary(panes.compactMap { pane in pane.restore_error.map { (pane.pane_id, $0) } }, uniquingKeysWith: { _, next in next })
-        let changed = errors.contains { requestedRestarts.contains($0.key) && reportedRestoreErrors[$0.key] != $0.value }
+        let changed = errors.contains { requestedRestarts.contains(PaneRestart.requestKey(server: commands.socketPath, pane: $0.key)) && reportedRestoreErrors[$0.key] != $0.value }
         if !changed { reportedRestoreErrors = errors; return }
         if window.attachedSheet == nil {
             reportedRestoreErrors = errors
@@ -739,15 +739,17 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     private func restartAgent(_ id: String, force: Bool = false) {
-        requestedRestarts.insert(id)
+        let key = PaneRestart.requestKey(server: commands.socketPath, pane: id)
+        requestedRestarts.insert(key)
         let commands = self.commands
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let reply = commands.restartAgent(paneId: id, force: force)
             DispatchQueue.main.async {
                 guard let self else { return }
                 switch reply {
-                case .success: break
+                case .success: self.requestedRestarts.remove(key)
                 case .failure(let code, let message, let reason):
+                    self.requestedRestarts.remove(key)
                     if PaneRestart.next(code: code, message: message, forced: force, reason: reason) == .confirm {
                         let alert = NSAlert()
                         alert.messageText = "Agent is working. Restart anyway?"
@@ -756,10 +758,10 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                         alert.addButton(withTitle: "Cancel")
                         alert.beginSheetModal(for: self.window) { [weak self] response in
                             if response == .alertFirstButtonReturn { self?.restartAgent(id, force: true) }
-                            else { self?.requestedRestarts.remove(id) }
+                            else { self?.requestedRestarts.remove(key) }
                         }
                     } else {
-                        self.requestedRestarts.remove(id)
+                        self.requestedRestarts.remove(key)
                         let alert = NSAlert()
                         alert.messageText = "Could not restart agent"
                         alert.informativeText = PaneRestart.message(code: code, fallback: message, reason: reason)

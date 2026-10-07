@@ -882,7 +882,13 @@ impl ClientShellState {
                     {
                         "This agent is already restarting. Wait for it to finish."
                     }
-                    Some("busy") => "This agent is blocked. Resolve its prompt before restarting.",
+                    Some("busy")
+                        if error.reason.as_deref() == Some("blocked")
+                            || error.reason.is_none() && error.message.ends_with(" is Blocked") =>
+                    {
+                        "This agent is blocked. Resolve its prompt before restarting."
+                    }
+                    Some("busy") => "This agent can't restart right now",
                     _ => "Could not restart the agent. Check the pane for errors.",
                 };
                 self.push_endpoint_notice(

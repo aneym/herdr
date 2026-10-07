@@ -16,7 +16,7 @@ afterEach(() => { dispose(); api.mockReset(); });
 function mount(hasAgent = true, restoreError?: string) {
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host); const onError = vi.fn();
-  const render = (restoreError?: string) => act(() => root.render(<PaneSurface pane={{ restore_error: restoreError, pane_id: "pane_1", terminal_id: "term_1", tab_id: "tab_1", workspace_id: "ws_1" }} machine="studio" focused hasAgent={hasAgent} onFocus={() => {}} shortcut={() => false} register={() => {}} onError={onError} />));
+  const render = (restoreError?: string, machine = "studio") => act(() => root.render(<PaneSurface pane={{ restore_error: restoreError, pane_id: "pane_1", terminal_id: "term_1", tab_id: "tab_1", workspace_id: "ws_1" }} machine={machine} focused hasAgent={hasAgent} onFocus={() => {}} shortcut={() => false} register={() => {}} onError={onError} />));
   render(restoreError);
   dispose = () => { act(() => root.unmount()); host.remove(); };
   const click = async (selector: string) => { const button = host.querySelector<HTMLButtonElement>(selector); expect(button, selector).not.toBeNull(); await act(async () => { button!.click(); }); };
@@ -41,9 +41,10 @@ it("restarts the same pane and only forces after busy confirmation", async () =>
 });
 it("reports non-busy errors through the existing shell notice", async () => {
   api.mockRejectedValueOnce("herdr api error not_resumable: No resumable session");
-  const { click, onError } = mount();
+  const { host, click, onError } = mount();
   await click('[aria-label="Pane actions"]'); await click('[role="menuitem"]');
-  expect(onError).toHaveBeenCalledWith("This agent can't be resumed: no saved chat found.");
+  expect(host.querySelector('[role="dialog"]')?.textContent).toContain("This agent can't be resumed: no saved chat found.");
+  expect(onError).not.toHaveBeenCalled();
 });
 it("canceling busy confirmation never sends a forced restart", async () => {
   api.mockRejectedValueOnce({ code: "busy", reason: "working", message: "server wording changed" });
@@ -77,20 +78,54 @@ it.each([
   ["blocked", "agent in pane pane_1 is Working", "This agent is blocked. Resolve its prompt before restarting."],
   ["restart_pending", "server wording changed", "This agent is already restarting. Wait for it to finish."],
   [undefined, "agent in pane pane_1 is Blocked", "This agent is blocked. Resolve its prompt before restarting."],
+  ["unknown", "agent in pane pane_1 is Working", "This agent can't restart right now"],
+  [undefined, "agent in pane pane_1 is Unknown", "This agent can't restart right now"],
   [undefined, "previous restart is still completing", "This agent is already restarting. Wait for it to finish."],
 ])("does not offer force for non-working busy: %s", async (reason, message, notice) => {
   api.mockRejectedValueOnce({ code: "busy", reason, message });
   const { host, click, onError } = mount();
   await click('[aria-label="Pane actions"]'); await click('[role="menuitem"]');
-  expect(host.querySelector('[role="dialog"]')).toBeNull();
-  expect(onError).toHaveBeenCalledWith(notice);
+  expect(host.querySelector('[role="dialog"]')?.textContent).toContain(notice);
+  expect(host.querySelector('[role="dialog"] button')?.textContent).toBe("OK");
+  expect(onError).not.toHaveBeenCalled();
   expect(api).toHaveBeenCalledTimes(1);
 });
 
-it("alerts on restore_error arriving after this pane restart was accepted", async () => {
+it("clears restart tracking after success and ignores later restore errors", async () => {
   api.mockResolvedValueOnce({ ok: true });
   const { click, render, onError } = mount();
   await click('[aria-label="Pane actions"]'); await click('[role="menuitem"]');
   render("start_failed: could not resume agent");
-  expect(onError).toHaveBeenCalledWith("The agent didn't come back up. Check the pane for errors.");
+  expect(onError).not.toHaveBeenCalled();
+});
+
+it("dismisses pane-local restart errors on OK and outside click", async () => {
+  api.mockRejectedValue({ code: "busy", reason: "blocked", message: "blocked" });
+  const { host, click } = mount();
+  await click('[aria-label="Pane actions"]'); await click('[role="menuitem"]');
+  await click('[role="dialog"] button');
+  expect(host.querySelector('[role="dialog"]')).toBeNull();
+  await click('[aria-label="Pane actions"]'); await click('[role="menuitem"]');
+  await act(async () => { document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); });
+  expect(host.querySelector('[role="dialog"]')).toBeNull();
+});
+it("does not carry pending restart tracking across machines with the same pane id", async () => {
+  let finish!: (value: unknown) => void;
+  api.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const { host, click, render, onError } = mount();
+  await click('[aria-label="Pane actions"]'); await click('[role="menuitem"]');
+  render("other machine error", "book");
+  expect(host.querySelector('[role="dialog"]')).toBeNull();
+  expect(onError).not.toHaveBeenCalled();
+  await act(async () => { finish({ ok: true }); });
+});
+
+it("ignores a late restart error after moving to another machine", async () => {
+  let fail!: (error: unknown) => void;
+  api.mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
+  const { host, click, render } = mount();
+  await click('[aria-label="Pane actions"]'); await click('[role="menuitem"]');
+  render(undefined, "book");
+  await act(async () => { fail({ code: "busy", reason: "blocked" }); });
+  expect(host.querySelector('[role="dialog"]')).toBeNull();
 });

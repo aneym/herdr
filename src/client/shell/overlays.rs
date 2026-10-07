@@ -274,6 +274,11 @@ pub(crate) fn render_context_menu(
 ) -> Option<OverlayRender> {
     let items = menu.items();
     let screen = buffer.area;
+    let heading = matches!(
+        menu.target,
+        super::state::ClientContextMenuTarget::RestartAgentConfirm { .. }
+    )
+    .then_some("Agent is working.");
     let max_item_width = items
         .iter()
         .map(|item| display_width(&item.label))
@@ -284,6 +289,7 @@ pub(crate) fn render_context_menu(
         .max(14)
         .min(screen.width.max(1));
     let height = (items.len() as u16)
+        .saturating_add(u16::from(heading.is_some()))
         .saturating_add(2)
         .min(screen.height.max(1));
     let x = menu
@@ -297,8 +303,24 @@ pub(crate) fn render_context_menu(
     let rect = Rect::new(x, y, width, height);
     let inner = panel(buffer, rect, palette.accent, palette.panel_bg)?;
     let mut rows = Vec::new();
+    if let Some(heading) = heading {
+        put_text(
+            buffer,
+            inner.x,
+            inner.y,
+            inner.width,
+            heading,
+            Style::default()
+                .fg(palette.text)
+                .bg(palette.panel_bg)
+                .add_modifier(Modifier::BOLD),
+        );
+    }
     for (index, item) in items.iter().enumerate() {
-        let row_y = inner.y.saturating_add(index as u16);
+        let row_y = inner
+            .y
+            .saturating_add(index as u16)
+            .saturating_add(u16::from(heading.is_some()));
         if row_y >= inner.bottom() {
             break;
         }
