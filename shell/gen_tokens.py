@@ -293,8 +293,10 @@ def over(fg, bg, alpha):
 def low_chat_contrast(t, source=None):
     """The Mac chat's faint text (captions, composer hints), as its Palette composites it."""
     text = source if source is not None else CHAT_VIEW.read_text()
-    block = re.search(r"private struct Palette \{(.*?)\n\}", text, re.S)
-    code = re.sub(r"//[^\n]*", "", block.group(1)) if block else ""
+    # Comments go first, so a commented-out Palette or declaration is never the one read.
+    text = re.sub(r"//[^\n]*", "", re.sub(r"/\*.*?\*/", "", text, flags=re.S))
+    blocks = re.findall(r"private struct Palette \{(.*?)\n\}", text, re.S)
+    code = blocks[0] if len(blocks) == 1 else ""
     shapes = {
         "faint": r"var faint: Color \{ t\.mute(?:\.opacity\(([\d.]+)\))? \}",
         "surface": r"var surface: Color \{ t\.ink\.opacity\(dark \? ([\d.]+) : ([\d.]+)\) \}",
