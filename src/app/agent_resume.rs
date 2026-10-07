@@ -201,7 +201,10 @@ impl App {
             .get(&terminal_id)
             .ok_or(InPlaceAgentResumeError::PaneNotFound)?;
         let recorded = terminal.launch_argv.clone();
-        let launch_env_overrides = terminal.launch_env_overrides.clone();
+        let launch_env_overrides = crate::agent_resume::restart_env_overrides(
+            terminal.launch_env_overrides.clone(),
+            crate::platform::process_env_var(process.pid, "PATH"),
+        );
         let outer = crate::platform::agent_launch_argv(shell_pid, process.pid);
         let known_outer = outer.as_ref().filter(|argv| {
             argv.iter()
