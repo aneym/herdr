@@ -6,7 +6,7 @@ mod overlays;
 pub(in crate::client::shell) mod sidebar;
 #[path = "../shell/tabs.rs"]
 mod tabs;
-pub(super) use tabs::{desk_label, tab_label};
+pub(super) use tabs::desk_label;
 
 pub(super) use super::agent_sidebar::{ordered_agent_pane_ids, render_agent_panel_with_overlay};
 pub(super) use super::aggregate_navigation::navigator_rows as client_navigator_rows;

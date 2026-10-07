@@ -1790,8 +1790,7 @@ fn priority_sort_rank_and_parked_preferences() {
     snapshot.tabs[1].sort_rank = 1;
     let mut state = tree_state(ClientTreeChrome::default());
     state.set_snapshot(Box::new(snapshot.clone()));
-    let mut tree = ClientTreeChrome::default();
-    tree.show_hidden_spaces = false;
+    let mut tree = ClientTreeChrome { show_hidden_spaces: false, ..ClientTreeChrome::default() };
     let headers = |state: &ClientShellState, tree: &ClientTreeChrome| {
         shape(state, tree)
             .into_iter()

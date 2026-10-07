@@ -1,6 +1,7 @@
 #![cfg(unix)]
 
-mod support;
+#[path = "support/protocol.rs"]
+mod protocol;
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
@@ -84,7 +85,7 @@ fn pane_close_helper_exits_when_probe_or_close_never_answers() {
                         "result": {
                             "type": "pong",
                             "version": env!("CARGO_PKG_VERSION"),
-                            "protocol": support::CURRENT_PROTOCOL,
+                            "protocol": protocol::CURRENT_PROTOCOL,
                             "capabilities": { "live_handoff": false }
                         }
                     });

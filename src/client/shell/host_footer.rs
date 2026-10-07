@@ -155,7 +155,7 @@ fn fit_fields(cells: &[String], room: usize) -> String {
         if kept == cells.len() && width <= room {
             return value.to_owned();
         }
-        if width + 1 <= room {
+        if width < room {
             // Only blank alignment padding is left: the mark stands alone.
             return if width == 0 {
                 "…".to_owned()
@@ -209,7 +209,7 @@ mod tests {
     /// but must not leave a number detached from its unit or shorten a fitting reason.
     #[test]
     fn whole_fields_at_26_32_40() {
-        let rows = vec![
+        let rows = [
             host("ax42", "2 running · 12G free · waiting on slowdown:check"),
             host("forge", "waiting on anthropic · 1 kept: 1 secret"),
         ];
@@ -227,7 +227,7 @@ mod tests {
     /// the field gives up a column so the cut still shows.
     #[test]
     fn exact_fit_after_a_drop_still_ends_in_the_marker() {
-        let rows = vec![host("forge", "waiting on anthropic.com · 1 kept: 1 secret")];
+        let rows = [host("forge", "waiting on anthropic.com · 1 kept: 1 secret")];
         assert_eq!(render(&rows, 26), vec![" forge  wait anthropic.co…"]);
     }
 
@@ -255,7 +255,7 @@ mod tests {
     #[test]
     fn dropped_fields_leave_an_ellipsis_at_the_column() {
         // The wait cell alone no longer fits once "slowdown" keeps its noun.
-        let rows = vec![host("ax42", "2 running · 12G free · waiting on slowdown:check")];
+        let rows = [host("ax42", "2 running · 12G free · waiting on slowdown:check")];
         assert_eq!(render(&rows, 40), vec![" ax42   2 running 12G free wait slowdown"]);
         assert_eq!(render(&rows, 30), vec![" ax42   2 running 12G free …"]);
         // Only the last remaining field may lose letters.
@@ -267,7 +267,7 @@ mod tests {
 
     #[test]
     fn non_admit_summaries_fall_through_as_extras() {
-        let rows = vec![host("forge", "down"), host("old", "3 live · drained")];
+        let rows = [host("forge", "down"), host("old", "3 live · drained")];
         assert_eq!(render(&rows, 40), vec![" forge  down", " old    3 drained"]);
     }
 }

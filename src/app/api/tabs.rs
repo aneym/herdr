@@ -219,7 +219,7 @@ impl App {
         tab.set_custom_name(params.label.clone());
         crate::logging::tab_renamed(&workspace_id, &tab_id);
         if self.priority_tab_rank(ws_idx, tab_idx).value != old_rank {
-            self.state.priority_renamed_pins(&[tab_id.clone()]);
+            self.state.priority_renamed_pins(std::slice::from_ref(&tab_id));
         }
         self.schedule_session_save();
         self.emit_event(EventEnvelope {

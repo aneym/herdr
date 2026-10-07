@@ -759,14 +759,14 @@ fn render_factory_group(
 /// factory rows and the pinned section so a chat reads the same in both. A
 /// configured blank icon still draws a mark: these rows must always say
 /// whether the chat is working.
-fn chat_state_mark<'a>(
+fn chat_state_mark(
     status: crate::api::schema::AgentStatus,
     idle: bool,
     workflow: bool,
     done: bool,
     failed: bool,
-    config: &'a ClientShellConfig,
-) -> (&'a str, ratatui::style::Color) {
+    config: &ClientShellConfig,
+) -> (&str, ratatui::style::Color) {
     let palette = &config.palette;
     let icon = if workflow {
         if failed { "✗" } else if done { "✓" } else { "◐" }
@@ -843,7 +843,7 @@ fn render_factory_tab(
         Some(machine) if !row.reviewing && (!row.scoping || row.scope_url.is_none()) && row.badge.is_none() => 3 + display_width(machine),
         _ => 0,
     };
-    let fits = |text: &str| display_width(&header.label) + display_width(text) + suffix + 1 <= available as usize;
+    let fits = |text: &str| display_width(&header.label) + display_width(text) + suffix < available as usize;
     let metadata = if !row.reviewing && !row.workflow && !row.background && !row.idle && row.summary.is_some()
         && row.badge.is_none() && available > 0 && !fits(&metadata) {
         let mut segments = metadata.split(" · ");

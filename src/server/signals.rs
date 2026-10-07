@@ -358,12 +358,7 @@ fn load_slot(slot: &SignalSlot, seen: u64) -> Option<LoadedSlot> {
 fn install_one(signal: libc::c_int) -> std::io::Result<()> {
     let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
     action.sa_flags = libc::SA_SIGINFO | libc::SA_RESTART;
-    action.sa_sigaction = unsafe {
-        std::mem::transmute::<
-            extern "C" fn(libc::c_int, *mut libc::siginfo_t, *mut libc::c_void),
-            libc::sighandler_t,
-        >(handle_server_signal)
-    };
+    action.sa_sigaction = handle_server_signal as *const () as libc::sighandler_t;
     let installed = unsafe {
         libc::sigemptyset(&mut action.sa_mask);
         for masked in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
