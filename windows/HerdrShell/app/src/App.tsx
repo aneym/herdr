@@ -6,6 +6,7 @@ import type { MachineStatus } from "./bridge";
 import { buildSidebar, pinCount, tabOrder } from "./model";
 import type { Snapshot } from "./model";
 import Sidebar, { useSelectionReveal } from "./Sidebar";
+import { useLaneFiles } from "./laneFiles";
 import { useAgentCards } from "./AgentFace";
 import Switcher from "./Switcher";
 import { actionFor } from "./keys";
@@ -116,6 +117,7 @@ function MachineView({ machine, machines, snapshot, chooseMachine, selections, c
   const revealed = useSelectionReveal(selected);
   // A dropped pin order shows until the snapshot agrees or PENDING_LIFETIME_MS passes.
   const [pendingPins, setPendingPins] = useState<PendingOrders>({});
+  const catalog = useLaneFiles(machine.name, machine.state === "up");
   const cards = useAgentCards(machine.name, machine.state === "up");
   const rows = useMemo(() => buildSidebar(snapshot, pendingPins, Date.now(), cards), [snapshot, pendingPins, cards]);
   useEffect(() => {
@@ -247,5 +249,5 @@ function MachineView({ machine, machines, snapshot, chooseMachine, selections, c
       showError(error);
     });
   }, [showError]);
-  return <div className="layout">{sidebarVisible && <Sidebar machines={machines} chooseMachine={chooseMachine} rows={rows} selected={selected} revealed={revealed} machine={machine} notice={notice?.text ?? null} select={select} pin={pin} movePin={movePin} renaming={renaming} startRename={id => { setRenaming(id); }} cancelRename={() => setRenaming(null)} commitRename={async (id, label) => { try { await action("rename_tab", label, id); setRenaming(null); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); } catch { /* runAction reports through the transient status notice. */ } }} />}<TabView snapshot={snapshot} selected={selected} machine={machine.name} focused={switcherOpen || renaming ? null : focused} onFocus={focus} shortcut={shortcut} register={register} pin={pin} />{docsOpen && docsItems.length > 0 && <DocPanel key={docsKey} machine={machine.name} items={docsItems} active={activeDoc} select={name => setDocsActive(value => ({ ...value, [docsKey]: name }))} error={docsError} />}{switcherOpen && <Switcher rows={rows} selected={selected} machine={machine.name} open={select} close={closeSwitcher} />}{!sidebarVisible && (notice || machine.state !== "up") && <div className="machine-error notice" role="status">{notice?.text ?? machine.error ?? machine.state}</div>}</div>;
+  return <div className="layout">{sidebarVisible && <Sidebar snapshot={snapshot} catalog={catalog} machines={machines} chooseMachine={chooseMachine} rows={rows} selected={selected} revealed={revealed} machine={machine} notice={notice?.text ?? null} select={select} pin={pin} movePin={movePin} renaming={renaming} startRename={id => { setRenaming(id); }} cancelRename={() => setRenaming(null)} commitRename={async (id, label) => { try { await action("rename_tab", label, id); setRenaming(null); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); } catch { /* runAction reports through the transient status notice. */ } }} />}<TabView snapshot={snapshot} selected={selected} machine={machine.name} focused={switcherOpen || renaming ? null : focused} onFocus={focus} shortcut={shortcut} register={register} pin={pin} />{docsOpen && docsItems.length > 0 && <DocPanel key={docsKey} machine={machine.name} items={docsItems} active={activeDoc} select={name => setDocsActive(value => ({ ...value, [docsKey]: name }))} error={docsError} />}{switcherOpen && <Switcher rows={rows} selected={selected} machine={machine.name} open={select} close={closeSwitcher} />}{!sidebarVisible && (notice || machine.state !== "up") && <div className="machine-error notice" role="status">{notice?.text ?? machine.error ?? machine.state}</div>}</div>;
 }

@@ -128,3 +128,17 @@ footer { color: var(--shell-muted); padding: 12px 8px; font-size: 12px; overflow
 .machine-row button:hover { background: var(--shell-hover); }
 .machine-row button[aria-pressed="true"] { color: var(--shell-text); background: var(--shell-selection); }
 .status.up { color: var(--shell-ok); }.status.connecting { color: var(--shell-warn); }.status.down { color: var(--shell-muted); }
+
+.areas-mode { display: flex; gap: 4px; padding: 8px; }
+.areas-mode button { flex: 1; border-radius: var(--shell-radius-control); padding: 4px; color: var(--shell-muted); }
+.areas-mode button[aria-pressed="true"], .areas-chips button[aria-pressed="true"] { background: var(--shell-selection); color: var(--shell-text); }
+.areas-chips { display: flex; gap: 4px; padding: 4px 0; }
+.areas-chips button { flex: 1; font-size: 12px; padding: 2px 0; border-radius: var(--shell-radius-control); color: var(--shell-muted); }
+.areas-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.areas-trailing { font-size: var(--shell-type-row-trailing); color: var(--shell-muted); white-space: nowrap; }
+.areas-line .chevron { flex-shrink: 0; }
+.areas-glyph { flex-shrink: 0; color: var(--shell-muted); }
+.areas-glyph.ok { color: var(--shell-ok); }
+.areas-glyph.warn { color: var(--shell-warn); }
+.areas-park-note { display: block; overflow: hidden; text-overflow: ellipsis; font-size: var(--shell-type-row-trailing); color: var(--shell-muted); }
+.areas-parked-row { height: auto; min-height: var(--shell-space-row-height); padding-top: 4px; padding-bottom: 4px; }
