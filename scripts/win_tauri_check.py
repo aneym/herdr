@@ -1,6 +1,8 @@
 """Compile the Tauri shell, preferring the installed Windows MSVC target."""
 
 from pathlib import Path
+import os
+import shutil
 import struct
 import subprocess
 import zlib
@@ -50,7 +52,21 @@ def main():
     installed = subprocess.check_output(
         ["rustup", "target", "list", "--installed"], text=True
     ).splitlines()
-    if WINDOWS_TARGET in installed:
+    env = os.environ.copy()
+    if WINDOWS_TARGET in installed and os.name != "nt":
+        for directory in (
+            Path("/opt/homebrew/opt/llvm@22/bin"),
+            Path("/opt/homebrew/opt/llvm/bin"),
+            Path("/opt/homebrew/opt/llvm@20/bin"),
+        ):
+            if directory.is_dir():
+                env["PATH"] = str(directory) + os.pathsep + env.get("PATH", "")
+                break
+    can_check_windows = WINDOWS_TARGET in installed
+    if can_check_windows and os.name != "nt" and not shutil.which("llvm-rc", path=env.get("PATH")):
+        print("win-tauri-check: llvm-rc unavailable; falling back to host target", flush=True)
+        can_check_windows = False
+    if can_check_windows:
         target = WINDOWS_TARGET
     else:
         version = subprocess.check_output(["rustc", "-vV"], text=True)
@@ -61,7 +77,7 @@ def main():
         )
     print(f"win-tauri-check: cargo check target {target}", flush=True)
     ensure_icons()
-    return subprocess.run(["cargo", "check", "--target", target], cwd=SHELL).returncode
+    return subprocess.run(["cargo", "check", "--target", target], cwd=SHELL, env=env).returncode
 
 
 if __name__ == "__main__":
