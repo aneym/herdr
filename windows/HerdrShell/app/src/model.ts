@@ -63,11 +63,16 @@ export function revealFold(rows: SidebarRow[], selected: string | null, expanded
   const space = tab && rows.find(r => r.kind === "space" && r.id === tab.spaceId);
   return space && !spaceOpen(space, rows, selected, expanded) ? foldKey(space) : null;
 }
-/** revealFold once per selection: `seen` outlives the sidebar, so remounting it (or StrictMode's
- *  second effect run) on the same selection reopens nothing the user folded since. */
-export function revealOnSelect(seen: { current: string | null | undefined }, rows: SidebarRow[], selected: string | null, expanded: Record<string, boolean>): string | null {
-  if (seen.current === selected) return null;
-  seen.current = selected;
+/** A selection change not yet revealed. App notes every change, sidebar shown or not; the sidebar
+ *  takes it once, so remounting it (or StrictMode's second effect run) reopens nothing the user
+ *  folded since, and a change made while it was hidden still reveals when it shows. */
+export interface RevealMemo { last: string | null | undefined; pending: string | null }
+export function noteSelection(memo: RevealMemo, selected: string | null): void {
+  if (memo.last !== selected) { memo.last = selected; memo.pending = selected; }
+}
+export function revealOnSelect(memo: RevealMemo, rows: SidebarRow[], selected: string | null, expanded: Record<string, boolean>): string | null {
+  if (memo.pending === null || memo.pending !== selected) return null;
+  memo.pending = null;
   return revealFold(rows, selected, expanded);
 }
 /** Pins on the machine in a `tab.list` answer. */

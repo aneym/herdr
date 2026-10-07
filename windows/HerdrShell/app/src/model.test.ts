@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSidebar, pinCount, revealFold, revealOnSelect, spaceOpen, tabStatus } from "./model";
+import { buildSidebar, noteSelection, pinCount, revealFold, revealOnSelect, spaceOpen, tabStatus } from "./model";
 import type { Snapshot } from "./model";
 import { encodeShiftEnter } from "./keys";
 // Pure ranking/deduplication has interacting edge cases: this inline contract table
@@ -77,11 +77,15 @@ describe("sidebar contract", () => {
     expect(revealFold(rows, "missing", {})).toBeNull();
     // Reveal fires once per selection: the sidebar remounting (Ctrl+B twice) or StrictMode's second
     // effect run on the same selection leaves a space the user folded since folded.
-    const seen = { current: undefined as string | null | undefined };
-    expect(revealOnSelect(seen, rows, "b:1", { b: false })).toBe("b");
-    expect(revealOnSelect(seen, rows, "b:1", { b: false })).toBeNull();
-    expect(revealOnSelect(seen, rows, "r:1", { b: false })).toBe("parked:r");
-    expect(revealOnSelect(seen, rows, "b:1", { b: false })).toBe("b");
+    const memo = { last: undefined as string | null | undefined, pending: null as string | null };
+    const show = (selected: string) => { noteSelection(memo, selected); return revealOnSelect(memo, rows, selected, { b: false }); };
+    expect(show("b:1")).toBe("b");
+    expect(show("b:1")).toBeNull();
+    expect(show("r:1")).toBe("parked:r");
+    expect(show("b:1")).toBe("b");
+    // Hidden sidebar: App still notes b -> r -> b, and showing it again reveals b's folded space.
+    noteSelection(memo, "r:1"); noteSelection(memo, "b:1");
+    expect(revealOnSelect(memo, rows, "b:1", { b: false })).toBe("b");
   });
   it("counts the machine's pins in a tab.list answer, for pinning at the end", () => {
     expect(pinCount({ type: "tab_list", tabs: [{ pin_index: 0 }, { pin_index: null }, {}, { pin_index: 3 }] })).toBe(2);

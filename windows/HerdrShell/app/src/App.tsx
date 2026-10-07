@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { bridge } from "./bridge";
 import type { MachineStatus } from "./bridge";
-import { buildSidebar, pinCount, tabOrder } from "./model";
+import { buildSidebar, noteSelection, pinCount, tabOrder } from "./model";
+import type { RevealMemo } from "./model";
 import type { Snapshot } from "./model";
 import Sidebar from "./Sidebar";
 import { useAgentCards } from "./AgentFace";
@@ -36,7 +37,9 @@ export default function App() {
   const showError = useCallback((error: unknown) => setNotice({ text: String(error) }), []);
   const [pending, setPending] = useState<{ tabId: string; paneId: string } | null>(null);
   const controllers = useRef(new Map<string, PaneController>());
-  const revealed = useRef<string | null | undefined>(undefined);
+  const revealed = useRef<RevealMemo>({ last: undefined, pending: null }).current;
+  // Noted in render, ahead of the sidebar's effects, which run before App's own; idempotent.
+  noteSelection(revealed, selected);
   // A dropped pin order shows until the snapshot agrees or PENDING_LIFETIME_MS passes.
   const [pendingPins, setPendingPins] = useState<PendingOrders>({});
   const cards = useAgentCards(machine.name, machine.state === "up");

@@ -6,7 +6,7 @@ import { DRAG_THRESHOLD, slotAt } from "./pinDrag";
 import type { PinSection, RowBox } from "./pinDrag";
 import type { MachineStatus } from "./bridge";
 import { foldKey, revealOnSelect, spaceOpen } from "./model";
-import type { SidebarRow } from "./model";
+import type { RevealMemo, SidebarRow } from "./model";
 export function Status({ status }: { status: string }) { return <span className={`status ${status}`} aria-label={status}>{status === "blocked" ? "■" : "●"}</span>; }
 function RenameInput({ label, commit, cancel }: { label: string; commit: (label: string) => Promise<void>; cancel: () => void }) {
   const [value, setValue] = useState(label);
@@ -18,7 +18,7 @@ function RenameInput({ label, commit, cancel }: { label: string; commit: (label:
   }} />;
 }
 interface Press { id: string; section: PinSection; x: number; y: number; ids: string[]; block: RowBox[]; active: boolean; cancelled: boolean; done: () => void }
-export default function Sidebar({ rows, selected, revealed, machine, notice, select, pin, movePin, renaming, startRename, cancelRename, commitRename }: { rows: SidebarRow[]; selected: string | null; revealed: { current: string | null | undefined }; machine: MachineStatus; notice: string | null; select: (id: string) => void; pin: (id: string, pinned: boolean) => void; movePin: (ids: string[], from: number, to: number) => void; renaming: string | null; startRename: (id: string) => void; cancelRename: () => void; commitRename: (id: string, label: string) => Promise<void> }) {
+export default function Sidebar({ rows, selected, revealed, machine, notice, select, pin, movePin, renaming, startRename, cancelRename, commitRename }: { rows: SidebarRow[]; selected: string | null; revealed: RevealMemo; machine: MachineStatus; notice: string | null; select: (id: string) => void; pin: (id: string, pinned: boolean) => void; movePin: (ids: string[], from: number, to: number) => void; renaming: string | null; startRename: (id: string) => void; cancelRename: () => void; commitRename: (id: string, label: string) => Promise<void> }) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem("herdr-space-expanded") || "{}"); } catch { return {}; } });
   const [hidden, setHidden] = useState(false);
   const toggle = (id: string, value: boolean) => setExpanded(previous => { const next = { ...previous, [id]: value }; try { localStorage.setItem("herdr-space-expanded", JSON.stringify(next)); } catch { /* Storage can be disabled by WebView policy. */ } return next; });
@@ -28,7 +28,7 @@ export default function Sidebar({ rows, selected, revealed, machine, notice, sel
   const reveal = useRef({ rows, expanded });
   reveal.current = { rows, expanded };
   // Only a change of selection reveals; folding the selected tab's space afterwards sticks, also
-  // across hiding and showing the sidebar, since App keeps the last revealed selection.
+  // across hiding and showing the sidebar, since App notes the changes (RevealMemo).
   useEffect(() => { const key = revealOnSelect(revealed, reveal.current.rows, selected, reveal.current.expanded); if (key) toggle(key, true); }, [selected, revealed]);
   const nav = useRef<HTMLElement>(null);
   const press = useRef<Press | null>(null);
