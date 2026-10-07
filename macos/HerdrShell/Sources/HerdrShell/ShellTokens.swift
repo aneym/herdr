@@ -22,7 +22,7 @@ enum ShellType {
     static let body: CGFloat = 14
     static let code: CGFloat = 12.5
     static let terminal: CGFloat = 13.5
-    static let switcherQuery: CGFloat = 14
+    static let switcherQuery: CGFloat = 16
     static let switcherRow: CGFloat = 13
     static let switcherMeta: CGFloat = 11
     static let chatH1: CGFloat = 19

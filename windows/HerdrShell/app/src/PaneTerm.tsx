@@ -8,6 +8,7 @@ import { bridge, fromBase64, toBase64 } from "./bridge";
 import type { Mode } from "./bridge";
 import type { Pane } from "./model";
 import { copy, paste, controlKey, handleKey } from "./keys";
+import { terminalFont } from "./tokens";
 import { Status } from "./Sidebar";
 import { appTheme, terminalThemes } from "./theme";
 export interface PaneController {
@@ -28,7 +29,7 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
   const takeover = useRef<() => void>(() => {});
   useEffect(() => {
     if (!host.current || !element.current) return;
-    const term = new Terminal({ fontFamily: "Cascadia Mono, Consolas, monospace", fontSize: 13, theme: terminalThemes[appTheme().mode], scrollback: 0, allowProposedApi: true });
+    const term = new Terminal({ fontFamily: terminalFont.family, fontSize: terminalFont.size, theme: terminalThemes[appTheme().mode], scrollback: 0, allowProposedApi: true });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.loadAddon(new Unicode11Addon());

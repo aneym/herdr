@@ -293,7 +293,7 @@ struct QuickSwitchPanel: View {
                 .font(.system(size: 14))
                 .foregroundStyle(t.mute)
             Text(shown)
-                .font(.system(size: 16))
+                .font(.system(size: ShellType.switcherQuery))
                 .foregroundStyle(model.query.isEmpty ? t.mute : t.ink)
                 .lineLimit(1)
                 .padding(.horizontal, 2)
@@ -311,13 +311,13 @@ struct QuickSwitchPanel: View {
         return HStack(spacing: 8) {
             StateGlyph(state: row.glyph, tokens: t)
             Text(row.label)
-                .font(.system(size: 13))
+                .font(.system(size: ShellType.switcherRow))
                 .foregroundStyle(row.parked ? t.mute : t.ink)
                 .lineLimit(1)
                 .layoutPriority(1)
             Spacer(minLength: 8)
             Text(meta)
-                .font(.system(size: 11))
+                .font(.system(size: ShellType.switcherMeta))
                 .foregroundStyle(t.mute)
                 .lineLimit(1)
             Text("⌘\(index + 1)")
@@ -327,6 +327,6 @@ struct QuickSwitchPanel: View {
         }
         .padding(.horizontal, 8)
         .frame(height: 32)
-        .background(RoundedRectangle(cornerRadius: 6).fill(on ? t.sel : Color.clear))
+        .background(RoundedRectangle(cornerRadius: ShellRadius.control).fill(on ? t.sel : Color.clear))
     }
 }
