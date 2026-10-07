@@ -371,7 +371,25 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         window.setFrame(f, display: false)
     }
 
+    private var reportedRestoreErrors: [String: String] = [:]
+
+    private func reportRestoreErrors() {
+        let panes = ([model.snapshot].compactMap { $0 } + model.machines.compactMap(\.snapshot)).flatMap(\.panes)
+        let errors = Dictionary(panes.compactMap { pane in pane.restore_error.map { (pane.pane_id, $0) } }, uniquingKeysWith: { _, next in next })
+        let changed = errors.contains { reportedRestoreErrors[$0.key] != $0.value }
+        if !changed { reportedRestoreErrors = errors; return }
+        if window.attachedSheet == nil {
+            reportedRestoreErrors = errors
+            let alert = NSAlert()
+            alert.messageText = "The agent didn't come back up."
+            alert.informativeText = "Check the pane for errors."
+            alert.addButton(withTitle: "OK")
+            alert.beginSheetModal(for: window)
+        }
+    }
+
     func snapshotChanged() {
+        reportRestoreErrors()
         quickSwitch.reload()
         noteAttention()
         if reconcileClose() { return }

@@ -13,6 +13,11 @@ export default function PaneSurface(props: { pane: Pane; machine: string; focuse
   const { pane, machine, hasAgent, register, pinned, onPin } = props;
   const toolsRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState(false);
+  const reportedRestoreError = useRef<string | undefined>();
+  useEffect(() => {
+    if (pane.restore_error && pane.restore_error !== reportedRestoreError.current) props.onError?.("The agent didn't come back up. Check the pane for errors.");
+    reportedRestoreError.current = pane.restore_error;
+  }, [pane.restore_error, props.onError]);
   const [confirmRestart, setConfirmRestart] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const restart = async (force = false) => {

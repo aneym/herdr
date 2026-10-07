@@ -4,7 +4,7 @@ import { cardsByTab, faceFor } from "./faces";
 import type { AgentCard, Face } from "./faces";
 export interface Workspace { workspace_id: string; number: number; sort_rank?: number; parked?: boolean; label?: string; focused?: boolean; active_tab_id?: string; work_status?: string; agent_status?: string; tokens?: { pinned?: string; hidden?: string } }
 export interface Tab { tab_id: string; workspace_id: string; number: number; label?: string; focused?: boolean; pane_count?: number; work_status?: string; agent_status?: string; pin_index?: number; role?: string; sort_rank?: number }
-export interface Pane { pane_id: string; terminal_id: string; workspace_id: string; tab_id: string; focused?: boolean; agent?: string; agent_status?: string; title?: string; terminal_title_stripped?: string; cwd?: string; tokens?: Record<string, string> }
+export interface Pane { restore_error?: string; pane_id: string; terminal_id: string; workspace_id: string; tab_id: string; focused?: boolean; agent?: string; agent_status?: string; title?: string; terminal_title_stripped?: string; cwd?: string; tokens?: Record<string, string> }
 export interface Rect { x: number; y: number; width: number; height: number }
 export interface Layout { tab_id: string; area: Rect; panes: { pane_id: string; rect: Rect }[]; splits?: { id: string; direction: string; ratio: number; rect: Rect }[]; zoomed?: boolean; focused_pane_id?: string }
 export interface Snapshot { workspaces?: Workspace[]; tabs?: Tab[]; panes?: Pane[]; agents?: { terminal_id: string; pane_id: string; tab_id: string; workspace_id: string; agent: string; agent_status: string; work_status?: string }[]; layouts?: Layout[] }

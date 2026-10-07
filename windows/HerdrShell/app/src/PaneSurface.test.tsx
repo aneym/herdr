@@ -13,10 +13,10 @@ const { default: PaneSurface } = await import("./PaneSurface");
 Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: () => null, setItem: () => {} } });
 let dispose = () => {};
 afterEach(() => { dispose(); api.mockReset(); });
-function mount(hasAgent = true) {
+function mount(hasAgent = true, restoreError?: string) {
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host); const onError = vi.fn();
-  act(() => root.render(<PaneSurface pane={{ pane_id: "pane_1", terminal_id: "term_1", tab_id: "tab_1", workspace_id: "ws_1" }} machine="studio" focused hasAgent={hasAgent} onFocus={() => {}} shortcut={() => false} register={() => {}} onError={onError} />));
+  act(() => root.render(<PaneSurface pane={{ restore_error: restoreError, pane_id: "pane_1", terminal_id: "term_1", tab_id: "tab_1", workspace_id: "ws_1" }} machine="studio" focused hasAgent={hasAgent} onFocus={() => {}} shortcut={() => false} register={() => {}} onError={onError} />));
   dispose = () => { act(() => root.unmount()); host.remove(); };
   const click = async (selector: string) => { const button = host.querySelector<HTMLButtonElement>(selector); expect(button, selector).not.toBeNull(); await act(async () => { button!.click(); }); };
   return { host, click, onError };
@@ -65,4 +65,9 @@ it("busy confirmation uses Enter to restart and Escape to cancel", async () => {
   await click('[aria-label="Pane actions"]'); await click('[role="menuitem"]');
   await act(async () => { host.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
   expect(api.mock.calls[1]).toEqual(["studio", "agent.restart", { pane_id: "pane_1", force: true }]);
+});
+
+it("shows asynchronous restart failure from pane.updated snapshot metadata", () => {
+  const { onError } = mount(true, "start_failed: could not resume agent");
+  expect(onError).toHaveBeenCalledWith("The agent didn't come back up. Check the pane for errors.");
 });
