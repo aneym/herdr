@@ -33,15 +33,22 @@ const spanText = (term: Terminal, regions: LinkRegion[]) => [...regions].sort((a
 // One Ctrl+left press and its release on the same cell. Mouse reports the program would get
 // for it are held until the link settles: a hit consumes them, a miss or a drag replays them,
 // as the Mac buffers a native gesture and replays it only on a miss.
-interface Gesture { cell: { row: number; col: number }; held: (() => void)[] }
+interface Gesture { cell: { row: number; col: number }; held: (() => void)[]; settled?: boolean }
 export interface LinkGate { hold: (data: string, flush: () => void) => boolean; dispose: () => void }
 const mouseReport = (data: string) => data.startsWith("\x1b[<") || data.startsWith("\x1b[M");
 // Call after term.open. A click xterm does not link (a wrapped URL's continuation rows) is
 // resolved through the server from the terminal's own mouseup.
 export function installLinks(term: Terminal, server: LinkServer, open: (url: string) => void): LinkGate {
   const linked = new WeakMap<MouseEvent, string>();
+  // The open gesture: pressed, or released this event turn. Only it holds reports and only it
+  // can be cancelled; a released click is settled once, by its own resolution.
   let gesture: Gesture | null = null;
-  const settle = (g: Gesture, hit: boolean) => { if (gesture === g) gesture = null; if (!hit) g.held.forEach(flush => flush()); };
+  const settle = (g: Gesture, hit: boolean) => {
+    if (gesture === g) gesture = null;
+    if (g.settled) return;
+    g.settled = true;
+    if (!hit) g.held.forEach(flush => flush());
+  };
   const finish = async (cell: { row: number; col: number } | null, resolved: string | null) => {
     const answer = cell ? await server.activate(cell.row, cell.col).catch(() => null) : null;
     const target = openTarget(resolved, answer?.url ?? null, answer?.handled ?? false);
@@ -68,6 +75,8 @@ export function installLinks(term: Terminal, server: LinkServer, open: (url: str
     const g = gesture, mouse = event as MouseEvent, cell = cellAt(term, mouse);
     if (!g || mouse.button !== 0) return;
     if (!mouse.ctrlKey || !cell || cell.row !== g.cell.row || cell.col !== g.cell.col) { settle(g, false); return; }
+    // xterm reports the release from the document after this listener; close the hold after it.
+    setTimeout(() => { if (gesture === g) gesture = null; }, 0);
     const uri = linked.get(mouse);
     void (uri != null ? finish(cell, uri) : resolve(cell)).then(hit => settle(g, hit), () => settle(g, false));
   };
