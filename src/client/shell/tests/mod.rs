@@ -270,6 +270,7 @@ mod endpoint_requests;
 mod endpoints;
 mod factory_sidebar;
 mod graphics;
+mod hidden_agents;
 #[path = "input.rs"]
 mod input_domain;
 mod keybindings_settings;
