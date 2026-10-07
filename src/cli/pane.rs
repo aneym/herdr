@@ -1,7 +1,8 @@
 use crate::api::schema::{
     Method, OutputMatch, PaneCurrentParams, PaneDirection, PaneEdgesParams,
     PaneFocusDirectionParams, PaneInputSetParams, PaneLayoutParams, PaneListParams,
-    PaneMoveDestination, PaneMoveParams, PaneNeighborParams, PaneProcessInfoParams, PaneReadParams,
+    PaneMoveDestination, PaneMoveParams, PaneNeighborParams, PanePlaceParams, PanePlaceTarget,
+    PaneProcessInfoParams, PaneReadParams,
     PaneReleaseAgentParams, PaneRenameParams, PaneReportAgentParams, PaneReportAgentSessionParams,
     PaneReportMetadataParams, PaneResizeParams, PaneRightClickTarget, PaneSendInputParams,
     PaneSendKeysParams, PaneSendTextParams, PaneSplitParams, PaneSwapParams, PaneTarget,
@@ -33,6 +34,7 @@ pub(super) fn run_pane_command(args: &[String]) -> std::io::Result<i32> {
         "split" => pane_split(&args[1..]),
         "swap" => pane_swap(&args[1..]),
         "move" => pane_move(&args[1..]),
+        "place" => pane_place(&args[1..]),
         "close" => pane_close(&args[1..]),
         "queue" => pane_queue(&args[1..]),
         "send-text" => pane_send_text(&args[1..]),
@@ -751,6 +753,86 @@ fn pane_swap(args: &[String]) -> std::io::Result<i32> {
     };
 
     super::runtime::pane_swap(params)
+}
+
+fn pane_place(args: &[String]) -> std::io::Result<i32> {
+    let params = match parse_pane_place_args(args) {
+        Ok(params) => params,
+        Err(message) => {
+            eprintln!("{message}");
+            return Ok(2);
+        }
+    };
+    super::runtime::pane_place(params)
+}
+
+fn parse_pane_place_args(args: &[String]) -> Result<PanePlaceParams, String> {
+    let usage = "usage: herdr pane place <pane> (--beside <pane> | --tab <tab>) --side left|right|up|down [--size F] [--dry-run] [--focus|--no-focus]";
+    let Some(pane) = args.first().filter(|arg| !arg.starts_with('-')) else {
+        return Err(usage.into());
+    };
+    let mut target = None;
+    let mut side = None;
+    let mut size = None;
+    let mut focus = false;
+    let mut dry_run = false;
+    let mut index = 1;
+    while index < args.len() {
+        let option = args[index].as_str();
+        match option {
+            "--focus" => focus = true,
+            "--no-focus" => focus = false,
+            "--dry-run" => dry_run = true,
+            "--beside" | "--tab" | "--side" | "--size" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| format!("missing value for {option}"))?;
+                match option {
+                    "--beside" | "--tab" => {
+                        if target.is_some() {
+                            return Err(usage.into());
+                        }
+                        target = Some(if option == "--beside" {
+                            PanePlaceTarget::Pane {
+                                pane_id: super::normalize_pane_id(value),
+                            }
+                        } else {
+                            PanePlaceTarget::Tab {
+                                tab_id: super::normalize_tab_id(value),
+                            }
+                        });
+                    }
+                    "--side" => side = Some(match value.as_str() {
+                        "left" => PaneDirection::Left,
+                        "right" => PaneDirection::Right,
+                        "up" => PaneDirection::Up,
+                        "down" => PaneDirection::Down,
+                        _ => return Err("side must be left, right, up or down".into()),
+                    }),
+                    _ => {
+                        let parsed = value
+                            .parse::<f32>()
+                            .map_err(|_| "size must be a finite number")?;
+                        if !parsed.is_finite() {
+                            return Err("size must be a finite number".into());
+                        }
+                        size = Some(parsed);
+                    }
+                }
+                index += 1;
+            }
+            _ => return Err(format!("unknown option: {option}")),
+        }
+        index += 1;
+    }
+    Ok(PanePlaceParams {
+        pane_id: super::normalize_pane_id(pane),
+        target: target.ok_or_else(|| usage.to_string())?,
+        side: side.ok_or_else(|| usage.to_string())?,
+        size,
+        focus,
+        dry_run,
+    })
 }
 
 fn pane_move(args: &[String]) -> std::io::Result<i32> {
@@ -1824,6 +1906,7 @@ fn print_pane_help() {
     );
     eprintln!("  herdr pane swap --direction left|right|up|down [--pane ID|--current]");
     eprintln!("  herdr pane swap --source-pane ID --target-pane ID");
+    eprintln!("  herdr pane place <pane> (--beside <pane> | --tab <tab>) --side left|right|up|down [--size F] [--dry-run] [--focus|--no-focus]");
     eprintln!("  herdr pane move <pane_id> --tab <tab_id> --split right|down [--target-pane ID] [--ratio FLOAT] [--focus|--no-focus]");
     eprintln!("  herdr pane move <pane_id> --new-tab [--workspace ID] [--label TEXT] [--focus|--no-focus]");
     eprintln!("  herdr pane move <pane_id> --new-workspace [--label TEXT] [--tab-label TEXT] [--focus|--no-focus]");

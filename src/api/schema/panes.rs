@@ -111,6 +111,54 @@ pub enum PaneMoveDestination {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PanePlaceParams {
+    pub pane_id: String,
+    pub target: PanePlaceTarget,
+    pub side: PaneDirection,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<f32>,
+    #[serde(default)]
+    pub focus: bool,
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PanePlaceTarget {
+    Pane { pane_id: String },
+    Tab { tab_id: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PanePlaceResult {
+    pub changed: bool,
+    pub dry_run: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<PanePlaceReason>,
+    pub pane_id: String,
+    pub previous_pane_id: String,
+    pub placed_rect: PaneLayoutRect,
+    pub target_layout: PaneLayoutSnapshot,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_layout: Option<PaneLayoutSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed_tab_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed_workspace_id: Option<String>,
+    pub focused_pane_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PanePlaceReason {
+    NoChange,
+    SamePane,
+    ZoomedTab,
+    NotTiled,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, Default)]
 pub struct PaneZoomParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]

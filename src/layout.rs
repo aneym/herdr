@@ -70,6 +70,7 @@ pub enum NavDirection {
 }
 
 /// A node in the BSP tree. Public for serialization.
+#[derive(Clone)]
 pub enum Node {
     Pane(PaneId),
     Split {
@@ -81,6 +82,7 @@ pub enum Node {
 }
 
 /// BSP tiling layout. Tracks a tree of splits and a focused pane.
+#[derive(Clone)]
 pub struct TileLayout {
     root: Node,
     focus: PaneId,
@@ -198,6 +200,97 @@ impl TileLayout {
             self.set_focus(moved);
         }
         true
+    }
+
+    /// Return a placement without changing this layout or its focus history.
+    pub fn place_pane(
+        &self,
+        moved: PaneId,
+        target: Option<PaneId>,
+        side: NavDirection,
+        size: f32,
+    ) -> Option<TileLayout> {
+        let ids = self.pane_ids();
+        if target == Some(moved) || target.is_some_and(|id| !ids.contains(&id)) {
+            return None;
+        }
+        let root = if ids.contains(&moved) {
+            remove_pane(self.root.clone(), moved)?
+        } else {
+            self.root.clone()
+        };
+        let size = if size.is_finite() {
+            size.clamp(0.1, 0.9)
+        } else {
+            0.5
+        };
+        fn wrap(node: Node, moved: PaneId, side: NavDirection, size: f32) -> Node {
+            let leading = matches!(side, NavDirection::Left | NavDirection::Up);
+            let direction = match side {
+                NavDirection::Left | NavDirection::Right => Direction::Horizontal,
+                NavDirection::Up | NavDirection::Down => Direction::Vertical,
+            };
+            let (first, second) = if leading {
+                (Node::Pane(moved), node)
+            } else {
+                (node, Node::Pane(moved))
+            };
+            Node::Split {
+                direction,
+                ratio: if leading { size } else { 1.0 - size },
+                first: Box::new(first),
+                second: Box::new(second),
+            }
+        }
+        fn place(node: Node, target: PaneId, moved: PaneId, side: NavDirection, size: f32) -> Node {
+            match node {
+                Node::Pane(id) if id == target => wrap(Node::Pane(id), moved, side, size),
+                Node::Split {
+                    direction,
+                    ratio,
+                    first,
+                    second,
+                } => Node::Split {
+                    direction,
+                    ratio,
+                    first: Box::new(place(*first, target, moved, side, size)),
+                    second: Box::new(place(*second, target, moved, side, size)),
+                },
+                node => node,
+            }
+        }
+        Some(Self {
+            root: match target {
+                Some(target) => place(root, target, moved, side, size),
+                None => wrap(root, moved, side, size),
+            },
+            focus: self.focus,
+            prev_focus: self.prev_focus,
+        })
+    }
+
+    pub(crate) fn same_tree(&self, other: &Self) -> bool {
+        fn equal(a: &Node, b: &Node) -> bool {
+            match (a, b) {
+                (Node::Pane(a), Node::Pane(b)) => a == b,
+                (
+                    Node::Split {
+                        direction: ad,
+                        ratio: ar,
+                        first: af,
+                        second: as_,
+                    },
+                    Node::Split {
+                        direction: bd,
+                        ratio: br,
+                        first: bf,
+                        second: bs,
+                    },
+                ) => ad == bd && (ar - br).abs() <= 1e-3 && equal(af, bf) && equal(as_, bs),
+                _ => false,
+            }
+        }
+        equal(&self.root, &other.root)
     }
 
     /// Close the focused pane, returning focus to the pane it came from when
