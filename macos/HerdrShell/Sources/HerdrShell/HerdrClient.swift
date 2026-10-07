@@ -490,31 +490,28 @@ struct HerdrCommands {
         return (env.result.url, env.result.handled)
     }
 
-    /// `pane.selection.read` for viewport cells (inclusive, reading order): the text the
-    /// server reads on the pane's own wrap-aware screen, trailing blanks off each line.
-    /// Rows are absolute there, so the pane's scroll from `pane.get` maps them, and a
-    /// viewport that moved during the read is read again. Nil when the server can't answer.
-    func paneViewportText(paneId: String, from: (col: Int, row: Int), to: (col: Int, row: Int)) -> String? {
+    /// The pane's viewport top in absolute screen rows.
+    func paneViewportTop(paneId: String) -> Int? {
         struct Scroll: Decodable { let max_offset_from_bottom: Int; let offset_from_bottom: Int }
         struct PaneEnv: Decodable { struct R: Decodable { struct P: Decodable { let scroll: Scroll? }; let pane: P }; let result: R }
+        guard let data = call("pane.get", ["pane_id": paneId], timeout: 1),
+              let env = try? JSONDecoder().decode(PaneEnv.self, from: data) else { return nil }
+        return env.result.pane.scroll.map { $0.max_offset_from_bottom - $0.offset_from_bottom } ?? 0
+    }
+
+    /// `pane.selection.read` for viewport cells (inclusive, reading order): the text the
+    /// server reads on the pane's own wrap-aware screen, trailing blanks off each line.
+    /// Nil when the server can't answer or the viewport moved since selection.
+    func paneViewportText(paneId: String, from: (col: Int, row: Int), to: (col: Int, row: Int), top expected: Int) -> String? {
         struct TextEnv: Decodable { struct R: Decodable { let text: String }; let result: R }
-        let top = { () -> Int? in
-            guard let data = call("pane.get", ["pane_id": paneId], timeout: 1),
-                  let env = try? JSONDecoder().decode(PaneEnv.self, from: data) else { return nil }
-            return env.result.pane.scroll.map { $0.max_offset_from_bottom - $0.offset_from_bottom } ?? 0
-        }
-        for _ in 0..<3 {
-            guard let before = top(),
-                  let data = call("pane.selection.read", ["pane_id": paneId,
-                                                          "anchor": ["row": before + from.row, "col": from.col],
-                                                          "cursor": ["row": before + to.row, "col": to.col]], timeout: 1),
-                  let env = try? JSONDecoder().decode(TextEnv.self, from: data) else { return nil }
-            guard top() == before else { continue }
-            return env.result.text.split(separator: "\n", omittingEmptySubsequences: false)
-                .map { $0.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression) }
-                .joined(separator: "\n")
-        }
-        return nil
+        guard let data = call("pane.selection.read", ["pane_id": paneId,
+                                                      "anchor": ["row": expected + from.row, "col": from.col],
+                                                      "cursor": ["row": expected + to.row, "col": to.col]], timeout: 1),
+              let env = try? JSONDecoder().decode(TextEnv.self, from: data),
+              paneViewportTop(paneId: paneId) == expected else { return nil }
+        return env.result.text.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression) }
+            .joined(separator: "\n")
     }
 
     /// `tab.rename`.

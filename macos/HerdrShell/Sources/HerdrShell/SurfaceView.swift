@@ -721,12 +721,13 @@ final class SurfaceView: NSView {
     private var appDragStart: Cell?
     private var appDragEnd: Cell?
     private(set) var appSelection: String?
-    /// The shadow's cells; the pasteboard's change count when it was made; and, once the
-    /// program has had time to answer the release, whether it copied the selection itself.
+    /// The shadow's cells and pasteboard counts for our writes and the program's copy.
     private var appRange: (Cell, Cell)?
     private var appBoardCount = 0
-    private var appProgramCopied: Bool?
+    private var appProgramCount: Int?
+    private var appWindowOpen = false
     private var appShadowId = 0
+    private var appShadowTop: Int?
     typealias Cell = (col: Int, row: Int)
 
     /// ⌘C in a pane: the shadow of a drag the program received, else Ghostty's own
@@ -736,12 +737,15 @@ final class SurfaceView: NSView {
         if let text = appSelection {
             // The program copied this selection itself (Claude's copy on select, OSC 52, which
             // herdr's attach client puts on the pasteboard with pbcopy).
-            if appProgramCopied ?? (NSPasteboard.general.changeCount != appBoardCount) { return true }
-            appProgramCopied = false
+            // A foreign pasteboard write within 1.5 s of a pane drag counts as the program's copy.
             let board = NSPasteboard.general
+            let now = board.changeCount
+            if appWindowOpen && now != appBoardCount { appProgramCount = now }
+            if appProgramCount == now { return true }
             board.clearContents()
             board.setString(text, forType: .string)
-            if let range = appRange { refineCopy(text, range, changeCount: board.changeCount) }
+            appBoardCount = board.changeCount
+            if let range = appRange, let top = appShadowTop { refineCopy(text, range, top: top, changeCount: board.changeCount) }
             return true
         }
         let action = "copy_to_clipboard"
@@ -752,16 +756,18 @@ final class SurfaceView: NSView {
     /// soft-wrapped line and keeps blanks a redraw wrote. The server reads the same cells
     /// from the pane's wrap-aware screen; its text replaces the copy unless the pasteboard
     /// changed meanwhile. An older server or a moved viewport keeps the grid's text.
-    private func refineCopy(_ text: String, _ range: (Cell, Cell), changeCount: Int) {
+    private func refineCopy(_ text: String, _ range: (Cell, Cell), top: Int, changeCount: Int) {
         let commands = HerdrCommands(socketPath: clipboardSocketPath), paneId = paneId
+        let id = appShadowId
         DispatchQueue.global(qos: .userInitiated).async {
-            guard let exact = commands.paneViewportText(paneId: paneId, from: range.0, to: range.1),
+            guard let exact = commands.paneViewportText(paneId: paneId, from: range.0, to: range.1, top: top),
                   exact != text, !exact.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             DispatchQueue.main.async {
                 let board = NSPasteboard.general
                 guard board.changeCount == changeCount else { return }
                 board.clearContents()
                 board.setString(exact, forType: .string)
+                if self.appShadowId == id { self.appBoardCount = board.changeCount }
             }
         }
     }
@@ -771,14 +777,24 @@ final class SurfaceView: NSView {
         appSelection = nonEmpty(readCells(s, e))
         appRange = appSelection == nil ? nil : (s, e)
         appBoardCount = NSPasteboard.general.changeCount
-        appProgramCopied = nil
+        appProgramCount = nil
+        appWindowOpen = true
+        appShadowTop = nil
         appShadowId += 1
-        // A program copies on the release or not at all; a later pasteboard change (another
-        // app, or this ⌘C) does not mean it did.
         let id = appShadowId
+        let commands = HerdrCommands(socketPath: clipboardSocketPath), paneId = paneId
+        DispatchQueue.global(qos: .userInitiated).async {
+            let top = commands.paneViewportTop(paneId: paneId)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.appShadowId == id else { return }
+                self.appShadowTop = top
+            }
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            guard let self, self.appShadowId == id, self.appProgramCopied == nil else { return }
-            self.appProgramCopied = NSPasteboard.general.changeCount != self.appBoardCount
+            guard let self, self.appShadowId == id else { return }
+            self.appWindowOpen = false
+            let now = NSPasteboard.general.changeCount
+            if now != self.appBoardCount { self.appProgramCount = now }
         }
     }
 

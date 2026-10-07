@@ -61,20 +61,19 @@ const viewportTop = async (api: Api, paneId: string) => {
 };
 
 /** The range's text from the server's screen, or `fallback` when the server cannot answer. */
-export async function exactText(api: Api, paneId: string, range: Range, fallback: string): Promise<string> {
+export async function exactText(api: Api, paneId: string, range: Range, fallback: string, top?: Promise<number | null>): Promise<string> {
   try {
-    // Rows are absolute in the server's screen; output that scrolls between the two reads
-    // moves the viewport, so read again rather than return the wrong rows.
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const top = await viewportTop(api, paneId);
-      const read = (await api("pane.selection.read", {
-        pane_id: paneId,
-        anchor: { row: top + range.start.row, col: range.start.col },
-        cursor: { row: top + range.end.row, col: range.end.col },
-      })) as { text?: string };
-      if (typeof read.text !== "string") return fallback;
-      if ((await viewportTop(api, paneId)) === top) return trimRows(read.text);
-    }
+    // Rows are absolute; a moved viewport keeps the selection's local snapshot.
+    const expected = await (top ?? viewportTop(api, paneId));
+    if (expected === null) return fallback;
+    const read = (await api("pane.selection.read", {
+      pane_id: paneId,
+      anchor: { row: expected + range.start.row, col: range.start.col },
+      cursor: { row: expected + range.end.row, col: range.end.col },
+    })) as { text?: string };
+    if (typeof read.text !== "string") return fallback;
+    if ((await viewportTop(api, paneId)) !== expected) return fallback;
+    return trimRows(read.text);
   } catch { /* An older or remote server without the read keeps xterm's text. */ }
   return fallback;
 }
@@ -86,6 +85,8 @@ export function decodeClipboard(b64: string): string {
 export class PaneCopy {
   private drag: { from: Cell; to: Cell } | null = null;
   private shadow: Range | null = null;
+  private shadowText = "";
+  private shadowTop?: Promise<number | null>;
   private clock = 0;
   private selectedAt = 0;
   private programAt = 0;
@@ -108,7 +109,11 @@ export class PaneCopy {
   }
   private keep(range: Range | null) {
     this.shadow = range && localText(this.term, range).trim() ? range : null;
-    if (this.shadow) this.selectedAt = ++this.clock;
+    if (this.shadow) {
+      this.shadowText = localText(this.term, this.shadow);
+      this.shadowTop = viewportTop(this.api, this.paneId()).catch(() => null);
+      this.selectedAt = ++this.clock;
+    }
   }
   /** Typing ends a shadow selection, so a later Ctrl+C interrupts again. */
   clear() { this.shadow = null; }
@@ -124,6 +129,8 @@ export class PaneCopy {
   /** Copies the selection; false when there is none, so the clipboard is left alone. */
   async copy(): Promise<boolean> {
     let range: Range | null = null;
+    let fallback: string | undefined;
+    let top: Promise<number | null> | undefined;
     if (this.term.hasSelection()) {
       const position = this.term.getSelectionPosition();
       if (position) {
@@ -135,11 +142,16 @@ export class PaneCopy {
       this.term.clearSelection();
     } else if (this.shadow) {
       range = this.shadow;
+      fallback = this.shadowText;
+      top = this.shadowTop;
       // The program already copied this selection itself, with its own exact text.
       if (this.programAt > this.selectedAt) return true;
     }
     if (!range) return false;
-    await this.write(await exactText(this.api, this.paneId(), range, localText(this.term, range)));
+    const before = this.programAt;
+    const text = await exactText(this.api, this.paneId(), range, fallback ?? localText(this.term, range), top);
+    if (this.programAt !== before) return true;
+    await this.write(text);
     return true;
   }
 }

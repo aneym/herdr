@@ -92,4 +92,40 @@ describe("terminal copy on the PC", () => {
     await result.work;
     expect(written).toEqual(["wrapped by claude — exact"]);
   });
+
+  it("keeps OSC 52 received while the shadow's server read is pending", async () => {
+    let finishRead!: (value: unknown) => void;
+    let started!: () => void;
+    const reading = new Promise<void>(resolve => { started = resolve; });
+    const api: Api = async method => {
+      if (method === "pane.get") return { pane: { scroll: { max_offset_from_bottom: 100, offset_from_bottom: 0 } } };
+      return new Promise(resolve => { finishRead = resolve; started(); });
+    };
+    const { copier, written, key } = await pane(["shadow text"], api);
+    drag(copier, [0, 0], [29, 0]);
+    const result = key("c", { ctrlKey: true });
+    expect(result.handled).toBe(true);
+    await reading;
+    await copier.programWrote(btoa("program text"));
+    finishRead({ text: "shadow text" });
+    await result.work;
+    expect(written[written.length - 1]).toBe("program text");
+    expect(written).toEqual(["program text"]);
+  });
+
+  it("keeps the selection-time snapshot when the pane scrolls before copy", async () => {
+    let gets = 0;
+    const api: Api = async method => {
+      if (method === "pane.get") return { pane: { scroll: { max_offset_from_bottom: gets++ === 0 ? 100 : 101, offset_from_bottom: 0 } } };
+      return { text: "server text for shifted rows" };
+    };
+    const { term, copier, written, key } = await pane(["selected first", "selected second"], api);
+    drag(copier, [0, 0], [29, 1]);
+    await redraw(term, ["shifted first", "shifted second"]);
+    const result = key("c", { ctrlKey: true });
+    expect(result.handled).toBe(true);
+    await result.work;
+    expect(written).toEqual(["selected first\nselected second"]);
+    expect(written).not.toContain("server text for shifted rows");
+  });
 });
