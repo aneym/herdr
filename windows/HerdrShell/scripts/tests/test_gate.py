@@ -57,6 +57,7 @@ class FakePC:
         self.gated = []   # helpers run through gated.ps1, in order
         self.direct = []  # helpers run without it
         self.herdr = []
+        self.cmds = []    # control commands sent
 
     def run(self, argv, **_kwargs):
         if argv[0] == 'scp':
@@ -79,6 +80,8 @@ class FakePC:
         helper = re.search(r'-Script (\S+)', argv[2]).group(1)
         args = json.loads(base64.b64decode(re.search(r'-ArgsB64 (\S+)', argv[2]).group(1)))
         self.gated.append(helper)
+        if helper == 'ctl.ps1':
+            self.cmds.append(json.loads(base64.b64decode(args[args.index('-JsonB64') + 1]))['cmd'])
         if len(self.gated) - 1 == self.refuse_at:
             return subprocess.CompletedProcess(argv, 75, 'GATED: game running', '')
         return subprocess.CompletedProcess(argv, 0, helper_reply(helper, args), '')
@@ -153,6 +156,8 @@ class GateTests(unittest.TestCase):
         for name, (fn, _expected) in COMMANDS.items():
             nominal = FakePC()
             outcome(nominal, fn)
+            if fn is pin_drag.main:  # the walk reaches the check's last drag and its restore
+                self.assertEqual(nominal.cmds[-2:], ['drag_divider', 'open'])
             for step in range(len(nominal.gated)):
                 with self.subTest(name, step=step):
                     fake = FakePC(refuse_at=step)
