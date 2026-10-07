@@ -66,6 +66,20 @@ fi
 nice -n 10 swift build -c release --package-path "$WT/macos/HerdrShell"
 "$WT/macos/HerdrShell/scripts/bundle.sh" prod "$WT/macos/HerdrShell/.build/bundle-prod"
 STAGE="$HOME/Library/Application Support/HerdrShell/staged"
+# Direct release.sh callers must obey the same no-downgrade contract as fanout.
+INSTALLED=$(/usr/libexec/PlistBuddy -c 'Print :HerdrShellCommit' "$HOME/Applications/Herdr Shell.app/Contents/Info.plist" 2>/dev/null || true)
+COMMIT=$(git -C "$MAIN" rev-parse --verify "$REF^{commit}")
+if ! git -C "$MAIN" rev-parse --verify "$INSTALLED^{commit}" >/dev/null 2>&1; then
+  HERDR_SHELL_PUBLISHING=1 git -C "$MAIN" fetch -q origin || true
+fi
+if [[ -z "$INSTALLED" ]] || ! OLD=$(git -C "$MAIN" rev-parse --verify "$INSTALLED^{commit}" 2>/dev/null); then
+  echo "release.sh: skip $COMMIT: installed commit unknown ($INSTALLED)"
+  exit 1
+fi
+if [[ "$OLD" == "$COMMIT" ]] || ! git -C "$MAIN" merge-base --is-ancestor "$OLD" "$COMMIT"; then
+  echo "release.sh: skip $COMMIT: not a strict descendant of installed $INSTALLED"
+  exit 1
+fi
 mkdir -p "$STAGE"
 INCOMING="$STAGE/Herdr Shell.app.incoming"
 rm -rf "$INCOMING"

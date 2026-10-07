@@ -192,6 +192,35 @@ def same(a, b):
     return bool(a) and bool(b) and (a.startswith(b) or b.startswith(a))
 
 
+def can_deliver(installed, commit, name):
+    """Fail closed unless the release is a strict descendant of a known install."""
+    if not installed:
+        log(f"{name}: skip {commit}: installed commit unknown")
+        return False
+    if same(installed, commit):
+        return False
+    for attempt in range(2):
+        try:
+            old = git("rev-parse", "--verify", installed + "^{commit}")
+            new = git("rev-parse", "--verify", commit + "^{commit}")
+            break
+        except subprocess.CalledProcessError:
+            if attempt == 0:
+                try:
+                    fetch()
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+            else:
+                log(f"{name}: skip {commit}: unknown installed/release commit {installed}")
+                return False
+    r = subprocess.run(["git", "-C", REPO, "merge-base", "--is-ancestor", old, new],
+                       capture_output=True)
+    if old != new and r.returncode == 0:
+        return True
+    log(f"{name}: skip {commit}: not a strict descendant of installed {installed}")
+    return False
+
+
 def shell_changed(old, new):
     """True unless macos/HerdrShell is identical at both commits; an unknown commit counts
     as changed. Most pushes to main touch only the Rust side and need no new app."""
@@ -210,6 +239,9 @@ def publish(ref):
     # release.sh stages Studio itself; hold the delivery lock through the build and the read of
     # what it staged, so a local (Studio) fanout never swaps staged/ in between.
     with open(f"{LOGDIR}/build.log", "a") as out, studio_build_lock(), delivery_lock():
+        st = probe({"local": True})
+        if st is None or not can_deliver(st.get("installed", ""), sha, "studio build"):
+            return False
         r = subprocess.run(["bash", script, sha], stdout=out, stderr=subprocess.STDOUT,
                            env={**os.environ, "HERDR_REPO": REPO})
         if r.returncode != 0:
@@ -345,7 +377,7 @@ def fanout():
             continue
         if t.get("server") and not t.get("local"):
             send_server_config(t)
-        if same(st.get("installed", ""), commit):
+        if not can_deliver(st.get("installed", ""), commit, name):
             continue
         if same(st.get("staged", ""), commit) and same(st.get("staged_app", ""), commit):
             continue
@@ -432,6 +464,9 @@ def install(name):
     t = next((t for t in targets() if t.get("name") == name), None)
     if not rel or not t:
         sys.exit(f"install: no release or no target {name}")
+    st = probe(t)
+    if st is None or not can_deliver(st.get("installed", ""), rel["commit"], name):
+        return
     source = os.path.realpath(STORE)
     if not os.path.isdir(f"{source}/{APP}"):
         sys.exit(f"{name}: install failed: release source missing")
