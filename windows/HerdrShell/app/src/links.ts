@@ -32,8 +32,9 @@ const spanText = (term: Terminal, regions: LinkRegion[]) => [...regions].sort((a
   .map(r => term.buffer.active.getLine(term.buffer.active.viewportY + r.row)?.translateToString(false, r.start_col, r.end_col + 1) ?? "").join("");
 // One Ctrl+left press and its release on the same cell. Mouse reports the program would get
 // for it are held until the link settles: a hit consumes them, a miss or a drag replays them,
-// as the Mac buffers a native gesture and replays it only on a miss.
-interface Gesture { cell: { row: number; col: number }; held: (() => void)[]; settled?: boolean }
+// as the Mac buffers a native gesture and replays it only on a miss. Reports that arrive while
+// an earlier click resolves queue behind it, so the program sees them in order.
+interface Gesture { cell: { row: number; col: number }; settled?: boolean; hit?: boolean }
 export interface LinkGate { hold: (data: string, flush: () => void) => boolean; dispose: () => void }
 const mouseReport = (data: string) => data.startsWith("\x1b[<") || data.startsWith("\x1b[M");
 // Call after term.open. A click xterm does not link (a wrapped URL's continuation rows) is
@@ -43,11 +44,13 @@ export function installLinks(term: Terminal, server: LinkServer, open: (url: str
   // The open gesture: pressed, or released this event turn. Only it holds reports and only it
   // can be cancelled; a released click is settled once, by its own resolution.
   let gesture: Gesture | null = null;
+  const queue: { g: Gesture | null; flush: () => void }[] = [];
   const settle = (g: Gesture, hit: boolean) => {
     if (gesture === g) gesture = null;
     if (g.settled) return;
     g.settled = true;
-    if (!hit) g.held.forEach(flush => flush());
+    g.hit = hit;
+    while (queue.length && (!queue[0].g || queue[0].g.settled)) { const entry = queue.shift()!; if (!entry.g?.hit) entry.flush(); }
   };
   const finish = async (cell: { row: number; col: number } | null, resolved: string | null) => {
     const answer = cell ? await server.activate(cell.row, cell.col).catch(() => null) : null;
@@ -69,7 +72,7 @@ export function installLinks(term: Terminal, server: LinkServer, open: (url: str
   // Registered after xterm's Linkifier on the same element, so its activation is already known.
   const down = (event: Event) => {
     const mouse = event as MouseEvent, cell = mouse.ctrlKey && mouse.button === 0 ? cellAt(term, mouse) : null;
-    if (cell) gesture = { cell, held: [] };
+    if (cell) gesture = { cell };
   };
   const up = (event: Event) => {
     const g = gesture, mouse = event as MouseEvent, cell = cellAt(term, mouse);
@@ -89,7 +92,7 @@ export function installLinks(term: Terminal, server: LinkServer, open: (url: str
   window.addEventListener("mouseup", away, true);
   window.addEventListener("blur", blur);
   return {
-    hold: (data, flush) => { if (!gesture || !mouseReport(data)) return false; gesture.held.push(flush); return true; },
+    hold: (data, flush) => { if (!mouseReport(data) || (!gesture && !queue.length)) return false; queue.push({ g: gesture, flush }); return true; },
     dispose: () => { screen?.removeEventListener("mousedown", down); screen?.removeEventListener("mouseup", up); window.removeEventListener("mouseup", away, true); window.removeEventListener("blur", blur); },
   };
 }

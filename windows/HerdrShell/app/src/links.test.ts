@@ -130,7 +130,7 @@ describe("terminal link clicks", () => {
     expect(sent).toEqual(["press"]);
     expect(gate.hold("\x1b[<35;6;2M", () => {})).toBe(false);
   });
-  it("a click released before focus is lost settles once, and later reports pass while it resolves", async () => {
+  it("a click released before focus is lost settles once, and later reports wait behind it", async () => {
     const sent: string[] = [];
     let answer: (regions: LinkRegion[]) => void = () => {};
     const { term, open, gate } = await pane(wrapped, { resolve: () => new Promise(resolve => { answer = resolve; }) });
@@ -143,11 +143,29 @@ describe("terminal link clicks", () => {
     await flushed();
     window.dispatchEvent(new Event("blur"));
     report("\x1b[<35;9;3M");
-    expect(sent).toEqual(["\x1b[<35;9;3M"]);
+    expect(sent).toEqual([]);
     answer([]);
     await flushed();
     expect(open).not.toHaveBeenCalled();
-    expect(sent).toEqual(["\x1b[<35;9;3M", "\x1b[<16;5;2M", "\x1b[<16;5;2m"]);
+    expect(sent).toEqual(["\x1b[<16;5;2M", "\x1b[<16;5;2m", "\x1b[<35;9;3M"]);
+  });
+  it("a plain click made while a link click resolves reaches the program after it, in order", async () => {
+    const sent: string[] = [];
+    let answer: (regions: LinkRegion[]) => void = () => {};
+    const { term, gate } = await pane(wrapped, { resolve: () => new Promise(resolve => { answer = resolve; }) });
+    const screen = term.element!.querySelector(".xterm-screen")!;
+    const report = (data: string) => { if (!gate.hold(data, () => sent.push(data))) sent.push(data); };
+    screen.dispatchEvent(at("mousedown", 1, 4));
+    report("\x1b[<16;5;2M");
+    screen.dispatchEvent(at("mouseup", 1, 4));
+    report("\x1b[<16;5;2m");
+    await flushed();
+    screen.dispatchEvent(at("mousedown", 2, 8, false));
+    report("\x1b[<0;9;3M");
+    answer([]);
+    await flushed();
+    report("\x1b[<0;9;3m");
+    expect(sent).toEqual(["\x1b[<16;5;2M", "\x1b[<16;5;2m", "\x1b[<0;9;3M", "\x1b[<0;9;3m"]);
   });
 });
 // Golden policy table: the same cases as macos/HerdrShell/scripts/check_terminal_links.py.
