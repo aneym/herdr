@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 
 pub mod agents;
 pub mod commands;
-pub mod desk;
 pub mod common;
+pub mod desk;
 pub mod events;
 pub mod integrations;
 pub mod panes;
@@ -17,8 +17,8 @@ pub mod worktrees;
 
 pub use agents::*;
 pub use commands::*;
-pub use desk::*;
 pub use common::*;
+pub use desk::*;
 pub use events::*;
 pub use integrations::*;
 pub use panes::*;

@@ -987,10 +987,7 @@ pub struct ClientShellPinnedTab {
     pub workspace_id: String,
     /// Live snapshots use JSON in EndpointControl.data. The legacy bincode
     /// ClientShellSnapshot variant is rejected by current clients.
-    #[serde(
-        default,
-        deserialize_with = "crate::api::schema::deserialize_pin_role"
-    )]
+    #[serde(default, deserialize_with = "crate::api::schema::deserialize_pin_role")]
     pub role: Option<crate::api::schema::TabRole>,
 }
 

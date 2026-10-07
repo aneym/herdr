@@ -26,36 +26,59 @@ pub(crate) fn render_tab_bar(
         .collect::<Vec<_>>();
     // The strip is navigation chrome, not the workflow list. Preserve snapshot
     // tab ids in hits (and snapshot indices for drag targets) after filtering.
-    let visible_tabs = tabs.iter().copied().filter(|tab| {
-        overlay.and_then(|overlay| overlay.tab(&tab.tab_id))
-            .is_none_or(|tag| tag.kind != crate::factory_overlay::TabKind::Workflow)
-    }).collect::<Vec<_>>();
+    let visible_tabs = tabs
+        .iter()
+        .copied()
+        .filter(|tab| {
+            overlay
+                .and_then(|overlay| overlay.tab(&tab.tab_id))
+                .is_none_or(|tag| tag.kind != crate::factory_overlay::TabKind::Workflow)
+        })
+        .collect::<Vec<_>>();
     let status_glyphs = visible_tabs
         .iter()
-        .map(|tab| tab_status_glyphs(snapshot, tab, config,
-            overlay.and_then(|overlay| overlay.tab(&tab.tab_id)).is_some_and(|tag| tag.busy)))
+        .map(|tab| {
+            tab_status_glyphs(
+                snapshot,
+                tab,
+                config,
+                overlay
+                    .and_then(|overlay| overlay.tab(&tab.tab_id))
+                    .is_some_and(|tag| tag.busy),
+            )
+        })
         .collect::<Vec<_>>();
     let attention_marks = visible_tabs
         .iter()
         .zip(&status_glyphs)
         .map(|(tab, glyphs)| {
-            let attention = overlay.and_then(|overlay| overlay.tab(&tab.tab_id))?.attention;
+            let attention = overlay
+                .and_then(|overlay| overlay.tab(&tab.tab_id))?
+                .attention;
             let color = match attention {
                 crate::factory_overlay::Attention::Act => palette.red,
                 crate::factory_overlay::Attention::Warn => palette.peach,
                 crate::factory_overlay::Attention::None => return None,
             };
-            let pane_count = snapshot.panes.iter().filter(|pane| pane.tab_id == tab.tab_id).count();
+            let pane_count = snapshot
+                .panes
+                .iter()
+                .filter(|pane| pane.tab_id == tab.tab_id)
+                .count();
             if attention == crate::factory_overlay::Attention::Act
                 && pane_count > 0
                 && glyphs.len() == pane_count
                 && glyphs.iter().all(|(glyph, _)| *glyph == "!")
-                && snapshot.panes.iter().filter(|pane| pane.tab_id == tab.tab_id).all(|pane| {
-                    snapshot.agents.iter().any(|agent| {
-                        agent.pane_id == pane.pane_id
-                            && agent.agent_status == crate::api::schema::AgentStatus::Blocked
+                && snapshot
+                    .panes
+                    .iter()
+                    .filter(|pane| pane.tab_id == tab.tab_id)
+                    .all(|pane| {
+                        snapshot.agents.iter().any(|agent| {
+                            agent.pane_id == pane.pane_id
+                                && agent.agent_status == crate::api::schema::AgentStatus::Blocked
+                        })
                     })
-                })
             {
                 return None;
             }

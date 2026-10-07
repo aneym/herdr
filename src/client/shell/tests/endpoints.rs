@@ -306,7 +306,7 @@ fn state_with_scrollable_agents() -> (ClientShellState, ClientEndpointId) {
             .agents
             .iter()
             .map(|agent| ClientShellPane {
-            tokens: Default::default(),
+                tokens: Default::default(),
                 pane_id: agent.pane_id.clone(),
                 focused: agent.focused,
                 ..projection.panes[0].clone()
@@ -737,7 +737,11 @@ fn sidebar_renders_local_and_saved_ssh_endpoints_with_status() {
     assert!(!text.contains(" machines"), "frame: {text}");
     assert!(text.contains(" spaces"), "frame: {text}");
     // The only machine hits left are one-line badges on rows.
-    assert!(state.hits.machines.iter().all(|hit| hit.status_badge.height == 1));
+    assert!(state
+        .hits
+        .machines
+        .iter()
+        .all(|hit| hit.status_badge.height == 1));
     let local = state
         .hits
         .workspaces
@@ -1391,7 +1395,7 @@ fn current_workspace_or_blocked_keeps_foreign_attention_only() {
         },
     ];
     remote.panes.push(ClientShellPane {
-            tokens: Default::default(),
+        tokens: Default::default(),
         pane_id: "pane_2".into(),
         focused: false,
         ..remote.panes[0].clone()
@@ -1853,7 +1857,7 @@ fn remote_chat_joins_the_space_its_label_names_with_a_badge_and_routes_to_its_ma
     let rect = chat_row(&endpoint_id);
     // Inside the space, the remote chat follows the local one.
     assert!(rect.y > local_rect.y, "{sidebar:#?}");
-    let lines =|rect: Rect| sidebar[usize::from(rect.y)..usize::from(rect.bottom())].join("\n");
+    let lines = |rect: Rect| sidebar[usize::from(rect.y)..usize::from(rect.bottom())].join("\n");
     assert!(
         lines(local_rect).contains("local chat"),
         "{}",
@@ -2550,7 +2554,7 @@ fn navigator_fuzzy_search_ranks_fragmented_endpoint_qualified_panes() {
         },
     ];
     remote.panes.push(ClientShellPane {
-            tokens: Default::default(),
+        tokens: Default::default(),
         pane_id: "pane_2".into(),
         focused: false,
         ..remote.panes[0].clone()
@@ -3608,7 +3612,6 @@ fn collapsed_sidebar_machine_badge_reopens_diagnostic() {
     }
 }
 
-
 #[test]
 fn remote_spaces_that_share_a_label_keep_rows_of_their_own() {
     let (mut state, remote_id) = state_with_remote();
@@ -3621,11 +3624,13 @@ fn remote_spaces_that_share_a_label_keep_rows_of_their_own() {
     remote.workspaces.push(second);
     for workspace in &mut remote.workspaces {
         workspace.label = "rails".into();
-        remote.pinned_tabs.push(crate::protocol::ClientShellPinnedTab {
-            workspace_id: workspace.workspace_id.clone(),
-            tab_id: format!("tab_{}", workspace.workspace_id),
-            role: None,
-        });
+        remote
+            .pinned_tabs
+            .push(crate::protocol::ClientShellPinnedTab {
+                workspace_id: workspace.workspace_id.clone(),
+                tab_id: format!("tab_{}", workspace.workspace_id),
+                role: None,
+            });
     }
     state.set_endpoint_snapshot(&remote_id, Box::new(remote));
     state.compose(100, 30).expect("two remote rails spaces");

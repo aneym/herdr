@@ -1490,9 +1490,9 @@ impl ClientShellState {
                             // A press and release with no motion leaves the offset alone.
                             let unchanged = last_sent_offset.map_or_else(
                                 || {
-                                    current_hit.scroll.is_some_and(|metrics| {
-                                        metrics.offset_from_bottom == offset
-                                    })
+                                    current_hit
+                                        .scroll
+                                        .is_some_and(|metrics| metrics.offset_from_bottom == offset)
                                 },
                                 |sent| sent == offset,
                             );
@@ -2035,41 +2035,63 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
-                if let Some(hit) = self.hits.factory_sections.iter().find(|hit| super::contains(hit.rect, point)).cloned() {
-                    self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
-                        target: ClientContextMenuTarget::FactorySection(hit), x: mouse.column, y: mouse.row, highlighted: 0,
-                    }));
+                if let Some(hit) = self
+                    .hits
+                    .factory_sections
+                    .iter()
+                    .find(|hit| super::contains(hit.rect, point))
+                    .cloned()
+                {
+                    self.overlay =
+                        Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
+                            target: ClientContextMenuTarget::FactorySection(hit),
+                            x: mouse.column,
+                            y: mouse.row,
+                            highlighted: 0,
+                        }));
                     outcome.repaint = true;
                     return;
                 }
                 // Pinned rows in the multi-machine sidebar carry no pin
                 // toggle (`pin` is empty); their menu is where they unpin.
-                let endpoint_chat = self.hits.endpoint_pins.iter()
+                let endpoint_chat = self
+                    .hits
+                    .endpoint_pins
+                    .iter()
                     .find(|(rect, pin, _, _)| pin.is_empty() && super::contains(*rect, point))
                     .map(|(_, _, endpoint_id, tab_id)| (endpoint_id.clone(), tab_id.clone()));
                 if let Some((endpoint_id, tab_id)) = endpoint_chat {
-                    let pinned = self.endpoints.iter()
+                    let pinned = self
+                        .endpoints
+                        .iter()
                         .find(|endpoint| endpoint.endpoint_id == endpoint_id)
                         .and_then(|endpoint| endpoint.snapshot.as_deref())
-                        .is_some_and(|snapshot| snapshot.pinned_tabs.iter().any(|pin| pin.tab_id == tab_id));
-                    self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
-                        target: ClientContextMenuTarget::EndpointChat {
-                            supports_role: self.endpoint_supports_tab_role(&endpoint_id),
-                            agent: self
-                                .endpoints
-                                .iter()
-                                .find(|endpoint| endpoint.endpoint_id == endpoint_id)
-                                .and_then(|endpoint| endpoint.snapshot.as_deref())
-                                .is_some_and(|snapshot| {
-                                    snapshot
-                                        .pinned_tabs
-                                        .iter()
-                                        .any(|pin| pin.tab_id == tab_id && pin.role.is_some())
-                                }),
-                            endpoint_id, tab_id, pinned,
-                        },
-                        x: mouse.column, y: mouse.row, highlighted: 0,
-                    }));
+                        .is_some_and(|snapshot| {
+                            snapshot.pinned_tabs.iter().any(|pin| pin.tab_id == tab_id)
+                        });
+                    self.overlay =
+                        Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
+                            target: ClientContextMenuTarget::EndpointChat {
+                                supports_role: self.endpoint_supports_tab_role(&endpoint_id),
+                                agent: self
+                                    .endpoints
+                                    .iter()
+                                    .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+                                    .and_then(|endpoint| endpoint.snapshot.as_deref())
+                                    .is_some_and(|snapshot| {
+                                        snapshot
+                                            .pinned_tabs
+                                            .iter()
+                                            .any(|pin| pin.tab_id == tab_id && pin.role.is_some())
+                                    }),
+                                endpoint_id,
+                                tab_id,
+                                pinned,
+                            },
+                            x: mouse.column,
+                            y: mouse.row,
+                            highlighted: 0,
+                        }));
                     outcome.repaint = true;
                     return;
                 }
@@ -2218,12 +2240,17 @@ impl ClientShellState {
                     return;
                 }
                 if self.config.mouse_capture {
-                    if let Some((_, url)) = self.hits.factory_review_urls.iter()
+                    if let Some((_, url)) = self
+                        .hits
+                        .factory_review_urls
+                        .iter()
                         .chain(self.hits.factory_scope_urls.iter())
                         .chain(self.hits.factory_usage_urls.iter())
                         .find(|(rect, _)| super::contains(*rect, point))
                     {
-                        outcome.actions.push(ClientShellAction::OpenSafeWebUrl(url.clone()));
+                        outcome
+                            .actions
+                            .push(ClientShellAction::OpenSafeWebUrl(url.clone()));
                         return;
                     }
                 }
@@ -2355,9 +2382,14 @@ impl ClientShellState {
                                     .tabs
                                     .iter()
                                     .filter(|tab| tab.workspace_id == id)
-                                    .filter(|tab| self.factory_overlay()
-                                        .and_then(|overlay| overlay.tab(&tab.tab_id))
-                                        .is_none_or(|tag| tag.kind != crate::factory_overlay::TabKind::Workflow))
+                                    .filter(|tab| {
+                                        self.factory_overlay()
+                                            .and_then(|overlay| overlay.tab(&tab.tab_id))
+                                            .is_none_or(|tag| {
+                                                tag.kind
+                                                    != crate::factory_overlay::TabKind::Workflow
+                                            })
+                                    })
                                     .count()
                             })
                         })
@@ -2739,16 +2771,29 @@ impl ClientShellState {
         );
     }
 
-    pub(super) fn change_factory_section(&mut self, hit: &FactorySectionHit, focus: bool, outcome: &mut ClientShellInput) {
+    pub(super) fn change_factory_section(
+        &mut self,
+        hit: &FactorySectionHit,
+        focus: bool,
+        outcome: &mut ClientShellInput,
+    ) {
         let tree = self.tree_chrome_mut();
         if focus {
-            if tree.factory_section_focus.get(&hit.workspace_id).is_some_and(|label| label == hit.label) {
+            if tree
+                .factory_section_focus
+                .get(&hit.workspace_id)
+                .is_some_and(|label| label == hit.label)
+            {
                 tree.factory_section_focus.remove(&hit.workspace_id);
             } else {
-                tree.factory_section_focus.insert(hit.workspace_id.clone(), hit.label.to_owned());
+                tree.factory_section_focus
+                    .insert(hit.workspace_id.clone(), hit.label.to_owned());
             }
         } else {
-            super::tree::ClientTreeChrome::toggle(&mut tree.factory_sections_collapsed, format!("{}:{}", hit.workspace_id, hit.label));
+            super::tree::ClientTreeChrome::toggle(
+                &mut tree.factory_sections_collapsed,
+                format!("{}:{}", hit.workspace_id, hit.label),
+            );
         }
         self.agent_scroll = 0;
         self.persist_chrome_preferences(outcome);
@@ -2772,15 +2817,21 @@ impl ClientShellState {
                 && super::contains(hit.rect, point)
         });
         if same_item {
-            if mouse.modifiers.contains(crossterm::event::KeyModifiers::ALT) {
+            if mouse
+                .modifiers
+                .contains(crossterm::event::KeyModifiers::ALT)
+            {
                 self.change_detail_panel(
-                    crate::factory_overlay::tab_panel_key(&press.tab_id), false, outcome,
+                    crate::factory_overlay::tab_panel_key(&press.tab_id),
+                    false,
+                    outcome,
                 );
             } else {
                 self.push_endpoint_method(
                     crate::api::schema::Method::TabFocus(crate::api::schema::TabTarget {
                         tab_id: press.tab_id,
-                    }), outcome,
+                    }),
+                    outcome,
                 );
             }
         }
@@ -2792,27 +2843,49 @@ impl ClientShellState {
         mouse: crossterm::event::MouseEvent,
         outcome: &mut ClientShellInput,
     ) -> bool {
-        if let Some((rect, clear, choices)) = self.hits.factory_goal_picker.clone().filter(|(rect, _, _)| super::contains(*rect, point)) {
+        if let Some((rect, clear, choices)) = self
+            .hits
+            .factory_goal_picker
+            .clone()
+            .filter(|(rect, _, _)| super::contains(*rect, point))
+        {
             if super::contains(clear, point) {
                 self.tree_chrome_mut().factory_goal_filter = None;
                 self.agent_scroll = 0;
                 self.persist_chrome_preferences(outcome);
             } else {
                 self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
-                    target: ClientContextMenuTarget::FactoryGoalPicker(choices), x: rect.x, y: rect.bottom(), highlighted: 0,
+                    target: ClientContextMenuTarget::FactoryGoalPicker(choices),
+                    x: rect.x,
+                    y: rect.bottom(),
+                    highlighted: 0,
                 }));
             }
             outcome.repaint = true;
             return true;
         }
-        if let Some((_, workspace_id)) = self.hits.factory_show_all.iter().find(|(rect, _)| super::contains(*rect, point)).cloned() {
-            self.tree_chrome_mut().factory_section_focus.remove(&workspace_id);
+        if let Some((_, workspace_id)) = self
+            .hits
+            .factory_show_all
+            .iter()
+            .find(|(rect, _)| super::contains(*rect, point))
+            .cloned()
+        {
+            self.tree_chrome_mut()
+                .factory_section_focus
+                .remove(&workspace_id);
             self.agent_scroll = 0;
             self.persist_chrome_preferences(outcome);
             outcome.repaint = true;
             return true;
         }
-        if let Some(hit) = self.hits.factory_sections.iter().find(|hit| super::contains(hit.rect, point)).cloned() {
+        if let Some(hit) = self
+            .hits
+            .factory_sections
+            .iter()
+            .find(|hit| super::contains(hit.rect, point))
+            .cloned()
+        {
             if super::contains(hit.button, point) {
                 self.change_factory_section(&hit, true, outcome);
             } else if super::contains(hit.label_rect, point) {
@@ -2871,13 +2944,25 @@ impl ClientShellState {
             });
             let tree = self.tree_chrome_mut();
             if let Some(workspace_id) = key.strip_prefix("factory-background:services:") {
-                super::tree::ClientTreeChrome::toggle(&mut tree.factory_auto_expanded, workspace_id.to_owned());
+                super::tree::ClientTreeChrome::toggle(
+                    &mut tree.factory_auto_expanded,
+                    workspace_id.to_owned(),
+                );
             } else if let Some(workspace_id) = key.strip_prefix("factory-background:parked:") {
-                super::tree::ClientTreeChrome::toggle(&mut tree.factory_parked_expanded, workspace_id.to_owned());
+                super::tree::ClientTreeChrome::toggle(
+                    &mut tree.factory_parked_expanded,
+                    workspace_id.to_owned(),
+                );
             } else if let Some(workspace_id) = key.strip_prefix("factory-background:closed:") {
-                super::tree::ClientTreeChrome::toggle(&mut tree.factory_idle_expanded, workspace_id.to_owned());
+                super::tree::ClientTreeChrome::toggle(
+                    &mut tree.factory_idle_expanded,
+                    workspace_id.to_owned(),
+                );
             } else if let Some(workspace_id) = key.strip_prefix("factory-background:") {
-                super::tree::ClientTreeChrome::toggle(&mut tree.factory_background_expanded, workspace_id.to_owned());
+                super::tree::ClientTreeChrome::toggle(
+                    &mut tree.factory_background_expanded,
+                    workspace_id.to_owned(),
+                );
             } else if !is_space && key == tab_id.as_deref().unwrap_or_default() {
                 if collapsed {
                     tree.factory_collapsed_lanes.remove(&key);
@@ -2932,7 +3017,10 @@ impl ClientShellState {
                 );
             } else {
                 let tree = self.tree_chrome_mut();
-                super::tree::ClientTreeChrome::toggle(&mut tree.pinned_spaces, workspace_id.clone());
+                super::tree::ClientTreeChrome::toggle(
+                    &mut tree.pinned_spaces,
+                    workspace_id.clone(),
+                );
                 self.persist_chrome_preferences(outcome);
                 // The pin is load-bearing on the endpoint too: it is what keeps a
                 // live tab in the space when its last one closes.

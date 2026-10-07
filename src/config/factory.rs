@@ -50,7 +50,10 @@ mod tests {
         let config = FactoryUiConfig::default();
         assert!(!config.enabled);
         assert_eq!(config.panel_width, 46);
-        assert!(config.overlay_path().unwrap().ends_with(".agent-rails/herdr/overlay.json"));
+        assert!(config
+            .overlay_path()
+            .unwrap()
+            .ends_with(".agent-rails/herdr/overlay.json"));
     }
 
     #[test]

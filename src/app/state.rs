@@ -10,7 +10,9 @@ pub(crate) type InstalledPluginRegistry =
     std::collections::HashMap<String, crate::api::schema::InstalledPluginInfo>;
 
 /// Persist the allocation counter even when all items have been closed.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct DeskState {
     #[serde(flatten)]
     pub info: crate::api::schema::DeskInfo,
@@ -34,7 +36,9 @@ impl Default for DeskState {
 /// One pinned chat in `AppState::pinned_tabs`. The Vec order is the pin order
 /// the sidebar draws and Cmd+1..9 resolves; `priority` decides where a newly
 /// pinned chat lands (higher sorts earlier, ties keep the earlier pin first).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct PinnedTab {
     /// Public tab id (`w<space>:t<n>`), stable across reorders and restarts.
     pub tab_id: String,
@@ -1057,9 +1061,7 @@ impl AppState {
 
     /// Position of `tab_id` in pin order, i.e. which Cmd+1..9 slot it owns.
     pub fn pinned_tab_index(&self, tab_id: &str) -> Option<usize> {
-        self.pinned_tabs
-            .iter()
-            .position(|pin| pin.tab_id == tab_id)
+        self.pinned_tabs.iter().position(|pin| pin.tab_id == tab_id)
     }
 
     pub fn is_tab_pinned(&self, tab_id: &str) -> bool {
@@ -1148,7 +1150,11 @@ impl AppState {
         self.pinned_tabs.insert(index, pin);
     }
 
-    pub fn set_tab_role(&mut self, tab_id: &str, role: Option<crate::api::schema::TabRole>) -> bool {
+    pub fn set_tab_role(
+        &mut self,
+        tab_id: &str,
+        role: Option<crate::api::schema::TabRole>,
+    ) -> bool {
         let existing = self.pinned_tab_index(tab_id);
         if existing.map_or(role.is_none(), |index| self.pinned_tabs[index].role == role) {
             return false;
@@ -1915,10 +1921,13 @@ impl AppState {
     pub fn assert_invariants_for_test(&self) {
         for desk in self.desks.values() {
             assert!(desk.info.items.len() <= 32);
-            let ids: std::collections::HashSet<_> =
-                desk.info.items.iter().map(|i| &i.id).collect();
+            let ids: std::collections::HashSet<_> = desk.info.items.iter().map(|i| &i.id).collect();
             assert_eq!(ids.len(), desk.info.items.len());
-            assert!(desk.info.front.as_ref().is_none_or(|front| ids.contains(front)));
+            assert!(desk
+                .info
+                .front
+                .as_ref()
+                .is_none_or(|front| ids.contains(front)));
             assert!(desk.info.items.iter().all(|i| i
                 .id
                 .strip_prefix('d')

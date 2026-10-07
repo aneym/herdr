@@ -59,12 +59,20 @@ impl FactoryOverlayPoller {
         });
         let areas_path = path.with_file_name("areas.json");
         let areas_stamp = fs::metadata(&areas_path).ok().map(|metadata| FileStamp {
-            path: areas_path.clone(), modified: metadata.modified().ok(), len: metadata.len(),
+            path: areas_path.clone(),
+            modified: metadata.modified().ok(),
+            len: metadata.len(),
         });
-        let areas_recent = areas_stamp.as_ref().and_then(|stamp| stamp.modified).is_some_and(|time| {
-            SystemTime::now().duration_since(time).is_ok_and(|age| age <= Duration::from_secs(2))
-        });
-        let stamp_changed = self.last_seen.as_ref() != Some(&stamp) || self.last_areas != areas_stamp;
+        let areas_recent = areas_stamp
+            .as_ref()
+            .and_then(|stamp| stamp.modified)
+            .is_some_and(|time| {
+                SystemTime::now()
+                    .duration_since(time)
+                    .is_ok_and(|age| age <= Duration::from_secs(2))
+            });
+        let stamp_changed =
+            self.last_seen.as_ref() != Some(&stamp) || self.last_areas != areas_stamp;
         if !stamp_changed && !recent && !areas_recent {
             return None;
         }
@@ -214,7 +222,11 @@ mod tests {
         };
         let valid_at = SystemTime::now() - Duration::from_secs(300);
         let mut poller = FactoryOverlayPoller::default();
-        fs::write(&path, br#"{"version":1,"tabs":{"one":{"kind":"workflow"}}}"#).unwrap();
+        fs::write(
+            &path,
+            br#"{"version":1,"tabs":{"one":{"kind":"workflow"}}}"#,
+        )
+        .unwrap();
         set_mtime(valid_at);
         let valid_at = fs::metadata(&path).unwrap().modified().unwrap();
         assert!(poller.poll(Some(&path)).is_some());
@@ -259,17 +271,29 @@ mod tests {
         let areas = dir.join("areas.json");
         let names = |poller: &FactoryOverlayPoller| -> Vec<String> {
             poller.current.as_deref().map_or_else(Vec::new, |overlay| {
-                overlay.space_groups.iter().map(|group| group.name.clone()).collect()
+                overlay
+                    .space_groups
+                    .iter()
+                    .map(|group| group.name.clone())
+                    .collect()
             })
         };
         let mut poller = FactoryOverlayPoller::default();
         // No areas.json: the overlay's own groups stand.
-        fs::write(&path, br#"{"version":1,"space_groups":[{"name":"Own","spaces":["a"]}]}"#).unwrap();
+        fs::write(
+            &path,
+            br#"{"version":1,"space_groups":[{"name":"Own","spaces":["a"]}]}"#,
+        )
+        .unwrap();
         poller.poll(Some(&path));
         assert_eq!(names(&poller), ["Own"]);
 
         // areas.json wins over the overlay's own groups.
-        fs::write(&areas, br#"{"space_groups":[{"name":"Rails","spaces":["a"]}]}"#).unwrap();
+        fs::write(
+            &areas,
+            br#"{"space_groups":[{"name":"Rails","spaces":["a"]}]}"#,
+        )
+        .unwrap();
         poller.poll(Some(&path));
         assert_eq!(names(&poller), ["Rails"]);
 

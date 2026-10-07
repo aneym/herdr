@@ -406,10 +406,7 @@ impl ReplayBudget {
 
     /// Runs `capture` with this pane's allowance and charges what it returns.
     /// A capture longer than its allowance is dropped rather than overspent.
-    pub(crate) fn take(
-        &mut self,
-        capture: impl FnOnce(usize) -> Option<String>,
-    ) -> Option<String> {
+    pub(crate) fn take(&mut self, capture: impl FnOnce(usize) -> Option<String>) -> Option<String> {
         let allowance = MAX_REPLAY_BYTES_PER_PANE.min(self.left);
         if allowance == 0 {
             return None;
@@ -675,7 +672,10 @@ mod tests {
         let path = dir.join("handoff.active");
         {
             let _marker = HandoffMarker::create(path.clone()).unwrap();
-            assert!(path.exists(), "clients must see a handoff while it is underway");
+            assert!(
+                path.exists(),
+                "clients must see a handoff while it is underway"
+            );
         }
         assert!(!path.exists(), "rollback must clear the handoff marker");
         std::fs::remove_dir(&dir).unwrap();

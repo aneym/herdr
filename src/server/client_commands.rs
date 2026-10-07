@@ -361,7 +361,10 @@ mod tests {
             "desk.list",
             "desk.read",
         ] {
-            assert!(actual.remove(method).is_some(), "{method} must advertise a shape");
+            assert!(
+                actual.remove(method).is_some(),
+                "{method} must advertise a shape"
+            );
         }
         // Fork: sidebar agent placement (docs/fork/port-0.9/PORT.md, ledger 31).
         assert_eq!(
@@ -376,7 +379,10 @@ mod tests {
             actual.remove("pane.link.resolve").as_deref(),
             Some("f5e4a3e01453ae7b188f127ce951c12c20e0bebcc17cc364eeb6d1a01fd5bf81")
         );
-        assert!(actual.remove("agent.usage").is_some(), "agent usage must advertise a shape");
+        assert!(
+            actual.remove("agent.usage").is_some(),
+            "agent usage must advertise a shape"
+        );
 
         assert_eq!(
             actual, expected,

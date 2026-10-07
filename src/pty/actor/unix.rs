@@ -14,7 +14,7 @@ use std::{
     collections::VecDeque,
     io::{Read, Write},
     os::fd::{AsRawFd, OwnedFd, RawFd},
-    sync::{Arc, Mutex, mpsc as std_mpsc},
+    sync::{mpsc as std_mpsc, Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -2011,11 +2011,9 @@ while True:
             .begin_handoff(Duration::from_secs(1))
             .expect_err("concurrent handoff rejected");
         assert_eq!(err.kind(), std::io::ErrorKind::WouldBlock);
-        assert!(
-            handle
-                .try_write_user_input(Bytes::from_static(b"blocked"))
-                .is_err()
-        );
+        assert!(handle
+            .try_write_user_input(Bytes::from_static(b"blocked"))
+            .is_err());
 
         peer.write_all(b"held").expect("peer write during quiesce");
         assert!(
@@ -2304,11 +2302,9 @@ while True:
         let (handle, mut peer, read_rx) = actor_with_socket_pair(false);
 
         handle.release_after_commit().expect("actor released");
-        assert!(
-            handle
-                .try_write_user_input(Bytes::from_static(b"blocked"))
-                .is_err()
-        );
+        assert!(handle
+            .try_write_user_input(Bytes::from_static(b"blocked"))
+            .is_err());
 
         let _ = peer.write_all(b"ignored");
         assert!(read_rx.recv_timeout(Duration::from_millis(150)).is_err());

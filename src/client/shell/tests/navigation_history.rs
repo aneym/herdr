@@ -113,7 +113,14 @@ fn collapsed_lane_snapshot(focused: &str, revision: u64, with_child: bool) -> Cl
     let mut snapshot = super::tree::tree_snapshot();
     snapshot.revision = revision;
     snapshot.focused_pane_id = Some(focused.into());
-    snapshot.focused_tab_id = Some(if focused == "pane_3" { "tab_3" } else { "tab_1" }.into());
+    snapshot.focused_tab_id = Some(
+        if focused == "pane_3" {
+            "tab_3"
+        } else {
+            "tab_1"
+        }
+        .into(),
+    );
     snapshot.focused_workspace_id = Some(if focused == "pane_3" { "ws_2" } else { "ws_1" }.into());
     for pane in &mut snapshot.panes {
         pane.focused = pane.pane_id == focused;
@@ -149,18 +156,27 @@ fn focusing_lane_header_or_other_tab_keeps_its_folded_children_hidden() {
     config.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
     state.set_snapshot(Box::new(collapsed_lane_snapshot("pane_3", 1, true)));
-    state.tree_chrome_mut().collapsed_tabs.insert("ws_1#1".into());
+    state
+        .tree_chrome_mut()
+        .collapsed_tabs
+        .insert("ws_1#1".into());
     // The lane's header is already visible, so focusing its own pane must not
     // unfold its tab; a subsequent focus into another space must not either.
     focus_and_confirm(&mut state, "pane_1");
     state.set_snapshot(Box::new(collapsed_lane_snapshot("pane_1", 2, true)));
     assert!(state.tree_chrome_mut().collapsed_tabs.contains("ws_1#1"));
-    assert!(!state.tree_chrome_mut().collapsed_agent_groups.contains("pane_1"));
+    assert!(!state
+        .tree_chrome_mut()
+        .collapsed_agent_groups
+        .contains("pane_1"));
 
     focus_and_confirm(&mut state, "pane_3");
     state.set_snapshot(Box::new(collapsed_lane_snapshot("pane_3", 3, true)));
     assert!(state.tree_chrome_mut().collapsed_tabs.contains("ws_1#1"));
-    assert!(!state.tree_chrome_mut().collapsed_agent_groups.contains("pane_1"));
+    assert!(!state
+        .tree_chrome_mut()
+        .collapsed_agent_groups
+        .contains("pane_1"));
 }
 
 #[test]
@@ -169,20 +185,29 @@ fn adding_child_to_collapsed_lane_does_not_open_it_on_focus() {
     config.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
     state.set_snapshot(Box::new(collapsed_lane_snapshot("pane_3", 1, false)));
-    state.tree_chrome_mut().collapsed_tabs.insert("ws_1#1".into());
+    state
+        .tree_chrome_mut()
+        .collapsed_tabs
+        .insert("ws_1#1".into());
     // `herdr agent group under` changes ownership in a snapshot, not focus.
     state.set_snapshot(Box::new(collapsed_lane_snapshot("pane_3", 2, true)));
     focus_and_confirm(&mut state, "pane_1");
     state.set_snapshot(Box::new(collapsed_lane_snapshot("pane_1", 3, true)));
     assert!(state.tree_chrome_mut().collapsed_tabs.contains("ws_1#1"));
-    assert!(!state.tree_chrome_mut().collapsed_agent_groups.contains("pane_1"));
+    assert!(!state
+        .tree_chrome_mut()
+        .collapsed_agent_groups
+        .contains("pane_1"));
 
     // A direct focus into the newly grouped child really does need its
     // ancestor group opened, without clearing the unrelated lane tab key.
     focus_and_confirm(&mut state, "pane_2");
     state.set_snapshot(Box::new(collapsed_lane_snapshot("pane_2", 4, true)));
     assert!(state.tree_chrome_mut().collapsed_tabs.contains("ws_1#1"));
-    assert!(state.tree_chrome_mut().collapsed_agent_groups.contains("pane_1"));
+    assert!(state
+        .tree_chrome_mut()
+        .collapsed_agent_groups
+        .contains("pane_1"));
 }
 
 #[test]
@@ -256,7 +281,9 @@ fn malformed_owner_cycle_does_not_block_explicit_reveal() {
     assert!(state.reveal_tree_ancestors_for_pane("pane_1"));
     assert_eq!(
         state.tree_chrome_mut().collapsed_agent_groups,
-        ["pane_1".to_owned(), "pane_2".to_owned()].into_iter().collect()
+        ["pane_1".to_owned(), "pane_2".to_owned()]
+            .into_iter()
+            .collect()
     );
 }
 

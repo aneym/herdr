@@ -177,17 +177,28 @@ fn mouse_reporting_double_click_copies_word_after_output_before_row_reply() {
     state.compose(106, 20).expect("composed frame");
     let pane = state.hits.panes[0].clone();
 
-    for kind in [MouseEventKind::Down(MouseButton::Left), MouseEventKind::Up(MouseButton::Left)] {
+    for kind in [
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Left),
+    ] {
         state.handle_raw_events(vec![pane_mouse(kind, &pane, 8)]);
     }
-    let second = state.handle_raw_events(vec![pane_mouse(MouseEventKind::Down(MouseButton::Left), &pane, 8)]);
+    let second = state.handle_raw_events(vec![pane_mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        &pane,
+        8,
+    )]);
     let word_request = endpoint_request(second);
     assert!(matches!(
         &word_request.method,
         crate::api::schema::Method::PaneSelectionRead(params)
             if params.content_revision.is_none()
     ));
-    state.handle_raw_events(vec![pane_mouse(MouseEventKind::Up(MouseButton::Left), &pane, 8)]);
+    state.handle_raw_events(vec![pane_mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        &pane,
+        8,
+    )]);
     let mut updated = state.pane_surface.as_ref().unwrap().clone();
     updated.surface_revision += 1;
     updated.panes[0].content_revision += 1;
@@ -201,9 +212,10 @@ fn mouse_reporting_double_click_copies_word_after_output_before_row_reply() {
             text: "alpha bravo charlie".into(),
         }),
     );
-    let copy = state.handle_raw_events(vec![RawInputEvent::Key(
-        crate::input::TerminalKey::new(KeyCode::Char('c'), KeyModifiers::SUPER),
-    )]);
+    let copy = state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+        KeyCode::Char('c'),
+        KeyModifiers::SUPER,
+    ))]);
     assert!(copy.actions.iter().any(|action| matches!(
         action,
         ClientShellAction::Endpoint { request, .. }
@@ -211,7 +223,10 @@ fn mouse_reporting_double_click_copies_word_after_output_before_row_reply() {
                 if params.anchor.col == 6 && params.cursor.col == 10)
     )));
     assert_ne!(
-        state.copy_feedback.as_ref().map(|toast| toast.message.as_str()),
+        state
+            .copy_feedback
+            .as_ref()
+            .map(|toast| toast.message.as_str()),
         Some("nothing selected to copy")
     );
 }
@@ -224,29 +239,51 @@ fn stale_word_row_reply_retries_once_without_revision() {
     state.set_pane_surface(surface());
     state.compose(106, 20).expect("composed frame");
     let pane = state.hits.panes[0].clone();
-    for kind in [MouseEventKind::Down(MouseButton::Left), MouseEventKind::Up(MouseButton::Left)] {
+    for kind in [
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Left),
+    ] {
         state.handle_raw_events(vec![pane_mouse(kind, &pane, 1)]);
     }
-    let second = state.handle_raw_events(vec![pane_mouse(MouseEventKind::Down(MouseButton::Left), &pane, 1)]);
+    let second = state.handle_raw_events(vec![pane_mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        &pane,
+        1,
+    )]);
     let first = endpoint_request(second);
-    state.handle_raw_events(vec![pane_mouse(MouseEventKind::Up(MouseButton::Left), &pane, 1)]);
+    state.handle_raw_events(vec![pane_mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        &pane,
+        1,
+    )]);
     let (_, actions) = state.handle_endpoint_result(
-        "boot-1", &first.id,
-        Err(ClientShellEndpointError { code: Some("stale_content".into()), message: "stale".into() }),
+        "boot-1",
+        &first.id,
+        Err(ClientShellEndpointError {
+            code: Some("stale_content".into()),
+            message: "stale".into(),
+        }),
     );
     let [ClientShellAction::Endpoint { request: retry, .. }] = &actions[..] else {
         panic!("retry word lookup");
     };
-    assert!(matches!(&retry.method, crate::api::schema::Method::PaneSelectionRead(params)
-        if params.content_revision.is_none()));
+    assert!(
+        matches!(&retry.method, crate::api::schema::Method::PaneSelectionRead(params)
+        if params.content_revision.is_none())
+    );
     let (_, actions) = state.handle_endpoint_result(
-        "boot-1", &retry.id,
+        "boot-1",
+        &retry.id,
         Ok(crate::api::schema::ResponseResult::PaneSelection {
-            pane_id: "pane_1".into(), text: "LIVE".into(),
+            pane_id: "pane_1".into(),
+            text: "LIVE".into(),
         }),
     );
     assert!(actions.is_empty());
-    assert!(state.selection.as_ref().is_some_and(crate::selection::Selection::is_finalized));
+    assert!(state
+        .selection
+        .as_ref()
+        .is_some_and(crate::selection::Selection::is_finalized));
 }
 
 #[test]
@@ -1463,7 +1500,9 @@ fn navigator_does_not_stitch_tab_and_pane_fields_into_a_single_term() {
         let rows =
             render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator);
         assert!(
-            !rows.iter().any(|row| matches!(row.target, ClientNavigatorTarget::Pane { .. })),
+            !rows
+                .iter()
+                .any(|row| matches!(row.target, ClientNavigatorTarget::Pane { .. })),
             "search_entry={search_entry}"
         );
     }
@@ -1644,7 +1683,10 @@ fn navigator_distinguishes_unnamed_terminals_on_numbered_tabs() {
         })
         .collect::<Vec<_>>();
     for (row, label) in rendered.iter().zip(labels) {
-        assert!(row.contains(label), "goto row {row:?} should show {label:?}");
+        assert!(
+            row.contains(label),
+            "goto row {row:?} should show {label:?}"
+        );
     }
 }
 
@@ -2217,7 +2259,7 @@ fn copy_mode_survives_mouse_motion_and_parks_across_focus_changes() {
     unfocused.focused_pane_id = Some("pane_2".into());
     unfocused.panes[0].focused = false;
     unfocused.panes.push(ClientShellPane {
-            tokens: Default::default(),
+        tokens: Default::default(),
         pane_id: "pane_2".into(),
         workspace_id: "ws_1".into(),
         tab_id: "tab_1".into(),

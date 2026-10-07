@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use crate::api::schema::{Method, Request, TabCreateParams, TabListParams, TabMoveParams, TabPinMoveParams, TabRenameParams, TabSetPinnedParams, TabTarget};
+use crate::api::schema::{
+    Method, Request, TabCreateParams, TabListParams, TabMoveParams, TabPinMoveParams,
+    TabRenameParams, TabSetPinnedParams, TabTarget,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Placement {
@@ -187,7 +190,9 @@ fn parse_move_args(args: &[String]) -> Result<(String, Placement), String> {
             "--before" => Placement::Before(super::normalize_tab_id(&pair[1])),
             "--after" => Placement::After(super::normalize_tab_id(&pair[1])),
             "--position" => {
-                let position = pair[1].parse::<usize>().map_err(|_| "--position must be a positive integer")?;
+                let position = pair[1]
+                    .parse::<usize>()
+                    .map_err(|_| "--position must be a positive integer")?;
                 if position == 0 {
                     return Err("--position must be at least 1".into());
                 }
@@ -207,17 +212,35 @@ fn same_workspace(source: &str, other: &str) -> Result<(), String> {
     if source == other {
         Ok(())
     } else {
-        Err(format!("cannot move tabs across workspaces ({source} and {other})"))
+        Err(format!(
+            "cannot move tabs across workspaces ({source} and {other})"
+        ))
     }
 }
 
 // The server interprets insert_index in the original list, then subtracts one
 // when removing a tab that precedes the insertion point.
-fn move_insert_index(order: &[String], tab_id: &str, placement: &Placement) -> Result<usize, String> {
-    let source = order.iter().position(|id| id == tab_id).ok_or("tab not in workspace")?;
+fn move_insert_index(
+    order: &[String],
+    tab_id: &str,
+    placement: &Placement,
+) -> Result<usize, String> {
+    let source = order
+        .iter()
+        .position(|id| id == tab_id)
+        .ok_or("tab not in workspace")?;
     let insert_index = match placement {
-        Placement::Before(other) => order.iter().position(|id| id == other).ok_or("reference tab not in workspace")?,
-        Placement::After(other) => order.iter().position(|id| id == other).ok_or("reference tab not in workspace")? + 1,
+        Placement::Before(other) => order
+            .iter()
+            .position(|id| id == other)
+            .ok_or("reference tab not in workspace")?,
+        Placement::After(other) => {
+            order
+                .iter()
+                .position(|id| id == other)
+                .ok_or("reference tab not in workspace")?
+                + 1
+        }
         Placement::Position(position) => {
             let final_index = position.saturating_sub(1).min(order.len() - 1);
             final_index + usize::from(source < final_index)
@@ -250,16 +273,22 @@ fn tab_move(args: &[String]) -> std::io::Result<i32> {
     let source_id = response_field(&source, "tab_id")?;
     let workspace_id = response_field(&source, "workspace_id")?;
     let placement = match &placement {
-        Placement::Before(other) | Placement::After(other) if other == source_id => placement.clone(),
+        Placement::Before(other) | Placement::After(other) if other == source_id => {
+            placement.clone()
+        }
         Placement::Before(other) | Placement::After(other) => {
             let reference = super::send_request(&Request {
                 id: "cli:tab:move:reference".into(),
-                method: Method::TabGet(TabTarget { tab_id: other.clone() }),
+                method: Method::TabGet(TabTarget {
+                    tab_id: other.clone(),
+                }),
             })?;
             if reference.get("error").is_some() {
                 return super::print_response(&reference);
             }
-            if let Err(message) = same_workspace(workspace_id, response_field(&reference, "workspace_id")?) {
+            if let Err(message) =
+                same_workspace(workspace_id, response_field(&reference, "workspace_id")?)
+            {
                 eprintln!("{message}");
                 return Ok(1);
             }
@@ -274,15 +303,25 @@ fn tab_move(args: &[String]) -> std::io::Result<i32> {
     };
     let list = super::send_request(&Request {
         id: "cli:tab:move:list".into(),
-        method: Method::TabList(TabListParams { workspace_id: Some(workspace_id.to_string()) }),
+        method: Method::TabList(TabListParams {
+            workspace_id: Some(workspace_id.to_string()),
+        }),
     })?;
     if list.get("error").is_some() {
         return super::print_response(&list);
     }
-    let tabs = list["result"]["tabs"].as_array()
+    let tabs = list["result"]["tabs"]
+        .as_array()
         .ok_or_else(|| std::io::Error::other("tab.list response missing tabs"))?;
-    let order: Vec<String> = tabs.iter().map(|tab| tab["tab_id"].as_str().map(str::to_string)
-        .ok_or_else(|| std::io::Error::other("tab.list response missing tab_id"))).collect::<std::io::Result<_>>()?;
+    let order: Vec<String> = tabs
+        .iter()
+        .map(|tab| {
+            tab["tab_id"]
+                .as_str()
+                .map(str::to_string)
+                .ok_or_else(|| std::io::Error::other("tab.list response missing tab_id"))
+        })
+        .collect::<std::io::Result<_>>()?;
     let insert_index = match move_insert_index(&order, source_id, &placement) {
         Ok(index) => index,
         Err(message) => {
@@ -290,10 +329,14 @@ fn tab_move(args: &[String]) -> std::io::Result<i32> {
             return Ok(1);
         }
     };
-    if matches!(&placement, Placement::Before(other) | Placement::After(other) if other == source_id) {
+    if matches!(&placement, Placement::Before(other) | Placement::After(other) if other == source_id)
+    {
         return super::print_response(&list);
     }
-    super::runtime::tab_move(TabMoveParams { tab_id: source_id.to_string(), insert_index })
+    super::runtime::tab_move(TabMoveParams {
+        tab_id: source_id.to_string(),
+        insert_index,
+    })
 }
 
 fn tab_pin(args: &[String]) -> std::io::Result<i32> {
@@ -426,7 +469,8 @@ mod tests {
                 insert_index - 1
             } else {
                 insert_index
-            }.min(order.len() - 1);
+            }
+            .min(order.len() - 1);
             let mut final_order = order.to_vec();
             let moved = final_order.remove(source_index);
             final_order.insert(destination, moved);
@@ -436,11 +480,17 @@ mod tests {
 
     #[test]
     fn move_arguments_require_one_placement_and_reject_cross_workspace() {
-        let parse = |args: &[&str]| parse_move_args(&args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>());
-        assert_eq!(parse(&["w5H:tE7", "--after", "w5H:tE8"]),
-            Ok(("w5H:tE7".into(), Placement::After("w5H:tE8".into()))));
-        assert_eq!(parse(&["w5H:tE7", "--position", "1"]),
-            Ok(("w5H:tE7".into(), Placement::Position(1))));
+        let parse = |args: &[&str]| {
+            parse_move_args(&args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>())
+        };
+        assert_eq!(
+            parse(&["w5H:tE7", "--after", "w5H:tE8"]),
+            Ok(("w5H:tE7".into(), Placement::After("w5H:tE8".into())))
+        );
+        assert_eq!(
+            parse(&["w5H:tE7", "--position", "1"]),
+            Ok(("w5H:tE7".into(), Placement::Position(1)))
+        );
         for args in [
             &[][..],
             &["w5H:tE7"][..],
@@ -450,15 +500,16 @@ mod tests {
         ] {
             assert!(parse(args).is_err(), "{args:?}");
         }
-        assert!(same_workspace("w5H", "w6Q").unwrap_err().contains("across workspaces"));
+        assert!(same_workspace("w5H", "w6Q")
+            .unwrap_err()
+            .contains("across workspaces"));
         assert!(same_workspace("w5H", "w5H").is_ok());
-        for args in [
-            &[][..],
-            &["--before", "w5H:tE8", "--after", "w5H:tE9"][..],
-        ] {
+        for args in [&[][..], &["--before", "w5H:tE8", "--after", "w5H:tE9"][..]] {
             let mut cli_args = vec!["herdr", "tab", "move", "w5H:tE7"];
             cli_args.extend(args);
-            assert!(super::super::spec::command().try_get_matches_from(cli_args).is_err());
+            assert!(super::super::spec::command()
+                .try_get_matches_from(cli_args)
+                .is_err());
         }
         assert!(super::super::spec::command()
             .try_get_matches_from(["herdr", "tab", "move", "w5H:tE7", "--before", "w5H:tE8"])

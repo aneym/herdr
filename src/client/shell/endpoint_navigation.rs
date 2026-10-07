@@ -50,22 +50,42 @@ impl ClientShellState {
         tab_id: String,
         outcome: &mut ClientShellInput,
     ) {
-        if !self.endpoint_is_online(&endpoint_id) { return; }
-        let Some(snapshot) = self.endpoints.iter()
+        if !self.endpoint_is_online(&endpoint_id) {
+            return;
+        }
+        let Some(snapshot) = self
+            .endpoints
+            .iter()
             .find(|endpoint| endpoint.endpoint_id == endpoint_id)
-            .and_then(|endpoint| endpoint.snapshot.as_deref()) else { return; };
+            .and_then(|endpoint| endpoint.snapshot.as_deref())
+        else {
+            return;
+        };
         let pinned = snapshot.pinned_tabs.iter().any(|pin| pin.tab_id == tab_id);
         let boot_id = snapshot.boot_id.clone();
         let id = format!("client-shell:{}", self.next_request_id);
         self.next_request_id = self.next_request_id.saturating_add(1);
-        self.pending_requests.insert(id.clone(), PendingEndpointRequest {
-            boot_id: boot_id.clone(), method_name: "tab.set_pinned".into(),
-            confirmation_workspace_id: None, kind: PendingEndpointKind::Generic,
-        });
-        outcome.actions.push(ClientShellAction::Endpoint { endpoint_id, boot_id,
-            request: Box::new(crate::api::schema::Request { id,
+        self.pending_requests.insert(
+            id.clone(),
+            PendingEndpointRequest {
+                boot_id: boot_id.clone(),
+                method_name: "tab.set_pinned".into(),
+                confirmation_workspace_id: None,
+                kind: PendingEndpointKind::Generic,
+            },
+        );
+        outcome.actions.push(ClientShellAction::Endpoint {
+            endpoint_id,
+            boot_id,
+            request: Box::new(crate::api::schema::Request {
+                id,
                 method: crate::api::schema::Method::TabSetPinned(
-                    crate::api::schema::TabSetPinnedParams { tab_id, pinned: !pinned, priority: None }),
+                    crate::api::schema::TabSetPinnedParams {
+                        tab_id,
+                        pinned: !pinned,
+                        priority: None,
+                    },
+                ),
             }),
         });
         outcome.repaint = true;
@@ -76,12 +96,21 @@ impl ClientShellState {
         point: (u16, u16),
         outcome: &mut ClientShellInput,
     ) -> bool {
-        if let Some((_, pin, endpoint_id, tab_id)) = self.hits.endpoint_pins.iter()
-            .find(|(rect, _, _, _)| super::contains(*rect, point)).cloned() {
+        if let Some((_, pin, endpoint_id, tab_id)) = self
+            .hits
+            .endpoint_pins
+            .iter()
+            .find(|(rect, _, _, _)| super::contains(*rect, point))
+            .cloned()
+        {
             if super::contains(pin, point) {
                 self.toggle_endpoint_chat_pin(endpoint_id, tab_id, outcome);
             } else {
-                self.focus_or_activate(endpoint_id, ClientEndpointFocusTarget::Tab(tab_id), outcome);
+                self.focus_or_activate(
+                    endpoint_id,
+                    ClientEndpointFocusTarget::Tab(tab_id),
+                    outcome,
+                );
             }
             outcome.repaint = true;
             return true;

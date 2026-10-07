@@ -214,7 +214,14 @@ fn read_host_keyboard_probe(
                 buffered_input.extend_from_slice(&scratch[..read]);
                 consume_host_keyboard_probe_responses(&mut buffered_input, &mut responses);
             }
-            Err(err) if matches!(err.kind(), io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock) => continue,
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
+                ) =>
+            {
+                continue
+            }
             Err(err) => {
                 tracing::debug!(%err, "host keyboard enhancement query read failed");
                 break;
@@ -820,16 +827,19 @@ mod tests {
             let original = unsafe { libc::fcntl(fd, libc::F_GETFL) };
             assert!(original >= 0);
             let start = Instant::now();
-            let result = read_host_keyboard_probe(fd, start + HOST_KEYBOARD_QUERY_TIMEOUT, |_, _| Ok(true));
+            let result =
+                read_host_keyboard_probe(fd, start + HOST_KEYBOARD_QUERY_TIMEOUT, |_, _| Ok(true));
             let restored = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-            send.send((result, start.elapsed(), original, restored)).unwrap();
+            send.send((result, start.elapsed(), original, restored))
+                .unwrap();
         });
         // Closing the writer releases a blocking base read even when the guard
         // regresses, so a failed regression never leaves the test process hung.
         let result = receive.recv_timeout(HOST_KEYBOARD_QUERY_TIMEOUT + Duration::from_millis(200));
         drop(writer);
         worker.join().unwrap();
-        let (probe, elapsed, original, restored) = result.expect("probe exceeded its deadline after a spurious wakeup");
+        let (probe, elapsed, original, restored) =
+            result.expect("probe exceeded its deadline after a spurious wakeup");
         assert_eq!(probe, (false, Vec::new()));
         assert!(elapsed <= HOST_KEYBOARD_QUERY_TIMEOUT + Duration::from_millis(200));
         assert_eq!(restored, original, "probe must restore the fd flags");
