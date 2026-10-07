@@ -666,9 +666,11 @@ mod tests {
                 entrypoint: "main".into(),
             },
         );
-        let request: crate::api::schema::Request =
-            serde_json::from_str(r#"{"id":"agents-test","method":"agents.list","params":{}}"#)
-                .unwrap();
+        let request = crate::cli::pinned_agents_request();
+        assert_eq!(
+            serde_json::to_value(&request).unwrap()["method"],
+            "agents.list"
+        );
         let response = app.handle_api_request(request);
         let value: serde_json::Value = serde_json::from_str(&response).unwrap();
         let agents = value["result"]["agents"].as_array().unwrap();
@@ -688,6 +690,19 @@ mod tests {
         assert!(agents[1]["plugin_id"].is_null());
         assert!(agents[1]["state_dir"].is_null());
         assert!(agents[1]["session_id"].is_null());
+
+        let terminal = app.state.terminals.values_mut().next().unwrap();
+        terminal.set_detected_state(Some(Agent::Codex), AgentState::Idle);
+        let legacy = app.handle_api_request(crate::api::schema::Request {
+            id: "cli:agent:list".into(),
+            method: crate::api::schema::Method::AgentList(Default::default()),
+        });
+        let legacy: serde_json::Value = serde_json::from_str(&legacy).unwrap();
+        let legacy_agents = legacy["result"]["agents"].as_array().unwrap();
+        assert_eq!(legacy_agents.len(), 1);
+        assert!(legacy_agents[0]["terminal_id"].is_string());
+        assert!(legacy_agents[0].get("pin_index").is_none());
+        assert!(legacy_agents[0].get("plugin_id").is_none());
     }
 
     fn app_with_agent() -> App {

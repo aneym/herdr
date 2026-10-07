@@ -23,6 +23,9 @@ macro_rules! println {
 }
 
 mod agent;
+
+#[cfg(test)]
+pub(crate) use agent::pinned_agents_request;
 mod api;
 mod completion;
 mod desk;

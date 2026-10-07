@@ -18,6 +18,7 @@ pub(super) fn run_agent_command(args: &[String]) -> std::io::Result<i32> {
 
     match subcommand {
         "list" => agent_list(&args[1..]),
+        "pinned" => agent_pinned(&args[1..]),
         "usage" => agent_usage(&args[1..]),
         "get" => agent_get(&args[1..]),
         "read" => agent_read(&args[1..]),
@@ -467,15 +468,31 @@ fn agent_start(args: &[String]) -> std::io::Result<i32> {
 }
 
 fn agent_list(args: &[String]) -> std::io::Result<i32> {
-    if !args.is_empty() && args != ["--json"] {
-        eprintln!("usage: herdr agent list [--json]");
+    if !args.is_empty() {
+        eprintln!("usage: herdr agent list");
         return Ok(2);
     }
 
     super::print_response(&super::send_request(&Request {
         id: "cli:agent:list".into(),
-        method: Method::AgentsList(EmptyParams::default()),
+        method: Method::AgentList(EmptyParams::default()),
     })?)
+}
+
+fn agent_pinned(args: &[String]) -> std::io::Result<i32> {
+    if !args.is_empty() && args != ["--json"] {
+        eprintln!("usage: herdr agent pinned [--json]");
+        return Ok(2);
+    }
+
+    super::print_response(&super::send_request(&pinned_agents_request())?)
+}
+
+pub(crate) fn pinned_agents_request() -> Request {
+    Request {
+        id: "cli:agent:pinned".into(),
+        method: Method::AgentsList(EmptyParams::default()),
+    }
 }
 
 fn agent_usage(args: &[String]) -> std::io::Result<i32> {
@@ -1101,6 +1118,7 @@ fn parse_agent_group(args: &[String]) -> Result<(&'static str, Method), i32> {
 fn print_agent_help() {
     eprintln!("herdr agent commands:");
     eprintln!("  herdr agent list");
+    eprintln!("  herdr agent pinned [--json]");
     eprintln!("  herdr agent usage");
     eprintln!("  herdr agent get <target>");
     eprintln!("  herdr agent read <target> [--source visible|recent|recent-unwrapped|detection] [--lines N] [--format text|ansi] [--ansi]");
