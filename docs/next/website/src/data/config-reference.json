@@ -27,6 +27,29 @@
           "type": "integer",
           "default": "40",
           "description": "Virtual terminal height used for layout and newly created panes when no client is attached. Must be greater than zero."
+        },
+        {
+          "key": "server.polite_send",
+          "type": "enum",
+          "default": "\"agents\"",
+          "description": "Which panes wait for the user to stop typing before Herdr sends them text: `agents` (only panes running an agent), `all`, or `off`.",
+          "values": [
+            "agents",
+            "all",
+            "off"
+          ]
+        },
+        {
+          "key": "server.polite_send_quiet_secs",
+          "type": "integer",
+          "default": "30",
+          "description": "Seconds without keyboard input before Herdr sends queued text to a pane."
+        },
+        {
+          "key": "server.polite_send_submit_settle_ms",
+          "type": "integer",
+          "default": "1500",
+          "description": "Milliseconds to wait after the user submits input before Herdr sends queued text."
         }
       ]
     },
@@ -900,6 +923,18 @@
           "type": "string",
           "default": "unset",
           "description": "Modifier combo for agent shortcuts 1-9. Unset by default."
+        },
+        {
+          "key": "keys.next_attention",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Jump to the next agent that is blocked or has unread output, or to the next open factory question. Unset by default."
+        },
+        {
+          "key": "keys.toggle_factory_overview",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Show or hide the factory overview detail panel. Unset by default."
         }
       ]
     },
@@ -1253,6 +1288,30 @@
           "type": "color",
           "default": "\"cyan\"",
           "description": "Accent color for highlights, borders, and navigation UI. Accepts hex (#89b4fa), named colors (cyan, blue), or RGB (rgb(137,180,250))."
+        },
+        {
+          "key": "ui.factory",
+          "type": "table",
+          "default": "{ enabled = false, overlay_file = \"~/.agent-rails/herdr/overlay.json\", panel_width = 46 }",
+          "description": "Factory overlay settings: `enabled` turns it on, `overlay_file` is the JSON file it reads, and `panel_width` is the panel width in columns."
+        },
+        {
+          "key": "ui.show_finished_dot",
+          "type": "boolean",
+          "default": "false",
+          "description": "Show a dot on tabs whose agent finished while you were away. An explicit `idle_unseen` icon still draws when this is off."
+        },
+        {
+          "key": "ui.sidebar.priority.order",
+          "type": "list of strings",
+          "default": "[]",
+          "description": "Workspaces and tabs to list first, in this order. Entries are workspace IDs or labels, or `tab:<id or glob>`."
+        },
+        {
+          "key": "ui.sidebar.priority.last",
+          "type": "list of strings",
+          "default": "[]",
+          "description": "Workspaces and tabs to park at the bottom, after everything unmatched. Same entry format as `order`."
         }
       ]
     },
