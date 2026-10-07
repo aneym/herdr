@@ -107,6 +107,8 @@ final class TestHook {
             mouse(obj)
         case "drag_divider":
             dragDivider(obj)
+        case "drag_doc_handle":
+            dragDocHandle(obj)
         case "drag_pin":
             dragPin(obj)
         case "set_role":
@@ -492,6 +494,45 @@ final class TestHook {
                 self?.dragRunning = false
             }
         }
+    }
+
+    /// {"cmd":"drag_doc_handle","dx":-80,"steps":8,"interval":0.05}: press on the docs column's
+    /// width handle, drag `dx` points (right positive) and release, through window.sendEvent so
+    /// a non-key window applies its first-mouse rule as for a physical click. `drag_running` in
+    /// the state says when it is done.
+    private func dragDocHandle(_ obj: [String: Any]) {
+        // A hidden column has no laid-out handle; pressing its zero frame would hit the window corner.
+        guard let c = controller, !dragRunning, !c.docPanel.view.isHidden, c.docPanel.view.window != nil,
+              c.docPanel.widthHandle.bounds.height > 0 else { log("hook: drag_doc_handle: no docs column"); return }
+        let h = c.docPanel.widthHandle
+        let dx = CGFloat(obj["dx"] as? Double ?? Double(obj["dx"] as? Int ?? 0))
+        let steps = max(1, obj["steps"] as? Int ?? 8)
+        let interval = obj["interval"] as? Double ?? 0.05
+        let start = h.convert(NSPoint(x: h.bounds.midX, y: h.bounds.midY), to: nil)
+        func post(_ type: NSEvent.EventType, _ p: NSPoint) {
+            guard let ev = NSEvent.mouseEvent(with: type, location: p, modifierFlags: [],
+                                              timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: c.window.windowNumber,
+                                              context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1) else { return }
+            c.window.sendEvent(ev)
+        }
+        dragRunning = true
+        delivered.append("drag_doc_handle dx=\(dx) key=\(c.window.isKeyWindow) via window.sendEvent")
+        post(.leftMouseDown, start)
+        var i = 0
+        // Common modes, so the release still comes while AppKit tracks the mouse.
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] t in
+            i += 1
+            let p = NSPoint(x: start.x + dx * CGFloat(min(i, steps)) / CGFloat(steps), y: start.y)
+            if i <= steps {
+                post(.leftMouseDragged, p)
+            } else {
+                post(.leftMouseUp, p)
+                t.invalidate()
+                self?.dragRunning = false
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        dragTimer = timer
     }
 
     /// {"cmd":"drag_pin","row":"pinned:<tab>","dy":48,"steps":8,"interval":0.05,"esc":false}: press

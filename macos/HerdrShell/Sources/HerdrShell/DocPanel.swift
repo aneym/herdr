@@ -17,6 +17,8 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
     private(set) var pageText = ""
 
     private let handle = DocWidthHandle()
+    /// The left-edge width handle, for the test hook's real-event drag.
+    var widthHandle: NSView { handle }
     private let approve = NoFocusButton()
     private let add = NoFocusButton()
     private let close = NoFocusButton()

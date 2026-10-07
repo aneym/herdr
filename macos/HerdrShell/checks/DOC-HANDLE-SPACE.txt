@@ -1,0 +1,4 @@
+[PASS] docs drawn 510 wide in the key window
+[PASS] control: a drag on the key window narrows it by 40
+[PASS] Finder in front: Herdr Shell inactive, window not key
+[PASS] the first press on the handle of an inactive window drags it 80 wider
