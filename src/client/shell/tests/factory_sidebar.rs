@@ -3945,6 +3945,10 @@ fn factory_goal_filter_limits_sections_shortcuts_and_clear_restores_rows() {
     assert!(focused.iter().any(|row| row.contains("show all · 2 more")));
     state.tree_chrome_mut().factory_section_focus.clear();
     let clear = hits.factory_goal_picker.as_ref().unwrap().1;
+    let fold = hits.spaces_fold_all.unwrap().0;
+    assert!(!clear.intersects(fold));
+    assert_eq!(buffer[(clear.right() - 1, clear.y)].symbol(), "✕");
+    assert_eq!(buffer[(fold.right() - 1, fold.y)].symbol(), "⊟");
     state.hits = hits;
     state.last_composed_size = Some((120, 60));
     factory_click(
