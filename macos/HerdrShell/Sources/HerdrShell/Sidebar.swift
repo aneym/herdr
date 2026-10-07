@@ -587,7 +587,6 @@ struct SidebarView: View {
                     .background(RoundedRectangle(cornerRadius: 4).stroke(t.line, lineWidth: 1))
             }
         }
-        .opacity(l.dim ? 0.72 : 1)
         .padding(.leading, CGFloat(6 + l.depth * 16))
         .padding(.trailing, 6)
         .padding(.vertical, 4)
