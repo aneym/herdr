@@ -958,16 +958,14 @@ impl HeadlessServer {
         let proxied_request_succeeded = proxied_result.is_some();
         // No-op moves and dry-run placements must not request shell focus.
         let pane_move_focus_succeeded = inspect_pane_move
-            && matches!(
+            && (matches!(
                 &proxied_result,
                 Some(api::schema::ResponseResult::PaneMove { move_result }) if move_result.changed
-            )
-            || (inspect_pane_move
-                && matches!(
-                    &proxied_result,
-                    Some(api::schema::ResponseResult::PanePlace { place })
-                        if place.changed && !place.dry_run
-                ));
+            ) || matches!(
+                &proxied_result,
+                Some(api::schema::ResponseResult::PanePlace { place })
+                    if place.changed && !place.dry_run
+            ));
         let successful_agent_focus_target = proxied_request_succeeded
             .then(|| {
                 agent_focus_target.as_deref().and_then(|target| {
