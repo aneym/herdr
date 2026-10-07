@@ -163,6 +163,8 @@ def main():
         if selected_before and not gated:
             try:
                 ctl({"cmd": "open", "tab_id": selected_before})
+            except pc.Gated:
+                raise
             except SystemExit:
                 pass
         alex_after = (server_pins(True), server_pins(False))

@@ -12,6 +12,7 @@ import base64
 import contextlib
 import importlib.util
 import io
+import itertools
 import json
 from pathlib import Path
 import re
@@ -90,6 +91,7 @@ def helper_reply(helper, args):
     if cmd['cmd'] == 'appearance':
         return json.dumps({'ok': True, 'mode': cmd['mode']})
     return json.dumps({'ok': True, 'commit': 'c', 'machine': {'state': 'up'}, 'rows': [], 'panes': [],
+                       'selected_tab': 't-alex',
                        'appearance': {'mode': 'light', 'override': 'system'}})
 
 
@@ -108,7 +110,7 @@ def outcome(fake, fn):
     with mock.patch.object(subprocess, 'run', fake.run), \
          mock.patch.object(pin_drag, 'OUT', Path(tempfile.mkdtemp()) / 'PIN-DRAG.txt'), \
          mock.patch.object(sys, 'argv', ['theme_check', '--out-dir', tempfile.mkdtemp()]), \
-         mock.patch('time.sleep'), \
+         mock.patch('time.sleep'), mock.patch('time.monotonic', itertools.count(step=5).__next__), \
          contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
         try:
             return fn() or 0
@@ -120,7 +122,7 @@ def ns(**kw):
     return argparse.Namespace(**kw)
 
 
-# name: (entry point, exit status with no game; None when the fake cannot satisfy its checks)
+# name: (entry point, exit status with no game against the fake PC)
 COMMANDS = {
     'install --relaunch': (lambda: pc.cmd_install(ns(sha='a' * 40, relaunch=True)), 0),
     'ctl update apply': (lambda: pc.cmd_ctl(ns(json='{"cmd":"update","action":"apply"}')), 0),
@@ -128,6 +130,7 @@ COMMANDS = {
     'shot': (lambda: pc.cmd_shot(ns(out=str(Path(tempfile.mkdtemp()) / 'shot.png'))), 0),
     'stage': (lambda: pc.ps_file('stage.ps1', '-Sha', 'a' * 40)[0], 0),
     'theme_check': (theme_check.main, 1),  # a mid-grey shot is neither light nor dark
+    'check_pin_drag': (pin_drag.main, 'FAIL'),  # the fake UI never shows the dragged order
 }
 
 
@@ -139,7 +142,9 @@ class GateTests(unittest.TestCase):
                 rc = outcome(fake, fn)
                 self.assertEqual(set(fake.direct) - PROBES, set())
                 self.assertTrue(fake.gated)
-                if expected is not None:
+                if expected == 'FAIL':
+                    self.assertTrue(str(rc).startswith('FAIL'), rc)
+                else:
                     self.assertEqual(rc, expected)
 
     def test_a_refusal_at_any_step_ends_the_command_with_75(self):
@@ -152,12 +157,10 @@ class GateTests(unittest.TestCase):
                     self.assertEqual(outcome(fake, fn), 75)
                     self.assertEqual(len(fake.gated), step + 1)
 
-    def test_pin_drag_closes_its_server_workspace_and_stops_at_a_refusal(self):
+    def test_pin_drag_closes_its_server_workspace_at_a_refusal(self):
         fake = FakePC(refuse_at=2)  # ping, ui, then the first wait on the throwaway pins
         self.assertEqual(outcome(fake, pin_drag.main), 75)
-        self.assertEqual(len(fake.gated), 3)
         self.assertIn(['workspace', 'close'], fake.herdr)
-
 
 if __name__ == '__main__':
     unittest.main()

@@ -52,8 +52,8 @@ def remote(cmd, input_data=None, stream=False, timeout=None):
 class Gated(SystemExit):
     """A game runs on the PC: the helper did not act, and nothing after it may."""
 
-    def __init__(self, name):
-        print(f"game running; {name} not run (exit 75)", file=sys.stderr)
+    def __init__(self, name, reason=""):
+        print(f"{reason.strip() or 'GATED'}; {name} not run (exit 75)", file=sys.stderr)
         super().__init__(75)
 
 
@@ -72,7 +72,7 @@ def ps_file(name, *args, stream=False, timeout=None):
         cmd = f"{PS} -File {R_SCRIPTS}/gated.ps1 -Script {name} -ArgsB64 {b64}"
     rc, out = remote(cmd, stream=stream, timeout=timeout)
     if rc == GATED and name not in UNGATED:
-        raise Gated(name)
+        raise Gated(name, out)
     return rc, out
 
 
