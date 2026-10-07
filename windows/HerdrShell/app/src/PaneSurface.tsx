@@ -4,8 +4,12 @@ import type { PaneController } from "./PaneTerm";
 import type { Pane } from "./model";
 import Chat from "./Chat";
 export type PaneMode = "terminal" | "chat";
-export default function PaneSurface(props: { pane: Pane; machine: string; focused: boolean; onFocus: (id: string) => void; shortcut: (event: KeyboardEvent) => boolean; register: (id: string, controller: PaneController | null) => void; hasAgent: boolean }) {
-  const { pane, machine, hasAgent, register } = props;
+/** The tab's pin as a pushpin; the slash marks the click that unpins. */
+function PinGlyph({ pinned }: { pinned: boolean }) {
+  return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2.5h4M7 2.5v4L4.5 9h7L9 6.5v-4M8 9v4.5" />{pinned && <path d="M3 3l10 10" />}</svg>;
+}
+export default function PaneSurface(props: { pane: Pane; machine: string; focused: boolean; onFocus: (id: string) => void; shortcut: (event: KeyboardEvent) => boolean; register: (id: string, controller: PaneController | null) => void; hasAgent: boolean; pinned?: boolean; onPin?: () => void }) {
+  const { pane, machine, hasAgent, register, pinned, onPin } = props;
   const storageKey = `herdr-shell.mode.${machine}.${pane.pane_id}`;
   const [mode, setMode] = useState<PaneMode>(() => { try { return localStorage.getItem(storageKey) === "chat" ? "chat" : "terminal"; } catch { return "terminal"; } });
   const [mounted, setMounted] = useState(mode === "chat");
@@ -34,6 +38,9 @@ export default function PaneSurface(props: { pane: Pane; machine: string; focuse
   return <div className="pane-surface" onMouseDown={() => props.onFocus(pane.pane_id)}>
     <div className={`terminal-surface ${chat ? "terminal-hidden" : ""}`} aria-hidden={chat}><PaneTerm {...props} focused={props.focused && !chat} register={wrappedRegister} /></div>
     {mounted && hasAgent && <div className={`chat-surface ${chat ? "" : "chat-hidden"}`}><Chat machine={machine} pane={pane.pane_id} focused={props.focused} visible={chat} onItems={onItems} /></div>}
-    {hasAgent && <button className="pane-mode" title="Toggle chat" onClick={() => set(chat ? "terminal" : "chat")}>{chat ? "Terminal" : "Chat"}</button>}
+    {(hasAgent || pinned !== undefined) && <div className="pane-tools">
+      {hasAgent && <button className="pane-mode" title="Toggle chat" onClick={() => set(chat ? "terminal" : "chat")}>{chat ? "Terminal" : "Chat"}</button>}
+      {pinned !== undefined && <button className={`pane-pin ${pinned ? "is-pinned" : ""}`} aria-pressed={pinned} aria-label={pinned ? "Unpin this tab" : "Pin this tab"} title={pinned ? "Unpin this chat" : "Pin this chat to the end of Pinned"} onClick={onPin}><PinGlyph pinned={pinned} /></button>}
+    </div>}
   </div>;
 }
