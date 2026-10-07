@@ -39,7 +39,7 @@ const mouseReport = (data: string) => data.startsWith("\x1b[<") || data.startsWi
 // Call after term.open. A click xterm does not link (a wrapped URL's continuation rows) is
 // resolved through the server from the terminal's own mouseup.
 export function installLinks(term: Terminal, server: LinkServer, open: (url: string) => void): LinkGate {
-  const linked = new WeakMap<MouseEvent, Promise<boolean>>();
+  const linked = new WeakMap<MouseEvent, string>();
   let gesture: Gesture | null = null;
   const settle = (g: Gesture, hit: boolean) => { if (gesture === g) gesture = null; if (!hit) g.held.forEach(flush => flush()); };
   const finish = async (cell: { row: number; col: number } | null, resolved: string | null) => {
@@ -54,7 +54,8 @@ export function installLinks(term: Terminal, server: LinkServer, open: (url: str
     const text = spanText(term, regions);
     return finish(cell, webUrl(text) ? text : null);
   };
-  const activate = (event: MouseEvent, uri: string) => { if (event.ctrlKey) linked.set(event, finish(cellAt(term, event), uri)); };
+  // xterm activates on a release anywhere in the pressed link; the gesture decides in `up`.
+  const activate = (event: MouseEvent, uri: string) => { if (event.ctrlKey) linked.set(event, uri); };
   term.options.linkHandler = { activate };
   term.loadAddon(new WebLinksAddon(activate));
   const screen = term.element?.querySelector(".xterm-screen");
@@ -67,15 +68,19 @@ export function installLinks(term: Terminal, server: LinkServer, open: (url: str
     const g = gesture, mouse = event as MouseEvent, cell = cellAt(term, mouse);
     if (!g || mouse.button !== 0) return;
     if (!mouse.ctrlKey || !cell || cell.row !== g.cell.row || cell.col !== g.cell.col) { settle(g, false); return; }
-    void (linked.get(mouse) ?? resolve(cell)).then(hit => settle(g, hit), () => settle(g, false));
+    const uri = linked.get(mouse);
+    void (uri != null ? finish(cell, uri) : resolve(cell)).then(hit => settle(g, hit), () => settle(g, false));
   };
-  // A release outside the grid ends the gesture before xterm reports it from the document.
+  // A release outside the grid ends the gesture before xterm reports it from the document; a
+  // window that loses focus may never see the release at all.
   const away = (event: Event) => { if (gesture && !(screen && event.target instanceof Node && screen.contains(event.target))) settle(gesture, false); };
+  const blur = () => { if (gesture) settle(gesture, false); };
   screen?.addEventListener("mousedown", down);
   screen?.addEventListener("mouseup", up);
   window.addEventListener("mouseup", away, true);
+  window.addEventListener("blur", blur);
   return {
     hold: (data, flush) => { if (!gesture || !mouseReport(data)) return false; gesture.held.push(flush); return true; },
-    dispose: () => { screen?.removeEventListener("mousedown", down); screen?.removeEventListener("mouseup", up); window.removeEventListener("mouseup", away, true); },
+    dispose: () => { screen?.removeEventListener("mousedown", down); screen?.removeEventListener("mouseup", up); window.removeEventListener("mouseup", away, true); window.removeEventListener("blur", blur); },
   };
 }

@@ -40,8 +40,9 @@ async function click(term: Terminal, row: number, col: number, ctrlKey = true, t
   const screen = term.element!.querySelector(".xterm-screen")!;
   screen.dispatchEvent(at("mousedown", row, col, ctrlKey));
   report?.("down");
-  const event = at("mouseup", to.row, to.col, ctrlKey), link = to.row === row && to.col === col ? await xtermLink(term, row, col) : undefined;
-  link?.activate(event, link.text);
+  // The Linkifier activates when press and release land in the same link.
+  const event = at("mouseup", to.row, to.col, ctrlKey), link = await xtermLink(term, row, col), other = await xtermLink(term, to.row, to.col);
+  if (link && other?.text === link.text) link.activate(event, link.text);
   screen.dispatchEvent(event);
   report?.("up");
   await flushed();
@@ -112,6 +113,22 @@ describe("terminal link clicks", () => {
     expect(run.open).not.toHaveBeenCalled();
     expect(sent).toEqual([press, release]);
     expect(run.gate.hold("x", () => {})).toBe(false);
+  });
+  it("a Ctrl-drag inside one link opens nothing and the program gets the whole drag", async () => {
+    const sent: string[] = [];
+    const { term, open, gate } = await pane("see https://example.com/a?b=1 now");
+    await click(term, 0, 10, true, { row: 0, col: 12 }, phase => { const data = phase === "down" ? "\x1b[<16;11;1M" : "\x1b[<16;13;1m"; if (!gate.hold(data, () => sent.push(data))) sent.push(data); });
+    expect(open).not.toHaveBeenCalled();
+    expect(sent).toEqual(["\x1b[<16;11;1M", "\x1b[<16;13;1m"]);
+  });
+  it("a window that loses focus mid-click replays the held press and holds nothing after", async () => {
+    const sent: string[] = [];
+    const { term, gate } = await pane(wrapped);
+    term.element!.querySelector(".xterm-screen")!.dispatchEvent(at("mousedown", 1, 4));
+    expect(gate.hold("\x1b[<16;5;2M", () => sent.push("press"))).toBe(true);
+    window.dispatchEvent(new Event("blur"));
+    expect(sent).toEqual(["press"]);
+    expect(gate.hold("\x1b[<35;6;2M", () => {})).toBe(false);
   });
 });
 // Golden policy table: the same cases as macos/HerdrShell/scripts/check_terminal_links.py.
