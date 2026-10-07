@@ -849,6 +849,42 @@ fn pane_info_reports_foreground_cwd_without_changing_pane_cwd() {
         foreground
     );
 
+    // The marker proves the child changed cwd, not that the server has sampled
+    // the new foreground group or that the sleep child has started.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let process_info = loop {
+        let response = send_request(
+            &socket_path,
+            &format!(
+                r#"{{"id":"fg_process_info","method":"pane.process_info","params":{{"pane_id":"{}"}}}}"#,
+                pane_id
+            ),
+        );
+        let info = &response["result"]["process_info"];
+        let ready = info["foreground_process_group_id"] == foreground_pid
+            && info["foreground_processes"]
+                .as_array()
+                .is_some_and(|processes| {
+                    processes.iter().any(|process| {
+                        process["pid"] == foreground_pid
+                            && process["name"] == "sh"
+                            && process["cwd"] == foreground.display().to_string()
+                    }) && processes.iter().any(|process| {
+                        process["name"] == "sleep"
+                            && process["pid"] != foreground_pid
+                            && process["cwd"] == foreground.display().to_string()
+                    })
+                });
+        if ready {
+            break response;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "foreground job did not become ready for pid {foreground_pid}: {response}"
+        );
+        thread::sleep(Duration::from_millis(25));
+    };
+
     let pane = send_request(
         &socket_path,
         &format!(
@@ -875,13 +911,6 @@ fn pane_info_reports_foreground_cwd_without_changing_pane_cwd() {
         foreground.display().to_string()
     );
 
-    let process_info = send_request(
-        &socket_path,
-        &format!(
-            r#"{{"id":"fg_process_info","method":"pane.process_info","params":{{"pane_id":"{}"}}}}"#,
-            pane_id
-        ),
-    );
     let process_info = &process_info["result"]["process_info"];
     assert!(process_info["shell_pid"].is_number());
     assert_eq!(process_info["foreground_process_group_id"], foreground_pid);
