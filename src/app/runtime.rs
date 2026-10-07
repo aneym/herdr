@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use super::{
     background_update_check_enabled, App, AUTO_UPDATE_CHECK_INTERVAL, MIN_RENDER_INTERVAL,
+    SCROLL_PRESENT_INTERVAL, SCROLL_PRESENT_WINDOW,
 };
 fn retain_detached_process_after_wait(
     pid: u32,
@@ -81,9 +82,22 @@ impl App {
     pub(crate) fn can_present_now(&self, now: Instant) -> bool {
         match self.last_presentation_at {
             Some(last_presentation_at) => {
-                now.duration_since(last_presentation_at) >= MIN_RENDER_INTERVAL
+                now.duration_since(last_presentation_at) >= self.presentation_interval(now)
             }
             None => true,
+        }
+    }
+
+    /// A terminal attach client scrolled: present at the scroll cadence for a while.
+    pub(crate) fn note_attach_scroll(&mut self, now: Instant) {
+        self.scroll_present_until = Some(now + SCROLL_PRESENT_WINDOW);
+    }
+
+    fn presentation_interval(&self, now: Instant) -> std::time::Duration {
+        if self.scroll_present_until.is_some_and(|until| now < until) {
+            SCROLL_PRESENT_INTERVAL
+        } else {
+            MIN_RENDER_INTERVAL
         }
     }
 
@@ -139,8 +153,15 @@ impl App {
         include_git_refresh: bool,
     ) -> Option<Instant> {
         let render_deadline = if needs_render {
+            let scroll_deadline = self
+                .last_presentation_at
+                .filter(|_| self.presentation_interval(now) < MIN_RENDER_INTERVAL)
+                .map(|last_presentation_at| last_presentation_at + SCROLL_PRESENT_INTERVAL);
             self.last_render_at
                 .map(|last_render_at| last_render_at + MIN_RENDER_INTERVAL)
+                .into_iter()
+                .chain(scroll_deadline)
+                .min()
                 .filter(|deadline| *deadline > now)
         } else {
             None
@@ -221,6 +242,26 @@ mod tests {
 
         assert!(!app.can_render_now(foreground_echo));
         assert!(app.can_present_now(foreground_echo));
+    }
+
+    #[test]
+    fn attach_scroll_presents_at_scroll_cadence_then_falls_back() {
+        let (mut app, _) = test_app_with_pane();
+        let presented = Instant::now();
+        app.record_render_attempt(presented, true);
+        let half_frame = presented + SCROLL_PRESENT_INTERVAL;
+        assert!(!app.can_present_now(half_frame));
+
+        app.note_attach_scroll(presented);
+        assert!(app.can_present_now(half_frame));
+        assert_eq!(
+            app.next_headless_loop_deadline_with_git_refresh(presented, true, false),
+            Some(half_frame)
+        );
+
+        let after_window = presented + SCROLL_PRESENT_WINDOW;
+        app.record_render_attempt(after_window, true);
+        assert!(!app.can_present_now(after_window + SCROLL_PRESENT_INTERVAL));
     }
 
     #[test]

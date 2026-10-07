@@ -1331,6 +1331,7 @@ impl HeadlessServer {
         {
             warn!(client_id, terminal_id = %terminal_id, err = %err, "terminal attach scroll failed");
         }
+        self.app.note_attach_scroll(Instant::now());
         true
     }
 

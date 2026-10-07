@@ -42,6 +42,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const MIN_RENDER_INTERVAL: Duration = Duration::from_millis(16);
+/// Presentation cadence while a terminal attach client scrolls. Half a 60 Hz
+/// refresh, so the client always has the newest scroll position before its next
+/// vsync instead of beating against it (dropped then doubled frames).
+const SCROLL_PRESENT_INTERVAL: Duration = Duration::from_millis(8);
+/// How long the scroll cadence holds after the last attach scroll event.
+const SCROLL_PRESENT_WINDOW: Duration = Duration::from_millis(100);
 const GIT_REMOTE_STATUS_REFRESH_INTERVAL: Duration = Duration::from_millis(1500);
 const GIT_REPO_DISCOVERY_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const AUTO_UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(30 * 60);
@@ -178,6 +184,8 @@ pub struct App {
     pub(crate) last_render_at: Option<Instant>,
     /// Last attempt that could update a connected presentation surface.
     pub(crate) last_presentation_at: Option<Instant>,
+    /// End of the faster presentation cadence after a terminal attach scroll.
+    pub(crate) scroll_present_until: Option<Instant>,
     pub render_notify: Arc<Notify>,
     pub(crate) render_dirty: Arc<crate::render_signal::RenderSignal>,
     pub(crate) full_redraw_pending: bool,
@@ -727,6 +735,7 @@ impl App {
             persist_pane_history: config.experimental.pane_history,
             last_render_at: None,
             last_presentation_at: None,
+            scroll_present_until: None,
             api_rx,
             event_hub,
             last_focus,
