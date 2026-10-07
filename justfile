@@ -255,6 +255,7 @@ shell-copy-check:
 
 # Mac and Windows Shell tokens both come from shell/tokens.json; fails when either client drifts.
 shell-tokens-check:
+    python3 shell/test_gen_tokens.py
     python3 shell/gen_tokens.py --check
 
 shell-build:

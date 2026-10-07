@@ -290,6 +290,32 @@ def over(fg, bg, alpha):
     return "".join(f"{round(int(a[i:i + 2], 16) * alpha + int(b[i:i + 2], 16) * (1 - alpha)):02X}" for i in (0, 2, 4))
 
 
+def swift_code(text):
+    """Swift source without comments. Block comments nest in Swift, so a depth count, not a
+    regex, finds where one ends; comment markers inside string literals are text."""
+    out, i, depth, quoted = [], 0, 0, False
+    while i < len(text):
+        pair = text[i:i + 2]
+        if depth:
+            depth += pair == "/*"
+            depth -= pair == "*/"
+            i += 2 if pair in ("/*", "*/") else 1
+        elif quoted:
+            out.append(text[i:i + 2] if pair[0] == "\\" else text[i])
+            quoted = text[i] != '"' and text[i] != "\n"
+            i += 2 if pair[0] == "\\" else 1
+        elif pair == "/*":
+            depth, i = 1, i + 2
+        elif pair == "//":
+            while i < len(text) and text[i] != "\n":
+                i += 1
+        else:
+            quoted = text[i] == '"'
+            out.append(text[i])
+            i += 1
+    return "".join(out)
+
+
 def low_chat_contrast(t, source=None):
     """The Mac chat's faint text (captions, composer hints), as its Palette composites it."""
     text = source if source is not None else CHAT_VIEW.read_text()
@@ -297,7 +323,7 @@ def low_chat_contrast(t, source=None):
     # then comments go, so a commented-out declaration is never read either.
     if len(re.findall(r"\bstruct Palette\b", text)) != 1:
         return [f"{CHAT_VIEW.relative_to(ROOT)}: expected one Palette; update the chat contrast gate"]
-    text = re.sub(r"//[^\n]*", "", re.sub(r"/\*.*?\*/", "", text, flags=re.S))
+    text = swift_code(text)
     blocks = re.findall(r"private struct Palette \{(.*?)\n\}", text, re.S)
     code = blocks[0] if len(blocks) == 1 else ""
     shapes = {
