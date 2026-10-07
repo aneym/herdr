@@ -33,7 +33,7 @@ final class PinDrag: ObservableObject {
     static func machine(of tab: String) -> String { Machines.split(tab)?.machine ?? "" }
 
     static func section(of row: String) -> String? {
-        row.hasPrefix("agent:") ? "agents" : row.hasPrefix("pinned:") ? "pinned" : nil
+        SpacesTree.pinSection(of: row)
     }
     private static func key(machine: String, section: String) -> String { machine + ":" + section }
 
@@ -42,7 +42,7 @@ final class PinDrag: ObservableObject {
     func changed(_ row: SpacesRow, rows: [SpacesRow], frames: [String: CGRect], location: CGPoint, start: CGPoint) {
         if cancelled { return }
         if dragged == nil {
-            guard let tab = row.tab else { return }
+            guard Self.section(of: row.id) != nil, let tab = row.tab else { return }
             let machine = Self.machine(of: tab)
             block = rows.filter { Self.section(of: $0.id) == Self.section(of: row.id) && Self.machine(of: $0.tab ?? "") == machine }
                 .compactMap { r in frames[r.id].map { (r.id, $0) } }
@@ -113,8 +113,9 @@ final class PinDrag: ObservableObject {
               (moving.role == "agent") == (destination.role == "agent") else { return }
         let section = moving.role == "agent" ? "agents" : "pinned"
         let key = Self.key(machine: Self.machine(of: tab), section: section)
-        // Snapshot indices name this section's slots even when ids is a pending permutation.
-        let slots = source.tabs.filter { ($0.role == "agent") == (moving.role == "agent") }.compactMap(\.pin_index).sorted()
+        // Snapshot indices name the visible section's slots, even for a pending permutation.
+        // Hidden agents retain their server slots but are not visual drop destinations.
+        let slots = source.tabs.filter { ($0.role == "agent") == (moving.role == "agent") && !(moving.role == "agent" && ($0.hidden ?? false)) }.compactMap(\.pin_index).sorted()
         guard slots.indices.contains(to) else { return }
         let pinIndex = slots[to]
         var order = ids

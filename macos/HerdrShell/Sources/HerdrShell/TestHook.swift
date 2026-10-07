@@ -121,6 +121,11 @@ final class TestHook {
             }
         case "drag_pin":
             dragPin(obj)
+        case "set_hidden":
+            guard let c = controller else { return }
+            let row = (obj["row"] as? String).flatMap { id in c.model.spacesRows(state: c.state).first { $0.id == id }?.tab }
+            guard let tab = obj["tab"] as? String ?? obj["tab_id"] as? String ?? row, let hidden = obj["hidden"] as? Bool else { return }
+            c.model.setAgentHidden(tab, hidden)
         case "set_role":
             guard let c = controller else { return }
             let row = (obj["row"] as? String).flatMap { id in c.model.spacesRows(state: c.state).first { $0.id == id }?.tab }
@@ -1037,6 +1042,7 @@ final class TestHook {
                           "done": ThemeStore.hex(c.theme.tokens.chrome.warn)],
             // What ⌘1..9 select, in order (pins first).
             "numbered_tabs": Array(c.model.numberedTabIds(state: c.state).prefix(9)),
+            "hidden_agents": ([c.model.snapshot].compactMap { $0 } + c.model.machines.compactMap(\.snapshot)).flatMap(\.tabs).filter { $0.role == "agent" && ($0.hidden ?? false) }.map(\.tab_id),
             "agent_tabs": c.model.numberedTabIds(state: c.state).filter { c.model.isAgent($0) },
             "pin_drag": ["dragged": PinDrag.shared.dragged as Any? ?? NSNull(), "target": PinDrag.shared.target as Any? ?? NSNull()] as [String: Any],
             // Each tab row's context menu items, as a right-click shows them.

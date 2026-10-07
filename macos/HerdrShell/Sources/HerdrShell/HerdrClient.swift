@@ -480,6 +480,13 @@ struct HerdrCommands {
         return obj["error"] == nil
     }
 
+    func tabSetHidden(tabId: String, hidden: Bool) -> Bool {
+        guard let data = call("tab.set_hidden", ["tab_id": tabId, "hidden": hidden]),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        // Older servers reject this method silently, like tab.set_role.
+        return obj["error"] == nil
+    }
+
     /// `tab.pin_move`: the pin's new place in its machine's shared pin order (0 is ⌘1).
     func tabPinMove(tabId: String, pinIndex: Int) -> Bool {
         succeeded("tab.pin_move", ["tab_id": tabId, "pin_index": pinIndex])

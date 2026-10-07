@@ -36,7 +36,12 @@ final class HerdrModel: ObservableObject {
     /// Tabs whose pane changed into blocked or done since the app started, newest first.
     /// The first snapshot is the baseline: a tab that was already blocked is not a jump.
     private(set) var attentionTrail: [String] = []
-    var latestAttentionTab: String? { attentionTrail.first }
+    var latestAttentionTab: String? {
+        attentionTrail.first { tab in
+            guard let row = source(for: tab)?.tabs.first(where: { $0.tab_id == tab }) else { return false }
+            return !(row.role == "agent" && (row.hidden ?? false))
+        }
+    }
     private var paneAttention: [String: String] = [:]
     private var attentionBaseline = false
 
@@ -289,14 +294,9 @@ extension HerdrModel {
     /// The shared pin order owns the numbered slots on every surface.
     func numberedTabIds(state: SidebarState) -> [String] {
         let tabs = ([snapshot].compactMap { $0 } + machines.compactMap(\.snapshot)).flatMap { $0.tabs }.map {
-            SpacesInput.Tab(id: $0.tab_id, space: $0.workspace_id, label: $0.label ?? $0.tab_id, pinIndex: $0.pin_index, role: $0.role)
+            SpacesInput.Tab(id: $0.tab_id, space: $0.workspace_id, label: $0.label ?? $0.tab_id, pinIndex: $0.pin_index, role: $0.role, hidden: $0.hidden ?? false, homeLocation: $0.home_location)
         }
-        let pins = [true, false].flatMap { agents in
-            PinDrag.shared.ordered(SpacesTree.pinTabs(tabs, agents: agents).map(\.id), section: agents ? "agents" : "pinned")
-        }
-        var seen = Set<String>()
-        let displayed = spacesRows(state: state).filter { $0.kind == .tab }.compactMap(\.tab)
-        return (pins + displayed + allRowsInOrder.map(\.id)).filter { seen.insert($0).inserted }
+        return SpacesTree.numbered(tabs, rows: spacesRows(state: state), rest: allRowsInOrder.map(\.id), order: PinDrag.shared.ordered)
     }
 
     func isAgent(_ tab: String) -> Bool {
@@ -306,6 +306,11 @@ extension HerdrModel {
     func setAgentRole(_ tab: String, _ on: Bool) {
         let commands = HerdrCommands(socketPath: env["HERDR_SOCKET_PATH"] ?? "")
         DispatchQueue.global(qos: .userInitiated).async { _ = commands.tabSetRole(tabId: tab, role: on ? "agent" : nil) }
+    }
+
+    func setAgentHidden(_ tab: String, _ hidden: Bool) {
+        let commands = HerdrCommands(socketPath: env["HERDR_SOCKET_PATH"] ?? "")
+        DispatchQueue.global(qos: .userInitiated).async { _ = commands.tabSetHidden(tabId: tab, hidden: hidden) }
     }
 
     func isPinned(_ tab: String) -> Bool {
@@ -379,7 +384,7 @@ extension HerdrModel {
                     return SpacesInput.Agent(status: agent.agent_status ?? "unknown", parent: parentTab)
                 },
                 focused: tab.tab_id == state.selectedTab, status: tab.agent_status ?? "unknown", pinIndex: tab.pin_index, work: tab.work_status, role: tab.role, sortRank: tab.sort_rank ?? 0,
-request: s.panes.filter { $0.tab_id == tab.tab_id }.compactMap { $0.tokens?["request"] }.first)
+request: s.panes.filter { $0.tab_id == tab.tab_id }.compactMap { $0.tokens?["request"] }.first, hidden: tab.hidden ?? false, homeLocation: tab.home_location)
         }, focusedTab: state.selectedTab)
         input = AgentCards.attach(input, panes: s.panes.map { ($0.pane_id, $0.tab_id) }, cards: catalog.snapshot.agents)
         // areas.json owns the space groups whenever it exists (an empty list clears them), as the Rust

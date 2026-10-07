@@ -80,7 +80,17 @@ struct SpacesRowView: View {
                         .layoutPriority(1)
                         .onTapGesture { click(row.link == nil ? "body" : "link") }
                 }
-                if row.kind != .goal, !isFooter, row.kind != .title {
+                if let home = row.home, let glyph = homeGlyph(home) {
+                    Text(glyph).font(.system(size: ShellType.rowTrailing))
+                        .foregroundStyle(home == "unsynced" ? t.warn : t.mute)
+                        .help(homeLabel(home)).accessibilityLabel(homeLabel(home))
+                }
+                if row.id == "hiddenagents" {
+                    if row.alert == "act" {
+                        Circle().fill(t.accent).frame(width: ShellFace.dot, height: ShellFace.dot)
+                            .accessibilityLabel("Hidden agent needs attention")
+                    }
+                } else if row.kind != .goal, !isFooter, row.kind != .title {
                     Text(row.alert == "none" ? "" : "!").fontWeight(.bold)
                         .foregroundStyle(row.alert == "act" ? t.bad : t.warn)
                         .frame(width: Self.alertWidth)
@@ -100,7 +110,7 @@ struct SpacesRowView: View {
                 }
                 // The PINNED header already says it, so pinned rows keep no pin glyph at rest; it comes
                 // back on hover to unpin, as does the row's context menu.
-                if row.kind == .tab, (!row.id.hasPrefix("pinned:") && !row.id.hasPrefix("agent:")) || hovered {
+                if row.kind == .tab, (!row.id.hasPrefix("pinned:") && !row.id.hasPrefix("agent:") && !row.id.hasPrefix("hiddenagent:")) || hovered {
                     Text("⚲").foregroundStyle(pinned ? t.accent : t.mute).fixedSize().onTapGesture { click("pin") }
                 }
                 if row.kind == .space {
@@ -125,6 +135,22 @@ struct SpacesRowView: View {
         }
         .padding(.leading, indent).padding(.horizontal, ShellSpace.rowPadX)
         .background(RoundedRectangle(cornerRadius: ShellRadius.row).fill(selected && row.kind == .tab ? t.sel : .clear))
+    }
+
+    private func homeGlyph(_ home: String) -> String? {
+        switch home {
+        case "cloud": return "☁︎"
+        case "local": return "⌂︎"
+        case "unsynced": return "⇡︎"
+        default: return nil
+        }
+    }
+    private func homeLabel(_ home: String) -> String {
+        switch home {
+        case "cloud": return "Memory in Rails cloud"
+        case "local": return "Memory on this machine only"
+        default: return "Memory not synced to Rails cloud"
+        }
     }
 
     /// Host summaries shed whole trailing fields before the first field clips.

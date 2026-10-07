@@ -9,12 +9,12 @@ struct SpacesInput: Codable {
     /// `work` is herdr's one answer to "is this chat working" (server app/work_status.rs); nil from older servers.
     struct Tab: Codable { var id: String; var space: String; var label: String; var agents: [Agent] = []; var focused = false; var status = "unknown"; var pinIndex: Int? = nil; var work: String? = nil; var role: String? = nil; var sortRank: UInt32 = 0; var request: String? = nil
         /// The agent card this tab runs (AgentCards): its name and https picture.
-        var agentName: String? = nil; var avatar: String? = nil
-        init(id: String, space: String, label: String, agents: [Agent] = [], focused: Bool = false, status: String = "unknown", pinIndex: Int? = nil, work: String? = nil, role: String? = nil, sortRank: UInt32 = 0, request: String? = nil) { self.id = id; self.space = space; self.label = label; self.agents = agents; self.focused = focused; self.status = status; self.pinIndex = pinIndex; self.work = work; self.role = role; self.sortRank = sortRank; self.request = request }
+        var agentName: String? = nil; var avatar: String? = nil; var hidden = false; var homeLocation: String? = nil
+        init(id: String, space: String, label: String, agents: [Agent] = [], focused: Bool = false, status: String = "unknown", pinIndex: Int? = nil, work: String? = nil, role: String? = nil, sortRank: UInt32 = 0, request: String? = nil, hidden: Bool = false, homeLocation: String? = nil) { self.hidden = hidden; self.homeLocation = homeLocation; self.id = id; self.space = space; self.label = label; self.agents = agents; self.focused = focused; self.status = status; self.pinIndex = pinIndex; self.work = work; self.role = role; self.sortRank = sortRank; self.request = request }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: Field.self)
             id = try c.decode(String.self, forKey: Field("id")); space = try c.decode(String.self, forKey: Field("space")); label = try c.decode(String.self, forKey: Field("label"))
-            agents = c.value("agents", []); focused = c.value("focused", false); status = c.value("status", "unknown"); pinIndex = c.optional("pinIndex"); work = c.optional("work"); role = c.optional("role"); sortRank = c.value("sortRank", 0); request = c.optional("request")
+            agents = c.value("agents", []); focused = c.value("focused", false); status = c.value("status", "unknown"); pinIndex = c.optional("pinIndex"); work = c.optional("work"); role = c.optional("role"); sortRank = c.value("sortRank", 0); request = c.optional("request"); hidden = c.value("hidden", false); homeLocation = c.optional("homeLocation")
         }
     }
     var spaces: [Space]; var tabs: [Tab]; var focusedTab: String?
@@ -98,12 +98,12 @@ private extension KeyedDecodingContainer where Key == Field {
 
 struct SpacesChrome: Codable {
     var collapsedSections: Set<String> = []; var expandedGroups: Set<String> = []; var expandedTabs: Set<String> = []; var collapsedTabs: Set<String> = []
-    var pinnedSpaces: Set<String> = []; var collapsedSpaces: Set<String> = []; var expandedParkedSpaces: Set<String> = []; var hiddenExpanded = false; var goalFilter: String?; var focusedSection: [String: String] = [:]
+    var pinnedSpaces: Set<String> = []; var collapsedSpaces: Set<String> = []; var expandedParkedSpaces: Set<String> = []; var hiddenExpanded = false; var hiddenAgentsExpanded = false; var goalFilter: String?; var focusedSection: [String: String] = [:]
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Field.self)
         collapsedSections = c.value("collapsedSections", []); expandedGroups = c.value("expandedGroups", []); expandedTabs = c.value("expandedTabs", []); collapsedTabs = c.value("collapsedTabs", [])
-        pinnedSpaces = c.value("pinnedSpaces", []); collapsedSpaces = c.value("collapsedSpaces", []); expandedParkedSpaces = c.value("expandedParkedSpaces", []); hiddenExpanded = c.value("hiddenExpanded", false); goalFilter = c.optional("goalFilter"); focusedSection = c.value("focusedSection", [:])
+        pinnedSpaces = c.value("pinnedSpaces", []); collapsedSpaces = c.value("collapsedSpaces", []); expandedParkedSpaces = c.value("expandedParkedSpaces", []); hiddenExpanded = c.value("hiddenExpanded", false); hiddenAgentsExpanded = c.value("hiddenAgentsExpanded", false); goalFilter = c.optional("goalFilter"); focusedSection = c.value("focusedSection", [:])
         if let legacy: String = c.optional("focusedSection"), let split = legacy.lastIndex(of: ":") { focusedSection[String(legacy[..<split])] = String(legacy[legacy.index(after: split)...]) }
     }
     func anySpaceExpanded(_ spaces: [SpacesInput.Space]) -> Bool {
@@ -121,6 +121,9 @@ struct SpacesChrome: Codable {
     /// Opens a selected tab's space, parked or folded, as the TUI's reveal does
     /// (client/shell/tree.rs). True when the chrome changed and needs saving.
     mutating func reveal(space: String, parked: Bool, selected: String? = nil, rows: [SpacesRow] = []) -> Bool {
+        if let selected, rows.contains(where: { $0.id == "hiddenagent:" + selected }) {
+            let changed = !hiddenAgentsExpanded; hiddenAgentsExpanded = true; return changed
+        }
         if let selected, rows.contains(where: { $0.id == "pinned:" + selected || $0.id == "agent:" + selected }) { return false }
         let unfolded = collapsedSpaces.remove(space) != nil
         let unparked = parked && expandedParkedSpaces.insert(space).inserted
@@ -130,6 +133,7 @@ struct SpacesChrome: Codable {
     /// yet focus can hold one open without an entry in either set.
     mutating func toggle(_ key: String, open: Bool? = nil) {
         if key.hasPrefix("all:") { focusedSection.removeValue(forKey: String(key.dropFirst(4))); return }
+        if key == "hiddenagents" { hiddenAgentsExpanded.toggle(); return }
         if key == "hidden" { hiddenExpanded.toggle(); return }
         let parts = key.split(separator: ":", maxSplits: 1).map(String.init)
         guard parts.count == 2 else { return }
@@ -159,6 +163,8 @@ struct SpacesRow: Identifiable, Equatable {
     var request: String?
     var pulse: Overlay.Pulse?
     /// An AGENTS row's face: the agent's picture, else its initial on a tint.
+    var home: String?
+    var setsHidden: Bool? { id.hasPrefix("agent:") ? true : id.hasPrefix("hiddenagent:") ? false : nil }
     var face: Face?
     struct Face: Equatable { var initial: String; var tint: Int; var avatar: String? }
     /// The dot set into the face, as a chrome token: an open request or a blocked agent needs you
@@ -187,10 +193,11 @@ struct SpacesRow: Identifiable, Equatable {
             faceField = ["face:" + face.initial + ":" + String(face.tint) + picture]
         }
         var dotField: [String] = []
-        if let faceDot { dotField = ["dot:" + faceDot] } else if let trailingRequest { dotField = ["request:" + trailingRequest] }
+        if id == "hiddenagents", alert == "act" { dotField = ["dot:accent"] } else if let faceDot { dotField = ["dot:" + faceDot] } else if let trailingRequest { dotField = ["request:" + trailingRequest] }
         let badgeField: [String] = badge.map { ["@" + $0 + (badgeState.map { ":" + $0 } ?? "")] } ?? []
         let pulseField = pulse.map { ["pulse:" + $0.line] + ($0.drifting ? ["pulse-bold"] : []) } ?? []
-        return (fields + faceField + dotField + badgeField + pulseField).joined(separator: "|")
+        // home stays the last field (agents-hide scenario).
+        return (fields + faceField + dotField + badgeField + pulseField + (home.map { ["home:" + $0] } ?? [])).joined(separator: "|")
     }
 }
 
@@ -243,9 +250,21 @@ enum SpacesTree {
                 .sorted { ($0.pinIndex ?? 0) < ($1.pinIndex ?? 0) }
         }
     }
+    /// Hidden agents are not draggable; only the two visible pin blocks have drop slots.
+    static func pinSection(of row: String) -> String? {
+        row.hasPrefix("agent:") ? "agents" : row.hasPrefix("pinned:") ? "pinned" : nil
+    }
+    static func numbered(_ tabs: [SpacesInput.Tab], rows: [SpacesRow], rest: [String] = [], order: ([String], String) -> [String] = { ids, _ in ids }) -> [String] {
+        let hidden = Set(tabs.filter { $0.role == "agent" && $0.hidden }.map(\.id))
+        let pins = [true, false].flatMap { agents in
+            order(pinTabs(tabs, agents: agents).filter { !hidden.contains($0.id) }.map(\.id), agents ? "agents" : "pinned")
+        }
+        var seen = Set<String>()
+        return (pins + rows.filter { $0.kind == .tab }.compactMap(\.tab) + rest).filter { !hidden.contains($0) && seen.insert($0).inserted }
+    }
     /// Close follows the drawn pin block, below first, then above, then the other block.
     static func closePinOrder(_ rows: [SpacesRow], selected: String?) -> [String] {
-        let agents = rows.filter { $0.id.hasPrefix("agent:") }.compactMap(\.tab)
+        let agents = rows.filter { ($0.id.hasPrefix("agent:") || $0.id.hasPrefix("hiddenagent:")) }.compactMap(\.tab)
         let pins = rows.filter { $0.id.hasPrefix("pinned:") }.compactMap(\.tab)
         guard let selected else { return [] }
         let own = agents.contains(selected) ? agents : pins
@@ -267,7 +286,11 @@ enum SpacesTree {
                                 title: tab.label, trailing: space?.name ?? tab.space, tab: tab.id,
                                 request: tab.role == "agent" ? tab.request : nil)
             row.pulse = overlay.tabs[tab.id]?.pulse
-            if prefix == "agent:" { row.face = face(name: tab.agentName ?? tab.label, avatar: tab.avatar) }
+            if tab.role == "agent" {
+                row.trailing = ""; row.home = tab.homeLocation.flatMap { ["cloud", "local", "unsynced"].contains($0) ? $0 : nil }
+                row.face = face(name: tab.agentName ?? tab.label, avatar: tab.avatar)
+                if tab.hidden { row.depth = 1 }
+            }
             return row
         }
         let agents = pinTabs(input.tabs, agents: true)
@@ -276,7 +299,13 @@ enum SpacesTree {
         var out = agents.isEmpty ? [SpacesRow(id: "agents", kind: .title, title: "agents")] : []
         if !agents.isEmpty {
             out.append(SpacesRow(id: "agentpins", kind: .section, title: "AGENTS"))
-            out += agents.map { pinRow($0, prefix: "agent:") }
+            out += agents.filter { !$0.hidden }.map { pinRow($0, prefix: "agent:") }
+            let hiddenAgents = agents.filter(\.hidden)
+            if !hiddenAgents.isEmpty {
+                let attention = !chrome.hiddenAgentsExpanded && hiddenAgents.contains { $0.request != nil || mark($0, overlay.tabs[$0.id] ?? Overlay.Tag(), foldable: false).tone == "blocked" }
+                out.append(SpacesRow(id: "hiddenagents", kind: .hidden, chevron: chrome.hiddenAgentsExpanded ? "open" : "closed", title: "Hidden", trailing: String(hiddenAgents.count), alert: attention ? "act" : "none", toggleKey: "hiddenagents"))
+                if chrome.hiddenAgentsExpanded { out += hiddenAgents.map { pinRow($0, prefix: "hiddenagent:") } }
+            }
         }
         if !pins.isEmpty {
             out.append(SpacesRow(id: "pinned", kind: .section, title: "PINNED"))
