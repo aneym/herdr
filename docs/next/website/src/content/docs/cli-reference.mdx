@@ -256,6 +256,7 @@ herdr pane swap --source-pane ID --target-pane ID
 herdr pane move <pane_id> --tab <tab_id> --split right|down [--target-pane ID] [--ratio FLOAT] [--focus|--no-focus]
 herdr pane move <pane_id> --new-tab [--workspace ID] [--label TEXT] [--focus|--no-focus]
 herdr pane move <pane_id> --new-workspace [--label TEXT] [--tab-label TEXT] [--focus|--no-focus]
+herdr pane place <pane_id> (--beside <pane_id> | --tab <tab_id>) --side left|right|up|down [--size FLOAT] [--dry-run] [--focus|--no-focus]
 herdr pane close [<pane_id>|self|--pane ID|--current]
 ```
 
@@ -278,6 +279,21 @@ the pane session is torn down. The pane then closes moments later, collapsing
 its tab or workspace when it was the last pane.
 
 After `pane move`, use `.result.move_result.pane.pane_id` for later commands. A cross-workspace move changes the workspace-qualified pane ID; the prior value remains at `.result.move_result.previous_pane_id`. The running process keeps its launch-time `HERDR_PANE_ID`, `HERDR_TAB_ID`, and `HERDR_WORKSPACE_ID`; Herdr retains the old pane ID as an alias for that terminal, so pane commands using `--current` still resolve it. A live agent name follows the terminal and continues to resolve after the move.
+
+`pane place` puts a pane beside another pane (`--beside`) or at the outer edge
+of a tab (`--tab`), in the same tab or a different one. `--side left` and
+`--side up` put the placed pane first. `--size` is the placed pane's share of
+the new split, clamped to 0.1..0.9; it defaults to 0.5 beside a pane and one
+third at a tab edge. `--dry-run` prints the result without changing anything.
+The JSON response is under `.result.place`: `changed`, optional `reason`
+(`same_pane`, `zoomed_tab`, `no_change`, or `not_tiled`), `pane_id` after the
+move, `placed_rect`, and `target_layout`. As with `pane move`, a
+cross-workspace placement assigns a new pane ID.
+
+```bash
+herdr pane place w1:p3 --beside w1:p1 --side left --dry-run
+herdr pane place w1:p3 --tab w1:t2 --side right --focus
+```
 
 Read output:
 
