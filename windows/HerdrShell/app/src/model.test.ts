@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSidebar, tabStatus } from "./model";
+import { buildSidebar, revealFold, spaceOpen, tabStatus } from "./model";
 import type { Snapshot } from "./model";
 import { encodeShiftEnter } from "./keys";
 // Pure ranking/deduplication has interacting edge cases: this inline contract table
@@ -39,6 +39,42 @@ describe("sidebar contract", () => {
       const ranked: Snapshot = { workspaces: snapshot.workspaces?.slice(0, 1), tabs: statuses.map((work_status, number) => ({ tab_id: `w1:t${number}`, workspace_id: "w1", number, work_status })) };
       expect(buildSidebar(ranked).find(r => r.kind === "space")?.status).toBe(expected);
     }
+  });
+  // Priority order and parking interact with the pin partition, the hidden group and the user's
+  // folds; the Mac's PRIORITY-ORDER check holds the same contract for its tree.
+  it("ranks spaces and tabs by the server's sort_rank inside the pin partition, and parks spaces folded", () => {
+    const ranked: Snapshot = {
+      workspaces: [
+        { workspace_id: "a", number: 1, label: "a", sort_rank: 5 },
+        { workspace_id: "b", number: 2, label: "b", sort_rank: 1 },
+        { workspace_id: "p", number: 3, label: "pinned", sort_rank: 9, tokens: { pinned: "true" } },
+        { workspace_id: "r", number: 4, label: "rails", sort_rank: 9, parked: true },
+        { workspace_id: "c", number: 5, label: "c" },
+      ],
+      tabs: [
+        { tab_id: "b:1", workspace_id: "b", number: 1, sort_rank: 2 },
+        { tab_id: "b:2", workspace_id: "b", number: 2, sort_rank: 0 },
+        { tab_id: "b:3", workspace_id: "b", number: 3 },
+        { tab_id: "r:1", workspace_id: "r", number: 1, work_status: "working" },
+      ],
+    };
+    const rows = buildSidebar(ranked);
+    expect(rows.filter(r => r.kind === "space").map(r => r.id)).toEqual(["p", "c", "b", "a", "r"]);
+    expect(rows.filter(r => r.kind === "tab").map(r => r.id)).toEqual(["b:2", "b:3", "b:1", "r:1"]);
+    const space = (id: string) => rows.find(r => r.kind === "space" && r.id === id)!;
+    // A parked space stays folded through live work and selection, and keeps its own fold key.
+    expect(space("r").parked).toBe(true);
+    expect(spaceOpen(space("r"), rows, "r:1", {})).toBe(false);
+    expect(spaceOpen(space("r"), rows, null, { "parked:r": true })).toBe(true);
+    expect(spaceOpen(space("r"), rows, null, { r: true })).toBe(false);
+    expect(spaceOpen(space("b"), rows, "b:1", {})).toBe(true);
+    expect(spaceOpen(space("b"), rows, "b:1", { b: false })).toBe(false);
+    // Selecting a tab the tree hides opens its space; a shown one needs nothing.
+    expect(revealFold(rows, "r:1", {})).toBe("parked:r");
+    expect(revealFold(rows, "r:1", { "parked:r": true })).toBeNull();
+    expect(revealFold(rows, "b:1", { b: false })).toBe("b");
+    expect(revealFold(rows, "b:1", {})).toBeNull();
+    expect(revealFold(rows, "missing", {})).toBeNull();
   });
   it("uses work status before first agent, then tab agent status and unknown", () => {
     const tab = { tab_id: "w1:t2", workspace_id: "w1", number: 2, agent_status: "done" };

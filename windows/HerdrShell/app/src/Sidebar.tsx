@@ -5,6 +5,7 @@ import AgentFace from "./AgentFace";
 import { DRAG_THRESHOLD, slotAt } from "./pinDrag";
 import type { PinSection, RowBox } from "./pinDrag";
 import type { MachineStatus } from "./bridge";
+import { foldKey, revealFold, spaceOpen } from "./model";
 import type { SidebarRow } from "./model";
 export function Status({ status }: { status: string }) { return <span className={`status ${status}`} aria-label={status}>{status === "blocked" ? "■" : "●"}</span>; }
 function RenameInput({ label, commit, cancel }: { label: string; commit: (label: string) => Promise<void>; cancel: () => void }) {
@@ -24,6 +25,10 @@ export default function Sidebar({ rows, selected, machine, notice, select, pin, 
   // Drag an AGENTS or PINNED row within its section, as the Mac's PinDrag: the row follows the
   // pointer, a line marks the slot, a release on the section moves the pin, Esc or a release
   // off the section moves nothing, and a press that travels less than the threshold is a click.
+  const reveal = useRef({ rows, expanded });
+  reveal.current = { rows, expanded };
+  // Only a change of selection reveals; folding the selected tab's space afterwards sticks.
+  useEffect(() => { const key = revealFold(reveal.current.rows, selected, reveal.current.expanded); if (key) toggle(key, true); }, [selected]);
   const nav = useRef<HTMLElement>(null);
   const press = useRef<Press | null>(null);
   const swallowClick = useRef(false);
@@ -96,8 +101,8 @@ export default function Sidebar({ rows, selected, machine, notice, select, pin, 
   </div>; };
   const spaceRow = (row: SidebarRow) => {
     const children = rows.filter(r => r.kind === "tab" && r.section === row.id);
-    const open = children.some(r => r.id === renaming) || (expanded[row.id] ?? (rows.some(r => r.id === selected && r.spaceId === row.id) || row.status === "working" || row.status === "blocked" || row.status === "done"));
-    return <div key={row.id}><button className="sidebar-row space-row" aria-expanded={open} onClick={() => toggle(row.id, !open)}><span className="chevron">{open ? "⌄" : "›"}</span><span className="label">{row.label}</span><Status status={row.status} /></button>{open && children.map(tabRow)}</div>;
+    const open = children.some(r => r.id === renaming) || spaceOpen(row, rows, selected, expanded);
+    return <div key={row.id}><button className="sidebar-row space-row" aria-expanded={open} onClick={() => toggle(foldKey(row), !open)}><span className="chevron">{open ? "⌄" : "›"}</span><span className="label">{row.label}</span><Status status={row.status} /></button>{open && children.map(tabRow)}</div>;
   };
   return <aside className={`sidebar ${drag ? "pin-dragging" : ""}`}><nav ref={nav}>
     {["AGENTS", "PINNED"].map(section => { const items = rows.filter(r => r.section === section); return items.length ? <section key={section}><h2>{section}</h2>{items.map(tabRow)}</section> : null; })}

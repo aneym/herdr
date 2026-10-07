@@ -2,18 +2,20 @@ import { pendingOrder } from "./pinDrag";
 import type { PendingOrders } from "./pinDrag";
 import { cardsByTab, faceFor } from "./faces";
 import type { AgentCard, Face } from "./faces";
-export interface Workspace { workspace_id: string; number: number; label?: string; focused?: boolean; active_tab_id?: string; work_status?: string; agent_status?: string; tokens?: { pinned?: string; hidden?: string } }
-export interface Tab { tab_id: string; workspace_id: string; number: number; label?: string; focused?: boolean; pane_count?: number; work_status?: string; agent_status?: string; pin_index?: number; role?: string }
+export interface Workspace { workspace_id: string; number: number; sort_rank?: number; parked?: boolean; label?: string; focused?: boolean; active_tab_id?: string; work_status?: string; agent_status?: string; tokens?: { pinned?: string; hidden?: string } }
+export interface Tab { tab_id: string; workspace_id: string; number: number; label?: string; focused?: boolean; pane_count?: number; work_status?: string; agent_status?: string; pin_index?: number; role?: string; sort_rank?: number }
 export interface Pane { pane_id: string; terminal_id: string; workspace_id: string; tab_id: string; focused?: boolean; agent?: string; agent_status?: string; title?: string; terminal_title_stripped?: string; cwd?: string; tokens?: Record<string, string> }
 export interface Rect { x: number; y: number; width: number; height: number }
 export interface Layout { tab_id: string; area: Rect; panes: { pane_id: string; rect: Rect }[]; splits?: { id: string; direction: string; ratio: number; rect: Rect }[]; zoomed?: boolean; focused_pane_id?: string }
 export interface Snapshot { workspaces?: Workspace[]; tabs?: Tab[]; panes?: Pane[]; agents?: { terminal_id: string; pane_id: string; tab_id: string; workspace_id: string; agent: string; agent_status: string; work_status?: string }[]; layouts?: Layout[] }
-export interface SidebarRow { kind: "agent" | "pinned" | "space" | "tab"; id: string; label: string; status: string; hotkey: number | null; section: string; spaceLabel?: string; spaceId?: string; hidden?: boolean; pinned?: boolean; face?: Face; request?: string }
+export interface SidebarRow { kind: "agent" | "pinned" | "space" | "tab"; id: string; label: string; status: string; hotkey: number | null; section: string; spaceLabel?: string; spaceId?: string; hidden?: boolean; parked?: boolean; pinned?: boolean; face?: Face; request?: string }
 export const tabStatus = (snapshot: Snapshot, tab: Tab): string => tab.work_status ?? snapshot.agents?.find(agent => agent.tab_id === tab.tab_id)?.agent_status ?? tab.agent_status ?? "unknown";
 export const statusRank = (status: string) => ({ blocked: 3, working: 2, done: 1 }[status] ?? 0);
 export function buildSidebar(snapshot: Snapshot, pending: PendingOrders = {}, now = Date.now(), cards: Record<string, AgentCard> = {}): SidebarRow[] {
   const tabs = snapshot.tabs ?? [];
-  const spaces = [...snapshot.workspaces ?? []].sort((a, b) => Number(b.tokens?.pinned === "true") - Number(a.tokens?.pinned === "true") || a.number - b.number);
+  // As the Mac's SpacesTree: the pin partition first, then the server's priority rank within each.
+  const byRank = (a: Workspace | Tab, b: Workspace | Tab) => (a.sort_rank ?? 0) - (b.sort_rank ?? 0) || a.number - b.number;
+  const spaces = [...snapshot.workspaces ?? []].sort((a, b) => Number(b.tokens?.pinned === "true") - Number(a.tokens?.pinned === "true") || byRank(a, b));
   const rows: SidebarRow[] = [];
   const row = (tab: Tab, kind: "agent" | "pinned" | "tab", section: string): SidebarRow => ({ kind, section, id: tab.tab_id, label: tab.label || snapshot.panes?.find(p => p.tab_id === tab.tab_id)?.terminal_title_stripped || `tab ${tab.number}`, status: tabStatus(snapshot, tab), hotkey: null, pinned: tab.pin_index != null, spaceId: tab.workspace_id, spaceLabel: spaces.find(s => s.workspace_id === tab.workspace_id)?.label });
   // As the Mac's SpacesTree.pinTabs: agents and plain pins are separate blocks, each in pin order.
@@ -33,8 +35,8 @@ export function buildSidebar(snapshot: Snapshot, pending: PendingOrders = {}, no
   for (const space of spaces.filter(s => s.tokens?.hidden !== "true").concat(spaces.filter(s => s.tokens?.hidden === "true"))) {
     const children = tabs.filter(t => t.workspace_id === space.workspace_id);
     const status = children.map(t => tabStatus(snapshot, t)).sort((a, b) => statusRank(b) - statusRank(a))[0] ?? "idle";
-    rows.push({ kind: "space", id: space.workspace_id, label: space.label || `space ${space.number}`, status, hotkey: null, section: "spaces", hidden: space.tokens?.hidden === "true" });
-    children.filter(t => t.role !== "agent").sort((a, b) => a.number - b.number).forEach(t => rows.push({ ...row(t, "tab", space.workspace_id), hidden: space.tokens?.hidden === "true" }));
+    rows.push({ kind: "space", id: space.workspace_id, label: space.label || `space ${space.number}`, status, hotkey: null, section: "spaces", hidden: space.tokens?.hidden === "true", ...(space.parked ? { parked: true } : {}) });
+    children.filter(t => t.role !== "agent").sort(byRank).forEach(t => rows.push({ ...row(t, "tab", space.workspace_id), hidden: space.tokens?.hidden === "true" }));
   }
   const numbered = new Map<string, number>();
   for (const item of rows) {
@@ -43,6 +45,23 @@ export function buildSidebar(snapshot: Snapshot, pending: PendingOrders = {}, no
     item.hotkey = numbered.get(item.id) ?? null;
   }
   return rows;
+}
+/** A space row's fold key: a parked space keeps its own, so unparking does not inherit its fold. */
+export const foldKey = (space: SidebarRow) => space.parked ? `parked:${space.id}` : space.id;
+/** Whether a space row shows its tabs: the user's fold wins; a parked space starts folded, any other
+ *  opens while it holds the selected tab or live work. */
+export function spaceOpen(space: SidebarRow, rows: SidebarRow[], selected: string | null, expanded: Record<string, boolean>): boolean {
+  const stored = expanded[foldKey(space)];
+  if (stored !== undefined) return stored;
+  if (space.parked) return false;
+  return rows.some(r => r.id === selected && r.spaceId === space.id) || space.status === "working" || space.status === "blocked" || space.status === "done";
+}
+/** Reveal on select, as the Mac's SpacesChrome.reveal: the fold key to open so the selected tab's
+ *  space shows its tabs, or null when it already does. Hidden spaces stay in the Hidden group. */
+export function revealFold(rows: SidebarRow[], selected: string | null, expanded: Record<string, boolean>): string | null {
+  const tab = rows.find(r => r.kind === "tab" && r.id === selected);
+  const space = tab && rows.find(r => r.kind === "space" && r.id === tab.spaceId);
+  return space && !spaceOpen(space, rows, selected, expanded) ? foldKey(space) : null;
 }
 export function tabOrder(rows: SidebarRow[]): string[] { return [...new Set(rows.filter(r => r.kind !== "space").map(r => r.id))]; }
 export function scaleRect(rect: Rect, area: Rect, width: number, height: number): Rect {
