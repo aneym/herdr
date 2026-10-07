@@ -197,7 +197,8 @@ mod imp {
                 }
                 forward_cmd(app, "appearance", req)
             }
-            cmd @ ("ui" | "machine" | "open" | "key" | "wheel" | "action" | "chat" | "update" | "drag_pin" | "drag_divider") => {
+            cmd @ ("ui" | "machine" | "open" | "key" | "wheel" | "action" | "chat" | "update"
+            | "drag_pin" | "drag_divider" | "link_click" | "copy_selection") => {
                 forward_cmd(app, cmd, req)
             }
             _ => json!({"ok": false, "error": "unknown cmd"}),

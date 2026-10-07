@@ -9,11 +9,14 @@ import type { LinkRegion } from "./links";
 import type { Mode } from "./bridge";
 import type { Pane } from "./model";
 import { paste, controlKey, handleKey } from "./keys";
-import { PaneCopy } from "./termCopy";
+import { PaneCopy, ordered } from "./termCopy";
+import type { Cell } from "./termCopy";
 import { terminalFont } from "./tokens";
 import { Status } from "./Sidebar";
 import { appTheme, terminalThemes } from "./theme";
 export interface PaneController {
+  linkClick: (row: number, col: number, ctrl: boolean) => Promise<string | null>;
+  copySelection: (from: Cell, to: Cell) => Promise<{ text: string; copied: boolean }>;
   chat?: (mode: "terminal" | "chat") => Promise<{ ok: boolean; items: number }>;
   toggleChat?: () => void;
   info: () => { pane_id: string; terminal_id: string; mode: "attach" | "observe" | "closed"; cols: number; rows: number; focused: boolean; background?: string };
@@ -37,10 +40,11 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
     term.loadAddon(new Unicode11Addon());
     term.unicode.activeVersion = "11";
     term.open(host.current);
+    let openTarget = (uri: string) => { void bridge.openUrl(uri).catch(error => setNotice(String(error))); };
     const links = installLinks(term, {
       resolve: async (viewport_row, col) => (await bridge.api(machine, "pane.link.resolve", { pane_id: pane.pane_id, viewport_row, col }) as { regions: LinkRegion[] }).regions,
       activate: async (viewport_row, col) => await bridge.api(machine, "pane.link.activate", { pane_id: pane.pane_id, viewport_row, col }) as { url?: string; handled: boolean },
-    }, uri => { void bridge.openUrl(uri).catch(error => setNotice(String(error))); });
+    }, uri => openTarget(uri));
     const unsubscribeTheme = appTheme().subscribe(mode => { term.options.theme = terminalThemes[mode]; });
     try { const webgl = new WebglAddon(); webgl.onContextLoss(() => webgl.dispose()); term.loadAddon(webgl); } catch { /* DOM renderer remains available without WebGL. */ }
     let disposed = false;
@@ -64,7 +68,8 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
       await pending;
     };
     const send = (text: string) => sendBytes(new TextEncoder().encode(text));
-    const copier = new PaneCopy(term, (method, params) => bridge.api(machine, method, params), () => pane.pane_id, text => bridge.clipboardWrite(text));
+    let writeTarget = (text: string) => bridge.clipboardWrite(text);
+    const copier = new PaneCopy(term, (method, params) => bridge.api(machine, method, params), () => pane.pane_id, text => writeTarget(text));
     const keyTarget = () => ({ term, mode, send, copier, shortcut: (event: KeyboardEvent) => live.current.shortcut(event) });
     term.attachCustomKeyEventHandler(event => {
       const result = handleKey(event, keyTarget());
@@ -139,8 +144,56 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
       copier.press(cell, event.detail, mode.mouse && !event.shiftKey);
       window.addEventListener("mousemove", onMove, true); window.addEventListener("mouseup", onUp, true);
     };
+    // Capture calls share callbacks; serialize them so each reply belongs to its own gesture.
+    let hookTail: Promise<unknown> = Promise.resolve();
+    const runHook = <T,>(work: () => Promise<T>): Promise<T> => {
+      const pending = hookTail.then(() => { if (disposed) throw new Error("Pane unavailable"); return work(); });
+      hookTail = pending.catch(() => {});
+      return pending;
+    };
+    const validateCell = (cell: Cell) => {
+      if (!Number.isInteger(cell.row) || !Number.isInteger(cell.col) || cell.row < 0 || cell.row >= term.rows || cell.col < 0 || cell.col >= term.cols) throw new Error("Cell outside viewport");
+    };
     const controller: PaneController = {
       info: () => ({ pane_id: pane.pane_id, terminal_id: pane.terminal_id, mode: attachMode, cols: term.cols, rows: term.rows, focused: live.current.focused, background: term.options.theme?.background }),
+      linkClick: (row, col, ctrl) => runHook(async () => {
+        validateCell({ row, col });
+        const screen = term.element?.querySelector(".xterm-screen");
+        const box = screen?.getBoundingClientRect();
+        if (!screen || !box?.width || !box.height) throw new Error("Terminal screen unavailable");
+        const normal = openTarget;
+        let opened: string | null = null;
+        let hit: () => void = () => {};
+        const settled = new Promise<void>(resolve => { hit = resolve; });
+        openTarget = uri => { opened = uri; hit(); };
+        let deadline: ReturnType<typeof setTimeout> | undefined;
+        try {
+          const event = { bubbles: true, cancelable: true, button: 0, ctrlKey: ctrl, clientX: box.left + (col + 0.5) * box.width / term.cols, clientY: box.top + (row + 0.5) * box.height / term.rows };
+          // Populate xterm's hover link, just as moving the physical pointer to the cell does.
+          screen.dispatchEvent(new MouseEvent("mousemove", event));
+          await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+          screen.dispatchEvent(new MouseEvent("mousedown", { ...event, buttons: 1, detail: 1 }));
+          screen.dispatchEvent(new MouseEvent("mouseup", { ...event, buttons: 0, detail: 1 }));
+          if (ctrl) await Promise.race([settled, new Promise<void>(resolve => { deadline = setTimeout(resolve, 1500); })]);
+          return opened;
+        } finally { clearTimeout(deadline); openTarget = normal; }
+      }),
+      copySelection: (from, to) => runHook(async () => {
+        validateCell(from); validateCell(to);
+        const normal = writeTarget;
+        let text = "";
+        writeTarget = async value => { text = value; };
+        term.clearSelection(); copier.clear();
+        try {
+          if (mode.mouse) { copier.press(from, 1, true); copier.move(to); copier.release(to); }
+          else {
+            const { start, end } = ordered(from, to);
+            term.select(start.col, term.buffer.active.viewportY + start.row, (end.row - start.row) * term.cols + end.col - start.col + 1);
+          }
+          const copied = await copier.copy();
+          return { text, copied };
+        } finally { writeTarget = normal; term.clearSelection(); copier.clear(); }
+      }),
       type: send,
       read: () => Array.from({ length: term.rows }, (_, i) => term.buffer.active.getLine(term.buffer.active.viewportY + i)?.translateToString(true) ?? "").join("\n"),
       key: async value => {

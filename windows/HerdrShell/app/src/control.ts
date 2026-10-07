@@ -3,6 +3,7 @@ import { bridge } from "./bridge";
 import type { DocsState } from "./docs";
 import type { MachineStatus } from "./bridge";
 import type { SidebarRow } from "./model";
+import type { Cell } from "./termCopy";
 import type { PaneController } from "./PaneTerm";
 import { appTheme } from "./theme";
 import type { Appearance } from "./theme";
@@ -40,6 +41,18 @@ export function installControl(get: () => ControlState): () => void {
     const pane = payload.pane_id ? get().panes.find(p => p.info().pane_id === payload.pane_id) : focused();
     if (!pane?.chat) throw new Error("Pane unavailable");
     return pane.chat(payload.mode);
+  });
+  // {"cmd":"link_click","pane_id"?:id,"row":n,"col":n,"ctrl":bool}: click a viewport cell without opening a browser.
+  watch<{ pane_id?: string; row: number; col: number; ctrl: boolean }>("link_click", async payload => {
+    const pane = payload.pane_id ? get().panes.find(p => p.info().pane_id === payload.pane_id) : focused();
+    if (!pane) throw new Error("Pane unavailable");
+    return { ok: true, opened: await pane.linkClick(payload.row, payload.col, payload.ctrl) };
+  });
+  // {"cmd":"copy_selection","pane_id"?:id,"from":{"row":n,"col":n},"to":{"row":n,"col":n}}: capture a drag's copy.
+  watch<{ pane_id?: string; from: Cell; to: Cell }>("copy_selection", async payload => {
+    const pane = payload.pane_id ? get().panes.find(p => p.info().pane_id === payload.pane_id) : focused();
+    if (!pane) throw new Error("Pane unavailable");
+    return { ok: true, ...await pane.copySelection(payload.from, payload.to) };
   });
   // The window theme (title bar, WebView scheme) is set natively before this runs; the
   // override lasts for this run only, like the Mac shell's --appearance.
