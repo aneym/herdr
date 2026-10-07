@@ -692,7 +692,11 @@ impl ClientShellState {
         // too, queued behind the focus on the same connection, the way the
         // local reveal opens a fold this client made.
         let server_folds = match &method {
-            crate::api::schema::Method::PaneFocus(target) => {
+            crate::api::schema::Method::PaneFocus(target)
+                if !snapshot.panes.iter().any(|pane| {
+                    pane.pane_id == target.pane_id && Self::tab_has_live_pin(snapshot, &pane.tab_id)
+                }) =>
+            {
                 super::tree::agent_group_ancestors(snapshot, &target.pane_id)
                     .into_iter()
                     .filter(|(_, owner)| owner.group.collapsed)

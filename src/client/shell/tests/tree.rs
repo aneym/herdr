@@ -469,6 +469,97 @@ fn pinned_chat_focus_preserves_home_folds_and_unpinned_focus_reveals() {
     assert!(!state.tree_chrome_mut().collapsed_tabs.contains("ws_2#1"));
 }
 
+/// Attention key input must preserve home folds when its target has a pin.
+#[test]
+fn pinned_next_attention_keeps_home_folds_but_unpinned_reveals() {
+    for pinned in [true, false] {
+        let mut tree = ClientTreeChrome::default();
+        tree.collapsed_spaces.insert("ws_2".into());
+        tree.collapsed_tabs.insert("ws_2#1".into());
+        tree.factory_collapsed_lanes.insert("tab_1".into());
+        let mut state = tree_state(tree.clone());
+        state.config.factory.enabled = true;
+        let mut snapshot = tree_snapshot();
+        snapshot.agents[1].agent_status = AgentStatus::Idle;
+        snapshot.agents[2].agent_status = AgentStatus::Blocked;
+        if pinned {
+            snapshot
+                .pinned_tabs
+                .push(crate::protocol::ClientShellPinnedTab {
+                    role: None,
+                    tab_id: "tab_3".into(),
+                    workspace_id: "ws_2".into(),
+                });
+        }
+        state.set_snapshot(Box::new(snapshot));
+        let mut overlay = crate::factory_overlay::FactoryOverlay::default();
+        overlay.tabs.insert(
+            "tab_3".into(),
+            crate::factory_overlay::TabTag {
+                parent: Some("tab_1".into()),
+                ..Default::default()
+            },
+        );
+        state.factory_overlay = Some(std::sync::Arc::new(overlay));
+        let mut outcome = ClientShellInput::default();
+        state.record_binding(
+            crate::input::KeybindMatch::Action(crate::input::KeybindAction::NextAttention),
+            &mut outcome,
+        );
+        assert!(sent_methods(&outcome).iter().any(|method| matches!(method,
+            crate::api::schema::Method::PaneFocus(target) if target.pane_id == "pane_3"
+        )));
+        let actual = state.tree_chrome_mut();
+        assert_eq!(actual.collapsed_spaces.contains("ws_2"), pinned);
+        assert_eq!(actual.factory_collapsed_lanes.contains("tab_1"), pinned);
+        assert_eq!(actual.factory_expanded_lanes.contains("tab_1"), !pinned);
+        assert_eq!(actual.collapsed_tabs, tree.collapsed_tabs);
+    }
+}
+
+/// The real focus request boundary must not send server unfold commands for pins.
+#[test]
+fn pinned_pane_focus_does_not_queue_server_group_unfolds() {
+    for pinned in [true, false] {
+        let mut state = tree_state(ClientTreeChrome::default());
+        let mut snapshot = tree_snapshot();
+        snapshot.agents[2].owner_pane_id = Some("pane_1".into());
+        snapshot.agents[0].group.collapsed = true;
+        if pinned {
+            snapshot
+                .pinned_tabs
+                .push(crate::protocol::ClientShellPinnedTab {
+                    role: None,
+                    tab_id: "tab_3".into(),
+                    workspace_id: "ws_2".into(),
+                });
+        }
+        state.set_snapshot(Box::new(snapshot));
+        let mut outcome = ClientShellInput::default();
+        state.push_endpoint_method(
+            crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget {
+                pane_id: "pane_3".into(),
+            }),
+            &mut outcome,
+        );
+        let methods = sent_methods(&outcome);
+        assert!(
+            matches!(&methods[0], crate::api::schema::Method::PaneFocus(target)
+            if target.pane_id == "pane_3")
+        );
+        let unfolds = methods
+            .iter()
+            .filter(|method| {
+                matches!(method,
+                    crate::api::schema::Method::AgentGroupCollapse(params)
+                        if params.target == "pane_1" && !params.collapsed
+                )
+            })
+            .count();
+        assert_eq!(unfolds, usize::from(!pinned));
+    }
+}
+
 fn pin_mouse(kind: crossterm::event::MouseEventKind, column: u16, row: u16) -> RawInputEvent {
     RawInputEvent::Mouse(MouseEvent {
         kind,

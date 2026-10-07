@@ -1584,6 +1584,11 @@ impl ClientShellState {
         }
     }
 
+    pub(super) fn tab_has_live_pin(snapshot: &ClientShellSnapshot, tab_id: &str) -> bool {
+        snapshot.tabs.iter().any(|tab| tab.tab_id == tab_id)
+            && snapshot.pinned_tabs.iter().any(|pin| pin.tab_id == tab_id)
+    }
+
     pub(super) fn reveal_tree_ancestors_for_pane(&mut self, pane_id: &str) -> bool {
         if !super::tree::tree_view_active(&self.config) {
             return false;
@@ -1596,12 +1601,7 @@ impl ClientShellState {
         };
         // A live pin already exposes this tab outside its home space and tab
         // folds. Focusing it must not unfold those independent tree groups.
-        if snapshot.tabs.iter().any(|tab| tab.tab_id == pane.tab_id)
-            && snapshot
-                .pinned_tabs
-                .iter()
-                .any(|pin| pin.tab_id == pane.tab_id)
-        {
+        if Self::tab_has_live_pin(snapshot, &pane.tab_id) {
             return false;
         }
         let workspace_id = pane.workspace_id.clone();

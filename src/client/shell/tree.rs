@@ -3365,6 +3365,9 @@ impl ClientShellState {
         let Some(snapshot) = self.snapshot.as_deref() else {
             return;
         };
+        if Self::tab_has_live_pin(snapshot, tab_id) {
+            return;
+        }
         let Some(tab) = snapshot.tabs.iter().find(|tab| tab.tab_id == tab_id) else {
             return;
         };
