@@ -608,6 +608,9 @@ impl App {
                     dropped_mouse_reports: tty_status.dropped_mouse_reports,
                     dropped_input_bytes: tty_status.dropped_input_bytes,
                     last_good_termios_at: tty_status.last_good_termios_at,
+                    human_input_age_ms: runtime
+                        .human_input_age()
+                        .map(|age| u64::try_from(age.as_millis()).unwrap_or(u64::MAX)),
                     shell_pid,
                     foreground_process_group_id,
                     tty: None,

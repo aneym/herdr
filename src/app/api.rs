@@ -1882,21 +1882,39 @@ mod tests {
             .attached_terminal_id
             .clone();
         let (runtime, _rx) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
-        app.terminal_runtimes.insert(terminal_id, runtime);
+        app.terminal_runtimes.insert(terminal_id.clone(), runtime);
         let target = app.public_pane_id(0, pane_id).unwrap();
+        let process_info = |app: &mut App| {
+            let response = app.handle_api_request(crate::api::schema::Request {
+                id: "process_info".into(),
+                method: crate::api::schema::Method::PaneProcessInfo(
+                    crate::api::schema::PaneProcessInfoParams {
+                        pane_id: Some(target.clone()),
+                    },
+                ),
+            });
+            serde_json::from_str::<serde_json::Value>(&response).unwrap()
+        };
 
-        let response = app.handle_api_request(crate::api::schema::Request {
-            id: "process_info".into(),
-            method: crate::api::schema::Method::PaneProcessInfo(
-                crate::api::schema::PaneProcessInfoParams {
-                    pane_id: Some(target.clone()),
-                },
-            ),
-        });
-        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
-
+        let response = process_info(&mut app);
         assert_eq!(response["result"]["type"], "pane_process_info");
         assert_eq!(response["result"]["process_info"]["pane_id"], target);
+        // The key is present and null before any human input, so a caller can
+        // tell "no human input yet" from a server that lacks the field.
+        assert_eq!(
+            response["result"]["process_info"].get("human_input_age_ms"),
+            Some(&serde_json::Value::Null)
+        );
+
+        app.terminal_runtimes
+            .get(&terminal_id)
+            .expect("test runtime")
+            .record_human_bytes(b"x");
+        let response = process_info(&mut app);
+        let age = response["result"]["process_info"]["human_input_age_ms"]
+            .as_u64()
+            .expect("human input age after a keystroke");
+        assert!(age < 60_000, "age {age} ms");
     }
 
     #[test]

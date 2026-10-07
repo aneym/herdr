@@ -9805,6 +9805,16 @@
               "minimum": 0,
               "type": "integer"
             },
+            "human_input_age_ms": {
+              "default": null,
+              "description": "Milliseconds since the last human input (a client keystroke, paste or\nraw byte batch, or a send marked human) reached this pane; null when\nnone has since the pane's runtime started.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "last_good_termios_at": {
               "default": null,
               "format": "uint64",

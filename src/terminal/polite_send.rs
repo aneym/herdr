@@ -307,6 +307,14 @@ impl PoliteSend {
                 .is_none_or(|at| now.saturating_duration_since(at) >= quiet)
     }
 
+    fn human_input_age(&self, now: Instant) -> Option<Duration> {
+        self.last_human_input_at
+            .into_iter()
+            .chain(self.last_raw_input_at)
+            .max()
+            .map(|at| now.saturating_duration_since(at))
+    }
+
     fn quiet(&self, now: Instant, quiet: Duration) -> bool {
         self.last_human_input_at
             .is_none_or(|at| now.saturating_duration_since(at) >= quiet)
@@ -359,6 +367,12 @@ impl TerminalRuntime {
     /// Whether no human keystroke reached this runtime within `quiet`.
     pub(crate) fn human_input_quiet_for(&self, quiet: Duration) -> bool {
         self.1.lock().human_input_quiet(Instant::now(), quiet)
+    }
+
+    /// Time since any human input reached this runtime, counting every raw
+    /// byte batch as `agent.resume` does; `None` when none has.
+    pub(crate) fn human_input_age(&self) -> Option<Duration> {
+        self.1.lock().human_input_age(Instant::now())
     }
 
     pub(crate) fn record_human_text(&self) {

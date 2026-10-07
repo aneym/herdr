@@ -517,6 +517,11 @@ pub struct PaneProcessInfo {
     pub dropped_input_bytes: u64,
     #[serde(default)]
     pub last_good_termios_at: Option<u64>,
+    /// Milliseconds since the last human input (a client keystroke, paste or
+    /// raw byte batch, or a send marked human) reached this pane; null when
+    /// none has since the pane's runtime started.
+    #[serde(default)]
+    pub human_input_age_ms: Option<u64>,
     pub pane_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shell_pid: Option<u32>,
