@@ -731,6 +731,9 @@ pub struct PaneQueueParams {
     pub pane_id: String,
     #[serde(default)]
     pub id: Option<String>,
+    /// Deliver held input despite a composer draft or quiet/settle window.
+    /// With `id`, deliver only that send and its FIFO predecessors, not successors.
+    /// Caller-supplied delivery guards still enforce session identity and expiry.
     #[serde(default)]
     pub flush: bool,
     /// With `id`: remove that held send before it reaches the pane (state

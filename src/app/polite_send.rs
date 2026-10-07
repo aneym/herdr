@@ -168,10 +168,10 @@ impl App {
                             .iter()
                             .any(|item| item.id == *qid)
                         {
-                            if let Err(err) = runtime.flush_polite_queue_guarded(
+                            if let Err(err) = runtime.flush_polite_send_guarded(
+                                qid,
                                 Instant::now(),
                                 self.polite_send_quiet,
-                                true,
                                 self.polite_options(ws_idx, pane_id, false, false),
                                 &|guard| self.agent_delivery_verdict(ws_idx, pane_id, guard),
                             ) {
@@ -211,13 +211,7 @@ impl App {
             return encode_error(id, "pane_not_found", "pane not found");
         };
         let Some(runtime) = self.lookup_runtime_sender(ws_idx, pane_id) else {
-            return encode_success(
-                id,
-                ResponseResult::PaneQueue {
-                    sends: vec![],
-                    recent: vec![],
-                },
-            );
+            return encode_error(id, "pane_not_found", "pane not found");
         };
         if params.flush {
             if let Err(err) = runtime.flush_polite_queue_guarded(

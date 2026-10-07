@@ -157,7 +157,18 @@ pub(crate) enum Payload {
 
 impl Payload {
     fn is_submit(&self) -> bool {
-        matches!(self, Self::Keys(keys) if keys.len() == 1 && keys[0].as_ref() == b"\r")
+        let Self::Keys(keys) = self else {
+            return false;
+        };
+        keys.len() == 1
+            && std::str::from_utf8(&keys[0])
+                .ok()
+                .and_then(crate::input::parse_terminal_key_sequence)
+                .is_some_and(|key| {
+                    key.code == KeyCode::Enter
+                        && key.modifiers.is_empty()
+                        && key.kind != KeyEventKind::Release
+                })
     }
 
     fn len(&self) -> usize {
@@ -205,7 +216,6 @@ struct HeldSend {
     method: &'static str,
     payload: Payload,
     guard: Option<DeliveryGuard>,
-    expires_at: Instant,
 }
 
 pub(super) struct PoliteSend {
@@ -404,7 +414,6 @@ impl PoliteSend {
     fn raw_bytes(&mut self, bytes: &[u8]) {
         let state = self;
         if !bytes.is_empty() {
-            state.agent_prompt_composer = false;
             state.last_raw_input_at = Some(Instant::now());
         }
         let mut input = std::mem::take(&mut state.raw_pending);
@@ -462,6 +471,7 @@ impl PoliteSend {
                 };
                 let sequence = &rest[..end];
                 if sequence == b"\x1b[200~" {
+                    state.agent_prompt_composer = false;
                     state.raw_paste = true;
                 } else if sequence == b"\x1b[201~" {
                     state.raw_paste = false;
@@ -583,7 +593,7 @@ impl TerminalRuntime {
             .last_submit_at
             .is_some_and(|at| now.saturating_duration_since(at) < options.settle);
         let owned_submit = state.agent_prompt_composer && payload.is_submit();
-        if !state.queue.is_empty()
+        if (!state.queue.is_empty() && !owned_submit)
             || guard_holds
             || (guarded
                 && ((screen_draft.unwrap_or(state.draft) && !owned_submit)
@@ -619,7 +629,6 @@ impl TerminalRuntime {
                 method,
                 payload,
                 guard,
-                expires_at: now + Duration::from_secs(120),
             });
             tracing::info!(pane_id = ?self.0.pane_id, method, bytes = len, "polite send held");
             return Ok(SendOutcome {
@@ -773,11 +782,48 @@ impl TerminalRuntime {
         options: SendOptions,
         verdict: &dyn Fn(&DeliveryGuard) -> DeliveryVerdict,
     ) -> std::io::Result<()> {
+        self.flush_polite_queue_through(now, quiet, force, options, verdict, None)
+    }
+
+    /// Flush only the named receipt and its FIFO predecessors, never successors.
+    pub(crate) fn flush_polite_send_guarded(
+        &self,
+        id: &str,
+        now: Instant,
+        quiet: Duration,
+        options: SendOptions,
+        verdict: &dyn Fn(&DeliveryGuard) -> DeliveryVerdict,
+    ) -> std::io::Result<()> {
+        self.flush_polite_queue_through(now, quiet, true, options, verdict, Some(id))
+    }
+
+    fn flush_polite_queue_through(
+        &self,
+        now: Instant,
+        quiet: Duration,
+        force: bool,
+        options: SendOptions,
+        verdict: &dyn Fn(&DeliveryGuard) -> DeliveryVerdict,
+        through: Option<&str>,
+    ) -> std::io::Result<()> {
+        let screen_draft = options
+            .claude
+            .then(|| self.0.claude_prompt_draft())
+            .flatten();
         let mut state = self.1.lock();
+        let mut remaining = match through {
+            Some(id) => match state.queue.iter().position(|item| item.id == id) {
+                Some(index) => index + 1,
+                None => return Ok(()),
+            },
+            None => state.queue.len(),
+        };
+        let limit = remaining;
+        let mut index = 0;
         state.queue.retain(|item| {
-            if now >= item.expires_at {
-                transition(&item.id, PaneSendState::Dropped, Some("hold_expired"));
-                return false;
+            index += 1;
+            if index > limit {
+                return true;
             }
             let Some(guard) = &item.guard else {
                 return true;
@@ -785,16 +831,11 @@ impl TerminalRuntime {
             let Some((drop_state, reason)) = self.guard_refusal(guard, verdict(guard), now) else {
                 return true;
             };
+            remaining -= 1;
             transition(&item.id, drop_state, Some(reason));
             tracing::info!(pane_id = ?item.pane_id, method = item.method, reason, "guarded polite send dropped");
             false
         });
-        drop(state);
-        let screen_draft = options
-            .claude
-            .then(|| self.0.claude_prompt_draft())
-            .flatten();
-        let mut state = self.1.lock();
         if screen_draft == Some(false) {
             state.draft = false;
         }
@@ -806,7 +847,10 @@ impl TerminalRuntime {
                 .last_human_input_at
                 .is_none_or(|input| submit >= input)
         });
-        while let Some(item) = state.queue.front() {
+        while remaining > 0 {
+            let Some(item) = state.queue.front() else {
+                break;
+            };
             let owned_submit = state.agent_prompt_composer && item.payload.is_submit();
             let reason = if screen_draft.unwrap_or(state.draft) && !owned_submit {
                 Some("human_composer_draft")
@@ -831,6 +875,7 @@ impl TerminalRuntime {
                     Some("foreground_pgid_changed"),
                 );
                 state.queue.pop_front();
+                remaining -= 1;
                 continue;
             }
             if let Some(guard) = &item.guard {
@@ -843,6 +888,7 @@ impl TerminalRuntime {
                     transition(&item.id, drop_state, Some(reason));
                     tracing::info!(pane_id = ?item.pane_id, method = item.method, reason, "guarded polite send dropped at handoff");
                     state.queue.pop_front();
+                    remaining -= 1;
                     continue;
                 }
                 if ready != DeliveryVerdict::Ready
@@ -857,6 +903,7 @@ impl TerminalRuntime {
             tracing::info!(pane_id = ?self.0.pane_id, method = item.method, bytes = len, "polite send flushed");
             state.agent_prompt_composer = item.method == "agent.prompt";
             state.queue.pop_front();
+            remaining -= 1;
         }
         Ok(())
     }
