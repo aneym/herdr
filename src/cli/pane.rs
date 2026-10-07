@@ -2,12 +2,11 @@ use crate::api::schema::{
     Method, OutputMatch, PaneCurrentParams, PaneDirection, PaneEdgesParams,
     PaneFocusDirectionParams, PaneInputSetParams, PaneLayoutParams, PaneListParams,
     PaneMoveDestination, PaneMoveParams, PaneNeighborParams, PanePlaceParams, PanePlaceTarget,
-    PaneProcessInfoParams, PaneReadParams,
-    PaneReleaseAgentParams, PaneRenameParams, PaneReportAgentParams, PaneReportAgentSessionParams,
-    PaneReportMetadataParams, PaneResizeParams, PaneRightClickTarget, PaneSendInputParams,
-    PaneSendKeysParams, PaneSendTextParams, PaneSplitParams, PaneSwapParams, PaneTarget,
-    PaneWaitForOutputParams, PaneZoomMode, PaneZoomParams, ReadFormat, ReadSource, Request,
-    SplitDirection,
+    PaneProcessInfoParams, PaneReadParams, PaneReleaseAgentParams, PaneRenameParams,
+    PaneReportAgentParams, PaneReportAgentSessionParams, PaneReportMetadataParams,
+    PaneResizeParams, PaneRightClickTarget, PaneSendInputParams, PaneSendKeysParams,
+    PaneSendTextParams, PaneSplitParams, PaneSwapParams, PaneTarget, PaneWaitForOutputParams,
+    PaneZoomMode, PaneZoomParams, ReadFormat, ReadSource, Request, SplitDirection,
 };
 
 pub(super) fn run_pane_command(args: &[String]) -> std::io::Result<i32> {
@@ -802,13 +801,15 @@ fn parse_pane_place_args(args: &[String]) -> Result<PanePlaceParams, String> {
                             }
                         });
                     }
-                    "--side" => side = Some(match value.as_str() {
-                        "left" => PaneDirection::Left,
-                        "right" => PaneDirection::Right,
-                        "up" => PaneDirection::Up,
-                        "down" => PaneDirection::Down,
-                        _ => return Err("side must be left, right, up or down".into()),
-                    }),
+                    "--side" => {
+                        side = Some(match value.as_str() {
+                            "left" => PaneDirection::Left,
+                            "right" => PaneDirection::Right,
+                            "up" => PaneDirection::Up,
+                            "down" => PaneDirection::Down,
+                            _ => return Err("side must be left, right, up or down".into()),
+                        })
+                    }
                     _ => {
                         let parsed = value
                             .parse::<f32>()

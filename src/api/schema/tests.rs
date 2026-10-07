@@ -1643,3 +1643,59 @@ fn pane_link_resolve_round_trips() {
         result
     );
 }
+
+#[test]
+fn pane_place_request_and_response_round_trip() {
+    let request_json = serde_json::json!({
+        "id": "place", "method": "pane.place", "params": {
+            "pane_id": "w1:p2", "target": {"type": "pane", "pane_id": "w2:p1"},
+            "side": "left", "size": 0.25, "focus": true, "dry_run": true
+        }
+    });
+    let request: Request = serde_json::from_value(request_json.clone()).unwrap();
+    assert!(matches!(&request.method, Method::PanePlace(params) if params.dry_run && params.focus));
+    assert_eq!(serde_json::to_value(&request).unwrap(), request_json);
+    let rect = PaneLayoutRect {
+        x: 0,
+        y: 0,
+        width: 20,
+        height: 24,
+    };
+    let layout = PaneLayoutSnapshot {
+        workspace_id: "w2".into(),
+        tab_id: "w2:t1".into(),
+        zoomed: false,
+        area: rect,
+        focused_pane_id: "w2:p2".into(),
+        panes: vec![PaneLayoutPane {
+            pane_id: "w2:p2".into(),
+            focused: true,
+            rect,
+        }],
+        splits: vec![],
+    };
+    let response = SuccessResponse {
+        id: "place".into(),
+        result: ResponseResult::PanePlace {
+            place: PanePlaceResult {
+                changed: true,
+                dry_run: true,
+                reason: None,
+                pane_id: "w2:p2".into(),
+                previous_pane_id: "w1:p2".into(),
+                placed_rect: rect,
+                target_layout: layout.clone(),
+                source_layout: Some(layout),
+                closed_tab_id: Some("w1:t1".into()),
+                closed_workspace_id: Some("w1".into()),
+                focused_pane_id: "w2:p2".into(),
+            },
+        },
+    };
+    let json = serde_json::to_value(&response).unwrap();
+    assert_eq!(json["result"]["type"], "pane_place");
+    assert_eq!(
+        serde_json::from_value::<SuccessResponse>(json).unwrap(),
+        response
+    );
+}

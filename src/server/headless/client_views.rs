@@ -313,6 +313,7 @@ impl HeadlessServer {
                 | Method::PaneClose(_)
                 | Method::PaneEditScrollback(_)
                 | Method::PaneMove(_)
+                | Method::PanePlace(_)
                 | Method::PaneSplit(_)
                 | Method::TabClose(_)
                 | Method::TabCreate(_)
@@ -347,6 +348,7 @@ impl HeadlessServer {
                 | Method::PaneClear(_)
                 | Method::PaneSplit(_)
                 | Method::PaneSwap(_)
+                | Method::PanePlace(_)
                 | Method::PaneZoom(_)
                 | Method::TabClose(_)
                 | Method::TabCreate(_)
@@ -381,6 +383,7 @@ impl HeadlessServer {
                 | Method::PaneResize(_)
                 | Method::PaneSplit(_)
                 | Method::PaneSwap(_)
+                | Method::PanePlace(_)
                 | Method::PaneZoom(_)
                 | Method::TabClose(_)
                 | Method::TabCreate(_)
@@ -940,6 +943,9 @@ impl HeadlessServer {
         let inspect_pane_move = matches!(
             &msg.request.method,
             api::schema::Method::PaneMove(params) if params.focus
+        ) || matches!(
+            &msg.request.method,
+            api::schema::Method::PanePlace(params) if params.focus && !params.dry_run
         );
         let response_proxy = (agent_focus_target.is_some() || inspect_pane_move).then(|| {
             let (proxy_tx, proxy_rx) = std::sync::mpsc::channel();
@@ -950,12 +956,18 @@ impl HeadlessServer {
         let changed = self.handle_api_request_with_shutdown_check_inner(msg, false, false);
         let proxied_result = forward_proxied_api_response(response_proxy);
         let proxied_request_succeeded = proxied_result.is_some();
-        // Same-tab and zoomed moves succeed without moving or requesting focus.
+        // No-op moves and dry-run placements must not request shell focus.
         let pane_move_focus_succeeded = inspect_pane_move
             && matches!(
                 &proxied_result,
                 Some(api::schema::ResponseResult::PaneMove { move_result }) if move_result.changed
-            );
+            )
+            || (inspect_pane_move
+                && matches!(
+                    &proxied_result,
+                    Some(api::schema::ResponseResult::PanePlace { place })
+                        if place.changed && !place.dry_run
+                ));
         let successful_agent_focus_target = proxied_request_succeeded
             .then(|| {
                 agent_focus_target.as_deref().and_then(|target| {
@@ -1050,5 +1062,28 @@ impl HeadlessServer {
                     || self.resize_shell_tab_if_controller(client_id, false)
             };
         changed | navigation_changed | geometry_changed | revealed
+    }
+}
+
+#[cfg(test)]
+mod placement_tests {
+    use super::*;
+
+    // Reviewer-required regression: pane.place must use all geometry/reconcile paths.
+    #[test]
+    fn pane_place_claims_and_reapplies_geometry_and_reconciles_locations() {
+        let method = api::schema::Method::PanePlace(api::schema::PanePlaceParams {
+            pane_id: "w1:p1".into(),
+            target: api::schema::PanePlaceTarget::Tab {
+                tab_id: "w1:t2".into(),
+            },
+            side: api::schema::PaneDirection::Left,
+            size: None,
+            focus: true,
+            dry_run: false,
+        });
+        assert!(HeadlessServer::shell_locations_may_need_reconcile(&method));
+        assert!(HeadlessServer::shell_endpoint_claims_geometry(&method));
+        assert!(HeadlessServer::public_request_may_change_geometry(&method));
     }
 }

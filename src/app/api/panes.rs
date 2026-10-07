@@ -7,15 +7,15 @@ use crate::api::schema::{
     PaneFocusDirectionReason, PaneFocusDirectionResult, PaneInfo, PaneInputSetParams,
     PaneLayoutPane, PaneLayoutParams, PaneLayoutRect, PaneLayoutSnapshot, PaneLayoutSplit,
     PaneListParams, PaneMoveDestination, PaneMoveParams, PaneMoveReason, PaneMoveResult,
-    PanePlaceParams, PanePlaceReason, PanePlaceResult, PanePlaceTarget,
-    PaneNeighborParams, PaneNeighborResult, PaneProcessInfo, PaneProcessInfoParams,
-    PaneProcessInfoProcess, PaneReadParams, PaneReadResult, PaneReleaseAgentParams,
-    PaneRenameParams, PaneReportAgentParams, PaneReportAgentSessionParams,
-    PaneReportMetadataParams, PaneResizeParams, PaneResizeReason, PaneResizeResult,
-    PaneScrollParams, PaneSelectionReadParams, PaneSendInputParams, PaneSendKeysParams,
-    PaneSendTextParams, PaneSetProfilesParams, PaneSplitParams, PaneSwapParams, PaneSwapReason,
-    PaneSwapResult, PaneTarget, PaneTextPoint, PaneTextRange, PaneZoomMode, PaneZoomParams,
-    PaneZoomReason, PaneZoomResult, ResponseResult,
+    PaneNeighborParams, PaneNeighborResult, PanePlaceParams, PanePlaceReason, PanePlaceResult,
+    PanePlaceTarget, PaneProcessInfo, PaneProcessInfoParams, PaneProcessInfoProcess,
+    PaneReadParams, PaneReadResult, PaneReleaseAgentParams, PaneRenameParams,
+    PaneReportAgentParams, PaneReportAgentSessionParams, PaneReportMetadataParams,
+    PaneResizeParams, PaneResizeReason, PaneResizeResult, PaneScrollParams,
+    PaneSelectionReadParams, PaneSendInputParams, PaneSendKeysParams, PaneSendTextParams,
+    PaneSetProfilesParams, PaneSplitParams, PaneSwapParams, PaneSwapReason, PaneSwapResult,
+    PaneTarget, PaneTextPoint, PaneTextRange, PaneZoomMode, PaneZoomParams, PaneZoomReason,
+    PaneZoomResult, ResponseResult,
 };
 use crate::app::actions::{PaneZoomCommand, PaneZoomNoopReason};
 use crate::app::App;
@@ -998,7 +998,8 @@ impl App {
         let Some((source_ws, moved)) = self.parse_pane_id(&params.pane_id) else {
             return encode_error(id, "pane_not_found", "source pane not found");
         };
-        let Some(source_tab) = self.state.workspaces[source_ws].find_tab_index_for_pane(moved) else {
+        let Some(source_tab) = self.state.workspaces[source_ws].find_tab_index_for_pane(moved)
+        else {
             return encode_error(id, "pane_not_found", "source pane not found");
         };
         let (target_ws, target_tab, target, default_size) = match &params.target {
@@ -1021,12 +1022,9 @@ impl App {
         let same_tab = source_ws == target_ws && source_tab == target_tab;
         let old = &self.state.workspaces[target_ws].tabs[target_tab];
         let side = NavDirection::from(params.side);
-        let candidate = old.layout.place_pane(
-            moved,
-            target,
-            side,
-            params.size.unwrap_or(default_size),
-        );
+        let candidate =
+            old.layout
+                .place_pane(moved, target, side, params.size.unwrap_or(default_size));
         let reason = if target == Some(moved) {
             Some(PanePlaceReason::SamePane)
         } else if old.zoomed || self.state.workspaces[source_ws].tabs[source_tab].zoomed {
@@ -1071,13 +1069,16 @@ impl App {
             .find(|pane| pane.id == moved)
             .map(|pane| pane.rect.into())
             .or_else(|| {
-                self.state.workspaces[source_ws].tabs.get(source_tab).and_then(|tab| {
-                    tab.layout
-                        .panes(self.state.view.terminal_area)
-                        .into_iter()
-                        .find(|pane| pane.id == moved)
-                        .map(|pane| pane.rect.into())
-                })
+                self.state.workspaces[source_ws]
+                    .tabs
+                    .get(source_tab)
+                    .and_then(|tab| {
+                        tab.layout
+                            .panes(self.state.view.terminal_area)
+                            .into_iter()
+                            .find(|pane| pane.id == moved)
+                            .map(|pane| pane.rect.into())
+                    })
             });
         let Some(placed_rect) = placed_rect else {
             return encode_error(id, "pane_layout_unavailable", "pane layout unavailable");
@@ -1087,15 +1088,21 @@ impl App {
             let source = &self.state.workspaces[source_ws].tabs[source_tab].layout;
             let mut source = source.clone();
             if changed && params.dry_run && source.close_pane(moved) {
-                source_layout = self.pane_layout_snapshot_for(source_ws, source_tab, &source);
+                source_layout = self.pane_layout_snapshot_for(source_ws, source_tab, &source, true);
             } else {
                 source_layout = self.pane_layout_snapshot(source_ws, source_tab);
             }
         }
-        let mut closed_tab_id = (changed && params.dry_run && !same_tab
-            && self.state.workspaces[source_ws].tabs[source_tab].layout.pane_count() == 1)
+        let mut closed_tab_id = (changed
+            && params.dry_run
+            && !same_tab
+            && self.state.workspaces[source_ws].tabs[source_tab]
+                .layout
+                .pane_count()
+                == 1)
             .then(|| previous_tab_id.clone());
-        let mut closed_workspace_id = (closed_tab_id.is_some() && source_ws != target_ws
+        let mut closed_workspace_id = (closed_tab_id.is_some()
+            && source_ws != target_ws
             && self.state.workspaces[source_ws].tabs.len() == 1)
             .then(|| previous_workspace_id.clone());
         if closed_tab_id.is_some() {
@@ -1104,18 +1111,22 @@ impl App {
         let mut result_pane_id = previous_pane_id.clone();
         if changed && !params.dry_run {
             if same_tab {
+                let Some(mut pane) = self.pane_info(source_ws, moved) else {
+                    return encode_error(id, "pane_not_found", "source pane not found");
+                };
                 let previous_focus = self.state.current_pane_focus_target();
                 self.state.workspaces[source_ws].tabs[source_tab].layout = layout.clone();
                 if params.focus {
                     self.state.switch_workspace_tab(source_ws, source_tab);
-                    self.state.record_pane_focus_change(previous_focus, source_ws, moved);
+                    self.state
+                        .record_pane_focus_change(previous_focus, source_ws, moved);
                     self.state.mode = crate::app::Mode::Terminal;
                 }
                 self.state.mark_session_dirty();
                 self.schedule_session_save();
-                let Some(pane) = self.pane_info(source_ws, moved) else {
-                    return encode_error(id, "pane_not_found", "source pane not found");
-                };
+                pane.focused = self.state.active == Some(source_ws)
+                    && self.state.workspaces[source_ws].active_tab == source_tab
+                    && layout.focused() == moved;
                 self.emit_event(EventEnvelope {
                     event: EventKind::PaneMoved,
                     data: EventData::PaneMoved {
@@ -1161,7 +1172,7 @@ impl App {
             return encode_error(id, "tab_not_found", "target tab not found");
         };
         let target_layout = if changed && params.dry_run {
-            self.pane_layout_snapshot_for(ws, tab, &layout)
+            self.pane_layout_snapshot_for(ws, tab, &layout, true)
         } else {
             self.pane_layout_snapshot(ws, tab)
         };
@@ -1171,7 +1182,11 @@ impl App {
         if changed && params.dry_run && source_ws != target_ws {
             result_pane_id = crate::workspace::public_pane_id_for_number(
                 &self.state.workspaces[target_ws].id,
-                self.state.workspaces[target_ws].next_public_pane_number,
+                self.state.workspaces[target_ws]
+                    .public_pane_numbers
+                    .get(&moved)
+                    .copied()
+                    .unwrap_or(self.state.workspaces[target_ws].next_public_pane_number),
             );
             for pane in &mut target_layout.panes {
                 if pane.pane_id == previous_pane_id {
@@ -1182,21 +1197,24 @@ impl App {
                 target_layout.focused_pane_id = result_pane_id.clone();
             }
         }
-        encode_success(id, ResponseResult::PanePlace {
-            place: PanePlaceResult {
-                changed,
-                dry_run: params.dry_run,
-                reason,
-                pane_id: result_pane_id,
-                previous_pane_id,
-                placed_rect,
-                focused_pane_id: target_layout.focused_pane_id.clone(),
-                target_layout,
-                source_layout,
-                closed_tab_id,
-                closed_workspace_id,
+        encode_success(
+            id,
+            ResponseResult::PanePlace {
+                place: PanePlaceResult {
+                    changed,
+                    dry_run: params.dry_run,
+                    reason,
+                    pane_id: result_pane_id,
+                    previous_pane_id,
+                    placed_rect,
+                    focused_pane_id: target_layout.focused_pane_id.clone(),
+                    target_layout,
+                    source_layout,
+                    closed_tab_id,
+                    closed_workspace_id,
+                },
             },
-        })
+        )
     }
 
     pub(super) fn handle_pane_move(&mut self, id: String, params: PaneMoveParams) -> String {
@@ -1488,6 +1506,8 @@ impl App {
                         );
                     }
                 };
+                // The split-right insertion transfers runtime/metadata ownership.
+                // pane.place then replaces that temporary split with its planned tree.
                 if let Some(mut layout) = placement {
                     if focus {
                         layout.focus_pane(moved_pane_id);
@@ -2344,7 +2364,7 @@ impl App {
     ) -> Option<PaneLayoutSnapshot> {
         let ws = self.state.workspaces.get(ws_idx)?;
         let tab = ws.tabs.get(tab_idx)?;
-        self.pane_layout_snapshot_for(ws_idx, tab_idx, &tab.layout)
+        self.pane_layout_snapshot_for(ws_idx, tab_idx, &tab.layout, false)
     }
 
     fn pane_layout_snapshot_for(
@@ -2352,12 +2372,20 @@ impl App {
         ws_idx: usize,
         tab_idx: usize,
         layout: &crate::layout::TileLayout,
+        cross_workspace_preview: bool,
     ) -> Option<PaneLayoutSnapshot> {
         let tab = self.state.workspaces.get(ws_idx)?.tabs.get(tab_idx)?;
         let public_id = |pane_id| {
             self.public_pane_id(ws_idx, pane_id).or_else(|| {
-                self.state.workspaces.iter().enumerate()
-                    .find_map(|(idx, _)| self.public_pane_id(idx, pane_id))
+                cross_workspace_preview
+                    .then(|| {
+                        self.state
+                            .workspaces
+                            .iter()
+                            .enumerate()
+                            .find_map(|(idx, _)| self.public_pane_id(idx, pane_id))
+                    })
+                    .flatten()
             })
         };
         let area = self.state.view.terminal_area;

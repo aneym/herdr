@@ -1,9 +1,8 @@
 use crate::api::schema::{
     Method, PaneFocusDirectionParams, PaneInputSetParams, PaneMoveParams, PanePlaceParams,
-    PaneRenameParams,
-    PaneResizeParams, PaneSplitParams, PaneSwapParams, PaneTarget, PaneZoomParams, Request,
-    TabCreateParams, TabListParams, TabMoveParams, TabPinMoveParams, TabRenameParams,
-    TabSetPinnedParams, TabTarget, WorkspaceCloseParams, WorkspaceCreateParams,
+    PaneRenameParams, PaneResizeParams, PaneSplitParams, PaneSwapParams, PaneTarget,
+    PaneZoomParams, Request, TabCreateParams, TabListParams, TabMoveParams, TabPinMoveParams,
+    TabRenameParams, TabSetPinnedParams, TabTarget, WorkspaceCloseParams, WorkspaceCreateParams,
     WorkspaceListParams, WorkspaceRenameParams, WorkspaceTarget, WorktreeCreateParams,
     WorktreeListParams, WorktreeOpenParams, WorktreeRemoveParams,
 };
