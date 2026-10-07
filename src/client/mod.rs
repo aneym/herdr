@@ -889,7 +889,7 @@ async fn run_client_loop(
                     continue;
                 }
                 let events = crate::raw_input::parse_raw_input_bytes_sync(&data);
-                let mut reported_theme = false;
+                let data = terminal_geometry::filter_attach_host_theme_reports(&data);
                 for event in &events {
                     if let Some(update) = terminal_geometry::host_theme_update(event) {
                         write_to_server(
@@ -897,14 +897,10 @@ async fn run_client_loop(
                             &ClientMessage::ClientShellHostTheme { update },
                         )
                         .map_err(ClientError::ConnectionLost)?;
-                        reported_theme = true;
                     }
                 }
-                if reported_theme {
-                    if crate::raw_input::events_require_host_terminal_theme_query(&events) {
-                        query_host_terminal_theme();
-                    }
-                    continue;
+                if crate::raw_input::events_require_host_terminal_theme_query(&events) {
+                    query_host_terminal_theme();
                 }
                 let data = if let Some(attach_escape) = &mut state.attach_escape {
                     if crate::raw_input::events_require_host_terminal_appearance_query(&events) {

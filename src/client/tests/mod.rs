@@ -935,3 +935,29 @@ fn forward_clipboard_uses_local_clipboard_path() {
     assert!(forward_clipboard("dGVzdA=="));
     assert!(!forward_clipboard("not base64"));
 }
+
+#[test]
+fn attach_theme_reply_preserves_coalesced_keys_and_paste() {
+    // Parser regression table: report encodings, coalesced keys, and opaque paste payloads.
+    for report in [
+        b"\x1b[?997;1n".as_slice(),
+        b"\x1b]11;rgb:2828/2a2a/3636\x07".as_slice(),
+        b"\x1b]10;rgb:ffff/ffff/ffff\x1b\\".as_slice(),
+        b"\x1b]4;1;rgb:ffff/0000/0000\x07".as_slice(),
+    ] {
+        let mut data = b"a".to_vec();
+        data.extend_from_slice(report);
+        data.extend_from_slice(b"z\x1b[A");
+        assert_eq!(
+            terminal_geometry::filter_attach_host_theme_reports(&data),
+            b"az\x1b[A"
+        );
+        let mut paste = b"\x1b[200~".to_vec();
+        paste.extend_from_slice(report);
+        paste.extend_from_slice(b"\x1b[201~");
+        assert_eq!(
+            terminal_geometry::filter_attach_host_theme_reports(&paste),
+            paste
+        );
+    }
+}

@@ -186,6 +186,18 @@ pub(super) fn apply_terminal_attach_input(
     runtime: &crate::terminal::TerminalRuntime,
     data: Vec<u8>,
 ) -> Result<(), String> {
+    let data = crate::raw_input::filter_raw_input_bytes(&data, |event| {
+        let focus = match event {
+            crate::raw_input::RawInputEvent::OuterFocusGained => crate::ghostty::FocusEvent::Gained,
+            crate::raw_input::RawInputEvent::OuterFocusLost => crate::ghostty::FocusEvent::Lost,
+            _ => return false,
+        };
+        runtime.try_send_focus_event(focus);
+        true
+    });
+    if data.is_empty() {
+        return Ok(());
+    }
     runtime.record_human_bytes(&data);
     runtime.scroll_reset();
     if let Some(text) = crate::raw_input::complete_text_bracketed_paste(&data) {

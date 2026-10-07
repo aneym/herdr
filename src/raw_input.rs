@@ -11,10 +11,31 @@ pub enum MouseNavButton {
     Forward,
 }
 
-// PORT-0.9: `parse_raw_input_bytes_with_ranges` and `RawInputEventWithRange`
-// existed only for the fork's server-side client-input routing tests, which the
-// 0.9 client shell replaces. Preserved at
-// docs/fork/port-0.9/orig/src/raw_input.rs. (docs/fork/port-0.9/PORT.md)
+/// Remove selected terminal reports while preserving all other input bytes.
+/// Complete pastes are a single event; an incomplete paste remains opaque.
+pub(crate) fn filter_raw_input_bytes(
+    data: &[u8],
+    mut remove: impl FnMut(&RawInputEvent) -> bool,
+) -> Vec<u8> {
+    let mut retained = Vec::with_capacity(data.len());
+    let mut offset = 0;
+    while offset < data.len() {
+        let remaining = &data[offset..];
+        if let Some((event, consumed)) = extract_one_event(remaining) {
+            if !remove(&event) {
+                retained.extend_from_slice(&remaining[..consumed]);
+            }
+            offset += consumed;
+        } else if remaining.starts_with(BRACKETED_PASTE_START) {
+            retained.extend_from_slice(remaining);
+            break;
+        } else {
+            retained.push(remaining[0]);
+            offset += 1;
+        }
+    }
+    retained
+}
 
 /// Parse raw terminal input bytes into a list of `RawInputEvent`s.
 ///

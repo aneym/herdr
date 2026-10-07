@@ -299,3 +299,8 @@ pub(super) fn host_theme_update(
         _ => None,
     }
 }
+
+/// Host replies are consumed locally, but keys coalesced with them still belong to the pane.
+pub(super) fn filter_attach_host_theme_reports(data: &[u8]) -> Vec<u8> {
+    crate::raw_input::filter_raw_input_bytes(data, |event| host_theme_update(event).is_some())
+}

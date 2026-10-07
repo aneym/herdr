@@ -7995,3 +7995,73 @@ fn no_handle_internal_event_bypass_in_module() {
         bypass_lines.join("\n  ")
     );
 }
+
+#[test]
+fn terminal_attach_focus_reports_respect_child_mode_and_human_quiet() {
+    // Integration at the attach input / terminal mode / PTY-write boundary.
+    for enabled in [false, true] {
+        with_terminal_attach_runtime(
+            if enabled { b"\x1b[?1004h" } else { b"" },
+            4,
+            |runtime, input_rx| {
+                assert!(runtime.human_input_age().is_none());
+                apply_terminal_attach_input(runtime, b"\x1b[I\x1b[O".to_vec()).unwrap();
+                assert!(runtime.human_input_age().is_none());
+                assert!(runtime.human_input_quiet_for(Duration::from_secs(60)));
+                assert_eq!(runtime.scroll_metrics().unwrap().offset_from_bottom, 4);
+                if enabled {
+                    assert_eq!(input_rx.try_recv().unwrap().as_ref(), b"\x1b[I");
+                    assert_eq!(input_rx.try_recv().unwrap().as_ref(), b"\x1b[O");
+                }
+                assert!(input_rx.try_recv().is_err());
+                apply_terminal_attach_input(runtime, b"\x1b[Ikey\x1b[O".to_vec()).unwrap();
+                assert!(runtime.human_input_age().is_some());
+                let mut bytes = Vec::new();
+                while let Ok(data) = input_rx.try_recv() {
+                    bytes.extend_from_slice(&data);
+                }
+                assert_eq!(
+                    bytes,
+                    if enabled {
+                        b"\x1b[I\x1b[Okey".as_slice()
+                    } else {
+                        b"key".as_slice()
+                    }
+                );
+                let paste = b"\x1b[200~\x1b[I\x1b[O\x1b[201~";
+                apply_terminal_attach_input(runtime, paste.to_vec()).unwrap();
+                assert_eq!(input_rx.try_recv().unwrap().as_ref(), b"\x1b[I\x1b[O");
+            },
+        );
+    }
+}
+
+#[test]
+fn terminal_attach_hover_does_not_select_appearance_authority() {
+    // Integration through both semantic and raw attach server events.
+    with_terminal_session_test_server(|server, _, _, public_pane_id| {
+        connect_pending_terminal_client(server, 7);
+        assert!(
+            server.handle_server_event(ServerEvent::ClientControlTerminal {
+                client_id: 7,
+                target: public_pane_id,
+                takeover: false,
+            })
+        );
+        server.appearance_authority_client_id = Some(1);
+        assert!(server.handle_server_event(ServerEvent::ClientAttachMouse {
+            client_id: 7,
+            kind: protocol::ClientMouseKind::Moved,
+            position: protocol::ClientMousePosition::Cell { column: 1, row: 1 },
+            geometry: None,
+            modifiers: 0,
+            lines: 1,
+        }));
+        assert_eq!(server.appearance_authority_client_id, Some(1));
+        assert!(server.handle_server_event(ServerEvent::ClientInput {
+            client_id: 7,
+            data: b"\x1b[<35;2;2M".to_vec(),
+        }));
+        assert_eq!(server.appearance_authority_client_id, Some(1));
+    });
+}
