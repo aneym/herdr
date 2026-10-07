@@ -83,6 +83,8 @@
   --shell-space-doc-width: 420px;
   --shell-space-doc-min-width: 320px;
   --shell-space-switcher-width: 560px;
+  --shell-space-terminal-pad-x: 8px;
+  --shell-space-terminal-pad-y: 6px;
   --shell-radius-row: 4px;
   --shell-radius-control: 6px;
   --shell-radius-code: 8px;

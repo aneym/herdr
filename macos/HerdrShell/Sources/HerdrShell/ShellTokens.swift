@@ -43,6 +43,8 @@ enum ShellSpace {
     static let docWidth: CGFloat = 420
     static let docMinWidth: CGFloat = 320
     static let switcherWidth: CGFloat = 560
+    static let terminalPadX: CGFloat = 8
+    static let terminalPadY: CGFloat = 6
 }
 
 enum ShellRadius {
