@@ -4,14 +4,8 @@
 # cannot slip through. Exits 75 without running the helper when a game is up.
 # League lobby processes (LeagueClientUx*, "Riot Client") are not games.
 param([Parameter(Mandatory = $true)][string]$Script, [string]$ArgsB64 = '')
-$pat = 'steamapps\\common|\\Epic Games\\|\\XboxGames\\|Riot Games\\League of Legends\\Game'
-$games = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
-    ($_.ExecutablePath -and $_.ExecutablePath -match $pat) -or $_.Name -match 'League of Legends'
-} | ForEach-Object { "{0} pid={1}" -f $_.Name, $_.ProcessId })
-if ($games.Count -gt 0) {
-    Write-Output "GATED: game running ($($games -join ', ')); did not run $Script"
-    exit 75
-}
+. (Join-Path $PSScriptRoot 'gamecheck.ps1')
+Stop-IfGame $Script
 $helper = Join-Path $PSScriptRoot $Script
 if (!(Test-Path -LiteralPath $helper -PathType Leaf)) { Write-Error "no helper $Script"; exit 1 }
 $list = @()

@@ -114,6 +114,13 @@ def check_mode(mode, out_dir):
     return failures, lumas
 
 
+def reset_override():
+    reset = ctl({"cmd": "appearance", "mode": "system"})
+    override = (ctl({"cmd": "ui"}).get("appearance") or {}).get("override")
+    failed = [] if reset.get("ok") and override == "system" else [f"reset to system failed: {reset}, override {override}"]
+    return {"reply": reset, "override": override}, failed
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out-dir", required=True)
@@ -130,12 +137,14 @@ def main():
             f, lumas = check_mode(mode, args.out_dir)
             failures += f
             report[mode] = lumas
-    finally:
-        reset = ctl({"cmd": "appearance", "mode": "system"})
-        override = (ctl({"cmd": "ui"}).get("appearance") or {}).get("override")
-        report["reset"] = {"reply": reset, "override": override}
-        if not reset.get("ok") or override != "system":
-            failures.append(f"reset to system failed: {reset}, override {override}")
+    except pc.Gated:
+        # A game started mid-check: nothing more reaches the app, not even the reset.
+        raise
+    except BaseException:
+        reset_override()
+        raise
+    report["reset"], reset_failure = reset_override()
+    failures += reset_failure
     print(json.dumps(report, indent=1))
     for f in failures:
         print(f"FAIL {f}")

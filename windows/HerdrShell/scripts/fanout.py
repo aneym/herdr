@@ -137,6 +137,9 @@ def main():
         try:
             state = read_state()
             return run_pass(state)
+        except pc.Gated:
+            log('deferred by game guard')
+            return 75
         except subprocess.TimeoutExpired as error:
             message = f'PC call timed out after {error.timeout} seconds'
             state['last_error'] = message

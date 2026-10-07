@@ -10,6 +10,9 @@ try {
     Write-Error "cannot connect to \\.\pipe\$pipeName : $($_.Exception.Message)"
     exit 1
 }
+# Connecting can wait up to 15 s; check again right before the command is sent.
+. (Join-Path $PSScriptRoot 'gamecheck.ps1')
+Stop-IfGame 'ctl'
 $writer = New-Object System.IO.StreamWriter($client)
 $writer.NewLine = "`n"
 $writer.AutoFlush = $true

@@ -89,6 +89,7 @@ def main():
     start = ctl({"cmd": "ui"})
     selected_before = start.get("selected_tab")
     alex_before = (server_pins(True), server_pins(False))
+    gated = False
     made = herdr("workspace", "create", "--label", "drag-check", "--no-focus")
     ws = made["workspace"]["workspace_id"]
     try:
@@ -151,11 +152,15 @@ def main():
             time.sleep(0.3)
         after = split()
         check("a divider drag right grows the left pane on the server", after["ratio"] > before["ratio"] + 0.05, f"{before['ratio']} -> {after['ratio']}")
+    except pc.Gated:
+        gated = True
+        raise
     except BaseException as error:  # noqa: BLE001 - recorded, then the cleanup and pin check still run
         check("the run completes", False, repr(error))
     finally:
         herdr("workspace", "close", ws)
-        if selected_before:
+        # A game started: the server-side cleanup above runs, nothing more reaches the app.
+        if selected_before and not gated:
             try:
                 ctl({"cmd": "open", "tab_id": selected_before})
             except SystemExit:

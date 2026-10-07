@@ -49,6 +49,14 @@ def remote(cmd, input_data=None, stream=False, timeout=None):
     return p.returncode, out
 
 
+class Gated(SystemExit):
+    """A game runs on the PC: the helper did not act, and nothing after it may."""
+
+    def __init__(self, name):
+        print(f"game running; {name} not run (exit 75)", file=sys.stderr)
+        super().__init__(75)
+
+
 # Read-only probes; every other helper can touch the app or the PC's load.
 UNGATED = {"game_guard.ps1", "status.ps1", "idle_refresh.ps1"}
 GATED = 75
@@ -63,8 +71,8 @@ def ps_file(name, *args, stream=False, timeout=None):
         b64 = base64.b64encode(json.dumps(list(args)).encode()).decode()
         cmd = f"{PS} -File {R_SCRIPTS}/gated.ps1 -Script {name} -ArgsB64 {b64}"
     rc, out = remote(cmd, stream=stream, timeout=timeout)
-    if rc == GATED:
-        print(f"game running; {name} not run (exit 75)", file=sys.stderr)
+    if rc == GATED and name not in UNGATED:
+        raise Gated(name)
     return rc, out
 
 
