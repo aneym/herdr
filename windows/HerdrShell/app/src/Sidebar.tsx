@@ -5,7 +5,7 @@ import AgentFace from "./AgentFace";
 import { DRAG_THRESHOLD, slotAt } from "./pinDrag";
 import type { PinSection, RowBox } from "./pinDrag";
 import type { MachineStatus } from "./bridge";
-import { foldKey, revealOnSelect, spaceOpen } from "./model";
+import { foldKey, noteSelection, revealOnSelect, spaceOpen } from "./model";
 import type { RevealMemo, SidebarRow } from "./model";
 export function Status({ status }: { status: string }) { return <span className={`status ${status}`} aria-label={status}>{status === "blocked" ? "■" : "●"}</span>; }
 function RenameInput({ label, commit, cancel }: { label: string; commit: (label: string) => Promise<void>; cancel: () => void }) {
@@ -16,6 +16,13 @@ function RenameInput({ label, commit, cancel }: { label: string; commit: (label:
     if (event.key === "Escape") { event.preventDefault(); cancel(); }
     if (event.key === "Enter" && !saving) { event.preventDefault(); setSaving(true); void commit(value).finally(() => setSaving(false)); }
   }} />;
+}
+/** The sidebar's reveal memo, held by its parent so it outlives hiding the sidebar. Noted in
+ *  render, ahead of the sidebar's effects, which run before the parent's own; idempotent. */
+export function useSelectionReveal(selected: string | null): RevealMemo {
+  const memo = useRef<RevealMemo>({ last: undefined, pending: null }).current;
+  noteSelection(memo, selected);
+  return memo;
 }
 interface Press { id: string; section: PinSection; x: number; y: number; ids: string[]; block: RowBox[]; active: boolean; cancelled: boolean; done: () => void }
 export default function Sidebar({ machines, chooseMachine, rows, selected, revealed, machine, notice, select, pin, movePin, renaming, startRename, cancelRename, commitRename }: { machines: MachineStatus[]; chooseMachine: (name: string) => void; rows: SidebarRow[]; selected: string | null; revealed: RevealMemo; machine: MachineStatus; notice: string | null; select: (id: string) => void; pin: (id: string, pinned: boolean) => void; movePin: (ids: string[], from: number, to: number) => void; renaming: string | null; startRename: (id: string) => void; cancelRename: () => void; commitRename: (id: string, label: string) => Promise<void> }) {

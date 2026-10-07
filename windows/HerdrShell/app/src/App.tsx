@@ -3,10 +3,9 @@ import { flushSync } from "react-dom";
 import { cycleMachine } from "./machines";
 import { bridge } from "./bridge";
 import type { MachineStatus } from "./bridge";
-import { buildSidebar, noteSelection, pinCount, tabOrder } from "./model";
-import type { RevealMemo } from "./model";
+import { buildSidebar, pinCount, tabOrder } from "./model";
 import type { Snapshot } from "./model";
-import Sidebar from "./Sidebar";
+import Sidebar, { useSelectionReveal } from "./Sidebar";
 import { useAgentCards } from "./AgentFace";
 import Switcher from "./Switcher";
 import { actionFor } from "./keys";
@@ -114,9 +113,7 @@ function MachineView({ machine, machines, snapshot, chooseMachine, selections, c
   const showError = useCallback((error: unknown) => setNotice({ text: String(error) }), []);
   const [pending, setPending] = useState<{ tabId: string; paneId: string } | null>(null);
   const controllers = useRef(new Map<string, PaneController>());
-  const revealed = useRef<RevealMemo>({ last: undefined, pending: null }).current;
-  // Noted in render, ahead of the sidebar's effects, which run before App's own; idempotent.
-  noteSelection(revealed, selected);
+  const revealed = useSelectionReveal(selected);
   // A dropped pin order shows until the snapshot agrees or PENDING_LIFETIME_MS passes.
   const [pendingPins, setPendingPins] = useState<PendingOrders>({});
   const cards = useAgentCards(machine.name, machine.state === "up");
