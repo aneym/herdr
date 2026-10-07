@@ -6,7 +6,7 @@ export interface UpdateStatus { current: string; staged: { sha: string; built_at
 export interface MachineStatus { name: string; state: "connecting" | "up" | "down"; error?: string }
 export interface Mode { mouse: boolean; sgrPixels: boolean; kittyFlags: number; modifyOtherKeys: number }
 export type AttachEvent = { kind: "bytes"; b64: string } | ({ kind: "mode"; b64: string } & Mode)
-  | { kind: "bell"; count: number } | { kind: "notice"; message: string } | { kind: "closed"; reason: string };
+  | { kind: "bell"; count: number } | { kind: "clipboard"; b64: string } | { kind: "notice"; message: string } | { kind: "closed"; reason: string };
 export const bridge = {
   updateStatus: () => invoke<UpdateStatus>("update_status"),
   updateApply: () => invoke<void>("update_apply"),

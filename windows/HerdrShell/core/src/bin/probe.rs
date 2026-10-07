@@ -107,6 +107,7 @@ fn run_attach(endpoint: &Endpoint, args: &[String]) -> Result<(), String> {
             }
             Some(AttachEvent::ModeChange { .. }) => mode_changes += 1,
             Some(AttachEvent::Bell { count }) => bells += u64::from(count),
+            Some(AttachEvent::Clipboard { data }) => eprintln!("clipboard: {data}"),
             Some(AttachEvent::Notice { message }) => eprintln!("notice: {message}"),
             Some(AttachEvent::Closed { reason }) => {
                 closed = Some(reason);

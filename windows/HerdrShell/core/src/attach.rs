@@ -68,6 +68,10 @@ pub enum AttachEvent {
     Bell {
         count: u16,
     },
+    /// OSC 52 clipboard data (base64) a program in the pane wrote, for the host clipboard.
+    Clipboard {
+        data: String,
+    },
     /// A non-fatal server error notice.
     Notice {
         message: String,
@@ -609,6 +613,7 @@ impl Worker {
                     modify_other_keys_level,
                 } => self.modes.keyboard_protocol(flags, modify_other_keys_level),
                 ServerMessage::TerminalBell { count } => Some(AttachEvent::Bell { count }),
+                ServerMessage::Clipboard { data } => Some(AttachEvent::Clipboard { data }),
                 ServerMessage::ClientShellError { message } => {
                     Some(AttachEvent::Notice { message })
                 }

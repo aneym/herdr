@@ -721,6 +721,12 @@ final class SurfaceView: NSView {
     private var appDragStart: Cell?
     private var appDragEnd: Cell?
     private(set) var appSelection: String?
+    /// The shadow's cells; the pasteboard's change count when it was made; and, once the
+    /// program has had time to answer the release, whether it copied the selection itself.
+    private var appRange: (Cell, Cell)?
+    private var appBoardCount = 0
+    private var appProgramCopied: Bool?
+    private var appShadowId = 0
     typealias Cell = (col: Int, row: Int)
 
     /// ⌘C in a pane: the shadow of a drag the program received, else Ghostty's own
@@ -728,23 +734,64 @@ final class SurfaceView: NSView {
     func copySelection() -> Bool {
         guard let surface else { return false }
         if let text = appSelection {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text, forType: .string)
+            // The program copied this selection itself (Claude's copy on select, OSC 52, which
+            // herdr's attach client puts on the pasteboard with pbcopy).
+            if appProgramCopied ?? (NSPasteboard.general.changeCount != appBoardCount) { return true }
+            appProgramCopied = false
+            let board = NSPasteboard.general
+            board.clearContents()
+            board.setString(text, forType: .string)
+            if let range = appRange { refineCopy(text, range, changeCount: board.changeCount) }
             return true
         }
         let action = "copy_to_clipboard"
         return ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
     }
 
+    /// The attach redraws rows with cursor positioning, so the grid read above splits a
+    /// soft-wrapped line and keeps blanks a redraw wrote. The server reads the same cells
+    /// from the pane's wrap-aware screen; its text replaces the copy unless the pasteboard
+    /// changed meanwhile. An older server or a moved viewport keeps the grid's text.
+    private func refineCopy(_ text: String, _ range: (Cell, Cell), changeCount: Int) {
+        let commands = HerdrCommands(socketPath: clipboardSocketPath), paneId = paneId
+        DispatchQueue.global(qos: .userInitiated).async {
+            guard let exact = commands.paneViewportText(paneId: paneId, from: range.0, to: range.1),
+                  exact != text, !exact.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            DispatchQueue.main.async {
+                let board = NSPasteboard.general
+                guard board.changeCount == changeCount else { return }
+                board.clearContents()
+                board.setString(exact, forType: .string)
+            }
+        }
+    }
+
+    private func setShadow(_ a: Cell, _ b: Cell) {
+        let (s, e) = (a.row, a.col) <= (b.row, b.col) ? (a, b) : (b, a)
+        appSelection = nonEmpty(readCells(s, e))
+        appRange = appSelection == nil ? nil : (s, e)
+        appBoardCount = NSPasteboard.general.changeCount
+        appProgramCopied = nil
+        appShadowId += 1
+        // A program copies on the release or not at all; a later pasteboard change (another
+        // app, or this ⌘C) does not mean it did.
+        let id = appShadowId
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self, self.appShadowId == id, self.appProgramCopied == nil else { return }
+            self.appProgramCopied = NSPasteboard.general.changeCount != self.appBoardCount
+        }
+    }
+
     private func notePress(_ event: NSEvent) {
         appSelection = nil
+        appRange = nil
         appDragStart = nil
         // Shift, and ⌘ through ghosttyMouseMods, make Ghostty select instead of reporting.
         guard mouseCaptured, event.modifierFlags.isDisjoint(with: [.shift, .command]),
               let c = cell(event) else { return }
         switch event.clickCount {
-        case 2: appSelection = word(at: c)
-        case 3: appSelection = nonEmpty(readCells((0, c.row), (gridSize.cols - 1, c.row)))
+        case 2: if let w = wordRange(at: c) { setShadow(w.0, w.1) }
+        case 3: setShadow((0, c.row), (gridSize.cols - 1, c.row))
         default: appDragStart = c; appDragEnd = c
         }
     }
@@ -752,7 +799,7 @@ final class SurfaceView: NSView {
     private func noteRelease() {
         defer { appDragStart = nil }
         guard let a = appDragStart, let b = appDragEnd, a != b else { return }
-        appSelection = nonEmpty(readCells(a, b))
+        setShadow(a, b)
     }
 
     private func nonEmpty(_ s: String) -> String? {
@@ -790,7 +837,7 @@ final class SurfaceView: NSView {
     }
 
     /// The run of non-blank cells around a cell on its row.
-    private func word(at c: Cell) -> String? {
+    private func wordRange(at c: Cell) -> (Cell, Cell)? {
         let inWord = { (col: Int) in
             !self.readCells((col, c.row), (col, c.row)).trimmingCharacters(in: .whitespaces).isEmpty
         }
@@ -798,7 +845,7 @@ final class SurfaceView: NSView {
         var lo = c.col, hi = c.col
         while lo > 0, inWord(lo - 1) { lo -= 1 }
         while hi < gridSize.cols - 1, inWord(hi + 1) { hi += 1 }
-        return nonEmpty(readCells((lo, c.row), (hi, c.row)))
+        return ((lo, c.row), (hi, c.row))
     }
 
     /// Right click the program does not take: Copy and Paste, through the Edit menu's actions.

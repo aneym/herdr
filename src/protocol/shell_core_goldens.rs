@@ -143,6 +143,12 @@ fn server_goldens() -> Vec<(&'static str, ServerMessage)> {
             },
         ),
         (
+            "server_clipboard",
+            ServerMessage::Clipboard {
+                data: "Y29waWVkIOKAlCB0ZXh0".into(),
+            },
+        ),
+        (
             "server_terminal_bell",
             ServerMessage::TerminalBell { count: 2 },
         ),

@@ -32,15 +32,17 @@ import type { Mode } from "./bridge";
 export function encodeShiftEnter(mode: Pick<Mode, "kittyFlags" | "modifyOtherKeys">): string {
   return mode.kittyFlags > 0 ? "\x1b[13;2u" : mode.modifyOtherKeys >= 2 ? "\x1b[27;2;13~" : "\x1b\r";
 }
-export interface KeyTarget { term: Terminal; mode: Mode; send: (text: string) => Promise<void>; shortcut: (event: KeyboardEvent) => boolean }
-export async function copy(term: Terminal) { await bridge.clipboardWrite(term.getSelection()); term.clearSelection(); }
+export interface Copier { has: () => boolean; copy: () => Promise<boolean>; clear: () => void }
+export interface KeyTarget { term: Terminal; mode: Mode; send: (text: string) => Promise<void>; shortcut: (event: KeyboardEvent) => boolean; copier: Copier }
 export async function paste(term: Terminal) { term.paste(await bridge.clipboardRead()); }
 // Both xterm keydown and control-pipe key requests use this decision path.
 export function handleKey(event: KeyboardEvent, target: KeyTarget): { handled: boolean; work?: Promise<void> } {
   if (event.type !== "keydown") return { handled: false };
   if (target.shortcut(event)) return { handled: true };
   const key = event.key.toLowerCase();
-  if (event.ctrlKey && key === "c" && (event.shiftKey || target.term.hasSelection())) return { handled: true, work: copy(target.term) };
+  // Ctrl+C copies a selection and otherwise interrupts; Ctrl+Shift+C only copies.
+  if (event.ctrlKey && !event.altKey && key === "c" && (event.shiftKey || target.copier.has())) return { handled: true, work: target.copier.copy().then(() => {}) };
+  if (!["control", "shift", "alt", "meta"].includes(key)) target.copier.clear();
   if (event.ctrlKey && key === "v") return { handled: true, work: paste(target.term) };
   if (event.key === "Enter" && !event.ctrlKey && !event.altKey && !event.metaKey) return { handled: true, work: target.send(event.shiftKey ? encodeShiftEnter(target.mode) : "\r") };
   return { handled: false };

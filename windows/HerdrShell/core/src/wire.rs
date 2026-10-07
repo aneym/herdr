@@ -44,6 +44,7 @@ pub mod server_tag {
     pub const WELCOME: u32 = 0;
     pub const TERMINAL: u32 = 1;
     pub const SERVER_SHUTDOWN: u32 = 3;
+    pub const CLIPBOARD: u32 = 5;
     pub const MOUSE_CAPTURE: u32 = 8;
     pub const TERMINAL_BELL: u32 = 9;
     pub const CLIENT_SHELL_ERROR: u32 = 15;
@@ -135,6 +136,10 @@ pub enum ServerMessage {
     Terminal(TerminalFrame),
     ServerShutdown {
         reason: Option<String>,
+    },
+    /// OSC 52 clipboard data a pane program wrote, base64 as herdr forwards it.
+    Clipboard {
+        data: String,
     },
     MouseCapture {
         enabled: bool,
@@ -389,6 +394,7 @@ impl ServerMessage {
             ServerMessage::Welcome { .. } => server_tag::WELCOME,
             ServerMessage::Terminal(_) => server_tag::TERMINAL,
             ServerMessage::ServerShutdown { .. } => server_tag::SERVER_SHUTDOWN,
+            ServerMessage::Clipboard { .. } => server_tag::CLIPBOARD,
             ServerMessage::MouseCapture { .. } => server_tag::MOUSE_CAPTURE,
             ServerMessage::TerminalBell { .. } => server_tag::TERMINAL_BELL,
             ServerMessage::ClientShellError { .. } => server_tag::CLIENT_SHELL_ERROR,
@@ -410,6 +416,7 @@ impl ServerMessage {
             } => encode_variant(tag, &(version, encoding, error)),
             ServerMessage::Terminal(frame) => encode_variant(tag, frame),
             ServerMessage::ServerShutdown { reason } => encode_variant(tag, &(reason,)),
+            ServerMessage::Clipboard { data } => encode_variant(tag, &(data,)),
             ServerMessage::MouseCapture {
                 enabled,
                 sgr_pixels,
@@ -448,6 +455,10 @@ impl ServerMessage {
             server_tag::SERVER_SHUTDOWN => {
                 let ((reason,), used) = decode_body::<(Option<String>,)>(body)?;
                 (ServerMessage::ServerShutdown { reason }, used)
+            }
+            server_tag::CLIPBOARD => {
+                let ((data,), used) = decode_body::<(String,)>(body)?;
+                (ServerMessage::Clipboard { data }, used)
             }
             server_tag::MOUSE_CAPTURE => {
                 let ((enabled, sgr_pixels), used) = decode_body::<(bool, bool)>(body)?;

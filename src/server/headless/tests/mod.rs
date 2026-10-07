@@ -6763,6 +6763,7 @@ fn clipboard_write_targets_foreground_client_only() {
     server.sync_foreground_client_state();
 
     let changed = server.handle_internal_event_with_forwarding(AppEvent::ClipboardWrite {
+        pane_id: crate::layout::PaneId::from_raw(1),
         content: b"test".to_vec(),
     });
 
@@ -6784,11 +6785,84 @@ fn clipboard_write_targets_foreground_client_only() {
 }
 
 #[test]
+fn clipboard_write_reaches_writable_attaches_of_the_writing_pane_only() {
+    with_terminal_session_test_server(|server, _runtime_terminal_id, terminal_id, _| {
+        let pane_id = server.app.state.workspaces[0].tabs[0].root_pane;
+        let mut controls = Vec::new();
+        for (client_id, mode) in [
+            (
+                1,
+                ClientConnectionMode::TerminalAttach {
+                    terminal_id: terminal_id.clone(),
+                },
+            ),
+            (
+                2,
+                ClientConnectionMode::TerminalObserve {
+                    terminal_id: terminal_id.clone(),
+                },
+            ),
+            (
+                3,
+                ClientConnectionMode::TerminalAttach {
+                    terminal_id: "term_other".into(),
+                },
+            ),
+        ] {
+            let (tx, control_rx, frames_rx) = test_client_writer();
+            server.clients.insert(
+                client_id,
+                ClientConnection::new_with_mode(
+                    mode,
+                    (80, 24),
+                    crate::kitty_graphics::HostCellSize::default(),
+                    client_id,
+                    RenderEncoding::TerminalAnsi,
+                    Some(tx),
+                ),
+            );
+            controls.push((control_rx, frames_rx));
+        }
+
+        let changed = server.handle_internal_event_with_forwarding(AppEvent::ClipboardWrite {
+            pane_id,
+            content: "copied \u{2014} text".as_bytes().to_vec(),
+        });
+
+        assert!(!changed);
+        match read_server_message(
+            controls[0]
+                .0
+                .recv_timeout(Duration::from_millis(100))
+                .expect("the pane's attach gets the clipboard write"),
+        ) {
+            ServerMessage::Clipboard { data } => assert_eq!(
+                base64::engine::general_purpose::STANDARD
+                    .decode(data)
+                    .unwrap(),
+                "copied \u{2014} text".as_bytes()
+            ),
+            other => panic!("expected clipboard message, got {other:?}"),
+        }
+        for (index, who) in [(1, "an observer"), (2, "another terminal's attach")] {
+            assert!(
+                controls[index]
+                    .0
+                    .recv_timeout(Duration::from_millis(50))
+                    .is_err(),
+                "{who} must not get the clipboard write"
+            );
+        }
+    });
+}
+
+#[test]
 fn clipboard_write_without_foreground_client_does_not_change_visual_state() {
     let mut server = test_headless_server();
     server.foreground_client_id = None;
 
     let changed = server.handle_internal_event_with_forwarding(AppEvent::ClipboardWrite {
+        pane_id: crate::layout::PaneId::from_raw(1),
         content: b"test".to_vec(),
     });
 
@@ -6815,6 +6889,7 @@ fn clipboard_write_failed_foreground_send_removes_client_without_visual_change()
     server.foreground_client_id = Some(1);
 
     let changed = server.handle_internal_event_with_forwarding(AppEvent::ClipboardWrite {
+        pane_id: crate::layout::PaneId::from_raw(1),
         content: b"test".to_vec(),
     });
 

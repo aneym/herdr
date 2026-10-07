@@ -10,8 +10,11 @@ known lines and counts the mouse reports it gets, so a plain drag goes to the pr
 and leaves no Ghostty selection, as in a Claude pane. Mouse events and Cmd-C go through
 the app's window and Edit menu as for a physical mouse and key. Asserts on the guest's
 general pasteboard (pbpaste in the guest) after: a plain drag, a double click on a word,
-and a shift-drag (Ghostty's own selection). Each copy first puts a sentinel on the
-pasteboard, so a Cmd-C that copies nothing fails.
+a shift-drag (Ghostty's own selection), a drag over a line the pane soft-wrapped (pasted
+as one line, read from the server's screen), and a release the program answers with an
+OSC 52 copy, as Claude Code's copy on select does (its text lands on the pasteboard and
+Cmd-C keeps it). Each copy first puts a sentinel on the pasteboard, so a Cmd-C that
+copies nothing fails. The lab server is HERDR_SHELL_BIN (default ~/.local/bin/herdr).
 """
 import json
 import os
@@ -39,10 +42,13 @@ if "--out" not in sys.argv:
 lines, failures = [], []
 SENTINEL = "copy-check-sentinel"
 
-AGENT_SRC = r'''import os, sys, termios, tty
+WRAP_FILE = os.path.join(LABDIR, "wrap.txt")
+PROGRAM_COPY = "PROGRAM-COPY exact \u2014 text"
+AGENT_SRC = r'''import base64, os, re, sys, termios, tty
 tty.setraw(0)
 w = sys.stdout.write
 w("\x1b[2J\x1b[1;1HCOPY-ALPHA first line of agent text\r\nCOPY-BETA second line here\r\n")
+w("\x1b[8;1HPROGRAM-ROW a release here copies through OSC 52")
 w("\x1b[?1000h\x1b[?1002h\x1b[?1006h")
 sys.stdout.flush()
 n = 0
@@ -51,9 +57,18 @@ while True:
     if not b:
         break
     n += b.count(b"\x1b[<")
-    w("\x1b[5;1HREPORTS %d\x1b[K" % n)
+    if b"w" in b.replace(b"\x1b[<", b""):
+        # One line longer than the pane, at row 3: the pane soft-wraps it onto row 4.
+        cols = os.get_terminal_size(1).columns
+        line = "WRAP-" + "".join(str(i %% 10) for i in range(cols + 7))
+        open(%(wrap)r, "w").write(line)
+        w("\x1b[3;1H\x1b[J" + line + "\x1b[8;1HPROGRAM-ROW a release here copies through OSC 52")
+    for m in re.finditer(rb"\x1b\[<\d+;\d+;(\d+)m", b):
+        if m.group(1) == b"8":
+            w("\x1b]52;c;%%s\x07" %% base64.b64encode(%(copy)r.encode()).decode())
+    w("\x1b[5;1HREPORTS %%d\x1b[K" %% n)
     sys.stdout.flush()
-'''
+''' % {"wrap": WRAP_FILE, "copy": PROGRAM_COPY}
 
 
 def say(s=""):
@@ -90,7 +105,7 @@ def surface(s, pane):
 
 
 def pasteboard():
-    return S.space("exec", "pbpaste")
+    return S.space("exec", "LANG=en_US.UTF-8 pbpaste")  # UTF-8, not the guest default MacRoman
 
 
 def reports(pane):
@@ -175,14 +190,43 @@ def main():
 
     def shift_drag():
         mouse(p1, "down", 0, 0, ["shift"])
-        mouse(p1, "drag", 9, 0, ["shift"])
-        mouse(p1, "up", 9, 0, ["shift"])
+        # Ghostty takes a cell once the pointer passes its middle: end past col 9's.
+        mouse(p1, "drag", 9.4, 0, ["shift"])
+        mouse(p1, "up", 9.4, 0, ["shift"])
         time.sleep(0.2)
         seen["selection"] = surface(S.state(), p1).get("selection")
     got = copy_after(shift_drag)
     sel = seen["selection"]
     check("Cmd-C after a shift-drag copies Ghostty's selection",
           bool(sel) and "ALPHA" in sel and got == sel, f"selection={sel!r} pasteboard={got!r}")
+
+    # 4. A line the pane soft-wrapped, dragged across both rows: one line, no padding.
+    if os.path.exists(WRAP_FILE):
+        os.remove(WRAP_FILE)
+    S.type_("w")
+    S.wait_read(p1, lambda x: "WRAP-" in x, 10)
+    wrap = open(WRAP_FILE).read() if os.path.exists(WRAP_FILE) else ""
+    got = copy_after(lambda: (mouse(p1, "down", 0, 2), mouse(p1, "drag", 10, 3), mouse(p1, "drag", 30, 3),
+                              mouse(p1, "up", 30, 3)))
+    check("Cmd-C after a drag over a soft-wrapped line pastes it as one line",
+          bool(wrap) and got == wrap, f"want {wrap!r} got {got!r}")
+
+    # 5. A release the program answers with OSC 52 (Claude Code's copy on select).
+    S.space("exec", f"printf %s {shlex.quote(SENTINEL)} | pbcopy")
+    mouse(p1, "down", 0, 7)
+    mouse(p1, "drag", 20, 7)
+    mouse(p1, "up", 20, 7)
+    got = SENTINEL
+    for _ in range(40):
+        got = pasteboard()
+        if got != SENTINEL:
+            break
+        time.sleep(0.1)
+    check("the program's OSC 52 copy reaches the guest pasteboard", got == PROGRAM_COPY, repr(got))
+    S.key("c", ["cmd"])
+    time.sleep(0.5)
+    got = pasteboard()
+    check("Cmd-C after the program copied keeps the program's text", got == PROGRAM_COPY, repr(got))
 
     shot = os.path.join(LABDIR, "copy.png")
     S.cmd({"cmd": "shot", "out": shot})

@@ -8,7 +8,8 @@ import { installLinks } from "./links";
 import type { LinkRegion } from "./links";
 import type { Mode } from "./bridge";
 import type { Pane } from "./model";
-import { copy, paste, controlKey, handleKey } from "./keys";
+import { paste, controlKey, handleKey } from "./keys";
+import { PaneCopy } from "./termCopy";
 import { terminalFont } from "./tokens";
 import { Status } from "./Sidebar";
 import { appTheme, terminalThemes } from "./theme";
@@ -63,7 +64,8 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
       await pending;
     };
     const send = (text: string) => sendBytes(new TextEncoder().encode(text));
-    const keyTarget = () => ({ term, mode, send, shortcut: (event: KeyboardEvent) => live.current.shortcut(event) });
+    const copier = new PaneCopy(term, (method, params) => bridge.api(machine, method, params), () => pane.pane_id, text => bridge.clipboardWrite(text));
+    const keyTarget = () => ({ term, mode, send, copier, shortcut: (event: KeyboardEvent) => live.current.shortcut(event) });
     term.attachCustomKeyEventHandler(event => {
       const result = handleKey(event, keyTarget());
       if (result.handled) { event.preventDefault(); result.work?.catch(error); return false; }
@@ -85,6 +87,7 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
       const onEvent = (event: import("./bridge").AttachEvent) => {
         if (disposed || generation !== currentGeneration) return;
         if (event.kind === "bytes" || event.kind === "mode") { term.write(fromBase64(event.b64)); if (event.kind === "mode") mode = event; }
+        else if (event.kind === "clipboard") void copier.programWrote(event.b64).catch(error);
         else if (event.kind === "bell") { setBell(true); clearTimeout(bellTimer); bellTimer = setTimeout(() => setBell(false), 180); }
         else if (event.kind === "notice") setNotice(event.message);
         else { closedDuringOpen = true; attachMode = "closed"; setState("closed"); setNotice(event.reason); }
@@ -118,7 +121,24 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
       });
     };
     const onWheel = (event: WheelEvent) => { if (mode.mouse) return; event.preventDefault(); event.stopPropagation(); wheel(event.deltaY * (event.deltaMode === 1 ? 1 : event.deltaMode === 2 ? term.rows : 1 / 40)); };
-    const onContext = (event: MouseEvent) => { event.preventDefault(); void (term.hasSelection() ? copy(term) : paste(term)).catch(error); };
+    const onContext = (event: MouseEvent) => { event.preventDefault(); void (copier.has() ? copier.copy() : paste(term)).catch(error); };
+    // The viewport cell under the pointer, clamped to the grid.
+    const cellAt = (event: MouseEvent) => {
+      const box = host.current?.querySelector(".xterm-screen")?.getBoundingClientRect();
+      if (!box || !box.width || !box.height) return null;
+      const clamp = (value: number, size: number) => Math.min(size - 1, Math.max(0, Math.floor(value)));
+      return { col: clamp((event.clientX - box.left) / (box.width / term.cols), term.cols), row: clamp((event.clientY - box.top) / (box.height / term.rows), term.rows) };
+    };
+    // Shift makes xterm select even while the program owns the mouse, as Ghostty does.
+    const onMove = (event: MouseEvent) => { const cell = cellAt(event); if (cell) copier.move(cell); };
+    const onUp = (event: MouseEvent) => { window.removeEventListener("mousemove", onMove, true); window.removeEventListener("mouseup", onUp, true); const cell = cellAt(event); if (cell) copier.release(cell); };
+    const onDown = (event: MouseEvent) => {
+      if (event.button !== 0) return;
+      const cell = cellAt(event);
+      if (!cell) return;
+      copier.press(cell, event.detail, mode.mouse && !event.shiftKey);
+      window.addEventListener("mousemove", onMove, true); window.addEventListener("mouseup", onUp, true);
+    };
     const controller: PaneController = {
       info: () => ({ pane_id: pane.pane_id, terminal_id: pane.terminal_id, mode: attachMode, cols: term.cols, rows: term.rows, focused: live.current.focused, background: term.options.theme?.background }),
       type: send,
@@ -144,10 +164,11 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
     const node = element.current;
     node.addEventListener("wheel", onWheel, { capture: true, passive: false });
     node.addEventListener("contextmenu", onContext);
+    node.addEventListener("mousedown", onDown, true);
     const observer = new ResizeObserver(() => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (disposed) return; fit.fit(); if (handle != null && (term.cols !== sentCols || term.rows !== sentRows)) { sentCols = term.cols; sentRows = term.rows; void bridge.resize(handle, sentCols, sentRows).catch(error); } }, 50); });
     observer.observe(node);
     void open();
-    return () => { disposed = true; unsubscribeTheme(); register(pane.pane_id, null); observer.disconnect(); clearTimeout(resizeTimer); clearTimeout(bellTimer); cancelAnimationFrame(wheelFrame); node.removeEventListener("wheel", onWheel, true); node.removeEventListener("contextmenu", onContext); data.dispose(); binary.dispose(); links.dispose(); if (handle != null) void bridge.close(handle).catch(() => {}); term.dispose(); };
+    return () => { disposed = true; unsubscribeTheme(); register(pane.pane_id, null); observer.disconnect(); clearTimeout(resizeTimer); clearTimeout(bellTimer); cancelAnimationFrame(wheelFrame); node.removeEventListener("wheel", onWheel, true); node.removeEventListener("contextmenu", onContext); node.removeEventListener("mousedown", onDown, true); window.removeEventListener("mousemove", onMove, true); window.removeEventListener("mouseup", onUp, true); data.dispose(); binary.dispose(); links.dispose(); if (handle != null) void bridge.close(handle).catch(() => {}); term.dispose(); };
   }, [machine, pane.pane_id, pane.terminal_id, register]);
   useEffect(() => { if (focused) host.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }, [focused]);
   return <div ref={element} className={`pane ${bell ? "bell" : ""}`} onMouseDown={() => { live.current.onFocus(pane.pane_id); host.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }}>

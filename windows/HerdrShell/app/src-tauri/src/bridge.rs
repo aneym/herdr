@@ -67,6 +67,10 @@ pub enum AttachEventJs {
     Bell {
         count: u16,
     },
+    /// OSC 52 data from the pane's program, still base64 as the server sent it.
+    Clipboard {
+        b64: String,
+    },
     Notice {
         message: String,
     },
@@ -286,6 +290,7 @@ fn forward(events: Receiver<AttachEvent>, channel: &Channel<AttachEventJs>) {
                 modify_other_keys: keyboard.modify_other_keys_level,
             },
             AttachEvent::Bell { count } => AttachEventJs::Bell { count },
+            AttachEvent::Clipboard { data } => AttachEventJs::Clipboard { b64: data },
             AttachEvent::Notice { message } => AttachEventJs::Notice { message },
             AttachEvent::Closed { reason } => AttachEventJs::Closed { reason },
             AttachEvent::Bytes(_) => unreachable!(),

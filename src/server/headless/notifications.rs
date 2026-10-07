@@ -331,11 +331,15 @@ impl HeadlessServer {
                 }
                 false
             }
-            AppEvent::ClipboardWrite { content } => {
+            AppEvent::ClipboardWrite { pane_id, content } => {
                 // Clipboard writes are client-local side effects. Forward them only to
-                // the foreground client instead of broadcasting to every attached client.
+                // the foreground client instead of broadcasting to every attached client,
+                // and to the writable direct attaches of the pane that wrote them: a
+                // client-owned shell (Herdr Shell) shows the pane there, and the user
+                // whose selection the program copied is at that attach, not the TUI.
                 let data = base64::engine::general_purpose::STANDARD.encode(content.as_slice());
-                self.send_to_foreground_client(ServerMessage::Clipboard { data });
+                self.send_to_foreground_client(ServerMessage::Clipboard { data: data.clone() });
+                self.send_clipboard_to_terminal_attaches(*pane_id, data);
                 false
             }
             AppEvent::StateChanged { pane_id, agent, .. } => {
@@ -698,6 +702,34 @@ impl HeadlessServer {
                 true
             }
             _ => self.app.handle_internal_event_with_render_impact(ev),
+        }
+    }
+
+    /// Sends a pane's OSC 52 write to every writable direct attach of that pane's
+    /// terminal. Observers are read-only viewers and never get the user's clipboard.
+    fn send_clipboard_to_terminal_attaches(
+        &mut self,
+        pane_id: crate::layout::PaneId,
+        data: String,
+    ) {
+        let Some(terminal_id) = self.terminal_id_for_pane(pane_id).map(ToString::to_string) else {
+            return;
+        };
+        let targets = self
+            .clients
+            .iter()
+            .filter(|(_, client)| {
+                matches!(&client.mode, ClientConnectionMode::TerminalAttach { terminal_id: id } if *id == terminal_id)
+            })
+            .map(|(&client_id, _)| client_id)
+            .collect::<Vec<_>>();
+        for client_id in targets {
+            if !self.send_to_client(client_id, ServerMessage::Clipboard { data: data.clone() }) {
+                debug!(
+                    client_id,
+                    "dropped clipboard write for a closed terminal attach"
+                );
+            }
         }
     }
 
