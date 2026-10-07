@@ -17,7 +17,7 @@ use crate::popup_size::PopupSize;
 const PLUGIN_BUILD_OUTPUT_MAX_BYTES: usize = 64 * 1024;
 const PLUGIN_INSTALL_USAGE: &str =
     "usage: herdr plugin install [--ref REF] [--yes|-y] <owner>/<repo>[/subdir...]";
-const PLUGIN_RELOAD_USAGE: &str = "herdr plugin reload <PLUGIN_ID> --pane <PANE> --request <ID> --changelog <LINE> [--json] [--timeout <MS>]";
+const PLUGIN_RELOAD_USAGE: &str = "herdr plugin reload <PLUGIN_ID> --pane <PANE> --request <ID> --changelog <LINE> [--json] [--timeout <MS>] [--no-resume]";
 const PLUGIN_RELOAD_DEFAULT_TIMEOUT_MS: u64 = 600_000;
 /// Exit code for "the agent stayed busy; nothing was restarted, retry later".
 const PLUGIN_RELOAD_EXIT_BUSY: i32 = 75;
@@ -389,6 +389,8 @@ struct PluginReloadArgs {
     request: String,
     changelog: String,
     timeout_ms: u64,
+    /// Prompt the running agent instead of restarting it with agent.resume.
+    no_resume: bool,
 }
 
 /// Parse `plugin reload` arguments; `Err` carries the exit code and its one
@@ -400,6 +402,7 @@ fn parse_plugin_reload_args(args: &[String]) -> Result<PluginReloadArgs, (i32, S
     let mut request = None;
     let mut changelog = None;
     let mut timeout_ms = PLUGIN_RELOAD_DEFAULT_TIMEOUT_MS;
+    let mut no_resume = false;
     let mut index = 0;
     while index < args.len() {
         let value = || args.get(index + 1).cloned();
@@ -416,6 +419,11 @@ fn parse_plugin_reload_args(args: &[String]) -> Result<PluginReloadArgs, (i32, S
             // Output is always exactly one JSON object; `--json` is accepted
             // so callers can say so.
             "--json" => {
+                index += 1;
+                continue;
+            }
+            "--no-resume" => {
+                no_resume = true;
                 index += 1;
                 continue;
             }
@@ -448,6 +456,7 @@ fn parse_plugin_reload_args(args: &[String]) -> Result<PluginReloadArgs, (i32, S
         request,
         changelog,
         timeout_ms,
+        no_resume,
     })
 }
 
@@ -468,7 +477,15 @@ fn plugin_reload_record_path(plugin_id: &str, request: &str) -> PathBuf {
 fn completed_plugin_reload_record(path: &Path) -> Option<serde_json::Value> {
     let record: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
-    (record.get("resumed") == Some(&serde_json::Value::Bool(true))).then_some(record)
+    plugin_reload_delivered(&record).then_some(record)
+}
+
+/// Whether a reload record finished: the agent was resumed, or (with
+/// `--no-resume`) the running agent was prompted.
+fn plugin_reload_delivered(record: &serde_json::Value) -> bool {
+    ["resumed", "prompted"]
+        .into_iter()
+        .any(|field| record.get(field) == Some(&serde_json::Value::Bool(true)))
 }
 
 fn plugin_reload_prompt(changelog: &str, request: &str) -> String {
@@ -574,7 +591,7 @@ fn plugin_reload(args: &[String]) -> std::io::Result<i32> {
     match run_plugin_reload(&args, &record_path) {
         Ok(record) => {
             println!("{record}");
-            if record.get("resumed") == Some(&serde_json::Value::Bool(true)) {
+            if plugin_reload_delivered(&record) {
                 Ok(0)
             } else {
                 Ok(PLUGIN_RELOAD_EXIT_NO_AGENT)
@@ -607,7 +624,8 @@ fn run_plugin_reload(
     let deadline = std::time::Instant::now()
         .checked_add(std::time::Duration::from_millis(args.timeout_ms))
         .ok_or_else(|| PluginReloadFailure::failed("--timeout is too large"))?;
-    let resumed = loop {
+    // The agent to prompt: (agent, session id, whether agent.resume restarted it).
+    let (agent_label, session_id, resumed) = loop {
         let agent = match plugin_reload_call(Method::AgentGet(crate::api::schema::AgentTarget {
             target: args.pane.clone(),
         })) {
@@ -647,13 +665,47 @@ fn run_plugin_reload(
             std::thread::sleep(PLUGIN_RELOAD_POLL);
             continue;
         }
+        if args.no_resume {
+            // Prompt the running agent as is; agent.prompt's polite send
+            // holds the line until the human is quiet.
+            let info = agent.get("agent");
+            let field = |name: &str| {
+                info.and_then(|info| info.get(name))
+                    .and_then(serde_json::Value::as_str)
+            };
+            let session = info
+                .and_then(|info| info.get("agent_session"))
+                .and_then(|session| session.get("value"))
+                .and_then(serde_json::Value::as_str);
+            let (Some("claude"), Some(session)) = (field("agent"), session) else {
+                return Err(PluginReloadFailure::failed(
+                    "--no-resume: the pane agent is not claude with a known session",
+                ));
+            };
+            break ("claude".to_string(), session.to_string(), false);
+        }
         // Recheck status and the existing per-terminal human-input timestamp
         // atomically at the mutation boundary, not just in this client poll.
         match plugin_reload_call(Method::AgentResume(crate::api::schema::AgentResumeParams {
             pane_id: args.pane.clone(),
             input_quiet_ms: Some(PLUGIN_RELOAD_INPUT_QUIET_MS),
         })) {
-            Ok(resumed) => break resumed,
+            Ok(resumed) => {
+                let field = |name: &str| {
+                    resumed
+                        .get(name)
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default()
+                        .to_string()
+                };
+                tracing::info!(
+                    plugin_id = %args.plugin_id,
+                    pane = %args.pane,
+                    request = %args.request,
+                    "resumed agent after plugin reload"
+                );
+                break (field("agent"), field("session_id"), true);
+            }
             Err((code, _)) if code == "agent_busy" => {
                 if std::time::Instant::now() + PLUGIN_RELOAD_POLL > deadline {
                     return Err(PluginReloadFailure {
@@ -670,26 +722,12 @@ fn run_plugin_reload(
             }
         }
     };
-    let session_id = resumed
-        .get("session_id")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    tracing::info!(
-        plugin_id = %args.plugin_id,
-        pane = %args.pane,
-        request = %args.request,
-        "resumed agent after plugin reload"
-    );
-
-    let resumed_agent = resumed
-        .get("agent")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
+    // Re-verify right before typing: the pane still runs this agent on this
+    // session, idle or done, with no restore error.
     wait_for_resumed_agent_idle(
         &ResumedAgent {
             pane: &args.pane,
-            agent: resumed_agent,
+            agent: &agent_label,
             session_id: &session_id,
         },
         deadline,
@@ -706,15 +744,18 @@ fn run_plugin_reload(
 
     wait_for_plugin_reload_prompt(&args.pane, prompt, deadline)?;
 
-    let record = serde_json::json!({
+    let mut record = serde_json::json!({
         "plugin_id": args.plugin_id,
         "reloaded_at": utc_now_iso(),
         "pane": args.pane,
         "session_id": session_id,
-        "resumed": true,
+        "resumed": resumed,
         "request": args.request,
         "changelog": args.changelog,
     });
+    if !resumed {
+        record["prompted"] = serde_json::Value::Bool(true);
+    }
     write_plugin_reload_record(record_path, &record).map_err(|err| {
         PluginReloadFailure::failed(format!("failed to write {}: {err}", record_path.display()))
     })?;
@@ -2343,13 +2384,17 @@ mod tests {
 
     /// Run the real `plugin reload` flow against a scripted server and return
     /// the outcome, the API calls made, and whether a record was written.
-    fn run_scripted_plugin_reload(
-        scenario: AfterResume,
-    ) -> (
+    type ScriptedReload = (
         Result<serde_json::Value, PluginReloadFailure>,
         Vec<&'static str>,
         bool,
-    ) {
+    );
+
+    fn run_scripted_plugin_reload(scenario: AfterResume) -> ScriptedReload {
+        run_scripted_plugin_reload_with(scenario, false)
+    }
+
+    fn run_scripted_plugin_reload_with(scenario: AfterResume, no_resume: bool) -> ScriptedReload {
         let dir = std::env::temp_dir().join(format!(
             "herdr-plugin-reload-test-{}-{}",
             std::process::id(),
@@ -2386,7 +2431,7 @@ mod tests {
                 match name {
                     "plugin.reload" => Ok(serde_json::json!({"type": "ok"})),
                     "plugin.action.list" => Ok(serde_json::json!({"actions": []})),
-                    "agent.get" if !resumed => Ok(claude("idle")),
+                    "agent.get" if !resumed && !no_resume => Ok(claude("idle")),
                     "agent.resume" => {
                         resumed = true;
                         Ok(
@@ -2430,6 +2475,7 @@ mod tests {
             request: "ar-1".into(),
             changelog: "run `agent-request confirm ar-1`".into(),
             timeout_ms: 30_000,
+            no_resume,
         };
         let result = run_plugin_reload(&args, &record_path);
         PLUGIN_RELOAD_TEST_CALL.with(|call| *call.borrow_mut() = None);
@@ -2468,6 +2514,41 @@ mod tests {
         }
     }
 
+    /// `--no-resume` prompts the running agent on its current session and
+    /// never restarts it.
+    #[test]
+    fn plugin_reload_no_resume_prompts_the_running_agent_without_agent_resume() {
+        let (result, calls, recorded) = run_scripted_plugin_reload_with(AfterResume::Ready, true);
+        let record = result.ok().expect("idle agent is prompted");
+        assert!(!calls.contains(&"agent.resume"), "{calls:?}");
+        assert!(calls.contains(&"agent.prompt"), "{calls:?}");
+        assert_eq!(record["resumed"], false);
+        assert_eq!(record["prompted"], true);
+        assert_eq!(record["session_id"], "sess-1");
+        assert!(plugin_reload_delivered(&record));
+        assert!(recorded);
+        // A prompted record short-circuits a retry; a no-agent record does not.
+        let dir = std::env::temp_dir().join(format!(
+            "herdr-plugin-reload-prompted-{}",
+            std::process::id()
+        ));
+        let record_path = dir.join("record.json");
+        write_plugin_reload_record(&record_path, &record).unwrap();
+        assert_eq!(completed_plugin_reload_record(&record_path), Some(record));
+        let mut no_agent = serde_json::json!({"resumed": false, "session_id": null});
+        write_plugin_reload_record(&record_path, &no_agent).unwrap();
+        assert_eq!(completed_plugin_reload_record(&record_path), None);
+        no_agent["prompted"] = serde_json::Value::Bool(false);
+        assert!(!plugin_reload_delivered(&no_agent));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let (result, calls, recorded) =
+            run_scripted_plugin_reload_with(AfterResume::RestoreErrorWhileIdle, true);
+        assert_eq!(result.err().map(|failure| failure.exit_code), Some(1));
+        assert!(!calls.contains(&"agent.resume") && !calls.contains(&"agent.prompt"));
+        assert!(!recorded);
+    }
+
     #[test]
     fn machine_plugin_connection_errors_never_use_local_offline_state() {
         crate::cli::target::with_test_client(crate::api::client::ApiClient::local(), || {
@@ -2499,6 +2580,7 @@ mod tests {
         assert_eq!(parsed.request, "ar-agent_1.2");
         assert_eq!(parsed.changelog, "updated handler");
         assert_eq!(parsed.timeout_ms, 600_000);
+        assert!(!parsed.no_resume);
         let mut catalog_args = vec![
             "herdr".to_string(),
             "plugin".to_string(),
@@ -2507,6 +2589,14 @@ mod tests {
         catalog_args.extend(args.clone());
         super::super::spec::command()
             .try_get_matches_from(catalog_args)
+            .unwrap();
+        let mut no_resume = args.clone();
+        no_resume.push("--no-resume".into());
+        assert!(parse_plugin_reload_args(&no_resume).unwrap().no_resume);
+        let mut catalog_no_resume = vec!["herdr".to_string(), "plugin".into(), "reload".into()];
+        catalog_no_resume.extend(no_resume);
+        super::super::spec::command()
+            .try_get_matches_from(catalog_no_resume)
             .unwrap();
         let mut timed = args.clone();
         timed.extend(["--timeout".into(), "1500".into()]);
