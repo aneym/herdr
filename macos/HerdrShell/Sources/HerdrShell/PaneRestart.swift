@@ -5,14 +5,14 @@ enum PaneRestart {
     enum Next: Equatable { case done, confirm, error(String) }
     struct Tracking {
         private var deadlines: [String: Date] = [:]
+        // Server startup polling lasts 5s; retain a 25s shutdown/delivery margin.
         mutating func request(_ key: String, now: Date = Date()) { deadlines[key] = now.addingTimeInterval(30) }
         mutating func clear(_ key: String) { deadlines.removeValue(forKey: key) }
         mutating func expire(now: Date = Date()) { deadlines = deadlines.filter { $0.value > now } }
-        mutating func observe(_ key: String, restoreError: String?, changed: Bool, running: Bool, now: Date = Date()) -> Bool {
+        mutating func observe(_ key: String, restoreError: String?, changed: Bool, now: Date = Date()) -> Bool {
             expire(now: now)
             guard deadlines[key] != nil else { return false }
             if restoreError != nil && changed { clear(key); return true }
-            if restoreError == nil && running { clear(key) }
             return false
         }
     }

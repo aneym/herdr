@@ -29,10 +29,10 @@ export default function PaneSurface(props: { pane: Pane; machine: string; focuse
       if (pane.restore_error && pane.restore_error !== reportedRestoreError.current) {
         clearRestart();
         setRestartError("The agent didn't come back up. Check the pane for errors.");
-      } else if (!pane.restore_error && hasAgent && pane.agent_status && pane.agent_status !== "unknown") clearRestart();
+      }
     }
     reportedRestoreError.current = pane.restore_error;
-  }, [pane.restore_error, pane.agent_status, hasAgent, restartKey, clearRestart]);
+  }, [pane.restore_error, restartKey, clearRestart]);
   const [confirmRestart, setConfirmRestart] = useState(false);
   const [restarting, setRestarting] = useState(false);
   useEffect(() => { clearRestart(); setMenu(false); setConfirmRestart(false); setRestartError(null); setRestarting(false); return clearRestart; }, [restartKey, clearRestart]);
@@ -41,6 +41,7 @@ export default function PaneSurface(props: { pane: Pane; machine: string; focuse
     setMenu(false); setConfirmRestart(false); setRestarting(true);
     clearRestart();
     requestedRestart.current = restartKey;
+    // Server startup polling lasts 5s; retain a 25s margin for shutdown and delivery.
     restartTimeout.current = setTimeout(clearRestart, 30_000);
     setRestartError(null);
     try {

@@ -386,14 +386,13 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         for pane in panes {
             let key = restartRequestKey(pane.pane_id)
             if let error = pane.restore_error { errors[key] = error }
-            let running = pane.agent_status.map { !$0.isEmpty && $0.lowercased() != "unknown" } ?? false
             if requestedRestarts.observe(key, restoreError: pane.restore_error,
-                                         changed: reportedRestoreErrors[key] != pane.restore_error, running: running) {
+                                         changed: window.attachedSheet == nil && reportedRestoreErrors[key] != pane.restore_error) {
                 failed = true
             }
         }
-        reportedRestoreErrors = errors
-        if failed {
+        if window.attachedSheet == nil { reportedRestoreErrors = errors }
+        if failed && window.attachedSheet == nil {
             let alert = NSAlert()
             alert.messageText = "The agent didn't come back up."
             alert.informativeText = "Check the pane for errors."
