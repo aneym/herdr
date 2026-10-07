@@ -467,14 +467,14 @@ fn agent_start(args: &[String]) -> std::io::Result<i32> {
 }
 
 fn agent_list(args: &[String]) -> std::io::Result<i32> {
-    if !args.is_empty() {
-        eprintln!("usage: herdr agent list");
+    if !args.is_empty() && args != ["--json"] {
+        eprintln!("usage: herdr agent list [--json]");
         return Ok(2);
     }
 
     super::print_response(&super::send_request(&Request {
         id: "cli:agent:list".into(),
-        method: Method::AgentList(EmptyParams::default()),
+        method: Method::AgentsList(EmptyParams::default()),
     })?)
 }
 

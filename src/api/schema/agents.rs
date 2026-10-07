@@ -395,3 +395,19 @@ pub struct AgentSessionInfo {
     pub kind: crate::agent_resume::AgentSessionRefKind,
     pub value: String,
 }
+
+/// A pinned agent tab, with its runtime binding when present.
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct PinnedAgentInfo {
+    pub tab_id: String,
+    pub workspace_id: String,
+    pub label: String,
+    pub pin_index: usize,
+    pub pane_id: String,
+    pub agent_status: super::common::AgentStatus,
+    pub plugin_id: Option<String>,
+    pub session_id: Option<String>,
+    pub state_dir: Option<String>,
+}

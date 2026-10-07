@@ -142,6 +142,9 @@ pub enum ResponseResult {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         delivery: Option<super::agents::AgentPromptDeliveryAck>,
     },
+    AgentsList {
+        agents: Vec<super::agents::PinnedAgentInfo>,
+    },
     AgentList {
         agents: Vec<AgentInfo>,
     },

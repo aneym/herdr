@@ -43,6 +43,58 @@ type QueuedAgentPrompt = (
 );
 
 impl App {
+    pub(super) fn handle_agents_list(&mut self, id: String) -> String {
+        let agents = self
+            .state
+            .pinned_tabs
+            .iter()
+            .enumerate()
+            .filter(|(_, pin)| pin.role == Some(crate::api::schema::TabRole::Agent))
+            .filter_map(|(pin_index, pin)| {
+                let (ws_idx, tab_idx) = self.parse_tab_id(&pin.tab_id)?;
+                let info = self.tab_info(ws_idx, tab_idx)?;
+                let tab = self.state.workspaces.get(ws_idx)?.tabs.get(tab_idx)?;
+                let pane_id = tab
+                    .panes
+                    .get_key_value(&tab.layout.focused())
+                    .map(|(id, _)| *id)
+                    .or_else(|| tab.layout.pane_ids().first().copied())?;
+                let plugin_id = tab.layout.pane_ids().iter().find_map(|id| {
+                    self.state
+                        .plugin_panes
+                        .get(id)
+                        .map(|record| record.plugin_id.clone())
+                });
+                let state_dir = plugin_id.as_deref().map(|id| {
+                    crate::plugin_paths::plugin_state_dir(id)
+                        .to_string_lossy()
+                        .into_owned()
+                });
+                let session_id = tab
+                    .panes
+                    .get(&pane_id)
+                    .and_then(|pane| self.state.terminals.get(&pane.attached_terminal_id))
+                    .and_then(|terminal| terminal.current_agent_session())
+                    .filter(|session| {
+                        session.session_ref.kind == crate::agent_resume::AgentSessionRefKind::Id
+                    })
+                    .map(|session| session.session_ref.value);
+                Some(crate::api::schema::PinnedAgentInfo {
+                    tab_id: info.tab_id,
+                    workspace_id: info.workspace_id,
+                    label: info.label,
+                    pin_index,
+                    pane_id: self.public_pane_id(ws_idx, pane_id)?,
+                    agent_status: info.agent_status,
+                    plugin_id,
+                    session_id,
+                    state_dir,
+                })
+            })
+            .collect();
+        encode_success(id, ResponseResult::AgentsList { agents })
+    }
+
     pub(super) fn handle_agent_list(&mut self, id: String) -> String {
         encode_success(
             id,
@@ -578,6 +630,65 @@ mod tests {
         detect::{Agent, AgentState},
         workspace::Workspace,
     };
+
+    #[test]
+    fn agents_list_returns_only_pinned_agents_in_pin_order() {
+        let mut app = app_with_agent();
+        let ws = &mut app.state.workspaces[0];
+        ws.test_add_tab(Some("bound"));
+        ws.test_add_tab(Some("plain"));
+        ws.test_add_tab(Some("unpinned"));
+        let first = app.public_tab_id(0, 0).unwrap();
+        let bound = app.public_tab_id(0, 1).unwrap();
+        let plain = app.public_tab_id(0, 2).unwrap();
+        app.state.pinned_tabs = vec![
+            crate::app::state::PinnedTab {
+                tab_id: bound.clone(),
+                priority: 0,
+                role: Some(crate::api::schema::TabRole::Agent),
+            },
+            crate::app::state::PinnedTab {
+                tab_id: plain,
+                priority: 0,
+                role: None,
+            },
+            crate::app::state::PinnedTab {
+                tab_id: first.clone(),
+                priority: 0,
+                role: Some(crate::api::schema::TabRole::Agent),
+            },
+        ];
+        let pane = app.state.workspaces[0].tabs[1].root_pane;
+        app.state.plugin_panes.insert(
+            pane,
+            crate::app::state::PluginPaneRecord {
+                plugin_id: "test-agent".into(),
+                entrypoint: "main".into(),
+            },
+        );
+        let request: crate::api::schema::Request =
+            serde_json::from_str(r#"{"id":"agents-test","method":"agents.list","params":{}}"#)
+                .unwrap();
+        let response = app.handle_api_request(request);
+        let value: serde_json::Value = serde_json::from_str(&response).unwrap();
+        let agents = value["result"]["agents"].as_array().unwrap();
+        assert_eq!(agents.len(), 2);
+        assert_eq!(agents[0]["tab_id"], bound);
+        assert_eq!(agents[0]["pin_index"], 0);
+        assert_eq!(agents[0]["pane_id"], app.public_pane_id(0, pane).unwrap());
+        assert_eq!(agents[0]["plugin_id"], "test-agent");
+        assert_eq!(
+            agents[0]["state_dir"],
+            crate::plugin_paths::plugin_state_dir("test-agent")
+                .to_string_lossy()
+                .as_ref()
+        );
+        assert_eq!(agents[1]["tab_id"], first);
+        assert_eq!(agents[1]["pin_index"], 2);
+        assert!(agents[1]["plugin_id"].is_null());
+        assert!(agents[1]["state_dir"].is_null());
+        assert!(agents[1]["session_id"].is_null());
+    }
 
     fn app_with_agent() -> App {
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();

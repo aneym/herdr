@@ -1152,6 +1152,7 @@ impl App {
             Method::TabSetRole(params) => return self.handle_tab_set_role(request.id, params),
             Method::TabPinMove(params) => return self.handle_tab_pin_move(request.id, params),
             Method::TabClose(target) => return self.handle_tab_close(request.id, target),
+            Method::AgentsList(_) => return self.handle_agents_list(request.id),
             Method::AgentList(_) => return self.handle_agent_list(request.id),
             Method::AgentUsage(_) => return self.handle_agent_usage(request.id),
             Method::AgentGet(target) => return self.handle_agent_get(request.id, target),
