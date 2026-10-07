@@ -63,6 +63,18 @@ export function revealFold(rows: SidebarRow[], selected: string | null, expanded
   const space = tab && rows.find(r => r.kind === "space" && r.id === tab.spaceId);
   return space && !spaceOpen(space, rows, selected, expanded) ? foldKey(space) : null;
 }
+/** revealFold once per selection: `seen` outlives the sidebar, so remounting it (or StrictMode's
+ *  second effect run) on the same selection reopens nothing the user folded since. */
+export function revealOnSelect(seen: { current: string | null | undefined }, rows: SidebarRow[], selected: string | null, expanded: Record<string, boolean>): string | null {
+  if (seen.current === selected) return null;
+  seen.current = selected;
+  return revealFold(rows, selected, expanded);
+}
+/** Pins on the machine in a `tab.list` answer. */
+export function pinCount(answer: unknown): number {
+  const tabs = (answer as { tabs?: { pin_index?: number | null }[] } | null)?.tabs;
+  return Array.isArray(tabs) ? tabs.filter(t => t?.pin_index != null).length : 0;
+}
 export function tabOrder(rows: SidebarRow[]): string[] { return [...new Set(rows.filter(r => r.kind !== "space").map(r => r.id))]; }
 export function scaleRect(rect: Rect, area: Rect, width: number, height: number): Rect {
   return { x: (rect.x - area.x) / Math.max(1, area.width) * width, y: (rect.y - area.y) / Math.max(1, area.height) * height, width: rect.width / Math.max(1, area.width) * width, height: rect.height / Math.max(1, area.height) * height };

@@ -35,7 +35,8 @@ export default function PaneSurface(props: { pane: Pane; machine: string; focuse
   } }), [register, set]);
   const onItems = useCallback((items: number) => { count.current = items; }, []);
   const chat = mode === "chat" && hasAgent;
-  return <div className="pane-surface" onMouseDown={() => props.onFocus(pane.pane_id)}>
+  const tools = (hasAgent ? 1 : 0) + (pinned !== undefined ? 1 : 0);
+  return <div className={`pane-surface ${tools ? `tools-${tools}` : ""}`} onMouseDown={() => props.onFocus(pane.pane_id)}>
     <div className={`terminal-surface ${chat ? "terminal-hidden" : ""}`} aria-hidden={chat}><PaneTerm {...props} focused={props.focused && !chat} register={wrappedRegister} /></div>
     {mounted && hasAgent && <div className={`chat-surface ${chat ? "" : "chat-hidden"}`}><Chat machine={machine} pane={pane.pane_id} focused={props.focused} visible={chat} onItems={onItems} /></div>}
     {(hasAgent || pinned !== undefined) && <div className="pane-tools">
