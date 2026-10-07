@@ -52,3 +52,16 @@ it("keeps the attach handle and close reason when the initial theme report fails
   await bridge.close(7);
   appTheme().dispose();
 });
+
+// Keep native metadata while preserving the display contract used by non-restart callers.
+it("renders a non-restart API error as legacy text and retains restart metadata", async () => {
+  ipc.invoke.mockRejectedValue({ code: "not_found", message: "tab no longer exists", reason: "blocked" });
+  const { bridge } = await import("./bridge");
+  const error = await bridge.api("studio", "tab.pin", { tab_id: "tab_1" }).catch(error => error) as Error & { code: string; reason?: string };
+  const status = document.createElement("div");
+  status.textContent = String(error);
+  expect(status.textContent).toBe("herdr api error not_found: tab no longer exists");
+  expect(error.code).toBe("not_found");
+  expect(error.reason).toBe("blocked");
+  expect(error.message).toBe("tab no longer exists");
+});

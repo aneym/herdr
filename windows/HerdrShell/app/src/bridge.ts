@@ -29,7 +29,13 @@ export const bridge = {
   remoteHome: (machine: string) => invoke<string>("remote_home", { machine }),
   machines: () => invoke<MachineStatus[]>("machines_list"),
   snapshot: (machine: string) => invoke<Snapshot>("snapshot", { machine }),
-  api: (machine: string, method: string, params: unknown) => invoke<unknown>("api_request", { machine, method, params }),
+  api: (machine: string, method: string, params: unknown) => invoke<unknown>("api_request", { machine, method, params }).catch((error: unknown) => {
+    if (error && typeof error === "object" && "code" in error && "message" in error) {
+      const server = error as { code: string; message: string; reason?: string };
+      throw Object.assign(new Error(server.message), { toString: () => `herdr api error ${server.code}: ${server.message}` }, { code: server.code, reason: server.reason });
+    }
+    throw error;
+  }),
   machineEvents: (fn: (status: MachineStatus) => void) => listen<MachineStatus>("herdr://machine", e => fn(e.payload)),
   snapshots: (fn: (value: { machine: string; snapshot: Snapshot }) => void) => listen<{ machine: string; snapshot: Snapshot }>("herdr://snapshot", e => fn(e.payload)),
   attach: (machine: string, terminalId: string, cols: number, rows: number, mode: "attach" | "observe", fn: (event: AttachEvent) => void) => {
