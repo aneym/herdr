@@ -212,19 +212,6 @@ fn space_row_status(
     )
 }
 
-/// The quiet badge on a row whose chat runs on another machine: one dim glyph
-/// and the machine's short name. An unreachable machine dims it further.
-pub(super) fn machine_badge(
-    endpoint: &ClientShellEndpoint,
-    palette: &Palette,
-) -> Option<(String, Style)> {
-    machine_badge_with(
-        endpoint,
-        endpoint.status == ClientEndpointStatus::Online,
-        palette,
-    )
-}
-
 fn machine_badge_with(
     endpoint: &ClientShellEndpoint,
     healthy: bool,

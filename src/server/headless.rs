@@ -3413,10 +3413,7 @@ impl Drop for HeadlessServer {
 
 fn note_server_signal(should_quit: &AtomicBool, server_event_tx: &mpsc::Sender<ServerEvent>) {
     #[cfg(unix)]
-    loop {
-        let Some(observed) = super::signals::poll() else {
-            break;
-        };
+    while let Some(observed) = super::signals::poll() {
         match observed.decision {
             super::signals::Decision::Ignore => {
                 super::signals::log_ignored(observed.signal, observed.sender_pid);
