@@ -758,6 +758,20 @@ pub fn process_agent_hint(_pid: u32) -> Option<crate::detect::Agent> {
     None
 }
 
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub fn process_env_var(_pid: u32, _name: &str) -> Option<String> {
+    None
+}
+
+/// The value of `name` in a NUL-separated `KEY=value` environment block.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn env_block_var(environ: &[u8], name: &str) -> Option<String> {
+    environ.split(|&byte| byte == 0).find_map(|record| {
+        let value = record.strip_prefix(name.as_bytes())?.strip_prefix(b"=")?;
+        String::from_utf8(value.to_vec()).ok()
+    })
+}
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn parse_agent_env_hint(environ: &[u8]) -> Option<crate::detect::Agent> {
     for record in environ.split(|&byte| byte == 0) {
@@ -905,6 +919,15 @@ mod tests {
     fn parse_agent_env_hint_ignores_missing_or_unknown_agents() {
         assert_eq!(parse_agent_env_hint(b"PATH=/bin\0TERM=xterm\0"), None);
         assert_eq!(parse_agent_env_hint(b"HERDR_AGENT=not-an-agent\0"), None);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn env_block_var_matches_whole_names_only() {
+        let environ = b"PATHEXT=.x\0PATH=/a:/b\0MANPATH=/m\0";
+        assert_eq!(env_block_var(environ, "PATH").as_deref(), Some("/a:/b"));
+        assert_eq!(env_block_var(environ, "MANPATH").as_deref(), Some("/m"));
+        assert_eq!(env_block_var(b"TERM=xterm\0", "PATH"), None);
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]

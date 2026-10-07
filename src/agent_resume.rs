@@ -1209,6 +1209,22 @@ pub(crate) fn restart_launch_argv(
     Ok((argv, "direct"))
 }
 
+/// Launch env overrides for an in-place restart. The server execs the launcher
+/// itself, so a bare launcher name resolves in the server's PATH, which lacks
+/// what the pane's shell adds (a server first started from a GUI app keeps that
+/// PATH through every live handoff). The replaced agent's PATH is the shell's.
+pub(crate) fn restart_env_overrides(
+    mut overrides: Vec<(String, String)>,
+    agent_path: Option<String>,
+) -> Vec<(String, String)> {
+    if let Some(path) = agent_path.filter(|path| !path.is_empty()) {
+        if !overrides.iter().any(|(key, _)| key == "PATH") {
+            overrides.push(("PATH".into(), path));
+        }
+    }
+    overrides
+}
+
 /// Summaries expose option names only; option values may contain credentials.
 pub(crate) fn restart_command_summary(argv: &[String]) -> String {
     let mut summary = argv.first().cloned().into_iter().collect::<Vec<_>>();
