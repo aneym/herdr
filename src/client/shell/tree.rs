@@ -436,7 +436,7 @@ pub(super) enum AgentPanelListEntry {
         alert: bool,
         indent: u8,
     },
-    FactoryTab(FactoryTabRow),
+    FactoryTab(Box<FactoryTabRow>),
     FactoryHost {
         name: String,
         summary: Option<String>,
@@ -2347,7 +2347,7 @@ fn factory_run_row(
     indent: u8,
 ) -> AgentPanelListEntry {
     let done = run_done(parent, run);
-    AgentPanelListEntry::FactoryTab(FactoryTabRow {
+    AgentPanelListEntry::FactoryTab(Box::new(FactoryTabRow {
         header: TreeHeader {
             workspace_id: parent.workspace_id.clone(),
             tab_id: Some(parent.tab_id.clone()),
@@ -2385,7 +2385,7 @@ fn factory_run_row(
         background: false,
         workflow: true,
         done,
-    })
+    }))
 }
 
 /// Collapse key of a workflow run row: the run lives inside its lane's tab, so
@@ -2523,7 +2523,7 @@ fn factory_row(
     );
     let background =
         tag.is_some_and(|tag| tag.done || tag.kind == crate::factory_overlay::TabKind::Advisor);
-    AgentPanelListEntry::FactoryTab(FactoryTabRow {
+    AgentPanelListEntry::FactoryTab(Box::new(FactoryTabRow {
         header: TreeHeader {
             workspace_id: tab.workspace_id.clone(),
             tab_id: Some(tab.tab_id.clone()),
@@ -2615,7 +2615,7 @@ fn factory_row(
         background,
         workflow: tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Workflow),
         done: tag.is_some_and(|tag| tag.done),
-    })
+    }))
 }
 
 /// One chat's state. The endpoint's `work_status` is the one rule every
