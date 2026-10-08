@@ -3485,11 +3485,10 @@ impl ClientShellState {
                 .iter()
                 .filter(|tab| tab.workspace_id == workspace.workspace_id)
             {
-                if snapshot
-                    .pinned_tabs
-                    .iter()
-                    .any(|pin| pin.tab_id == tab.tab_id && pin.hidden)
-                {
+                if snapshot.pinned_tabs.iter().any(|pin| {
+                    pin.tab_id == tab.tab_id
+                        && (pin.role == Some(crate::api::schema::TabRole::Agent) && pin.hidden)
+                }) {
                     continue;
                 }
                 let tag = overlay.and_then(|overlay| overlay.tab(&tab.tab_id));

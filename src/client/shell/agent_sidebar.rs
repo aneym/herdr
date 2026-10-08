@@ -1079,7 +1079,7 @@ fn render_panel_list_entry(
             alert,
         } => {
             let style = Style::default().fg(config.palette.overlay0);
-            let text = format!(" Hidden {count} {}", if *collapsed { "▸" } else { "▾" });
+            let text = format!(" Hidden {count}");
             put_text(buffer, rect.x, rect.y, rect.width, &text, style);
             if *alert {
                 let x = rect.x.saturating_add(display_width(&text) as u16 + 1);
@@ -1092,6 +1092,17 @@ fn render_panel_list_entry(
                     Style::default().fg(config.palette.accent),
                 );
             }
+            let x = rect
+                .x
+                .saturating_add(display_width(&text) as u16 + if *alert { 3 } else { 1 });
+            put_text(
+                buffer,
+                x,
+                rect.y,
+                rect.right().saturating_sub(x),
+                if *collapsed { "▸" } else { "▾" },
+                style,
+            );
             hits.hidden_agents_header = rect;
         }
         AgentPanelListEntry::HiddenSpacesHeader { count, collapsed } => {

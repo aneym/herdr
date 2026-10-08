@@ -3695,3 +3695,73 @@ fn folded_remote_worktree_group_stays_while_only_a_hidden_child_has_a_chat() {
         .iter()
         .any(|hit| hit.endpoint_id == remote_id && hit.workspace_id == "ws_1"));
 }
+
+/// Reviewer regression: the multi-machine shortcut dispatch must select the
+/// same visible chat whose digit is rendered, even with the Hidden fold open.
+#[test]
+fn hidden_agent_aggregate_shortcut_matches_drawn_digit() {
+    let (mut state, remote) = state_with_remote();
+    let mut local = state.snapshot.as_deref().expect("local snapshot").clone();
+    local.pinned_tabs.clear();
+    state.set_snapshot(Box::new(local));
+    let mut snapshot = state
+        .endpoints
+        .iter()
+        .find(|endpoint| endpoint.endpoint_id == remote)
+        .and_then(|endpoint| endpoint.snapshot.clone())
+        .expect("remote snapshot");
+    let template = snapshot.tabs[0].clone();
+    snapshot.tabs = (1..=4)
+        .map(|number| ClientShellTab {
+            tab_id: format!("remote-{number}"),
+            number,
+            label: format!("remote chat {number}"),
+            focused: number == 1,
+            ..template.clone()
+        })
+        .collect();
+    snapshot.pinned_tabs = snapshot
+        .tabs
+        .iter()
+        .enumerate()
+        .map(|(index, tab)| {
+            crate::protocol::ClientShellPinnedTab {
+                tab_id: tab.tab_id.clone(),
+                workspace_id: tab.workspace_id.clone(),
+                role: (index < 3).then_some(crate::api::schema::TabRole::Agent),
+                // A stray flag on a plain pin must not hide it.
+                hidden: index == 1 || index == 3,
+            }
+        })
+        .collect();
+    state.set_endpoint_snapshot(&remote, snapshot);
+    for expanded in [false, true] {
+        state.tree_chrome_mut().hidden_agents_expanded = expanded;
+        let frame = state.compose(100, 40).expect("aggregate frame");
+        let hit = state
+            .hits
+            .pinned_rows
+            .iter()
+            .find(|hit| hit.tab_id == "remote-3")
+            .expect("visible C row");
+        let slot = super::super::agent_sidebar::chat_pin_rect(hit.rect);
+        let cell =
+            usize::from(hit.rect.y) * usize::from(frame.width) + usize::from(slot.right() - 1);
+        assert_eq!(frame.cells[cell].symbol, "2");
+        let numbered = state.aggregate_numbered_tabs().expect("visible pins");
+        assert_eq!(
+            numbered[..3],
+            [
+                (remote.clone(), "remote-1".into()),
+                (remote.clone(), "remote-3".into()),
+                (remote.clone(), "remote-4".into()),
+            ]
+        );
+        let mut outcome = ClientShellInput::default();
+        assert!(state
+            .handle_endpoint_navigation(crate::input::KeybindAction::SwitchTab(1), &mut outcome));
+        assert!(matches!(outcome.actions.as_slice(),
+            [ClientShellAction::ActivateEndpoint { endpoint_id, target: Some(ClientEndpointFocusTarget::Tab(tab_id)) }]
+            if endpoint_id == &remote && tab_id == "remote-3"));
+    }
+}

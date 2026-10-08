@@ -571,10 +571,10 @@ impl ClientShellState {
                     .any(|pin| pin.tab_id == tab_id && pin.role.is_some()),
                 supports_role: self.endpoint_supports_tab_role(&self.active_endpoint_id),
                 supports_hidden: self.endpoint_supports_tab_hidden(&self.active_endpoint_id),
-                hidden: snapshot
-                    .pinned_tabs
-                    .iter()
-                    .any(|pin| pin.tab_id == tab_id && pin.hidden),
+                hidden: snapshot.pinned_tabs.iter().any(|pin| {
+                    pin.tab_id == tab_id
+                        && (pin.role == Some(crate::api::schema::TabRole::Agent) && pin.hidden)
+                }),
                 pinned,
             },
             x,

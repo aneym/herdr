@@ -2156,10 +2156,12 @@ impl ClientShellState {
                                     .find(|endpoint| endpoint.endpoint_id == endpoint_id)
                                     .and_then(|endpoint| endpoint.snapshot.as_deref())
                                     .is_some_and(|snapshot| {
-                                        snapshot
-                                            .pinned_tabs
-                                            .iter()
-                                            .any(|pin| pin.tab_id == tab_id && pin.hidden)
+                                        snapshot.pinned_tabs.iter().any(|pin| {
+                                            pin.tab_id == tab_id
+                                                && (pin.role
+                                                    == Some(crate::api::schema::TabRole::Agent)
+                                                    && pin.hidden)
+                                        })
                                     }),
                                 agent: self
                                     .endpoints

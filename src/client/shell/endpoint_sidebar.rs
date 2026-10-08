@@ -934,7 +934,7 @@ fn render_hidden_agents_header(
     config: &ClientShellConfig,
     hits: &mut ShellHitMap,
 ) {
-    let text = format!(" Hidden {count} {}", if expanded { "▾" } else { "▸" });
+    let text = format!(" Hidden {count}");
     put_text(
         buffer,
         rect.x,
@@ -954,5 +954,16 @@ fn render_hidden_agents_header(
             Style::default().fg(config.palette.accent),
         );
     }
+    let x = rect
+        .x
+        .saturating_add(display_width(&text) as u16 + if !expanded && alert { 3 } else { 1 });
+    put_text(
+        buffer,
+        x,
+        rect.y,
+        rect.right().saturating_sub(x),
+        if expanded { "▾" } else { "▸" },
+        Style::default().fg(config.palette.overlay0),
+    );
     hits.hidden_agents_header = rect;
 }

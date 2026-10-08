@@ -285,7 +285,11 @@ impl ClientShellState {
                         snapshot
                             .pinned_tabs
                             .iter()
-                            .filter(|pin| snapshot.tabs.iter().any(|tab| tab.tab_id == pin.tab_id))
+                            .filter(|pin| {
+                                !(pin.role == Some(crate::api::schema::TabRole::Agent)
+                                    && pin.hidden)
+                                    && snapshot.tabs.iter().any(|tab| tab.tab_id == pin.tab_id)
+                            })
                             .map(move |pin| {
                                 (
                                     pin.role.is_none(),
