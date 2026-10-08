@@ -131,7 +131,7 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
   // The settle is over once every pane box that moved has stopped.
   const moving = useRef(new Set<string>());
   const onMotion = useCallback((id: string, on: boolean) => {
-    if (on) moving.current.add(id);
+    if (on) { if (moving.current.size === 0) paneDrag.settleMoving(); moving.current.add(id); }
     else if (moving.current.delete(id) && moving.current.size === 0) paneDrag.settleEnded();
   }, [paneDrag]);
   useEffect(() => { if (!online) paneDrag.cancel(); }, [online, paneDrag]);
@@ -147,10 +147,33 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
   const contextStop = useRef<(() => void) | null>(null);
   useEffect(() => () => contextStop.current?.(), []);
   useEffect(() => { if (paneState?.phase === "idle") paneStop.current?.(); }, [paneState?.phase]);
+  const paneAt = (at: { x: number; y: number }): { pane: string; cap: boolean } | null => {
+    const shown = paneDrag.shownLayout(latestLayout);
+    if (!shown) return null;
+    const capHeight = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--shell-space-pane-cap-height")) || 0;
+    for (const p of shown.panes) {
+      if (shown.zoomed && p.pane_id !== shown.focused_pane_id) continue;
+      const r = shown.zoomed ? { x: 0, y: 0, ...size } : scaleRect(p.rect, shown.area, size.width, size.height);
+      if (at.x >= r.x && at.x < r.x + r.width && at.y >= r.y && at.y < r.y + r.height) return { pane: p.pane_id, cap: at.y < r.y + capHeight };
+    }
+    return null;
+  };
   const capPress = (event: ReactPointerEvent<HTMLDivElement>, id: string, label: string) => {
     if (event.button !== 0 || !layout || resizer.busy || !host.current) return;
     const bounds = host.current.getBoundingClientRect();
     const point = (e: { clientX: number; clientY: number }) => ({ x: e.clientX - bounds.left, y: e.clientY - bounds.top });
+    // A press that just ended a pending drop is aimed at the panes the flushed layout draws there, as on the Mac.
+    if (flushedBy.current === event.nativeEvent) {
+      const hit = paneAt(point(event));
+      if (!hit) return;
+      if (hit.pane !== id) {
+        // The compat mousedown would focus the pane drawn there before the flush.
+        event.preventDefault(); onFocus(hit.pane);
+        if (!hit.cap) return;
+        const pane = tabPanes.find(p => p.pane_id === hit.pane);
+        id = hit.pane; label = pane?.title ?? pane?.agent ?? "shell";
+      }
+    }
     if (!paneDrag.press({ pane: id, label, point: point(event), layout, size, supported })) return;
     const el = event.currentTarget;
     try { el.setPointerCapture(event.pointerId); } catch { /* Synthetic control events have no capture. */ }
@@ -222,6 +245,8 @@ export function PaneClip({ id, box, lifted, animateLayout, onMotion, children }:
     if (from.width !== next.width) running.current.add("width");
     if (from.height !== next.height) running.current.add("height");
     heading.current = next; setAnimate(true); setFrame(next);
+    // Timed from when the transition really starts, so slow frames never cut a settle short.
+    clearTimeout(timer.current); timer.current = setTimeout(ended, motion.settleMs + 50);
   };
   useEffect(() => () => { stop(); if (moving.current) motionChanged.current?.(id, false); }, []);
   useLayoutEffect(() => {
@@ -235,14 +260,12 @@ export function PaneClip({ id, box, lifted, animateLayout, onMotion, children }:
       timer.current = setTimeout(ended, motion.reducedFadeMs);
       return;
     }
-    clearTimeout(timer.current);
     if (!moving.current) {
       // Start: hold the drawn frame, then move to the newest target two frames in, once the transition is on.
       begin(); heading.current = old; setFrame(old); setAnimate(false); setSettling(true);
       frames.current = [requestAnimationFrame(() => { frames.current = [requestAnimationFrame(() => { frames.current = []; headFor(previous.current); })]; })];
     } else if (frames.current.length === 0) headFor(box);
     // A change before the move began needs nothing: the move reads the newest target when it starts.
-    timer.current = setTimeout(ended, motion.settleMs + 50);
   }, [box.x, box.y, box.width, box.height]);
   const transitionEnded = (event: React.TransitionEvent<HTMLDivElement>) => {
     if (event.target !== event.currentTarget || !running.current.delete(event.propertyName)) return;

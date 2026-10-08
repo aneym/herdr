@@ -233,12 +233,16 @@ export class PaneDrag {
     return this.frozenPanes.map(p => { const now = live.get(p.pane_id); return now ? { ...now, tab_id: p.tab_id } : p; });
   }
   /** A settle (re)started: snapshots retarget it until its transition ends, or at the latest its full duration on. */
+  /** The timer is only a backstop for a settle no pane box moves in: once one moves, its transition ends it. */
   private armSettle() {
     this.settling = true; clearTimeout(this.settleTimer);
-    this.settleTimer = setTimeout(() => { this.settling = false; }, motion.settleMs + 50);
+    if (!this.boxesMoving) this.settleTimer = setTimeout(() => { this.settling = false; }, motion.settleMs + 50);
   }
+  private boxesMoving = false;
+  /** A pane box began its settle; its transition, timed from when it really starts, now decides the end. */
+  settleMoving(): void { this.boxesMoving = true; clearTimeout(this.settleTimer); }
   /** Every pane box that moved in the settle has finished moving: the settle is over. */
-  settleEnded(): void { this.settling = false; clearTimeout(this.settleTimer); }
+  settleEnded(): void { this.boxesMoving = false; this.settling = false; clearTimeout(this.settleTimer); }
   /** Only an accepted drop settles, once, and a snapshot during that settle retargets it. As on the Mac, nothing
    * animates across a different pane set, a host size change (a live window resize) or a divider drag. */
   shouldAnimateLayout(layout: Layout | undefined, size?: { width: number; height: number }, busy = false): boolean {

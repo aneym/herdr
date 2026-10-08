@@ -387,3 +387,48 @@ it("ends a settle when every moving property has ended, not when the first one d
   expect(settles()).toEqual([]);
   expect(drawn("a")).toEqual(["translate(600px, 0px)", "400px", "399px"]);
 });
+
+it("lands a press that ends a pending drop on the cap the flushed layout draws there, as the Mac does", async () => {
+  // The cap band's height, which the shell's tokens.css sets on the page.
+  document.documentElement.style.setProperty("--shell-space-pane-cap-height", "36px");
+  const render = await mount();
+  await dropAOn(B_CENTRE);
+  const first = drop;
+  // The server swapped a and b; the snapshot is buffered while the reply is outstanding.
+  render(SWAPPED);
+  await settleTimers(40);
+  expect(drawn("a")).toEqual(FROZEN_A);
+  // A press on a's cap as drawn at the release. After the flush b's cap is there, so the drag is b's.
+  fire(host.querySelector('[data-cap="a"]')!, "pointerdown", { button: 0, buttons: 1, clientX: 200, clientY: 10 });
+  expect(last()).toMatchObject({ phase: "pressed", source: "b" });
+  fire(window, "pointermove", { button: -1, buttons: 1, clientX: 500, clientY: 500 });
+  fire(window, "pointermove", { button: -1, buttons: 1, clientX: 750, clientY: 600 });
+  await settleTimers(0);
+  fire(window, "pointerup", { button: 0, buttons: 0, clientX: 750, clientY: 600 });
+  expect(api).toHaveBeenLastCalledWith("studio", "pane.swap", { source_pane_id: "b", target_pane_id: "c" });
+  const emitted = states.length;
+  await act(async () => { first.resolve({ swap: { changed: true, source_pane_id: "a", focused_pane_id: "a", layout: SWAPPED } }); });
+  expect(states.length).toBe(emitted);
+  document.documentElement.style.removeProperty("--shell-space-pane-cap-height");
+});
+
+it("times a settle from when its transition really starts, so slow frames never cut it short", async () => {
+  // 30 Hz: the move starts two frames, about 67 ms, after the reply.
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => setTimeout(() => callback(0), 33));
+  const render = await mount();
+  await dropAOn(B_CENTRE);
+  await act(async () => { drop.resolve({ swap: { changed: true, source_pane_id: "a", focused_pane_id: "a", layout: SWAPPED } }); });
+  film = []; shoot();
+  await roll(256);
+  // 256 ms after the reply: the transition began near 66 ms and runs to about 316 ms, so it is still on.
+  expect(clip("a").style.transition).toContain("transform");
+  // A snapshot now retargets the running settle rather than snapping.
+  render(tab(r(60, 0, 40, 20), r(0, 0, 60, 40), r(60, 20, 40, 20))); shoot();
+  await roll(400);
+  expect(film).toEqual([
+    ["translate(0px, 0px)", "499px", "800px", "false"],
+    ["translate(500px, 0px)", "500px", "399px", "true"],
+    ["translate(600px, 0px)", "400px", "399px", "true"],
+    ["translate(600px, 0px)", "400px", "399px", "false"],
+  ]);
+});
