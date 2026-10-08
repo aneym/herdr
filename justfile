@@ -258,9 +258,11 @@ shell-copy-check:
     python3 macos/HerdrShell/scripts/check_copy.py
 
 # Mac and Windows Shell tokens both come from shell/tokens.json; fails when either client drifts.
+# Also scans the Mac Shell for OS-notification APIs (none on any platform, Alex 2026-10-08).
 shell-tokens-check:
     python3 shell/test_gen_tokens.py
     python3 shell/gen_tokens.py --check
+    python3 macos/HerdrShell/scripts/check_no_notifications.py
 
 shell-build:
     bash macos/HerdrShell/scripts/vendor-ghostty.sh

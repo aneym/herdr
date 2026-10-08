@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""P29 check: command-click opens a link; a background tab that blocks or finishes notifies once.
+"""P29 check: command-click opens a link; agent transitions raise in-app attention only, never an OS notification.
 
-  python3 scripts/check_p29.py [--out checks/P29.txt]
+  HERDR_SHELL_SPACE=1 python3 scripts/check_p29.py [--out checks/P29.txt]
 
 Lab `shellspike-p29`. Agent status is reported on plain shells (same as check_p26). The
-app is --agent-run, so it records opened_urls / notifications / dock_badge and does not
-open a browser or post a banner. A click marks the offscreen window as the one Alex is
-looking at; the selected tab then blocks with no notification, a parked tab never does,
-and two flips of a background tab inside a second stay one notification.
+app records opened_urls and does not open a browser. Herdr Shell posts no OS
+notifications, dock badges or sounds on any platform (Alex 2026-10-08), so the TestHook
+state must carry no `notifications` or `dock_badge` (absent, empty or nil) through every
+transition: the selected tab blocking, a parked tab blocking, a background tab blocking
+and flipping, and a background tab finishing. Attention stays in the app: a background
+tab going blocked shows the blocked dot and leads attention_order / attention_latest, a
+parked tab never joins attention_order, and a finished background tab joins it.
 """
 import json
 import os
@@ -70,11 +73,15 @@ def wait_state(pred, timeout=25):
     return last
 
 
-def notes(s, tab=None):
-    rows = s.get("notifications") or []
-    if tab is None:
-        return rows
-    return [n for n in rows if n.get("tab") == tab]
+def os_alerts(s):
+    """OS-level alert state in the TestHook dump; empty when the app posts none."""
+    if s is None:
+        return {"state": None}
+    return {k: s.get(k) for k in ("notifications", "dock_badge") if s.get(k)}
+
+
+def order(s):
+    return (s or {}).get("attention_order") or []
 
 
 def status_of(s, tab):
@@ -165,45 +172,42 @@ def main():
     # Marks the offscreen window as key for the attention rule (agent-run never activates).
     S.cmd({"cmd": "mouse", "pane": look_pane, "action": "down", "col": 1, "row": 1})
     S.cmd({"cmd": "mouse", "pane": look_pane, "action": "up", "col": 1, "row": 1})
-    before = len(notes(S.state()))
+    check("no os alerts at baseline", not os_alerts(S.state()), f"{os_alerts(S.state())}")
 
     herdr("pane", "report-agent", look_pane, "--source", "spike", "--agent", "claude", "--state", "blocked")
     time.sleep(1.5)
     s = S.state()
-    check("selected key tab going blocked does not notify",
-          not notes(s, look), f"{notes(s, look)}")
+    check("selected key tab going blocked posts no os notification", not os_alerts(s), f"{os_alerts(s)}")
     herdr("pane", "report-agent", look_pane, "--source", "spike", "--agent", "claude", "--state", "working")
 
     herdr("pane", "report-agent", parked_pane, "--source", "spike", "--agent", "claude", "--state", "blocked")
     time.sleep(1.5)
     s = S.state()
-    check("parked tab going blocked does not notify", not notes(s, parked), f"{notes(s, parked)}")
+    check("parked tab going blocked posts no os notification", not os_alerts(s), f"{os_alerts(s)}")
+    check("parked tab stays out of attention_order", parked not in order(s), f"{order(s)}")
 
     herdr("pane", "report-agent", bg_pane, "--source", "spike", "--agent", "claude", "--state", "blocked")
-    s = wait_state(lambda s: len(notes(s, bg)) == 1, 20)
-    bg_notes = notes(s, bg) if s else []
-    check("background tab going blocked notifies once",
-          len(bg_notes) == 1 and bg_notes[0].get("kind") == "blocked" and bg_notes[0].get("title") == "background",
-          f"{bg_notes}")
-    check("that notification is the only new one",
-          s is not None and len(notes(s)) == before + 1, f"{notes(s) if s else None}")
+    s = wait_state(lambda s: status_of(s, bg) == "blocked" and bg in order(s), 20)
+    check("background tab going blocked shows the blocked dot",
+          s is not None and status_of(s, bg) == "blocked", f"{status_of(s, bg) if s else None}")
+    check("background blocked tab leads attention",
+          s is not None and order(s)[:1] == [bg] and s.get("attention_latest") == bg,
+          f"order={order(s)} latest={(s or {}).get('attention_latest')}")
+    check("background tab going blocked posts no os notification", not os_alerts(s), f"{os_alerts(s)}")
 
     herdr("pane", "report-agent", bg_pane, "--source", "spike", "--agent", "claude", "--state", "working")
     time.sleep(0.3)
     herdr("pane", "report-agent", bg_pane, "--source", "spike", "--agent", "claude", "--state", "blocked")
     time.sleep(2.0)
     s = S.state()
-    check("two flips in 1s coalesce to one notification", len(notes(s, bg)) == 1, f"{notes(s, bg)}")
+    check("two flips in 1s post no os notification", not os_alerts(s), f"{os_alerts(s)}")
 
     # herdr has no reported "done": an idle agent in a tab nobody has looked at reads as done.
     herdr("pane", "report-agent", fin_pane, "--source", "spike", "--agent", "claude", "--state", "idle")
-    s = wait_state(lambda s: s.get("dock_badge") == "2" and any(n.get("tab") == fin and n.get("kind") == "done" for n in notes(s)), 20)
-    fin_notes = notes(s, fin) if s else []
-    check("working to done on a background tab notifies finished",
-          len(fin_notes) == 1 and fin_notes[0].get("kind") == "done" and fin_notes[0].get("title") == "finisher",
-          f"{fin_notes}")
-    check("dock badge counts blocked and done, not the parked tab",
-          s is not None and s.get("dock_badge") == "2", f"{s.get('dock_badge') if s else None}")
+    s = wait_state(lambda s: fin in order(s), 20)
+    check("working to done on a background tab joins attention_order",
+          s is not None and fin in order(s) and parked not in order(s), f"{order(s)}")
+    check("working to done posts no os notification and no dock badge", not os_alerts(s), f"{os_alerts(s)}")
 
     S.cmd({"cmd": "select", "tab": look})
     time.sleep(0.4)
