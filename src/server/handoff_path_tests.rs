@@ -11,7 +11,9 @@ struct Replacement(u32);
 impl Drop for Replacement {
     fn drop(&mut self) {
         // This PID is the import child of this test's isolated server.
-        unsafe { libc::kill(self.0 as libc::pid_t, libc::SIGTERM); }
+        unsafe {
+            libc::kill(self.0 as libc::pid_t, libc::SIGTERM);
+        }
     }
 }
 
@@ -29,9 +31,14 @@ fn request(socket: &Path, params: serde_json::Value) {
     });
     writeln!(stream, "{request}").expect("send handoff request");
     let mut response = String::new();
-    BufReader::new(stream).read_line(&mut response).expect("read handoff response");
+    BufReader::new(stream)
+        .read_line(&mut response)
+        .expect("read handoff response");
     let response: serde_json::Value = serde_json::from_str(&response).expect("parse response");
-    assert!(response.get("result").is_some(), "handoff failed: {response}");
+    assert!(
+        response.get("result").is_some(),
+        "handoff failed: {response}"
+    );
 }
 
 // Real server/CLI integration: inspect the replacement process, not a launch mock.
@@ -44,43 +51,75 @@ fn check_handoff_path(cli: bool, expected_path: &str) {
     std::fs::create_dir_all(&runtime).expect("runtime directory");
     std::fs::write(config.join("herdr-dev/config.toml"), "onboarding = false\n")
         .expect("test config");
-    let exe = std::env::current_exe().expect("test executable")
-        .parent().expect("deps directory").parent().expect("target directory").join("herdr");
+    let exe = std::env::current_exe()
+        .expect("test executable")
+        .parent()
+        .expect("deps directory")
+        .parent()
+        .expect("target directory")
+        .join("herdr");
     let configure = |command: &mut Command| {
-        command.env("XDG_CONFIG_HOME", &config)
+        command
+            .env("XDG_CONFIG_HOME", &config)
             .env("XDG_RUNTIME_DIR", &runtime)
             .env("HERDR_SOCKET_PATH", &socket)
-            .env("HERDR_CLIENT_SOCKET_PATH", base.as_path().join("client.sock"))
+            .env(
+                "HERDR_CLIENT_SOCKET_PATH",
+                base.as_path().join("client.sock"),
+            )
             .env_remove("HERDR_SESSION")
             .env_remove("HERDR_ENV")
             .env("SHELL", "/bin/sh");
     };
     let mut command = Command::new(&exe);
     configure(&mut command);
-    let old = Server(command.arg("server").env("PATH", "/usr/bin:/bin")
-        .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null()).spawn().expect("spawn old server"));
+    let old = Server(
+        command
+            .arg("server")
+            .env("PATH", "/usr/bin:/bin")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn old server"),
+    );
     let deadline = Instant::now() + Duration::from_secs(10);
     while !socket.exists() {
         assert!(Instant::now() < deadline, "old server socket not found");
         std::thread::sleep(Duration::from_millis(25));
     }
-    assert_eq!(crate::platform::process_env_var(old.0.id(), "PATH").as_deref(), Some("/usr/bin:/bin"));
+    assert_eq!(
+        crate::platform::process_env_var(old.0.id(), "PATH").as_deref(),
+        Some("/usr/bin:/bin")
+    );
     if cli {
         let mut command = Command::new(&exe);
         configure(&mut command);
-        let output = command.args(["server", "live-handoff"]).env("PATH", "/x:/usr/bin")
-            .output().expect("request CLI handoff");
-        assert!(output.status.success(), "CLI handoff failed: {}", String::from_utf8_lossy(&output.stderr));
+        let output = command
+            .args(["server", "live-handoff"])
+            .env("PATH", "/x:/usr/bin")
+            .output()
+            .expect("request CLI handoff");
+        assert!(
+            output.status.success(),
+            "CLI handoff failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     } else {
         request(&socket, serde_json::json!({}));
     }
     let pattern = format!("herdr-handoff-{}.sock", old.0.id());
     let deadline = Instant::now() + Duration::from_secs(10);
     let replacement = loop {
-        let output = Command::new("pgrep").args(["-f", &pattern]).output().expect("find import server");
-        if let Some(pid) = String::from_utf8_lossy(&output.stdout).lines()
-            .filter_map(|line| line.parse::<u32>().ok()).find(|pid| *pid != old.0.id()) {
+        let output = Command::new("pgrep")
+            .args(["-f", &pattern])
+            .output()
+            .expect("find import server");
+        if let Some(pid) = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| line.parse::<u32>().ok())
+            .find(|pid| *pid != old.0.id())
+        {
             break pid;
         }
         assert!(Instant::now() < deadline, "replacement server not found");

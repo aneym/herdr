@@ -4512,6 +4512,13 @@
                 "string",
                 "null"
               ]
+            },
+            "path": {
+              "description": "Requester PATH for the replacement server; absent requests retain the server PATH.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "type": "object"
