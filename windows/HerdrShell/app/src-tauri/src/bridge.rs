@@ -467,6 +467,7 @@ fn validate_action(verb: &str, args: &[String]) -> Result<(), String> {
     }
     let target = args.first().ok_or("missing target")?;
     if target.is_empty()
+        || target.starts_with('-')
         || !target
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b))
@@ -526,6 +527,8 @@ mod action_tests {
             ),
             ("exec", vec!["w1:t1"], false),
             ("park", vec!["../bad"], false),
+            ("park", vec!["--help"], false),
+            ("unpark", vec!["-tab"], false),
             ("park", vec!["w1:t1", "--by=other"], false),
             ("unpark", vec!["w1:t1", "--note=x"], false),
             (

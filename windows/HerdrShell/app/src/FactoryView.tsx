@@ -43,7 +43,7 @@ export function FactoryView({ snapshot: s, machine }: { snapshot: FactorySnapsho
   return <main className="factory-view" aria-label="Factory">
     <header><h1>Factory</h1><span>{s.updated}</span></header>
     <section><h2>Machines</h2>{!s.machines.length && <p>no machines</p>}{s.machines.map(r => {
-      const attention = r.attention === "warn" ? "var(--shell-warn)" : r.attention === "act" ? "var(--shell-bad)" : "var(--shell-text)";
+      const attention = r.attention === "warn" ? "var(--shell-warn)" : r.attention === "act" ? "var(--shell-attention-act)" : "var(--shell-text)";
       const usage = r.usageState === "overloaded" ? "var(--shell-bad)" : r.usageState === "idle" ? "var(--shell-muted)" : "var(--shell-ok)";
       const glyph = r.usageState === "overloaded" ? "blocked" : r.usageState === "idle" ? "idle" : "working";
       const state = r.state.startsWith("drained") || r.state.startsWith("down") || r.state === "held" ? "var(--shell-warn)" : "var(--shell-ok)";

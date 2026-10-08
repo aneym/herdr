@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { neighbor } from "./actions";
-import type { Layout } from "./model";
+import { latestAttentionTab, neighbor, runAction, type ActionContext } from "./actions";
+import type { Layout, Snapshot } from "./model";
 const pane = (pane_id: string, x: number, y: number, width = 10, height = 10) => ({ pane_id, rect: { x, y, width, height } });
 const layout = (panes: Layout["panes"]): Layout => ({ tab_id: "t", area: { x: 0, y: 0, width: 100, height: 100 }, panes });
 // Pure geometric ranking needs adversarial gaps, overlap, ties and zoom cases.
@@ -22,5 +22,31 @@ describe("directional layout navigation", () => {
   it("allows subpixel edge tolerance but rejects overlapping and non-overlapping candidates", () => {
     expect(neighbor(layout([pane("s", 0, 0), pane("near", 9.6, 0), pane("overlap", 9, 0), pane("diagonal", 10, 10)]), "s", "right")).toBe("near");
     expect(neighbor(layout([pane("s", 0, 0), pane("overlap", 9, 0), pane("diagonal", 10, 10)]), "s", "right")).toBeNull();
+  });
+});
+
+// Pure trail ranking has deleted ids, hidden agents and exhausted-trail edge cases;
+// dispatch also exercises the real fallback action rather than a duplicate algorithm.
+describe("attention trail navigation", () => {
+  it("skips deleted tabs, then falls back to next attention when no trail tab survives", async () => {
+    const snapshot: Snapshot = { tabs: [
+      { tab_id: "hidden", workspace_id: "w", number: 1, role: "agent", hidden: true },
+      { tab_id: "live", workspace_id: "w", number: 2 },
+      { tab_id: "blocked", workspace_id: "w", number: 3 },
+    ] };
+    expect(latestAttentionTab(["deleted", "hidden", "live"], snapshot)).toBe("live");
+    expect(latestAttentionTab(["deleted", "hidden"], snapshot)).toBeUndefined();
+    const selected: string[] = [];
+    const ctx: ActionContext = {
+      machine: "test", snapshot, selected: null, focused: null,
+      rows: [{ kind: "tab", id: "blocked", label: "Blocked", status: "blocked", hotkey: null, section: "w" }],
+      attentionTrail: ["deleted", "hidden", "live"],
+      select: id => { selected.push(id); }, api: async () => ({}),
+      focus: () => {}, created: () => {}, rename: () => {}, switcher: () => {}, toggleSidebar: () => {},
+      error: error => { throw error; },
+    };
+    await runAction("attention_jump", ctx);
+    await runAction("attention_jump", { ...ctx, attentionTrail: ["deleted", "hidden"] });
+    expect(selected).toEqual(["live", "blocked"]);
   });
 });

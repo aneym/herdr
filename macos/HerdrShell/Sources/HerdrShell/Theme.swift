@@ -44,6 +44,7 @@ struct ChromePalette: Equatable {
     var faint: UInt32
     var accent: UInt32
     var bad: UInt32
+    var attentionAct: UInt32
 
     static let textTokenNames = ["ink", "mute", "orch", "lane", "wf", "ok", "warn"]
     static let surfaceTokenNames = ["panel", "sel"]
@@ -89,6 +90,7 @@ struct ChromePalette: Equatable {
         case "faint": return faint
         case "accent": return accent
         case "bad": return bad
+        case "attentionAct": return attentionAct
         default: return nil
         }
     }
@@ -139,6 +141,7 @@ struct Tokens {
     var field: Color { Color(hex: chrome.field) }
     var faint: Color { Color(hex: chrome.faint) }
     var accent: Color { Color(hex: chrome.accent) }
+    var attentionAct: Color { Color(hex: chrome.attentionAct) }
     var bad: Color { Color(hex: chrome.bad) }
     /// Ink at a few percent: toggle tracks and small tags.
     var tint: Color { ink.opacity(mode == .dark ? 0.055 : 0.045) }

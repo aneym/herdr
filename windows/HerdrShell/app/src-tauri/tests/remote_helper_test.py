@@ -54,6 +54,15 @@ class RemoteHelperTest(unittest.TestCase):
         self.assertEqual(response["id"], self.next_id)
         return response
 
+    def test_action_rejects_option_targets(self):
+        # Real helper pipes must reject option-shaped ids before starting a command.
+        for verb in ("park", "unpark"):
+            for target in ("--help", "-tab"):
+                with self.subTest(verb=verb, target=target):
+                    reply = self.request("action", verb=verb, args=[target], by="herdr-shell@test")
+                    self.assertFalse(reply["ok"])
+                    self.assertEqual(reply["error"], "invalid target")
+
     def test_reads_metadata_and_range_contract(self):
         self.assertEqual(self.request("home")["home"], str(self.home))
         content = bytes(range(256)) * 9000

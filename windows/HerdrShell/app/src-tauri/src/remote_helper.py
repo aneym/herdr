@@ -198,7 +198,7 @@ def request(req):
             raise ValueError("invalid action")
         if not all(isinstance(a, str) and chr(0) not in a for a in args):
             raise ValueError("invalid arguments")
-        if not re.fullmatch(r"[A-Za-z0-9._:-]+", args[0]):
+        if not re.fullmatch(r"[A-Za-z0-9._:][A-Za-z0-9._:-]*", args[0]):
             raise ValueError("invalid target")
         if verb == "approve":
             if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,80}", args[0]) or len(args) != 3 or not args[1].startswith("--quote=") or not args[1][8:].strip() or args[2] != "--by=alex":

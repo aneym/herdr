@@ -44,6 +44,10 @@ jobs:
         with:
           workspaces: windows/HerdrShell -> target
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - name: npm ci
         working-directory: windows/HerdrShell/app
         run: npm ci

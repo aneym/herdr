@@ -273,7 +273,7 @@ struct FactoryView: View {
         }
     }
 
-    private var act: Color { t.mode == .dark ? Color(hex: 0xFF6B6B) : Color(hex: 0xB42318) }
+    private var act: Color { t.attentionAct }
 }
 
 struct ThinBar: View {

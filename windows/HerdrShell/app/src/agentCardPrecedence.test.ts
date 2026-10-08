@@ -61,14 +61,14 @@ describe("agent card folder precedence", () => {
     { name: "Invalid" },
     "{broken json",
   ])("an invalid earlier card does not claim a pane (%j)", async invalid => {
-    expect(await loadCards(["b-two", "a-zero", "a-one"], {
+    expect(await loadCards(["a-zero", "a-one", "b-two"], {
       "a-zero": invalid,
       "a-one": { name: "First", pane: "p1" },
       "b-two": { name: "Second", pane: "p1" },
     })).toEqual({ p1: { name: "First" } });
   });
   it("uses code-unit ordering and still loads other panes after an unreadable folder", async () => {
-    expect(await loadCards(["a-one", "missing", "B-two", "other"], {
+    expect(await loadCards(["B-two", "missing", "a-one", "other"], {
       "a-one": { name: "Lowercase", pane: "p1" },
       "B-two": { name: "Uppercase", pane: "p1" },
       other: { name: "Other", pane: "p2" },

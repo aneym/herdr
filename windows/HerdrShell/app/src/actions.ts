@@ -20,7 +20,7 @@ export function trackAttention(previous: Snapshot | undefined, next: Snapshot, t
   return result.slice(0, 20);
 }
 export function latestAttentionTab(trail: readonly string[], snapshot: Snapshot): string | undefined {
-  return trail.find(id => { const tab = snapshot.tabs?.find(t => t.tab_id === id); return !(tab?.role === "agent" && tab.hidden); });
+  return trail.find(id => { const tab = snapshot.tabs?.find(t => t.tab_id === id); return tab !== undefined && !(tab.role === "agent" && tab.hidden); });
 }
 export type Direction = "left" | "right" | "up" | "down";
 // Match Mac Shell: nearest facing edge, then largest perpendicular overlap.

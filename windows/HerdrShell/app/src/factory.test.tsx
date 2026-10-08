@@ -48,7 +48,7 @@ it("renders wk, attention and usage tokens, and picks only when expanded", async
  await act(async () => root.render(<FactoryPage machine="studio" online />));
  expect(host.querySelector('meter[aria-label="sol wk"]')).not.toBeNull();
  const row = (name: string) => host.querySelector(`[data-machine="${name}"]`)!;
- for (const [name, token] of [["studio", "bad"], ["pc", "warn"]]) {
+ for (const [name, token] of [["studio", "attention-act"], ["pc", "warn"]]) {
   expect(row(name).querySelector<HTMLElement>(".factory-machine-name")?.style.color).toBe(`var(--shell-${token})`);
   expect(row(name).querySelector<HTMLElement>(".factory-machine-summary")?.style.color).toBe(`var(--shell-${token})`);
  }

@@ -20,6 +20,7 @@
   --shell-faint: #6C7086;
   --shell-accent: #89B4FA;
   --shell-bad: #F38BA8;
+  --shell-attention-act: #FF6B6B;
   --shell-scrim: #1E1E2EEE;
   --shell-scroll-thumb: #E6E6EA38;
   --shell-scroll-thumb-hover: #E6E6EA66;
@@ -46,6 +47,7 @@
   --shell-faint: #63666B;
   --shell-accent: #0963CE;
   --shell-bad: #C7212C;
+  --shell-attention-act: #B42318;
   --shell-scrim: #FFFFFFEE;
   --shell-scroll-thumb: #1F232838;
   --shell-scroll-thumb-hover: #1F232866;
