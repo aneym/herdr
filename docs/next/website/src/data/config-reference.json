@@ -13,6 +13,18 @@
       ]
     },
     {
+      "id": "agent_restart",
+      "title": "Agent restart",
+      "keys": [
+        {
+          "key": "agent_restart.launchers",
+          "type": "table of strings",
+          "default": "{}",
+          "description": "Map agent kinds to launcher executables for in-place restarts. Used when no recorded launcher is available; unspecified kinds restart directly with the agent executable. Bare launcher names resolve through the pane agent's PATH."
+        }
+      ]
+    },
+    {
       "id": "server",
       "title": "Server",
       "keys": [
