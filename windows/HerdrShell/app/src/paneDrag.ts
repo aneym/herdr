@@ -59,7 +59,10 @@ export class PaneDrag {
   move(point: { x: number; y: number }, row: RowTarget | null = null): void {
     if (!["pressed", "dragging"].includes(this.value.phase) || this.value.keyboard) return;
     if (this.value.phase === "pressed" && Math.hypot(point.x - this.input!.point.x, point.y - this.input!.point.y) < motion.dragThresholdPx) { this.emit({ pointer: point }); return; }
-    this.row = row; this.emit({ phase: "dragging", pointer: point }); this.setZone(this.at(point));
+    const lifting = this.value.phase === "pressed";
+    this.row = row; this.emit({ phase: "dragging", pointer: point });
+    // The threshold event lifts the cap; target selection starts on the next move.
+    if (!lifting) this.setZone(this.at(point));
   }
   private at(point: { x: number; y: number }): PaneZone | null {
     if (this.row) return this.row.kind === "tab" ? this.row.tab_id === this.input!.layout.tab_id ? null : { kind: "into_tab", tab_id: this.row.tab_id } : { kind: "new_tab_in", workspace_id: this.row.workspace_id };
