@@ -68,8 +68,10 @@ jobs:
           Copy-Item "$rel/HerdrShell.exe" dist-shell/HerdrShell.exe
           $nsis = Get-ChildItem "$rel/bundle/nsis" -Filter *.exe | Select-Object -First 1
           Copy-Item $nsis.FullName "dist-shell/HerdrShell-setup-$sha.exe"
-          Set-Content -NoNewline dist-shell/build-sha.txt $sha
+          [IO.File]::WriteAllText((Join-Path (Get-Location) 'dist-shell/build-sha.txt'), $sha)
           Get-FileHash dist-shell/*.exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  $(Split-Path -Leaf $_.Path)" } | Set-Content dist-shell/SHA256SUMS
+          Get-ChildItem dist-shell | Format-Table Name, Length -AutoSize | Out-String | Write-Output
+          if (!(Test-Path dist-shell/build-sha.txt)) { throw 'build-sha.txt was not written' }
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
