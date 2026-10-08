@@ -13,14 +13,15 @@ export function useAgentCards(machine: string, up: boolean): Record<string, Agen
       if (disposed || busy || document.hidden) return;
       busy = true;
       try {
-        const names = await bridge.fileList(machine, AGENTS_DIR);
+        const names = (await bridge.fileList(machine, AGENTS_DIR)).sort();
         if (disposed) return;
         // A folder without a card, or an unreadable one, names no row; the rest still load.
         const texts = await Promise.all(names.map(name => bridge.fileRead(machine, `${AGENTS_DIR}/${name}/agent.json`, 0, 65536)
           .then(chunk => new TextDecoder().decode(fromBase64(chunk.data_b64)), () => "")));
         const next: Record<string, AgentCard> = {};
-        // Two cards naming one pane: the later folder wins, as the Mac's AgentCards.load.
-        for (const parsed of texts.map(parseCard)) if (parsed) next[parsed.pane] = parsed.card;
+        // Sorted folder order owns precedence: the first valid card for a pane wins, as on Mac.
+        for (const parsed of texts.map(parseCard))
+          if (parsed && !Object.prototype.hasOwnProperty.call(next, parsed.pane)) next[parsed.pane] = parsed.card;
         const nextStamp = JSON.stringify(next);
         if (!disposed && nextStamp !== stamp) { stamp = nextStamp; setCards(next); }
       } catch { /* No agents folder or helper down: rows keep their tinted initials. */ }
