@@ -9,10 +9,15 @@ export type PaneZone = DropZone | { kind: "into_tab"; tab_id: string } | { kind:
 export interface PaneDragState {
   phase: "idle" | "pressed" | "dragging" | "dropped"; keyboard: boolean; source: string | null; label: string;
   pointer: { x: number; y: number } | null; sourceRect: Rect | null; zone: PaneZone | null; ghost: Rect | null; exact: boolean; pending: boolean;
+  /** How the last drag ended: `cancel` springs the chip back, `settle` and `quiet` fade it. */
+  end: "cancel" | "settle" | "quiet" | null;
 }
 export interface PaneDragPress { pane: string; label: string; point: { x: number; y: number }; layout: Layout; size: { width: number; height: number }; supported: boolean }
-const idle = (): PaneDragState => ({ phase: "idle", keyboard: false, source: null, label: "", pointer: null, sourceRect: null, zone: null, ghost: null, exact: false, pending: false });
+const idle = (): PaneDragState => ({ phase: "idle", keyboard: false, source: null, label: "", pointer: null, sourceRect: null, zone: null, ghost: null, exact: false, pending: false, end: null });
 type Placement = { changed: boolean; placed_rect?: Rect };
+// The drop's reply: pane.place, pane.swap or pane.move, each with the server's layouts after the change.
+type DropReply = { place?: DropResult; swap?: DropResult; move_result?: DropResult; changed?: boolean } | null | undefined;
+type DropResult = { changed: boolean; layout?: Layout; target_layout?: Layout; source_layout?: Layout | null };
 const zoneKey = (zone: PaneZone | null) => JSON.stringify(zone);
 export function canDragPane(layout: Layout | undefined, supported: boolean): boolean { return supported && !!layout && !layout.zoomed && layout.panes.length >= 2; }
 export async function probePlace(machine: string, paneId: string): Promise<boolean | null> {
@@ -36,10 +41,10 @@ export class PaneDrag {
   private row: RowTarget | null = null;
   private target: string | null = null;
   private timer?: ReturnType<typeof setTimeout>;
-  // The pending drop's zone and, once the dry run answered, where it puts the source: they recognise the drop's own
-  // layout, so another change on the tab meanwhile applies at once.
-  private dropZone: PaneZone | null = null;
-  private placed?: Rect;
+  // The newest snapshot layout, and the layouts a drop's reply returned with the snapshot layout they replace. The view
+  // shows the reply until the next snapshot arrives, which then wins as it is, without motion.
+  private latest?: Layout;
+  private settled?: { base: Layout | undefined; layouts: Layout[] };
   constructor(private machine: string, private options: { onChange?: (state: PaneDragState) => void; onError?: (error: unknown) => void } = {}) {}
   get state(): PaneDragState { return this.value; }
   private emit(patch: Partial<PaneDragState>) {
@@ -123,42 +128,43 @@ export class PaneDrag {
     if (zone.kind === "centre") { method = "pane.swap"; params = { source_pane_id: source, target_pane_id: zone.target }; }
     else if (zone.kind === "new_tab_in") { method = "pane.move"; params = { pane_id: source, destination: { type: "new_tab", workspace_id: zone.workspace_id }, focus: true }; }
     else { method = "pane.place"; params = { ...(zone.kind === "into_tab" ? { pane_id: source, target: { type: "tab", tab_id: zone.tab_id }, side: "right" } : this.place(zone)), focus: true, dry_run: false }; }
-    this.dropZone = zone; this.placed = zone.kind === "pane_edge" || zone.kind === "tab_edge" ? this.cache.get(zoneKey(zone))?.placed_rect : undefined;
     const generation = ++this.generation;
     this.emit({ phase: "dropped", pending: false, keyboard: false });
-    this.timer = setTimeout(() => { if (generation === this.generation) this.cancel(); }, 4000);
+    // No reply in time: the server may still have applied the drop, so end without a rollback.
+    this.timer = setTimeout(() => { if (generation === this.generation) this.finish("quiet"); }, 4000);
     void bridge.api(this.machine, method, params).then(result => {
       if (generation !== this.generation) return;
-      const answer = result as { place?: Placement; swap?: Placement; move_result?: Placement; changed?: boolean };
-      if (answer?.place?.changed === false || answer?.swap?.changed === false || answer?.move_result?.changed === false || answer?.changed === false) this.cancel();
-    }).catch(error => { if (generation === this.generation) { this.cancel(); this.options.onError?.(error); } });
+      const reply = result as DropReply, answer = reply?.place ?? reply?.swap ?? reply?.move_result;
+      if (answer?.changed === false || reply?.changed === false) { this.finish("cancel"); return; }
+      if (!answer) { this.finish("quiet"); return; }
+      const layouts = [answer.layout, answer.target_layout, answer.source_layout].filter((l): l is Layout => !!l);
+      this.settled = { base: this.latest, layouts };
+      this.finish("settle");
+    }).catch(error => {
+      if (generation !== this.generation) return;
+      // A server error (it carries a code) moved nothing; a lost connection leaves the outcome unknown.
+      this.finish((error as { code?: string })?.code ? "cancel" : "quiet");
+      this.options.onError?.(error);
+    });
     return "dropped";
   }
-  // Against the layout the drop was made on: a swap puts the source in the target's rect; a placement puts it where
-  // the dry run said, else anywhere new; a move into another tab takes it out of this one.
-  private isDropLayout(layout: Layout): boolean {
-    const zone = this.dropZone, source = this.value.source, base = this.input?.layout;
-    if (!zone || !base) return false;
-    const rectOf = (l: Layout, id: string | null) => l.panes.find(p => p.pane_id === id)?.rect;
-    const same = (a?: Rect, b?: Rect) => !!a && !!b && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
-    if (zone.kind === "centre") return same(rectOf(layout, source), rectOf(base, zone.target));
-    if (zone.kind === "into_tab" || zone.kind === "new_tab_in") return !rectOf(layout, source);
-    return this.placed ? same(rectOf(layout, source), this.placed) : !same(rectOf(layout, source), rectOf(base, source));
+  /** Esc, a right click, a release on no zone or the view going away. A drop already sent ends quietly. */
+  cancel(): void { this.finish(this.value.phase === "dragging" ? "cancel" : this.value.phase === "dropped" ? "quiet" : null); }
+  private finish(end: PaneDragState["end"]) { ++this.generation; clearTimeout(this.timer); this.cache.clear(); this.flight = false; this.raw = null; this.row = null; this.target = null; this.emit({ ...idle(), end }); }
+  /** What the tab shows: a drop reply's layout from the moment it lands until the next snapshot replaces `layout`. */
+  shownLayout(layout: Layout | undefined): Layout | undefined {
+    if (!layout || !this.settled || this.settled.base !== layout) return layout;
+    return this.settled.layouts.find(l => l.tab_id === layout.tab_id) ?? layout;
   }
-  cancel(): void { ++this.generation; clearTimeout(this.timer); this.dropZone = null; this.placed = undefined; this.cache.clear(); this.flight = false; this.raw = null; this.row = null; this.target = null; this.emit(idle()); }
-  // Only the server geometry that carries this client's drop earns a settle.
-  shouldAnimateLayout(layout: Layout | undefined): boolean {
-    return this.value.phase === "dropped" && !!layout && layout.tab_id === this.input?.layout.tab_id
-      && JSON.stringify(layout.panes) !== JSON.stringify(this.input.layout.panes) && this.isDropLayout(layout);
-  }
+  /** Only a drop reply's layout settles; snapshots, pending drop or not, apply at once. */
+  shouldAnimateLayout(layout: Layout | undefined): boolean { return !!layout && !!this.settled?.layouts.includes(layout); }
   layoutChanged(layout: Layout | undefined): void {
-    if (this.value.phase === "idle") return;
+    this.latest = layout;
+    // A pending drop ends only with its reply or the timeout; snapshots meanwhile apply as they come.
+    if (this.value.phase === "idle" || this.value.phase === "dropped") return;
     if (!layout || layout.tab_id !== this.input!.layout.tab_id || !layout.panes.some(p => p.pane_id === this.value.source)) { this.cancel(); return; }
     if (JSON.stringify(layout.panes) === JSON.stringify(this.input!.layout.panes) && JSON.stringify(layout.area) === JSON.stringify(this.input!.layout.area) && layout.zoomed === this.input!.layout.zoomed) return;
-    // A pending drop ends with its own layout; another change on the tab meanwhile becomes the base it settles from.
-    // The dry run's placed rect belonged to the old base, so from here any new rect for the source is the drop.
-    if (this.value.phase === "dropped" && !layout.zoomed && !this.isDropLayout(layout)) { this.input = { ...this.input!, layout }; this.placed = undefined; return; }
-    if (this.value.phase === "dropped" || layout.zoomed) { this.cancel(); return; }
+    if (layout.zoomed) { this.cancel(); return; }
     ++this.generation; this.flight = false; this.cache.clear(); this.input = { ...this.input!, layout }; this.rebuild();
     this.emit({ sourceRect: this.boxes.find(p => p.id === this.value.source)!.rect });
     if (this.value.phase === "dragging") this.setZone(this.value.keyboard ? this.raw : this.at(this.value.pointer!), true);

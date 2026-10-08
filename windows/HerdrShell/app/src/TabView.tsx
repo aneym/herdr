@@ -13,6 +13,8 @@ import { motion } from "./tokens";
 import { clipRect, blockCancelContextMenu } from "./paneClip";
 export default function TabView({ snapshot, selected, machine, focused, onFocus, shortcut, register, pin, onError, registerDrag, onDragChange, online = true }: { online?: boolean; registerDrag?: (drag: PaneDrag | null, lift?: () => boolean) => void; onDragChange?: (state: PaneDragState) => void; snapshot: Snapshot; selected: string | null; machine: string; focused: string | null; onFocus: (id: string) => void; shortcut: (event: KeyboardEvent) => boolean; register: (id: string, value: PaneController | null) => void; pin: (id: string, pinned: boolean) => void; onError?: (error: unknown) => void }) {
   const host = useRef<HTMLDivElement>(null);
+  const [paneState, setPaneState] = useState<PaneDragState | null>(null);
+  const callbacks = useRef({ onError, onDragChange }); callbacks.current = { onError, onDragChange };
   const [size, setSize] = useState({ width: 0, height: 0 });
   useEffect(() => { if (!host.current) return; const observer = new ResizeObserver(([entry]) => setSize({ width: entry.contentRect.width, height: entry.contentRect.height })); observer.observe(host.current); return () => observer.disconnect(); }, []);
   // While a divider drag runs, panes follow the layouts pane.resize answers with, not snapshots:
@@ -20,7 +22,10 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
   const [held, setHeld] = useState<Layout | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const snapshotLayout = snapshot.layouts?.find(l => l.tab_id === selected);
-  const layout = held?.tab_id === selected ? held : snapshotLayout;
+  const latestLayout = held?.tab_id === selected ? held : snapshotLayout;
+  // A pane drop's reply shows its layout until the next snapshot (or held resize answer) replaces latestLayout.
+  const paneDrag = useMemo(() => new PaneDrag(machine, { onChange: state => { setPaneState(state); callbacks.current.onDragChange?.(state); }, onError: error => callbacks.current.onError?.(error) }), [machine]);
+  const layout = paneDrag.shownLayout(latestLayout);
   const shown = useRef(layout); shown.current = layout;
   const release = useRef<ReturnType<typeof setTimeout>>();
   const resizer = useMemo(() => new Resizer(
@@ -33,9 +38,10 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
   const stop = useRef<(() => void) | null>(null);
   // A drag belongs to one tab on one machine: switching either, or unmounting, drops it.
   useEffect(() => () => { stop.current?.(); resizer.cancel(); clearTimeout(release.current); setHeld(null); setDragging(null); }, [selected, resizer]);
-  const panes = (snapshot.panes ?? []).filter(p => p.tab_id === selected && (!layout?.zoomed || p.pane_id === layout.focused_pane_id));
+  // A drop reply's layout can already lack a pane the older snapshot still lists, as when it moved to another tab.
+  const panes = (snapshot.panes ?? []).filter(p => p.tab_id === selected && (!layout?.zoomed || p.pane_id === layout.focused_pane_id)
+    && (layout === latestLayout || !!layout?.panes.some(lp => lp.pane_id === p.pane_id)));
   const lines = layout && !layout.zoomed ? dividers(layout) : [];
-  const [paneState, setPaneState] = useState<PaneDragState | null>(null);
   const grab = (event: ReactPointerEvent<HTMLDivElement>, d: Divider) => {
     if (event.button !== 0 || !layout || resizer.busy || paneState?.phase === "dragging") return;
     event.preventDefault();
@@ -67,7 +73,7 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
     const previous = priorVisual.current; priorVisual.current = paneState;
     if (!paneState) return;
     if (paneState.phase === "idle" && previous && ["dragging", "dropped"].includes(previous.phase)) {
-      const cancelled = previous.phase === "dragging";
+      const cancelled = paneState.end === "cancel";
       const duration = cancelled ? motion.cancelMs : motion.fadeMs;
       const reduced = prefersReducedMotion();
       const ease = getComputedStyle(document.documentElement).getPropertyValue("--shell-motion-ease").trim();
@@ -86,8 +92,6 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
     const ease = getComputedStyle(document.documentElement).getPropertyValue("--shell-motion-ease").trim();
     chip.current.animate(prefersReducedMotion() ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, scale: .96 }, { opacity: 1, scale: 1 }], { duration: prefersReducedMotion() ? motion.reducedFadeMs : motion.fadeMs, easing: ease });
   }, [visual?.phase]);
-  const callbacks = useRef({ onError, onDragChange }); callbacks.current = { onError, onDragChange };
-  const paneDrag = useMemo(() => new PaneDrag(machine, { onChange: state => { setPaneState(state); callbacks.current.onDragChange?.(state); }, onError: error => callbacks.current.onError?.(error) }), [machine]);
   const support = useRef(new Map<string, boolean>());
   const probes = useRef(new Map<string, Promise<boolean | null>>());
   const [supported, setSupported] = useState(false);
@@ -102,7 +106,8 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
     }
     return () => { alive = false; };
   }, [machine, layout, online]);
-  useEffect(() => { paneDrag.layoutChanged(layout); }, [paneDrag, layout]);
+  // Before paint, so a drop reply landing next sees the snapshot this render shows.
+  useLayoutEffect(() => { paneDrag.layoutChanged(latestLayout); }, [paneDrag, latestLayout]);
   useEffect(() => { if (!online) paneDrag.cancel(); }, [online, paneDrag]);
   const latest = useRef({ layout, size, focused, supported, panes }); latest.current = { layout, size, focused, supported, panes };
   useEffect(() => {

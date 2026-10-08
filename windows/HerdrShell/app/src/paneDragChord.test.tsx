@@ -99,23 +99,3 @@ it("ends the drag on the last button up even when that button is the right one",
   expect(last()).toBe("idle");
   expect(changes()).toEqual([]);
 });
-
-it("settles only the pending drop's own layout, not another change on the tab meanwhile", async () => {
-  const three: Layout = { ...two, panes: [two.panes[0], { pane_id: "b", rect: { x: 50, y: 0, width: 50, height: 20 } }, { pane_id: "c", rect: { x: 50, y: 20, width: 50, height: 20 } }] };
-  const render = await dragAOverB(three);
-  fire(window, "pointermove", { button: -1, buttons: 1, clientX: 750, clientY: 200 }); // b's centre
-  fire(window, "pointerup", { button: 0, buttons: 0, clientX: 750, clientY: 200 });
-  expect(changes()).toEqual([["studio", "pane.swap", { source_pane_id: "a", target_pane_id: "b" }]]);
-  expect(last()).toBe("dropped");
-  const settles = () => [...host.querySelectorAll<HTMLElement>(".pane-clip")].filter(el => el.style.transition.includes("transform")).map(el => el.dataset.pane);
-  // Another client moves the b/c split while the swap is pending.
-  const resized: Layout = { ...three, panes: [three.panes[0], { pane_id: "b", rect: { x: 50, y: 0, width: 50, height: 25 } }, { pane_id: "c", rect: { x: 50, y: 25, width: 50, height: 15 } }] };
-  render(resized);
-  act(() => vi.advanceTimersByTime(40));
-  expect(settles()).toEqual([]);
-  expect(last()).toBe("dropped");
-  // Then the swap lands: a takes b's rect.
-  render({ ...resized, panes: [{ pane_id: "a", rect: resized.panes[1].rect }, { pane_id: "b", rect: resized.panes[0].rect }, resized.panes[2]] });
-  act(() => vi.advanceTimersByTime(40));
-  expect(settles().sort()).toEqual(["a", "b"]);
-});

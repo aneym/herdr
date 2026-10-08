@@ -120,8 +120,9 @@ describe("pane drag: zones and dry runs", () => {
 });
 
 describe("pane drag: drop", () => {
-  it("drops with pane.place dry_run false and focus true; the ghost holds until the snapshot (step 3)", async () => {
-    api.mockResolvedValueOnce(placed({ x: 60, y: 0, width: 60, height: 20 })).mockResolvedValueOnce(placed({ x: 60, y: 0, width: 60, height: 20 }, { dry_run: false }));
+  it("drops with pane.place dry_run false and focus true; the ghost holds until the server replies (step 3)", async () => {
+    const reply = deferred<unknown>();
+    api.mockResolvedValueOnce(placed({ x: 60, y: 0, width: 60, height: 20 })).mockReturnValueOnce(reply.promise);
     const drag = lifted();
     drag.move(at(1150, 200));
     await flush();
@@ -129,8 +130,12 @@ describe("pane drag: drop", () => {
     expect(calls()[1]).toEqual({ machine: "studio", method: "pane.place", params: { pane_id: "A", target: toB, side: "right", focus: true, dry_run: false } });
     await flush();
     expect(drag.state).toMatchObject({ phase: "dropped", ghost: B_PX });
-    drag.layoutChanged({ ...three, panes: [{ pane_id: "B", rect: { x: 0, y: 0, width: 60, height: 20 } }, { pane_id: "A", rect: { x: 60, y: 0, width: 60, height: 20 } }, { pane_id: "C", rect: { x: 0, y: 20, width: 120, height: 20 } }] });
-    expect(drag.state).toMatchObject({ phase: "idle", source: null, zone: null, ghost: null });
+    const after = { ...three, panes: [{ pane_id: "B", rect: { x: 0, y: 0, width: 60, height: 20 } }, { pane_id: "A", rect: { x: 60, y: 0, width: 60, height: 20 } }, { pane_id: "C", rect: { x: 0, y: 20, width: 120, height: 20 } }] };
+    drag.layoutChanged(after);
+    expect(drag.state).toMatchObject({ phase: "dropped", ghost: B_PX });
+    reply.resolve(placed({ x: 60, y: 0, width: 60, height: 20 }, { dry_run: false, target_layout: after }));
+    await flush();
+    expect(drag.state).toMatchObject({ phase: "idle", source: null, zone: null, ghost: null, end: "settle" });
     expect(api).toHaveBeenCalledTimes(2);
   });
   it("swaps on a centre release, with no dry run (step 5)", () => {

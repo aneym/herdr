@@ -57,18 +57,6 @@ describe("S7a pane drag regressions", () => {
     expect(clip.style.transform).toBe("translate(500px, 0px)"); expect(clip.style.transition).toBe("");
     expect(host.querySelector("span")?.getAttribute("data-settling")).toBe("false");
   });
-  it("settles only the first changed geometry after this client's drop", () => {
-    const drag = pressed();
-    renderClip({ x: 0, y: 0, width: 500, height: 800 }, false);
-    drag.move({ x: 750, y: 400 }); expect(drag.release()).toBe("dropped");
-    expect(drag.shouldAnimateLayout(layout)).toBe(false);
-    expect(drag.shouldAnimateLayout(swapped)).toBe(true);
-    renderClip({ x: 500, y: 0, width: 500, height: 800 }, drag.shouldAnimateLayout(swapped));
-    expect(host.querySelector<HTMLElement>(".pane-clip")!.style.transform).toBe("translate(0px, 0px)");
-    act(() => vi.advanceTimersByTime(40));
-    expect(host.querySelector<HTMLElement>(".pane-clip")!.style.transition).toContain("transform");
-    drag.layoutChanged(swapped); expect(drag.shouldAnimateLayout(layout)).toBe(false);
-  });
   it("picks a zone on the threshold crossing move so a one-move flick drops", () => {
     const drag = pressed(); drag.move({ x: 750, y: 400 });
     expect(drag.state.zone).toEqual({ kind: "centre", target: "b" });
