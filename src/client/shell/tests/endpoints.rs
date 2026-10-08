@@ -103,6 +103,7 @@ fn pinned_chats_survive_aggregate_sidebar_and_route_to_their_endpoint() {
     snapshot
         .pinned_tabs
         .push(crate::protocol::ClientShellPinnedTab {
+            hidden: false,
             role: None,
             tab_id: "tab_1".into(),
             workspace_id: "ws_1".into(),
@@ -3102,6 +3103,7 @@ fn dragging_a_remote_pin_moves_it_on_its_own_machine() {
     let (mut state, remote) = state_with_remote();
     let mut local = state.snapshot.as_deref().expect("local snapshot").clone();
     local.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+        hidden: false,
         role: None,
         tab_id: "tab_1".into(),
         workspace_id: "ws_1".into(),
@@ -3129,6 +3131,7 @@ fn dragging_a_remote_pin_moves_it_on_its_own_machine() {
         .tabs
         .iter()
         .map(|tab| crate::protocol::ClientShellPinnedTab {
+            hidden: false,
             role: None,
             tab_id: tab.tab_id.clone(),
             workspace_id: tab.workspace_id.clone(),
@@ -3263,6 +3266,7 @@ fn aggregate_pins_scroll_within_their_section_and_keep_the_divider_below_them() 
         .tabs
         .iter()
         .map(|tab| crate::protocol::ClientShellPinnedTab {
+            hidden: false,
             role: None,
             tab_id: tab.tab_id.clone(),
             workspace_id: tab.workspace_id.clone(),
@@ -3374,6 +3378,7 @@ fn inactive_machine_pin_rolls_up_from_that_machines_factory_overlay() {
     let mut remote_snapshot = snapshot();
     remote_snapshot.boot_id = "remote-boot".into();
     remote_snapshot.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+        hidden: false,
         role: None,
         tab_id: "tab_1".into(),
         workspace_id: "ws_1".into(),
@@ -3461,6 +3466,7 @@ fn inactive_machine_overlay_change_redraws_its_pin_only_when_pinned() {
     assert!(deliver(&mut state, 1, idle).is_none());
 
     remote_snapshot.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+        hidden: false,
         role: None,
         tab_id: "tab_1".into(),
         workspace_id: "ws_1".into(),
@@ -3491,6 +3497,7 @@ fn aggregate_agent_pins_display_and_cmd_digits_agree() {
     let (mut state, remote) = state_with_remote();
     let mut local = state.snapshot.as_deref().unwrap().clone();
     local.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+        hidden: false,
         tab_id: "tab_1".into(),
         workspace_id: "ws_1".into(),
         role: None,
@@ -3506,6 +3513,7 @@ fn aggregate_agent_pins_display_and_cmd_digits_agree() {
         .unwrap()
         .clone();
     snapshot.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+        hidden: false,
         tab_id: "tab_1".into(),
         workspace_id: "ws_1".into(),
         role: Some(crate::api::schema::TabRole::Agent),
@@ -3537,6 +3545,7 @@ fn machine_diagnostic_badge_on_remote_pin_reopens_notice() {
     remote
         .pinned_tabs
         .push(crate::protocol::ClientShellPinnedTab {
+            hidden: false,
             workspace_id: "ws_1".into(),
             tab_id: "tab_1".into(),
             role: None,
@@ -3627,6 +3636,7 @@ fn remote_spaces_that_share_a_label_keep_rows_of_their_own() {
         remote
             .pinned_tabs
             .push(crate::protocol::ClientShellPinnedTab {
+                hidden: false,
                 workspace_id: workspace.workspace_id.clone(),
                 tab_id: format!("tab_{}", workspace.workspace_id),
                 role: None,

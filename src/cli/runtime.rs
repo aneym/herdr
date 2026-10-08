@@ -77,6 +77,12 @@ pub(super) fn tab_set_pinned(params: TabSetPinnedParams) -> std::io::Result<i32>
     print_method_response("cli:tab:set_pinned", Method::TabSetPinned(params))
 }
 
+pub(super) fn tab_set_hidden(
+    params: crate::api::schema::TabSetHiddenParams,
+) -> std::io::Result<i32> {
+    print_method_response("cli:tab:set_hidden", Method::TabSetHidden(params))
+}
+
 pub(super) fn tab_set_role(params: crate::api::schema::TabSetRoleParams) -> std::io::Result<i32> {
     print_method_response("cli:tab:set_role", Method::TabSetRole(params))
 }

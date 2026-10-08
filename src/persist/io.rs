@@ -205,6 +205,7 @@ mod tests {
             pinned_tabs: Vec::new(),
             tree_show_hidden_spaces: false,
             hidden_spaces_expanded: false,
+            hidden_agents_expanded: false,
         }
     }
 

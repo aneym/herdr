@@ -141,19 +141,21 @@ pub(super) fn render_agent_panel_with_overlay(
         && snapshot.agent_view_label.is_none()
         && tree.show_tabs;
     let rows = super::tree::arrange_agent_hierarchy_with(snapshot, tree, rows, !tree_tabs);
-    let mut entries =
-        if super::tree::tree_view_active(config) && snapshot.agent_view_label.is_none() {
-            super::tree::tree_list_entries_with_overlay(snapshot, tree, rows, overlay)
-        } else {
-            // The pinned section tops the flat list too; there is no spaces
-            // strip inside the agent panel in this mode.
-            let mut entries = super::tree::pinned_tab_entries(snapshot, overlay);
-            entries.extend(
-                rows.into_iter()
-                    .map(super::tree::AgentPanelListEntry::Agent),
-            );
-            entries
-        };
+    let mut entries = if super::tree::tree_view_active(config)
+        && snapshot.agent_view_label.is_none()
+    {
+        super::tree::tree_list_entries_with_overlay(snapshot, tree, rows, overlay)
+    } else {
+        // The pinned section tops the flat list too; there is no spaces
+        // strip inside the agent panel in this mode.
+        let mut entries =
+            super::tree::folded_pinned_tab_entries(snapshot, overlay, tree.hidden_agents_expanded);
+        entries.extend(
+            rows.into_iter()
+                .map(super::tree::AgentPanelListEntry::Agent),
+        );
+        entries
+    };
     super::tree::append_automations(&mut entries, tree, automations);
     let fold_fallback = snapshot.agent_view_label.is_none()
         && !snapshot.workspaces.is_empty()
@@ -701,12 +703,14 @@ pub(super) fn render_pinned_tab_row(
         pinned: true,
         collapsed: false,
     });
-    hits.pinned_rows.push(PinnedRowHit {
-        rect,
-        endpoint_id: None,
-        tab_id: row.tab_id.clone(),
-        slot: row.slot,
-    });
+    if !row.hidden {
+        hits.pinned_rows.push(PinnedRowHit {
+            rect,
+            endpoint_id: None,
+            tab_id: row.tab_id.clone(),
+            slot: row.slot,
+        });
+    }
     machine_badge
 }
 
@@ -1068,6 +1072,27 @@ fn render_panel_list_entry(
                 &format!(" {name}"),
                 style,
             );
+        }
+        AgentPanelListEntry::HiddenAgentsHeader {
+            count,
+            collapsed,
+            alert,
+        } => {
+            let style = Style::default().fg(config.palette.overlay0);
+            let text = format!(" Hidden {count} {}", if *collapsed { "▸" } else { "▾" });
+            put_text(buffer, rect.x, rect.y, rect.width, &text, style);
+            if *alert {
+                let x = rect.x.saturating_add(display_width(&text) as u16 + 1);
+                put_text(
+                    buffer,
+                    x,
+                    rect.y,
+                    rect.right().saturating_sub(x),
+                    "•",
+                    Style::default().fg(config.palette.accent),
+                );
+            }
+            hits.hidden_agents_header = rect;
         }
         AgentPanelListEntry::HiddenSpacesHeader { count, collapsed } => {
             let palette = &config.palette;

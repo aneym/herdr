@@ -4,7 +4,7 @@ use crate::app;
 use crate::protocol::{self, FrameData};
 
 #[cfg(test)]
-pub(super) fn snapshot(
+pub(crate) fn snapshot(
     app: &app::App,
     boot_id: &str,
     revision: u64,
@@ -347,6 +347,7 @@ pub(super) fn snapshot_with_completions(
                 let (ws_idx, _) = app.parse_tab_id(&pin.tab_id)?;
                 Some(protocol::ClientShellPinnedTab {
                     role: pin.role,
+                    hidden: pin.hidden,
                     tab_id: pin.tab_id.clone(),
                     workspace_id: app.public_workspace_id(ws_idx),
                 })

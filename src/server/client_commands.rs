@@ -57,6 +57,7 @@ const CLIENT_SHELL_METHODS: &[&str] = &[
     "tab.rename",
     "tab.set_pinned",
     "tab.set_role",
+    "tab.set_hidden",
     "workspace.close",
     "workspace.create",
     "workspace.focus",
@@ -91,6 +92,7 @@ pub(crate) fn client_shell_method_is_surface_independent(method: &Method) -> boo
         Method::TabSetPinned(_)
             | Method::TabPinMove(_)
             | Method::TabSetRole(_)
+            | Method::TabSetHidden(_)
             | Method::DeskOpen(_)
             | Method::DeskClose(_)
             | Method::DeskFocus(_)
@@ -361,6 +363,7 @@ mod tests {
             "profile.list",
             "profile.switch",
             "tab.set_role",
+            "tab.set_hidden",
             "desk.open",
             "desk.close",
             "desk.focus",

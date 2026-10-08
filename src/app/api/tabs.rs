@@ -320,6 +320,54 @@ impl App {
         encode_success(id, ResponseResult::TabInfo { tab })
     }
 
+    pub(super) fn handle_tab_set_hidden(
+        &mut self,
+        id: String,
+        params: TabSetHiddenParams,
+    ) -> String {
+        let Some((ws_idx, tab_idx)) = self.parse_tab_id(&params.tab_id) else {
+            return tab_not_found(id, &params.tab_id);
+        };
+        let Some(tab_id) = self.public_tab_id(ws_idx, tab_idx) else {
+            return tab_not_found(id, &params.tab_id);
+        };
+        if !self
+            .state
+            .pinned_tabs
+            .iter()
+            .any(|pin| pin.tab_id == tab_id && pin.role.is_some())
+        {
+            return encode_error(id, "tab_not_agent", "tab is not an agent pin");
+        }
+        if self.state.set_tab_hidden(&tab_id, params.hidden) {
+            self.state.mark_session_dirty();
+            self.schedule_session_save();
+            let workspace = self.workspace_info(ws_idx);
+            self.emit_event(EventEnvelope {
+                event: EventKind::WorkspaceUpdated,
+                data: EventData::WorkspaceUpdated { workspace },
+            });
+            self.emit_event(EventEnvelope {
+                event: EventKind::TabPinMoved,
+                data: EventData::TabPinMoved {
+                    tab_id: tab_id.clone(),
+                    workspace_id: self.public_workspace_id(ws_idx),
+                    pin_index: self.state.pinned_tab_index(&tab_id).unwrap_or(0),
+                    pinned_tab_ids: self
+                        .state
+                        .pinned_tabs
+                        .iter()
+                        .map(|pin| pin.tab_id.clone())
+                        .collect(),
+                },
+            });
+        }
+        let Some(tab) = self.tab_info(ws_idx, tab_idx) else {
+            return tab_not_found(id, &params.tab_id);
+        };
+        encode_success(id, ResponseResult::TabInfo { tab })
+    }
+
     /// Move a pinned chat within the shared pin order. Every client draws the
     /// pinned section and resolves Cmd+1..9 from this order, so a drag in any
     /// client lands here and reaches the others through the next snapshot.
@@ -610,6 +658,7 @@ mod tests {
                         .iter()
                         .copied()
                         .map(|(i, agent)| PinnedTab {
+                            hidden: false,
                             tab_id: ids.get(i).cloned().unwrap_or_else(|| "missing:t1".into()),
                             priority: 0,
                             role: agent.then_some(TabRole::Agent),

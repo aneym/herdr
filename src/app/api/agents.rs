@@ -80,6 +80,7 @@ impl App {
                         })
                         .map(|session| session.session_ref.value);
                     Some(crate::api::schema::PinnedAgentInfo {
+                        hidden: info.hidden,
                         tab_id: info.tab_id,
                         workspace_id: info.workspace_id,
                         label: info.label,
@@ -695,16 +696,19 @@ mod tests {
         let plain = app.public_tab_id(0, 2).unwrap();
         app.state.pinned_tabs = vec![
             crate::app::state::PinnedTab {
+                hidden: false,
                 tab_id: bound.clone(),
                 priority: 0,
                 role: Some(crate::api::schema::TabRole::Agent),
             },
             crate::app::state::PinnedTab {
+                hidden: false,
                 tab_id: plain,
                 priority: 0,
                 role: None,
             },
             crate::app::state::PinnedTab {
+                hidden: false,
                 tab_id: first.clone(),
                 priority: 0,
                 role: Some(crate::api::schema::TabRole::Agent),

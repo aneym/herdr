@@ -133,6 +133,7 @@ pub(super) struct ShellHitMap {
     pub(super) agent_groups: Vec<AgentGroupHit>,
     pub(super) tree_headers: Vec<TreeHeaderHit>,
     pub(super) tree_hidden_header: Rect,
+    pub(super) hidden_agents_header: Rect,
     pub(super) automations_header: Rect,
     pub(super) sidebar_divider: Rect,
     pub(super) sidebar_section_divider: Rect,
@@ -702,6 +703,7 @@ pub(super) enum ClientContextMenuAction {
     /// Pin or unpin a chat in the sidebar's pinned section.
     TogglePin,
     ToggleRole,
+    ToggleHidden,
 }
 
 #[derive(Debug)]
@@ -734,6 +736,8 @@ pub(super) enum ClientContextMenuTarget {
         pinned: bool,
         agent: bool,
         supports_role: bool,
+        hidden: bool,
+        supports_hidden: bool,
     },
     /// A pinned chat in the multi-machine sidebar, on any endpoint.
     EndpointChat {
@@ -742,6 +746,8 @@ pub(super) enum ClientContextMenuTarget {
         pinned: bool,
         agent: bool,
         supports_role: bool,
+        hidden: bool,
+        supports_hidden: bool,
     },
     Pane {
         pane_id: String,

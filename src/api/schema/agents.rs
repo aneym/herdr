@@ -401,6 +401,8 @@ pub struct AgentSessionInfo {
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct PinnedAgentInfo {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
     pub tab_id: String,
     pub workspace_id: String,
     pub label: String,

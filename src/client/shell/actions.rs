@@ -8,7 +8,7 @@ impl ClientShellState {
         let mut numbered: Vec<String> = snapshot
             .pinned_tabs
             .iter()
-            .filter(|pin| snapshot.tabs.iter().any(|tab| tab.tab_id == pin.tab_id))
+            .filter(|pin| !pin.hidden && snapshot.tabs.iter().any(|tab| tab.tab_id == pin.tab_id))
             .map(|pin| pin.tab_id.clone())
             .collect();
         numbered.extend(self.focused_space_numbered_tab_ids(snapshot));

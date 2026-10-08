@@ -5,6 +5,14 @@ const SELECTION_AUTOSCROLL_INTERVAL: std::time::Duration = std::time::Duration::
 const SELECTION_REPAINT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
 
 impl ClientShellState {
+    fn on_hidden_agents_header(&mut self, outcome: &mut ClientShellInput) {
+        let tree = self.tree_chrome_mut();
+        tree.hidden_agents_expanded = !tree.hidden_agents_expanded;
+        self.agent_scroll = 0;
+        self.persist_chrome_preferences(outcome);
+        outcome.repaint = true;
+    }
+
     fn set_sidebar_width_from_column(&mut self, column: u16, outcome: &mut ClientShellInput) {
         let (min, max) = crate::config::validated_sidebar_bounds(
             self.config.sidebar_min_width,
@@ -2141,6 +2149,18 @@ impl ClientShellState {
                         Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
                             target: ClientContextMenuTarget::EndpointChat {
                                 supports_role: self.endpoint_supports_tab_role(&endpoint_id),
+                                supports_hidden: self.endpoint_supports_tab_hidden(&endpoint_id),
+                                hidden: self
+                                    .endpoints
+                                    .iter()
+                                    .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+                                    .and_then(|endpoint| endpoint.snapshot.as_deref())
+                                    .is_some_and(|snapshot| {
+                                        snapshot
+                                            .pinned_tabs
+                                            .iter()
+                                            .any(|pin| pin.tab_id == tab_id && pin.hidden)
+                                    }),
                                 agent: self
                                     .endpoints
                                     .iter()
@@ -2997,6 +3017,10 @@ impl ClientShellState {
             self.agent_scroll = 0;
             self.persist_chrome_preferences(outcome);
             outcome.repaint = true;
+            return true;
+        }
+        if super::contains(self.hits.hidden_agents_header, point) {
+            self.on_hidden_agents_header(outcome);
             return true;
         }
         if super::contains(self.hits.tree_hidden_header, point) {

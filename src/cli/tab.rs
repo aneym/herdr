@@ -27,6 +27,8 @@ pub(super) fn run_tab_command(args: &[String]) -> std::io::Result<i32> {
         "move" => tab_move(&args[1..]),
         "pin" => tab_pin(&args[1..]),
         "unpin" => tab_unpin(&args[1..]),
+        "hide" => tab_set_hidden(&args[1..], true),
+        "unhide" => tab_set_hidden(&args[1..], false),
         "set-role" => tab_set_role(&args[1..]),
         "pin-move" => tab_pin_move(&args[1..]),
         "close" => tab_close(&args[1..]),
@@ -39,6 +41,20 @@ pub(super) fn run_tab_command(args: &[String]) -> std::io::Result<i32> {
             Ok(2)
         }
     }
+}
+
+fn tab_set_hidden(args: &[String], hidden: bool) -> std::io::Result<i32> {
+    if args.len() != 1 {
+        eprintln!(
+            "usage: herdr tab {} <tab>",
+            if hidden { "hide" } else { "unhide" }
+        );
+        return Ok(2);
+    }
+    super::runtime::tab_set_hidden(crate::api::schema::TabSetHiddenParams {
+        tab_id: super::normalize_tab_id(&args[0]),
+        hidden,
+    })
 }
 
 fn tab_list(args: &[String]) -> std::io::Result<i32> {
@@ -444,6 +460,8 @@ fn print_tab_help() {
     eprintln!("  herdr tab move <tab_id> (--before <tab_id> | --after <tab_id> | --position <N>)");
     eprintln!("  herdr tab pin <tab_id> [--priority N]");
     eprintln!("  herdr tab unpin <tab_id>");
+    eprintln!("  herdr tab hide <tab_id>");
+    eprintln!("  herdr tab unhide <tab_id>");
     eprintln!("  herdr tab set-role <tab_id> <agent|none>");
     eprintln!("  herdr tab pin-move <tab_id> <pin_index>");
     eprintln!("  herdr tab close <tab_id>");

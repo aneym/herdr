@@ -34,6 +34,7 @@ pub(super) struct ClientTreeChromePreferences {
     pub(super) pinned_spaces: Vec<String>,
     pub(super) show_hidden_spaces: bool,
     pub(super) hidden_spaces_expanded: bool,
+    pub(super) hidden_agents_expanded: bool,
     pub(super) automations_expanded: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(super) collapsed_agent_groups: Vec<String>,
@@ -71,6 +72,7 @@ impl Default for ClientTreeChromePreferences {
             pinned_spaces: Vec::new(),
             show_hidden_spaces: true,
             hidden_spaces_expanded: false,
+            hidden_agents_expanded: false,
             automations_expanded: false,
             collapsed_agent_groups: Vec::new(),
             space_order: Vec::new(),
@@ -159,6 +161,7 @@ pub(super) fn migrated_from_session(
             pinned_spaces: sorted(session.tree_pinned_spaces),
             show_hidden_spaces: session.tree_show_hidden_spaces,
             hidden_spaces_expanded: session.hidden_spaces_expanded,
+            hidden_agents_expanded: session.hidden_agents_expanded,
             automations_expanded: session.automations_expanded,
             collapsed_agent_groups: sorted(session.collapsed_agent_group_keys),
             space_order: Vec::new(),

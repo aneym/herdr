@@ -514,17 +514,34 @@ pub(super) fn render_expanded(
             pins.push((endpoint.endpoint_id.clone(), row));
         }
     }
-    pins.sort_by_key(|(endpoint, row)| (!row.agent, !endpoint.is_local()));
-    for (index, (_, row)) in pins.iter_mut().enumerate() {
-        row.shortcut = if index < 9 { index + 1 } else { 0 };
+    pins.sort_by_key(|(endpoint, row)| (!row.agent, row.hidden, !endpoint.is_local()));
+    let mut numbered = 0;
+    for (_, row) in &mut pins {
+        if !row.hidden {
+            numbered += 1;
+        }
+        row.shortcut = if !row.hidden && numbered <= 9 {
+            numbered
+        } else {
+            0
+        };
     }
+    let hidden_count = pins.iter().filter(|(_, row)| row.hidden).count();
+    let hidden_alert = pins.iter().any(|(_, row)| {
+        row.hidden
+            && (row.request.is_some() || row.status == crate::api::schema::AgentStatus::Blocked)
+    });
+    let has_agents = pins.iter().any(|(_, row)| row.agent);
+    let expanded = state.tree.hidden_agents_expanded;
+    pins.retain(|(_, row)| !row.hidden || expanded);
     let mut y = area.y;
     hits.endpoint_pin_body = Rect::default();
     hits.endpoint_pin_max_scroll = 0;
-    if !pins.is_empty() && area.height > 1 {
+    if (!pins.is_empty() || hidden_count > 0) && area.height > 1 {
         // The section takes at most a third of the column and scrolls past
         // that, so the spaces list below always keeps its rows.
-        let headers = usize::from(pins.iter().any(|(_, row)| row.agent))
+        let headers = usize::from(has_agents)
+            + usize::from(hidden_count > 0)
             + usize::from(pins.iter().any(|(_, row)| !row.agent));
         let visible = pins
             .len()
@@ -537,7 +554,35 @@ pub(super) fn render_expanded(
         let pin_top = y;
         hits.endpoint_pin_max_scroll = max_scroll;
         let mut block = None;
+        let mut hidden_header_drawn = false;
         for (endpoint_id, row) in pins.into_iter().skip(first).take(visible) {
+            if hidden_count > 0 && !hidden_header_drawn && (row.hidden || !row.agent) {
+                if block.is_none() && has_agents {
+                    put_text(
+                        buffer,
+                        area.x,
+                        y,
+                        width,
+                        " agents",
+                        Style::default()
+                            .fg(palette.overlay0)
+                            .add_modifier(Modifier::BOLD),
+                    );
+                    y += 1;
+                    block = Some(true);
+                }
+                render_hidden_agents_header(
+                    buffer,
+                    Rect::new(area.x, y, width, 1),
+                    hidden_count,
+                    expanded,
+                    hidden_alert,
+                    config,
+                    hits,
+                );
+                y += 1;
+                hidden_header_drawn = true;
+            }
             if block != Some(row.agent) {
                 put_text(
                     buffer,
@@ -572,12 +617,41 @@ pub(super) fn render_expanded(
                 });
             }
             hits.tree_headers.truncate(hit_start);
-            if let Some(hit) = hits.pinned_rows.last_mut() {
+            if let Some(hit) = hits
+                .pinned_rows
+                .last_mut()
+                .filter(|hit| hit.tab_id == row.tab_id)
+            {
                 hit.endpoint_id = Some(endpoint_id.clone());
             }
             // No pin toggle on pinned rows: unpinning is in the row's context menu.
             hits.endpoint_pins
                 .push((rect, Rect::default(), endpoint_id, row.tab_id));
+            y += 1;
+        }
+        if hidden_count > 0 && !hidden_header_drawn {
+            if block.is_none() {
+                put_text(
+                    buffer,
+                    area.x,
+                    y,
+                    width,
+                    " agents",
+                    Style::default()
+                        .fg(palette.overlay0)
+                        .add_modifier(Modifier::BOLD),
+                );
+                y += 1;
+            }
+            render_hidden_agents_header(
+                buffer,
+                Rect::new(area.x, y, width, 1),
+                hidden_count,
+                expanded,
+                hidden_alert,
+                config,
+                hits,
+            );
             y += 1;
         }
         hits.endpoint_pin_body = Rect::new(area.x, pin_top, width, y.saturating_sub(pin_top));
@@ -849,4 +923,36 @@ fn active_endpoint_label<'a>(state: &'a ShellRenderState<'_>) -> &'a str {
         .iter()
         .find(|endpoint| &endpoint.endpoint_id == state.active_endpoint_id)
         .map_or("Local", |endpoint| endpoint.label.as_str())
+}
+
+fn render_hidden_agents_header(
+    buffer: &mut Buffer,
+    rect: Rect,
+    count: usize,
+    expanded: bool,
+    alert: bool,
+    config: &ClientShellConfig,
+    hits: &mut ShellHitMap,
+) {
+    let text = format!(" Hidden {count} {}", if expanded { "▾" } else { "▸" });
+    put_text(
+        buffer,
+        rect.x,
+        rect.y,
+        rect.width,
+        &text,
+        Style::default().fg(config.palette.overlay0),
+    );
+    if !expanded && alert {
+        let x = rect.x.saturating_add(display_width(&text) as u16 + 1);
+        put_text(
+            buffer,
+            x,
+            rect.y,
+            rect.right().saturating_sub(x),
+            "•",
+            Style::default().fg(config.palette.accent),
+        );
+    }
+    hits.hidden_agents_header = rect;
 }

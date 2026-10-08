@@ -142,6 +142,8 @@ pub enum Method {
     TabSetPinned(TabSetPinnedParams),
     #[serde(rename = "tab.set_role")]
     TabSetRole(TabSetRoleParams),
+    #[serde(rename = "tab.set_hidden")]
+    TabSetHidden(TabSetHiddenParams),
     #[serde(rename = "tab.pin_move")]
     TabPinMove(TabPinMoveParams),
     #[serde(rename = "tab.close")]

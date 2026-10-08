@@ -411,6 +411,7 @@ fn restored_ui_prefs(snapshot: &crate::persist::SessionSnapshot) -> crate::persi
         pinned_tabs: snapshot.pinned_tabs.clone(),
         tree_show_hidden_spaces: snapshot.tree_show_hidden_spaces,
         hidden_spaces_expanded: snapshot.hidden_spaces_expanded,
+        hidden_agents_expanded: snapshot.hidden_agents_expanded,
     }
 }
 
@@ -620,6 +621,7 @@ impl App {
         state.normalize_pin_roles();
         state.tree_show_hidden_spaces = ui_prefs.tree_show_hidden_spaces;
         state.hidden_spaces_expanded = ui_prefs.hidden_spaces_expanded;
+        state.hidden_agents_expanded = ui_prefs.hidden_agents_expanded;
         state.agent_close_focus = config.ui.agent_close_focus;
         state.status_indicators = config.ui.status_indicators;
         state.pending_agent_close_focus = None;

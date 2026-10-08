@@ -31,6 +31,12 @@ pub struct TabSetRoleParams {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TabSetHiddenParams {
+    pub tab_id: String,
+    pub hidden: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TabCreateParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_id: Option<String>,
@@ -102,6 +108,8 @@ pub struct TabInfo {
     pub pin_index: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<TabRole>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
 }
 
 /// Classify strict role decoding errors consistently at both JSON front doors.

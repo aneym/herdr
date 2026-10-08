@@ -50,6 +50,8 @@ pub struct PinnedTab {
         deserialize_with = "crate::api::schema::deserialize_pin_role"
     )]
     pub role: Option<crate::api::schema::TabRole>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PluginPaneRecord {
@@ -951,6 +953,7 @@ pub struct AppState {
     /// The `hidden` section is open. Starts closed, so demoting a space
     /// costs one shared row rather than one row each.
     pub hidden_spaces_expanded: bool,
+    pub hidden_agents_expanded: bool,
     pub next_agent_state_change_seq: u64,
     /// Capture mouse input for Herdr's own mouse UI. When false, Herdr only
     /// captures mouse while the focused pane app requests mouse reporting.
@@ -1056,6 +1059,7 @@ impl AppState {
             pinned_tabs: self.pinned_tabs.clone(),
             tree_show_hidden_spaces: self.tree_show_hidden_spaces,
             hidden_spaces_expanded: self.hidden_spaces_expanded,
+            hidden_agents_expanded: self.hidden_agents_expanded,
         }
     }
 
@@ -1076,6 +1080,10 @@ impl AppState {
             .iter()
             .find(|pin| pin.tab_id == tab_id)
             .and_then(|pin| pin.role);
+        let hidden = self
+            .pinned_tabs
+            .iter()
+            .any(|pin| pin.tab_id == tab_id && pin.role.is_some() && pin.hidden);
         self.unpin_tab(&tab_id);
         let agents = self
             .pinned_tabs
@@ -1096,6 +1104,7 @@ impl AppState {
                 tab_id,
                 priority,
                 role,
+                hidden,
             },
         );
         if role.is_none() && !self.sidebar_priority.is_empty() {
@@ -1165,8 +1174,12 @@ impl AppState {
                 tab_id: tab_id.to_owned(),
                 priority: 0,
                 role: None,
+                hidden: false,
             });
         pin.role = role;
+        if role.is_none() {
+            pin.hidden = false;
+        }
         let index = self
             .pinned_tabs
             .iter()
@@ -1176,6 +1189,21 @@ impl AppState {
         if role.is_none() {
             self.priority_renamed_pins(&[tab_id.to_owned()]);
         }
+        true
+    }
+
+    pub fn set_tab_hidden(&mut self, tab_id: &str, hidden: bool) -> bool {
+        let Some(pin) = self
+            .pinned_tabs
+            .iter_mut()
+            .find(|pin| pin.tab_id == tab_id && pin.role.is_some())
+        else {
+            return false;
+        };
+        if pin.hidden == hidden {
+            return false;
+        }
+        pin.hidden = hidden;
         true
     }
 
@@ -1645,6 +1673,7 @@ impl AppState {
             pinned_tabs: Vec::new(),
             tree_show_hidden_spaces: false,
             hidden_spaces_expanded: false,
+            hidden_agents_expanded: false,
             next_agent_state_change_seq: 0,
             mouse_capture: true,
             copy_on_select: true,

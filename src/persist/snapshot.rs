@@ -76,6 +76,8 @@ pub struct SessionSnapshot {
     pub tree_show_hidden_spaces: bool,
     #[serde(default)]
     pub hidden_spaces_expanded: bool,
+    #[serde(default)]
+    pub hidden_agents_expanded: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -409,6 +411,8 @@ struct RawSessionSnapshot {
     tree_show_hidden_spaces: bool,
     #[serde(default)]
     hidden_spaces_expanded: bool,
+    #[serde(default)]
+    hidden_agents_expanded: bool,
 }
 
 fn migrate_snapshot(raw: RawSessionSnapshot) -> Result<SessionSnapshot, String> {
@@ -438,6 +442,7 @@ fn migrate_snapshot(raw: RawSessionSnapshot) -> Result<SessionSnapshot, String> 
         pinned_tabs: raw.pinned_tabs,
         tree_show_hidden_spaces: raw.tree_show_hidden_spaces,
         hidden_spaces_expanded: raw.hidden_spaces_expanded,
+        hidden_agents_expanded: raw.hidden_agents_expanded,
     })
 }
 
@@ -514,6 +519,7 @@ pub struct UiPrefs {
     pub pinned_tabs: Vec<crate::app::state::PinnedTab>,
     pub tree_show_hidden_spaces: bool,
     pub hidden_spaces_expanded: bool,
+    pub hidden_agents_expanded: bool,
 }
 
 impl Default for UiPrefs {
@@ -531,6 +537,7 @@ impl Default for UiPrefs {
             pinned_tabs: Vec::new(),
             tree_show_hidden_spaces: false,
             hidden_spaces_expanded: false,
+            hidden_agents_expanded: false,
         }
     }
 }
@@ -574,6 +581,7 @@ pub fn capture(
         pinned_tabs: ui.pinned_tabs,
         tree_show_hidden_spaces: ui.tree_show_hidden_spaces,
         hidden_spaces_expanded: ui.hidden_spaces_expanded,
+        hidden_agents_expanded: ui.hidden_agents_expanded,
     }
 }
 
@@ -1093,6 +1101,7 @@ mod tests {
             pinned_tabs: Vec::new(),
             tree_show_hidden_spaces: false,
             hidden_spaces_expanded: false,
+            hidden_agents_expanded: false,
         };
         let json = serde_json::to_string(&snap).unwrap();
         let restored = parse_snapshot(&json).unwrap();
@@ -1249,6 +1258,7 @@ mod tests {
             pinned_tabs: Vec::new(),
             tree_show_hidden_spaces: false,
             hidden_spaces_expanded: false,
+            hidden_agents_expanded: false,
             version: SNAPSHOT_VERSION,
         };
 
@@ -1334,6 +1344,7 @@ mod tests {
             pinned_tabs: Vec::new(),
             tree_show_hidden_spaces: false,
             hidden_spaces_expanded: false,
+            hidden_agents_expanded: false,
             version: SNAPSHOT_VERSION,
         };
 
@@ -2297,6 +2308,7 @@ mod tests {
             pinned_tabs: Vec::new(),
             tree_show_hidden_spaces: false,
             hidden_spaces_expanded: false,
+            hidden_agents_expanded: false,
         };
 
         let json = serde_json::to_string(&snap).unwrap();

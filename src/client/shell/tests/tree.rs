@@ -219,16 +219,19 @@ fn pinned_chats_top_the_tree_and_own_cmd_digits_in_pin_order() {
     // pin from the focused space.
     snapshot.pinned_tabs = vec![
         crate::protocol::ClientShellPinnedTab {
+            hidden: false,
             role: None,
             tab_id: "tab_3".into(),
             workspace_id: "ws_2".into(),
         },
         crate::protocol::ClientShellPinnedTab {
+            hidden: false,
             role: None,
             tab_id: "gone".into(),
             workspace_id: "ws_2".into(),
         },
         crate::protocol::ClientShellPinnedTab {
+            hidden: false,
             role: None,
             tab_id: "tab_2".into(),
             workspace_id: "ws_1".into(),
@@ -401,6 +404,7 @@ fn pinned_chat_focus_preserves_home_folds_and_unpinned_focus_reveals() {
     snapshot
         .pinned_tabs
         .push(crate::protocol::ClientShellPinnedTab {
+            hidden: false,
             role: None,
             tab_id: "tab_3".into(),
             workspace_id: "ws_2".into(),
@@ -486,6 +490,7 @@ fn pinned_next_attention_keeps_home_folds_but_unpinned_reveals() {
             snapshot
                 .pinned_tabs
                 .push(crate::protocol::ClientShellPinnedTab {
+                    hidden: false,
                     role: None,
                     tab_id: "tab_3".into(),
                     workspace_id: "ws_2".into(),
@@ -529,6 +534,7 @@ fn pinned_pane_focus_does_not_queue_server_group_unfolds() {
             snapshot
                 .pinned_tabs
                 .push(crate::protocol::ClientShellPinnedTab {
+                    hidden: false,
                     role: None,
                     tab_id: "tab_3".into(),
                     workspace_id: "ws_2".into(),
@@ -603,6 +609,7 @@ fn dragging_a_pinned_chat_moves_its_pin_and_never_clicks() {
     snapshot.pinned_tabs = ["tab_1", "tab_2", "tab_3"]
         .into_iter()
         .map(|tab_id| crate::protocol::ClientShellPinnedTab {
+            hidden: false,
             role: None,
             tab_id: tab_id.into(),
             workspace_id: if tab_id == "tab_3" { "ws_2" } else { "ws_1" }.into(),
@@ -779,6 +786,7 @@ fn pin_drag_state() -> ClientShellState {
         .tabs
         .iter()
         .map(|tab| crate::protocol::ClientShellPinnedTab {
+            hidden: false,
             role: None,
             tab_id: tab.tab_id.clone(),
             workspace_id: tab.workspace_id.clone(),
@@ -801,6 +809,7 @@ fn pin_drag_snapshot_rebases_preview_and_cancel_order() {
         fourth.number = 4;
         live.pinned_tabs
             .push(crate::protocol::ClientShellPinnedTab {
+                hidden: false,
                 role: None,
                 tab_id: fourth.tab_id.clone(),
                 workspace_id: fourth.workspace_id.clone(),
@@ -875,6 +884,7 @@ fn space_groups_keep_pinned_chats_above_the_groups() {
     config.agent_panel_sort = crate::config::AgentPanelSortConfig::Tree;
     let mut snapshot = tree_snapshot();
     snapshot.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+        hidden: false,
         role: None,
         tab_id: "tab_3".into(),
         workspace_id: "ws_2".into(),
@@ -1866,11 +1876,13 @@ fn agent_pin_section_digits_drag_boundary_and_role_menu() {
     let mut snapshot = tree_snapshot();
     snapshot.pinned_tabs = vec![
         crate::protocol::ClientShellPinnedTab {
+            hidden: false,
             tab_id: "tab_1".into(),
             workspace_id: "ws_1".into(),
             role: Some(crate::api::schema::TabRole::Agent),
         },
         crate::protocol::ClientShellPinnedTab {
+            hidden: false,
             tab_id: "tab_2".into(),
             workspace_id: "ws_1".into(),
             role: None,
@@ -1955,11 +1967,13 @@ fn agent_pin_appears_only_in_agents_while_plain_pin_stays_in_space() {
     let mut snapshot = tree_snapshot();
     snapshot.pinned_tabs = vec![
         crate::protocol::ClientShellPinnedTab {
+            hidden: false,
             tab_id: "tab_1".into(),
             workspace_id: "ws_1".into(),
             role: Some(crate::api::schema::TabRole::Agent),
         },
         crate::protocol::ClientShellPinnedTab {
+            hidden: false,
             tab_id: "tab_2".into(),
             workspace_id: "ws_1".into(),
             role: None,
@@ -2126,6 +2140,7 @@ fn request_dot_agents_only() {
         let mut snapshot = tree_snapshot();
         snapshot.agents.clear();
         snapshot.pinned_tabs = vec![crate::protocol::ClientShellPinnedTab {
+            hidden: false,
             role: role.map(|_| crate::api::schema::TabRole::Agent),
             tab_id: "tab_1".into(),
             workspace_id: "ws_1".into(),
@@ -2195,11 +2210,13 @@ fn bulk_space_fold_scenario(goal_visible: bool) {
     snapshot.workspaces[1].parked = true;
     snapshot.pinned_tabs = vec![
         crate::protocol::ClientShellPinnedTab {
+            hidden: false,
             tab_id: "tab_1".into(),
             workspace_id: "ws_1".into(),
             role: Some(crate::api::schema::TabRole::Agent),
         },
         crate::protocol::ClientShellPinnedTab {
+            hidden: false,
             tab_id: "tab_2".into(),
             workspace_id: "ws_1".into(),
             role: None,
@@ -2257,6 +2274,7 @@ fn bulk_space_fold_header_without_pins_respects_available_room_and_flat_view() {
             snapshot
                 .pinned_tabs
                 .push(crate::protocol::ClientShellPinnedTab {
+                    hidden: false,
                     tab_id: "missing-tab".into(),
                     workspace_id: "ws_1".into(),
                     role: None,

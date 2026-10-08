@@ -26,6 +26,7 @@ pub(super) struct ClientTreeChrome {
     pub(super) pinned_spaces: HashSet<String>,
     pub(super) show_hidden_spaces: bool,
     pub(super) hidden_spaces_expanded: bool,
+    pub(super) hidden_agents_expanded: bool,
     pub(super) automations_expanded: bool,
     pub(super) collapsed_agent_groups: HashSet<String>,
     /// Workspace ids in the order the tree lists their spaces. Ids missing from
@@ -54,6 +55,7 @@ impl Default for ClientTreeChrome {
             pinned_spaces: HashSet::new(),
             show_hidden_spaces: true,
             hidden_spaces_expanded: false,
+            hidden_agents_expanded: false,
             automations_expanded: false,
             collapsed_agent_groups: HashSet::new(),
             space_order: Vec::new(),
@@ -188,6 +190,7 @@ impl ClientTreeChrome {
             pinned_spaces: saved.pinned_spaces.into_iter().collect(),
             show_hidden_spaces: saved.show_hidden_spaces,
             hidden_spaces_expanded: saved.hidden_spaces_expanded,
+            hidden_agents_expanded: saved.hidden_agents_expanded,
             automations_expanded: saved.automations_expanded,
             collapsed_agent_groups: saved.collapsed_agent_groups.into_iter().collect(),
             space_order: saved.space_order,
@@ -235,6 +238,7 @@ impl ClientTreeChrome {
             pinned_spaces: sorted(&self.pinned_spaces),
             show_hidden_spaces: self.show_hidden_spaces,
             hidden_spaces_expanded: self.hidden_spaces_expanded,
+            hidden_agents_expanded: self.hidden_agents_expanded,
             automations_expanded: self.automations_expanded,
             collapsed_agent_groups: sorted(&self.collapsed_agent_groups),
             space_order: self.space_order.clone(),
@@ -402,6 +406,11 @@ pub(super) enum AgentPanelListEntry {
     /// The `pinned` section label at the very top of the sidebar.
     PinnedChatsHeader,
     AgentChatsHeader,
+    HiddenAgentsHeader {
+        count: usize,
+        collapsed: bool,
+        alert: bool,
+    },
     /// A pinned chat from any space, in pin order (the Cmd+1..9 order).
     PinnedTab(PinnedTabRow),
     /// Title of a named group of spaces from the overlay's `space_groups`.
@@ -477,6 +486,7 @@ impl FactoryGroupKind {
 pub(super) struct PinnedTabRow {
     pub(super) request: Option<String>,
     pub(super) agent: bool,
+    pub(super) hidden: bool,
     pub(super) workspace_id: String,
     pub(super) tab_id: String,
     pub(super) label: String,
@@ -546,6 +556,7 @@ pub(super) fn pinned_tab_entries(
         }
     }
     let mut block = None;
+    let mut numbered = 0;
     for (index, (pin, tab)) in live.into_iter().enumerate() {
         let agent = pin.role == Some(crate::api::schema::TabRole::Agent);
         if block != Some(agent) {
@@ -578,6 +589,10 @@ pub(super) fn pinned_tab_entries(
             .and_then(|states| states.get(&tab.tab_id))
             .copied()
             .unwrap_or((status, lane_is_idle(tag, status, tab.work_status.is_some())));
+        let hidden = agent && pin.hidden;
+        if !hidden {
+            numbered += 1;
+        }
         out.push(AgentPanelListEntry::PinnedTab(PinnedTabRow {
             request: agent
                 .then(|| {
@@ -589,6 +604,7 @@ pub(super) fn pinned_tab_entries(
                 })
                 .flatten(),
             agent,
+            hidden: agent && pin.hidden,
             workspace_id: pin.workspace_id.clone(),
             tab_id: pin.tab_id.clone(),
             label: super::render::desk_label(tab.label.clone(), tab.desk_count),
@@ -600,7 +616,11 @@ pub(super) fn pinned_tab_entries(
             failed: tag.is_some_and(|tag| {
                 tag.done && tag.attention == crate::factory_overlay::Attention::Act
             }),
-            shortcut: if index < 9 { index + 1 } else { 0 },
+            shortcut: if !hidden && numbered <= 9 {
+                numbered
+            } else {
+                0
+            },
             slot: index,
             active: snapshot.focused_workspace_id.as_deref() == Some(tab.workspace_id.as_str())
                 && tab.focused,
@@ -611,6 +631,49 @@ pub(super) fn pinned_tab_entries(
         out.clear();
     }
     out
+}
+
+pub(super) fn folded_pinned_tab_entries(
+    snapshot: &ClientShellSnapshot,
+    overlay: Option<&crate::factory_overlay::FactoryOverlay>,
+    expanded: bool,
+) -> Vec<AgentPanelListEntry> {
+    let entries = pinned_tab_entries(snapshot, overlay);
+    let mut visible = Vec::new();
+    let mut hidden = Vec::new();
+    let mut plain = Vec::new();
+    let mut has_agents = false;
+    for entry in entries {
+        match entry {
+            AgentPanelListEntry::AgentChatsHeader => has_agents = true,
+            AgentPanelListEntry::PinnedTab(row) if row.hidden => hidden.push(row),
+            AgentPanelListEntry::PinnedChatsHeader => {
+                plain.push(AgentPanelListEntry::PinnedChatsHeader)
+            }
+            AgentPanelListEntry::PinnedTab(row) if !row.agent => {
+                plain.push(AgentPanelListEntry::PinnedTab(row))
+            }
+            other => visible.push(other),
+        }
+    }
+    if has_agents {
+        visible.insert(0, AgentPanelListEntry::AgentChatsHeader);
+    }
+    if !hidden.is_empty() {
+        let alert = hidden.iter().any(|row| {
+            row.request.is_some() || row.status == crate::api::schema::AgentStatus::Blocked
+        });
+        visible.push(AgentPanelListEntry::HiddenAgentsHeader {
+            count: hidden.len(),
+            collapsed: !expanded,
+            alert: !expanded && alert,
+        });
+        if expanded {
+            visible.extend(hidden.into_iter().map(AgentPanelListEntry::PinnedTab));
+        }
+    }
+    visible.extend(plain);
+    visible
 }
 
 /// Status and idle ring of every factory tab row the spaces tree builds for
@@ -953,7 +1016,7 @@ pub(super) fn tree_list_entries_with_overlay(
     if priority.ranked() {
         workspace_order.sort_by_key(|id| priority.space_rank(id));
     }
-    let mut out = pinned_tab_entries(snapshot, overlay);
+    let mut out = folded_pinned_tab_entries(snapshot, overlay, tree.hidden_agents_expanded);
     if let Some(overlay) =
         overlay.filter(|overlay| overlay.tabs.values().any(|tag| tag.section.is_some()))
     {
@@ -2627,6 +2690,7 @@ fn group_spaces(
             entry,
             AgentPanelListEntry::FactoryGoalPicker { .. }
                 | AgentPanelListEntry::AgentChatsHeader
+                | AgentPanelListEntry::HiddenAgentsHeader { .. }
                 | AgentPanelListEntry::PinnedChatsHeader
                 | AgentPanelListEntry::PinnedTab(_)
         ) {
@@ -2673,6 +2737,7 @@ fn reorder_spaces(
             entry,
             AgentPanelListEntry::FactoryGoalPicker { .. }
                 | AgentPanelListEntry::AgentChatsHeader
+                | AgentPanelListEntry::HiddenAgentsHeader { .. }
                 | AgentPanelListEntry::PinnedChatsHeader
                 | AgentPanelListEntry::PinnedTab(_)
         ) {
@@ -3420,6 +3485,13 @@ impl ClientShellState {
                 .iter()
                 .filter(|tab| tab.workspace_id == workspace.workspace_id)
             {
+                if snapshot
+                    .pinned_tabs
+                    .iter()
+                    .any(|pin| pin.tab_id == tab.tab_id && pin.hidden)
+                {
+                    continue;
+                }
                 let tag = overlay.and_then(|overlay| overlay.tab(&tab.tab_id));
                 let mode = tag.map_or(TabMode::Active, |tag| tag.mode);
                 let parent_mode = tag

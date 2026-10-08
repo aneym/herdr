@@ -188,6 +188,8 @@ impl ClientContextMenuOverlay {
                 pinned,
                 agent,
                 supports_role,
+                hidden,
+                supports_hidden,
                 ..
             } => {
                 let mut items = vec![
@@ -196,6 +198,12 @@ impl ClientContextMenuOverlay {
                     item("Close", Action::Close),
                     item(if *pinned { "Unpin" } else { "Pin" }, Action::TogglePin),
                 ];
+                if *agent && *supports_hidden {
+                    items.push(item(
+                        if *hidden { "Show in Agents" } else { "Hide" },
+                        Action::ToggleHidden,
+                    ));
+                }
                 if *supports_role {
                     items.push(item(
                         if *agent {
@@ -212,12 +220,20 @@ impl ClientContextMenuOverlay {
                 pinned,
                 agent,
                 supports_role,
+                hidden,
+                supports_hidden,
                 ..
             } => {
                 let mut items = vec![item(
                     if *pinned { "Unpin" } else { "Pin" },
                     Action::TogglePin,
                 )];
+                if *agent && *supports_hidden {
+                    items.push(item(
+                        if *hidden { "Show in Agents" } else { "Hide" },
+                        Action::ToggleHidden,
+                    ));
+                }
                 if *supports_role {
                     items.push(item(
                         if *agent {
@@ -554,6 +570,11 @@ impl ClientShellState {
                     .iter()
                     .any(|pin| pin.tab_id == tab_id && pin.role.is_some()),
                 supports_role: self.endpoint_supports_tab_role(&self.active_endpoint_id),
+                supports_hidden: self.endpoint_supports_tab_hidden(&self.active_endpoint_id),
+                hidden: snapshot
+                    .pinned_tabs
+                    .iter()
+                    .any(|pin| pin.tab_id == tab_id && pin.hidden),
                 pinned,
             },
             x,
@@ -664,6 +685,8 @@ impl ClientShellState {
                 pinned,
                 agent,
                 supports_role,
+                hidden,
+                supports_hidden,
             } => {
                 if action == ClientContextMenuAction::TogglePin {
                     // The endpoint owns the pin order; the next snapshot redraws.
@@ -678,6 +701,11 @@ impl ClientShellState {
                         outcome,
                     );
                     outcome.repaint = true;
+                } else if action == ClientContextMenuAction::ToggleHidden
+                    && agent
+                    && supports_hidden
+                {
+                    self.push_tab_hidden(self.active_endpoint_id.clone(), tab_id, !hidden, outcome);
                 } else if action == ClientContextMenuAction::ToggleRole && supports_role {
                     self.push_tab_role(self.active_endpoint_id.clone(), tab_id, !agent, outcome);
                 } else {
@@ -689,10 +717,17 @@ impl ClientShellState {
                 tab_id,
                 agent,
                 supports_role,
+                hidden,
+                supports_hidden,
                 ..
             } => {
                 if action == ClientContextMenuAction::TogglePin {
                     self.toggle_endpoint_chat_pin(endpoint_id, tab_id, outcome);
+                } else if action == ClientContextMenuAction::ToggleHidden
+                    && agent
+                    && supports_hidden
+                {
+                    self.push_tab_hidden(endpoint_id, tab_id, !hidden, outcome);
                 } else if action == ClientContextMenuAction::ToggleRole && supports_role {
                     self.push_tab_role(endpoint_id, tab_id, !agent, outcome);
                 }

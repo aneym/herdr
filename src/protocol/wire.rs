@@ -989,6 +989,8 @@ pub struct ClientShellPinnedTab {
     /// ClientShellSnapshot variant is rejected by current clients.
     #[serde(default, deserialize_with = "crate::api::schema::deserialize_pin_role")]
     pub role: Option<crate::api::schema::TabRole>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

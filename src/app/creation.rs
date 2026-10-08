@@ -255,6 +255,11 @@ impl App {
                 .get(&tab_id)
                 .filter(|desk| !desk.info.items.is_empty())
                 .map(|desk| desk.info.clone()),
+            hidden: self
+                .state
+                .pinned_tabs
+                .iter()
+                .any(|pin| pin.tab_id == tab_id && pin.hidden),
             role: self
                 .state
                 .pinned_tabs

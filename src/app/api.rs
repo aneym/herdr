@@ -1205,6 +1205,7 @@ impl App {
             Method::DeskList(params) => return self.handle_desk_list(request.id, params),
             Method::DeskRead(params) => return self.handle_desk_read(request.id, params),
             Method::TabSetRole(params) => return self.handle_tab_set_role(request.id, params),
+            Method::TabSetHidden(params) => return self.handle_tab_set_hidden(request.id, params),
             Method::TabPinMove(params) => return self.handle_tab_pin_move(request.id, params),
             Method::TabClose(target) => return self.handle_tab_close(request.id, target),
             Method::AgentsList(_) => return self.handle_agents_list(request.id),

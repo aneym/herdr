@@ -2305,6 +2305,7 @@ fn focusing_a_tab_or_workspace_reveals_its_agent_group_unless_pinned() {
                 .push(crate::app::state::PinnedTab {
                     tab_id: other_tab_id.clone(),
                     priority: 0,
+                    hidden: false,
                     role,
                 });
         }

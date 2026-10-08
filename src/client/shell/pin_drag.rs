@@ -302,6 +302,59 @@ impl ClientShellState {
         outcome.repaint = true;
     }
 
+    pub(super) fn endpoint_supports_tab_hidden(&self, endpoint_id: &ClientEndpointId) -> bool {
+        self.endpoint_is_online(endpoint_id)
+            && self
+                .endpoints
+                .iter()
+                .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+                .and_then(|endpoint| endpoint.methods.as_ref())
+                .is_some_and(|methods| methods.contains("tab.set_hidden"))
+    }
+
+    pub(super) fn push_tab_hidden(
+        &mut self,
+        endpoint_id: ClientEndpointId,
+        tab_id: String,
+        hidden: bool,
+        outcome: &mut ClientShellInput,
+    ) {
+        if !self.endpoint_supports_tab_hidden(&endpoint_id) {
+            return;
+        }
+        let Some(boot_id) = self
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+            .and_then(|endpoint| endpoint.snapshot.as_deref())
+            .map(|snapshot| snapshot.boot_id.clone())
+        else {
+            return;
+        };
+        let id = format!("client-shell:{}", self.next_request_id);
+        self.next_request_id = self.next_request_id.saturating_add(1);
+        self.pending_requests.insert(
+            id.clone(),
+            PendingEndpointRequest {
+                boot_id: boot_id.clone(),
+                method_name: "tab.set_hidden".into(),
+                confirmation_workspace_id: None,
+                kind: PendingEndpointKind::Generic,
+            },
+        );
+        outcome.actions.push(ClientShellAction::Endpoint {
+            endpoint_id,
+            boot_id,
+            request: Box::new(crate::api::schema::Request {
+                id,
+                method: crate::api::schema::Method::TabSetHidden(
+                    crate::api::schema::TabSetHiddenParams { tab_id, hidden },
+                ),
+            }),
+        });
+        outcome.repaint = true;
+    }
+
     fn endpoint_supports_pin_move(&self, endpoint_id: &ClientEndpointId) -> bool {
         self.endpoint_is_online(endpoint_id)
             && self

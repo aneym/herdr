@@ -809,6 +809,7 @@ fn panel_next_close_leaves_pinned_successor_to_server() {
         snapshot
             .pinned_tabs
             .push(crate::protocol::ClientShellPinnedTab {
+                hidden: false,
                 role: Some(crate::api::schema::TabRole::Agent),
                 tab_id: "tab_1".into(),
                 workspace_id: "ws_1".into(),

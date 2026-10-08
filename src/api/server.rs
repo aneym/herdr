@@ -671,6 +671,7 @@ pub(crate) fn api_method_name(method: &Method) -> &'static str {
         Method::DeskList(_) => "desk.list",
         Method::DeskRead(_) => "desk.read",
         Method::TabSetRole(_) => "tab.set_role",
+        Method::TabSetHidden(_) => "tab.set_hidden",
         Method::TabPinMove(_) => "tab.pin_move",
         Method::TabClose(_) => "tab.close",
         Method::AgentList(_) => "agent.list",
