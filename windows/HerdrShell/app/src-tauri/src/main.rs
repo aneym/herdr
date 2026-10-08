@@ -139,6 +139,7 @@ fn main() {
             bridge::attach_close,
             bridge::open_url,
             bridge::clipboard_read,
+            bridge::clipboard_read_image,
             bridge::clipboard_write
         ])
         .setup(|app| {

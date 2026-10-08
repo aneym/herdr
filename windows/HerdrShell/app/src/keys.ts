@@ -34,8 +34,24 @@ export function encodeShiftEnter(mode: Pick<Mode, "kittyFlags" | "modifyOtherKey
   return mode.kittyFlags > 0 ? "\x1b[13;2u" : mode.modifyOtherKeys >= 2 ? "\x1b[27;2;13~" : "\x1b\r";
 }
 export interface Copier { has: () => boolean; copy: () => Promise<boolean>; clear: () => void }
-export interface KeyTarget { term: Terminal; mode: Mode; send: (text: string) => Promise<void>; shortcut: (event: KeyboardEvent) => boolean; copier: Copier }
-export async function paste(term: Terminal) { term.paste(await bridge.clipboardRead()); }
+export interface KeyTarget { term: Terminal; machine?: string; mode: Mode; send: (text: string) => Promise<void>; shortcut: (event: KeyboardEvent) => boolean; copier: Copier }
+export async function paste(term: Terminal, machine?: string) {
+  // Mac reads text first, including an empty string. Only image-only user pastes
+  // upload; OSC 52 clipboard reads continue to use the text-only native command.
+  let text: string;
+  try { text = await bridge.clipboardRead(); }
+  catch (textError) {
+    const image = await bridge.clipboardReadImage();
+    if (image === null) throw textError;
+    const bytes = image.length * 3 / 4 - (image.endsWith("==") ? 2 : image.endsWith("=") ? 1 : 0);
+    if (!machine || bytes === 0 || bytes > 16 * 1024 * 1024) throw new Error("Clipboard image upload failed");
+    const reply = await bridge.api(machine, "clipboard.image.write", { extension: "png", data_base64: image });
+    if (!reply || typeof reply !== "object" || !("paste_text" in reply) || typeof reply.paste_text !== "string" || !reply.paste_text) throw new Error("Clipboard image upload failed");
+    term.paste(reply.paste_text);
+    return;
+  }
+  term.paste(text);
+}
 // Both xterm keydown and control-pipe key requests use this decision path.
 export function handleKey(event: KeyboardEvent, target: KeyTarget): { handled: boolean; work?: Promise<void> } {
   if (event.type !== "keydown") return { handled: false };
@@ -44,7 +60,7 @@ export function handleKey(event: KeyboardEvent, target: KeyTarget): { handled: b
   // Ctrl+C copies a selection and otherwise interrupts; Ctrl+Shift+C only copies.
   if (event.ctrlKey && !event.altKey && key === "c" && (event.shiftKey || target.copier.has())) return { handled: true, work: target.copier.copy().then(() => {}) };
   if (!["control", "shift", "alt", "meta"].includes(key)) target.copier.clear();
-  if (event.ctrlKey && key === "v") return { handled: true, work: paste(target.term) };
+  if (event.ctrlKey && key === "v") return { handled: true, work: paste(target.term, target.machine) };
   if (event.key === "Enter" && !event.ctrlKey && !event.altKey && !event.metaKey) return { handled: true, work: target.send(event.shiftKey ? encodeShiftEnter(target.mode) : "\r") };
   return { handled: false };
 }

@@ -91,19 +91,62 @@ pub async fn api_request(
 ) -> Result<Value, Value> {
     let (endpoint, _) = machines.endpoints(&machine).map_err(Value::String)?;
     tauri::async_runtime::spawn_blocking(move || {
-        ApiClient::new(endpoint)
-            .request(&method, params)
-            .map_err(|e| match e {
-                ApiError::Server {
-                    code,
-                    message,
-                    reason,
-                } => serde_json::json!({"code": code, "message": message, "reason": reason}),
-                other => Value::String(other.to_string()),
-            })
+        (if method == "clipboard.image.write" {
+            clipboard_image_request(endpoint, params)
+        } else {
+            ApiClient::new(endpoint).request(&method, params)
+        })
+        .map_err(|e| match e {
+            ApiError::Server {
+                code,
+                message,
+                reason,
+            } => serde_json::json!({"code": code, "message": message, "reason": reason}),
+            other => Value::String(other.to_string()),
+        })
     })
     .await
     .map_err(|e| Value::String(e.to_string()))?
+}
+// Match the Mac clipboard exchange's request ID and 30-second deadline without
+// changing timeouts for ordinary API calls. A timed-out reply is never pasted.
+fn clipboard_image_request(
+    endpoint: herdr_shell_core::endpoint::Endpoint,
+    params: Value,
+) -> Result<Value, ApiError> {
+    use herdr_shell_core::endpoint::Conn;
+    use std::io::{BufRead, BufReader, Write};
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let result = (|| {
+            let mut stream = endpoint.connect()?;
+            if let Conn::Tcp(tcp) = &mut stream {
+                tcp.set_read_timeout(Some(Duration::from_secs(30)))?;
+                tcp.set_write_timeout(Some(Duration::from_secs(30)))?;
+            }
+            let mut body = serde_json::to_vec(&serde_json::json!({
+                "id": "shell:clipboard-image", "method": "clipboard.image.write", "params": params
+            }))
+            .map_err(|e| ApiError::InvalidResponse(e.to_string()))?;
+            body.push(b'\n');
+            stream.write_all(&body)?;
+            stream.flush()?;
+            let mut line = String::new();
+            BufReader::new(stream).read_line(&mut line)?;
+            let reply: Value = serde_json::from_str(&line)
+                .map_err(|e| ApiError::InvalidResponse(e.to_string()))?;
+            if let Some(error) = reply.get("error") {
+                return Err(ApiError::InvalidResponse(error.to_string()));
+            }
+            reply
+                .get("result")
+                .cloned()
+                .ok_or_else(|| ApiError::InvalidResponse("missing clipboard result".into()))
+        })();
+        let _ = tx.send(result);
+    });
+    rx.recv_timeout(Duration::from_secs(30))
+        .map_err(|e| ApiError::InvalidResponse(format!("clipboard image upload failed: {e}")))?
 }
 #[tauri::command]
 pub async fn snapshot(machines: State<'_, Machines>, machine: String) -> Result<Value, String> {
@@ -383,6 +426,33 @@ pub fn clipboard_read() -> Result<String, String> {
     arboard::Clipboard::new()
         .and_then(|mut c| c.get_text())
         .map_err(|e| e.to_string())
+}
+/// Image-only user pastes encode the native RGBA clipboard as PNG, never a
+/// client-local filename. No image is a normal clipboard state.
+#[tauri::command]
+pub fn clipboard_read_image() -> Result<Option<String>, String> {
+    let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+    let image = match clipboard.get_image() {
+        Ok(image) => image,
+        Err(arboard::Error::ContentNotAvailable) => return Ok(None),
+        Err(e) => return Err(e.to_string()),
+    };
+    let width = u32::try_from(image.width).map_err(|_| "Clipboard image too wide")?;
+    let height = u32::try_from(image.height).map_err(|_| "Clipboard image too tall")?;
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut bytes, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
+        writer
+            .write_image_data(&image.bytes)
+            .map_err(|e| e.to_string())?;
+    }
+    if bytes.is_empty() || bytes.len() > 16 * 1024 * 1024 {
+        return Err("Clipboard image upload failed: PNG exceeds 16 MiB".into());
+    }
+    Ok(Some(STANDARD.encode(bytes)))
 }
 #[tauri::command]
 pub fn clipboard_write(text: String) -> Result<(), String> {

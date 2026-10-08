@@ -74,7 +74,7 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
     };
     const send = (text: string) => sendBytes(new TextEncoder().encode(text));
     const copier = new PaneCopy(term, (method, params) => bridge.api(machine, method, params), () => pane.pane_id, text => bridge.clipboardWrite(text));
-    const keyTarget = () => ({ term, mode, send, copier, shortcut: (event: KeyboardEvent) => live.current.shortcut(event) });
+    const keyTarget = () => ({ term, machine, mode, send, copier, shortcut: (event: KeyboardEvent) => live.current.shortcut(event) });
     term.attachCustomKeyEventHandler(event => {
       const result = handleKey(event, keyTarget());
       if (result.handled) { event.preventDefault(); result.work?.catch(error); return false; }
@@ -130,7 +130,7 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
       });
     };
     const onWheel = (event: WheelEvent) => { if (mode.mouse) return; event.preventDefault(); event.stopPropagation(); wheel(event.deltaY * (event.deltaMode === 1 ? 1 : event.deltaMode === 2 ? term.rows : 1 / 40)); };
-    const onContext = (event: MouseEvent) => { event.preventDefault(); void (copier.has() ? copier.copy() : paste(term)).catch(error); };
+    const onContext = (event: MouseEvent) => { event.preventDefault(); void (copier.has() ? copier.copy() : paste(term, machine)).catch(error); };
     // The viewport cell under the pointer, clamped to the grid.
     const cellAt = (event: MouseEvent) => {
       const box = host.current?.querySelector(".xterm-screen")?.getBoundingClientRect();
