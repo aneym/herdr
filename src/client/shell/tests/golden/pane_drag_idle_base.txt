@@ -1,0 +1,42 @@
+# pane drag S3 idle frame, captured on the S3 base; regenerate only there
+fnv1a64 18b82963a4de424c
+|─────────────────────────│  one      two     +                                                     default|
+| agents     usage tree  ⊟│┌──────────────────────────────────────┐┌──────────────────────────────────────┐|
+|                         ││bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb││cccccccccccccccccccccccccccccccccccccc│|
+| alpha             ⚲ + ▾ ││bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb││cccccccccccccccccccccccccccccccccccccc│|
+|  one               ●  ⚲ ││bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb││cccccccccccccccccccccccccccccccccccccc│|
+|  two               ●  ⚲ ││bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb││cccccccccccccccccccccccccccccccccccccc│|
+| beta              ⚲ + ▾ ││bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb││cccccccccccccccccccccccccccccccccccccc│|
+|  three             ○  ⚲ ││bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb││cccccccccccccccccccccccccccccccccccccc│|
+|                         ││bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb││cccccccccccccccccccccccccccccccccccccc│|
+|                         ││bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb││cccccccccccccccccccccccccccccccccccccc│|
+|                         ││bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb││cccccccccccccccccccccccccccccccccccccc│|
+|                         ││bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb││cccccccccccccccccccccccccccccccccccccc│|
+|                         ││bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb││cccccccccccccccccccccccccccccccccccccc│|
+|                         ││bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb││cccccccccccccccccccccccccccccccccccccc│|
+|                         ││bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb││cccccccccccccccccccccccccccccccccccccc│|
+|                         ││bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb││cccccccccccccccccccccccccccccccccccccc│|
+|                         ││bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb││cccccccccccccccccccccccccccccccccccccc│|
+|                         ││bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb││cccccccccccccccccccccccccccccccccccccc│|
+|                         ││bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb││cccccccccccccccccccccccccccccccccccccc│|
+|                         │└──────────────────────────────────────┘└──────────────────────────────────────┘|
+|                         │┌──────────────────────────────────────────────────────────────────────────────┐|
+|                         ││aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa│|
+|                         ││aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa│|
+|                         ││aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa│|
+|                         ││aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa│|
+|                         ││aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa│|
+|                         ││aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa│|
+|                         ││aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa│|
+|                         ││aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa│|
+|                         ││aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa│|
+|                         ││aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa│|
+|                         ││aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa│|
+|                         ││aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa│|
+|                         ││aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa│|
+|                         ││aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa│|
+|                         ││aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa│|
+|                         ││aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa│|
+|                         ││aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa│|
+|                         ││aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa│|
+| new                 men«│└──────────────────────────────────────────────────────────────────────────────┘|
