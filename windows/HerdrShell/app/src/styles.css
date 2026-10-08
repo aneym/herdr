@@ -14,6 +14,7 @@ button:focus-visible { outline: 1px solid var(--shell-muted); outline-offset: -1
 .select-tab { font: inherit; display: flex; align-items: center; gap: var(--shell-space-sidebar-row-gap); width: 100%; min-width: 0; height: 100%; text-align: left; }
 .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 .status { font-size: var(--shell-type-glyph); color: var(--shell-muted); flex-shrink: 0; }
+.status.state-dot { display: inline-block; background: currentColor; border-radius: 50%; }
 .status.working { color: var(--shell-ok); }.status.blocked { color: var(--shell-bad); }.status.done { color: var(--shell-warn); }
 .muted { color: var(--shell-muted); }.space-label { max-width: var(--shell-space-step55); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--shell-type-row-trailing); }
 .pin { display: none; color: var(--shell-muted); flex-shrink: 0; }.tab-row:hover .pin, .tab-row:focus-within .pin { display: block; }.pin.is-pinned { color: var(--shell-text); }
@@ -130,8 +131,8 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 .machine-row button[aria-pressed="true"] { color: var(--shell-text); background: var(--shell-selection); }
 .status.up { color: var(--shell-ok); }.status.connecting { color: var(--shell-warn); }.status.down { color: var(--shell-muted); }
 
-.areas-mode { display: flex; gap: var(--shell-space-step4); padding: var(--shell-space-step8); }
-.areas-mode button { flex: 1; border-radius: var(--shell-radius-control); padding: var(--shell-space-step4); color: var(--shell-muted); }
+.areas-mode { display: flex; align-items: center; justify-content: flex-end; gap: var(--shell-space-step4); height: calc(var(--shell-space-step32) + var(--shell-space-step4)); padding-left: var(--shell-space-step52); }
+.areas-mode button { flex: 0 0 auto; border-radius: var(--shell-radius-curve5); padding: var(--shell-space-step3) var(--shell-space-step8); font-size: var(--shell-type-size12); color: var(--shell-muted); }
 .areas-mode button[aria-pressed="true"], .areas-chips button[aria-pressed="true"] { background: var(--shell-selection); color: var(--shell-text); }
 .areas-chips { display: flex; gap: var(--shell-space-step2); padding: var(--shell-space-step4) var(--shell-space-step8); }
 .areas-chips button { flex: 1; font-size: var(--shell-type-size12); padding: var(--shell-space-step2) 0; border-radius: var(--shell-radius-control); color: var(--shell-muted); }
@@ -211,3 +212,12 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 .factory-usage-glyph { width: calc(var(--shell-type-glyph) * .64); height: calc(var(--shell-type-glyph) * .64); border-radius: 50%; background: currentColor; flex-shrink: 0; }
 .factory-usage-glyph.blocked { border-radius: calc(var(--shell-radius-row) * .3); }
 .factory-usage-glyph.idle { background: transparent; border: 1px solid currentColor; }
+
+.docs-header { display: flex; align-items: center; flex-shrink: 0; }
+.docs-header .docs-tabs { flex: 1; min-width: 0; }
+.docs-header > button { padding: var(--shell-space-step4) var(--shell-space-step7); }
+.docs-address { display: flex; align-items: center; gap: var(--shell-space-step8); height: calc(var(--shell-space-step24) + var(--shell-space-step2)); padding: 0 var(--shell-space-step8) 0 calc(var(--shell-space-step52) + var(--shell-space-step24) + var(--shell-space-step2)); color: var(--shell-muted); }
+.docs-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+.docs-address button { flex: 0 0 calc(var(--shell-space-step32) + var(--shell-space-step12)); color: var(--shell-muted); }
+.docs-add { padding: var(--shell-space-step4) var(--shell-space-step8); }
+.docs-add input { width: 100%; font: inherit; color: var(--shell-text); background: var(--shell-surface); border: 1px solid var(--shell-line); }

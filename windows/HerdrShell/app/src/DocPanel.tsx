@@ -70,9 +70,11 @@ export function useDocs(machine: string, tab: string | null, snapshot: Snapshot,
   }, [machine, folder, open]);
   return { items: useMemo(() => open ? docItems(lane, found.folder === folder ? found.paths : new Set()) : [], [lane, found, folder, open]), error };
 }
-export default function DocPanel({ machine, tab, items, active, select, error: catalogError }: { machine: string; tab?: string | null; items: DocItem[]; active: string | null; select: (name: string) => void; error: string }) {
+export default function DocPanel({ machine, tab, items, active, select, error: catalogError, close }: { machine: string; tab?: string | null; items: DocItem[]; active: string | null; select: (name: string) => void; error: string; close?: () => void }) {
   const item = items.find(item => docKey(item) === active);
   const [content, setContent] = useState({ path: "", text: "", error: "", source: "" });
+  const [adding, setAdding] = useState(false);
+  const [address, setAddress] = useState("");
   const path = item?.path;
   useEffect(() => {
     if (!path) return;
@@ -110,10 +112,22 @@ export default function DocPanel({ machine, tab, items, active, select, error: c
   const html = useMemo(() => renderMarkdown(content.path === path ? content.text : ""), [content, path]);
   const open = (url: string) => { if (/^(https?:|mailto:)/i.test(url)) void bridge.openUrl(url).catch(error => setContent(value => ({ ...value, error: String(error) }))); };
   return <section className="docs" aria-label="Documents">
-    <div className="docs-tabs" role="tablist" aria-label="Documents">{items.map(doc => <button key={docKey(doc)} role="tab" aria-selected={docKey(doc) === active} onClick={() => select(docKey(doc))}>{doc.name}</button>)}</div>
+    <div className="docs-header"><div className="docs-tabs" role="tablist" aria-label="Documents">{items.map(doc => <button key={docKey(doc)} role="tab" aria-selected={docKey(doc) === active} onClick={() => select(docKey(doc))}>{doc.name}</button>)}</div>
+      <button aria-label="Add document" onClick={() => setAdding(value => !value)}>+</button>
+      <button aria-label="Close document" onClick={() => {
+        if (item?.id && tab) void bridge.api(machine, "desk.close", { tab_id: tab, item: item.id }).catch(error => setContent(value => ({ ...value, error: String(error) })));
+        else close?.();
+      }}>✕</button>
+    </div>
+    {adding && <form className="docs-add" onSubmit={event => {
+      event.preventDefault(); const ref = address.trim();
+      if (!ref || !tab) return;
+      void bridge.api(machine, "desk.open", { tab_id: tab, ref, opened_by: "user" }).then(() => { setAddress(""); setAdding(false); }, error => setContent(value => ({ ...value, error: String(error) })));
+    }}><input autoFocus aria-label="Document address" placeholder="https://… or a file path" value={address} onChange={event => setAddress(event.target.value)} onKeyDown={event => { if (event.key === "Escape") setAdding(false); }} /></form>}
+    {item && <div className="docs-address"><span className="docs-path" title={path ?? item.url}>{path ?? item.url}</span><button aria-label="Open document externally" className={item.url && /^(https?:|mailto:)/i.test(item.url) ? "muted" : undefined} disabled={!item.url || !/^(https?:|mailto:)/i.test(item.url)} title={!item.url ? "File is on Studio" : undefined} onClick={() => { if (item.url) open(item.url); }}>Open</button></div>}
     <div className="docs-body" role="tabpanel">
       {(catalogError || content.error) && <p className="muted" role="status">{catalogError || content.error}</p>}
-      {item?.kind === "web" ? <>{item.url && /^(https?:|mailto:)/i.test(item.url) && <button className="muted" onClick={() => open(item.url!)}>Open {item.name} externally</button>}{item.url && webUrl(item.url) && <iframe title={item.name} src={item.url} sandbox="allow-scripts allow-forms allow-same-origin" style={{ width: "100%", height: "100%", border: 0 }} />}</> : content.source ? <iframe title={item?.name} src={content.source} sandbox="" style={{ width: "100%", height: "100%", border: 0 }} /> : item?.kind === "file" && item.mime !== "text/markdown" ? <pre>{content.text}</pre> : <div className="chat-markdown" onAuxClick={event => { if ((event.target as HTMLElement).closest("a")) event.preventDefault(); }} onClick={event => {
+      {item?.kind === "web" ? <>{item.url && webUrl(item.url) && <iframe title={item.name} src={item.url} sandbox="allow-scripts allow-forms allow-same-origin" style={{ width: "100%", height: "100%", border: 0 }} />}</> : content.source ? <iframe title={item?.name} src={content.source} sandbox="" style={{ width: "100%", height: "100%", border: 0 }} /> : item?.kind === "file" && item.mime !== "text/markdown" ? <pre>{content.text}</pre> : <div className="chat-markdown" onAuxClick={event => { if ((event.target as HTMLElement).closest("a")) event.preventDefault(); }} onClick={event => {
         const anchor = (event.target as HTMLElement).closest("a");
         if (anchor) { event.preventDefault(); const url = anchor.getAttribute("href"); if (url) open(url); }
       }} dangerouslySetInnerHTML={{ __html: html }} />}
