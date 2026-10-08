@@ -4,15 +4,22 @@
 Runs on Studio (macOS), stdlib only. All real work happens on the PC over
 `ssh pc`; PowerShell helpers are scp'd to C:\\Users\\aneym\\winshell\\scripts.
 
-Subcommands: sync, build, install, run, ctl, shot, status.
+Subcommands: sync, build, fetch, install, run, ctl, shot, status.
+
+Windows App Control on the PC blocks cargo's freshly linked build scripts, so
+the normal path builds on a GitHub Windows runner (windows-shell.yml):
+`fetch --sha <sha> --dispatch` copies the built exe and installer to the PC and
+`install --artifact <sha> --relaunch` swaps the exe in place.
 """
 
 import argparse
 import base64
+import hashlib
 import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -31,6 +38,8 @@ R_SHARED_SHELL = "C:/Users/aneym/shell"
 SYNC_PATHS = ("windows/HerdrShell", "shell")
 
 PS = "powershell -NoProfile -ExecutionPolicy Bypass"
+GH_REPO = "aneym/herdr"
+WORKFLOW = "windows-shell.yml"
 
 
 def remote(cmd, input_data=None, stream=False, timeout=None):
@@ -206,16 +215,91 @@ def cmd_build(_args):
     sys.exit(rc)
 
 
+def gh(*args, timeout=120):
+    p = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=timeout)
+    return p.returncode, p.stdout.strip()
+
+
+def find_artifact_run(sha):
+    """Run id of the newest unexpired herdr-shell-<sha> artifact, or None."""
+    rc, out = gh("api", f"repos/{GH_REPO}/actions/artifacts?name=herdr-shell-{sha}&per_page=10",
+                 "--jq", "[.artifacts[] | select(.expired | not) | .workflow_run.id][0] // empty")
+    return out if rc == 0 and out else None
+
+
+def full_sha(ref):
+    # The launchd fanout runs an installed copy outside any checkout.
+    if len(ref) == 40 and all(c in "0123456789abcdef" for c in ref):
+        return ref
+    out =subprocess.run(["git", "-C", str(REPO), "rev-parse", "--verify", f"{ref}^{{commit}}"],
+                         capture_output=True, text=True)
+    if out.returncode != 0:
+        print(f"unknown commit {ref}", file=sys.stderr)
+        sys.exit(2)
+    return out.stdout.strip()
+
+
+def cmd_fetch(args):
+    sha = full_sha(args.sha)
+    run = find_artifact_run(sha)
+    if not run and args.dispatch:
+        rc, out = gh("workflow", "run", WORKFLOW, "-R", GH_REPO, "--ref", "main", "-f", f"ref={sha}")
+        if rc != 0:
+            print(f"dispatch failed: {out}", file=sys.stderr)
+            sys.exit(1)
+        print(f"dispatched {WORKFLOW} for {sha}")
+        deadline = time.monotonic() + 60 * 60
+        while not run and time.monotonic() < deadline:
+            time.sleep(30)
+            run = find_artifact_run(sha)
+    if not run:
+        print(f"no herdr-shell-{sha} artifact (dispatch with --dispatch)", file=sys.stderr)
+        sys.exit(1)
+    with tempfile.TemporaryDirectory(prefix="herdr-shell-") as tmp:
+        rc, out = gh("run", "download", run, "-R", GH_REPO, "-n", f"herdr-shell-{sha}", "-D", tmp,
+                     timeout=600)
+        if rc != 0:
+            print(f"download failed: {out}", file=sys.stderr)
+            sys.exit(1)
+        d = Path(tmp)
+        stamp = d / "build-sha.txt"
+        if stamp.exists() and stamp.read_text().strip() != sha:
+            print("artifact build-sha.txt does not match", file=sys.stderr)
+            sys.exit(1)
+        for line in (d / "SHA256SUMS").read_text().splitlines():
+            digest, name = line.split(maxsplit=1)
+            if hashlib.sha256((d / name).read_bytes()).hexdigest().upper() != digest.upper():
+                print(f"checksum mismatch for {name}", file=sys.stderr)
+                sys.exit(1)
+        bootstrap()
+        for local, name in ((d / "HerdrShell.exe", f"HerdrShell-{sha}.exe"),
+                            (d / f"HerdrShell-setup-{sha}.exe", f"HerdrShell-setup-{sha}.exe")):
+            if scp_to(local, f"{R_OUT}/{name}") != 0:
+                print(f"scp failed for {name}", file=sys.stderr)
+                sys.exit(1)
+    print(f"fetched {sha} (run {run}) -> {R_OUT}")
+
+
 def cmd_install(args):
     bootstrap()
-    argv = ["-Sha", args.sha] if args.sha else []
-    rc, out = ps_file("install.ps1", *argv)
-    print(out.strip())
-    if rc != 0 or not args.relaunch:
-        sys.exit(rc)
-    rc = launch_app(argparse.Namespace(force_idle=True, test_window=False))
-    if rc != 0:
-        sys.exit(rc)
+    want = None
+    if getattr(args, "artifact", ""):
+        # install_copy.ps1 relaunches and rolls back itself; no installer runs.
+        want = full_sha(args.artifact)
+        argv = ["-Sha", want] + (["-Relaunch"] if args.relaunch else [])
+        rc, out = ps_file("install_copy.ps1", *argv)
+        print(out.strip())
+        if rc != 0 or not args.relaunch:
+            sys.exit(rc)
+    else:
+        argv = ["-Sha", args.sha] if args.sha else []
+        rc, out = ps_file("install.ps1", *argv)
+        print(out.strip())
+        if rc != 0 or not args.relaunch:
+            sys.exit(rc)
+        rc = launch_app(argparse.Namespace(force_idle=True, test_window=False))
+        if rc != 0:
+            sys.exit(rc)
     deadline = time.monotonic() + 60
     summary = {"machine_state": "unavailable", "rows": 0, "panes": 0}
     while time.monotonic() < deadline:
@@ -225,6 +309,13 @@ def cmd_install(args):
             summary = {"machine_state": ui.get("machine", {}).get("state"),
                        "rows": len(ui.get("rows", [])), "panes": len(ui.get("panes", []))}
             if rc == 0 and ui.get("ok") is True and summary["machine_state"] == "up":
+                if want:
+                    _rc, pong = ctl_send({"cmd": "ping"}, timeout=10)
+                    summary["commit"] = json.loads(pong).get("commit")
+                    if summary["commit"] != want:
+                        print(json.dumps(summary))
+                        print(f"running commit is not {want}", file=sys.stderr)
+                        sys.exit(1)
                 print(json.dumps(summary))
                 sys.exit(0)
         except (subprocess.TimeoutExpired, ValueError, TypeError, AttributeError):
@@ -347,8 +438,14 @@ def main():
     p.add_argument("--src", default=str(REPO), help="source repository directory")
     p.set_defaults(fn=cmd_build)
 
-    p = sub.add_parser("install", help="run the NSIS installer silently")
+    p = sub.add_parser("fetch", help="copy a GitHub-built exe and installer to the PC")
+    p.add_argument("--sha", default="origin/main", help="commit to fetch (default origin/main)")
+    p.add_argument("--dispatch", action="store_true", help="run windows-shell.yml when no artifact exists")
+    p.set_defaults(fn=cmd_fetch)
+
+    p = sub.add_parser("install", help="run the NSIS installer silently, or swap in a fetched exe")
     p.add_argument("--sha", default="")
+    p.add_argument("--artifact", default="", help="commit fetched with `fetch`; copies the exe, no installer")
     p.add_argument("--relaunch", action="store_true", help="launch and verify the UI after installation")
     p.set_defaults(fn=cmd_install)
 

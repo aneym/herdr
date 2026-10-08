@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One Studio-side, game-guarded build/stage pass; never installs the shell."""
+"""One Studio-side, game-guarded fetch/stage pass; never installs the shell."""
 
 import fcntl
 import json
@@ -96,15 +96,14 @@ def run_pass(state):
         return 0
     # Build the shell-touching commit, not an unrelated newer main commit.
     git('checkout', '--detach', sha)
+    # App Control on the PC blocks local cargo builds; a GitHub Windows runner
+    # builds it and the PC only receives the files.
     log(f'building {sha}')
     result = subprocess.run([sys.executable, str(pc.HERE / 'pc.py'),
-                             'build', '--src', str(CHECKOUT)],
-                            capture_output=True, text=True, timeout=3600)
-    if result.returncode == 75:
-        log('build deferred by game guard')
-        return 75
+                             'fetch', '--sha', sha, '--dispatch'],
+                            capture_output=True, text=True, timeout=3900)
     if result.returncode:
-        raise RuntimeError(f'PC build failed ({result.returncode})')
+        raise RuntimeError(f'off-PC build or fetch failed ({result.returncode})')
     rc = pc.scp_to(pc.HERE / 'pc/stage.ps1', f'{pc.R_SCRIPTS}/stage.ps1')
     if rc:
         raise RuntimeError(f'stage helper upload failed ({rc})')
