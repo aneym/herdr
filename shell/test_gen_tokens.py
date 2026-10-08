@@ -163,5 +163,59 @@ class MotionTokenTests(unittest.TestCase):
                     self.assertAlmostEqual(got, want, places=6)
 
 
+# Explicit exemptions: zero is absence of layout; one logical unit is a hairline.
+# Percentages and runtime geometry are not fixed design dimensions. Generated files
+# are checked byte-for-byte by gen_tokens.py, not scanned as client consumers.
+EXEMPT_DIMENSIONS = {0, 1}
+GENERATED_DIMENSIONS = {"ShellTokens.swift", "tokens.css", "tokens.ts"}
+
+
+def raw_dimensions(path, source):
+    """File-boundary design contract: inspect actual shipped client consumers."""
+    source = re.sub(r"/\*.*?\*/|//[^\n]*", "", source, flags=re.S)
+    spans = []
+    if path.suffix == ".swift":
+        # Balanced padding arguments include ternaries and depth-based expressions.
+        for match in re.finditer(r"\.padding\(", source):
+            start = match.end()
+            depth, end = 1, start
+            while end < len(source) and depth:
+                depth += (source[end] == "(") - (source[end] == ")")
+                end += 1
+            spans.append((start, source[start:end - 1]))
+        for match in re.finditer(r"(?:\b(?:spacing|cornerRadius|size|ofSize)\s*:\s*|\.cornerRadius\s*=\s*|\bspacing\s*:\s*CGFloat\s*=\s*)([^,\n)}]+)", source):
+            spans.append((match.start(1), match.group(1)))
+    elif path.suffix == ".css":
+        for match in re.finditer(r"(?:^|[;{])\s*(?:padding[\w-]*|margin[\w-]*|gap|row-gap|column-gap|border[\w-]*radius|font-size|letter-spacing|(?:min-|max-)?(?:width|height)|inset|top|bottom|left|right)\s*:\s*([^;}]+)", source):
+            spans.append((match.start(1), match.group(1)))
+    else:
+        for match in re.finditer(r"\b(?:padding\w*|margin\w*|gap|rowGap|columnGap|borderRadius|fontSize)\s*:\s*([^,}\n]+)", source):
+            spans.append((match.start(1), match.group(1)))
+    failures = []
+    for start, expression in spans:
+        for number in re.finditer(r"(?<![\w.])-?\d+(?:\.\d+)?(?![\w.])", expression):
+            tail = expression[number.end():]
+            before = expression[:number.start()].rstrip()
+            if path.suffix == ".css" and not tail.startswith("px"):
+                continue  # percentages, vh/vw and unitless layout factors
+            if tail.startswith("%") or before.endswith(("==", "!=", "<=", ">=", "<", ">")):
+                continue  # branch predicates are not dimension values
+            if abs(float(number.group())) in EXEMPT_DIMENSIONS:
+                continue
+            line = source.count("\n", 0, start + number.start()) + 1
+            failures.append(f"{path}:{line}: raw dimension {number.group()}")
+    return failures
+
+
+class ClientDimensionTests(unittest.TestCase):
+    def test_shipped_clients_use_shared_dimensions(self):
+        failures = []
+        for root, suffixes in ((gen.MAC_DIR, {".swift"}), (gen.WEB_DIR, {".css", ".tsx"})):
+            for path in sorted(root.rglob("*")):
+                if path.suffix in suffixes and path.name not in GENERATED_DIMENSIONS and not path.name.endswith(".test.tsx"):
+                    failures.extend(raw_dimensions(path, path.read_text()))
+        self.assertEqual(failures, [], "\n" + "\n".join(failures))
+
+
 if __name__ == "__main__":
     unittest.main()
