@@ -60,7 +60,7 @@ pub(super) fn snapshot() -> ClientShellSnapshot {
             focused: true,
             agent_status: AgentStatus::Idle,
             work_status: None,
-                home_location: None,
+            home_location: None,
         }],
         panes: vec![ClientShellPane {
             tokens: Default::default(),

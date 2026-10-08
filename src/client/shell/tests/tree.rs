@@ -18,7 +18,7 @@ fn tab(tab_id: &str, workspace_id: &str, number: usize, label: &str) -> ClientSh
         focused: false,
         agent_status: AgentStatus::Idle,
         work_status: None,
-                home_location: None,
+        home_location: None,
     }
 }
 

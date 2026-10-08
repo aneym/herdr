@@ -615,7 +615,7 @@ fn mobile_background_workspace_uses_its_own_active_tab_status() {
         focused: false,
         agent_status: AgentStatus::Idle,
         work_status: None,
-                home_location: None,
+        home_location: None,
     });
     projected.workspaces.push(ClientShellWorkspace {
         sort_rank: 0,
@@ -649,7 +649,7 @@ fn mobile_background_workspace_uses_its_own_active_tab_status() {
             focused: false,
             agent_status: AgentStatus::Idle,
             work_status: None,
-                home_location: None,
+            home_location: None,
         });
     }
     state.set_snapshot(Box::new(projected));

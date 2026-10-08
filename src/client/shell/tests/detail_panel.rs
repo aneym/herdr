@@ -575,7 +575,7 @@ fn overview_task_counts_follow_live_workflows_including_orchestrator() {
         focused: false,
         agent_status: AgentStatus::Working,
         work_status: None,
-                home_location: None,
+        home_location: None,
     })
     .collect();
     snapshot.panes = [

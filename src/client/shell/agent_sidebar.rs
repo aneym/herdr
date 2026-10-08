@@ -628,8 +628,8 @@ pub(super) fn render_pinned_tab_row(
         content_right
     };
     let budget = content_right.saturating_sub(name_x);
-    // Keep at least half the text budget for the chat title. The source space
-    // is secondary context and must yield even when its name is very long.
+    // Keep at least half the text budget for the chat title. The home glyph
+    // or plain pin's space label is secondary context and must yield.
     let trailing = match row.home_location {
         Some(crate::api::schema::HomeLocation::Cloud) => "☁",
         Some(crate::api::schema::HomeLocation::Local) => "⌂",
@@ -681,11 +681,13 @@ pub(super) fn render_pinned_tab_row(
             rect.y,
             space_width,
             &crate::ui::truncate_end(trailing, space_width as usize),
-            Style::default().fg(if row.home_location == Some(crate::api::schema::HomeLocation::Unsynced) {
-                status_color(crate::api::schema::AgentStatus::Done, palette)
-            } else {
-                palette.overlay0
-            }),
+            Style::default().fg(
+                if row.home_location == Some(crate::api::schema::HomeLocation::Unsynced) {
+                    status_color(crate::api::schema::AgentStatus::Done, palette)
+                } else {
+                    palette.overlay0
+                },
+            ),
         );
     }
     if slot.width > 0 && !hint.is_empty() {

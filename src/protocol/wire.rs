@@ -1103,7 +1103,10 @@ pub struct ClientShellWorktree {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientShellTab {
-    #[serde(default, deserialize_with = "crate::api::schema::tabs::deserialize_home_location")]
+    #[serde(
+        default,
+        deserialize_with = "crate::api::schema::tabs::deserialize_home_location"
+    )]
     pub home_location: Option<crate::api::schema::HomeLocation>,
     #[serde(default)]
     pub desk_count: usize,

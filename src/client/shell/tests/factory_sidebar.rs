@@ -29,7 +29,7 @@ fn fixture() -> (ClientShellSnapshot, FactoryOverlay) {
             focused: false,
             agent_status: AgentStatus::Working,
             work_status: None,
-                home_location: None,
+            home_location: None,
         });
     }
     snapshot.agents.push(ClientShellAgent {
@@ -257,7 +257,7 @@ fn focused_agent_half_pad_does_not_overlap_next_factory_space() {
         focused: false,
         agent_status: AgentStatus::Idle,
         work_status: None,
-                home_location: None,
+        home_location: None,
     });
     overlay.tabs.insert(
         "other-tab".into(),
@@ -451,7 +451,7 @@ fn lab_fixture() -> (ClientShellSnapshot, FactoryOverlay) {
         focused: false,
         agent_status: AgentStatus::Working,
         work_status: None,
-                home_location: None,
+        home_location: None,
     });
     overlay.tabs.insert(
         "poker".into(),
@@ -2561,7 +2561,7 @@ fn factory_grouping_ignores_cycles_and_cross_space_parents() {
         focused: false,
         agent_status: AgentStatus::Idle,
         work_status: None,
-                home_location: None,
+        home_location: None,
     });
     snapshot.workspaces.push(ClientShellWorkspace {
         sort_rank: 0,

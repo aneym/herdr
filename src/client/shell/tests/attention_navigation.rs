@@ -27,7 +27,7 @@ fn attention_state(statuses: &[AgentStatus]) -> ClientShellState {
             focused: index == 0,
             agent_status: status,
             work_status: None,
-                home_location: None,
+            home_location: None,
         });
         projected.panes.push(ClientShellPane {
             tokens: Default::default(),

@@ -3317,7 +3317,10 @@ impl HeadlessServer {
         let mut changed = false;
         self.app.flush_polite_sends(now);
 
-        if self.next_agent_home_poll.is_none_or(|deadline| now >= deadline) {
+        if self
+            .next_agent_home_poll
+            .is_none_or(|deadline| now >= deadline)
+        {
             self.next_agent_home_poll = Some(now + Duration::from_secs(15));
             let agents_dir = std::env::var_os("HERDR_AGENTS_DIR")
                 .map(std::path::PathBuf::from)
