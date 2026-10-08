@@ -14,7 +14,7 @@ const { default: Sidebar, useSelectionReveal } = await import("./Sidebar");
 const stored = new Map<string, string>();
 Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => void stored.set(key, value), clear: () => stored.clear() } });
 const story = (): Snapshot => ({
-  workspaces: [{ workspace_id: "w1", number: 1, label: "Home" }, { workspace_id: "w2", number: 2, label: "Work", tokens: { pinned: "true" } }],
+  workspaces: [{ workspace_id: "w1", number: 1, label: "Home" }, { workspace_id: "w2", number: 2, label: "Work" }],
   tabs: [{ tab_id: "A", workspace_id: "w2", number: 1, label: "alpha", pin_index: 0 }],
 });
 describe("Spaces sidebar header actions", () => {
@@ -64,14 +64,37 @@ describe("Spaces sidebar header actions", () => {
     expect(host.querySelector("output")?.textContent).toBe("NEW");
     expect(host.querySelector('[aria-label="Fold Home"]')?.getAttribute("aria-expanded")).toBe("true");
   });
-  it("pins and unpins the owning space without toggling its fold", async () => {
+  it("toggles a client space pin twice, keeps its fold and restores the pin on remount", async () => {
     mount(story());
-    await click("Pin space"); await click("Unpin space");
-    expect(api.mock.calls).toEqual([
-      ["studio", "workspace.set_pinned", { workspace_id: "w1", pinned: true }],
-      ["studio", "workspace.set_pinned", { workspace_id: "w2", pinned: false }],
-    ]);
+    const home = () => host.querySelector<HTMLButtonElement>('[data-space="w1"] .pin')!;
+    const clickHome = async () => { await act(async () => home().click()); };
+    expect(home().classList.contains("is-pinned")).toBe(false);
+    await clickHome();
+    expect(home().classList.contains("is-pinned")).toBe(true);
+    expect(home().getAttribute("aria-label")).toBe("Unpin space");
+    act(() => root.unmount()); root = createRoot(host); mount(story());
+    expect(home().classList.contains("is-pinned")).toBe(true);
+    await clickHome();
+    expect(home().classList.contains("is-pinned")).toBe(false);
+    expect(home().getAttribute("aria-label")).toBe("Pin space");
+    expect(api).not.toHaveBeenCalled();
     expect(host.querySelector('[aria-label="Fold Home"]')?.getAttribute("aria-expanded")).toBe("false");
+  });
+  it("partitions client pins first and ranks stably within each partition like Mac", async () => {
+    const snapshot: Snapshot = { workspaces: [
+      { workspace_id: "a", number: 9, label: "A", sort_rank: 2 },
+      { workspace_id: "b", number: 8, label: "B", sort_rank: 1 },
+      { workspace_id: "c", number: 7, label: "C", sort_rank: 1 },
+      { workspace_id: "d", number: 6, label: "D", sort_rank: 0 },
+    ] };
+    mount(snapshot, null);
+    const order = () => Array.from(host.querySelectorAll<HTMLElement>("[data-space]")).map(row => row.dataset.space);
+    expect(order()).toEqual(["d", "b", "c", "a"]);
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-space="a"] .pin')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-space="c"] .pin')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-space="b"] .pin')!.click());
+    expect(order()).toEqual(["b", "c", "a", "d"]);
+    expect(api).not.toHaveBeenCalled();
   });
   it("reports a failed pin without selecting the created tab", async () => {
     api.mockImplementation(async (_machine: string, method: string) => { if (method === "tab.set_pinned") throw new Error("pin failed"); return { tab: { tab_id: "NEW" } }; });

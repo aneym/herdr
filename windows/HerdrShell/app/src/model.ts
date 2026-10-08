@@ -14,9 +14,9 @@ export const tabStatus = (snapshot: Snapshot, tab: Tab): string => tab.work_stat
 export const statusRank = (status: string) => ({ blocked: 3, working: 2, done: 1 }[status] ?? 0);
 export function buildSidebar(snapshot: Snapshot, pending: PendingOrders = {}, now = Date.now(), cards: Record<string, AgentCard> = {}): SidebarRow[] {
   const tabs = snapshot.tabs ?? [];
-  // As the Mac's SpacesTree: the pin partition first, then the server's priority rank within each.
+  // The Mac ranks spaces stably; the client applies its presentation pin partition.
   const byRank = (a: Workspace | Tab, b: Workspace | Tab) => (a.sort_rank ?? 0) - (b.sort_rank ?? 0) || a.number - b.number;
-  const spaces = [...snapshot.workspaces ?? []].sort((a, b) => Number(b.tokens?.pinned === "true") - Number(a.tokens?.pinned === "true") || byRank(a, b));
+  const spaces = [...snapshot.workspaces ?? []].sort((a, b) => (a.sort_rank ?? 0) - (b.sort_rank ?? 0));
   const rows: SidebarRow[] = [];
   const row = (tab: Tab, kind: "agent" | "pinned" | "tab", section: string): SidebarRow => ({ kind, section, id: tab.tab_id, label: tab.label || snapshot.panes?.find(p => p.tab_id === tab.tab_id)?.terminal_title_stripped || `tab ${tab.number}`, status: tabStatus(snapshot, tab), hotkey: null, pinned: tab.pin_index != null, spaceId: tab.workspace_id, spaceLabel: spaces.find(s => s.workspace_id === tab.workspace_id)?.label });
   // As the Mac's SpacesTree.pinTabs: agents and plain pins are separate blocks, each in pin order.

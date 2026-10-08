@@ -75,6 +75,8 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
   const [hidden, setHidden] = useState(false);
   const read = <T,>(key: string, fallback: T): T => { try { return JSON.parse(localStorage.getItem(`herdr-shell.areas.${key}`) ?? "null") ?? fallback; } catch { return fallback; } };
   const save = (key: string, value: unknown) => { try { localStorage.setItem(`herdr-shell.areas.${key}`, JSON.stringify(value)); } catch { /* Storage can be disabled by WebView policy. */ } };
+  const [pinnedSpaces, setPinnedSpaces] = useState<string[]>(() => read("pinnedSpaces", []));
+  const orderedSpaces = rows.filter(row => row.kind === "space").sort((a, b) => Number(pinnedSpaces.includes(b.id)) - Number(pinnedSpaces.includes(a.id)));
   const [hiddenAgents, setHiddenAgents] = useState(() => read("hiddenAgents", false));
   const [menu, setMenu] = useState<{ row?: SidebarRow; line?: AreaLine; x: number; y: number } | null>(null);
   const [menuError, setMenuError] = useState<string | null>(null);
@@ -234,12 +236,13 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
     finally { setCreating(false); }
   };
   const toggleSpacePin = (id: string, pinned: boolean) => {
-    void bridge.api(machine.name, "workspace.set_pinned", { workspace_id: id, pinned }).catch(error => setMenuError(String(error)));
+    const next = pinned ? [...pinnedSpaces, id] : pinnedSpaces.filter(space => space !== id);
+    setPinnedSpaces(next); save("pinnedSpaces", next);
   };
   const spaceRow = (row: SidebarRow) => {
     const children = rows.filter(r => r.kind === "tab" && r.section === row.id);
     const open = children.some(r => r.id === renaming) || spaceOpen(row, rows, selected, expanded);
-    const pinned = snapshot.workspaces?.find(workspace => workspace.workspace_id === row.id)?.tokens?.pinned === "true";
+    const pinned = pinnedSpaces.includes(row.id);
     return <div key={row.id}><div data-space={row.id} className={`sidebar-row space-row ${paneDropRow === `space:${row.id}` ? "drop-above" : ""}`} aria-expanded={open} onClick={() => toggle(foldKey(row), !open)}>
       <button className="select-tab" aria-expanded={open} onClick={event => { event.stopPropagation(); toggle(foldKey(row), !open); }}><span className="label">{row.label}</span><Status solid status={row.status} /></button>
       <button className={`pin ${pinned ? "is-pinned" : ""}`} aria-label={pinned ? "Unpin space" : "Pin space"} onClick={event => { event.stopPropagation(); toggleSpacePin(row.id, !pinned); }}>⌖</button>
@@ -274,8 +277,8 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
       <button data-row="hiddenagents" className="sidebar-row muted hidden-agents" aria-expanded={hiddenAgents} onClick={() => { setHiddenAgents(!hiddenAgents); save("hiddenAgents", !hiddenAgents); }}><span>Hidden</span><span>{items.filter(r => r.hidden).length}</span>{!hiddenAgents && items.some(r => r.hidden && (r.status === "blocked" || r.request != null)) && <span className="hidden-agents-dot" data-dot="accent" />}<span className="chevron"><Chevron open={hiddenAgents} /></span></button>
       {hiddenAgents && items.filter(r => r.hidden).map(tabRow)}
     </>}</section> : null; })}
-    <section className="spaces">{rows.filter(r => r.kind === "space" && !r.hidden).map(spaceRow)}
-    {rows.some(r => r.kind === "space" && r.hidden) && <><button className="sidebar-row muted" aria-expanded={hidden} onClick={() => setHidden(!hidden)}><span className="chevron"><Chevron open={hidden} /></span>Hidden</button>{(hidden || rows.some(r => r.hidden && r.id === renaming)) && rows.filter(r => r.kind === "space" && r.hidden).map(spaceRow)}</>}
+    <section className="spaces">{orderedSpaces.filter(r => !r.hidden).map(spaceRow)}
+    {rows.some(r => r.kind === "space" && r.hidden) && <><button className="sidebar-row muted" aria-expanded={hidden} onClick={() => setHidden(!hidden)}><span className="chevron"><Chevron open={hidden} /></span>Hidden</button>{(hidden || rows.some(r => r.hidden && r.id === renaming)) && orderedSpaces.filter(r => r.hidden).map(spaceRow)}</>}
     </section>
     </>}
   </nav>{menu && <div ref={menuRef} className="pane-menu agent-menu" role="menu" style={{ left: Math.min(menu.x, Math.max(0, window.innerWidth - 180)), top: Math.min(menu.y, Math.max(0, window.innerHeight - 40)) }}>

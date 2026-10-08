@@ -49,14 +49,24 @@ export function installControl(get: () => ControlState): () => void {
     await new Promise(resolve => requestAnimationFrame(resolve));
     return { ok: true };
   });
+  watch<{ selector: string; on: boolean }>("hover", async payload => {
+    const element = document.querySelector<HTMLElement>(payload.selector);
+    if (!element) return { ok: false, error: "no match" };
+    const hover = element.closest(".sidebar-row") ?? element;
+    if (payload.on) hover.setAttribute("data-test-hover", "");
+    else hover.removeAttribute("data-test-hover");
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    return { ok: true };
+  });
   watch<{ selector: string; hover?: boolean; nth?: number }>("click", async payload => {
     const matches = document.querySelectorAll<HTMLElement>(payload.selector);
     const element = matches[payload.nth ?? 0];
     if (!element) return { ok: false, error: "no match" };
     const hover = element.closest(".sidebar-row") ?? element;
+    const wasHovered = hover.hasAttribute("data-test-hover");
     if (payload.hover) hover.setAttribute("data-test-hover", "");
     try { flushSync(() => element.click()); }
-    finally { if (payload.hover) hover.removeAttribute("data-test-hover"); }
+    finally { if (payload.hover && !wasHovered) hover.removeAttribute("data-test-hover"); }
     await new Promise(resolve => requestAnimationFrame(resolve));
     return { ok: true, matched: matches.length };
   });

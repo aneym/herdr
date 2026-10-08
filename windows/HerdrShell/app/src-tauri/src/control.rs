@@ -295,7 +295,7 @@ mod imp {
     }
 
     fn dispatch(app: &AppHandle, req: &Value, test_window: bool) -> Value {
-        if matches!(req["cmd"].as_str(), Some("open_detail" | "row_menu" | "paste_image" | "click"))
+        if matches!(req["cmd"].as_str(), Some("open_detail" | "row_menu" | "paste_image" | "click" | "hover"))
             && !test_window
         {
             return json!({"ok": false, "error": "command requires --test-window"});
@@ -364,7 +364,7 @@ mod imp {
             }
             cmd @ ("ui" | "machine" | "open" | "key" | "wheel" | "action" | "chat" | "update"
             | "drag_pane" | "motion" | "drag_pin" | "drag_divider" | "link_click"
-            | "copy_selection" | "open_detail" | "row_menu" | "paste_image" | "click") => forward_cmd(app, cmd, req),
+            | "copy_selection" | "open_detail" | "row_menu" | "paste_image" | "click" | "hover") => forward_cmd(app, cmd, req),
             _ => json!({"ok": false, "error": "unknown cmd"}),
         }
     }

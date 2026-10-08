@@ -121,6 +121,11 @@ fn ctl_paste_image_result(result: serde_json::Value) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn ctl_hover_result(result: serde_json::Value) -> Result<(), String> {
+    control::deliver_result("hover", result)
+}
+
+#[tauri::command]
 fn ctl_click_result(result: serde_json::Value) -> Result<(), String> {
     control::deliver_result("click", result)
 }
@@ -164,6 +169,7 @@ fn main() {
             ctl_copy_selection_result,
             ctl_drop_paths_result,
             ctl_click_result,
+            ctl_hover_result,
             bridge::machines_list,
             bridge::snapshot,
             bridge::api_request,

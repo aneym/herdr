@@ -7,8 +7,8 @@ import { encodeShiftEnter } from "./keys";
 // The S0a demo has no sidebar coverage; wrong ordering changes Ctrl+N's target.
 const snapshot: Snapshot = {
   workspaces: [
-    { workspace_id: "w1", number: 1, label: "ordinary", tokens: {} },
-    { workspace_id: "w2", number: 2, label: "pinned space", tokens: { pinned: "true" } },
+    { workspace_id: "w1", number: 1, label: "ordinary", sort_rank: 1, tokens: {} },
+    { workspace_id: "w2", number: 2, label: "first space", sort_rank: 0 },
     { workspace_id: "w3", number: 3, label: "secret", tokens: { hidden: "true" } },
   ],
   tabs: [
@@ -40,14 +40,14 @@ describe("sidebar contract", () => {
       expect(buildSidebar(ranked).find(r => r.kind === "space")?.status).toBe(expected);
     }
   });
-  // Priority order and parking interact with the pin partition, the hidden group and the user's
+  // Priority order and parking interact with the hidden group and the user's
   // folds; the Mac's PRIORITY-ORDER check holds the same contract for its tree.
-  it("ranks spaces and tabs by the server's sort_rank inside the pin partition, and parks spaces folded", () => {
+  it("ranks spaces and tabs by the server's sort_rank, and parks spaces folded", () => {
     const ranked: Snapshot = {
       workspaces: [
         { workspace_id: "a", number: 1, label: "a", sort_rank: 5 },
         { workspace_id: "b", number: 2, label: "b", sort_rank: 1 },
-        { workspace_id: "p", number: 3, label: "pinned", sort_rank: 9, tokens: { pinned: "true" } },
+        { workspace_id: "p", number: 3, label: "p", sort_rank: 9 },
         { workspace_id: "r", number: 4, label: "rails", sort_rank: 9, parked: true },
         { workspace_id: "c", number: 5, label: "c" },
       ],
@@ -59,7 +59,7 @@ describe("sidebar contract", () => {
       ],
     };
     const rows = buildSidebar(ranked);
-    expect(rows.filter(r => r.kind === "space").map(r => r.id)).toEqual(["p", "c", "b", "a", "r"]);
+    expect(rows.filter(r => r.kind === "space").map(r => r.id)).toEqual(["c", "b", "a", "p", "r"]);
     expect(rows.filter(r => r.kind === "tab").map(r => r.id)).toEqual(["b:2", "b:3", "b:1", "r:1"]);
     const space = (id: string) => rows.find(r => r.kind === "space" && r.id === id)!;
     // A parked space stays folded through live work and selection, and keeps its own fold key.

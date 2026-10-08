@@ -34,6 +34,7 @@ beforeEach(async () => {
 });
 afterEach(() => { cleanup(); stored.clear(); vi.restoreAllMocks(); });
 async function command(cmd: string, payload: unknown) {
+  result.mockClear();
   await act(async () => { events.get(cmd)!(payload); await vi.waitFor(() => expect(result).toHaveBeenCalled()); });
   return result.mock.calls[result.mock.calls.length - 1]?.[1];
 }
@@ -60,12 +61,26 @@ it("escapes a quoted drag section and tab id rather than failing selector parsin
     expect(await command("drag_pin", { section: 'quoted"section', tab_id: 'tab"id', steps: 1, interval_ms: 0 })).toMatchObject({ ok: true });
   } finally { row.remove(); }
 });
-it("rejects click at the real CLI boundary without test-window mode", () => {
+it("keeps hover controls visible across commands until explicitly cleared", async () => {
+  const selector = ".space-row .sidebar-plus";
+  const button = document.querySelector<HTMLButtonElement>(selector)!;
+  expect(await command("hover", { selector, on: true })).toEqual({ ok: true });
+  expect(getComputedStyle(button).display).toBe("block");
+  await command("click", { selector, hover: true });
+  expect(button.closest(".sidebar-row")!.hasAttribute("data-test-hover")).toBe(true);
+  expect(getComputedStyle(button).display).toBe("block");
+  expect(await command("hover", { selector, on: false })).toEqual({ ok: true });
+  expect(getComputedStyle(button).display).toBe("none");
+  expect(document.querySelector("[data-test-hover]")).toBeNull();
+  expect(await command("hover", { selector: ".missing", on: true })).toEqual({ ok: false, error: "no match" });
+});
+it.each(["click", "hover"])("rejects %s at the real CLI boundary without test-window mode", cmd => {
   const script = resolve("../scripts/pc.py");
   let error: { status?: number; stderr?: Buffer } | undefined;
-  try { execFileSync("python3", [script, "ctl", JSON.stringify({ cmd: "click", selector: ".sidebar-plus", hover: true })], { stdio: "pipe" }); }
+  try { execFileSync("python3", [script, "ctl", JSON.stringify({ cmd, selector: ".sidebar-plus", hover: true, on: true })], { stdio: "pipe" }); }
   catch (caught) { error = caught as typeof error; }
   expect(error?.status).toBe(2);
   expect(error?.stderr?.toString()).toContain("command requires --test-window");
+  expect(document.querySelector("[data-test-hover]")).toBeNull();
   expect(bridge.api).not.toHaveBeenCalled();
 });
