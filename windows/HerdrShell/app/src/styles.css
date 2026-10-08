@@ -138,6 +138,7 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 .areas-mode button[aria-pressed="true"], .areas-chips button[aria-pressed="true"] { background: var(--shell-selection); color: var(--shell-text); }
 .areas-chips { display: flex; gap: var(--shell-space-step2); padding: var(--shell-space-step4) var(--shell-space-step8); }
 .areas-chips button { flex: 1; font-size: var(--shell-type-size12); padding: var(--shell-space-step2) 0; border-radius: var(--shell-radius-control); color: var(--shell-muted); }
+.areas-dot-ring { outline: 1px solid var(--shell-muted); }
 .areas-dot { width: var(--shell-space-step7); height: var(--shell-space-step7); border-radius: 50%; flex-shrink: 0; }
 .areas-trailing, .areas-badge { font-size: var(--shell-type-row-trailing); color: var(--shell-muted); white-space: nowrap; }
 .areas-badge.is-review { color: var(--shell-text); }

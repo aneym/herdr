@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { buildAreas, focusTabs, stageImplied, stageWord } from "./areas";
 import { bridge } from "./bridge";
+import { areaDotNeedsRing } from "./areaContrast";
+import { appTheme } from "./theme";
 import type { AreaLine } from "./areas";
 import type { AreaChip } from "./areas";
 import { LaneSnapshot } from "./laneFiles";
@@ -61,6 +63,9 @@ export function useSidebarNavigation(snapshot: Snapshot, catalog: LaneSnapshot, 
 }
 export type SidebarNavigation = ReturnType<typeof useSidebarNavigation>;
 export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneSnapshot(), machines, chooseMachine, rows, selected, revealed, machine, notice, select, pin, movePin, renaming, startRename, cancelRename, commitRename, paneDropRow, openDetail }: { openDetail?: (id: string) => void; navigation?: SidebarNavigation; paneDropRow?: string | null; snapshot?: Snapshot; catalog?: LaneSnapshot; machines: MachineStatus[]; chooseMachine: (name: string) => void; rows: SidebarRow[]; selected: string | null; revealed: RevealMemo; machine: MachineStatus; notice: string | null; select: (id: string) => void; pin: (id: string, pinned: boolean) => void; movePin: (ids: string[], from: number, to: number) => void; renaming: string | null; startRename: (id: string) => void; cancelRename: () => void; commitRename: (id: string, label: string) => Promise<void> }) {
+  const [themeMode, setThemeMode] = useState(() => appTheme().mode);
+  useEffect(() => appTheme().subscribe(setThemeMode), []);
+  const sidebarBackground = useMemo(() => getComputedStyle(document.documentElement).getPropertyValue("--shell-surface").trim(), [themeMode]);
   // Folds are per machine: workspace ids repeat across machines. Studio keeps the pre-switcher key.
   const foldStore = machine.name === "studio" ? "herdr-space-expanded" : `herdr-space-expanded:${machine.name}`;
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem(foldStore) || "{}"); } catch { return {}; } });
@@ -218,7 +223,7 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
           else if (line.tab) select(line.tab);
           else if (line.toggle) toggleAreaLine(line.toggle, !line.chevron);
         }}>
-          {line.kind === "area" && <span className="areas-dot" style={{ backgroundColor: line.color }} />}
+          {line.kind === "area" && <span className={`areas-dot${areaDotNeedsRing(line.color, sidebarBackground) ? " areas-dot-ring" : ""}`} style={{ backgroundColor: line.color }} />}
           {line.glyph && (["•", "●", "■"].includes(line.glyph) ? <Status solid status={line.status ?? line.glyphTone ?? "idle"} /> : <span className={`areas-glyph ${line.glyphTone}`} aria-label={line.status}>{line.glyph}</span>)}
           <span className="label">{line.tab && renaming === line.tab ? <RenameInput label={line.title} commit={label => commitRename(line.tab!, label)} cancel={cancelRename} /> : line.title}{line.parkNote && <small className="areas-park-note">{line.parkNote}</small>}</span>{line.badge && (chip === "all" || !stageImplied(chip, line)) && <span className={`areas-badge ${line.badge === "Ready for review" || line.stage === "reviewing" ? "is-review" : ""}`}>{stageWord(line.badge)}</span>}{line.trailing && <span className="areas-trailing">{line.trailing}</span>}
         </button>

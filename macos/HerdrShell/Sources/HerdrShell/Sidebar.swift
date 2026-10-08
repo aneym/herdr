@@ -539,7 +539,13 @@ struct SidebarView: View {
             if let open = l.chevron {
                 Text(open ? "▾" : "▸").foregroundStyle(t.mute)
             }
-            Circle().fill(Color(shellHex: l.color ?? "#999999")).frame(width: 8, height: 8)
+            Circle().fill(Color(shellHex: l.color ?? "#999999"))
+                .overlay {
+                    if areaDotNeedsRing(l.color ?? "#999999", background: t.chrome.panel) {
+                        Circle().stroke(t.mute, lineWidth: 1).padding(-ShellRadius.curve0_5)
+                    }
+                }
+                .frame(width: 8, height: 8)
             Text(l.title).lineLimit(1)
             Spacer(minLength: 4)
             Text(l.trailing).foregroundStyle(t.mute)

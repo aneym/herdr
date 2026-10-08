@@ -3,6 +3,10 @@ import { StrictMode, act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+const tokensCSS = readFileSync("src/tokens.css", "utf8");
+import { appTheme } from "./theme";
+import { LaneSnapshot } from "./laneFiles";
 import { buildSidebar } from "./model";
 import type { Snapshot } from "./model";
 vi.mock("./bridge", () => ({ bridge: { updateStatus: () => new Promise(() => {}), fileList: async () => [], fileRead: async () => ({ data_b64: "" }) }, fromBase64: () => new Uint8Array() }));
@@ -77,5 +81,30 @@ describe.each([["plain", false], ["StrictMode", true]])("sidebar reveal on selec
     fold("rails");
     act(() => drive.show(false)); act(() => drive.show(true));
     expect(open("rails")).toBe("false");
+  });
+});
+
+// Real catalog -> sidebar DOM: preserve the fill, add visibility, and follow live theme changes.
+describe("area dot visibility", () => {
+  it("rings the factory dot in dark mode and removes the ring in light mode", () => {
+    localStorage.clear();
+    localStorage.setItem("herdr-shell.areas.mode", JSON.stringify("areas"));
+    const style = document.createElement("style"); style.textContent = tokensCSS; document.head.append(style);
+    const catalog = new LaneSnapshot();
+    catalog.areas = [{ id: "factory", name: "factory", color: "#1F1F23" }];
+    catalog.spaces = { a: "factory" };
+    const host = document.createElement("div"); document.body.append(host);
+    const root = createRoot(host), noop = () => {};
+    appTheme().setOverride("dark");
+    try {
+      act(() => root.render(<Sidebar snapshot={snapshot} catalog={catalog} machines={[]} chooseMachine={noop} rows={[]} selected={null} revealed={{ last: null, pending: null }} machine={{ name: "studio", state: "up" }} notice={null} select={noop} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} />));
+      const dot = host.querySelector<HTMLElement>(".areas-dot")!;
+      expect(dot.classList.contains("areas-dot-ring")).toBe(true);
+      expect(dot.style.backgroundColor).toBe("#1F1F23");
+      act(() => appTheme().setOverride("light"));
+      expect(dot.classList.contains("areas-dot-ring")).toBe(false);
+    } finally {
+      act(() => root.unmount()); host.remove(); style.remove(); localStorage.clear(); appTheme().setOverride("system");
+    }
   });
 });
