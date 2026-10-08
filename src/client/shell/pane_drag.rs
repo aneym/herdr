@@ -171,7 +171,7 @@ impl ClientShellState {
             topology: self
                 .pane_surface
                 .as_ref()
-                .map_or(0, |s| pane_drag_surface_signature(s)),
+                .map_or(0, pane_drag_surface_signature),
             committed: false,
             rects: self.hits.panes.iter().map(|h| h.rect).collect(),
             area: self
