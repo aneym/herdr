@@ -166,6 +166,12 @@ fn run_pane_place_scenario(mut app: App) {
     app.state.assert_invariants_for_test();
     for workspace in &app.state.workspaces { workspace.assert_invariants_for_test(); }
 
+    let sized = |size| json!({"pane_id": ids.c, "target": {"type": "pane", "pane_id": ids.a}, "side": "left", "size": size, "dry_run": true});
+    let clamped = place(&mut app, sized(1.5));
+    let upper = place(&mut app, sized(0.9));
+    assert_eq!(clamped, upper, "out-of-range size uses the documented upper clamp");
+    for workspace in &app.state.workspaces { workspace.assert_invariants_for_test(); }
+
     let before = layout_of(&mut app, &ids.a);
     assert_eq!(before["area"], rect(0, 0, 120, 40));
     assert_eq!(rect_of(&before, &ids.a), rect(0, 0, 60, 40));

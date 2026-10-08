@@ -117,6 +117,7 @@ pub struct PanePlaceParams {
     pub target: PanePlaceTarget,
     pub side: PaneDirection,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Fraction allocated to the moved pane, clamped to 0.1..=0.9.
     pub size: Option<f32>,
     #[serde(default)]
     pub focus: bool,

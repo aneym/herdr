@@ -766,7 +766,7 @@ fn pane_place(args: &[String]) -> std::io::Result<i32> {
 }
 
 fn parse_pane_place_args(args: &[String]) -> Result<PanePlaceParams, String> {
-    let usage = "usage: herdr pane place <pane> (--beside <pane> | --tab <tab>) --side left|right|up|down [--size F] [--dry-run] [--focus|--no-focus]";
+    let usage = "usage: herdr pane place <pane> (--beside <pane> | --tab <tab>) --side left|right|up|down [--size F (clamped to 0.1..=0.9)] [--dry-run] [--focus|--no-focus]";
     let Some(pane) = args.first().filter(|arg| !arg.starts_with('-')) else {
         return Err(usage.into());
     };
@@ -1907,7 +1907,7 @@ fn print_pane_help() {
     );
     eprintln!("  herdr pane swap --direction left|right|up|down [--pane ID|--current]");
     eprintln!("  herdr pane swap --source-pane ID --target-pane ID");
-    eprintln!("  herdr pane place <pane> (--beside <pane> | --tab <tab>) --side left|right|up|down [--size F] [--dry-run] [--focus|--no-focus]");
+    eprintln!("  herdr pane place <pane> (--beside <pane> | --tab <tab>) --side left|right|up|down [--size F (clamped to 0.1..=0.9)] [--dry-run] [--focus|--no-focus]");
     eprintln!("  herdr pane move <pane_id> --tab <tab_id> --split right|down [--target-pane ID] [--ratio FLOAT] [--focus|--no-focus]");
     eprintln!("  herdr pane move <pane_id> --new-tab [--workspace ID] [--label TEXT] [--focus|--no-focus]");
     eprintln!("  herdr pane move <pane_id> --new-workspace [--label TEXT] [--tab-label TEXT] [--focus|--no-focus]");
