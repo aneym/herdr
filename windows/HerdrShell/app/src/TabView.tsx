@@ -15,6 +15,7 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
   const host = useRef<HTMLDivElement>(null);
   const [paneState, setPaneState] = useState<PaneDragState | null>(null);
   const callbacks = useRef({ onError, onDragChange, onSpring }); callbacks.current = { onError, onDragChange, onSpring };
+  const snapshotNow = useRef(snapshot); snapshotNow.current = snapshot;
   const [size, setSize] = useState({ width: 0, height: 0 });
   const sizeNow = useRef(size); sizeNow.current = size;
   // While a divider drag runs, panes follow the layouts pane.resize answers with, not snapshots:
@@ -25,7 +26,7 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
   const latestLayout = held?.tab_id === selected ? held : snapshotLayout;
   // A pending pane drop shows the tab as it was at the release; an accepted one shows its settle target until the next
   // snapshot (or held resize answer) replaces latestLayout.
-  const paneDrag = useMemo(() => new PaneDrag(machine, { onChange: state => { setPaneState(state); callbacks.current.onDragChange?.(state); }, onError: error => callbacks.current.onError?.(error), onSpring: tabId => callbacks.current.onSpring?.(tabId) }), [machine]);
+  const paneDrag = useMemo(() => new PaneDrag(machine, { onChange: state => { setPaneState(state); callbacks.current.onDragChange?.(state); }, onError: error => callbacks.current.onError?.(error), onSpring: tabId => callbacks.current.onSpring?.(tabId), canSpring: tabId => !!snapshotNow.current.tabs?.some(t => t.tab_id === tabId) }), [machine]);
   const layout = paneDrag.shownLayout(latestLayout);
   const shown = useRef(layout); shown.current = layout;
   // A window resize, a sidebar toggle or a sidebar resize all reach the tab as a new host size. A pending drop ends

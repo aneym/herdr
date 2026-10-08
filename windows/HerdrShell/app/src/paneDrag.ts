@@ -47,6 +47,7 @@ export class PaneDrag {
   private dwell?: { tab: string; point: { x: number; y: number } };
   private origin?: string;
   private springTab?: string;
+  private springRequest = 0;
   // The newest snapshot layout and the tab's pane descriptors. While a sent drop waits for its reply, snapshots only
   // land here (the newest wins) and the tab keeps showing `frozen`, its layout at the release, with the panes it had
   // then (`frozenPanes`): no box moves, appears or leaves and no terminal resizes until the drop ends.
@@ -61,7 +62,7 @@ export class PaneDrag {
   private settled?: { base: Layout | undefined; layout: Layout; panes: string; size: { width: number; height: number } };
   private settling = false;
   private settleTimer?: ReturnType<typeof setTimeout>;
-  constructor(private machine: string, private options: { onChange?: (state: PaneDragState) => void; onError?: (error: unknown) => void; onSpring?: (tabId: string) => void } = {}) {}
+  constructor(private machine: string, private options: { onChange?: (state: PaneDragState) => void; onError?: (error: unknown) => void; onSpring?: (tabId: string) => void; canSpring?: (tabId: string) => boolean } = {}) {}
   get state(): PaneDragState { return this.value; }
   private emit(patch: Partial<PaneDragState>) {
     const next = { ...this.value, ...patch };
@@ -103,18 +104,26 @@ export class PaneDrag {
     this.springTimer = setTimeout(() => {
       this.clearDwell();
       if (this.value.phase !== "dragging") return;
+      if (this.options.canSpring && !this.options.canSpring(tab)) { this.finish("quiet"); return; }
       this.springTab = tab;
-      const generation = this.generation;
-      void bridge.api(this.machine, "tab.focus", { tab_id: tab }).catch(error => {
-        if (generation !== this.generation) return;
-        this.cancel(); this.options.onError?.(error);
+      const request = ++this.springRequest;
+      void bridge.api(this.machine, "tab.focus", { tab_id: tab }).catch(() => {
+        // Layout changes invalidate probes, not this focus request. A failed spring ends quietly.
+        if (request !== this.springRequest) return;
+        this.finish("quiet");
+        const generation = this.generation;
+        void bridge.snapshot(this.machine).then(snapshot => {
+          if (generation !== this.generation) return;
+          const focused = snapshot.tabs?.find(t => t.focused)?.tab_id;
+          if (focused) this.selectSpring(focused);
+        }).catch(() => {});
       });
       // Mark the switch before notifying the view: its next layout belongs to this spring, not an external switch.
-      this.options.onSpring?.(tab);
+      if (!this.selectSpring(tab)) this.finish("quiet");
     }, motion.springLoadMs);
   }
   private at(point: { x: number; y: number }): PaneZone | null {
-    if (this.row) return this.row.kind === "tab" ? this.row.tab_id === this.input!.layout.tab_id ? null : { kind: "into_tab", tab_id: this.row.tab_id } : { kind: "new_tab_in", workspace_id: this.row.workspace_id };
+    if (this.row) return this.row.kind === "tab" ? this.row.tab_id === this.origin ? null : { kind: "into_tab", tab_id: this.row.tab_id } : { kind: "new_tab_in", workspace_id: this.row.workspace_id };
     const i = this.input!;
     return dropZoneAt(this.area(), this.boxes, i.pane, point, pixelMetrics({ width: i.size.width / i.layout.area.width, height: i.size.height / i.layout.area.height }));
   }
@@ -196,8 +205,8 @@ export class PaneDrag {
       this.finish("settle");
     }).catch(error => {
       if (generation !== this.generation) return;
-      // A server error (it carries a code) moved nothing; a lost connection leaves the outcome unknown.
-      this.finish((error as { code?: string })?.code ? "cancel" : "quiet");
+      // A refused sprung drop restores the origin; without a spring, a lost connection leaves the outcome unknown.
+      this.finish(this.springTab || (error as { code?: string })?.code ? "cancel" : "quiet");
       this.options.onError?.(error);
     });
     return "dropped";
@@ -210,12 +219,17 @@ export class PaneDrag {
   /** Every end unfreezes the tab: a refusal, the timeout or a quiet end shows the buffered snapshot as it is. */
   private finish(end: PaneDragState["end"]) {
     const restore = end === "cancel" && this.springTab && this.springTab !== this.origin ? this.origin : undefined;
-    this.clearDwell(); this.springTab = undefined; this.origin = undefined;
-    if (restore) {
-      void bridge.api(this.machine, "tab.focus", { tab_id: restore }).catch(error => this.options.onError?.(error));
-      this.options.onSpring?.(restore);
+    this.clearDwell(); this.springTab = undefined; this.origin = undefined; ++this.springRequest;
+    ++this.generation; clearTimeout(this.timer); this.frozen = undefined; this.frozenPanes = []; this.cache.clear(); this.flight = false; this.raw = null; this.row = null; this.target = null; this.emit({ ...idle(), end });
+    // Reset before notifying the view. A closed origin must neither throw nor send a focus.
+    if (restore && this.selectSpring(restore)) {
+      void bridge.api(this.machine, "tab.focus", { tab_id: restore }).catch(() => {});
     }
-    ++this.generation; clearTimeout(this.timer); this.frozen = undefined; this.frozenPanes = []; this.cache.clear(); this.flight = false; this.raw = null; this.row = null; this.target = null; this.emit({ ...idle(), end }); }
+  }
+  private selectSpring(tab: string): boolean {
+    if (this.options.canSpring && !this.options.canSpring(tab)) return false;
+    try { this.options.onSpring?.(tab); return true; } catch { return false; }
+  }
   /** What the tab shows: the release-time layout while a drop is pending, then an accepted drop's settle target until
    * the next snapshot replaces `layout`. */
   shownLayout(layout: Layout | undefined): Layout | undefined {
@@ -261,7 +275,11 @@ export class PaneDrag {
     if (this.value.phase === "dropped" && layout?.tab_id !== this.input!.layout.tab_id) { this.finish("quiet"); return; }
     if (this.value.phase === "idle" || this.value.phase === "dropped") return;
     const springLayout = !!layout && layout.tab_id === this.springTab;
-    if (!layout || (!springLayout && (layout.tab_id !== this.input!.layout.tab_id || !layout.panes.some(p => p.pane_id === this.value.source)))) { this.cancel(); return; }
+    if (!layout || (!springLayout && (layout.tab_id !== this.input!.layout.tab_id || !layout.panes.some(p => p.pane_id === this.value.source)))) {
+      if (this.springTab && layout?.tab_id !== this.input!.layout.tab_id) this.finish("quiet");
+      else this.cancel();
+      return;
+    }
     if (layout.tab_id === this.input!.layout.tab_id && JSON.stringify(layout.panes) === JSON.stringify(this.input!.layout.panes) && JSON.stringify(layout.area) === JSON.stringify(this.input!.layout.area) && layout.zoomed === this.input!.layout.zoomed) return;
     if (layout.zoomed) { this.cancel(); return; }
     ++this.generation; this.flight = false; this.cache.clear(); this.input = { ...this.input!, layout }; this.rebuild();
