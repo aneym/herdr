@@ -29,12 +29,20 @@ enum ShellType {
     static let switcherQuery: CGFloat = 16
     static let switcherRow: CGFloat = 13
     static let switcherMeta: CGFloat = 11
+    static let detailTracking: CGFloat = 0.8
     static let chatH1: CGFloat = 19
     static let chatH2: CGFloat = 16.5
     static let chatH3: CGFloat = 14.5
 }
 
 enum ShellSpace {
+    static let detailWidth: CGFloat = 340
+    static let detailPadding: CGFloat = 12
+    static let detailGap: CGFloat = 14
+    static let detailSectionGap: CGFloat = 4
+    static let detailLineGap: CGFloat = 6
+    static let detailHostPadX: CGFloat = 5
+    static let detailHostPadY: CGFloat = 1
     static let sidebarWidth: CGFloat = 300
     static let rowHeight: CGFloat = 23
     static let rowPadX: CGFloat = 4
@@ -52,6 +60,7 @@ enum ShellSpace {
 }
 
 enum ShellRadius {
+    static let detailButton: CGFloat = 5
     static let row: CGFloat = 4
     static let control: CGFloat = 6
     static let code: CGFloat = 8

@@ -40,7 +40,7 @@ it("lane detail preserves the current pane and owns Escape only while open", asy
   cleanup = () => { act(() => root.unmount()); host.remove(); };
   await act(async () => { root.render(<Shell />); });
   const pane = host.querySelector("textarea")!; pane.focus(); const before = document.activeElement;
-  const row = [...host.querySelectorAll<HTMLButtonElement>(".select-tab")].find(b => b.textContent === "Lane")!;
+  const row = [...host.querySelectorAll<HTMLButtonElement>(".select-tab")].find(b => b.querySelector(".label")?.textContent === "Lane")!;
   expect(row).toBeTruthy();
   await act(async () => { row.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true })); row.click(); });
   const panel = host.querySelector('[aria-label="Lane details"]');

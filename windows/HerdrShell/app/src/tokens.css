@@ -69,9 +69,17 @@
   --shell-type-switcher-query: 16px;
   --shell-type-switcher-row: 13px;
   --shell-type-switcher-meta: 11px;
+  --shell-type-detail-tracking: 0.8px;
   --shell-type-chat-h1: 19px;
   --shell-type-chat-h2: 16.5px;
   --shell-type-chat-h3: 14.5px;
+  --shell-space-detail-width: 340px;
+  --shell-space-detail-padding: 12px;
+  --shell-space-detail-gap: 14px;
+  --shell-space-detail-section-gap: 4px;
+  --shell-space-detail-line-gap: 6px;
+  --shell-space-detail-host-pad-x: 5px;
+  --shell-space-detail-host-pad-y: 1px;
   --shell-space-sidebar-width: 300px;
   --shell-space-row-height: 23px;
   --shell-space-row-pad-x: 4px;
@@ -86,6 +94,7 @@
   --shell-space-switcher-width: 560px;
   --shell-space-terminal-pad-x: 8px;
   --shell-space-terminal-pad-y: 6px;
+  --shell-radius-detail-button: 5px;
   --shell-radius-row: 4px;
   --shell-radius-control: 6px;
   --shell-radius-code: 8px;

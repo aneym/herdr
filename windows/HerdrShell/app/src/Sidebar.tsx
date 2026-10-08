@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { buildAreas, focusTabs, stageImplied, stageWord } from "./areas";
 import { bridge } from "./bridge";
+import { detailRows } from "./detailContent";
 import type { AreaLine } from "./areas";
 import type { AreaChip } from "./areas";
 import { LaneSnapshot } from "./laneFiles";
@@ -56,7 +57,7 @@ export function useSidebarNavigation(snapshot: Snapshot, catalog: LaneSnapshot, 
   } };
 }
 export type SidebarNavigation = ReturnType<typeof useSidebarNavigation>;
-export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneSnapshot(), machines, chooseMachine, rows, selected, revealed, machine, notice, select, pin, movePin, renaming, startRename, cancelRename, commitRename, paneDropRow }: { navigation?: SidebarNavigation; paneDropRow?: string | null; snapshot?: Snapshot; catalog?: LaneSnapshot; machines: MachineStatus[]; chooseMachine: (name: string) => void; rows: SidebarRow[]; selected: string | null; revealed: RevealMemo; machine: MachineStatus; notice: string | null; select: (id: string) => void; pin: (id: string, pinned: boolean) => void; movePin: (ids: string[], from: number, to: number) => void; renaming: string | null; startRename: (id: string) => void; cancelRename: () => void; commitRename: (id: string, label: string) => Promise<void> }) {
+export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneSnapshot(), machines, chooseMachine, rows, selected, revealed, machine, notice, select, pin, movePin, renaming, startRename, cancelRename, commitRename, paneDropRow, openDetail }: { openDetail?: (id: string) => void; navigation?: SidebarNavigation; paneDropRow?: string | null; snapshot?: Snapshot; catalog?: LaneSnapshot; machines: MachineStatus[]; chooseMachine: (name: string) => void; rows: SidebarRow[]; selected: string | null; revealed: RevealMemo; machine: MachineStatus; notice: string | null; select: (id: string) => void; pin: (id: string, pinned: boolean) => void; movePin: (ids: string[], from: number, to: number) => void; renaming: string | null; startRename: (id: string) => void; cancelRename: () => void; commitRename: (id: string, label: string) => Promise<void> }) {
   // Folds are per machine: workspace ids repeat across machines. Studio keeps the pre-switcher key.
   const foldStore = machine.name === "studio" ? "herdr-space-expanded" : `herdr-space-expanded:${machine.name}`;
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem(foldStore) || "{}"); } catch { return {}; } });
@@ -87,6 +88,7 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
     return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", escape); };
   }, [menu]);
   useEffect(() => { setMenu(null); setPrompt(null); setMenuError(null); }, [machine.name]);
+  const detailIds = useMemo(() => new Set(detailRows(snapshot).filter(row => row.kind !== "workflow").map(row => row.id)), [snapshot]);
   const localNavigation = useSidebarNavigation(snapshot, catalog, selected);
   const { mode, chip, focusCursor, changeMode, changeChip } = navigation ?? localNavigation;
   const [folded, setFolded] = useState<string[]>(() => read("folded", []));
@@ -188,7 +190,7 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
     return { className: drag.target < from ? "drop-above" : "drop-below" };
   };
   const tabRow = (row: SidebarRow) => { const dragged = dragStyle(row); const pinRow = !row.hidden && (row.kind === "agent" || row.kind === "pinned"); return <div key={`${row.kind}:${row.id}`} data-row={`${row.kind}:${row.id}`} data-pin-section={pinRow ? row.kind : undefined} data-tab={row.id} style={dragged.style} onPointerDown={pinRow ? event => startPress(event, row) : undefined} onClickCapture={event => { if (swallowClick.current) { event.stopPropagation(); event.preventDefault(); } }} className={`sidebar-row tab-row ${row.kind === "tab" ? "indented" : ""} ${selected === row.id ? "selected" : ""} ${dragged.className} ${paneDropRow === `tab:${row.id}` ? "pane-drop-fill" : ""}`}>
-    {renaming === row.id && rows.find(r => r.kind !== "space" && r.id === row.id) === row ? <RenameInput key={row.id} label={row.label} commit={label => commitRename(row.id, label)} cancel={cancelRename} /> : <button className="select-tab" onContextMenu={row.kind === "agent" ? event => { event.preventDefault(); setMenuError(null); setMenu({ row, x: event.clientX, y: event.clientY }); } : undefined} onClick={() => select(row.id)} onDoubleClick={() => startRename(row.id)}>{row.face ? <AgentFace face={row.face} status={row.status} request={row.request} /> : <Status status={row.status} />}<span className="label">{row.label}</span>{row.kind === "pinned" && <span className="muted space-label">{row.spaceLabel}</span>}{row.kind === "agent" && row.home && ["cloud", "local", "unsynced"].includes(row.home) && <span className={`home-glyph ${row.home === "unsynced" ? "warn" : "muted"}`} title={homeTitles[row.home]} aria-label={homeTitles[row.home]}>{homeGlyphs[row.home]}</span>}</button>}
+    {renaming === row.id && rows.find(r => r.kind !== "space" && r.id === row.id) === row ? <RenameInput key={row.id} label={row.label} commit={label => commitRename(row.id, label)} cancel={cancelRename} /> : <button className="select-tab" onContextMenu={row.kind === "agent" ? event => { event.preventDefault(); setMenuError(null); setMenu({ row, x: event.clientX, y: event.clientY }); } : undefined} onMouseDown={event => { if (openDetail && detailIds.has(row.id)) event.preventDefault(); }} onClick={() => { if (openDetail && detailIds.has(row.id)) openDetail(row.id); else select(row.id); }} onDoubleClick={() => startRename(row.id)}>{row.face ? <AgentFace face={row.face} status={row.status} request={row.request} /> : <Status status={row.status} />}<span className="label">{row.label}</span>{row.kind === "pinned" && <span className="muted space-label">{row.spaceLabel}</span>}{row.kind === "agent" && row.home && ["cloud", "local", "unsynced"].includes(row.home) && <span className={`home-glyph ${row.home === "unsynced" ? "warn" : "muted"}`} title={homeTitles[row.home]} aria-label={homeTitles[row.home]}>{homeGlyphs[row.home]}</span>}</button>}
     <button className={`pin ${row.pinned ? "is-pinned" : ""}`} aria-label={row.pinned ? "Unpin tab" : "Pin tab"} onClick={() => pin(row.id, !row.pinned)}>⌖</button>
   </div>; };
   const spaceRow = (row: SidebarRow) => {
@@ -230,6 +232,7 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
   </nav>{menu && <div ref={menuRef} className="pane-menu agent-menu" role="menu" style={{ left: Math.min(menu.x, Math.max(0, window.innerWidth - 180)), top: Math.min(menu.y, Math.max(0, window.innerHeight - 40)) }}>
     {menu.row && <button role="menuitem" onClick={() => { const row = menu.row!; setMenu(null); void setAgentHidden(machine.name, row.id, !row.hidden).catch(error => setMenuError(String(error))); }}>{menu.row.hidden ? "Show in Agents" : "Hide"}</button>}
     {menu.line && <>
+      {openDetail && detailIds.has(menu.line.tab!) && <button role="menuitem" onClick={() => { const id = menu.line!.tab!; setMenu(null); openDetail(id); }}>Info</button>}
       <button role="menuitem" onClick={() => { startRename(menu.line!.tab!); setMenu(null); }}>Rename…</button>
       {menu.line.parked ? <button role="menuitem" disabled={savingAction} onClick={() => { const tab = menu.line!.tab!; setMenu(null); void runAction("unpark", [tab]); }}>Resume</button> : (menu.line.kind === "lane" || menu.line.kind === "orchestrator") && <button role="menuitem" onClick={() => ask(menu.line!, "park")}>Park…</button>}
       {scopeSlug(catalog.lanes[menu.line.tab!]?.scopeURL) && <button role="menuitem" onClick={() => ask(menu.line!, "approve")}>Approve scope…</button>}
