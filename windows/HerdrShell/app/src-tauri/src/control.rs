@@ -198,9 +198,8 @@ mod imp {
                 forward_cmd(app, "appearance", req)
             }
             cmd @ ("ui" | "machine" | "open" | "key" | "wheel" | "action" | "chat" | "update"
-            | "drag_pane" | "motion" | "drag_pin" | "drag_divider" | "link_click" | "copy_selection") => {
-                forward_cmd(app, cmd, req)
-            }
+            | "drag_pane" | "motion" | "drag_pin" | "drag_divider" | "link_click"
+            | "copy_selection") => forward_cmd(app, cmd, req),
             _ => json!({"ok": false, "error": "unknown cmd"}),
         }
     }
@@ -236,6 +235,23 @@ mod imp {
     }
 
     fn forward_cmd(app: &AppHandle, cmd: &str, req: &Value) -> Value {
+        // These hooks acknowledge enqueue, not execution: a frozen/throttled view
+        // must not hold the named pipe open. Other commands retain result replies.
+        if cmd == "motion"
+            || (cmd == "drag_pane"
+                && req["hold"] == true
+                && req["cancel"] != true
+                && req["release"] != true)
+        {
+            let mut payload = req.clone();
+            if let Some(object) = payload.as_object_mut() {
+                object.remove("cmd");
+            }
+            return match app.emit(&format!("ctl-{cmd}"), payload) {
+                Ok(()) => json!({"ok": true, "queued": true}),
+                Err(_) => json!({"ok": false, "error": "frontend not reachable"}),
+            };
+        }
         let (tx, rx) = channel();
         match result_slot(cmd).lock() {
             Ok(mut guard) => *guard = Some((cmd.into(), tx)),

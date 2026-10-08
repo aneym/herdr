@@ -145,6 +145,12 @@ fn main() {
                 .find(|w| w.label == "main")
                 .ok_or("missing main window config")?;
             let mut window = tauri::WebviewWindowBuilder::from_config(app, config)?;
+            // backgroundThrottling is unsupported by WebView2. Disable Chromium's
+            // background timer/renderer throttling so queued control hooks still run.
+            #[cfg(windows)]
+            {
+                window = window.additional_browser_args("--disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows");
+            }
             if test_window {
                 window = window
                     .position(-20000.0, 0.0)

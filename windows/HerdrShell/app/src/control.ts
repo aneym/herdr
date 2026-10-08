@@ -12,11 +12,12 @@ export interface ControlState { paneDrag?: PaneDrag | null; machine: MachineStat
 export function installControl(get: () => ControlState): () => void {
   let disposed = false;
   const listeners: (() => void)[] = [];
-  const watch = <T,>(cmd: string, fn: (payload: T) => Promise<unknown>, read = false, reply = true) => {
+  const watch = <T,>(cmd: string, fn: (payload: T) => Promise<unknown>, read = false, reply: boolean | ((payload: T) => boolean) = true) => {
     void bridge.controlEvent<T>(cmd, payload => {
+      const respond = typeof reply === "function" ? reply(payload) : reply;
       void fn(payload).then(result => {
-        if (reply) return read ? bridge.readResult(String(result)) : bridge.controlResult(cmd, result);
-      }).catch(error => { if (reply) void (read ? bridge.readResult(`Error: ${String(error)}`) : bridge.controlResult(cmd, { ok: false, error: String(error) })).catch(() => {}); });
+        if (respond) return read ? bridge.readResult(String(result)) : bridge.controlResult(cmd, result);
+      }).catch(error => { if (respond) void (read ? bridge.readResult(`Error: ${String(error)}`) : bridge.controlResult(cmd, { ok: false, error: String(error) })).catch(() => {}); });
     }).then(unlisten => { if (disposed) unlisten(); else listeners.push(unlisten); }).catch(() => {});
   };
   const focused = () => { const pane = get().focused; if (!pane) throw new Error("No focused pane"); return pane; };
@@ -79,8 +80,9 @@ export function installControl(get: () => ControlState): () => void {
       else { animation.pause(); animation.currentTime = payload.freeze_ms; }
     }
     return { ok: true };
-  });
-  watch<DragPayload & { pane_id?: string; release?: boolean; to?: { pane_id?: string; zone?: string; tab_edge?: string; tab_id?: string; space_id?: string } }>("drag_pane", async payload => {
+  }, false, false);
+  watch<DragPayload & { pane_id?: string; release?: boolean; cancel?: boolean; to?: { pane_id?: string; zone?: string; tab_edge?: string; tab_id?: string; space_id?: string } }>("drag_pane", async payload => {
+    if (payload.cancel) { dragGeneration++; get().paneDrag?.cancel(); endHold?.(); endHold = null; return { ok: true, state: get().paneDrag?.state }; }
     if (payload.release) { endHold?.(); endHold = null; return { ok: true, state: get().paneDrag?.state }; }
     const cap = document.querySelector<HTMLElement>(`[data-pane="${CSS.escape(payload.pane_id ?? "")}"] .pane-cap`);
     if (!cap) throw new Error("No pane cap");
@@ -94,16 +96,18 @@ export function installControl(get: () => ControlState): () => void {
     const y = side === "up" ? r.top + inset : side === "down" ? r.bottom - inset : r.top + r.height / 2;
     await pointerDrag(cap, x - c.left - c.width / 2, y - c.top - c.height / 2, payload);
     return { ok: true, state: get().paneDrag?.state };
-  });
+  }, false, payload => !payload.hold || !!payload.release || !!payload.cancel);
   watch<{ dy: number }>("wheel", async payload => { focused().wheel(payload.dy); return { ok: true }; });
   return () => { disposed = true; listeners.forEach(unlisten => unlisten()); };
 }
 let endHold: (() => void) | null = null;
+let dragGeneration = 0;
 interface DragPayload { steps?: number; interval_ms?: number; esc?: boolean; right_click?: boolean; hold?: boolean }
 // Press on the centre of `el`, move by (dx, dy) in steps and release, as a physical mouse does:
 // events go to the element under each point, and the release clicks the nearest element the
 // press and release share, so the app's own handlers tell a drag from a click.
 async function pointerDrag(el: HTMLElement, dx: number, dy: number, payload: DragPayload) {
+  const generation = dragGeneration;
   const box = el.getBoundingClientRect();
   const x = box.left + box.width / 2, y = box.top + box.height / 2;
   const steps = Math.max(1, Math.min(20, payload.steps ?? 8));
@@ -112,9 +116,10 @@ async function pointerDrag(el: HTMLElement, dx: number, dy: number, payload: Dra
   const fire = (type: string, target: Element, px: number, py: number) => target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, composed: true, clientX: px, clientY: py, pointerId: 1, pointerType: "mouse", isPrimary: true, button: 0, buttons: type === "pointerup" ? 0 : 1 }));
   const down = at(x, y);
   fire("pointerdown", down, x, y);
-  for (let i = 1; i <= steps; i++) { await pause(); fire("pointermove", at(x + dx * i / steps, y + dy * i / steps), x + dx * i / steps, y + dy * i / steps); }
+  for (let i = 1; i <= steps; i++) { await pause(); if (generation !== dragGeneration) return { ok: true, cancelled: true }; fire("pointermove", at(x + dx * i / steps, y + dy * i / steps), x + dx * i / steps, y + dy * i / steps); }
   if (payload.esc) { await pause(); (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); }
   await pause();
+  if (generation !== dragGeneration) return { ok: true, cancelled: true };
   if (payload.right_click) at(x + dx, y + dy).dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 2, clientX: x + dx, clientY: y + dy }));
   if (payload.hold) { endHold = () => fire("pointerup", at(x + dx, y + dy), x + dx, y + dy); return { ok: true }; }
   const up = at(x + dx, y + dy);

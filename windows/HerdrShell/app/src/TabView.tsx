@@ -10,6 +10,7 @@ import type { Divider, ResizeAnswer } from "./dividers";
 import { PaneDrag, canDragPane, probePlace, transitionFor, prefersReducedMotion } from "./paneDrag";
 import type { PaneDragState } from "./paneDrag";
 import { motion } from "./tokens";
+import { Status } from "./Sidebar";
 import { clipRect, blockCancelContextMenu } from "./paneClip";
 export default function TabView({ snapshot, selected, machine, focused, onFocus, shortcut, register, pin, onError, registerDrag, onDragChange, onSpring, online = true }: { onSpring?: (tabId: string) => void; online?: boolean; registerDrag?: (drag: PaneDrag | null, lift?: () => boolean) => void; onDragChange?: (state: PaneDragState) => void; snapshot: Snapshot; selected: string | null; machine: string; focused: string | null; onFocus: (id: string) => void; shortcut: (event: KeyboardEvent) => boolean; register: (id: string, value: PaneController | null) => void; pin: (id: string, pinned: boolean) => void; onError?: (error: unknown) => void }) {
   const host = useRef<HTMLDivElement>(null);
@@ -140,7 +141,7 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
   useEffect(() => {
     registerDrag?.(paneDrag, () => {
       const l = latest.current; const pane = l.panes.find(p => p.pane_id === l.focused);
-      return !!pane && !!l.layout && paneDrag.lift({ pane: pane.pane_id, label: pane.title ?? pane.agent ?? "shell", layout: l.layout, size: l.size, supported: l.supported });
+      return !!pane && !!l.layout && paneDrag.lift({ pane: pane.pane_id, label: [pane.agent, pane.terminal_title_stripped || pane.title].filter(Boolean).join(" · ") || "shell", layout: l.layout, size: l.size, supported: l.supported });
     });
     return () => { paneStop.current?.(); paneDrag.cancel(); registerDrag?.(null); };
   }, [paneDrag, registerDrag]);
@@ -208,13 +209,13 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
   const animateLayout = paneDrag.shouldAnimateLayout(layout, size, resizer.busy || !!held);
   return <main ref={host} onPointerDownCapture={pressFirst} className={`tab-view ${paneState?.phase === "dragging" ? "pane-dragging" : ""}`}>{panes.map((pane, index) => {
     const box = boxes[index];
-    return <PaneClip key={`${selected}:${pane.terminal_id}`} id={pane.pane_id} box={clipRect(box, size)} animateLayout={animateLayout} onMotion={onMotion} lifted={paneState?.source === pane.pane_id && ["dragging", "dropped"].includes(paneState.phase)}>{settling => <PaneSurface settling={settling} grabbable={canDragPane(layout, supported)} onCapPointerDown={event => capPress(event, pane.pane_id, pane.title ?? pane.agent ?? "shell")} onError={onError} hasAgent={!!pane.agent || !!snapshot.agents?.some(a => a.pane_id === pane.pane_id && a.agent)} pane={pane} machine={machine} focused={focused === pane.pane_id} onFocus={onFocus} shortcut={shortcut} register={register} {...(index === corner && tab ? { pinned: tab.pin_index != null, onPin: () => pin(tab.tab_id, tab.pin_index == null) } : {})} />}</PaneClip>;
+    return <PaneClip key={`${selected}:${pane.terminal_id}`} id={pane.pane_id} box={clipRect(box, size)} animateLayout={animateLayout} onMotion={onMotion} lifted={paneState?.source === pane.pane_id && ["dragging", "dropped"].includes(paneState.phase)}>{settling => <PaneSurface settling={settling} grabbable={canDragPane(layout, supported)} onCapPointerDown={event => capPress(event, pane.pane_id, [pane.agent, pane.terminal_title_stripped || pane.title].filter(Boolean).join(" · ") || "shell")} onError={onError} hasAgent={!!pane.agent || !!snapshot.agents?.some(a => a.pane_id === pane.pane_id && a.agent)} pane={pane} machine={machine} focused={focused === pane.pane_id} onFocus={onFocus} shortcut={shortcut} register={register} {...(index === corner && tab ? { pinned: tab.pin_index != null, onPin: () => pin(tab.tab_id, tab.pin_index == null) } : {})} />}</PaneClip>;
   })}{layout && lines.map(d => {
     const r = scaleRect({ x: d.vertical ? d.pos : d.splitRect.x, y: d.vertical ? d.splitRect.y : d.pos, width: d.vertical ? 0 : d.splitRect.width, height: d.vertical ? d.splitRect.height : 0 }, layout.area, size.width, size.height);
     // The 1 px gap between panes sits just before the line; the grab strip centres on it.
     const style = d.vertical ? { left: r.x - 4.5, top: r.y, width: 7, height: r.height } : { left: r.x, top: r.y - 4.5, width: r.width, height: 7 };
     return <div key={d.splitId} data-split={d.splitId} className={`divider ${d.vertical ? "vertical" : "horizontal"} ${dragging === d.splitId ? "dragging" : ""}`} style={style} onPointerDown={event => grab(event, d)} />;
-  })}{visual?.ghost && <div ref={zoneOverlay} className="pane-drop-zone" style={{ transform: `translate(${visual.ghost.x}px, ${visual.ghost.y}px)`, width: `calc(${visual.ghost.width}px - var(--shell-motion-zone-inset) * 2)`, height: `calc(${visual.ghost.height}px - var(--shell-motion-zone-inset) * 2)`, margin: "var(--shell-motion-zone-inset)", transition: transitionFor("zone") }} />}{visual && ["dragging", "dropped"].includes(visual.phase) && (visual.pointer || visual.ghost) && <div ref={chip} className="pane-drag-chip" style={{ left: `calc(${visual.pointer?.x ?? visual.ghost!.x}px + var(--shell-motion-chip-offset))`, top: `calc(${visual.pointer?.y ?? visual.ghost!.y}px + var(--shell-motion-chip-offset))`, transition: transitionFor("lift") }}>{visual.label}</div>}</main>;
+  })}{visual?.ghost && <div ref={zoneOverlay} className="pane-drop-zone" style={{ transform: `translate(${visual.ghost.x}px, ${visual.ghost.y}px)`, width: `calc(${visual.ghost.width}px - var(--shell-motion-zone-inset) * 2)`, height: `calc(${visual.ghost.height}px - var(--shell-motion-zone-inset) * 2)`, margin: "var(--shell-motion-zone-inset)", transition: transitionFor("zone") }} />}{visual && ["dragging", "dropped"].includes(visual.phase) && (visual.pointer || visual.ghost) && <div ref={chip} className="pane-drag-chip" style={{ left: `calc(${visual.pointer?.x ?? visual.ghost!.x}px + var(--shell-motion-chip-offset))`, top: `calc(${visual.pointer?.y ?? visual.ghost!.y}px + var(--shell-motion-chip-offset))`, transition: transitionFor("lift") }}><Status status={snapshot.agents?.find(agent => agent.pane_id === visual.source)?.agent_status ?? snapshot.panes?.find(pane => pane.pane_id === visual.source)?.agent_status ?? "unknown"} /><span>{visual.label}</span></div>}</main>;
 }
 
 // Animate the clip only: terminal content takes its final size without scaling glyphs.
