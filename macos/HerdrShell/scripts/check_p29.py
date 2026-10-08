@@ -6,7 +6,7 @@
 Lab `shellspike-p29`. Agent status is reported on plain shells (same as check_p26). The
 app records opened_urls and does not open a browser. Herdr Shell posts no OS
 notifications, dock badges or sounds on any platform (Alex 2026-10-08), so the TestHook
-state must carry no `notifications` or `dock_badge` (absent, empty or nil) through every
+state must not contain the `notifications` or `dock_badge` keys at all through every
 transition: the selected tab blocking, a parked tab blocking, a background tab blocking
 and flipping, and a background tab finishing. Attention stays in the app: a background
 tab going blocked shows the blocked dot and leads attention_order / attention_latest, a
@@ -74,10 +74,10 @@ def wait_state(pred, timeout=25):
 
 
 def os_alerts(s):
-    """OS-level alert state in the TestHook dump; empty when the app posts none."""
+    """OS-level alert keys present in the TestHook dump; the app must emit neither key at all."""
     if s is None:
         return {"state": None}
-    return {k: s.get(k) for k in ("notifications", "dock_badge") if s.get(k)}
+    return {k: s[k] for k in ("notifications", "dock_badge") if k in s}
 
 
 def order(s):
@@ -211,35 +211,48 @@ def main():
 
     S.cmd({"cmd": "select", "tab": look})
     time.sleep(0.4)
-    S.cmd({"cmd": "type", "text": "printf 'https://example.com/p29\\n'\n"})
+    # A typed "\n" does not submit; press Return so the url prints on its own row.
+    S.cmd({"cmd": "type", "text": "printf 'https://example.com/p29\\n'"})
+    S.cmd({"cmd": "key", "key": "return"})
+    # Click the printed output row, not the echoed command line: the command line holds
+    # `printf '...p29\n'`, and a link there resolves with the literal \n (p29%5Cn).
+    def output_row(text):
+        return next((i for i, line in enumerate(text.splitlines()) if line.strip() == URL), None)
+
     seen = ""
     t0 = time.time()
     while time.time() - t0 < 15:
         seen = herdr("pane", "read", look_pane, "--source", "visible")
-        if URL in seen:
+        if output_row(seen) is not None:
             break
         time.sleep(0.2)
-    check("pane shows the url", URL in seen, seen[-180:].replace("\n", " | "))
+    row = output_row(seen)
+    check("pane prints the url on its own row", row is not None, seen[-180:].replace("\n", " | "))
+    row = row or 0
     rows = seen.splitlines()
-    row = next((i for i, line in enumerate(rows) if URL in line), 0)
-    col = rows[row].find("https") if row < len(rows) else 0
-    if col < 0:
-        col = 0
+    col = max(rows[row].find(URL), 0) if row < len(rows) else 0
+
+    def link(u):
+        return u[len("desk "):] if u.startswith("desk ") else u
+
+    def new_links(s, n):
+        return [link(u) for u in ((s or {}).get("opened_urls") or [])[n:]]
+
+    before_click = len(S.state().get("opened_urls") or [])
     click = {"cmd": "mouse", "pane": look_pane, "col": col + 4, "row": row, "mods": ["cmd"]}
     S.cmd({**click, "action": "move"})
     time.sleep(0.15)
     S.cmd({**click, "action": "down"})
     S.cmd({**click, "action": "up"})
-    s = wait_state(lambda s: any(URL in u for u in (s.get("opened_urls") or [])), 8)
-    opened = (s or {}).get("opened_urls") or []
-    check("cmd-click opens the link", any(URL in u for u in opened), f"{opened}")
+    s = wait_state(lambda s: len(s.get("opened_urls") or []) > before_click, 8)
+    added = new_links(s, before_click)
+    check("cmd-click opens exactly the printed link", added == [URL], f"{added}")
 
-    before_sim = len(opened)
+    before_sim = len((s or {}).get("opened_urls") or [])
     S.cmd({"cmd": "open_url_sim", "url": URL})
     s = wait_state(lambda s: len(s.get("opened_urls") or []) > before_sim, 8)
-    opened = (s or {}).get("opened_urls") or []
-    check("open_url_sim records the link",
-          len(opened) > before_sim and any(URL in u for u in opened), f"{opened}")
+    added = new_links(s, before_sim)
+    check("open_url_sim records exactly the link", added == [URL], f"{added}")
 
     shot("P29-links.png")
     finish()

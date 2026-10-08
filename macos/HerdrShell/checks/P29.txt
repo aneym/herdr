@@ -1,6 +1,6 @@
-HerdrShell P29 check  2026-10-08T15:28:53Z
+HerdrShell P29 check  2026-10-08T16:21:52Z
 app start: {"space": "herdr-qa", "ip": "192.168.64.5", "herdr_sha": "9d1761161e26"}
-{"space": "herdr-qa", "app_pid": "18656", "exe": "/Users/lume/.herdr-space/bin/HerdrShell", "host_socket": "/Users/aneyman/.cache/herdr-build/s/9b9fb3/h/.config/herdr/sessions/shellspike-p29/herdr.sock", "guest_socket": "/Users/lume/.herdr-space/herdr.sock", "owner": "claude-0f04de7f"}
+{"space": "herdr-qa", "app_pid": "23528", "exe": "/Users/lume/.herdr-space/bin/HerdrShell", "host_socket": "/Users/aneyman/.cache/herdr-build/s/9b9fb3/h/.config/herdr/sessions/shellspike-p29/herdr.sock", "guest_socket": "/Users/lume/.herdr-space/herdr.sock", "owner": "claude-0f04de7f"}
 [PASS] baseline is working before any transition -- look=working bg=working
 [PASS] no os alerts at baseline -- {}
 [PASS] selected key tab going blocked posts no os notification -- {}
@@ -12,9 +12,9 @@ app start: {"space": "herdr-qa", "ip": "192.168.64.5", "herdr_sha": "9d1761161e2
 [PASS] two flips in 1s post no os notification -- {}
 [PASS] working to done on a background tab joins attention_order -- ['w2:t2', 'w2:t4']
 [PASS] working to done posts no os notification and no dock badge -- {}
-[PASS] pane shows the url -- tmp % printf 'https://example.com/p29\n' | 
-[PASS] cmd-click opens the link -- ['desk https://example.com/p29%5Cn']
-[PASS] open_url_sim records the link -- ['desk https://example.com/p29%5Cn', 'desk https://example.com/p29']
+[PASS] pane prints the url on its own row -- tmp % printf 'https://example.com/p29\n' | https://example.com/p29 | tmp % | 
+[PASS] cmd-click opens exactly the printed link -- ['https://example.com/p29']
+[PASS] open_url_sim records exactly the link -- ['https://example.com/p29']
 [PASS] screenshot checks/P29-links.png -- /Volumes/StudioExt/repos/herdr-wt/parity-mac-no-notify/macos/HerdrShell/checks/P29-links.png
 lab down: stop: 0
 
