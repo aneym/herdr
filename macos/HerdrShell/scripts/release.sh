@@ -93,7 +93,7 @@ if [[ -d "$HOME/Applications/Herdr Shell.app" ]]; then
     # commits OLD already contains never match, so an older REF stays refused.
     TREE=$(git -C "$MAIN" rev-parse "$OLD^{tree}")
     SINCE=$(( $(git -C "$MAIN" log -1 --format=%ct "$OLD") - 86400 ))
-    TWIN=$(git -C "$MAIN" log --since="$SINCE" --format='%H %T' "$COMMIT" "^$OLD" | awk -v t="$TREE" '$2 == t && !f { print $1; f = 1 }')
+    TWIN=$(git -C "$MAIN" log --max-count=500 --since="$SINCE" --format='%H %T' "$COMMIT" "^$OLD" | awk -v t="$TREE" '$2 == t && !f { print $1; f = 1 }')
     if [[ -n "$TWIN" ]]; then
       echo "release.sh: installed $INSTALLED was rewritten as $TWIN (same tree)"
     fi

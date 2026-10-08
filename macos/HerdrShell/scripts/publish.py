@@ -232,7 +232,6 @@ def can_deliver(installed, commit, name):
             log(f"{name}: installed {installed} was rewritten as {twin[:12]} (same tree)")
             old = twin
     if old != new and is_ancestor(old, new):
-        stalled(name, None)
         return True
     if old != new:
         log(f"{name}: skip {commit}: not a strict descendant of installed {installed}")
@@ -251,7 +250,7 @@ def tree_twin(old, new):
     there is none. Commits old already contains never match, so an older release stays refused."""
     tree = git("rev-parse", old + "^{tree}")
     since = int(git("log", "-1", "--format=%ct", old)) - 86400
-    for line in git("log", f"--since={since}", "--format=%H %T", new, "^" + old).splitlines():
+    for line in git("log", "--max-count=500", f"--since={since}", "--format=%H %T", new, "^" + old).splitlines():
         sha, t = line.split()
         if t == tree:
             return sha
@@ -449,6 +448,7 @@ def fanout():
         if not can_deliver(st.get("installed", ""), commit, name):
             continue
         if same(st.get("staged", ""), commit) and same(st.get("staged_app", ""), commit):
+            stalled(name, None)
             continue
         if not os.path.isdir(f"{source}/{APP}") or not os.path.isfile(f"{source}/release.json"):
             log(f"{name}: FAIL deliver {commit}: release source missing")
@@ -464,6 +464,7 @@ def fanout():
             tar.stdout.close()
             tar_code = tar.wait()
         if r is not None and r.returncode == 0 and tar_code == 0 and "delivered" in r.stdout:
+            stalled(name, None)
             log(f"{name}: staged {commit} (installed {st.get('installed') or 'none'})")
         elif r is not None:
             log(f"{name}: FAIL deliver {commit}: {(r.stderr or r.stdout).strip()[-300:]}")
@@ -549,8 +550,9 @@ def install(name):
     r = subprocess.run(on(t, REMOTE_INSTALL),
                        stdin=tar.stdout, capture_output=True, text=True, timeout=900)
     tar.stdout.close()
-    tar.wait()
-    if r.returncode == 0 and "installed" in r.stdout:
+    tar_code = tar.wait()
+    if r.returncode == 0 and tar_code == 0 and "installed" in r.stdout:
+        stalled(name, None)
         log(f"{name}: installed {rel['commit']}")
     else:
         sys.exit(f"{name}: install failed: {(r.stdout + r.stderr).strip()[-300:]}")

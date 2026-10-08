@@ -119,6 +119,32 @@ with tempfile.TemporaryDirectory(prefix="publish-check-", dir=os.environ.get("TM
         sentinel.write_text(json.dumps({"commit": new}))
         (store / "release.json").write_text(json.dumps({"commit": old}))
         bundle_commit(old)
+    if case in ("all", "search-cap"):
+        # The exact twin exists, but is outside the bounded release-history search.
+        (repo / "shell.txt").write_text("cap twin\n")
+        git("add", "shell.txt")
+        git("commit", "-qm", "cap twin")
+        twin = git("rev-parse", "HEAD")
+        divergent = git("commit-tree", twin + "^{tree}", "-p", old, "-m", "divergent install")
+        (repo / "shell.txt").write_text("past cap\n")
+        git("commit", "-qam", "past cap")
+        far = git("rev-parse", "HEAD")
+        tree = git("rev-parse", far + "^{tree}")
+        for i in range(499):
+            far = git("commit-tree", tree, "-p", far, "-m", f"cap successor {i}")
+        (store / "release.json").write_text(json.dumps({"commit": far}))
+        bundle_commit(far)
+        with plist.open("wb") as f:
+            plistlib.dump({"HerdrShellCommit": divergent}, f)
+        result = subprocess.run([sys.executable, str(publisher), "fanout"], env=env,
+                                capture_output=True, text=True, timeout=60)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "not a strict descendant" in result.stdout, result.stdout
+        assert json.loads(sentinel.read_text())["commit"] == new
+        status = subprocess.run([sys.executable, str(publisher), "status"], env=env,
+                                capture_output=True, text=True, timeout=30)
+        assert '"STALLED"' in status.stdout, status.stdout
+        print("PASS fanout: a divergent twin beyond 500 commits is refused and STALLED")
     (store / "release.json").write_text(json.dumps({"commit": new}))
     with plist.open("wb") as f:
         plistlib.dump({"HerdrShellCommit": old}, f)
@@ -136,6 +162,18 @@ with tempfile.TemporaryDirectory(prefix="publish-check-", dir=os.environ.get("TM
             print(f"PASS {' '.join(command)}: bundle commit mismatch refused")
 
     if case in ("all", "first-install"):
+        # A refused machine can later be reprovisioned; first install must retire its stall.
+        (store / "release.json").write_text(json.dumps({"commit": old}))
+        bundle_commit(old)
+        with plist.open("wb") as f:
+            plistlib.dump({"HerdrShellCommit": new}, f)
+        result = subprocess.run([sys.executable, str(publisher), "fanout"], env=env,
+                                capture_output=True, text=True, timeout=30)
+        assert "not a strict descendant" in result.stdout, result.stdout
+        status = subprocess.run([sys.executable, str(publisher), "status"], env=env,
+                                capture_output=True, text=True, timeout=30)
+        assert '"STALLED"' in status.stdout, status.stdout
+        (store / "release.json").write_text(json.dumps({"commit": new}))
         shutil.rmtree(home / "Applications/Herdr Shell.app")
         bundle_commit(new[:12])
         result = subprocess.run([sys.executable, str(publisher), "install", "test"], env=env,
@@ -143,7 +181,10 @@ with tempfile.TemporaryDirectory(prefix="publish-check-", dir=os.environ.get("TM
         assert result.returncode == 0, result.stdout + result.stderr
         with plist.open("rb") as f:
             assert plistlib.load(f)["HerdrShellCommit"] == new[:12]
-        print("PASS install: first install delivers verified bundle")
+        status = subprocess.run([sys.executable, str(publisher), "status"], env=env,
+                                capture_output=True, text=True, timeout=30)
+        assert '"STALLED"' not in status.stdout, status.stdout
+        print("PASS install: first install delivers verified bundle and clears STALLED")
     if case in ("all", "release", "release-first-install"):
         # Exercise release.sh against real worktrees; only the Swift build boundary is fake.
         scripts = repo / "macos/HerdrShell/scripts"
