@@ -887,6 +887,14 @@
           ],
           "type": "string"
         },
+        "HomeLocation": {
+          "enum": [
+            "cloud",
+            "local",
+            "unsynced"
+          ],
+          "type": "string"
+        },
         "PaneInfo": {
           "properties": {
             "agent": {
@@ -1188,6 +1196,19 @@
             },
             "focused": {
               "type": "boolean"
+            },
+            "hidden": {
+              "type": "boolean"
+            },
+            "home_location": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/event/$defs/HomeLocation"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "label": {
               "type": "string"
@@ -5106,6 +5127,21 @@
           ],
           "type": "string"
         },
+        "TabSetHiddenParams": {
+          "properties": {
+            "hidden": {
+              "type": "boolean"
+            },
+            "tab_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "tab_id",
+            "hidden"
+          ],
+          "type": "object"
+        },
         "TabSetPinnedParams": {
           "description": "Pin or unpin a chat in the sidebar's pinned section. `priority` sets where\nit lands in pin order (higher first); omitted keeps/appends at the end.",
           "properties": {
@@ -6288,6 +6324,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/TabSetRoleParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "tab.set_hidden",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/TabSetHiddenParams"
             }
           },
           "required": [
@@ -9131,6 +9183,14 @@
           ],
           "type": "string"
         },
+        "HomeLocation": {
+          "enum": [
+            "cloud",
+            "local",
+            "unsynced"
+          ],
+          "type": "string"
+        },
         "InstalledPluginInfo": {
           "properties": {
             "actions": {
@@ -10486,6 +10546,19 @@
           "properties": {
             "agent_status": {
               "$ref": "#/schemas/success_response/$defs/AgentStatus"
+            },
+            "hidden": {
+              "type": "boolean"
+            },
+            "home_location": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/HomeLocation"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "label": {
               "type": "string"
@@ -12861,6 +12934,19 @@
             },
             "focused": {
               "type": "boolean"
+            },
+            "hidden": {
+              "type": "boolean"
+            },
+            "home_location": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/HomeLocation"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "label": {
               "type": "string"
