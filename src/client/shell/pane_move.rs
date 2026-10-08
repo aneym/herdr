@@ -127,7 +127,7 @@ impl ClientShellState {
     ) -> bool {
         if !matches!(self.chrome_drag, Some(ClientChromeDrag::Pane { .. })) {
             self.cancel_pane_drag();
-            return false;
+            return key.code == KeyCode::Esc;
         }
         if key.kind == crossterm::event::KeyEventKind::Release {
             return true;

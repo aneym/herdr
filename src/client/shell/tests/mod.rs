@@ -283,6 +283,7 @@ mod navigation_history;
 mod pane_drag;
 mod pane_drag_fixture;
 mod pane_drag_spring;
+mod pane_drag_spring_edges;
 mod pane_drop_zone_fixture;
 mod pane_motion;
 mod pane_move_mode;

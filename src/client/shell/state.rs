@@ -2184,7 +2184,7 @@ impl ClientShellState {
             }
         }
         if matches!(&self.chrome_drag, Some(ClientChromeDrag::Pane { source_pane_id, origin_tab_id, .. })
-            if snapshot.focused_tab_id.as_ref() != self.pane_drag.as_ref().map(|p| &p.current_tab_id).or(Some(origin_tab_id))
+            if !snapshot.focused_tab_id.as_ref().is_some_and(|tab| self.pane_drag.as_ref().map_or(tab == origin_tab_id, |p| p.requested_tabs.contains(tab)))
                 || !snapshot.panes.iter().any(|p| &p.pane_id == source_pane_id))
         {
             self.cancel_pane_drag();
