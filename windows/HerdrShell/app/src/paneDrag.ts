@@ -43,6 +43,10 @@ export class PaneDrag {
   private row: RowTarget | null = null;
   private target: string | null = null;
   private timer?: ReturnType<typeof setTimeout>;
+  private springTimer?: ReturnType<typeof setTimeout>;
+  private dwell?: { tab: string; point: { x: number; y: number } };
+  private origin?: string;
+  private springTab?: string;
   // The newest snapshot layout and the tab's pane descriptors. While a sent drop waits for its reply, snapshots only
   // land here (the newest wins) and the tab keeps showing `frozen`, its layout at the release, with the panes it had
   // then (`frozenPanes`): no box moves, appears or leaves and no terminal resizes until the drop ends.
@@ -57,7 +61,7 @@ export class PaneDrag {
   private settled?: { base: Layout | undefined; layout: Layout; panes: string; size: { width: number; height: number } };
   private settling = false;
   private settleTimer?: ReturnType<typeof setTimeout>;
-  constructor(private machine: string, private options: { onChange?: (state: PaneDragState) => void; onError?: (error: unknown) => void } = {}) {}
+  constructor(private machine: string, private options: { onChange?: (state: PaneDragState) => void; onError?: (error: unknown) => void; onSpring?: (tabId: string) => void } = {}) {}
   get state(): PaneDragState { return this.value; }
   private emit(patch: Partial<PaneDragState>) {
     const next = { ...this.value, ...patch };
@@ -73,7 +77,7 @@ export class PaneDrag {
     const shown = this.shownLayout(this.latest);
     if (shown?.tab_id === input.layout.tab_id) input = { ...input, layout: shown };
     if (!canDragPane(input.layout, input.supported) || !input.layout.panes.some(p => p.pane_id === input.pane)) return false;
-    this.cancel(); this.input = input; this.rebuild(); this.target = input.pane;
+    this.cancel(); this.origin = input.layout.tab_id; this.input = input; this.rebuild(); this.target = input.pane;
     this.emit({ phase: "pressed", source: input.pane, label: input.label, pointer: input.point, sourceRect: this.boxes.find(p => p.id === input.pane)!.rect }); return true;
   }
   lift(input: Omit<PaneDragPress, "point">): boolean {
@@ -88,6 +92,26 @@ export class PaneDrag {
     const lifting = this.value.phase === "pressed";
     this.row = row; this.emit({ phase: "dragging", pointer: point });
     this.setZone(this.at(point), false, lifting);
+    this.dwellOn(point, row);
+  }
+  private clearDwell() { clearTimeout(this.springTimer); this.dwell = undefined; }
+  private dwellOn(point: { x: number; y: number }, row: RowTarget | null) {
+    const tab = row?.kind === "tab" ? row.tab_id : undefined;
+    if (!tab || tab === this.input!.layout.tab_id || tab === this.springTab) { this.clearDwell(); return; }
+    if (this.dwell?.tab === tab && Math.hypot(point.x - this.dwell.point.x, point.y - this.dwell.point.y) < motion.dragThresholdPx) return;
+    this.clearDwell(); this.dwell = { tab, point };
+    this.springTimer = setTimeout(() => {
+      this.clearDwell();
+      if (this.value.phase !== "dragging") return;
+      this.springTab = tab;
+      const generation = this.generation;
+      void bridge.api(this.machine, "tab.focus", { tab_id: tab }).catch(error => {
+        if (generation !== this.generation) return;
+        this.cancel(); this.options.onError?.(error);
+      });
+      // Mark the switch before notifying the view: its next layout belongs to this spring, not an external switch.
+      this.options.onSpring?.(tab);
+    }, motion.springLoadMs);
   }
   private at(point: { x: number; y: number }): PaneZone | null {
     if (this.row) return this.row.kind === "tab" ? this.row.tab_id === this.input!.layout.tab_id ? null : { kind: "into_tab", tab_id: this.row.tab_id } : { kind: "new_tab_in", workspace_id: this.row.workspace_id };
@@ -145,6 +169,7 @@ export class PaneDrag {
     if (zone.kind === "centre") { method = "pane.swap"; params = { source_pane_id: source, target_pane_id: zone.target }; }
     else if (zone.kind === "new_tab_in") { method = "pane.move"; params = { pane_id: source, destination: { type: "new_tab", workspace_id: zone.workspace_id }, focus: true }; }
     else { method = "pane.place"; params = { ...(zone.kind === "into_tab" ? { pane_id: source, target: { type: "tab", tab_id: zone.tab_id }, side: "right" } : this.place(zone)), focus: true, dry_run: false }; }
+    this.clearDwell();
     const generation = ++this.generation;
     this.frozen = this.input!.layout; this.latestAtRelease = this.latest;
     this.frozenPanes = this.livePanes.filter(p => this.frozen!.panes.some(lp => lp.pane_id === p.pane_id));
@@ -183,7 +208,14 @@ export class PaneDrag {
    * so it ends quietly first: the buffered snapshot is then drawn and its terminals fitted at the new size. */
   hostResized(): void { if (this.value.phase === "dropped") this.finish("quiet"); }
   /** Every end unfreezes the tab: a refusal, the timeout or a quiet end shows the buffered snapshot as it is. */
-  private finish(end: PaneDragState["end"]) { ++this.generation; clearTimeout(this.timer); this.frozen = undefined; this.frozenPanes = []; this.cache.clear(); this.flight = false; this.raw = null; this.row = null; this.target = null; this.emit({ ...idle(), end }); }
+  private finish(end: PaneDragState["end"]) {
+    const restore = end === "cancel" && this.springTab && this.springTab !== this.origin ? this.origin : undefined;
+    this.clearDwell(); this.springTab = undefined; this.origin = undefined;
+    if (restore) {
+      void bridge.api(this.machine, "tab.focus", { tab_id: restore }).catch(error => this.options.onError?.(error));
+      this.options.onSpring?.(restore);
+    }
+    ++this.generation; clearTimeout(this.timer); this.frozen = undefined; this.frozenPanes = []; this.cache.clear(); this.flight = false; this.raw = null; this.row = null; this.target = null; this.emit({ ...idle(), end }); }
   /** What the tab shows: the release-time layout while a drop is pending, then an accepted drop's settle target until
    * the next snapshot replaces `layout`. */
   shownLayout(layout: Layout | undefined): Layout | undefined {
@@ -224,11 +256,12 @@ export class PaneDrag {
     // tab ends it quietly: the chip and ghost belong to that tab, and the server may still apply the drop.
     if (this.value.phase === "dropped" && layout?.tab_id !== this.input!.layout.tab_id) { this.finish("quiet"); return; }
     if (this.value.phase === "idle" || this.value.phase === "dropped") return;
-    if (!layout || layout.tab_id !== this.input!.layout.tab_id || !layout.panes.some(p => p.pane_id === this.value.source)) { this.cancel(); return; }
-    if (JSON.stringify(layout.panes) === JSON.stringify(this.input!.layout.panes) && JSON.stringify(layout.area) === JSON.stringify(this.input!.layout.area) && layout.zoomed === this.input!.layout.zoomed) return;
+    const springLayout = !!layout && layout.tab_id === this.springTab;
+    if (!layout || (!springLayout && (layout.tab_id !== this.input!.layout.tab_id || !layout.panes.some(p => p.pane_id === this.value.source)))) { this.cancel(); return; }
+    if (layout.tab_id === this.input!.layout.tab_id && JSON.stringify(layout.panes) === JSON.stringify(this.input!.layout.panes) && JSON.stringify(layout.area) === JSON.stringify(this.input!.layout.area) && layout.zoomed === this.input!.layout.zoomed) return;
     if (layout.zoomed) { this.cancel(); return; }
     ++this.generation; this.flight = false; this.cache.clear(); this.input = { ...this.input!, layout }; this.rebuild();
-    this.emit({ sourceRect: this.boxes.find(p => p.id === this.value.source)!.rect });
+    this.emit({ sourceRect: this.boxes.find(p => p.id === this.value.source)?.rect ?? this.value.sourceRect });
     if (this.value.phase === "dragging") this.setZone(this.value.keyboard ? this.raw : this.at(this.value.pointer!), true);
   }
 }

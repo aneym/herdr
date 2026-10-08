@@ -11,10 +11,10 @@ import { PaneDrag, canDragPane, probePlace, transitionFor, prefersReducedMotion 
 import type { PaneDragState } from "./paneDrag";
 import { motion } from "./tokens";
 import { clipRect, blockCancelContextMenu } from "./paneClip";
-export default function TabView({ snapshot, selected, machine, focused, onFocus, shortcut, register, pin, onError, registerDrag, onDragChange, online = true }: { online?: boolean; registerDrag?: (drag: PaneDrag | null, lift?: () => boolean) => void; onDragChange?: (state: PaneDragState) => void; snapshot: Snapshot; selected: string | null; machine: string; focused: string | null; onFocus: (id: string) => void; shortcut: (event: KeyboardEvent) => boolean; register: (id: string, value: PaneController | null) => void; pin: (id: string, pinned: boolean) => void; onError?: (error: unknown) => void }) {
+export default function TabView({ snapshot, selected, machine, focused, onFocus, shortcut, register, pin, onError, registerDrag, onDragChange, onSpring, online = true }: { onSpring?: (tabId: string) => void; online?: boolean; registerDrag?: (drag: PaneDrag | null, lift?: () => boolean) => void; onDragChange?: (state: PaneDragState) => void; snapshot: Snapshot; selected: string | null; machine: string; focused: string | null; onFocus: (id: string) => void; shortcut: (event: KeyboardEvent) => boolean; register: (id: string, value: PaneController | null) => void; pin: (id: string, pinned: boolean) => void; onError?: (error: unknown) => void }) {
   const host = useRef<HTMLDivElement>(null);
   const [paneState, setPaneState] = useState<PaneDragState | null>(null);
-  const callbacks = useRef({ onError, onDragChange }); callbacks.current = { onError, onDragChange };
+  const callbacks = useRef({ onError, onDragChange, onSpring }); callbacks.current = { onError, onDragChange, onSpring };
   const [size, setSize] = useState({ width: 0, height: 0 });
   const sizeNow = useRef(size); sizeNow.current = size;
   // While a divider drag runs, panes follow the layouts pane.resize answers with, not snapshots:
@@ -25,7 +25,7 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
   const latestLayout = held?.tab_id === selected ? held : snapshotLayout;
   // A pending pane drop shows the tab as it was at the release; an accepted one shows its settle target until the next
   // snapshot (or held resize answer) replaces latestLayout.
-  const paneDrag = useMemo(() => new PaneDrag(machine, { onChange: state => { setPaneState(state); callbacks.current.onDragChange?.(state); }, onError: error => callbacks.current.onError?.(error) }), [machine]);
+  const paneDrag = useMemo(() => new PaneDrag(machine, { onChange: state => { setPaneState(state); callbacks.current.onDragChange?.(state); }, onError: error => callbacks.current.onError?.(error), onSpring: tabId => callbacks.current.onSpring?.(tabId) }), [machine]);
   const layout = paneDrag.shownLayout(latestLayout);
   const shown = useRef(layout); shown.current = layout;
   // A window resize, a sidebar toggle or a sidebar resize all reach the tab as a new host size. A pending drop ends
@@ -158,7 +158,7 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
       // A right press while the left is held arrives as a chorded pointermove, never a pointerdown.
       if (e.button === 2 || e.buttons & 2) { rightCancel(e, !(e.buttons & 2)); return; }
       const hit = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>("[data-tab], [data-space]");
-      paneDrag.move(point(e), hit?.dataset.tab ? { kind: "tab", tab_id: hit.dataset.tab } : hit?.dataset.space ? { kind: "space", workspace_id: hit.dataset.space } : null);
+      paneDrag.move(point(e), hit?.dataset.tab && snapshot.tabs?.some(t => t.tab_id === hit.dataset.tab) ? { kind: "tab", tab_id: hit.dataset.tab } : hit?.dataset.space ? { kind: "space", workspace_id: hit.dataset.space } : null);
       if (paneDrag.state.phase === "dragging") { e.preventDefault(); e.stopPropagation(); }
     };
     const done = () => { window.removeEventListener("pointermove", move, true); window.removeEventListener("pointerup", up, true); window.removeEventListener("pointercancel", cancel, true); window.removeEventListener("pointerdown", right, true); window.removeEventListener("contextmenu", context, true); paneStop.current = null; try { el.releasePointerCapture(event.pointerId); } catch { /* Already released. */ } };
