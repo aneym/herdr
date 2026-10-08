@@ -1032,9 +1032,8 @@ impl App {
         } else if candidate
             .as_ref()
             .is_some_and(|layout| old.layout.same_tree(layout))
+            || (same_tab && target.is_none() && old.layout.pane_count() == 1)
         {
-            Some(PanePlaceReason::NoChange)
-        } else if same_tab && target.is_none() && old.layout.pane_count() == 1 {
             Some(PanePlaceReason::NoChange)
         } else if candidate.is_none() {
             Some(PanePlaceReason::NotTiled)
@@ -1164,7 +1163,9 @@ impl App {
                 let Some(result) = move_result else {
                     // Preserve move errors, but pane.place must never leak a pane_move result.
                     if serde_json::from_str::<serde_json::Value>(&response)
-                        .ok().is_some_and(|value| value.get("error").is_some()) {
+                        .ok()
+                        .is_some_and(|value| value.get("error").is_some())
+                    {
                         return response;
                     }
                     return encode_error(id, "pane_place_failed", "pane placement was not applied");

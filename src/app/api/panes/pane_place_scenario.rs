@@ -164,18 +164,30 @@ fn pane_moved_count(events: &[EventKind]) -> usize {
 fn run_pane_place_scenario(mut app: App) {
     let ids = build_place_tabs(&mut app);
     app.state.assert_invariants_for_test();
-    for workspace in &app.state.workspaces { workspace.assert_invariants_for_test(); }
+    for workspace in &app.state.workspaces {
+        workspace.assert_invariants_for_test();
+    }
 
     let sized = |size| json!({"pane_id": ids.c, "target": {"type": "pane", "pane_id": ids.a}, "side": "left", "size": size, "dry_run": true});
     let clamped = place(&mut app, sized(1.5));
     let upper = place(&mut app, sized(0.9));
-    assert_eq!(clamped, upper, "out-of-range size uses the documented upper clamp");
-    for workspace in &app.state.workspaces { workspace.assert_invariants_for_test(); }
+    assert_eq!(
+        clamped, upper,
+        "out-of-range size uses the documented upper clamp"
+    );
+    for workspace in &app.state.workspaces {
+        workspace.assert_invariants_for_test();
+    }
 
-    let lone = place(&mut app, json!({"pane_id": ids.y, "target": {"type": "tab", "tab_id": ids.tab3}, "side": "left"}));
+    let lone = place(
+        &mut app,
+        json!({"pane_id": ids.y, "target": {"type": "tab", "tab_id": ids.tab3}, "side": "left"}),
+    );
     assert_eq!(lone["changed"], false);
     assert_eq!(lone["reason"], "no_change");
-    for workspace in &app.state.workspaces { workspace.assert_invariants_for_test(); }
+    for workspace in &app.state.workspaces {
+        workspace.assert_invariants_for_test();
+    }
 
     let before = layout_of(&mut app, &ids.a);
     assert_eq!(before["area"], rect(0, 0, 120, 40));
@@ -216,7 +228,9 @@ fn run_pane_place_scenario(mut app: App) {
         "a dry run emits nothing"
     );
     app.state.assert_invariants_for_test();
-    for workspace in &app.state.workspaces { workspace.assert_invariants_for_test(); }
+    for workspace in &app.state.workspaces {
+        workspace.assert_invariants_for_test();
+    }
 
     // 2. The same call applied gives `(C | A) | B`, focuses C and lands
     //    exactly where the dry run said.
@@ -253,7 +267,9 @@ fn run_pane_place_scenario(mut app: App) {
     assert_eq!(applied["target_layout"], after);
     assert_eq!(pane_moved_count(&events_since(&app, mark)), 1);
     app.state.assert_invariants_for_test();
-    for workspace in &app.state.workspaces { workspace.assert_invariants_for_test(); }
+    for workspace in &app.state.workspaces {
+        workspace.assert_invariants_for_test();
+    }
 
     // 3. The tab's right edge makes C a full-height right third.
     let mark = event_mark(&app);
@@ -271,7 +287,9 @@ fn run_pane_place_scenario(mut app: App) {
     assert_eq!(rect_of(&after, &ids.c), rect(80, 0, 40, 40));
     assert_eq!(pane_moved_count(&events_since(&app, mark)), 1);
     app.state.assert_invariants_for_test();
-    for workspace in &app.state.workspaces { workspace.assert_invariants_for_test(); }
+    for workspace in &app.state.workspaces {
+        workspace.assert_invariants_for_test();
+    }
 
     // 4. Repeating it changes nothing and emits nothing.
     let mark = event_mark(&app);
@@ -282,7 +300,9 @@ fn run_pane_place_scenario(mut app: App) {
     assert_eq!(layout_of(&mut app, &ids.a), after);
     assert!(events_since(&app, mark).is_empty());
     app.state.assert_invariants_for_test();
-    for workspace in &app.state.workspaces { workspace.assert_invariants_for_test(); }
+    for workspace in &app.state.workspaces {
+        workspace.assert_invariants_for_test();
+    }
 
     // 5. A pane cannot be placed beside itself.
     let mark = event_mark(&app);
@@ -299,7 +319,9 @@ fn run_pane_place_scenario(mut app: App) {
     assert_eq!(layout_of(&mut app, &ids.a), after);
     assert!(events_since(&app, mark).is_empty());
     app.state.assert_invariants_for_test();
-    for workspace in &app.state.workspaces { workspace.assert_invariants_for_test(); }
+    for workspace in &app.state.workspaces {
+        workspace.assert_invariants_for_test();
+    }
 
     // 6. A zoomed tab refuses the move.
     let zoom = call(
@@ -330,7 +352,9 @@ fn run_pane_place_scenario(mut app: App) {
         "unzoom: {unzoom}"
     );
     app.state.assert_invariants_for_test();
-    for workspace in &app.state.workspaces { workspace.assert_invariants_for_test(); }
+    for workspace in &app.state.workspaces {
+        workspace.assert_invariants_for_test();
+    }
 
     // 7. Across tabs: B goes above X in tab 2 and tab 1 reflows to `A | C`.
     let mark = event_mark(&app);
@@ -370,7 +394,9 @@ fn run_pane_place_scenario(mut app: App) {
     assert_eq!(pane_tab(&mut app, &ids.b), ids.tab2);
     assert_eq!(pane_moved_count(&events_since(&app, mark)), 1);
     app.state.assert_invariants_for_test();
-    for workspace in &app.state.workspaces { workspace.assert_invariants_for_test(); }
+    for workspace in &app.state.workspaces {
+        workspace.assert_invariants_for_test();
+    }
 
     // 8. Moving the only pane out of tab 3 closes that tab.
     let tabs_before = app.state.workspaces[0].tabs.len();
@@ -395,7 +421,9 @@ fn run_pane_place_scenario(mut app: App) {
     assert_eq!(rect_of(&after, &ids.c), rect(80, 0, 40, 40));
     assert_eq!(pane_moved_count(&events_since(&app, mark)), 1);
     app.state.assert_invariants_for_test();
-    for workspace in &app.state.workspaces { workspace.assert_invariants_for_test(); }
+    for workspace in &app.state.workspaces {
+        workspace.assert_invariants_for_test();
+    }
 }
 
 #[test]
@@ -446,5 +474,7 @@ fn unknown_pane_or_tab_is_an_error_and_changes_nothing() {
     assert_eq!(layout_of(&mut app, &ids.a), before);
     assert!(events_since(&app, mark).is_empty());
     app.state.assert_invariants_for_test();
-    for workspace in &app.state.workspaces { workspace.assert_invariants_for_test(); }
+    for workspace in &app.state.workspaces {
+        workspace.assert_invariants_for_test();
+    }
 }
