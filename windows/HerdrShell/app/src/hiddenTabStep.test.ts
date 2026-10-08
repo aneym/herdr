@@ -3,7 +3,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { runAction } from "./actions";
 import type { ActionContext } from "./actions";
-import { buildSidebar } from "./model";
+import { buildSidebar, selectionAfterClose, tabOrder } from "./model";
 import type { Snapshot, Tab } from "./model";
 
 function story(hiddenB = true): Snapshot {
@@ -40,5 +40,18 @@ describe("next and previous tab skip hidden agents", () => {
     const next = await step("next_tab", "B");
     const prev = await step("prev_tab", "B");
     for (const id of [next, prev]) expect(["A", "C", "P"]).toContain(id);
+  });
+  it("keeps a hidden agent selectable: App treats tabOrder as the set of live selections", () => {
+    // Review FAIL on 409bce23: dropping hidden agents from tabOrder made App bounce a click on a
+    // hidden row straight to the next visible agent.
+    expect(tabOrder(buildSidebar(story()))).toContain("B");
+  });
+  it("never falls back onto a hidden agent when the selected tab closes", () => {
+    const before = buildSidebar(story());
+    const closedA = { ...story(), tabs: story().tabs!.filter(t => t.tab_id !== "A") };
+    expect(selectionAfterClose(before, buildSidebar(closedA), "A")).toBe("C");
+    const closedC = { ...story(), tabs: story().tabs!.filter(t => t.tab_id !== "C") };
+    expect(selectionAfterClose(before, buildSidebar(closedC), "C")).toBe("A");
+    expect(selectionAfterClose(before, buildSidebar(story()), "gone", "B")).not.toBe("B");
   });
 });
