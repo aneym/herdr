@@ -1,3 +1,4 @@
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import PaneTerm from "./PaneTerm";
 import type { PaneController } from "./PaneTerm";
@@ -9,7 +10,7 @@ export type PaneMode = "terminal" | "chat";
 function PinGlyph({ pinned }: { pinned: boolean }) {
   return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2.5h4M7 2.5v4L4.5 9h7L9 6.5v-4M8 9v4.5" />{pinned && <path d="M3 3l10 10" />}</svg>;
 }
-export default function PaneSurface(props: { pane: Pane; machine: string; focused: boolean; onFocus: (id: string) => void; shortcut: (event: KeyboardEvent) => boolean; register: (id: string, controller: PaneController | null) => void; hasAgent: boolean; pinned?: boolean; onPin?: () => void; onError?: (error: unknown) => void }) {
+export default function PaneSurface(props: { grabbable?: boolean; onCapPointerDown?: (event: ReactPointerEvent<HTMLDivElement>) => void; settling?: boolean; pane: Pane; machine: string; focused: boolean; onFocus: (id: string) => void; shortcut: (event: KeyboardEvent) => boolean; register: (id: string, controller: PaneController | null) => void; hasAgent: boolean; pinned?: boolean; onPin?: () => void; onError?: (error: unknown) => void }) {
   const { pane, machine, hasAgent, register, pinned, onPin } = props;
   const toolsRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState(false);

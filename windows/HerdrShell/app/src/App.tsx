@@ -9,7 +9,7 @@ import Sidebar, { useSelectionReveal } from "./Sidebar";
 import { useLaneFiles } from "./laneFiles";
 import { useAgentCards } from "./AgentFace";
 import Switcher from "./Switcher";
-import { actionFor } from "./keys";
+import { moveModeKey, actionFor } from "./keys";
 import type { Action } from "./keys";
 import { runAction } from "./actions";
 import TabView from "./TabView";
@@ -24,6 +24,7 @@ import type { MutableRefObject } from "react";
 import "@xterm/xterm/css/xterm.css";
 import "./tokens.css";
 import "./styles.css";
+import type { PaneDrag, PaneDragState } from "./paneDrag";
 interface ViewSelection { selected: string | null; focused: string | null }
 export default function App() {
   const [machines, setMachines] = useState<MachineStatus[]>([]);
@@ -102,6 +103,10 @@ function MachineView({ machine, machines, snapshot, chooseMachine, selections, c
   const savedSelection = useRef({ selected, focused });
   savedSelection.current = { selected, focused };
   useEffect(() => () => { selections.set(machine.name, savedSelection.current); }, [selections, machine.name]);
+  const paneDrag = useRef<PaneDrag | null>(null);
+  const liftPane = useRef<(() => boolean) | undefined>();
+  const [paneDragState, setPaneDragState] = useState<PaneDragState | null>(null);
+  const registerDrag = useCallback((drag: PaneDrag | null, lift?: () => boolean) => { paneDrag.current = drag; liftPane.current = lift; }, []);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -183,6 +188,7 @@ function MachineView({ machine, machines, snapshot, chooseMachine, selections, c
   }, [pending, snapshot, select, focus]);
   const action = useCallback((name: string, label?: string, tabId?: string) => {
     const current = state.current;
+    if (name === "move_pane_mode") { liftPane.current?.(); return Promise.resolve(); }
     if (name === "next_machine" || name === "prev_machine") {
       const next = cycleMachine(current.machines.map(m => m.name), current.machine.name, name === "next_machine" ? 1 : -1);
       if (next) chooseMachine(next);
@@ -209,6 +215,15 @@ function MachineView({ machine, machines, snapshot, chooseMachine, selections, c
   const closeSwitcher = () => { setSwitcherOpen(false); const id = state.current.focused; if (id) controllers.current.get(id)?.focus(); };
   const shortcut = useCallback((event: KeyboardEvent) => {
     if (event.type !== "keydown") return false;
+    const drag = paneDrag.current;
+    if (drag?.state.keyboard) {
+      const key = moveModeKey(event);
+      if (key?.kind === "target") drag.key(key.side, key.edge);
+      else if (key?.kind === "drop") drag.release();
+      else if (key?.kind === "cancel") drag.cancel();
+      return true;
+    }
+    if (event.key === "Escape" && drag && drag.state.phase !== "idle") { drag.cancel(); return true; }
     if (event.target instanceof Element && event.target.closest("textarea:not(.xterm-helper-textarea)") &&
         !(event.ctrlKey && !event.altKey && !event.metaKey &&
           ((!event.shiftKey && /^[1-9]$/.test(event.key)) || event.key === "Tab" ||
@@ -227,7 +242,7 @@ function MachineView({ machine, machines, snapshot, chooseMachine, selections, c
   control.current = () => {
     const current = state.current;
     const panes = [...controllers.current.values()].filter(p => current.snapshot.panes?.some(info => info.pane_id === p.info().pane_id && info.tab_id === current.selected));
-    return { machine: current.machine, machines: current.machines, chooseMachine, selected: current.selected, rows: current.rows, docs: current.docs, panes, focused: panes.find(p => p.info().pane_id === current.focused), open: select, action };
+    return { paneDrag: paneDrag.current, machine: current.machine, machines: current.machines, chooseMachine, selected: current.selected, rows: current.rows, docs: current.docs, panes, focused: panes.find(p => p.info().pane_id === current.focused), open: select, action };
   };
   // A pin lands by priority, so as the Mac's pinAtEnd it then moves to the last place, counted
   // on the owning server after the pin rather than from a snapshot that may be behind.
@@ -248,5 +263,5 @@ function MachineView({ machine, machines, snapshot, chooseMachine, selections, c
       showError(error);
     });
   }, [showError]);
-  return <div className="layout">{sidebarVisible && <Sidebar snapshot={snapshot} catalog={catalog} machines={machines} chooseMachine={chooseMachine} rows={rows} selected={selected} revealed={revealed} machine={machine} notice={notice?.text ?? null} select={select} pin={pin} movePin={movePin} renaming={renaming} startRename={id => { setRenaming(id); }} cancelRename={() => setRenaming(null)} commitRename={async (id, label) => { try { await action("rename_tab", label, id); setRenaming(null); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); } catch { /* runAction reports through the transient status notice. */ } }} />}<TabView snapshot={snapshot} selected={selected} machine={machine.name} focused={switcherOpen || renaming ? null : focused} onFocus={focus} shortcut={shortcut} register={register} pin={pin} onError={showError} />{docsOpen && docsItems.length > 0 && <DocPanel key={docsKey} machine={machine.name} items={docsItems} active={activeDoc} select={name => setDocsActive(value => ({ ...value, [docsKey]: name }))} error={docsError} />}{switcherOpen && <Switcher rows={rows} selected={selected} machine={machine.name} open={select} close={closeSwitcher} />}{!sidebarVisible && (notice || machine.state !== "up") && <div className="machine-error notice" role="status">{notice?.text ?? machine.error ?? machine.state}</div>}</div>;
+  return <div className="layout">{sidebarVisible && <Sidebar paneDropRow={paneDragState?.zone?.kind === "into_tab" ? `tab:${paneDragState.zone.tab_id}` : paneDragState?.zone?.kind === "new_tab_in" ? `space:${paneDragState.zone.workspace_id}` : null} snapshot={snapshot} catalog={catalog} machines={machines} chooseMachine={chooseMachine} rows={rows} selected={selected} revealed={revealed} machine={machine} notice={notice?.text ?? null} select={select} pin={pin} movePin={movePin} renaming={renaming} startRename={id => { setRenaming(id); }} cancelRename={() => setRenaming(null)} commitRename={async (id, label) => { try { await action("rename_tab", label, id); setRenaming(null); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); } catch { /* runAction reports through the transient status notice. */ } }} />}<TabView online={machine.state === "up"} registerDrag={registerDrag} onDragChange={setPaneDragState} snapshot={snapshot} selected={selected} machine={machine.name} focused={switcherOpen || renaming ? null : focused} onFocus={focus} shortcut={shortcut} register={register} pin={pin} onError={showError} />{docsOpen && docsItems.length > 0 && <DocPanel key={docsKey} machine={machine.name} items={docsItems} active={activeDoc} select={name => setDocsActive(value => ({ ...value, [docsKey]: name }))} error={docsError} />}{switcherOpen && <Switcher rows={rows} selected={selected} machine={machine.name} open={select} close={closeSwitcher} />}{!sidebarVisible && (notice || machine.state !== "up") && <div className="machine-error notice" role="status">{notice?.text ?? machine.error ?? machine.state}</div>}</div>;
 }

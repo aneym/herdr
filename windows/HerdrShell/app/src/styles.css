@@ -173,3 +173,18 @@ footer { color: var(--shell-muted); padding: 12px 8px; font-size: 12px; overflow
 .sidebar-row.has-pulse > .select-tab { height: var(--shell-space-row-height); flex: 1; }
 .tab-pulse { display: block; flex-basis: 100%; min-width: 0; height: var(--shell-space-row-height); padding-left: calc(var(--shell-face-size) + 7px); color: var(--shell-muted); font-size: var(--shell-type-row-title); font-weight: 400; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tab-pulse-bold { font-weight: 700; }
+/* Pane motion is shared with the other shells through generated tokens. */
+.pane-cap.grab { cursor: grab; }
+.pane-dragging, .pane-dragging .pane-cap.grab { cursor: grabbing; }
+.tab-view.pane-dragging .term-host { pointer-events: none; }
+.pane-clip { overflow: hidden; }
+.pane-box { transition: opacity var(--shell-motion-fade-ms) var(--shell-motion-ease); }
+.pane-box.lifted { opacity: var(--shell-motion-lift-opacity); outline: var(--shell-motion-zone-stroke) solid var(--shell-accent); outline-offset: calc(-1 * var(--shell-motion-zone-stroke)); transition: opacity var(--shell-motion-fade-ms) var(--shell-motion-ease); }
+.pane-drop-zone { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 4; border-radius: var(--shell-radius-control); border: var(--shell-motion-zone-stroke) solid var(--shell-accent); box-sizing: border-box; background: color-mix(in srgb, var(--shell-accent) calc(var(--shell-motion-zone-fill-alpha-dark) * 100%), transparent); }
+:root[data-theme="light"] .pane-drop-zone { background: color-mix(in srgb, var(--shell-accent) calc(var(--shell-motion-zone-fill-alpha-light) * 100%), transparent); }
+.pane-drag-chip { position: absolute; pointer-events: none; z-index: 5; padding: var(--shell-space-terminal-pad-y) var(--shell-space-terminal-pad-x); border-radius: var(--shell-radius-control); background: var(--shell-cap); color: var(--shell-text); border: var(--shell-motion-zone-stroke) solid var(--shell-line); box-shadow: 0 4px 16px color-mix(in srgb, color-mix(in srgb, var(--shell-bg) 25%, black) 45%, transparent); }
+.space-row.drop-above { position: relative; }
+.space-row.drop-above::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: var(--shell-motion-zone-stroke); background: var(--shell-muted); pointer-events: none; }
+@media (prefers-reduced-motion: reduce) {
+  .pane-box.lifted { transition: opacity var(--shell-motion-reduced-fade-ms) var(--shell-motion-ease); }
+}

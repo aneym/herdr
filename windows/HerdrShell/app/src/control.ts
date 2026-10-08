@@ -7,7 +7,8 @@ import type { Cell } from "./termCopy";
 import type { PaneController } from "./PaneTerm";
 import { appTheme } from "./theme";
 import type { Appearance } from "./theme";
-export interface ControlState { machine: MachineStatus; machines: MachineStatus[]; chooseMachine: (name: string) => MachineStatus; selected: string | null; docs: DocsState; rows: SidebarRow[]; panes: PaneController[]; focused: PaneController | undefined; open: (id: string) => void; action: (name: string) => Promise<void> }
+import type { PaneDrag } from "./paneDrag";
+export interface ControlState { paneDrag?: PaneDrag | null; machine: MachineStatus; machines: MachineStatus[]; chooseMachine: (name: string) => MachineStatus; selected: string | null; docs: DocsState; rows: SidebarRow[]; panes: PaneController[]; focused: PaneController | undefined; open: (id: string) => void; action: (name: string) => Promise<void> }
 export function installControl(get: () => ControlState): () => void {
   let disposed = false;
   const listeners: (() => void)[] = [];
@@ -32,7 +33,7 @@ export function installControl(get: () => ControlState): () => void {
     }
     return bridge.updateStatus();
   });
-  watch("ui", async () => { const state = get(); return { ok: true, machine: state.machine, machines: state.machines.map(({ name, state }) => ({ name, state })), selected_tab: state.selected, appearance: { override: appTheme().override, mode: appTheme().mode }, docs: state.docs, rows: state.rows.map(({ kind, id, label, status, hotkey }) => ({ kind, id, label, status, hotkey })), panes: state.panes.map(p => p.info()) }; });
+  watch("ui", async () => { const state = get(); return { ok: true, machine: state.machine, machines: state.machines.map(({ name, state }) => ({ name, state })), pane_drag: state.paneDrag?.state ?? null, selected_tab: state.selected, appearance: { override: appTheme().override, mode: appTheme().mode }, docs: state.docs, rows: state.rows.map(({ kind, id, label, status, hotkey }) => ({ kind, id, label, status, hotkey })), panes: state.panes.map(p => p.info()) }; });
   watch<{ name: string }>("machine", async payload => { return { ok: true, machine: get().chooseMachine(payload.name) }; });
   watch<{ tab_id: string }>("open", async payload => { get().open(payload.tab_id); return { ok: true }; });
   watch<{ key: string }>("key", async payload => ({ ok: true, sent_b64: await focused().key(payload.key) }));
@@ -72,10 +73,33 @@ export function installControl(get: () => ControlState): () => void {
     const vertical = strip.classList.contains("vertical");
     return pointerDrag(strip, vertical ? payload.delta : 0, vertical ? 0 : payload.delta, payload);
   });
+  watch<{ freeze_ms: number | null }>("motion", async payload => {
+    for (const animation of document.getAnimations()) {
+      if (payload.freeze_ms === null) animation.play();
+      else { animation.pause(); animation.currentTime = payload.freeze_ms; }
+    }
+    return { ok: true };
+  });
+  watch<DragPayload & { pane_id?: string; release?: boolean; to?: { pane_id?: string; zone?: string; tab_edge?: string; tab_id?: string; space_id?: string } }>("drag_pane", async payload => {
+    if (payload.release) { endHold?.(); endHold = null; return { ok: true, state: get().paneDrag?.state }; }
+    const cap = document.querySelector<HTMLElement>(`[data-pane="${CSS.escape(payload.pane_id ?? "")}"] .pane-cap`);
+    if (!cap) throw new Error("No pane cap");
+    const to = payload.to ?? {};
+    const target = document.querySelector<HTMLElement>(to.pane_id ? `[data-pane="${CSS.escape(to.pane_id)}"]` : to.tab_id ? `[data-tab="${CSS.escape(to.tab_id)}"]` : to.space_id ? `[data-space="${CSS.escape(to.space_id)}"]` : ".tab-view");
+    if (!target) throw new Error("No drag target");
+    const r = target.getBoundingClientRect(), c = cap.getBoundingClientRect();
+    const side = to.tab_edge ?? to.zone;
+    const inset = to.tab_edge ? 4 : 10;
+    const x = side === "left" ? r.left + inset : side === "right" ? r.right - inset : r.left + r.width / 2;
+    const y = side === "up" ? r.top + inset : side === "down" ? r.bottom - inset : r.top + r.height / 2;
+    await pointerDrag(cap, x - c.left - c.width / 2, y - c.top - c.height / 2, payload);
+    return { ok: true, state: get().paneDrag?.state };
+  });
   watch<{ dy: number }>("wheel", async payload => { focused().wheel(payload.dy); return { ok: true }; });
   return () => { disposed = true; listeners.forEach(unlisten => unlisten()); };
 }
-interface DragPayload { steps?: number; interval_ms?: number; esc?: boolean }
+let endHold: (() => void) | null = null;
+interface DragPayload { steps?: number; interval_ms?: number; esc?: boolean; right_click?: boolean; hold?: boolean }
 // Press on the centre of `el`, move by (dx, dy) in steps and release, as a physical mouse does:
 // events go to the element under each point, and the release clicks the nearest element the
 // press and release share, so the app's own handlers tell a drag from a click.
@@ -91,6 +115,8 @@ async function pointerDrag(el: HTMLElement, dx: number, dy: number, payload: Dra
   for (let i = 1; i <= steps; i++) { await pause(); fire("pointermove", at(x + dx * i / steps, y + dy * i / steps), x + dx * i / steps, y + dy * i / steps); }
   if (payload.esc) { await pause(); (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); }
   await pause();
+  if (payload.right_click) at(x + dx, y + dy).dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 2, clientX: x + dx, clientY: y + dy }));
+  if (payload.hold) { endHold = () => fire("pointerup", at(x + dx, y + dy), x + dx, y + dy); return { ok: true }; }
   const up = at(x + dx, y + dy);
   fire("pointerup", up, x + dx, y + dy);
   let shared: Element | null = down;

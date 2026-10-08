@@ -1,4 +1,4 @@
-export type Action = "new_tab" | "close_pane" | "split_right" | "split_down"
+export type Action = "move_pane_mode" | "new_tab" | "close_pane" | "split_right" | "split_down"
   | "focus_pane_left" | "focus_pane_right" | "focus_pane_up" | "focus_pane_down"
   | "toggle_docs" | "zoom_pane" | "rename_tab" | "switcher" | "toggle_sidebar" | "next_attention"
   | "next_machine" | "prev_machine" | "next_tab" | "prev_tab" | "next_pane" | "prev_pane" | `select_tab_${number}`;
@@ -7,6 +7,7 @@ export function actionFor(event: KeyEvent): Action | null {
   const { ctrlKey: ctrl, shiftKey: shift, altKey: alt, metaKey: meta } = event;
   const key = event.key.toLowerCase();
   if (meta) return null;
+  if (ctrl && alt && !shift && event.key === "m") return "move_pane_mode";
   if (ctrl && !alt) {
     if (key === "tab") return shift ? "prev_tab" : "next_tab";
     if (!shift) {
@@ -51,4 +52,13 @@ export function controlKey(value: string): KeyboardEvent {
   const parts = value.toLowerCase().split("+");
   const key = parts[parts.length - 1];
   return new KeyboardEvent("keydown", { key: ({ enter: "Enter", tab: "Tab", arrowleft: "ArrowLeft", arrowright: "ArrowRight", arrowup: "ArrowUp", arrowdown: "ArrowDown", f2: "F2" } as Record<string, string>)[key] ?? key, ctrlKey: parts.includes("ctrl"), shiftKey: parts.includes("shift"), altKey: parts.includes("alt"), metaKey: parts.includes("meta"), bubbles: true, cancelable: true });
+}
+
+import type { DropSide } from "./paneDrop";
+export function moveModeKey(event: KeyEvent): { kind: "target"; side: DropSide; edge: boolean } | { kind: "drop" } | { kind: "cancel" } | null {
+  if (event.ctrlKey || event.altKey || event.metaKey) return null;
+  if (event.key === "Escape") return { kind: "cancel" };
+  if (event.key === "Enter" || event.key === " ") return { kind: "drop" };
+  const side = ({ arrowleft: "left", h: "left", arrowdown: "down", j: "down", arrowup: "up", k: "up", arrowright: "right", l: "right" } as Record<string, DropSide>)[event.key.toLowerCase()];
+  return side ? { kind: "target", side, edge: event.shiftKey } : null;
 }

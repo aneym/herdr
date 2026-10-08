@@ -1,3 +1,4 @@
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -22,9 +23,11 @@ export interface PaneController {
   info: () => { pane_id: string; terminal_id: string; mode: "attach" | "observe" | "closed"; cols: number; rows: number; focused: boolean; background?: string };
   type: (text: string) => Promise<void>; read: () => string; key: (key: string) => Promise<string | null>; wheel: (dy: number) => void; focus: () => void;
 }
-export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, register }: { pane: Pane; machine: string; focused: boolean; onFocus: (id: string) => void; shortcut: (event: KeyboardEvent) => boolean; register: (id: string, value: PaneController | null) => void }) {
+export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, register, grabbable, onCapPointerDown, settling }: { grabbable?: boolean; onCapPointerDown?: (event: ReactPointerEvent<HTMLDivElement>) => void; settling?: boolean; pane: Pane; machine: string; focused: boolean; onFocus: (id: string) => void; shortcut: (event: KeyboardEvent) => boolean; register: (id: string, value: PaneController | null) => void }) {
   const host = useRef<HTMLDivElement>(null);
   const element = useRef<HTMLDivElement>(null);
+  const fitNow = useRef<() => void>(() => {});
+  const isSettling = useRef(settling); isSettling.current = settling;
   const live = useRef({ focused, onFocus, shortcut });
   live.current = { focused, onFocus, shortcut };
   const [state, setState] = useState<"attach" | "observe" | "closed">("closed");
@@ -226,14 +229,16 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
     node.addEventListener("wheel", onWheel, { capture: true, passive: false });
     node.addEventListener("contextmenu", onContext);
     node.addEventListener("mousedown", onDown, true);
-    const observer = new ResizeObserver(() => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (disposed) return; fit.fit(); if (handle != null && (term.cols !== sentCols || term.rows !== sentRows)) { sentCols = term.cols; sentRows = term.rows; void bridge.resize(handle, sentCols, sentRows).catch(error); } }, 50); });
+    fitNow.current = () => { if (disposed || isSettling.current) return; fit.fit(); if (handle != null && (term.cols !== sentCols || term.rows !== sentRows)) { sentCols = term.cols; sentRows = term.rows; void bridge.resize(handle, sentCols, sentRows).catch(error); } };
+    const observer = new ResizeObserver(() => { clearTimeout(resizeTimer); if (!isSettling.current) resizeTimer = setTimeout(() => fitNow.current(), 50); });
     observer.observe(node);
     void open();
     return () => { disposed = true; unsubscribeTheme(); register(pane.pane_id, null); observer.disconnect(); clearTimeout(resizeTimer); clearTimeout(bellTimer); cancelAnimationFrame(wheelFrame); node.removeEventListener("wheel", onWheel, true); node.removeEventListener("contextmenu", onContext); node.removeEventListener("mousedown", onDown, true); window.removeEventListener("mousemove", onMove, true); window.removeEventListener("mouseup", onUp, true); data.dispose(); binary.dispose(); links.dispose(); if (handle != null) void bridge.close(handle).catch(() => {}); term.dispose(); };
   }, [machine, pane.pane_id, pane.terminal_id, register]);
+  useEffect(() => { if (!settling) fitNow.current(); }, [settling]);
   useEffect(() => { if (focused) host.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }, [focused]);
   return <div ref={element} className={`pane ${bell ? "bell" : ""}`} onMouseDown={() => { live.current.onFocus(pane.pane_id); host.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }}>
-    <div className="pane-cap"><Status status={pane.agent_status || "unknown"} /><span className="label">{[pane.agent, pane.terminal_title_stripped || pane.title].filter(Boolean).join(" · ")}</span>{state === "observe" && <button onClick={() => takeover.current()}>Take control</button>}</div>
+    <div className={`pane-cap ${grabbable ? "grab" : ""}`} onPointerDown={event => { if (!(event.target as Element).closest("button")) onCapPointerDown?.(event); }}><Status status={pane.agent_status || "unknown"} /><span className="label">{[pane.agent, pane.terminal_title_stripped || pane.title].filter(Boolean).join(" · ")}</span>{state === "observe" && <button onClick={() => takeover.current()}>Take control</button>}</div>
     <div className="term-host" ref={host} />
     {state === "closed" && <button className="disconnected" title={notice} onClick={() => reconnect.current()}>Disconnected — click to reconnect</button>}
     {notice && state !== "closed" && <div className="notice">{notice}</div>}
