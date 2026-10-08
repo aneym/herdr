@@ -178,6 +178,7 @@ impl ClientShellConfig {
             prompt_new_workspace_name: config.ui.prompt_new_workspace_name,
             confirm_close: config.ui.confirm_close,
             mouse_capture: config.ui.mouse_capture,
+            reduce_motion: config.ui.reduce_motion,
             mouse_back_button: config.ui.mouse_back_button,
             mouse_forward_button: config.ui.mouse_forward_button,
             mouse_scroll_lines: config.ui.mouse_scroll_lines(),
@@ -389,6 +390,7 @@ impl ClientShellConfig {
                 self.prompt_new_workspace_name = ui.prompt_new_workspace_name;
                 self.confirm_close = ui.confirm_close;
                 self.mouse_capture = ui.mouse_capture;
+                self.reduce_motion = ui.reduce_motion;
                 self.mouse_back_button = ui.mouse_back_button;
                 self.mouse_forward_button = ui.mouse_forward_button;
                 self.mouse_scroll_lines = ui.mouse_scroll_lines();

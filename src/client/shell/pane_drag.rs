@@ -36,9 +36,9 @@ pub(super) struct ClientPaneDragPreview {
     rects: Vec<Rect>,
     area: Rect,
     invalidated: bool,
-    source: PaneHit,
-    row: Option<Rect>,
-    accent: u32,
+    pub(super) source: PaneHit,
+    pub(super) row: Option<Rect>,
+    pub(super) accent: u32,
     background: u32,
     text: u32,
 }
@@ -218,6 +218,7 @@ impl ClientShellState {
             outcome.repaint = true;
             return;
         }
+        let drawn = self.drawn_ghost();
         let Some(preview) = self.pane_drag.as_mut() else {
             return;
         };
@@ -338,6 +339,7 @@ impl ClientShellState {
         if target == old && !invalidated {
             return;
         }
+        let mut dry_run = None;
         preview.row = row;
         preview.queued = None;
         preview.ghost = zone.map(|z| super::pane_drop::zone_estimate_rect(area, &preview.rects, z));
@@ -351,9 +353,13 @@ impl ClientShellState {
                 if preview.in_flight.is_some() {
                     preview.queued = Some(t);
                 } else {
-                    self.send_pane_drag_dry_run(source, origin, t, outcome);
+                    dry_run = Some(t);
                 }
             }
+        }
+        self.retarget_ghost(drawn);
+        if let Some(t) = dry_run {
+            self.send_pane_drag_dry_run(source, origin, t, outcome);
         }
     }
     fn pane_place_method(
@@ -423,6 +429,7 @@ impl ClientShellState {
             .last_composed_size
             .map(|(c, r)| self.layout(c, r).pane_surface)
             .unwrap_or_default();
+        let drawn = self.drawn_ghost();
         let Some(p) = self.pane_drag.as_mut().filter(|p| !p.committed) else {
             return false;
         };
@@ -464,6 +471,7 @@ impl ClientShellState {
         if matches!(&self.chrome_drag, Some(ClientChromeDrag::Pane { target: Some(t), .. }) if *t == target)
         {
             p.ghost = rect;
+            self.retarget_ghost(drawn);
         }
         true
     }
@@ -494,7 +502,7 @@ impl ClientShellState {
             ..
         }) = self.chrome_drag.take()
         else {
-            self.cancel_pane_drag();
+            self.user_cancel_pane_drag();
             return;
         };
         if self.pane_drag.as_ref().is_some_and(|p| {
@@ -502,7 +510,7 @@ impl ClientShellState {
                 .iter()
                 .any(|(t, r)| *t == target && !matches!(r, PaneDragAnswer::Changed(_)))
         }) {
-            self.cancel_pane_drag();
+            self.user_cancel_pane_drag();
             return;
         }
         let method = match &target {
@@ -546,6 +554,8 @@ impl ClientShellState {
         if self.mode == ClientShellMode::Move {
             self.mode = self.copy_or_terminal_mode();
         }
+        self.pane_motion
+            .retain(|m| m.kind == super::pane_motion::PaneMotionKind::Settle);
         changed
     }
     pub(super) fn render_pane_grips(&self, frame: &mut FrameData) {
@@ -577,6 +587,7 @@ impl ClientShellState {
         frame: &mut FrameData,
         occlusion: &mut crate::kitty_graphics::surface::Occlusion,
     ) {
+        self.render_pane_settles(frame, occlusion);
         let Some(p) = self.pane_drag.as_ref() else {
             return;
         };
@@ -597,7 +608,7 @@ impl ClientShellState {
                 }
             }
         }
-        if let Some(r) = p.ghost.filter(|r| r.width > 1 && r.height > 1) {
+        if let Some(r) = self.drawn_ghost().filter(|r| r.width > 1 && r.height > 1) {
             occlusion.cover(r);
             for y in r.y..r.bottom() {
                 for x in r.x..r.right() {

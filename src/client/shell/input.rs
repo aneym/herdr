@@ -331,7 +331,7 @@ impl ClientShellState {
             && (self.pane_press.is_some()
                 || matches!(self.chrome_drag, Some(ClientChromeDrag::Pane { .. })))
         {
-            outcome.repaint |= self.cancel_pane_drag();
+            outcome.repaint |= self.user_cancel_pane_drag();
             return;
         }
         outcome.repaint |= self.clear_link_hover();

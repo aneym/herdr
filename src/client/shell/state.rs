@@ -51,6 +51,7 @@ pub(crate) struct ClientShellConfig {
     pub(super) prompt_new_workspace_name: bool,
     pub(super) confirm_close: bool,
     pub(super) mouse_capture: bool,
+    pub(super) reduce_motion: bool,
     pub(super) mouse_back_button: crate::config::MouseNavButtonActionConfig,
     pub(super) mouse_forward_button: crate::config::MouseNavButtonActionConfig,
     pub(super) mouse_scroll_lines: usize,
@@ -1232,6 +1233,7 @@ pub(crate) struct ClientShellState {
     pub(super) pane_move: Option<super::pane_move::ClientPaneMove>,
     pub(super) pane_press: Option<ClientPanePress>,
     pub(super) pane_drag: Option<super::pane_drag::ClientPaneDragPreview>,
+    pub(super) pane_motion: Vec<super::pane_motion::PaneMotion>,
     pub(super) pane_grip_hover: Option<String>,
     pub(super) pane_press_replay: bool,
     pub(super) pin_press: Option<ClientPinPress>,
@@ -1444,6 +1446,7 @@ impl ClientShellState {
             pane_move: None,
             pane_press: None,
             pane_drag: None,
+            pane_motion: Vec::with_capacity(4),
             pane_grip_hover: None,
             pane_press_replay: false,
             pin_press: None,
@@ -2285,6 +2288,7 @@ impl ClientShellState {
         if surface.projection_revision != snapshot.revision {
             self.hits = ShellHitMap::default();
         }
+        self.start_pane_settle(&surface);
         self.rebase_pane_drag_surface(&surface);
         self.acknowledge_active_surface_agents(&surface);
         let previous_popup = self.popup_terminal_id.clone();
@@ -2564,7 +2568,8 @@ impl ClientShellState {
     }
 
     pub(crate) fn timer_delay(&self, now: std::time::Instant) -> std::time::Duration {
-        let default = std::time::Duration::from_millis(100);
+        let default =
+            std::time::Duration::from_millis(if self.pane_motion.is_empty() { 100 } else { 16 });
         self.selection_autoscroll_deadline
             .into_iter()
             .chain(self.selection_repaint_deadline)

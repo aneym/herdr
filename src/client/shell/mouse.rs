@@ -678,6 +678,13 @@ impl ClientShellState {
     }
 
     pub(super) fn handle_mouse(&mut self, mouse: MouseEvent, outcome: &mut ClientShellInput) {
+        if self
+            .pane_motion
+            .iter()
+            .any(|m| m.kind == super::pane_motion::PaneMotionKind::Cancel)
+        {
+            return;
+        }
         if matches!(self.chrome_drag, Some(ClientChromeDrag::Pane { .. })) {
             if !self.pane_drag_supported() {
                 outcome.repaint |= self.cancel_pane_drag();
@@ -691,7 +698,7 @@ impl ClientShellState {
                     self.drop_pane((mouse.column, mouse.row), outcome)
                 }
                 MouseEventKind::Down(MouseButton::Right) => {
-                    outcome.repaint |= self.cancel_pane_drag();
+                    outcome.repaint |= self.user_cancel_pane_drag();
                 }
                 _ => {}
             }
