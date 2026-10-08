@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import { buildAreas, stageImplied, stageWord } from "./areas";
+import { buildAreas, focusTabs, stageImplied, stageWord } from "./areas";
 import { bridge } from "./bridge";
 import type { AreaLine } from "./areas";
 import type { AreaChip } from "./areas";
@@ -37,7 +37,26 @@ interface Press { id: string; section: PinSection; x: number; y: number; ids: st
 function scopeSlug(url?: string): string | null {
   try { const route = new URL(url!).searchParams.get("route"); const slug = route?.startsWith("scoping/") ? route.slice(8) : ""; return /^[a-z0-9][a-z0-9-]{0,80}$/.test(slug) ? slug : null; } catch { return null; }
 }
-export default function Sidebar({ snapshot = {}, catalog = new LaneSnapshot(), machines, chooseMachine, rows, selected, revealed, machine, notice, select, pin, movePin, renaming, startRename, cancelRename, commitRename, paneDropRow }: { paneDropRow?: string | null; snapshot?: Snapshot; catalog?: LaneSnapshot; machines: MachineStatus[]; chooseMachine: (name: string) => void; rows: SidebarRow[]; selected: string | null; revealed: RevealMemo; machine: MachineStatus; notice: string | null; select: (id: string) => void; pin: (id: string, pinned: boolean) => void; movePin: (ids: string[], from: number, to: number) => void; renaming: string | null; startRename: (id: string) => void; cancelRename: () => void; commitRename: (id: string, label: string) => Promise<void> }) {
+/** Shared presentation controls; also usable when the sidebar is hidden. */
+export function useSidebarNavigation(snapshot: Snapshot, catalog: LaneSnapshot, selected: string | null) {
+  const read = <T,>(key: string, fallback: T): T => { try { return JSON.parse(localStorage.getItem(`herdr-shell.areas.${key}`) ?? "null") ?? fallback; } catch { return fallback; } };
+  const save = (key: string, value: unknown) => { try { localStorage.setItem(`herdr-shell.areas.${key}`, JSON.stringify(value)); } catch { /* Storage can be disabled. */ } };
+  const [mode, setMode] = useState<"areas" | "spaces">(() => read("mode", "spaces"));
+  const [chip, setChip] = useState<AreaChip>(() => read("chip", "all"));
+  const [focusCursor, setFocusCursor] = useState<number | null>(null);
+  const changeMode = (value: "areas" | "spaces") => { setMode(value); save("mode", value); };
+  const changeChip = (value: AreaChip) => { setChip(value); save("chip", value); };
+  return { mode, chip, focusCursor, changeMode, changeChip, stepFocus: (delta: number) => {
+    const ids = focusTabs(snapshot, catalog);
+    if (!ids.length) return undefined;
+    const current = focusCursor !== null ? focusCursor - 1 : ids.indexOf(selected ?? "");
+    const next = current < 0 ? (delta > 0 ? 0 : ids.length - 1) : (current + delta + ids.length) % ids.length;
+    setFocusCursor(next + 1);
+    return ids[next];
+  } };
+}
+export type SidebarNavigation = ReturnType<typeof useSidebarNavigation>;
+export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneSnapshot(), machines, chooseMachine, rows, selected, revealed, machine, notice, select, pin, movePin, renaming, startRename, cancelRename, commitRename, paneDropRow }: { navigation?: SidebarNavigation; paneDropRow?: string | null; snapshot?: Snapshot; catalog?: LaneSnapshot; machines: MachineStatus[]; chooseMachine: (name: string) => void; rows: SidebarRow[]; selected: string | null; revealed: RevealMemo; machine: MachineStatus; notice: string | null; select: (id: string) => void; pin: (id: string, pinned: boolean) => void; movePin: (ids: string[], from: number, to: number) => void; renaming: string | null; startRename: (id: string) => void; cancelRename: () => void; commitRename: (id: string, label: string) => Promise<void> }) {
   // Folds are per machine: workspace ids repeat across machines. Studio keeps the pre-switcher key.
   const foldStore = machine.name === "studio" ? "herdr-space-expanded" : `herdr-space-expanded:${machine.name}`;
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem(foldStore) || "{}"); } catch { return {}; } });
@@ -68,17 +87,14 @@ export default function Sidebar({ snapshot = {}, catalog = new LaneSnapshot(), m
     return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", escape); };
   }, [menu]);
   useEffect(() => { setMenu(null); setPrompt(null); setMenuError(null); }, [machine.name]);
-  const [savedMode, setMode] = useState<"areas" | "spaces" | null>(() => read("mode", null));
-  // Spaces until the user picks Areas, as the Mac (P33).
-  const mode = savedMode ?? "spaces";
-  const [chip, setChip] = useState<AreaChip>(() => read("chip", "all"));
+  const localNavigation = useSidebarNavigation(snapshot, catalog, selected);
+  const { mode, chip, focusCursor, changeMode, changeChip } = navigation ?? localNavigation;
   const [folded, setFolded] = useState<string[]>(() => read("folded", []));
   const [focusExpanded, setFocusExpanded] = useState(() => read("focusExpanded", false));
   const [areaOnly, setAreaOnly] = useState<string | null>(() => read("only", null));
   const [manualOpen, setManualOpen] = useState<Record<string, boolean>>({});
-  const changeChip = (value: AreaChip) => { setChip(value); save("chip", value); };
   const parkedCount = useMemo(() => mode === "areas" ? buildAreas(snapshot, catalog, { chip: "parked", areaOnly }).length : 0, [snapshot, catalog, areaOnly, mode]);
-  const areaLines = useMemo(() => mode === "areas" ? buildAreas(snapshot, catalog, { chip, folded: new Set(folded), focusExpanded, selectedTab: selected, manualOpen, areaOnly }) : [], [snapshot, catalog, chip, folded, focusExpanded, selected, manualOpen, areaOnly, mode]);
+  const areaLines = useMemo(() => mode === "areas" ? buildAreas(snapshot, catalog, { chip, folded: new Set(folded), focusExpanded, focusCursor, selectedTab: selected, manualOpen, areaOnly }) : [], [snapshot, catalog, chip, folded, focusExpanded, focusCursor, selected, manualOpen, areaOnly, mode]);
   const toggleAreaLine = (id: string, open: boolean) => {
     if (id === "focus") { setFocusExpanded(open); save("focusExpanded", open); }
     else if (id.startsWith("area:")) { const area = id.slice(5); const next = open ? folded.filter(a => a !== area) : [...folded, area]; setFolded(next); save("folded", next); }
@@ -181,9 +197,9 @@ export default function Sidebar({ snapshot = {}, catalog = new LaneSnapshot(), m
     return <div key={row.id}><button data-space={row.id} className={`sidebar-row space-row ${paneDropRow === `space:${row.id}` ? "drop-above" : ""}`} aria-expanded={open} onClick={() => toggle(foldKey(row), !open)}><span className="chevron">{open ? "⌄" : "›"}</span><span className="label">{row.label}</span><Status status={row.status} /></button>{open && children.map(tabRow)}</div>;
   };
   const collapseSpacesButton = <button className="spaces-fold-all" aria-label={anySpaceExpanded ? "Collapse all spaces" : "Expand all spaces"} title={anySpaceExpanded ? "Collapse all spaces" : "Expand all spaces"} onClick={toggleAllSpaces}><svg width="12" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={anySpaceExpanded ? "m8 4 4 4 4-4M12 2v6m-4 12 4-4 4 4M12 16v6M4 12h16" : "m8 6 4-4 4 4M12 2v6m-4 10 4 4 4-4M12 16v6M4 12h16"} /></svg></button>;
-  return <aside className={`sidebar ${drag ? "pin-dragging" : ""}`}><div className="machine-row" aria-label="Machines">{machines.map(item => <button key={item.name} aria-pressed={item.name === machine.name} onClick={() => chooseMachine(item.name)}><Status status={item.state} /><span>{item.name}</span></button>)}</div><div className="areas-mode" aria-label="Sidebar mode">{(["areas", "spaces"] as const).map(value => <button key={value} aria-pressed={mode === value} onClick={() => { setMode(value); save("mode", value); }}>{value === "areas" ? "Areas" : "Spaces"}</button>)}{mode === "spaces" && rows.some(row => row.kind === "space") && collapseSpacesButton}</div><nav ref={nav}>
+  return <aside className={`sidebar ${drag ? "pin-dragging" : ""}`}><div className="machine-row" aria-label="Machines">{machines.map(item => <button key={item.name} aria-pressed={item.name === machine.name} onClick={() => chooseMachine(item.name)}><Status status={item.state} /><span>{item.name}</span></button>)}</div><div className="areas-mode" aria-label="Sidebar mode">{(["areas", "spaces"] as const).map(value => <button key={value} aria-pressed={mode === value} onClick={() => changeMode(value)}>{value === "areas" ? "Areas" : "Spaces"}</button>)}{mode === "spaces" && rows.some(row => row.kind === "space") && collapseSpacesButton}</div><nav ref={nav}>
     {mode === "areas" ? <>
-      <div className="areas-chips" aria-label="Area filters">{([["all", "All"], ["scoping", "Scope"], ["building", "Build"], ["review", "Review"], ["use", "Use"], ["parked", "Parked"]] as const).map(([value, title]) => <button key={value} aria-pressed={chip === value} onClick={() => changeChip(value)}>{value === "parked" && parkedCount ? `Parked ${parkedCount}` : title}</button>)}</div>
+      <div className="areas-chips" aria-label="Area filters">{([["all", "All"], ["needs", "Needs You"], ["scoping", "Scope"], ["building", "Build"], ["review", "Review"], ["use", "Use"], ["parked", "Parked"]] as const).map(([value, title]) => <button key={value} aria-pressed={chip === value} onClick={() => changeChip(value)}>{value === "parked" && parkedCount ? `Parked ${parkedCount}` : title}</button>)}</div>
       {areaOnly && <button className="sidebar-row muted" onClick={() => { setAreaOnly(null); save("only", null); }}>Only {catalog.areaName(areaOnly)} ×</button>}
       {areaLines.map(line => line.kind === "header" ? <h2 key={line.id}>{line.title}</h2> : <div key={line.id} data-row={line.id} className={`sidebar-row areas-line ${line.parked ? "areas-parked-row" : ""} ${(line.selected || (line.kind === "focus" && chip === "needs")) ? "selected" : ""} ${line.dim ? "muted" : ""}`} style={{ paddingLeft: 8 + line.depth * 16 }} onContextMenu={event => {
         if (!line.tab) return;

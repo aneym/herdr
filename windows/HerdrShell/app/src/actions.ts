@@ -1,3 +1,5 @@
+import type { SidebarNavigation } from "./Sidebar";
+import type { AreaChip } from "./areas";
 import type { Action } from "./keys";
 import type { Layout, Snapshot, SidebarRow } from "./model";
 import { tabOrder } from "./model";
@@ -23,8 +25,9 @@ export interface ActionContext {
   api: (machine: string, method: string, params: unknown) => Promise<unknown>;
   select: (id: string) => void; focus: (id: string) => void;
   created: (tabId: string, paneId: string) => void;
-  rename: (id: string) => void; switcher: () => void; toggleSidebar: () => void;
+  rename: (id: string) => void; switcher: (mode?: "switcher" | "search" | "goto") => void; toggleSidebar: () => void;
   error: (error: unknown) => void;
+  navigation?: SidebarNavigation; latestAttention?: string | null;
   label?: string; tabId?: string;
 }
 function responseId(value: unknown, field: string, id: string): string {
@@ -44,7 +47,20 @@ export async function runAction(action: Action, ctx: ActionContext): Promise<voi
     const tab = ctx.snapshot.tabs?.find(t => t.tab_id === ctx.selected);
     const pane = () => { if (!ctx.focused) throw new Error("No focused pane"); return ctx.focused; };
     const api = (method: string, params: unknown) => ctx.api(ctx.machine, method, params);
-    if (/^select_tab_[1-9]$/.test(action)) {
+    if (action === "toggle_area_mode") ctx.navigation?.changeMode(ctx.navigation.mode === "areas" ? "spaces" : "areas");
+    else if (/^filter_[1-6]$/.test(action)) ctx.navigation?.changeChip((["all", "needs", "scoping", "building", "review", "use"] as AreaChip[])[Number(action.slice(7)) - 1]);
+    else if (/^goto_space_[1-9]$/.test(action)) {
+      const space = ctx.rows.filter(r => r.kind === "space" && !r.hidden)[Number(action.slice(11)) - 1];
+      const active = ctx.snapshot.workspaces?.find(w => w.workspace_id === space?.id)?.active_tab_id;
+      const id = ctx.snapshot.tabs?.find(t => t.tab_id === active)?.tab_id ?? ctx.snapshot.tabs?.filter(t => t.workspace_id === space?.id).sort((a, b) => a.number - b.number)[0]?.tab_id;
+      if (space && id) ctx.select(id);
+    } else if (action === "agent_list_up" || action === "agent_list_down") {
+      const id = step([...new Set(ctx.rows.filter(r => r.kind === "agent" && !r.hidden).map(r => r.id))], ctx.selected, action === "agent_list_down" ? 1 : -1);
+      if (id) ctx.select(id);
+    } else if (action === "attention_jump" && ctx.latestAttention) ctx.select(ctx.latestAttention);
+    else if ((action === "next_pane" || action === "prev_pane") && ctx.navigation?.mode === "areas") {
+      const id = ctx.navigation.stepFocus(action === "next_pane" ? 1 : -1); if (id) ctx.select(id);
+    } else if (/^select_tab_[1-9]$/.test(action)) {
       const id = ctx.rows.find(r => r.kind !== "space" && r.hotkey === Number(action.slice(11)))?.id;
       if (id) ctx.select(id);
     } else if (action === "next_tab" || action === "prev_tab") {
@@ -60,11 +76,11 @@ export async function runAction(action: Action, ctx: ActionContext): Promise<voi
         }
       }
       if (id) ctx.select(id);
-    } else if (action === "next_attention") {
+    } else if (action === "next_attention" || action === "attention_jump") {
       const attention = ["blocked", "done"].flatMap(status => order.filter(id => ctx.rows.some(r => r.kind !== "space" && !(r.kind === "agent" && r.hidden) && r.id === id && r.status === status)));
       const id = step(attention, ctx.selected, 1); if (id) ctx.select(id);
     } else if (action === "toggle_sidebar") ctx.toggleSidebar();
-    else if (action === "switcher") ctx.switcher();
+    else if (action === "switcher" || action === "search" || action === "goto") ctx.switcher(action);
     else if (action === "rename_tab") {
       const id = ctx.tabId ?? ctx.selected;
       if (!id) throw new Error("No selected tab");
