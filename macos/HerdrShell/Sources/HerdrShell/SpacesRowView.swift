@@ -34,9 +34,11 @@ struct SpacesRowView: View {
     static let titleMinWidth: CGFloat = 96
 
     private var isFooter: Bool { row.kind == .footerUsage || row.kind == .footerHost }
-    /// Tab and section rows hold the chevron slot even with nothing to open, so their glyphs
-    /// and labels share one column. Runs never open; their indent already nests them.
-    private var treeRow: Bool { row.kind == .tab || row.kind == .section }
+    /// Tab, section and Hidden-agent header rows hold the leading chevron slot, so their
+    /// labels share one column. The Hidden header keeps its actual chevron trailing.
+    /// Runs never open; their indent already nests them.
+    private var treeRow: Bool { row.kind == .tab || row.kind == .section || row.id == "hiddenagents" }
+    private var agentRow: Bool { row.id.hasPrefix("agent:") || row.id.hasPrefix("hiddenagent:") }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -70,7 +72,7 @@ struct SpacesRowView: View {
                     Circle().fill(t.accent).frame(width: ShellFace.dot, height: ShellFace.dot)
                         .help("request \(request)")
                 }
-                if let machine = row.badge { badge(machine) }
+                if !agentRow, let machine = row.badge { badge(machine) }
                 Spacer(minLength: 4)
                 if row.kind == .goal { collapseSpaces }
                 if !row.trailing.isEmpty, row.kind != .goal {
@@ -85,6 +87,8 @@ struct SpacesRowView: View {
                         .foregroundStyle(home == "unsynced" ? t.warn : t.mute)
                         .help(homeLabel(home)).accessibilityLabel(homeLabel(home))
                 }
+                // Agent machine badges follow the home glyph (spec line 98).
+                if agentRow, let machine = row.badge { badge(machine) }
                 if row.id == "hiddenagents" {
                     if row.alert == "act" {
                         Circle().fill(t.accent).frame(width: ShellFace.dot, height: ShellFace.dot)

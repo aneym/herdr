@@ -212,14 +212,14 @@ check('digits A1 C2 P3: numbered skips hidden B (shut and open)',
       numbered('shut')[:3] == [A, C, P] and B not in numbered('shut')
       and numbered('open')[:3] == [A, C, P] and B not in numbered('open'), ','.join(numbered('open')))
 
-# Open: B at depth 1 under the header, drawn as an agent row, still with no digit.
+# Spec line 86: hidden rows use the same depth as visible agent rows (0), with no digit.
 hidden_b = row('open', 'hiddenagent:' + B)
 check('open fold: hiddenagent:B right under the header, before PINNED',
       agent_block('open') == ['agentpins', 'agent:' + A, 'agent:' + C, 'hiddenagents', 'hiddenagent:' + B, 'pinned', 'pinned:' + P])
 check('open header chevron is open with the same count',
       row('open', 'hiddenagents')[3] == 'open' and row('open', 'hiddenagents')[7] == '1')
-check('hidden row: tab kind, depth 1, opens B, agent face, no space name',
-      hidden_b[0] == 'tab' and hidden_b[2] == '1' and hidden_b[10] == B and hidden_b[7] == ''
+check('hidden row: tab kind, depth 0, opens B, agent face, no space name',
+      hidden_b[0] == 'tab' and hidden_b[2] == '0' and hidden_b[10] == B and hidden_b[7] == ''
       and any(f.startswith('face:') for f in extras(hidden_b)), '|'.join(hidden_b))
 check('the header toggle key opens the fold and the choice survives a save',
       ids('toggled') == ids('open') and line('toggled', 'chrome') == ['true', 'false'] and line('shut', 'chrome') == ['false', 'false'])
@@ -258,9 +258,10 @@ check('a remote agent keeps its @ax42 badge, with home:unsynced kept last',
       extras(r1)[-2:] == ['@ax42', 'home:unsynced'] and r1[7] == '', '|'.join(r1))
 check('an agent from an older snapshot (no home_location) dumps no home and no space name',
       r3[0] == 'tab' and home(r3) is None and r3[7] == '' and '@ax42' in extras(r3), '|'.join(r3))
+# Spec line 86 applies to remote hidden rows too: the same depth as visible agents.
 check('a remote hidden agent joins the fold with its badge; an unknown home_location draws nothing',
       row('machines', 'hiddenagents')[7] == '2' and 'agent:' + R2 not in ids('machines')
-      and r2[0] == 'tab' and r2[2] == '1' and '@ax42' in extras(r2) and home(r2) is None
+      and r2[0] == 'tab' and r2[2] == '0' and '@ax42' in extras(r2) and home(r2) is None
       and ids('machines-open').index('hiddenagent:' + B) < ids('machines-open').index('hiddenagent:' + R2), '|'.join(r2))
 check('digits across machines: A, C, ax42 visible agents, then P; no hidden agent numbered',
       numbered('machines')[:5] == [A, C, R1, R3, P] and B not in numbered('machines') and R2 not in numbered('machines'),

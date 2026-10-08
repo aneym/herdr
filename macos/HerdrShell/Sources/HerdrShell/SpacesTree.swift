@@ -296,7 +296,6 @@ enum SpacesTree {
             if tab.role == "agent" {
                 row.trailing = ""; row.home = tab.homeLocation.flatMap { ["cloud", "local", "unsynced"].contains($0) ? $0 : nil }
                 row.face = face(name: tab.agentName ?? tab.label, avatar: tab.avatar)
-                if tab.hidden { row.depth = 1 }
             }
             return row
         }
