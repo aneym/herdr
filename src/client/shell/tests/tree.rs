@@ -155,6 +155,12 @@ fn shape(state: &ClientShellState, tree: &ClientTreeChrome) -> Vec<String> {
                     if *collapsed { "closed" } else { "open" }
                 )
             }
+            AgentPanelListEntry::HiddenAgentsHeader {
+                count, collapsed, ..
+            } => format!(
+                "hidden-agents:{count}:{}",
+                if *collapsed { "closed" } else { "open" }
+            ),
             AgentPanelListEntry::AutomationsHeader(summary) => {
                 format!("automations:{}", summary.label())
             }

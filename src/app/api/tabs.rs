@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use crate::api::schema::{
     EventData, EventEnvelope, EventKind, ResponseResult, TabCreateParams, TabListParams,
-    TabMoveParams, TabPinMoveParams, TabRenameParams, TabSetPinnedParams, TabSetRoleParams,
-    TabTarget,
+    TabMoveParams, TabPinMoveParams, TabRenameParams, TabSetHiddenParams, TabSetPinnedParams,
+    TabSetRoleParams, TabTarget,
 };
 use crate::app::{App, Mode};
 
