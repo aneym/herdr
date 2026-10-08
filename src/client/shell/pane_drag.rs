@@ -562,7 +562,7 @@ impl ClientShellState {
             for x in g.x..g.right() {
                 if let Some(c) = cell_mut(frame, x, g.y) {
                     c.symbol.clear();
-                    c.symbol.push_str("⠿");
+                    c.symbol.push('⠿');
                     c.fg = if lifted || self.pane_grip_hover.as_ref() == Some(&hit.pane_id) {
                         accent
                     } else {
@@ -648,7 +648,7 @@ impl ClientShellState {
             }
             if let Some(c) = cell_mut(frame, r.x, r.y) {
                 c.symbol.clear();
-                c.symbol.push_str("│");
+                c.symbol.push('│');
                 c.fg = accent;
             }
         }
