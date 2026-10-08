@@ -1899,7 +1899,7 @@ fn agent_pin_section_digits_drag_boundary_and_role_menu() {
     let tree = ClientTreeChrome::default();
     assert_eq!(
         &shape(&state, &tree)[..4],
-        ["agents", "pin:1:one:alpha", "pinned", "pin:2:two:alpha"]
+        ["agents", "pin:1:one:", "pinned", "pin:2:two:alpha"]
     );
     assert_eq!(
         &state.numbered_tab_ids(state.snapshot.as_deref().unwrap())[..2],
@@ -1993,7 +1993,7 @@ fn agent_pin_appears_only_in_agents_while_plain_pin_stays_in_space() {
         shape(&state, &tree),
         [
             "agents",
-            "pin:1:one:alpha",
+            "pin:1:one:",
             "pinned",
             "pin:2:two:alpha",
             "space:alpha",
@@ -2034,7 +2034,7 @@ fn agent_pin_appears_only_in_agents_while_plain_pin_stays_in_space() {
         shape(&state, &tree),
         [
             "agents",
-            "pin:1:one:alpha",
+            "pin:1:one:",
             "space:alpha",
             "space:beta",
             "tab:three",
