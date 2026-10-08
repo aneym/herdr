@@ -523,9 +523,13 @@ final class MainWindowController: NSObject, NSWindowDelegate {
 
     /// Quick switch, attention jumps and header clicks land on tabs the tree may hide.
     private func revealSpace(of tabId: String) {
-        guard let space = model.displayedSpace(of: tabId),
-              state.spacesChrome.collapsedSpaces.contains(space.id) || (space.parked && !state.spacesChrome.expandedParkedSpaces.contains(space.id)) else { return }
-        if state.spacesChrome.reveal(space: space.id, parked: space.parked, selected: tabId, rows: model.spacesRows(state: state)) { state.saveSpacesChrome() }
+        let tab = model.source(for: tabId)?.tabs.first { $0.tab_id == tabId }
+        let hiddenAgent = tab?.role == "agent" && (tab?.hidden ?? false)
+        guard let space = model.displayedSpace(of: tabId) else { return }
+        if state.spacesChrome.reveal(space: space.id, parked: space.parked, selected: tabId,
+                                    rows: model.spacesRows(state: state), hiddenAgent: hiddenAgent) {
+            state.saveSpacesChrome()
+        }
     }
 
     private var seenDeskIds: [String: Set<String>]?

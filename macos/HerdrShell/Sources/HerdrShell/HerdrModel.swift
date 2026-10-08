@@ -38,7 +38,7 @@ final class HerdrModel: ObservableObject {
     private(set) var attentionTrail: [String] = []
     var latestAttentionTab: String? {
         attentionTrail.first { tab in
-            guard let row = source(for: tab)?.tabs.first(where: { $0.tab_id == tab }) else { return false }
+            guard let row = source(for: tab)?.tabs.first(where: { $0.tab_id == tab }) else { return true }
             return !(row.role == "agent" && (row.hidden ?? false))
         }
     }

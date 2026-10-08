@@ -27,7 +27,7 @@ enum MachineMerge {
         var byLabel: [String: String] = [:]
         for space in local.spaces where byLabel[key(space.name)] == nil { byLabel[key(space.name)] = space.id }
         for machine in machines {
-            let shown = machine.tabs.filter { !$0.agents.isEmpty || $0.pinIndex != nil || $0.role == "agent" }
+            let shown = machine.tabs.filter { !$0.agents.isEmpty || $0.pinIndex != nil }
             for var tab in shown {
                 guard let space = machine.spaces.first(where: { $0.id == tab.space }) else { continue }
                 if let home = byLabel[key(space.name)] {

@@ -120,8 +120,9 @@ struct SpacesChrome: Codable {
     }
     /// Opens a selected tab's space, parked or folded, as the TUI's reveal does
     /// (client/shell/tree.rs). True when the chrome changed and needs saving.
-    mutating func reveal(space: String, parked: Bool, selected: String? = nil, rows: [SpacesRow] = []) -> Bool {
-        if let selected, rows.contains(where: { $0.id == "hiddenagent:" + selected }) {
+    mutating func reveal(space: String, parked: Bool, selected: String? = nil, rows: [SpacesRow] = [], hiddenAgent: Bool = false) -> Bool {
+        // Snapshot metadata still identifies the agent when its fold has no drawn rows.
+        if hiddenAgent || selected.map({ selected in rows.contains { $0.id == "hiddenagent:" + selected } }) == true {
             let changed = !hiddenAgentsExpanded; hiddenAgentsExpanded = true; return changed
         }
         if let selected, rows.contains(where: { $0.id == "pinned:" + selected || $0.id == "agent:" + selected }) { return false }
