@@ -81,7 +81,6 @@ try {{
     Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) update failed: $_" -ErrorAction SilentlyContinue
     if ($backedUp -and $changed) {{
         try {{
-            Stop-IfGame 'HerdrShellUpdate rollback'
             Get-Process HerdrShell -ErrorAction SilentlyContinue |
                 Where-Object {{ $_.Path -eq $exe }} | Stop-Process -Force
             Copy-Item -LiteralPath $prev -Destination $exe -Force
@@ -174,6 +173,34 @@ fn install_inner(app: tauri::AppHandle, name: &str) -> Result<(), String> {
     use windows_sys::Win32::System::Threading::{
         CREATE_BREAKAWAY_FROM_JOB, CREATE_NO_WINDOW, DETACHED_PROCESS,
     };
+
+    // Check in this process before handing off or closing the app. The helper
+    // still rechecks because a game may start after this preflight.
+    let preflight = format!(
+        "{}\nStop-IfGame 'HerdrShellUpdate preflight'",
+        include_str!("../../../scripts/gamecheck.ps1"),
+    );
+    let output = Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &preflight,
+        ])
+        .stdin(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|error| format!("Check games before update: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "Update preflight failed ({}): {}{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout).trim(),
+            String::from_utf8_lossy(&output.stderr).trim(),
+        ));
+    }
 
     let build = manifest(name)?;
     if !build.installer.is_absolute() || !build.installer.is_file() {
@@ -332,6 +359,19 @@ mod tests {
         let rollback_launch = script
             .rfind("Start-Process -FilePath $exe -ArgumentList '--background'")
             .expect("rollback launch");
+        let rollback_block = &script[script
+            .find("if ($backedUp -and $changed)")
+            .expect("rollback block")..];
+        let first_game_guard = rollback_block
+            .find("Stop-IfGame")
+            .expect("rollback launch guard");
+        let restore = rollback_block
+            .find("Copy-Item -LiteralPath $prev -Destination $exe")
+            .expect("restore");
+        assert!(
+            restore < first_game_guard,
+            "a game must never prevent restoring the previous exe"
+        );
         assert!(rollback < rollback_guard && rollback_guard < rollback_launch);
         assert!(script.contains("function Get-Game"));
         assert!(script.contains("exit 75"));

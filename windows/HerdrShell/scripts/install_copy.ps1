@@ -117,7 +117,7 @@ if ($MarkVerified) {
     Write-Output "verified: $Sha"
     exit 0
 }
-if ($Rollback) { Undo "post-install check failed for $Sha" ($Relaunch -and (Get-App).Count -gt 0) }
+if ($Rollback) { Undo "post-install check failed for $Sha" $Relaunch }
 
 $src = Join-Path $OutDir "HerdrShell-$Sha.exe"
 if (!$expected) { Write-Output "no checksum for $Sha; fetch it first"; exit 1 }
