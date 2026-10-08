@@ -76,6 +76,8 @@ fn fast_path_blocker(
         Some("client_surface_patch.fallback.link_hover")
     } else if state.pane_scrollbar_emphasis_blocks_patch(patch) {
         Some("client_surface_patch.fallback.pane_scrollbar")
+    } else if state.pane_drag.is_some() {
+        Some("client_surface_patch.fallback.pane_drag")
     } else if state.selection.is_some() {
         Some("client_surface_patch.fallback.selection")
     } else if state.copy_mode.is_some() {
