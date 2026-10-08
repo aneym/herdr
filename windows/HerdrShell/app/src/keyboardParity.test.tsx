@@ -3,12 +3,16 @@ import { act, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { actionFor, controlKey } from "./keys";
-import { runAction } from "./actions";
+import { runAction, trackAttention, latestAttentionTab } from "./actions";
 import type { ActionContext } from "./actions";
 import { buildSidebar } from "./model";
 import type { Snapshot } from "./model";
 import { LaneSnapshot } from "./laneFiles";
-vi.mock("./bridge", () => ({ bridge: { updateStatus: () => new Promise(() => {}), fileList: async () => [], fileRead: async () => ({ data_b64: "" }) }, fromBase64: () => new Uint8Array() }));
+let publishSnapshot: ((value: { machine: string; snapshot: Snapshot }) => void) | undefined;
+vi.mock("./bridge", () => ({ bridge: {
+  machines: async () => [{ name: "studio", state: "up" }], snapshot: async () => snapshot,
+  machineEvents: async () => () => {}, snapshots: async (publish: typeof publishSnapshot) => { publishSnapshot = publish; return () => {}; },
+  controlEvent: async () => () => {}, api: async () => ({}), updateStatus: () => new Promise(() => {}), fileList: async () => [], fileRead: async () => ({ data_b64: "" }) }, fromBase64: () => new Uint8Array() }));
 import Sidebar, { useSelectionReveal, useSidebarNavigation } from "./Sidebar";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const stored = new Map<string, string>();
@@ -36,7 +40,7 @@ const snapshot: Snapshot = {
 };
 const catalog = new LaneSnapshot();
 const noop = () => {};
-function context(selected: string | null, select: (id: string) => void): ActionContext {
+function context(selected: string | null, select: (id: string, stepping?: boolean) => void): ActionContext {
   return { machine: "studio", snapshot, rows: buildSidebar(snapshot), selected, focused: null, api: async () => ({}), select, focus: noop, created: noop, rename: noop, switcher: noop, toggleSidebar: noop, error: error => { throw error; } };
 }
 function Shell() {
@@ -44,7 +48,7 @@ function Shell() {
   const navigation = useSidebarNavigation(snapshot, catalog, selected);
   const revealed = useSelectionReveal(selected);
   useEffect(() => {
-    const key = (event: KeyboardEvent) => { const action = actionFor(event); if (action) void runAction(action, { ...context(selected, select), navigation }); };
+    const key = (event: KeyboardEvent) => { const action = actionFor(event); if (action) void runAction(action, { ...context(selected, (id, stepping) => { navigation.noteSelection?.(!!stepping); select(id); }), navigation }); };
     document.addEventListener("keydown", key); return () => document.removeEventListener("keydown", key);
   }, [selected, navigation]);
   return <><output aria-label="Selection">{selected}</output><Sidebar navigation={navigation} snapshot={snapshot} catalog={catalog} machines={[]} chooseMachine={noop} rows={buildSidebar(snapshot)} selected={selected} revealed={revealed} machine={{ name: "studio", state: "up" }} notice={null} select={select} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} /></>;
@@ -60,7 +64,8 @@ it("keyboard switches Areas, filters Needs You, steps Focus and selects the seco
   expect([...host.querySelectorAll("button")].find(b => b.textContent === "Areas")?.getAttribute("aria-pressed")).toBe("true");
   expect(stored.get("herdr-shell.areas.mode")).toBe('"areas"');
   await press("ctrl+alt+2");
-  expect([...host.querySelectorAll("button")].find(b => b.textContent === "Needs You")?.getAttribute("aria-pressed")).toBe("true");
+  expect(stored.get("herdr-shell.areas.chip")).toBe('"needs"');
+  expect(host.querySelector('[data-row="focus"]')?.classList.contains("selected")).toBe(true);
   await press("alt+]");
   expect(host.textContent).toContain("2 of 2");
   expect(host.querySelector("output")?.textContent).toBe("b1");
@@ -75,4 +80,74 @@ it("agent_list_down wraps through visible agents", async () => {
 it("attention_jump falls back to next_attention without a transition", async () => {
   const selected: string[] = []; await runAction("attention_jump", context("a1", id => selected.push(id)));
   expect(selected).toEqual(["b1"]);
+});
+it("Focus cursor resets on mode, chip and ordinary selection, but survives stepping", async () => {
+  const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
+  dispose = () => { act(() => root.unmount()); host.remove(); };
+  act(() => root.render(<Shell />));
+  const press = async (chord: string) => { await act(async () => { document.dispatchEvent(controlKey(chord)); }); };
+  await press("ctrl+alt+a"); await press("alt+]");
+  expect(host.textContent).toContain("2 of 2");
+  await press("ctrl+alt+2"); expect(host.textContent).not.toContain("of 2");
+  await press("alt+["); expect(host.textContent).toContain("1 of 2");
+  await press("ctrl+alt+a"); await press("ctrl+alt+a"); expect(host.textContent).not.toContain("of 2");
+  await press("alt+]"); expect(host.textContent).toContain("2 of 2");
+  await press("ctrl+shift+1"); expect(host.textContent).not.toContain("of 2");
+  expect([...host.querySelectorAll(".areas-chips button")].map(b => b.textContent)).toEqual(["All", "Scope", "Build", "Review", "Use", "Parked"]);
+});
+// Golden class transitions cover idle->done, blocked->done, baseline and hidden trail entries.
+it("attention trail captures class changes and skips hidden agents at read time", () => {
+  const frame = (a: string, b: string): Snapshot => ({ ...snapshot, panes: [{ pane_id: "p1", terminal_id: "t1", workspace_id: "a", tab_id: "a1", agent_status: a }, { pane_id: "p2", terminal_id: "t2", workspace_id: "b", tab_id: "b1", agent_status: b }] });
+  let trail = trackAttention(undefined, frame("idle", "idle"), []);
+  expect(trail).toEqual([]);
+  trail = trackAttention(frame("idle", "idle"), frame("blocked", "idle"), trail);
+  trail = trackAttention(frame("blocked", "idle"), frame("blocked", "done"), trail);
+  expect(trail).toEqual(["b1", "a1"]);
+  expect(latestAttentionTab(trail, { ...snapshot, tabs: snapshot.tabs?.map(t => ({ ...t, hidden: t.tab_id === "b1" })) })).toBe("a1");
+  trail = trackAttention(frame("blocked", "done"), frame("done", "done"), trail);
+  expect(trail[0]).toBe("a1");
+  expect(trackAttention(frame("idle", "idle"), frame("done", "done"), Array(20).fill("old"))).toHaveLength(20);
+});
+it("search and goto re-present the open app Switcher and select the query only for goto", async () => {
+  const { default: App } = await import("./App");
+  const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
+  dispose = () => { act(() => root.unmount()); host.remove(); };
+  await act(async () => { root.render(<App />); });
+  const press = async (chord: string) => { await act(async () => { (host.querySelector("input") ?? window).dispatchEvent(controlKey(chord)); }); };
+  await press("ctrl+shift+k");
+  const input = host.querySelector<HTMLInputElement>('[aria-label="Filter tabs"]')!;
+  expect(input).not.toBeNull();
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "First");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  input.setSelectionRange(5, 5);
+  await press("ctrl+shift+g");
+  expect([input.selectionStart, input.selectionEnd]).toEqual([0, 5]);
+  await press("ctrl+shift+k");
+  expect([input.selectionStart, input.selectionEnd]).toEqual([5, 5]);
+  await press("ctrl+shift+g");
+  expect([input.selectionStart, input.selectionEnd]).toEqual([0, 5]);
+  expect(host.querySelectorAll('[aria-label="Switch tab"]')).toHaveLength(1);
+});
+it("App attention jump uses idle-to-done history and skips the newest hidden agent", async () => {
+  const { default: App } = await import("./App");
+  const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
+  dispose = () => { act(() => root.unmount()); host.remove(); };
+  await act(async () => { root.render(<App />); });
+  const frame = (a: string, b: string, hidden = false): Snapshot => ({ ...snapshot,
+    tabs: snapshot.tabs?.map(t => ({ ...t, hidden: hidden && t.tab_id === "b1" })),
+    panes: [{ pane_id: "p1", terminal_id: "t1", workspace_id: "a", tab_id: "a1", agent_status: a }, { pane_id: "p2", terminal_id: "t2", workspace_id: "b", tab_id: "b1", agent_status: b }],
+  });
+  // Keep real terminal rendering out of this path by viewing the pane-less target tab.
+  const press = async (chord: string) => { await act(async () => { window.dispatchEvent(controlKey(chord)); }); };
+  await press("ctrl+shift+2");
+  for (const value of [frame("idle", "idle"), frame("done", "idle"), frame("done", "done")]) {
+    await act(async () => { publishSnapshot?.({ machine: "studio", snapshot: value }); });
+  }
+  await press("ctrl+shift+o");
+  expect(host.querySelector('[data-row="agent:b1"]')?.classList.contains("selected")).toBe(true);
+  await act(async () => { publishSnapshot?.({ machine: "studio", snapshot: frame("done", "done", true) }); });
+  await press("ctrl+shift+o");
+  expect(host.querySelector('[data-row="agent:a1"]')?.classList.contains("selected")).toBe(true);
 });

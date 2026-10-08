@@ -1,14 +1,14 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import type { SidebarRow } from "./model";
 import { Status } from "./Sidebar";
-export default function Switcher({ query: savedQuery, changeQuery, selectQuery = false, rows, selected, machine, open, close }: { query?: string; changeQuery?: (query: string) => void; selectQuery?: boolean; rows: SidebarRow[]; selected: string | null; machine: string; open: (id: string) => void; close: () => void }) {
+export default function Switcher({ presentation = 0, query: savedQuery, changeQuery, selectQuery = false, rows, selected, machine, open, close }: { presentation?: number; query?: string; changeQuery?: (query: string) => void; selectQuery?: boolean; rows: SidebarRow[]; selected: string | null; machine: string; open: (id: string) => void; close: () => void }) {
   // As the Mac quick switcher: each row names its space and machine.
   const where = (row: SidebarRow) => [row.spaceLabel, machine.charAt(0).toUpperCase() + machine.slice(1)].filter(Boolean).join(" · ");
   const [localQuery, setLocalQuery] = useState("");
   const query = savedQuery ?? localQuery;
   const setQuery = changeQuery ?? setLocalQuery;
   const input = useRef<HTMLInputElement>(null);
-  useEffect(() => { if (selectQuery) input.current?.select(); else input.current?.setSelectionRange(query.length, query.length); }, [selectQuery]);
+  useEffect(() => { if (selectQuery) input.current?.select(); else input.current?.setSelectionRange(query.length, query.length); }, [selectQuery, presentation]);
   const [index, setIndex] = useState(0);
   const list = useRef<HTMLDivElement>(null);
   const results = useMemo(() => {

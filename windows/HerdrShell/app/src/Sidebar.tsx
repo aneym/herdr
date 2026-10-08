@@ -46,9 +46,9 @@ export function useSidebarNavigation(snapshot: Snapshot, catalog: LaneSnapshot, 
   const [mode, setMode] = useState<"areas" | "spaces">(() => read("mode", "spaces"));
   const [chip, setChip] = useState<AreaChip>(() => read("chip", "all"));
   const [focusCursor, setFocusCursor] = useState<number | null>(null);
-  const changeMode = (value: "areas" | "spaces") => { setMode(value); save("mode", value); };
-  const changeChip = (value: AreaChip) => { setChip(value); save("chip", value); };
-  return { mode, chip, focusCursor, changeMode, changeChip, stepFocus: (delta: number) => {
+  const changeMode = (value: "areas" | "spaces") => { setMode(value); setFocusCursor(null); save("mode", value); };
+  const changeChip = (value: AreaChip) => { setChip(value); setFocusCursor(null); save("chip", value); };
+  return { mode, chip, focusCursor, changeMode, changeChip, noteSelection: (stepping: boolean) => { if (!stepping) setFocusCursor(null); }, stepFocus: (delta: number) => {
     const ids = focusTabs(snapshot, catalog);
     if (!ids.length) return undefined;
     const current = focusCursor !== null ? focusCursor - 1 : ids.indexOf(selected ?? "");
@@ -202,7 +202,7 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
   const collapseSpacesButton = <button className="spaces-fold-all" aria-label={anySpaceExpanded ? "Collapse all spaces" : "Expand all spaces"} title={anySpaceExpanded ? "Collapse all spaces" : "Expand all spaces"} onClick={toggleAllSpaces}><svg width="12" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={anySpaceExpanded ? "m8 4 4 4 4-4M12 2v6m-4 12 4-4 4 4M12 16v6M4 12h16" : "m8 6 4-4 4 4M12 2v6m-4 10 4 4 4-4M12 16v6M4 12h16"} /></svg></button>;
   return <aside className={`sidebar ${drag ? "pin-dragging" : ""}`}><div className="machine-row" aria-label="Machines">{machines.map(item => <button key={item.name} aria-pressed={item.name === machine.name} onClick={() => chooseMachine(item.name)}><Status status={item.state} /><span>{item.name}</span></button>)}</div><div className="areas-mode" aria-label="Sidebar mode">{(["areas", "spaces"] as const).map(value => <button key={value} aria-pressed={mode === value} onClick={() => changeMode(value)}>{value === "areas" ? "Areas" : "Spaces"}</button>)}{mode === "spaces" && rows.some(row => row.kind === "space") && collapseSpacesButton}</div><nav ref={nav}>
     {mode === "areas" ? <>
-      <div className="areas-chips" aria-label="Area filters">{([["all", "All"], ["needs", "Needs You"], ["scoping", "Scope"], ["building", "Build"], ["review", "Review"], ["use", "Use"], ["parked", "Parked"]] as const).map(([value, title]) => <button key={value} aria-pressed={chip === value} onClick={() => changeChip(value)}>{value === "parked" && parkedCount ? `Parked ${parkedCount}` : title}</button>)}</div>
+      <div className="areas-chips" aria-label="Area filters">{([["all", "All"], ["scoping", "Scope"], ["building", "Build"], ["review", "Review"], ["use", "Use"], ["parked", "Parked"]] as const).map(([value, title]) => <button key={value} aria-pressed={chip === value} onClick={() => changeChip(value)}>{value === "parked" && parkedCount ? `Parked ${parkedCount}` : title}</button>)}</div>
       {areaOnly && <button className="sidebar-row muted" onClick={() => { setAreaOnly(null); save("only", null); }}>Only {catalog.areaName(areaOnly)} ×</button>}
       {areaLines.map(line => line.kind === "header" ? <h2 key={line.id}>{line.title}</h2> : <div key={line.id} data-row={line.id} className={`sidebar-row areas-line ${line.parked ? "areas-parked-row" : ""} ${(line.selected || (line.kind === "focus" && chip === "needs")) ? "selected" : ""} ${line.dim ? "muted" : ""}`} style={{ paddingLeft: space.sidebarAreaInset + line.depth * space.sidebarIndent }} onContextMenu={event => {
         if (!line.tab) return;

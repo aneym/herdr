@@ -3,6 +3,25 @@ import type { AreaChip } from "./areas";
 import type { Action } from "./keys";
 import type { Layout, Snapshot, SidebarRow } from "./model";
 import { tabOrder } from "./model";
+/** Mac attention classes, independent of notification suppression and delivery. */
+export function trackAttention(previous: Snapshot | undefined, next: Snapshot, trail: readonly string[]): string[] {
+  const classes = (snapshot: Snapshot) => new Map((snapshot.panes ?? []).map(pane => {
+    const agents = snapshot.agents?.filter(a => a.pane_id === pane.pane_id) ?? [];
+    const status = (agents[0]?.agent_status ?? pane.agent_status ?? "unknown").toLowerCase();
+    const phase = agents.map(a => (a as typeof a & { tokens?: Record<string, string> }).tokens?.phase?.trim().toLowerCase()).find(Boolean);
+    return [pane.pane_id, status === "blocked" ? "blocked" : status === "done" || phase === "done" || phase === "finished" ? "done" : "other"];
+  }));
+  if (!previous) return [...trail];
+  const old = classes(previous), current = classes(next), result = [...trail];
+  for (const pane of next.panes ?? []) {
+    const cls = current.get(pane.pane_id);
+    if (old.has(pane.pane_id) && old.get(pane.pane_id) !== cls && (cls === "blocked" || cls === "done")) result.unshift(pane.tab_id);
+  }
+  return result.slice(0, 20);
+}
+export function latestAttentionTab(trail: readonly string[], snapshot: Snapshot): string | undefined {
+  return trail.find(id => { const tab = snapshot.tabs?.find(t => t.tab_id === id); return !(tab?.role === "agent" && tab.hidden); });
+}
 export type Direction = "left" | "right" | "up" | "down";
 // Match Mac Shell: nearest facing edge, then largest perpendicular overlap.
 export function neighbor(layout: Layout, paneId: string, dir: Direction): string | null {
@@ -23,11 +42,11 @@ export function neighbor(layout: Layout, paneId: string, dir: Direction): string
 export interface ActionContext {
   machine: string; snapshot: Snapshot; rows: SidebarRow[]; selected: string | null; focused: string | null;
   api: (machine: string, method: string, params: unknown) => Promise<unknown>;
-  select: (id: string) => void; focus: (id: string) => void;
+  select: (id: string, stepping?: boolean) => void; focus: (id: string) => void;
   created: (tabId: string, paneId: string) => void;
   rename: (id: string) => void; switcher: (mode?: "switcher" | "search" | "goto") => void; toggleSidebar: () => void;
   error: (error: unknown) => void;
-  navigation?: SidebarNavigation; latestAttention?: string | null;
+  navigation?: SidebarNavigation; attentionTrail?: readonly string[];
   label?: string; tabId?: string;
 }
 function responseId(value: unknown, field: string, id: string): string {
@@ -57,9 +76,9 @@ export async function runAction(action: Action, ctx: ActionContext): Promise<voi
     } else if (action === "agent_list_up" || action === "agent_list_down") {
       const id = step([...new Set(ctx.rows.filter(r => r.kind === "agent" && !r.hidden).map(r => r.id))], ctx.selected, action === "agent_list_down" ? 1 : -1);
       if (id) ctx.select(id);
-    } else if (action === "attention_jump" && ctx.latestAttention) ctx.select(ctx.latestAttention);
+    } else if (action === "attention_jump" && latestAttentionTab(ctx.attentionTrail ?? [], ctx.snapshot)) ctx.select(latestAttentionTab(ctx.attentionTrail ?? [], ctx.snapshot)!);
     else if ((action === "next_pane" || action === "prev_pane") && ctx.navigation?.mode === "areas") {
-      const id = ctx.navigation.stepFocus(action === "next_pane" ? 1 : -1); if (id) ctx.select(id);
+      const id = ctx.navigation.stepFocus(action === "next_pane" ? 1 : -1); if (id) ctx.select(id, true);
     } else if (/^select_tab_[1-9]$/.test(action)) {
       const id = ctx.rows.find(r => r.kind !== "space" && r.hotkey === Number(action.slice(11)))?.id;
       if (id) ctx.select(id);

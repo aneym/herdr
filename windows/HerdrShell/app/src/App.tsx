@@ -15,7 +15,7 @@ import { useAgentCards } from "./AgentFace";
 import Switcher from "./Switcher";
 import { moveModeKey, actionFor } from "./keys";
 import type { Action } from "./keys";
-import { runAction } from "./actions";
+import { runAction, trackAttention } from "./actions";
 import TabView from "./TabView";
 import DetailPanel, { useDetailPanel } from "./DetailPanel";
 import DocPanel, { useDocs } from "./DocPanel";
@@ -42,8 +42,8 @@ export default function App() {
   const [machines, setMachines] = useState<MachineStatus[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [active, setActive] = useState(() => { try { return localStorage.getItem("herdr-shell.machine") || "studio"; } catch { return "studio"; } });
-  const latestAttention = useRef<Record<string, string>>({});
-  const recordAttention = useCallback((machine: string, tab: string) => { latestAttention.current[machine] = tab; }, []);
+  const attentionTrails = useRef<Record<string, string[]>>({});
+  const attentionSnapshots = useRef<Record<string, Snapshot>>({});
   const [snapshots, setSnapshots] = useState<Record<string, Snapshot>>({});
   const selections = useRef(new Map<string, ViewSelection>());
   const [, selectionChanged] = useState(0);
@@ -100,7 +100,11 @@ export default function App() {
       requests.set(name, request);
       try {
         const snapshot = await bridge.snapshot(name);
-        if (!disposed && revision === revisions.get(name) && request === requests.get(name)) setSnapshots(value => ({ ...value, [name]: snapshot }));
+        if (!disposed && revision === revisions.get(name) && request === requests.get(name)) {
+          attentionTrails.current[name] = trackAttention(attentionSnapshots.current[name], snapshot, attentionTrails.current[name] ?? []);
+          attentionSnapshots.current[name] = snapshot;
+          setSnapshots(value => ({ ...value, [name]: snapshot }));
+        }
       } catch { /* The supervisor publishes connection failures. */ }
     };
     void (async () => {
@@ -114,6 +118,8 @@ export default function App() {
       await track(bridge.snapshots(value => {
         if (disposed) return;
         revisions.set(value.machine, (revisions.get(value.machine) ?? 0) + 1);
+        attentionTrails.current[value.machine] = trackAttention(attentionSnapshots.current[value.machine], value.snapshot, attentionTrails.current[value.machine] ?? []);
+        attentionSnapshots.current[value.machine] = value.snapshot;
         setSnapshots(previous => ({ ...previous, [value.machine]: value.snapshot }));
       }));
       const before = new Map(statusRevisions);
@@ -135,9 +141,9 @@ export default function App() {
     }
   }, [machines, active, loaded]);
   const machine: MachineStatus = machines.find(m => m.name === active) ?? { name: active, state: loaded ? "down" : "connecting", error: loaded ? "Machine unavailable" : undefined };
-  return <><AttentionObserver recordAttention={recordAttention} machine={machine} snapshots={snapshots} selected={restoredSelection(snapshots[active] ?? {}, selections.current.get(active)?.selected ?? null)} windowFocused={windowFocused} updateAttention={updateAttention} /><MachineView latestAttention={latestAttention} key={active} machine={machine} machines={machines} snapshot={snapshots[active] ?? {}} chooseMachine={chooseMachine} selections={selections.current} control={control} onSelection={onSelection} /></>;
+  return <><AttentionObserver machine={machine} snapshots={snapshots} selected={restoredSelection(snapshots[active] ?? {}, selections.current.get(active)?.selected ?? null)} windowFocused={windowFocused} updateAttention={updateAttention} /><MachineView attentionTrails={attentionTrails} key={active} machine={machine} machines={machines} snapshot={snapshots[active] ?? {}} chooseMachine={chooseMachine} selections={selections.current} control={control} onSelection={onSelection} /></>;
 }
-function MachineView({ latestAttention, machine, machines, snapshot, chooseMachine, selections, control, onSelection }: { latestAttention: MutableRefObject<Record<string, string>>; machine: MachineStatus; machines: MachineStatus[]; snapshot: Snapshot; chooseMachine: (name: string) => MachineStatus; selections: Map<string, ViewSelection>; control: MutableRefObject<(() => ControlState) | null>; onSelection: (machine: string, tab: string | null) => void }) {
+function MachineView({ attentionTrails, machine, machines, snapshot, chooseMachine, selections, control, onSelection }: { attentionTrails: MutableRefObject<Record<string, string[]>>; machine: MachineStatus; machines: MachineStatus[]; snapshot: Snapshot; chooseMachine: (name: string) => MachineStatus; selections: Map<string, ViewSelection>; control: MutableRefObject<(() => ControlState) | null>; onSelection: (machine: string, tab: string | null) => void }) {
   const [selected, setSelected] = useState<string | null>(() => restoredSelection(snapshot, selections.get(machine.name)?.selected ?? null));
   const [focused, setFocused] = useState<string | null>(selections.get(machine.name)?.focused ?? null);
   const savedSelection = useRef({ selected, focused });
@@ -152,6 +158,7 @@ function MachineView({ latestAttention, machine, machines, snapshot, chooseMachi
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [switcherQuery, setSwitcherQuery] = useState("");
   const [selectQuery, setSelectQuery] = useState(false);
+  const [queryPresentation, setQueryPresentation] = useState(0);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ text: string } | null>(null);
   useEffect(() => {
@@ -201,7 +208,8 @@ function MachineView({ latestAttention, machine, machines, snapshot, chooseMachi
   const docs: DocsState = { open: docsOpen, items: docsItems.map(item => item.name), active: docsItems.find(item => (item.id ?? item.name) === activeDoc)?.name ?? null };
   const state = useRef({ machine, machines, snapshot, selected, focused, rows, docs, docsKey, docsShown });
   state.current = { machine, machines, snapshot, selected, focused, rows, docs, docsKey, docsShown };
-  const select = useCallback((id: string) => {
+  const select = useCallback((id: string, stepping = false) => {
+    navigationRef.current.noteSelection(stepping);
     if (!state.current.snapshot.tabs?.some(t => t.tab_id === id)) throw new Error(`Unknown tab: ${id}`);
     // Update the control target immediately, before React commits the new view.
     if (state.current.selected !== id) {
@@ -263,9 +271,9 @@ function MachineView({ latestAttention, machine, machines, snapshot, chooseMachi
     }
     return runAction(name as Action, {
       machine: current.machine.name, snapshot: current.snapshot, rows: current.rows, selected: current.selected, focused: current.focused,
-      navigation: navigationRef.current, latestAttention: latestAttention.current[current.machine.name],
+      navigation: navigationRef.current, attentionTrail: attentionTrails.current[current.machine.name],
       api: bridge.api, select, focus, created: (tabId, paneId) => setPending({ tabId, paneId }),
-      rename: id => { setSidebarVisible(true); setRenaming(id); }, switcher: mode => { setRenaming(null); setSelectQuery(mode === "goto"); setSwitcherOpen(value => mode === "search" || mode === "goto" ? true : !value); },
+      rename: id => { setSidebarVisible(true); setRenaming(id); }, switcher: mode => { setRenaming(null); setSelectQuery(mode === "goto"); setQueryPresentation(value => value + 1); setSwitcherOpen(value => mode === "search" || mode === "goto" ? true : !value); },
       toggleSidebar: () => { setRenaming(null); setSidebarVisible(value => !value); },
       error: showError, label, tabId,
     });
@@ -288,7 +296,7 @@ function MachineView({ latestAttention, machine, machines, snapshot, chooseMachi
           ((!event.shiftKey && /^[1-9]$/.test(event.key)) || event.key === "Tab" ||
            (event.shiftKey && (["p", "m", "[", "]", "{", "}"].includes(event.key.toLowerCase()) || event.code === "BracketLeft" || event.code === "BracketRight"))))) return false;
     const name = actionFor(event);
-    if (switcherOpen && name === "switcher") { void action(name).catch(() => {}); return true; }
+    if (switcherOpen && (name === "switcher" || name === "search" || name === "goto")) { void action(name).catch(() => {}); return true; }
     if (switcherOpen || renaming) return false;
     if (event.target instanceof Element && event.target.closest('input, [contenteditable="true"]')) return false;
     if (event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === "m") { controllers.current.get(state.current.focused ?? "")?.toggleChat?.(); return true; }
@@ -322,11 +330,11 @@ function MachineView({ latestAttention, machine, machines, snapshot, chooseMachi
       showError(error);
     });
   }, [showError]);
-  return <div className="layout">{sidebarVisible && <Sidebar openDetail={detailPanel.toggle} navigation={navigation} paneDropRow={paneDragState?.zone?.kind === "into_tab" ? `tab:${paneDragState.zone.tab_id}` : paneDragState?.zone?.kind === "new_tab_in" ? `space:${paneDragState.zone.workspace_id}` : null} snapshot={snapshot} catalog={catalog} machines={machines} chooseMachine={chooseMachine} rows={rows} selected={selected} revealed={revealed} machine={machine} notice={notice?.text ?? null} select={select} pin={pin} movePin={movePin} renaming={renaming} startRename={id => { setRenaming(id); }} cancelRename={() => setRenaming(null)} commitRename={async (id, label) => { try { await action("rename_tab", label, id); setRenaming(null); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); } catch { /* runAction reports through the transient status notice. */ } }} />}{detailPanel.rowId && <DetailPanel snapshot={snapshot} rowId={detailPanel.rowId} openFull={id => { detailPanel.close(); select(id); }} />}<TabView onSpring={select} online={machine.state === "up"} registerDrag={registerDrag} onDragChange={setPaneDragState} snapshot={snapshot} selected={selected} machine={machine.name} focused={switcherOpen || renaming ? null : focused} onFocus={focus} shortcut={shortcut} register={register} pin={pin} onError={showError} />{docsOpen && docsItems.length > 0 && <DocPanel key={docsKey} machine={machine.name} tab={selected} items={docsItems} active={activeDoc} select={selectDoc} error={docsError} />}{switcherOpen && <Switcher query={switcherQuery} changeQuery={setSwitcherQuery} selectQuery={selectQuery} rows={rows} selected={selected} machine={machine.name} open={select} close={closeSwitcher} />}{!sidebarVisible && (notice || machine.state !== "up") && <div className="machine-error notice" role="status">{notice?.text ?? machine.error ?? machine.state}</div>}</div>;
+  return <div className="layout">{sidebarVisible && <Sidebar openDetail={detailPanel.toggle} navigation={navigation} paneDropRow={paneDragState?.zone?.kind === "into_tab" ? `tab:${paneDragState.zone.tab_id}` : paneDragState?.zone?.kind === "new_tab_in" ? `space:${paneDragState.zone.workspace_id}` : null} snapshot={snapshot} catalog={catalog} machines={machines} chooseMachine={chooseMachine} rows={rows} selected={selected} revealed={revealed} machine={machine} notice={notice?.text ?? null} select={select} pin={pin} movePin={movePin} renaming={renaming} startRename={id => { setRenaming(id); }} cancelRename={() => setRenaming(null)} commitRename={async (id, label) => { try { await action("rename_tab", label, id); setRenaming(null); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); } catch { /* runAction reports through the transient status notice. */ } }} />}{detailPanel.rowId && <DetailPanel snapshot={snapshot} rowId={detailPanel.rowId} openFull={id => { detailPanel.close(); select(id); }} />}<TabView onSpring={select} online={machine.state === "up"} registerDrag={registerDrag} onDragChange={setPaneDragState} snapshot={snapshot} selected={selected} machine={machine.name} focused={switcherOpen || renaming ? null : focused} onFocus={focus} shortcut={shortcut} register={register} pin={pin} onError={showError} />{docsOpen && docsItems.length > 0 && <DocPanel key={docsKey} machine={machine.name} tab={selected} items={docsItems} active={activeDoc} select={selectDoc} error={docsError} />}{switcherOpen && <Switcher presentation={queryPresentation} query={switcherQuery} changeQuery={setSwitcherQuery} selectQuery={selectQuery} rows={rows} selected={selected} machine={machine.name} open={select} close={closeSwitcher} />}{!sidebarVisible && (notice || machine.state !== "up") && <div className="machine-error notice" role="status">{notice?.text ?? machine.error ?? machine.state}</div>}</div>;
 }
 
 // Only the displayed machine supplies notifications, like the Mac model.snapshot.
-function AttentionObserver({ recordAttention, machine, snapshots, selected, windowFocused, updateAttention }: { recordAttention: (machine: string, tab: string) => void; machine: MachineStatus; snapshots: Record<string, Snapshot>; selected: string | null; windowFocused: boolean; updateAttention: (attention: boolean) => void }) {
+function AttentionObserver({ machine, snapshots, selected, windowFocused, updateAttention }: { machine: MachineStatus; snapshots: Record<string, Snapshot>; selected: string | null; windowFocused: boolean; updateAttention: (attention: boolean) => void }) {
   const catalog = useLaneFiles(machine.name, machine.state === "up");
   const previous = useRef<{ machine: string; snapshot: Snapshot }>();
   const lastSent = useRef<Record<string, number>>({});
@@ -336,9 +344,6 @@ function AttentionObserver({ recordAttention, machine, snapshots, selected, wind
     const snapshot = snapshots[machine.name];
     const now = Date.now();
     const result = observeActiveAttention(previous.current?.machine === machine.name ? previous.current.snapshot : undefined, snapshots, machine.name, selected, windowFocused, new Set(Object.keys(catalog.parked)), Object.fromEntries(Object.entries(lastSent.current).filter(([key]) => key.startsWith(`${machine.name}:`)).map(([key, value]) => [key.slice(machine.name.length + 1), value])), now);
-    // Reuse the notifier's transition detector without delivery throttling or foreground suppression.
-    const transitions = observeActiveAttention(previous.current?.machine === machine.name ? previous.current.snapshot : undefined, snapshots, machine.name, null, false, new Set(Object.keys(catalog.parked)), {}, now);
-    for (const note of transitions.notifications) recordAttention(machine.name, note.tab);
     previous.current = snapshot ? { machine: machine.name, snapshot } : undefined;
     updateAttention(result.attention);
     for (const note of result.notifications) {
@@ -350,7 +355,7 @@ function AttentionObserver({ recordAttention, machine, snapshots, selected, wind
         sendNotification({ title: note.title, body: note.body });
       }).catch(error => console.warn("Notification delivery failed", error));
     }
-  }, [snapshots, selected, windowFocused, catalog, machine.name, updateAttention, recordAttention]);
+  }, [snapshots, selected, windowFocused, catalog, machine.name, updateAttention]);
   useEffect(() => () => updateAttention(false), [updateAttention]);
   return null;
 }
