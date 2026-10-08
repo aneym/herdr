@@ -22,7 +22,8 @@ final class PaneDrag: NSObject {
     private var sourceGlyph: ShellState = .asleep
     private var lastHostSize = CGSize.zero
     private var zone: Zone?, lastZone: Zone?
-    private var awaitingDropLayout = false
+    /// The generation of the drop whose layout may still settle; nil once that layout came or the drop ended.
+    private var dropGeneration: Int?
     private var pointer = CGPoint.zero, start = CGPoint.zero
     private var keyboard = false, keyboardTarget: String?
     private var sent: [[String: Any]] = []
@@ -104,7 +105,7 @@ final class PaneDrag: NSObject {
         guard placeSupported, owner.host.rects.count > 1, owner.shownLayout?.zoomed != true else {
             owner.focusPane(pane); return
         }
-        resetVisuals(); awaitingDropLayout = false
+        resetVisuals(); dropGeneration = nil
         generation += 1; source = pane; originTab = owner.state.selectedTab
         label = owner.host.caps[pane]?.name ?? ""
         sourceGlyph = owner.host.caps[pane]?.glyph ?? .asleep
@@ -215,7 +216,7 @@ final class PaneDrag: NSObject {
         if phase == .pressed { let p = source; finish(); if let p { owner.focusPane(p) }; return }
         guard phase == .lifted, let z = zone, let source else { cancel(); return }
         motions.removeAll { $0.pane == source && $0.kind == "fade" }
-        lastZone = z; phase = .dropping; awaitingDropLayout = true
+        lastZone = z; phase = .dropping; dropGeneration = generation
         updateSidebarIndicator()
         let method: String, p: [String: Any]
         switch z {
@@ -228,27 +229,39 @@ final class PaneDrag: NSObject {
         let commands = owner.commands, gen = generation
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let reply = commands.paneDragCall(method, p)
-            if method == "pane.swap", reply?["result"] != nil { _ = commands.paneDragCall("pane.focus", ["pane_id": source]) }
+            let refused = PaneDrag.refused(reply)
+            if method == "pane.swap", reply?["result"] != nil, !refused { _ = commands.paneDragCall("pane.focus", ["pane_id": source]) }
             DispatchQueue.main.async {
                 guard let self, self.generation == gen else { return }
-                if reply?["result"] == nil { self.awaitingDropLayout = false; self.cancel(); return }
+                // A refusal (an error, or changed:false such as a pane gone) moved nothing, so the chip goes back.
+                if refused { if self.phase == .dropping { self.animateCancel() }; return }
+                // With no reply at all the outcome is unknown: end without a rollback.
+                if reply?["result"] == nil { self.cancel(); return }
                 self.owner?.focusPane(source)
-                if self.phase == .dropping {
-                    self.phase = .settling
-                    if !self.reduce { self.addMotion(pane: nil, kind: "fade", from: .zero, to: .zero, duration: ShellMotion.fadeMs) }
-                }
+                if self.phase == .dropping { self.settle() }
                 self.draw()
             }
         }
+    }
+    /// The server answered and changed nothing: an error, or `changed: false` in the place, swap or move result.
+    private static func refused(_ reply: [String: Any]?) -> Bool {
+        guard let reply else { return false }
+        guard let result = reply["result"] as? [String: Any] else { return true }
+        if result["changed"] as? Bool == false { return true }
+        return ["place", "swap", "move_result"].contains { (result[$0] as? [String: Any])?["changed"] as? Bool == false }
     }
     func cancel() {
         guard phase == .pressed || phase == .lifted || phase == .dropping else { return }
         // Once sent, the server may already have committed the drop. Never animate a rollback.
         if phase == .dropping {
-            generation += 1; inFlight = nil; awaitingDropLayout = false
+            generation += 1; inFlight = nil
             finish(); return
         }
-        awaitingDropLayout = false
+        animateCancel()
+    }
+    /// The chip springs back to the source cap. Also ends a drop the server refused, which moved nothing.
+    private func animateCancel() {
+        dropGeneration = nil
         lastZone = zone; zone = nil; phase = .cancelling; generation += 1; inFlight = nil
         motions.removeAll { $0.kind == "zone" || $0.kind == "fade" }
         ghost = nil; ghostTarget = nil
@@ -306,8 +319,11 @@ final class PaneDrag: NSObject {
         motions.removeAll { $0.kind == "settle" || $0.kind == "crossfade" }
         let sameSize = lastHostSize == owner.host.bounds.size
         lastHostSize = owner.host.bounds.size
-        let isDropLayout = awaitingDropLayout && !fromResize
-        if isDropLayout { awaitingDropLayout = false }
+        // Only this drop's own layout settles: one that moves the source or takes it out of the tab, or follows it to
+        // another tab. Another client's change while the drop is pending, or after it ended, applies at once.
+        let movesSource = source.map { old[$0] != new[$0] } ?? false
+        let isDropLayout = dropGeneration == generation && !fromResize && (movesSource || !sameTab)
+        if isDropLayout { dropGeneration = nil }
         let canAnimate = isDropLayout && sameTab && sameSize && Set(old.keys) == Set(new.keys) && !owner.resizer.isBusy && !owner.window.inLiveResize
         if canAnimate {
             for (pane, rect) in new where old[pane] != rect {
@@ -317,12 +333,15 @@ final class PaneDrag: NSObject {
         }
         boxes = new
         if phase == .idle && !motions.isEmpty { phase = .settling }
-        if phase == .dropping && isDropLayout {
-            phase = .settling
-            motions.removeAll { $0.pane == source && $0.kind == "fade" }
-            if !reduce { addMotion(pane: nil, kind: "fade", from: .zero, to: .zero, duration: ShellMotion.fadeMs) }
-        }
-
+        if phase == .dropping && isDropLayout { settle() }
+    }
+    /// The drop is in: the zone fades out (a crossfade over reducedFadeMs under Reduce Motion) and tick() finishes once
+    /// it and any settle are done. Every drop ends here, also one whose layout brings no settle or crossfade, such as a
+    /// move into another tab.
+    private func settle() {
+        phase = .settling
+        motions.removeAll { $0.pane == source && $0.kind == "fade" }
+        addMotion(pane: nil, kind: "fade", from: .zero, to: .zero, duration: reduce ? ShellMotion.reducedFadeMs : ShellMotion.fadeMs)
     }
     func layoutDidApply() {
         draw()
@@ -429,7 +448,7 @@ final class PaneDrag: NSObject {
     }
     private func resetVisuals() { motions = []; link?.invalidate(); link = nil; ghost = nil; ghostTarget = nil }
     private func finish() {
-        phase = .idle; zone = nil; resetVisuals()
+        phase = .idle; zone = nil; dropGeneration = nil; resetVisuals()
         if let monitor { NSEvent.removeMonitor(monitor) }; monitor = nil
         NSCursor.arrow.set(); draw()
     }
