@@ -4,7 +4,7 @@
 Run only in the Cua Space: HERDR_SHELL_SPACE=1 python3 macos/HerdrShell/scripts/check_pane_drag.py
 The lab server is HERDR_SHELL_BIN and must answer `pane.place` (S1); the default is this
 checkout's target/release or target/debug herdr, else ~/.local/bin/herdr. A server without
-pane.place is BLOCKED (exit 2). `--spring` belongs to S8 and exits 3 until S8 writes it.
+pane.place is BLOCKED (exit 2). `--spring` runs the S8 scenario, check_pane_drag_spring.py, instead.
 
 Mouse events go through NSApp.sendEvent from the TestHook, as check_pin_drag does, so the
 app's own hit-testing decides cap, zone and row. Hook lines (JSON on the control FIFO):
@@ -42,8 +42,11 @@ import pathlib
 import sys
 import time
 
-if "--spring" in sys.argv:
-    raise SystemExit(3)  # spring-loaded tabs: slice S8 adds this scenario
+if __name__ == "__main__" and "--spring" in sys.argv:
+    import runpy
+    sys.argv.remove("--spring")
+    runpy.run_path(str(pathlib.Path(__file__).with_name("check_pane_drag_spring.py")), run_name="__main__")
+    raise SystemExit(0)
 if os.environ.get("HERDR_SHELL_SPACE") != "1":
     raise SystemExit("check_pane_drag requires HERDR_SHELL_SPACE=1; host launch is forbidden")
 # Short name: the Space bridge forwards sessions/<name>/herdr-client.sock and ssh refuses 104+ bytes.
