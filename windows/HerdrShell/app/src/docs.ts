@@ -1,7 +1,9 @@
+import { useEffect, useRef, useState } from "react";
+import { bridge } from "./bridge";
 import type { Snapshot } from "./model";
 export interface Lane { tab: string; name: string; label: string; displayName: string; scopeURL?: string; reviewURL?: string }
 export interface LaneCatalog { lanes: Record<string, Lane>; names: Record<string, string> }
-export interface DocItem { name: string; kind: "web" | "markdown"; url?: string; path?: string }
+export interface DocItem { name: string; kind: "web" | "markdown" | "file"; url?: string; path?: string; id?: string; mime?: string }
 export interface DocsState { open: boolean; items: string[]; active: string | null }
 const object = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const str = (value: unknown) => typeof value === "string" ? value.trim() || undefined : undefined;
@@ -54,3 +56,49 @@ export function docItems(lane: Lane | null, existing: ReadonlySet<string>): DocI
   }
   return items;
 }
+
+export interface DeskItem { id: string; kind: string; ref: string; title: string; mime: string; opened_by: string; opened_at_ms: number }
+export interface DeskInfo { items: DeskItem[]; front: string | null }
+export const emptyDesk: DeskInfo = { items: [], front: null };
+export function deskFor(snapshot: Snapshot, tab: string | null): DeskInfo {
+  return (snapshot.tabs?.find(t => t.tab_id === tab) as ({ desk?: DeskInfo } | undefined))?.desk ?? emptyDesk;
+}
+const docKey = (item: DocItem) => item.id ?? item.name;
+// Server snapshots carry tab.desk; desk.changed invalidates that snapshot, exactly as on Mac.
+export function useDesk(machine: string, tab: string | null, snapshot: Snapshot, catalog: DocItem[], landed: (tab: string) => void) {
+  const [activeKeys, setActiveKeys] = useState<Record<string, string>>({});
+  const fronts = useRef<Record<string, string | null>>({});
+  const seen = useRef<{ machine: string; ids: Record<string, Set<string>> } | null>(null);
+  const onLanded = useRef(landed); onLanded.current = landed;
+  const desk = deskFor(snapshot, tab);
+  const items: DocItem[] = [...catalog, ...desk.items.map(item => ({ id: item.id, name: item.title, kind: item.kind === "url" ? "web" as const : "file" as const, url: item.kind === "url" ? item.ref : undefined, path: item.kind === "file" ? item.ref : undefined, mime: item.mime }))];
+  const key = `${machine}.${tab}`;
+  const old = activeKeys[key];
+  const valid = items.some(item => docKey(item) === old);
+  const front = desk.items.some(item => item.id === desk.front) ? desk.front : desk.items[0]?.id;
+  const active = front && (fronts.current[key] !== desk.front || !valid) ? front : valid ? old : items[0] ? docKey(items[0]) : null;
+  useEffect(() => {
+    if (!snapshot.tabs?.length) return;
+    const ids: Record<string, Set<string>> = {};
+    for (const t of snapshot.tabs) {
+      const current = deskFor(snapshot, t.tab_id);
+      ids[t.tab_id] = new Set(current.items.map(item => item.id));
+      if (seen.current?.machine === machine && current.items.some(item => !seen.current!.ids[t.tab_id]?.has(item.id))) {
+        onLanded.current(t.tab_id);
+        // MainWindow.refreshDocs selects the server front even for a background arrival.
+        if (current.front) setActiveKeys(value => ({ ...value, [`${machine}.${t.tab_id}`]: current.front! }));
+      }
+    }
+    seen.current = { machine, ids };
+  }, [machine, snapshot]);
+  useEffect(() => {
+    fronts.current[key] = desk.front;
+    if (active !== null && active !== old) setActiveKeys(value => ({ ...value, [key]: active }));
+  }, [key, desk.front, active, old]);
+  const select = (id: string) => {
+    setActiveKeys(value => ({ ...value, [key]: id }));
+    if (desk.items.some(item => item.id === id)) void bridge.api(machine, "desk.focus", { tab_id: tab, item: id }).catch(console.error);
+  };
+  return { items, active, select };
+}
+export { docKey };

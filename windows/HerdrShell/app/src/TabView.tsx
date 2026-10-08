@@ -207,7 +207,7 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
   const corner = boxes.reduce((best, b, i) => best < 0 || b.y < boxes[best].y - .5 || (Math.abs(b.y - boxes[best].y) <= .5 && b.x + b.width > boxes[best].x + boxes[best].width) ? i : best, -1);
   const tab = snapshot.tabs?.find(t => t.tab_id === selected);
   const animateLayout = paneDrag.shouldAnimateLayout(layout, size, resizer.busy || !!held);
-  return <main ref={host} onPointerDownCapture={pressFirst} className={`tab-view ${paneState?.phase === "dragging" ? "pane-dragging" : ""}`}>{panes.map((pane, index) => {
+  return <main ref={host} data-desk-machine={machine} data-desk-tab={selected} onPointerDownCapture={pressFirst} className={`tab-view ${paneState?.phase === "dragging" ? "pane-dragging" : ""}`}>{panes.map((pane, index) => {
     const box = boxes[index];
     return <PaneClip key={`${selected}:${pane.terminal_id}`} id={pane.pane_id} box={clipRect(box, size)} animateLayout={animateLayout} onMotion={onMotion} lifted={paneState?.source === pane.pane_id && ["dragging", "dropped"].includes(paneState.phase)}>{settling => <PaneSurface settling={settling} grabbable={canDragPane(layout, supported)} onCapPointerDown={event => capPress(event, pane.pane_id, [pane.agent, pane.terminal_title_stripped || pane.title].filter(Boolean).join(" · ") || "shell")} onError={onError} hasAgent={!!pane.agent || !!snapshot.agents?.some(a => a.pane_id === pane.pane_id && a.agent)} pane={pane} machine={machine} focused={focused === pane.pane_id} onFocus={onFocus} shortcut={shortcut} register={register} {...(index === corner && tab ? { pinned: tab.pin_index != null, onPin: () => pin(tab.tab_id, tab.pin_index == null) } : {})} />}</PaneClip>;
   })}{layout && lines.map(d => {

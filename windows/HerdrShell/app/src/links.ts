@@ -1,3 +1,4 @@
+import { bridge } from "./bridge";
 import type { Terminal } from "@xterm/xterm";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 // Ctrl-click opens a terminal link, as Cmd-click does on the Mac (TerminalLinks.swift). Agents
@@ -61,7 +62,7 @@ export function installLinks(term: Terminal, server: LinkServer, open: (url: str
     const answer = await server.activate(cell.row, cell.col).catch(() => null);
     const target = openTarget(resolved, answer?.url ?? null, answer?.handled ?? false);
     if (disposed || g.settled) return false;
-    if (target && webUrl(target)) { g.open(target); return true; }
+    if (target && /^(https?:|file:|mailto:)/i.test(target)) { g.open(target); return true; }
     return answer?.handled ?? false;
   };
   const resolve = async (g: Gesture, cell: { row: number; col: number }) => {
@@ -78,7 +79,21 @@ export function installLinks(term: Terminal, server: LinkServer, open: (url: str
   // Registered after xterm's Linkifier on the same element, so its activation is already known.
   const down = (event: Event) => {
     const mouse = event as MouseEvent, cell = mouse.ctrlKey && mouse.button === 0 ? cellAt(term, mouse) : null;
-    if (cell) gesture = { cell, open: gestureOpen(mouse) };
+    if (cell) {
+      const external = gestureOpen(mouse);
+      const context = term.element?.closest<HTMLElement>("[data-desk-machine][data-desk-tab]");
+      const machine = context?.dataset.deskMachine, tab = context?.dataset.deskTab;
+      const pane = term.element?.closest<HTMLElement>("[data-pane]")?.dataset.pane;
+      const shift = mouse.shiftKey;
+      gesture = { cell, open: url => {
+        if (!machine || !tab || shift || /^mailto:/i.test(url)) { external(url); return; }
+        let ref = url;
+        if (/^file:/i.test(url)) { try { const parsed = new URL(url); ref = decodeURIComponent(parsed.pathname); if (/^\/[a-z]:/i.test(ref)) ref = ref.slice(1); } catch { external(url); return; } }
+        void bridge.api(machine, "desk.open", { ...(pane ? { pane_id: pane } : { tab_id: tab }), ref, opened_by: "user" }).then(() => {
+          window.dispatchEvent(new CustomEvent("herdr-desk-opened", { detail: { machine, tab } }));
+        }).catch(() => external(url));
+      } };
+    }
   };
   const up = (event: Event) => {
     const g = gesture, mouse = event as MouseEvent, cell = cellAt(term, mouse);

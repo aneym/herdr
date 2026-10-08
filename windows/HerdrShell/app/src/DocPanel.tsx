@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { bridge, fromBase64 } from "./bridge";
-import { docItems, laneFor, parseCatalog, projectFolder } from "./docs";
+import { docItems, docKey, laneFor, parseCatalog, projectFolder } from "./docs";
 import type { DocItem, LaneCatalog } from "./docs";
 import type { Snapshot } from "./model";
 import { renderMarkdown } from "./markdown";
@@ -69,39 +69,50 @@ export function useDocs(machine: string, tab: string | null, snapshot: Snapshot,
   }, [machine, folder, open]);
   return { items: useMemo(() => open ? docItems(lane, found.folder === folder ? found.paths : new Set()) : [], [lane, found, folder, open]), error };
 }
-export default function DocPanel({ machine, items, active, select, error: catalogError }: { machine: string; items: DocItem[]; active: string | null; select: (name: string) => void; error: string }) {
-  const item = items.find(item => item.name === active);
-  const [content, setContent] = useState({ path: "", text: "", error: "" });
+export default function DocPanel({ machine, tab, items, active, select, error: catalogError }: { machine: string; tab?: string | null; items: DocItem[]; active: string | null; select: (name: string) => void; error: string }) {
+  const item = items.find(item => docKey(item) === active);
+  const [content, setContent] = useState({ path: "", text: "", error: "", source: "" });
   const path = item?.path;
   useEffect(() => {
     if (!path) return;
     let disposed = false, busy = false, stamp = "";
-    setContent({ path, text: "", error: "" });
+    setContent({ path, text: "", error: "", source: "" });
     const poll = async () => {
       if (disposed || busy || document.hidden) return;
       busy = true;
       try {
+        if (item?.id && tab) {
+          const result = await bridge.api(machine, "desk.read", { tab_id: tab, item: item.id, ...(stamp ? { known_mtime_ms: Number(stamp) } : {}) }) as { mtime_ms: number; unchanged?: boolean; data_base64?: string; mime?: string };
+          if (!disposed && !result.unchanged && result.data_base64 !== undefined) {
+            stamp = String(result.mtime_ms);
+            const bytes = fromBase64(result.data_base64);
+            const mime = result.mime ?? item.mime ?? "text/plain";
+            const text = new TextDecoder().decode(bytes);
+            setContent({ path, text, error: "", source: mime === "text/markdown" || mime === "text/plain" ? "" : `data:${mime};base64,${result.data_base64}` });
+          }
+          return;
+        }
         const stat = await bridge.fileStat(machine, path);
         if (!stat.exists) throw new Error("Document no longer exists");
         const next = `${stat.mtime_ms}:${stat.size}:${stat.inode}`;
         if (next !== stamp) {
           const text = await readWhole(machine, path);
-          if (!disposed) { stamp = next; setContent({ path, text, error: "" }); }
+          if (!disposed) { stamp = next; setContent({ path, text, error: "", source: "" }); }
         }
-      } catch (error) { stamp = ""; if (!disposed) setContent({ path, text: "", error: String(error) }); }
+      } catch (error) { stamp = ""; if (!disposed) setContent(value => ({ ...value, path, error: String(error) })); }
       finally { busy = false; }
     };
     void poll(); const timer = setInterval(() => void poll(), 1000);
     document.addEventListener("visibilitychange", poll);
     return () => { disposed = true; clearInterval(timer); document.removeEventListener("visibilitychange", poll); };
-  }, [machine, path]);
+  }, [machine, path, tab, item?.id, item?.mime]);
   const html = useMemo(() => renderMarkdown(content.path === path ? content.text : ""), [content, path]);
   const open = (url: string) => { if (/^(https?:|mailto:)/i.test(url)) void bridge.openUrl(url).catch(error => setContent(value => ({ ...value, error: String(error) }))); };
   return <section className="docs" aria-label="Documents">
-    <div className="docs-tabs" role="tablist" aria-label="Documents">{items.map(doc => <button key={doc.name} role="tab" aria-selected={doc.name === active} onClick={() => { select(doc.name); if (doc.url) open(doc.url); }}>{doc.name}</button>)}</div>
+    <div className="docs-tabs" role="tablist" aria-label="Documents">{items.map(doc => <button key={docKey(doc)} role="tab" aria-selected={docKey(doc) === active} onClick={() => select(docKey(doc))}>{doc.name}</button>)}</div>
     <div className="docs-body" role="tabpanel">
       {(catalogError || content.error) && <p className="muted" role="status">{catalogError || content.error}</p>}
-      {item?.kind === "web" ? <button className="muted" onClick={() => open(item.url!)}>Open {item.name} externally</button> : <div className="chat-markdown" onAuxClick={event => { if ((event.target as HTMLElement).closest("a")) event.preventDefault(); }} onClick={event => {
+      {item?.kind === "web" ? <><button className="muted" onClick={() => open(item.url!)}>Open {item.name} externally</button><iframe title={item.name} src={item.url} sandbox="allow-scripts allow-forms allow-same-origin" style={{ width: "100%", height: "100%", border: 0 }} /></> : content.source ? <iframe title={item?.name} src={content.source} sandbox="" style={{ width: "100%", height: "100%", border: 0 }} /> : item?.kind === "file" && item.mime !== "text/markdown" ? <pre>{content.text}</pre> : <div className="chat-markdown" onAuxClick={event => { if ((event.target as HTMLElement).closest("a")) event.preventDefault(); }} onClick={event => {
         const anchor = (event.target as HTMLElement).closest("a");
         if (anchor) { event.preventDefault(); const url = anchor.getAttribute("href"); if (url) open(url); }
       }} dangerouslySetInnerHTML={{ __html: html }} />}

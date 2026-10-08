@@ -40,6 +40,7 @@ const LIFECYCLE: &[&str] = &[
     "pane.exited",
     "pane.agent_detected",
     "layout.updated",
+    "desk.changed",
 ];
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Deserialize, Serialize)]

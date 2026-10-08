@@ -18,6 +18,7 @@ import type { Action } from "./keys";
 import { runAction } from "./actions";
 import TabView from "./TabView";
 import DocPanel, { useDocs } from "./DocPanel";
+import { useDesk } from "./docs";
 import type { DocsState } from "./docs";
 import type { PaneController } from "./PaneTerm";
 import { installControl } from "./control";
@@ -165,12 +166,21 @@ function MachineView({ machine, machines, snapshot, chooseMachine, selections, c
   }, [snapshot, pendingPins]);
   const docsKey = `herdr-shell.docs.${machine.name}.${selected}`;
   const [docsShown, setDocsShown] = useState<Record<string, boolean>>({});
-  const [docsActive, setDocsActive] = useState<Record<string, string>>({});
   const storedDocs = () => { try { return localStorage.getItem(docsKey) === "true"; } catch { return false; } };
   const docsOpen = selected !== null && (docsShown[docsKey] ?? storedDocs());
-  const { items: docsItems, error: docsError } = useDocs(machine.name, selected, snapshot, docsOpen);
-  const activeDoc = docsItems.find(item => item.name === docsActive[docsKey])?.name ?? docsItems[0]?.name ?? null;
-  const docs: DocsState = { open: docsOpen, items: docsItems.map(item => item.name), active: activeDoc };
+  const { items: catalogDocs, error: docsError } = useDocs(machine.name, selected, snapshot, docsOpen);
+  const showDesk = (tab: string) => {
+    const key = `herdr-shell.docs.${machine.name}.${tab}`;
+    setDocsShown(value => ({ ...value, [key]: true }));
+    try { localStorage.setItem(key, "true"); } catch (error) { showError(error); }
+  };
+  const { items: docsItems, active: activeDoc, select: selectDoc } = useDesk(machine.name, selected, snapshot, catalogDocs, showDesk);
+  useEffect(() => {
+    const opened = (event: Event) => { const detail = (event as CustomEvent<{ machine: string; tab: string }>).detail; if (detail.machine === machine.name) showDesk(detail.tab); };
+    window.addEventListener("herdr-desk-opened", opened);
+    return () => window.removeEventListener("herdr-desk-opened", opened);
+  }, [machine.name]);
+  const docs: DocsState = { open: docsOpen, items: docsItems.map(item => item.name), active: docsItems.find(item => (item.id ?? item.name) === activeDoc)?.name ?? null };
   const state = useRef({ machine, machines, snapshot, selected, focused, rows, docs, docsKey, docsShown });
   state.current = { machine, machines, snapshot, selected, focused, rows, docs, docsKey, docsShown };
   const select = useCallback((id: string) => {
@@ -289,7 +299,7 @@ function MachineView({ machine, machines, snapshot, chooseMachine, selections, c
       showError(error);
     });
   }, [showError]);
-  return <div className="layout">{sidebarVisible && <Sidebar paneDropRow={paneDragState?.zone?.kind === "into_tab" ? `tab:${paneDragState.zone.tab_id}` : paneDragState?.zone?.kind === "new_tab_in" ? `space:${paneDragState.zone.workspace_id}` : null} snapshot={snapshot} catalog={catalog} machines={machines} chooseMachine={chooseMachine} rows={rows} selected={selected} revealed={revealed} machine={machine} notice={notice?.text ?? null} select={select} pin={pin} movePin={movePin} renaming={renaming} startRename={id => { setRenaming(id); }} cancelRename={() => setRenaming(null)} commitRename={async (id, label) => { try { await action("rename_tab", label, id); setRenaming(null); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); } catch { /* runAction reports through the transient status notice. */ } }} />}<TabView onSpring={select} online={machine.state === "up"} registerDrag={registerDrag} onDragChange={setPaneDragState} snapshot={snapshot} selected={selected} machine={machine.name} focused={switcherOpen || renaming ? null : focused} onFocus={focus} shortcut={shortcut} register={register} pin={pin} onError={showError} />{docsOpen && docsItems.length > 0 && <DocPanel key={docsKey} machine={machine.name} items={docsItems} active={activeDoc} select={name => setDocsActive(value => ({ ...value, [docsKey]: name }))} error={docsError} />}{switcherOpen && <Switcher rows={rows} selected={selected} machine={machine.name} open={select} close={closeSwitcher} />}{!sidebarVisible && (notice || machine.state !== "up") && <div className="machine-error notice" role="status">{notice?.text ?? machine.error ?? machine.state}</div>}</div>;
+  return <div className="layout">{sidebarVisible && <Sidebar paneDropRow={paneDragState?.zone?.kind === "into_tab" ? `tab:${paneDragState.zone.tab_id}` : paneDragState?.zone?.kind === "new_tab_in" ? `space:${paneDragState.zone.workspace_id}` : null} snapshot={snapshot} catalog={catalog} machines={machines} chooseMachine={chooseMachine} rows={rows} selected={selected} revealed={revealed} machine={machine} notice={notice?.text ?? null} select={select} pin={pin} movePin={movePin} renaming={renaming} startRename={id => { setRenaming(id); }} cancelRename={() => setRenaming(null)} commitRename={async (id, label) => { try { await action("rename_tab", label, id); setRenaming(null); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); } catch { /* runAction reports through the transient status notice. */ } }} />}<TabView onSpring={select} online={machine.state === "up"} registerDrag={registerDrag} onDragChange={setPaneDragState} snapshot={snapshot} selected={selected} machine={machine.name} focused={switcherOpen || renaming ? null : focused} onFocus={focus} shortcut={shortcut} register={register} pin={pin} onError={showError} />{docsOpen && docsItems.length > 0 && <DocPanel key={docsKey} machine={machine.name} tab={selected} items={docsItems} active={activeDoc} select={selectDoc} error={docsError} />}{switcherOpen && <Switcher rows={rows} selected={selected} machine={machine.name} open={select} close={closeSwitcher} />}{!sidebarVisible && (notice || machine.state !== "up") && <div className="machine-error notice" role="status">{notice?.text ?? machine.error ?? machine.state}</div>}</div>;
 }
 
 // Only the displayed machine supplies notifications, like the Mac model.snapshot.
