@@ -47,7 +47,8 @@ with tempfile.TemporaryDirectory(prefix='agents-section-') as directory:
     check('AGENTS precedes PINNED (remote agent before local plain pin)', 0 <= at('agentpins') < at('agent:ax42/w1:t1') < at('pinned') < at('pinned:s1:t1'))
     check('agent appears once, only in AGENTS', sum('ax42/w1:t1' in r.split('|')[1] for r in rows if r.startswith('tab|')) == 1 and at('tab:ax42/w1:t1') == -1)
     check('AGENTS and PINNED headers carry no key hints (Alex, 2026-10-06)', field('agentpins')[7] == '' and field('pinned')[7] == '')
-    check('remote agent badge and space label survive', field('agent:ax42/w1:t1')[-1] == '@ax42' and field('agent:ax42/w1:t1')[7] == 'rails')
+    # Agent rows drop the space name for the home glyph (spec agents-hide-and-home-glyph, 2026-10-07); the badge stays.
+    check('remote agent badge survives and the space label is gone', field('agent:ax42/w1:t1')[-1] == '@ax42' and field('agent:ax42/w1:t1')[7] == '')
     check('numbered order starts remote A, local P', rows[0].split('|')[1].split(',')[:2] == ['ax42/w1:t1', 's1:t1'])
     check('source pin indices preserved for moves', rows[1] == 'indices|s1:t1:0,ax42/w1:t1:0')
     original = rows[:]
