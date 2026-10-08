@@ -89,7 +89,7 @@ export function pinCount(answer: unknown): number {
   const tabs = (answer as { tabs?: { pin_index?: number | null }[] } | null)?.tabs;
   return Array.isArray(tabs) ? tabs.filter(t => t?.pin_index != null).length : 0;
 }
-export function tabOrder(rows: SidebarRow[]): string[] { return [...new Set(rows.filter(r => r.kind !== "space" && !(r.kind === "agent" && r.hidden)).map(r => r.id))]; }
+export function tabOrder(rows: SidebarRow[]): string[] { return [...new Set(rows.filter(r => r.kind !== "space").map(r => r.id))]; }
 export function scaleRect(rect: Rect, area: Rect, width: number, height: number): Rect {
   return { x: (rect.x - area.x) / Math.max(1, area.width) * width, y: (rect.y - area.y) / Math.max(1, area.height) * height, width: rect.width / Math.max(1, area.width) * width, height: rect.height / Math.max(1, area.height) * height };
 }
@@ -97,7 +97,8 @@ export function scaleRect(rect: Rect, area: Rect, width: number, height: number)
 // A removed selection follows its previous drawn pin block; unpinned selection
 // retains the old index-based fallback, including the server's initial focus.
 export function selectionAfterClose(previous: SidebarRow[], rows: SidebarRow[], selected: string | null, initial?: string): string | null {
-  const order = tabOrder(rows);
+  const visible = (items: SidebarRow[]) => tabOrder(items.filter(r => !(r.kind === "agent" && r.hidden)));
+  const order = visible(rows);
   if (selected) {
     const pin = previous.find(r => r.id === selected && (r.kind === "agent" || r.kind === "pinned"));
     if (pin) {
@@ -108,6 +109,6 @@ export function selectionAfterClose(previous: SidebarRow[], rows: SidebarRow[], 
       if (next) return next;
     }
   }
-  const index = selected ? tabOrder(previous).indexOf(selected) : -1;
+  const index = selected ? visible(previous).indexOf(selected) : -1;
   return index >= 0 ? order[Math.min(index, order.length - 1)] ?? null : initial != null && !rows.some(r => r.id === initial && r.kind === "agent" && r.hidden) ? initial : order[0] ?? null;
 }

@@ -48,7 +48,8 @@ export async function runAction(action: Action, ctx: ActionContext): Promise<voi
       const id = ctx.rows.find(r => r.kind !== "space" && r.hotkey === Number(action.slice(11)))?.id;
       if (id) ctx.select(id);
     } else if (action === "next_tab" || action === "prev_tab") {
-      const id = step(order, ctx.selected, action === "next_tab" ? 1 : -1); if (id) ctx.select(id);
+      const visible = tabOrder(ctx.rows.filter(r => !(r.kind === "agent" && r.hidden)));
+      const id = step(visible, ctx.selected, action === "next_tab" ? 1 : -1); if (id) ctx.select(id);
     } else if (action === "next_attention") {
       const attention = ["blocked", "done"].flatMap(status => order.filter(id => ctx.rows.some(r => r.kind !== "space" && !(r.kind === "agent" && r.hidden) && r.id === id && r.status === status)));
       const id = step(attention, ctx.selected, 1); if (id) ctx.select(id);
