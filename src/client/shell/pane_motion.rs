@@ -84,7 +84,7 @@ impl ClientShellState {
     pub(super) fn retarget_ghost(&mut self, from: Option<Rect>) {
         self.pane_motion
             .retain(|m| m.kind == PaneMotionKind::Settle);
-        if self.config.reduce_motion {
+        if self.config.reduce_motion || self.mode == ClientShellMode::Move {
             return;
         }
         if let Some(p) = self.pane_drag.as_mut() {
@@ -104,6 +104,9 @@ impl ClientShellState {
         }
     }
     pub(super) fn user_cancel_pane_drag(&mut self) -> bool {
+        if self.mode == ClientShellMode::Move {
+            return self.cancel_pane_drag();
+        }
         let from = self.drawn_ghost();
         self.chrome_drag = None;
         self.pane_press = None;
