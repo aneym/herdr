@@ -30,7 +30,7 @@ mod imp {
     use std::time::Duration;
     use tauri::{AppHandle, Emitter, Manager};
     use windows_sys::Win32::Foundation::{
-        CloseHandle, GetLastError, ERROR_PIPE_CONNECTED, HANDLE, HWND, INVALID_HANDLE_VALUE, RECT,
+        CloseHandle, GetLastError, ERROR_NO_DATA, ERROR_PIPE_CONNECTED, HANDLE, HWND, INVALID_HANDLE_VALUE, RECT,
     };
     use windows_sys::Win32::Graphics::Gdi::{
         BitBlt, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetWindowDC,
@@ -90,6 +90,23 @@ mod imp {
         std::thread::spawn(move || serve(app, test_window));
     }
 
+    fn log_pipe_error(pipe: &str, error: u32, message: &str) {
+        use std::io::Write;
+        tracing::warn!(pipe, error, message);
+        let logged = (|| -> std::io::Result<()> {
+            let base = std::env::var_os("LOCALAPPDATA")
+                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "LOCALAPPDATA not set"))?;
+            let logs = std::path::PathBuf::from(base).join("HerdrShell").join("logs");
+            std::fs::create_dir_all(&logs)?;
+            let mut log = std::fs::OpenOptions::new().create(true).append(true)
+                .open(logs.join("control.log"))?;
+            writeln!(log, "{pipe}: {message} (Windows error {error})")
+        })();
+        if let Err(log_error) = logged {
+            eprintln!("{pipe}: {message} (Windows error {error}); log: {log_error}");
+        }
+    }
+
     fn serve(app: AppHandle, test_window: bool) {
         let user = std::env::var("USERNAME").unwrap_or_else(|_| "user".to_string());
         let pipe = super::control_pipe_name(&user, test_window);
@@ -108,26 +125,40 @@ mod imp {
         };
         let mut h = create(true);
         if h == INVALID_HANDLE_VALUE {
-            tracing::warn!(pipe, error = unsafe { GetLastError() }, "control server disabled: cannot own pipe");
+            log_pipe_error(&pipe, unsafe { GetLastError() }, "control server disabled: cannot own pipe");
             return;
         }
         loop {
             unsafe {
-                if ConnectNamedPipe(h, std::ptr::null_mut()) == 0
-                    && GetLastError() != ERROR_PIPE_CONNECTED
-                {
-                    tracing::warn!(pipe, error = GetLastError(), "control server disabled: cannot connect pipe");
-                    CloseHandle(h);
-                    return;
+                if h == INVALID_HANDLE_VALUE {
+                    std::thread::sleep(Duration::from_secs(1));
+                    h = create(false);
+                    if h == INVALID_HANDLE_VALUE {
+                        log_pipe_error(&pipe, GetLastError(), "cannot recreate listener; retrying");
+                        continue;
+                    }
                 }
-                // Reserve the next listener before the connection can close, so
-                // another process can never acquire first-instance ownership.
-                let next = create(false);
-                let error = if next == INVALID_HANDLE_VALUE {
-                    GetLastError()
-                } else {
-                    0
-                };
+                if ConnectNamedPipe(h, std::ptr::null_mut()) == 0 {
+                    let error = GetLastError();
+                    if error == ERROR_NO_DATA {
+                        DisconnectNamedPipe(h);
+                        continue;
+                    }
+                    if error != ERROR_PIPE_CONNECTED {
+                        log_pipe_error(&pipe, error, "cannot connect pipe; retrying");
+                        CloseHandle(h);
+                        h = INVALID_HANDLE_VALUE;
+                        continue;
+                    }
+                }
+                // Reserve the next listener before the connection can close.
+                // If creation fails, retain this handle until a replacement exists.
+                let mut next = create(false);
+                while next == INVALID_HANDLE_VALUE {
+                    log_pipe_error(&pipe, GetLastError(), "cannot create next listener; retrying");
+                    std::thread::sleep(Duration::from_secs(1));
+                    next = create(false);
+                }
                 // One thread per connection: a client that never reads its reply blocks
                 // only its own FlushFileBuffers, never the listener.
                 let raw = h as usize;
@@ -138,10 +169,6 @@ mod imp {
                     DisconnectNamedPipe(h);
                     CloseHandle(h);
                 });
-                if next == INVALID_HANDLE_VALUE {
-                    tracing::warn!(pipe, error, "control server disabled: cannot create next listener");
-                    return;
-                }
                 h = next;
             }
         }

@@ -4,9 +4,11 @@
 Uses throwaway workspaces only, with real cap pointer events and server layouts.
 This script is intentionally not run by the S7 implementation seat.
 """
+import argparse
 import json
 import pathlib
 import subprocess
+import sys
 import time
 
 import pc
@@ -23,8 +25,11 @@ def herdr(*args):
     return json.loads(out)["result"]
 
 
+TEST_WINDOW = False
+
+
 def ctl(payload):
-    rc, out = pc.ctl_send(payload, timeout=60)
+    rc, out = pc.ctl_send(payload, timeout=60, test_window=TEST_WINDOW)
     reply = json.loads(out.splitlines()[-1], strict=False) if out else {}
     if rc or reply.get("ok") is False:
         raise RuntimeError(f"{payload.get('cmd')}: {out}")
@@ -54,14 +59,19 @@ def wait(predicate):
 
 def shot(name):
     EVIDENCE.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["python3", str(HERE / "pc.py"), "shot", "--out", str(EVIDENCE / f"s7-{name}.png")], check=True)
+    switches = ["--test-window"] if TEST_WINDOW else []
+    subprocess.run(["python3", str(HERE / "pc.py"), "shot", "--out", str(EVIDENCE / f"s7-{name}.png"), *switches], check=True)
 
 
 def drag(source, to, **extra):
     return ctl({"cmd": "drag_pane", "pane_id": source, "to": to, "steps": 8, "interval_ms": 40, **extra})
 
 
-def main():
+def main(argv=()):
+    global TEST_WINDOW
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--test-window", action="store_true", help="target the isolated test window pipe")
+    TEST_WINDOW = ap.parse_args(argv).test_window
     pc.bootstrap()
     if pc.guard(quiet=True)[0]:
         print("game guard holds; PC acceptance deferred")
@@ -128,4 +138,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

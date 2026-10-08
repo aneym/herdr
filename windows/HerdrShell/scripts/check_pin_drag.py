@@ -17,6 +17,7 @@ macos/HerdrShell/scripts/check_pin_drag.py:
   - dragging a split divider right grows the left pane's ratio on the server.
 Refuses to run while a game is running. Writes windows/HerdrShell/checks/PIN-DRAG.txt.
 """
+import argparse
 import json
 import pathlib
 import subprocess
@@ -45,8 +46,11 @@ def herdr(*args):
     return json.loads(out)["result"] if out.strip().startswith("{") else out
 
 
+TEST_WINDOW = False
+
+
 def ctl(obj):
-    rc, out = pc.ctl_send(obj, timeout=60)
+    rc, out = pc.ctl_send(obj, timeout=60, test_window=TEST_WINDOW)
     try:
         reply = json.loads(out.splitlines()[-1], strict=False) if out else {}
     except json.JSONDecodeError:
@@ -81,7 +85,11 @@ def drag(tab, rows, esc=False):
     return ctl({"cmd": "ui"})
 
 
-def main():
+def main(argv=()):
+    global TEST_WINDOW
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--test-window", action="store_true", help="target the isolated test window pipe")
+    TEST_WINDOW = ap.parse_args(argv).test_window
     pc.bootstrap()
     if pc.guard(quiet=True)[0]:
         raise SystemExit("a game is running on the PC; not driving the app")
@@ -177,4 +185,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

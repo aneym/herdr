@@ -64,5 +64,65 @@ class TestWindowRoutingTests(unittest.TestCase):
                     self.assertEqual(payload['cmd'], command)
 
 
+    def test_acceptance_scripts_route_their_first_control_command(self):
+        class Captured(Exception):
+            pass
+
+        for name, expected in [('check_pin_drag', 'ping'), ('check_pane_drag', 'ui'),
+                               ('theme_check', 'appearance')]:
+            for test_window in (False, True):
+                with self.subTest(script=name, test_window=test_window):
+                    spec = importlib.util.spec_from_file_location(name, SCRIPTS / f'{name}.py')
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)
+                    sent = []
+
+                    def run(argv, *args, **kwargs):
+                        if argv[0] in ('ssh', 'scp'):
+                            if argv[0] == 'ssh':
+                                parts = shlex.split(argv[2])
+                                if '-Script' in parts and parts[parts.index('-Script') + 1] == 'ctl.ps1':
+                                    sent.append(json.loads(base64.b64decode(parts[parts.index('-ArgsB64') + 1])))
+                                    raise Captured()
+                            return subprocess.CompletedProcess(argv, 0, '{"game":false}\n', '')
+                        return REAL_RUN(argv, *args, **kwargs)
+
+                    arguments = [f'{name}.py']
+                    if name == 'theme_check':
+                        arguments += ['--out-dir', str(SCRIPTS)]
+                    if test_window:
+                        arguments.append('--test-window')
+                    with mock.patch.object(sys, 'argv', arguments), \
+                            mock.patch.object(subprocess, 'run', run), \
+                            contextlib.redirect_stdout(io.StringIO()):
+                        with self.assertRaises(Captured):
+                            module.main(arguments[1:])
+                    self.assertTrue(sent)
+                    for helper_args in sent:
+                        self.assertEqual('-Test' in helper_args, test_window)
+                        payload = json.loads(base64.b64decode(helper_args[helper_args.index('-JsonB64') + 1]))
+                        self.assertEqual(payload['cmd'], expected)
+
+    def test_pane_drag_screenshot_passes_instance_to_pc_cli(self):
+        spec = importlib.util.spec_from_file_location('pane_shot', SCRIPTS / 'check_pane_drag.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            module.EVIDENCE = Path(directory)
+            for test_window in (False, True):
+                module.TEST_WINDOW = test_window
+                sent = []
+
+                def run(argv, *args, **kwargs):
+                    sent.append(argv)
+                    return subprocess.CompletedProcess(argv, 0, '', '')
+
+                with mock.patch.object(subprocess, 'run', run):
+                    module.shot('routing')
+                self.assertEqual(len(sent), 1)
+                self.assertEqual('--test-window' in sent[0], test_window)
+
+
 if __name__ == '__main__':
     unittest.main()

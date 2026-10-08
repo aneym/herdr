@@ -3,7 +3,8 @@
 Tauri 2 shell scaffold for Herdr on Windows 11. One xterm.js terminal
 (WebGL + unicode11, Cascadia Mono 13, Catppuccin Mocha) in local-echo demo
 mode — no server connection yet — plus a named-pipe control channel
-(`\\.\pipe\herdr-shell-control-<username>`) for test automation:
+(`\\.\pipe\herdr-shell-control-<username>`, or the isolated
+`\\.\pipe\herdr-shell-control-<username>-test` with `--test-window`) for test automation:
 `ping`, `state`, `shot`, `type`, `read`.
 
 ## Layout

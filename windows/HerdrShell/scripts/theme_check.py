@@ -75,8 +75,11 @@ def regions(w, h):
     }
 
 
+TEST_WINDOW = False
+
+
 def ctl(obj):
-    rc, out = pc.ctl_send(obj, timeout=30)
+    rc, out = pc.ctl_send(obj, timeout=30, test_window=TEST_WINDOW)
     try:
         return json.loads(out, strict=False) if rc == 0 else {"ok": False, "error": out or f"rc {rc}"}
     except json.JSONDecodeError:
@@ -121,10 +124,13 @@ def reset_override():
     return {"reply": reset, "override": override}, failed
 
 
-def main():
+def main(argv=None):
+    global TEST_WINDOW
     ap = argparse.ArgumentParser()
     ap.add_argument("--out-dir", required=True)
-    args = ap.parse_args()
+    ap.add_argument("--test-window", action="store_true", help="target the isolated test window pipe")
+    args = ap.parse_args(argv)
+    TEST_WINDOW = args.test_window
     Path(args.out_dir).mkdir(parents=True, exist_ok=True)
     pc.bootstrap()
     game, _ = pc.guard(quiet=True)
@@ -153,4 +159,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
