@@ -288,3 +288,5 @@ mod profile_usage;
 mod startup_overlays;
 mod tab_bar;
 mod tree;
+
+mod pane_drag_regressions;

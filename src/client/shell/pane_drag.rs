@@ -11,15 +11,31 @@ pub(super) enum PaneDragTarget {
     IntoTab { tab_id: String },
     NewTabIn { workspace_id: String },
 }
+#[derive(Clone, Debug)]
+pub(super) enum PaneDragAnswer {
+    Changed(Rect),
+    NoChange,
+    Error,
+}
+impl PaneDragAnswer {
+    fn rect(&self) -> Option<Rect> {
+        match self {
+            Self::Changed(rect) => Some(*rect),
+            _ => None,
+        }
+    }
+}
 pub(super) struct ClientPaneDragPreview {
     pub(super) chip: String,
     pub(super) ghost: Option<Rect>,
     pub(super) in_flight: Option<(String, PaneDragTarget)>,
     pub(super) queued: Option<PaneDragTarget>,
-    pub(super) answers: Vec<(PaneDragTarget, Option<Rect>)>,
+    pub(super) answers: Vec<(PaneDragTarget, PaneDragAnswer)>,
     pub(super) topology: u64,
     pub(super) committed: bool,
     rects: Vec<Rect>,
+    area: Rect,
+    invalidated: bool,
     source: PaneHit,
     row: Option<Rect>,
     accent: u32,
@@ -145,9 +161,14 @@ impl ClientShellState {
             topology: self
                 .pane_surface
                 .as_ref()
-                .map_or(0, |s| pane_surface_topology_signature(s)),
+                .map_or(0, |s| pane_drag_surface_signature(s)),
             committed: false,
             rects: self.hits.panes.iter().map(|h| h.rect).collect(),
+            area: self
+                .last_composed_size
+                .map(|(c, r)| self.layout(c, r).pane_surface)
+                .unwrap_or_default(),
+            invalidated: false,
             source,
             row: None,
             accent: crate::protocol::color_to_u32(self.config.palette.accent),
@@ -179,9 +200,33 @@ impl ClientShellState {
             return;
         };
         let area = self.layout(cols, rows).pane_surface;
+        let missing_target = matches!(&old,
+            Some(PaneDragTarget::Centre { pane_id } | PaneDragTarget::PaneEdge { pane_id, .. })
+                if !self.hits.panes.iter().any(|h| &h.pane_id == pane_id));
+        if missing_target || !self.hits.panes.iter().any(|h| h.pane_id == source) {
+            self.cancel_pane_drag();
+            outcome.repaint = true;
+            return;
+        }
         let Some(preview) = self.pane_drag.as_mut() else {
             return;
         };
+        let geometry_changed = preview.area != area
+            || !preview
+                .rects
+                .iter()
+                .copied()
+                .eq(self.hits.panes.iter().map(|h| h.rect));
+        if geometry_changed {
+            preview.answers.clear();
+            preview.in_flight = None;
+            preview.queued = None;
+            preview.invalidated = true;
+        }
+        preview.area = area;
+        preview.rects.clear();
+        preview.rects.extend(self.hits.panes.iter().map(|h| h.rect));
+        let invalidated = std::mem::take(&mut preview.invalidated);
         let zone = super::pane_drop::drop_zone_at(
             area,
             &preview.rects,
@@ -260,7 +305,7 @@ impl ClientShellState {
             *current = target.clone();
         }
         outcome.repaint = true;
-        if target == old {
+        if target == old && !invalidated {
             return;
         }
         preview.row = row;
@@ -268,7 +313,7 @@ impl ClientShellState {
         preview.ghost = zone.map(|z| super::pane_drop::zone_estimate_rect(area, &preview.rects, z));
         if let Some(t) = target {
             if let Some((_, rect)) = preview.answers.iter().find(|(key, _)| *key == t) {
-                preview.ghost = *rect;
+                preview.ghost = rect.rect();
             } else if matches!(
                 t,
                 PaneDragTarget::PaneEdge { .. } | PaneDragTarget::TabEdge { .. }
@@ -359,14 +404,14 @@ impl ClientShellState {
             return false;
         }
         p.in_flight = None;
-        let rect = match result {
+        let answer = match result {
             Ok(ResponseResult::PanePlace { place: result }) if result.changed => {
                 let a = result.target_layout.area;
                 let r = result.placed_rect;
                 if a.width == 0 || a.height == 0 {
-                    None
+                    PaneDragAnswer::Error
                 } else {
-                    Some(Rect::new(
+                    PaneDragAnswer::Changed(Rect::new(
                         area.x.saturating_add(
                             ((u32::from(r.x.saturating_sub(a.x)) * u32::from(area.width))
                                 / u32::from(a.width)) as u16,
@@ -381,9 +426,11 @@ impl ClientShellState {
                     ))
                 }
             }
-            _ => None,
+            Ok(ResponseResult::PanePlace { place }) if !place.changed => PaneDragAnswer::NoChange,
+            _ => PaneDragAnswer::Error,
         };
-        p.answers.push((target.clone(), rect));
+        let rect = answer.rect();
+        p.answers.push((target.clone(), answer));
         if matches!(&self.chrome_drag, Some(ClientChromeDrag::Pane { target: Some(t), .. }) if *t == target)
         {
             p.ghost = rect;
@@ -420,11 +467,11 @@ impl ClientShellState {
             self.cancel_pane_drag();
             return;
         };
-        if self
-            .pane_drag
-            .as_ref()
-            .is_some_and(|p| p.answers.iter().any(|(t, r)| *t == target && r.is_none()))
-        {
+        if self.pane_drag.as_ref().is_some_and(|p| {
+            p.answers
+                .iter()
+                .any(|(t, r)| *t == target && !matches!(r, PaneDragAnswer::Changed(_)))
+        }) {
             self.cancel_pane_drag();
             return;
         }
@@ -612,6 +659,9 @@ impl ClientShellState {
     pub(super) fn rebase_pane_drag_surface(&mut self, surface: &PaneSurfaceFrame) {
         if self.pane_drag.as_ref().is_some_and(|p| {
             p.committed || !surface.panes.iter().any(|h| h.pane_id == p.source.pane_id)
+                || matches!(&self.chrome_drag, Some(ClientChromeDrag::Pane {
+                    target: Some(PaneDragTarget::Centre { pane_id } | PaneDragTarget::PaneEdge { pane_id, .. }), ..
+                }) if !surface.panes.iter().any(|h| &h.pane_id == pane_id))
         }) {
             self.cancel_pane_drag();
             return;
@@ -619,7 +669,7 @@ impl ClientShellState {
         if self.pane_drag.is_none() {
             return;
         }
-        let signature = pane_surface_topology_signature(surface);
+        let signature = pane_drag_surface_signature(surface);
         let Some(p) = self.pane_drag.as_mut() else {
             return;
         };
@@ -629,6 +679,21 @@ impl ClientShellState {
             p.in_flight = None;
             p.queued = None;
             p.ghost = None;
+            p.invalidated = true;
         }
     }
+}
+
+// Event-only drag invalidation, not the pane-scaled compose topology path.
+fn pane_drag_surface_signature(surface: &PaneSurfaceFrame) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    pane_surface_topology_signature(surface).hash(&mut hash);
+    surface.frame.width.hash(&mut hash);
+    surface.frame.height.hash(&mut hash);
+    for pane in &surface.panes {
+        pane.pane_id.hash(&mut hash);
+        (pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height).hash(&mut hash);
+    }
+    hash.finish()
 }
