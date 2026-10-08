@@ -109,5 +109,5 @@ export function selectionAfterClose(previous: SidebarRow[], rows: SidebarRow[], 
     }
   }
   const index = selected ? tabOrder(previous).indexOf(selected) : -1;
-  return index >= 0 ? order[Math.min(index, order.length - 1)] ?? null : initial && order.includes(initial) ? initial : order[0] ?? null;
+  return index >= 0 ? order[Math.min(index, order.length - 1)] ?? null : initial != null && !rows.some(r => r.id === initial && r.kind === "agent" && r.hidden) ? initial : order[0] ?? null;
 }
