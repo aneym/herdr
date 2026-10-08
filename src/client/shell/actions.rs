@@ -839,6 +839,20 @@ impl ClientShellState {
         {
             return (false, Vec::new());
         }
+        if let PendingEndpointKind::PaneDragDrop { source_pane_id } = &pending.kind {
+            let accepted = matches!(&result,
+                Ok(crate::api::schema::ResponseResult::PanePlace { place }) if place.changed)
+                || matches!(&result, Ok(crate::api::schema::ResponseResult::PaneSwap { swap }) if swap.changed)
+                || matches!(&result, Ok(crate::api::schema::ResponseResult::PaneMove { move_result }) if move_result.changed);
+            if !accepted
+                && self
+                    .pane_drag
+                    .as_ref()
+                    .is_some_and(|p| p.committed && p.source.pane_id == *source_pane_id)
+            {
+                return (self.user_cancel_pane_drag(), Vec::new());
+            }
+        }
         if let PendingEndpointKind::PaneDragDryRun {
             source_pane_id,
             target,
@@ -984,7 +998,8 @@ impl ClientShellState {
             }
         }
         match pending.kind {
-            PendingEndpointKind::PaneDragDryRun { .. } => {}
+            PendingEndpointKind::PaneDragDryRun { .. }
+            | PendingEndpointKind::PaneDragDrop { .. } => {}
             PendingEndpointKind::AgentRestart { .. } | PendingEndpointKind::Generic => {}
             PendingEndpointKind::Focus { .. } => {
                 if result.is_ok() {

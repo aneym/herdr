@@ -891,6 +891,9 @@ impl ClientShellOverlay {
 
 #[derive(Debug)]
 pub(super) enum PendingEndpointKind {
+    PaneDragDrop {
+        source_pane_id: String,
+    },
     PaneDragDryRun {
         source_pane_id: String,
         target: super::pane_drag::PaneDragTarget,

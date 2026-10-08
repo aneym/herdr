@@ -292,3 +292,5 @@ mod tab_bar;
 mod tree;
 
 mod pane_drag_regressions;
+
+mod pane_drop_refused;

@@ -535,7 +535,16 @@ impl ClientShellState {
             _ => Self::pane_place_method(source_pane_id, origin_tab_id, &target, false),
         };
         if let Some(method) = method {
-            self.push_endpoint_method(method, outcome);
+            let source_pane_id = self
+                .pane_drag
+                .as_ref()
+                .map(|p| p.source.pane_id.clone())
+                .unwrap_or_default();
+            self.push_endpoint_method_with_kind(
+                method,
+                PendingEndpointKind::PaneDragDrop { source_pane_id },
+                outcome,
+            );
         }
         if let Some(p) = self.pane_drag.as_mut() {
             p.committed = true;
