@@ -154,8 +154,8 @@ function MachineView({ attentionTrails, machine, machines, snapshot, chooseMachi
   const [paneDragState, setPaneDragState] = useState<PaneDragState | null>(null);
   const registerDrag = useCallback((drag: PaneDrag | null, lift?: () => boolean) => { paneDrag.current = drag; liftPane.current = lift; }, []);
   const [sidebarVisible, setSidebarVisible] = useState(true);
-  const detailPanel = useDetailPanel();
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  const detailPanel = useDetailPanel(switcherOpen, snapshot);
   const [switcherQuery, setSwitcherQuery] = useState("");
   const [selectQuery, setSelectQuery] = useState(false);
   const [queryPresentation, setQueryPresentation] = useState(0);
@@ -281,7 +281,6 @@ function MachineView({ attentionTrails, machine, machines, snapshot, chooseMachi
   const closeSwitcher = () => { setSwitcherOpen(false); const id = state.current.focused; if (id) controllers.current.get(id)?.focus(); };
   const shortcut = useCallback((event: KeyboardEvent) => {
     if (event.type !== "keydown") return false;
-    if (detailPanel.claimEscape(event)) return true;
     const drag = paneDrag.current;
     if (drag?.state.keyboard) {
       const key = moveModeKey(event);
@@ -303,7 +302,7 @@ function MachineView({ attentionTrails, machine, machines, snapshot, chooseMachi
     if (!name) return false;
     void action(name).catch(() => {});
     return true;
-  }, [action, switcherOpen, renaming, detailPanel.claimEscape]);
+  }, [action, switcherOpen, renaming]);
   useEffect(() => { const handler = (event: KeyboardEvent) => { if (shortcut(event)) { event.preventDefault(); event.stopPropagation(); } }; window.addEventListener("keydown", handler, true); return () => window.removeEventListener("keydown", handler, true); }, [shortcut]);
   const register = useCallback((id: string, value: PaneController | null) => { if (value) controllers.current.set(id, value); else controllers.current.delete(id); }, []);
   control.current = () => {

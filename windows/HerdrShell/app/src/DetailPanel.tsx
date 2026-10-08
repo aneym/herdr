@@ -2,20 +2,24 @@ import { useCallback, useEffect, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type { Snapshot } from "./model";
 import { buildDetailContent } from "./detailContent";
-export function useDetailPanel() {
+export function useDetailPanel(switcherOpen = false, snapshot?: Snapshot) {
   const [rowId, setRowId] = useState<string | null>(null);
   const close = useCallback(() => setRowId(null), []);
   const toggle = useCallback((id: string) => setRowId(current => current === id ? null : id), []);
   const claimEscape = useCallback((event: KeyboardEvent) => {
-    if (!rowId || event.key !== "Escape" || event.isComposing || event.keyCode === 229) return false;
+    const textInput = document.activeElement?.matches('input, textarea:not(.xterm-helper-textarea), [contenteditable="true"]');
+    if (switcherOpen || textInput || !rowId || event.key !== "Escape" || event.isComposing || event.keyCode === 229) return false;
     close(); return true;
-  }, [rowId, close]);
+  }, [rowId, close, switcherOpen]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => { if (claimEscape(event)) { event.preventDefault(); event.stopImmediatePropagation(); } };
     window.addEventListener("keydown", key, true);
     return () => window.removeEventListener("keydown", key, true);
   }, [claimEscape]);
-  return { rowId, toggle, close, claimEscape };
+  useEffect(() => {
+    if (rowId && snapshot?.tabs && !snapshot.tabs.some(tab => tab.tab_id === rowId)) close();
+  }, [snapshot, rowId, close]);
+  return { rowId, toggle, close };
 }
 const muted: CSSProperties = { color: "var(--shell-muted)" };
 const line: CSSProperties = { display: "flex", alignItems: "baseline", gap: "var(--shell-space-detail-line-gap)" };

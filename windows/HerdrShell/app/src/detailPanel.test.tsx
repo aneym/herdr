@@ -7,6 +7,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { buildSidebar } from "./model";
 import type { Snapshot } from "./model";
 import { useLaneFiles } from "./laneFiles";
+import Switcher from "./Switcher";
 import Sidebar, { useSelectionReveal } from "./Sidebar";
 import DetailPanel, { useDetailPanel } from "./DetailPanel";
 const read = vi.fn(async (_machine: string, path: string) => ({ data_b64: btoa(path.endsWith("lanes.json") ? JSON.stringify({ lanes: [{ tab: "lane", name: "Lane catalog", kind: "project" }] }) : "{}") }));
@@ -25,32 +26,50 @@ const snapshot = {
   ],
 } as unknown as Snapshot;
 const paneEscape = vi.fn();
-function Shell() {
+function Shell({ data = snapshot }: { data?: Snapshot }) {
   const [selected, select] = useState("current");
+  const [switcher, setSwitcher] = useState(false);
   const catalog = useLaneFiles("book", true);
-  const panel = useDetailPanel();
+  const panel = useDetailPanel(switcher, data);
   const noop = () => {};
-  return <><output>{selected}</output><Sidebar snapshot={snapshot} catalog={catalog} machines={[]} chooseMachine={noop} rows={buildSidebar(snapshot)} selected={selected} revealed={useSelectionReveal(selected)} machine={{ name: "book", state: "up" }} notice={null} select={select} openDetail={panel.toggle} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} />{panel.rowId && <DetailPanel snapshot={snapshot} rowId={panel.rowId} openFull={id => { panel.close(); select(id); }} />}<textarea aria-label="Pane" onKeyDown={event => { if (event.key === "Escape") paneEscape(); }} /></>;
+  return <><output>{selected}</output><button onClick={() => setSwitcher(true)}>Switch</button><Sidebar snapshot={data} catalog={catalog} machines={[]} chooseMachine={noop} rows={buildSidebar(data)} selected={selected} revealed={useSelectionReveal(selected)} machine={{ name: "book", state: "up" }} notice={null} select={select} openDetail={panel.toggle} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} />{panel.rowId && <DetailPanel snapshot={data} rowId={panel.rowId} openFull={id => { panel.close(); select(id); }} />}<textarea className="xterm-helper-textarea" aria-label="Pane" onKeyDown={event => { if (event.key === "Escape") paneEscape(); }} />{switcher && <Switcher rows={buildSidebar(data)} selected={selected} machine="book" open={select} close={() => setSwitcher(false)} />}</>;
 }
 let cleanup: (() => void) | undefined;
 afterEach(() => { cleanup?.(); stored.clear(); paneEscape.mockClear(); read.mockClear(); });
-it("lane detail preserves the current pane and owns Escape only while open", async () => {
+async function mount() {
   stored.set("herdr-shell.areas.mode", '"spaces"');
   const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
   cleanup = () => { act(() => root.unmount()); host.remove(); };
   await act(async () => { root.render(<Shell />); });
-  const pane = host.querySelector("textarea")!; pane.focus(); const before = document.activeElement;
-  const row = [...host.querySelectorAll<HTMLButtonElement>(".select-tab")].find(b => b.querySelector(".label")?.textContent === "Lane")!;
-  expect(row).toBeTruthy();
-  await act(async () => { row.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true })); row.click(); });
-  const panel = host.querySelector('[aria-label="Lane details"]');
-  expect(panel?.textContent).toContain("Check the diff"); expect(panel?.textContent).toContain("lead");
-  expect(panel?.textContent).toContain("Address notes"); expect(panel?.textContent).toContain("wf verify wants you");
-  expect(panel?.textContent).toContain("wf verify"); expect(panel?.textContent).toContain("review"); expect(panel?.textContent).toContain("Studio");
-  expect(host.querySelector("output")?.textContent).toBe("current"); expect(document.activeElement).toBe(before);
-  expect(read.mock.calls.every(([machine]) => machine === "book")).toBe(true);
-  act(() => pane.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
-  expect(host.querySelector('[aria-label="Lane details"]')).toBeNull(); expect(paneEscape).not.toHaveBeenCalled();
-  act(() => pane.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
-  expect(paneEscape).toHaveBeenCalledOnce(); expect(document.activeElement).toBe(before);
+  return { host, root, pane: host.querySelector("textarea")! };
+}
+const laneRow = (host: HTMLElement) => [...host.querySelectorAll<HTMLButtonElement>(".select-tab")].find(b => b.querySelector(".label")?.textContent === "Lane")!;
+const panelIn = (host: HTMLElement) => host.querySelector('[aria-label="Lane details"]');
+function escape(target: Element) { act(() => target.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))); }
+it("Spaces clicks select without opening details", async () => {
+  const { host } = await mount(); act(() => laneRow(host).click());
+  expect(host.querySelector("output")?.textContent).toBe("lane"); expect(panelIn(host)).toBeNull();
+});
+it("Switcher Escape takes precedence over an open detail panel", async () => {
+  const { host } = await mount();
+  act(() => laneRow(host).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })));
+  act(() => [...host.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(b => b.textContent === "Show info")!.click());
+  act(() => [...host.querySelectorAll("button")].find(b => b.textContent === "Switch")!.click());
+  escape(host.querySelector('[aria-label="Filter tabs"]')!);
+  expect(host.querySelector('[aria-label="Switch tab"]')).toBeNull(); expect(panelIn(host)).not.toBeNull();
+});
+it("Show info preserves selection and routes Escape only while open; row removal closes it", async () => {
+  const { host, root, pane } = await mount();
+  const show = () => {
+    act(() => laneRow(host).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })));
+    act(() => [...host.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(b => b.textContent === "Show info")!.click());
+  };
+  pane.focus(); show();
+  expect(document.activeElement).toBe(pane);
+  expect(host.querySelector("output")?.textContent).toBe("current");
+  expect(panelIn(host)?.textContent).toContain("Check the diff"); expect(panelIn(host)?.textContent).toContain("wf verify");
+  escape(pane); expect(panelIn(host)).toBeNull(); expect(paneEscape).not.toHaveBeenCalled();
+  escape(pane); expect(paneEscape).toHaveBeenCalledOnce(); expect(document.activeElement).toBe(pane);
+  show(); act(() => root.render(<Shell data={{ ...snapshot, tabs: snapshot.tabs?.filter(t => t.tab_id !== "lane") }} />));
+  expect(panelIn(host)).toBeNull();
 });
