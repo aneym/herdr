@@ -5,9 +5,11 @@ param([Parameter(Mandatory = $true)][string]$Exe, [switch]$TestWindow)
 $Exe = $Exe.Trim('"')
 $arg = if ($TestWindow) { '--test-window' } else { '' }
 # Scheduled tasks do not inherit the SSH helper's environment. Set the hook-only
-# override in the task process; normal Start-menu launches keep browser defaults.
+# override in the task process for test windows only; install and --relaunch
+# restarts are Alex's own window and keep browser defaults and throttling.
 $quotedExe = $Exe.Replace("'", "''")
-$command = "`$env:HERDR_SHELL_CONTROL='1'; & '$quotedExe' $arg"
+$control = if ($TestWindow) { "`$env:HERDR_SHELL_CONTROL='1'; " } else { '' }
+$command = "$control& '$quotedExe' $arg"
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -WindowStyle Hidden -EncodedCommand $encoded"
 $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
