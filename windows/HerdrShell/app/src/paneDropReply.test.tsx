@@ -299,6 +299,8 @@ it.each([
 });
 
 it("ends a pending drop quietly when another pane is pressed, and the new drag holds the flushed boxes, never the old release", async () => {
+  // The cap band's height, which the shell's tokens.css sets on the page: the press at y=410 is on c's cap.
+  document.documentElement.style.setProperty("--shell-space-pane-cap-height", "36px");
   const render = await mount();
   await dropAOn(B_CENTRE);
   const first = drop;
@@ -325,6 +327,7 @@ it("ends a pending drop quietly when another pane is pressed, and the new drag h
   await settleTimers(40);
   expect(states.length).toBe(emitted);
   expect(drawn("a")).toEqual(["translate(0px, 0px)", "399px", "800px"]);
+  document.documentElement.style.removeProperty("--shell-space-pane-cap-height");
 });
 
 it("ends a pending drop quietly when the host resizes, before any box rescales, and ignores the late reply", async () => {

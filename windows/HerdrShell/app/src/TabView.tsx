@@ -167,10 +167,10 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
     if (flushedBy.current === event.nativeEvent) {
       const hit = paneAt(point(event));
       if (!hit) return;
+      if (!hit.cap) { event.preventDefault(); onFocus(hit.pane); return; }
       if (hit.pane !== id) {
         // The compat mousedown would focus the pane drawn there before the flush.
         event.preventDefault(); onFocus(hit.pane);
-        if (!hit.cap) return;
         const pane = tabPanes.find(p => p.pane_id === hit.pane);
         id = hit.pane; label = pane?.title ?? pane?.agent ?? "shell";
       }
