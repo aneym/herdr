@@ -92,6 +92,14 @@ mod imp {
 
     fn log_pipe_error(pipe: &str, error: u32, message: &str) {
         use std::io::Write;
+        static LAST_ERROR: Mutex<Option<u32>> = Mutex::new(None);
+        {
+            let mut last = LAST_ERROR.lock().unwrap_or_else(|error| error.into_inner());
+            if *last == Some(error) {
+                return;
+            }
+            *last = Some(error);
+        }
         tracing::warn!(pipe, error, message);
         let logged = (|| -> std::io::Result<()> {
             let base = std::env::var_os("LOCALAPPDATA")
@@ -130,24 +138,30 @@ mod imp {
         }
         loop {
             unsafe {
-                if h == INVALID_HANDLE_VALUE {
-                    std::thread::sleep(Duration::from_secs(1));
-                    h = create(false);
-                    if h == INVALID_HANDLE_VALUE {
-                        log_pipe_error(&pipe, GetLastError(), "cannot recreate listener; retrying");
-                        continue;
-                    }
-                }
                 if ConnectNamedPipe(h, std::ptr::null_mut()) == 0 {
                     let error = GetLastError();
                     if error == ERROR_NO_DATA {
-                        DisconnectNamedPipe(h);
+                        if DisconnectNamedPipe(h) == 0 {
+                            std::thread::sleep(Duration::from_millis(100));
+                        }
                         continue;
                     }
                     if error != ERROR_PIPE_CONNECTED {
                         log_pipe_error(&pipe, error, "cannot connect pipe; retrying");
-                        CloseHandle(h);
-                        h = INVALID_HANDLE_VALUE;
+                        if DisconnectNamedPipe(h) == 0 {
+                            // Reuse failed. Keep the old instance alive until a
+                            // replacement exists so the pipe name stays owned.
+                            let mut next = INVALID_HANDLE_VALUE;
+                            while next == INVALID_HANDLE_VALUE {
+                                std::thread::sleep(Duration::from_secs(1));
+                                next = create(false);
+                                if next == INVALID_HANDLE_VALUE {
+                                    log_pipe_error(&pipe, GetLastError(), "cannot recreate listener; retrying");
+                                }
+                            }
+                            CloseHandle(h);
+                            h = next;
+                        }
                         continue;
                     }
                 }
