@@ -198,7 +198,13 @@ struct SpacesRow: Identifiable, Equatable {
         let badgeField: [String] = badge.map { ["@" + $0 + (badgeState.map { ":" + $0 } ?? "")] } ?? []
         let pulseField = pulse.map { ["pulse:" + $0.line] + ($0.drifting ? ["pulse-bold"] : []) } ?? []
         // home stays the last field (agents-hide scenario).
-        return (fields + faceField + dotField + badgeField + pulseField + (home.map { ["home:" + $0] } ?? [])).joined(separator: "|")
+        var output = fields
+        output.append(contentsOf: faceField)
+        output.append(contentsOf: dotField)
+        output.append(contentsOf: badgeField)
+        output.append(contentsOf: pulseField)
+        if let home { output.append("home:" + home) }
+        return output.joined(separator: "|")
     }
 }
 

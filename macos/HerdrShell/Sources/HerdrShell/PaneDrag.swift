@@ -22,6 +22,7 @@ final class PaneDrag: NSObject {
     private var sourceGlyph: ShellState = .asleep
     private var lastHostSize = CGSize.zero
     private var zone: Zone?, lastZone: Zone?
+    private var awaitingDropLayout = false
     private var pointer = CGPoint.zero, start = CGPoint.zero
     private var keyboard = false, keyboardTarget: String?
     private var sent: [[String: Any]] = []
@@ -103,7 +104,7 @@ final class PaneDrag: NSObject {
         guard placeSupported, owner.host.rects.count > 1, owner.shownLayout?.zoomed != true else {
             owner.focusPane(pane); return
         }
-        resetVisuals()
+        resetVisuals(); awaitingDropLayout = false
         generation += 1; source = pane; originTab = owner.state.selectedTab
         label = owner.host.caps[pane]?.name ?? ""
         sourceGlyph = owner.host.caps[pane]?.glyph ?? .asleep
@@ -130,7 +131,8 @@ final class PaneDrag: NSObject {
         let view = owner.sidebarHostView, safe = view.safeAreaRect, p = view.convert(windowPoint, from: nil)
         let inset = view.isFlipped ? safe.minY : view.bounds.height - safe.maxY
         let rowPoint = CGPoint(x: p.x - safe.minX, y: (view.isFlipped ? p.y : view.bounds.height - p.y) - inset)
-        if let row = owner.state.rowFrames.first(where: { $0.value.contains(rowPoint) })?.key {
+        if owner.state.sidebarVisible, !view.isHidden, view.bounds.contains(p),
+           let row = owner.state.rowFrames.first(where: { $0.value.contains(rowPoint) })?.key {
             let id = String(row.dropFirst(row.hasPrefix("tab:") ? 4 : 6))
             if (row.hasPrefix("tab:") || row.hasPrefix("space:")), PinDrag.machine(of: id) == PinDrag.machine(of: source ?? "") {
                 setZone(row.hasPrefix("tab:") ? .intoTab(id) : .newTabIn(id)); return
@@ -212,7 +214,9 @@ final class PaneDrag: NSObject {
         guard let owner else { return }
         if phase == .pressed { let p = source; finish(); if let p { owner.focusPane(p) }; return }
         guard phase == .lifted, let z = zone, let source else { cancel(); return }
-        lastZone = z; phase = .dropping
+        motions.removeAll { $0.pane == source && $0.kind == "fade" }
+        lastZone = z; phase = .dropping; awaitingDropLayout = true
+        updateSidebarIndicator()
         let method: String, p: [String: Any]
         switch z {
         case .centre(let target): method = "pane.swap"; p = ["source_pane_id": source, "target_pane_id": target]
@@ -227,11 +231,11 @@ final class PaneDrag: NSObject {
             if method == "pane.swap", reply?["result"] != nil { _ = commands.paneDragCall("pane.focus", ["pane_id": source]) }
             DispatchQueue.main.async {
                 guard let self, self.generation == gen else { return }
-                if reply?["result"] == nil { self.cancel(); return }
+                if reply?["result"] == nil { self.awaitingDropLayout = false; self.cancel(); return }
                 self.owner?.focusPane(source)
                 if self.phase == .dropping {
                     self.phase = .settling
-                    self.addMotion(pane: nil, kind: "fade", from: .zero, to: .zero, duration: ShellMotion.fadeMs)
+                    if !self.reduce { self.addMotion(pane: nil, kind: "fade", from: .zero, to: .zero, duration: ShellMotion.fadeMs) }
                 }
                 self.draw()
             }
@@ -239,6 +243,12 @@ final class PaneDrag: NSObject {
     }
     func cancel() {
         guard phase == .pressed || phase == .lifted || phase == .dropping else { return }
+        // Once sent, the server may already have committed the drop. Never animate a rollback.
+        if phase == .dropping {
+            generation += 1; inFlight = nil; awaitingDropLayout = false
+            finish(); return
+        }
+        awaitingDropLayout = false
         lastZone = zone; zone = nil; phase = .cancelling; generation += 1; inFlight = nil
         motions.removeAll { $0.kind == "zone" || $0.kind == "fade" }
         ghost = nil; ghostTarget = nil
@@ -290,13 +300,15 @@ final class PaneDrag: NSObject {
         }
         return true
     }
-    func layoutWillApply(old: [String: NSRect], new: [String: NSRect], sameTab: Bool) {
+    func layoutWillApply(old: [String: NSRect], new: [String: NSRect], sameTab: Bool, fromResize: Bool = false) {
         layoutGeneration += 1; cache = [:]; rejected = []
         guard let owner else { return }
         motions.removeAll { $0.kind == "settle" || $0.kind == "crossfade" }
         let sameSize = lastHostSize == owner.host.bounds.size
         lastHostSize = owner.host.bounds.size
-        let canAnimate = sameTab && sameSize && Set(old.keys) == Set(new.keys) && !owner.resizer.isBusy && !owner.window.inLiveResize
+        let isDropLayout = awaitingDropLayout && !fromResize
+        if isDropLayout { awaitingDropLayout = false }
+        let canAnimate = isDropLayout && sameTab && sameSize && Set(old.keys) == Set(new.keys) && !owner.resizer.isBusy && !owner.window.inLiveResize
         if canAnimate {
             for (pane, rect) in new where old[pane] != rect {
                 addMotion(pane: pane, kind: reduce ? "crossfade" : "settle", from: old[pane] ?? rect, to: rect,
@@ -305,9 +317,10 @@ final class PaneDrag: NSObject {
         }
         boxes = new
         if phase == .idle && !motions.isEmpty { phase = .settling }
-        if phase == .dropping {
+        if phase == .dropping && isDropLayout {
             phase = .settling
-            addMotion(pane: nil, kind: "fade", from: .zero, to: .zero, duration: ShellMotion.fadeMs)
+            motions.removeAll { $0.pane == source && $0.kind == "fade" }
+            if !reduce { addMotion(pane: nil, kind: "fade", from: .zero, to: .zero, duration: ShellMotion.fadeMs) }
         }
 
     }
@@ -358,8 +371,21 @@ final class PaneDrag: NSObject {
             else { draw() }
         }
     }
+    private func updateSidebarIndicator() {
+        var row: String?
+        if phase == .lifted {
+            switch zone {
+            case .intoTab(let id): row = "tab:" + id
+            case .newTabIn(let id): row = "space:" + id
+            default: break
+            }
+        }
+        if owner?.state.paneDropRow != row { owner?.state.paneDropRow = row }
+    }
     private func draw() {
         guard let owner else { return }
+        if phase != .lifted { motions.removeAll { $0.pane == source && $0.kind == "fade" } }
+        updateSidebarIndicator()
         var drawn = Dictionary(uniqueKeysWithValues: owner.host.rects.map { ($0.0.paneId, owner.host.boxRect($0.1)) })
         for m in motions {
             if m.kind == "zone" { ghost = interpolate(m.from, m.to, progress(m)) }

@@ -24,6 +24,8 @@ final class SidebarState: ObservableObject {
     /// hook, which turns it into a real mouse click, and by a pin drag for its slots; not
     /// observed, so it never redraws.
     var rowFrames: [String: CGRect] = [:]
+    /// Transient client-only insertion cue for a pane dragged into a tab or space.
+    @Published var paneDropRow: String?
 
     /// Areas is the default once a lanes or areas file is present. Without one, the sidebar
     /// stays the spaces list (P10). A saved choice wins over that default.
@@ -292,7 +294,7 @@ struct SidebarView: View {
                 }
             }
         }
-        .pinDraggable(row, rows: all, frames: { state.rowFrames }, drag: pinDrag, model: model, t: t)
+        .pinDraggable(row, rows: all, frames: { state.rowFrames }, drag: pinDrag, model: model, t: t, paneDropTarget: state.paneDropRow == row.id)
         .clickTarget(row.id)
     }
 

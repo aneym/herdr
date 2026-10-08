@@ -171,8 +171,8 @@ extension View {
     /// A PINNED row the pointer can drag to a new place among its machine's pins. A press that
     /// moves less than `PinDrag.threshold` stays the row's click.
     func pinDraggable(_ row: SpacesRow, rows: [SpacesRow], frames: @escaping () -> [String: CGRect], drag: PinDrag,
-                      model: HerdrModel, t: Tokens) -> some View {
-        modifier(PinDragRow(row: row, rows: rows, frames: frames, drag: drag, model: model, t: t))
+                      model: HerdrModel, t: Tokens, paneDropTarget: Bool = false) -> some View {
+        modifier(PinDragRow(row: row, rows: rows, frames: frames, drag: drag, model: model, t: t, paneDropTarget: paneDropTarget))
     }
 }
 
@@ -183,10 +183,11 @@ private struct PinDragRow: ViewModifier {
     @ObservedObject var drag: PinDrag
     let model: HerdrModel
     let t: Tokens
+    let paneDropTarget: Bool
 
     func body(content: Content) -> some View {
         let isDragged = drag.dragged == row.id
-        let line = insertion
+        let line: Edge? = paneDropTarget ? .below : insertion
         return content
             .overlay(alignment: line == .above ? .top : .bottom) {
                 if line != nil {

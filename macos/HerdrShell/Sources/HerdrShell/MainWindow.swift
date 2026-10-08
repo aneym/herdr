@@ -679,7 +679,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         host.area = layout.area
         let newBoxes = Dictionary(uniqueKeysWithValues: items.map { ($0.0.paneId, host.boxRect($0.1)) })
         paneDrag.layoutWillApply(old: oldBoxes, new: newBoxes,
-                                sameTab: previousLayout?.tab_id == tab && previousLayout.map { $0.area.x == layout.area.x && $0.area.y == layout.area.y && $0.area.width == layout.area.width && $0.area.height == layout.area.height } == true)
+                                sameTab: previousLayout?.tab_id == tab && previousLayout.map { $0.area.x == layout.area.x && $0.area.y == layout.area.y && $0.area.width == layout.area.width && $0.area.height == layout.area.height } == true,
+                                fromResize: forced != nil)
         host.show(items, area: layout.area, dividers: zoomedPane == nil && !Machines.isRemote(tab) ? PaneDivider.from(layout) : [])
         paneDrag.layoutDidApply()
         applyPendingFocus()
