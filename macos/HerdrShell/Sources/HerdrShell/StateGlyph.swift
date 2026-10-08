@@ -14,6 +14,17 @@ enum ShellState: String {
         default: return hasAgent ? .idle : .asleep
         }
     }
+
+    /// The herdr status the sidebar keys its glyph and tone on: needs and a failed run both read as
+    /// blocked, idle and asleep as idle.
+    var sidebarStatus: String {
+        switch self {
+        case .working: return "working"
+        case .needs, .blocked: return "blocked"
+        case .done: return "done"
+        case .idle, .asleep: return "idle"
+        }
+    }
 }
 
 struct StateGlyph: View {

@@ -620,29 +620,22 @@ final class PaneDrag: NSObject {
             } ?? [],
             "sidebarZoneFill": PaneDropFill.drawn(in: owner?.sidebarHostView, row: owner?.state.paneDropRow ?? ""),
             "hairline": ShellFace.ring,
-            "chip": ["visible": phase == .lifted || phase == .dropping || phase == .cancelling, "label": label, "text": chipText, "glyph": chipGlyph, "stroke": chipBorder.lineWidth, "sourceState": sourceGlyph.rawValue],
+            "chip": ["visible": phase == .lifted || phase == .dropping || phase == .cancelling, "label": label, "text": chipText, "glyph": chipGlyph, "stroke": chipBorder.lineWidth, "sourceState": sourceGlyph.rawValue, "sidebarStatus": sourceGlyph.sidebarStatus],
             "boxes": boxes.mapValues { [$0.minX, $0.minY, $0.width, $0.height] }, "sent": sent,
             "frozen": holdsLayout, "replyHeld": heldReply != nil,
             "replies": ["handled": repliesHandled, "ignored": repliesIgnored],
             "motion": ["frozenMs": frozenMs ?? (NSNull() as Any), "reduce": reduce,
                        "active": motions.map { ["pane": $0.pane ?? (NSNull() as Any), "kind": $0.kind, "elapsedMs": elapsed($0)] }]]
     }
-    private var chipGlyph: String {
-        switch sourceGlyph {
-        case .working: return "●"
-        case .needs: return "■"
-        case .blocked: return "■"
-        case .idle: return "○"
-        case .asleep: return "·"
-        case .done: return "✓"
-        }
-    }
+    /// The sidebar row's glyph for the source's state (SpacesTree.statusGlyph), not a set of its own.
+    private var chipGlyph: String { SpacesTree.statusGlyph(sourceGlyph.sidebarStatus) }
+    /// The sidebar row's tone (SpacesRowView.tone, Windows `.status`): working ok, blocked bad, done warn, else mute.
     private func chipColor(_ t: Tokens) -> NSColor {
-        switch sourceGlyph {
-        case .working: return NSColor(hex: t.chrome.ok)
-        case .needs, .blocked: return NSColor(hex: t.chrome.bad)
-        case .done: return NSColor(hex: t.chrome.warn)
-        case .idle, .asleep: return NSColor(hex: t.chrome.mute)
+        switch sourceGlyph.sidebarStatus {
+        case "working": return NSColor(hex: t.chrome.ok)
+        case "blocked": return NSColor(hex: t.chrome.bad)
+        case "done": return NSColor(hex: t.chrome.warn)
+        default: return NSColor(hex: t.chrome.mute)
         }
     }
     private var chipText: String { chipGlyph + " " + label }

@@ -220,9 +220,12 @@ enum SpacesTree {
         // As Rust summarize_factory_parent: a header with live children shows as working, not idle.
         if tab.work == nil && foldable && ["idle", "done", "unknown"].contains(status) { status = "working" }
         let idle = t.kind == "lane" && (tab.work != nil || !t.busy) && (t.summary ?? "").trimmingCharacters(in: .whitespaces).isEmpty && status == "idle"
-        let glyph = t.kind == "workflow" ? (t.done ? (t.attention == "act" ? "✗" : "✓") : "◐") : idle ? "○" : status == "blocked" ? "■" : "●"
+        let glyph = t.kind == "workflow" ? (t.done ? (t.attention == "act" ? "✗" : "✓") : "◐") : idle ? "○" : statusGlyph(status)
         return (glyph, idle ? "mute" : status, idle)
     }
+    /// A chat's state glyph from its status alone, as its row draws it and as the Windows sidebar's
+    /// Status does: a square for blocked, a dot for everything else. The pane drag chip uses it too.
+    static func statusGlyph(_ status: String) -> String { status == "blocked" ? "■" : "●" }
     /// As Rust run_done: an agent:<id> run is the chat's own Claude subagent or teammate, over once
     /// herdr reports the chat quiet, even while the overlay still lists it.
     static func runDone(_ run: Overlay.Run, of tab: SpacesInput.Tab) -> Bool {

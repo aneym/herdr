@@ -18,10 +18,19 @@ def settle(ws):
     D.hook("move", steps=1, **D.centre(D.pd(state)["boxes"][b]))
     state = D.wait(lambda s: D.zone_is(s, kind="centre", target=b) and (D.pd(s).get("chip") or {}).get("stroke", 0) > 0)
     chip = D.pd(state).get("chip") or {}
-    D.check("chip: sidebar state glyph precedes cap name", chip.get("glyph") == {"working": "●", "needs": "■", "blocked": "■", "idle": "○", "asleep": "·", "done": "✓"}.get(chip.get("sourceState"))
-            and chip.get("text") == chip.get("glyph", "") + " " + chip.get("label", ""), json.dumps(chip))
-    D.check("chip: stroke is the hairline token", chip.get("stroke") == 0.5
-, json.dumps(chip))
+    # The sidebar's rule (SpacesTree.statusGlyph, Windows Sidebar.tsx Status): a square for a blocked
+    # chat, a dot for every other state. A chip glyph set of its own (✓ ○ ·) fails here.
+    rule = "■" if chip.get("sourceState") in ("needs", "blocked") else "●"
+    D.check("chip: glyph follows the sidebar rule (■ blocked or needs, ● otherwise)", chip.get("glyph") == rule
+            and chip.get("text") == rule + " " + chip.get("label", ""), json.dumps(chip))
+    row = next((r.split("|") for r in state.get("spaces_rows", []) if r.split("|")[1] == "tab:" + tab), None)
+    tone = lambda t: t if t in ("working", "blocked", "done") else "mute"
+    D.check("chip: glyph and tone match the source tab's sidebar row as drawn", row is not None
+            and chip.get("glyph") == row[4] and tone(chip.get("sidebarStatus")) == tone(row[5]),
+            json.dumps([chip.get("glyph"), chip.get("sidebarStatus"), row and row[4:6]]))
+    hairline = D.pd(state).get("hairline")
+    D.check("chip: stroke is the hairline token the dump reports", isinstance(hairline, (int, float)) and hairline > 0
+            and chip.get("stroke") == hairline, json.dumps([chip.get("stroke"), hairline]))
     D.hook("hold-replies", on=True)
     D.hook("drop")
     state = D.wait(lambda s: D.pd(s).get("replyHeld"))
@@ -79,14 +88,20 @@ def quiet_pending(ws):
     D.hook("hold-drops", on=True)
     D.hook("drop")
     D.wait(lambda s: D.pd(s).get("phase") == "dropping")
+    # `begin` ends the pending drop and only then clears `sent`, so a restore sent while ending it
+    # would be wiped from the log. Judge by what follows: the server's focus after the new drag, and
+    # every send from the new drag on, read once that drag has ended.
     D.hook("begin", pane=x)
     state = D.wait(lambda s: D.pd(s).get("phase") == "lifted")
-    D.check("quiet: a new drag during a spring drop does not restore origin",
-            state.get("selected_tab") == dest and P.focus_calls(state) == [], json.dumps(P.focus_calls(state)))
+    D.check("quiet: a new drag during a spring drop keeps the Shell on dest", state.get("selected_tab") == dest,
+            json.dumps(state.get("selected_tab")))
     D.hook("hold-drops", on=False)
     D.hook("cancel", via="esc")
     D.motion("run")
-    D.wait(D.idle)
+    state = D.wait(D.idle)
+    D.check("quiet: no tab.focus after the new drag, through its end", P.focus_calls(state) == []
+            and state.get("selected_tab") == dest, json.dumps([P.focus_calls(state), state.get("selected_tab")]))
+    D.check("quiet: the server keeps dest focused", P.server_focused(ws) == [dest], json.dumps(P.server_focused(ws)))
     D.close(origin)
     D.close(dest)
 
