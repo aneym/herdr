@@ -526,7 +526,8 @@ impl ClientShellState {
                 true
             }
             (
-                PendingEndpointKind::PaneDragDrop { .. }
+                PendingEndpointKind::PaneDragSpringFocus { .. }
+                | PendingEndpointKind::PaneDragDrop { .. }
                 | PendingEndpointKind::PaneDragDryRun { .. }
                 | PendingEndpointKind::AgentRestart { .. }
                 | PendingEndpointKind::Generic

@@ -891,6 +891,9 @@ impl ClientShellOverlay {
 
 #[derive(Debug)]
 pub(super) enum PendingEndpointKind {
+    PaneDragSpringFocus {
+        generation: u64,
+    },
     PaneDragDrop {
         source_pane_id: String,
     },
@@ -1236,6 +1239,7 @@ pub(crate) struct ClientShellState {
     pub(super) pane_move: Option<super::pane_move::ClientPaneMove>,
     pub(super) pane_press: Option<ClientPanePress>,
     pub(super) pane_drag: Option<super::pane_drag::ClientPaneDragPreview>,
+    pub(super) pane_drag_generation: u64,
     pub(super) pane_motion: Vec<super::pane_motion::PaneMotion>,
     pub(super) pane_grip_hover: Option<String>,
     pub(super) pane_press_replay: bool,
@@ -1449,6 +1453,7 @@ impl ClientShellState {
             pane_move: None,
             pane_press: None,
             pane_drag: None,
+            pane_drag_generation: 0,
             pane_motion: Vec::with_capacity(4),
             pane_grip_hover: None,
             pane_press_replay: false,
@@ -2183,16 +2188,8 @@ impl ClientShellState {
                 Some(_) => {}
             }
         }
-        if let Some(preview) = self.pane_drag.as_mut() {
-            if snapshot.focused_tab_id.as_ref() == Some(&preview.current_tab_id) {
-                // The latest spring focus is acknowledged. Earlier tabs no longer
-                // belong to an in-flight request and cannot mask foreign focus.
-                preview.requested_tabs.clear();
-                preview.requested_tabs.push(preview.current_tab_id.clone());
-            }
-        }
         if matches!(&self.chrome_drag, Some(ClientChromeDrag::Pane { source_pane_id, origin_tab_id, .. })
-            if !snapshot.focused_tab_id.as_ref().is_some_and(|tab| self.pane_drag.as_ref().map_or(tab == origin_tab_id, |p| p.requested_tabs.contains(tab)))
+            if !snapshot.focused_tab_id.as_ref().is_some_and(|tab| self.pane_drag.as_ref().map_or(tab == origin_tab_id, |p| tab == &p.acked_tab || p.pending_focus.contains(tab)))
                 || !snapshot.panes.iter().any(|p| &p.pane_id == source_pane_id))
         {
             self.cancel_pane_drag();

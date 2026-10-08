@@ -839,6 +839,24 @@ impl ClientShellState {
         {
             return (false, Vec::new());
         }
+        if let PendingEndpointKind::PaneDragSpringFocus { generation } = &pending.kind {
+            self.pending_focus_reveals.remove(request_id);
+            let Some(preview) = self
+                .pane_drag
+                .as_mut()
+                .filter(|p| p.generation == *generation)
+            else {
+                return (false, Vec::new());
+            };
+            let Some(tab) = preview.pending_focus.pop_front() else {
+                return (false, Vec::new());
+            };
+            if result.is_ok() {
+                preview.acked_tab = tab;
+                return (false, Vec::new());
+            }
+            return (self.cancel_pane_drag(), Vec::new());
+        }
         let mut drop_cancel_repaint = false;
         let mut drop_restore = ClientShellInput::default();
         if let PendingEndpointKind::PaneDragDrop { source_pane_id } = &pending.kind {
@@ -1002,6 +1020,7 @@ impl ClientShellState {
         }
         match pending.kind {
             PendingEndpointKind::PaneDragDryRun { .. }
+            | PendingEndpointKind::PaneDragSpringFocus { .. }
             | PendingEndpointKind::PaneDragDrop { .. } => {}
             PendingEndpointKind::AgentRestart { .. } | PendingEndpointKind::Generic => {}
             PendingEndpointKind::Focus { .. } => {

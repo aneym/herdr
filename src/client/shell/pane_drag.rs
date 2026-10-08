@@ -35,7 +35,9 @@ pub(super) struct ClientPaneDragPreview {
     pub(super) committed: bool,
     pub(super) current_tab_id: String,
     pub(super) origin_tab_id: String,
-    pub(super) requested_tabs: Vec<String>,
+    pub(super) acked_tab: String,
+    pub(super) pending_focus: VecDeque<String>,
+    pub(super) generation: u64,
     pub(super) spring_dwell: Option<(String, (u16, u16), std::time::Instant)>,
     rects: Vec<Rect>,
     area: Rect,
@@ -80,19 +82,20 @@ impl ClientShellState {
         if !matches!(self.chrome_drag, Some(ClientChromeDrag::Pane { .. })) {
             return;
         }
+        let Some(generation) = self.pane_drag.as_ref().map(|p| p.generation) else {
+            return;
+        };
         if !self.push_endpoint_method_with_kind(
             crate::api::schema::Method::TabFocus(crate::api::schema::TabTarget {
                 tab_id: tab_id.clone(),
             }),
-            PendingEndpointKind::Generic,
+            PendingEndpointKind::PaneDragSpringFocus { generation },
             outcome,
         ) {
             return;
         }
         if let Some(p) = self.pane_drag.as_mut() {
-            if !p.requested_tabs.contains(&tab_id) {
-                p.requested_tabs.push(tab_id.clone());
-            }
+            p.pending_focus.push_back(tab_id.clone());
             p.current_tab_id = tab_id;
             p.spring_dwell = None;
             p.answers.clear();
@@ -234,6 +237,7 @@ impl ClientShellState {
             chip.push(ch);
         }
         chip.push(' ');
+        self.pane_drag_generation = self.pane_drag_generation.wrapping_add(1);
         self.pane_drag = Some(ClientPaneDragPreview {
             chip,
             ghost: None,
@@ -247,7 +251,9 @@ impl ClientShellState {
             committed: false,
             current_tab_id: origin_tab_id.clone(),
             origin_tab_id: origin_tab_id.clone(),
-            requested_tabs: vec![origin_tab_id.clone()],
+            acked_tab: origin_tab_id.clone(),
+            pending_focus: VecDeque::new(),
+            generation: self.pane_drag_generation,
             spring_dwell: None,
             rects: self.hits.panes.iter().map(|h| h.rect).collect(),
             area: self
