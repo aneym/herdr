@@ -80,6 +80,7 @@ impl App {
                         })
                         .map(|session| session.session_ref.value);
                     Some(crate::api::schema::PinnedAgentInfo {
+                        home_location: info.home_location,
                         hidden: info.hidden,
                         tab_id: info.tab_id,
                         workspace_id: info.workspace_id,

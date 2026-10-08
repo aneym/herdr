@@ -401,6 +401,8 @@ pub struct AgentSessionInfo {
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct PinnedAgentInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home_location: Option<super::tabs::HomeLocation>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hidden: bool,
     pub tab_id: String,

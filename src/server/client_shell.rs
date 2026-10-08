@@ -132,6 +132,7 @@ pub(super) fn snapshot_with_completions(
                 zoomed: state.zoomed,
                 agent_status: tab.agent_status,
                 work_status: tab.work_status,
+                home_location: tab.home_location,
             }
         })
         .collect();

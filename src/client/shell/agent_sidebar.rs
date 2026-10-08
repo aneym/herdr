@@ -630,7 +630,13 @@ pub(super) fn render_pinned_tab_row(
     let budget = content_right.saturating_sub(name_x);
     // Keep at least half the text budget for the chat title. The source space
     // is secondary context and must yield even when its name is very long.
-    let space_width = (display_width(&row.space_label) as u16).min(budget.saturating_sub(1) / 2);
+    let trailing = match row.home_location {
+        Some(crate::api::schema::HomeLocation::Cloud) => "☁",
+        Some(crate::api::schema::HomeLocation::Local) => "⌂",
+        Some(crate::api::schema::HomeLocation::Unsynced) => "⇡",
+        None => row.space_label.as_str(),
+    };
+    let space_width = (display_width(trailing) as u16).min(budget.saturating_sub(1) / 2);
     let space_x = content_right.saturating_sub(space_width);
     let name_width = space_x
         .saturating_sub(u16::from(space_width > 0))
@@ -674,8 +680,12 @@ pub(super) fn render_pinned_tab_row(
             space_x,
             rect.y,
             space_width,
-            &crate::ui::truncate_end(&row.space_label, space_width as usize),
-            Style::default().fg(palette.overlay0),
+            &crate::ui::truncate_end(trailing, space_width as usize),
+            Style::default().fg(if row.home_location == Some(crate::api::schema::HomeLocation::Unsynced) {
+                status_color(crate::api::schema::AgentStatus::Done, palette)
+            } else {
+                palette.overlay0
+            }),
         );
     }
     if slot.width > 0 && !hint.is_empty() {

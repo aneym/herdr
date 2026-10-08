@@ -18,6 +18,7 @@ fn owned_snapshot() -> ClientShellSnapshot {
         focused: true,
         agent_status: AgentStatus::Idle,
         work_status: None,
+                home_location: None,
     }];
     snapshot.panes.clear();
     snapshot.agents.clear();
@@ -752,6 +753,7 @@ fn close_focus_state(focus: crate::config::AgentCloseFocusConfig) -> ClientShell
         focused: false,
         agent_status: AgentStatus::Idle,
         work_status: None,
+                home_location: None,
     });
     for item in &mut snapshot.panes {
         if item.pane_id == "root" {

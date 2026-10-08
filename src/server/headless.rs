@@ -211,6 +211,8 @@ pub struct HeadlessServer {
     client_shell_boot_id: String,
     factory_overlay_poller: factory_overlay::FactoryOverlayPoller,
     next_factory_overlay_poll: Option<Instant>,
+    agent_home_poller: crate::agent_home::AgentHomePoller,
+    next_agent_home_poll: Option<Instant>,
     /// Outer window title last pushed, paired with the client that received it.
     /// Keying on the client means a newly attached terminal is written to even
     /// when the title itself has not changed, without every code path that
@@ -363,6 +365,8 @@ impl HeadlessServer {
             ),
             factory_overlay_poller: Default::default(),
             next_factory_overlay_poll: None,
+            agent_home_poller: Default::default(),
+            next_agent_home_poll: None,
             sent_window_title: None,
             api_window_title: None,
             server_keybindings,
@@ -605,6 +609,10 @@ impl HeadlessServer {
             let next_deadline = self
                 .next_factory_overlay_poll
                 .filter(|_| self.app.factory_ui.enabled)
+                .map(|pending| next_deadline.map_or(pending, |current| current.min(pending)))
+                .or(next_deadline);
+            let next_deadline = self
+                .next_agent_home_poll
                 .map(|pending| next_deadline.map_or(pending, |current| current.min(pending)))
                 .or(next_deadline);
             let next_deadline = self
@@ -3308,6 +3316,17 @@ impl HeadlessServer {
     fn handle_scheduled_tasks_headless(&mut self, now: Instant, geometry_dirty: bool) -> bool {
         let mut changed = false;
         self.app.flush_polite_sends(now);
+
+        if self.next_agent_home_poll.is_none_or(|deadline| now >= deadline) {
+            self.next_agent_home_poll = Some(now + Duration::from_secs(15));
+            let agents_dir = std::env::var_os("HERDR_AGENTS_DIR")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| crate::worktree::expand_tilde_path("~/.agent-rails/agents"));
+            if self.agent_home_poller.poll(&agents_dir) {
+                self.app.state.agent_homes = self.agent_home_poller.homes().clone();
+                changed = true;
+            }
+        }
 
         if !self.app.factory_ui.enabled {
             // Drop any stale deadline so a disabled overlay never wakes the loop.

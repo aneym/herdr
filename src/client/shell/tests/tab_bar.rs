@@ -131,6 +131,7 @@ fn overflowing_tabs_never_overwrite_the_badge() {
             focused: false,
             agent_status: AgentStatus::Idle,
             work_status: None,
+                home_location: None,
         });
     }
     state.set_snapshot(Box::new(snapshot));

@@ -492,6 +492,7 @@ pub(super) struct PinnedTabRow {
     pub(super) label: String,
     /// The chat's home space, drawn muted so cross-space pins stay legible.
     pub(super) space_label: String,
+    pub(super) home_location: Option<crate::api::schema::HomeLocation>,
     /// The chat's state, worked out as its row in the spaces tree works it
     /// out (`factory_row`), so a pinned row and its space row agree.
     pub(super) status: crate::api::schema::AgentStatus,
@@ -608,7 +609,8 @@ pub(super) fn pinned_tab_entries(
             workspace_id: pin.workspace_id.clone(),
             tab_id: pin.tab_id.clone(),
             label: super::render::desk_label(tab.label.clone(), tab.desk_count),
-            space_label,
+            space_label: if agent { String::new() } else { space_label },
+            home_location: agent.then_some(tab.home_location).flatten(),
             status,
             idle,
             workflow: tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Workflow),

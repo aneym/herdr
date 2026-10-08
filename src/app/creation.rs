@@ -246,6 +246,10 @@ impl App {
             .unwrap_or((crate::detect::AgentState::Unknown, true));
         let tab_id = self.public_tab_id(ws_idx, tab_idx)?;
         Some(crate::api::schema::TabInfo {
+            home_location: tab.layout.pane_ids().into_iter().find_map(|pane_id| {
+                let public_id = self.public_pane_id(ws_idx, pane_id)?;
+                self.state.agent_homes.get(&public_id).copied()
+            }),
             sort_rank: self
                 .priority_tab_rank_with_workspace(ws_idx, tab_idx, &tab_id, workspace_rank)
                 .value,

@@ -868,6 +868,8 @@ pub enum TabBarStatusSegment {
 }
 
 pub struct AppState {
+    /// Ephemeral server-resolved home locations, keyed by public pane id.
+    pub agent_homes: std::collections::HashMap<String, crate::api::schema::HomeLocation>,
     pub terminals:
         std::collections::HashMap<crate::terminal::TerminalId, crate::terminal::TerminalState>,
     /// Terminal ids whose size is currently owned by a direct attach client.
@@ -1674,6 +1676,7 @@ impl AppState {
             tree_show_hidden_spaces: false,
             hidden_spaces_expanded: false,
             hidden_agents_expanded: false,
+            agent_homes: Default::default(),
             next_agent_state_change_seq: 0,
             mouse_capture: true,
             copy_on_select: true,

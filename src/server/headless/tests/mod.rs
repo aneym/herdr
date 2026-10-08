@@ -112,6 +112,8 @@ fn test_headless_server_with_event_hub(event_hub: api::EventHub) -> HeadlessServ
         tab_geometry_controllers: HashMap::new(),
         popup_owner_tab_id: None,
         client_shell_boot_id: "test-boot".into(),
+        agent_home_poller: Default::default(),
+        next_agent_home_poll: None,
         factory_overlay_poller: Default::default(),
         next_factory_overlay_poll: None,
         sent_window_title: None,

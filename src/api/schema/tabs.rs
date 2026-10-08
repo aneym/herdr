@@ -1,3 +1,27 @@
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HomeLocation {
+    Cloud,
+    Local,
+    Unsynced,
+}
+
+/// Ignore future home classifications in snapshots from newer endpoints.
+pub fn deserialize_home_location<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<HomeLocation>, D::Error> {
+    if !deserializer.is_human_readable() {
+        return Option::<HomeLocation>::deserialize(deserializer);
+    }
+    let value = Option::<String>::deserialize(deserializer)?;
+    Ok(match value.as_deref() {
+        Some("cloud") => Some(HomeLocation::Cloud),
+        Some("local") => Some(HomeLocation::Local),
+        Some("unsynced") => Some(HomeLocation::Unsynced),
+        _ => None,
+    })
+}
+
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
@@ -88,6 +112,8 @@ pub struct TabMoveParams {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TabInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home_location: Option<HomeLocation>,
     #[serde(default)]
     pub sort_rank: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
