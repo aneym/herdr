@@ -3,6 +3,7 @@ import { bridge, fromBase64 } from "./bridge";
 import { docItems, docKey, laneFor, parseCatalog, projectFolder } from "./docs";
 import type { DocItem, LaneCatalog } from "./docs";
 import type { Snapshot } from "./model";
+import { webUrl } from "./links";
 import { renderMarkdown } from "./markdown";
 const catalogPaths = ["~/.agent-rails/herdr/lanes.json", "~/.agent-rails/herdr/areas.json"];
 async function readWhole(machine: string, path: string): Promise<string> {
@@ -112,7 +113,7 @@ export default function DocPanel({ machine, tab, items, active, select, error: c
     <div className="docs-tabs" role="tablist" aria-label="Documents">{items.map(doc => <button key={docKey(doc)} role="tab" aria-selected={docKey(doc) === active} onClick={() => select(docKey(doc))}>{doc.name}</button>)}</div>
     <div className="docs-body" role="tabpanel">
       {(catalogError || content.error) && <p className="muted" role="status">{catalogError || content.error}</p>}
-      {item?.kind === "web" ? <><button className="muted" onClick={() => open(item.url!)}>Open {item.name} externally</button><iframe title={item.name} src={item.url} sandbox="allow-scripts allow-forms allow-same-origin" style={{ width: "100%", height: "100%", border: 0 }} /></> : content.source ? <iframe title={item?.name} src={content.source} sandbox="" style={{ width: "100%", height: "100%", border: 0 }} /> : item?.kind === "file" && item.mime !== "text/markdown" ? <pre>{content.text}</pre> : <div className="chat-markdown" onAuxClick={event => { if ((event.target as HTMLElement).closest("a")) event.preventDefault(); }} onClick={event => {
+      {item?.kind === "web" ? <>{item.url && /^(https?:|mailto:)/i.test(item.url) && <button className="muted" onClick={() => open(item.url!)}>Open {item.name} externally</button>}{item.url && webUrl(item.url) && <iframe title={item.name} src={item.url} sandbox="allow-scripts allow-forms allow-same-origin" style={{ width: "100%", height: "100%", border: 0 }} />}</> : content.source ? <iframe title={item?.name} src={content.source} sandbox="" style={{ width: "100%", height: "100%", border: 0 }} /> : item?.kind === "file" && item.mime !== "text/markdown" ? <pre>{content.text}</pre> : <div className="chat-markdown" onAuxClick={event => { if ((event.target as HTMLElement).closest("a")) event.preventDefault(); }} onClick={event => {
         const anchor = (event.target as HTMLElement).closest("a");
         if (anchor) { event.preventDefault(); const url = anchor.getAttribute("href"); if (url) open(url); }
       }} dangerouslySetInnerHTML={{ __html: html }} />}

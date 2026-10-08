@@ -322,9 +322,37 @@ struct Subscription {
     receiver: mpsc::Receiver<Result<Value, String>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
+// Only retry a newly rejected lifecycle event; transport and other errors still fail.
+fn rejected_event(reason: &str, excluded: &BTreeSet<String>) -> Option<String> {
+    let rest = reason.split_once("unknown variant `")?.1;
+    let event = rest.split_once('`')?.0;
+    (LIFECYCLE.contains(&event) && !excluded.contains(event)).then(|| event.to_owned())
+}
 impl Subscription {
     fn open(endpoint: &Endpoint, panes: &BTreeSet<String>) -> Result<Self, String> {
-        let mut subscriptions: Vec<Value> = LIFECYCLE.iter().map(|t| json!({"type": t})).collect();
+        let mut excluded = BTreeSet::new();
+        loop {
+            match Self::open_with_events(endpoint, panes, &excluded) {
+                Ok(subscription) => return Ok(subscription),
+                Err(reason) => match rejected_event(&reason, &excluded) {
+                    Some(event) => {
+                        excluded.insert(event);
+                    }
+                    None => return Err(reason),
+                },
+            }
+        }
+    }
+    fn open_with_events(
+        endpoint: &Endpoint,
+        panes: &BTreeSet<String>,
+        excluded: &BTreeSet<String>,
+    ) -> Result<Self, String> {
+        let mut subscriptions: Vec<Value> = LIFECYCLE
+            .iter()
+            .filter(|t| !excluded.contains(**t))
+            .map(|t| json!({"type": t}))
+            .collect();
         subscriptions.extend(
             panes
                 .iter()
@@ -647,6 +675,76 @@ impl Drop for Job {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Pure retry parser covers quoted errors, unsupported variants and repeat
+    // rejections; these cases prevent unbounded retries or hidden failures.
+    #[test]
+    fn unknown_event_retry_decision() {
+        let mut excluded = BTreeSet::new();
+        assert_eq!(
+            rejected_event(
+                "subscription rejected: unknown variant `desk.changed`, expected tab.created",
+                &excluded
+            ),
+            Some("desk.changed".into())
+        );
+        excluded.insert("desk.changed".into());
+        for reason in [
+            "unknown variant `desk.changed`",
+            "unknown variant `not.a.lifecycle`",
+            "unknown variant `desk.changed",
+            "connection reset",
+            "permission denied",
+        ] {
+            assert_eq!(rejected_event(reason, &excluded), None, "{reason}");
+        }
+    }
+    // A real older-server boundary rejects desk.changed, then accepts the
+    // replacement subscription without losing the remaining lifecycle events.
+    #[cfg(unix)]
+    #[test]
+    fn older_server_retries_without_unknown_event() -> Result<(), Box<dyn std::error::Error>> {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixListener;
+        let path = std::env::temp_dir().join(format!("desk-retry-{}.sock", std::process::id()));
+        let listener = UnixListener::bind(&path)?;
+        let server = std::thread::spawn(move || -> Result<(), String> {
+            for attempt in 0..2 {
+                let (mut stream, _) = listener.accept().map_err(|e| e.to_string())?;
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .map_err(|e| e.to_string())?;
+                let mut line = String::new();
+                BufReader::new(&mut stream)
+                    .read_line(&mut line)
+                    .map_err(|e| e.to_string())?;
+                let request: Value = serde_json::from_str(&line).map_err(|e| e.to_string())?;
+                let subscriptions = request["params"]["subscriptions"]
+                    .as_array()
+                    .ok_or("missing subscriptions")?;
+                let desk = subscriptions.iter().any(|v| v["type"] == "desk.changed");
+                if desk != (attempt == 0)
+                    || !subscriptions.iter().any(|v| v["type"] == "tab.created")
+                {
+                    return Err("wrong retry subscriptions".into());
+                }
+                let reply = if attempt == 0 {
+                    json!({"error":{"message":"unknown variant `desk.changed`, expected tab.created"}})
+                } else {
+                    json!({"result":{"type":"subscription_started"}})
+                };
+                writeln!(stream, "{reply}").map_err(|e| e.to_string())?;
+            }
+            Ok(())
+        });
+        let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+            let subscription = Subscription::open(&Endpoint::from_path(&path), &BTreeSet::new())?;
+            drop(subscription);
+            server.join().map_err(|_| "retry server panicked")??;
+            Ok(())
+        })();
+        fs::remove_file(path)?;
+        result
+    }
     // Real local-socket boundary covers subscription ack/event framing and dropping
     // an idle stream, independently of the TCP-only predecessor and pure config tests.
     #[cfg(unix)]

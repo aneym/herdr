@@ -7,7 +7,7 @@ import { Terminal } from "@xterm/xterm";
 import { afterEach, expect, it, vi } from "vitest";
 import { bridge } from "./bridge";
 import DocPanel from "./DocPanel";
-import { useDesk } from "./docs";
+import { useDesk, docItems, parseCatalog } from "./docs";
 import { installLinks } from "./links";
 import type { Snapshot } from "./model";
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -65,3 +65,16 @@ it("routes terminal Ctrl links to desk.open, Shift externally, and mailto extern
   expect(native.invoke).toHaveBeenCalledWith("open_url", { url: "mailto:test@example.com" });
   expect(native.invoke.mock.calls.filter(([cmd]) => cmd === "api_request")).toHaveLength(1);
 });
+
+// Catalog input is an untrusted machine boundary, not an internal collaborator.
+for (const [url, allowed] of [["javascript:window.__unsafe=1", false], ["https://example.com/safe", true]] as const) {
+  it(`frames only web catalog scope URLs: ${url}`, async () => {
+    const catalog = parseCatalog(JSON.stringify({ lanes: [{ tab: "t1", scope_url: url }] }));
+    const items = docItems(catalog.lanes.t1, new Set());
+    const host = document.createElement("div"); document.body.append(host);
+    const root = createRoot(host); cleanup.push(() => act(() => root.unmount()));
+    await act(async () => root.render(<DocPanel machine="pc" tab="t1" items={items} active="Scope" select={() => {}} error="" />));
+    expect(host.querySelector("iframe")?.getAttribute("src") ?? null).toBe(allowed ? url : null);
+    expect(host.querySelector("button.muted") !== null).toBe(allowed);
+  });
+}
