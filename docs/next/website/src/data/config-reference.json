@@ -889,6 +889,12 @@
           "description": "Enter resize mode."
         },
         {
+          "key": "keys.move_pane_mode",
+          "type": "keybinding",
+          "default": "\"prefix+m\"",
+          "description": "Enter move mode to move the focused pane to another pane, edge or tab."
+        },
+        {
           "key": "keys.resize_pane_left",
           "type": "keybinding",
           "default": "unset",
