@@ -340,6 +340,10 @@ impl ClientShellState {
                     self.move_focused_pin(delta, outcome);
                     return;
                 }
+                if action == crate::input::KeybindAction::EnterMovePaneMode {
+                    self.enter_pane_move_mode(outcome);
+                    return;
+                }
                 if action == crate::input::KeybindAction::EnterResizeMode {
                     self.mode = ClientShellMode::Resize;
                     outcome.repaint = true;

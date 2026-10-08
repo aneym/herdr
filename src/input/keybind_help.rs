@@ -166,6 +166,7 @@ pub(crate) fn keybind_help_groups(
                 entry(binding_label(&keybinds.copy_mode), "copy mode"),
                 entry(binding_label(&keybinds.zoom), "zoom pane"),
                 entry(binding_label(&keybinds.resize_mode), "resize mode"),
+                entry(binding_label(&keybinds.move_pane_mode), "move pane"),
                 entry(
                     binding_label(&keybinds.resize_pane_left),
                     "resize pane left",

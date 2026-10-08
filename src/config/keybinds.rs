@@ -374,6 +374,7 @@ pub struct Keybinds {
     pub close_pane: ActionKeybinds,
     pub zoom: ActionKeybinds,
     pub resize_mode: ActionKeybinds,
+    pub move_pane_mode: ActionKeybinds,
     pub resize_pane_left: ActionKeybinds,
     pub resize_pane_down: ActionKeybinds,
     pub resize_pane_up: ActionKeybinds,
@@ -553,6 +554,7 @@ impl Config {
             close_pane: empty_action!(),
             zoom: empty_action!(),
             resize_mode: empty_action!(),
+            move_pane_mode: empty_action!(),
             resize_pane_left: empty_action!(),
             resize_pane_down: empty_action!(),
             resize_pane_up: empty_action!(),
@@ -711,6 +713,7 @@ impl Config {
             apply_action!(keybinds.close_pane, close_pane, source);
             apply_action!(keybinds.zoom, zoom, source);
             apply_action!(keybinds.resize_mode, resize_mode, source);
+            apply_action!(keybinds.move_pane_mode, move_pane_mode, source);
             apply_action!(keybinds.resize_pane_left, resize_pane_left, source);
             apply_action!(keybinds.resize_pane_down, resize_pane_down, source);
             apply_action!(keybinds.resize_pane_up, resize_pane_up, source);
@@ -866,7 +869,9 @@ fn parse_action_bindings(
                 bindings.push(binding);
             }
             Some(ParsedBinding::Range(_)) => {
-                let diag = format!("range keybinding is only valid for indexed actions: {field} = {raw:?}; disabling binding");
+                let diag = format!(
+                    "range keybinding is only valid for indexed actions: {field} = {raw:?}; disabling binding"
+                );
                 warn!(message = %diag, "config diagnostic");
                 diagnostics.push(diag);
             }
@@ -902,7 +907,9 @@ fn parse_navigate_bindings(
                 bindings.push(binding);
             }
             Some(ParsedBinding::Range(_)) => {
-                let diag = format!("range keybinding is only valid for indexed actions: {field} = {raw:?}; disabling binding");
+                let diag = format!(
+                    "range keybinding is only valid for indexed actions: {field} = {raw:?}; disabling binding"
+                );
                 warn!(message = %diag, "config diagnostic");
                 diagnostics.push(diag);
             }

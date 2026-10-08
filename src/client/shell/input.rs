@@ -561,6 +561,10 @@ impl ClientShellState {
             }
             return None;
         }
+        if self.mode == ClientShellMode::Move {
+            self.route_move_key(key, outcome);
+            return None;
+        }
         if let Some(target) = self.popup_input_target() {
             return Some(target);
         }
@@ -672,6 +676,10 @@ impl ClientShellState {
             }
             ClientShellMode::Navigate => {
                 self.route_navigate_key(key, outcome);
+                None
+            }
+            ClientShellMode::Move => {
+                self.route_move_key(key, outcome);
                 None
             }
             ClientShellMode::Resize => {

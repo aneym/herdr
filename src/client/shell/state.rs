@@ -412,6 +412,7 @@ pub(super) enum ClientShellMode {
     Prefix,
     Navigate,
     Resize,
+    Move,
     Copy,
 }
 
@@ -1228,6 +1229,7 @@ pub(crate) struct ClientShellState {
     pub(super) detail_panel_press: Option<(u16, u16)>,
     pub(super) tab_press: Option<ClientTabPress>,
     pub(super) tree_tab_press: Option<ClientTabPress>,
+    pub(super) pane_move: Option<super::pane_move::ClientPaneMove>,
     pub(super) pane_press: Option<ClientPanePress>,
     pub(super) pane_drag: Option<super::pane_drag::ClientPaneDragPreview>,
     pub(super) pane_grip_hover: Option<String>,
@@ -1439,6 +1441,7 @@ impl ClientShellState {
             detail_panel_press: None,
             tab_press: None,
             tree_tab_press: None,
+            pane_move: None,
             pane_press: None,
             pane_drag: None,
             pane_grip_hover: None,
@@ -1984,7 +1987,10 @@ impl ClientShellState {
             } else if active_keymap_changed
                 && matches!(
                     self.mode,
-                    ClientShellMode::Prefix | ClientShellMode::Navigate | ClientShellMode::Resize
+                    ClientShellMode::Prefix
+                        | ClientShellMode::Navigate
+                        | ClientShellMode::Resize
+                        | ClientShellMode::Move
                 )
             {
                 self.mode = ClientShellMode::Terminal;

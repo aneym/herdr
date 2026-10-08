@@ -37,6 +37,7 @@ mod pane_drag;
 #[allow(dead_code)]
 mod pane_drop;
 mod pane_location;
+mod pane_move;
 mod pane_scrollbar;
 mod pin_drag;
 mod preferences;

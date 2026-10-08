@@ -18,6 +18,7 @@ impl ClientShellState {
             ClientShellMode::Prefix
                 | ClientShellMode::Navigate
                 | ClientShellMode::Resize
+                | ClientShellMode::Move
                 | ClientShellMode::Copy
         )
     }

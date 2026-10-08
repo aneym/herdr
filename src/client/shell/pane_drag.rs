@@ -117,22 +117,32 @@ impl ClientShellState {
         let Some(p) = self.pane_press.take() else {
             return;
         };
+        if self.lift_pane(p.pane_id, p.tab_id, (mouse.column, mouse.row)) {
+            self.drag_pane((mouse.column, mouse.row), outcome);
+        }
+    }
+    pub(super) fn lift_pane(
+        &mut self,
+        source_pane_id: String,
+        origin_tab_id: String,
+        pointer: (u16, u16),
+    ) -> bool {
         let Some(source) = self
             .hits
             .panes
             .iter()
-            .find(|h| h.pane_id == p.pane_id)
+            .find(|h| h.pane_id == source_pane_id)
             .cloned()
         else {
-            return;
+            return false;
         };
         let snapshot = self.snapshot.as_deref();
-        let pane = snapshot.and_then(|s| s.panes.iter().find(|h| h.pane_id == p.pane_id));
+        let pane = snapshot.and_then(|s| s.panes.iter().find(|h| h.pane_id == source_pane_id));
         let label = pane
             .and_then(|h| h.label.clone())
             .or_else(|| {
                 snapshot
-                    .and_then(|s| s.agents.iter().find(|a| a.pane_id == p.pane_id))
+                    .and_then(|s| s.agents.iter().find(|a| a.pane_id == source_pane_id))
                     .and_then(|a| a.name.clone())
             })
             .or_else(|| {
@@ -176,12 +186,12 @@ impl ClientShellState {
             text: crate::protocol::color_to_u32(self.config.palette.text),
         });
         self.chrome_drag = Some(ClientChromeDrag::Pane {
-            source_pane_id: p.pane_id,
-            origin_tab_id: p.tab_id,
-            pointer: (mouse.column, mouse.row),
+            source_pane_id,
+            origin_tab_id,
+            pointer,
             target: None,
         });
-        self.drag_pane((mouse.column, mouse.row), outcome);
+        true
     }
     pub(super) fn drag_pane(&mut self, point: (u16, u16), outcome: &mut ClientShellInput) {
         let Some(ClientChromeDrag::Pane {
@@ -226,7 +236,6 @@ impl ClientShellState {
         preview.area = area;
         preview.rects.clear();
         preview.rects.extend(self.hits.panes.iter().map(|h| h.rect));
-        let invalidated = std::mem::take(&mut preview.invalidated);
         let zone = super::pane_drop::drop_zone_at(
             area,
             &preview.rects,
@@ -295,15 +304,36 @@ impl ClientShellState {
                     }
                 })
         });
-        if let Some(ClientChromeDrag::Pane {
-            pointer,
+        if let Some(ClientChromeDrag::Pane { pointer, .. }) = self.chrome_drag.as_mut() {
+            *pointer = point;
+        }
+        self.retarget_pane_drag(target, zone, row, outcome);
+    }
+    pub(super) fn retarget_pane_drag(
+        &mut self,
+        target: Option<PaneDragTarget>,
+        zone: Option<DropZone>,
+        row: Option<Rect>,
+        outcome: &mut ClientShellInput,
+    ) {
+        let Some(ClientChromeDrag::Pane {
+            source_pane_id,
+            origin_tab_id,
             target: current,
             ..
         }) = self.chrome_drag.as_mut()
-        {
-            *pointer = point;
-            *current = target.clone();
-        }
+        else {
+            return;
+        };
+        let source = source_pane_id.clone();
+        let origin = origin_tab_id.clone();
+        let old = current.clone();
+        *current = target.clone();
+        let Some(preview) = self.pane_drag.as_mut() else {
+            return;
+        };
+        let invalidated = std::mem::take(&mut preview.invalidated);
+        let area = preview.area;
         outcome.repaint = true;
         if target == old && !invalidated {
             return;
@@ -512,6 +542,10 @@ impl ClientShellState {
             self.chrome_drag = None;
         }
         self.pane_grip_hover = None;
+        self.pane_move = None;
+        if self.mode == ClientShellMode::Move {
+            self.mode = self.copy_or_terminal_mode();
+        }
         changed
     }
     pub(super) fn render_pane_grips(&self, frame: &mut FrameData) {

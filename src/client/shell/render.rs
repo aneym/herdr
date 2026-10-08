@@ -72,6 +72,19 @@ pub(super) fn render_mode_bar(
             palette.accent
         })
         .add_modifier(Modifier::BOLD);
+    if mode == ClientShellMode::Move && endpoint_error.is_none() {
+        buffer.set_stringn(bar.x, bar.y, " MOVE ", usize::from(bar.width), mode_style);
+        if bar.width > 6 {
+            buffer.set_stringn(
+                bar.x + 6,
+                bar.y,
+                " move: ←↑↓→ target · ⇧ edge · [ ] tab · ⏎ drop · esc",
+                usize::from(bar.width - 6),
+                base,
+            );
+        }
+        return Some(bar);
+    }
     let prefix = crate::config::format_key_combo(keybinds.prefix);
     let prefix_rhs = |bindings: &crate::config::ActionKeybinds| {
         bindings
@@ -113,6 +126,7 @@ pub(super) fn render_mode_bar(
                     (" keybinds".to_owned(), base),
                 ]);
             }
+            ClientShellMode::Move => return Some(bar),
             ClientShellMode::Resize => {
                 segments.extend([
                     (" RESIZE ".to_owned(), mode_style),
