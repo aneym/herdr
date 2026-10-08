@@ -170,7 +170,8 @@ final class PaneDrag: NSObject {
             let id = String(row.dropFirst(row.hasPrefix("tab:") ? 4 : 6))
             if (row.hasPrefix("tab:") || row.hasPrefix("space:")), PinDrag.machine(of: id) == PinDrag.machine(of: source ?? "") {
                 updateDwell(tab: row.hasPrefix("tab:") ? id : nil)
-                setZone(row.hasPrefix("tab:") ? .intoTab(id) : .newTabIn(id)); return
+                // The source tab remains a dwell target (spring back), never a drop target.
+                setZone(row.hasPrefix("tab:") ? (id == originTab ? nil : .intoTab(id)) : .newTabIn(id)); return
             }
         }
         updateDwell(tab: nil)
@@ -187,7 +188,7 @@ final class PaneDrag: NSObject {
     }
     private func updateDwell(tab: String?) {
         guard phase == .lifted, let tab, tab != owner?.state.selectedTab else { dwell = nil; return }
-        if let dwell, dwell.tab == tab, hypot(pointer.x - dwell.point.x, pointer.y - dwell.point.y) < 4 { return }
+        if let dwell, dwell.tab == tab, hypot(pointer.x - dwell.point.x, pointer.y - dwell.point.y) < ShellMotion.dragThresholdPx { return }
         dwell = Dwell(tab: tab, point: pointer, frozenStart: frozenMs)
         ensureClock()
     }
@@ -366,10 +367,10 @@ final class PaneDrag: NSObject {
     /// The chip springs back to the source cap. Also ends a drop the server refused, which moved nothing.
     private func animateCancel() {
         dwell = nil
-        if sprung, let originTab {
-            sprung = false
+        if sprung, let originTab, owner?.state.selectedTab != originTab {
             focusSpringTab(originTab)
         }
+        sprung = false
         lastZone = zone; zone = nil; phase = .cancelling; generation += 1; inFlight = nil
         motions.removeAll { $0.kind == "zone" || $0.kind == "fade" }
         ghost = nil; ghostTarget = nil
@@ -381,7 +382,11 @@ final class PaneDrag: NSObject {
     func selectionChanging(to tab: String?) {
         // A drop still waiting on its reply ends quietly too: its chip and ghost belong to the tab being left.
         if !springSelection, phase == .pressed || phase == .lifted || phase == .dropping,
-           tab != owner?.state.selectedTab { cancel() }
+           tab != owner?.state.selectedTab {
+            // A foreign selection owns the next tab. Do not nest an origin selection inside it.
+            sprung = false
+            cancel()
+        }
         if phase == .idle { source = nil }
         DispatchQueue.main.async { [weak self] in self?.probe() }
     }
