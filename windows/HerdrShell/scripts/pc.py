@@ -27,6 +27,8 @@ R_STAGE = f"{W}/stage"
 R_OUT = f"{W}/out"
 R_SHOTS = f"{W}/shots"
 R_CACHE = f"{W}/cache"
+R_SHARED_SHELL = "C:/Users/aneym/shell"
+SYNC_PATHS = ("windows/HerdrShell", "shell")
 
 PS = "powershell -NoProfile -ExecutionPolicy Bypass"
 
@@ -124,11 +126,6 @@ def git_sha(repo=REPO):
 
 def cmd_sync(_args):
     repo = Path(_args.src).resolve()
-    bootstrap()
-    remote(
-        f"{PS} -Command \"if (Test-Path '{R_STAGE}') {{ Remove-Item -Recurse -Force '{R_STAGE}' }}; "
-        f"New-Item -ItemType Directory -Force -Path '{R_STAGE}' | Out-Null\""
-    )
     excl = []
     for pat in (
         "*/node_modules", "*/node_modules/*", "*/dist", "*/dist/*",
@@ -136,10 +133,36 @@ def cmd_sync(_args):
         "*.exe", "*/icons/*.png", "*/icons/*.ico", "*/icons/*.icns",
         ".DS_Store", "*/.DS_Store", "._*", "*/._*",
     ):
-        excl += ["--exclude", pat]
+        # Exclude Windows build artifacts without filtering the shared shell tree.
+        excl += ["--exclude", f"windows/HerdrShell/{pat}"]
+        if pat.startswith("*/"):
+            excl += ["--exclude", f"windows/HerdrShell/{pat[2:]}"]
+        else:
+            excl += ["--exclude", f"windows/HerdrShell/*/{pat}"]
+    tar_cmd = ["tar", "-cf", "-", "-C", str(repo)] + excl + list(SYNC_PATHS)
+    if getattr(_args, "dry_run", False):
+        print(f"windows/HerdrShell -> {R_SRC}")
+        print(f"shell -> {R_SHARED_SHELL}")
+        payload = subprocess.run(
+            tar_cmd, capture_output=True, env={**os.environ, "COPYFILE_DISABLE": "1"},
+        )
+        if payload.returncode != 0:
+            print(payload.stderr.decode("utf-8", "replace"), file=sys.stderr)
+            sys.exit(payload.returncode)
+        listing = subprocess.run(["tar", "-tf", "-"], input=payload.stdout,
+                                 capture_output=True)
+        print(listing.stdout.decode("utf-8", "replace"), end="")
+        if listing.returncode != 0:
+            print(listing.stderr.decode("utf-8", "replace"), file=sys.stderr)
+            sys.exit(listing.returncode)
+        return
+    bootstrap()
+    remote(
+        f"{PS} -Command \"if (Test-Path '{R_STAGE}') {{ Remove-Item -Recurse -Force '{R_STAGE}' }}; "
+        f"New-Item -ItemType Directory -Force -Path '{R_STAGE}' | Out-Null\""
+    )
     tar = subprocess.Popen(
-        ["tar", "-cf", "-", "-C", str(repo)] + excl + ["windows/HerdrShell"],
-        stdout=subprocess.PIPE,
+        tar_cmd, stdout=subprocess.PIPE,
         env={**os.environ, "COPYFILE_DISABLE": "1"},
     )
     rc, out = _untar(tar)
@@ -150,7 +173,7 @@ def cmd_sync(_args):
     if rc != 0:
         print(out, file=sys.stderr)
         sys.exit(rc)
-    print(f"synced windows/HerdrShell -> {R_SRC}")
+    print(f"synced windows/HerdrShell -> {R_SRC}; shell -> {R_SHARED_SHELL}")
 
 
 def _untar(tar_proc):
@@ -314,8 +337,10 @@ def main():
     ap = argparse.ArgumentParser(description="Herdr Shell PC harness")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    p = sub.add_parser("sync", help="tar windows/HerdrShell to the PC")
+    p = sub.add_parser("sync", help="tar windows/HerdrShell and shared shell to the PC")
     p.add_argument("--src", default=str(REPO), help="source repository directory")
+    p.add_argument("--dry-run", action="store_true",
+                   help="list the sync archive and destinations locally; never contact the PC")
     p.set_defaults(fn=cmd_sync)
 
     p = sub.add_parser("build", help="guard + sync + tauri build --bundles nsis")
