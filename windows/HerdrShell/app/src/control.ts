@@ -16,8 +16,9 @@ export function installControl(get: () => ControlState): () => void {
     void bridge.controlEvent<T>(cmd, payload => {
       const respond = typeof reply === "function" ? reply(payload) : reply;
       void fn(payload).then(result => {
+        if (cmd === "motion") return bridge.motionResult(result);
         if (respond) return read ? bridge.readResult(String(result)) : bridge.controlResult(cmd, result);
-      }).catch(error => { if (respond) void (read ? bridge.readResult(`Error: ${String(error)}`) : bridge.controlResult(cmd, { ok: false, error: String(error) })).catch(() => {}); });
+      }).catch(error => { console.error(`control ${cmd} failed`, error); if (cmd === "motion") void bridge.motionResult({ ok: false, error: String(error) }).catch(error => console.error("motion completion failed", error)); if (respond) void (read ? bridge.readResult(`Error: ${String(error)}`) : bridge.controlResult(cmd, { ok: false, error: String(error) })).catch(() => {}); });
     }).then(unlisten => { if (disposed) unlisten(); else listeners.push(unlisten); }).catch(() => {});
   };
   const focused = () => { const pane = get().focused; if (!pane) throw new Error("No focused pane"); return pane; };

@@ -64,6 +64,7 @@ export const bridge = {
   clipboardWrite: (text: string) => invoke<void>("clipboard_write", { text }),
   info: () => invoke<{ version: string; commit: string; built_at: string }>("app_info"),
   controlEvent: <T,>(cmd: string, fn: (payload: T) => void) => listen<T>(`ctl-${cmd}`, e => fn(e.payload)),
+  motionResult: (result: unknown) => invoke<void>("ctl_motion_result", { result }),
   readResult: (text: string) => invoke<void>("ctl_read_result", { text }),
   controlResult: (cmd: string, result: unknown) => invoke<void>(`ctl_${cmd}_result`, { result }),
 };

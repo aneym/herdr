@@ -15,7 +15,6 @@
       {
         "label": "main",
         "create": false,
-        "backgroundThrottling": "disabled",
         "title": "Herdr Shell",
         "width": 1400,
         "height": 860,

@@ -273,5 +273,5 @@ export function PaneClip({ id, box, lifted, animateLayout, onMotion, children }:
     if (event.target !== event.currentTarget || !running.current.delete(event.propertyName)) return;
     if (running.current.size === 0) ended();
   };
-  return <div ref={clip} data-pane={id} className={`pane-box pane-clip ${lifted ? "lifted" : ""}`} onTransitionEnd={transitionEnded} style={{ left: 0, top: 0, transform: `translate(${frame.x}px, ${frame.y}px)`, width: frame.width, height: frame.height, transition: animate ? transitionFor("settle") : undefined }}><div style={{ position: "relative", width: box.width, height: box.height }}>{children(settling)}</div></div>;
+  return <div ref={clip} data-pane={id} className={`pane-box pane-clip ${lifted ? "lifted" : ""}`} onTransitionEnd={transitionEnded} style={{ left: 0, top: 0, transform: `translate(${frame.x}px, ${frame.y}px)`, width: frame.width, height: frame.height, transition: animate ? transitionFor("settle") : undefined }}><div className="pane-surface" style={{ position: "relative", width: box.width, height: box.height }}>{children(settling)}</div></div>;
 }

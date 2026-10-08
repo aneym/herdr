@@ -28,6 +28,16 @@ mod imp {
 
     static ACTION_TX: Mutex<Option<(String, Sender<Value>)>> = Mutex::new(None);
 
+    static MOTION_RX: Mutex<Option<std::sync::mpsc::Receiver<Value>>> = Mutex::new(None);
+    static MOTION_TX: Mutex<Option<Sender<Value>>> = Mutex::new(None);
+
+    pub fn deliver_motion(result: Value) -> Result<(), String> {
+        if let Some(tx) = MOTION_TX.lock().map_err(|_| "motion lock poisoned")?.take() {
+            let _ = tx.send(result);
+        }
+        Ok(())
+    }
+
     static READ_TX: Mutex<Option<Sender<String>>> = Mutex::new(None);
 
     pub fn deliver_read(text: String) -> Result<(), String> {
@@ -160,6 +170,25 @@ mod imp {
     }
 
     fn dispatch(app: &AppHandle, req: &Value) -> Value {
+        // Motion acknowledges enqueue, but subsequent commands (including native
+        // screenshots) wait for its frontend completion before they may run.
+        let pending_motion = MOTION_RX.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some(rx) = pending_motion {
+            match rx.recv_timeout(Duration::from_secs(5)) {
+                Ok(result) if result["ok"] == true => {}
+                Ok(result) => {
+                    eprintln!("motion hook failed: {result}");
+                    return result;
+                }
+                Err(error) => {
+                    eprintln!("motion hook completion: {error}");
+                    // Keep the barrier on timeout; no later command may overtake
+                    // an accepted freeze that the frontend has not applied yet.
+                    *MOTION_RX.lock().unwrap_or_else(|e| e.into_inner()) = Some(rx);
+                    return json!({"ok": false, "error": "motion completion timeout"});
+                }
+            }
+        }
         match req.get("cmd").and_then(|c| c.as_str()).unwrap_or("") {
             "ping" => json!({"ok": true, "commit": env!("HERDR_SHELL_COMMIT")}),
             "state" => state(app),
@@ -247,9 +276,20 @@ mod imp {
             if let Some(object) = payload.as_object_mut() {
                 object.remove("cmd");
             }
+            if cmd == "motion" {
+                let (tx, rx) = channel();
+                *MOTION_TX.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
+                *MOTION_RX.lock().unwrap_or_else(|e| e.into_inner()) = Some(rx);
+            }
             return match app.emit(&format!("ctl-{cmd}"), payload) {
                 Ok(()) => json!({"ok": true, "queued": true}),
-                Err(_) => json!({"ok": false, "error": "frontend not reachable"}),
+                Err(_) => {
+                    if cmd == "motion" {
+                        *MOTION_TX.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                        *MOTION_RX.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                    }
+                    json!({"ok": false, "error": "frontend not reachable"})
+                }
             };
         }
         let (tx, rx) = channel();
@@ -378,5 +418,10 @@ pub fn deliver_read(_text: String) -> Result<(), String> {
 
 #[cfg(not(windows))]
 pub fn deliver_result(_cmd: &str, _result: serde_json::Value) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn deliver_motion(_result: serde_json::Value) -> Result<(), String> {
     Ok(())
 }

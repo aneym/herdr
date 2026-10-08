@@ -43,6 +43,7 @@ beforeEach(async () => {
   if (!Element.prototype.animate) Element.prototype.animate = () => ({}) as Animation;
   vi.spyOn(bridge, "api").mockResolvedValue({ place: { changed: true } });
   vi.spyOn(bridge, "controlEvent").mockImplementation(async (cmd, fn) => { events.set(cmd, fn as (payload: unknown) => void); return () => { events.delete(cmd); }; });
+  vi.spyOn(bridge, "motionResult").mockResolvedValue();
   vi.spyOn(bridge, "controlResult").mockImplementation(async (...args) => { result(...args); });
   vi.spyOn(bridge, "attach").mockResolvedValue(1);
   vi.spyOn(bridge, "resize").mockResolvedValue();
@@ -83,4 +84,14 @@ it("does not send a late frontend completion for an enqueue-acknowledged motion 
   await act(async () => { events.get("motion")!({ freeze_ms: 50 }); await vi.advanceTimersByTimeAsync(0); });
   expect(pause).toHaveBeenCalledOnce(); expect(animation.currentTime).toBe(50);
   expect(result).not.toHaveBeenCalled();
+  expect(bridge.motionResult).toHaveBeenCalledWith({ ok: true });
+});
+
+it("reports failed motion execution to the native ordering barrier", async () => {
+  const error = new Error("animation unavailable");
+  document.getAnimations = () => { throw error; };
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  await act(async () => { events.get("motion")!({ freeze_ms: 50 }); await vi.advanceTimersByTimeAsync(0); });
+  expect(logged).toHaveBeenCalledWith("control motion failed", error);
+  expect(bridge.motionResult).toHaveBeenCalledWith({ ok: false, error: "Error: animation unavailable" });
 });

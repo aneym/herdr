@@ -31,6 +31,11 @@ fn ctl_read_result(text: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn ctl_motion_result(result: serde_json::Value) -> Result<(), String> {
+    control::deliver_motion(result)
+}
+
+#[tauri::command]
 fn ctl_ui_result(result: serde_json::Value) -> Result<(), String> {
     control::deliver_result("ui", result)
 }
@@ -109,6 +114,7 @@ fn main() {
             files::remote_home,
             files::file_list,
             ctl_read_result,
+            ctl_motion_result,
             ctl_ui_result,
             ctl_machine_result,
             ctl_open_result,
@@ -138,19 +144,27 @@ fn main() {
         .setup(|app| {
             let test_window = std::env::args().any(|a| a == "--test-window")
                 || std::env::var("HERDR_SHELL_TEST_WINDOW").as_deref() == Ok("1");
-            let config = app
+            let control_motion = test_window
+                || std::env::var("HERDR_SHELL_CONTROL").as_deref() == Ok("1");
+            let mut config = app
                 .config()
                 .app
                 .windows
                 .iter()
                 .find(|w| w.label == "main")
-                .ok_or("missing main window config")?;
-            let mut window = tauri::WebviewWindowBuilder::from_config(app, config)?;
+                .ok_or("missing main window config")?
+                .clone();
+            if control_motion {
+                config.background_throttling = Some(tauri::utils::config::BackgroundThrottlingPolicy::Disabled);
+            }
+            let mut window = tauri::WebviewWindowBuilder::from_config(app, &config)?;
             // backgroundThrottling is unsupported by WebView2. Disable Chromium's
             // background timer/renderer throttling so queued control hooks still run.
             #[cfg(windows)]
             {
-                window = window.additional_browser_args("--disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows");
+                if control_motion {
+                    window = window.additional_browser_args("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows");
+                }
             }
             if test_window {
                 window = window

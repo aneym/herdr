@@ -175,7 +175,8 @@ footer { color: var(--shell-muted); padding: 12px 8px; font-size: 12px; overflow
 .tab-view.pane-dragging .term-host { pointer-events: none; }
 .pane-clip { overflow: hidden; }
 .pane-box { position: absolute; transition: opacity var(--shell-motion-fade-ms) var(--shell-motion-ease); }
-.pane-box.lifted { opacity: var(--shell-motion-lift-opacity); transition: opacity var(--shell-motion-fade-ms) var(--shell-motion-ease); }
+.pane-box > .pane-surface { transition: opacity var(--shell-motion-fade-ms) var(--shell-motion-ease); }
+.pane-box.lifted > .pane-surface { opacity: var(--shell-motion-lift-opacity); }
 .pane-box.lifted::after { content: ""; position: absolute; inset: 0; border: var(--shell-motion-zone-stroke) solid var(--shell-accent); border-radius: var(--shell-radius-control); z-index: 6; pointer-events: none; }
 .pane-drop-zone { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 4; border-radius: var(--shell-radius-control); border: var(--shell-motion-zone-stroke) solid var(--shell-accent); box-sizing: border-box; background: color-mix(in srgb, var(--shell-accent) calc(var(--shell-motion-zone-fill-alpha-dark) * 100%), transparent); }
 :root[data-theme="light"] .pane-drop-zone, :root[data-theme="light"] .tab-row.pane-drop-fill { background: color-mix(in srgb, var(--shell-accent) calc(var(--shell-motion-zone-fill-alpha-light) * 100%), transparent); }
@@ -183,7 +184,7 @@ footer { color: var(--shell-muted); padding: 12px 8px; font-size: 12px; overflow
 .space-row.drop-above { position: relative; }
 .space-row.drop-above::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: var(--shell-motion-zone-stroke); background: var(--shell-muted); pointer-events: none; }
 @media (prefers-reduced-motion: reduce) {
-  .pane-box.lifted { transition: opacity var(--shell-motion-reduced-fade-ms) var(--shell-motion-ease); }
+  .pane-box.lifted > .pane-surface { transition: opacity var(--shell-motion-reduced-fade-ms) var(--shell-motion-ease); }
 }
 
 .tab-row.pane-drop-fill { background: color-mix(in srgb, var(--shell-accent) calc(var(--shell-motion-zone-fill-alpha-dark) * 100%), transparent); }

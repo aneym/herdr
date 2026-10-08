@@ -4,7 +4,12 @@
 param([Parameter(Mandatory = $true)][string]$Exe, [switch]$TestWindow)
 $Exe = $Exe.Trim('"')
 $arg = if ($TestWindow) { '--test-window' } else { '' }
-$action = if ($arg) { New-ScheduledTaskAction -Execute $Exe -Argument $arg } else { New-ScheduledTaskAction -Execute $Exe }
+# Scheduled tasks do not inherit the SSH helper's environment. Set the hook-only
+# override in the task process; normal Start-menu launches keep browser defaults.
+$quotedExe = $Exe.Replace("'", "''")
+$command = "`$env:HERDR_SHELL_CONTROL='1'; & '$quotedExe' $arg"
+$encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -WindowStyle Hidden -EncodedCommand $encoded"
 $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
 Register-ScheduledTask -TaskName HerdrShellLaunch -Action $action -Principal $principal -Settings $settings -Force | Out-Null
