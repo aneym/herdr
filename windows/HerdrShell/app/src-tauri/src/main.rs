@@ -97,6 +97,7 @@ fn ctl_copy_selection_result(result: serde_json::Value) -> Result<(), String> {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             app_info,
             update::update_status,

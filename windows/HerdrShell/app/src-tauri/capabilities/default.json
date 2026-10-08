@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Main window: app commands plus core event listen/unlisten used by machine status and the control pipe.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "core:window:allow-is-focused", "core:window:allow-request-user-attention", "notification:default"]
 }

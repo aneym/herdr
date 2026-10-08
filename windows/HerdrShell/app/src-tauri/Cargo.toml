@@ -13,6 +13,8 @@ path = "src/main.rs"
 tauri-build = "2"
 
 [dependencies]
+# OS delivery for unseen-tab attention, matching the native Mac shell.
+tauri-plugin-notification = "2"
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
