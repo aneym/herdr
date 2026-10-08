@@ -26,6 +26,15 @@ final class PaneDrag: NSObject {
     /// `sendHeldDrop()`. Snapshots keep arriving meanwhile.
     var holdDrops = false
     private var heldDrop: (() -> Void)?
+    /// Check hook only: hold a drop's reply once it is in, until `sendHeldReply()`, so the drop's own snapshot can land
+    /// first.
+    var holdReplies = false
+    private var heldReply: (() -> Void)?
+    /// The boxes and host size when the drop was released: the reply settles from these when the drop's own snapshot
+    /// has already drawn the reply's layout.
+    private var dropBoxes: [String: CGRect] = [:], dropSize = CGSize.zero
+    /// How long a sent drop waits for its reply, the same as the Windows Shell.
+    static let replyTimeout: TimeInterval = 4
     private var pointer = CGPoint.zero, start = CGPoint.zero
     private var keyboard = false, keyboardTarget: String?
     private var sent: [[String: Any]] = []
@@ -219,6 +228,7 @@ final class PaneDrag: NSObject {
         guard phase == .lifted, let z = zone, let source else { cancel(); return }
         motions.removeAll { $0.pane == source && $0.kind == "fade" }
         lastZone = z; phase = .dropping
+        dropBoxes = boxes; dropSize = owner.host.bounds.size
         updateSidebarIndicator()
         let method: String, p: [String: Any]
         switch z {
@@ -232,26 +242,49 @@ final class PaneDrag: NSObject {
         // The drop ends with the server's answer to this call, never with a snapshot: snapshots that land while it
         // is pending apply at once, and only the reply's own layout settles.
         let send = {
+            // No reply in time (as on Windows, 4 s): the server may still have applied it, so end without a rollback.
+            DispatchQueue.main.asyncAfter(deadline: .now() + PaneDrag.replyTimeout) { [weak self] in
+                guard let self, self.generation == gen, self.phase == .dropping, self.heldReply == nil else { return }
+                self.cancel()
+            }
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 let reply = commands.paneDragCall(method, p)
                 let refused = PaneDrag.refused(reply)
-                if method == "pane.swap", reply?["result"] != nil, !refused { _ = commands.paneDragCall("pane.focus", ["pane_id": source]) }
                 DispatchQueue.main.async {
-                    guard let self, self.generation == gen, self.phase == .dropping else { return }
-                    // A refusal (an error, or changed:false such as a pane gone) moved nothing, so the chip goes back.
-                    if refused { self.animateCancel(); return }
-                    // With no reply at all the server may still have applied it: end without a rollback.
-                    if reply?["result"] == nil { self.cancel(); return }
-                    self.settle()
-                    self.owner?.applyDropReply(PaneDrag.layouts(reply))
-                    self.owner?.focusPane(source)
-                    self.draw()
+                    guard let self else { return }
+                    let answer = { [weak self] in
+                        guard let self, self.generation == gen, self.phase == .dropping else { return }
+                        // A refusal (an error, or changed:false such as a pane gone) moved nothing, so the chip goes back.
+                        if refused { self.animateCancel(); return }
+                        // With no reply at all the server may still have applied it: end without a rollback.
+                        if reply?["result"] == nil { self.cancel(); return }
+                        self.settle()
+                        self.owner?.applyDropReply(PaneDrag.layouts(reply))
+                        self.owner?.focusPane(source)
+                        self.draw()
+                    }
+                    if self.holdReplies { self.heldReply = answer } else { answer() }
                 }
+                // After the reply is handled, not before: the focus call must not delay the settle.
+                if method == "pane.swap", reply?["result"] != nil, !refused { _ = commands.paneDragCall("pane.focus", ["pane_id": source]) }
             }
         }
         if holdDrops { heldDrop = send } else { send() }
     }
     func sendHeldDrop() { let send = heldDrop; heldDrop = nil; send?() }
+    func sendHeldReply() { let answer = heldReply; heldReply = nil; answer?() }
+    /// The drop's own snapshot landed before its reply and already drew the reply's layout, so nothing would move:
+    /// settle from the boxes at the release instead, under the same rules as any settle.
+    func settleFromDrop() {
+        guard let owner, phase == .settling, dropSize == owner.host.bounds.size, !owner.resizer.isBusy, !owner.window.inLiveResize else { return }
+        let now = Dictionary(uniqueKeysWithValues: owner.host.rects.map { ($0.0.paneId, owner.host.boxRect($0.1)) })
+        guard Set(now.keys) == Set(dropBoxes.keys) else { return }
+        for (pane, rect) in now where dropBoxes[pane] != rect {
+            addMotion(pane: pane, kind: reduce ? "crossfade" : "settle", from: dropBoxes[pane] ?? rect, to: rect,
+                      duration: reduce ? ShellMotion.reducedFadeMs : ShellMotion.settleMs)
+        }
+        draw()
+    }
     /// The layouts a drop's reply carries: pane.swap's `layout`, or pane.place's and pane.move's target and source.
     private static func layouts(_ reply: [String: Any]?) -> [Snapshot.Layout] {
         guard let result = reply?["result"] as? [String: Any] else { return [] }
@@ -288,7 +321,8 @@ final class PaneDrag: NSObject {
         draw()
     }
     func selectionChanging(to tab: String?) {
-        if phase == .pressed || phase == .lifted, tab != originTab { cancel() }
+        // A drop still waiting on its reply ends quietly too: its chip and ghost belong to the tab being left.
+        if phase == .pressed || phase == .lifted || phase == .dropping, tab != originTab { cancel() }
         if phase == .idle { source = nil }
         DispatchQueue.main.async { [weak self] in self?.probe() }
     }
@@ -460,7 +494,7 @@ final class PaneDrag: NSObject {
     }
     private func resetVisuals() { motions = []; link?.invalidate(); link = nil; ghost = nil; ghostTarget = nil }
     private func finish() {
-        phase = .idle; zone = nil; heldDrop = nil; resetVisuals()
+        phase = .idle; zone = nil; heldDrop = nil; heldReply = nil; dropBoxes = [:]; resetVisuals()
         if let monitor { NSEvent.removeMonitor(monitor) }; monitor = nil
         NSCursor.arrow.set(); draw()
     }

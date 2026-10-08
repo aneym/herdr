@@ -16,6 +16,11 @@ unsent, as a slow link would, while other clients change the tab:
   5. A swap refused after another client's snapshot moved the source: the refusal still plays the cancel.
   6. The target resized while the drop is pending and again right after it lands: the drop ends on its reply and
      the later snapshot that disagrees with the reply wins, so the boxes end on the server's layout.
+S10a. The hook also holds a reply that is in until the check releases it, so the drop's own snapshot lands first:
+  7. A swap whose snapshot lands before its reply: the snapshot applies at once with no settle; the reply then
+     settles a and b from where they stood at the release; a later snapshot during that settle applies with no motion.
+  8. Another tab selected while a drop is pending: the drop ends quietly (no cancel, no chip) and a late reply
+     changes nothing on the new tab.
 Writes macos/HerdrShell/checks/PANE-DRAG-END.txt.
 """
 import json
@@ -143,6 +148,59 @@ def disagreeing_snapshot(ws):
     D.close(tab)
 
 
+def snapshot_before_reply(ws):
+    tab, a, b, c, state = D.fresh(ws, "snapshot-first")
+    before = dict(D.pd(state)["boxes"])
+    D.hook("begin", pane=a)
+    D.hook("move", steps=1, **D.centre(before[b]))
+    D.wait(lambda s: D.zone_is(s, kind="centre", target=b))
+    old = D.rects(D.layout(a))
+    D.hook("hold-replies", on=True)
+    D.hook("drop")
+    D.wait(lambda s: D.rects(D.layout(a)) != old, timeout=5)
+    state = D.wait(lambda s: boxes_on_server(s, a), timeout=5)
+    D.check("snapshot-first: the swap's own snapshot shows at once, with no settle, the reply held",
+            boxes_on_server(state, a) and D.pd(state).get("phase") == "dropping" and not D.settling(state),
+            json.dumps([D.pd(state).get("phase"), active(state)]))
+    D.motion("freeze", ms=0)
+    D.hook("send-reply")
+    D.hook("hold-replies", on=False)
+    state = D.wait(lambda s: D.settling(s), timeout=5)
+    got = D.pd(state).get("boxes") or {}
+    D.check("snapshot-first: the reply settles a and b", {a, b} <= D.settling(state), json.dumps(active(state)))
+    D.check("snapshot-first: the settle starts from the boxes at the release",
+            all(p in got and D.near(got[p], before[p]) for p in (a, b)), json.dumps([got, before]))
+    old = D.rects(D.layout(a))
+    resize(a, "left")
+    D.wait(lambda s: D.rects(D.layout(a)) != old, timeout=5)
+    state = D.wait(lambda s: boxes_on_server(s, a), timeout=5)
+    D.check("snapshot-first: a later snapshot during the settle applies at once, with no motion",
+            boxes_on_server(state, a) and not D.settling(state), json.dumps([D.pd(state).get("boxes"), active(state)]))
+    D.motion("run")
+    state = D.wait(D.idle, timeout=5)
+    D.check("snapshot-first: the drop ends idle on the server's layout", D.idle(state) and boxes_on_server(state, a),
+            json.dumps([D.pd(state).get("phase"), D.pd(state).get("boxes")]))
+    D.close(tab)
+
+
+def tab_switch_pending(ws, other):
+    tab, a, b, c, state = held_drop(ws, "tab-switch", lambda r: D.edge_point(r, "right"))
+    S.cmd({"cmd": "select", "tab": other})
+    state = D.wait(lambda s: s.get("selected_tab") == other and D.pd(s).get("phase") != "dropping", timeout=5)
+    D.check("tab-switch: the pending drop ends quietly, with no cancel and no chip",
+            D.pd(state).get("phase") == "idle" and "cancel" not in active(state)
+            and not (D.pd(state).get("chip") or {}).get("visible"),
+            json.dumps([state.get("selected_tab"), D.pd(state).get("phase"), active(state), D.pd(state).get("chip")]))
+    shown = dict(D.pd(state).get("boxes") or {})
+    D.hook("send-drop")
+    D.wait(lambda s: a in D.rects(D.layout(b)) and D.rects(D.layout(b))[a][0] > D.rects(D.layout(b))[b][0], timeout=5)
+    state = D.wait(D.idle, timeout=5)
+    D.check("tab-switch: the late reply changes nothing on the new tab",
+            D.idle(state) and state.get("selected_tab") == other and (D.pd(state).get("boxes") or {}) == shown,
+            json.dumps([state.get("selected_tab"), D.pd(state).get("boxes"), shown]))
+    D.close(tab)
+
+
 def refused_drop(ws):
     tab, a, b, c, state = D.fresh(ws, "refused")
     D.motion("freeze", ms=0)
@@ -196,6 +254,8 @@ def main():
     pending_foreign_resize(ws)
     refused_after_foreign(ws)
     disagreeing_snapshot(ws)
+    snapshot_before_reply(ws)
+    tab_switch_pending(ws, tab2)
     D.finish()
 
 

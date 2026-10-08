@@ -14,6 +14,7 @@ app's own hit-testing decides cap, zone and row. Hook lines (JSON on the control
   {"cmd":"pane-drag","op":"drop"}                        release at the last point
   {"cmd":"pane-drag","op":"cancel","via":"esc"|"right"}  typed Esc, or a right click at the last point
   {"cmd":"pane-drag","op":"hold-drops","on":B} / {"op":"send-drop"}  hold the next drop's call unsent / send it
+  {"cmd":"pane-drag","op":"hold-replies","on":B} / {"op":"send-reply"}  hold a drop's reply once in / handle it
   {"cmd":"motion","op":"freeze","ms":N} | {"cmd":"motion","op":"run"} | {"cmd":"motion","op":"reduce","on":true|false|null}
 State dump key `paneDrag` (see the S6 brief): phase, source, zone, lastZone, ghostRect,
 ghostTarget, ghostSource, dryRunPending, placeSupported, chip, boxes, sent, motion; plus

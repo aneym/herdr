@@ -590,6 +590,8 @@ final class TestHook {
         case "drop": post(.leftMouseUp, paneDragPoint)
         case "hold-drops": c.paneDrag.holdDrops = obj["on"] as? Bool ?? true
         case "send-drop": c.paneDrag.sendHeldDrop()
+        case "hold-replies": c.paneDrag.holdReplies = obj["on"] as? Bool ?? true
+        case "send-reply": c.paneDrag.sendHeldReply()
         case "cancel":
             if obj["via"] as? String == "right" { post(.rightMouseDown, paneDragPoint); post(.rightMouseUp, paneDragPoint) }
             else if let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],

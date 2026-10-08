@@ -648,12 +648,15 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     private var dropHold: (layout: Snapshot.Layout, epoch: Int)?
 
     /// The server answered a pane drop: snapshots that came while it was pending show first, as they are, then the
-    /// panes settle to the reply's layout for this tab. The next snapshot replaces it, with no motion.
+    /// panes settle to the reply's layout for this tab. The next snapshot replaces it, with no motion. When the drop's
+    /// own snapshot came first and already drew the reply's layout, the panes settle from where they stood at the drop.
     func applyDropReply(_ layouts: [Snapshot.Layout]) {
         guard let tab = state.selectedTab, let layout = layouts.first(where: { $0.tab_id == tab }) else { return }
         refreshHost()
         dropHold = (layout, model.snapshotEpoch(for: tab))
+        let shown = lastLayoutKey
         refreshHost(using: layout, fromDrop: true)
+        if lastLayoutKey == shown { paneDrag.settleFromDrop() }
     }
 
     private func heldDropLayout(_ tab: String) -> Snapshot.Layout? {
