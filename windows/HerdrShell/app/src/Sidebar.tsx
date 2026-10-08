@@ -16,6 +16,9 @@ import type { MachineStatus } from "./bridge";
 import { foldAllSpaces, foldKey, noteSelection, revealOnSelect, spaceOpen } from "./model";
 import type { RevealMemo, SidebarRow } from "./model";
 export function Status({ status, solid = false }: { status: string; solid?: boolean }) { return <span className={`status ${status} ${solid ? "state-dot" : ""}`} aria-label={status} style={solid ? { width: "var(--shell-face-dot)", height: "var(--shell-face-dot)" } : undefined}>{solid ? null : status === "blocked" ? "■" : "●"}</span>; }
+function Chevron({ open }: { open: boolean }) {
+  return <svg className={`disclosure-chevron${open ? " is-open" : ""}`} viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2.5 1.5 5 4 2.5 6.5" /></svg>;
+}
 function RenameInput({ label, commit, cancel }: { label: string; commit: (label: string) => Promise<void>; cancel: () => void }) {
   const [value, setValue] = useState(label);
   const [saving, setSaving] = useState(false);
@@ -196,7 +199,7 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
   const spaceRow = (row: SidebarRow) => {
     const children = rows.filter(r => r.kind === "tab" && r.section === row.id);
     const open = children.some(r => r.id === renaming) || spaceOpen(row, rows, selected, expanded);
-    return <div key={row.id}><button data-space={row.id} className={`sidebar-row space-row ${paneDropRow === `space:${row.id}` ? "drop-above" : ""}`} aria-expanded={open} onClick={() => toggle(foldKey(row), !open)}><span className="label">{row.label}</span><Status solid status={row.status} /><span className="chevron">{open ? "⌄" : "›"}</span></button>{open && children.map(tabRow)}</div>;
+    return <div key={row.id}><button data-space={row.id} className={`sidebar-row space-row ${paneDropRow === `space:${row.id}` ? "drop-above" : ""}`} aria-expanded={open} onClick={() => toggle(foldKey(row), !open)}><span className="label">{row.label}</span><Status solid status={row.status} /><span className="chevron"><Chevron open={open} /></span></button>{open && children.map(tabRow)}</div>;
   };
   const collapseSpacesButton = <button className="spaces-fold-all" aria-label={anySpaceExpanded ? "Collapse all spaces" : "Expand all spaces"} title={anySpaceExpanded ? "Collapse all spaces" : "Expand all spaces"} onClick={toggleAllSpaces}><svg width="12" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={anySpaceExpanded ? "m8 4 4 4 4-4M12 2v6m-4 12 4-4 4 4M12 16v6M4 12h16" : "m8 6 4-4 4 4M12 2v6m-4 10 4 4 4-4M12 16v6M4 12h16"} /></svg></button>;
   return <aside className={`sidebar ${drag ? "pin-dragging" : ""}`}><div className="machine-row" aria-label="Machines">{machines.map(item => <button key={item.name} aria-pressed={item.name === machine.name} onClick={() => chooseMachine(item.name)}><Status solid status={item.state} /><span>{item.name}</span></button>)}</div><div className="areas-mode" aria-label="Sidebar mode">{(["areas", "spaces"] as const).map(value => <button key={value} aria-pressed={mode === value} onClick={() => changeMode(value)}>{value === "areas" ? "Areas" : "Spaces"}</button>)}{mode === "spaces" && rows.some(row => row.kind === "space") && collapseSpacesButton}</div><nav ref={nav}>
@@ -207,7 +210,7 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
         if (!line.tab) return;
         event.preventDefault(); setMenuError(null); setMenu({ line, x: event.clientX, y: event.clientY });
       }}>
-        {line.toggle && <button className="chevron" aria-label={`Fold ${line.title}`} aria-expanded={line.chevron} onClick={() => toggleAreaLine(line.toggle!, !line.chevron)}>{line.chevron ? "⌄" : "›"}</button>}
+        {line.toggle && <button className="chevron" aria-label={`Fold ${line.title}`} aria-expanded={line.chevron} onClick={() => toggleAreaLine(line.toggle!, !line.chevron)}><Chevron open={!!line.chevron} /></button>}
         <button className="select-tab" onClick={event => {
           if (renaming === line.tab) return;
           if (line.kind === "focus") { changeChip("needs"); toggleAreaLine("focus", !focusExpanded); }
@@ -222,11 +225,11 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
       </div>)}
     </> : <>
     {["AGENTS", "PINNED"].map(section => { const items = rows.filter(r => r.section === section); return items.length ? <section key={section}><h2>{section}</h2>{items.filter(r => !r.hidden).map(tabRow)}{section === "AGENTS" && items.some(r => r.hidden) && <>
-      <button data-row="hiddenagents" className="sidebar-row muted hidden-agents" aria-expanded={hiddenAgents} onClick={() => { setHiddenAgents(!hiddenAgents); save("hiddenAgents", !hiddenAgents); }}><span>Hidden</span><span>{items.filter(r => r.hidden).length}</span>{!hiddenAgents && items.some(r => r.hidden && (r.status === "blocked" || r.request != null)) && <span className="hidden-agents-dot" data-dot="accent" />}<span className="chevron">{hiddenAgents ? "▾" : "▸"}</span></button>
+      <button data-row="hiddenagents" className="sidebar-row muted hidden-agents" aria-expanded={hiddenAgents} onClick={() => { setHiddenAgents(!hiddenAgents); save("hiddenAgents", !hiddenAgents); }}><span>Hidden</span><span>{items.filter(r => r.hidden).length}</span>{!hiddenAgents && items.some(r => r.hidden && (r.status === "blocked" || r.request != null)) && <span className="hidden-agents-dot" data-dot="accent" />}<span className="chevron"><Chevron open={hiddenAgents} /></span></button>
       {hiddenAgents && items.filter(r => r.hidden).map(tabRow)}
     </>}</section> : null; })}
     <section className="spaces">{rows.filter(r => r.kind === "space" && !r.hidden).map(spaceRow)}
-    {rows.some(r => r.kind === "space" && r.hidden) && <><button className="sidebar-row muted" aria-expanded={hidden} onClick={() => setHidden(!hidden)}><span className="chevron">{hidden ? "⌄" : "›"}</span>Hidden</button>{(hidden || rows.some(r => r.hidden && r.id === renaming)) && rows.filter(r => r.kind === "space" && r.hidden).map(spaceRow)}</>}
+    {rows.some(r => r.kind === "space" && r.hidden) && <><button className="sidebar-row muted" aria-expanded={hidden} onClick={() => setHidden(!hidden)}><span className="chevron"><Chevron open={hidden} /></span>Hidden</button>{(hidden || rows.some(r => r.hidden && r.id === renaming)) && rows.filter(r => r.kind === "space" && r.hidden).map(spaceRow)}</>}
     </section>
     </>}
   </nav>{menu && <div ref={menuRef} className="pane-menu agent-menu" role="menu" style={{ left: Math.min(menu.x, Math.max(0, window.innerWidth - 180)), top: Math.min(menu.y, Math.max(0, window.innerHeight - 40)) }}>

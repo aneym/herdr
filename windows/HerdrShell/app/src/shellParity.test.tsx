@@ -46,6 +46,8 @@ function sidebar() {
   const { host, root } = mount(); const noop = () => {};
   const rows = [
     { kind: "pinned" as const, id: "p1", label: "Pinned", status: "working", hotkey: null, section: "PINNED" },
+    { kind: "agent" as const, id: "a1", label: "Hidden agent", status: "idle", hotkey: null, section: "AGENTS", hidden: true },
+    { kind: "space" as const, id: "w2", label: "Hidden space", status: "idle", hotkey: null, section: "spaces", hidden: true },
     { kind: "space" as const, id: "w1", label: "recruiting", status: "done", hotkey: null, section: "spaces" },
     { kind: "tab" as const, id: "t1", spaceId: "w1", label: "Lane", status: "working", hotkey: null, section: "w1" },
   ];
@@ -60,10 +62,25 @@ it("paints pinned, group and lane state as token-sized solid elements rather tha
     expect(getComputedStyle(dot).borderRadius).toBe("50%"); expect(getComputedStyle(dot).backgroundColor).not.toBe("transparent");
   }
 });
-it("places the group disclosure chevron after the name and toggles its direction", () => {
+it("draws every sidebar disclosure as a token-sized SVG and rotates it with the fold state", () => {
   const host = sidebar(); const group = host.querySelector<HTMLButtonElement>('[data-space="w1"]')!;
-  expect(group.lastElementChild?.className).toBe("chevron"); expect(group.lastElementChild?.textContent).toBe("⌄");
-  act(() => group.click()); expect(group.lastElementChild?.textContent).toBe("›");
+  expect(group.lastElementChild?.className).toBe("chevron");
+  const checkToggle = (button: HTMLButtonElement) => {
+    const check = () => {
+      const svg = button.querySelector("svg")!;
+      expect(svg).not.toBeNull(); expect(svg.getAttribute("aria-hidden")).toBe("true");
+      expect(button.textContent).not.toMatch(/[⌄›▾▸]/);
+      expect(getComputedStyle(svg).width).toBe("8px"); expect(getComputedStyle(svg).height).toBe("8px");
+      expect(getComputedStyle(svg).transform).toBe(button.getAttribute("aria-expanded") === "true" ? "rotate(90deg)" : "rotate(0deg)");
+    };
+    check(); const before = button.getAttribute("aria-expanded");
+    act(() => button.click()); expect(button.getAttribute("aria-expanded")).not.toBe(before); check();
+  };
+  checkToggle(group);
+  checkToggle(host.querySelector<HTMLButtonElement>('[data-row="hiddenagents"]')!);
+  checkToggle(host.querySelector<HTMLButtonElement>('.spaces > button[aria-expanded]')!);
+  act(() => [...host.querySelectorAll<HTMLButtonElement>(".areas-mode button")].find(button => button.textContent === "Areas")!.click());
+  checkToggle(host.querySelector<HTMLButtonElement>('[aria-label="Fold Focus"]')!);
 });
 it("keeps the Areas/Spaces switch compact and right-aligned beside collapse", () => {
   const host = sidebar(); const mode = host.querySelector<HTMLElement>(".areas-mode")!;
