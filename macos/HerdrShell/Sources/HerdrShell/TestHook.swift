@@ -1041,6 +1041,9 @@ final class TestHook {
             "sidebar": ["orchestrator": rows(c.model.orchestrators), "lanes": rows(c.model.lanes),
                         "workflows": rows(c.model.workflows)],
             "spaces_rows": c.model.spacesRows(state: c.state).map { $0.dump },
+            // The color each spaces row paints its state glyph in (SpacesRowView.tone).
+            "spaces_row_tones": Dictionary(c.model.spacesRows(state: c.state).map { ($0.id, ThemeStore.hex(c.theme.tokens.stateTone($0.tone))) },
+                                           uniquingKeysWith: { a, _ in a }),
             // Each drawn agent face in window points from the top left, the pictures fetched, and the dot colors.
             "face_frames": Dictionary(uniqueKeysWithValues: c.state.rowFrames.filter { $0.key.hasPrefix("face:") }
                 .map { ($0.key, windowFrame($0.value, in: c.sidebarHostView, c)) }),

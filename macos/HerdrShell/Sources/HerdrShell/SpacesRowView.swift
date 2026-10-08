@@ -183,14 +183,7 @@ struct SpacesRowView: View {
     }
 
     /// Status color, as Ghostty: working green, blocked red, done peach, idle and unknown mute.
-    private var tone: Color {
-        switch row.tone {
-        case "working": return t.ok
-        case "blocked": return t.bad
-        case "done": return t.warn
-        default: return t.mute
-        }
-    }
+    private var tone: Color { Color(hex: t.stateTone(row.tone)) }
 
     /// Leading inset: sections sit under the space name, rows under the section label.
     private var indent: CGFloat {

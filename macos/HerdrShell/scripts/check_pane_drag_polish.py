@@ -24,10 +24,10 @@ def settle(ws):
     D.check("chip: glyph follows the sidebar rule (■ blocked or needs, ● otherwise)", chip.get("glyph") == rule
             and chip.get("text") == rule + " " + chip.get("label", ""), json.dumps(chip))
     row = next((r.split("|") for r in state.get("spaces_rows", []) if r.split("|")[1] == "tab:" + tab), None)
-    tone = lambda t: t if t in ("working", "blocked", "done") else "mute"
-    D.check("chip: glyph and tone match the source tab's sidebar row as drawn", row is not None
-            and chip.get("glyph") == row[4] and tone(chip.get("sidebarStatus")) == tone(row[5]),
-            json.dumps([chip.get("glyph"), chip.get("sidebarStatus"), row and row[4:6]]))
+    row_tone = (state.get("spaces_row_tones") or {}).get("tab:" + tab)
+    D.check("chip: glyph and painted tone match the source tab's sidebar row as drawn", row is not None
+            and chip.get("glyph") == row[4] and isinstance(row_tone, str) and chip.get("tone") == row_tone,
+            json.dumps([chip.get("glyph"), chip.get("tone"), row and row[4], row_tone]))
     hairline = D.pd(state).get("hairline")
     D.check("chip: stroke is the hairline token the dump reports", isinstance(hairline, (int, float)) and hairline > 0
             and chip.get("stroke") == hairline, json.dumps([chip.get("stroke"), hairline]))
@@ -88,9 +88,9 @@ def quiet_pending(ws):
     D.hook("hold-drops", on=True)
     D.hook("drop")
     D.wait(lambda s: D.pd(s).get("phase") == "dropping")
-    # `begin` ends the pending drop and only then clears `sent`, so a restore sent while ending it
-    # would be wiped from the log. Judge by what follows: the server's focus after the new drag, and
-    # every send from the new drag on, read once that drag has ended.
+    # `begin` ends the pending drop and only then clears `sent`, so read the append-only `sendLog`:
+    # every call from here on, the quiet end inside `begin` included.
+    mark = max([c.get("seq", 0) for c in D.pd(D.S.state()).get("sendLog") or []], default=0)
     D.hook("begin", pane=x)
     state = D.wait(lambda s: D.pd(s).get("phase") == "lifted")
     D.check("quiet: a new drag during a spring drop keeps the Shell on dest", state.get("selected_tab") == dest,
@@ -99,8 +99,10 @@ def quiet_pending(ws):
     D.hook("cancel", via="esc")
     D.motion("run")
     state = D.wait(D.idle)
-    D.check("quiet: no tab.focus after the new drag, through its end", P.focus_calls(state) == []
-            and state.get("selected_tab") == dest, json.dumps([P.focus_calls(state), state.get("selected_tab")]))
+    since = [c for c in D.pd(state).get("sendLog") or [] if c.get("seq", 0) > mark]
+    focus = [c.get("params", {}).get("tab_id") for c in since if c.get("method") == "tab.focus"]
+    D.check("quiet: no tab.focus from the quiet end through the new drag's end", mark > 0 and focus == []
+            and state.get("selected_tab") == dest, json.dumps([mark, since, state.get("selected_tab")]))
     D.check("quiet: the server keeps dest focused", P.server_focused(ws) == [dest], json.dumps(P.server_focused(ws)))
     D.close(origin)
     D.close(dest)

@@ -46,7 +46,18 @@ final class PaneDrag: NSObject {
     static let replyTimeout: TimeInterval = 4
     private var pointer = CGPoint.zero, start = CGPoint.zero
     private var keyboard = false, keyboardTarget: String?
-    private var sent: [[String: Any]] = []
+    private var sent: [[String: Any]] = [] {
+        // Every call also lands in `sendLog`, which a new drag does not clear, so a check can see what a
+        // drag's end sent even when the next drag begins in the same turn.
+        didSet {
+            guard sent.count > oldValue.count else { return }
+            for call in sent[oldValue.count...] { sendSeq += 1; sendLog.append(call.merging(["seq": sendSeq]) { a, _ in a }) }
+            if sendLog.count > 64 { sendLog.removeFirst(sendLog.count - 64) }
+        }
+    }
+    private var sendLog: [[String: Any]] = [], sendSeq = 0
+    /// The chip glyph's color as last painted (check hook).
+    private var chipPaintedTone: UInt32?
     private var supported: [String: Bool] = [:], probing = Set<String>()
     private var generation = 0, layoutGeneration = 0
     private var cache: [String: CGRect] = [:], rejected = Set<String>()
@@ -146,7 +157,7 @@ final class PaneDrag: NSObject {
         generation += 1; source = pane; originTab = owner.state.selectedTab
         label = owner.host.caps[pane]?.name ?? ""
         sourceGlyph = owner.host.caps[pane]?.glyph ?? .asleep
-        sent = []; lastZone = nil; zone = nil; cache = [:]; rejected = []; inFlight = nil
+        sent = []; chipPaintedTone = nil; lastZone = nil; zone = nil; cache = [:]; rejected = []; inFlight = nil
         pointer = owner.host.convert(point, from: nil); start = pointer
         phase = .pressed; keyboard = false; installMonitor()
     }
@@ -620,8 +631,9 @@ final class PaneDrag: NSObject {
             } ?? [],
             "sidebarZoneFill": PaneDropFill.drawn(in: owner?.sidebarHostView, row: owner?.state.paneDropRow ?? ""),
             "hairline": ShellFace.ring,
-            "chip": ["visible": phase == .lifted || phase == .dropping || phase == .cancelling, "label": label, "text": chipText, "glyph": chipGlyph, "stroke": chipBorder.lineWidth, "sourceState": sourceGlyph.rawValue, "sidebarStatus": sourceGlyph.sidebarStatus],
-            "boxes": boxes.mapValues { [$0.minX, $0.minY, $0.width, $0.height] }, "sent": sent,
+            "chip": ["visible": phase == .lifted || phase == .dropping || phase == .cancelling, "label": label, "text": chipText, "glyph": chipGlyph, "stroke": chipBorder.lineWidth, "sourceState": sourceGlyph.rawValue, "sidebarStatus": sourceGlyph.sidebarStatus,
+                     "tone": chipPaintedTone.map { ThemeStore.hex($0) as Any } ?? NSNull()],
+            "boxes": boxes.mapValues { [$0.minX, $0.minY, $0.width, $0.height] }, "sent": sent, "sendLog": sendLog,
             "frozen": holdsLayout, "replyHeld": heldReply != nil,
             "replies": ["handled": repliesHandled, "ignored": repliesIgnored],
             "motion": ["frozenMs": frozenMs ?? (NSNull() as Any), "reduce": reduce,
@@ -629,15 +641,6 @@ final class PaneDrag: NSObject {
     }
     /// The sidebar row's glyph for the source's state (SpacesTree.statusGlyph), not a set of its own.
     private var chipGlyph: String { SpacesTree.statusGlyph(sourceGlyph.sidebarStatus) }
-    /// The sidebar row's tone (SpacesRowView.tone, Windows `.status`): working ok, blocked bad, done warn, else mute.
-    private func chipColor(_ t: Tokens) -> NSColor {
-        switch sourceGlyph.sidebarStatus {
-        case "working": return NSColor(hex: t.chrome.ok)
-        case "blocked": return NSColor(hex: t.chrome.bad)
-        case "done": return NSColor(hex: t.chrome.warn)
-        default: return NSColor(hex: t.chrome.mute)
-        }
-    }
     private var chipText: String { chipGlyph + " " + label }
     private var zoneFillAlpha: CGFloat {
         owner?.host.tokens.mode == .dark ? ShellMotion.zoneFillAlphaDark : ShellMotion.zoneFillAlphaLight
@@ -685,7 +688,9 @@ final class PaneDrag: NSObject {
             if chipBorder.superlayer == nil { overlay.layer?.addSublayer(chipBorder) }
             CATransaction.commit()
             let attributed = NSMutableAttributedString(string: text, attributes: attrs)
-            attributed.addAttribute(.foregroundColor, value: chipColor(t), range: NSRange(location: 0, length: (chipGlyph as NSString).length))
+            let tone = t.stateTone(sourceGlyph.sidebarStatus)
+            chipPaintedTone = tone
+            attributed.addAttribute(.foregroundColor, value: NSColor(hex: tone), range: NSRange(location: 0, length: (chipGlyph as NSString).length))
             attributed.draw(at: CGPoint(x: r.minX + ShellMotion.chipOffset, y: r.midY - size.height / 2))
             NSGraphicsContext.restoreGraphicsState()
         }

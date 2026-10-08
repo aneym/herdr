@@ -143,6 +143,16 @@ struct Tokens {
     var accent: Color { Color(hex: chrome.accent) }
     var attentionAct: Color { Color(hex: chrome.attentionAct) }
     var bad: Color { Color(hex: chrome.bad) }
+    /// The chrome color a chat's state tone paints in, on a spaces row and on the pane drag chip (Windows
+    /// `.status`): working ok, blocked bad, done warn, anything else mute.
+    func stateTone(_ tone: String) -> UInt32 {
+        switch tone {
+        case "working": return chrome.ok
+        case "blocked": return chrome.bad
+        case "done": return chrome.warn
+        default: return chrome.mute
+        }
+    }
     /// Ink at a few percent: toggle tracks and small tags.
     var tint: Color { ink.opacity(mode == .dark ? 0.055 : 0.045) }
 
