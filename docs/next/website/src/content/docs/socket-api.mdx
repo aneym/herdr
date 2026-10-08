@@ -360,6 +360,10 @@ only pane placed at that tab's own edge). Unchanged calls return the current
 layout. Errors are `pane_not_found` for an unknown source or target pane,
 `tab_not_found` for an unknown target tab, and `pane_layout_unavailable`.
 A changed placement emits `pane.moved` and `layout.updated`.
+Pane drag and move mode in the TUI and the Shells send `pane.place` for edge and
+tab drops, with a dry run for the drop preview, and `pane.swap` for a centre
+drop. Clients offer them only when the server advertises
+`pane.place` in its methods, so an older server keeps working without them.
 
 `pane.zoom` toggles, enables, or disables zoom for the target pane's tab:
 

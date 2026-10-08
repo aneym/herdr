@@ -287,6 +287,7 @@ of a tab (`--tab`), in the same tab or a different one. `--side left` and
 `--side up` put the placed pane first. `--size` is the placed pane's share of
 the new split, clamped to 0.1..0.9; it defaults to 0.5 beside a pane and one
 third at a tab edge. `--dry-run` prints the result without changing anything.
+Focus does not move unless you pass `--focus`.
 The JSON response is under `.result.place`: `changed`, optional `reason`
 (`same_pane`, `zoomed_tab`, `no_change`, or `not_tiled`), `pane_id` after the
 move, `placed_rect`, and `target_layout`. As with `pane move`, a

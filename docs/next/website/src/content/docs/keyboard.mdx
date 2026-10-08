@@ -7,7 +7,7 @@ description: What the prefix is, which bindings to learn first, and how to go pr
 You already know this model. Jump to the [keybinding reference](/docs/configuration/#keybindings) for the full default keymap and config syntax.
 :::
 
-Herdr is mouse-native. You can click panes, tabs, workspaces, and agents, drag split borders, and use right-click menus without learning a single keybinding. Keyboard control is optional.
+Herdr is mouse-native. You can click panes, tabs, workspaces, and agents, drag split borders, drag panes to rearrange them, and use right-click menus without learning a single keybinding. Keyboard control is optional.
 
 ## What the prefix is
 
@@ -38,6 +38,7 @@ Panes:
 | Zoom the focused pane | `prefix+z` |
 | Close pane | `prefix+x` |
 | Swap panes | `prefix+shift+h/j/k/l` |
+| Move mode | `prefix+m` |
 | Resize mode | `prefix+r` |
 | Copy mode | `prefix+[` |
 
@@ -63,6 +64,42 @@ Workspaces and session:
 The full keymap and the binding syntax live in the [keybinding reference](/docs/configuration/#keybindings).
 
 The Goto picker (`prefix+g`) lists each agent or terminal on its own row, grouped by workspace. Split tabs never hide their panes behind another row. Click a row or press Enter to jump directly to it. Press `/` to search names, agent kinds, tabs, workspaces, branches, or paths; use Up/Down or `j/k` to move between rows when not typing a search. Left/Right jumps to the first agent or terminal in the previous/next workspace section, without wrapping. While editing a search, Left/Right moves the text cursor instead. Outside search, `b/w/i/d` filter blocked, working, idle, or done agents, and `a` shows all terminals again. The selected destination's location and path appear below the list. When the list overflows, use the mouse wheel, click the scrollbar track, or drag its thumb to scroll without opening a destination.
+
+## Rearrange panes
+
+Drag a pane by its top border to move it. In the TUI, the grip `⠿⠿` sits in the middle of the top border, and the rest of the top border works too. In the Mac and Windows Shells, drag the pane cap. The TUI needs `ui.mouse_capture`, which is on by default.
+
+While you drag, an outline shows where the pane will land. Where you release decides the result:
+
+| Drop on | Result |
+| --- | --- |
+| The centre of another pane | The two panes swap places. Each position keeps its size. |
+| An edge of another pane | That pane splits. The dragged pane takes half of it, on that side. |
+| The outer edge of the tab | The dragged pane becomes a full-height or full-width strip along that side, one third of the tab. |
+| A tab in the tab bar, or a tab row in the sidebar | The pane moves into that tab, as a strip along its right edge, one third of the tab. |
+| A space header in the sidebar | The pane opens as a new tab in that space. |
+
+Hold the pane over a tab for about half a second to open that tab. The drag continues there, so you can drop the pane on an exact spot in it.
+
+The moved pane takes focus. After a swap, focus stays on the pane you dragged.
+
+To cancel, press Esc, right-click, or release anywhere that is not a target. Nothing changes, and a tab opened during the drag switches back to the tab you started in. There is no undo after a drop; drag the pane back instead.
+
+A pane that is alone in its tab does not drag; drag the tab instead. Panes in a zoomed tab and popup panes do not drag either. A pane cannot move to another machine, so rows from other machines are not targets.
+
+### Move mode
+
+Move mode does the same from the keyboard. Press `prefix+m` in the TUI, `⌥⌘M` in the Mac Shell, or `Ctrl+Alt+M` in the Windows Shell. The focused pane lifts, and the target starts on its nearest neighbour.
+
+| Key | Action |
+| --- | --- |
+| Arrows or `h/j/k/l` | Move the target to the next pane in that direction. Dropping there swaps the two panes. |
+| `Shift+arrow` or `H/J/K/L` | Choose that edge of the target. When the target is the lifted pane itself, this chooses the tab edge on that side. |
+| `[` / `]` | Open the previous / next tab of the workspace and keep moving there |
+| Enter or Space | Drop the pane |
+| Esc | Cancel |
+
+In a tab with only one pane, `prefix+m` shows `nothing to move`. Change the TUI binding with `keys.move_pane_mode` (see [Keybindings](/docs/configuration/#keybindings)). To turn off the drag animations in the TUI, see [Reduce motion](/docs/configuration/#reduce-motion).
 
 ## Editing text fields
 

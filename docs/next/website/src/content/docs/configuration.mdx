@@ -164,6 +164,13 @@ resize_pane_right = "ctrl+shift+alt+right"
 
 Key strings accept plain keys, modifier combinations such as `ctrl+a`, `shift+n`, `alt+1`, `cmd+k`, and special keys such as `enter`, `tab`, `esc`, `left`, `right`, `up`, and `down`. Named punctuation such as `minus`, `comma`, `ampersand`, `plus`, and `backtick` is also accepted. Plain direct printable keys such as `n` are unsafe because they intercept typing; use `prefix+n` unless you intentionally want a direct binding. The `navigate_workspace_*` and `navigate_pane_*` fields are navigate-mode-only and may use plain keys such as `j` or `k`; they must not use `prefix+`, `esc`, `enter`, `tab`, `shift+tab`, `left`, `right`, or unmodified `1` through `9`. Left and right arrows are permanent aliases for pane-left and pane-right navigation. These navigate-mode shortcuts are independent from general action bindings such as `focus_pane_down = "prefix+j"`; when both use the same key, the navigate-mode shortcut wins while navigate mode is open. Alt, Cmd/Super, and punctuation with modifiers depend on your terminal and tmux settings.
 
+`move_pane_mode` (default `prefix+m`) opens move mode, which lifts the focused pane so the keyboard can place it. See [Rearrange panes](/docs/keyboard/#rearrange-panes).
+
+```toml
+[keys]
+move_pane_mode = "prefix+m"
+```
+
 If you have old custom keybindings and want the new defaults, run `herdr config reset-keys`. Herdr backs up `config.toml`, removes `[keys]` and `[[keys.command]]`, and uses built-in v2 defaults after restart or `herdr server reload-config`.
 
 ## Indexed jumps
@@ -348,6 +355,17 @@ status_indicators = "symbols"
 ```
 
 The symbols are static, so this option does not enable spinner animation.
+
+### Reduce motion
+
+When you drag or move a pane in the TUI, the outline glides between targets, a cancelled drag glides back to the pane, and the panes ease into their new places after the drop. Panes also ease into place after any other move or swap, such as one from the keyboard, the CLI, or another client.
+
+```toml
+[ui]
+reduce_motion = true
+```
+
+`reduce_motion` defaults to `false`. When it is `true`, the TUI shows the outline, the cancel, and the settle with no animation; a settle is one short accent outline around each moved pane. The Mac and Windows Shells do not read this key. They follow the operating system's reduce-motion setting.
 
 ### Saved sidebar priority
 
