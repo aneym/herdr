@@ -61,8 +61,7 @@ export class PaneDrag {
     if (this.value.phase === "pressed" && Math.hypot(point.x - this.input!.point.x, point.y - this.input!.point.y) < motion.dragThresholdPx) { this.emit({ pointer: point }); return; }
     const lifting = this.value.phase === "pressed";
     this.row = row; this.emit({ phase: "dragging", pointer: point });
-    // The threshold event lifts the cap; target selection starts on the next move.
-    if (!lifting) this.setZone(this.at(point));
+    this.setZone(this.at(point), false, lifting);
   }
   private at(point: { x: number; y: number }): PaneZone | null {
     if (this.row) return this.row.kind === "tab" ? this.row.tab_id === this.input!.layout.tab_id ? null : { kind: "into_tab", tab_id: this.row.tab_id } : { kind: "new_tab_in", workspace_id: this.row.workspace_id };
@@ -74,14 +73,19 @@ export class PaneDrag {
     if (!edge) this.target = neighbour(this.boxes, this.target!, side) ?? this.target;
     this.setZone(edge ? this.target === this.value.source ? { kind: "tab_edge", side } : { kind: "pane_edge", target: this.target!, side } : this.target === this.value.source ? null : { kind: "centre", target: this.target! });
   }
-  private setZone(zone: PaneZone | null, force = false) {
+  private setZone(zone: PaneZone | null, force = false, deferProbe = false) {
     if (!force && zoneKey(zone) === zoneKey(this.raw)) return;
     this.raw = zone;
     if (!zone || zone.kind === "into_tab" || zone.kind === "new_tab_in") { this.emit({ zone, ghost: null, exact: false, pending: false }); return; }
     if (zone.kind === "centre") { this.emit({ zone, ghost: zoneEstimateRect(this.area(), this.boxes, zone), exact: true, pending: false }); return; }
     const cached = this.cache.get(zoneKey(zone));
     if (cached) { this.answer(zone, cached); return; }
-    this.emit({ zone, ghost: zoneEstimateRect(this.area(), this.boxes, zone), exact: false, pending: true }); this.pump();
+    this.emit({ zone, ghost: zoneEstimateRect(this.area(), this.boxes, zone), exact: false, pending: true });
+    // Select immediately on lift; let a same-event release supersede the preview request.
+    if (deferProbe) {
+      const generation = this.generation;
+      queueMicrotask(() => { if (generation === this.generation) this.pump(); });
+    } else this.pump();
   }
   private place(zone: Exclude<DropZone, { kind: "centre" }>) {
     return { pane_id: this.value.source, target: zone.kind === "pane_edge" ? { type: "pane", pane_id: zone.target } : { type: "tab", tab_id: this.input!.layout.tab_id }, side: zone.side };
@@ -126,6 +130,11 @@ export class PaneDrag {
     return "dropped";
   }
   cancel(): void { ++this.generation; clearTimeout(this.timer); this.cache.clear(); this.flight = false; this.raw = null; this.row = null; this.target = null; this.emit(idle()); }
+  // Only the first server geometry following this client's drop earns a settle.
+  shouldAnimateLayout(layout: Layout | undefined): boolean {
+    return this.value.phase === "dropped" && !!layout && layout.tab_id === this.input?.layout.tab_id
+      && JSON.stringify(layout.panes) !== JSON.stringify(this.input.layout.panes);
+  }
   layoutChanged(layout: Layout | undefined): void {
     if (this.value.phase === "idle") return;
     if (!layout || layout.tab_id !== this.input!.layout.tab_id || !layout.panes.some(p => p.pane_id === this.value.source)) { this.cancel(); return; }
@@ -133,6 +142,6 @@ export class PaneDrag {
     if (this.value.phase === "dropped" || layout.zoomed) { this.cancel(); return; }
     ++this.generation; this.flight = false; this.cache.clear(); this.input = { ...this.input!, layout }; this.rebuild();
     this.emit({ sourceRect: this.boxes.find(p => p.id === this.value.source)!.rect });
-    this.setZone(this.value.keyboard ? this.raw : this.at(this.value.pointer!), true);
+    if (this.value.phase === "dragging") this.setZone(this.value.keyboard ? this.raw : this.at(this.value.pointer!), true);
   }
 }

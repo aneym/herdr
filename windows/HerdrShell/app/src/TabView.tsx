@@ -10,6 +10,7 @@ import type { Divider, ResizeAnswer } from "./dividers";
 import { PaneDrag, canDragPane, probePlace, transitionFor, prefersReducedMotion } from "./paneDrag";
 import type { PaneDragState } from "./paneDrag";
 import { motion } from "./tokens";
+import { clipRect, blockCancelContextMenu } from "./paneClip";
 export default function TabView({ snapshot, selected, machine, focused, onFocus, shortcut, register, pin, onError, registerDrag, onDragChange, online = true }: { online?: boolean; registerDrag?: (drag: PaneDrag | null, lift?: () => boolean) => void; onDragChange?: (state: PaneDragState) => void; snapshot: Snapshot; selected: string | null; machine: string; focused: string | null; onFocus: (id: string) => void; shortcut: (event: KeyboardEvent) => boolean; register: (id: string, value: PaneController | null) => void; pin: (id: string, pinned: boolean) => void; onError?: (error: unknown) => void }) {
   const host = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -112,6 +113,8 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
     return () => { paneStop.current?.(); paneDrag.cancel(); registerDrag?.(null); };
   }, [paneDrag, registerDrag]);
   const paneStop = useRef<(() => void) | null>(null);
+  const contextStop = useRef<(() => void) | null>(null);
+  useEffect(() => () => contextStop.current?.(), []);
   useEffect(() => { if (paneState?.phase === "idle") paneStop.current?.(); }, [paneState?.phase]);
   const capPress = (event: ReactPointerEvent<HTMLDivElement>, id: string, label: string) => {
     if (event.button !== 0 || !layout || resizer.busy || !host.current) return;
@@ -128,7 +131,7 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
     const done = () => { window.removeEventListener("pointermove", move, true); window.removeEventListener("pointerup", up, true); window.removeEventListener("pointercancel", cancel, true); window.removeEventListener("pointerdown", right, true); window.removeEventListener("contextmenu", context, true); paneStop.current = null; try { el.releasePointerCapture(event.pointerId); } catch { /* Already released. */ } };
     const up = (e: PointerEvent) => { if (e.button !== 0) return; const result = paneDrag.release(); done(); if (result !== "click") { e.preventDefault(); e.stopPropagation(); } };
     const cancel = () => { paneDrag.cancel(); done(); };
-    const right = (e: PointerEvent) => { if (e.button === 2) { e.preventDefault(); e.stopPropagation(); cancel(); } };
+    const right = (e: PointerEvent) => { if (e.button === 2) { e.preventDefault(); e.stopPropagation(); contextStop.current?.(); contextStop.current = blockCancelContextMenu(window); cancel(); } };
     const context = (e: Event) => { e.preventDefault(); };
     window.addEventListener("pointermove", move, true); window.addEventListener("pointerup", up, true); window.addEventListener("pointercancel", cancel, true); window.addEventListener("pointerdown", right, true); window.addEventListener("contextmenu", context, true); paneStop.current = done;
   };
@@ -141,7 +144,7 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
   const tab = snapshot.tabs?.find(t => t.tab_id === selected);
   return <main ref={host} className={`tab-view ${paneState?.phase === "dragging" ? "pane-dragging" : ""}`}>{panes.map((pane, index) => {
     const box = boxes[index];
-    return <PaneClip key={`${selected}:${pane.terminal_id}`} id={pane.pane_id} box={box} lifted={paneState?.source === pane.pane_id && ["dragging", "dropped"].includes(paneState.phase)}>{settling => <PaneSurface settling={settling} grabbable={canDragPane(layout, supported)} onCapPointerDown={event => capPress(event, pane.pane_id, pane.title ?? pane.agent ?? "shell")} onError={onError} hasAgent={!!pane.agent || !!snapshot.agents?.some(a => a.pane_id === pane.pane_id && a.agent)} pane={pane} machine={machine} focused={focused === pane.pane_id} onFocus={onFocus} shortcut={shortcut} register={register} {...(index === corner && tab ? { pinned: tab.pin_index != null, onPin: () => pin(tab.tab_id, tab.pin_index == null) } : {})} />}</PaneClip>;
+    return <PaneClip key={`${selected}:${pane.terminal_id}`} id={pane.pane_id} box={clipRect(box, size)} animateLayout={paneDrag.shouldAnimateLayout(layout)} lifted={paneState?.source === pane.pane_id && ["dragging", "dropped"].includes(paneState.phase)}>{settling => <PaneSurface settling={settling} grabbable={canDragPane(layout, supported)} onCapPointerDown={event => capPress(event, pane.pane_id, pane.title ?? pane.agent ?? "shell")} onError={onError} hasAgent={!!pane.agent || !!snapshot.agents?.some(a => a.pane_id === pane.pane_id && a.agent)} pane={pane} machine={machine} focused={focused === pane.pane_id} onFocus={onFocus} shortcut={shortcut} register={register} {...(index === corner && tab ? { pinned: tab.pin_index != null, onPin: () => pin(tab.tab_id, tab.pin_index == null) } : {})} />}</PaneClip>;
   })}{layout && lines.map(d => {
     const r = scaleRect({ x: d.vertical ? d.pos : d.splitRect.x, y: d.vertical ? d.splitRect.y : d.pos, width: d.vertical ? 0 : d.splitRect.width, height: d.vertical ? d.splitRect.height : 0 }, layout.area, size.width, size.height);
     // The 1 px gap between panes sits just before the line; the grab strip centres on it.
@@ -151,7 +154,7 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
 }
 
 // Animate the clip only: terminal content takes its final size without scaling glyphs.
-function PaneClip({ id, box, lifted, children }: { id: string; box: Rect; lifted: boolean; children: (settling: boolean) => React.ReactNode }) {
+export function PaneClip({ id, box, lifted, animateLayout, children }: { id: string; box: Rect; lifted: boolean; animateLayout: boolean; children: (settling: boolean) => React.ReactNode }) {
   const clip = useRef<HTMLDivElement>(null);
   const previous = useRef(box);
   const [frame, setFrame] = useState(box);
@@ -160,6 +163,7 @@ function PaneClip({ id, box, lifted, children }: { id: string; box: Rect; lifted
   useLayoutEffect(() => {
     const old = previous.current; previous.current = box;
     if (JSON.stringify(old) === JSON.stringify(box)) return;
+    if (!animateLayout) { setFrame(box); setAnimate(false); setSettling(false); return; }
     if (prefersReducedMotion()) {
       setFrame(box); setAnimate(true);
       clip.current?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: motion.reducedFadeMs });
