@@ -2183,6 +2183,14 @@ impl ClientShellState {
                 Some(_) => {}
             }
         }
+        if let Some(preview) = self.pane_drag.as_mut() {
+            if snapshot.focused_tab_id.as_ref() == Some(&preview.current_tab_id) {
+                // The latest spring focus is acknowledged. Earlier tabs no longer
+                // belong to an in-flight request and cannot mask foreign focus.
+                preview.requested_tabs.clear();
+                preview.requested_tabs.push(preview.current_tab_id.clone());
+            }
+        }
         if matches!(&self.chrome_drag, Some(ClientChromeDrag::Pane { source_pane_id, origin_tab_id, .. })
             if !snapshot.focused_tab_id.as_ref().is_some_and(|tab| self.pane_drag.as_ref().map_or(tab == origin_tab_id, |p| p.requested_tabs.contains(tab)))
                 || !snapshot.panes.iter().any(|p| &p.pane_id == source_pane_id))
