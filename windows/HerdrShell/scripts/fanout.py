@@ -84,26 +84,26 @@ def run_pass(state):
     if decide(state, sha, False, None) == 'skip':
         log(f'unchanged {sha}')
         return 0
-    status = subprocess.run([sys.executable, str(pc.HERE / 'pc.py'), 'status'],
-                            capture_output=True, text=True, timeout=120)
-    if status.returncode:
-        raise RuntimeError(f'PC status failed ({status.returncode})')
-    game = json.loads(status.stdout)['game']['game']
-    if not isinstance(game, bool):
-        raise ValueError('PC game status is not boolean')
-    if decide(state, sha, game, None) == 'wait':
-        log('game running; retry next tick')
-        return 0
     # Build the shell-touching commit, not an unrelated newer main commit.
     git('checkout', '--detach', sha)
     # App Control on the PC blocks local cargo builds; a GitHub Windows runner
-    # builds it and the PC only receives the files.
-    log(f'building {sha}')
-    result = subprocess.run([sys.executable, str(pc.HERE / 'pc.py'),
-                             'fetch', '--sha', sha, '--dispatch'],
-                            capture_output=True, text=True, timeout=3900)
-    if result.returncode:
-        raise RuntimeError(f'off-PC build or fetch failed ({result.returncode})')
+    # builds it and the PC only receives the files. Copying files is safe
+    # during a game, so the fetch never waits on the guard.
+    if state.get('fetched') != sha:
+        log(f'building {sha}')
+        result = subprocess.run([sys.executable, str(pc.HERE / 'pc.py'),
+                                 'fetch', '--sha', sha, '--dispatch'],
+                                capture_output=True, text=True, timeout=3900)
+        if result.returncode:
+            raise RuntimeError(f'off-PC build or fetch failed ({result.returncode})')
+        state.update(fetched=sha)
+        write_state(state)
+    # Only game_guard.ps1 here: it runs in the ssh session and never touches
+    # Alex's desktop. Staging is a gated helper and waits for the game to end.
+    game, _ = pc.guard(quiet=True)
+    if decide(state, sha, game, None) == 'wait':
+        log(f'fetched {sha}; game running, staging next tick')
+        return 0
     rc = pc.scp_to(pc.HERE / 'pc/stage.ps1', f'{pc.R_SCRIPTS}/stage.ps1')
     if rc:
         raise RuntimeError(f'stage helper upload failed ({rc})')

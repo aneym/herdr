@@ -385,11 +385,10 @@ def launch_app(args):
     if game:
         print("game running; not launching (exit 75)", file=sys.stderr)
         sys.exit(75)
-    idle = refresh_idle()
-    idle_s = idle.get("idle_s")
     # --test-window opens off every monitor without focus, so it may run while Alex is active.
-    if (idle_s is None or idle_s < 300) and not args.test_window:
-        if not args.force_idle:
+    if not args.test_window and not args.force_idle:
+        idle_s = refresh_idle().get("idle_s")
+        if idle_s is None or idle_s < 300:
             print(f"idle_s={idle_s} (<300 or unknown); not launching (exit 75)", file=sys.stderr)
             sys.exit(75)
     rc, out = ps_file("status.ps1")
@@ -409,10 +408,12 @@ def launch_app(args):
     return rc
 
 
-def cmd_status(_args):
+def cmd_status(args):
     bootstrap()
     game, gdata = guard(quiet=True)
-    idle = refresh_idle()
+    # The idle probe runs a task in Alex's session; never during a game, and
+    # only on request, so polls cannot touch his desktop.
+    idle = refresh_idle() if getattr(args, "idle", False) and not game else {}
     rc, out = ps_file("status.ps1")
     app = {}
     try:
@@ -462,7 +463,9 @@ def main():
     p.add_argument("--out", required=True)
     p.set_defaults(fn=cmd_shot)
 
-    p = sub.add_parser("status", help="game + idle + app status as JSON")
+    p = sub.add_parser("status", help="game + app status as JSON (idle with --idle)")
+    p.add_argument("--idle", action="store_true",
+                   help="also probe Alex's idle time (runs a task in his session; skipped during a game)")
     p.set_defaults(fn=cmd_status)
 
     args = ap.parse_args()
