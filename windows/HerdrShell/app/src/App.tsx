@@ -2,10 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { cycleMachine } from "./machines";
 import { bridge } from "./bridge";
-import { attentionTransition, observeActiveAttention } from "./notify";
-import { isTauri } from "@tauri-apps/api/core";
-import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
-import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import type { MachineStatus } from "./bridge";
 import { buildSidebar, pinCount, selectionAfterClose, tabOrder } from "./model";
 import type { SidebarRow, Snapshot } from "./model";
@@ -32,7 +28,7 @@ import "./tokens.css";
 import "./styles.css";
 import type { PaneDrag, PaneDragState } from "./paneDrag";
 interface ViewSelection { selected: string | null; focused: string | null }
-// Resolve restoration before the observer runs, using the same row policy as MachineView.
+// Resolve saved selection using the same row policy as later snapshot updates.
 function restoredSelection(snapshot: Snapshot, selected: string | null): string | null {
   const rows = buildSidebar(snapshot);
   if (selected && tabOrder(rows).includes(selected)) return selected;
@@ -46,31 +42,10 @@ export default function App() {
   const attentionSnapshots = useRef<Record<string, Snapshot>>({});
   const [snapshots, setSnapshots] = useState<Record<string, Snapshot>>({});
   const selections = useRef(new Map<string, ViewSelection>());
-  const [, selectionChanged] = useState(0);
   const onSelection = useCallback((machine: string, tab: string | null) => {
     const previous = selections.current.get(machine);
     if (previous?.selected === tab) return;
     selections.current.set(machine, { selected: tab, focused: previous?.focused ?? null });
-    selectionChanged(value => value + 1);
-  }, []);
-  const [windowFocused, setWindowFocused] = useState(() => document.hasFocus());
-  const attention = useRef(false);
-  const updateAttention = useCallback((needsAttention: boolean) => {
-    const action = attentionTransition(attention.current, needsAttention);
-    attention.current = needsAttention;
-    if (action && isTauri()) {
-      // Windows uses quiet taskbar attention instead of the Mac's red Dock count.
-      void getCurrentWindow().requestUserAttention(action === "request" ? UserAttentionType.Informational : null).catch(error => console.warn("Taskbar attention failed", error));
-    }
-  }, []);
-  useEffect(() => {
-    if (!isTauri()) return;
-    let disposed = false;
-    let unlisten: (() => void) | undefined;
-    const window = getCurrentWindow();
-    void window.onFocusChanged(({ payload }) => { if (!disposed) setWindowFocused(payload); }).then(fn => { if (disposed) fn(); else unlisten = fn; });
-    void window.isFocused().then(focused => { if (!disposed) setWindowFocused(focused); });
-    return () => { disposed = true; unlisten?.(); };
   }, []);
   const control = useRef<(() => ControlState) | null>(null);
   useEffect(() => installControl(() => {
@@ -141,7 +116,7 @@ export default function App() {
     }
   }, [machines, active, loaded]);
   const machine: MachineStatus = machines.find(m => m.name === active) ?? { name: active, state: loaded ? "down" : "connecting", error: loaded ? "Machine unavailable" : undefined };
-  return <><AttentionObserver machine={machine} snapshots={snapshots} selected={restoredSelection(snapshots[active] ?? {}, selections.current.get(active)?.selected ?? null)} windowFocused={windowFocused} updateAttention={updateAttention} /><MachineView attentionTrails={attentionTrails} key={active} machine={machine} machines={machines} snapshot={snapshots[active] ?? {}} chooseMachine={chooseMachine} selections={selections.current} control={control} onSelection={onSelection} /></>;
+  return <MachineView attentionTrails={attentionTrails} key={active} machine={machine} machines={machines} snapshot={snapshots[active] ?? {}} chooseMachine={chooseMachine} selections={selections.current} control={control} onSelection={onSelection} />;
 }
 function MachineView({ attentionTrails, machine, machines, snapshot, chooseMachine, selections, control, onSelection }: { attentionTrails: MutableRefObject<Record<string, string[]>>; machine: MachineStatus; machines: MachineStatus[]; snapshot: Snapshot; chooseMachine: (name: string) => MachineStatus; selections: Map<string, ViewSelection>; control: MutableRefObject<(() => ControlState) | null>; onSelection: (machine: string, tab: string | null) => void }) {
   const [selected, setSelected] = useState<string | null>(() => restoredSelection(snapshot, selections.get(machine.name)?.selected ?? null));
@@ -333,28 +308,3 @@ function MachineView({ attentionTrails, machine, machines, snapshot, chooseMachi
 }
 
 // Only the displayed machine supplies notifications, like the Mac model.snapshot.
-function AttentionObserver({ machine, snapshots, selected, windowFocused, updateAttention }: { machine: MachineStatus; snapshots: Record<string, Snapshot>; selected: string | null; windowFocused: boolean; updateAttention: (attention: boolean) => void }) {
-  const catalog = useLaneFiles(machine.name, machine.state === "up");
-  const previous = useRef<{ machine: string; snapshot: Snapshot }>();
-  const lastSent = useRef<Record<string, number>>({});
-  // Serialize permission prompting and delivery so a burst cannot open multiple prompts.
-  const delivery = useRef(Promise.resolve());
-  useEffect(() => {
-    const snapshot = snapshots[machine.name];
-    const now = Date.now();
-    const result = observeActiveAttention(previous.current?.machine === machine.name ? previous.current.snapshot : undefined, snapshots, machine.name, selected, windowFocused, new Set(Object.keys(catalog.parked)), Object.fromEntries(Object.entries(lastSent.current).filter(([key]) => key.startsWith(`${machine.name}:`)).map(([key, value]) => [key.slice(machine.name.length + 1), value])), now);
-    previous.current = snapshot ? { machine: machine.name, snapshot } : undefined;
-    updateAttention(result.attention);
-    for (const note of result.notifications) {
-      lastSent.current[`${machine.name}:${note.tab}`] = now;
-      if (!isTauri()) continue; // Browser checks must not raise a host OS banner.
-      delivery.current = delivery.current.then(async () => {
-        if (!await isPermissionGranted() && await requestPermission() !== "granted") return;
-        // Tauri notification action callbacks are mobile-only; Windows cannot select a tab on click.
-        sendNotification({ title: note.title, body: note.body });
-      }).catch(error => console.warn("Notification delivery failed", error));
-    }
-  }, [snapshots, selected, windowFocused, catalog, machine.name, updateAttention]);
-  useEffect(() => () => updateAttention(false), [updateAttention]);
-  return null;
-}
