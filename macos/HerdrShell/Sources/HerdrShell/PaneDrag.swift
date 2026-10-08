@@ -20,11 +20,14 @@ final class PaneDrag: NSObject {
     private(set) var phase: Phase = .idle
     private var source: String?, originTab: String?, label = ""
     private var sourceGlyph: ShellState = .asleep
+    private var sidebarGlyph: String?
     private var lastHostSize = CGSize.zero
     private var zone: Zone?, lastZone: Zone?
     /// Check hook only (check_pane_drag_end.py): hold a drop's call before it is sent, as a slow link would, until
     /// `sendHeldDrop()`. Snapshots keep arriving meanwhile.
     var holdDrops = false
+    /// Inject a failed network edge without sending a mutation (check hook only).
+    var failNextDrop = false
     private var heldDrop: (() -> Void)?
     /// Check hook only: hold a drop's reply once it is in, until `sendHeldReply()`, so the drop's own snapshot can land
     /// first. A held reply outlives the drop's end, so a check can deliver it late.
@@ -142,6 +145,7 @@ final class PaneDrag: NSObject {
         generation += 1; source = pane; originTab = owner.state.selectedTab
         label = owner.host.caps[pane]?.name ?? ""
         sourceGlyph = owner.host.caps[pane]?.glyph ?? .asleep
+        sidebarGlyph = owner.model.spacesRows(state: owner.state).first { $0.tab == originTab && !$0.glyph.isEmpty }?.glyph
         sent = []; lastZone = nil; zone = nil; cache = [:]; rejected = []; inFlight = nil
         pointer = owner.host.convert(point, from: nil); start = pointer
         phase = .pressed; keyboard = false; installMonitor()
@@ -299,8 +303,10 @@ final class PaneDrag: NSObject {
                 guard let self, self.generation == gen, self.phase == .dropping, self.heldReply?.generation != gen else { return }
                 self.cancel()
             }
+            let failTransport = self.failNextDrop
+            self.failNextDrop = false
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                let reply = commands.paneDragCall(method, p)
+                let reply = failTransport ? nil : commands.paneDragCall(method, p)
                 let refused = PaneDrag.refused(reply)
                 DispatchQueue.main.async {
                     guard let self else { return }
@@ -315,8 +321,8 @@ final class PaneDrag: NSObject {
                         // With no reply at all the server may still have applied it: end without a rollback.
                         if reply?["result"] == nil { self.cancel(); return }
                         let buffered = self.unfreeze()
-                        self.settle()
                         self.owner?.applyDropReply(PaneDrag.layouts(reply), buffered: buffered)
+                        self.settle()
                         self.owner?.focusPane(source)
                         self.draw()
                     }
@@ -357,6 +363,7 @@ final class PaneDrag: NSObject {
         if phase == .dropping {
             generation += 1; inFlight = nil
             let frozen = holdsLayout
+            if sprung, let originTab, owner?.state.selectedTab != originTab { focusSpringTab(originTab) }
             _ = unfreeze(); finish()
             // The buffered snapshot shows as it is.
             if frozen { owner?.refreshHost() }
@@ -515,7 +522,13 @@ final class PaneDrag: NSObject {
     @objc private func tick() {
         evaluateDwell()
         draw()
-        if frozenMs == nil { motions.removeAll { elapsed($0) >= $0.duration } }
+        if frozenMs == nil {
+            // Retain the completed ghost fade until the last moving surface ends. Removing it
+            // at fadeMs would paint alpha 1 again for the rest of the 200 ms settle.
+            let ended = motions.allSatisfy { elapsed($0) >= $0.duration }
+            motions.removeAll { elapsed($0) >= $0.duration && !($0.pane == nil && $0.kind == "fade" && phase == .settling) }
+            if ended && phase == .settling { finish(); return }
+        }
         if motions.isEmpty && dwell == nil {
             link?.invalidate(); link = nil
             if phase == .cancelling || phase == .settling { finish() }
@@ -544,11 +557,14 @@ final class PaneDrag: NSObject {
             if m.kind == "cancel", !reduce { pointer = interpolate(m.from, m.to, progress(m)).origin }
         }
         boxes = drawn
+        let moving = Set(motions.compactMap { ($0.kind == "settle" || $0.kind == "crossfade") ? $0.pane : nil })
         for (pane, box) in drawn {
             let crossfade = motions.first { $0.pane == pane && $0.kind == "crossfade" }
             let alpha = crossfade.map { ease(elapsed($0) / $0.duration) } ?? 1
-            owner.host.drawBox(pane, rect: box, opacity: alpha * sourceOpacity(pane))
+            owner.host.drawBox(pane, rect: box, opacity: alpha * sourceOpacity(pane), moving: moving.contains(pane))
         }
+        overlay.wantsLayer = true
+        overlay.layer?.zPosition = 2
         overlay.frame = owner.host.bounds
         owner.host.addSubview(overlay, positioned: .above, relativeTo: nil)
         overlay.needsDisplay = true
@@ -589,12 +605,35 @@ final class PaneDrag: NSObject {
         return ["phase": phase.rawValue, "source": source ?? (NSNull() as Any), "zone": zone?.json ?? (NSNull() as Any),
             "lastZone": lastZone?.json ?? (NSNull() as Any), "ghostRect": rect(ghost), "ghostTarget": rect(ghostTarget),
             "ghostSource": ghostSource, "dryRunPending": inFlight != nil, "placeSupported": placeSupported,
-            "chip": ["visible": phase == .lifted || phase == .dropping || phase == .cancelling, "label": label],
+            "ghostAlpha": ghostAlpha,
+            "sidebarZoneFill": ["row": owner?.state.paneDropRow ?? "", "alpha": zoneFillAlpha],
+            "hairline": ShellFace.ring,
+            "chip": ["visible": phase == .lifted || phase == .dropping || phase == .cancelling, "label": label, "text": chipText, "glyph": chipGlyph, "stroke": ShellFace.ring],
             "boxes": boxes.mapValues { [$0.minX, $0.minY, $0.width, $0.height] }, "sent": sent,
             "frozen": holdsLayout, "replyHeld": heldReply != nil,
             "replies": ["handled": repliesHandled, "ignored": repliesIgnored],
             "motion": ["frozenMs": frozenMs ?? (NSNull() as Any), "reduce": reduce,
                        "active": motions.map { ["pane": $0.pane ?? (NSNull() as Any), "kind": $0.kind, "elapsedMs": elapsed($0)] }]]
+    }
+    private var chipGlyph: String {
+        if let sidebarGlyph { return sidebarGlyph }
+        switch sourceGlyph {
+        case .working: return "●"
+        case .needs: return "◐"
+        case .blocked: return "✕"
+        case .idle: return "○"
+        case .asleep: return "·"
+        case .done: return "✓"
+        }
+    }
+    private var chipText: String { chipGlyph + " " + label }
+    private var zoneFillAlpha: CGFloat {
+        owner?.host.tokens.mode == .dark ? ShellMotion.zoneFillAlphaDark : ShellMotion.zoneFillAlphaLight
+    }
+    private var ghostAlpha: CGFloat {
+        guard ghost != nil, phase == .lifted || phase == .dropping || phase == .settling else { return 0 }
+        guard phase == .settling, let fade = motions.first(where: { $0.pane == nil && $0.kind == "fade" }) else { return 1 }
+        return 1 - ease(elapsed(fade) / fade.duration)
     }
     fileprivate func paint() {
         guard let owner else { return }
@@ -608,9 +647,9 @@ final class PaneDrag: NSObject {
         let endingAlpha = ending.map { 1 - ease(elapsed($0) / $0.duration) } ?? 1
         if let ghost, phase == .lifted || phase == .dropping || phase == .settling {
             NSGraphicsContext.saveGraphicsState()
-            NSGraphicsContext.current?.cgContext.setAlpha(endingAlpha)
+            NSGraphicsContext.current?.cgContext.setAlpha(ghostAlpha)
             let p = NSBezierPath(roundedRect: ghost.insetBy(dx: ShellMotion.zoneInset, dy: ShellMotion.zoneInset), xRadius: ShellRadius.control, yRadius: ShellRadius.control)
-            t.accentNS.withAlphaComponent(t.mode == .dark ? ShellMotion.zoneFillAlphaDark : ShellMotion.zoneFillAlphaLight).setFill(); p.fill()
+            t.accentNS.withAlphaComponent(zoneFillAlpha).setFill(); p.fill()
             t.accentNS.setStroke(); p.lineWidth = ShellMotion.zoneStroke; p.stroke()
             NSGraphicsContext.restoreGraphicsState()
         }
@@ -619,14 +658,14 @@ final class PaneDrag: NSObject {
             let fade = motions.first { $0.pane == source && $0.kind == "fade" }
             let alpha = phase == .cancelling ? endingAlpha : fade.map { ease(elapsed($0) / $0.duration) } ?? 1
             NSGraphicsContext.current?.cgContext.setAlpha(alpha)
-            let text = sourceGlyph.rawValue + " · " + label
+            let text = chipText
             let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: ShellType.rowTitle), .foregroundColor: t.inkNS]
             let size = (text as NSString).size(withAttributes: attrs)
             let r = CGRect(x: pointer.x + ShellMotion.chipOffset, y: pointer.y + ShellMotion.chipOffset,
                            width: size.width + ShellMotion.chipOffset * 2, height: ShellSpace.paneCapHeight)
             NSColor(hex: t.chrome.panel).setFill(); NSBezierPath(roundedRect: r, xRadius: ShellRadius.control, yRadius: ShellRadius.control).fill()
             NSColor(hex: t.chrome.line).setStroke(); let border = NSBezierPath(roundedRect: r, xRadius: ShellRadius.control, yRadius: ShellRadius.control)
-            border.lineWidth = ShellMotion.zoneStroke; border.stroke()
+            border.lineWidth = ShellFace.ring; border.stroke()
             (text as NSString).draw(at: CGPoint(x: r.minX + ShellMotion.chipOffset, y: r.midY - size.height / 2), withAttributes: attrs)
             NSGraphicsContext.restoreGraphicsState()
         }

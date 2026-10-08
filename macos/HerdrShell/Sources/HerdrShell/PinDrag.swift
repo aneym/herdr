@@ -187,8 +187,15 @@ private struct PinDragRow: ViewModifier {
 
     func body(content: Content) -> some View {
         let isDragged = drag.dragged == row.id
-        let line: Edge? = paneDropTarget ? .below : insertion
+        let line: Edge? = paneDropTarget ? nil : insertion
         return content
+            .overlay {
+                if paneDropTarget {
+                    RoundedRectangle(cornerRadius: ShellRadius.row)
+                        .fill(t.accent.opacity(t.mode == .dark ? ShellMotion.zoneFillAlphaDark : ShellMotion.zoneFillAlphaLight))
+                        .allowsHitTesting(false)
+                }
+            }
             .overlay(alignment: line == .above ? .top : .bottom) {
                 if line != nil {
                     Rectangle().fill(t.mute.opacity(0.7)).frame(height: 1.5)

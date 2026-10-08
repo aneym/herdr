@@ -588,6 +588,7 @@ final class TestHook {
             paneDragPoint = end
             if obj["drop"] as? Bool == true { post(.leftMouseUp, end) }
         case "drop": post(.leftMouseUp, paneDragPoint)
+        case "fail-next-drop": c.paneDrag.failNextDrop = true
         case "hold-drops": c.paneDrag.holdDrops = obj["on"] as? Bool ?? true
         case "send-drop": c.paneDrag.sendHeldDrop()
         case "hold-replies": c.paneDrag.holdReplies = obj["on"] as? Bool ?? true

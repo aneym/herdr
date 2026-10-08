@@ -102,7 +102,7 @@ final class PaneHostView: NSView {
                       width: r.width * sx - gapL, height: r.height * sy - gapT).integral
     }
     /// Change origin and clip only; terminal size is established by layout().
-    func drawBox(_ pane: String, rect: NSRect, opacity: CGFloat) {
+    func drawBox(_ pane: String, rect: NSRect, opacity: CGFloat, moving: Bool = false) {
         guard let (surface, r) = rects.first(where: { $0.0.paneId == pane }) else { return }
         let final = boxRect(r), capH = min(ShellSpace.paneCapHeight, final.height)
         capHosts[pane]?.setFrameOrigin(rect.origin)
@@ -110,6 +110,9 @@ final class PaneHostView: NSView {
         chatViews[pane]?.setFrameOrigin(surface.frame.origin)
         for view in [surface as NSView, capHosts[pane], chatViews[pane]].compactMap({ $0 }) {
             view.wantsLayer = true; view.alphaValue = opacity
+            // Back moving terminal glyphs with opaque pane paint, above the static panes.
+            view.layer?.backgroundColor = moving ? NSColor(hex: tokens.terminalBg).cgColor : nil
+            view.layer?.zPosition = moving ? 1 : 0
             if rect == final {
                 view.layer?.mask = nil
                 continue
