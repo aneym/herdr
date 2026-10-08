@@ -1,0 +1,90 @@
+{
+  "overlay": {
+    "generated_at": "2026-10-08T14:00:00Z",
+    "hosts": [
+      {
+        "name": "studio",
+        "summary": "ready",
+        "usage": {
+          "state": "idle",
+          "age_s": 2,
+          "cpu_pct": 12
+        }
+      }
+    ]
+  },
+  "boxes": {
+    "boxes": [
+      {
+        "name": "studio",
+        "kind": "mac",
+        "sessions": 2,
+        "checks": 4
+      }
+    ]
+  },
+  "poolState": {
+    "drained": [
+      "studio"
+    ],
+    "drained_why": {
+      "studio": "maintenance"
+    }
+  },
+  "disk": {
+    "studio": {
+      "status": "ok",
+      "last_run": {
+        "free_gib": 123.4
+      }
+    }
+  },
+  "pools": {
+    "pools": [
+      {
+        "id": "sol",
+        "provider": "openai",
+        "usableAccounts": 2,
+        "totalAccounts": 3,
+        "fiveHourRemainingPercent": 75,
+        "weeklyRemainingPercent": 60,
+        "weeklyPacePercent": 80
+      }
+    ]
+  },
+  "poolsInterval": 60,
+  "routing": {
+    "ladder_mode": "interim",
+    "interim_ladder": {
+      "mechanical": [
+        "sol-low"
+      ],
+      "implement": [
+        {
+          "model": "sol",
+          "effort": "medium"
+        }
+      ]
+    }
+  },
+  "decider": {
+    "decider": "opus",
+    "policy": "room",
+    "version": 3
+  },
+  "picks": {
+    "implement": "sol selected"
+  },
+  "flights": [
+    {
+      "run_id": "p9",
+      "name": "Factory parity",
+      "lane": "parity",
+      "tab": "t9",
+      "host": "studio",
+      "started": "2026-10-08T14:00:00Z",
+      "headless": true
+    }
+  ],
+  "landed": "abc123\t1791468000\tfeat: previous slice"
+}
