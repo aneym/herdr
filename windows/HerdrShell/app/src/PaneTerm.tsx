@@ -9,7 +9,7 @@ import { installLinks, RESOLVE_MS } from "./links";
 import type { LinkRegion } from "./links";
 import type { Mode } from "./bridge";
 import type { Pane } from "./model";
-import { paste, controlKey, handleKey } from "./keys";
+import { paste, pasteImage, controlKey, handleKey } from "./keys";
 import { PaneCopy, ordered } from "./termCopy";
 import type { Cell } from "./termCopy";
 import { terminalFont } from "./tokens";
@@ -18,6 +18,7 @@ import { appTheme, terminalThemes } from "./theme";
 export interface PaneController {
   linkClick: (row: number, col: number, ctrl: boolean) => Promise<string | null>;
   copySelection: (from: Cell, to: Cell) => Promise<{ text: string; copied: boolean }>;
+  pasteImage?: (pngBase64: string) => Promise<void>;
   chat?: (mode: "terminal" | "chat") => Promise<{ ok: boolean; items: number }>;
   toggleChat?: () => void;
   info: () => { pane_id: string; terminal_id: string; mode: "attach" | "observe" | "closed"; cols: number; rows: number; focused: boolean; background?: string };
@@ -206,6 +207,7 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
         } finally { try { term.clearSelection(); } finally { hookCopier.clear(); } }
       }),
       type: send,
+      pasteImage: image => pasteImage(term, image, machine),
       read: () => Array.from({ length: term.rows }, (_, i) => term.buffer.active.getLine(term.buffer.active.viewportY + i)?.translateToString(true) ?? "").join("\n"),
       key: async value => {
         capture = [];

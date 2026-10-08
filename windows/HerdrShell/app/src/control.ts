@@ -1,3 +1,4 @@
+import { flushSync } from "react-dom";
 import { showUpdateError } from "./UpdatePill";
 import { bridge } from "./bridge";
 import type { DocsState } from "./docs";
@@ -8,7 +9,7 @@ import type { PaneController } from "./PaneTerm";
 import { appTheme } from "./theme";
 import type { Appearance } from "./theme";
 import type { PaneDrag } from "./paneDrag";
-export interface ControlState { paneDrag?: PaneDrag | null; machine: MachineStatus; machines: MachineStatus[]; chooseMachine: (name: string) => MachineStatus; selected: string | null; docs: DocsState; rows: SidebarRow[]; panes: PaneController[]; focused: PaneController | undefined; open: (id: string) => void; action: (name: string) => Promise<void> }
+export interface ControlState { paneDrag?: PaneDrag | null; machine: MachineStatus; machines: MachineStatus[]; chooseMachine: (name: string) => MachineStatus; selected: string | null; docs: DocsState; rows: SidebarRow[]; panes: PaneController[]; focused: PaneController | undefined; openDetail?: (id?: string, paneId?: string) => void; open: (id: string) => void; action: (name: string) => Promise<void> }
 export function installControl(get: () => ControlState): () => void {
   let disposed = false;
   const listeners: (() => void)[] = [];
@@ -38,6 +39,30 @@ export function installControl(get: () => ControlState): () => void {
   watch("ui", async () => { const state = get(); return { ok: true, machine: state.machine, machines: state.machines.map(({ name, state }) => ({ name, state })), pane_drag: state.paneDrag?.state ?? null, selected_tab: state.selected, appearance: { override: appTheme().override, mode: appTheme().mode }, docs: state.docs, rows: state.rows.map(({ kind, id, label, status, hotkey }) => ({ kind, id, label, status, hotkey })), panes: state.panes.map(p => p.info()) }; });
   watch<{ name: string }>("machine", async payload => { return { ok: true, machine: get().chooseMachine(payload.name) }; });
   watch<{ tab_id: string }>("open", async payload => { get().open(payload.tab_id); return { ok: true }; });
+  watch<{ row_id?: string; pane_id?: string }>("open_detail", async payload => {
+    const open = get().openDetail;
+    if (!open) throw new Error("Detail unavailable");
+    flushSync(() => open(payload.row_id, payload.pane_id));
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    return { ok: true };
+  });
+  watch<{ row_id: string }>("row_menu", async payload => {
+    const row = document.querySelector<HTMLElement>(`[data-row="${CSS.escape(payload.row_id)}"]`);
+    if (!row) throw new Error("No menu row");
+    const target = row.querySelector<HTMLElement>(".select-tab") ?? row;
+    const box = target.getBoundingClientRect();
+    flushSync(() => target.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: box.left + box.width / 2, clientY: box.top + box.height / 2 })));
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    if (!document.querySelector('[role="menu"]')) throw new Error("Row has no context menu");
+    return { ok: true };
+  });
+  watch<{ png_base64: string }>("paste_image", async payload => {
+    if (typeof payload.png_base64 !== "string" || !payload.png_base64) throw new Error("Missing PNG image");
+    const pane = focused();
+    if (!pane.pasteImage) throw new Error("Image paste unavailable");
+    await pane.pasteImage(payload.png_base64);
+    return { ok: true };
+  });
   watch<{ key: string }>("key", async payload => ({ ok: true, sent_b64: await focused().key(payload.key) }));
   watch<{ name: string }>("action", async payload => { await get().action(payload.name); return { ok: true }; });
   watch<{ pane_id?: string; mode: "terminal" | "chat" }>("chat", async payload => {

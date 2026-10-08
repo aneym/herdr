@@ -26,6 +26,34 @@ class LaunchUpdateTests(unittest.TestCase):
         self.assertIn('-ArgumentList \'$arg\'', source)
         self.assertIn('-Value "$control$start"', source)
 
+    def test_launch_resolves_script_directory_after_parameter_binding(self):
+        # Windows-only task handoff: guard empty paths before writing or registering tasks.
+        source = (SCRIPTS / 'launch.ps1').read_text()
+        self.assertNotIn('$ScriptDir = $PSScriptRoot', source)
+        resolved = source.index('$HelperDir = Split-Path -Parent $MyInvocation.MyCommand.Path')
+        self.assertIn('if (-not $ScriptDir) { $ScriptDir = $HelperDir }', source)
+        self.assertIn('Test-Path -LiteralPath $ScriptDir -PathType Container', source)
+        guard = source.index("throw 'Cannot resolve launch script directory'")
+        self.assertLess(resolved, guard)
+        self.assertLess(guard, source.index('Set-Content'))
+        self.assertLess(guard, source.index('Register-ScheduledTask'))
+        gated = (SCRIPTS / 'gated.ps1').read_text()
+        self.assertIn('-File $helper @list', gated)
+
+    def test_windows_control_capture_and_result_handoff_contract(self):
+        # Windows-only native/IPC boundary, inspected until Windows CI compiles it.
+        control = (UPDATE.parent / 'control.rs').read_text()
+        main = (UPDATE.parent / 'main.rs').read_text()
+        self.assertIn('PrintWindow(hwnd, mem, PW_CLIENTONLY | PW_RENDERFULLCONTENT)', control)
+        self.assertIn('let src = GetDC(hwnd)', control)
+        self.assertIn('handle_conn(h, &app, test_window)', control)
+        guard = control.index('command requires --test-window')
+        self.assertLess(guard, control.index('let pending_motion ='))
+        for command in ('drag_pane', 'open_detail', 'row_menu', 'paste_image'):
+            self.assertIn(f'control::deliver_result("{command}", result)', main)
+            handler = main[main.index('tauri::generate_handler!'):]
+            self.assertIn(f'ctl_{command}_result,', handler)
+
     def test_explicit_rollback_relaunch_does_not_require_a_live_app(self):
         # PowerShell handoff contract: a crashed build still gets its old build
         # relaunched on request. Start-App owns the separate game gate.

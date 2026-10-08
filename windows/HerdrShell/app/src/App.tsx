@@ -286,7 +286,12 @@ function MachineView({ attentionTrails, machine, machines, snapshot, chooseMachi
   control.current = () => {
     const current = state.current;
     const panes = [...controllers.current.values()].filter(p => current.snapshot.panes?.some(info => info.pane_id === p.info().pane_id && info.tab_id === current.selected));
-    return { paneDrag: paneDrag.current, machine: current.machine, machines: current.machines, chooseMachine, selected: current.selected, rows: current.rows, docs: current.docs, panes, focused: panes.find(p => p.info().pane_id === current.focused), open: select, action };
+    return { paneDrag: paneDrag.current, machine: current.machine, machines: current.machines, chooseMachine, selected: current.selected, rows: current.rows, docs: current.docs, panes, focused: panes.find(p => p.info().pane_id === current.focused), open: select, openDetail: (id, paneId) => {
+      const tab = paneId ? current.snapshot.panes?.find(p => p.pane_id === paneId)?.tab_id
+        : current.snapshot.tabs?.find(t => t.tab_id === id || ["agent:", "pinned:", "tab:", "focus:", "parked:"].some(prefix => prefix + t.tab_id === id))?.tab_id;
+      if (!tab) throw new Error("No detail row");
+      detailPanel.open(tab);
+    }, action };
   };
   // A pin lands by priority, so as the Mac's pinAtEnd it then moves to the last place, counted
   // on the owning server after the pin rather than from a snapshot that may be behind.

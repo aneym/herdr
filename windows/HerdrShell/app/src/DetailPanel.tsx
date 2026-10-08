@@ -19,7 +19,7 @@ export function useDetailPanel(switcherOpen = false, snapshot?: Snapshot) {
   useEffect(() => {
     if (rowId && snapshot?.tabs && !snapshot.tabs.some(tab => tab.tab_id === rowId)) close();
   }, [snapshot, rowId, close]);
-  return { rowId, toggle, close };
+  return { rowId, toggle, close, open: setRowId };
 }
 const muted: CSSProperties = { color: "var(--shell-muted)" };
 const line: CSSProperties = { display: "flex", alignItems: "baseline", gap: "var(--shell-space-detail-line-gap)" };

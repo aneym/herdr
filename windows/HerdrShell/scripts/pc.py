@@ -503,12 +503,15 @@ def ctl_send(obj, timeout=None, test_window=False):
 
 
 def cmd_ctl(args):
-    bootstrap()
     try:
         obj = json.loads(args.json)
     except json.JSONDecodeError as e:
         print(f"bad json: {e}", file=sys.stderr)
         sys.exit(2)
+    if isinstance(obj, dict) and obj.get("cmd") in {"open_detail", "row_menu", "paste_image"} and not getattr(args, "test_window", False):
+        print("command requires --test-window", file=sys.stderr)
+        sys.exit(2)
+    bootstrap()
     rc, out = ctl_send(obj, test_window=getattr(args, "test_window", False))
     print(out)
     sys.exit(rc)

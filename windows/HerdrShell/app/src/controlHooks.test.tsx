@@ -61,6 +61,16 @@ describe("control-pipe terminal gestures", () => {
     expect(result.mock.calls[0][0]).toBe(cmd);
     return result.mock.calls[0][1];
   }
+  it("image hook uploads to the focused pane's host and pastes the returned path without reading the clipboard", async () => {
+    vi.spyOn(bridge, "clipboardRead").mockRejectedValue(new Error("must not read"));
+    vi.spyOn(bridge, "clipboardReadImage").mockRejectedValue(new Error("must not read"));
+    vi.mocked(bridge.api).mockResolvedValue({ paste_text: "'/host/image.png'" });
+    expect(await command("paste_image", { png_base64: "iVBORw0KGgo=" })).toEqual({ ok: true });
+    expect(bridge.api).toHaveBeenCalledWith("studio", "clipboard.image.write", { extension: "png", data_base64: "iVBORw0KGgo=" });
+    expect(bridge.input).toHaveBeenCalledWith(1, utf8Base64("'/host/image.png'"));
+    expect(bridge.clipboardRead).not.toHaveBeenCalled();
+    expect(bridge.clipboardReadImage).not.toHaveBeenCalled();
+  });
   it("Ctrl-click uses real xterm web links and captures the opener; plain click opens nothing", async () => {
     // No server link regions or URL: the URL must come from the real WebLinksAddon.
     expect(await command("link_click", { row: 0, col: 4, ctrl: true })).toEqual({ ok: true, opened: "https://example.com" });

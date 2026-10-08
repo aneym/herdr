@@ -64,6 +64,20 @@ class TestWindowRoutingTests(unittest.TestCase):
                     self.assertEqual(payload['cmd'], command)
 
 
+    def test_screenshot_hooks_refuse_production_before_any_remote_call(self):
+        for command in ('open_detail', 'row_menu', 'paste_image'):
+            with self.subTest(command=command), \
+                    mock.patch.object(sys, 'argv', ['pc.py', 'ctl', json.dumps({'cmd': command})]), \
+                    mock.patch.object(subprocess, 'run') as remote, \
+                    contextlib.redirect_stderr(io.StringIO()) as error:
+                with self.assertRaises(SystemExit) as stop:
+                    pc.main()
+                self.assertEqual(stop.exception.code, 2)
+                self.assertIn('--test-window', error.getvalue())
+                remote.assert_not_called()
+            helper_args = self.command(['ctl', json.dumps({'cmd': command}), '--test-window'])
+            self.assertIn('-Test', helper_args)
+
     def test_acceptance_scripts_route_their_first_control_command(self):
         class Captured(Exception):
             pass

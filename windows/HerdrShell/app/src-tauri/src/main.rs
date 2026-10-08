@@ -100,6 +100,26 @@ fn ctl_copy_selection_result(result: serde_json::Value) -> Result<(), String> {
     control::deliver_result("copy_selection", result)
 }
 
+#[tauri::command]
+fn ctl_drag_pane_result(result: serde_json::Value) -> Result<(), String> {
+    control::deliver_result("drag_pane", result)
+}
+
+#[tauri::command]
+fn ctl_open_detail_result(result: serde_json::Value) -> Result<(), String> {
+    control::deliver_result("open_detail", result)
+}
+
+#[tauri::command]
+fn ctl_row_menu_result(result: serde_json::Value) -> Result<(), String> {
+    control::deliver_result("row_menu", result)
+}
+
+#[tauri::command]
+fn ctl_paste_image_result(result: serde_json::Value) -> Result<(), String> {
+    control::deliver_result("paste_image", result)
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -124,6 +144,10 @@ fn main() {
             ctl_chat_result,
             ctl_wheel_result,
             ctl_appearance_result,
+            ctl_drag_pane_result,
+            ctl_open_detail_result,
+            ctl_row_menu_result,
+            ctl_paste_image_result,
             ctl_drag_pin_result,
             ctl_drag_divider_result,
             ctl_link_click_result,

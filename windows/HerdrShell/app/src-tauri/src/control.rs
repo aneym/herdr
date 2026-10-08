@@ -51,7 +51,7 @@ mod imp {
         INVALID_HANDLE_VALUE, RECT,
     };
     use windows_sys::Win32::Graphics::Gdi::{
-        BitBlt, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetWindowDC,
+        BitBlt, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC,
         ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, SRCCOPY,
     };
     use windows_sys::Win32::Storage::FileSystem::{
@@ -63,7 +63,7 @@ mod imp {
         PIPE_TYPE_BYTE, PIPE_WAIT,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetClientRect, GetForegroundWindow, IsWindowVisible, PW_RENDERFULLCONTENT,
+        GetClientRect, GetForegroundWindow, IsWindowVisible, PW_CLIENTONLY, PW_RENDERFULLCONTENT,
     };
 
     static RESULT_TX: Mutex<Option<(String, Sender<Value>)>> = Mutex::new(None);
@@ -225,7 +225,7 @@ mod imp {
                 let app = app.clone();
                 std::thread::spawn(move || {
                     let h = raw as HANDLE;
-                    handle_conn(h, &app);
+                    handle_conn(h, &app, test_window);
                     DisconnectNamedPipe(h);
                     CloseHandle(h);
                 });
@@ -234,7 +234,7 @@ mod imp {
         }
     }
 
-    fn handle_conn(h: HANDLE, app: &AppHandle) {
+    fn handle_conn(h: HANDLE, app: &AppHandle, test_window: bool) {
         let mut buf = Vec::new();
         let mut tmp = [0u8; 4096];
         loop {
@@ -265,7 +265,7 @@ mod imp {
             let _turn = DISPATCH
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            dispatch(app, &req)
+            dispatch(app, &req, test_window)
         };
         let out = format!("{resp}\n");
         let mut rest = out.as_bytes();
@@ -291,7 +291,12 @@ mod imp {
         }
     }
 
-    fn dispatch(app: &AppHandle, req: &Value) -> Value {
+    fn dispatch(app: &AppHandle, req: &Value, test_window: bool) -> Value {
+        if matches!(req["cmd"].as_str(), Some("open_detail" | "row_menu" | "paste_image"))
+            && !test_window
+        {
+            return json!({"ok": false, "error": "command requires --test-window"});
+        }
         // Motion acknowledges enqueue, but subsequent commands (including native
         // screenshots) wait for its frontend completion before they may run.
         let pending_motion = MOTION_RX.lock().unwrap_or_else(|e| e.into_inner()).take();
@@ -350,7 +355,7 @@ mod imp {
             }
             cmd @ ("ui" | "machine" | "open" | "key" | "wheel" | "action" | "chat" | "update"
             | "drag_pane" | "motion" | "drag_pin" | "drag_divider" | "link_click"
-            | "copy_selection") => forward_cmd(app, cmd, req),
+            | "copy_selection" | "open_detail" | "row_menu" | "paste_image") => forward_cmd(app, cmd, req),
             _ => json!({"ok": false, "error": "unknown cmd"}),
         }
     }
@@ -497,8 +502,8 @@ mod imp {
                 return Err("CreateDIBSection failed".into());
             }
             let old = SelectObject(mem, dib);
-            if PrintWindow(hwnd, mem, PW_RENDERFULLCONTENT) == 0 || pixels_black(bits, w, hgt) {
-                let src = GetWindowDC(hwnd);
+            if PrintWindow(hwnd, mem, PW_CLIENTONLY | PW_RENDERFULLCONTENT) == 0 || pixels_black(bits, w, hgt) {
+                let src = GetDC(hwnd);
                 if !src.is_null() {
                     BitBlt(mem, 0, 0, w, hgt, src, 0, 0, SRCCOPY);
                     ReleaseDC(hwnd, src);

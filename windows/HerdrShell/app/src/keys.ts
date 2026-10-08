@@ -51,14 +51,17 @@ export async function paste(term: Terminal, machine?: string) {
   catch (textError) {
     const image = await bridge.clipboardReadImage();
     if (image === null) throw textError;
-    const bytes = image.length * 3 / 4 - (image.endsWith("==") ? 2 : image.endsWith("=") ? 1 : 0);
-    if (!machine || bytes === 0 || bytes > 16 * 1024 * 1024) throw new Error("Clipboard image upload failed");
-    const reply = await bridge.api(machine, "clipboard.image.write", { extension: "png", data_base64: image });
-    if (!reply || typeof reply !== "object" || !("paste_text" in reply) || typeof reply.paste_text !== "string" || !reply.paste_text) throw new Error("Clipboard image upload failed");
-    term.paste(reply.paste_text);
+    await pasteImage(term, image, machine);
     return;
   }
   term.paste(text);
+}
+export async function pasteImage(term: Terminal, image: string, machine?: string) {
+  const bytes = image.length * 3 / 4 - (image.endsWith("==") ? 2 : image.endsWith("=") ? 1 : 0);
+  if (!machine || bytes === 0 || bytes > 16 * 1024 * 1024) throw new Error("Clipboard image upload failed");
+  const reply = await bridge.api(machine, "clipboard.image.write", { extension: "png", data_base64: image });
+  if (!reply || typeof reply !== "object" || !("paste_text" in reply) || typeof reply.paste_text !== "string" || !reply.paste_text) throw new Error("Clipboard image upload failed");
+  term.paste(reply.paste_text);
 }
 // Both xterm keydown and control-pipe key requests use this decision path.
 export function handleKey(event: KeyboardEvent, target: KeyTarget): { handled: boolean; work?: Promise<void> } {

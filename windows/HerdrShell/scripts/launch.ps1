@@ -6,10 +6,17 @@
 # That hidden powershell starts the app with Start-Process, so the app gets fresh
 # startup info and its window opens normally.
 param([Parameter(Mandatory = $true)][string]$Exe, [switch]$TestWindow, [switch]$Background,
-      [string]$TaskName = 'HerdrShellLaunch', [string]$ScriptDir = $PSScriptRoot,
+      [string]$TaskName = 'HerdrShellLaunch', [string]$ScriptDir,
       [string]$TestArguments)
+# PowerShell 5.1 may not populate $PSScriptRoot while binding param defaults.
+$HelperDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+if (-not $ScriptDir) { $ScriptDir = $HelperDir }
+if (-not $ScriptDir -or -not (Test-Path -LiteralPath $ScriptDir -PathType Container)) {
+    throw 'Cannot resolve launch script directory'
+}
+if (-not $HelperDir) { throw 'Cannot resolve launch helper directory' }
 # Test overrides isolate the task, generated files and harmless stand-in arguments.
-if ($TestArguments -and ($TaskName -eq 'HerdrShellLaunch' -or $ScriptDir -eq $PSScriptRoot)) {
+if ($TestArguments -and ($TaskName -eq 'HerdrShellLaunch' -or $ScriptDir -eq $HelperDir)) {
     throw 'TestArguments requires an isolated TaskName and ScriptDir'
 }
 $Exe = $Exe.Trim('"')
@@ -21,7 +28,7 @@ $arg = if ($TestWindow) { '--test-window' } else { '--background' }
 $quotedExe = $Exe.Replace("'", "''")
 $control = "`$ErrorActionPreference = 'Stop'`r`n"
 if ($TestWindow) { $control += "`$env:HERDR_SHELL_CONTROL='1'`r`n" }
-$quotedGamecheck = (Join-Path $PSScriptRoot 'gamecheck.ps1').Replace("'", "''")
+$quotedGamecheck = (Join-Path $HelperDir 'gamecheck.ps1').Replace("'", "''")
 $control += ". '$quotedGamecheck'`r`nStop-IfGame 'HerdrShellLaunch'`r`n"
 if ($TestArguments) { $arg = $TestArguments.Replace("'", "''") }
 $start = "Start-Process -FilePath '$quotedExe' -ArgumentList '$arg'"
@@ -38,7 +45,7 @@ $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interac
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
 Register-ScheduledTask -TaskName $TaskName -Action $action -Principal $principal -Settings $settings -Force | Out-Null
 # A game may have started while the task was registered; check right before it runs.
-. (Join-Path $PSScriptRoot 'gamecheck.ps1')
+. (Join-Path $HelperDir 'gamecheck.ps1')
 Stop-IfGame 'HerdrShellLaunch'
 Start-ScheduledTask -TaskName $TaskName
 Write-Output "launched: $Exe $arg"
