@@ -13,6 +13,9 @@
 //! run on the base with only this module registered. After that, the S3 head
 //! must reproduce the base idle frame byte for byte whenever the endpoint does
 //! not offer `pane.place`.
+//!
+//! S4 (`pane_motion.rs`) reuses the builders below to stage server reflows;
+//! the refactor that exposed them leaves every fixture byte unchanged.
 
 use super::*;
 use crossterm::event::MouseEvent;
@@ -88,7 +91,7 @@ fn client_pane(pane_id: &str, label: Option<&str>) -> crate::protocol::ClientShe
 /// A server-drawn surface: each pane has its own square border and is filled
 /// with one letter. It carries no rounded corner and no grip glyph, so any
 /// `╭`, `╯` or `⠿` in a composed frame came from the client.
-fn fixture_surface(
+pub(super) fn fixture_surface(
     width: u16,
     height: u16,
     panes: &[FixturePane],
@@ -147,7 +150,7 @@ fn fixture_surface(
 
 /// A shell state on the tree sidebar (two spaces; `ws_1` holds `tab_1` and
 /// `tab_2`, `ws_2` holds `tab_3`) whose focused tab `tab_1` shows `panes`.
-fn state_with_panes(
+pub(super) fn state_with_panes(
     pane_place: bool,
     panes: &[FixturePane],
     splits: impl FnOnce(u16, u16) -> Vec<PaneSurfaceSplit>,
@@ -177,8 +180,16 @@ fn state_with_panes(
 /// Surface-relative rects of the scenario's three panes: `B | C` on top, `A`
 /// full width below. Two agents side by side, a shell below.
 pub(super) fn three_pane_rects(width: u16, height: u16) -> [(&'static str, SurfaceRect); 3] {
+    three_pane_rects_at(width, height, height / 2)
+}
+
+/// The same three panes with the horizontal divider at row `top`.
+pub(super) fn three_pane_rects_at(
+    width: u16,
+    height: u16,
+    top: u16,
+) -> [(&'static str, SurfaceRect); 3] {
     let half = width / 2;
-    let top = height / 2;
     [
         (
             A,
@@ -210,6 +221,67 @@ pub(super) fn three_pane_rects(width: u16, height: u16) -> [(&'static str, Surfa
     ]
 }
 
+/// The fixture panes at `rects`: one fill letter per pane id, and pane B with
+/// mouse reporting on.
+pub(super) fn three_pane_panes(rects: [(&'static str, SurfaceRect); 3]) -> Vec<FixturePane> {
+    rects
+        .into_iter()
+        .map(|(pane_id, rect)| FixturePane {
+            pane_id: pane_id.into(),
+            rect,
+            fill: match pane_id {
+                A => 'a',
+                B => 'b',
+                _ => 'c',
+            },
+            mouse_reporting: pane_id == B,
+        })
+        .collect()
+}
+
+/// The splits of `three_pane_rects_at(width, height, top)`: the root
+/// divider at `top` (its resize hit covers the rows either side of it) and
+/// the `B | C` divider above it.
+pub(super) fn three_pane_splits(width: u16, height: u16, top: u16) -> Vec<PaneSurfaceSplit> {
+    let half = width / 2;
+    vec![
+        PaneSurfaceSplit {
+            direction: PaneSurfaceSplitDirection::Vertical,
+            pos: top,
+            area: SurfaceRect {
+                x: 0,
+                y: 0,
+                width,
+                height,
+            },
+            hit_rect: SurfaceRect {
+                x: 0,
+                y: top - 1,
+                width,
+                height: 2,
+            },
+            path: Vec::new(),
+        },
+        PaneSurfaceSplit {
+            direction: PaneSurfaceSplitDirection::Horizontal,
+            pos: half,
+            area: SurfaceRect {
+                x: 0,
+                y: 0,
+                width,
+                height: top,
+            },
+            hit_rect: SurfaceRect {
+                x: half - 1,
+                y: 0,
+                width: 2,
+                height: top,
+            },
+            path: vec![false],
+        },
+    ]
+}
+
 /// The scenario fixture. Pane B has mouse reporting on. The root split's
 /// resize hit covers the row A's top border sits on, so A's grip has to win
 /// over the split there.
@@ -223,58 +295,9 @@ pub(super) fn three_pane_state(pane_place: bool) -> ClientShellState {
         area.width >= 60 && area.height >= 24,
         "fixture needs a roomy pane surface, got {area:?}"
     );
-    let panes = three_pane_rects(area.width, area.height)
-        .into_iter()
-        .map(|(pane_id, rect)| FixturePane {
-            pane_id: pane_id.into(),
-            rect,
-            fill: match pane_id {
-                A => 'a',
-                B => 'b',
-                _ => 'c',
-            },
-            mouse_reporting: pane_id == B,
-        })
-        .collect::<Vec<_>>();
+    let panes = three_pane_panes(three_pane_rects(area.width, area.height));
     state_with_panes(pane_place, &panes, |width, height| {
-        let half = width / 2;
-        let top = height / 2;
-        vec![
-            PaneSurfaceSplit {
-                direction: PaneSurfaceSplitDirection::Vertical,
-                pos: top,
-                area: SurfaceRect {
-                    x: 0,
-                    y: 0,
-                    width,
-                    height,
-                },
-                hit_rect: SurfaceRect {
-                    x: 0,
-                    y: top - 1,
-                    width,
-                    height: 2,
-                },
-                path: Vec::new(),
-            },
-            PaneSurfaceSplit {
-                direction: PaneSurfaceSplitDirection::Horizontal,
-                pos: half,
-                area: SurfaceRect {
-                    x: 0,
-                    y: 0,
-                    width,
-                    height: top,
-                },
-                hit_rect: SurfaceRect {
-                    x: half - 1,
-                    y: 0,
-                    width: 2,
-                    height: top,
-                },
-                path: vec![false],
-            },
-        ]
+        three_pane_splits(width, height, height / 2)
     })
 }
 

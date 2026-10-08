@@ -6,18 +6,27 @@
 //! endpoint answer path (`handle_endpoint_result`) and the real composer
 //! (`compose`). The only S3 name it relies on is `ClientChromeDrag::Pane`.
 //!
+//! S4 note: this file checks where things land, not how they move, so its
+//! states run with `ui.reduce_motion` on, where every rect change is instant.
+//! Motion is owned by `pane_motion.rs`.
+//!
 //! Geometry (surface-relative, W x H = the fixture's pane surface): `B | C` on
 //! top, each `W/2 x H/2`; `A` below, full width. A's grip sits on its top
 //! border, inside the root split's resize hit, so the grip must win there.
 
-use super::pane_drag_fixture::{
-    grid_state, mouse, three_pane_rects, three_pane_state, A, A_LABEL, B, C, COLS, ROWS,
-};
+use super::pane_drag_fixture::{grid_state, mouse, three_pane_rects, A, A_LABEL, B, C, COLS, ROWS};
 use super::*;
 use crate::api::schema::{
     Method, PaneDirection, PaneLayoutPane, PaneLayoutRect, PaneLayoutSnapshot, PaneMoveDestination,
     PanePlaceResult, PanePlaceTarget, ResponseResult,
 };
+
+/// The S3 fixture with reduced motion: ghosts and cancels apply at once.
+fn three_pane_state(pane_place: bool) -> ClientShellState {
+    let mut state = super::pane_drag_fixture::three_pane_state(pane_place);
+    state.config.reduce_motion = true;
+    state
+}
 
 /// Absolute frame rects of the fixture's panes, by id.
 struct Geometry {
@@ -52,7 +61,7 @@ fn grip(rect: Rect) -> (u16, u16) {
     (rect.x + (rect.width - 2) / 2, rect.y)
 }
 
-fn sent_methods(outcome: &ClientShellInput) -> Vec<Method> {
+pub(super) fn sent_methods(outcome: &ClientShellInput) -> Vec<Method> {
     outcome
         .actions
         .iter()
@@ -63,7 +72,7 @@ fn sent_methods(outcome: &ClientShellInput) -> Vec<Method> {
         .collect()
 }
 
-fn request_id(outcome: &ClientShellInput) -> String {
+pub(super) fn request_id(outcome: &ClientShellInput) -> String {
     outcome
         .actions
         .iter()
@@ -106,7 +115,10 @@ fn surface_contains(frame: &FrameData, surface: Rect, needle: &str) -> bool {
 }
 
 /// Press on A's grip and move straight to `to` in one motion event.
-fn lift_a_to(state: &mut ClientShellState, to: (u16, u16)) -> (ClientShellInput, ClientShellInput) {
+pub(super) fn lift_a_to(
+    state: &mut ClientShellState,
+    to: (u16, u16),
+) -> (ClientShellInput, ClientShellInput) {
     let (gx, gy) = grip(geometry(state).a);
     let press =
         state.handle_raw_events(vec![mouse(MouseEventKind::Down(MouseButton::Left), gx, gy)]);
@@ -122,7 +134,7 @@ fn lift_a_to(state: &mut ClientShellState, to: (u16, u16)) -> (ClientShellInput,
 /// be B's right half, full height. Rects are in the server's layout space,
 /// whose origin is not the client's surface origin; the client maps them
 /// through `target_layout.area`.
-fn dry_run_answer(surface: Rect, origin: (u16, u16)) -> (ResponseResult, Rect) {
+pub(super) fn dry_run_answer(surface: Rect, origin: (u16, u16)) -> (ResponseResult, Rect) {
     let (w, h) = (surface.width, surface.height);
     let half = w / 2;
     let quarter = half / 2;

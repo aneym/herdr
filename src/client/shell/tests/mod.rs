@@ -284,6 +284,7 @@ mod pane_drag;
 mod pane_drag_fixture;
 mod pane_drop_zone_fixture;
 mod pane_move_mode;
+mod pane_motion;
 mod popup_focus_projection;
 mod profile_usage;
 mod startup_overlays;
