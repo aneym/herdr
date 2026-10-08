@@ -224,3 +224,15 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 .docs-address button { flex: 0 0 calc(var(--shell-space-step32) + var(--shell-space-step12)); color: var(--shell-muted); }
 .docs-add { padding: var(--shell-space-step4) var(--shell-space-step8); }
 .docs-add input { width: 100%; font: inherit; color: var(--shell-text); background: var(--shell-surface); border: 1px solid var(--shell-line); }
+
+.sidebar-section-title { display: flex; align-items: center; justify-content: space-between; }
+.sidebar-plus { color: var(--shell-muted); flex-shrink: 0; font-size: var(--shell-type-glyph); }
+.space-row .sidebar-plus { display: none; }
+.space-row:hover .pin, .space-row:focus-within .pin, .space-row .pin.is-pinned,
+.space-row:hover .sidebar-plus, .space-row:focus-within .sidebar-plus { display: block; }
+.sidebar-plus:disabled { cursor: default; }
+
+.plus-glyph { display: inline-block; position: relative; width: var(--shell-space-step12); height: var(--shell-space-step12); }
+.plus-glyph::before, .plus-glyph::after { content: ""; position: absolute; background: currentColor; }
+.plus-glyph::before { left: var(--shell-space-step2); right: var(--shell-space-step2); top: 50%; height: 1px; }
+.plus-glyph::after { top: var(--shell-space-step2); bottom: var(--shell-space-step2); left: 50%; width: 1px; }

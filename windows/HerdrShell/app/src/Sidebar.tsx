@@ -15,11 +15,14 @@ import AgentFace from "./AgentFace";
 import { DRAG_THRESHOLD, slotAt } from "./pinDrag";
 import type { PinSection, RowBox } from "./pinDrag";
 import type { MachineStatus } from "./bridge";
-import { foldAllSpaces, foldKey, noteSelection, revealOnSelect, spaceOpen } from "./model";
+import { foldAllSpaces, foldKey, noteSelection, pinCount, revealOnSelect, spaceOpen } from "./model";
 import type { RevealMemo, SidebarRow } from "./model";
 export function Status({ status, solid = false }: { status: string; solid?: boolean }) { return <span className={`status ${status} ${solid ? "state-dot" : ""}`} aria-label={status} style={solid ? { width: "var(--shell-face-dot)", height: "var(--shell-face-dot)" } : undefined}>{solid ? null : status === "blocked" ? "■" : "●"}</span>; }
 function Chevron({ open }: { open: boolean }) {
   return <svg className={`disclosure-chevron${open ? " is-open" : ""}`} viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2.5 1.5 5 4 2.5 6.5" /></svg>;
+}
+function Plus() {
+  return <span className="plus-glyph" aria-hidden="true" />;
 }
 function RenameInput({ label, commit, cancel }: { label: string; commit: (label: string) => Promise<void>; cancel: () => void }) {
   const [value, setValue] = useState(label);
@@ -201,10 +204,48 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
     {renaming === row.id && rows.find(r => r.kind !== "space" && r.id === row.id) === row ? <RenameInput key={row.id} label={row.label} commit={label => commitRename(row.id, label)} cancel={cancelRename} /> : <button className="select-tab" onContextMenu={event => { menuReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; event.preventDefault(); setMenuError(null); setMenu({ row, x: event.clientX, y: event.clientY }); }} onClick={() => select(row.id)} onDoubleClick={() => startRename(row.id)}>{row.face ? <AgentFace face={row.face} status={row.status} request={row.request} /> : <Status solid status={row.status} />}<span className="label">{row.label}</span>{row.kind === "pinned" && <span className="muted space-label">{row.spaceLabel}</span>}{row.kind === "agent" && row.home && ["cloud", "local", "unsynced"].includes(row.home) && <span className={`home-glyph ${row.home === "unsynced" ? "warn" : "muted"}`} title={homeTitles[row.home]} aria-label={homeTitles[row.home]}>{homeGlyphs[row.home]}</span>}</button>}
     <button className={`pin ${row.pinned ? "is-pinned" : ""}`} aria-label={row.pinned ? "Unpin tab" : "Pin tab"} onClick={() => pin(row.id, !row.pinned)}>⌖</button>
   </div>; };
+  const [pendingTab, setPendingTab] = useState<{ machine: string; id: string } | null>(null);
+  const [creating, setCreating] = useState(false);
+  const activeMachine = useRef(machine.name);
+  activeMachine.current = machine.name;
+  useEffect(() => {
+    if (!pendingTab) return;
+    if (pendingTab.machine !== machine.name) { setPendingTab(null); return; }
+    if (snapshot.tabs?.some(tab => tab.tab_id === pendingTab.id)) {
+      select(pendingTab.id);
+      setPendingTab(null);
+    }
+  }, [pendingTab, snapshot, machine.name, select]);
+  const createTab = async (workspace: string | undefined, pinned: boolean) => {
+    if (!workspace || creating) return;
+    const name = machine.name;
+    setCreating(true); setMenuError(null);
+    try {
+      const result = await bridge.api(name, "tab.create", { workspace_id: workspace, focus: false }) as { tab?: { tab_id?: string } };
+      const id = result?.tab?.tab_id;
+      if (!id) throw new Error("API response missing tab.tab_id");
+      if (pinned) {
+        await bridge.api(name, "tab.set_pinned", { tab_id: id, pinned: true });
+        const pins = pinCount(await bridge.api(name, "tab.list", {}));
+        if (pins > 0) await bridge.api(name, "tab.pin_move", { tab_id: id, pin_index: pins - 1 });
+      }
+      if (activeMachine.current === name) setPendingTab({ machine: name, id });
+    } catch (error) { if (activeMachine.current === name) setMenuError(String(error)); }
+    finally { setCreating(false); }
+  };
+  const toggleSpacePin = (id: string, pinned: boolean) => {
+    void bridge.api(machine.name, "workspace.set_pinned", { workspace_id: id, pinned }).catch(error => setMenuError(String(error)));
+  };
   const spaceRow = (row: SidebarRow) => {
     const children = rows.filter(r => r.kind === "tab" && r.section === row.id);
     const open = children.some(r => r.id === renaming) || spaceOpen(row, rows, selected, expanded);
-    return <div key={row.id}><button data-space={row.id} className={`sidebar-row space-row ${paneDropRow === `space:${row.id}` ? "drop-above" : ""}`} aria-expanded={open} onClick={() => toggle(foldKey(row), !open)}><span className="label">{row.label}</span><Status solid status={row.status} /><span className="chevron"><Chevron open={open} /></span></button>{open && children.map(tabRow)}</div>;
+    const pinned = snapshot.workspaces?.find(workspace => workspace.workspace_id === row.id)?.tokens?.pinned === "true";
+    return <div key={row.id}><div data-space={row.id} className={`sidebar-row space-row ${paneDropRow === `space:${row.id}` ? "drop-above" : ""}`} aria-expanded={open} onClick={() => toggle(foldKey(row), !open)}>
+      <button className="select-tab" aria-expanded={open} onClick={event => { event.stopPropagation(); toggle(foldKey(row), !open); }}><span className="label">{row.label}</span><Status solid status={row.status} /></button>
+      <button className={`pin ${pinned ? "is-pinned" : ""}`} aria-label={pinned ? "Unpin space" : "Pin space"} onClick={event => { event.stopPropagation(); toggleSpacePin(row.id, !pinned); }}>⌖</button>
+      <button className="sidebar-plus" aria-label={`New tab in ${row.label}`} disabled={creating} onClick={event => { event.stopPropagation(); void createTab(row.id, false); }}><Plus /></button>
+      <button className="chevron" aria-label={`Fold ${row.label}`} aria-expanded={open} onClick={event => { event.stopPropagation(); toggle(foldKey(row), !open); }}><Chevron open={open} /></button>
+    </div>{open && children.map(tabRow)}</div>;
   };
   const collapseSpacesButton = <button className="spaces-fold-all" aria-label={anySpaceExpanded ? "Collapse all spaces" : "Expand all spaces"} title={anySpaceExpanded ? "Collapse all spaces" : "Expand all spaces"} onClick={toggleAllSpaces}><svg width="12" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={anySpaceExpanded ? "m8 4 4 4 4-4M12 2v6m-4 12 4-4 4 4M12 16v6M4 12h16" : "m8 6 4-4 4 4M12 2v6m-4 10 4 4 4-4M12 16v6M4 12h16"} /></svg></button>;
   return <aside className={`sidebar ${drag ? "pin-dragging" : ""}`}><div className="machine-row" aria-label="Machines">{machines.map(item => <button key={item.name} aria-pressed={item.name === machine.name} onClick={() => chooseMachine(item.name)}><Status solid status={item.state} /><span>{item.name}</span></button>)}</div><div className="areas-mode" aria-label="Sidebar mode">{(["areas", "spaces"] as const).map(value => <button key={value} aria-pressed={mode === value} onClick={() => changeMode(value)}>{value === "areas" ? "Areas" : "Spaces"}</button>)}{mode === "spaces" && rows.some(row => row.kind === "space") && collapseSpacesButton}</div><nav ref={nav}>
@@ -229,7 +270,7 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
         </button>
       </div>)}
     </> : <>
-    {["AGENTS", "PINNED"].map(section => { const items = rows.filter(r => r.section === section); return items.length ? <section key={section}><h2>{section}</h2>{items.filter(r => !r.hidden).map(tabRow)}{section === "AGENTS" && items.some(r => r.hidden) && <>
+    {["AGENTS", "PINNED"].map(section => { const items = rows.filter(r => r.section === section); return items.length || (section === "PINNED" && snapshot.workspaces?.length) ? <section key={section}><h2 className="sidebar-section-title"><span>{section}</span>{section === "PINNED" && <button className="sidebar-plus" aria-label="New pinned tab" disabled={creating} onClick={() => void createTab(snapshot.tabs?.find(tab => tab.tab_id === selected)?.workspace_id ?? snapshot.workspaces?.[0]?.workspace_id, true)}><Plus /></button>}</h2>{items.filter(r => !r.hidden).map(tabRow)}{section === "AGENTS" && items.some(r => r.hidden) && <>
       <button data-row="hiddenagents" className="sidebar-row muted hidden-agents" aria-expanded={hiddenAgents} onClick={() => { setHiddenAgents(!hiddenAgents); save("hiddenAgents", !hiddenAgents); }}><span>Hidden</span><span>{items.filter(r => r.hidden).length}</span>{!hiddenAgents && items.some(r => r.hidden && (r.status === "blocked" || r.request != null)) && <span className="hidden-agents-dot" data-dot="accent" />}<span className="chevron"><Chevron open={hiddenAgents} /></span></button>
       {hiddenAgents && items.filter(r => r.hidden).map(tabRow)}
     </>}</section> : null; })}
