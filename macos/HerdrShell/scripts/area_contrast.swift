@@ -1,6 +1,11 @@
 import Foundation
 
+// From the repository root: python3 macos/HerdrShell/scripts/check_area_contrast.py
 // Golden cases protect WCAG luminance, invalid input, and both generated sidebar palettes.
+// Theme.swift logs missing terminal themes when compiled outside the app.
+func log(_ message: String) {
+    FileHandle.standardError.write(Data((message + "\n").utf8))
+}
 @main
 struct AreaContrastCheck {
     static func main() {
