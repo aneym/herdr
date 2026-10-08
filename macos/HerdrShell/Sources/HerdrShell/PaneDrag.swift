@@ -27,12 +27,15 @@ final class PaneDrag: NSObject {
     var holdDrops = false
     private var heldDrop: (() -> Void)?
     /// Check hook only: hold a drop's reply once it is in, until `sendHeldReply()`, so the drop's own snapshot can land
-    /// first.
+    /// first. A held reply outlives the drop's end, so a check can deliver it late.
     var holdReplies = false
-    private var heldReply: (() -> Void)?
-    /// The boxes and host size when the drop was released: the reply settles from these when the drop's own snapshot
-    /// has already drawn the reply's layout.
-    private var dropBoxes: [String: CGRect] = [:], dropSize = CGSize.zero
+    private var heldReply: (generation: Int, answer: () -> Void)?
+    /// Replies handled, and how many of them came for a drop that had already ended (and so changed nothing).
+    private var repliesHandled = 0, repliesIgnored = 0
+    /// While a sent drop waits for its reply the host keeps the boxes it had at the release: snapshots that land
+    /// meanwhile stay in the model (the newest wins) and only their caps apply. `frozenEpoch` tells whether one did.
+    private(set) var holdsLayout = false
+    private var frozenEpoch = 0
     /// How long a sent drop waits for its reply, the same as the Windows Shell.
     static let replyTimeout: TimeInterval = 4
     private var pointer = CGPoint.zero, start = CGPoint.zero
@@ -111,6 +114,8 @@ final class PaneDrag: NSObject {
     }
     func press(pane: String, at point: CGPoint) {
         guard let owner else { return }
+        // A new drag ends a drop still waiting on its reply, quietly.
+        if phase == .dropping { cancel() }
         source = pane
         probe()
         guard placeSupported, owner.host.rects.count > 1, owner.shownLayout?.zoomed != true else {
@@ -228,7 +233,7 @@ final class PaneDrag: NSObject {
         guard phase == .lifted, let z = zone, let source else { cancel(); return }
         motions.removeAll { $0.pane == source && $0.kind == "fade" }
         lastZone = z; phase = .dropping
-        dropBoxes = boxes; dropSize = owner.host.bounds.size
+        holdsLayout = true; frozenEpoch = owner.state.selectedTab.map { owner.model.snapshotEpoch(for: $0) } ?? 0
         updateSidebarIndicator()
         let method: String, p: [String: Any]
         switch z {
@@ -236,15 +241,15 @@ final class PaneDrag: NSObject {
         case .newTabIn(let ws): method = "pane.move"; p = ["pane_id": source, "destination": ["type": "new_tab", "workspace_id": ws], "focus": true]
         default: method = "pane.place"; p = params(z, dry: false) ?? [:]
         }
+        // No pane.focus: pane.swap focuses the source on the server, and pane.place and pane.move carry focus:true.
         sent.append(["method": method, "params": p])
-        if method == "pane.swap" { sent.append(["method": "pane.focus", "params": ["pane_id": source]]) }
         let commands = owner.commands, gen = generation
         // The drop ends with the server's answer to this call, never with a snapshot: snapshots that land while it
-        // is pending apply at once, and only the reply's own layout settles.
+        // is pending are buffered, and the answer settles the panes once from where they stood at the release.
         let send = {
             // No reply in time (as on Windows, 4 s): the server may still have applied it, so end without a rollback.
             DispatchQueue.main.asyncAfter(deadline: .now() + PaneDrag.replyTimeout) { [weak self] in
-                guard let self, self.generation == gen, self.phase == .dropping, self.heldReply == nil else { return }
+                guard let self, self.generation == gen, self.phase == .dropping, self.heldReply?.generation != gen else { return }
                 self.cancel()
             }
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -253,37 +258,35 @@ final class PaneDrag: NSObject {
                 DispatchQueue.main.async {
                     guard let self else { return }
                     let answer = { [weak self] in
-                        guard let self, self.generation == gen, self.phase == .dropping else { return }
-                        // A refusal (an error, or changed:false such as a pane gone) moved nothing, so the chip goes back.
-                        if refused { self.animateCancel(); return }
+                        guard let self else { return }
+                        self.repliesHandled += 1
+                        // A drop that already ended (timeout, tab switch, offline, a new drag) ignores its reply entirely.
+                        guard self.generation == gen, self.phase == .dropping else { self.repliesIgnored += 1; return }
+                        // A refusal (an error, or changed:false such as a pane gone) moved nothing: the buffered snapshot
+                        // shows as it is, then the chip goes back.
+                        if refused { _ = self.unfreeze(); self.owner?.refreshHost(); self.animateCancel(); return }
                         // With no reply at all the server may still have applied it: end without a rollback.
                         if reply?["result"] == nil { self.cancel(); return }
+                        let buffered = self.unfreeze()
                         self.settle()
-                        self.owner?.applyDropReply(PaneDrag.layouts(reply))
+                        self.owner?.applyDropReply(PaneDrag.layouts(reply), buffered: buffered)
                         self.owner?.focusPane(source)
                         self.draw()
                     }
-                    if self.holdReplies { self.heldReply = answer } else { answer() }
+                    if self.holdReplies { self.heldReply = (gen, answer) } else { answer() }
                 }
-                // After the reply is handled, not before: the focus call must not delay the settle.
-                if method == "pane.swap", reply?["result"] != nil, !refused { _ = commands.paneDragCall("pane.focus", ["pane_id": source]) }
             }
         }
         if holdDrops { heldDrop = send } else { send() }
     }
     func sendHeldDrop() { let send = heldDrop; heldDrop = nil; send?() }
-    func sendHeldReply() { let answer = heldReply; heldReply = nil; answer?() }
-    /// The drop's own snapshot landed before its reply and already drew the reply's layout, so nothing would move:
-    /// settle from the boxes at the release instead, under the same rules as any settle.
-    func settleFromDrop() {
-        guard let owner, phase == .settling, dropSize == owner.host.bounds.size, !owner.resizer.isBusy, !owner.window.inLiveResize else { return }
-        let now = Dictionary(uniqueKeysWithValues: owner.host.rects.map { ($0.0.paneId, owner.host.boxRect($0.1)) })
-        guard Set(now.keys) == Set(dropBoxes.keys) else { return }
-        for (pane, rect) in now where dropBoxes[pane] != rect {
-            addMotion(pane: pane, kind: reduce ? "crossfade" : "settle", from: dropBoxes[pane] ?? rect, to: rect,
-                      duration: reduce ? ShellMotion.reducedFadeMs : ShellMotion.settleMs)
-        }
-        draw()
+    func sendHeldReply() { let held = heldReply; heldReply = nil; held?.answer() }
+    /// Ends the freeze; true when any snapshot for the tab landed while it held.
+    private func unfreeze() -> Bool {
+        guard holdsLayout else { return false }
+        holdsLayout = false
+        guard let owner, let tab = owner.state.selectedTab else { return false }
+        return owner.model.snapshotEpoch(for: tab) != frozenEpoch
     }
     /// The layouts a drop's reply carries: pane.swap's `layout`, or pane.place's and pane.move's target and source.
     private static func layouts(_ reply: [String: Any]?) -> [Snapshot.Layout] {
@@ -306,7 +309,11 @@ final class PaneDrag: NSObject {
         // Once sent, the server may already have committed the drop. Never animate a rollback.
         if phase == .dropping {
             generation += 1; inFlight = nil
-            finish(); return
+            let frozen = holdsLayout
+            _ = unfreeze(); finish()
+            // The buffered snapshot shows as it is.
+            if frozen { owner?.refreshHost() }
+            return
         }
         animateCancel()
     }
@@ -367,15 +374,20 @@ final class PaneDrag: NSObject {
     func layoutWillApply(old: [String: NSRect], new: [String: NSRect], sameTab: Bool, fromDrop: Bool = false) {
         layoutGeneration += 1; cache = [:]; rejected = []
         guard let owner else { return }
-        motions.removeAll { $0.kind == "settle" || $0.kind == "crossfade" }
+        // A layout landing during an accepted drop's settle retargets it from the boxes drawn last (`old`).
+        let retarget = phase == .settling && motions.contains { $0.kind == "settle" || $0.kind == "crossfade" }
         let sameSize = lastHostSize == owner.host.bounds.size
         lastHostSize = owner.host.bounds.size
-        // Only a drop reply's layout settles. Snapshots, while a drop is pending or after its reply, apply at once.
-        let canAnimate = fromDrop && sameTab && sameSize && Set(old.keys) == Set(new.keys) && !owner.resizer.isBusy && !owner.window.inLiveResize
-        if canAnimate {
-            for (pane, rect) in new where old[pane] != rect {
-                addMotion(pane: pane, kind: reduce ? "crossfade" : "settle", from: old[pane] ?? rect, to: rect,
-                          duration: reduce ? ShellMotion.reducedFadeMs : ShellMotion.settleMs)
+        // Only an accepted drop settles, once. Snapshots after its settle apply at once.
+        let canAnimate = (fromDrop || retarget) && sameTab && sameSize && Set(old.keys) == Set(new.keys) && !owner.resizer.isBusy && !owner.window.inLiveResize
+        // Under Reduce Motion a retarget keeps the running fade; the panes just take their new frames.
+        if !(canAnimate && retarget && reduce) {
+            motions.removeAll { $0.kind == "settle" || $0.kind == "crossfade" }
+            if canAnimate {
+                for (pane, rect) in new where old[pane] != rect {
+                    addMotion(pane: pane, kind: reduce ? "crossfade" : "settle", from: old[pane] ?? rect, to: rect,
+                              duration: reduce ? ShellMotion.reducedFadeMs : ShellMotion.settleMs)
+                }
             }
         }
         boxes = new
@@ -494,7 +506,7 @@ final class PaneDrag: NSObject {
     }
     private func resetVisuals() { motions = []; link?.invalidate(); link = nil; ghost = nil; ghostTarget = nil }
     private func finish() {
-        phase = .idle; zone = nil; heldDrop = nil; heldReply = nil; dropBoxes = [:]; resetVisuals()
+        phase = .idle; zone = nil; heldDrop = nil; resetVisuals()
         if let monitor { NSEvent.removeMonitor(monitor) }; monitor = nil
         NSCursor.arrow.set(); draw()
     }
@@ -505,6 +517,8 @@ final class PaneDrag: NSObject {
             "ghostSource": ghostSource, "dryRunPending": inFlight != nil, "placeSupported": placeSupported,
             "chip": ["visible": phase == .lifted || phase == .dropping || phase == .cancelling, "label": label],
             "boxes": boxes.mapValues { [$0.minX, $0.minY, $0.width, $0.height] }, "sent": sent,
+            "frozen": holdsLayout, "replyHeld": heldReply != nil,
+            "replies": ["handled": repliesHandled, "ignored": repliesIgnored],
             "motion": ["frozenMs": frozenMs ?? (NSNull() as Any), "reduce": reduce,
                        "active": motions.map { ["pane": $0.pane ?? (NSNull() as Any), "kind": $0.kind, "elapsedMs": elapsed($0)] }]]
     }

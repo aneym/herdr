@@ -9,23 +9,29 @@ Same lab server rules as check_pane_drag.py (HERDR_SHELL_BIN must answer pane.pl
   2. The same for a release on a space header (a new tab in that space).
   3. A drop the server refuses (a centre swap with a pane closed under the drag) plays the cancel:
      the phase passes through cancelling with a cancel motion, then ends idle with the layout as it was.
-S10 (a drop ends with the server's reply, never with a guess from snapshots). The hook holds the drop's call
-unsent, as a slow link would, while other clients change the tab:
-  4. An edge drop pending while another client resizes the source: that snapshot applies at once with no settle
-     and the drop stays pending; the reply then settles the panes onto the server's layout.
-  5. A swap refused after another client's snapshot moved the source: the refusal still plays the cancel.
-  6. The target resized while the drop is pending and again right after it lands: the drop ends on its reply and
-     the later snapshot that disagrees with the reply wins, so the boxes end on the server's layout.
-S10a. The hook also holds a reply that is in until the check releases it, so the drop's own snapshot lands first:
-  7. A swap whose snapshot lands before its reply: the snapshot applies at once with no settle; the reply then
-     settles a and b from where they stood at the release; a later snapshot during that settle applies with no motion.
-  8. Another tab selected while a drop is pending: the drop ends quietly (no cancel, no chip) and a late reply
-     changes nothing on the new tab.
+S10/S10b (a drop ends with the server's reply, never with a guess from snapshots; while it is pending the boxes stay
+where they were at the release and snapshots are buffered). The hook holds the drop's call unsent, as a slow link
+would, while other clients change the tab:
+  4. An edge drop pending while another client resizes the source: the boxes stay frozen, the drop stays pending;
+     the reply then settles the panes from the release boxes onto the server's layout.
+  5. A swap refused after other clients resized the source and closed the target: the boxes stay frozen until the
+     refusal, which shows the buffered snapshot at once and plays the cancel.
+  6. The target resized while the drop is pending and again right after it lands: the boxes stay frozen, the drop
+     ends on its reply and the boxes end on the server's layout.
+The hook also holds a reply that is in until the check releases it, so the drop's own snapshot lands first:
+  7. A swap whose snapshot lands before its reply: the boxes stay frozen and the only call sent is pane.swap (the
+     server focuses the source). Sampled on a frozen clock at 0/50/100/150/200 ms, the reply's settle starts at the
+     release boxes and moves a and b monotonically to the server's layout: no frame shows the final layout first
+     and nothing moves backwards. A snapshot during the settle retargets it from where the boxes are.
+  8. A swap whose call was sent and whose reply is held, then another tab selected: the drop ends quietly (no
+     cancel, no chip). The held reply is then delivered and ignored: selection, boxes, Shell focus, the server's
+     layout and focus, and the calls sent are all unchanged.
 Writes macos/HerdrShell/checks/PANE-DRAG-END.txt.
 """
 import json
 import pathlib
 import sys
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import check_pane_drag as D  # noqa: E402  (sets the lab name, the server binary and the Space guard)
@@ -76,21 +82,33 @@ def held_drop(ws, label, zone_of):
     return tab, a, b, c, state
 
 
+def frozen_through(state, release, label):
+    """The snapshot landed (the server moved) and the Shell still draws the release boxes, the drop pending."""
+    got = D.pd(state).get("boxes") or {}
+    D.check(f"{label}: the boxes stay where they were at the release while the drop is pending",
+            set(got) == set(release) and all(D.near(got[p], release[p]) for p in release)
+            and D.pd(state).get("frozen") is True and D.pd(state).get("phase") == "dropping" and not D.settling(state),
+            json.dumps([got, release, D.pd(state).get("phase"), D.pd(state).get("frozen"), active(state)]))
+
+
+def server_moved(pane, old):
+    D.wait(lambda s: D.rects(D.layout(pane)) != old, timeout=5)
+    time.sleep(0.6)  # the snapshot reaches the Shell
+    return S.state()
+
+
 def pending_foreign_resize(ws):
     tab, a, b, c, state = held_drop(ws, "pending-resize", lambda r: D.edge_point(r, "right"))
+    release = dict(D.pd(state)["boxes"])
     old = D.rects(D.layout(a))
     resize(a, "left")
-    D.wait(lambda s: D.rects(D.layout(a)) != old, timeout=5)
-    state = D.wait(lambda s: boxes_on_server(s, a), timeout=5)
-    D.check("pending: another client's resize of the source shows at once", boxes_on_server(state, a),
-            json.dumps([D.pd(state).get("boxes"), D.host_rects(D.layout(a), state)]))
-    D.check("pending: that snapshot brings no settle and the drop stays pending",
-            D.pd(state).get("phase") == "dropping" and not D.settling(state),
-            json.dumps([D.pd(state).get("phase"), active(state)]))
+    frozen_through(server_moved(a, old), release, "pending")
     D.motion("freeze", ms=0)
     D.hook("send-drop")
     state = D.wait(lambda s: D.settling(s), timeout=5)
-    D.check("pending: the reply settles the panes it moved", {a, b} <= D.settling(state), json.dumps(active(state)))
+    got = D.pd(state).get("boxes") or {}
+    D.check("pending: the reply settles the panes from the release boxes", {a, b} <= D.settling(state)
+            and all(D.near(got.get(p), release[p]) for p in (a, b)), json.dumps([active(state), got, release]))
     D.motion("run")
     state = D.wait(D.idle, timeout=5)
     final = D.rects(D.layout(a))
@@ -104,22 +122,21 @@ def pending_foreign_resize(ws):
 
 def refused_after_foreign(ws):
     tab, a, b, c, state = held_drop(ws, "refused-foreign", D.centre)
+    release = dict(D.pd(state)["boxes"])
     old = D.rects(D.layout(a))
     resize(a, "left")
-    D.wait(lambda s: D.rects(D.layout(a)) != old, timeout=5)
-    state = D.wait(lambda s: boxes_on_server(s, a), timeout=5)
-    D.check("refused-foreign: the resize of the source shows at once, with no settle, the drop pending",
-            boxes_on_server(state, a) and D.pd(state).get("phase") == "dropping" and not D.settling(state),
-            json.dumps([D.pd(state).get("phase"), active(state)]))
+    frozen_through(server_moved(a, old), release, "refused-foreign")
     S.lab("herdr", "pane", "close", b)
-    state = D.wait(lambda s: b not in (D.pd(s).get("boxes") or {}) and boxes_on_server(s, a), timeout=5)
+    D.wait(lambda s: b not in D.rects(D.layout(a)), timeout=5)
+    time.sleep(0.6)
+    frozen_through(S.state(), release, "refused-foreign, target closed")
     closed = D.rects(D.layout(a))
     D.motion("freeze", ms=0)
     D.hook("send-drop")
     state = D.wait(lambda s: D.pd(s).get("phase") != "dropping", timeout=5)
-    D.check("refused-foreign: the refusal plays the cancel",
-            D.pd(state).get("phase") == "cancelling" and "cancel" in active(state),
-            json.dumps([D.pd(state).get("phase"), active(state)]))
+    D.check("refused-foreign: the refusal shows the buffered snapshot at once and plays the cancel",
+            D.pd(state).get("phase") == "cancelling" and "cancel" in active(state) and not D.settling(state)
+            and boxes_on_server(state, a), json.dumps([D.pd(state).get("phase"), active(state), D.pd(state).get("boxes")]))
     D.motion("run")
     state = D.wait(D.idle, timeout=5)
     D.check("refused-foreign: nothing moved; the boxes stay on the server's layout",
@@ -130,13 +147,10 @@ def refused_after_foreign(ws):
 
 def disagreeing_snapshot(ws):
     tab, a, b, c, state = held_drop(ws, "coalesced", lambda r: D.edge_point(r, "right"))
+    release = dict(D.pd(state)["boxes"])
     old = D.rects(D.layout(b))
     resize(b, "left")
-    D.wait(lambda s: D.rects(D.layout(b)) != old, timeout=5)
-    state = D.wait(lambda s: boxes_on_server(s, b), timeout=5)
-    D.check("coalesced: the target's resize shows at once while the drop is pending",
-            boxes_on_server(state, b) and D.pd(state).get("phase") == "dropping" and not D.settling(state),
-            json.dumps([D.pd(state).get("phase"), active(state)]))
+    frozen_through(server_moved(b, old), release, "coalesced")
     D.hook("send-drop")
     resize(b, "left")
     state = D.wait(lambda s: D.idle(s) and boxes_on_server(s, b), timeout=3)
@@ -157,47 +171,88 @@ def snapshot_before_reply(ws):
     old = D.rects(D.layout(a))
     D.hook("hold-replies", on=True)
     D.hook("drop")
-    D.wait(lambda s: D.rects(D.layout(a)) != old, timeout=5)
-    state = D.wait(lambda s: boxes_on_server(s, a), timeout=5)
-    D.check("snapshot-first: the swap's own snapshot shows at once, with no settle, the reply held",
-            boxes_on_server(state, a) and D.pd(state).get("phase") == "dropping" and not D.settling(state),
-            json.dumps([D.pd(state).get("phase"), active(state)]))
+    state = server_moved(a, old)
+    frozen_through(state, before, "snapshot-first")
+    D.check("snapshot-first: the release sends pane.swap and no pane.focus",
+            [x.get("method") for x in D.sent(state)] == ["pane.swap"], json.dumps(D.sent(state)))
+    final = D.host_rects(D.layout(a), state)
     D.motion("freeze", ms=0)
     D.hook("send-reply")
     D.hook("hold-replies", on=False)
     state = D.wait(lambda s: D.settling(s), timeout=5)
-    got = D.pd(state).get("boxes") or {}
     D.check("snapshot-first: the reply settles a and b", {a, b} <= D.settling(state), json.dumps(active(state)))
-    D.check("snapshot-first: the settle starts from the boxes at the release",
-            all(p in got and D.near(got[p], before[p]) for p in (a, b)), json.dumps([got, before]))
+    samples = {}
+    for ms in (0, 50, 100, 150, 200):
+        D.motion("freeze", ms=ms)
+        samples[ms] = {p: (D.pd(S.state()).get("boxes") or {}).get(p) for p in (a, b)}
+    for p in (a, b):
+        v = [samples[ms][p] or [0, 0, 0, 0] for ms in (0, 50, 100, 150, 200)]
+        o, n = before[p], final[p]
+        dist = [[abs(x[i] - n[i]) for i in range(4)] for x in v]
+        starts = D.near(v[0], o, 1.5)
+        forward = all(dist[k + 1][i] <= dist[k][i] + 0.5 for k in range(4) for i in range(4))
+        bounded = all(min(o[i], n[i]) - 0.5 <= x[i] <= max(o[i], n[i]) + 0.5 for x in v for i in range(4))
+        ends = D.near(v[-1], n)
+        D.check(f"snapshot-first: {p} starts at its release box and only moves toward the final one",
+                starts and forward and bounded and ends, json.dumps({"release": o, "final": n, "samples": v}))
+    # A snapshot mid-settle retargets the running settle from where the boxes are; it never restarts from the release.
+    D.motion("freeze", ms=100)
+    mid = dict(D.pd(S.state()).get("boxes") or {})
     old = D.rects(D.layout(a))
     resize(a, "left")
-    D.wait(lambda s: D.rects(D.layout(a)) != old, timeout=5)
-    state = D.wait(lambda s: boxes_on_server(s, a), timeout=5)
-    D.check("snapshot-first: a later snapshot during the settle applies at once, with no motion",
-            boxes_on_server(state, a) and not D.settling(state), json.dumps([D.pd(state).get("boxes"), active(state)]))
+    state = server_moved(a, old)
+    target = D.host_rects(D.layout(a), state)
+    got = D.pd(state).get("boxes") or {}
+    between = all(min(mid[a][i], target[a][i]) - 0.5 <= got[a][i] <= max(mid[a][i], target[a][i]) + 0.5 for i in range(4))
+    D.check("snapshot-first: a snapshot during the settle retargets it from the drawn boxes",
+            a in D.settling(state) and between and not D.near(got[a], before[a]),
+            json.dumps([active(state), mid.get(a), got.get(a), target.get(a)]))
     D.motion("run")
-    state = D.wait(D.idle, timeout=5)
+    state = D.wait(lambda s: D.idle(s) and boxes_on_server(s, a), timeout=5)
     D.check("snapshot-first: the drop ends idle on the server's layout", D.idle(state) and boxes_on_server(state, a),
             json.dumps([D.pd(state).get("phase"), D.pd(state).get("boxes")]))
     D.close(tab)
 
 
-def tab_switch_pending(ws, other):
-    tab, a, b, c, state = held_drop(ws, "tab-switch", lambda r: D.edge_point(r, "right"))
+def tab_switch_pending(ws, other, other_pane):
+    tab, a, b, c, state = D.fresh(ws, "tab-switch")
+    D.hook("begin", pane=a)
+    D.hook("move", steps=1, **D.centre(D.pd(state)["boxes"][b]))
+    D.wait(lambda s: D.zone_is(s, kind="centre", target=b))
+    old = D.rects(D.layout(a))
+    D.hook("hold-replies", on=True)
+    D.hook("drop")
+    # The call went out and the server applied it; its reply is in and held.
+    D.wait(lambda s: D.rects(D.layout(a)) != old, timeout=5)
+    state = D.wait(lambda s: D.pd(s).get("replyHeld") is True, timeout=5)
+    D.check("tab-switch: the swap was sent and its reply is held", D.pd(state).get("replyHeld") is True
+            and [x.get("method") for x in D.sent(state)] == ["pane.swap"], json.dumps([D.pd(state).get("replyHeld"), D.sent(state)]))
     S.cmd({"cmd": "select", "tab": other})
     state = D.wait(lambda s: s.get("selected_tab") == other and D.pd(s).get("phase") != "dropping", timeout=5)
     D.check("tab-switch: the pending drop ends quietly, with no cancel and no chip",
             D.pd(state).get("phase") == "idle" and "cancel" not in active(state)
             and not (D.pd(state).get("chip") or {}).get("visible"),
             json.dumps([state.get("selected_tab"), D.pd(state).get("phase"), active(state), D.pd(state).get("chip")]))
-    shown = dict(D.pd(state).get("boxes") or {})
-    D.hook("send-drop")
-    D.wait(lambda s: a in D.rects(D.layout(b)) and D.rects(D.layout(b))[a][0] > D.rects(D.layout(b))[b][0], timeout=5)
-    state = D.wait(D.idle, timeout=5)
-    D.check("tab-switch: the late reply changes nothing on the new tab",
-            D.idle(state) and state.get("selected_tab") == other and (D.pd(state).get("boxes") or {}) == shown,
-            json.dumps([state.get("selected_tab"), D.pd(state).get("boxes"), shown]))
+    state = D.wait(lambda s: D.idle(s) and s.get("focused_pane") is not None, timeout=5)
+    replies = dict(D.pd(state).get("replies") or {})
+    shown = (dict(D.pd(state).get("boxes") or {}), state.get("focused_pane"), list(D.sent(state)))
+    server = (D.layout(a), D.layout(other_pane))
+    D.hook("send-reply")
+    D.hook("hold-replies", on=False)
+    state = D.wait(lambda s: (D.pd(s).get("replies") or {}).get("ignored", 0) > replies.get("ignored", 0), timeout=5)
+    time.sleep(0.6)  # anything the reply could have set off has landed
+    state = S.state()
+    got = D.pd(state).get("replies") or {}
+    D.check("tab-switch: the held reply was delivered after the switch and ignored",
+            got.get("handled") == replies.get("handled", -1) + 1 and got.get("ignored") == replies.get("ignored", -1) + 1
+            and D.pd(state).get("replyHeld") is False, json.dumps([replies, got, D.pd(state).get("replyHeld")]))
+    now = (dict(D.pd(state).get("boxes") or {}), state.get("focused_pane"), list(D.sent(state)))
+    D.check("tab-switch: the late reply changes no selection, box, Shell focus or call",
+            D.idle(state) and state.get("selected_tab") == other and now == shown, json.dumps([state.get("selected_tab"), now, shown]))
+    after = (D.layout(a), D.layout(other_pane))
+    D.check("tab-switch: the late reply changes neither tab's layout or focus on the server",
+            all(D.rects(x) == D.rects(y) and x.get("focused_pane_id") == y.get("focused_pane_id") for x, y in zip(server, after)),
+            json.dumps([[D.rects(x), x.get("focused_pane_id")] for x in server], ) + " -> " + json.dumps([[D.rects(x), x.get("focused_pane_id")] for x in after]))
     D.close(tab)
 
 
@@ -241,7 +296,8 @@ def main():
         print(f"[BLOCKED] lab server does not answer pane.place: {json.dumps(probe)[:300]}")
         S.lab("down")
         raise SystemExit(2)
-    tab2 = D.api("tab", "create", "--workspace", ws, "--label", "two", "--no-focus")["tab"]["tab_id"]
+    made2 = D.api("tab", "create", "--workspace", ws, "--label", "two", "--no-focus")
+    tab2, pane2 = made2["tab"]["tab_id"], made2["root_pane"]["pane_id"]
     S.app("start")
     S.cmd({"cmd": "activate"})
     state = D.wait(lambda s: s.get("window_key") is True and "paneDrag" in s)
@@ -255,7 +311,7 @@ def main():
     refused_after_foreign(ws)
     disagreeing_snapshot(ws)
     snapshot_before_reply(ws)
-    tab_switch_pending(ws, tab2)
+    tab_switch_pending(ws, tab2, pane2)
     D.finish()
 
 

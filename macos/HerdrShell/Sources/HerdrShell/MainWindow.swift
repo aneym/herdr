@@ -647,16 +647,21 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     /// A pane drop's reply layout and the snapshot epoch it answered: shown until a newer snapshot lands.
     private var dropHold: (layout: Snapshot.Layout, epoch: Int)?
 
-    /// The server answered a pane drop: snapshots that came while it was pending show first, as they are, then the
-    /// panes settle to the reply's layout for this tab. The next snapshot replaces it, with no motion. When the drop's
-    /// own snapshot came first and already drew the reply's layout, the panes settle from where they stood at the drop.
-    func applyDropReply(_ layouts: [Snapshot.Layout]) {
-        guard let tab = state.selectedTab, let layout = layouts.first(where: { $0.tab_id == tab }) else { return }
-        refreshHost()
+    /// The server accepted a pane drop. The host still shows the boxes it had at the release, so the panes settle once
+    /// from there: to the newest snapshot when one that moved panes landed while the drop was pending (`buffered`; a
+    /// title or status snapshot does not count), else to the reply's layout for this tab, which shows until the next
+    /// snapshot. A snapshot during the settle retargets it.
+    func applyDropReply(_ layouts: [Snapshot.Layout], buffered: Bool) {
+        guard let tab = state.selectedTab else { return }
+        func geometry(_ l: Snapshot.Layout?) -> String {
+            guard let l else { return "" }
+            let rects = l.panes.sorted { $0.pane_id < $1.pane_id }.map { "\($0.pane_id)@\($0.rect.x),\($0.rect.y),\($0.rect.width),\($0.rect.height)" }
+            return "\(l.area.x),\(l.area.y),\(l.area.width),\(l.area.height)|\(l.zoomed == true)|" + rects.joined(separator: "|")
+        }
+        let moved = buffered && geometry(model.layout(forTab: tab)) != geometry(shownLayout)
+        guard !moved, let layout = layouts.first(where: { $0.tab_id == tab }) else { refreshHost(fromDrop: true); return }
         dropHold = (layout, model.snapshotEpoch(for: tab))
-        let shown = lastLayoutKey
         refreshHost(using: layout, fromDrop: true)
-        if lastLayoutKey == shown { paneDrag.settleFromDrop() }
     }
 
     private func heldDropLayout(_ tab: String) -> Snapshot.Layout? {
@@ -670,6 +675,9 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     /// skipped while a divider drag is live.
     func refreshHost(using forced: Snapshot.Layout? = nil, fromDrop: Bool = false) {
         if forced == nil, resizer.isBusy { return }
+        // A pane drop waiting on its reply keeps the boxes, and the terminals' sizes, it had at the release; the
+        // snapshot stays buffered in the model until the drop ends. Titles and status still update.
+        if forced == nil, paneDrag.holdsLayout { applyCaps(); return }
         guard let tab = state.selectedTab, let layout = forced ?? heldDropLayout(tab) ?? model.layout(forTab: tab), layout.tab_id == tab else { return }
         let previousLayout = shownLayout
         shownLayout = layout
