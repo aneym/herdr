@@ -4,6 +4,8 @@ import json
 import os
 import stat
 import sys
+import re
+import subprocess
 
 HOME = os.path.expanduser("~")
 ROOTS = [os.path.realpath(os.path.join(HOME, suffix)) for suffix in
@@ -48,6 +50,30 @@ def metadata(info):
 
 def request(req):
     op = req.get("op")
+    if op == "action":
+        verb, args = req.get("verb"), req.get("args")
+        if verb not in ("park", "unpark", "approve") or not isinstance(args, list) or not args:
+            raise ValueError("invalid action")
+        if not all(isinstance(a, str) and chr(0) not in a for a in args):
+            raise ValueError("invalid arguments")
+        if not re.fullmatch(r"[A-Za-z0-9._:-]+", args[0]):
+            raise ValueError("invalid target")
+        if verb == "approve":
+            if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,80}", args[0]) or len(args) != 3 or not args[1].startswith("--quote=") or not args[1][8:].strip() or args[2] != "--by=alex":
+                raise ValueError("invalid approval")
+        else:
+            if len(args) > 2 or (len(args) == 2 and (verb != "park" or not args[1].startswith("--note="))):
+                raise ValueError("invalid park arguments")
+            by = req.get("by")
+            if not isinstance(by, str) or not re.fullmatch(r"herdr-shell@[a-z0-9_-]+", by):
+                raise ValueError("invalid attribution")
+            args = [args[0], "--by=" + by] + args[1:]
+        result = subprocess.run(["python3", os.path.join(HOME, ".local/bin/herdr-shell-remote"), verb] + args,
+                                capture_output=True, text=True, timeout=18)
+        reply = json.loads(result.stdout)
+        if result.returncode or reply.get("ok") is not True:
+            raise ValueError(reply.get("error", "action failed"))
+        return reply
     if op == "home":
         return {"home": HOME}
     if op == "list":

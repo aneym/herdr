@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { buildAreas, stageImplied, stageWord } from "./areas";
+import { bridge } from "./bridge";
+import type { AreaLine } from "./areas";
 import type { AreaChip } from "./areas";
 import { LaneSnapshot } from "./laneFiles";
 import type { Snapshot } from "./model";
@@ -32,6 +34,9 @@ export function useSelectionReveal(selected: string | null): RevealMemo {
 const homeGlyphs = { cloud: "☁︎", local: "⌂︎", unsynced: "⇡︎" };
 const homeTitles = { cloud: "Memory in Rails cloud", local: "Memory on this machine only", unsynced: "Memory not synced to Rails cloud" };
 interface Press { id: string; section: PinSection; x: number; y: number; ids: string[]; block: RowBox[]; active: boolean; cancelled: boolean; done: () => void }
+function scopeSlug(url?: string): string | null {
+  try { const route = new URL(url!).searchParams.get("route"); const slug = route?.startsWith("scoping/") ? route.slice(8) : ""; return /^[a-z0-9][a-z0-9-]{0,80}$/.test(slug) ? slug : null; } catch { return null; }
+}
 export default function Sidebar({ snapshot = {}, catalog = new LaneSnapshot(), machines, chooseMachine, rows, selected, revealed, machine, notice, select, pin, movePin, renaming, startRename, cancelRename, commitRename, paneDropRow }: { paneDropRow?: string | null; snapshot?: Snapshot; catalog?: LaneSnapshot; machines: MachineStatus[]; chooseMachine: (name: string) => void; rows: SidebarRow[]; selected: string | null; revealed: RevealMemo; machine: MachineStatus; notice: string | null; select: (id: string) => void; pin: (id: string, pinned: boolean) => void; movePin: (ids: string[], from: number, to: number) => void; renaming: string | null; startRename: (id: string) => void; cancelRename: () => void; commitRename: (id: string, label: string) => Promise<void> }) {
   // Folds are per machine: workspace ids repeat across machines. Studio keeps the pre-switcher key.
   const foldStore = machine.name === "studio" ? "herdr-space-expanded" : `herdr-space-expanded:${machine.name}`;
@@ -40,8 +45,18 @@ export default function Sidebar({ snapshot = {}, catalog = new LaneSnapshot(), m
   const read = <T,>(key: string, fallback: T): T => { try { return JSON.parse(localStorage.getItem(`herdr-shell.areas.${key}`) ?? "null") ?? fallback; } catch { return fallback; } };
   const save = (key: string, value: unknown) => { try { localStorage.setItem(`herdr-shell.areas.${key}`, JSON.stringify(value)); } catch { /* Storage can be disabled by WebView policy. */ } };
   const [hiddenAgents, setHiddenAgents] = useState(() => read("hiddenAgents", false));
-  const [menu, setMenu] = useState<{ row: SidebarRow; x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ row?: SidebarRow; line?: AreaLine; x: number; y: number } | null>(null);
   const [menuError, setMenuError] = useState<string | null>(null);
+  const [prompt, setPrompt] = useState<{ line: AreaLine; verb: "park" | "approve" } | null>(null);
+  const [words, setWords] = useState("");
+  const [savingAction, setSavingAction] = useState(false);
+  const runAction = async (verb: "park" | "unpark" | "approve", args: string[]) => {
+    setSavingAction(true); setMenuError(null);
+    try { await bridge.remoteAction(machine.name, verb, args); setPrompt(null); }
+    catch (error) { setMenuError(String(error)); }
+    finally { setSavingAction(false); }
+  };
+  const ask = (line: AreaLine, verb: "park" | "approve") => { setMenu(null); setWords(verb === "approve" ? "approved" : ""); setPrompt({ line, verb }); };
   const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!menu) return;
@@ -52,7 +67,7 @@ export default function Sidebar({ snapshot = {}, catalog = new LaneSnapshot(), m
     menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
     return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", escape); };
   }, [menu]);
-  useEffect(() => { setMenu(null); setMenuError(null); }, [machine.name]);
+  useEffect(() => { setMenu(null); setPrompt(null); setMenuError(null); }, [machine.name]);
   const [savedMode, setMode] = useState<"areas" | "spaces" | null>(() => read("mode", null));
   // Spaces until the user picks Areas, as the Mac (P33).
   const mode = savedMode ?? "spaces";
@@ -170,9 +185,13 @@ export default function Sidebar({ snapshot = {}, catalog = new LaneSnapshot(), m
     {mode === "areas" ? <>
       <div className="areas-chips" aria-label="Area filters">{([["all", "All"], ["scoping", "Scope"], ["building", "Build"], ["review", "Review"], ["use", "Use"], ["parked", "Parked"]] as const).map(([value, title]) => <button key={value} aria-pressed={chip === value} onClick={() => changeChip(value)}>{value === "parked" && parkedCount ? `Parked ${parkedCount}` : title}</button>)}</div>
       {areaOnly && <button className="sidebar-row muted" onClick={() => { setAreaOnly(null); save("only", null); }}>Only {catalog.areaName(areaOnly)} ×</button>}
-      {areaLines.map(line => line.kind === "header" ? <h2 key={line.id}>{line.title}</h2> : <div key={line.id} data-row={line.id} className={`sidebar-row areas-line ${line.parked ? "areas-parked-row" : ""} ${line.selected ? "selected" : ""} ${line.dim ? "muted" : ""}`} style={{ paddingLeft: 8 + line.depth * 16 }}>
+      {areaLines.map(line => line.kind === "header" ? <h2 key={line.id}>{line.title}</h2> : <div key={line.id} data-row={line.id} className={`sidebar-row areas-line ${line.parked ? "areas-parked-row" : ""} ${(line.selected || (line.kind === "focus" && chip === "needs")) ? "selected" : ""} ${line.dim ? "muted" : ""}`} style={{ paddingLeft: 8 + line.depth * 16 }} onContextMenu={event => {
+        if (!line.tab) return;
+        event.preventDefault(); setMenuError(null); setMenu({ line, x: event.clientX, y: event.clientY });
+      }}>
         {line.toggle && <button className="chevron" aria-label={`Fold ${line.title}`} aria-expanded={line.chevron} onClick={() => toggleAreaLine(line.toggle!, !line.chevron)}>{line.chevron ? "⌄" : "›"}</button>}
         <button className="select-tab" onClick={event => {
+          if (renaming === line.tab) return;
           if (line.kind === "focus") { changeChip("needs"); toggleAreaLine("focus", !focusExpanded); }
           else if (line.kind === "area" && event.altKey) { setAreaOnly(line.area!); save("only", line.area!); }
           else if (line.tab) select(line.tab);
@@ -180,7 +199,7 @@ export default function Sidebar({ snapshot = {}, catalog = new LaneSnapshot(), m
         }}>
           {line.kind === "area" && <span className="areas-dot" style={{ backgroundColor: line.color }} />}
           {line.glyph && <span className={`areas-glyph ${line.glyphTone}`} aria-label={line.status}>{line.glyph}</span>}
-          <span className="label">{line.title}{line.parkNote && <small className="areas-park-note">{line.parkNote}</small>}</span>{line.badge && (chip === "all" || !stageImplied(chip, line)) && <span className={`areas-badge ${line.badge === "Ready for review" || line.stage === "reviewing" ? "is-review" : ""}`}>{stageWord(line.badge)}</span>}{line.trailing && <span className="areas-trailing">{line.trailing}</span>}
+          <span className="label">{line.tab && renaming === line.tab ? <RenameInput label={line.title} commit={label => commitRename(line.tab!, label)} cancel={cancelRename} /> : line.title}{line.parkNote && <small className="areas-park-note">{line.parkNote}</small>}</span>{line.badge && (chip === "all" || !stageImplied(chip, line)) && <span className={`areas-badge ${line.badge === "Ready for review" || line.stage === "reviewing" ? "is-review" : ""}`}>{stageWord(line.badge)}</span>}{line.trailing && <span className="areas-trailing">{line.trailing}</span>}
         </button>
       </div>)}
     </> : <>
@@ -192,5 +211,22 @@ export default function Sidebar({ snapshot = {}, catalog = new LaneSnapshot(), m
     {rows.some(r => r.kind === "space" && r.hidden) && <><button className="sidebar-row muted" aria-expanded={hidden} onClick={() => setHidden(!hidden)}><span className="chevron">{hidden ? "⌄" : "›"}</span>Hidden</button>{(hidden || rows.some(r => r.hidden && r.id === renaming)) && rows.filter(r => r.kind === "space" && r.hidden).map(spaceRow)}</>}
     </section>
     </>}
-  </nav>{menu && <div ref={menuRef} className="pane-menu agent-menu" role="menu" style={{ left: Math.min(menu.x, Math.max(0, window.innerWidth - 180)), top: Math.min(menu.y, Math.max(0, window.innerHeight - 40)) }}><button role="menuitem" onClick={() => { const row = menu.row; setMenu(null); void setAgentHidden(machine.name, row.id, !row.hidden).catch(error => setMenuError(String(error))); }}>{menu.row.hidden ? "Show in Agents" : "Hide"}</button></div>}<footer role="status">{notice ?? menuError ?? (machine.state === "up" ? `${machine.name} · connected` : machine.state === "connecting" ? "connecting…" : `offline: ${machine.error || "disconnected"}`)}<UpdatePill /></footer></aside>;
+  </nav>{menu && <div ref={menuRef} className="pane-menu agent-menu" role="menu" style={{ left: Math.min(menu.x, Math.max(0, window.innerWidth - 180)), top: Math.min(menu.y, Math.max(0, window.innerHeight - 40)) }}>
+    {menu.row && <button role="menuitem" onClick={() => { const row = menu.row!; setMenu(null); void setAgentHidden(machine.name, row.id, !row.hidden).catch(error => setMenuError(String(error))); }}>{menu.row.hidden ? "Show in Agents" : "Hide"}</button>}
+    {menu.line && <>
+      <button role="menuitem" onClick={() => { startRename(menu.line!.tab!); setMenu(null); }}>Rename…</button>
+      {menu.line.parked ? <button role="menuitem" disabled={savingAction} onClick={() => { const tab = menu.line!.tab!; setMenu(null); void runAction("unpark", [tab]); }}>Resume</button> : (menu.line.kind === "lane" || menu.line.kind === "orchestrator") && <button role="menuitem" onClick={() => ask(menu.line!, "park")}>Park…</button>}
+      {scopeSlug(catalog.lanes[menu.line.tab!]?.scopeURL) && <button role="menuitem" onClick={() => ask(menu.line!, "approve")}>Approve scope…</button>}
+    </>}
+  </div>}
+  {prompt && <div className="pane-menu restart-confirm" role="dialog" aria-label={`${prompt.verb === "park" ? "Park" : "Approve"} ${prompt.line.title}?`} onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); setPrompt(null); } }}>
+    <p>{prompt.verb === "park" ? "Park" : "Approve"} {prompt.line.title}?</p>
+    {prompt.verb === "park" && <p>It leaves every filter but Parked and stops counting in Needs you. Resume puts it back.</p>}
+    <input className="rename-input" autoFocus value={words} disabled={savingAction} aria-label={prompt.verb === "park" ? "Park note" : "Approval quote"} placeholder={prompt.verb === "park" ? "Note (optional): why, and when to come back" : "Your words, saved as the approval quote"} onChange={event => setWords(event.target.value)} />
+    <div className="restart-actions"><button onClick={() => setPrompt(null)} disabled={savingAction}>Cancel</button><button className="restart-primary" disabled={savingAction || (prompt.verb === "approve" && !words.trim())} onClick={() => {
+      const args = prompt.verb === "park" ? [prompt.line.tab!, ...(words.trim() ? [`--note=${words.trim()}`] : [])] : [scopeSlug(catalog.lanes[prompt.line.tab!]?.scopeURL)!, `--quote=${words}`, "--by=alex"];
+      void runAction(prompt.verb, args);
+    }}>{prompt.verb === "park" ? "Park" : "Approve"}</button></div>
+  </div>}
+  <footer role="status">{notice ?? menuError ?? (machine.state === "up" ? `${machine.name} · connected` : machine.state === "connecting" ? "connecting…" : `offline: ${machine.error || "disconnected"}`)}<UpdatePill /></footer></aside>;
 }

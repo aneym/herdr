@@ -130,6 +130,7 @@ fn main() {
             bridge::machines_list,
             bridge::snapshot,
             bridge::api_request,
+            bridge::remote_action,
             bridge::attach_open,
             bridge::attach_input,
             bridge::attach_resize,

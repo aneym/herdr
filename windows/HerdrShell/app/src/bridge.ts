@@ -26,6 +26,7 @@ export const bridge = {
   fileStat: (machine: string, path: string) => invoke<{ exists: boolean; size: number; mtime_ms: number; inode: number }>("file_stat", { machine, path }),
   fileRead: (machine: string, path: string, offset: number, max: number) => invoke<{ size: number; mtime_ms: number; inode: number; offset: number; data_b64: string }>("file_read", { machine, path, offset, max }),
   fileList: (machine: string, path: string) => invoke<string[]>("file_list", { machine, path }),
+  remoteAction: (machine: string, verb: "park" | "unpark" | "approve", args: string[]) => invoke<unknown>("remote_action", { machine, verb, args }),
   remoteHome: (machine: string) => invoke<string>("remote_home", { machine }),
   machines: () => invoke<MachineStatus[]>("machines_list"),
   snapshot: (machine: string) => invoke<Snapshot>("snapshot", { machine }),

@@ -735,3 +735,101 @@ mod tests {
         Ok(())
     }
 }
+
+impl Machines {
+    pub(crate) fn remote_action(
+        &self,
+        machine: &str,
+        verb: &str,
+        args: &[String],
+    ) -> Result<Value, String> {
+        use std::io::{Read, Write};
+        let config = self.configs.get(machine).ok_or("unknown machine")?;
+        let script = include_str!("remote_helper.py");
+        let remote = config.kind != MachineKind::Local;
+        let mut command = if !remote {
+            let mut c = Command::new("python3");
+            c.args(["-I", "-u", "-c", script]);
+            c
+        } else {
+            #[cfg(windows)]
+            let mut c = Command::new("ssh.exe");
+            #[cfg(not(windows))]
+            let mut c = Command::new("ssh");
+            // File-helper bootstrap: user argv is JSON on stdin, never shell text.
+            c.args(["-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", &config.ssh_host,
+                "python3 -I -u -c 'import sys;n=int(sys.stdin.buffer.readline());exec(compile(sys.stdin.buffer.read(n),\"herdr-shell-helper\",\"exec\"))'"]);
+            c
+        };
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000);
+        }
+        let hostname = std::env::var("COMPUTERNAME")
+            .or_else(|_| std::env::var("HOSTNAME"))
+            .or_else(|_| {
+                Command::new("hostname")
+                    .output()
+                    .map_err(|e| e.to_string())
+                    .and_then(|o| String::from_utf8(o.stdout).map_err(|e| e.to_string()))
+            })
+            .map_err(|e| e.to_string())?;
+        let by = format!(
+            "herdr-shell@{}",
+            hostname
+                .trim()
+                .split('.')
+                .next()
+                .ok_or("hostname missing")?
+                .to_lowercase()
+        );
+        let mut child = command.spawn().map_err(|e| e.to_string())?;
+        if let Some(job) = &self.job {
+            if let Err(error) = job.assign(&child) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
+        }
+        let mut input = child.stdin.take().ok_or("action stdin missing")?;
+        let mut output = child.stdout.take().ok_or("action stdout missing")?;
+        let request = json!({"op":"action", "verb":verb, "args":args, "by":by});
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let run = || -> Result<Value, String> {
+                if remote {
+                    writeln!(input, "{}", script.len()).map_err(|e| e.to_string())?;
+                    input
+                        .write_all(script.as_bytes())
+                        .map_err(|e| e.to_string())?;
+                }
+                serde_json::to_writer(&mut input, &request).map_err(|e| e.to_string())?;
+                input.write_all(b"\n").map_err(|e| e.to_string())?;
+                drop(input);
+                let mut bytes = Vec::new();
+                output
+                    .by_ref()
+                    .take(1024 * 1024)
+                    .read_to_end(&mut bytes)
+                    .map_err(|e| e.to_string())?;
+                serde_json::from_slice(&bytes).map_err(|e| e.to_string())
+            };
+            let _ = tx.send(run());
+        });
+        let result = rx
+            .recv_timeout(Duration::from_secs(28))
+            .map_err(|e| e.to_string());
+        let _ = child.kill();
+        let _ = child.wait();
+        let value = result??;
+        if value["ok"] != true {
+            return Err(value["error"].as_str().unwrap_or("action failed").into());
+        }
+        Ok(value)
+    }
+}

@@ -460,3 +460,88 @@ pub fn clipboard_write(text: String) -> Result<(), String> {
         .and_then(|mut c| c.set_text(text))
         .map_err(|e| e.to_string())
 }
+
+fn validate_action(verb: &str, args: &[String]) -> Result<(), String> {
+    if !matches!(verb, "park" | "unpark" | "approve") {
+        return Err("invalid action".into());
+    }
+    let target = args.first().ok_or("missing target")?;
+    if target.is_empty()
+        || !target
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b))
+        || args.iter().any(|a| a.contains('\0'))
+    {
+        return Err("invalid target or arguments".into());
+    }
+    let valid = match verb {
+        "approve" => {
+            args.len() == 3
+                && args[1].starts_with("--quote=")
+                && !args[1][8..].trim().is_empty()
+                && args[2] == "--by=alex"
+                && target.len() <= 81
+                && target
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+                && target.as_bytes()[0].is_ascii_alphanumeric()
+        }
+        "park" => args.len() == 1 || (args.len() == 2 && args[1].starts_with("--note=")),
+        _ => args.len() == 1,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err("invalid action arguments".into())
+    }
+}
+
+#[tauri::command]
+pub async fn remote_action(
+    machines: State<'_, Machines>,
+    machine: String,
+    verb: String,
+    args: Vec<String>,
+) -> Result<Value, String> {
+    validate_action(&verb, &args)?;
+    let machines = machines.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || machines.remote_action(&machine, &verb, &args))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod action_tests {
+    use super::validate_action;
+    // Pure allow-list has adversarial target, verb and option edge cases.
+    #[test]
+    fn action_allowlist() {
+        for (verb, args, valid) in [
+            ("park", vec!["w1:t1", "--note=a '; $(bad)"], true),
+            ("unpark", vec!["w1:t1"], true),
+            (
+                "approve",
+                vec!["scope-name", "--quote=approved", "--by=alex"],
+                true,
+            ),
+            ("exec", vec!["w1:t1"], false),
+            ("park", vec!["../bad"], false),
+            ("park", vec!["w1:t1", "--by=other"], false),
+            ("unpark", vec!["w1:t1", "--note=x"], false),
+            (
+                "approve",
+                vec!["scope-name", "--quote= ", "--by=alex"],
+                false,
+            ),
+        ] {
+            assert_eq!(
+                validate_action(
+                    verb,
+                    &args.into_iter().map(str::to_owned).collect::<Vec<_>>()
+                )
+                .is_ok(),
+                valid
+            );
+        }
+    }
+}
