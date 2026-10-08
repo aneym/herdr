@@ -378,15 +378,44 @@ fn shutdown_preserves_session_after_shell_is_signaled() {
     let pane_id = created["result"]["root_pane"]["pane_id"]
         .as_str()
         .expect("root pane id");
-    let process_info = send_request(
+    // A spawned PID does not prove the shell has finished initializing. Wait
+    // for the shell itself to execute a command before delivering SIGHUP.
+    let shell_ready = base.join("shell-ready");
+    let sent = send_request(
         &socket_path,
-        &format!(
-            r#"{{"id":"process","method":"pane.process_info","params":{{"pane_id":"{pane_id}"}}}}"#
-        ),
+        &serde_json::json!({
+            "id": "shell_ready",
+            "method": "pane.send_text",
+            "params": {
+                "pane_id": pane_id,
+                "text": format!("printf '%s\\n' $$ > {}", shell_ready.display()),
+            },
+        })
+        .to_string(),
     );
-    let shell_pid = process_info["result"]["process_info"]["shell_pid"]
-        .as_u64()
-        .expect("shell pid") as libc::pid_t;
+    assert_eq!(sent["result"]["type"], "ok");
+    let entered = send_request(
+        &socket_path,
+        &serde_json::json!({
+            "id": "shell_ready_enter",
+            "method": "pane.send_keys",
+            "params": { "pane_id": pane_id, "keys": ["Enter"] },
+        })
+        .to_string(),
+    );
+    assert_eq!(entered["result"]["type"], "ok");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let shell_pid = loop {
+        if let Ok(pid) = fs::read_to_string(&shell_ready) {
+            if let Some(pid) = pid.strip_suffix('\n') {
+                if let Ok(pid) = pid.parse::<libc::pid_t>() {
+                    break pid;
+                }
+            }
+        }
+        assert!(Instant::now() < deadline, "shell did not become ready");
+        thread::sleep(Duration::from_millis(20));
+    };
 
     assert_eq!(unsafe { libc::kill(shell_pid, libc::SIGHUP) }, 0);
 
