@@ -29,9 +29,9 @@ use crate::factory_overlay::{FactoryOverlay, TabKind};
 
 use super::App;
 
-/// How long an overlay rewrite stays a fresh signal. The agent-rails writer
-/// rewrites the file every few seconds; a dead writer must not hold a chat
-/// working forever.
+/// How long the writer's mtime heartbeat stays a fresh signal. The agent-rails
+/// writer refreshes it at least every 60 seconds, even when content is unchanged;
+/// a dead writer must not hold a chat working forever.
 pub(crate) const FACTORY_OVERLAY_FRESH: Duration = Duration::from_secs(120);
 
 /// Overlay run ids for the chat's own Claude subagents and teammates.
