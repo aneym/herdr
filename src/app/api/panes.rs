@@ -1160,7 +1160,12 @@ impl App {
                     Some(&mut move_result),
                 );
                 let Some(result) = move_result else {
-                    return response;
+                    // Preserve move errors, but pane.place must never leak a pane_move result.
+                    if serde_json::from_str::<serde_json::Value>(&response)
+                        .ok().is_some_and(|value| value.get("error").is_some()) {
+                        return response;
+                    }
+                    return encode_error(id, "pane_place_failed", "pane placement was not applied");
                 };
                 result_pane_id = result.pane.pane_id.clone();
                 source_layout = result.source_layout.map(|layout| *layout);
