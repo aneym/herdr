@@ -47,6 +47,15 @@ final class TestHook {
         case "key":
             viaPid = (obj["via"] as? String) == "pid"
             key(obj["key"] as? String ?? "", mods: obj["mods"] as? [String] ?? [])
+        case "drop_files":
+            // Private board, same decoder and paste path as an AppKit Finder drop.
+            guard let c = controller, let pane = obj["pane"] as? String,
+                  let paths = obj["paths"] as? [String],
+                  let view = c.registry.byTerminal.values.first(where: { $0.paneId == pane }) else { return }
+            let board = NSPasteboard(name: NSPasteboard.Name("herdr-shell-drop-\(getpid())"))
+            board.clearContents()
+            board.writeObjects(paths.map { NSURL(fileURLWithPath: $0) })
+            delivered.append("drop_files \(pane) \(view.dropFiles(from: board))")
         case "clipboard_image":
             // {"cmd":"clipboard_image","path":"<png>"}: later pastes read a private named
             // board holding only this image, so a check never touches the user's clipboard.

@@ -45,6 +45,7 @@ final class SurfaceView: NSView {
         self.clipboardSocketPath = env["HERDR_SOCKET_PATH"] ?? ""
         self.terminalId = terminalId
         super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        registerForDraggedTypes([.fileURL])
 
         var cfg = ghostty_surface_config_new()
         cfg.userdata = Unmanaged.passUnretained(self).toOpaque()
@@ -162,6 +163,35 @@ final class SurfaceView: NSView {
         guard let surface else { return (0, 0) }
         let s = ghostty_surface_size(surface)
         return (Int(s.columns), Int(s.rows))
+    }
+
+    // Only terminal surfaces accept Finder items; sidebar and desk drops stay unchanged.
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard !exited, surface != nil,
+              sender.draggingSourceOperationMask.contains(.copy),
+              !Self.fileURLs(from: sender.draggingPasteboard).isEmpty else { return [] }
+        return .copy
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        dropFiles(from: sender.draggingPasteboard)
+    }
+
+    private static func fileURLs(from board: NSPasteboard) -> [URL] {
+        (board.readObjects(forClasses: [NSURL.self],
+                           options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+    }
+
+    /// Shared by AppKit drops and the private agent-run hook. Paste through Ghostty's
+    /// clipboard completion path, as image paste does, to preserve bracketed paste.
+    @discardableResult
+    func dropFiles(from board: NSPasteboard) -> Bool {
+        guard !exited, surface != nil else { return false }
+        let urls = Self.fileURLs(from: board)
+        guard !urls.isEmpty else { return false }
+        window?.makeFirstResponder(self)
+        GhosttyRuntime.paste(FileDropPaths.text(urls.map { $0.path }), into: self)
+        return true
     }
 
     // MARK: focus

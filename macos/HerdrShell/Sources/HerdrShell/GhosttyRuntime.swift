@@ -154,6 +154,17 @@ final class GhosttyRuntime {
         }
     }
 
+    private static var pendingPastes: [String: String] = [:]
+
+    static func paste(_ text: String, into view: SurfaceView) {
+        guard let surface = view.surface else { return }
+        pendingPastes[view.terminalId] = text
+        let action = "paste_from_clipboard"
+        if !ghostty_surface_binding_action(surface, action, UInt(action.utf8.count)) {
+            pendingPastes.removeValue(forKey: view.terminalId)
+        }
+    }
+
     static func readClipboard(
         _ userdata: UnsafeMutableRawPointer?,
         state: UnsafeMutableRawPointer?,
@@ -163,6 +174,10 @@ final class GhosttyRuntime {
         guard let userdata else { return GHOSTTY_CLIPBOARD_READ_UNSUPPORTED }
         let view = Unmanaged<SurfaceView>.fromOpaque(userdata).takeUnretainedValue()
         guard let surface = view.surface else { return GHOSTTY_CLIPBOARD_READ_UNAVAILABLE }
+        if let pending = pendingPastes.removeValue(forKey: view.terminalId) {
+            completeClipboard(surface, state: state, text: pending, mime: "text/plain")
+            return GHOSTTY_CLIPBOARD_READ_STARTED
+        }
         let board = ClipboardImagePaste.board
         guard let text = board.string(forType: .string) else {
             // Image-only clipboard (a screenshot, Copy Image): stage it on the server
