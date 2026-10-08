@@ -77,6 +77,7 @@ def swift(t):
         out.append(f"    static let fallback{mode.capitalize()}: (bg: UInt32, fg: UInt32) = "
                    f"(0x{hex6(term['background'])}, 0x{hex6(term['foreground'])})")
     out.append("}")
+    out += ["", "enum ShellShadow {", f"    static let base: UInt32 = 0x{hex6(t['shadow']['base'])}", "}"]
     for enum, key in (("ShellType", "type"), ("ShellSpace", "space"), ("ShellRadius", "radius")):
         out += ["", f"enum {enum} {{"]
         for k, v in t[key].items():
@@ -109,7 +110,8 @@ def css_colors(t, mode):
 
 def css(t):
     sb = t["scrollbar"]
-    metrics = [f"  --shell-font-ui: {t['font']['ui']['windows']};",
+    metrics = [f"  --shell-shadow-base: #{hex6(t['shadow']['base'])};",
+               f"  --shell-font-ui: {t['font']['ui']['windows']};",
                f"  --shell-font-mono: {t['font']['mono']['windows']};"]
     for group in ("type", "space", "radius"):
         for k, v in t[group].items():

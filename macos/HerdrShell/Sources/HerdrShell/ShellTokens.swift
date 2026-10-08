@@ -11,6 +11,10 @@ extension TerminalTheme {
     static let fallbackLight: (bg: UInt32, fg: UInt32) = (0xFFFFFF, 0x3A3A38)
 }
 
+enum ShellShadow {
+    static let base: UInt32 = 0x000000
+}
+
 enum ShellType {
     static let sectionLabel: CGFloat = 10.5
     static let sectionTracking: CGFloat = 0.4

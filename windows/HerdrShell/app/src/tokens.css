@@ -53,6 +53,7 @@
   --shell-terminal-fg: #3A3A38;
 }
 :root {
+  --shell-shadow-base: #000000;
   --shell-font-ui: "Segoe UI Variable Text", "Segoe UI", sans-serif;
   --shell-font-mono: "Cascadia Mono", Consolas, monospace;
   --shell-type-section-label: 10.5px;

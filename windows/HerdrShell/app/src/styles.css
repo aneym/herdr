@@ -150,7 +150,7 @@ footer { color: var(--shell-muted); padding: 12px 8px; font-size: 12px; overflow
 .areas-mode .spaces-fold-all:hover { background: var(--shell-hover); }
 
 .pane-surface.tools-3 .pane-cap { padding-right: 148px; }
-.pane-menu { position: absolute; top: var(--shell-space-pane-cap-height); right: 0; min-width: 150px; padding: 0; background: var(--shell-field); color: var(--shell-text); border: 1px solid var(--shell-line); border-radius: var(--shell-radius-control); box-shadow: 0 4px 16px color-mix(in srgb, color-mix(in srgb, var(--shell-bg) 25%, black) 45%, transparent); z-index: 12; }
+.pane-menu { position: absolute; top: var(--shell-space-pane-cap-height); right: 0; min-width: 150px; padding: 0; background: var(--shell-field); color: var(--shell-text); border: 1px solid var(--shell-line); border-radius: var(--shell-radius-control); box-shadow: 0 4px 16px color-mix(in srgb, color-mix(in srgb, var(--shell-bg) 25%, var(--shell-shadow-base)) 45%, transparent); z-index: 12; }
 .pane-menu button { border: 0; border-radius: var(--shell-radius-control); outline: none; }
 .pane-menu button:focus-visible { outline: 2px solid var(--shell-accent); outline-offset: -2px; }
 .pane-menu [role="menuitem"] { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 12px; text-align: left; }

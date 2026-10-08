@@ -5,13 +5,13 @@ import { appTheme, terminalThemes } from "./theme";
 import type { Mode as ThemeMode } from "./theme";
 
 const themeSubscriptions = new Map<number, () => void>();
-const rgb = (hex: string | undefined): [number, number, number] => {
+const colorChannels = (hex: string | undefined): [number, number, number] => {
   if (!hex || !/^#[0-9a-f]{6}$/i.test(hex)) throw new Error("Terminal default color must be #RRGGBB");
   return [1, 3, 5].map(offset => parseInt(hex.slice(offset, offset + 2), 16)) as [number, number, number];
 };
 function reportTheme(handle: number, mode: ThemeMode): Promise<void> {
   const palette = terminalThemes[mode];
-  return invoke<void>("attach_theme", { handle, dark: mode === "dark", foreground: rgb(palette.foreground), background: rgb(palette.background) });
+  return invoke<void>("attach_theme", { handle, dark: mode === "dark", foreground: colorChannels(palette.foreground), background: colorChannels(palette.background) });
 }
 
 export interface UpdateStatus { current: string; staged: { sha: string; built_at: string } | null; available: boolean; previous: { sha: string } | null }
