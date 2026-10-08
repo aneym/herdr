@@ -24,7 +24,7 @@ async function step(action: "next_tab" | "prev_tab", selected: string, snapshot 
   const noop = () => {};
   const ctx: ActionContext = { machine: "studio", snapshot, rows: buildSidebar(snapshot), selected, focused: null, api: async () => ({}), select, focus: noop, created: noop, rename: noop, switcher: noop, toggleSidebar: noop, error: e => { throw e; } };
   await runAction(action, ctx);
-  return select.mock.calls.at(-1)?.[0];
+  return select.mock.calls[select.mock.calls.length - 1]?.[0];
 }
 
 describe("next and previous tab skip hidden agents", () => {
