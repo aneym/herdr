@@ -526,7 +526,8 @@ impl ClientShellState {
                 true
             }
             (
-                PendingEndpointKind::AgentRestart { .. }
+                PendingEndpointKind::PaneDragDryRun { .. }
+                | PendingEndpointKind::AgentRestart { .. }
                 | PendingEndpointKind::Generic
                 | PendingEndpointKind::Focus { .. }
                 | PendingEndpointKind::ProductAnnouncementDismiss { .. }

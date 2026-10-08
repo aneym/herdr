@@ -326,6 +326,14 @@ impl ClientShellState {
         key: crate::input::TerminalKey,
         outcome: &mut ClientShellInput,
     ) {
+        if key.kind == KeyEventKind::Press
+            && key.code == KeyCode::Esc
+            && (self.pane_press.is_some()
+                || matches!(self.chrome_drag, Some(ClientChromeDrag::Pane { .. })))
+        {
+            outcome.repaint |= self.cancel_pane_drag();
+            return;
+        }
         outcome.repaint |= self.clear_link_hover();
         if self.copy_operation_in_flight {
             self.copy_input_queue.push_back(key);

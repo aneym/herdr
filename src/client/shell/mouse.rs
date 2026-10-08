@@ -670,6 +670,69 @@ impl ClientShellState {
     }
 
     pub(super) fn handle_mouse(&mut self, mouse: MouseEvent, outcome: &mut ClientShellInput) {
+        if matches!(self.chrome_drag, Some(ClientChromeDrag::Pane { .. })) {
+            if !self.pane_drag_supported() {
+                outcome.repaint |= self.cancel_pane_drag();
+                return;
+            }
+            match mouse.kind {
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    self.drag_pane((mouse.column, mouse.row), outcome)
+                }
+                MouseEventKind::Up(MouseButton::Left) => {
+                    self.drop_pane((mouse.column, mouse.row), outcome)
+                }
+                MouseEventKind::Down(MouseButton::Right) => {
+                    outcome.repaint |= self.cancel_pane_drag();
+                }
+                _ => {}
+            }
+            return;
+        }
+        if self.pane_press.is_some() {
+            match mouse.kind {
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    self.start_pane_drag(mouse, outcome);
+                    return;
+                }
+                MouseEventKind::Up(MouseButton::Left) => {
+                    if let Some(press) = self.pane_press.take() {
+                        self.pane_press_replay = true;
+                        self.handle_mouse(press.down, outcome);
+                        self.pane_press_replay = false;
+                    }
+                }
+                MouseEventKind::Down(MouseButton::Right) => {
+                    self.cancel_pane_drag();
+                    return;
+                }
+                _ => return,
+            }
+        }
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left)
+            && !self.pane_press_replay
+            && self.overlay.is_none()
+            && self.chrome_drag.is_none()
+            && self.arm_pane_press(mouse)
+        {
+            return;
+        }
+        if mouse.kind == MouseEventKind::Moved {
+            let hovered = self
+                .hits
+                .panes
+                .iter()
+                .find(|h| {
+                    super::pane_drag::pane_grip_rect(h)
+                        .is_some_and(|r| contains(r, (mouse.column, mouse.row)))
+                })
+                .map(|h| h.pane_id.clone());
+            if hovered != self.pane_grip_hover {
+                self.pane_grip_hover = hovered;
+                outcome.repaint = true;
+            }
+        }
+
         if self.handle_pane_location_mouse(mouse, outcome) {
             return;
         }
@@ -1313,6 +1376,10 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
+                Some(ClientChromeDrag::Pane { .. }) => {
+                    self.drag_pane(point, outcome);
+                    return;
+                }
                 Some(ClientChromeDrag::Pin { .. }) => {
                     self.drag_pin(point, outcome);
                     return;
@@ -1402,6 +1469,7 @@ impl ClientShellState {
                 self.tab_press = None;
                 self.tree_tab_press = None;
                 match drag {
+                    ClientChromeDrag::Pane { .. } => {}
                     ClientChromeDrag::Pin {
                         endpoint_id,
                         tab_id,

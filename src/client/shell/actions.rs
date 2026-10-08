@@ -762,6 +762,7 @@ impl ClientShellState {
     }
 
     pub(crate) fn receive_endpoint_unavailable(&mut self, message: String) -> bool {
+        self.cancel_pane_drag();
         self.push_endpoint_notice(
             ClientEndpointNoticeKind::Unavailable,
             message.clone(),
@@ -830,6 +831,22 @@ impl ClientShellState {
                 .is_none_or(|snapshot| snapshot.boot_id != boot_id)
         {
             return (false, Vec::new());
+        }
+        if let PendingEndpointKind::PaneDragDryRun {
+            source_pane_id,
+            target,
+        } = &pending.kind
+        {
+            if !matches!(&self.chrome_drag, Some(ClientChromeDrag::Pane { source_pane_id: source, .. }) if source == source_pane_id)
+            {
+                return (false, Vec::new());
+            }
+            let repaint = self.complete_pane_drag_dry_run(request_id, target.clone(), result);
+            let mut outcome = ClientShellInput::default();
+            if repaint {
+                self.dispatch_queued_pane_drag(&mut outcome);
+            }
+            return (repaint, outcome.actions);
         }
         if let PendingEndpointKind::PaneLinkResolve { target } = pending.kind {
             return self.complete_link_hover(target, result);
@@ -960,6 +977,7 @@ impl ClientShellState {
             }
         }
         match pending.kind {
+            PendingEndpointKind::PaneDragDryRun { .. } => {}
             PendingEndpointKind::AgentRestart { .. } | PendingEndpointKind::Generic => {}
             PendingEndpointKind::Focus { .. } => {
                 if result.is_ok() {

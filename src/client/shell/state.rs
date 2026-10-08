@@ -239,6 +239,12 @@ pub(super) struct PinnedRowHit {
 
 /// A left press on a pinned row: a reorder drag once the pointer leaves the
 /// row, the row's click when released in place.
+pub(super) struct ClientPanePress {
+    pub(super) pane_id: String,
+    pub(super) tab_id: String,
+    pub(super) down: crossterm::event::MouseEvent,
+}
+
 pub(super) struct ClientPinPress {
     pub(super) endpoint_id: ClientEndpointId,
     pub(super) aggregate: bool,
@@ -264,6 +270,12 @@ pub(super) struct ClientTabPress {
 }
 
 pub(super) enum ClientChromeDrag {
+    Pane {
+        source_pane_id: String,
+        origin_tab_id: String,
+        pointer: (u16, u16),
+        target: Option<super::pane_drag::PaneDragTarget>,
+    },
     SidebarWidth,
     SidebarSection,
     WorkspaceScrollbar {
@@ -871,6 +883,10 @@ impl ClientShellOverlay {
 
 #[derive(Debug)]
 pub(super) enum PendingEndpointKind {
+    PaneDragDryRun {
+        source_pane_id: String,
+        target: super::pane_drag::PaneDragTarget,
+    },
     AgentRestart {
         pane_id: String,
         force: bool,
@@ -1206,6 +1222,10 @@ pub(crate) struct ClientShellState {
     pub(super) detail_panel_press: Option<(u16, u16)>,
     pub(super) tab_press: Option<ClientTabPress>,
     pub(super) tree_tab_press: Option<ClientTabPress>,
+    pub(super) pane_press: Option<ClientPanePress>,
+    pub(super) pane_drag: Option<super::pane_drag::ClientPaneDragPreview>,
+    pub(super) pane_grip_hover: Option<String>,
+    pub(super) pane_press_replay: bool,
     pub(super) pin_press: Option<ClientPinPress>,
     pub(super) pin_preview: Option<ClientPinPreview>,
     pub(super) collapsed_groups: HashSet<String>,
@@ -1413,6 +1433,10 @@ impl ClientShellState {
             detail_panel_press: None,
             tab_press: None,
             tree_tab_press: None,
+            pane_press: None,
+            pane_drag: None,
+            pane_grip_hover: None,
+            pane_press_replay: false,
             pin_press: None,
             pin_preview: None,
             collapsed_groups: preferences.collapsed_groups.into_iter().collect(),
@@ -1779,6 +1803,7 @@ impl ClientShellState {
     }
 
     pub(super) fn reset_endpoint_projection(&mut self) {
+        self.cancel_pane_drag();
         self.hits = ShellHitMap::default();
         self.pane_surface = None;
         self.pending_pane_surface = None;
@@ -2139,6 +2164,12 @@ impl ClientShellState {
                 Some(_) => {}
             }
         }
+        if matches!(&self.chrome_drag, Some(ClientChromeDrag::Pane { source_pane_id, origin_tab_id, .. })
+            if snapshot.focused_tab_id.as_ref() != Some(origin_tab_id)
+                || !snapshot.panes.iter().any(|p| &p.pane_id == source_pane_id))
+        {
+            self.cancel_pane_drag();
+        }
         self.snapshot = Some(snapshot);
         let focused = self
             .snapshot
@@ -2242,6 +2273,7 @@ impl ClientShellState {
         if surface.projection_revision != snapshot.revision {
             self.hits = ShellHitMap::default();
         }
+        self.rebase_pane_drag_surface(&surface);
         self.acknowledge_active_surface_agents(&surface);
         let previous_popup = self.popup_terminal_id.clone();
         let next_popup = surface
