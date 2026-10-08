@@ -1,3 +1,27 @@
+fn control_pipe_name(user: &str, test_window: bool) -> String {
+    let suffix = if test_window { "-test" } else { "" };
+    format!(r"\\.\pipe\herdr-shell-control-{user}{suffix}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::control_pipe_name;
+
+    #[test]
+    fn control_pipe_names_keep_production_and_test_separate() {
+        for user in ["aneym", "user with spaces", "用户"] {
+            assert_eq!(
+                control_pipe_name(user, false),
+                format!(r"\\.\pipe\herdr-shell-control-{user}")
+            );
+            assert_eq!(
+                control_pipe_name(user, true),
+                format!(r"\\.\pipe\herdr-shell-control-{user}-test")
+            );
+        }
+    }
+}
+
 #[cfg(windows)]
 mod imp {
     use serde_json::{json, Value};
@@ -13,7 +37,7 @@ mod imp {
         ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, SRCCOPY,
     };
     use windows_sys::Win32::Storage::FileSystem::{
-        FlushFileBuffers, ReadFile, WriteFile, PIPE_ACCESS_DUPLEX,
+        FlushFileBuffers, ReadFile, WriteFile, FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_DUPLEX,
     };
     use windows_sys::Win32::Storage::Xps::PrintWindow;
     use windows_sys::Win32::System::Pipes::{
@@ -62,42 +86,48 @@ mod imp {
         Ok(())
     }
 
-    pub fn start(app: AppHandle) {
-        std::thread::spawn(move || serve(app));
+    pub fn start(app: AppHandle, test_window: bool) {
+        std::thread::spawn(move || serve(app, test_window));
     }
 
-    fn pipe_name() -> Vec<u16> {
+    fn serve(app: AppHandle, test_window: bool) {
         let user = std::env::var("USERNAME").unwrap_or_else(|_| "user".to_string());
-        format!(r"\\.\pipe\herdr-shell-control-{user}")
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect()
-    }
-
-    fn serve(app: AppHandle) {
-        let name = pipe_name();
+        let pipe = super::control_pipe_name(&user, test_window);
+        let name: Vec<u16> = pipe.encode_utf16().chain(std::iter::once(0)).collect();
+        let create = |first| unsafe {
+            CreateNamedPipeW(
+                name.as_ptr(),
+                PIPE_ACCESS_DUPLEX | if first { FILE_FLAG_FIRST_PIPE_INSTANCE } else { 0 },
+                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                255,
+                65536,
+                65536,
+                0,
+                std::ptr::null(),
+            )
+        };
+        let mut h = create(true);
+        if h == INVALID_HANDLE_VALUE {
+            tracing::warn!(pipe, error = unsafe { GetLastError() }, "control server disabled: cannot own pipe");
+            return;
+        }
         loop {
             unsafe {
-                let h = CreateNamedPipeW(
-                    name.as_ptr(),
-                    PIPE_ACCESS_DUPLEX,
-                    PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-                    255,
-                    65536,
-                    65536,
-                    0,
-                    std::ptr::null(),
-                );
-                if h == INVALID_HANDLE_VALUE {
-                    std::thread::sleep(Duration::from_secs(1));
-                    continue;
-                }
                 if ConnectNamedPipe(h, std::ptr::null_mut()) == 0
                     && GetLastError() != ERROR_PIPE_CONNECTED
                 {
+                    tracing::warn!(pipe, error = GetLastError(), "control server disabled: cannot connect pipe");
                     CloseHandle(h);
-                    continue;
+                    return;
                 }
+                // Reserve the next listener before the connection can close, so
+                // another process can never acquire first-instance ownership.
+                let next = create(false);
+                let error = if next == INVALID_HANDLE_VALUE {
+                    GetLastError()
+                } else {
+                    0
+                };
                 // One thread per connection: a client that never reads its reply blocks
                 // only its own FlushFileBuffers, never the listener.
                 let raw = h as usize;
@@ -108,6 +138,11 @@ mod imp {
                     DisconnectNamedPipe(h);
                     CloseHandle(h);
                 });
+                if next == INVALID_HANDLE_VALUE {
+                    tracing::warn!(pipe, error, "control server disabled: cannot create next listener");
+                    return;
+                }
+                h = next;
             }
         }
     }
@@ -409,7 +444,7 @@ mod imp {
 pub use imp::*;
 
 #[cfg(not(windows))]
-pub fn start(_app: tauri::AppHandle) {}
+pub fn start(_app: tauri::AppHandle, _test_window: bool) {}
 
 #[cfg(not(windows))]
 pub fn deliver_read(_text: String) -> Result<(), String> {

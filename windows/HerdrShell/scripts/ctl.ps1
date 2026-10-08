@@ -1,8 +1,9 @@
 # ctl.ps1 -JsonB64 <b64>: send one JSON line to the HerdrShell control pipe,
 # print the reply line.
-param([Parameter(Mandatory = $true)][string]$JsonB64)
+param([Parameter(Mandatory = $true)][string]$JsonB64, [switch]$Test)
 $json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($JsonB64))
 $pipeName = 'herdr-shell-control-' + $env:USERNAME
+if ($Test) { $pipeName += '-test' }
 $client = New-Object System.IO.Pipes.NamedPipeClientStream('.', $pipeName, [System.IO.Pipes.PipeDirection]::InOut)
 try {
     $client.Connect(15000)

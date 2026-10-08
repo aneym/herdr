@@ -167,6 +167,11 @@ fn main() {
             // background timer/renderer throttling so queued control hooks still run.
             #[cfg(windows)]
             {
+                if test_window {
+                    window = window.data_directory(
+                        app.path().app_local_data_dir()?.join("test-window-webview"),
+                    );
+                }
                 if control_motion {
                     window = window.additional_browser_args("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows");
                 }
@@ -183,7 +188,7 @@ fn main() {
             app.manage(bridge::Attaches::default());
             app.manage(files::Files::default());
             app.manage(machines::Machines::start(app.handle().clone())?);
-            control::start(app.handle().clone());
+            control::start(app.handle().clone(), test_window);
             Ok(())
         })
         .run(tauri::generate_context!())

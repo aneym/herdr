@@ -493,9 +493,10 @@ def cmd_install(args):
     sys.exit(0)
 
 
-def ctl_send(obj, timeout=None):
+def ctl_send(obj, timeout=None, test_window=False):
     b64 = base64.b64encode(json.dumps(obj).encode()).decode()
-    rc, out = ps_file("ctl.ps1", "-JsonB64", b64, timeout=timeout)
+    switches = ["-Test"] if test_window else []
+    rc, out = ps_file("ctl.ps1", "-JsonB64", b64, *switches, timeout=timeout)
     return rc, out.strip()
 
 
@@ -506,7 +507,7 @@ def cmd_ctl(args):
     except json.JSONDecodeError as e:
         print(f"bad json: {e}", file=sys.stderr)
         sys.exit(2)
-    rc, out = ctl_send(obj)
+    rc, out = ctl_send(obj, test_window=getattr(args, "test_window", False))
     print(out)
     sys.exit(rc)
 
@@ -515,7 +516,7 @@ def cmd_shot(args):
     bootstrap()
     remote(f"{PS} -Command \"New-Item -ItemType Directory -Force -Path '{R_SHOTS}' | Out-Null\"")
     rpath = f"{R_SHOTS}/shot-{time.strftime('%Y%m%d-%H%M%S')}.png".replace("/", "\\")
-    rc, out = ctl_send({"cmd": "shot", "out": rpath})
+    rc, out = ctl_send({"cmd": "shot", "out": rpath}, test_window=getattr(args, "test_window", False))
     print(out)
     if rc != 0:
         sys.exit(rc)
@@ -627,10 +628,12 @@ def main():
 
     p = sub.add_parser("ctl", help="send one JSON line to the control pipe")
     p.add_argument("json")
+    p.add_argument("--test-window", action="store_true", help="target the isolated test window pipe")
     p.set_defaults(fn=cmd_ctl)
 
     p = sub.add_parser("shot", help="screenshot the app window to a local PNG")
     p.add_argument("--out", required=True)
+    p.add_argument("--test-window", action="store_true", help="target the isolated test window pipe")
     p.set_defaults(fn=cmd_shot)
 
     p = sub.add_parser("status", help="game + app status as JSON (idle with --idle)")

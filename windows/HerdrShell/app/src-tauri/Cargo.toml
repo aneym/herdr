@@ -36,4 +36,6 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_Pipes",
     "Win32_UI_WindowsAndMessaging",
 ] }
+# Log pipe ownership failures without terminating the app.
+tracing = "0.1"
 image = { version = "0.25", default-features = false, features = ["png"] }
