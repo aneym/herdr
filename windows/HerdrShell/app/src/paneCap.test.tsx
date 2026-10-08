@@ -14,7 +14,7 @@ const pane: Pane = { pane_id: "p", terminal_id: "term", tab_id: "t", workspace_i
 const transcript = JSON.stringify({ type: "assistant", uuid: "a", message: { content: [{ type: "tool_use", id: "edit", name: "Edit", input: { file_path: "/repo/a", old_string: "old", new_string: "new" } }, { type: "tool_use", id: "bash", name: "Bash", input: { command: "pwd" } }] } }) + "\n";
 const encode = (text: string) => toBase64(new TextEncoder().encode(text));
 const register = () => {};
-const render = (agent = true) => root.render(<PaneSurface pane={agent ? pane : { ...pane, agent: undefined, agent_status: undefined }} machine="studio" focused hasAgent={agent} onFocus={() => {}} shortcut={() => false} register={register} />);
+const render = (agent = true) => root.render(<PaneSurface agent={agent ? { ...pane, agent: "claude", agent_status: "blocked" } : undefined} pane={agent ? pane : { ...pane, agent: undefined, agent_status: undefined }} machine="studio" focused hasAgent={agent} onFocus={() => {}} shortcut={() => false} register={register} />);
 const click = async (text: string) => { const button = [...host.querySelectorAll("button")].find(b => b.textContent === text)!; expect(button).toBeTruthy(); await act(async () => button.click()); };
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); const storage = new Map<string, string>(); vi.stubGlobal("localStorage", { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value) });

@@ -1,5 +1,6 @@
 import { useCallback, useLayoutEffect, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
+import type { AgentCard } from "./faces";
 import type { Layout, Snapshot, Rect } from "./model";
 import { scaleRect } from "./model";
 import PaneSurface from "./PaneSurface";
@@ -12,7 +13,7 @@ import type { PaneDragState } from "./paneDrag";
 import { motion } from "./tokens";
 import { Status } from "./Sidebar";
 import { clipRect, blockCancelContextMenu } from "./paneClip";
-export default function TabView({ snapshot, selected, machine, focused, onFocus, shortcut, register, pin, onError, registerDrag, onDragChange, onSpring, online = true }: { onSpring?: (tabId: string) => void; online?: boolean; registerDrag?: (drag: PaneDrag | null, lift?: () => boolean) => void; onDragChange?: (state: PaneDragState) => void; snapshot: Snapshot; selected: string | null; machine: string; focused: string | null; onFocus: (id: string) => void; shortcut: (event: KeyboardEvent) => boolean; register: (id: string, value: PaneController | null) => void; pin: (id: string, pinned: boolean) => void; onError?: (error: unknown) => void }) {
+export default function TabView({ cards = {}, snapshot, selected, machine, focused, onFocus, shortcut, register, pin, onError, registerDrag, onDragChange, onSpring, online = true }: { cards?: Record<string, AgentCard>; onSpring?: (tabId: string) => void; online?: boolean; registerDrag?: (drag: PaneDrag | null, lift?: () => boolean) => void; onDragChange?: (state: PaneDragState) => void; snapshot: Snapshot; selected: string | null; machine: string; focused: string | null; onFocus: (id: string) => void; shortcut: (event: KeyboardEvent) => boolean; register: (id: string, value: PaneController | null) => void; pin: (id: string, pinned: boolean) => void; onError?: (error: unknown) => void }) {
   const host = useRef<HTMLDivElement>(null);
   const [paneState, setPaneState] = useState<PaneDragState | null>(null);
   const callbacks = useRef({ onError, onDragChange, onSpring }); callbacks.current = { onError, onDragChange, onSpring };
@@ -209,7 +210,7 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
   const animateLayout = paneDrag.shouldAnimateLayout(layout, size, resizer.busy || !!held);
   return <main ref={host} data-desk-machine={machine} data-desk-tab={selected} onPointerDownCapture={pressFirst} className={`tab-view ${paneState?.phase === "dragging" ? "pane-dragging" : ""}`}>{panes.map((pane, index) => {
     const box = boxes[index];
-    return <PaneClip key={`${selected}:${pane.terminal_id}`} id={pane.pane_id} box={clipRect(box, size)} animateLayout={animateLayout} onMotion={onMotion} lifted={paneState?.source === pane.pane_id && ["dragging", "dropped"].includes(paneState.phase)}>{settling => <PaneSurface settling={settling} grabbable={canDragPane(layout, supported)} onCapPointerDown={event => capPress(event, pane.pane_id, [pane.agent, pane.terminal_title_stripped || pane.title].filter(Boolean).join(" · ") || "shell")} onError={onError} hasAgent={!!pane.agent || !!snapshot.agents?.some(a => a.pane_id === pane.pane_id && a.agent)} pane={pane} machine={machine} focused={focused === pane.pane_id} onFocus={onFocus} shortcut={shortcut} register={register} {...(index === corner && tab ? { pinned: tab.pin_index != null, onPin: () => pin(tab.tab_id, tab.pin_index == null) } : {})} />}</PaneClip>;
+    return <PaneClip key={`${selected}:${pane.terminal_id}`} id={pane.pane_id} box={clipRect(box, size)} animateLayout={animateLayout} onMotion={onMotion} lifted={paneState?.source === pane.pane_id && ["dragging", "dropped"].includes(paneState.phase)}>{settling => <PaneSurface cards={cards} agent={snapshot.agents?.find(agent => agent.pane_id === pane.pane_id)} settling={settling} grabbable={canDragPane(layout, supported)} onCapPointerDown={event => capPress(event, pane.pane_id, [pane.agent, pane.terminal_title_stripped || pane.title].filter(Boolean).join(" · ") || "shell")} onError={onError} hasAgent={!!pane.agent || !!snapshot.agents?.some(a => a.pane_id === pane.pane_id && a.agent)} pane={pane} machine={machine} focused={focused === pane.pane_id} onFocus={onFocus} shortcut={shortcut} register={register} {...(index === corner && tab ? { pinned: tab.pin_index != null, onPin: () => pin(tab.tab_id, tab.pin_index == null) } : {})} />}</PaneClip>;
   })}{layout && lines.map(d => {
     const r = scaleRect({ x: d.vertical ? d.pos : d.splitRect.x, y: d.vertical ? d.splitRect.y : d.pos, width: d.vertical ? 0 : d.splitRect.width, height: d.vertical ? d.splitRect.height : 0 }, layout.area, size.width, size.height);
     // The 1 px gap between panes sits just before the line; the grab strip centres on it.
