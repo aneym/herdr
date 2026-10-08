@@ -22,8 +22,8 @@ export async function probePlace(machine: string, paneId: string): Promise<boole
 export function prefersReducedMotion(): boolean { return globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false; }
 export function transitionFor(kind: "zone" | "settle" | "cancel" | "lift", reduced = prefersReducedMotion()): string {
   if (reduced) return "opacity var(--shell-motion-reduced-fade-ms) var(--shell-motion-ease)";
-  const duration = kind === "zone" ? "zone-morph" : kind === "lift" ? "fade" : kind;
-  return (kind === "lift" ? ["opacity"] : ["transform", "width", "height", "opacity"]).map(p => `${p} var(--shell-motion-${duration}-ms) var(--shell-motion-ease)`).join(", ");
+  const duration = kind === "zone" ? "--shell-motion-zone-morph-ms" : kind === "lift" ? "--shell-motion-fade-ms" : kind === "settle" ? "--shell-motion-settle-ms" : "--shell-motion-cancel-ms";
+  return (kind === "lift" ? ["opacity"] : ["transform", "width", "height", "opacity"]).map(p => `${p} var(${duration}) var(--shell-motion-ease)`).join(", ");
 }
 export class PaneDrag {
   private value = idle();
