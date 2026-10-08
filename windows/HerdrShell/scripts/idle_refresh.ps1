@@ -4,8 +4,8 @@
 # shows on Alex's desktop; powershell -WindowStyle Hidden alone flashes one.
 $scripts = 'C:\Users\aneym\winshell\scripts'
 $vbs = Join-Path $scripts 'idle.vbs'
-$cmd = "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $scripts\idle.ps1"
-Set-Content -LiteralPath $vbs -Encoding ASCII -Value "CreateObject(""WScript.Shell"").Run ""$cmd"", 0, True"
+$cmd = "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""$scripts\idle.ps1"""
+Set-Content -LiteralPath $vbs -Encoding Unicode -Value ('WScript.Quit CreateObject("WScript.Shell").Run("' + $cmd.Replace('"', '""') + '", 0, True)')
 schtasks /create /tn HerdrShellIdle /sc once /st 00:00 /it /f /tr "wscript.exe //B $vbs" | Out-Null
 # gated.ps1 checked for a game already; check again right before the task starts.
 . (Join-Path $PSScriptRoot 'gamecheck.ps1')
