@@ -35,6 +35,7 @@ def decide(state, newest_sha, game_running, lock_age_s):
 # alone until main moves (pc.py also refuses to dispatch a sha that failed twice).
 FETCH_TRIES = 3
 FETCH_BACKOFF_S = 1800
+FETCH_TIMEOUT_S = 3900
 
 
 def fetch_due(state, sha, now):
@@ -57,7 +58,8 @@ def log(event):
         out.write(f'{timestamp()} {event}\n')
 
 
-def read_state(path=STATE):
+def read_state(path=None):
+    path = path or STATE
     try:
         with path.open() as source:
             state = json.load(source)
@@ -68,7 +70,8 @@ def read_state(path=STATE):
     return state
 
 
-def write_state(state, path=STATE):
+def write_state(state, path=None):
+    path = path or STATE
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix('.json.tmp')
     with temporary.open('w') as out:
@@ -111,18 +114,27 @@ def run_pass(state):
             log(f'fetch of {sha} backing off after failures')
             return 0
         log(f'building {sha}')
-        result = subprocess.run([sys.executable, str(pc.HERE / 'pc.py'),
-                                 'fetch', '--sha', sha, '--dispatch'],
-                                capture_output=True, text=True, timeout=3900)
-        run = re.search(r'build run (\d+)|\(run (\d+)\)', result.stdout or '')
+        try:
+            result = subprocess.run([sys.executable, str(pc.HERE / 'pc.py'),
+                                     'fetch', '--sha', sha, '--dispatch'],
+                                    capture_output=True, text=True, timeout=FETCH_TIMEOUT_S)
+            code, stdout = result.returncode, result.stdout or ''
+        except subprocess.TimeoutExpired as error:
+            # A hung build or copy backs off like a failed one.
+            code, stdout = f'timed out after {error.timeout} s', ''
+            if isinstance(error.stdout, bytes):
+                stdout = error.stdout.decode(errors='replace')
+            elif error.stdout:
+                stdout = error.stdout
+        run = re.search(r'build run (\d+)|\(run (\d+)\)', stdout)
         if run:
             state.setdefault('runs', {})[sha] = run.group(1) or run.group(2)
-        if result.returncode:
+        if code:
             failures = state.setdefault('fetch_failures', {})
             n = failures.get(sha, {}).get('n', 0) + 1
             failures[sha] = {'n': n, 'last': time.time()}
             write_state(state)
-            raise RuntimeError(f'off-PC build or fetch failed ({result.returncode}), try {n}')
+            raise RuntimeError(f'off-PC build or fetch failed ({code}), try {n}')
         state.get('fetch_failures', {}).pop(sha, None)
         state.update(fetched=sha)
         write_state(state)

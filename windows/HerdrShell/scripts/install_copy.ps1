@@ -5,7 +5,9 @@
 # The new exe is staged as HerdrShell.exe.new and hash-checked before the app stops.
 # HerdrShell.exe.prev only ever holds a verified build: installed.json records the
 # installed sha, its hash and whether pc.py saw it report its commit (-MarkVerified).
-# Any failed copy, launch or startup restores .prev. Every launch rechecks for a game
+# Missing or unreadable metadata counts as unverified. -Check reads the commit compiled
+# into the installed exe and rolls back when it is not <sha>. Any failed copy, metadata
+# write, launch or startup restores .prev. Every launch rechecks for a game
 # first; with a game running nothing launches and the script exits 76, leaving the new
 # exe staged (or swapped in, not started) for the next run to finish.
 #
@@ -47,6 +49,11 @@ function Write-Meta($path, $sha, $hash, $verified) {
     $json = [ordered]@{ sha = $sha; sha256 = $hash; verified = [bool]$verified } | ConvertTo-Json -Compress
     [IO.File]::WriteAllText($path, $json, (New-Object Text.UTF8Encoding($false)))
 }
+# build.rs compiles HERDR_SHELL_COMMIT into the exe as a plain string.
+function Has-Commit($path, $sha) {
+    if (!(Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
+    [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($path)).Contains($sha)
+}
 function Get-App {
     @(Get-Process $procName -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $dst })
 }
@@ -64,6 +71,8 @@ function Start-App {
     if ($games.Count) { return 'game' }
     $since = Get-Date
     & (Join-Path $PSScriptRoot 'launch.ps1') -Exe $dst -Background | Out-Null
+    # launch.ps1 checks for a game again right before it starts the task.
+    if ($LASTEXITCODE -eq 75) { return 'game' }
     $deadline = [DateTime]::UtcNow.AddSeconds($UpSeconds + 12)
     while ([DateTime]::UtcNow -lt $deadline) {
         Start-Sleep -Milliseconds 500
@@ -96,11 +105,10 @@ $sumFile = Join-Path $OutDir "HerdrShell-$Sha.sha256"
 if (Test-Path -LiteralPath $sumFile) { $expected = (Get-Content -LiteralPath $sumFile -Raw).Trim().ToUpperInvariant() }
 
 if ($Check) {
-    $m = Read-Meta $meta
     $h = Hash $dst
-    if ($expected -and $h -eq $expected -and $m -and $m.sha -eq $Sha) { Write-Output "installed: $Sha"; exit 0 }
-    Write-Output "installed exe is not $Sha (hash $h, recorded $($m.sha))"
-    exit 1
+    if ($expected -and $h -eq $expected -and (Has-Commit $dst $Sha)) { Write-Output "installed: $Sha"; exit 0 }
+    # A wrong exe that is running is replaced by a running previous build.
+    Undo "installed exe is not $Sha (hash $h)" ((Get-App).Count -gt 0)
 }
 if ($MarkVerified) {
     $h = Hash $dst
@@ -133,7 +141,7 @@ if (!$swapped) {
     # .prev keeps the last verified build; an unverified install never replaces it.
     $m = Read-Meta $meta
     $current = Hash $dst
-    $good = (-not $m) -or ($m.verified -and $m.sha256 -eq $current)
+    $good = $m -and $m.verified -and $m.sha256 -eq $current
     if ($good -or !(Test-Path -LiteralPath $prev -PathType Leaf)) {
         Copy-Item -LiteralPath $dst -Destination $prev -Force
         if ($m) { Write-Meta $prevMeta $m.sha $current $true } else { Write-Meta $prevMeta 'unknown' $current $true }
@@ -141,11 +149,11 @@ if (!$swapped) {
     try {
         Stop-App
         Move-Item -LiteralPath $new -Destination $dst -Force
+        if ((Hash $dst) -ne $expected) { throw 'installed exe hash mismatch after swap' }
+        Write-Meta $meta $Sha $expected $false
     } catch {
         Undo "swap failed: $($_.Exception.Message)" ($running -gt 0)
     }
-    if ((Hash $dst) -ne $expected) { Undo 'installed exe hash mismatch after swap' ($running -gt 0) }
-    Write-Meta $meta $Sha $expected $false
     Write-Output "swapped: $dst"
 } else {
     Write-Output "already swapped: $Sha"

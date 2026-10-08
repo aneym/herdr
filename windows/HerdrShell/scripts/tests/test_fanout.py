@@ -8,6 +8,9 @@ state and partial JSON writes at the persistence boundary.
 
 import importlib.util
 import json
+import subprocess
+import time
+from unittest import mock
 from pathlib import Path
 import sys
 import tempfile
@@ -58,6 +61,27 @@ class FanoutTests(unittest.TestCase):
         for state, now, expected in cases:
             with self.subTest(state=state, now=now):
                 self.assertEqual(fanout.fetch_due(state, 's', now), expected)
+
+    def test_a_fetch_that_times_out_backs_off_like_a_failure(self):
+        # Integration at the subprocess edge: git and the pc.py fetch are external
+        # processes; a hung fetch used to skip the failure record and retry every pass.
+        sha = 'f' * 40
+
+        def fake_run(argv, **kw):
+            if argv[0] == 'git':
+                return subprocess.CompletedProcess(argv, 0, sha if 'log' in argv else '', '')
+            raise subprocess.TimeoutExpired(argv, kw.get('timeout'), output=f'build run 77 for {sha}')
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with mock.patch.multiple(fanout, CHECKOUT=root, STATE=root / 'state.json',
+                                     LOG=root / 'fanout.log'), \
+                    mock.patch.object(subprocess, 'run', fake_run):
+                self.assertEqual(fanout.main(), 1)
+                state = fanout.read_state(root / 'state.json')
+                self.assertEqual(state['fetch_failures'][sha]['n'], 1)
+                self.assertEqual(state['runs'][sha], '77')
+                self.assertFalse(fanout.fetch_due(state, sha, time.time()))
 
     def test_state_file_round_trip(self):
         with tempfile.TemporaryDirectory() as directory:

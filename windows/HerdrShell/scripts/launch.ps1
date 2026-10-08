@@ -16,5 +16,8 @@ $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfil
 $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
 Register-ScheduledTask -TaskName HerdrShellLaunch -Action $action -Principal $principal -Settings $settings -Force | Out-Null
+# A game may have started while the task was registered; check right before it runs.
+. (Join-Path $PSScriptRoot 'gamecheck.ps1')
+Stop-IfGame 'HerdrShellLaunch'
 Start-ScheduledTask -TaskName HerdrShellLaunch
 Write-Output "launched: $Exe $arg"

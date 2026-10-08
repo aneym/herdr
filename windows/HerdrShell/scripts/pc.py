@@ -451,21 +451,26 @@ def cmd_install_artifact(args):
     if rc != 0:
         sys.exit(rc)
     if not args.relaunch:
+        # -Check reads the commit compiled into the installed exe and rolls back on a mismatch.
         rc, out = ps_file("install_copy.ps1", "-Sha", want, "-Check")
         print(out.strip())
-        sys.exit(rc)
+        sys.exit(1 if rc else 0)
     commit = running_commit(60)
-    if commit != want:
-        print(f"running commit is {commit}, not {want}; rolling back", file=sys.stderr)
+    up, summary = wait_ui(60) if commit == want else (False, {})
+    summary["commit"] = commit
+    print(json.dumps(summary))
+    if commit != want or not up:
+        why = f"running commit is {commit}, not {want}" if commit != want else \
+            "UI did not report machine up within 60 s"
+        print(f"{why}; rolling back", file=sys.stderr)
         _rc, out = ps_file("install_copy.ps1", "-Sha", want, "-Rollback", "-Relaunch")
         print(out.strip())
         sys.exit(1)
-    ps_file("install_copy.ps1", "-Sha", want, "-MarkVerified")
-    up, summary = wait_ui(60)
-    summary["commit"] = commit
-    print(json.dumps(summary))
-    if not up:
-        fail("install post-check failed: UI did not report machine up within 60 s")
+    # Verified only after the commit and the UI health check both pass.
+    rc, out = ps_file("install_copy.ps1", "-Sha", want, "-MarkVerified")
+    print(out.strip())
+    if rc != 0:
+        fail("install post-check failed: could not mark the installed exe verified")
     sys.exit(0)
 
 

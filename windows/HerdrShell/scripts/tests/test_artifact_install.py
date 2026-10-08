@@ -6,7 +6,8 @@ records every remote command. Regressions caught: trusting an artifact without i
 build stamp or with a partial checksum list, copying straight over the final name,
 keeping a build that reports the wrong commit, skipping the commit check without
 --relaunch, and redispatching a sha whose build keeps failing (Codex review of
-3d26a4f0, 2026-10-08).
+3d26a4f0, 2026-10-08); marking a build verified before the UI health check or when
+the mark fails (Codex review of 7a6d36f1).
 """
 
 import argparse
@@ -41,12 +42,15 @@ class Fake:
     """GitHub and the PC. `files` is what the artifact download writes; `runs` the
     windows-shell.yml runs gh lists; `commit` what the relaunched app reports."""
 
-    def __init__(self, files=None, runs=None, artifact=True, commit=SHA, pc_hash_ok=True):
+    def __init__(self, files=None, runs=None, artifact=True, commit=SHA, pc_hash_ok=True,
+                 ui_up=True, mode_rc=None):
         self.files = files if files is not None else good_files()
         self.runs = runs or []
         self.artifact = artifact
         self.commit = commit
         self.pc_hash_ok = pc_hash_ok
+        self.ui_up = ui_up
+        self.mode_rc = mode_rc or {}  # install_copy.ps1 mode -> exit code
         self.dispatched = 0
         self.scp = []      # remote destinations
         self.remote = []   # decoded PowerShell scripts and helper names, in order
@@ -77,8 +81,10 @@ class Fake:
                 c = json.loads(base64.b64decode(args[args.index('-JsonB64') + 1]))
                 if c['cmd'] == 'ping':
                     return ok(json.dumps({'ok': True, 'commit': self.commit}))
-                return ok(json.dumps({'ok': True, 'machine': {'state': 'up'}, 'rows': [], 'panes': []}))
-            return ok('done')
+                state = 'up' if self.ui_up else 'starting'
+                return ok(json.dumps({'ok': True, 'machine': {'state': state}, 'rows': [], 'panes': []}))
+            mode = args[2] if len(args) > 2 else 'install'
+            return subprocess.CompletedProcess(argv, self.mode_rc.get(mode, 0), 'done', '')
         return ok('{"game":false,"procs":[]}')
 
     def gh(self, args):
@@ -199,6 +205,17 @@ class InstallTests(unittest.TestCase):
         fake = Fake()
         self.assertEqual(run(fake, install(relaunch=False)), 0)
         self.assertEqual(self.modes(fake), ['install', '-Check'])
+        fake = Fake(mode_rc={'-Check': 1})
+        self.assertEqual(run(fake, install(relaunch=False)), 1)
+
+    def test_a_build_whose_ui_never_comes_up_rolls_back_unverified(self):
+        fake = Fake(ui_up=False)
+        self.assertEqual(run(fake, install(relaunch=True)), 1)
+        self.assertEqual(self.modes(fake), ['-Relaunch', '-Rollback'])
+
+    def test_a_failed_verified_mark_fails_the_install(self):
+        fake = Fake(mode_rc={'-MarkVerified': 1})
+        self.assertNotEqual(run(fake, install(relaunch=True)), 0)
 
 
 if __name__ == '__main__':
