@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { TabPulse } from "./model";
 import { bridge, fromBase64 } from "./bridge";
 
 export interface LaneRecord { tab: string; name: string; label: string; kind?: string; goal?: string; goalArea?: string; section?: string; scopeURL?: string; reviewURL?: string }
@@ -39,7 +40,14 @@ export function parseModes(value: unknown): Record<string, ParkRecord> {
   }
   return out;
 }
+export function parsePulses(value: unknown): Record<string, TabPulse> {
+  return Object.fromEntries(Object.entries(object(json(value).tabs)).flatMap(([id, tag]) => {
+    const pulse = object(object(tag).pulse);
+    return typeof pulse.line === "string" ? [[id, { line: pulse.line, drifting: pulse.drifting === true }]] : [];
+  }));
+}
 export class LaneSnapshot {
+  pulses: Record<string, TabPulse> = {};
   areas: AreaDef[] = [];
   lanes: Record<string, LaneRecord> = {};
   tabs: Record<string, TabAssign> = {};
