@@ -3,9 +3,26 @@ fn control_pipe_name(user: &str, test_window: bool) -> String {
     format!(r"\\.\pipe\herdr-shell-control-{user}{suffix}")
 }
 
+// A retry always yields; repeated failures replace the listener while retaining
+// its predecessor until the replacement exists.
+#[cfg(any(windows, test))]
+fn pipe_retry(failures: u32) -> (std::time::Duration, bool) {
+    (std::time::Duration::from_millis(100), failures >= 5)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::control_pipe_name;
+    use super::{control_pipe_name, pipe_retry};
+
+    // Pure retry policy: the table covers both recovery and persistent errors.
+    #[test]
+    fn pipe_retry_yields_and_eventually_replaces() {
+        for failures in [1, 2, 3, 4, 5, 6, u32::MAX] {
+            let (delay, replace) = pipe_retry(failures);
+            assert!(delay >= std::time::Duration::from_millis(100));
+            assert_eq!(replace, failures >= 5);
+        }
+    }
 
     #[test]
     fn control_pipe_names_keep_production_and_test_separate() {
@@ -30,7 +47,8 @@ mod imp {
     use std::time::Duration;
     use tauri::{AppHandle, Emitter, Manager};
     use windows_sys::Win32::Foundation::{
-        CloseHandle, GetLastError, ERROR_NO_DATA, ERROR_PIPE_CONNECTED, HANDLE, HWND, INVALID_HANDLE_VALUE, RECT,
+        CloseHandle, GetLastError, ERROR_NO_DATA, ERROR_PIPE_CONNECTED, HANDLE, HWND,
+        INVALID_HANDLE_VALUE, RECT,
     };
     use windows_sys::Win32::Graphics::Gdi::{
         BitBlt, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetWindowDC,
@@ -90,9 +108,10 @@ mod imp {
         std::thread::spawn(move || serve(app, test_window));
     }
 
+    static LAST_ERROR: Mutex<Option<u32>> = Mutex::new(None);
+
     fn log_pipe_error(pipe: &str, error: u32, message: &str) {
         use std::io::Write;
-        static LAST_ERROR: Mutex<Option<u32>> = Mutex::new(None);
         {
             let mut last = LAST_ERROR.lock().unwrap_or_else(|error| error.into_inner());
             if *last == Some(error) {
@@ -102,11 +121,16 @@ mod imp {
         }
         tracing::warn!(pipe, error, message);
         let logged = (|| -> std::io::Result<()> {
-            let base = std::env::var_os("LOCALAPPDATA")
-                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "LOCALAPPDATA not set"))?;
-            let logs = std::path::PathBuf::from(base).join("HerdrShell").join("logs");
+            let base = std::env::var_os("LOCALAPPDATA").ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::NotFound, "LOCALAPPDATA not set")
+            })?;
+            let logs = std::path::PathBuf::from(base)
+                .join("HerdrShell")
+                .join("logs");
             std::fs::create_dir_all(&logs)?;
-            let mut log = std::fs::OpenOptions::new().create(true).append(true)
+            let mut log = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
                 .open(logs.join("control.log"))?;
             writeln!(log, "{pipe}: {message} (Windows error {error})")
         })();
@@ -122,7 +146,12 @@ mod imp {
         let create = |first| unsafe {
             CreateNamedPipeW(
                 name.as_ptr(),
-                PIPE_ACCESS_DUPLEX | if first { FILE_FLAG_FIRST_PIPE_INSTANCE } else { 0 },
+                PIPE_ACCESS_DUPLEX
+                    | if first {
+                        FILE_FLAG_FIRST_PIPE_INSTANCE
+                    } else {
+                        0
+                    },
                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
                 255,
                 65536,
@@ -133,43 +162,60 @@ mod imp {
         };
         let mut h = create(true);
         if h == INVALID_HANDLE_VALUE {
-            log_pipe_error(&pipe, unsafe { GetLastError() }, "control server disabled: cannot own pipe");
+            log_pipe_error(
+                &pipe,
+                unsafe { GetLastError() },
+                "control server disabled: cannot own pipe",
+            );
             return;
         }
+        let mut failures = 0u32;
         loop {
             unsafe {
                 if ConnectNamedPipe(h, std::ptr::null_mut()) == 0 {
                     let error = GetLastError();
-                    if error == ERROR_NO_DATA {
-                        if DisconnectNamedPipe(h) == 0 {
-                            std::thread::sleep(Duration::from_millis(100));
-                        }
-                        continue;
-                    }
                     if error != ERROR_PIPE_CONNECTED {
-                        log_pipe_error(&pipe, error, "cannot connect pipe; retrying");
-                        if DisconnectNamedPipe(h) == 0 {
-                            // Reuse failed. Keep the old instance alive until a
-                            // replacement exists so the pipe name stays owned.
-                            let mut next = INVALID_HANDLE_VALUE;
-                            while next == INVALID_HANDLE_VALUE {
-                                std::thread::sleep(Duration::from_secs(1));
-                                next = create(false);
-                                if next == INVALID_HANDLE_VALUE {
-                                    log_pipe_error(&pipe, GetLastError(), "cannot recreate listener; retrying");
+                        let disconnected = DisconnectNamedPipe(h) != 0;
+                        if error == ERROR_NO_DATA && disconnected {
+                            failures = 0;
+                        } else {
+                            log_pipe_error(&pipe, error, "cannot connect pipe; retrying");
+                            failures = failures.saturating_add(1);
+                            let (delay, replace) = super::pipe_retry(failures);
+                            std::thread::sleep(delay);
+                            if replace || (error != ERROR_NO_DATA && !disconnected) {
+                                // Reserve before close: never release the pipe name.
+                                let mut next = INVALID_HANDLE_VALUE;
+                                while next == INVALID_HANDLE_VALUE {
+                                    std::thread::sleep(Duration::from_secs(1));
+                                    next = create(false);
+                                    if next == INVALID_HANDLE_VALUE {
+                                        log_pipe_error(
+                                            &pipe,
+                                            GetLastError(),
+                                            "cannot recreate listener; retrying",
+                                        );
+                                    }
                                 }
+                                CloseHandle(h);
+                                h = next;
+                                failures = 0;
                             }
-                            CloseHandle(h);
-                            h = next;
                         }
                         continue;
                     }
                 }
+                failures = 0;
+                *LAST_ERROR.lock().unwrap_or_else(|error| error.into_inner()) = None;
                 // Reserve the next listener before the connection can close.
                 // If creation fails, retain this handle until a replacement exists.
                 let mut next = create(false);
                 while next == INVALID_HANDLE_VALUE {
-                    log_pipe_error(&pipe, GetLastError(), "cannot create next listener; retrying");
+                    log_pipe_error(
+                        &pipe,
+                        GetLastError(),
+                        "cannot create next listener; retrying",
+                    );
                     std::thread::sleep(Duration::from_secs(1));
                     next = create(false);
                 }

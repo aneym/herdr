@@ -50,7 +50,7 @@ fn same_sha(current: &str, staged: &str) -> bool {
 // One source of truth for games, embedded so the updater also works without
 // the SSH helper scripts installed on the PC.
 #[cfg(any(windows, test))]
-fn update_script(log: &str, pid: u32, installer: &str, exe: &str) -> String {
+fn update_script(log: &str, pid: u32, installer: &str, exe: &str, rollback: bool) -> String {
     format!(
         r#"$ErrorActionPreference = 'Stop'
 {gamecheck}
@@ -61,15 +61,15 @@ $backedUp = $false
 $changed = $false
 $rc = 0
 try {{
-    Stop-IfGame 'HerdrShellUpdate install'
+    {install_guard}
     $parent = Get-Process -Id {pid} -ErrorAction SilentlyContinue
     if ($parent -and -not $parent.WaitForExit(20000)) {{
         throw 'Herdr Shell did not exit within 20 seconds'
     }}
-    Stop-IfGame 'HerdrShellUpdate install'
+    {install_guard}
     Copy-Item -LiteralPath $exe -Destination $prev -Force
     $backedUp = $true
-    Stop-IfGame 'HerdrShellUpdate install'
+    {install_guard}
     $changed = $true
     $installer = Start-Process -FilePath {installer} -ArgumentList '/S' -WindowStyle Hidden -PassThru -Wait
     Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) installer exit code: $($installer.ExitCode)"
@@ -96,6 +96,11 @@ try {{
 }}
 exit $rc
 "#,
+        install_guard = if rollback {
+            ""
+        } else {
+            "Stop-IfGame 'HerdrShellUpdate install'"
+        },
         gamecheck = include_str!("../../../scripts/gamecheck.ps1"),
     )
 }
@@ -124,13 +129,17 @@ pub fn update_status() -> UpdateStatus {
 }
 
 #[tauri::command]
-pub fn update_apply(app: tauri::AppHandle) -> Result<(), String> {
-    install(app, "staged.json")
+pub async fn update_apply(app: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || install(app, "staged.json"))
+        .await
+        .map_err(|error| format!("Update worker failed: {error}"))?
 }
 
 #[tauri::command]
-pub fn update_rollback(app: tauri::AppHandle) -> Result<(), String> {
-    install(app, "previous.json")
+pub async fn update_rollback(app: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || install(app, "previous.json"))
+        .await
+        .map_err(|error| format!("Rollback worker failed: {error}"))?
 }
 
 fn install(app: tauri::AppHandle, name: &str) -> Result<(), String> {
@@ -174,32 +183,34 @@ fn install_inner(app: tauri::AppHandle, name: &str) -> Result<(), String> {
         CREATE_BREAKAWAY_FROM_JOB, CREATE_NO_WINDOW, DETACHED_PROCESS,
     };
 
-    // Check in this process before handing off or closing the app. The helper
-    // still rechecks because a game may start after this preflight.
-    let preflight = format!(
-        "{}\nStop-IfGame 'HerdrShellUpdate preflight'",
-        include_str!("../../../scripts/gamecheck.ps1"),
-    );
-    let output = Command::new("powershell.exe")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            &preflight,
-        ])
-        .stdin(Stdio::null())
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|error| format!("Check games before update: {error}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "Update preflight failed ({}): {}{}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout).trim(),
-            String::from_utf8_lossy(&output.stderr).trim(),
-        ));
+    if name != "previous.json" {
+        // Check in this process before handing off or closing the app. The helper
+        // still rechecks because a game may start after this preflight.
+        let preflight = format!(
+            "{}\nStop-IfGame 'HerdrShellUpdate preflight'",
+            include_str!("../../../scripts/gamecheck.ps1"),
+        );
+        let output = Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                &preflight,
+            ])
+            .stdin(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map_err(|error| format!("Check games before update: {error}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "Update preflight failed ({}): {}{}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout).trim(),
+                String::from_utf8_lossy(&output.stderr).trim(),
+            ));
+        }
     }
 
     let build = manifest(name)?;
@@ -226,6 +237,7 @@ fn install_inner(app: tauri::AppHandle, name: &str) -> Result<(), String> {
         std::process::id(),
         &quote(&build.installer)?,
         &quote(&exe)?,
+        name == "previous.json",
     );
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -325,11 +337,18 @@ Start-ScheduledTask -TaskName HerdrShellUpdate"#;
 mod tests {
     use super::{same_sha, update_script};
 
+    #[test]
+    fn manual_rollback_only_gates_relaunch() {
+        let script = update_script("'log'", 42, "'setup'", "'shell'", true);
+        assert!(!script.contains("Stop-IfGame 'HerdrShellUpdate install'"));
+        assert!(script.contains("Stop-IfGame 'HerdrShellUpdate relaunch'"));
+    }
+
     // Generated PowerShell is the independent Windows handoff contract. Order
     // matters: guard before mutation and never launch a failed install.
     #[test]
     fn update_handoff_guards_swaps_and_restores_before_background_relaunch() {
-        let script = update_script("'log'", 42, "'setup'", "'shell'");
+        let script = update_script("'log'", 42, "'setup'", "'shell'", false);
         let guard = script
             .find("Stop-IfGame 'HerdrShellUpdate install'")
             .expect("install guard");

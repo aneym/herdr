@@ -39,6 +39,8 @@ class LaunchUpdateTests(unittest.TestCase):
         # current app is still alive, not only in the detached updater.
         source = UPDATE.read_text()
         owner = source[source.index('#[cfg(windows)]\nfn install_inner'):source.index('#[cfg(test)]')]
+        self.assertIn('if name != "previous.json" {', owner)
+        self.assertIn('spawn_blocking(move || install(app, "staged.json"))', source)
         gate = owner.index("Stop-IfGame 'HerdrShellUpdate preflight'")
         refusal = owner.index('return Err(', gate)
         handoff = owner.index('let scheduled =')
@@ -46,6 +48,22 @@ class LaunchUpdateTests(unittest.TestCase):
         self.assertLess(refusal, handoff)
         self.assertLess(handoff, owner.index('app.exit(0)'))
         self.assertIn('include_str!("../../../scripts/gamecheck.ps1")', owner[:handoff])
+
+    def test_standalone_rust_pipe_contracts(self):
+        source = (UPDATE.parent / 'control.rs').read_text()
+        # Only the Windows API module is excluded; the real retry policy and
+        # its table-driven tests compile and execute unchanged.
+        source = source[:source.index('#[cfg(windows)]')]
+        with tempfile.TemporaryDirectory(prefix='shell-pipe-rust-') as tmp:
+            path = Path(tmp) / 'control.rs'
+            path.write_text(source)
+            binary = Path(tmp) / 'control-tests'
+            linker = ['-C', 'linker=/usr/bin/cc'] if sys.platform == 'darwin' else []
+            subprocess.run(['rustc', '--edition=2021', *linker, '--test', str(path),
+                            '-o', str(binary)], check=True)
+            result = subprocess.run([str(binary), '--nocapture'], text=True, capture_output=True)
+            print(result.stdout, end='')
+            self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_standalone_rust_update_contracts(self):
         source = UPDATE.read_text()
