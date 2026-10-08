@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tab_pulse: decode older overlays and render optional normal/drifting timing lines."""
+"""tab_pulse: an overlay pulse decodes but never adds a timing line to a sidebar row."""
 import json
 import pathlib
 import subprocess
@@ -16,18 +16,7 @@ with tempfile.TemporaryDirectory(prefix="herdr-tab-pulse-") as scratch:
         path.write_text(json.dumps(fixture))
         return subprocess.check_output([str(driver), str(path)], text=True).splitlines()
     baseline = rows()
-    assert all("pulse:" not in row and "pulse-bold" not in row for row in baseline)
-    print("PASS tab_pulse_older_overlay_has_no_extra_row")
-    for line in ("", " \t\n"):
-        fixture["overlay"]["tabs"]["orch"]["pulse"] = {"line": line, "drifting": False}
-        assert rows() == baseline
-    print("PASS tab_pulse_blank_has_no_extra_row")
     for drifting in (False, True):
         fixture["overlay"]["tabs"]["orch"]["pulse"] = {"line": "reply 18s · first act 9s · 140k · inline 0/5", "drifting": drifting}
-        actual = rows()
-        assert len(actual) == len(baseline)
-        pulse = next(row for row in actual if row.startswith("tab|tab:orch|"))
-        assert "|pulse:reply 18s · first act 9s · 140k · inline 0/5" in pulse
-        assert ("|pulse-bold" in pulse) == drifting
-        assert pulse.split("|")[10] == "orch"
-        print("PASS tab_pulse_drifting" if drifting else "PASS tab_pulse_normal")
+        assert rows() == baseline
+    print("PASS tab_pulse_stays_out_of_rows")

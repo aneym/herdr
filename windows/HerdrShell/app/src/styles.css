@@ -169,10 +169,6 @@ footer { color: var(--shell-muted); padding: 12px 8px; font-size: 12px; overflow
 .hidden-agents .chevron { margin-left: auto; }
 .hidden-agents-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--shell-accent); }
 .agent-menu { position: fixed; right: auto; min-width: 180px; }
-.sidebar-row.has-pulse { height: auto; min-height: var(--shell-space-row-height); flex-wrap: wrap; row-gap: 0; }
-.sidebar-row.has-pulse > .select-tab { height: var(--shell-space-row-height); flex: 1; }
-.tab-pulse { display: block; flex-basis: 100%; min-width: 0; height: var(--shell-space-row-height); padding-left: calc(var(--shell-face-size) + 7px); color: var(--shell-muted); font-size: var(--shell-type-row-title); font-weight: 400; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tab-pulse-bold { font-weight: 700; }
 /* Pane motion is shared with the other shells through generated tokens. */
 .pane-cap.grab { cursor: grab; }
 .pane-dragging, .pane-dragging .pane-cap.grab { cursor: grabbing; }

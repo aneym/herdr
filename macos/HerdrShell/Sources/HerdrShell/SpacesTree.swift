@@ -162,7 +162,6 @@ struct SpacesRow: Identifiable, Equatable {
     /// nil while that machine is healthy; "unreachable" or "needs update" otherwise.
     var badgeState: String?
     var request: String?
-    var pulse: Overlay.Pulse?
     /// An AGENTS row's face: the agent's picture, else its initial on a tint.
     var home: String?
     var setsHidden: Bool? { id.hasPrefix("agent:") ? true : id.hasPrefix("hiddenagent:") ? false : nil }
@@ -196,13 +195,11 @@ struct SpacesRow: Identifiable, Equatable {
         var dotField: [String] = []
         if id == "hiddenagents", alert == "act" { dotField = ["dot:accent"] } else if let faceDot { dotField = ["dot:" + faceDot] } else if let trailingRequest { dotField = ["request:" + trailingRequest] }
         let badgeField: [String] = badge.map { ["@" + $0 + (badgeState.map { ":" + $0 } ?? "")] } ?? []
-        let pulseField = pulse.map { ["pulse:" + $0.line] + ($0.drifting ? ["pulse-bold"] : []) } ?? []
         // home stays the last field (agents-hide scenario).
         var output = fields
         output.append(contentsOf: faceField)
         output.append(contentsOf: dotField)
         output.append(contentsOf: badgeField)
-        output.append(contentsOf: pulseField)
         if let home { output.append("home:" + home) }
         return output.joined(separator: "|")
     }
@@ -292,7 +289,6 @@ enum SpacesTree {
             var row = SpacesRow(id: prefix + tab.id, kind: .tab, glyph: state.glyph, tone: state.tone,
                                 title: tab.label, trailing: space?.name ?? tab.space, tab: tab.id,
                                 request: tab.role == "agent" ? tab.request : nil)
-            row.pulse = overlay.tabs[tab.id]?.pulse
             if tab.role == "agent" {
                 row.trailing = ""; row.home = tab.homeLocation.flatMap { ["cloud", "local", "unsynced"].contains($0) ? $0 : nil }
                 row.face = face(name: tab.agentName ?? tab.label, avatar: tab.avatar)
@@ -386,7 +382,6 @@ enum SpacesTree {
                     trailing = [trailing, progress].filter { !$0.isEmpty }.joined(separator: " · ")
                 }
                 out.append(SpacesRow(id: "tab:" + tab.id, kind: .tab, depth: level, chevron: foldable ? (open ? "open" : "closed") : "none", glyph: state.glyph, tone: state.tone, title: name, trailing: trailing, alert: attention, link: link, tab: tab.id, toggleKey: foldable ? "tab:" + tab.id : nil, dim: idle || t.done || t.kind == "advisor" || t.mode == "parked"))
-                out[out.count - 1].pulse = t.pulse
                 if open {
                     for child in grouped { appendTab(child, level + 1, inside: true) }
                     for child in children { appendTab(child, level + 1, nest: false) }

@@ -762,7 +762,6 @@ pub(super) struct FactoryTabRow {
     pub(super) phase: Option<String>,
     pub(super) started: Option<i64>,
     pub(super) summary: Option<String>,
-    pub(super) pulse: Option<Box<crate::factory_overlay::TabPulse>>,
     pub(super) attention: crate::factory_overlay::Attention,
     /// Derived from this client's live lane status, not the overlay's delayed idle hint.
     pub(super) idle: bool,
@@ -777,16 +776,15 @@ impl AgentPanelListEntry {
     pub(super) fn line_count(&self) -> usize {
         match self {
             Self::Agent(row) | Self::Automation(row) => row.rows.len().max(1),
-            Self::FactoryTab(row) => {
-                1 + usize::from(row.pulse.is_some())
-                    + usize::from(
-                        row.workflow
-                            && !row.done
-                            && row
-                                .phase
-                                .as_ref()
-                                .is_some_and(|phase| !phase.trim().is_empty()),
-                    )
+            Self::FactoryTab(row)
+                if row.workflow
+                    && !row.done
+                    && row
+                        .phase
+                        .as_ref()
+                        .is_some_and(|phase| !phase.trim().is_empty()) =>
+            {
+                2
             }
             _ => 1,
         }
@@ -2377,7 +2375,6 @@ fn factory_run_row(
         phase: run.phase.clone(),
         started: run.started,
         summary: None,
-        pulse: None,
         attention: run.attention,
         idle: false,
         idle_reason: None,
@@ -2603,10 +2600,6 @@ fn factory_row(
         phase: tag.and_then(|tag| tag.phase.clone()),
         started: tag.and_then(|tag| tag.started),
         summary: tag.and_then(|tag| tag.summary.clone()),
-        pulse: tag
-            .and_then(|tag| tag.pulse.clone())
-            .filter(|pulse| !pulse.line.trim().is_empty())
-            .map(Box::new),
         attention: tag.map_or(crate::factory_overlay::Attention::None, |tag| tag.attention),
         idle: lane_is_idle(tag, status, tab.work_status.is_some()),
         idle_reason: tag.and_then(|tag| tag.idle_reason.clone()),

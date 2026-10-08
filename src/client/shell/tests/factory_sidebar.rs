@@ -4751,65 +4751,22 @@ fn priority_tree_keeps_original_workflow_parent() {
 }
 
 #[test]
-fn tab_pulse_renders_one_muted_row_and_retains_tab_hit_target() {
-    let render = |snapshot: &ClientShellSnapshot, overlay: &FactoryOverlay| {
-        rendered_factory_rows_with_gap(snapshot, overlay, &ClientTreeChrome::default(), 25, 0)
-    };
+fn tab_pulse_stays_out_of_the_tab_row() {
     let (snapshot, mut overlay) = fixture();
-    let (_, base_hits, _) = render(&snapshot, &overlay);
-    let base = base_hits
+    overlay.tabs.get_mut("orch").unwrap().pulse = Some(crate::factory_overlay::TabPulse {
+        line: "reply 18s · first act 9s · 140k · inline 0/5".into(),
+        drifting: true,
+    });
+    let (rows, hits, _) =
+        rendered_factory_rows_with_gap(&snapshot, &overlay, &ClientTreeChrome::default(), 25, 0);
+    let hit = hits
         .tree_headers
         .iter()
         .find(|hit| hit.key == "orch")
         .unwrap();
-    assert_eq!(base.rect.height, 1);
-    for line in ["", " \t\n"] {
-        overlay.tabs.get_mut("orch").unwrap().pulse = Some(crate::factory_overlay::TabPulse {
-            line: line.into(),
-            drifting: false,
-        });
-        let (_, hits, _) = render(&snapshot, &overlay);
-        assert_eq!(
-            hits.tree_headers
-                .iter()
-                .find(|hit| hit.key == "orch")
-                .unwrap()
-                .rect
-                .height,
-            1
-        );
-    }
-    for drifting in [false, true] {
-        overlay.tabs.get_mut("orch").unwrap().pulse = Some(crate::factory_overlay::TabPulse {
-            line: "reply 18s · first act 9s · 140k · inline 0/5".into(),
-            drifting,
-        });
-        let (rows, hits, buffer) = render(&snapshot, &overlay);
-        let hit = hits
-            .tree_headers
-            .iter()
-            .find(|hit| hit.key == "orch")
-            .unwrap();
-        assert_eq!(hit.rect.height, 2);
-        assert_eq!(hit.tab_id.as_deref(), Some("orch"));
-        let y = hit.rect.y + 1;
-        assert!(rows[y as usize].contains("reply 18s"));
-        assert!(rows[y as usize].contains('…'));
-        let x = (0..buffer.area.width)
-            .find(|x| buffer[(*x, y)].symbol() == "r")
-            .unwrap();
-        assert_eq!(
-            buffer[(x, y)].fg,
-            ClientShellConfig::from_config(&Config::default())
-                .palette
-                .overlay0
-        );
-        assert_eq!(
-            buffer[(x, y)]
-                .modifier
-                .contains(ratatui::style::Modifier::BOLD),
-            drifting
-        );
-        assert!(hit.rect.contains(ratatui::layout::Position::new(x, y)));
-    }
+    assert_eq!(hit.rect.height, 1);
+    assert!(
+        rows.iter().all(|row| !row.contains("reply 18s")),
+        "{rows:#?}"
+    );
 }
