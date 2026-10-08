@@ -283,6 +283,7 @@ mod navigation_history;
 mod pane_drag;
 mod pane_drag_fixture;
 mod pane_drop_zone_fixture;
+mod pane_move_mode;
 mod popup_focus_projection;
 mod profile_usage;
 mod startup_overlays;
