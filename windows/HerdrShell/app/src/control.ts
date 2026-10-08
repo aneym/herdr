@@ -49,6 +49,17 @@ export function installControl(get: () => ControlState): () => void {
     await new Promise(resolve => requestAnimationFrame(resolve));
     return { ok: true };
   });
+  watch<{ selector: string; hover?: boolean; nth?: number }>("click", async payload => {
+    const matches = document.querySelectorAll<HTMLElement>(payload.selector);
+    const element = matches[payload.nth ?? 0];
+    if (!element) return { ok: false, error: "no match" };
+    const hover = element.closest(".sidebar-row") ?? element;
+    if (payload.hover) hover.setAttribute("data-test-hover", "");
+    try { flushSync(() => element.click()); }
+    finally { if (payload.hover) hover.removeAttribute("data-test-hover"); }
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    return { ok: true, matched: matches.length };
+  });
   watch<{ row_id: string }>("row_menu", async payload => {
     const row = document.querySelector<HTMLElement>(`[data-row="${CSS.escape(payload.row_id)}"]`);
     if (!row) throw new Error("No menu row");
@@ -91,7 +102,7 @@ export function installControl(get: () => ControlState): () => void {
   // {"cmd":"drag_pin","tab_id":id,"section":"pinned"|"agent","rows":n|"dy":px,"steps":8,"interval_ms":40,"esc":false}:
   // drag a sidebar pin row from its centre.
   watch<DragPayload & { tab_id: string; section?: "pinned" | "agent"; rows?: number; dy?: number }>("drag_pin", async payload => {
-    const row = document.querySelector<HTMLElement>(`[data-row="${payload.section ?? "pinned"}:${CSS.escape(payload.tab_id)}"]`);
+    const row = document.querySelector<HTMLElement>(`[data-row=${CSS.escape(`${payload.section ?? "pinned"}:${payload.tab_id}`)}]`);
     if (!row) throw new Error(`No ${payload.section ?? "pinned"} row ${payload.tab_id}`);
     return pointerDrag(row, 0, payload.dy ?? (payload.rows ?? 0) * row.getBoundingClientRect().height, payload);
   });

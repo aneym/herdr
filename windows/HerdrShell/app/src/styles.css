@@ -17,7 +17,7 @@ button:focus-visible { outline: 1px solid var(--shell-muted); outline-offset: -1
 .status.state-dot { display: inline-block; background: currentColor; border-radius: 50%; }
 .status.working { color: var(--shell-ok); }.status.blocked { color: var(--shell-bad); }.status.done { color: var(--shell-warn); }
 .muted { color: var(--shell-muted); }.space-label { max-width: var(--shell-space-step55); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--shell-type-row-trailing); }
-.pin { display: none; color: var(--shell-muted); flex-shrink: 0; }.tab-row:hover .pin, .tab-row:focus-within .pin { display: block; }.pin.is-pinned { color: var(--shell-text); }
+.pin { display: none; color: var(--shell-muted); flex-shrink: 0; }.tab-row:hover .pin, .tab-row:focus-within .pin, .tab-row[data-test-hover] .pin { display: block; }.pin.is-pinned { color: var(--shell-text); }
 .indented { padding-left: var(--shell-space-step24); }.chevron { width: var(--shell-space-step10); color: var(--shell-muted); }
 .disclosure-chevron { display: inline-block; width: var(--shell-type-size8); height: var(--shell-type-size8); vertical-align: middle; transform: rotate(0deg); }
 .disclosure-chevron.is-open { transform: rotate(90deg); }
@@ -228,8 +228,8 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 .sidebar-section-title { display: flex; align-items: center; justify-content: space-between; }
 .sidebar-plus { color: var(--shell-muted); flex-shrink: 0; font-size: var(--shell-type-glyph); }
 .space-row .sidebar-plus { display: none; }
-.space-row:hover .pin, .space-row:focus-within .pin, .space-row .pin.is-pinned,
-.space-row:hover .sidebar-plus, .space-row:focus-within .sidebar-plus { display: block; }
+.space-row:hover .pin, .space-row:focus-within .pin, .space-row .pin.is-pinned, .space-row[data-test-hover] .pin,
+.space-row:hover .sidebar-plus, .space-row:focus-within .sidebar-plus, .space-row[data-test-hover] .sidebar-plus { display: block; }
 .sidebar-plus:disabled { cursor: default; }
 
 .plus-glyph { display: inline-block; position: relative; width: var(--shell-space-step12); height: var(--shell-space-step12); }
