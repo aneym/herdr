@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Snapshot } from "./model";
-import { observeAttention } from "./notify";
+import { attentionTransition, observeActiveAttention, observeAttention } from "./notify";
 
 // Pure transition algorithm: pane identity, focus, parking, priority and time gates
 // have distinct edge cases; no existing shell test owns notification decisions.
@@ -55,5 +55,22 @@ describe("Mac unseen-tab notification contract", () => {
     delete after.tabs![0].label;
     after.agents = [{ pane_id: "p", terminal_id: "term", tab_id: "t", workspace_id: "w", agent: "claude", agent_status: "blocked" }];
     expect(observe(before, after).notifications).toEqual([{ tab: "t", kind: "blocked", title: "tab 1", body: "needs you" }]);
+  });
+});
+
+// Regression: unchanged aggregate attention must not restart Windows' flash cycle.
+describe("app-wide taskbar attention transitions", () => {
+  it.each([
+    [false, false, undefined], [false, true, "request"],
+    [true, true, undefined], [true, false, "clear"],
+  ])("%s → %s decides %s", (previous, next, expected) => {
+    expect(attentionTransition(previous, next)).toBe(expected);
+  });
+  it("observes only the active machine, not a background blocked transition", () => {
+    const snapshots = { studio: snapshot("working"), pc: snapshot("blocked") };
+    const result = observeActiveAttention(snapshot("working"), snapshots, "studio", null, true, new Set(), {}, 100_000);
+    expect(result.notifications).toEqual([]);
+    expect(result.attention).toBe(false);
+    expect(observeActiveAttention(snapshot("working"), snapshots, "pc", null, true, new Set(), {}, 100_000).notifications).toHaveLength(1);
   });
 });

@@ -35,3 +35,14 @@ export function observeAttention(previous: Snapshot | undefined, next: Snapshot,
   }
   return { notifications, attention };
 }
+
+/** Restart Windows flashing only when the app-wide unseen-attention fact changes. */
+export function attentionTransition(previous: boolean, next: boolean): "request" | "clear" | undefined {
+  return previous === next ? undefined : next ? "request" : "clear";
+}
+
+/** Like Mac model.snapshot, only the displayed machine supplies attention facts. */
+export function observeActiveAttention(previous: Snapshot | undefined, snapshots: Readonly<Record<string, Snapshot>>, active: string, selected: string | null, windowFocused: boolean, parked: ReadonlySet<string>, lastSent: Readonly<Record<string, number>>, now: number) {
+  const snapshot = snapshots[active];
+  return snapshot ? observeAttention(previous, snapshot, selected, windowFocused, parked, lastSent, now) : { notifications: [], attention: false };
+}

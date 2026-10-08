@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { cycleMachine } from "./machines";
 import { bridge } from "./bridge";
-import { observeAttention } from "./notify";
+import { attentionTransition, observeActiveAttention } from "./notify";
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
@@ -39,12 +39,13 @@ export default function App() {
   const [notificationSelection, setNotificationSelection] = useState<{ machine: string; tab: string | null } | null>(null);
   const onSelection = useCallback((machine: string, tab: string | null) => setNotificationSelection(value => value?.machine === machine && value.tab === tab ? value : { machine, tab }), []);
   const [windowFocused, setWindowFocused] = useState(false);
-  const attention = useRef(new Map<string, boolean>());
-  const updateAttention = useCallback((machine: string, needsAttention: boolean) => {
-    attention.current.set(machine, needsAttention);
-    if (isTauri()) {
+  const attention = useRef(false);
+  const updateAttention = useCallback((needsAttention: boolean) => {
+    const action = attentionTransition(attention.current, needsAttention);
+    attention.current = needsAttention;
+    if (action && isTauri()) {
       // Windows uses quiet taskbar attention instead of the Mac's red Dock count.
-      void getCurrentWindow().requestUserAttention([...attention.current.values()].some(Boolean) ? UserAttentionType.Informational : null).catch(error => console.warn("Taskbar attention failed", error));
+      void getCurrentWindow().requestUserAttention(action === "request" ? UserAttentionType.Informational : null).catch(error => console.warn("Taskbar attention failed", error));
     }
   }, []);
   useEffect(() => {
@@ -119,7 +120,7 @@ export default function App() {
     }
   }, [machines, active, loaded]);
   const machine: MachineStatus = machines.find(m => m.name === active) ?? { name: active, state: loaded ? "down" : "connecting", error: loaded ? "Machine unavailable" : undefined };
-  return <>{machines.map(status => <AttentionObserver key={status.name} machine={status} snapshot={snapshots[status.name]} selected={notificationSelection?.machine === status.name && active === status.name ? notificationSelection.tab : null} windowFocused={windowFocused} updateAttention={updateAttention} />)}<MachineView key={active} machine={machine} machines={machines} snapshot={snapshots[active] ?? {}} chooseMachine={chooseMachine} selections={selections.current} control={control} onSelection={onSelection} /></>;
+  return <><AttentionObserver machine={machine} snapshots={snapshots} selected={notificationSelection?.machine === active ? notificationSelection.tab : null} windowFocused={windowFocused} updateAttention={updateAttention} /><MachineView key={active} machine={machine} machines={machines} snapshot={snapshots[active] ?? {}} chooseMachine={chooseMachine} selections={selections.current} control={control} onSelection={onSelection} /></>;
 }
 function MachineView({ machine, machines, snapshot, chooseMachine, selections, control, onSelection }: { machine: MachineStatus; machines: MachineStatus[]; snapshot: Snapshot; chooseMachine: (name: string) => MachineStatus; selections: Map<string, ViewSelection>; control: MutableRefObject<(() => ControlState) | null>; onSelection: (machine: string, tab: string | null) => void }) {
   const [selected, setSelected] = useState<string | null>(selections.get(machine.name)?.selected ?? null);
@@ -291,21 +292,21 @@ function MachineView({ machine, machines, snapshot, chooseMachine, selections, c
   return <div className="layout">{sidebarVisible && <Sidebar paneDropRow={paneDragState?.zone?.kind === "into_tab" ? `tab:${paneDragState.zone.tab_id}` : paneDragState?.zone?.kind === "new_tab_in" ? `space:${paneDragState.zone.workspace_id}` : null} snapshot={snapshot} catalog={catalog} machines={machines} chooseMachine={chooseMachine} rows={rows} selected={selected} revealed={revealed} machine={machine} notice={notice?.text ?? null} select={select} pin={pin} movePin={movePin} renaming={renaming} startRename={id => { setRenaming(id); }} cancelRename={() => setRenaming(null)} commitRename={async (id, label) => { try { await action("rename_tab", label, id); setRenaming(null); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); } catch { /* runAction reports through the transient status notice. */ } }} />}<TabView onSpring={select} online={machine.state === "up"} registerDrag={registerDrag} onDragChange={setPaneDragState} snapshot={snapshot} selected={selected} machine={machine.name} focused={switcherOpen || renaming ? null : focused} onFocus={focus} shortcut={shortcut} register={register} pin={pin} onError={showError} />{docsOpen && docsItems.length > 0 && <DocPanel key={docsKey} machine={machine.name} items={docsItems} active={activeDoc} select={name => setDocsActive(value => ({ ...value, [docsKey]: name }))} error={docsError} />}{switcherOpen && <Switcher rows={rows} selected={selected} machine={machine.name} open={select} close={closeSwitcher} />}{!sidebarVisible && (notice || machine.state !== "up") && <div className="machine-error notice" role="status">{notice?.text ?? machine.error ?? machine.state}</div>}</div>;
 }
 
-// One observer per machine keeps background machines eligible and preserves transition history across switching.
-function AttentionObserver({ machine, snapshot, selected, windowFocused, updateAttention }: { machine: MachineStatus; snapshot?: Snapshot; selected: string | null; windowFocused: boolean; updateAttention: (machine: string, attention: boolean) => void }) {
+// Only the displayed machine supplies notifications, like the Mac model.snapshot.
+function AttentionObserver({ machine, snapshots, selected, windowFocused, updateAttention }: { machine: MachineStatus; snapshots: Record<string, Snapshot>; selected: string | null; windowFocused: boolean; updateAttention: (attention: boolean) => void }) {
   const catalog = useLaneFiles(machine.name, machine.state === "up");
-  const previous = useRef<Snapshot>();
+  const previous = useRef<{ machine: string; snapshot: Snapshot }>();
   const lastSent = useRef<Record<string, number>>({});
   // Serialize permission prompting and delivery so a burst cannot open multiple prompts.
   const delivery = useRef(Promise.resolve());
   useEffect(() => {
-    if (!snapshot) return;
+    const snapshot = snapshots[machine.name];
     const now = Date.now();
-    const result = observeAttention(previous.current, snapshot, selected, windowFocused, new Set(Object.keys(catalog.parked)), lastSent.current, now);
-    previous.current = snapshot;
-    updateAttention(machine.name, result.attention);
+    const result = observeActiveAttention(previous.current?.machine === machine.name ? previous.current.snapshot : undefined, snapshots, machine.name, selected, windowFocused, new Set(Object.keys(catalog.parked)), Object.fromEntries(Object.entries(lastSent.current).filter(([key]) => key.startsWith(`${machine.name}:`)).map(([key, value]) => [key.slice(machine.name.length + 1), value])), now);
+    previous.current = snapshot ? { machine: machine.name, snapshot } : undefined;
+    updateAttention(result.attention);
     for (const note of result.notifications) {
-      lastSent.current[note.tab] = now;
+      lastSent.current[`${machine.name}:${note.tab}`] = now;
       if (!isTauri()) continue; // Browser checks must not raise a host OS banner.
       delivery.current = delivery.current.then(async () => {
         if (!await isPermissionGranted() && await requestPermission() !== "granted") return;
@@ -313,7 +314,7 @@ function AttentionObserver({ machine, snapshot, selected, windowFocused, updateA
         sendNotification({ title: note.title, body: note.body });
       }).catch(error => console.warn("Notification delivery failed", error));
     }
-  }, [snapshot, selected, windowFocused, catalog, machine.name, updateAttention]);
-  useEffect(() => () => updateAttention(machine.name, false), [machine.name, updateAttention]);
+  }, [snapshots, selected, windowFocused, catalog, machine.name, updateAttention]);
+  useEffect(() => () => updateAttention(false), [updateAttention]);
   return null;
 }
