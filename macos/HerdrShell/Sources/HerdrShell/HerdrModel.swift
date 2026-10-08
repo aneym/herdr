@@ -96,8 +96,17 @@ final class HerdrModel: ObservableObject {
         }
     }
 
+    /// Bumped on every applied local snapshot, as MachineState.epoch is for another machine's.
+    private var localEpoch = 0
+    /// Changes whenever a new snapshot lands for the machine that owns `id`.
+    func snapshotEpoch(for id: String) -> Int {
+        guard let name = Machines.split(id)?.machine else { return localEpoch }
+        return machines.first { $0.name == name }?.epoch ?? 0
+    }
+
     private func apply(_ s: Snapshot) {
         reloadSpacesOverlay()
+        localEpoch += 1
         snapshot = s
         let c = TabClassifier(s)
         var orch: [TabRow] = [], lane: [TabRow] = [], wf: [TabRow] = []

@@ -644,11 +644,30 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         DispatchQueue.global(qos: .userInitiated).async { cmds.tabFocus(tabId: tabId) }
     }
 
+    /// A pane drop's reply layout and the snapshot epoch it answered: shown until a newer snapshot lands.
+    private var dropHold: (layout: Snapshot.Layout, epoch: Int)?
+
+    /// The server answered a pane drop: snapshots that came while it was pending show first, as they are, then the
+    /// panes settle to the reply's layout for this tab. The next snapshot replaces it, with no motion.
+    func applyDropReply(_ layouts: [Snapshot.Layout]) {
+        guard let tab = state.selectedTab, let layout = layouts.first(where: { $0.tab_id == tab }) else { return }
+        refreshHost()
+        dropHold = (layout, model.snapshotEpoch(for: tab))
+        refreshHost(using: layout, fromDrop: true)
+    }
+
+    private func heldDropLayout(_ tab: String) -> Snapshot.Layout? {
+        guard let hold = dropHold, hold.layout.tab_id == tab else { return nil }
+        guard model.snapshotEpoch(for: tab) == hold.epoch else { dropHold = nil; return nil }
+        return hold.layout
+    }
+
     /// Rebuild the pane host only when the tab's geometry actually changed.
-    /// `forced` is a layout herdr just answered a resize with; a snapshot is skipped while a drag is live.
-    func refreshHost(using forced: Snapshot.Layout? = nil) {
+    /// `forced` is a layout herdr just answered a resize or, with `fromDrop`, a pane drop with; a snapshot is
+    /// skipped while a divider drag is live.
+    func refreshHost(using forced: Snapshot.Layout? = nil, fromDrop: Bool = false) {
         if forced == nil, resizer.isBusy { return }
-        guard let tab = state.selectedTab, let layout = forced ?? model.layout(forTab: tab), layout.tab_id == tab else { return }
+        guard let tab = state.selectedTab, let layout = forced ?? heldDropLayout(tab) ?? model.layout(forTab: tab), layout.tab_id == tab else { return }
         let previousLayout = shownLayout
         shownLayout = layout
         // herdr reports the split rects even while a tab is zoomed; the shell draws the zoom itself.
@@ -680,7 +699,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         let newBoxes = Dictionary(uniqueKeysWithValues: items.map { ($0.0.paneId, host.boxRect($0.1)) })
         paneDrag.layoutWillApply(old: oldBoxes, new: newBoxes,
                                 sameTab: previousLayout?.tab_id == tab && previousLayout.map { $0.area.x == layout.area.x && $0.area.y == layout.area.y && $0.area.width == layout.area.width && $0.area.height == layout.area.height } == true,
-                                fromResize: forced != nil)
+                                fromDrop: fromDrop)
         host.show(items, area: layout.area, dividers: zoomedPane == nil && !Machines.isRemote(tab) ? PaneDivider.from(layout) : [])
         paneDrag.layoutDidApply()
         applyPendingFocus()

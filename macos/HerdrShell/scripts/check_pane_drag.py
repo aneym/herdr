@@ -13,6 +13,7 @@ app's own hit-testing decides cap, zone and row. Hook lines (JSON on the control
   {"cmd":"pane-drag","op":"move","row":ROW_ID,"drop":true}  drag to a sidebar row's centre, release there
   {"cmd":"pane-drag","op":"drop"}                        release at the last point
   {"cmd":"pane-drag","op":"cancel","via":"esc"|"right"}  typed Esc, or a right click at the last point
+  {"cmd":"pane-drag","op":"hold-drops","on":B} / {"op":"send-drop"}  hold the next drop's call unsent / send it
   {"cmd":"motion","op":"freeze","ms":N} | {"cmd":"motion","op":"run"} | {"cmd":"motion","op":"reduce","on":true|false|null}
 State dump key `paneDrag` (see the S6 brief): phase, source, zone, lastZone, ghostRect,
 ghostTarget, ghostSource, dryRunPending, placeSupported, chip, boxes, sent, motion; plus
@@ -260,7 +261,8 @@ def main():
     state = S.state()
     check("1: past the threshold the pane lifts with no zone",
           pd(state).get("phase") == "lifted" and pd(state).get("source") == a and pd(state).get("zone") is None, json.dumps(pd(state))[:300])
-    hook("move", **centre(boxes0[b]))
+    # One drag event straight to B's centre: a stepped path from A's cap crosses B's left band on the way.
+    hook("move", steps=1, **centre(boxes0[b]))
     state = wait(lambda s: zone_is(s, kind="centre", target=b))
     check("1: over B's centre the zone is centre and no dry run is sent", zone_is(state, kind="centre", target=b) and dry_runs(state) == [],
           json.dumps([pd(state).get("zone"), dry_runs(state)]))
@@ -308,25 +310,25 @@ def main():
     cancel_case(ws, "4 right click", "right")
     cancel_case(ws, "4 release on the source", "source")
     tab, a, b, c, state = fresh(ws, "click")
-    S.lab("herdr", "pane", "focus", a)
-    check("4: precondition: A has focus before the click", layout(a)["focused_pane_id"] == a, layout(a)["focused_pane_id"])
+    # A Shell click focuses the pane in the Shell (its key surface), as every Shell pane click does; it sends no
+    # pane.focus, so the server's focused pane is not what this step reads.
+    state = wait(lambda s: s.get("focused_pane") not in (None, b))
+    check("4: precondition: another pane has focus before the click", state.get("focused_pane") not in (None, b),
+          str(state.get("focused_pane")))
     hook("begin", pane=b, travel=2)
     state = S.state()
     check("4: a press under the threshold does not lift", pd(state).get("phase") in ("idle", "pressed"), str(pd(state).get("phase")))
     hook("drop")
-    deadline = time.monotonic() + 5
-    while layout(b)["focused_pane_id"] != b and time.monotonic() < deadline:
-        time.sleep(0.2)
-    state = S.state()
-    check("4: the click focuses the pane and moves nothing", layout(b)["focused_pane_id"] == b and changes(state) == [],
-          f"focus={layout(b)['focused_pane_id']} {json.dumps(changes(state))}")
+    state = wait(lambda s: s.get("focused_pane") == b, timeout=5)
+    check("4: the click focuses the pane and moves nothing", state.get("focused_pane") == b and changes(state) == [],
+          f"focus={state.get('focused_pane')} {json.dumps(changes(state))}")
     close(tab)
 
     # Step 5: centre swap.
     tab, a, b, c, state = fresh(ws, "swap")
     before = rects(layout(a))
     hook("begin", pane=a)
-    hook("move", **centre(pd(state)["boxes"][b]))
+    hook("move", steps=1, **centre(pd(state)["boxes"][b]))  # straight to the centre, as in step 1
     hook("drop")
     state = wait(lambda s: idle(s) and changes(s))
     got = changes(state)

@@ -22,8 +22,10 @@ final class PaneDrag: NSObject {
     private var sourceGlyph: ShellState = .asleep
     private var lastHostSize = CGSize.zero
     private var zone: Zone?, lastZone: Zone?
-    /// The generation of the drop whose layout may still settle; nil once that layout came or the drop ended.
-    private var dropGeneration: Int?
+    /// Check hook only (check_pane_drag_end.py): hold a drop's call before it is sent, as a slow link would, until
+    /// `sendHeldDrop()`. Snapshots keep arriving meanwhile.
+    var holdDrops = false
+    private var heldDrop: (() -> Void)?
     private var pointer = CGPoint.zero, start = CGPoint.zero
     private var keyboard = false, keyboardTarget: String?
     private var sent: [[String: Any]] = []
@@ -105,7 +107,7 @@ final class PaneDrag: NSObject {
         guard placeSupported, owner.host.rects.count > 1, owner.shownLayout?.zoomed != true else {
             owner.focusPane(pane); return
         }
-        resetVisuals(); dropGeneration = nil
+        resetVisuals()
         generation += 1; source = pane; originTab = owner.state.selectedTab
         label = owner.host.caps[pane]?.name ?? ""
         sourceGlyph = owner.host.caps[pane]?.glyph ?? .asleep
@@ -216,7 +218,7 @@ final class PaneDrag: NSObject {
         if phase == .pressed { let p = source; finish(); if let p { owner.focusPane(p) }; return }
         guard phase == .lifted, let z = zone, let source else { cancel(); return }
         motions.removeAll { $0.pane == source && $0.kind == "fade" }
-        lastZone = z; phase = .dropping; dropGeneration = generation
+        lastZone = z; phase = .dropping
         updateSidebarIndicator()
         let method: String, p: [String: Any]
         switch z {
@@ -227,20 +229,36 @@ final class PaneDrag: NSObject {
         sent.append(["method": method, "params": p])
         if method == "pane.swap" { sent.append(["method": "pane.focus", "params": ["pane_id": source]]) }
         let commands = owner.commands, gen = generation
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let reply = commands.paneDragCall(method, p)
-            let refused = PaneDrag.refused(reply)
-            if method == "pane.swap", reply?["result"] != nil, !refused { _ = commands.paneDragCall("pane.focus", ["pane_id": source]) }
-            DispatchQueue.main.async {
-                guard let self, self.generation == gen else { return }
-                // A refusal (an error, or changed:false such as a pane gone) moved nothing, so the chip goes back.
-                if refused { if self.phase == .dropping { self.animateCancel() }; return }
-                // With no reply at all the outcome is unknown: end without a rollback.
-                if reply?["result"] == nil { self.cancel(); return }
-                self.owner?.focusPane(source)
-                if self.phase == .dropping { self.settle() }
-                self.draw()
+        // The drop ends with the server's answer to this call, never with a snapshot: snapshots that land while it
+        // is pending apply at once, and only the reply's own layout settles.
+        let send = {
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let reply = commands.paneDragCall(method, p)
+                let refused = PaneDrag.refused(reply)
+                if method == "pane.swap", reply?["result"] != nil, !refused { _ = commands.paneDragCall("pane.focus", ["pane_id": source]) }
+                DispatchQueue.main.async {
+                    guard let self, self.generation == gen, self.phase == .dropping else { return }
+                    // A refusal (an error, or changed:false such as a pane gone) moved nothing, so the chip goes back.
+                    if refused { self.animateCancel(); return }
+                    // With no reply at all the server may still have applied it: end without a rollback.
+                    if reply?["result"] == nil { self.cancel(); return }
+                    self.settle()
+                    self.owner?.applyDropReply(PaneDrag.layouts(reply))
+                    self.owner?.focusPane(source)
+                    self.draw()
+                }
             }
+        }
+        if holdDrops { heldDrop = send } else { send() }
+    }
+    func sendHeldDrop() { let send = heldDrop; heldDrop = nil; send?() }
+    /// The layouts a drop's reply carries: pane.swap's `layout`, or pane.place's and pane.move's target and source.
+    private static func layouts(_ reply: [String: Any]?) -> [Snapshot.Layout] {
+        guard let result = reply?["result"] as? [String: Any] else { return [] }
+        let answer = ["place", "swap", "move_result"].lazy.compactMap { result[$0] as? [String: Any] }.first ?? [:]
+        return ["layout", "target_layout", "source_layout"].compactMap { key in
+            answer[key].flatMap { try? JSONSerialization.data(withJSONObject: $0) }
+                .flatMap { try? JSONDecoder().decode(Snapshot.Layout.self, from: $0) }
         }
     }
     /// The server answered and changed nothing: an error, or `changed: false` in the place, swap or move result.
@@ -261,7 +279,6 @@ final class PaneDrag: NSObject {
     }
     /// The chip springs back to the source cap. Also ends a drop the server refused, which moved nothing.
     private func animateCancel() {
-        dropGeneration = nil
         lastZone = zone; zone = nil; phase = .cancelling; generation += 1; inFlight = nil
         motions.removeAll { $0.kind == "zone" || $0.kind == "fade" }
         ghost = nil; ghostTarget = nil
@@ -313,18 +330,14 @@ final class PaneDrag: NSObject {
         }
         return true
     }
-    func layoutWillApply(old: [String: NSRect], new: [String: NSRect], sameTab: Bool, fromResize: Bool = false) {
+    func layoutWillApply(old: [String: NSRect], new: [String: NSRect], sameTab: Bool, fromDrop: Bool = false) {
         layoutGeneration += 1; cache = [:]; rejected = []
         guard let owner else { return }
         motions.removeAll { $0.kind == "settle" || $0.kind == "crossfade" }
         let sameSize = lastHostSize == owner.host.bounds.size
         lastHostSize = owner.host.bounds.size
-        // Only this drop's own layout settles: one that moves the source or takes it out of the tab, or follows it to
-        // another tab. Another client's change while the drop is pending, or after it ended, applies at once.
-        let movesSource = source.map { old[$0] != new[$0] } ?? false
-        let isDropLayout = dropGeneration == generation && !fromResize && (movesSource || !sameTab)
-        if isDropLayout { dropGeneration = nil }
-        let canAnimate = isDropLayout && sameTab && sameSize && Set(old.keys) == Set(new.keys) && !owner.resizer.isBusy && !owner.window.inLiveResize
+        // Only a drop reply's layout settles. Snapshots, while a drop is pending or after its reply, apply at once.
+        let canAnimate = fromDrop && sameTab && sameSize && Set(old.keys) == Set(new.keys) && !owner.resizer.isBusy && !owner.window.inLiveResize
         if canAnimate {
             for (pane, rect) in new where old[pane] != rect {
                 addMotion(pane: pane, kind: reduce ? "crossfade" : "settle", from: old[pane] ?? rect, to: rect,
@@ -333,7 +346,6 @@ final class PaneDrag: NSObject {
         }
         boxes = new
         if phase == .idle && !motions.isEmpty { phase = .settling }
-        if phase == .dropping && isDropLayout { settle() }
     }
     /// The drop is in: the zone fades out (a crossfade over reducedFadeMs under Reduce Motion) and tick() finishes once
     /// it and any settle are done. Every drop ends here, also one whose layout brings no settle or crossfade, such as a
@@ -448,7 +460,7 @@ final class PaneDrag: NSObject {
     }
     private func resetVisuals() { motions = []; link?.invalidate(); link = nil; ghost = nil; ghostTarget = nil }
     private func finish() {
-        phase = .idle; zone = nil; dropGeneration = nil; resetVisuals()
+        phase = .idle; zone = nil; heldDrop = nil; resetVisuals()
         if let monitor { NSEvent.removeMonitor(monitor) }; monitor = nil
         NSCursor.arrow.set(); draw()
     }
