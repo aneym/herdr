@@ -53,6 +53,15 @@ final class PaneDrag: NSObject {
     private var monitor: Any?
     private var link: CADisplayLink?
     private var frozenMs: CGFloat?
+    private struct Dwell {
+        var tab: String, point: CGPoint
+        var started = ProcessInfo.processInfo.systemUptime
+        var frozenStart: CGFloat?
+    }
+    private var dwell: Dwell?
+    private var springSelection = false, sprung = false
+    // Keep a quick cancel's origin focus behind the spring's destination focus on the wire.
+    private let tabFocusQueue = DispatchQueue(label: "herdr.pane-drag.tab-focus")
     var reduceOverride: Bool?
     private var reduce: Bool { reduceOverride ?? NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
     private struct Motion {
@@ -160,9 +169,11 @@ final class PaneDrag: NSObject {
            let row = owner.state.rowFrames.first(where: { $0.value.contains(rowPoint) })?.key {
             let id = String(row.dropFirst(row.hasPrefix("tab:") ? 4 : 6))
             if (row.hasPrefix("tab:") || row.hasPrefix("space:")), PinDrag.machine(of: id) == PinDrag.machine(of: source ?? "") {
+                updateDwell(tab: row.hasPrefix("tab:") ? id : nil)
                 setZone(row.hasPrefix("tab:") ? .intoTab(id) : .newTabIn(id)); return
             }
         }
+        updateDwell(tab: nil)
         let ids = owner.host.rects.map { $0.0.paneId }, rects = owner.host.rects.map { owner.host.boxRect($0.1) }
         let metrics = PaneDropMetrics(tabEdge: ShellMotion.tabEdgePx, bandMin: ShellMotion.edgeBandMin,
             bandFraction: ShellMotion.edgeBandFraction, bandMaxFraction: ShellMotion.edgeBandMaxFraction,
@@ -174,13 +185,38 @@ final class PaneDrag: NSObject {
         case nil: setZone(nil)
         }
     }
+    private func updateDwell(tab: String?) {
+        guard phase == .lifted, let tab, tab != owner?.state.selectedTab else { dwell = nil; return }
+        if let dwell, dwell.tab == tab, hypot(pointer.x - dwell.point.x, pointer.y - dwell.point.y) < 4 { return }
+        dwell = Dwell(tab: tab, point: pointer, frozenStart: frozenMs)
+        ensureClock()
+    }
+    private func dwellElapsed(_ dwell: Dwell) -> CGFloat {
+        if let frozenMs { return max(0, frozenMs - (dwell.frozenStart ?? 0)) }
+        return CGFloat((ProcessInfo.processInfo.systemUptime - dwell.started) * 1000)
+    }
+    private func focusSpringTab(_ tab: String) {
+        guard let owner else { return }
+        sent.append(["method": "tab.focus", "params": ["tab_id": tab]])
+        let commands = HerdrCommands(socketPath: socket)
+        tabFocusQueue.async { commands.tabFocus(tabId: tab) }
+        springSelection = true
+        owner.selectTab(tab)
+        springSelection = false
+    }
+    private func evaluateDwell() {
+        guard phase == .lifted, let dwell, dwellElapsed(dwell) >= ShellMotion.springLoadMs else { return }
+        self.dwell = nil; sprung = true
+        setZone(nil)
+        focusSpringTab(dwell.tab)
+    }
     private func key(_ z: Zone) -> String { String(describing: z) }
     private func params(_ z: Zone, dry: Bool) -> [String: Any]? {
         guard let source else { return nil }
         let target: [String: Any], side: PaneDropSide
         switch z {
         case .paneEdge(let p, let s): target = ["type": "pane", "pane_id": p]; side = s
-        case .tabEdge(let s): target = ["type": "tab", "tab_id": originTab ?? ""]; side = s
+        case .tabEdge(let s): target = ["type": "tab", "tab_id": owner?.state.selectedTab ?? ""]; side = s
         case .intoTab(let t): target = ["type": "tab", "tab_id": t]; side = .right
         default: return nil
         }
@@ -240,6 +276,7 @@ final class PaneDrag: NSObject {
         if phase == .pressed { let p = source; finish(); if let p { owner.focusPane(p) }; return }
         guard phase == .lifted, let z = zone, let source else { cancel(); return }
         motions.removeAll { $0.pane == source && $0.kind == "fade" }
+        dwell = nil
         lastZone = z; phase = .dropping
         holdsLayout = true; frozenEpoch = owner.state.selectedTab.map { owner.model.snapshotEpoch(for: $0) } ?? 0
         dropSize = owner.host.bounds.size
@@ -328,6 +365,11 @@ final class PaneDrag: NSObject {
     }
     /// The chip springs back to the source cap. Also ends a drop the server refused, which moved nothing.
     private func animateCancel() {
+        dwell = nil
+        if sprung, let originTab {
+            sprung = false
+            focusSpringTab(originTab)
+        }
         lastZone = zone; zone = nil; phase = .cancelling; generation += 1; inFlight = nil
         motions.removeAll { $0.kind == "zone" || $0.kind == "fade" }
         ghost = nil; ghostTarget = nil
@@ -338,7 +380,8 @@ final class PaneDrag: NSObject {
     }
     func selectionChanging(to tab: String?) {
         // A drop still waiting on its reply ends quietly too: its chip and ghost belong to the tab being left.
-        if phase == .pressed || phase == .lifted || phase == .dropping, tab != originTab { cancel() }
+        if !springSelection, phase == .pressed || phase == .lifted || phase == .dropping,
+           tab != owner?.state.selectedTab { cancel() }
         if phase == .idle { source = nil }
         DispatchQueue.main.async { [weak self] in self?.probe() }
     }
@@ -429,11 +472,20 @@ final class PaneDrag: NSObject {
         }
     }
     func freeze(ms: CGFloat) { frozenMs = ms; link?.isPaused = true; tick() }
-    func run() { frozenMs = nil; link?.isPaused = false; tick() }
+    func run() {
+        if var dwell = dwell, frozenMs != nil {
+            dwell.started = ProcessInfo.processInfo.systemUptime - Double(dwellElapsed(dwell)) / 1000
+            dwell.frozenStart = nil; self.dwell = dwell
+        }
+        frozenMs = nil; link?.isPaused = false; tick()
+    }
     private func elapsed(_ m: Motion) -> CGFloat { frozenMs ?? CGFloat((ProcessInfo.processInfo.systemUptime - m.started) * 1000) }
     private func addMotion(pane: String?, kind: String, from: CGRect, to: CGRect, duration: CGFloat) {
         motions.removeAll { $0.pane == pane && $0.kind == kind }
         motions.append(Motion(pane: pane, kind: kind, from: from, to: to, duration: duration))
+        ensureClock()
+    }
+    private func ensureClock() {
         if link == nil, let host = owner?.host {
             link = host.displayLink(target: self, selector: #selector(tick))
             link?.add(to: .main, forMode: .common)
@@ -456,9 +508,10 @@ final class PaneDrag: NSObject {
                width: a.width + (b.width - a.width) * t, height: a.height + (b.height - a.height) * t)
     }
     @objc private func tick() {
+        evaluateDwell()
         draw()
         if frozenMs == nil { motions.removeAll { elapsed($0) >= $0.duration } }
-        if motions.isEmpty {
+        if motions.isEmpty && dwell == nil {
             link?.invalidate(); link = nil
             if phase == .cancelling || phase == .settling { finish() }
             else { draw() }
@@ -520,7 +573,7 @@ final class PaneDrag: NSObject {
         }
         return 1
     }
-    private func resetVisuals() { motions = []; link?.invalidate(); link = nil; ghost = nil; ghostTarget = nil }
+    private func resetVisuals() { dwell = nil; sprung = false; motions = []; link?.invalidate(); link = nil; ghost = nil; ghostTarget = nil }
     private func finish() {
         phase = .idle; zone = nil; heldDrop = nil; resetVisuals()
         if let monitor { NSEvent.removeMonitor(monitor) }; monitor = nil
