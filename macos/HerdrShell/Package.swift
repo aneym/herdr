@@ -32,7 +32,6 @@ let package = Package(
                 .linkedFramework("Metal"),
                 .linkedFramework("QuartzCore"),
                 .linkedFramework("UniformTypeIdentifiers"),
-                .linkedFramework("UserNotifications"),
                 .linkedFramework("WebKit"),
             ]
         ),

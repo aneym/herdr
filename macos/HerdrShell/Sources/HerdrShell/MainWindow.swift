@@ -227,8 +227,6 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     private var didRestoreTabFocus = false
     private var didRestorePaneFocus = false
     private(set) var quickSwitch: QuickSwitchController!
-    /// Last snapshot the notifier has applied. The next one is compared against it.
-    private var attentionOld = Notifier.Facts.empty
     /// `--agent-run` never activates, so the window stays non-key. A click through the
     /// test hook still means Alex is looking at the selected tab.
     var inProcessKey = false
@@ -303,7 +301,6 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         model.catalog.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in
             DispatchQueue.main.async {
                 self?.refreshDocs()
-                self?.noteAttention()
             }
         }.store(in: &bag)
 
@@ -452,7 +449,6 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     func snapshotChanged() {
         reportRestoreErrors()
         quickSwitch.reload()
-        noteAttention()
         if reconcileClose() { return }
         // A panel for a row that no longer exists (or is now a workflow) has nothing to show.
         if let id = detailPanel.model.rowId, detailContent == nil, model.snapshot != nil,
@@ -501,14 +497,6 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         let remote = [state.selectedTab, pendingSelectTab].contains { $0.map(Machines.isRemote) == true }
         guard remote else { refreshDocs(); return }
         snapshotChanged()
-    }
-
-    /// Blocked, or done after working, on a tab Alex is not looking at.
-    private func noteAttention() {
-        let new = Notifier.capture(snapshot: model.snapshot, parked: Set(model.catalog.snapshot.parked.keys))
-        Notifier.shared.observe(old: attentionOld, new: new, selected: state.selectedTab,
-                                windowKey: window.isKeyWindow || inProcessKey)
-        attentionOld = new
     }
 
     var forcedEmptyDocs = false
@@ -562,7 +550,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                 case .unsupported: self.docPanel.addTransient(url, tabId: tabId)
                 case .failed:
                     // A refused open (say a file the pane's server cannot see) still opens, in the browser.
-                    Notifier.shared.recordOpened(url.absoluteString)
+                    OpenedLinks.shared.record(url.absoluteString)
                     shellOpen(url)
                     return
                 case .result: break
@@ -1159,7 +1147,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
 
     @objc func copy(_ sender: Any?) {
         guard let s = focusedSurface else { return forwardEdit(#selector(NSText.copy(_:)), sender) }
-        if !s.copySelection() { NSSound.beep() }
+        _ = s.copySelection()
     }
     @objc func paste(_ sender: Any?) {
         // With the switcher up, a paste is a query, never terminal input.

@@ -118,17 +118,7 @@ final class GhosttyRuntime {
             return true
         }
         if action.tag == GHOSTTY_ACTION_DESKTOP_NOTIFICATION {
-            let n = action.action.desktop_notification
-            let title = n.title.map { String(cString: $0) } ?? ""
-            let body = n.body.map { String(cString: $0) } ?? ""
-            var pane = ""
-            if target.tag == GHOSTTY_TARGET_SURFACE, let ud = ghostty_surface_userdata(target.target.surface) {
-                pane = Unmanaged<SurfaceView>.fromOpaque(ud).takeUnretainedValue().paneId
-            }
-            DispatchQueue.main.async {
-                let tab = Notifier.shared.tabId(forPane: pane, in: Notifier.shared.latest) ?? ""
-                Notifier.shared.desktop(title: title, body: body, tab: tab)
-            }
+            // Swallow OSC 9/777 quietly: the shell never forwards OS notifications.
             return true
         }
         return false
@@ -156,7 +146,7 @@ final class GhosttyRuntime {
         if route == .desk, controller == nil { route = .external }
         let s = url.absoluteString
         if agentRun { log("open_url \(s)") }
-        Notifier.shared.recordOpened(route == .desk ? "desk \(s)" : s)
+        OpenedLinks.shared.record(route == .desk ? "desk \(s)" : s)
         switch route {
         case .desk: controller?.openOnDesk(url, paneId: paneId)
         case .external: if !agentRun { shellOpen(url) }
@@ -191,7 +181,6 @@ final class GhosttyRuntime {
                     } else {
                         // Never paste a client-local path: it does not exist on the agent's host.
                         ghostty_surface_deny_clipboard_request(surface, state)
-                        NSSound.beep()
                         log("clipboard image upload failed socket=\(path)")
                     }
                 }
