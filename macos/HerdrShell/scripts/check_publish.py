@@ -86,6 +86,39 @@ with tempfile.TemporaryDirectory(prefix="publish-check-", dir=os.environ.get("TM
                 with plist.open("rb") as f:
                     assert plistlib.load(f)["HerdrShellCommit"] == installed
                 print(f"PASS {' '.join(command)}: {reason}; installed/staged unchanged")
+        status = subprocess.run([sys.executable, str(publisher), "status"], env=env,
+                                capture_output=True, text=True, timeout=30)
+        assert '"STALLED"' in status.stdout, status.stdout
+        print("PASS status: a refused target is reported as STALLED")
+    if case in ("all", "rewritten"):
+        # Studio stalled 2026-10-07 to 10-08: its installed commit was amended onto main under
+        # a new sha, so no later release descended from it. The same tree on main counts.
+        (repo / "shell.txt").write_text("landed\n")
+        git("add", "shell.txt")
+        git("commit", "-qm", "landed")
+        landed = git("rev-parse", "HEAD")
+        installed = git("commit-tree", landed + "^{tree}", "-p", old, "-m", "landed before amend")
+        (repo / "shell.txt").write_text("after\n")
+        git("commit", "-qam", "after")
+        after = git("rev-parse", "HEAD")
+        (store / "release.json").write_text(json.dumps({"commit": after}))
+        bundle_commit(after)
+        with plist.open("wb") as f:
+            plistlib.dump({"HerdrShellCommit": installed}, f)
+        result = subprocess.run([sys.executable, str(publisher), "fanout"], env=env,
+                                capture_output=True, text=True, timeout=60)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert f"was rewritten as {landed[:12]}" in result.stdout, result.stdout
+        assert json.loads(sentinel.read_text())["commit"] == after, result.stdout
+        status = subprocess.run([sys.executable, str(publisher), "status"], env=env,
+                                capture_output=True, text=True, timeout=30)
+        assert '"STALLED"' not in status.stdout, status.stdout
+        print("PASS fanout: an install rewritten onto main takes the next release")
+        sentinel.unlink()
+        (stage / "staged").unlink()
+        sentinel.write_text(json.dumps({"commit": new}))
+        (store / "release.json").write_text(json.dumps({"commit": old}))
+        bundle_commit(old)
     (store / "release.json").write_text(json.dumps({"commit": new}))
     with plist.open("wb") as f:
         plistlib.dump({"HerdrShellCommit": old}, f)

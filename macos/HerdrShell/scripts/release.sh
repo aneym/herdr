@@ -87,7 +87,22 @@ if [[ -d "$HOME/Applications/Herdr Shell.app" ]]; then
     echo "release.sh: already installed $COMMIT"
     exit 0
   fi
+  TWIN=""
   if ! git -C "$MAIN" merge-base --is-ancestor "$OLD" "$COMMIT"; then
+    # An install whose commit was rebased or amended onto REF counts as the commit with its tree;
+    # commits OLD already contains never match, so an older REF stays refused.
+    TREE=$(git -C "$MAIN" rev-parse "$OLD^{tree}")
+    SINCE=$(( $(git -C "$MAIN" log -1 --format=%ct "$OLD") - 86400 ))
+    TWIN=$(git -C "$MAIN" log --since="$SINCE" --format='%H %T' "$COMMIT" "^$OLD" | awk -v t="$TREE" '$2 == t && !f { print $1; f = 1 }')
+    if [[ -n "$TWIN" ]]; then
+      echo "release.sh: installed $INSTALLED was rewritten as $TWIN (same tree)"
+    fi
+  fi
+  if [[ "$TWIN" == "$COMMIT" ]]; then
+    echo "release.sh: already installed $COMMIT"
+    exit 0
+  fi
+  if ! git -C "$MAIN" merge-base --is-ancestor "${TWIN:-$OLD}" "$COMMIT"; then
     echo "release.sh: skip $COMMIT: not a strict descendant of installed $INSTALLED"
     exit 1
   fi

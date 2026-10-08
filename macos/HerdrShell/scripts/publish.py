@@ -226,12 +226,59 @@ def can_deliver(installed, commit, name):
             else:
                 log(f"{name}: skip {commit}: unknown installed/release commit {installed}")
                 return False
-    r = subprocess.run(["git", "-C", REPO, "merge-base", "--is-ancestor", old, new],
-                       capture_output=True)
-    if old != new and r.returncode == 0:
+    if not is_ancestor(old, new):
+        twin = tree_twin(old, new)
+        if twin:
+            log(f"{name}: installed {installed} was rewritten as {twin[:12]} (same tree)")
+            old = twin
+    if old != new and is_ancestor(old, new):
+        stalled(name, None)
         return True
-    log(f"{name}: skip {commit}: not a strict descendant of installed {installed}")
+    if old != new:
+        log(f"{name}: skip {commit}: not a strict descendant of installed {installed}")
+        stalled(name, f"installed {installed} is not an ancestor of the release")
     return False
+
+
+def is_ancestor(old, new):
+    return subprocess.run(["git", "-C", REPO, "merge-base", "--is-ancestor", old, new],
+                          capture_output=True).returncode == 0
+
+
+def tree_twin(old, new):
+    """The commit in new's history, outside old's, with old's exact tree, so an install whose
+    commit was later rebased or amended onto the branch counts as that branch commit; None if
+    there is none. Commits old already contains never match, so an older release stays refused."""
+    tree = git("rev-parse", old + "^{tree}")
+    since = int(git("log", "-1", "--format=%ct", old)) - 86400
+    for line in git("log", f"--since={since}", "--format=%H %T", new, "^" + old).splitlines():
+        sha, t = line.split()
+        if t == tree:
+            return sha
+    return None
+
+
+def stalled(name, reason):
+    """Record why a target is stuck behind the release in stalled.json, which `status` prints,
+    so a skip that repeats every watch run is visible outside the log."""
+    path = f"{LOGDIR}/stalled.json"
+    try:
+        with open(path) as f:
+            state = json.load(f)
+    except (OSError, ValueError):
+        state = {}
+    if reason is None and name not in state:
+        return
+    if reason is None:
+        state.pop(name)
+    elif state.get(name, {}).get("reason") == reason:
+        return
+    else:
+        state[name] = {"reason": reason, "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    os.makedirs(LOGDIR, exist_ok=True)
+    with open(path + ".tmp", "w") as f:
+        json.dump(state, f)
+    os.replace(path + ".tmp", path)
 
 
 def shell_changed(old, new):
@@ -646,6 +693,12 @@ def auto(refetch=False):
 def status():
     rel = release()
     print(json.dumps({"branch": branch(), "release": rel and rel.get("commit")}))
+    try:
+        with open(f"{LOGDIR}/stalled.json") as f:
+            for name, why in json.load(f).items():
+                print(json.dumps({"target": name, "STALLED": why}))
+    except (OSError, ValueError):
+        pass
     for t in targets():
         print(json.dumps({"target": t.get("name"), **(probe(t) or {"unreachable": True})}))
 
