@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment happy-dom
+import { describe, expect, it, vi } from "vitest";
 import type { Snapshot } from "./model";
 import { attentionTransition, observeActiveAttention, observeAttention } from "./notify";
 
@@ -73,4 +74,50 @@ describe("app-wide taskbar attention transitions", () => {
     expect(result.attention).toBe(false);
     expect(observeActiveAttention(snapshot("working"), snapshots, "pc", null, true, new Set(), {}, 100_000).notifications).toHaveLength(1);
   });
+});
+
+// Integration wiring: real App, observer, selection restoration and control dispatch;
+// only native Tauri IPC/window/notification APIs are replaced at the host boundary.
+const native = vi.hoisted(() => ({
+  attention: vi.fn(async () => {}), invoke: vi.fn(),
+  events: new Map<string, (event: { payload: unknown }) => void>(),
+}));
+vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => true, invoke: native.invoke, Channel: class {} }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: async (name: string, callback: (event: { payload: unknown }) => void) => { native.events.set(name, callback); return () => { native.events.delete(name); }; } }));
+vi.mock("@tauri-apps/api/window", () => ({ UserAttentionType: { Informational: 2 }, getCurrentWindow: () => ({ requestUserAttention: native.attention, onFocusChanged: async () => () => {}, isFocused: () => new Promise<boolean>(() => {}) }) }));
+vi.mock("@tauri-apps/plugin-notification", () => ({ isPermissionGranted: async () => true, requestPermission: async () => "granted", sendNotification: vi.fn() }));
+
+it("never flashes when a focused machine switch restores its selected blocked tab", async () => {
+  const { act, createElement } = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const { default: App } = await import("./App");
+  const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  const stored = new Map<string, string>();
+  vi.stubGlobal("localStorage", { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value), clear: () => stored.clear() });
+  localStorage.setItem("herdr-shell.machine", "pc");
+  let pcStatus = "working";
+  const machineSnapshot = (name: string): Snapshot => ({ tabs: [{ tab_id: "t", workspace_id: "w", number: 1, focused: true }], panes: [{ pane_id: "p", terminal_id: "term", tab_id: "t", workspace_id: "w", agent_status: name === "pc" ? pcStatus : "working" }], workspaces: [{ workspace_id: "w", number: 1 }] });
+  native.invoke.mockImplementation(async (cmd: string, args?: { machine?: string }) => {
+    if (cmd === "machines_list") return [{ name: "pc", state: "up" }, { name: "studio", state: "up" }];
+    if (cmd === "snapshot") return machineSnapshot(args!.machine!);
+    if (cmd === "file_stat") return { exists: false };
+    if (cmd === "file_read") throw new Error("missing catalog");
+    if (cmd === "api_request") return [];
+    return undefined;
+  });
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(createElement(App)));
+    await act(async () => { native.events.get("ctl-machine")?.({ payload: { name: "studio" } }); });
+    pcStatus = "blocked";
+    await act(async () => native.events.get("herdr://snapshot")!({ payload: { machine: "pc", snapshot: machineSnapshot("pc") } }));
+    native.attention.mockClear();
+    await act(async () => { native.events.get("ctl-machine")?.({ payload: { name: "pc" } }); });
+    expect(native.events.has("ctl-machine")).toBe(true);
+    expect(native.attention).not.toHaveBeenCalled();
+  } finally {
+    await act(async () => root.unmount()); host.remove(); focus.mockRestore(); vi.unstubAllGlobals();
+  }
 });

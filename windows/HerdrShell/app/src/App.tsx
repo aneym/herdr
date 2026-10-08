@@ -31,6 +31,12 @@ import "./tokens.css";
 import "./styles.css";
 import type { PaneDrag, PaneDragState } from "./paneDrag";
 interface ViewSelection { selected: string | null; focused: string | null }
+// Resolve restoration before the observer runs, using the same row policy as MachineView.
+function restoredSelection(snapshot: Snapshot, selected: string | null): string | null {
+  const rows = buildSidebar(snapshot);
+  if (selected && tabOrder(rows).includes(selected)) return selected;
+  return selectionAfterClose([], rows, selected, snapshot.tabs?.find(tab => tab.focused)?.tab_id);
+}
 export default function App() {
   const [machines, setMachines] = useState<MachineStatus[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -39,9 +45,14 @@ export default function App() {
   const recordAttention = useCallback((machine: string, tab: string) => { latestAttention.current[machine] = tab; }, []);
   const [snapshots, setSnapshots] = useState<Record<string, Snapshot>>({});
   const selections = useRef(new Map<string, ViewSelection>());
-  const [notificationSelection, setNotificationSelection] = useState<{ machine: string; tab: string | null } | null>(null);
-  const onSelection = useCallback((machine: string, tab: string | null) => setNotificationSelection(value => value?.machine === machine && value.tab === tab ? value : { machine, tab }), []);
-  const [windowFocused, setWindowFocused] = useState(false);
+  const [, selectionChanged] = useState(0);
+  const onSelection = useCallback((machine: string, tab: string | null) => {
+    const previous = selections.current.get(machine);
+    if (previous?.selected === tab) return;
+    selections.current.set(machine, { selected: tab, focused: previous?.focused ?? null });
+    selectionChanged(value => value + 1);
+  }, []);
+  const [windowFocused, setWindowFocused] = useState(() => document.hasFocus());
   const attention = useRef(false);
   const updateAttention = useCallback((needsAttention: boolean) => {
     const action = attentionTransition(attention.current, needsAttention);
@@ -123,11 +134,10 @@ export default function App() {
     }
   }, [machines, active, loaded]);
   const machine: MachineStatus = machines.find(m => m.name === active) ?? { name: active, state: loaded ? "down" : "connecting", error: loaded ? "Machine unavailable" : undefined };
-  return <><AttentionObserver recordAttention={recordAttention} machine={machine} snapshots={snapshots} selected={notificationSelection?.machine === active ? notificationSelection.tab : null} windowFocused={windowFocused} updateAttention={updateAttention} /><MachineView latestAttention={latestAttention} key={active} machine={machine} machines={machines} snapshot={snapshots[active] ?? {}} chooseMachine={chooseMachine} selections={selections.current} control={control} onSelection={onSelection} /></>;
+  return <><AttentionObserver recordAttention={recordAttention} machine={machine} snapshots={snapshots} selected={restoredSelection(snapshots[active] ?? {}, selections.current.get(active)?.selected ?? null)} windowFocused={windowFocused} updateAttention={updateAttention} /><MachineView latestAttention={latestAttention} key={active} machine={machine} machines={machines} snapshot={snapshots[active] ?? {}} chooseMachine={chooseMachine} selections={selections.current} control={control} onSelection={onSelection} /></>;
 }
 function MachineView({ latestAttention, machine, machines, snapshot, chooseMachine, selections, control, onSelection }: { latestAttention: MutableRefObject<Record<string, string>>; machine: MachineStatus; machines: MachineStatus[]; snapshot: Snapshot; chooseMachine: (name: string) => MachineStatus; selections: Map<string, ViewSelection>; control: MutableRefObject<(() => ControlState) | null>; onSelection: (machine: string, tab: string | null) => void }) {
-  const [selected, setSelected] = useState<string | null>(selections.get(machine.name)?.selected ?? null);
-  useEffect(() => onSelection(machine.name, selected), [machine.name, selected, onSelection]);
+  const [selected, setSelected] = useState<string | null>(() => restoredSelection(snapshot, selections.get(machine.name)?.selected ?? null));
   const [focused, setFocused] = useState<string | null>(selections.get(machine.name)?.focused ?? null);
   const savedSelection = useRef({ selected, focused });
   savedSelection.current = { selected, focused };
@@ -202,18 +212,21 @@ function MachineView({ latestAttention, machine, machines, snapshot, chooseMachi
     }
     state.current.selected = id;
     state.current.focused = null;
+    onSelection(state.current.machine.name, id);
     setRenaming(null); setSelected(id); setFocused(null);
-  }, []);
+  }, [onSelection]);
   const previousRows = useRef<SidebarRow[]>([]);
   useEffect(() => {
     const order = tabOrder(rows);
     if (!selected || !order.includes(selected)) {
       const initial = snapshot.tabs?.find(t => t.focused)?.tab_id;
       setRenaming(null);
-      setSelected(selectionAfterClose(previousRows.current, rows, selected, initial));
+      const next = selectionAfterClose(previousRows.current, rows, selected, initial);
+      onSelection(machine.name, next);
+      setSelected(next);
     }
     previousRows.current = rows;
-  }, [rows, selected, snapshot]);
+  }, [rows, selected, snapshot, machine.name, onSelection]);
   useEffect(() => {
     const layout = snapshot.layouts?.find(l => l.tab_id === selected);
     const panes = snapshot.panes?.filter(p => p.tab_id === selected && (!layout?.zoomed || p.pane_id === layout.focused_pane_id)) ?? [];
