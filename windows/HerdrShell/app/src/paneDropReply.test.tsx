@@ -3,10 +3,12 @@
 // While the drop is pending the boxes stay where they were at the release; snapshots are buffered, not drawn.
 // Through the real TabView (window pointer listeners, PaneClip, PaneDrag). Faked: the Tauri bridge (external) and
 // PaneTerm, whose xterm/WebGL terminal cannot run in happy-dom. Each case is a post-merge must-fix from review.
+// S10c: membership and descriptors freeze too; a press, a host resize or a tab switch ends a pending drop quietly
+// first; a settle stays retargetable until its latest retarget has really ended.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import type { Layout, Rect, Snapshot } from "./model";
+import type { Layout, Pane, Rect, Snapshot } from "./model";
 import type { PaneDragState } from "./paneDrag";
 const api = vi.hoisted(() => vi.fn());
 vi.mock("./bridge", () => ({ bridge: { api: (...args: unknown[]) => api(...args) } }));
@@ -26,6 +28,8 @@ let root: Root | undefined;
 let host: HTMLDivElement;
 let drop: { resolve: (value: unknown) => void };
 let dryRun: (params: object) => Promise<unknown>;
+/** The tab host's ResizeObserver: a window resize or a sidebar toggle reaches the tab as a new host size. */
+let resizeHost: (width: number, height: number) => void;
 const animate = vi.fn((_frames: Keyframe[] | PropertyIndexedKeyframes | null, _options?: number | KeyframeAnimationOptions) => ({}) as Animation);
 beforeEach(() => {
   vi.useFakeTimers(); api.mockReset(); animate.mockClear(); states = [];
@@ -41,7 +45,7 @@ beforeEach(() => {
   vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
-  vi.stubGlobal("ResizeObserver", class { constructor(private callback: (entries: { contentRect: { width: number; height: number } }[]) => void) {} observe() { this.callback([{ contentRect: { width: 1000, height: 800 } }]); } disconnect() {} });
+  vi.stubGlobal("ResizeObserver", class { constructor(private callback: (entries: { contentRect: { width: number; height: number } }[]) => void) {} observe() { resizeHost = (width, height) => this.callback([{ contentRect: { width, height } }]); resizeHost(1000, 800); } disconnect() {} });
   if (!document.elementFromPoint) document.elementFromPoint = () => null;
   Element.prototype.animate = animate;
   host = document.createElement("div"); document.body.append(host);
@@ -51,10 +55,11 @@ afterEach(() => { act(() => root?.unmount()); root = undefined; host.remove(); v
 function snapshot(layout: Layout): Snapshot {
   return { layouts: [layout], tabs: [], panes: layout.panes.map(p => ({ pane_id: p.pane_id, terminal_id: "term-" + p.pane_id, tab_id: layout.tab_id, workspace_id: "w" })) } as Snapshot;
 }
+const show = (next: Snapshot) => act(() => root!.render(<TabView snapshot={next} selected="t" machine="studio" focused={null} onFocus={() => {}} shortcut={() => false} register={() => {}} pin={() => {}} onDragChange={state => states.push(state)} />));
 /** Each call is a new snapshot from the server: a new object, as every herdr://snapshot event brings. */
 async function mount() {
   root ??= createRoot(host);
-  const render = (next: Layout) => act(() => root!.render(<TabView snapshot={snapshot(structuredClone(next))} selected="t" machine="studio" focused={null} onFocus={() => {}} shortcut={() => false} register={() => {}} pin={() => {}} onDragChange={state => states.push(state)} />));
+  const render = (next: Layout) => show(snapshot(structuredClone(next)));
   render(three);
   await settleTimers(0); // the pane.place support probe answers
   return render;
@@ -263,4 +268,122 @@ it("ends a pending drop quietly when another tab is selected, so its chip and gh
   expect(api.mock.calls.length).toBe(calls);
   expect(states.length).toBe(emitted);
   expect(last()).toMatchObject({ phase: "idle", end: "quiet" });
+});
+
+// Another client closes c, or moves it to tab u: the tab is left a | b.
+const ab: Layout = { tab_id: "t", area: r(0, 0, 100, 40), panes: [{ pane_id: "a", rect: r(0, 0, 50, 40) }, { pane_id: "b", rect: r(50, 0, 50, 40) }] };
+const paneOf = (pane_id: string, tab_id: string): Pane => ({ pane_id, terminal_id: "term-" + pane_id, tab_id, workspace_id: "w" });
+const clips = () => [...host.querySelectorAll<HTMLElement>(".pane-clip")].map(el => el.dataset.pane).sort();
+const SWAPPED = tab(r(50, 0, 50, 20), r(0, 0, 50, 40), r(50, 20, 50, 20));
+// happy-dom's TransitionEvent is a plain Event, so the property name goes on as the browser would set it.
+const transitionEnd = (id: string, propertyName: string) => act(() => { clip(id).dispatchEvent(Object.assign(new Event("transitionend", { bubbles: true }), { propertyName })); });
+
+it.each([
+  ["closed", { layouts: [ab], tabs: [], panes: [paneOf("a", "t"), paneOf("b", "t")] }],
+  ["moved to another tab", { layouts: [ab, { tab_id: "u", area: r(0, 0, 100, 40), panes: [{ pane_id: "c", rect: r(0, 0, 100, 40) }] }], tabs: [], panes: [paneOf("a", "t"), paneOf("b", "t"), paneOf("c", "u")] }],
+])("keeps every release-time box while a drop is pending, even a pane %s by another client", async (_how, foreign) => {
+  await mount();
+  await dropAOn(B_RIGHT_BAND);
+  const release = ["a", "b", "c"].map(drawn);
+  show(foreign as unknown as Snapshot);
+  await settleTimers(40);
+  expect(clips()).toEqual(["a", "b", "c"]);
+  expect(["a", "b", "c"].map(drawn)).toEqual(release);
+  expect(last().phase).toBe("dropped");
+  // The reply ends the freeze. The pane set changed under the drop, so the buffered snapshot applies without motion.
+  await act(async () => { drop.resolve({ place: { changed: true, dry_run: false, pane_id: "a", focused_pane_id: "a", target_layout: ab } }); });
+  await settleTimers(40);
+  expect(clips()).toEqual(["a", "b"]);
+  expect(settles()).toEqual([]);
+  expect(drawn("b")).toEqual(["translate(500px, 0px)", "500px", "800px"]);
+});
+
+it("ends a pending drop quietly when another pane is pressed, and the new drag holds the flushed boxes, never the old release", async () => {
+  const render = await mount();
+  await dropAOn(B_CENTRE);
+  const first = drop;
+  render(sourceResized);
+  await settleTimers(40);
+  expect(drawn("a")).toEqual(FROZEN_A);
+  // A press on c's cap ends the pending swap quietly first: the buffered snapshot shows, with no cancel.
+  fire(host.querySelector('[data-cap="c"]')!, "pointerdown", { button: 0, buttons: 1, clientX: 700, clientY: 410 });
+  expect(states.some(s => s.phase === "idle" && s.end === "quiet")).toBe(true);
+  expect(drawn("a")).toEqual(["translate(0px, 0px)", "399px", "800px"]);
+  fire(window, "pointermove", { button: -1, buttons: 1, clientX: 600, clientY: 500 });
+  fire(window, "pointermove", { button: -1, buttons: 1, clientX: 200, clientY: 400 });
+  await settleTimers(0);
+  expect(last().sourceRect).toEqual({ x: 400, y: 400, width: 600, height: 400 }); // c in the buffered snapshot
+  fire(window, "pointerup", { button: 0, buttons: 0, clientX: 200, clientY: 400 });
+  expect(api).toHaveBeenLastCalledWith("studio", "pane.swap", { source_pane_id: "c", target_pane_id: "a" });
+  expect(last().phase).toBe("dropped");
+  await settleTimers(40);
+  // The second drop freezes the boxes it was released over, not the first drop's.
+  expect(drawn("a")).toEqual(["translate(0px, 0px)", "399px", "800px"]);
+  // The first drop's late reply changes nothing.
+  const emitted = states.length;
+  await act(async () => { first.resolve({ swap: { changed: true, source_pane_id: "a", focused_pane_id: "a", layout: SWAPPED } }); });
+  await settleTimers(40);
+  expect(states.length).toBe(emitted);
+  expect(drawn("a")).toEqual(["translate(0px, 0px)", "399px", "800px"]);
+});
+
+it("ends a pending drop quietly when the host resizes, before any box rescales, and ignores the late reply", async () => {
+  const render = await mount();
+  await dropAOn(B_CENTRE);
+  render(sourceResized);
+  await settleTimers(40);
+  expect(drawn("a")).toEqual(FROZEN_A);
+  act(() => resizeHost(1200, 800));
+  expect(last()).toMatchObject({ phase: "idle", end: "quiet" });
+  // The buffered snapshot at the new size: a is 40 of 100 cells of 1200 px.
+  expect(drawn("a")).toEqual(["translate(0px, 0px)", "479px", "800px"]);
+  await settleTimers(40);
+  expect(settles()).toEqual([]);
+  const emitted = states.length;
+  await act(async () => { drop.resolve({ swap: { changed: true, source_pane_id: "a", focused_pane_id: "a", layout: SWAPPED } }); });
+  await settleTimers(400);
+  expect(states.length).toBe(emitted);
+  expect(drawn("a")).toEqual(["translate(0px, 0px)", "479px", "800px"]);
+  expect(chipSprangBack()).toBe(false);
+});
+
+it("keeps a settle retargetable for as long as a retarget extends it", async () => {
+  const render = await mount();
+  await dropAOn(B_CENTRE);
+  await act(async () => { drop.resolve({ swap: { changed: true, source_pane_id: "a", focused_pane_id: "a", layout: SWAPPED } }); });
+  film = []; shoot();
+  await roll(152);
+  // Another client nudges the divider mid-settle: the settle retargets and now runs until about 400 ms.
+  render(tab(r(60, 0, 40, 20), r(0, 0, 60, 40), r(60, 20, 40, 20))); shoot();
+  await roll(152);
+  // 300 ms in: past the first settle's end but inside the retarget's, so this snapshot retargets too.
+  render(tab(r(70, 0, 30, 20), r(0, 0, 70, 40), r(70, 20, 30, 20))); shoot();
+  await roll(400);
+  expect(film).toEqual([
+    ["translate(0px, 0px)", "499px", "800px", "false"], // the release frame, just accepted
+    ["translate(500px, 0px)", "500px", "399px", "true"], // settling to the reply's layout
+    ["translate(600px, 0px)", "400px", "399px", "true"], // retargeted
+    ["translate(700px, 0px)", "300px", "399px", "true"], // retargeted again, still moving
+    ["translate(700px, 0px)", "300px", "399px", "false"], // at rest
+  ]);
+});
+
+it("ends a settle when every moving property has ended, not when the first one does", async () => {
+  const render = await mount();
+  await dropAOn(B_CENTRE);
+  await act(async () => { drop.resolve({ swap: { changed: true, source_pane_id: "a", focused_pane_id: "a", layout: SWAPPED } }); });
+  await settleTimers(80);
+  expect(settles()).toEqual(["a", "b"]);
+  // a moves, narrows and shortens; its width transition ends first.
+  transitionEnd("a", "width");
+  expect(settles()).toEqual(["a", "b"]);
+  for (const property of ["transform", "height"]) transitionEnd("a", property);
+  expect(settles()).toEqual(["b"]);
+  for (const property of ["transform", "width", "height"]) transitionEnd("b", property);
+  expect(settles()).toEqual([]);
+  // The settle is over before its timer: the next snapshot applies as it is.
+  render(tab(r(60, 0, 40, 20), r(0, 0, 60, 40), r(60, 20, 40, 20)));
+  await settleTimers(40);
+  expect(settles()).toEqual([]);
+  expect(drawn("a")).toEqual(["translate(600px, 0px)", "400px", "399px"]);
 });

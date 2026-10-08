@@ -1,6 +1,6 @@
 import { bridge } from "./bridge";
 import { scaleRect } from "./model";
-import type { Layout, Rect } from "./model";
+import type { Layout, Pane, Rect } from "./model";
 import { dropZoneAt, neighbour, pixelMetrics, zoneEstimateRect } from "./paneDrop";
 import type { DropSide, DropZone, PaneBox } from "./paneDrop";
 import { motion } from "./tokens";
@@ -43,14 +43,17 @@ export class PaneDrag {
   private row: RowTarget | null = null;
   private target: string | null = null;
   private timer?: ReturnType<typeof setTimeout>;
-  // The newest snapshot layout. While a sent drop waits for its reply, snapshots only land here (the newest wins) and the
-  // tab keeps showing `frozen`, its layout at the release: no box moves and no terminal resizes until the drop ends.
+  // The newest snapshot layout and the tab's pane descriptors. While a sent drop waits for its reply, snapshots only
+  // land here (the newest wins) and the tab keeps showing `frozen`, its layout at the release, with the panes it had
+  // then (`frozenPanes`): no box moves, appears or leaves and no terminal resizes until the drop ends.
   private latest?: Layout;
+  private livePanes: Pane[] = [];
   private frozen?: Layout;
+  private frozenPanes: Pane[] = [];
   private latestAtRelease?: Layout;
   // An accepted drop: the layout its panes settle to, shown until the next snapshot replaces `base`, and what the
-  // settle may animate across (the pane set and host size at the release). `settling` stays on for one settle, so a
-  // snapshot landing mid-settle retargets it; after that, snapshots apply as they are.
+  // settle may animate across (the pane set and host size at the release). `settling` lasts until the latest
+  // retarget's transition has ended (`settleEnded`) or its timer fires, so any snapshot before then retargets it.
   private settled?: { base: Layout | undefined; layout: Layout; panes: string; size: { width: number; height: number } };
   private settling = false;
   private settleTimer?: ReturnType<typeof setTimeout>;
@@ -64,6 +67,11 @@ export class PaneDrag {
   private area(): Rect { return { x: 0, y: 0, ...this.input!.size }; }
   private rebuild() { const i = this.input!; this.boxes = i.layout.panes.map(p => ({ id: p.pane_id, rect: scaleRect(p.rect, i.layout.area, i.size.width, i.size.height) })); }
   press(input: PaneDragPress): boolean {
+    // A press ends a drop still waiting on its reply, quietly, and the new drag starts from the layout that shows
+    // after that (the buffered snapshot, or a settle's target), never the release-time one the press was aimed at.
+    if (this.value.phase === "dropped") this.finish("quiet");
+    const shown = this.shownLayout(this.latest);
+    if (shown?.tab_id === input.layout.tab_id) input = { ...input, layout: shown };
     if (!canDragPane(input.layout, input.supported) || !input.layout.panes.some(p => p.pane_id === input.pane)) return false;
     this.cancel(); this.input = input; this.rebuild(); this.target = input.pane;
     this.emit({ phase: "pressed", source: input.pane, label: input.label, pointer: input.point, sourceRect: this.boxes.find(p => p.id === input.pane)!.rect }); return true;
@@ -139,6 +147,7 @@ export class PaneDrag {
     else { method = "pane.place"; params = { ...(zone.kind === "into_tab" ? { pane_id: source, target: { type: "tab", tab_id: zone.tab_id }, side: "right" } : this.place(zone)), focus: true, dry_run: false }; }
     const generation = ++this.generation;
     this.frozen = this.input!.layout; this.latestAtRelease = this.latest;
+    this.frozenPanes = this.livePanes.filter(p => this.frozen!.panes.some(lp => lp.pane_id === p.pane_id));
     this.settled = undefined; this.settling = false; clearTimeout(this.settleTimer);
     this.emit({ phase: "dropped", pending: false, keyboard: false });
     // No reply in time: the server may still have applied the drop, so end without a rollback.
@@ -157,8 +166,7 @@ export class PaneDrag {
       const target = buffered || !replied ? latest : replied;
       if (target) {
         this.settled = { base: latest, layout: target, panes: paneSet(frozen), size: { ...this.input!.size } };
-        this.settling = true;
-        this.settleTimer = setTimeout(() => { this.settling = false; }, motion.settleMs + 50);
+        this.armSettle();
       }
       this.finish("settle");
     }).catch(error => {
@@ -171,8 +179,11 @@ export class PaneDrag {
   }
   /** Esc, a right click, a release on no zone or the view going away. A drop already sent ends quietly. */
   cancel(): void { this.finish(this.value.phase === "dragging" ? "cancel" : this.value.phase === "dropped" ? "quiet" : null); }
+  /** The host changed size (a window resize, a sidebar toggle or resize). A pending drop holds its release-time boxes,
+   * so it ends quietly first: the buffered snapshot is then drawn and its terminals fitted at the new size. */
+  hostResized(): void { if (this.value.phase === "dropped") this.finish("quiet"); }
   /** Every end unfreezes the tab: a refusal, the timeout or a quiet end shows the buffered snapshot as it is. */
-  private finish(end: PaneDragState["end"]) { ++this.generation; clearTimeout(this.timer); this.frozen = undefined; this.cache.clear(); this.flight = false; this.raw = null; this.row = null; this.target = null; this.emit({ ...idle(), end }); }
+  private finish(end: PaneDragState["end"]) { ++this.generation; clearTimeout(this.timer); this.frozen = undefined; this.frozenPanes = []; this.cache.clear(); this.flight = false; this.raw = null; this.row = null; this.target = null; this.emit({ ...idle(), end }); }
   /** What the tab shows: the release-time layout while a drop is pending, then an accepted drop's settle target until
    * the next snapshot replaces `layout`. */
   shownLayout(layout: Layout | undefined): Layout | undefined {
@@ -180,6 +191,22 @@ export class PaneDrag {
     if (this.frozen?.tab_id === layout.tab_id) return this.frozen;
     return this.settled?.base === layout ? this.settled.layout : layout;
   }
+  /** The tab's pane descriptors from the newest snapshot. */
+  panesChanged(panes: Pane[]): void { this.livePanes = panes; }
+  /** The panes the tab draws: while a drop is pending, the ones it had at the release, even one another client closed
+   * or moved away meanwhile; a snapshot updates only their titles, status and terminals. */
+  shownPanes(panes: Pane[]): Pane[] {
+    if (!this.frozen) return panes;
+    const live = new Map(panes.map(p => [p.pane_id, p]));
+    return this.frozenPanes.map(p => { const now = live.get(p.pane_id); return now ? { ...now, tab_id: p.tab_id } : p; });
+  }
+  /** A settle (re)started: snapshots retarget it until its transition ends, or at the latest its full duration on. */
+  private armSettle() {
+    this.settling = true; clearTimeout(this.settleTimer);
+    this.settleTimer = setTimeout(() => { this.settling = false; }, motion.settleMs + 50);
+  }
+  /** Every pane box that moved in the settle has finished moving: the settle is over. */
+  settleEnded(): void { this.settling = false; clearTimeout(this.settleTimer); }
   /** Only an accepted drop settles, once, and a snapshot during that settle retargets it. As on the Mac, nothing
    * animates across a different pane set, a host size change (a live window resize) or a divider drag. */
   shouldAnimateLayout(layout: Layout | undefined, size?: { width: number; height: number }, busy = false): boolean {
@@ -188,7 +215,11 @@ export class PaneDrag {
       && paneSet(layout) === s.panes && (!size || (size.width === s.size.width && size.height === s.size.height));
   }
   layoutChanged(layout: Layout | undefined): void {
+    const before = this.settling ? this.shownLayout(this.latest) : undefined;
     this.latest = layout;
+    // A snapshot that moves panes mid-settle retargets it, so the settle runs on from now.
+    const after = before && this.shownLayout(layout);
+    if (before && after && geometry(before) !== geometry(after)) this.armSettle();
     // A pending drop ends only with its reply or the timeout; snapshots meanwhile are buffered in `latest`. Leaving its
     // tab ends it quietly: the chip and ghost belong to that tab, and the server may still apply the drop.
     if (this.value.phase === "dropped" && layout?.tab_id !== this.input!.layout.tab_id) { this.finish("quiet"); return; }

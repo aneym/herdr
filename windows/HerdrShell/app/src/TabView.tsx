@@ -1,4 +1,4 @@
-import { useLayoutEffect, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { Layout, Snapshot, Rect } from "./model";
 import { scaleRect } from "./model";
@@ -16,7 +16,7 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
   const [paneState, setPaneState] = useState<PaneDragState | null>(null);
   const callbacks = useRef({ onError, onDragChange }); callbacks.current = { onError, onDragChange };
   const [size, setSize] = useState({ width: 0, height: 0 });
-  useEffect(() => { if (!host.current) return; const observer = new ResizeObserver(([entry]) => setSize({ width: entry.contentRect.width, height: entry.contentRect.height })); observer.observe(host.current); return () => observer.disconnect(); }, []);
+  const sizeNow = useRef(size); sizeNow.current = size;
   // While a divider drag runs, panes follow the layouts pane.resize answers with, not snapshots:
   // a snapshot from before the last resize would snap the divider back.
   const [held, setHeld] = useState<Layout | null>(null);
@@ -28,6 +28,17 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
   const paneDrag = useMemo(() => new PaneDrag(machine, { onChange: state => { setPaneState(state); callbacks.current.onDragChange?.(state); }, onError: error => callbacks.current.onError?.(error) }), [machine]);
   const layout = paneDrag.shownLayout(latestLayout);
   const shown = useRef(layout); shown.current = layout;
+  // A window resize, a sidebar toggle or a sidebar resize all reach the tab as a new host size. A pending drop ends
+  // quietly before the new size renders, so no pane box rescales and no terminal fits while it is frozen.
+  useEffect(() => {
+    if (!host.current) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const next = { width: entry.contentRect.width, height: entry.contentRect.height };
+      if (next.width !== sizeNow.current.width || next.height !== sizeNow.current.height) paneDrag.hostResized();
+      setSize(next);
+    });
+    observer.observe(host.current); return () => observer.disconnect();
+  }, [paneDrag]);
   const release = useRef<ReturnType<typeof setTimeout>>();
   const resizer = useMemo(() => new Resizer(
     async (pane, direction, amount) => ((await bridge.api(machine, "pane.resize", { pane_id: pane, direction, amount })) as { resize?: ResizeAnswer } | null)?.resize ?? null,
@@ -39,12 +50,15 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
   const stop = useRef<(() => void) | null>(null);
   // A drag belongs to one tab on one machine: switching either, or unmounting, drops it.
   useEffect(() => () => { stop.current?.(); resizer.cancel(); clearTimeout(release.current); setHeld(null); setDragging(null); }, [selected, resizer]);
-  // A drop reply's layout can already lack a pane the older snapshot still lists, as when it moved to another tab.
-  const panes = (snapshot.panes ?? []).filter(p => p.tab_id === selected && (!layout?.zoomed || p.pane_id === layout.focused_pane_id)
+  const tabPanes = useMemo(() => (snapshot.panes ?? []).filter(p => p.tab_id === selected), [snapshot.panes, selected]);
+  // A pending drop draws the panes the tab had at the release. A drop reply's layout can already lack a pane the older
+  // snapshot still lists, as when it moved to another tab.
+  const panes = paneDrag.shownPanes(tabPanes).filter(p => (!layout?.zoomed || p.pane_id === layout.focused_pane_id)
     && (layout === latestLayout || !!layout?.panes.some(lp => lp.pane_id === p.pane_id)));
   const lines = layout && !layout.zoomed ? dividers(layout) : [];
   const grab = (event: ReactPointerEvent<HTMLDivElement>, d: Divider) => {
-    if (event.button !== 0 || !layout || resizer.busy || paneState?.phase === "dragging") return;
+    // A press that ended a pending drop hit a divider drawn where it stood at the release; the real one is elsewhere.
+    if (event.button !== 0 || !layout || resizer.busy || paneState?.phase === "dragging" || flushedBy.current === event.nativeEvent) return;
     event.preventDefault();
     const el = event.currentTarget;
     try { el.setPointerCapture(event.pointerId); } catch { /* A synthetic pointer has nothing to capture; window listeners still follow it. */ }
@@ -108,7 +122,18 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
     return () => { alive = false; };
   }, [machine, layout, online]);
   // Before paint, so a drop reply landing next sees the snapshot this render shows.
+  useLayoutEffect(() => { paneDrag.panesChanged(tabPanes); }, [paneDrag, tabPanes]);
   useLayoutEffect(() => { paneDrag.layoutChanged(latestLayout); }, [paneDrag, latestLayout]);
+  // A press anywhere on the panes ends a pending drop quietly before the press is handled: a cap press then starts its
+  // drag from the flushed layout, a terminal press focuses as usual.
+  const flushedBy = useRef<Event | null>(null);
+  const pressFirst = (event: ReactPointerEvent<HTMLElement>) => { if (paneDrag.state.phase === "dropped") { flushedBy.current = event.nativeEvent; paneDrag.cancel(); } };
+  // The settle is over once every pane box that moved has stopped.
+  const moving = useRef(new Set<string>());
+  const onMotion = useCallback((id: string, on: boolean) => {
+    if (on) moving.current.add(id);
+    else if (moving.current.delete(id) && moving.current.size === 0) paneDrag.settleEnded();
+  }, [paneDrag]);
   useEffect(() => { if (!online) paneDrag.cancel(); }, [online, paneDrag]);
   const latest = useRef({ layout, size, focused, supported, panes }); latest.current = { layout, size, focused, supported, panes };
   useEffect(() => {
@@ -157,9 +182,9 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
   const corner = boxes.reduce((best, b, i) => best < 0 || b.y < boxes[best].y - .5 || (Math.abs(b.y - boxes[best].y) <= .5 && b.x + b.width > boxes[best].x + boxes[best].width) ? i : best, -1);
   const tab = snapshot.tabs?.find(t => t.tab_id === selected);
   const animateLayout = paneDrag.shouldAnimateLayout(layout, size, resizer.busy || !!held);
-  return <main ref={host} className={`tab-view ${paneState?.phase === "dragging" ? "pane-dragging" : ""}`}>{panes.map((pane, index) => {
+  return <main ref={host} onPointerDownCapture={pressFirst} className={`tab-view ${paneState?.phase === "dragging" ? "pane-dragging" : ""}`}>{panes.map((pane, index) => {
     const box = boxes[index];
-    return <PaneClip key={`${selected}:${pane.terminal_id}`} id={pane.pane_id} box={clipRect(box, size)} animateLayout={animateLayout} lifted={paneState?.source === pane.pane_id && ["dragging", "dropped"].includes(paneState.phase)}>{settling => <PaneSurface settling={settling} grabbable={canDragPane(layout, supported)} onCapPointerDown={event => capPress(event, pane.pane_id, pane.title ?? pane.agent ?? "shell")} onError={onError} hasAgent={!!pane.agent || !!snapshot.agents?.some(a => a.pane_id === pane.pane_id && a.agent)} pane={pane} machine={machine} focused={focused === pane.pane_id} onFocus={onFocus} shortcut={shortcut} register={register} {...(index === corner && tab ? { pinned: tab.pin_index != null, onPin: () => pin(tab.tab_id, tab.pin_index == null) } : {})} />}</PaneClip>;
+    return <PaneClip key={`${selected}:${pane.terminal_id}`} id={pane.pane_id} box={clipRect(box, size)} animateLayout={animateLayout} onMotion={onMotion} lifted={paneState?.source === pane.pane_id && ["dragging", "dropped"].includes(paneState.phase)}>{settling => <PaneSurface settling={settling} grabbable={canDragPane(layout, supported)} onCapPointerDown={event => capPress(event, pane.pane_id, pane.title ?? pane.agent ?? "shell")} onError={onError} hasAgent={!!pane.agent || !!snapshot.agents?.some(a => a.pane_id === pane.pane_id && a.agent)} pane={pane} machine={machine} focused={focused === pane.pane_id} onFocus={onFocus} shortcut={shortcut} register={register} {...(index === corner && tab ? { pinned: tab.pin_index != null, onPin: () => pin(tab.tab_id, tab.pin_index == null) } : {})} />}</PaneClip>;
   })}{layout && lines.map(d => {
     const r = scaleRect({ x: d.vertical ? d.pos : d.splitRect.x, y: d.vertical ? d.splitRect.y : d.pos, width: d.vertical ? 0 : d.splitRect.width, height: d.vertical ? d.splitRect.height : 0 }, layout.area, size.width, size.height);
     // The 1 px gap between panes sits just before the line; the grab strip centres on it.
@@ -170,38 +195,58 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
 
 // Animate the clip only: terminal content takes its final size without scaling glyphs.
 // A settle starts from the box drawn last. A box change during a running settle retargets it: the CSS transition carries
-// on from the clip's current frame to the new box, never snapping or restarting from the start.
-export function PaneClip({ id, box, lifted, animateLayout, children }: { id: string; box: Rect; lifted: boolean; animateLayout: boolean; children: (settling: boolean) => React.ReactNode }) {
+// on from the clip's current frame to the new box, never snapping or restarting from the start. It ends when every
+// property the latest retarget moved has finished its transition, or a settle's duration after that retarget.
+export function PaneClip({ id, box, lifted, animateLayout, onMotion, children }: { id: string; box: Rect; lifted: boolean; animateLayout: boolean; onMotion?: (id: string, moving: boolean) => void; children: (settling: boolean) => React.ReactNode }) {
   const clip = useRef<HTMLDivElement>(null);
   const previous = useRef(box);
+  // The frame the running transition heads for, and the properties whose transition toward it has not ended.
+  const heading = useRef(box);
+  const running = useRef(new Set<string>());
   const moving = useRef(false);
   const frames = useRef<number[]>([]);
   const timer = useRef<ReturnType<typeof setTimeout>>();
+  const motionChanged = useRef(onMotion); motionChanged.current = onMotion;
   const [frame, setFrame] = useState(box);
   const [settling, setSettling] = useState(false);
   const [animate, setAnimate] = useState(false);
   const stop = () => { frames.current.forEach(cancelAnimationFrame); frames.current = []; clearTimeout(timer.current); };
-  const ended = () => { moving.current = false; setSettling(false); setAnimate(false); };
-  useEffect(() => stop, []);
+  const begin = () => { if (!moving.current) { moving.current = true; motionChanged.current?.(id, true); } };
+  const ended = () => {
+    stop(); running.current.clear(); setSettling(false); setAnimate(false);
+    if (moving.current) { moving.current = false; motionChanged.current?.(id, false); }
+  };
+  const headFor = (next: Rect) => {
+    const from = heading.current;
+    if (from.x !== next.x || from.y !== next.y) running.current.add("transform");
+    if (from.width !== next.width) running.current.add("width");
+    if (from.height !== next.height) running.current.add("height");
+    heading.current = next; setAnimate(true); setFrame(next);
+  };
+  useEffect(() => () => { stop(); if (moving.current) motionChanged.current?.(id, false); }, []);
   useLayoutEffect(() => {
     const old = previous.current; previous.current = box;
     if (JSON.stringify(old) === JSON.stringify(box)) return;
-    if (!animateLayout) { stop(); moving.current = false; setFrame(box); setAnimate(false); setSettling(false); return; }
+    if (!animateLayout) { heading.current = box; setFrame(box); ended(); return; }
     if (prefersReducedMotion()) {
       // The reduced settle: the panes take their new frames at once and fade in, once per settle.
       if (!moving.current) clip.current?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: motion.reducedFadeMs });
-      stop(); moving.current = true; setFrame(box); setAnimate(true);
+      stop(); begin(); heading.current = box; setFrame(box); setAnimate(true);
       timer.current = setTimeout(ended, motion.reducedFadeMs);
       return;
     }
     clearTimeout(timer.current);
     if (!moving.current) {
       // Start: hold the drawn frame, then move to the newest target two frames in, once the transition is on.
-      moving.current = true; setFrame(old); setAnimate(false); setSettling(true);
-      frames.current = [requestAnimationFrame(() => { frames.current = [requestAnimationFrame(() => { frames.current = []; setAnimate(true); setFrame(previous.current); })]; })];
-    } else if (frames.current.length === 0) { setAnimate(true); setFrame(box); }
+      begin(); heading.current = old; setFrame(old); setAnimate(false); setSettling(true);
+      frames.current = [requestAnimationFrame(() => { frames.current = [requestAnimationFrame(() => { frames.current = []; headFor(previous.current); })]; })];
+    } else if (frames.current.length === 0) headFor(box);
     // A change before the move began needs nothing: the move reads the newest target when it starts.
     timer.current = setTimeout(ended, motion.settleMs + 50);
   }, [box.x, box.y, box.width, box.height]);
-  return <div ref={clip} data-pane={id} className={`pane-box pane-clip ${lifted ? "lifted" : ""}`} onTransitionEnd={event => { if (event.target === event.currentTarget) ended(); }} style={{ left: 0, top: 0, transform: `translate(${frame.x}px, ${frame.y}px)`, width: frame.width, height: frame.height, transition: animate ? transitionFor("settle") : undefined }}><div style={{ position: "relative", width: box.width, height: box.height }}>{children(settling)}</div></div>;
+  const transitionEnded = (event: React.TransitionEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget || !running.current.delete(event.propertyName)) return;
+    if (running.current.size === 0) ended();
+  };
+  return <div ref={clip} data-pane={id} className={`pane-box pane-clip ${lifted ? "lifted" : ""}`} onTransitionEnd={transitionEnded} style={{ left: 0, top: 0, transform: `translate(${frame.x}px, ${frame.y}px)`, width: frame.width, height: frame.height, transition: animate ? transitionFor("settle") : undefined }}><div style={{ position: "relative", width: box.width, height: box.height }}>{children(settling)}</div></div>;
 }
