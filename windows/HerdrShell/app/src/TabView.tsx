@@ -92,6 +92,8 @@ export default function TabView({ cards = {}, snapshot, selected, machine, focus
     if (!element || !visual || !host.current) return;
     const pointer = visual.pointer ?? visual.ghost;
     if (!pointer) return;
+    // Absolute auto width can shrink to the space left at the pointer before the flip.
+    element.style.width = "max-content";
     const position = paneDragChipPosition(pointer,
       { width: element.offsetWidth, height: element.offsetHeight },
       { width: host.current.clientWidth, height: host.current.clientHeight });
@@ -109,7 +111,7 @@ export default function TabView({ cards = {}, snapshot, selected, machine, focus
       zoneOverlay.current?.animate([{ opacity: 1 }, { opacity: 0 }], { duration: reduced ? motion.reducedFadeMs : duration, easing: ease, fill: "forwards" });
       if (chip.current) {
         const destination = previous.sourceRect;
-        chip.current.animate(cancelled && !reduced && destination && previous.pointer ? [{ opacity: 1, transform: "translate(0, 0)" }, { opacity: 0, transform: `translate(${destination.x - previous.pointer.x}px, ${destination.y - previous.pointer.y}px)` }] : [{ opacity: 1 }, { opacity: 0 }], { duration: reduced ? motion.reducedFadeMs : duration, easing: ease, fill: "forwards" });
+        chip.current.animate(cancelled && !reduced && destination && previous.pointer ? [{ opacity: 1, transform: "translate(0, 0)" }, { opacity: 0, transform: `translate(${destination.x - chip.current.offsetLeft}px, ${destination.y - chip.current.offsetTop}px)` }] : [{ opacity: 1 }, { opacity: 0 }], { duration: reduced ? motion.reducedFadeMs : duration, easing: ease, fill: "forwards" });
       }
       const timer = setTimeout(() => setVisual(null), reduced ? motion.reducedFadeMs : duration);
       return () => clearTimeout(timer);
