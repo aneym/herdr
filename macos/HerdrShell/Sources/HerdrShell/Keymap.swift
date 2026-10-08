@@ -202,6 +202,8 @@ extension MainWindowController {
         case "split_right": splitRight(nil)
         case "split_down": splitDown(nil)
         case "close_pane": if docsOwnClose { closeDocs() } else { closePane() }
+        case "move_pane_mode":
+            if let pane = focusedSurface?.paneId ?? state.focusedPane { paneDrag.beginKeyboard(pane: pane) }
         case "zoom_pane": zoomPane()
         case "next_attention": nextAttention()
         case "attention_jump": attentionJump()

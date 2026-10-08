@@ -35,17 +35,20 @@ struct PaneCapBar: View {
     var onFull: () -> Void
     var onPin: () -> Void = {}
     var onRestart: () -> Void = {}
+    var onGrab: (NSPoint) -> Void = { _ in }
 
     var body: some View {
         let bg = state.focused ? Color(hex: tokens.terminalBg) : tokens.cap
         HStack(spacing: 8) {
-            StateGlyph(state: state.glyph, tokens: tokens)
-            Text(state.name.isEmpty ? "Brief" : state.name)
-                .font(.system(size: 12.5, weight: state.focused ? .medium : .regular))
-                .foregroundStyle(state.focused ? tokens.ink : tokens.mute)
-                .lineLimit(1)
-                .help("\(state.paneId) · \(state.name)")
-            Spacer(minLength: 8)
+            HStack(spacing: 8) {
+                StateGlyph(state: state.glyph, tokens: tokens)
+                Text(state.name.isEmpty ? "Brief" : state.name)
+                    .font(.system(size: 12.5, weight: state.focused ? .medium : .regular))
+                    .foregroundStyle(state.focused ? tokens.ink : tokens.mute)
+                    .lineLimit(1)
+                    .help("\(state.paneId) · \(state.name)")
+                Spacer(minLength: 8)
+            }.overlay { PaneCapGrab(onPress: onGrab) }
             if state.agent {
                 if state.chat {
                     density("Focus", on: state.density != "full", action: onFocus)
@@ -128,4 +131,18 @@ struct PaneCapBar: View {
             .contentShape(Rectangle())
             .onTapGesture(perform: action)
     }
+}
+
+/// Only the title/empty region owns this native handle. SwiftUI controls remain siblings.
+private struct PaneCapGrab: NSViewRepresentable {
+    var onPress: (NSPoint) -> Void
+    func makeNSView(context: Context) -> PaneCapGrabView { PaneCapGrabView() }
+    func updateNSView(_ view: PaneCapGrabView, context: Context) { view.onPress = onPress }
+}
+private final class PaneCapGrabView: NSView {
+    var onPress: (NSPoint) -> Void = { _ in }
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
+    override func mouseDown(with event: NSEvent) { onPress(event.locationInWindow) }
 }

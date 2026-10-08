@@ -563,9 +563,13 @@ final class SurfaceView: NSView {
         return NSPoint(x: p.x, y: bounds.height - p.y)
     }
 
+    private var paneDragBlocksMouse: Bool { (window?.delegate as? MainWindowController)?.paneDrag.suppressMouse == true }
+    private(set) var mouseSent = 0
     private func sendPos(_ event: NSEvent) {
+        guard !paneDragBlocksMouse else { return }
         guard let surface else { return }
         let p = surfacePoint(event)
+        mouseSent += 1
         ghostty_surface_mouse_pos(surface, p.x, p.y, ghosttyMouseMods(event.modifierFlags))
     }
 
@@ -592,12 +596,14 @@ final class SurfaceView: NSView {
     /// the pane) when it has. Shift forces selection, as in Ghostty itself.
     private func sendButton(_ state: ghostty_input_mouse_state_e, _ button: ghostty_input_mouse_button_e,
                             _ event: NSEvent) -> Bool {
-        guard let surface else { return false }
+        guard !paneDragBlocksMouse, let surface else { return false }
         sendPos(event)
+        mouseSent += 1
         return ghostty_surface_mouse_button(surface, state, button, ghosttyMouseMods(event.modifierFlags))
     }
 
     override func mouseDown(with event: NSEvent) {
+        guard !paneDragBlocksMouse else { return }
         // Hand first responder to the surface on every click (agent-zero's
         // terminals never took keys because this only happened once).
         window?.makeFirstResponder(self)
@@ -637,6 +643,7 @@ final class SurfaceView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        guard !paneDragBlocksMouse else { return }
         if let gesture = pendingLinkGesture { gesture.events.append(event); return }
         if linkClickDown { linkClickDown = false; return }
         noteRelease()
@@ -644,55 +651,70 @@ final class SurfaceView: NSView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        guard !paneDragBlocksMouse else { return }
         window?.makeFirstResponder(self)
         // A shadow selection or an unconsumed click takes AppKit's context menu path.
         if appSelection != nil || !sendButton(GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_RIGHT, event) { super.rightMouseDown(with: event) }
     }
 
     override func rightMouseUp(with event: NSEvent) {
+        guard !paneDragBlocksMouse else { return }
         if appSelection != nil || !sendButton(GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_RIGHT, event) { super.rightMouseUp(with: event) }
     }
 
     override func otherMouseDown(with event: NSEvent) {
+        guard !paneDragBlocksMouse else { return }
         guard event.buttonNumber == 2 else { super.otherMouseDown(with: event); return }
         window?.makeFirstResponder(self)
         _ = sendButton(GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_MIDDLE, event)
     }
 
     override func otherMouseUp(with event: NSEvent) {
+        guard !paneDragBlocksMouse else { return }
         guard event.buttonNumber == 2 else { super.otherMouseUp(with: event); return }
         _ = sendButton(GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_MIDDLE, event)
     }
 
     override func mouseMoved(with event: NSEvent) {
+        guard !paneDragBlocksMouse else { return }
         updateLinkHover(at: surfacePoint(event), flags: event.modifierFlags)
         sendPos(event)
     }
     override func mouseDragged(with event: NSEvent) {
+        guard !paneDragBlocksMouse else { return }
         if let gesture = pendingLinkGesture { gesture.events.append(event); return }
         if linkClickDown { return }
         if appDragStart != nil, let c = cell(event) { appDragEnd = c }
         sendPos(event)
     }
-    override func rightMouseDragged(with event: NSEvent) { sendPos(event) }
-    override func otherMouseDragged(with event: NSEvent) { sendPos(event) }
+    override func rightMouseDragged(with event: NSEvent) {
+        guard !paneDragBlocksMouse else { return }
+        sendPos(event)
+    }
+    override func otherMouseDragged(with event: NSEvent) {
+        guard !paneDragBlocksMouse else { return }
+        sendPos(event)
+    }
     override func mouseEntered(with event: NSEvent) {
+        guard !paneDragBlocksMouse else { return }
         updateLinkHover(at: surfacePoint(event), flags: event.modifierFlags)
         sendPos(event)
     }
 
     override func mouseExited(with event: NSEvent) {
+        guard !paneDragBlocksMouse else { return }
         links.clear()
         setHoveredLink("")
         // Leave the position alone while a button is held: a drag selection keeps
         // extending outside the view. Otherwise park it outside so hover state clears.
-        guard let surface, NSEvent.pressedMouseButtons == 0 else { return }
+        guard !paneDragBlocksMouse, let surface, NSEvent.pressedMouseButtons == 0 else { return }
+        mouseSent += 1
         ghostty_surface_mouse_pos(surface, -1, -1, ghosttyMouseMods(event.modifierFlags))
     }
 
     /// Packed like Ghostty's macOS app: bit 0 precise (trackpad), bits 1...3 momentum phase.
     override func scrollWheel(with event: NSEvent) {
-        guard let surface else { return }
+        guard !paneDragBlocksMouse, let surface else { return }
         var x = event.scrollingDeltaX
         var y = event.scrollingDeltaY
         let precise = event.hasPreciseScrollingDeltas
@@ -708,6 +730,7 @@ final class SurfaceView: NSView {
         default: momentum = GHOSTTY_MOUSE_MOMENTUM_NONE
         }
         let mods = (precise ? 1 : 0) | Int32(momentum.rawValue) << 1
+        mouseSent += 1
         ghostty_surface_mouse_scroll(surface, x, y, mods)
     }
 

@@ -18,6 +18,7 @@ final class FactoryHostingView: NSHostingView<FactoryPage> {
 }
 
 final class PaneHostView: NSView {
+    weak var paneDrag: PaneDrag?
     var rects: [(SurfaceView, Snapshot.Rect)] = []
     var area = Snapshot.Rect(x: 0, y: 0, width: 1, height: 1)
     /// Grab strips over the split dividers (P9), rebuilt from herdr's layout on every `show`.
@@ -63,11 +64,8 @@ final class PaneHostView: NSView {
         for (id, v) in capHosts where !live.contains(id) { v.removeFromSuperview(); capHosts[id] = nil }
         for (id, v) in chatViews where !live.contains(id) { v.removeFromSuperview(); chatViews[id] = nil }
         for (s, r) in rects {
-            let gapL: CGFloat = r.x > area.x ? 1 : 0
-            let gapT: CGFloat = r.y > area.y ? 1 : 0
-            let full = NSRect(x: (r.x - area.x) * sx + gapL, y: (r.y - area.y) * sy + gapT,
-                             width: r.width * sx - gapL, height: r.height * sy - gapT).integral
-            let capH = min(36, full.height)
+            let full = boxRect(r)
+            let capH = min(ShellSpace.paneCapHeight, full.height)
             let capFrame = NSRect(x: full.minX, y: full.minY, width: full.width, height: capH)
             let body = NSRect(x: full.minX, y: full.minY + capH, width: full.width, height: max(0, full.height - capH))
             let cap = ensureCap(s.paneId)
@@ -81,6 +79,7 @@ final class PaneHostView: NSView {
                 chat.frame = body
             }
         }
+        paneDrag?.hostSizeChanged()
         let reach: CGFloat = 4
         for h in handles.values {
             let d = h.divider
@@ -93,6 +92,33 @@ final class PaneHostView: NSView {
         }
     }
 
+    /// Shared layout conversion for caps, body, previews and hook dumps.
+    func boxRect(_ r: Snapshot.Rect) -> NSRect {
+        let sx = bounds.width / area.width, sy = bounds.height / area.height
+        let gapL: CGFloat = r.x > area.x ? 1 : 0, gapT: CGFloat = r.y > area.y ? 1 : 0
+        return NSRect(x: (r.x - area.x) * sx + gapL, y: (r.y - area.y) * sy + gapT,
+                      width: r.width * sx - gapL, height: r.height * sy - gapT).integral
+    }
+    /// Change origin and clip only; terminal size is established by layout().
+    func drawBox(_ pane: String, rect: NSRect, opacity: CGFloat) {
+        guard let (surface, r) = rects.first(where: { $0.0.paneId == pane }) else { return }
+        let final = boxRect(r), capH = min(ShellSpace.paneCapHeight, final.height)
+        capHosts[pane]?.setFrameOrigin(rect.origin)
+        surface.setFrameOrigin(NSPoint(x: rect.minX, y: rect.minY + capH))
+        chatViews[pane]?.setFrameOrigin(surface.frame.origin)
+        for view in [surface as NSView, capHosts[pane], chatViews[pane]].compactMap({ $0 }) {
+            view.wantsLayer = true; view.alphaValue = opacity
+            if rect == final {
+                view.layer?.mask = nil
+                continue
+            }
+            let mask = (view.layer?.mask as? CAShapeLayer) ?? CAShapeLayer()
+            let height = view === capHosts[pane] ? min(capH, rect.height) : max(0, rect.height - capH)
+            mask.path = CGPath(rect: CGRect(x: 0, y: view.isFlipped ? 0 : view.bounds.height - height, width: rect.width, height: height), transform: nil)
+            view.layer?.mask = mask
+        }
+    }
+
     private func ensureCap(_ paneId: String) -> NSView {
         if let v = capHosts[paneId] {
             if let state = caps[paneId] {
@@ -102,7 +128,8 @@ final class PaneHostView: NSView {
                                         onFocus: { [weak self] in self?.capAction?(paneId, "focus") },
                                         onFull: { [weak self] in self?.capAction?(paneId, "full") },
                                         onPin: { [weak self] in self?.capAction?(paneId, "pin") },
-                                        onRestart: { [weak self] in self?.capAction?(paneId, "restart") })
+                                        onRestart: { [weak self] in self?.capAction?(paneId, "restart") },
+                                        onGrab: { [weak self] point in self?.paneDrag?.press(pane: paneId, at: point) })
             }
             return v
         }
@@ -113,7 +140,8 @@ final class PaneHostView: NSView {
                                                    onFocus: { [weak self] in self?.capAction?(paneId, "focus") },
                                                    onFull: { [weak self] in self?.capAction?(paneId, "full") },
                                                    onPin: { [weak self] in self?.capAction?(paneId, "pin") },
-                                                   onRestart: { [weak self] in self?.capAction?(paneId, "restart") }))
+                                                   onRestart: { [weak self] in self?.capAction?(paneId, "restart") },
+                                        onGrab: { [weak self] point in self?.paneDrag?.press(pane: paneId, at: point) }))
         // The cap sits under the transparent titlebar; with the titlebar's safe area its content
         // slid down into the body, where a chat view covered its lower half.
         v.safeAreaRegions = []
@@ -162,6 +190,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     let state = SidebarState()
     let registry: SurfaceRegistry
     let host = PaneHostView(frame: .zero)
+    private(set) var paneDrag: PaneDrag!
     let theme: ThemeStore
     // Set in init after super.init (they need `self` for the sidebar callbacks).
     private var sidebarContainer: SidebarContainer!
@@ -200,6 +229,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                              backing: .buffered, defer: false)
         super.init()
+        paneDrag = PaneDrag(owner: self)
+        host.paneDrag = paneDrag
         quickSwitch = QuickSwitchController(owner: self)
         window.title = Channel.name
         if Channel.kind == .dev { window.subtitle = "DEV" }
@@ -247,10 +278,13 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             // objectWillChange fires before the value lands; read it on the next turn.
             DispatchQueue.main.async { self?.applyTheme() }
         }.store(in: &bag)
+        model.$lastError.receive(on: RunLoop.main).sink { [weak self] error in
+            self?.paneDrag.connectionChanged(online: error == nil)
+        }.store(in: &bag)
         model.$snapshot.receive(on: RunLoop.main).sink { [weak self] _ in self?.snapshotChanged() }.store(in: &bag)
         // $machines fires before the value lands; read it on the next turn.
         model.$machines.receive(on: RunLoop.main).sink { [weak self] _ in
-            DispatchQueue.main.async { self?.machinesChanged() }
+            DispatchQueue.main.async { self?.machinesChanged(); self?.paneDrag.machinesChanged() }
         }.store(in: &bag)
         model.catalog.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in
             DispatchQueue.main.async {
@@ -469,6 +503,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     var docsLastClicked = false
 
     func selectTab(_ tabId: String, revealDocs: Bool = false) {
+        paneDrag.selectionChanging(to: tabId)
         if state.selectedTab != tabId { forcedEmptyDocs = false; docsLastClicked = false }
         quickSwitch.noteSelected(tabId)
         noteLookedAt(tabId)
@@ -610,6 +645,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     func refreshHost(using forced: Snapshot.Layout? = nil) {
         if forced == nil, resizer.isBusy { return }
         guard let tab = state.selectedTab, let layout = forced ?? model.layout(forTab: tab), layout.tab_id == tab else { return }
+        let previousLayout = shownLayout
         shownLayout = layout
         // herdr reports the split rects even while a tab is zoomed; the shell draws the zoom itself.
         let zoomedPane = layout.zoomed == true ? layout.focused_pane_id : nil
@@ -635,7 +671,13 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             items.append((s, lp.rect))
         }
         // Splits on another machine are not dragged from here: a resize in flight could outlive the selection.
+        let oldBoxes = paneDrag.drawnBoxes
+        host.area = layout.area
+        let newBoxes = Dictionary(uniqueKeysWithValues: items.map { ($0.0.paneId, host.boxRect($0.1)) })
+        paneDrag.layoutWillApply(old: oldBoxes, new: newBoxes,
+                                sameTab: previousLayout?.tab_id == tab && previousLayout.map { $0.area.x == layout.area.x && $0.area.y == layout.area.y && $0.area.width == layout.area.width && $0.area.height == layout.area.height } == true)
         host.show(items, area: layout.area, dividers: zoomedPane == nil && !Machines.isRemote(tab) ? PaneDivider.from(layout) : [])
+        paneDrag.layoutDidApply()
         applyPendingFocus()
         if let focusedPane, let replacement = items.first(where: { $0.0.paneId == focusedPane })?.0 {
             window.makeFirstResponder(replacement)
@@ -828,6 +870,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         host.caps = next
         host.needsLayout = true
         host.layoutSubtreeIfNeeded()
+        paneDrag.layoutDidApply()
     }
 
     var factoryMachines: [MachineRow] { factoryModel?.snapshot.machines ?? [] }
@@ -1115,6 +1158,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     func windowDidResignKey(_ notification: Notification) {
+        paneDrag.cancel()
         ghostty_app_set_focus(GhosttyRuntime.shared.app, false)
     }
 }

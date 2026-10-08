@@ -318,18 +318,40 @@ struct HerdrCommands {
             guard let c = Machines.config(for: id) else { log("\(method): unknown machine for \(id)"); return nil }
             path = c.socket
             machine = c.name
-            for (k, v) in params where k.hasSuffix("_id") {
-                if let s = v as? String, let (m, raw) = Machines.split(s) {
-                    guard m == c.name else { log("\(method): ids from two machines"); return nil }
-                    params[k] = raw
+            func raw(_ object: [String: Any]) -> [String: Any]? {
+                var result = object
+                for (k, v) in object {
+                    if k.hasSuffix("_id"), let id = v as? String, let (m, value) = Machines.split(id) {
+                        guard m == c.name else { return nil }
+                        result[k] = value
+                    } else if let nested = v as? [String: Any] {
+                        guard let converted = raw(nested) else { return nil }
+                        result[k] = converted
+                    }
                 }
+                return result
             }
+            guard let converted = raw(params) else { log("\(method): ids from two machines"); return nil }
+            params = converted
         }
         let body: [String: Any] = ["id": "shell:\(method)", "method": method, "params": params]
         guard let data = try? JSONSerialization.data(withJSONObject: body),
               let json = String(data: data, encoding: .utf8),
               let reply = HerdrSocket.request(path, json, timeout: timeout) else { return nil }
         return machine.map { Machines.namespace(reply, machine: $0) } ?? reply
+    }
+
+    /// Neutral socket entry for pane rearrangement, including dry-run/error replies.
+    func paneDragCall(_ method: String, _ params: [String: Any]) -> [String: Any]? {
+        guard let data = call(method, params) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+    func panePlace(params: [String: Any]) -> [String: Any]? { paneDragCall("pane.place", params) }
+    func paneSwap(source: String, target: String) -> [String: Any]? {
+        paneDragCall("pane.swap", ["source_pane_id": source, "target_pane_id": target])
+    }
+    func paneMove(pane: String, workspace: String) -> [String: Any]? {
+        paneDragCall("pane.move", ["pane_id": pane, "destination": ["type": "new_tab", "workspace_id": workspace], "focus": true])
     }
 
     enum RestartReply {

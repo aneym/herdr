@@ -2,6 +2,7 @@
   "version": 1,
   "note": "App chords (entries) run an app action and send nothing to the pane. Chords under terminal are not claimed by the app; they are turned into bytes for the pane. Every other key goes to the terminal. Chords match the physical key (US ANSI keycode) plus the exact modifier set. Source of the entries: Alex's Ghostty herdr relay block, ~/.config/ghostty/herdr-common.conf. Diffs from it: cmd+[ and cmd+] switch panes in the app (the herdr focus-history relay is not used); the app owns cmd+shift+[ and cmd+shift+] for tabs. copy, paste and quit stay in the Edit and app menus. 'pending' names the piece that will implement the action; until then the chord is still claimed, so it never reaches the pane.",
   "entries": [
+    {"chord": "cmd+opt+m", "action": "move_pane_mode", "title": "Move Pane", "menu": "Pane"},
     {
       "chord": "cmd+]",
       "action": "next_pane",

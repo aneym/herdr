@@ -109,6 +109,16 @@ final class TestHook {
             dragDivider(obj)
         case "drag_doc_handle":
             dragDocHandle(obj)
+        case "pane-drag":
+            paneDragEvent(obj)
+        case "motion":
+            guard let drag = controller?.paneDrag else { return }
+            switch obj["op"] as? String {
+            case "freeze": drag.freeze(ms: CGFloat((obj["ms"] as? NSNumber)?.doubleValue ?? 0))
+            case "run": drag.run()
+            case "reduce": drag.reduceOverride = obj["on"] as? Bool
+            default: break
+            }
         case "drag_pin":
             dragPin(obj)
         case "set_role":
@@ -540,6 +550,48 @@ final class TestHook {
     /// release; with "esc" Esc goes in before the release. Events go through NSApp.sendEvent as a
     /// physical mouse's do, so SwiftUI's own gestures tell a drag from a click. Returns at once;
     /// `drag_running` in the state says when it is done.
+    private var paneDragPoint = NSPoint.zero
+    private func paneDragEvent(_ obj: [String: Any]) {
+        guard let c = controller else { return }
+        func post(_ type: NSEvent.EventType, _ p: NSPoint) {
+            if let e = NSEvent.mouseEvent(with: type, location: p, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: c.window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1) { NSApp.sendEvent(e) }
+        }
+        switch obj["op"] as? String {
+        case "begin":
+            guard let pane = obj["pane"] as? String, let f = c.host.capFrames[pane] else { return }
+            paneDragPoint = c.host.convert(NSPoint(x: f.midX, y: f.midY), to: nil)
+            post(.mouseMoved, paneDragPoint); post(.leftMouseDown, paneDragPoint)
+            paneDragPoint.x += CGFloat((obj["travel"] as? NSNumber)?.doubleValue ?? 8)
+            post(.leftMouseDragged, paneDragPoint)
+        case "move":
+            let end: NSPoint
+            if let row = obj["row"] as? String, let f = c.state.rowFrames[row] {
+                let view = c.sidebarHostView, safe = view.safeAreaRect
+                let inset = view.isFlipped ? safe.minY : view.bounds.height - safe.maxY
+                let y = inset + f.midY
+                end = view.convert(NSPoint(x: safe.minX + f.midX, y: view.isFlipped ? y : view.bounds.height - y), to: nil)
+            } else {
+                end = c.host.convert(NSPoint(x: (obj["x"] as? NSNumber)?.doubleValue ?? 0, y: (obj["y"] as? NSNumber)?.doubleValue ?? 0), to: nil)
+            }
+            let steps = max(1, obj["steps"] as? Int ?? 4), start = paneDragPoint
+            for i in 1...steps {
+                let t = CGFloat(i) / CGFloat(steps)
+                post(.leftMouseDragged, NSPoint(x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t))
+            }
+            paneDragPoint = end
+            if obj["drop"] as? Bool == true { post(.leftMouseUp, end) }
+        case "drop": post(.leftMouseUp, paneDragPoint)
+        case "cancel":
+            if obj["via"] as? String == "right" { post(.rightMouseDown, paneDragPoint); post(.rightMouseUp, paneDragPoint) }
+            else if let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: c.window.windowNumber,
+                context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53) { NSApp.sendEvent(e) }
+        default: break
+        }
+    }
+
     private func dragPin(_ obj: [String: Any]) {
         guard let c = controller, let id = obj["row"] as? String, let frame = c.state.rowFrames[id], !dragRunning else {
             log("hook: drag_pin: no row \(obj["row"] ?? "?")"); return
@@ -927,7 +979,7 @@ final class TestHook {
             let lines = s.visibleText().split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
             return ["pane": s.paneId, "terminal": s.terminalId, "cols": g.cols, "rows": g.rows,
                     "first_responder": c.window.firstResponder === s, "exited": s.exited,
-                    "mouse_captured": s.mouseCaptured,
+                    "mouse_captured": s.mouseCaptured, "mouse_sent": s.mouseSent,
                     "hovered_link": s.hoveredLink,
                     "keys_sent": s.keysSent, "last_key_sent": s.lastKeySent,
                     "frame": [s.frame.minX, s.frame.minY, s.frame.width, s.frame.height],
@@ -960,6 +1012,7 @@ final class TestHook {
             "host_panes": c.host.rects.map { r -> [String: Any] in
                 ["pane": r.0.paneId, "frame": [r.0.frame.minX, r.0.frame.minY, r.0.frame.width, r.0.frame.height]]
             },
+            "paneDrag": c.paneDrag.dump(),
             "host_size": [c.host.bounds.width, c.host.bounds.height],
             "dividers": c.host.dividerHandles.map { h -> [String: Any] in
                 ["split": h.divider.splitId, "vertical": h.divider.vertical, "ratio": h.divider.ratio,
