@@ -8,14 +8,16 @@
 param([Parameter(Mandatory = $true)][string]$Exe, [switch]$TestWindow, [switch]$Background)
 $Exe = $Exe.Trim('"')
 # --background: the window opens without taking focus (install relaunches).
-$arg = if ($TestWindow) { '--test-window' } elseif ($Background) { '--background' } else { '' }
+$arg = if ($TestWindow) { '--test-window' } else { '--background' }
 # Scheduled tasks do not inherit the SSH helper's environment. Set the hook-only
 # override in the task process for test windows only; install and --relaunch
 # restarts are Alex's own window and keep browser defaults and throttling.
 $quotedExe = $Exe.Replace("'", "''")
 $control = "`$ErrorActionPreference = 'Stop'`r`n"
 if ($TestWindow) { $control += "`$env:HERDR_SHELL_CONTROL='1'`r`n" }
-$start = if ($arg) { "Start-Process -FilePath '$quotedExe' -ArgumentList '$arg'" } else { "Start-Process -FilePath '$quotedExe'" }
+$quotedGamecheck = (Join-Path $PSScriptRoot 'gamecheck.ps1').Replace("'", "''")
+$control += ". '$quotedGamecheck'`r`nStop-IfGame 'HerdrShellLaunch'`r`n"
+$start = "Start-Process -FilePath '$quotedExe' -ArgumentList '$arg'"
 $ps1 = Join-Path $PSScriptRoot 'launch-task.ps1'
 $vbs = Join-Path $PSScriptRoot 'launch-task.vbs'
 # UTF-16 with a BOM so non-ASCII paths survive both Windows PowerShell 5.1 and wscript.

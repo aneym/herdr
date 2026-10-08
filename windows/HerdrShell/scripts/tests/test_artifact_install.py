@@ -213,9 +213,12 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(run(fake, install(relaunch=True)), 1)
         self.assertEqual(self.modes(fake), ['-Relaunch', '-Rollback'])
 
-    def test_a_failed_verified_mark_fails_the_install(self):
+    def test_a_failed_verified_mark_rolls_back_and_fails_the_install(self):
         fake = Fake(mode_rc={'-MarkVerified': 1})
         self.assertNotEqual(run(fake, install(relaunch=True)), 0)
+        self.assertEqual(self.modes(fake), ['-Relaunch', '-MarkVerified', '-Rollback'])
+        self.assertEqual(fake.helpers[-1],
+                         ('install_copy.ps1', ['-Sha', SHA, '-Rollback', '-Relaunch']))
 
 
 if __name__ == '__main__':

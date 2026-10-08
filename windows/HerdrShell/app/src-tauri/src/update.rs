@@ -47,6 +47,60 @@ fn same_sha(current: &str, staged: &str) -> bool {
     !current.is_empty() && staged.starts_with(current)
 }
 
+// One source of truth for games, embedded so the updater also works without
+// the SSH helper scripts installed on the PC.
+#[cfg(any(windows, test))]
+fn update_script(log: &str, pid: u32, installer: &str, exe: &str) -> String {
+    format!(
+        r#"$ErrorActionPreference = 'Stop'
+{gamecheck}
+$log = {log}
+$exe = {exe}
+$prev = "$exe.prev"
+$backedUp = $false
+$changed = $false
+$rc = 0
+try {{
+    Stop-IfGame 'HerdrShellUpdate install'
+    $parent = Get-Process -Id {pid} -ErrorAction SilentlyContinue
+    if ($parent -and -not $parent.WaitForExit(20000)) {{
+        throw 'Herdr Shell did not exit within 20 seconds'
+    }}
+    Stop-IfGame 'HerdrShellUpdate install'
+    Copy-Item -LiteralPath $exe -Destination $prev -Force
+    $backedUp = $true
+    Stop-IfGame 'HerdrShellUpdate install'
+    $changed = $true
+    $installer = Start-Process -FilePath {installer} -ArgumentList '/S' -WindowStyle Hidden -PassThru -Wait
+    Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) installer exit code: $($installer.ExitCode)"
+    if ($installer.ExitCode -ne 0) {{ throw "Installer failed: $($installer.ExitCode)" }}
+    Stop-IfGame 'HerdrShellUpdate relaunch'
+    Start-Process -FilePath $exe -ArgumentList '--background'
+}} catch {{
+    $rc = 1
+    Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) update failed: $_" -ErrorAction SilentlyContinue
+    if ($backedUp -and $changed) {{
+        try {{
+            Stop-IfGame 'HerdrShellUpdate rollback'
+            Get-Process HerdrShell -ErrorAction SilentlyContinue |
+                Where-Object {{ $_.Path -eq $exe }} | Stop-Process -Force
+            Copy-Item -LiteralPath $prev -Destination $exe -Force
+            Stop-IfGame 'HerdrShellUpdate rollback relaunch'
+            Start-Process -FilePath $exe -ArgumentList '--background'
+        }} catch {{
+            Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) rollback failed: $_"
+        }}
+    }}
+}} finally {{
+    Remove-Item -LiteralPath $PSCommandPath -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath ([IO.Path]::ChangeExtension($PSCommandPath, '.vbs')) -ErrorAction SilentlyContinue
+}}
+exit $rc
+"#,
+        gamecheck = include_str!("../../../scripts/gamecheck.ps1"),
+    )
+}
+
 #[tauri::command]
 pub fn update_status() -> UpdateStatus {
     let current = env!("HERDR_SHELL_COMMIT").to_string();
@@ -140,28 +194,11 @@ fn install_inner(app: tauri::AppHandle, name: &str) -> Result<(), String> {
         let text = path.to_str().ok_or("Update path is not valid Unicode")?;
         Ok(format!("'{}'", text.replace('\'', "''")))
     };
-    let script = format!(
-        r#"$ErrorActionPreference = 'Stop'
-$log = {log}
-try {{
-    $parent = Get-Process -Id {pid} -ErrorAction SilentlyContinue
-    if ($parent -and -not $parent.WaitForExit(20000)) {{
-        throw 'Herdr Shell did not exit within 20 seconds'
-    }}
-    $installer = Start-Process -FilePath {installer} -ArgumentList '/S' -PassThru -Wait
-    Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) installer exit code: $($installer.ExitCode)"
-    Start-Process -FilePath {exe}
-}} catch {{
-    Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) update failed: $_"
-}} finally {{
-    Remove-Item -LiteralPath $PSCommandPath -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath ([IO.Path]::ChangeExtension($PSCommandPath, '.vbs')) -ErrorAction SilentlyContinue
-}}
-"#,
-        log = quote(&logs.join("update.log"))?,
-        pid = std::process::id(),
-        installer = quote(&build.installer)?,
-        exe = quote(&exe)?,
+    let script = update_script(
+        &quote(&logs.join("update.log"))?,
+        std::process::id(),
+        &quote(&build.installer)?,
+        &quote(&exe)?,
     );
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -195,7 +232,7 @@ try {{
 $script = $env:HERDR_SHELL_UPDATE_SCRIPT
 $vbs = [IO.Path]::ChangeExtension($script, '.vbs')
 $cmd = 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $script + '"'
-Set-Content -LiteralPath $vbs -Encoding Unicode -Value ('CreateObject("WScript.Shell").Run "' + $cmd.Replace('"', '""') + '", 0, False')
+Set-Content -LiteralPath $vbs -Encoding Unicode -Value ('WScript.Quit CreateObject("WScript.Shell").Run("' + $cmd.Replace('"', '""') + '", 0, True)')
 $action = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ('//B "' + $vbs + '"')
 $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances Parallel
@@ -259,7 +296,48 @@ Start-ScheduledTask -TaskName HerdrShellUpdate"#;
 
 #[cfg(test)]
 mod tests {
-    use super::same_sha;
+    use super::{same_sha, update_script};
+
+    // Generated PowerShell is the independent Windows handoff contract. Order
+    // matters: guard before mutation and never launch a failed install.
+    #[test]
+    fn update_handoff_guards_swaps_and_restores_before_background_relaunch() {
+        let script = update_script("'log'", 42, "'setup'", "'shell'");
+        let guard = script
+            .find("Stop-IfGame 'HerdrShellUpdate install'")
+            .expect("install guard");
+        let backup = script
+            .find("Copy-Item -LiteralPath $exe -Destination $prev")
+            .expect("backup");
+        let install = script
+            .find("Start-Process -FilePath 'setup'")
+            .expect("installer");
+        let failed = script
+            .find("if ($installer.ExitCode -ne 0)")
+            .expect("installer result");
+        let relaunch_guard = script
+            .find("Stop-IfGame 'HerdrShellUpdate relaunch'")
+            .expect("relaunch guard");
+        let relaunch = script
+            .find("Start-Process -FilePath $exe -ArgumentList '--background'")
+            .expect("background launch");
+        assert!(guard < backup && backup < install && install < failed);
+        assert!(failed < relaunch_guard && relaunch_guard < relaunch);
+        let rollback = script
+            .find("Copy-Item -LiteralPath $prev -Destination $exe")
+            .expect("restore");
+        let rollback_guard = script
+            .find("Stop-IfGame 'HerdrShellUpdate rollback relaunch'")
+            .expect("rollback guard");
+        let rollback_launch = script
+            .rfind("Start-Process -FilePath $exe -ArgumentList '--background'")
+            .expect("rollback launch");
+        assert!(rollback < rollback_guard && rollback_guard < rollback_launch);
+        assert!(script.contains("function Get-Game"));
+        assert!(script.contains("exit 75"));
+        assert!(script.contains("exit $rc"));
+        assert_eq!(script.matches("Start-Process -FilePath $exe").count(), 2);
+    }
 
     // Pure prefix algorithm: guards short/dirty build identity without launching an installer.
     #[test]

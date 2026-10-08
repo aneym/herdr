@@ -470,7 +470,9 @@ def cmd_install_artifact(args):
     rc, out = ps_file("install_copy.ps1", "-Sha", want, "-MarkVerified")
     print(out.strip())
     if rc != 0:
-        fail("install post-check failed: could not mark the installed exe verified")
+        _rc, out = ps_file("install_copy.ps1", "-Sha", want, "-Rollback", "-Relaunch")
+        print(out.strip())
+        fail("install post-check failed: could not mark the installed exe verified; rolled back")
     sys.exit(0)
 
 
