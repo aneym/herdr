@@ -18,7 +18,8 @@ enum AgentCards {
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let name = str(obj["name"]), let pane = str(obj["pane"]), pane != "none" else { continue }
             let avatar = str(obj["avatar_url"]).flatMap { isPicture($0) ? $0 : nil }
-            out[pane] = AgentCard(name: name, avatar: avatar)
+            // Sorted folder order owns precedence: the first valid card for a pane wins.
+            if out[pane] == nil { out[pane] = AgentCard(name: name, avatar: avatar) }
         }
         return out
     }
