@@ -108,7 +108,10 @@ fn tab_2_in_bar(state: &ClientShellState, column: u16) -> (u16, u16) {
         .iter()
         .find(|(_, tab_id)| tab_id == TAB_2)
         .expect("tab_2 in the tab bar");
-    assert!(rect.width >= 3, "tab_2's tab is wide enough to move within: {rect:?}");
+    assert!(
+        rect.width >= 3,
+        "tab_2's tab is wide enough to move within: {rect:?}"
+    );
     (rect.x + column, rect.y)
 }
 
@@ -175,7 +178,8 @@ fn assert_no_pane_input(outcome: &ClientShellInput, step: &str) {
     assert!(
         !outcome.requests.iter().any(|request| matches!(
             request,
-            ClientMessage::ClientShellPaneInput { .. } | ClientMessage::ClientShellPopupInput { .. }
+            ClientMessage::ClientShellPaneInput { .. }
+                | ClientMessage::ClientShellPopupInput { .. }
         )),
         "{step}: a pane program received input: {:?}",
         outcome.requests
@@ -238,13 +242,23 @@ fn tab_2_panes(state: &ClientShellState) -> Vec<FixturePane> {
     vec![
         FixturePane {
             pane_id: X.into(),
-            rect: SurfaceRect { x: 0, y: 0, width: half, height: area.height },
+            rect: SurfaceRect {
+                x: 0,
+                y: 0,
+                width: half,
+                height: area.height,
+            },
             fill: 'x',
             mouse_reporting: false,
         },
         FixturePane {
             pane_id: Y.into(),
-            rect: SurfaceRect { x: half, y: 0, width: area.width - half, height: area.height },
+            rect: SurfaceRect {
+                x: half,
+                y: 0,
+                width: area.width - half,
+                height: area.height,
+            },
             fill: 'y',
             mouse_reporting: false,
         },
@@ -417,7 +431,10 @@ fn spring_leaving_before_the_dwell_sends_nothing() {
 
     let (back_before, back, back_after) = bracket(&mut state, |s| drag_to(s, over));
     assert_nothing_sent(&back, "back on tab_2");
-    assert!(back_before > after, "the clock moved between the two visits");
+    assert!(
+        back_before > after,
+        "the clock moved between the two visits"
+    );
     assert_nothing_sent(
         &state.tick_pane_spring(after + DWELL),
         "the dwell restarts on return; the first visit's deadline is void",
@@ -449,7 +466,10 @@ fn spring_travel_of_one_cell_restarts_the_dwell() {
     let next_cell = tab_2_in_bar(&state, 2);
     let (moved_before, moved, moved_after) = bracket(&mut state, |s| drag_to(s, next_cell));
     assert_nothing_sent(&moved, "one cell along tab_2");
-    assert!(moved_before > after, "the clock moved between the two events");
+    assert!(
+        moved_before > after,
+        "the clock moved between the two events"
+    );
     assert_nothing_sent(
         &state.tick_pane_spring(after + DWELL),
         "one cell of travel restarts the dwell",
@@ -511,7 +531,11 @@ fn spring_cancel_restores_the_origin_tab() {
 fn open_move(state: &mut ClientShellState) {
     assert_nothing_sent(&state.handle_input_bytes(PREFIX), "prefix");
     assert_nothing_sent(&state.handle_input_bytes(b"m"), "prefix+m");
-    assert_eq!(state.mode, ClientShellMode::Move, "prefix+m opens move mode");
+    assert_eq!(
+        state.mode,
+        ClientShellMode::Move,
+        "prefix+m opens move mode"
+    );
 }
 
 fn esc(state: &mut ClientShellState) -> ClientShellInput {
@@ -534,7 +558,11 @@ fn spring_move_mode_brackets_and_esc_restores_the_origin() {
     assert_eq!(state.mode, ClientShellMode::Move, "] keeps move mode");
     let panes = tab_2_panes(&state);
     server_shows(&mut state, TAB_2, &panes);
-    assert_eq!(state.mode, ClientShellMode::Move, "the switch keeps move mode");
+    assert_eq!(
+        state.mode,
+        ClientShellMode::Move,
+        "the switch keeps move mode"
+    );
 
     let previous = state.handle_input_bytes(b"[");
     assert_only_tab_focus(&previous, ORIGIN, "[ from tab_2");
@@ -589,7 +617,11 @@ fn spring_move_mode_drop_uses_the_new_tabs_panes() {
         "Enter places A at that edge: {:?}",
         sent_methods(&drop)
     );
-    assert_eq!(state.mode, ClientShellMode::Terminal, "a drop ends move mode");
+    assert_eq!(
+        state.mode,
+        ClientShellMode::Terminal,
+        "a drop ends move mode"
+    );
 }
 
 /// S5 review advisory: move mode must not outlive the lift. When the lift is
