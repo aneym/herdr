@@ -97,7 +97,30 @@ def scp_from(remote_path, local):
     return p.returncode
 
 
+# First commit whose PC helpers keep every probe off Alex's desktop. Older
+# checkouts would copy the flashing idle task back onto the PC.
+DESKTOP_SAFE = "57faaaa8e0e7f31fb82717f77649dcf9186c9d0d"
+
+
+def stale_checkout(repo=None):
+    """True when repo is a git checkout that does not contain DESKTOP_SAFE.
+    The launchd fanout runs an installed snapshot outside any checkout."""
+    repo = repo or REPO
+    inside = subprocess.run(["git", "-C", str(repo), "rev-parse", "--is-inside-work-tree"],
+                            capture_output=True, text=True)
+    if inside.returncode != 0:
+        return False
+    rc = subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", DESKTOP_SAFE, "HEAD"],
+                        capture_output=True, text=True).returncode
+    return rc != 0
+
+
 def bootstrap():
+    if stale_checkout():
+        print(f"{REPO} does not contain {DESKTOP_SAFE[:8]}; its PC helpers would flash a console "
+              f"on Alex's desktop. Rebase first: git -C {REPO} fetch origin && "
+              f"git -C {REPO} rebase origin/main", file=sys.stderr)
+        sys.exit(3)
     remote(
         f"{PS} -Command \"New-Item -ItemType Directory -Force -Path "
         f"'{R_SCRIPTS}','{R_OUT}','{R_SHOTS}','{R_STAGE}','{R_CACHE}' | Out-Null\""

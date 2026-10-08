@@ -12,9 +12,10 @@ public static class IdleProbe {
     [DllImport("kernel32.dll")] static extern uint GetTickCount();
     [DllImport("kernel32.dll")] static extern IntPtr GetConsoleWindow();
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    struct STARTUPINFO { public int cb; public string r; public string d; public string t; public int x, y, w, h, cx, cy, fill, flags; public short show, r2; public IntPtr r3, i, o, e; }
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern void GetStartupInfo(out STARTUPINFO si);
+    // String fields stay IntPtr: marshalling them as strings frees memory the process owns.
+    [StructLayout(LayoutKind.Sequential)]
+    struct STARTUPINFO { public int cb; public IntPtr r, d, t; public int x, y, w, h, cx, cy, fill, flags; public short show, r2; public IntPtr r3, i, o, e; }
+    [DllImport("kernel32.dll", EntryPoint = "GetStartupInfoW")] static extern void GetStartupInfo(out STARTUPINFO si);
     // The show state this process (and its console) was created with; 0 = SW_HIDE.
     public static int StartShow() { STARTUPINFO si; GetStartupInfo(out si); return (si.flags & 1) != 0 ? si.show : -1; }
     public static bool ConsoleVisible() { IntPtr h = GetConsoleWindow(); return h != IntPtr.Zero && IsWindowVisible(h); }
