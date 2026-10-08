@@ -49,7 +49,17 @@ export async function runAction(action: Action, ctx: ActionContext): Promise<voi
       if (id) ctx.select(id);
     } else if (action === "next_tab" || action === "prev_tab") {
       const visible = tabOrder(ctx.rows.filter(r => !(r.kind === "agent" && r.hidden)));
-      const id = step(visible, ctx.selected, action === "next_tab" ? 1 : -1); if (id) ctx.select(id);
+      const amount = action === "next_tab" ? 1 : -1;
+      const index = order.indexOf(ctx.selected ?? "");
+      let id = step(visible, ctx.selected, amount);
+      if (index >= 0 && !visible.includes(ctx.selected ?? "")) {
+        const visibleIds = new Set(visible);
+        for (let offset = 1; offset <= order.length; offset++) {
+          const candidate = order[(index + amount * offset + order.length) % order.length];
+          if (visibleIds.has(candidate)) { id = candidate; break; }
+        }
+      }
+      if (id) ctx.select(id);
     } else if (action === "next_attention") {
       const attention = ["blocked", "done"].flatMap(status => order.filter(id => ctx.rows.some(r => r.kind !== "space" && !(r.kind === "agent" && r.hidden) && r.id === id && r.status === status)));
       const id = step(attention, ctx.selected, 1); if (id) ctx.select(id);

@@ -39,6 +39,10 @@ describe("next and previous tab skip hidden agents", () => {
   it("leaves a selected hidden agent for a visible tab, never staying on or returning to it", async () => {
     const next = await step("next_tab", "B");
     const prev = await step("prev_tab", "B");
+    // Hidden rows follow visible agents: full order A, C, B, P; visible order A, C, P.
+    expect(tabOrder(buildSidebar(story()))).toEqual(["A", "C", "B", "P"]);
+    expect(next).toBe("P");
+    expect(prev).toBe("C");
     for (const id of [next, prev]) expect(["A", "C", "P"]).toContain(id);
   });
   it("keeps a hidden agent selectable: App treats tabOrder as the set of live selections", () => {
