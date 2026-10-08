@@ -441,7 +441,7 @@ fn hidden_agent_hides_renumbers_folds_alerts_and_returns_to_its_slot() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(focused, [c.clone()], "Cmd+2 opens C");
+    assert_eq!(focused, std::slice::from_ref(&c), "Cmd+2 opens C");
 
     // Open the fold: B shows under the header with no digit.
     let header = sidebar_cell(&mut client, "hidden");
