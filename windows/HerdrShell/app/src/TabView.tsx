@@ -8,7 +8,7 @@ import type { PaneController } from "./PaneTerm";
 import { bridge } from "./bridge";
 import { dividers, extent, Resizer } from "./dividers";
 import type { Divider, ResizeAnswer } from "./dividers";
-import { PaneDrag, canDragPane, probePlace, transitionFor, prefersReducedMotion } from "./paneDrag";
+import { PaneDrag, canDragPane, probePlace, transitionFor, prefersReducedMotion, paneDragChipPosition } from "./paneDrag";
 import type { PaneDragState } from "./paneDrag";
 import { motion } from "./tokens";
 import { Status } from "./Sidebar";
@@ -87,6 +87,17 @@ export default function TabView({ cards = {}, snapshot, selected, machine, focus
   const priorVisual = useRef<PaneDragState | null>(null);
   const chip = useRef<HTMLDivElement>(null);
   const zoneOverlay = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = chip.current;
+    if (!element || !visual || !host.current) return;
+    const pointer = visual.pointer ?? visual.ghost;
+    if (!pointer) return;
+    const position = paneDragChipPosition(pointer,
+      { width: element.offsetWidth, height: element.offsetHeight },
+      { width: host.current.clientWidth, height: host.current.clientHeight });
+    element.style.left = `${position.x}px`;
+    element.style.top = `${position.y}px`;
+  }, [visual, size.width, size.height]);
   useEffect(() => {
     const previous = priorVisual.current; priorVisual.current = paneState;
     if (!paneState) return;

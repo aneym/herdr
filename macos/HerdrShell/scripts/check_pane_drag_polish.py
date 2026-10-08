@@ -31,6 +31,24 @@ def settle(ws):
     hairline = D.pd(state).get("hairline")
     D.check("chip: stroke is the hairline token the dump reports", isinstance(hairline, (int, float)) and hairline > 0
             and chip.get("stroke") == hairline, json.dumps([chip.get("stroke"), hairline]))
+    # Use the live drawing frame, not a recomputed placement, against its window host bounds.
+    width, height = D.pd(state)["chipBounds"]
+    inset, offset = D.pd(state)["chipInset"], D.pd(state)["chipOffset"]
+    D.hook("move", steps=1, x=width - 4, y=height - 4)
+    state = D.wait(lambda s: (D.pd(s).get("chip") or {}).get("frame") != chip.get("frame"))
+    frame = D.pd(state)["chip"]["frame"]
+    x, y, w, h = frame
+    D.check("chip: bottom-right drag keeps the whole frame inside window bounds",
+            x >= inset and y >= inset and x + w <= width - inset and y + h <= height - inset,
+            json.dumps([frame, [width, height], inset]))
+    D.hook("move", steps=1, x=width / 2, y=height / 2)
+    state = D.wait(lambda s: D.pd(s)["chip"]["frame"] != frame)
+    middle = D.pd(state)["chip"]["frame"]
+    D.check("chip: middle drag retains the existing pointer offset",
+            abs(middle[0] - (width / 2 + offset)) < 0.01
+            and abs(middle[1] - (height / 2 + offset)) < 0.01, json.dumps(middle))
+    D.hook("move", steps=1, **D.centre(D.pd(state)["boxes"][b]))
+    D.wait(lambda s: D.zone_is(s, kind="centre", target=b))
     D.hook("hold-replies", on=True)
     D.hook("drop")
     state = D.wait(lambda s: D.pd(s).get("replyHeld"))

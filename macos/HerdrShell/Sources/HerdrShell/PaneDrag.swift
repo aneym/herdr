@@ -1,6 +1,15 @@
 import AppKit
 import QuartzCore
 
+/// Pure chip placement: preserve the offset, flip overflowing axes, then clamp to the inset.
+func paneDragChipFrame(pointer: CGPoint, size: CGSize, bounds: CGSize) -> CGRect {
+    let offset = ShellMotion.chipOffset, inset = ShellMotion.zoneInset
+    var x = pointer.x + offset, y = pointer.y + offset
+    if x + size.width > bounds.width - inset { x = pointer.x - offset - size.width }
+    if y + size.height > bounds.height - inset { y = pointer.y - offset - size.height }
+    return CGRect(x: max(inset, x), y: max(inset, y), width: size.width, height: size.height)
+}
+
 /// Per-window gesture owner; snapshots and pane.place remain layout authority.
 final class PaneDrag: NSObject {
     enum Phase: String { case idle, pressed, lifted, dropping, settling, cancelling }
@@ -58,6 +67,7 @@ final class PaneDrag: NSObject {
     private var sendLog: [[String: Any]] = [], sendSeq = 0
     /// The chip glyph's color as last painted (check hook).
     private var chipPaintedTone: UInt32?
+    private var chipFrame: CGRect?
     private var supported: [String: Bool] = [:], probing = Set<String>()
     private var generation = 0, layoutGeneration = 0
     private var cache: [String: CGRect] = [:], rejected = Set<String>()
@@ -631,7 +641,9 @@ final class PaneDrag: NSObject {
             } ?? [],
             "sidebarZoneFill": PaneDropFill.drawn(in: owner?.sidebarHostView, row: owner?.state.paneDropRow ?? ""),
             "hairline": ShellFace.ring,
-            "chip": ["visible": phase == .lifted || phase == .dropping || phase == .cancelling, "label": label, "text": chipText, "glyph": chipGlyph, "stroke": chipBorder.lineWidth, "sourceState": sourceGlyph.rawValue, "sidebarStatus": sourceGlyph.sidebarStatus,
+            "chipBounds": [overlay.bounds.width, overlay.bounds.height],
+            "chipInset": ShellMotion.zoneInset, "chipOffset": ShellMotion.chipOffset,
+            "chip": ["frame": rect(chipFrame), "visible": phase == .lifted || phase == .dropping || phase == .cancelling, "label": label, "text": chipText, "glyph": chipGlyph, "stroke": chipBorder.lineWidth, "sourceState": sourceGlyph.rawValue, "sidebarStatus": sourceGlyph.sidebarStatus,
                      "tone": chipPaintedTone.map { ThemeStore.hex($0) as Any } ?? NSNull()],
             "boxes": boxes.mapValues { [$0.minX, $0.minY, $0.width, $0.height] }, "sent": sent, "sendLog": sendLog,
             "frozen": holdsLayout, "replyHeld": heldReply != nil,
@@ -676,8 +688,10 @@ final class PaneDrag: NSObject {
             let text = chipText
             let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: ShellType.rowTitle), .foregroundColor: t.inkNS]
             let size = (text as NSString).size(withAttributes: attrs)
-            let r = CGRect(x: pointer.x + ShellMotion.chipOffset, y: pointer.y + ShellMotion.chipOffset,
-                           width: size.width + ShellMotion.chipOffset * 2, height: ShellSpace.paneCapHeight)
+            let r = paneDragChipFrame(pointer: pointer,
+                                      size: CGSize(width: size.width + ShellMotion.chipOffset + ShellMotion.chipOffset, height: ShellSpace.paneCapHeight),
+                                      bounds: overlay.bounds.size)
+            chipFrame = r
             NSColor(hex: t.chrome.panel).setFill(); NSBezierPath(roundedRect: r, xRadius: ShellRadius.control, yRadius: ShellRadius.control).fill()
             CATransaction.begin(); CATransaction.setDisableActions(true)
             chipBorder.path = CGPath(roundedRect: r, cornerWidth: ShellRadius.control, cornerHeight: ShellRadius.control, transform: nil)

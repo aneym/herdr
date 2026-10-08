@@ -7,7 +7,7 @@ import type { Layout, Rect } from "./model";
 // (scripts/check_pane_drag.py) proves one real drag; this table owns the rules.
 const api = vi.hoisted(() => vi.fn());
 vi.mock("./bridge", () => ({ bridge: { api: (...args: unknown[]) => api(...args) } }));
-import { canDragPane, PaneDrag, prefersReducedMotion, probePlace, transitionFor } from "./paneDrag";
+import { canDragPane, PaneDrag, prefersReducedMotion, probePlace, transitionFor, paneDragChipPosition } from "./paneDrag";
 import type { PaneDragPress, PaneDragState } from "./paneDrag";
 import { actionFor, moveModeKey } from "./keys";
 import type { KeyEvent } from "./keys";
@@ -323,4 +323,23 @@ describe("pane drag: motion", () => {
     expect(transitionFor("lift")).toContain("opacity var(--shell-motion-fade-ms) var(--shell-motion-ease)");
     expect(transitionFor("lift")).not.toMatch(/transform/);
   });
+});
+
+// Golden geometry table for the pure flip/clamp algorithm, including independent axes.
+it("keeps the drag chip inset at the bottom-right without moving a middle drag", () => {
+  const chip = { width: 120, height: 28 }, bounds = { width: 800, height: 600 };
+  for (const [pointer, expected] of [
+    [{ x: 796, y: 596 }, { x: 664, y: 556 }],
+    [{ x: 400, y: 300 }, { x: 412, y: 312 }],
+    [{ x: 796, y: 300 }, { x: 664, y: 312 }],
+    [{ x: 400, y: 596 }, { x: 412, y: 556 }],
+    [{ x: -20, y: -20 }, { x: 4, y: 4 }],
+  ]) {
+    const position = paneDragChipPosition(pointer, chip, bounds);
+    expect(position).toEqual(expected);
+    expect(position.x).toBeGreaterThanOrEqual(4);
+    expect(position.y).toBeGreaterThanOrEqual(4);
+    expect(position.x + chip.width).toBeLessThanOrEqual(bounds.width - 4);
+    expect(position.y + chip.height).toBeLessThanOrEqual(bounds.height - 4);
+  }
 });

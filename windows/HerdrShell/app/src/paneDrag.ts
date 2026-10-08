@@ -287,3 +287,13 @@ export class PaneDrag {
     if (this.value.phase === "dragging") this.setZone(this.value.keyboard ? this.raw : this.at(this.value.pointer!), true);
   }
 }
+
+// Pure placement policy shared with the Mac Shell: flip each overflowing axis, then inset.
+export function paneDragChipPosition(pointer: { x: number; y: number }, chip: { width: number; height: number }, bounds: { width: number; height: number }): { x: number; y: number } {
+  const offset = motion.chipOffset, inset = motion.zoneInset;
+  const x = pointer.x + offset, y = pointer.y + offset;
+  return {
+    x: Math.max(inset, x + chip.width > bounds.width - inset ? pointer.x - offset - chip.width : x),
+    y: Math.max(inset, y + chip.height > bounds.height - inset ? pointer.y - offset - chip.height : y),
+  };
+}
