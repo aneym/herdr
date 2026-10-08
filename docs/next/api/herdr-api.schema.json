@@ -12,6 +12,12 @@
             },
             "message": {
               "type": "string"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -1648,6 +1654,21 @@
           },
           "required": [
             "target"
+          ],
+          "type": "object"
+        },
+        "AgentRestartParams": {
+          "properties": {
+            "force": {
+              "default": false,
+              "type": "boolean"
+            },
+            "pane_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane_id"
           ],
           "type": "object"
         },
@@ -3348,6 +3369,7 @@
             },
             "flush": {
               "default": false,
+              "description": "Deliver held input despite a composer draft or quiet/settle window.\nWith `id`, deliver only that send and its FIFO predecessors, not successors.\nCaller-supplied delivery guards still enforce session identity and expiry.",
               "type": "boolean"
             },
             "id": {
@@ -6429,6 +6451,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/AgentResumeParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agent.restart",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentRestartParams"
             }
           },
           "required": [
@@ -11320,6 +11358,26 @@
                 "type",
                 "agent",
                 "argv"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "command_summary": {
+                  "type": "string"
+                },
+                "ok": {
+                  "type": "boolean"
+                },
+                "type": {
+                  "const": "agent_restarted",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "ok",
+                "command_summary"
               ],
               "type": "object"
             },
