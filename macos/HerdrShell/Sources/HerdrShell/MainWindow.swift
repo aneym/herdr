@@ -57,6 +57,8 @@ final class PaneHostView: NSView {
     }
 
     override func layout() {
+        // Before any pane box takes the new size: a drop still waiting on its reply ends first (see hostWillLayout).
+        paneDrag?.hostWillLayout(bounds.size)
         super.layout()
         guard area.width > 0, area.height > 0 else { return }
         let sx = bounds.width / area.width, sy = bounds.height / area.height
@@ -676,7 +678,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     func refreshHost(using forced: Snapshot.Layout? = nil, fromDrop: Bool = false) {
         if forced == nil, resizer.isBusy { return }
         // A pane drop waiting on its reply keeps the boxes, and the terminals' sizes, it had at the release; the
-        // snapshot stays buffered in the model until the drop ends. Titles and status still update.
+        // snapshot stays buffered in the model until the drop ends. Titles and status still update. A host resize or a
+        // press on the panes ends the drop first (PaneDrag.hostWillLayout, its mouse-down monitor).
         if forced == nil, paneDrag.holdsLayout { applyCaps(); return }
         guard let tab = state.selectedTab, let layout = forced ?? heldDropLayout(tab) ?? model.layout(forTab: tab), layout.tab_id == tab else { return }
         let previousLayout = shownLayout

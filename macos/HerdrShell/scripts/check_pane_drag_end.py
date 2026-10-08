@@ -26,10 +26,19 @@ The hook also holds a reply that is in until the check releases it, so the drop'
   8. A swap whose call was sent and whose reply is held, then another tab selected: the drop ends quietly (no
      cancel, no chip). The held reply is then delivered and ignored: selection, boxes, Shell focus, the server's
      layout and focus, and the calls sent are all unchanged.
+S10c (a host resize or a press on the panes ends a pending drop quietly first; the event is then handled against the
+flushed layout):
+  9. A swap applied on the server, its reply held, then the window resized: the drop ends quietly before any box
+     rescales, the buffered snapshot lays out at the new size with each terminal at its box, and the late reply is
+     ignored.
+ 10. The same pending swap, then a press where a's cap was drawn at the release: the drop ends quietly first, so the
+     press lands on the flushed layout (b's cap, after the swap) and drags b from the server's boxes. That drag drops
+     as usual and the first drop's late reply is ignored.
 Writes macos/HerdrShell/checks/PANE-DRAG-END.txt.
 """
 import json
 import pathlib
+import re
 import sys
 import time
 
@@ -256,6 +265,85 @@ def tab_switch_pending(ws, other, other_pane):
     D.close(tab)
 
 
+def pending_swap(ws, label):
+    """A fresh a | (b / c) tab; a swapped onto b with the call sent, the server applied, the reply held, the Shell frozen."""
+    tab, a, b, c, state = D.fresh(ws, label)
+    release = dict(D.pd(state)["boxes"])
+    D.hook("begin", pane=a)
+    D.hook("move", steps=1, **D.centre(release[b]))
+    D.wait(lambda s: D.zone_is(s, kind="centre", target=b))
+    old = D.rects(D.layout(a))
+    D.hook("hold-replies", on=True)
+    D.hook("drop")
+    D.wait(lambda s: D.rects(D.layout(a)) != old, timeout=5)
+    D.wait(lambda s: D.pd(s).get("replyHeld") is True, timeout=5)
+    time.sleep(0.6)  # the swap's snapshot reaches the Shell
+    state = S.state()
+    frozen_through(state, release, label)
+    D.hook("hold-replies", on=False)
+    return tab, a, b, c, state, release
+
+
+def late_reply_ignored(label, replies):
+    D.hook("send-reply")
+    state = D.wait(lambda s: (D.pd(s).get("replies") or {}).get("ignored", 0) > replies.get("ignored", 0), timeout=5)
+    got = D.pd(state).get("replies") or {}
+    D.check(f"{label}: the first drop's late reply is ignored", got.get("ignored") == replies.get("ignored", -1) + 1
+            and D.pd(state).get("replyHeld") is False, json.dumps([replies, got]))
+
+
+def resize_pending(ws):
+    tab, a, b, c, state, release = pending_swap(ws, "resize-pending")
+    replies = dict(D.pd(state).get("replies") or {})
+    size = state["host_size"]
+    # The window's frame as "{{x, y}, {w, h}}": narrow it, as a user's window resize would.
+    w, h = [float(v) for v in re.findall(r"-?[\d.]+", state["window_frame"])[2:4]]
+    S.cmd({"cmd": "frame", "w": int(w) - 120, "h": int(h)})
+    state = D.wait(lambda s: s["host_size"] != size and D.pd(s).get("phase") != "dropping", timeout=5)
+    D.check("resize-pending: the window resize ends the drop quietly, with no cancel and no chip",
+            state["host_size"] != size and D.pd(state).get("phase") == "idle" and D.pd(state).get("frozen") is False
+            and "cancel" not in active(state) and not (D.pd(state).get("chip") or {}).get("visible"),
+            json.dumps([size, state["host_size"], D.pd(state).get("phase"), D.pd(state).get("frozen"), active(state)]))
+    D.check("resize-pending: the buffered snapshot lays out at the new size", boxes_on_server(state, a),
+            json.dumps([D.pd(state).get("boxes"), D.host_rects(D.layout(a), state)]))
+    boxes, surfaces = D.pd(state).get("boxes") or {}, D.surfaces(state)
+    D.check("resize-pending: every terminal takes its box's width at the new size",
+            all(p in surfaces and abs(surfaces[p]["frame"][2] - boxes[p][2]) <= 2 for p in boxes),
+            json.dumps([{p: s.get("frame") for p, s in surfaces.items()}, boxes]))
+    late_reply_ignored("resize-pending", replies)
+    state = S.state()
+    D.check("resize-pending: the late reply moves no box", boxes_on_server(state, a) and D.idle(state),
+            json.dumps([D.pd(state).get("phase"), D.pd(state).get("boxes")]))
+    D.close(tab)
+
+
+def second_drag_pending(ws):
+    tab, a, b, c, state, release = pending_swap(ws, "second-drag")
+    replies = dict(D.pd(state).get("replies") or {})
+    # The hook presses the centre of a's cap as drawn now, at the release. After the swap b sits there.
+    D.hook("begin", pane=a)
+    state = D.wait(lambda s: D.pd(s).get("phase") in ("pressed", "lifted"), timeout=5)
+    D.check("second-drag: the press ends the pending drop quietly, with no cancel",
+            D.pd(state).get("frozen") is False and "cancel" not in active(state),
+            json.dumps([D.pd(state).get("phase"), D.pd(state).get("frozen"), active(state)]))
+    D.check("second-drag: the press lands on the flushed layout, so it drags b, from the server's boxes",
+            D.pd(state).get("source") == b and boxes_on_server(state, a),
+            json.dumps([D.pd(state).get("source"), D.pd(state).get("boxes"), D.host_rects(D.layout(a), state)]))
+    D.hook("move", steps=1, **D.centre(D.pd(state)["boxes"][c]))
+    D.wait(lambda s: D.zone_is(s, kind="centre", target=c))
+    old = D.rects(D.layout(a))
+    D.hook("drop")
+    state = D.wait(lambda s: D.idle(s) and D.rects(D.layout(a)) != old and boxes_on_server(s, a), timeout=5)
+    final = D.rects(D.layout(a))
+    D.check("second-drag: the second drop swaps b and c and ends on the server's layout",
+            D.idle(state) and final[b] == old[c] and final[c] == old[b] and boxes_on_server(state, a),
+            json.dumps([D.pd(state).get("phase"), old, final, D.pd(state).get("boxes")]))
+    late_reply_ignored("second-drag", replies)
+    D.check("second-drag: the late reply changes the server's layout no further", D.rects(D.layout(a)) == final,
+            json.dumps([final, D.rects(D.layout(a))]))
+    D.close(tab)
+
+
 def refused_drop(ws):
     tab, a, b, c, state = D.fresh(ws, "refused")
     D.motion("freeze", ms=0)
@@ -312,6 +400,8 @@ def main():
     disagreeing_snapshot(ws)
     snapshot_before_reply(ws)
     tab_switch_pending(ws, tab2, pane2)
+    second_drag_pending(ws)
+    resize_pending(ws)
     D.finish()
 
 

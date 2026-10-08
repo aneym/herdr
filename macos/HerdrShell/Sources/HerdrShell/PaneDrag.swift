@@ -36,6 +36,8 @@ final class PaneDrag: NSObject {
     /// meanwhile stay in the model (the newest wins) and only their caps apply. `frozenEpoch` tells whether one did.
     private(set) var holdsLayout = false
     private var frozenEpoch = 0
+    /// The host size at the release: a pending drop holds its boxes and terminal sizes at this size.
+    private var dropSize = CGSize.zero
     /// How long a sent drop waits for its reply, the same as the Windows Shell.
     static let replyTimeout: TimeInterval = 4
     private var pointer = CGPoint.zero, start = CGPoint.zero
@@ -100,8 +102,14 @@ final class PaneDrag: NSObject {
     }
     private func installMonitor() {
         if let monitor { NSEvent.removeMonitor(monitor) }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDragged, .leftMouseUp, .rightMouseDown, .rightMouseUp]) { [weak self] e in
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .leftMouseDragged, .leftMouseUp, .rightMouseDown, .rightMouseUp]) { [weak self] e in
             guard let self, let owner = self.owner, e.window === owner.window else { return e }
+            // A press on the panes ends a drop still waiting on its reply, quietly, before the window hit-tests it:
+            // the press then lands on the flushed layout, so a cap press drags from there and a terminal press focuses.
+            if e.type == .leftMouseDown {
+                if self.phase == .dropping, owner.host.bounds.contains(owner.host.convert(e.locationInWindow, from: nil)) { self.cancel() }
+                return e
+            }
             if e.type == .keyDown { return self.handleKey(e) ? nil : e }
             if e.type == .rightMouseDown && self.phase != .idle { self.cancel(); return nil }
             if e.type == .rightMouseUp && self.phase == .cancelling { return nil }
@@ -234,6 +242,7 @@ final class PaneDrag: NSObject {
         motions.removeAll { $0.pane == source && $0.kind == "fade" }
         lastZone = z; phase = .dropping
         holdsLayout = true; frozenEpoch = owner.state.selectedTab.map { owner.model.snapshotEpoch(for: $0) } ?? 0
+        dropSize = owner.host.bounds.size
         updateSidebarIndicator()
         let method: String, p: [String: Any]
         switch z {
@@ -404,6 +413,13 @@ final class PaneDrag: NSObject {
     func layoutDidApply() {
         draw()
         if phase == .lifted { requestDryRun() }
+    }
+    /// The host is about to lay out at `size`. A window resize or a sidebar or side column change while a drop waits on
+    /// its reply ends the drop quietly first, so the release-time boxes never rescale and no terminal resizes while
+    /// they hold: the buffered snapshot is laid out, at the new size, instead.
+    func hostWillLayout(_ size: CGSize) {
+        guard phase == .dropping, holdsLayout, size != dropSize else { return }
+        cancel()
     }
     func hostSizeChanged() {
         if let owner, owner.host.bounds.size != lastHostSize {
