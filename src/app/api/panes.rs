@@ -1034,6 +1034,8 @@ impl App {
             .is_some_and(|layout| old.layout.same_tree(layout))
         {
             Some(PanePlaceReason::NoChange)
+        } else if same_tab && target.is_none() && old.layout.pane_count() == 1 {
+            Some(PanePlaceReason::NoChange)
         } else if candidate.is_none() {
             Some(PanePlaceReason::NotTiled)
         } else {

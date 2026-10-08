@@ -172,6 +172,11 @@ fn run_pane_place_scenario(mut app: App) {
     assert_eq!(clamped, upper, "out-of-range size uses the documented upper clamp");
     for workspace in &app.state.workspaces { workspace.assert_invariants_for_test(); }
 
+    let lone = place(&mut app, json!({"pane_id": ids.y, "target": {"type": "tab", "tab_id": ids.tab3}, "side": "left"}));
+    assert_eq!(lone["changed"], false);
+    assert_eq!(lone["reason"], "no_change");
+    for workspace in &app.state.workspaces { workspace.assert_invariants_for_test(); }
+
     let before = layout_of(&mut app, &ids.a);
     assert_eq!(before["area"], rect(0, 0, 120, 40));
     assert_eq!(rect_of(&before, &ids.a), rect(0, 0, 60, 40));
