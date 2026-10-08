@@ -548,3 +548,49 @@ mod action_tests {
         }
     }
 }
+
+/// Stage dropped images through the same PNG host upload as clipboard images.
+/// Directories (even ones named *.png) and ordinary files remain path drops.
+#[tauri::command]
+pub fn drop_read_image(path: String) -> Result<Option<String>, String> {
+    let path = std::path::Path::new(&path);
+    let extension = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !matches!(
+        extension.as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp"
+    ) {
+        return Ok(None);
+    }
+    let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+    if metadata.is_dir() {
+        return Ok(None);
+    }
+    if metadata.len() > 16 * 1024 * 1024 {
+        return Err("Dropped image exceeds 16 MiB".into());
+    }
+    #[cfg(windows)]
+    {
+        let mut reader = image::ImageReader::open(path).map_err(|e| e.to_string())?;
+        let mut limits = image::Limits::default();
+        limits.max_alloc = Some(64 * 1024 * 1024);
+        reader.limits(limits);
+        let image = reader.decode().map_err(|e| e.to_string())?;
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .map_err(|e| e.to_string())?;
+        let bytes = bytes.into_inner();
+        if bytes.is_empty() || bytes.len() > 16 * 1024 * 1024 {
+            return Err("Dropped image PNG exceeds 16 MiB".into());
+        }
+        Ok(Some(STANDARD.encode(bytes)))
+    }
+    #[cfg(not(windows))]
+    {
+        Err("Image drops are available on Windows only".into())
+    }
+}

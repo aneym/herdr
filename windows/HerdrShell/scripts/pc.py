@@ -508,7 +508,7 @@ def cmd_ctl(args):
     except json.JSONDecodeError as e:
         print(f"bad json: {e}", file=sys.stderr)
         sys.exit(2)
-    if isinstance(obj, dict) and obj.get("cmd") in {"open_detail", "row_menu", "paste_image"} and not getattr(args, "test_window", False):
+    if isinstance(obj, dict) and obj.get("cmd") in {"open_detail", "row_menu", "paste_image", "drop_paths"} and not getattr(args, "test_window", False):
         print("command requires --test-window", file=sys.stderr)
         sys.exit(2)
     bootstrap()

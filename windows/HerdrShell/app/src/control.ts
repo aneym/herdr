@@ -1,4 +1,6 @@
 import { flushSync } from "react-dom";
+import { handleDropPaths } from "./dropPaths";
+import type { DropPaths } from "./dropPaths";
 import { showUpdateError } from "./UpdatePill";
 import { bridge } from "./bridge";
 import type { DocsState } from "./docs";
@@ -24,6 +26,7 @@ export function installControl(get: () => ControlState): () => void {
   };
   const focused = () => { const pane = get().focused; if (!pane) throw new Error("No focused pane"); return pane; };
   watch<string>("type", async text => { await focused().type(text); }, false, false);
+  watch<DropPaths>("drop_paths", payload => handleDropPaths(payload, get().panes));
   watch("read", async () => focused().read(), true);
   watch<{ action?: "apply" | "rollback" } | null>("update", async payload => {
     if (payload?.action === "apply" || payload?.action === "rollback") {

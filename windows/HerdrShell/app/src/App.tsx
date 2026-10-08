@@ -19,6 +19,7 @@ import DocPanel, { useDocs } from "./DocPanel";
 import { useDesk } from "./docs";
 import type { DocsState } from "./docs";
 import type { PaneController } from "./PaneTerm";
+import { installPathDrops } from "./dropPaths";
 import { installControl } from "./control";
 import { PENDING_LIFETIME_MS, pinMovePlan } from "./pinDrag";
 import type { PendingOrders } from "./pinDrag";
@@ -53,6 +54,7 @@ export default function App() {
     if (!control.current) throw new Error("No active machine view");
     return control.current();
   }), []);
+  useEffect(() => installPathDrops(() => control.current?.().panes ?? []), []);
   const current = useRef({ machines, active });
   current.current = { machines, active };
   const chooseMachine = useCallback((name: string) => {

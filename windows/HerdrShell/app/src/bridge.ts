@@ -64,6 +64,7 @@ export const bridge = {
   },
   openUrl: (url: string) => invoke<void>("open_url", { url }),
   clipboardRead: () => invoke<string>("clipboard_read"),
+  dropReadImage: (path: string) => invoke<string | null>("drop_read_image", { path }),
   clipboardReadImage: () => invoke<string | null>("clipboard_read_image"),
   clipboardWrite: (text: string) => invoke<void>("clipboard_write", { text }),
   info: () => invoke<{ version: string; commit: string; built_at: string }>("app_info"),

@@ -339,6 +339,12 @@ mod imp {
                     Err(e) => json!({"ok": false, "error": e.to_string()}),
                 }
             }
+            "drop_paths" => {
+                if !test_window {
+                    return json!({"ok": false, "error": "drop_paths requires --test-window"});
+                }
+                forward_cmd(app, "drop_paths", req)
+            }
             "read" => read_cmd(app),
             "appearance" => {
                 let theme = match req.get("mode").and_then(|m| m.as_str()).unwrap_or("system") {

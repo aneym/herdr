@@ -120,6 +120,11 @@ fn ctl_paste_image_result(result: serde_json::Value) -> Result<(), String> {
     control::deliver_result("paste_image", result)
 }
 
+#[tauri::command]
+fn ctl_drop_paths_result(result: serde_json::Value) -> Result<(), String> {
+    control::deliver_result("drop_paths", result)
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -152,6 +157,7 @@ fn main() {
             ctl_drag_divider_result,
             ctl_link_click_result,
             ctl_copy_selection_result,
+            ctl_drop_paths_result,
             bridge::machines_list,
             bridge::snapshot,
             bridge::api_request,
@@ -166,6 +172,7 @@ fn main() {
             bridge::open_url,
             bridge::clipboard_read,
             bridge::clipboard_read_image,
+            bridge::drop_read_image,
             bridge::clipboard_write
         ])
         .setup(|app| {

@@ -10,6 +10,7 @@ import type { LinkRegion } from "./links";
 import type { Mode } from "./bridge";
 import type { Pane } from "./model";
 import { paste, pasteImage, controlKey, handleKey } from "./keys";
+import { droppedText } from "./dropPaths";
 import { PaneCopy, ordered } from "./termCopy";
 import type { Cell } from "./termCopy";
 import { terminalFont } from "./tokens";
@@ -22,6 +23,7 @@ export interface PaneController {
   chat?: (mode: "terminal" | "chat") => Promise<{ ok: boolean; items: number }>;
   toggleChat?: () => void;
   info: () => { pane_id: string; terminal_id: string; mode: "attach" | "observe" | "closed"; cols: number; rows: number; focused: boolean; background?: string };
+  dropPaths?: (paths: readonly string[]) => Promise<void>;
   type: (text: string) => Promise<void>; read: () => string; key: (key: string) => Promise<string | null>; wheel: (dy: number) => void; focus: () => void;
 }
 export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, register, grabbable, onCapPointerDown, settling, capLabel }: { capLabel?: ReactNode; grabbable?: boolean; onCapPointerDown?: (event: ReactPointerEvent<HTMLDivElement>) => void; settling?: boolean; pane: Pane; machine: string; focused: boolean; onFocus: (id: string) => void; shortcut: (event: KeyboardEvent) => boolean; register: (id: string, value: PaneController | null) => void }) {
@@ -206,6 +208,16 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
           return { text, copied };
         } finally { try { term.clearSelection(); } finally { hookCopier.clear(); } }
       }),
+      dropPaths: async paths => {
+        const text = await droppedText(paths, machine);
+        capturePending = [];
+        try {
+          live.current.onFocus(pane.pane_id);
+          term.focus();
+          term.paste(text);
+          await Promise.all(capturePending);
+        } finally { capturePending = null; }
+      },
       type: send,
       pasteImage: image => pasteImage(term, image, machine),
       read: () => Array.from({ length: term.rows }, (_, i) => term.buffer.active.getLine(term.buffer.active.viewportY + i)?.translateToString(true) ?? "").join("\n"),
@@ -239,7 +251,7 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
   }, [machine, pane.pane_id, pane.terminal_id, register]);
   useEffect(() => { if (!settling) fitNow.current(); }, [settling]);
   useEffect(() => { if (focused) host.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }, [focused]);
-  return <div ref={element} className={`pane ${bell ? "bell" : ""}`} onMouseDown={() => { live.current.onFocus(pane.pane_id); host.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }}>
+  return <div ref={element} data-pane-id={pane.pane_id} className={`pane ${bell ? "bell" : ""}`} onMouseDown={() => { live.current.onFocus(pane.pane_id); host.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }}>
     <div className={`pane-cap ${grabbable ? "grab" : ""}`} onPointerDown={event => { if (!(event.target as Element).closest("button")) onCapPointerDown?.(event); }}>{capLabel ?? <><Status status={pane.agent_status || "unknown"} /><span className="label">{[pane.agent, pane.terminal_title_stripped || pane.title].filter(Boolean).join(" · ")}</span></>}{state === "observe" && <button onClick={() => takeover.current()}>Take control</button>}</div>
     <div className="term-host" ref={host} />
     {state === "closed" && <button className="disconnected" title={notice} onClick={() => reconnect.current()}>Disconnected — click to reconnect</button>}
