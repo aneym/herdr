@@ -172,6 +172,7 @@ impl Files {
             .checked_add(1)
             .ok_or("file request ids exhausted")?;
         request["id"] = json!(state.next_id);
+        let timeout = if request["op"] == "factory" { 25 } else { 10 };
         let result = match state.helper.as_ref() {
             Some(helper) => helper
                 .requests
@@ -180,7 +181,7 @@ impl Files {
                 .and_then(|_| {
                     helper
                         .responses
-                        .recv_timeout(Duration::from_secs(10))
+                        .recv_timeout(Duration::from_secs(timeout))
                         .map_err(|e| format!("helper response: {e}"))
                 })
                 .and_then(|r| r),
@@ -489,14 +490,19 @@ mod tests {
                 std::fs::create_dir_all(home.join(".agent-rails/agents").join(name))?;
             }
             assert_eq!(
-                local_request(&home, &json!({"op":"list","path":"~/.agent-rails/agents"}))?["names"],
+                local_request(&home, &json!({"op":"list","path":"~/.agent-rails/agents"}))?
+                    ["names"],
                 json!(["frank", "recruiter"])
             );
             assert_eq!(
                 local_request(&home, &json!({"op":"list","path":"~/.agent-rails/none"}))?["names"],
                 json!([])
             );
-            assert!(local_request(&home, &json!({"op":"list","path":"~/.agent-rails/../outside"})).is_err());
+            assert!(local_request(
+                &home,
+                &json!({"op":"list","path":"~/.agent-rails/../outside"})
+            )
+            .is_err());
             assert!(local_request(&home, &json!({"op":"list","path":path})).is_err());
             assert_eq!(
                 local_request(&home, &json!({"op":"stat","path":path}))?["exists"],
@@ -557,5 +563,41 @@ mod tests {
         let result = run();
         std::fs::remove_dir_all(&home)?;
         result
+    }
+}
+
+#[tauri::command]
+pub async fn factory_snapshot(
+    files: State<'_, Files>,
+    machines: State<'_, Machines>,
+    machine: String,
+) -> Result<Value, String> {
+    if machines.is_local(&machine)? {
+        return Err("Factory home unavailable on local Windows host".into());
+    }
+    let files = files.inner().clone();
+    let machines = machines.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        files.request(&machines, &machine, json!({"op":"factory"}))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod factory_tests {
+    #[test]
+    fn fixed_host_bundle_boundary() {
+        let status = std::process::Command::new("python3")
+            .args([
+                "-I",
+                concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/src/remote_helper_factory_test.py"
+                ),
+            ])
+            .status()
+            .expect("Python host helper tests launch");
+        assert!(status.success(), "Factory host protocol floor failed");
     }
 }

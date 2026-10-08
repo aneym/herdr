@@ -79,6 +79,10 @@
   --shell-type-size8: 8px;
   --shell-type-size8_5: 8.5px;
   --shell-type-size12_5: 12.5px;
+  --shell-type-factory-title: 18px;
+  --shell-type-factory-body: 12px;
+  --shell-type-factory-section: 13px;
+  --shell-type-factory-detail: 11px;
   --shell-space-detail-width: 340px;
   --shell-space-detail-padding: 12px;
   --shell-space-detail-gap: 14px;
@@ -147,6 +151,12 @@
   --shell-space-chat-composer-x: 14px;
   --shell-space-chat-composer-top: 12px;
   --shell-space-chat-composer-bottom: 10px;
+  --shell-space-factory-padding: 20px;
+  --shell-space-factory-gap: 22px;
+  --shell-space-factory-row-gap: 8px;
+  --shell-space-factory-detail-gap: 4px;
+  --shell-space-factory-bar-width: 140px;
+  --shell-space-factory-label-width: 22px;
   --shell-radius-detail-button: 5px;
   --shell-radius-row: 4px;
   --shell-radius-control: 6px;

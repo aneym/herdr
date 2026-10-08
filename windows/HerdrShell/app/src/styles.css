@@ -188,3 +188,23 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 }
 
 .tab-row.pane-drop-fill { background: color-mix(in srgb, var(--shell-accent) calc(var(--shell-motion-zone-fill-alpha-dark) * 100%), transparent); }
+/* Factory replaces the pane surface, preserving its mounted terminals. */
+.factory-pane-host { display: contents; }
+.factory-pane-host[hidden] { display: none; }
+.factory-view { flex: 1; overflow: auto; min-width: 0; padding: var(--shell-space-factory-padding); background: var(--shell-bg); color: var(--shell-text); font: var(--shell-type-factory-body) var(--shell-font-mono); }
+.factory-view header, .factory-row, .factory-detail, .factory-bar-row { display: flex; align-items: baseline; gap: var(--shell-space-factory-row-gap); }
+.factory-view header { justify-content: space-between; }
+.factory-view h1 { font: 600 var(--shell-type-factory-title) var(--shell-font-ui); margin: 0; }
+.factory-view h2 { font: 600 var(--shell-type-factory-section) var(--shell-font-mono); margin: 0 0 var(--shell-space-factory-row-gap); padding-bottom: var(--shell-space-factory-row-gap); border-bottom: 1px solid var(--shell-line); }
+.factory-view section { margin-top: var(--shell-space-factory-gap); }
+.factory-view p, .factory-detail, .factory-view header span, .factory-bar-row { color: var(--shell-muted); }
+.factory-detail { font-size: var(--shell-type-factory-detail); margin-bottom: var(--shell-space-factory-row-gap); }
+.factory-trailing { margin-left: auto; }
+.factory-dim { opacity: .4; }
+.factory-pool { margin-bottom: var(--shell-space-factory-row-gap); }
+.factory-bar-row > span:first-child { width: var(--shell-space-factory-label-width); }
+.factory-bar-row meter { width: var(--shell-space-factory-bar-width); accent-color: var(--shell-text); }
+.factory-route { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--shell-space-factory-row-gap); border: 0; background: transparent; color: inherit; font: inherit; padding: var(--shell-space-factory-detail-gap) 0; cursor: pointer; }
+.factory-chip { border: 1px solid var(--shell-line); border-radius: var(--shell-radius-row); padding: 0 var(--shell-space-factory-detail-gap); }
+.tone-amber { color: var(--shell-warn); }
+.tone-red { color: var(--shell-bad); }

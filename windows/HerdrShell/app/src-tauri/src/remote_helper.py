@@ -6,6 +6,9 @@ import stat
 import sys
 import re
 import subprocess
+import time
+import urllib.request
+import urllib.parse
 
 HOME = os.path.expanduser("~")
 ROOTS = [os.path.realpath(os.path.join(HOME, suffix)) for suffix in
@@ -48,8 +51,111 @@ def metadata(info):
             "inode": info.st_ino}
 
 
+FACTORY_CAP = 1048576
+FACTORY_CACHE = {}
+
+
+def factory_cached(key, interval, load):
+    now = time.monotonic()
+    previous = FACTORY_CACHE.get(key)
+    if previous is not None and now - previous[0] < interval:
+        return previous[1]
+    try:
+        value = load()
+    except (OSError, ValueError):
+        value = None
+    FACTORY_CACHE[key] = (now, value)
+    return value
+
+
+def factory_pools(url):
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in ("http", "https") or parsed.hostname not in ("127.0.0.1", "localhost") or parsed.username or parsed.password:
+        raise ValueError("pools URL not allowed")
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            raise ValueError("pools redirect not allowed")
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+    with opener.open(urllib.request.Request(url, method="GET"), timeout=5) as response:
+        data = response.read(FACTORY_CAP + 1)
+    if len(data) > FACTORY_CAP:
+        raise ValueError("pools response too large")
+    return json.loads(data)
+
+
+def factory_file(path):
+    try:
+        with open(path, "rb") as source:
+            data = source.read(FACTORY_CAP + 1)
+        return json.loads(data) if len(data) <= FACTORY_CAP else None
+    except (OSError, ValueError):
+        return None
+
+
+def factory_exec(argv):
+    try:
+        result = subprocess.run(argv, capture_output=True, text=True, timeout=5)
+        return (result.stdout.strip() or result.stderr.strip()) if result.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def factory_alive(pid):
+    if type(pid) is not int or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def factory_bundle():
+    # Fixed host-owned inputs only; client fields are never consulted.
+    def source(key, default):
+        return os.path.expanduser(os.environ.get(key, "").strip() or default)
+    paths = {
+        "overlay": source("FACTORY_OVERLAY", HOME + "/.agent-rails/herdr/overlay.json"),
+        "boxes": source("FACTORY_BOXES", HOME + "/.agent-rails/factory/boxes.json"),
+        "poolState": source("FACTORY_POOLSTATE", HOME + "/.agent-rails/factory/state/pool.json"),
+        "disk": source("FACTORY_DISK", HOME + "/.agent-rails/fleet-disk-watch/state.json"),
+        "routing": source("FACTORY_ROUTING", HOME + "/.agent-lb/managed/coding-agents/routing-table.json"),
+        "decider": "/Volumes/StudioExt/repos/agent-lb/clients/open-factory/open_factory/decider.json",
+    }
+    bundle = {key: factory_cached(key, 1 if key == "overlay" else 15, lambda path=path: factory_file(path)) for key, path in paths.items()}
+    directory = source("FACTORY_WORKFLOWS_DIR", HOME + "/.agent-rails/workflows/tabs")
+    def read_flights():
+        try:
+            flights = []
+            for name in os.listdir(directory):
+                if not name.endswith(".json"):
+                    continue
+                row = factory_file(os.path.join(directory, name))
+                if isinstance(row, dict) and (factory_alive(row.get("runner_pid")) or factory_alive(row.get("child_pid"))):
+                    flights.append(dict(row, run_id=row.get("run_id") or name))
+            return flights
+        except OSError:
+            return None
+    bundle["flights"] = factory_cached("flights", 5, read_flights)
+    repo = source("FACTORY_REPO", "/Volumes/StudioExt/repos/agent-rails")
+    bundle["landed"] = factory_cached("landed", 60, lambda: factory_exec(["/usr/bin/git", "--no-pager", "-C", repo, "log", "origin/main", "--since=midnight", "--format=%h%x09%ct%x09%s"]))
+    bundle["picks"] = {name: factory_cached("pick:" + name, 60, lambda name=name: factory_exec([HOME + "/.local/bin/route", "pick", name])) for name in ("implement", "mechanical")}
+    try:
+        interval = float(os.environ.get("FACTORY_POOLS_INTERVAL", "60"))
+        if not 0 < interval < float("inf"):
+            interval = 60
+    except ValueError:
+        interval = 60
+    bundle["pools"] = factory_cached("pools", interval, lambda: factory_pools(source("FACTORY_POOLS_URL", "http://127.0.0.1:2455/api/pools")))
+    bundle["poolsAgeSeconds"] = max(0, time.monotonic() - FACTORY_CACHE["pools"][0])
+    bundle["poolsInterval"] = interval
+    return bundle
+
+
 def request(req):
     op = req.get("op")
+    if op == "factory":
+        return factory_bundle()
     if op == "action":
         verb, args = req.get("verb"), req.get("args")
         if verb not in ("park", "unpark", "approve") or not isinstance(args, list) or not args:

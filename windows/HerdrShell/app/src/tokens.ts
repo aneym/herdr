@@ -58,6 +58,10 @@ export const type = {
   size8: 8,
   size8_5: 8.5,
   size12_5: 12.5,
+  factoryTitle: 18,
+  factoryBody: 12,
+  factorySection: 13,
+  factoryDetail: 11,
 } as const;
 
 export const space = {
@@ -129,6 +133,12 @@ export const space = {
   chatComposerX: 14,
   chatComposerTop: 12,
   chatComposerBottom: 10,
+  factoryPadding: 20,
+  factoryGap: 22,
+  factoryRowGap: 8,
+  factoryDetailGap: 4,
+  factoryBarWidth: 140,
+  factoryLabelWidth: 22,
 } as const;
 
 export const radius = {

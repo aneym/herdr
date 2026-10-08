@@ -112,6 +112,7 @@ fn main() {
             files::file_read,
             files::remote_home,
             files::file_list,
+            files::factory_snapshot,
             ctl_read_result,
             ctl_motion_result,
             ctl_ui_result,

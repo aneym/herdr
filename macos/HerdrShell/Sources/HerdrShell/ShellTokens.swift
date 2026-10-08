@@ -39,6 +39,10 @@ enum ShellType {
     static let size8: CGFloat = 8
     static let size8_5: CGFloat = 8.5
     static let size12_5: CGFloat = 12.5
+    static let factoryTitle: CGFloat = 18
+    static let factoryBody: CGFloat = 12
+    static let factorySection: CGFloat = 13
+    static let factoryDetail: CGFloat = 11
 }
 
 enum ShellSpace {
@@ -110,6 +114,12 @@ enum ShellSpace {
     static let chatComposerX: CGFloat = 14
     static let chatComposerTop: CGFloat = 12
     static let chatComposerBottom: CGFloat = 10
+    static let factoryPadding: CGFloat = 20
+    static let factoryGap: CGFloat = 22
+    static let factoryRowGap: CGFloat = 8
+    static let factoryDetailGap: CGFloat = 4
+    static let factoryBarWidth: CGFloat = 140
+    static let factoryLabelWidth: CGFloat = 22
 }
 
 enum ShellRadius {

@@ -45,6 +45,7 @@ export interface ActionContext {
   select: (id: string, stepping?: boolean) => void; focus: (id: string) => void;
   created: (tabId: string, paneId: string) => void;
   rename: (id: string) => void; switcher: (mode?: "switcher" | "search" | "goto") => void; toggleSidebar: () => void;
+  toggleFactory?: () => void;
   error: (error: unknown) => void;
   navigation?: SidebarNavigation; attentionTrail?: readonly string[];
   label?: string; tabId?: string;
@@ -66,7 +67,8 @@ export async function runAction(action: Action, ctx: ActionContext): Promise<voi
     const tab = ctx.snapshot.tabs?.find(t => t.tab_id === ctx.selected);
     const pane = () => { if (!ctx.focused) throw new Error("No focused pane"); return ctx.focused; };
     const api = (method: string, params: unknown) => ctx.api(ctx.machine, method, params);
-    if (action === "toggle_area_mode") ctx.navigation?.changeMode(ctx.navigation.mode === "areas" ? "spaces" : "areas");
+    if (action === "open_factory") ctx.toggleFactory?.();
+    else if (action === "toggle_area_mode") ctx.navigation?.changeMode(ctx.navigation.mode === "areas" ? "spaces" : "areas");
     else if (/^filter_[1-6]$/.test(action)) ctx.navigation?.changeChip((["all", "needs", "scoping", "building", "review", "use"] as AreaChip[])[Number(action.slice(7)) - 1]);
     else if (/^goto_space_[1-9]$/.test(action)) {
       const space = ctx.rows.filter(r => r.kind === "space" && !r.hidden)[Number(action.slice(11)) - 1];

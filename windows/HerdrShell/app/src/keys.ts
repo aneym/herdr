@@ -1,6 +1,6 @@
 export type Action = "move_pane_mode" | "new_tab" | "close_pane" | "split_right" | "split_down"
   | "focus_pane_left" | "focus_pane_right" | "focus_pane_up" | "focus_pane_down"
-  | "toggle_docs" | "zoom_pane" | "rename_tab" | "switcher" | "toggle_sidebar" | "next_attention"
+  | "open_factory" | "toggle_docs" | "zoom_pane" | "rename_tab" | "switcher" | "toggle_sidebar" | "next_attention"
   | "next_machine" | "prev_machine" | "next_tab" | "prev_tab" | "next_pane" | "prev_pane" | `select_tab_${number}` | "toggle_area_mode" | `filter_${number}` | `goto_space_${number}`
   | "agent_list_up" | "agent_list_down" | "attention_jump" | "search" | "goto";
 export interface KeyEvent { key: string; code?: string; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean }
@@ -24,7 +24,7 @@ export function actionFor(event: KeyEvent): Action | null {
     if (event.code === "BracketRight") return "next_machine";
     if (key === "[" || key === "{") return "prev_machine";
     if (key === "]" || key === "}") return "next_machine";
-    return ({ t: "new_tab", w: "close_pane", z: "zoom_pane", p: "switcher", a: "next_attention", d: "toggle_docs", o: "attention_jump", k: "search", g: "goto" } as const)[key as "t"] ?? null;
+    return ({ f: "open_factory", t: "new_tab", w: "close_pane", z: "zoom_pane", p: "switcher", a: "next_attention", d: "toggle_docs", o: "attention_jump", k: "search", g: "goto" } as const)[key as "t"] ?? null;
   }
   if (alt && !ctrl) {
     if (shift) return key === "=" || key === "+" ? "split_right" : key === "-" || key === "_" ? "split_down" : null;
