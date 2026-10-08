@@ -101,6 +101,7 @@ fn pane_drag_resize_reissues_same_zone_dry_run() {
 #[test]
 fn pane_drag_output_patch_recomposes_ghost_corners() {
     let mut state = three_pane_state(true);
+    state.config.reduce_motion = true;
     start(&mut state, B);
     let ghost = state
         .pane_drag

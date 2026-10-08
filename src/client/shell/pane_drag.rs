@@ -540,11 +540,17 @@ impl ClientShellState {
                 .as_ref()
                 .map(|p| p.source.pane_id.clone())
                 .unwrap_or_default();
-            self.push_endpoint_method_with_kind(
+            if !self.push_endpoint_method_with_kind(
                 method,
                 PendingEndpointKind::PaneDragDrop { source_pane_id },
                 outcome,
-            );
+            ) {
+                outcome.repaint |= self.user_cancel_pane_drag();
+                return;
+            }
+        } else {
+            outcome.repaint |= self.user_cancel_pane_drag();
+            return;
         }
         if let Some(p) = self.pane_drag.as_mut() {
             p.committed = true;

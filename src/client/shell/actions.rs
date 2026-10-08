@@ -850,7 +850,7 @@ impl ClientShellState {
                     .as_ref()
                     .is_some_and(|p| p.committed && p.source.pane_id == *source_pane_id)
             {
-                return (self.user_cancel_pane_drag(), Vec::new());
+                self.user_cancel_pane_drag();
             }
         }
         if let PendingEndpointKind::PaneDragDryRun {
