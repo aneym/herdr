@@ -218,7 +218,6 @@ impl ClientShellState {
             outcome.repaint = true;
             return;
         }
-        let drawn = self.drawn_ghost();
         let Some(preview) = self.pane_drag.as_mut() else {
             return;
         };
@@ -317,6 +316,7 @@ impl ClientShellState {
         row: Option<Rect>,
         outcome: &mut ClientShellInput,
     ) {
+        let drawn = self.drawn_ghost();
         let Some(ClientChromeDrag::Pane {
             source_pane_id,
             origin_tab_id,
