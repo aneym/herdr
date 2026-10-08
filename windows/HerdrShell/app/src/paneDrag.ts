@@ -19,6 +19,8 @@ type Placement = { changed: boolean; placed_rect?: Rect };
 type DropReply = { place?: DropResult; swap?: DropResult; move_result?: DropResult; changed?: boolean } | null | undefined;
 type DropResult = { changed: boolean; layout?: Layout; target_layout?: Layout; source_layout?: Layout | null };
 const zoneKey = (zone: PaneZone | null) => JSON.stringify(zone);
+const geometry = (layout: Layout) => JSON.stringify([layout.area, layout.zoomed ?? false, [...layout.panes].sort((a, b) => a.pane_id < b.pane_id ? -1 : 1).map(p => [p.pane_id, p.rect])]);
+const sameGeometry = (a: Layout, b: Layout) => geometry(a) === geometry(b);
 export function canDragPane(layout: Layout | undefined, supported: boolean): boolean { return supported && !!layout && !layout.zoomed && layout.panes.length >= 2; }
 export async function probePlace(machine: string, paneId: string): Promise<boolean | null> {
   try { await bridge.api(machine, "pane.place", { pane_id: paneId, target: { type: "pane", pane_id: paneId }, side: "right", dry_run: true }); return true; }
@@ -44,7 +46,10 @@ export class PaneDrag {
   // The newest snapshot layout, and the layouts a drop's reply returned with the snapshot layout they replace. The view
   // shows the reply until the next snapshot arrives, which then wins as it is, without motion.
   private latest?: Layout;
-  private settled?: { base: Layout | undefined; layouts: Layout[] };
+  // `from` is the tab's layout at the release, when the drop's own snapshot came first and already shows the reply:
+  // the panes then settle from where they stood at the drop. `id` marks each reply so the view starts its settle once.
+  private settled?: { base: Layout | undefined; layouts: Layout[]; from?: Layout; id: number };
+  private settles = 0;
   constructor(private machine: string, private options: { onChange?: (state: PaneDragState) => void; onError?: (error: unknown) => void } = {}) {}
   get state(): PaneDragState { return this.value; }
   private emit(patch: Partial<PaneDragState>) {
@@ -128,7 +133,7 @@ export class PaneDrag {
     if (zone.kind === "centre") { method = "pane.swap"; params = { source_pane_id: source, target_pane_id: zone.target }; }
     else if (zone.kind === "new_tab_in") { method = "pane.move"; params = { pane_id: source, destination: { type: "new_tab", workspace_id: zone.workspace_id }, focus: true }; }
     else { method = "pane.place"; params = { ...(zone.kind === "into_tab" ? { pane_id: source, target: { type: "tab", tab_id: zone.tab_id }, side: "right" } : this.place(zone)), focus: true, dry_run: false }; }
-    const generation = ++this.generation;
+    const generation = ++this.generation, before = this.input!.layout;
     this.emit({ phase: "dropped", pending: false, keyboard: false });
     // No reply in time: the server may still have applied the drop, so end without a rollback.
     this.timer = setTimeout(() => { if (generation === this.generation) this.finish("quiet"); }, 4000);
@@ -138,7 +143,8 @@ export class PaneDrag {
       if (answer?.changed === false || reply?.changed === false) { this.finish("cancel"); return; }
       if (!answer) { this.finish("quiet"); return; }
       const layouts = [answer.layout, answer.target_layout, answer.source_layout].filter((l): l is Layout => !!l);
-      this.settled = { base: this.latest, layouts };
+      const shown = this.latest, replied = layouts.find(l => l.tab_id === shown?.tab_id);
+      this.settled = { base: shown, layouts, id: ++this.settles, ...(shown && replied && sameGeometry(shown, replied) ? { from: before } : {}) };
       this.finish("settle");
     }).catch(error => {
       if (generation !== this.generation) return;
@@ -156,11 +162,19 @@ export class PaneDrag {
     if (!layout || !this.settled || this.settled.base !== layout) return layout;
     return this.settled.layouts.find(l => l.tab_id === layout.tab_id) ?? layout;
   }
+  /** Where a reply's settle starts when the drop's own snapshot already drew its layout; else the panes as shown. */
+  settleFrom(layout: Layout | undefined): { from?: Layout; id: number } {
+    const settled = this.settled;
+    if (!layout || !settled?.layouts.includes(layout)) return { id: settled?.id ?? 0 };
+    return { id: settled.id, ...(settled.from?.tab_id === layout.tab_id ? { from: settled.from } : {}) };
+  }
   /** Only a drop reply's layout settles; snapshots, pending drop or not, apply at once. */
   shouldAnimateLayout(layout: Layout | undefined): boolean { return !!layout && !!this.settled?.layouts.includes(layout); }
   layoutChanged(layout: Layout | undefined): void {
     this.latest = layout;
-    // A pending drop ends only with its reply or the timeout; snapshots meanwhile apply as they come.
+    // A pending drop ends only with its reply or the timeout; snapshots meanwhile apply as they come. Leaving its tab
+    // ends it quietly: the chip and ghost belong to that tab, and the server may still apply the drop.
+    if (this.value.phase === "dropped" && layout?.tab_id !== this.input!.layout.tab_id) { this.finish("quiet"); return; }
     if (this.value.phase === "idle" || this.value.phase === "dropped") return;
     if (!layout || layout.tab_id !== this.input!.layout.tab_id || !layout.panes.some(p => p.pane_id === this.value.source)) { this.cancel(); return; }
     if (JSON.stringify(layout.panes) === JSON.stringify(this.input!.layout.panes) && JSON.stringify(layout.area) === JSON.stringify(this.input!.layout.area) && layout.zoomed === this.input!.layout.zoomed) return;

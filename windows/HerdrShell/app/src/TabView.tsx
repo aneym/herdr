@@ -155,9 +155,11 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
   // As the Mac's PaneCap: the tab's pin sits on the top-right pane's cap only.
   const corner = boxes.reduce((best, b, i) => best < 0 || b.y < boxes[best].y - .5 || (Math.abs(b.y - boxes[best].y) <= .5 && b.x + b.width > boxes[best].x + boxes[best].width) ? i : best, -1);
   const tab = snapshot.tabs?.find(t => t.tab_id === selected);
+  const settleFrom = paneDrag.settleFrom(layout);
   return <main ref={host} className={`tab-view ${paneState?.phase === "dragging" ? "pane-dragging" : ""}`}>{panes.map((pane, index) => {
     const box = boxes[index];
-    return <PaneClip key={`${selected}:${pane.terminal_id}`} id={pane.pane_id} box={clipRect(box, size)} animateLayout={paneDrag.shouldAnimateLayout(layout)} lifted={paneState?.source === pane.pane_id && ["dragging", "dropped"].includes(paneState.phase)}>{settling => <PaneSurface settling={settling} grabbable={canDragPane(layout, supported)} onCapPointerDown={event => capPress(event, pane.pane_id, pane.title ?? pane.agent ?? "shell")} onError={onError} hasAgent={!!pane.agent || !!snapshot.agents?.some(a => a.pane_id === pane.pane_id && a.agent)} pane={pane} machine={machine} focused={focused === pane.pane_id} onFocus={onFocus} shortcut={shortcut} register={register} {...(index === corner && tab ? { pinned: tab.pin_index != null, onPin: () => pin(tab.tab_id, tab.pin_index == null) } : {})} />}</PaneClip>;
+    const fromRect = settleFrom.from?.panes.find(p => p.pane_id === pane.pane_id)?.rect;
+    return <PaneClip key={`${selected}:${pane.terminal_id}`} id={pane.pane_id} box={clipRect(box, size)} animateLayout={paneDrag.shouldAnimateLayout(layout)} settle={settleFrom.id} from={fromRect && settleFrom.from ? clipRect(scaleRect(fromRect, settleFrom.from.area, size.width, size.height), size) : undefined} lifted={paneState?.source === pane.pane_id && ["dragging", "dropped"].includes(paneState.phase)}>{settling => <PaneSurface settling={settling} grabbable={canDragPane(layout, supported)} onCapPointerDown={event => capPress(event, pane.pane_id, pane.title ?? pane.agent ?? "shell")} onError={onError} hasAgent={!!pane.agent || !!snapshot.agents?.some(a => a.pane_id === pane.pane_id && a.agent)} pane={pane} machine={machine} focused={focused === pane.pane_id} onFocus={onFocus} shortcut={shortcut} register={register} {...(index === corner && tab ? { pinned: tab.pin_index != null, onPin: () => pin(tab.tab_id, tab.pin_index == null) } : {})} />}</PaneClip>;
   })}{layout && lines.map(d => {
     const r = scaleRect({ x: d.vertical ? d.pos : d.splitRect.x, y: d.vertical ? d.splitRect.y : d.pos, width: d.vertical ? 0 : d.splitRect.width, height: d.vertical ? d.splitRect.height : 0 }, layout.area, size.width, size.height);
     // The 1 px gap between panes sits just before the line; the grab strip centres on it.
@@ -167,14 +169,17 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
 }
 
 // Animate the clip only: terminal content takes its final size without scaling glyphs.
-export function PaneClip({ id, box, lifted, animateLayout, children }: { id: string; box: Rect; lifted: boolean; animateLayout: boolean; children: (settling: boolean) => React.ReactNode }) {
+// A new `settle` with `from` (a drop reply whose layout was already drawn) starts the move from `from`.
+export function PaneClip({ id, box, lifted, animateLayout, settle = 0, from, children }: { id: string; box: Rect; lifted: boolean; animateLayout: boolean; settle?: number; from?: Rect; children: (settling: boolean) => React.ReactNode }) {
   const clip = useRef<HTMLDivElement>(null);
   const previous = useRef(box);
+  const lastSettle = useRef(settle);
   const [frame, setFrame] = useState(box);
   const [settling, setSettling] = useState(false);
   const [animate, setAnimate] = useState(false);
   useLayoutEffect(() => {
-    const old = previous.current; previous.current = box;
+    const fresh = settle !== lastSettle.current; lastSettle.current = settle;
+    const old = fresh && from ? from : previous.current; previous.current = box;
     if (JSON.stringify(old) === JSON.stringify(box)) return;
     if (!animateLayout) { setFrame(box); setAnimate(false); setSettling(false); return; }
     if (prefersReducedMotion()) {
@@ -187,6 +192,6 @@ export function PaneClip({ id, box, lifted, animateLayout, children }: { id: str
     const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => { setAnimate(true); setFrame(box); }); });
     const timer = setTimeout(() => setSettling(false), motion.settleMs + 50);
     return () => { cancelAnimationFrame(first); cancelAnimationFrame(second); clearTimeout(timer); };
-  }, [box.x, box.y, box.width, box.height]);
+  }, [box.x, box.y, box.width, box.height, settle]);
   return <div ref={clip} data-pane={id} className={`pane-box pane-clip ${lifted ? "lifted" : ""}`} onTransitionEnd={event => { if (event.target === event.currentTarget) setSettling(false); }} style={{ left: 0, top: 0, transform: `translate(${frame.x}px, ${frame.y}px)`, width: frame.width, height: frame.height, transition: animate ? transitionFor("settle") : undefined }}><div style={{ position: "relative", width: box.width, height: box.height }}>{children(settling)}</div></div>;
 }

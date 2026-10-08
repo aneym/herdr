@@ -138,3 +138,46 @@ it("ends a drop whose target was resized after its dry run on the reply, and tak
   expect(["a", "b", "c"].map(drawn)).toEqual(settled);
   expect(last()).toMatchObject({ phase: "idle", end: "settle" });
 });
+
+it("settles a swap from the pre-drop rects when its own snapshot lands before the reply, then takes a later snapshot without motion", async () => {
+  const render = await mount();
+  await dropAOn(B_CENTRE);
+  const swapped = tab(r(50, 0, 50, 20), r(0, 0, 50, 40), r(50, 20, 50, 20));
+  render(swapped);
+  await settleTimers(40);
+  expect(settles()).toEqual([]);
+  expect(drawn("a")).toEqual(["translate(500px, 0px)", "500px", "399px"]);
+  expect(last().phase).toBe("dropped");
+  await act(async () => { drop.resolve({ swap: { changed: true, source_pane_id: "a", focused_pane_id: "a", layout: swapped } }); });
+  expect(last()).toMatchObject({ phase: "idle", end: "settle" });
+  // The settle starts where the panes stood when the drop was released, not where the snapshot already put them.
+  expect(drawn("a")).toEqual(["translate(0px, 0px)", "499px", "800px"]);
+  await settleTimers(40);
+  expect(settles()).toEqual(["a", "b"]);
+  expect(drawn("a")).toEqual(["translate(500px, 0px)", "500px", "399px"]);
+  expect(chipSprangBack()).toBe(false);
+  await settleTimers(400);
+  const later = tab(r(60, 0, 40, 20), r(0, 0, 60, 40), r(60, 20, 40, 20));
+  render(later);
+  await settleTimers(40);
+  expect(settles()).toEqual([]);
+  expect(drawn("a")).toEqual(["translate(600px, 0px)", "400px", "399px"]);
+});
+
+it("ends a pending drop quietly when another tab is selected, so its chip and ghost leave with the tab", async () => {
+  await mount();
+  await dropAOn(B_RIGHT_BAND);
+  expect(host.querySelector(".pane-drag-chip")).not.toBeNull();
+  const other: Layout = { tab_id: "u", area: r(0, 0, 100, 40), panes: [{ pane_id: "d", rect: r(0, 0, 100, 40) }] };
+  const both = { layouts: [three, other], tabs: [], panes: [...(snapshot(three).panes ?? []), { pane_id: "d", terminal_id: "term-d", tab_id: "u", workspace_id: "w" }] } as unknown as Snapshot;
+  act(() => root!.render(<TabView snapshot={both} selected="u" machine="studio" focused={null} onFocus={() => {}} shortcut={() => false} register={() => {}} pin={() => {}} onDragChange={state => states.push(state)} />));
+  await settleTimers(0);
+  expect(last()).toMatchObject({ phase: "idle", end: "quiet" });
+  await settleTimers(400); // the chip fades out
+  expect(host.querySelector(".pane-drag-chip")).toBeNull();
+  expect(host.querySelector(".pane-drop-zone")).toBeNull();
+  expect(chipSprangBack()).toBe(false);
+  // A late reply for the old tab changes nothing.
+  await act(async () => { drop.resolve({ place: { changed: true, dry_run: false, pane_id: "a", focused_pane_id: "a", target_layout: three } }); });
+  expect(last()).toMatchObject({ phase: "idle", end: "quiet" });
+});
