@@ -63,8 +63,11 @@ mod imp {
         PIPE_TYPE_BYTE, PIPE_WAIT,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetClientRect, GetForegroundWindow, IsWindowVisible, PW_CLIENTONLY, PW_RENDERFULLCONTENT,
+        GetClientRect, GetForegroundWindow, IsWindowVisible, PW_RENDERFULLCONTENT,
     };
+
+    // windows-sys does not export PW_CLIENTONLY from WindowsAndMessaging; value from WinUser.h.
+    const PW_CLIENTONLY: u32 = 0x1;
 
     static RESULT_TX: Mutex<Option<(String, Sender<Value>)>> = Mutex::new(None);
 
