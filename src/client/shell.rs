@@ -34,10 +34,10 @@ mod notification_policy;
 mod notifications;
 mod overlay_input;
 mod pane_drag;
-mod pane_motion;
 #[allow(dead_code)]
 mod pane_drop;
 mod pane_location;
+mod pane_motion;
 mod pane_move;
 mod pane_scrollbar;
 mod pin_drag;

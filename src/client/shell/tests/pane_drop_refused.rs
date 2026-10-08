@@ -48,7 +48,8 @@ fn refused_drop_releases_the_ghost_and_patch_fast_path() {
                 }
                 Ok(answer)
             };
-            state.handle_endpoint_result("boot-1", &id, result);
+            let (repaint, _) = state.handle_endpoint_result("boot-1", &id, result);
+            assert!(repaint, "ending a refused drop must repaint");
             if let Some(code) = code {
                 let notice = state
                     .visible_endpoint_notice

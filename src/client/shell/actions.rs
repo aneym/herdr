@@ -839,6 +839,7 @@ impl ClientShellState {
         {
             return (false, Vec::new());
         }
+        let mut drop_cancel_repaint = false;
         if let PendingEndpointKind::PaneDragDrop { source_pane_id } = &pending.kind {
             let accepted = matches!(&result,
                 Ok(crate::api::schema::ResponseResult::PanePlace { place }) if place.changed)
@@ -850,7 +851,7 @@ impl ClientShellState {
                     .as_ref()
                     .is_some_and(|p| p.committed && p.source.pane_id == *source_pane_id)
             {
-                self.user_cancel_pane_drag();
+                drop_cancel_repaint = self.user_cancel_pane_drag();
             }
         }
         if let PendingEndpointKind::PaneDragDryRun {
@@ -1395,7 +1396,7 @@ impl ClientShellState {
             }
             Err(_) => true,
         };
-        (repaint, Vec::new())
+        (repaint || drop_cancel_repaint, Vec::new())
     }
 
     pub(super) fn endpoint_method_for_action(
