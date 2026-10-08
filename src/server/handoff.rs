@@ -98,6 +98,7 @@ impl Drop for HandoffMarker {
 #[cfg(unix)]
 pub(crate) fn spawn_handoff_import(
     import_exe: Option<&Path>,
+    path: Option<&str>,
     socket_path: &Path,
     token: &str,
 ) -> io::Result<Child> {
@@ -114,6 +115,9 @@ pub(crate) fn spawn_handoff_import(
         &fallback_exe
     };
     let mut command = Command::new(exe);
+    if let Some(path) = path {
+        command.env("PATH", path);
+    }
     command
         .arg("server")
         .arg("--handoff-import")

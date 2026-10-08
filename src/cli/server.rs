@@ -249,12 +249,14 @@ fn print_agent_manifest_status(response: &serde_json::Value) {
 }
 
 fn server_live_handoff(args: &[String]) -> std::io::Result<i32> {
-    let Some(params) = parse_live_handoff_params(args) else {
+    let Some(mut params) = parse_live_handoff_params(args) else {
         eprintln!(
             "usage: herdr server live-handoff [--import-exe <path>] [--expected-protocol <n>] [--expected-version <version>]"
         );
         return Ok(2);
     };
+
+    params.path = std::env::var("PATH").ok();
 
     // Live handoff is itself a protocol-mismatch recovery path, so it must
     // reach the running server without the normal CLI compatibility guard.

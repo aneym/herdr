@@ -11,6 +11,8 @@ pub(crate) mod clients;
 pub(crate) mod clipboard_image;
 #[cfg(unix)]
 pub(crate) mod handoff;
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+mod handoff_path_tests;
 pub mod headless;
 pub(crate) mod keybindings;
 pub(crate) mod notifications;

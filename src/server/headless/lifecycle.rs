@@ -117,6 +117,7 @@ impl HeadlessServer {
         );
         let mut import_child = match crate::server::handoff::spawn_handoff_import(
             import_exe.as_deref(),
+            params.path.as_deref(),
             &socket_path,
             &token,
         ) {

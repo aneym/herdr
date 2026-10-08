@@ -1604,6 +1604,7 @@ fn live_handoff_server_via_api_for_release_at(
     use crate::api::schema::{Method, ServerLiveHandoffParams};
 
     let params = ServerLiveHandoffParams {
+        path: std::env::var("PATH").ok(),
         import_exe: Some(updated_exe.display().to_string()),
         expected_protocol: release.target_protocol,
         expected_version: Some(release.label().to_string()),

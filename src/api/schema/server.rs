@@ -13,6 +13,9 @@ pub struct ClipboardImageWriteParams {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ServerLiveHandoffParams {
+    /// Requester PATH for the replacement server; absent requests retain the server PATH.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub import_exe: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
