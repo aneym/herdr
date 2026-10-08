@@ -1,4 +1,4 @@
-import type { PointerEvent as ReactPointerEvent } from "react";
+import type { ReactNode, PointerEvent as ReactPointerEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -23,7 +23,7 @@ export interface PaneController {
   info: () => { pane_id: string; terminal_id: string; mode: "attach" | "observe" | "closed"; cols: number; rows: number; focused: boolean; background?: string };
   type: (text: string) => Promise<void>; read: () => string; key: (key: string) => Promise<string | null>; wheel: (dy: number) => void; focus: () => void;
 }
-export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, register, grabbable, onCapPointerDown, settling }: { grabbable?: boolean; onCapPointerDown?: (event: ReactPointerEvent<HTMLDivElement>) => void; settling?: boolean; pane: Pane; machine: string; focused: boolean; onFocus: (id: string) => void; shortcut: (event: KeyboardEvent) => boolean; register: (id: string, value: PaneController | null) => void }) {
+export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, register, grabbable, onCapPointerDown, settling, capLabel }: { capLabel?: ReactNode; grabbable?: boolean; onCapPointerDown?: (event: ReactPointerEvent<HTMLDivElement>) => void; settling?: boolean; pane: Pane; machine: string; focused: boolean; onFocus: (id: string) => void; shortcut: (event: KeyboardEvent) => boolean; register: (id: string, value: PaneController | null) => void }) {
   const host = useRef<HTMLDivElement>(null);
   const element = useRef<HTMLDivElement>(null);
   const fitNow = useRef<() => void>(() => {});
@@ -238,7 +238,7 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
   useEffect(() => { if (!settling) fitNow.current(); }, [settling]);
   useEffect(() => { if (focused) host.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }, [focused]);
   return <div ref={element} className={`pane ${bell ? "bell" : ""}`} onMouseDown={() => { live.current.onFocus(pane.pane_id); host.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }}>
-    <div className={`pane-cap ${grabbable ? "grab" : ""}`} onPointerDown={event => { if (!(event.target as Element).closest("button")) onCapPointerDown?.(event); }}><Status status={pane.agent_status || "unknown"} /><span className="label">{[pane.agent, pane.terminal_title_stripped || pane.title].filter(Boolean).join(" · ")}</span>{state === "observe" && <button onClick={() => takeover.current()}>Take control</button>}</div>
+    <div className={`pane-cap ${grabbable ? "grab" : ""}`} onPointerDown={event => { if (!(event.target as Element).closest("button")) onCapPointerDown?.(event); }}>{capLabel ?? <><Status status={pane.agent_status || "unknown"} /><span className="label">{[pane.agent, pane.terminal_title_stripped || pane.title].filter(Boolean).join(" · ")}</span></>}{state === "observe" && <button onClick={() => takeover.current()}>Take control</button>}</div>
     <div className="term-host" ref={host} />
     {state === "closed" && <button className="disconnected" title={notice} onClick={() => reconnect.current()}>Disconnected — click to reconnect</button>}
     {notice && state !== "closed" && <div className="notice">{notice}</div>}

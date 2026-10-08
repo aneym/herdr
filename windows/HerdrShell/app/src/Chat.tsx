@@ -15,12 +15,16 @@ function Markdown({ text }: { text: string }) {
     if (url && /^(https?:|mailto:)/i.test(url)) void bridge.openUrl(url).catch(() => {});
   }} dangerouslySetInnerHTML={{ __html: html }} />;
 }
-function ToolGroup({ items }: { items: ChatItem[] }) {
-  return <details className="chat-tools"><summary>{items.length === 1 ? `${items[0].tool}: ${items[0].text}` : `${items.length} tool calls · ${[...new Set(items.map(item => item.tool))].join(", ")}`}</summary>
-    {items.map(item => <details key={item.id} className="chat-tool"><summary>{item.tool} · {item.text} <span className="muted">{item.status}</span></summary><pre>{item.input}</pre>{item.result !== undefined && <pre>{item.result}</pre>}</details>)}
+function ToolGroup({ items, density }: { items: ChatItem[]; density: "focus" | "full" }) {
+  const [open, setOpen] = useState(density === "full");
+  const [rows, setRows] = useState<Record<string, boolean>>({});
+  useEffect(() => { setOpen(density === "full"); setRows({}); }, [density]);
+  const defaultOpen = (item: ChatItem) => density === "full" && ["Edit", "Write", "MultiEdit"].includes(item.tool ?? "") && (item.input ?? "").split("\n").length <= 26;
+  return <details className="chat-tools" open={open}><summary onClick={event => { event.preventDefault(); setOpen(value => !value); }}>{items.length === 1 ? `${items[0].tool}: ${items[0].text}` : `${items.length} tool calls · ${[...new Set(items.map(item => item.tool))].join(", ")}`}</summary>
+    {items.map(item => <details key={item.id} className="chat-tool" open={rows[item.id] ?? defaultOpen(item)}><summary onClick={event => { event.preventDefault(); setRows(current => ({ ...current, [item.id]: !(current[item.id] ?? defaultOpen(item)) })); }}>{item.tool} · {item.text} <span className="muted">{item.status}</span></summary><pre>{item.input}</pre>{item.result !== undefined && <pre>{item.result}</pre>}</details>)}
   </details>;
 }
-export default function Chat({ machine, pane, focused, visible, onItems }: { machine: string; pane: string; focused: boolean; visible: boolean; onItems: (count: number) => void }) {
+export default function Chat({ machine, pane, focused, visible, onItems, density = "focus" }: { density?: "focus" | "full"; machine: string; pane: string; focused: boolean; visible: boolean; onItems: (count: number) => void }) {
   const [items, setItems] = useState<ChatItem[]>([]);
   const [status, setStatus] = useState("asleep"), [name, setName] = useState("Claude");
   const [waiting, setWaiting] = useState(false), [earlier, setEarlier] = useState(false), [error, setError] = useState("");
@@ -78,7 +82,7 @@ export default function Chat({ machine, pane, focused, visible, onItems }: { mac
         {waiting && <p className="muted">Waiting for transcript…</p>}
         {!waiting && !items.length && <p className="muted">{tail.current?.agent.agent_session ? "No messages yet" : "No transcript available for this pane"}</p>}
         {groups.map(group => { const item = group[0]; return <div key={item.id} className={`chat-item chat-${item.kind}`}>
-          {item.kind === "tool" ? <ToolGroup items={group} /> : item.kind === "assistant" ? <Markdown text={item.text} /> : <>{item.kind === "user" && <div className="chat-caption">You{item.queued ? " · Queued" : ""}</div>}<div className="chat-plain">{item.text}</div></>}
+          {item.kind === "tool" ? <ToolGroup items={group} density={density} /> : item.kind === "assistant" ? <Markdown text={item.text} /> : <>{item.kind === "user" && <div className="chat-caption">You{item.queued ? " · Queued" : ""}</div>}<div className="chat-plain">{item.text}</div></>}
         </div>; })}
         {send.text && <div className="chat-item chat-user chat-pending"><div className="chat-caption">You · {send.warning ? "Not sent" : "Pending"}</div><div className="chat-plain">{send.text}</div></div>}
       </div>
