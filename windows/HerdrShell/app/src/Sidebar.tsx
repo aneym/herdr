@@ -84,7 +84,12 @@ export default function Sidebar({ snapshot = {}, catalog = new LaneSnapshot(), m
   reveal.current = { rows, expanded };
   // Only a change of selection reveals; folding the selected tab's space afterwards sticks, also
   // across hiding and showing the sidebar, since App notes the changes (RevealMemo).
-  useEffect(() => { const key = revealOnSelect(revealed, reveal.current.rows, selected, reveal.current.expanded); if (key) toggle(key, true); }, [selected, revealed]);
+  useEffect(() => {
+    const hiddenAgent = mode === "spaces" && revealed.pending !== null && revealed.pending === selected && reveal.current.rows.some(row => row.id === selected && row.kind === "agent" && row.hidden);
+    const key = revealOnSelect(revealed, reveal.current.rows, selected, reveal.current.expanded);
+    if (hiddenAgent) { setHiddenAgents(true); save("hiddenAgents", true); }
+    else if (key) toggle(key, true);
+  }, [selected, revealed]);
   const nav = useRef<HTMLElement>(null);
   const press = useRef<Press | null>(null);
   const swallowClick = useRef(false);
