@@ -1999,6 +1999,7 @@ impl ClientShellState {
                         | ClientShellMode::Move
                 )
             {
+                self.cancel_pane_drag();
                 self.mode = ClientShellMode::Terminal;
             }
         }
@@ -2183,7 +2184,7 @@ impl ClientShellState {
             }
         }
         if matches!(&self.chrome_drag, Some(ClientChromeDrag::Pane { source_pane_id, origin_tab_id, .. })
-            if snapshot.focused_tab_id.as_ref() != Some(origin_tab_id)
+            if snapshot.focused_tab_id.as_ref() != self.pane_drag.as_ref().map(|p| &p.current_tab_id).or(Some(origin_tab_id))
                 || !snapshot.panes.iter().any(|p| &p.pane_id == source_pane_id))
         {
             self.cancel_pane_drag();
@@ -2577,6 +2578,15 @@ impl ClientShellState {
             .into_iter()
             .chain(self.selection_repaint_deadline)
             .chain(self.usage_refresh_deadline)
+            .chain(
+                self.pane_drag
+                    .as_ref()
+                    .and_then(|p| p.spring_dwell.as_ref())
+                    .map(|(_, _, start)| {
+                        *start
+                            + std::time::Duration::from_millis(super::motion_tokens::SPRING_LOAD_MS)
+                    }),
+            )
             .min()
             .map(|deadline| deadline.saturating_duration_since(now).min(default))
             .unwrap_or(default)

@@ -524,6 +524,7 @@ pub struct KeysConfig {
     pub zoom: BindingConfig,
     /// Enter resize mode. Default: "prefix+r"
     pub resize_mode: BindingConfig,
+    /// Enter move mode to place the focused pane. Default: "prefix+m"
     pub move_pane_mode: BindingConfig,
     /// Resize the focused pane toward the left. Unset by default.
     pub resize_pane_left: BindingConfig,

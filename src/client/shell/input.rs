@@ -331,6 +331,7 @@ impl ClientShellState {
             && (self.pane_press.is_some()
                 || matches!(self.chrome_drag, Some(ClientChromeDrag::Pane { .. })))
         {
+            self.restore_pane_origin(outcome);
             outcome.repaint |= self.user_cancel_pane_drag();
             return;
         }
@@ -561,8 +562,7 @@ impl ClientShellState {
             }
             return None;
         }
-        if self.mode == ClientShellMode::Move {
-            self.route_move_key(key, outcome);
+        if self.mode == ClientShellMode::Move && self.route_move_key(key, outcome) {
             return None;
         }
         if let Some(target) = self.popup_input_target() {

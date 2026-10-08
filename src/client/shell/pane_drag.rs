@@ -33,6 +33,8 @@ pub(super) struct ClientPaneDragPreview {
     pub(super) answers: Vec<(PaneDragTarget, PaneDragAnswer)>,
     pub(super) topology: u64,
     pub(super) committed: bool,
+    pub(super) current_tab_id: String,
+    pub(super) spring_dwell: Option<(String, (u16, u16), std::time::Instant)>,
     rects: Vec<Rect>,
     area: Rect,
     invalidated: bool,
@@ -55,6 +57,72 @@ fn direction(side: DropSide) -> PaneDirection {
     }
 }
 impl ClientShellState {
+    pub(crate) fn tick_pane_spring(&mut self, now: std::time::Instant) -> ClientShellInput {
+        let mut outcome = ClientShellInput::default();
+        let due = self
+            .pane_drag
+            .as_ref()
+            .and_then(|p| p.spring_dwell.as_ref())
+            .filter(|(_, _, start)| {
+                now.saturating_duration_since(*start)
+                    >= std::time::Duration::from_millis(super::motion_tokens::SPRING_LOAD_MS)
+            })
+            .map(|(tab, _, _)| tab.clone());
+        if let Some(tab) = due {
+            self.spring_pane_tab(tab, &mut outcome);
+        }
+        outcome
+    }
+
+    pub(super) fn spring_pane_tab(&mut self, tab_id: String, outcome: &mut ClientShellInput) {
+        if !matches!(self.chrome_drag, Some(ClientChromeDrag::Pane { .. })) {
+            return;
+        }
+        if !self.push_endpoint_method_with_kind(
+            crate::api::schema::Method::TabFocus(crate::api::schema::TabTarget {
+                tab_id: tab_id.clone(),
+            }),
+            PendingEndpointKind::Generic,
+            outcome,
+        ) {
+            return;
+        }
+        if let Some(p) = self.pane_drag.as_mut() {
+            p.current_tab_id = tab_id;
+            p.spring_dwell = None;
+            p.answers.clear();
+            p.in_flight = None;
+            p.queued = None;
+            p.ghost = None;
+            p.row = None;
+            p.invalidated = true;
+        }
+        if let Some(ClientChromeDrag::Pane { target, .. }) = self.chrome_drag.as_mut() {
+            *target = None;
+        }
+        outcome.repaint = true;
+    }
+
+    pub(super) fn restore_pane_origin(&mut self, outcome: &mut ClientShellInput) {
+        if let Some(ClientChromeDrag::Pane { origin_tab_id, .. }) = self.chrome_drag.as_ref() {
+            if self
+                .pane_drag
+                .as_ref()
+                .is_some_and(|p| p.current_tab_id != *origin_tab_id)
+            {
+                self.push_endpoint_method(
+                    crate::api::schema::Method::TabFocus(crate::api::schema::TabTarget {
+                        tab_id: origin_tab_id.clone(),
+                    }),
+                    outcome,
+                );
+            }
+        }
+        if let Some(p) = self.pane_drag.as_mut() {
+            p.spring_dwell = None;
+        }
+    }
+
     pub(super) fn pane_drag_supported(&self) -> bool {
         self.config.mouse_capture
             && self.endpoint_is_online(&self.active_endpoint_id)
@@ -173,6 +241,8 @@ impl ClientShellState {
                 .as_ref()
                 .map_or(0, pane_drag_surface_signature),
             committed: false,
+            current_tab_id: origin_tab_id.clone(),
+            spring_dwell: None,
             rects: self.hits.panes.iter().map(|h| h.rect).collect(),
             area: self
                 .last_composed_size
@@ -204,7 +274,10 @@ impl ClientShellState {
             return;
         };
         let source = source_pane_id.clone();
-        let origin = origin_tab_id.clone();
+        let origin = self
+            .pane_drag
+            .as_ref()
+            .map_or_else(|| origin_tab_id.clone(), |p| p.current_tab_id.clone());
         let old = old.clone();
         let Some((cols, rows)) = self.last_composed_size else {
             return;
@@ -213,7 +286,9 @@ impl ClientShellState {
         let missing_target = matches!(&old,
             Some(PaneDragTarget::Centre { pane_id } | PaneDragTarget::PaneEdge { pane_id, .. })
                 if !self.hits.panes.iter().any(|h| &h.pane_id == pane_id));
-        if missing_target || !self.hits.panes.iter().any(|h| h.pane_id == source) {
+        if missing_target
+            || (origin == *origin_tab_id && !self.hits.panes.iter().any(|h| h.pane_id == source))
+        {
             self.cancel_pane_drag();
             outcome.repaint = true;
             return;
@@ -259,19 +334,10 @@ impl ClientShellState {
                 return None;
             }
             let snapshot = self.snapshot.as_ref()?;
-            let workspace = snapshot
-                .tabs
-                .iter()
-                .find(|t| t.tab_id == origin)?
-                .workspace_id
-                .as_str();
             if let Some((rect, id)) = self.hits.tabs.iter().find(|(r, id)| {
                 contains(*r, point)
                     && *id != origin
-                    && snapshot
-                        .tabs
-                        .iter()
-                        .any(|t| &t.tab_id == id && t.workspace_id == workspace)
+                    && snapshot.tabs.iter().any(|t| &t.tab_id == id)
             }) {
                 row = Some(*rect);
                 return Some(PaneDragTarget::IntoTab { tab_id: id.clone() });
@@ -284,7 +350,13 @@ impl ClientShellState {
             {
                 row = Some(h.rect);
                 return match &h.tab_id {
-                    Some(id) if *id != origin && h.workspace_id == workspace => {
+                    Some(id)
+                        if *id != origin
+                            && snapshot
+                                .tabs
+                                .iter()
+                                .any(|t| t.tab_id == *id && t.workspace_id == h.workspace_id) =>
+                    {
                         Some(PaneDragTarget::IntoTab { tab_id: id.clone() })
                     }
                     None => Some(PaneDragTarget::NewTabIn {
@@ -307,6 +379,16 @@ impl ClientShellState {
         if let Some(ClientChromeDrag::Pane { pointer, .. }) = self.chrome_drag.as_mut() {
             *pointer = point;
         }
+        if let Some(preview) = self.pane_drag.as_mut() {
+            let tab = match &target {
+                Some(PaneDragTarget::IntoTab { tab_id }) => Some(tab_id),
+                _ => None,
+            };
+            if !matches!((&preview.spring_dwell, tab), (Some((id, anchor, _)), Some(tab)) if id == tab && *anchor == point)
+            {
+                preview.spring_dwell = tab.map(|id| (id.clone(), point, std::time::Instant::now()));
+            }
+        }
         self.retarget_pane_drag(target, zone, row, outcome);
     }
     pub(super) fn retarget_pane_drag(
@@ -327,7 +409,10 @@ impl ClientShellState {
             return;
         };
         let source = source_pane_id.clone();
-        let origin = origin_tab_id.clone();
+        let origin = self
+            .pane_drag
+            .as_ref()
+            .map_or_else(|| origin_tab_id.clone(), |p| p.current_tab_id.clone());
         let old = current.clone();
         *current = target.clone();
         let Some(preview) = self.pane_drag.as_mut() else {
@@ -489,19 +574,30 @@ impl ClientShellState {
         };
         self.send_pane_drag_dry_run(
             source_pane_id.clone(),
-            origin_tab_id.clone(),
+            self.pane_drag
+                .as_ref()
+                .map_or_else(|| origin_tab_id.clone(), |p| p.current_tab_id.clone()),
             target,
             outcome,
         );
     }
     pub(super) fn drop_pane(&mut self, _point: (u16, u16), outcome: &mut ClientShellInput) {
-        let Some(ClientChromeDrag::Pane {
-            source_pane_id,
-            origin_tab_id,
-            target: Some(target),
-            ..
-        }) = self.chrome_drag.take()
+        let Some((source_pane_id, origin_tab_id, target)) =
+            self.chrome_drag.as_ref().and_then(|drag| match drag {
+                ClientChromeDrag::Pane {
+                    source_pane_id,
+                    origin_tab_id,
+                    target: Some(target),
+                    ..
+                } => Some((
+                    source_pane_id.clone(),
+                    origin_tab_id.clone(),
+                    target.clone(),
+                )),
+                _ => None,
+            })
         else {
+            self.restore_pane_origin(outcome);
             self.user_cancel_pane_drag();
             return;
         };
@@ -510,6 +606,7 @@ impl ClientShellState {
                 .iter()
                 .any(|(t, r)| *t == target && !matches!(r, PaneDragAnswer::Changed(_)))
         }) {
+            self.restore_pane_origin(outcome);
             self.user_cancel_pane_drag();
             return;
         }
@@ -532,7 +629,14 @@ impl ClientShellState {
                     focus: true,
                 }))
             }
-            _ => Self::pane_place_method(source_pane_id, origin_tab_id, &target, false),
+            _ => Self::pane_place_method(
+                source_pane_id,
+                self.pane_drag
+                    .as_ref()
+                    .map_or(origin_tab_id, |p| p.current_tab_id.clone()),
+                &target,
+                false,
+            ),
         };
         if let Some(method) = method {
             let source_pane_id = self
@@ -545,17 +649,25 @@ impl ClientShellState {
                 PendingEndpointKind::PaneDragDrop { source_pane_id },
                 outcome,
             ) {
+                self.restore_pane_origin(outcome);
                 outcome.repaint |= self.user_cancel_pane_drag();
                 return;
             }
         } else {
+            self.restore_pane_origin(outcome);
             outcome.repaint |= self.user_cancel_pane_drag();
             return;
         }
+        self.chrome_drag = None;
         if let Some(p) = self.pane_drag.as_mut() {
+            p.spring_dwell = None;
             p.committed = true;
             p.in_flight = None;
             p.queued = None;
+        }
+        self.pane_move = None;
+        if self.mode == ClientShellMode::Move {
+            self.mode = self.copy_or_terminal_mode();
         }
         outcome.repaint = true;
     }
@@ -717,8 +829,19 @@ fn cell_mut(frame: &mut FrameData, x: u16, y: u16) -> Option<&mut crate::protoco
 }
 impl ClientShellState {
     pub(super) fn rebase_pane_drag_surface(&mut self, surface: &PaneSurfaceFrame) {
+        if let Some(movement) = self.pane_move.as_mut() {
+            if !surface
+                .panes
+                .iter()
+                .any(|p| p.pane_id == movement.target_pane_id)
+            {
+                if let Some(pane) = surface.panes.first() {
+                    movement.target_pane_id = pane.pane_id.clone();
+                }
+            }
+        }
         if self.pane_drag.as_ref().is_some_and(|p| {
-            p.committed || !surface.panes.iter().any(|h| h.pane_id == p.source.pane_id)
+            p.committed || (matches!(&self.chrome_drag, Some(ClientChromeDrag::Pane { origin_tab_id, .. }) if *origin_tab_id == p.current_tab_id) && !surface.panes.iter().any(|h| h.pane_id == p.source.pane_id))
                 || matches!(&self.chrome_drag, Some(ClientChromeDrag::Pane {
                     target: Some(PaneDragTarget::Centre { pane_id } | PaneDragTarget::PaneEdge { pane_id, .. }), ..
                 }) if !surface.panes.iter().any(|h| &h.pane_id == pane_id))

@@ -124,39 +124,65 @@ impl ClientShellState {
         &mut self,
         key: &crate::input::TerminalKey,
         outcome: &mut ClientShellInput,
-    ) {
+    ) -> bool {
+        if !matches!(self.chrome_drag, Some(ClientChromeDrag::Pane { .. })) {
+            self.cancel_pane_drag();
+            return false;
+        }
         if key.kind == crossterm::event::KeyEventKind::Release {
-            return;
+            return true;
         }
         if matches!(key.code, KeyCode::Enter | KeyCode::Char(' ')) && key.modifiers.is_empty() {
             let pointer = match self.chrome_drag.as_ref() {
                 Some(ClientChromeDrag::Pane { pointer, .. }) => *pointer,
                 _ => {
                     self.cancel_pane_drag();
-                    return;
+                    return true;
                 }
             };
             self.drop_pane(pointer, outcome);
             self.pane_move = None;
             self.mode = self.copy_or_terminal_mode();
             outcome.repaint = true;
-            return;
+            return true;
         }
         if key
             .modifiers
             .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
         {
-            return;
+            return true;
+        }
+        if matches!(key.code, KeyCode::Char('[' | ']')) {
+            let next = self.snapshot.as_ref().and_then(|s| {
+                let current = self.pane_drag.as_ref()?.current_tab_id.as_str();
+                let tab = s.tabs.iter().find(|t| t.tab_id == current)?;
+                let tabs: Vec<_> = s
+                    .tabs
+                    .iter()
+                    .filter(|t| t.workspace_id == tab.workspace_id)
+                    .collect();
+                let index = tabs.iter().position(|t| t.tab_id == current)?;
+                let index = if key.code == KeyCode::Char(']') {
+                    (index + 1) % tabs.len()
+                } else {
+                    (index + tabs.len() - 1) % tabs.len()
+                };
+                (tabs[index].tab_id != current).then(|| tabs[index].tab_id.clone())
+            });
+            if let Some(tab) = next {
+                self.spring_pane_tab(tab, outcome);
+            }
+            return true;
         }
         let (direction, side) = match key.code {
             KeyCode::Char('h' | 'H') | KeyCode::Left => (NavDirection::Left, DropSide::Left),
             KeyCode::Char('j' | 'J') | KeyCode::Down => (NavDirection::Down, DropSide::Down),
             KeyCode::Char('k' | 'K') | KeyCode::Up => (NavDirection::Up, DropSide::Up),
             KeyCode::Char('l' | 'L') | KeyCode::Right => (NavDirection::Right, DropSide::Right),
-            _ => return,
+            _ => return true,
         };
         let Some(movement) = self.pane_move.as_ref() else {
-            return;
+            return true;
         };
         let target = movement.target_pane_id.clone();
         if key.modifiers.contains(KeyModifiers::SHIFT)
@@ -190,5 +216,6 @@ impl ClientShellState {
             }
             self.move_centre(outcome);
         }
+        true
     }
 }

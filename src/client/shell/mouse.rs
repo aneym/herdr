@@ -698,6 +698,7 @@ impl ClientShellState {
                     self.drop_pane((mouse.column, mouse.row), outcome)
                 }
                 MouseEventKind::Down(MouseButton::Right) => {
+                    self.restore_pane_origin(outcome);
                     outcome.repaint |= self.user_cancel_pane_drag();
                 }
                 _ => {}

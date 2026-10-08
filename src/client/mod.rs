@@ -2318,6 +2318,9 @@ async fn run_client_loop(
                             | shell.tick_workspace_highlight(now)
                             | shell.tick_endpoint_error(now)
                             | shell.tick_pane_motion(now);
+                        let spring = shell.tick_pane_spring(now);
+                        outcome.repaint |= spring.repaint;
+                        outcome.actions.extend(spring.actions);
                         let frame = outcome
                             .repaint
                             .then(|| shell.compose(state.reported_size.0, state.reported_size.1))
