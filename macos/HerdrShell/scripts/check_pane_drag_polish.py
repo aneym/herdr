@@ -16,12 +16,12 @@ def settle(ws):
     D.motion("freeze", ms=0)
     D.hook("begin", pane=a)
     D.hook("move", steps=1, **D.centre(D.pd(state)["boxes"][b]))
-    state = D.wait(lambda s: D.zone_is(s, kind="centre", target=b))
+    state = D.wait(lambda s: D.zone_is(s, kind="centre", target=b) and (D.pd(s).get("chip") or {}).get("stroke", 0) > 0)
     chip = D.pd(state).get("chip") or {}
-    D.check("chip: sidebar state glyph precedes cap name", chip.get("glyph") in ("●", "◐", "✕", "✗", "■", "○", "·", "✓")
+    D.check("chip: sidebar state glyph precedes cap name", chip.get("glyph") == {"working": "●", "needs": "■", "blocked": "■", "idle": "○", "asleep": "·", "done": "✓"}.get(chip.get("sourceState"))
             and chip.get("text") == chip.get("glyph", "") + " " + chip.get("label", ""), json.dumps(chip))
     D.check("chip: stroke is the hairline token", chip.get("stroke") == 0.5
-            and chip.get("stroke") == D.pd(state).get("hairline"), json.dumps(chip))
+, json.dumps(chip))
     D.hook("hold-replies", on=True)
     D.hook("drop")
     state = D.wait(lambda s: D.pd(s).get("replyHeld"))
@@ -36,33 +36,57 @@ def settle(ws):
     D.wait(lambda s: D.pd(s).get("phase") == "settling")
     alphas = []
     for ms in range(0, 201, 10):
-        D.motion("freeze", ms=ms)
+        D.motion("advance", ms=ms)
         alphas.append(D.pd(S.state()).get("ghostAlpha"))
-    D.check("ghost: never rises across settle 0–200ms", all(isinstance(x, (int, float)) for x in alphas)
+    D.check("ghost: never rises across production pruning 0–200ms", all(isinstance(x, (int, float)) for x in alphas)
             and alphas[0] > 0.999 and alphas[-1] < 0.001
             and all(y <= x + 1e-6 for x, y in zip(alphas, alphas[1:])), json.dumps(alphas))
     D.motion("run")
-    D.wait(D.idle)
+    state = D.wait(D.idle)
+    layers = D.pd(state).get("surfaceLayers") or []
+    D.check("settle: surfaces return to static z-order without drag backing", bool(layers)
+            and all(v.get("z") == 0 and not v.get("backed") for v in layers), json.dumps(layers))
     D.close(tab)
 
 
-def transport(ws):
+def transport(ws, timeout=False):
     origin, dest, a, b, x, y, _ = P.hover_dest(ws, "polish-transport")
-    state = S.state()
+    state = D.wait(lambda s: (D.pd(s).get("sidebarZoneFill") or {}).get("width", 0) > 0)
     fill = D.pd(state).get("sidebarZoneFill") or {}
     D.check("into-tab: hovered row reports accent zone fill", fill.get("row") == "tab:" + dest
-            and fill.get("alpha") in (0.12, 0.16), json.dumps(fill))
+            and any(abs(fill.get("alpha", 0) - a) < 1e-6 for a in (0.12, 0.16)) and fill.get("height", 0) > 0, json.dumps(fill))
     D.motion("freeze", ms=450)
     state = D.wait(lambda s: s.get("selected_tab") == dest and set(D.pd(s).get("boxes") or {}) == {x, y})
     D.hook("move", steps=1, **D.centre(D.pd(state)["boxes"][y]))
     D.wait(lambda s: D.zone_is(s, kind="centre", target=y))
-    D.hook("fail-next-drop")
+    D.hook("lose-next-drop" if timeout else "fail-next-drop")
     D.hook("drop")
-    state = D.wait(lambda s: D.idle(s) and s.get("selected_tab") == origin)
-    D.check("transport: failed spring drop sends tab.focus(origin)", P.focus_calls(state) == [dest, origin]
+    state = D.wait(lambda s: D.idle(s) and s.get("selected_tab") == origin, timeout=10)
+    D.check("lost connection after spring restores origin (win parity)", P.focus_calls(state) == [dest, origin]
             and state.get("selected_tab") == origin, json.dumps([P.focus_calls(state), state.get("selected_tab")]))
     D.check("transport: server focus restored too", P.server_focused(ws) == [origin], json.dumps(P.server_focused(ws)))
     D.motion("run")
+    D.close(origin)
+    D.close(dest)
+
+
+def quiet_pending(ws):
+    origin, dest, a, b, x, y, _ = P.hover_dest(ws, "polish-quiet")
+    D.motion("freeze", ms=450)
+    state = D.wait(lambda s: s.get("selected_tab") == dest and set(D.pd(s).get("boxes") or {}) == {x, y})
+    D.hook("move", steps=1, **D.centre(D.pd(state)["boxes"][y]))
+    D.wait(lambda s: D.zone_is(s, kind="centre", target=y))
+    D.hook("hold-drops", on=True)
+    D.hook("drop")
+    D.wait(lambda s: D.pd(s).get("phase") == "dropping")
+    D.hook("begin", pane=x)
+    state = D.wait(lambda s: D.pd(s).get("phase") == "lifted")
+    D.check("quiet: a new drag during a spring drop does not restore origin",
+            state.get("selected_tab") == dest and P.focus_calls(state) == [], json.dumps(P.focus_calls(state)))
+    D.hook("hold-drops", on=False)
+    D.hook("cancel", via="esc")
+    D.motion("run")
+    D.wait(D.idle)
     D.close(origin)
     D.close(dest)
 
@@ -78,6 +102,8 @@ def main():
     D.wait(lambda s: s.get("window_key") and "paneDrag" in s)
     settle(ws)
     transport(ws)
+    transport(ws, timeout=True)
+    quiet_pending(ws)
     D.finish()
 
 

@@ -115,6 +115,7 @@ final class TestHook {
             guard let drag = controller?.paneDrag else { return }
             switch obj["op"] as? String {
             case "freeze": drag.freeze(ms: CGFloat((obj["ms"] as? NSNumber)?.doubleValue ?? 0))
+            case "advance": drag.advance(ms: CGFloat((obj["ms"] as? NSNumber)?.doubleValue ?? 0))
             case "run": drag.run()
             case "reduce": drag.reduceOverride = obj["on"] as? Bool
             default: break
@@ -588,6 +589,7 @@ final class TestHook {
             paneDragPoint = end
             if obj["drop"] as? Bool == true { post(.leftMouseUp, end) }
         case "drop": post(.leftMouseUp, paneDragPoint)
+        case "lose-next-drop": c.paneDrag.loseNextDrop = true
         case "fail-next-drop": c.paneDrag.failNextDrop = true
         case "hold-drops": c.paneDrag.holdDrops = obj["on"] as? Bool ?? true
         case "send-drop": c.paneDrag.sendHeldDrop()

@@ -124,6 +124,15 @@ final class PaneHostView: NSView {
         }
     }
 
+    func resetDragLayers() {
+        for (surface, _) in rects {
+            for view in [surface as NSView, capHosts[surface.paneId], chatViews[surface.paneId]].compactMap({ $0 }) {
+                view.layer?.zPosition = 0
+                view.layer?.backgroundColor = nil
+            }
+        }
+    }
+
     private func ensureCap(_ paneId: String) -> NSView {
         if let v = capHosts[paneId] {
             if let state = caps[paneId] {

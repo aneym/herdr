@@ -19,8 +19,8 @@ final class PaneDrag: NSObject {
     private weak var owner: MainWindowController?
     private(set) var phase: Phase = .idle
     private var source: String?, originTab: String?, label = ""
+    private let chipBorder = CAShapeLayer()
     private var sourceGlyph: ShellState = .asleep
-    private var sidebarGlyph: String?
     private var lastHostSize = CGSize.zero
     private var zone: Zone?, lastZone: Zone?
     /// Check hook only (check_pane_drag_end.py): hold a drop's call before it is sent, as a slow link would, until
@@ -28,6 +28,7 @@ final class PaneDrag: NSObject {
     var holdDrops = false
     /// Inject a failed network edge without sending a mutation (check hook only).
     var failNextDrop = false
+    var loseNextDrop = false
     private var heldDrop: (() -> Void)?
     /// Check hook only: hold a drop's reply once it is in, until `sendHeldReply()`, so the drop's own snapshot can land
     /// first. A held reply outlives the drop's end, so a check can deliver it late.
@@ -145,7 +146,6 @@ final class PaneDrag: NSObject {
         generation += 1; source = pane; originTab = owner.state.selectedTab
         label = owner.host.caps[pane]?.name ?? ""
         sourceGlyph = owner.host.caps[pane]?.glyph ?? .asleep
-        sidebarGlyph = owner.model.spacesRows(state: owner.state).first { $0.tab == originTab && !$0.glyph.isEmpty }?.glyph
         sent = []; lastZone = nil; zone = nil; cache = [:]; rejected = []; inFlight = nil
         pointer = owner.host.convert(point, from: nil); start = pointer
         phase = .pressed; keyboard = false; installMonitor()
@@ -298,11 +298,12 @@ final class PaneDrag: NSObject {
         // The drop ends with the server's answer to this call, never with a snapshot: snapshots that land while it
         // is pending are buffered, and the answer settles the panes once from where they stood at the release.
         let send = {
-            // No reply in time (as on Windows, 4 s): the server may still have applied it, so end without a rollback.
+            // No reply in time: restore spring selection (Windows parity), but never roll back pane layout.
             DispatchQueue.main.asyncAfter(deadline: .now() + PaneDrag.replyTimeout) { [weak self] in
                 guard let self, self.generation == gen, self.phase == .dropping, self.heldReply?.generation != gen else { return }
-                self.cancel()
+                self.restoreAfterFailedDrop(); self.cancel()
             }
+            if self.loseNextDrop { self.loseNextDrop = false; return }
             let failTransport = self.failNextDrop
             self.failNextDrop = false
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -319,7 +320,7 @@ final class PaneDrag: NSObject {
                         // shows as it is, then the chip goes back.
                         if refused { _ = self.unfreeze(); self.owner?.refreshHost(); self.animateCancel(); return }
                         // With no reply at all the server may still have applied it: end without a rollback.
-                        if reply?["result"] == nil { self.cancel(); return }
+                        if reply?["result"] == nil { self.restoreAfterFailedDrop(); self.cancel(); return }
                         let buffered = self.unfreeze()
                         self.owner?.applyDropReply(PaneDrag.layouts(reply), buffered: buffered)
                         self.settle()
@@ -363,13 +364,15 @@ final class PaneDrag: NSObject {
         if phase == .dropping {
             generation += 1; inFlight = nil
             let frozen = holdsLayout
-            if sprung, let originTab, owner?.state.selectedTab != originTab { focusSpringTab(originTab) }
             _ = unfreeze(); finish()
             // The buffered snapshot shows as it is.
             if frozen { owner?.refreshHost() }
             return
         }
         animateCancel()
+    }
+    private func restoreAfterFailedDrop() {
+        if sprung, let originTab, owner?.state.selectedTab != originTab { focusSpringTab(originTab) }
     }
     /// The chip springs back to the source cap. Also ends a drop the server refused, which moved nothing.
     private func animateCancel() {
@@ -519,10 +522,14 @@ final class PaneDrag: NSObject {
         CGRect(x: a.minX + (b.minX - a.minX) * t, y: a.minY + (b.minY - a.minY) * t,
                width: a.width + (b.width - a.width) * t, height: a.height + (b.height - a.height) * t)
     }
-    @objc private func tick() {
+    func advance(ms: CGFloat) {
+        frozenMs = ms; link?.isPaused = true; step(prune: true); step(prune: true)
+    }
+    @objc private func tick() { step(prune: frozenMs == nil) }
+    private func step(prune: Bool) {
         evaluateDwell()
         draw()
-        if frozenMs == nil {
+        if prune {
             // Retain the completed ghost fade until the last moving surface ends. Removing it
             // at fadeMs would paint alpha 1 again for the rest of the 200 ms settle.
             let ended = motions.allSatisfy { elapsed($0) >= $0.duration }
@@ -567,6 +574,7 @@ final class PaneDrag: NSObject {
         overlay.layer?.zPosition = 2
         overlay.frame = owner.host.bounds
         owner.host.addSubview(overlay, positioned: .above, relativeTo: nil)
+        chipBorder.isHidden = !(phase == .lifted || phase == .dropping || phase == .cancelling)
         overlay.needsDisplay = true
     }
     private func ease(_ value: CGFloat) -> CGFloat {
@@ -596,6 +604,7 @@ final class PaneDrag: NSObject {
     }
     private func resetVisuals() { dwell = nil; sprung = false; motions = []; link?.invalidate(); link = nil; ghost = nil; ghostTarget = nil }
     private func finish() {
+        owner?.host.resetDragLayers()
         phase = .idle; zone = nil; heldDrop = nil; resetVisuals()
         if let monitor { NSEvent.removeMonitor(monitor) }; monitor = nil
         NSCursor.arrow.set(); draw()
@@ -606,9 +615,12 @@ final class PaneDrag: NSObject {
             "lastZone": lastZone?.json ?? (NSNull() as Any), "ghostRect": rect(ghost), "ghostTarget": rect(ghostTarget),
             "ghostSource": ghostSource, "dryRunPending": inFlight != nil, "placeSupported": placeSupported,
             "ghostAlpha": ghostAlpha,
-            "sidebarZoneFill": ["row": owner?.state.paneDropRow ?? "", "alpha": zoneFillAlpha],
+            "surfaceLayers": owner?.host.rects.map { surface, _ in
+                ["pane": surface.paneId, "z": surface.layer?.zPosition ?? 0, "backed": surface.layer?.backgroundColor != nil] as [String: Any]
+            } ?? [],
+            "sidebarZoneFill": PaneDropFill.drawn(in: owner?.sidebarHostView, row: owner?.state.paneDropRow ?? ""),
             "hairline": ShellFace.ring,
-            "chip": ["visible": phase == .lifted || phase == .dropping || phase == .cancelling, "label": label, "text": chipText, "glyph": chipGlyph, "stroke": ShellFace.ring],
+            "chip": ["visible": phase == .lifted || phase == .dropping || phase == .cancelling, "label": label, "text": chipText, "glyph": chipGlyph, "stroke": chipBorder.lineWidth, "sourceState": sourceGlyph.rawValue],
             "boxes": boxes.mapValues { [$0.minX, $0.minY, $0.width, $0.height] }, "sent": sent,
             "frozen": holdsLayout, "replyHeld": heldReply != nil,
             "replies": ["handled": repliesHandled, "ignored": repliesIgnored],
@@ -616,14 +628,21 @@ final class PaneDrag: NSObject {
                        "active": motions.map { ["pane": $0.pane ?? (NSNull() as Any), "kind": $0.kind, "elapsedMs": elapsed($0)] }]]
     }
     private var chipGlyph: String {
-        if let sidebarGlyph { return sidebarGlyph }
         switch sourceGlyph {
         case .working: return "●"
-        case .needs: return "◐"
-        case .blocked: return "✕"
+        case .needs: return "■"
+        case .blocked: return "■"
         case .idle: return "○"
         case .asleep: return "·"
         case .done: return "✓"
+        }
+    }
+    private func chipColor(_ t: Tokens) -> NSColor {
+        switch sourceGlyph {
+        case .working: return NSColor(hex: t.chrome.ok)
+        case .needs, .blocked: return NSColor(hex: t.chrome.bad)
+        case .done: return NSColor(hex: t.chrome.warn)
+        case .idle, .asleep: return NSColor(hex: t.chrome.mute)
         }
     }
     private var chipText: String { chipGlyph + " " + label }
@@ -664,9 +683,17 @@ final class PaneDrag: NSObject {
             let r = CGRect(x: pointer.x + ShellMotion.chipOffset, y: pointer.y + ShellMotion.chipOffset,
                            width: size.width + ShellMotion.chipOffset * 2, height: ShellSpace.paneCapHeight)
             NSColor(hex: t.chrome.panel).setFill(); NSBezierPath(roundedRect: r, xRadius: ShellRadius.control, yRadius: ShellRadius.control).fill()
-            NSColor(hex: t.chrome.line).setStroke(); let border = NSBezierPath(roundedRect: r, xRadius: ShellRadius.control, yRadius: ShellRadius.control)
-            border.lineWidth = ShellFace.ring; border.stroke()
-            (text as NSString).draw(at: CGPoint(x: r.minX + ShellMotion.chipOffset, y: r.midY - size.height / 2), withAttributes: attrs)
+            CATransaction.begin(); CATransaction.setDisableActions(true)
+            chipBorder.path = CGPath(roundedRect: r, cornerWidth: ShellRadius.control, cornerHeight: ShellRadius.control, transform: nil)
+            chipBorder.fillColor = nil
+            chipBorder.strokeColor = NSColor(hex: t.chrome.line).cgColor
+            chipBorder.lineWidth = ShellFace.ring
+            chipBorder.opacity = Float(alpha)
+            if chipBorder.superlayer == nil { overlay.layer?.addSublayer(chipBorder) }
+            CATransaction.commit()
+            let attributed = NSMutableAttributedString(string: text, attributes: attrs)
+            attributed.addAttribute(.foregroundColor, value: chipColor(t), range: NSRange(location: 0, length: (chipGlyph as NSString).length))
+            attributed.draw(at: CGPoint(x: r.minX + ShellMotion.chipOffset, y: r.midY - size.height / 2))
             NSGraphicsContext.restoreGraphicsState()
         }
     }
