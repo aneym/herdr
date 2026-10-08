@@ -4,6 +4,9 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import PaneSurface from "./PaneSurface";
+import App from "./App";
+import { AGENTS_DIR } from "./faces";
+import type { Snapshot } from "./model";
 import { bridge, toBase64 } from "./bridge";
 import type { Pane } from "./model";
 let root: Root, host: HTMLDivElement;
@@ -28,7 +31,7 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 it("names a blocked agent and persists Focus/Full tool disclosure across remount, with Brief for a shell", async () => {
   await act(async () => render());
-  expect(host.querySelector(".pane-cap")?.textContent).toContain("Sol");
+  expect(host.querySelector(".pane-cap")?.textContent).toContain("claude");
   expect(host.querySelector('.pane-cap [aria-label="blocked"]')).not.toBeNull();
   await click("Chat");
   expect(host.querySelector('.pane-tools button[aria-pressed="true"]')?.textContent).toBe("Focus");
@@ -43,4 +46,44 @@ it("names a blocked agent and persists Focus/Full tool disclosure across remount
   act(() => root.unmount()); root = createRoot(host); await act(async () => render(false));
   expect(host.querySelector(".pane-cap")?.textContent).toContain("Brief");
   expect([...host.querySelectorAll("button")].some(b => b.textContent === "Full")).toBe(false);
+});
+
+// Integration through App → TabView → PaneSurface, faking only native IPC and time.
+async function renderPanes(count: number) {
+  const panes = Array.from({ length: count }, (_, i) => ({ ...pane, pane_id: `p${i}`, terminal_id: `term${i}` }));
+  const snapshot: Snapshot = {
+    workspaces: [{ workspace_id: "w", number: 1 }],
+    tabs: [{ tab_id: "t", workspace_id: "w", number: 1, focused: true }],
+    panes,
+    agents: panes.map(p => ({ ...p, agent: "claude", agent_status: "blocked", work_status: "working" })),
+    layouts: [{ tab_id: "t", area: { x: 0, y: 0, width: 900, height: 600 }, panes: panes.map((p, i) => ({ pane_id: p.pane_id, rect: { x: i * 900 / count, y: 0, width: 900 / count, height: 600 } })) }],
+  };
+  for (const p of panes) localStorage.setItem(`herdr-shell.mode.studio.${p.pane_id}`, "chat");
+  vi.spyOn(bridge, "machines").mockResolvedValue([{ name: "studio", state: "up" }]);
+  vi.spyOn(bridge, "snapshot").mockResolvedValue(snapshot);
+  vi.spyOn(bridge, "machineEvents").mockResolvedValue(() => {});
+  vi.spyOn(bridge, "snapshots").mockResolvedValue(() => {});
+  vi.spyOn(bridge, "controlEvent").mockResolvedValue(() => {});
+  vi.spyOn(bridge, "updateStatus").mockImplementation(() => new Promise(() => {}));
+  vi.spyOn(bridge, "remoteHome").mockResolvedValue("/home/test");
+  await act(async () => root.render(<App />));
+}
+it("the visible Chat cap uses work status and agent kind, not the card name", async () => {
+  await renderPanes(1);
+  const cap = host.querySelector('.pane-surface > .pane-cap');
+  expect(cap).not.toBeNull();
+  expect(cap?.querySelector('[aria-label="working"]')).not.toBeNull();
+  expect(cap?.querySelector('.label')?.textContent).toBe("claude");
+  expect(cap?.querySelector('.face')).not.toBeNull();
+});
+it("N panes share one agents directory read on mount and each poll", async () => {
+  vi.useFakeTimers();
+  try {
+    await renderPanes(3);
+    expect(host.querySelectorAll('.pane-surface > .pane-tools')).toHaveLength(3);
+    const reads = () => vi.mocked(bridge.fileList).mock.calls.filter(([, path]) => path === AGENTS_DIR).length;
+    expect(reads()).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    expect(reads()).toBe(2);
+  } finally { vi.useRealTimers(); }
 });
