@@ -155,6 +155,7 @@ try {{
     Add-Content -LiteralPath $log -Value "$(Get-Date -Format o) update failed: $_"
 }} finally {{
     Remove-Item -LiteralPath $PSCommandPath -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath ([IO.Path]::ChangeExtension($PSCommandPath, '.vbs')) -ErrorAction SilentlyContinue
 }}
 "#,
         log = quote(&logs.join("update.log"))?,
@@ -187,9 +188,15 @@ try {{
     drop(file);
     // A shell launched by a scheduled task lives in that task's job, which ends
     // a child helper together with the app. A task of its own outlives both.
+    // The task runs wscript, which starts powershell with window style 0 (hidden from
+    // creation); an interactive task running powershell -WindowStyle Hidden flashes a
+    // console on the desktop first. The update script starts the app with Start-Process.
     let register = r#"$ErrorActionPreference = 'Stop'
-$arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $env:HERDR_SHELL_UPDATE_SCRIPT + '"'
-$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arguments
+$script = $env:HERDR_SHELL_UPDATE_SCRIPT
+$vbs = [IO.Path]::ChangeExtension($script, '.vbs')
+$cmd = 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $script + '"'
+Set-Content -LiteralPath $vbs -Encoding Unicode -Value ('CreateObject("WScript.Shell").Run "' + $cmd.Replace('"', '""') + '", 0, False')
+$action = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ('//B "' + $vbs + '"')
 $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances Parallel
 Register-ScheduledTask -TaskName HerdrShellUpdate -Action $action -Principal $principal -Settings $settings -Force | Out-Null
