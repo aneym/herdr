@@ -36,6 +36,10 @@ export class PaneDrag {
   private row: RowTarget | null = null;
   private target: string | null = null;
   private timer?: ReturnType<typeof setTimeout>;
+  // The pending drop's zone and, once the dry run answered, where it puts the source: they recognise the drop's own
+  // layout, so another change on the tab meanwhile applies at once.
+  private dropZone: PaneZone | null = null;
+  private placed?: Rect;
   constructor(private machine: string, private options: { onChange?: (state: PaneDragState) => void; onError?: (error: unknown) => void } = {}) {}
   get state(): PaneDragState { return this.value; }
   private emit(patch: Partial<PaneDragState>) {
@@ -119,6 +123,7 @@ export class PaneDrag {
     if (zone.kind === "centre") { method = "pane.swap"; params = { source_pane_id: source, target_pane_id: zone.target }; }
     else if (zone.kind === "new_tab_in") { method = "pane.move"; params = { pane_id: source, destination: { type: "new_tab", workspace_id: zone.workspace_id }, focus: true }; }
     else { method = "pane.place"; params = { ...(zone.kind === "into_tab" ? { pane_id: source, target: { type: "tab", tab_id: zone.tab_id }, side: "right" } : this.place(zone)), focus: true, dry_run: false }; }
+    this.dropZone = zone; this.placed = zone.kind === "pane_edge" || zone.kind === "tab_edge" ? this.cache.get(zoneKey(zone))?.placed_rect : undefined;
     const generation = ++this.generation;
     this.emit({ phase: "dropped", pending: false, keyboard: false });
     this.timer = setTimeout(() => { if (generation === this.generation) this.cancel(); }, 4000);
@@ -129,16 +134,30 @@ export class PaneDrag {
     }).catch(error => { if (generation === this.generation) { this.cancel(); this.options.onError?.(error); } });
     return "dropped";
   }
-  cancel(): void { ++this.generation; clearTimeout(this.timer); this.cache.clear(); this.flight = false; this.raw = null; this.row = null; this.target = null; this.emit(idle()); }
-  // Only the first server geometry following this client's drop earns a settle.
+  // Against the layout the drop was made on: a swap puts the source in the target's rect; a placement puts it where
+  // the dry run said, else anywhere new; a move into another tab takes it out of this one.
+  private isDropLayout(layout: Layout): boolean {
+    const zone = this.dropZone, source = this.value.source, base = this.input?.layout;
+    if (!zone || !base) return false;
+    const rectOf = (l: Layout, id: string | null) => l.panes.find(p => p.pane_id === id)?.rect;
+    const same = (a?: Rect, b?: Rect) => !!a && !!b && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+    if (zone.kind === "centre") return same(rectOf(layout, source), rectOf(base, zone.target));
+    if (zone.kind === "into_tab" || zone.kind === "new_tab_in") return !rectOf(layout, source);
+    return this.placed ? same(rectOf(layout, source), this.placed) : !same(rectOf(layout, source), rectOf(base, source));
+  }
+  cancel(): void { ++this.generation; clearTimeout(this.timer); this.dropZone = null; this.placed = undefined; this.cache.clear(); this.flight = false; this.raw = null; this.row = null; this.target = null; this.emit(idle()); }
+  // Only the server geometry that carries this client's drop earns a settle.
   shouldAnimateLayout(layout: Layout | undefined): boolean {
     return this.value.phase === "dropped" && !!layout && layout.tab_id === this.input?.layout.tab_id
-      && JSON.stringify(layout.panes) !== JSON.stringify(this.input.layout.panes);
+      && JSON.stringify(layout.panes) !== JSON.stringify(this.input.layout.panes) && this.isDropLayout(layout);
   }
   layoutChanged(layout: Layout | undefined): void {
     if (this.value.phase === "idle") return;
     if (!layout || layout.tab_id !== this.input!.layout.tab_id || !layout.panes.some(p => p.pane_id === this.value.source)) { this.cancel(); return; }
     if (JSON.stringify(layout.panes) === JSON.stringify(this.input!.layout.panes) && JSON.stringify(layout.area) === JSON.stringify(this.input!.layout.area) && layout.zoomed === this.input!.layout.zoomed) return;
+    // A pending drop ends with its own layout; another change on the tab meanwhile becomes the base it settles from.
+    // The dry run's placed rect belonged to the old base, so from here any new rect for the source is the drop.
+    if (this.value.phase === "dropped" && !layout.zoomed && !this.isDropLayout(layout)) { this.input = { ...this.input!, layout }; this.placed = undefined; return; }
     if (this.value.phase === "dropped" || layout.zoomed) { this.cancel(); return; }
     ++this.generation; this.flight = false; this.cache.clear(); this.input = { ...this.input!, layout }; this.rebuild();
     this.emit({ sourceRect: this.boxes.find(p => p.id === this.value.source)!.rect });

@@ -124,14 +124,22 @@ export default function TabView({ snapshot, selected, machine, focused, onFocus,
     const el = event.currentTarget;
     try { el.setPointerCapture(event.pointerId); } catch { /* Synthetic control events have no capture. */ }
     const move = (e: PointerEvent) => {
+      // A right press while the left is held arrives as a chorded pointermove, never a pointerdown.
+      if (e.button === 2 || e.buttons & 2) { rightCancel(e, !(e.buttons & 2)); return; }
       const hit = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>("[data-tab], [data-space]");
       paneDrag.move(point(e), hit?.dataset.tab ? { kind: "tab", tab_id: hit.dataset.tab } : hit?.dataset.space ? { kind: "space", workspace_id: hit.dataset.space } : null);
       if (paneDrag.state.phase === "dragging") { e.preventDefault(); e.stopPropagation(); }
     };
     const done = () => { window.removeEventListener("pointermove", move, true); window.removeEventListener("pointerup", up, true); window.removeEventListener("pointercancel", cancel, true); window.removeEventListener("pointerdown", right, true); window.removeEventListener("contextmenu", context, true); paneStop.current = null; try { el.releasePointerCapture(event.pointerId); } catch { /* Already released. */ } };
-    const up = (e: PointerEvent) => { if (e.button !== 0) return; const result = paneDrag.release(); done(); if (result !== "click") { e.preventDefault(); e.stopPropagation(); } };
+    const up = (e: PointerEvent) => {
+      if (e.button === 0) { const result = paneDrag.release(); done(); if (result !== "click") { e.preventDefault(); e.stopPropagation(); } return; }
+      // The last button up ends the drag even when it is not the left one: the left went up in a chord.
+      if (e.buttons === 0) { if (e.button === 2) rightCancel(e, true); else { cancel(); e.preventDefault(); e.stopPropagation(); } }
+    };
     const cancel = () => { paneDrag.cancel(); done(); };
-    const right = (e: PointerEvent) => { if (e.button === 2) { e.preventDefault(); e.stopPropagation(); contextStop.current?.(); contextStop.current = blockCancelContextMenu(window); cancel(); } };
+    // The context-menu blocker outlives the drag until that right button's release.
+    const rightCancel = (e: PointerEvent, releasing = false) => { e.preventDefault(); e.stopPropagation(); contextStop.current?.(); contextStop.current = blockCancelContextMenu(window, releasing); cancel(); };
+    const right = (e: PointerEvent) => { if (e.button === 2) rightCancel(e); };
     const context = (e: Event) => { e.preventDefault(); };
     window.addEventListener("pointermove", move, true); window.addEventListener("pointerup", up, true); window.addEventListener("pointercancel", cancel, true); window.addEventListener("pointerdown", right, true); window.addEventListener("contextmenu", context, true); paneStop.current = done;
   };
