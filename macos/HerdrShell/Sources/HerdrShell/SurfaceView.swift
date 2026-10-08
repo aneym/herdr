@@ -503,7 +503,7 @@ final class SurfaceView: NSView {
     }()
     private lazy var linkPreview: LinkPreview = {
         let label = LinkPreview(labelWithString: "")
-        label.font = .systemFont(ofSize: 11)
+        label.font = .systemFont(ofSize: ShellType.switcherMeta)
         label.textColor = .secondaryLabelColor
         label.backgroundColor = .windowBackgroundColor
         label.drawsBackground = true

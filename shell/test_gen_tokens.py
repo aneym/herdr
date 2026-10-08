@@ -183,17 +183,17 @@ def raw_dimensions(path, source):
                 depth += (source[end] == "(") - (source[end] == ")")
                 end += 1
             spans.append((start, source[start:end - 1]))
-        for match in re.finditer(r"(?:\b(?:spacing|cornerRadius|size|ofSize)\s*:\s*|\.cornerRadius\s*=\s*|\bspacing\s*:\s*CGFloat\s*=\s*)([^,\n)}]+)", source):
+        for match in re.finditer(r"(?:\b(?:spacing|horizontalSpacing|verticalSpacing|cornerRadius|size|ofSize)\s*:\s*|\.cornerRadius\s*=\s*|\bspacing\s*:\s*CGFloat\s*=\s*)([^,\n)}]+)", source):
             spans.append((match.start(1), match.group(1)))
     elif path.suffix == ".css":
-        for match in re.finditer(r"(?:^|[;{])\s*(?:padding[\w-]*|margin[\w-]*|gap|row-gap|column-gap|border[\w-]*radius|font-size|letter-spacing|(?:min-|max-)?(?:width|height)|inset|top|bottom|left|right)\s*:\s*([^;}]+)", source):
+        for match in re.finditer(r"(?:^|(?<=[;{]))\s*(?:padding[\w-]*|margin[\w-]*|gap|row-gap|column-gap|border[\w-]*radius|font-size|letter-spacing|(?:min-|max-)?(?:width|height)|inset|top|bottom|left|right)\s*:\s*([^;}]+)", source):
             spans.append((match.start(1), match.group(1)))
     else:
         for match in re.finditer(r"\b(?:padding\w*|margin\w*|gap|rowGap|columnGap|borderRadius|fontSize)\s*:\s*([^,}\n]+)", source):
             spans.append((match.start(1), match.group(1)))
     failures = []
     for start, expression in spans:
-        for number in re.finditer(r"(?<![\w.])-?\d+(?:\.\d+)?(?![\w.])", expression):
+        for number in re.finditer(r"(?<![\w.])-?\d+(?:\.\d+)?(?=px\b|[^\w.]|$)", expression):
             tail = expression[number.end():]
             before = expression[:number.start()].rstrip()
             if path.suffix == ".css" and not tail.startswith("px"):
@@ -208,6 +208,21 @@ def raw_dimensions(path, source):
 
 
 class ClientDimensionTests(unittest.TestCase):
+    def test_literal_parser_edge_cases(self):
+        """Golden syntax table for the pure literal parser's overlapping edge cases."""
+        cases = [
+            ("a.css", "a { gap: 7px; padding: 4px 8px; font-size: 12.5px; }", 4),
+            ("a.css", "a { border-radius: 50%; padding: 0; height: 100vh; border: 1px solid; }", 0),
+            ("a.css", "a { gap: var(--shell-space-step8); margin: calc(-1 * var(--shell-space-step12)); }", 0),
+            ("a.tsx", 'style={{ paddingLeft: 8 + depth * 16, fontSize: "12px" }}', 3),
+            ("a.swift", ".padding(.top, count > 2 ? 6 : 0).font(.system(size: 12.5))", 2),
+            ("a.swift", "HStack(spacing: 4) { }.padding(.leading, CGFloat(depth) * 16)", 2),
+            ("a.swift", "/* .padding(9) */ HStack(spacing: 0) { }.padding(1)", 0),
+        ]
+        for name, text, count in cases:
+            with self.subTest(source=text):
+                self.assertEqual(len(raw_dimensions(pathlib.Path(name), text)), count)
+
     def test_shipped_clients_use_shared_dimensions(self):
         failures = []
         for root, suffixes in ((gen.MAC_DIR, {".swift"}), (gen.WEB_DIR, {".css", ".tsx"})):

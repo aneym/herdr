@@ -124,13 +124,13 @@ struct DetailPanelView: View {
     var body: some View {
         Group {
             if let id = panel.rowId, let c = panel.provider.content(for: id, in: model) {
-                let stack = VStack(alignment: .leading, spacing: 14) { body(c) }.padding(12)
+                let stack = VStack(alignment: .leading, spacing: ShellSpace.step14) { body(c) }.padding(ShellSpace.step12)
                 if scrolls { ScrollView { stack } } else { stack.frame(maxHeight: .infinity, alignment: .topLeading) }
             } else {
-                Text("row is gone").foregroundStyle(t.mute).padding(12).frame(maxWidth: .infinity, alignment: .topLeading)
+                Text("row is gone").foregroundStyle(t.mute).padding(ShellSpace.step12).frame(maxWidth: .infinity, alignment: .topLeading)
             }
         }
-        .font(.system(size: 12, design: .monospaced))
+        .font(.system(size: ShellType.size12, design: .monospaced))
         .foregroundStyle(t.ink)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(t.panel)
@@ -140,11 +140,11 @@ struct DetailPanelView: View {
 
     @ViewBuilder private func body(_ c: DetailContent) -> some View {
         HStack {
-            Text(c.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(kindColor(c.kind)).lineLimit(1)
+            Text(c.title).font(.system(size: ShellType.switcherRow, weight: .semibold)).foregroundStyle(kindColor(c.kind)).lineLimit(1)
             Spacer(minLength: 4)
             Text("esc").foregroundStyle(t.mute)
         }
-        Text("\(c.kind.rawValue) · \(c.agent ?? "shell") · \(c.status) · \(c.host)").foregroundStyle(t.mute).font(.system(size: 11))
+        Text("\(c.kind.rawValue) · \(c.agent ?? "shell") · \(c.status) · \(c.host)").foregroundStyle(t.mute).font(.system(size: ShellType.switcherMeta))
         section("INBOX", count: c.inbox.count) {
             if c.inbox.isEmpty { Text("nothing waiting").foregroundStyle(t.mute) }
             ForEach(Array(c.inbox.enumerated()), id: \.offset) { _, i in
@@ -160,15 +160,15 @@ struct DetailPanelView: View {
             if c.groups.isEmpty { Text("none running").foregroundStyle(t.mute) }
             ForEach(Array(c.groups.enumerated()), id: \.offset) { _, g in
                 if let lane = g.lane {
-                    Text(lane).foregroundStyle(t.lane).font(.system(size: 11, weight: .semibold)).padding(.top, 2)
+                    Text(lane).foregroundStyle(t.lane).font(.system(size: ShellType.switcherMeta, weight: .semibold)).padding(.top, ShellSpace.step2)
                 }
                 ForEach(g.workflows) { w in workflowRow(w) }
             }
         }
         Button { openFull(c.rowId) } label: {
             Text("open full \(c.kind.rawValue) tab")
-            .padding(.horizontal, 8).padding(.vertical, 4)
-            .overlay(RoundedRectangle(cornerRadius: 5).stroke(t.line, lineWidth: 1))
+            .padding(.horizontal, ShellSpace.step8).padding(.vertical, ShellSpace.step4)
+            .overlay(RoundedRectangle(cornerRadius: ShellRadius.curve5).stroke(t.line, lineWidth: 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -177,37 +177,37 @@ struct DetailPanelView: View {
     }
 
     private func section<Content: View>(_ title: String, count: Int, @ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: ShellSpace.step4) {
             Divider().overlay(t.line)
             HStack {
-                Text(title).font(.system(size: 10.5, weight: .semibold)).tracking(0.8)
+                Text(title).font(.system(size: ShellType.sectionLabel, weight: .semibold)).tracking(0.8)
                 Spacer()
                 Text("\(count)")
             }
-            .foregroundStyle(t.mute).padding(.top, 4)
+            .foregroundStyle(t.mute).padding(.top, ShellSpace.step4)
             content()
         }
     }
 
     private func line(_ text: String, trailing: String, trailingColor: Color? = nil) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
+        HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step6) {
             Text(text).lineLimit(2)
             Spacer(minLength: 4)
-            Text(trailing).foregroundStyle(trailingColor ?? t.mute).font(.system(size: 11))
+            Text(trailing).foregroundStyle(trailingColor ?? t.mute).font(.system(size: ShellType.switcherMeta))
         }
     }
 
     private func workflowRow(_ w: DetailWorkflow) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: ShellSpace.step6) {
             Text(dot(w.status)).foregroundStyle(w.status == "working" ? t.ok : (w.status == "blocked" ? t.warn : t.mute))
             Text(w.label).foregroundStyle(t.wf).lineLimit(1)
             Spacer(minLength: 4)
             Text(w.phase).foregroundStyle(w.status == "blocked" ? t.warn : t.mute)
             Text(w.host)
-                .font(.system(size: 10, weight: .semibold))
-                .padding(.horizontal, 5).padding(.vertical, 1)
+                .font(.system(size: ShellType.glyph, weight: .semibold))
+                .padding(.horizontal, ShellSpace.step5).padding(.vertical, 1)
                 .foregroundStyle(w.host == TabClassifier.defaultHost ? t.mute : t.warn)
-                .overlay(RoundedRectangle(cornerRadius: 4).stroke(t.line, lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: ShellRadius.row).stroke(t.line, lineWidth: 1))
         }
     }
 

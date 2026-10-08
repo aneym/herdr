@@ -194,6 +194,12 @@ def ts(t):
         out.append(f"  {key}: {num(value)},")
     out.append("  ease: [" + ", ".join(num(v) for v in t["motion"]["ease"]) + "],")
     out.append("} as const;")
+    for group in ("type", "space", "radius"):
+        out += ["", f"export const {group} = {{"]
+        for key, value in t[group].items():
+            if not key.startswith("_"):
+                out.append(f"  {key}: {num(value)},")
+        out.append("} as const;")
     return "\n".join(out) + "\n"
 
 

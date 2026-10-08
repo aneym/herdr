@@ -246,18 +246,18 @@ struct QuickSwitchPanel: View {
                 t.ink.opacity(0.32)
                     .contentShape(Rectangle())
                     .onTapGesture { model.dismiss() }
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: ShellSpace.step2) {
                     field(t)
                     Rectangle().fill(t.mute.opacity(0.25)).frame(height: 1)
-                        .padding(.horizontal, -12)
-                        .padding(.bottom, 6)
+                        .padding(.horizontal, -ShellSpace.step12)
+                        .padding(.bottom, ShellSpace.step6)
                     let rows = model.visible
                     if rows.isEmpty {
                         Text("No matches")
-                            .font(.system(size: 12.5))
+                            .font(.system(size: ShellType.rowTitle))
                             .foregroundStyle(t.mute)
-                            .padding(.horizontal, 8)
-                            .padding(.bottom, 6)
+                            .padding(.horizontal, ShellSpace.step8)
+                            .padding(.bottom, ShellSpace.step6)
                     } else {
                         ScrollViewReader { proxy in
                             ScrollView(.vertical) {
@@ -276,7 +276,7 @@ struct QuickSwitchPanel: View {
                         }
                     }
                 }
-                .padding(12)
+                .padding(ShellSpace.switcherInset)
                 .frame(width: ShellSpace.switcherWidth)
                 .background(OverlayBackground(theme: theme, corner: 10))
                 .padding(.top, top)
@@ -288,27 +288,27 @@ struct QuickSwitchPanel: View {
     private func field(_ t: Tokens) -> some View {
         let shown = model.query.isEmpty ? "Jump to a lane, agent, or tab" : model.query
         // The field sits straight on the panel; a hairline below it, no inner box.
-        return HStack(spacing: 8) {
+        return HStack(spacing: ShellSpace.switcherQueryGap) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 14))
+                .font(.system(size: ShellType.body))
                 .foregroundStyle(t.mute)
             Text(shown)
                 .font(.system(size: ShellType.switcherQuery))
                 .foregroundStyle(model.query.isEmpty ? t.mute : t.ink)
                 .lineLimit(1)
-                .padding(.horizontal, 2)
-                .background(RoundedRectangle(cornerRadius: 4).fill(model.selectAll && !model.query.isEmpty ? t.sel : Color.clear))
+                .padding(.horizontal, ShellSpace.step2)
+                .background(RoundedRectangle(cornerRadius: ShellRadius.row).fill(model.selectAll && !model.query.isEmpty ? t.sel : Color.clear))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 8)
-        .padding(.top, 2)
-        .padding(.bottom, 10)
+        .padding(.horizontal, ShellSpace.step8)
+        .padding(.top, ShellSpace.step2)
+        .padding(.bottom, ShellSpace.step10)
     }
 
     private func rowView(_ row: QuickSwitch.Row, on: Bool, tokens t: Tokens) -> some View {
         let state = row.parked ? "parked" : row.badge
         let meta = [row.workspace, state, row.host].filter { !$0.isEmpty }.joined(separator: " · ")
-        return HStack(spacing: 8) {
+        return HStack(spacing: ShellSpace.switcherQueryGap) {
             StateGlyph(state: row.glyph, tokens: t)
             Text(row.label)
                 .font(.system(size: ShellType.switcherRow))
@@ -321,8 +321,8 @@ struct QuickSwitchPanel: View {
                 .foregroundStyle(t.mute)
                 .lineLimit(1)
         }
-        .padding(.horizontal, 8)
-        .frame(height: 32)
+        .padding(.horizontal, ShellSpace.step8)
+        .frame(height: ShellSpace.switcherRowHeight)
         .background(RoundedRectangle(cornerRadius: ShellRadius.control).fill(on ? t.sel : Color.clear))
     }
 }

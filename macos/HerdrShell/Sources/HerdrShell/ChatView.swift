@@ -178,40 +178,40 @@ private struct Markdown: View {
     @ViewBuilder private func view(_ block: Block) -> some View {
         switch block {
         case .heading(let level, let s):
-            inline(s, size: level == 1 ? 19 : level == 2 ? 16.5 : 14.5)
-                .font(.system(size: level == 1 ? 19 : level == 2 ? 16.5 : 14.5, weight: .semibold))
-                .padding(.top, level <= 2 ? 6 : 2)
+            inline(s, size: level == 1 ? ShellType.chatH1 : level == 2 ? ShellType.chatH2 : ShellType.chatH3)
+                .font(.system(size: level == 1 ? ShellType.chatH1 : level == 2 ? ShellType.chatH2 : ShellType.chatH3, weight: .semibold))
+                .padding(.top, level <= 2 ? ShellSpace.step6 : ShellSpace.step2)
         case .paragraph(let s):
             inline(s).font(.system(size: Metric.body)).lineSpacing(Metric.leading)
         case .list(let items):
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: ShellSpace.step5) {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step8) {
                         Text(item.marker).font(.system(size: Metric.body)).foregroundStyle(p.mute)
                             .frame(minWidth: 12, alignment: item.marker == "•" ? .center : .trailing)
                         inline(item.text).font(.system(size: Metric.body)).lineSpacing(Metric.leading)
                     }
-                    .padding(.leading, CGFloat(item.depth) * 18)
+                    .padding(.leading, CGFloat(item.depth) * ShellSpace.step18)
                 }
             }
         case .code(let lang, let code):
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: ShellSpace.step6) {
                 if !lang.isEmpty { Text(lang).font(.system(size: Metric.caption)).foregroundStyle(p.faint) }
                 ScrollView(.horizontal, showsIndicators: false) {
                     chatText(code, p).font(ChatFont.mono(codeFamily, Metric.code)).lineSpacing(3).fixedSize()
                 }
             }
-            .padding(.horizontal, 14).padding(.vertical, 11)
+            .padding(.horizontal, ShellSpace.step14).padding(.vertical, ShellSpace.step11)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(p.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(p.surface, in: RoundedRectangle(cornerRadius: ShellRadius.code, style: .continuous))
         case .table(let rows):
-            Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 0) {
+            Grid(alignment: .leading, horizontalSpacing: ShellSpace.step24, verticalSpacing: 0) {
                 ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
                     GridRow {
                         ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
-                            inline(cell, size: 13.5).font(.system(size: 13.5, weight: index == 0 ? .semibold : .regular))
+                            inline(cell, size: ShellType.terminal).font(.system(size: ShellType.terminal, weight: index == 0 ? .semibold : .regular))
                                 .foregroundStyle(index == 0 ? p.ink : p.ink.opacity(0.92))
-                                .padding(.vertical, 7)
+                                .padding(.vertical, ShellSpace.step7)
                         }
                     }
                     if index < rows.count - 1 {
@@ -221,9 +221,9 @@ private struct Markdown: View {
             }
         case .quote(let s):
             inline(s).font(.system(size: Metric.body)).italic().foregroundStyle(p.mute).lineSpacing(Metric.leading)
-                .padding(.leading, 14)
+                .padding(.leading, ShellSpace.step14)
         case .rule:
-            Rectangle().fill(p.hair).frame(height: 1).padding(.vertical, 4)
+            Rectangle().fill(p.hair).frame(height: 1).padding(.vertical, ShellSpace.step4)
         }
     }
 }
@@ -251,14 +251,14 @@ private struct ToolRow: View {
     private var isDiff: Bool { ["Edit", "Write", "MultiEdit"].contains(item.tool ?? "") }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: ShellSpace.step6) {
             Button { expanded.toggle() } label: {
-                HStack(spacing: 8) {
+                HStack(spacing: ShellSpace.step8) {
                     ZStack {
                         if item.status == "running" {
                             ProgressView().controlSize(.mini)
                         } else {
-                            Image(systemName: icon).font(.system(size: 11, weight: .regular))
+                            Image(systemName: icon).font(.system(size: ShellType.switcherMeta, weight: .regular))
                                 .foregroundStyle(item.status == "error" ? p.del : p.mute)
                         }
                     }
@@ -267,7 +267,7 @@ private struct ToolRow: View {
                     Text(item.text).font(.system(size: Metric.small)).foregroundStyle(p.mute).lineLimit(1).truncationMode(.middle)
                     if item.status == "error" { Text("failed").font(.system(size: Metric.small)).foregroundStyle(p.del) }
                     Spacer(minLength: 8)
-                    Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(p.faint)
+                    Image(systemName: "chevron.right").font(.system(size: ShellType.size9, weight: .semibold)).foregroundStyle(p.faint)
                         .rotationEffect(.degrees(expanded ? 90 : 0))
                         .opacity(hover || expanded ? 1 : 0)
                 }
@@ -276,7 +276,7 @@ private struct ToolRow: View {
             }
             .buttonStyle(.plain)
             .onHover { hover = $0 }
-            if expanded { detail.padding(.leading, 24) }
+            if expanded { detail.padding(.leading, ShellSpace.step24) }
         }
     }
 
@@ -290,31 +290,31 @@ private struct ToolRow: View {
                         chatText(line.text.isEmpty ? " " : line.text, p).foregroundStyle(p.ink.opacity(0.9))
                     }
                     .font(mono)
-                    .padding(.vertical, 2.5).padding(.trailing, 12)
+                    .padding(.vertical, ShellSpace.step2_5).padding(.trailing, ShellSpace.step12)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Rectangle().fill(line.sign == "+" ? p.addFill : line.sign == "-" ? p.delFill : Color.clear))
                 }
                 if let r = item.result, item.status == "error" {
-                    chatText(r, p).font(mono).foregroundStyle(p.del).textSelection(.enabled).padding(12)
+                    chatText(r, p).font(mono).foregroundStyle(p.del).textSelection(.enabled).padding(ShellSpace.step12)
                 }
             } else {
                 ScrollView(.vertical) {
-                    VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: ShellSpace.step10) {
                         chatText(item.input ?? "", p).font(mono).foregroundStyle(p.ink.opacity(0.85)).textSelection(.enabled)
                         if let r = item.result, !r.isEmpty {
                             Rectangle().fill(p.hair).frame(height: 1)
                             chatText(r, p).font(mono).foregroundStyle(item.status == "error" ? p.del : p.mute).textSelection(.enabled)
                         }
                     }
-                    .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(ShellSpace.step12).frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(maxHeight: 260)
                 .fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(p.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(p.surface, in: RoundedRectangle(cornerRadius: ShellRadius.code, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: ShellRadius.code, style: .continuous))
         .textSelection(.enabled)
     }
 
@@ -341,12 +341,12 @@ private struct ToolGroup: View {
         VStack(alignment: .leading, spacing: 0) {
             if items.count > 1 {
                 Button { open.toggle() } label: {
-                    HStack(spacing: 8) {
+                    HStack(spacing: ShellSpace.step8) {
                         ZStack {
                             if items.contains(where: { $0.status == "running" }) && !open {
                                 ProgressView().controlSize(.mini)
                             } else {
-                                Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(p.faint)
+                                Image(systemName: "chevron.right").font(.system(size: ShellType.size9, weight: .semibold)).foregroundStyle(p.faint)
                                     .rotationEffect(.degrees(open ? 90 : 0))
                             }
                         }
@@ -363,13 +363,13 @@ private struct ToolGroup: View {
                 .buttonStyle(.plain)
             }
             if items.count == 1 || open {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: ShellSpace.step2) {
                     ForEach(items) { item in
                         ToolRow(item: item, p: p, codeFamily: codeFamily, expanded: expanded(item.id))
                             .onAppear { ui.rendered.insert(item.id) }.onDisappear { ui.rendered.remove(item.id) }
                     }
                 }
-                .padding(.leading, items.count > 1 ? 24 : 0)
+                .padding(.leading, items.count > 1 ? ShellSpace.step24 : 0)
             }
         }
     }
@@ -481,7 +481,7 @@ struct ChatView: View {
                         // changes that push this marker off screen must not.
                         Color.clear.frame(height: 1).id("latest").onAppear { stick = true }
                     }
-                    .padding(.horizontal, Metric.gutter).padding(.top, 12).padding(.bottom, 12)
+                    .padding(.horizontal, Metric.gutter).padding(.top, ShellSpace.step12).padding(.bottom, ShellSpace.step12)
                     .frame(maxWidth: Metric.column).frame(maxWidth: .infinity)
                 }
                 .scrollIndicators(.never)
@@ -503,22 +503,22 @@ struct ChatView: View {
                 .overlay(alignment: .bottom) {
                     if !stick && !transcript.items.isEmpty {
                         Button { stick = true; withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("latest", anchor: .bottom) } } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "arrow.down").font(.system(size: 10, weight: .semibold))
+                            HStack(spacing: ShellSpace.step6) {
+                                Image(systemName: "arrow.down").font(.system(size: ShellType.glyph, weight: .semibold))
                                 Text("Jump to latest").font(.system(size: Metric.small, weight: .medium))
                             }
                             .foregroundStyle(p.ink.opacity(0.85))
-                            .padding(.horizontal, 12).frame(height: 28)
+                            .padding(.horizontal, ShellSpace.step12).frame(height: 28)
                             .background(Capsule().fill(p.page))
                             .overlay(Capsule().stroke(p.hair, lineWidth: 1))
                             .shadow(color: .black.opacity(p.dark ? 0.4 : 0.08), radius: 8, y: 2)
                         }
-                        .buttonStyle(.plain).padding(.bottom, 10)
+                        .buttonStyle(.plain).padding(.bottom, ShellSpace.step10)
                     }
                 }
             }
             footer(p)
-                .padding(.horizontal, Metric.gutter).padding(.bottom, 18)
+                .padding(.horizontal, Metric.gutter).padding(.bottom, ShellSpace.step18)
                 .frame(maxWidth: Metric.column).frame(maxWidth: .infinity)
         }
         .foregroundStyle(p.ink)
@@ -551,22 +551,22 @@ struct ChatView: View {
         case "user":
             youBubble(item.text, p)
             if item.queued {
-                HStack(spacing: 4) {
+                HStack(spacing: ShellSpace.step4) {
                     Spacer()
-                    Image(systemName: "clock").font(.system(size: 10))
+                    Image(systemName: "clock").font(.system(size: ShellType.glyph))
                     Text("Queued until the current step ends").font(.system(size: Metric.caption))
                 }
-                .foregroundStyle(p.mute).padding(.top, -10)
+                .foregroundStyle(p.mute).padding(.top, -ShellSpace.step10)
             }
         case "assistant":
             Markdown(text: item.text, p: p, codeFamily: codeFamily)
         case "duration":
-            HStack(spacing: 12) {
+            HStack(spacing: ShellSpace.step12) {
                 Rectangle().fill(p.hair).frame(height: 1)
                 Text("Worked for \(item.text)").font(.system(size: Metric.caption)).foregroundStyle(p.mute).fixedSize()
                 Rectangle().fill(p.hair).frame(height: 1)
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, ShellSpace.step6)
         default:
             note(item.text, p)
         }
@@ -576,13 +576,13 @@ struct ChatView: View {
         HStack {
             Spacer(minLength: 96)
             chatText(s, p).font(.system(size: Metric.body)).lineSpacing(Metric.leading).textSelection(.enabled)
-                .padding(.horizontal, 14).padding(.vertical, 9)
-                .background(p.you, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .padding(.horizontal, ShellSpace.chatBubbleX).padding(.vertical, ShellSpace.chatBubbleY)
+                .background(p.you, in: RoundedRectangle(cornerRadius: ShellRadius.bubble, style: .continuous))
         }
     }
 
     private func pendingBubble(_ p: Palette) -> some View {
-        VStack(alignment: .trailing, spacing: 6) {
+        VStack(alignment: .trailing, spacing: ShellSpace.step6) {
             youBubble(sender.pending, p).opacity(0.55)
             Text(sender.warning ? "Not sent" : sender.status.hasPrefix("held") ? "Held: sends when the terminal stops asking" : "Sending")
                 .font(.system(size: Metric.caption)).foregroundStyle(p.mute)
@@ -596,8 +596,8 @@ struct ChatView: View {
         if s.hasPrefix("from "), let colon = s.range(of: ": ") {
             pane = String(s[s.index(s.startIndex, offsetBy: 5)..<colon.lowerBound]); body = String(s[colon.upperBound...])
         }
-        return HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: "arrow.turn.down.right").font(.system(size: 10)).frame(width: 16)
+        return HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step8) {
+            Image(systemName: "arrow.turn.down.right").font(.system(size: ShellType.glyph)).frame(width: 16)
             (Text(pane.isEmpty ? "" : pane + "  ").fontWeight(.medium).foregroundColor(p.ink.opacity(0.78)) + Text(body))
                 .font(.system(size: Metric.small)).lineLimit(2)
         }
@@ -605,7 +605,7 @@ struct ChatView: View {
     }
 
     @ViewBuilder private func empty(_ p: Palette) -> some View {
-        VStack(spacing: 8) {
+        VStack(spacing: ShellSpace.step8) {
             if transcript.waiting {
                 ProgressView().controlSize(.small)
                 Text("Waiting for the session").font(.system(size: Metric.body, weight: .medium))
@@ -624,25 +624,25 @@ struct ChatView: View {
     // MARK: Footer: status line, draft warning, composer
 
     @ViewBuilder private func footer(_ p: Palette) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: ShellSpace.step10) {
             status(p)
             if sender.warning {
-                HStack(spacing: 10) {
-                    Image(systemName: "exclamationmark.circle").font(.system(size: 13)).foregroundStyle(p.t.warn)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(sender.status).font(.system(size: 13, weight: .medium))
+                HStack(spacing: ShellSpace.step10) {
+                    Image(systemName: "exclamationmark.circle").font(.system(size: ShellType.switcherRow)).foregroundStyle(p.t.warn)
+                    VStack(alignment: .leading, spacing: ShellSpace.step2) {
+                        Text(sender.status).font(.system(size: ShellType.switcherRow, weight: .medium))
                         Text(sender.status.contains("prompt") ? "The prompt isn't in view, so this may append to a draft." : "Sending now would join it to your message.").font(.system(size: Metric.small)).foregroundStyle(p.mute)
                     }
                     Spacer()
                     Button("Cancel") { text = sender.cancel() }.buttonStyle(.plain).font(.system(size: Metric.small, weight: .medium)).foregroundStyle(p.mute)
                     Button { sender.send(sender.pending, anyway: true, known: transcript.items.map(\.id)) } label: {
                         Text("Send anyway").font(.system(size: Metric.small, weight: .medium)).foregroundStyle(p.page)
-                            .padding(.horizontal, 10).frame(height: 24).background(p.ink, in: Capsule())
+                            .padding(.horizontal, ShellSpace.step10).frame(height: 24).background(p.ink, in: Capsule())
                     }
                     .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 12).padding(.vertical, 10)
-                .background(p.warnFill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .padding(.horizontal, ShellSpace.step12).padding(.vertical, ShellSpace.step10)
+                .background(p.warnFill, in: RoundedRectangle(cornerRadius: ShellRadius.overlay, style: .continuous))
             }
             composer(p)
         }
@@ -650,12 +650,12 @@ struct ChatView: View {
 
     @ViewBuilder private func status(_ p: Palette) -> some View {
         let message = sender.warning || sender.status.isEmpty || sender.status == "sending" || sender.status.hasPrefix("held") ? "" : sender.status
-        HStack(spacing: 8) {
+        HStack(spacing: ShellSpace.step8) {
             switch transcript.state {
             case "working":
                 TimelineView(.periodic(from: .now, by: 0.5)) { context in
                     let phase = Int(context.date.timeIntervalSinceReferenceDate * 2) % 2 == 0
-                    HStack(spacing: 8) {
+                    HStack(spacing: ShellSpace.step8) {
                         Circle().fill(p.t.ok).frame(width: 7, height: 7).opacity(phase ? 1 : 0.35)
                             .animation(.easeInOut(duration: 0.45), value: phase)
                         Text(ChatUI.activity(transcript.items)).font(.system(size: Metric.small, weight: .medium)).lineLimit(1)
@@ -677,7 +677,7 @@ struct ChatView: View {
             if !message.isEmpty { Text(message).font(.system(size: Metric.small)).foregroundStyle(p.mute).lineLimit(1) }
         }
         .frame(height: 18)
-        .padding(.leading, 4)
+        .padding(.leading, ShellSpace.step4)
     }
 
     static func elapsed(_ s: TimeInterval) -> String {
@@ -687,7 +687,7 @@ struct ChatView: View {
 
     private func composer(_ p: Palette) -> some View {
         let empty = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: ShellSpace.step8) {
             ComposerField(text: $ui.draft, height: $composerHeight, ink: NSColor(hex: p.t.chrome.ink), submit: submit)
                 .frame(height: min(max(composerHeight, 21), 200))
                 .overlay(alignment: .topLeading) {
@@ -696,11 +696,11 @@ struct ChatView: View {
                             .padding(.top, 1).allowsHitTesting(false)
                     }
                 }
-            HStack(spacing: 8) {
+            HStack(spacing: ShellSpace.step8) {
                 Text("Enter to send  ·  Shift+Enter for a new line").font(.system(size: Metric.caption)).foregroundStyle(p.faint)
                 Spacer()
                 Button { submit(false) } label: {
-                    Image(systemName: "arrow.up").font(.system(size: 12, weight: .semibold))
+                    Image(systemName: "arrow.up").font(.system(size: ShellType.size12, weight: .semibold))
                         .foregroundStyle(empty ? p.mute : p.page)
                         .frame(width: 26, height: 26)
                         .background(Circle().fill(empty ? p.hair : p.ink))
@@ -708,9 +708,9 @@ struct ChatView: View {
                 .buttonStyle(.plain).disabled(empty).help("Send (Enter)")
             }
         }
-        .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 10)
-        .background(p.field, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(p.hair, lineWidth: 1))
+        .padding(.horizontal, ShellSpace.chatComposerX).padding(.top, ShellSpace.chatComposerTop).padding(.bottom, ShellSpace.chatComposerBottom)
+        .background(p.field, in: RoundedRectangle(cornerRadius: ShellRadius.composer, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: ShellRadius.composer, style: .continuous).stroke(p.hair, lineWidth: 1))
         .shadow(color: .black.opacity(p.dark ? 0 : 0.035), radius: 6, y: 2)
     }
 

@@ -33,6 +33,12 @@ enum ShellType {
     static let chatH1: CGFloat = 19
     static let chatH2: CGFloat = 16.5
     static let chatH3: CGFloat = 14.5
+    static let size18: CGFloat = 18
+    static let size12: CGFloat = 12
+    static let size9: CGFloat = 9
+    static let size8: CGFloat = 8
+    static let size8_5: CGFloat = 8.5
+    static let size12_5: CGFloat = 12.5
 }
 
 enum ShellSpace {
@@ -57,6 +63,53 @@ enum ShellSpace {
     static let switcherWidth: CGFloat = 560
     static let terminalPadX: CGFloat = 8
     static let terminalPadY: CGFloat = 6
+    static let sidebarRowInset: CGFloat = 4
+    static let sidebarAreaInset: CGFloat = 6
+    static let sidebarIndent: CGFloat = 16
+    static let paneCapGap: CGFloat = 8
+    static let step10: CGFloat = 10
+    static let step2: CGFloat = 2
+    static let step5: CGFloat = 5
+    static let step20: CGFloat = 20
+    static let step3: CGFloat = 3
+    static let step14: CGFloat = 14
+    static let step16: CGFloat = 16
+    static let step52: CGFloat = 52
+    static let step7: CGFloat = 7
+    static let step9: CGFloat = 9
+    static let step24: CGFloat = 24
+    static let step2_5: CGFloat = 2.5
+    static let step11: CGFloat = 11
+    static let step8: CGFloat = 8
+    static let step4: CGFloat = 4
+    static let step55: CGFloat = 55
+    static let step12: CGFloat = 12
+    static let step96: CGFloat = 96
+    static let step32: CGFloat = 32
+    static let step6: CGFloat = 6
+    static let step15: CGFloat = 15
+    static let step400: CGFloat = 400
+    static let step13: CGFloat = 13
+    static let step84: CGFloat = 84
+    static let step116: CGFloat = 116
+    static let step180: CGFloat = 180
+    static let step1half: CGFloat = 1.5
+    static let step148: CGFloat = 148
+    static let step150: CGFloat = 150
+    static let step320: CGFloat = 320
+    static let step28: CGFloat = 28
+    static let step22: CGFloat = 22
+    static let step18: CGFloat = 18
+    static let sidebarRowGap: CGFloat = 5
+    static let switcherRowHeight: CGFloat = 32
+    static let switcherQueryHeight: CGFloat = 46
+    static let switcherQueryGap: CGFloat = 8
+    static let switcherInset: CGFloat = 12
+    static let chatBubbleX: CGFloat = 14
+    static let chatBubbleY: CGFloat = 9
+    static let chatComposerX: CGFloat = 14
+    static let chatComposerTop: CGFloat = 12
+    static let chatComposerBottom: CGFloat = 10
 }
 
 enum ShellRadius {
@@ -67,6 +120,10 @@ enum ShellRadius {
     static let overlay: CGFloat = 10
     static let composer: CGFloat = 14
     static let bubble: CGFloat = 16
+    static let curve5: CGFloat = 5
+    static let curve0_5: CGFloat = 0.5
+    static let curve1_5: CGFloat = 1.5
+    static let curve7: CGFloat = 7
 }
 
 enum ShellMotion {

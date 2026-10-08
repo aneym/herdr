@@ -9,6 +9,7 @@ import { LaneSnapshot } from "./laneFiles";
 import type { Snapshot } from "./model";
 import { setAgentHidden } from "./control";
 import UpdatePill from "./UpdatePill";
+import { space } from "./tokens";
 import AgentFace from "./AgentFace";
 import { DRAG_THRESHOLD, slotAt } from "./pinDrag";
 import type { PinSection, RowBox } from "./pinDrag";
@@ -203,7 +204,7 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
     {mode === "areas" ? <>
       <div className="areas-chips" aria-label="Area filters">{([["all", "All"], ["needs", "Needs You"], ["scoping", "Scope"], ["building", "Build"], ["review", "Review"], ["use", "Use"], ["parked", "Parked"]] as const).map(([value, title]) => <button key={value} aria-pressed={chip === value} onClick={() => changeChip(value)}>{value === "parked" && parkedCount ? `Parked ${parkedCount}` : title}</button>)}</div>
       {areaOnly && <button className="sidebar-row muted" onClick={() => { setAreaOnly(null); save("only", null); }}>Only {catalog.areaName(areaOnly)} ×</button>}
-      {areaLines.map(line => line.kind === "header" ? <h2 key={line.id}>{line.title}</h2> : <div key={line.id} data-row={line.id} className={`sidebar-row areas-line ${line.parked ? "areas-parked-row" : ""} ${(line.selected || (line.kind === "focus" && chip === "needs")) ? "selected" : ""} ${line.dim ? "muted" : ""}`} style={{ paddingLeft: 8 + line.depth * 16 }} onContextMenu={event => {
+      {areaLines.map(line => line.kind === "header" ? <h2 key={line.id}>{line.title}</h2> : <div key={line.id} data-row={line.id} className={`sidebar-row areas-line ${line.parked ? "areas-parked-row" : ""} ${(line.selected || (line.kind === "focus" && chip === "needs")) ? "selected" : ""} ${line.dim ? "muted" : ""}`} style={{ paddingLeft: space.sidebarAreaInset + line.depth * space.sidebarIndent }} onContextMenu={event => {
         if (!line.tab) return;
         event.preventDefault(); setMenuError(null); setMenu({ line, x: event.clientX, y: event.clientY });
       }}>

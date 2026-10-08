@@ -64,14 +64,14 @@ struct HostsRow: View {
     let statusIsError: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: ShellSpace.step3) {
             HStack {
-                Text("HOSTS").font(.system(size: 10.5, weight: .semibold)).tracking(0.8).foregroundStyle(tokens.mute)
+                Text("HOSTS").font(.system(size: ShellType.sectionLabel, weight: .semibold)).tracking(0.8).foregroundStyle(tokens.mute)
                 Spacer()
                 Text(status).foregroundStyle(statusIsError ? tokens.warn : tokens.mute)
             }
             ForEach(hosts.rows) { h in
-                HStack(spacing: 6) {
+                HStack(spacing: ShellSpace.step6) {
                     Text(h.host).foregroundStyle(h.host == TabClassifier.defaultHost ? tokens.ink : tokens.warn)
                     Spacer(minLength: 4)
                     Text(h.detail).foregroundStyle(tokens.mute).lineLimit(1)
@@ -79,12 +79,12 @@ struct HostsRow: View {
             }
             if Channel.kind == .dev {
                 Text("DEV")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(size: ShellType.size9, weight: .semibold))
                     .tracking(0.6)
                     .foregroundStyle(tokens.warn)
             }
         }
-        .font(.system(size: 11, design: .monospaced))
-        .padding(.horizontal, 10).padding(.vertical, 7)
+        .font(.system(size: ShellType.switcherMeta, design: .monospaced))
+        .padding(.horizontal, ShellSpace.step10).padding(.vertical, ShellSpace.step7)
     }
 }

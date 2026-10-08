@@ -356,7 +356,7 @@ final class NoticeBar: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.borderWidth = 1
-        label.font = .systemFont(ofSize: 12, weight: .medium)
+        label.font = .systemFont(ofSize: ShellType.size12, weight: .medium)
         label.lineBreakMode = .byTruncatingMiddle
         label.stringValue = message
         addSubview(label)

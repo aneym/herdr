@@ -196,7 +196,7 @@ struct SidebarView: View {
             }
             if state.mode == .spaces { spacesFooter(spaces) } else { factoryFooter }
         }
-        .font(.system(size: 12.5))
+        .font(.system(size: ShellType.rowTitle))
         .foregroundStyle(t.ink)
         // Glass on the sidebar puts a panel-colored scrim over the blur layer under the
         // view, so text keeps its contrast whatever the desktop behind is.
@@ -217,8 +217,8 @@ struct SidebarView: View {
                 ForEach(spaces.filter { $0.kind != .footerUsage && $0.kind != .footerHost }) { spacesRow($0, firstSpaceId: spaces.first { $0.kind == .space }?.id, all: spaces) }
             } else { ForEach(lines) { line in lineView(line) } }
         }
-        .padding(.horizontal, 8)
-        .padding(.top, 10)
+        .padding(.horizontal, ShellSpace.step8)
+        .padding(.top, ShellSpace.step10)
     }
 
     /// What the sidebar draws, from SidebarModel (the state dump reads the same lines).
@@ -239,15 +239,15 @@ struct SidebarView: View {
         VStack(alignment: .leading, spacing: 0) {
             footerGroup(.footerUsage, allRows: rows)
             footerGroup(.footerHost, allRows: rows)
-        }.padding(.horizontal, 8).padding(.bottom, 8)
+        }.padding(.horizontal, ShellSpace.step8).padding(.bottom, ShellSpace.step8)
     }
 
     private func footerGroup(_ kind: SpacesRow.Kind, allRows: [SpacesRow]) -> some View {
         let rows = allRows.filter { $0.kind == kind }
         return ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) {
+            HStack(spacing: ShellSpace.step8) {
                 ForEach(rows) { row in
-                    HStack(spacing: 4) {
+                    HStack(spacing: ShellSpace.step4) {
                         Text(row.title).foregroundStyle(t.mute)
                         Text(row.trailing).foregroundStyle(row.alert == "act" ? t.bad : row.alert == "warn" ? t.warn : t.mute)
                     }.fixedSize().contentShape(Rectangle())
@@ -305,7 +305,7 @@ struct SidebarView: View {
             state.saveSpacesChrome()
         } label: {
             Image(systemName: expanded ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
-                .font(.system(size: 10)).foregroundStyle(t.mute)
+                .font(.system(size: ShellType.glyph)).foregroundStyle(t.mute)
         }.buttonStyle(.plain).help(expanded ? "Collapse all spaces" : "Expand all spaces")
     }
 
@@ -349,8 +349,8 @@ struct SidebarView: View {
     }
 
     private var chrome: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
+        VStack(alignment: .leading, spacing: ShellSpace.step4) {
+            HStack(spacing: ShellSpace.step4) {
                 Spacer(minLength: 0)
                 modeButton("Areas", .areas)
                 modeButton("Spaces", .spaces)
@@ -359,18 +359,18 @@ struct SidebarView: View {
                     collapseSpacesButton
                 }
             }
-            .padding(.leading, 52)
+            .padding(.leading, ShellSpace.step52)
             .frame(height: 36)
             if state.mode == .areas {
                 chipRow
                 if let id = state.areaOnly {
-                    HStack(spacing: 4) {
+                    HStack(spacing: ShellSpace.step4) {
                         Text("Only").foregroundStyle(t.mute)
                         Text(model.catalog.snapshot.areaName(id)).foregroundStyle(t.ink)
                         Text("✕").foregroundStyle(t.mute)
                     }
-                    .font(.system(size: 11.5))
-                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .font(.system(size: ShellType.caption))
+                    .padding(.horizontal, ShellSpace.step8).padding(.vertical, ShellSpace.step3)
                     .contentShape(Rectangle())
                     .onTapGesture { state.setAreaOnly(nil) }
                     .hookAction("only") { state.setAreaOnly(nil) }
@@ -378,14 +378,14 @@ struct SidebarView: View {
                 }
             }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, ShellSpace.step8)
     }
 
     private func modeButton(_ title: String, _ mode: SidebarMode) -> some View {
         Text(title)
-            .font(.system(size: 12, weight: state.mode == mode ? .semibold : .regular))
-            .padding(.horizontal, 8).padding(.vertical, 3)
-            .background(RoundedRectangle(cornerRadius: 5).fill(state.mode == mode ? t.sel : Color.clear))
+            .font(.system(size: ShellType.size12, weight: state.mode == mode ? .semibold : .regular))
+            .padding(.horizontal, ShellSpace.step8).padding(.vertical, ShellSpace.step3)
+            .background(RoundedRectangle(cornerRadius: ShellRadius.curve5).fill(state.mode == mode ? t.sel : Color.clear))
             .contentShape(Rectangle())
             .onTapGesture { state.setMode(mode) }
             .hookAction("mode:\(mode.rawValue)") { state.setMode(mode) }
@@ -401,15 +401,15 @@ struct SidebarView: View {
             (.parked, parkedCount > 0 ? "Parked \(parkedCount)" : "Parked"),
         ]
         // Six chips share the sidebar width: one line each, tighter gaps, never a wrapped "Parked N".
-        return HStack(spacing: 4) {
+        return HStack(spacing: ShellSpace.step4) {
             ForEach(chips, id: \.0.rawValue) { chip, title in
                 Text(title)
                     .lineLimit(1)
                     .fixedSize()
-                    .font(.system(size: 12, weight: state.chip == chip ? .medium : .regular))
+                    .font(.system(size: ShellType.size12, weight: state.chip == chip ? .medium : .regular))
                     .foregroundStyle(state.chip == chip ? t.ink : t.mute)
-                    .padding(.horizontal, 4).padding(.vertical, 2)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(state.chip == chip ? t.sel : Color.clear))
+                    .padding(.horizontal, ShellSpace.step4).padding(.vertical, ShellSpace.step2)
+                    .background(RoundedRectangle(cornerRadius: ShellRadius.control).fill(state.chip == chip ? t.sel : Color.clear))
                     .contentShape(Rectangle())
                     .onTapGesture { state.setChip(chip) }
                     .hookAction("chip:\(chip.rawValue)") { state.setChip(chip) }
@@ -433,18 +433,18 @@ struct SidebarView: View {
     }
 
     private func focusHeader(_ l: SidebarLine) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: ShellSpace.step6) {
             StateGlyph(state: .needs, tokens: t)
-            Text("Focus").font(.system(size: 12, weight: .semibold)).foregroundStyle(t.ink)
-            Text(l.trailing).font(.system(size: 11, weight: .semibold)).foregroundStyle(t.warn)
+            Text("Focus").font(.system(size: ShellType.size12, weight: .semibold)).foregroundStyle(t.ink)
+            Text(l.trailing).font(.system(size: ShellType.switcherMeta, weight: .semibold)).foregroundStyle(t.warn)
             Spacer(minLength: 4)
             if let open = l.chevron {
                 Text(open ? "▾" : "▸").foregroundStyle(t.faint)
             }
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, ShellSpace.step6)
         .frame(height: 28)
-        .background(RoundedRectangle(cornerRadius: 6).fill(state.chip == .needs ? t.sel : Color.clear))
+        .background(RoundedRectangle(cornerRadius: ShellRadius.control).fill(state.chip == .needs ? t.sel : Color.clear))
         .contentShape(Rectangle())
         .onTapGesture {
             state.setChip(.needs)
@@ -459,15 +459,15 @@ struct SidebarView: View {
     /// The foot group: a hairline above, then "Parked N", shut until opened.
     private func parkedHeader(_ l: SidebarLine) -> some View {
         VStack(spacing: 0) {
-            Rectangle().fill(t.line).frame(height: 1).padding(.top, 10).padding(.bottom, 6)
-            HStack(spacing: 6) {
+            Rectangle().fill(t.line).frame(height: 1).padding(.top, ShellSpace.step10).padding(.bottom, ShellSpace.step6)
+            HStack(spacing: ShellSpace.step6) {
                 Text((l.chevron ?? false) ? "▾" : "▸").foregroundStyle(t.mute)
                 Text(l.title).foregroundStyle(t.mute)
                 Spacer(minLength: 4)
                 Text(l.trailing).foregroundStyle(t.mute)
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 4)
+            .padding(.horizontal, ShellSpace.step6)
+            .padding(.vertical, ShellSpace.step4)
             .contentShape(Rectangle())
             .onTapGesture { if let id = l.toggle { toggle(id, currentlyOpen: l.chevron ?? false) } }
             .clickTarget(l.id)
@@ -476,31 +476,31 @@ struct SidebarView: View {
 
     /// A parked row: name, then when and why on a second line; Resume on the right.
     private func parkedRow(_ l: SidebarLine) -> some View {
-        HStack(alignment: .center, spacing: 6) {
+        HStack(alignment: .center, spacing: ShellSpace.step6) {
             if !l.glyph.isEmpty { Text(l.glyph).foregroundStyle(t.mute) }
             VStack(alignment: .leading, spacing: 1) {
                 Text(l.title).foregroundStyle(t.ink).lineLimit(1)
                 if let note = l.parkNote, !note.isEmpty {
-                    Text(note).font(.system(size: 11)).foregroundStyle(t.mute).lineLimit(2).truncationMode(.tail)
+                    Text(note).font(.system(size: ShellType.switcherMeta)).foregroundStyle(t.mute).lineLimit(2).truncationMode(.tail)
                         .help(note)
                 }
             }
             Spacer(minLength: 4)
             if let tab = l.tab {
                 Text(resuming.contains(tab) ? "Resuming…" : "Resume")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: ShellType.switcherMeta, weight: .medium))
                     .foregroundStyle(t.ink)
-                    .padding(.horizontal, 8).padding(.vertical, 2)
-                    .background(RoundedRectangle(cornerRadius: 5).stroke(t.line, lineWidth: 1))
+                    .padding(.horizontal, ShellSpace.step8).padding(.vertical, ShellSpace.step2)
+                    .background(RoundedRectangle(cornerRadius: ShellRadius.curve5).stroke(t.line, lineWidth: 1))
                     .contentShape(Rectangle())
                     .onTapGesture { resume(tab) }
                     .clickTarget("resume:\(tab)")
             }
         }
-        .padding(.leading, CGFloat(6 + l.depth * 16))
-        .padding(.trailing, 6)
-        .padding(.vertical, 4)
-        .background(RoundedRectangle(cornerRadius: 5).fill(l.selected ? t.sel : .clear))
+        .padding(.leading, ShellSpace.step6 + CGFloat(l.depth) * ShellSpace.step16)
+        .padding(.trailing, ShellSpace.step6)
+        .padding(.vertical, ShellSpace.step4)
+        .background(RoundedRectangle(cornerRadius: ShellRadius.curve5).fill(l.selected ? t.sel : .clear))
         .contentShape(Rectangle())
         .onTapGesture { click(l) }
         .contextMenu {
@@ -535,7 +535,7 @@ struct SidebarView: View {
     }
 
     private func areaHeader(_ l: SidebarLine) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: ShellSpace.step6) {
             if let open = l.chevron {
                 Text(open ? "▾" : "▸").foregroundStyle(t.mute)
             }
@@ -544,8 +544,8 @@ struct SidebarView: View {
             Spacer(minLength: 4)
             Text(l.trailing).foregroundStyle(t.mute)
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 4)
+        .padding(.horizontal, ShellSpace.step6)
+        .padding(.vertical, ShellSpace.step4)
         .contentShape(Rectangle())
         .onTapGesture { areaClick(l) }
         .hookAction("area:\(l.title)") { areaClick(l) }
@@ -554,24 +554,24 @@ struct SidebarView: View {
 
     private func header(_ l: SidebarLine) -> some View {
         HStack {
-            Text(l.title).font(.system(size: 10.5, weight: .semibold)).tracking(0.8)
+            Text(l.title).font(.system(size: ShellType.sectionLabel, weight: .semibold)).tracking(0.8)
             Spacer()
-            Text(l.trailing).font(.system(size: 10.5))
+            Text(l.trailing).font(.system(size: ShellType.sectionLabel))
         }
         .foregroundStyle(t.mute)
-        .padding(.horizontal, 6)
-        .padding(.top, 12)
-        .padding(.bottom, 4)
+        .padding(.horizontal, ShellSpace.step6)
+        .padding(.top, ShellSpace.step12)
+        .padding(.bottom, ShellSpace.step4)
     }
 
     /// The mock's one-line summary under a collapsed group.
     private func note(_ l: SidebarLine) -> some View {
         Text(l.title).lineLimit(1).truncationMode(.tail)
-            .font(.system(size: 11))
+            .font(.system(size: ShellType.switcherMeta))
             .foregroundStyle(t.mute)
-            .padding(.leading, CGFloat(6 + l.depth * 16 + 12))
-            .padding(.trailing, 6)
-            .padding(.bottom, 2)
+            .padding(.leading, ShellSpace.step6 + CGFloat(l.depth) * ShellSpace.step16 + ShellSpace.step12)
+            .padding(.trailing, ShellSpace.step6)
+            .padding(.bottom, ShellSpace.step2)
     }
 
     private func tone(_ tone: SidebarLine.Tone) -> Color {
@@ -579,7 +579,7 @@ struct SidebarView: View {
     }
 
     private func rowView(_ l: SidebarLine) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: ShellSpace.step6) {
             if let open = l.chevron {
                 Text(open ? "▾" : "▸").foregroundStyle(t.mute)
                     .contentShape(Rectangle())
@@ -594,23 +594,23 @@ struct SidebarView: View {
             Spacer(minLength: 4)
             if !l.badge.isEmpty, state.chip == .all || !stageImplied(l) {
                 Text(stageWord(l.badge))
-                    .font(.system(size: 11))
+                    .font(.system(size: ShellType.switcherMeta))
                     .foregroundStyle(l.badge == "Review" || l.stage == "reviewing" ? t.ink : t.mute)
             }
             if let tab = l.tab, approved.contains(tab) { Text("Approved").foregroundStyle(t.ok) }
             if !l.trailing.isEmpty { Text(l.trailing).foregroundStyle(tone(l.trailingTone)) }
             if let host = l.host {
                 Text(host)
-                    .font(.system(size: 10, weight: .semibold))
-                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .font(.system(size: ShellType.glyph, weight: .semibold))
+                    .padding(.horizontal, ShellSpace.step5).padding(.vertical, 1)
                     .foregroundStyle(host == TabClassifier.defaultHost ? t.mute : t.warn)
-                    .background(RoundedRectangle(cornerRadius: 4).stroke(t.line, lineWidth: 1))
+                    .background(RoundedRectangle(cornerRadius: ShellRadius.row).stroke(t.line, lineWidth: 1))
             }
         }
-        .padding(.leading, CGFloat(6 + l.depth * 16))
-        .padding(.trailing, 6)
-        .padding(.vertical, 4)
-        .background(RoundedRectangle(cornerRadius: 6).fill(l.selected ? t.sel : .clear))
+        .padding(.leading, ShellSpace.step6 + CGFloat(l.depth) * ShellSpace.step16)
+        .padding(.trailing, ShellSpace.step6)
+        .padding(.vertical, ShellSpace.step4)
+        .background(RoundedRectangle(cornerRadius: ShellRadius.control).fill(l.selected ? t.sel : .clear))
         .contentShape(Rectangle())
         .onTapGesture { click(l) }
         .hookAction(l.kind == .focus ? "focus" : "row:\(l.title)") { click(l) }
@@ -685,22 +685,22 @@ struct SidebarView: View {
     }
 
     private var factoryFooter: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: ShellSpace.step8) {
             Text("Factory")
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: ShellType.size12, weight: .medium))
                 .foregroundStyle(t.ink)
             Spacer(minLength: 4)
             ForEach(model.hostsModel.rows.prefix(4)) { h in
                 Text(h.host)
-                    .font(.system(size: 11))
+                    .font(.system(size: ShellType.switcherMeta))
                     .foregroundStyle(t.mute)
                     .lineLimit(1)
             }
             if Channel.kind == .dev {
-                Text("DEV").font(.system(size: 9, weight: .semibold)).foregroundStyle(t.warn)
+                Text("DEV").font(.system(size: ShellType.size9, weight: .semibold)).foregroundStyle(t.warn)
             }
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, ShellSpace.step10)
         .frame(height: 36)
         .frame(maxWidth: .infinity)
         .background(state.factoryOpen ? t.sel : Color.clear)

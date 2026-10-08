@@ -39,11 +39,11 @@ struct PaneCapBar: View {
 
     var body: some View {
         let bg = state.focused ? Color(hex: tokens.terminalBg) : tokens.cap
-        HStack(spacing: 8) {
-            HStack(spacing: 8) {
+        HStack(spacing: ShellSpace.paneCapGap) {
+            HStack(spacing: ShellSpace.paneCapGap) {
                 StateGlyph(state: state.glyph, tokens: tokens)
                 Text(state.name.isEmpty ? "Brief" : state.name)
-                    .font(.system(size: 12.5, weight: state.focused ? .medium : .regular))
+                    .font(.system(size: ShellType.rowTitle, weight: state.focused ? .medium : .regular))
                     .foregroundStyle(state.focused ? tokens.ink : tokens.mute)
                     .lineLimit(1)
                     .help("\(state.paneId) · \(state.name)")
@@ -63,7 +63,7 @@ struct PaneCapBar: View {
                     .disabled(!PaneRestart.enabled(hasAgent: state.agent))
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: ShellType.switcherMeta, weight: .medium))
                     .foregroundStyle(tokens.mute)
                     .frame(width: Self.pinWidth, height: 20)
                     .opacity(state.focused ? 1 : 0.55)
@@ -81,11 +81,11 @@ struct PaneCapBar: View {
 
     private func density(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
         Text(title)
-            .font(.system(size: 11, weight: .medium))
+            .font(.system(size: ShellType.switcherMeta, weight: .medium))
             .foregroundStyle(on ? tokens.ink : tokens.mute)
-            .padding(.horizontal, 6)
+            .padding(.horizontal, ShellSpace.step6)
             .frame(height: 20)
-            .background(RoundedRectangle(cornerRadius: 6).fill(on ? tokens.tint : Color.clear))
+            .background(RoundedRectangle(cornerRadius: ShellRadius.control).fill(on ? tokens.tint : Color.clear))
             .contentShape(Rectangle())
             .onTapGesture(perform: action)
     }
@@ -93,10 +93,10 @@ struct PaneCapBar: View {
     /// Same quiet language as the segment: tint behind it while the tab is pinned.
     private func pin(_ pinned: Bool) -> some View {
         Image(systemName: pinned ? "pin.slash" : "pin")
-            .font(.system(size: 11, weight: .medium))
+            .font(.system(size: ShellType.switcherMeta, weight: .medium))
             .foregroundStyle(pinned ? tokens.ink : tokens.mute)
             .frame(width: PaneCapBar.pinWidth, height: 20)
-            .background(RoundedRectangle(cornerRadius: 6).fill(pinned ? tokens.tint : Color.clear))
+            .background(RoundedRectangle(cornerRadius: ShellRadius.control).fill(pinned ? tokens.tint : Color.clear))
             .opacity(state.focused ? 1 : 0.55)
             .contentShape(Rectangle())
             .onTapGesture(perform: onPin)
@@ -112,21 +112,21 @@ struct PaneCapBar: View {
             seg("Terminal", on: !state.chat, action: onTerminal)
             seg("Chat", on: state.chat, action: onChat)
         }
-        .padding(2)
-        .background(RoundedRectangle(cornerRadius: 7).fill(tokens.tint))
+        .padding(ShellSpace.step2)
+        .background(RoundedRectangle(cornerRadius: ShellRadius.curve7).fill(tokens.tint))
         .opacity(state.focused ? 1 : 0.55)
     }
 
     private func seg(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
         Text(title)
-            .font(.system(size: 11, weight: .medium))
+            .font(.system(size: ShellType.switcherMeta, weight: .medium))
             .foregroundStyle(on ? tokens.ink : tokens.mute)
-            .padding(.horizontal, 8)
+            .padding(.horizontal, ShellSpace.step8)
             .frame(height: 20)
             .background(
-                RoundedRectangle(cornerRadius: 5)
+                RoundedRectangle(cornerRadius: ShellRadius.curve5)
                     .fill(on ? (tokens.mode == .dark ? tokens.sel : Color(hex: tokens.terminalBg)) : Color.clear)
-                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(on && tokens.mode == .light ? tokens.line : Color.clear, lineWidth: 0.5))
+                    .overlay(RoundedRectangle(cornerRadius: ShellRadius.curve5).stroke(on && tokens.mode == .light ? tokens.line : Color.clear, lineWidth: 0.5))
             )
             .contentShape(Rectangle())
             .onTapGesture(perform: action)

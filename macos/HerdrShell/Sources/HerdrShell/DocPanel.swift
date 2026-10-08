@@ -68,21 +68,21 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         }
         approve.title = "Approve"
         approve.isBordered = false
-        approve.font = .systemFont(ofSize: 12, weight: .medium)
+        approve.font = .systemFont(ofSize: ShellType.size12, weight: .medium)
         approve.target = self
         approve.action = #selector(approveScope)
         approve.isHidden = true
         add.title = "+"
         add.isBordered = false
-        add.font = .systemFont(ofSize: 16, weight: .medium)
+        add.font = .systemFont(ofSize: ShellType.switcherQuery, weight: .medium)
         add.target = self
         add.action = #selector(addDoc)
         close.title = "✕"
         close.isBordered = false
-        close.font = .systemFont(ofSize: 12)
+        close.font = .systemFont(ofSize: ShellType.size12)
         close.target = self
         close.action = #selector(closed)
-        empty.font = .systemFont(ofSize: 13)
+        empty.font = .systemFont(ofSize: ShellType.switcherRow)
         empty.textColor = .secondaryLabelColor
         urlField.isHidden = true
         urlField.placeholderString = "https://… or a file path"
@@ -105,7 +105,7 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
                                    (reload, "↻", #selector(reloadPage)), (openBrowser, "Open", #selector(openOutside))] {
             b.title = title
             b.isBordered = false
-            b.font = .systemFont(ofSize: 13)
+            b.font = .systemFont(ofSize: ShellType.switcherRow)
             b.target = self
             b.action = action
             b.isHidden = true
@@ -296,7 +296,7 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         view.needsLayout = true
         for (index, button) in tabButtons.enumerated() {
             button.contentTintColor = docs[index].key == activeKey ? .labelColor : .secondaryLabelColor
-            button.font = .systemFont(ofSize: 12, weight: docs[index].key == activeKey ? .semibold : .regular)
+            button.font = .systemFont(ofSize: ShellType.size12, weight: docs[index].key == activeKey ? .semibold : .regular)
         }
         if let rowId { activeKeys[rowId] = item.key }
         if let rowId { SidebarState.store.set(item.title, forKey: "herdr.shell.docLast.\(rowId)") }
@@ -503,7 +503,7 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
             let b = NoFocusButton()
             b.title = item.title
             b.isBordered = false
-            b.font = .systemFont(ofSize: 12, weight: item.title == active ? .semibold : .regular)
+            b.font = .systemFont(ofSize: ShellType.size12, weight: item.title == active ? .semibold : .regular)
             b.target = self
             b.action = #selector(pick(_:))
             view.addSubview(b)

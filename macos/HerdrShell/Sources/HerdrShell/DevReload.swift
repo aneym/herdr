@@ -108,7 +108,7 @@ enum DevReload {
     /// covers a prompt or the chat composer.
     static func toast(_ text: String, in view: NSView) {
         let label = NSTextField(labelWithString: text)
-        label.font = .systemFont(ofSize: 12, weight: .medium)
+        label.font = .systemFont(ofSize: ShellType.size12, weight: .medium)
         label.textColor = .secondaryLabelColor
         label.sizeToFit()
         let pad = NSSize(width: 12, height: 5)
@@ -116,7 +116,7 @@ enum DevReload {
         let box = NSView(frame: NSRect(x: (view.bounds.width - size.width) / 2, y: view.bounds.height - 34 - size.height,
                                        width: size.width, height: size.height))
         box.wantsLayer = true
-        box.layer?.cornerRadius = 7
+        box.layer?.cornerRadius = ShellRadius.curve7
         box.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         box.layer?.borderColor = NSColor.separatorColor.cgColor
         box.layer?.borderWidth = 1

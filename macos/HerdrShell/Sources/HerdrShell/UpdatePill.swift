@@ -17,7 +17,7 @@ final class UpdateController: NSObject {
         pill.target = self
         pill.action = #selector(togglePopover)
         pill.bezelStyle = .recessed
-        pill.font = .systemFont(ofSize: 12, weight: .medium)
+        pill.font = .systemFont(ofSize: ShellType.size12, weight: .medium)
         pill.setButtonType(.momentaryPushIn)
         pill.frame = NSRect(x: 0, y: 1, width: 76, height: 20)
         box.addSubview(pill)
@@ -201,13 +201,13 @@ final class UpdatePopoverController: NSViewController {
         let meta = [String(offer.commit.prefix(8)), Self.when(offer.builtAt)].filter { !$0.isEmpty }.joined(separator: " · ")
 
         let title = NSTextField(labelWithString: "What's new")
-        title.font = .systemFont(ofSize: 13, weight: .semibold)
+        title.font = .systemFont(ofSize: ShellType.switcherRow, weight: .semibold)
         let text = NSTextField(wrappingLabelWithString: notes)
-        text.font = .systemFont(ofSize: 12)
+        text.font = .systemFont(ofSize: ShellType.size12)
         text.textColor = .secondaryLabelColor
         text.preferredMaxLayoutWidth = width - 2 * pad
         let foot = NSTextField(labelWithString: offer.reason.isEmpty ? meta : offer.reason)
-        foot.font = .systemFont(ofSize: 11)
+        foot.font = .systemFont(ofSize: ShellType.switcherMeta)
         foot.textColor = .tertiaryLabelColor
         foot.lineBreakMode = .byTruncatingTail
 

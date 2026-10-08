@@ -29,13 +29,13 @@ struct StateGlyph: View {
         case .needs:
             Rectangle().fill(tokens.warn).frame(width: 7 * scale, height: 7 * scale).rotationEffect(.degrees(45))
         case .blocked:
-            RoundedRectangle(cornerRadius: 1.5 * scale).fill(tokens.bad).frame(width: 7.5 * scale, height: 7.5 * scale)
+            RoundedRectangle(cornerRadius: ShellRadius.curve1_5 * scale).fill(tokens.bad).frame(width: 7.5 * scale, height: 7.5 * scale)
         case .idle:
             Circle().stroke(tokens.mute, lineWidth: 1.5 * scale).frame(width: s, height: s)
         case .asleep:
-            RoundedRectangle(cornerRadius: 0.5).fill(tokens.faint).frame(width: 7 * scale, height: 1.5 * scale)
+            RoundedRectangle(cornerRadius: ShellRadius.curve0_5).fill(tokens.faint).frame(width: 7 * scale, height: 1.5 * scale)
         case .done:
-            Image(systemName: "checkmark").font(.system(size: 10 * scale, weight: .semibold)).foregroundStyle(tokens.faint)
+            Image(systemName: "checkmark").font(.system(size: ShellType.glyph * scale, weight: .semibold)).foregroundStyle(tokens.faint)
         }
     }
 }

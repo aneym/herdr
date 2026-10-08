@@ -22,14 +22,14 @@ struct FactoryView: View {
     private var t: Tokens { tokens }
 
     var body: some View {
-        let stack = VStack(alignment: .leading, spacing: 22) {
+        let stack = VStack(alignment: .leading, spacing: ShellSpace.step22) {
             header
             machines
             pools
             routing
             inFlight
         }
-        .padding(20)
+        .padding(ShellSpace.step20)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         Group {
             if scrolls {
@@ -38,14 +38,14 @@ struct FactoryView: View {
                 stack
             }
         }
-        .font(.system(size: 12, design: .monospaced))
+        .font(.system(size: ShellType.size12, design: .monospaced))
         .foregroundStyle(t.ink)
         .background(t.windowBg)
     }
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text("Factory").font(.system(size: 18, weight: .semibold))
+            Text("Factory").font(.system(size: ShellType.size18, weight: .semibold))
             Spacer(minLength: 8)
             Text(snapshot.updated).foregroundStyle(t.mute).monospacedDigit()
         }
@@ -82,16 +82,16 @@ struct FactoryView: View {
                 routeRow(row)
             }
             if !snapshot.decider.isEmpty {
-                Text(snapshot.decider).foregroundStyle(t.mute).font(.system(size: 11)).padding(.top, 4)
+                Text(snapshot.decider).foregroundStyle(t.mute).font(.system(size: ShellType.switcherMeta)).padding(.top, ShellSpace.step4)
             }
             Button(action: openRouting) {
                 Text("Open routing table")
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(t.line, lineWidth: 1))
+                    .padding(.horizontal, ShellSpace.step8).padding(.vertical, ShellSpace.step4)
+                    .overlay(RoundedRectangle(cornerRadius: ShellRadius.curve5).stroke(t.line, lineWidth: 1))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .padding(.top, 4)
+            .padding(.top, ShellSpace.step4)
         }
     }
 
@@ -101,10 +101,10 @@ struct FactoryView: View {
             ForEach(snapshot.flights) { row in
                 flightRow(row)
             }
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Landed today: \(snapshot.landedCount)").foregroundStyle(t.mute).padding(.top, 6)
+            VStack(alignment: .leading, spacing: ShellSpace.step4) {
+                Text("Landed today: \(snapshot.landedCount)").foregroundStyle(t.mute).padding(.top, ShellSpace.step6)
                 ForEach(snapshot.landed) { row in
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step8) {
                         Text(row.time).foregroundStyle(t.mute).monospacedDigit().frame(width: 72, alignment: .trailing)
                         Text(row.subject).lineLimit(1)
                     }
@@ -114,9 +114,9 @@ struct FactoryView: View {
     }
 
     private func section<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: ShellSpace.step8) {
             Text(title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: ShellType.switcherRow, weight: .semibold))
                 .foregroundStyle(t.ink)
             Rectangle().fill(t.line).frame(height: 1)
             content()
@@ -124,20 +124,20 @@ struct FactoryView: View {
     }
 
     private func machineRow(_ row: MachineRow) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+        VStack(alignment: .leading, spacing: ShellSpace.step2) {
+            HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step8) {
                 if !row.usageState.isEmpty {
                     StateGlyph(state: usageGlyph(row.usageState), tokens: t, scale: 0.8)
                 }
                 Text(row.name).foregroundStyle(attention(row.attention)).lineLimit(1)
                 if !row.kind.isEmpty {
-                    Text(row.kind).foregroundStyle(t.mute).font(.system(size: 11))
+                    Text(row.kind).foregroundStyle(t.mute).font(.system(size: ShellType.switcherMeta))
                 }
                 Text(row.summary).foregroundStyle(row.attention.isEmpty ? t.mute : attention(row.attention)).lineLimit(1)
                 Spacer(minLength: 8)
                 Text(row.state).foregroundStyle(stateColor(row.state)).monospacedDigit().lineLimit(1)
             }
-            HStack(spacing: 8) {
+            HStack(spacing: ShellSpace.step8) {
                 if !row.usageLine.isEmpty {
                     Text(row.usageLine).foregroundStyle(usageColor(row.usageState)).monospacedDigit().lineLimit(1)
                 }
@@ -147,17 +147,17 @@ struct FactoryView: View {
                 Text(row.disk).lineLimit(1)
                 Spacer(minLength: 0)
             }
-            .font(.system(size: 11))
+            .font(.system(size: ShellType.switcherMeta))
             .foregroundStyle(t.mute)
         }
         .opacity(row.dimmed ? 0.4 : 1)
-        .padding(.vertical, 2)
+        .padding(.vertical, ShellSpace.step2)
     }
 
     private func poolRow(_ row: PoolRow) -> some View {
         let color = tone(row.tone)
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+        return VStack(alignment: .leading, spacing: ShellSpace.step4) {
+            HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step8) {
                 Text(row.provider).foregroundStyle(color)
                 Text(row.id).foregroundStyle(color).lineLimit(1)
                 Spacer(minLength: 8)
@@ -166,26 +166,26 @@ struct FactoryView: View {
             barLine("5h", fraction: row.fiveHour, label: row.fiveHourLabel, color: color)
             barLine("wk", fraction: row.weekly, label: row.weeklyLabel, color: color)
             if !row.pace.isEmpty || !row.monthly.isEmpty || !row.refill.isEmpty {
-                HStack(spacing: 12) {
+                HStack(spacing: ShellSpace.step12) {
                     if !row.pace.isEmpty { Text(row.pace).monospacedDigit() }
                     if !row.monthly.isEmpty { Text(row.monthly).monospacedDigit().lineLimit(1) }
                     Spacer(minLength: 4)
                     if !row.refill.isEmpty { Text(row.refill).monospacedDigit() }
                 }
-                .font(.system(size: 11))
+                .font(.system(size: ShellType.switcherMeta))
                 .foregroundStyle(t.mute)
             }
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, ShellSpace.step3)
     }
 
     private func barLine(_ name: String, fraction: Double?, label: String, color: Color) -> some View {
-        HStack(spacing: 8) {
-            Text(name).font(.system(size: 11)).foregroundStyle(t.mute).frame(width: 22, alignment: .leading)
+        HStack(spacing: ShellSpace.step8) {
+            Text(name).font(.system(size: ShellType.switcherMeta)).foregroundStyle(t.mute).frame(width: 22, alignment: .leading)
             ThinBar(percent: fraction, fill: color, track: t.line)
                 .frame(width: 140)
             Text(label.isEmpty ? "—" : label)
-                .font(.system(size: 11))
+                .font(.system(size: ShellType.switcherMeta))
                 .foregroundStyle(t.mute)
                 .monospacedDigit()
                 .lineLimit(1)
@@ -194,9 +194,9 @@ struct FactoryView: View {
     }
 
     private func routeRow(_ row: RouteRow) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: ShellSpace.step6) {
             Button { toggleRoute(row.name) } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step8) {
                     Text(row.expanded ? "▾" : "▸").foregroundStyle(t.mute).frame(width: 12)
                     Text(row.name).frame(width: 96, alignment: .leading)
                     ChipFlow(chips: row.chips, tokens: t)
@@ -207,18 +207,18 @@ struct FactoryView: View {
             .buttonStyle(.plain)
             if row.expanded, !row.pick.isEmpty {
                 Text(row.pick)
-                    .font(.system(size: 11))
+                    .font(.system(size: ShellType.switcherMeta))
                     .foregroundStyle(t.mute)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.leading, 20)
+                    .padding(.leading, ShellSpace.step20)
             } else if row.expanded {
-                Text("asking route pick…").font(.system(size: 11)).foregroundStyle(t.mute).padding(.leading, 20)
+                Text("asking route pick…").font(.system(size: ShellType.switcherMeta)).foregroundStyle(t.mute).padding(.leading, ShellSpace.step20)
             }
         }
     }
 
     private func flightRow(_ row: FlightRow) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step8) {
             Text(row.name).lineLimit(1)
             Text(row.lane).foregroundStyle(t.lane).lineLimit(1)
             Text(row.tab).foregroundStyle(t.mute).lineLimit(1)
@@ -227,9 +227,9 @@ struct FactoryView: View {
             }
             if row.headless {
                 Text("headless")
-                    .font(.system(size: 10, weight: .semibold))
-                    .padding(.horizontal, 5).padding(.vertical, 1)
-                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(t.line, lineWidth: 1))
+                    .font(.system(size: ShellType.glyph, weight: .semibold))
+                    .padding(.horizontal, ShellSpace.step5).padding(.vertical, 1)
+                    .overlay(RoundedRectangle(cornerRadius: ShellRadius.row).stroke(t.line, lineWidth: 1))
             }
             Spacer(minLength: 4)
             Text(row.age).foregroundStyle(t.mute).monospacedDigit()
@@ -298,20 +298,20 @@ struct ChipFlow: View {
     var tokens: Tokens
 
     var body: some View {
-        Flow(spacing: 4) {
+        Flow(spacing: ShellSpace.step4) {
             ForEach(Array(chips.enumerated()), id: \.offset) { _, chip in
                 Text(chip)
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(RoundedRectangle(cornerRadius: 4).fill(tokens.sel))
-                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(tokens.line, lineWidth: 1))
+                    .font(.system(size: ShellType.sectionLabel, design: .monospaced))
+                    .padding(.horizontal, ShellSpace.step6).padding(.vertical, ShellSpace.step2)
+                    .background(RoundedRectangle(cornerRadius: ShellRadius.row).fill(tokens.sel))
+                    .overlay(RoundedRectangle(cornerRadius: ShellRadius.row).stroke(tokens.line, lineWidth: 1))
             }
         }
     }
 }
 
 struct Flow: Layout {
-    var spacing: CGFloat = 4
+    var spacing: CGFloat = ShellSpace.step4
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let maxW = proposal.width ?? 640

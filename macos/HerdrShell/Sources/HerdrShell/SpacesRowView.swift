@@ -41,7 +41,7 @@ struct SpacesRowView: View {
     private var agentRow: Bool { row.id.hasPrefix("agent:") || row.id.hasPrefix("hiddenagent:") }
 
     var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: ShellSpace.sidebarRowGap) {
             if row.chevron != "none", row.kind != .space, row.kind != .hidden {
                 chevron
             } else if treeRow {
@@ -50,7 +50,7 @@ struct SpacesRowView: View {
             if let face = row.face {
                 AgentFace(face: face, dot: row.faceDot, tone: row.tone, request: row.request, t: t).clickTarget("face:" + row.id)
             } else if !row.glyph.isEmpty {
-                Text(row.glyph).font(.system(size: 10)).foregroundStyle(tone).frame(width: Self.glyphWidth)
+                Text(row.glyph).font(.system(size: ShellType.glyph)).foregroundStyle(tone).frame(width: Self.glyphWidth)
             }
             if row.kind == .goal {
                 Text("goal").foregroundStyle(t.mute)
@@ -75,7 +75,7 @@ struct SpacesRowView: View {
             Spacer(minLength: 4)
             if row.kind == .goal { collapseSpaces }
             if !row.trailing.isEmpty, row.kind != .goal {
-                trailingText.font(.system(size: 10.5)).monospacedDigit().foregroundStyle(row.link == nil ? t.mute : t.accent)
+                trailingText.font(.system(size: ShellType.sectionLabel)).monospacedDigit().foregroundStyle(row.link == nil ? t.mute : t.accent)
                     .lineLimit(1).truncationMode(.tail)
                     .frame(minWidth: Self.countWidth, alignment: .trailing)
                     .layoutPriority(1)
@@ -108,7 +108,7 @@ struct SpacesRowView: View {
                 Text("+").foregroundStyle(t.mute).fixedSize().onTapGesture { click("plus") }.clickTarget("pinned+")
             }
             if row.kind == .section {
-                Text(focusMark ?? "").font(.system(size: 10)).foregroundStyle(t.mute)
+                Text(focusMark ?? "").font(.system(size: ShellType.glyph)).foregroundStyle(t.mute)
                     .frame(width: 10).onTapGesture { if focusMark != nil { click("focus") } }
             }
             // The PINNED header already says it, so pinned rows keep no pin glyph at rest; it comes
@@ -124,9 +124,9 @@ struct SpacesRowView: View {
                 chevron
             }
         }
-        .padding(.top, row.kind == .space && row.id != firstSpaceId ? 10 : 0)
+        .padding(.top, row.kind == .space && row.id != firstSpaceId ? ShellSpace.step10 : 0)
         .frame(height: ShellSpace.rowHeight)
-        .padding(.leading, indent).padding(.horizontal, ShellSpace.rowPadX)
+        .padding(.leading, indent).padding(.horizontal, ShellSpace.sidebarRowInset)
         .background(RoundedRectangle(cornerRadius: ShellRadius.row).fill(selected && row.kind == .tab ? t.sel : .clear))
     }
 
@@ -166,9 +166,9 @@ struct SpacesRowView: View {
     /// The machine running this chat: an icon and its short name, quiet after the title. An
     /// unreachable machine or one that needs an update dims it further and says so on hover.
     private func badge(_ machine: String) -> some View {
-        HStack(spacing: 2) {
-            Image(systemName: "desktopcomputer").font(.system(size: 8.5))
-            Text(machine).font(.system(size: 10.5))
+        HStack(spacing: ShellSpace.step2) {
+            Image(systemName: "desktopcomputer").font(.system(size: ShellType.size8_5))
+            Text(machine).font(.system(size: ShellType.sectionLabel))
         }
         .foregroundStyle(t.mute)
         .opacity(row.badgeState == nil ? 0.9 : 0.45)
@@ -178,7 +178,7 @@ struct SpacesRowView: View {
     }
 
     private var chevron: some View {
-        Image(systemName: row.chevron == "open" ? "chevron.down" : "chevron.right").font(.system(size: 8, weight: .semibold)).foregroundStyle(t.mute)
+        Image(systemName: row.chevron == "open" ? "chevron.down" : "chevron.right").font(.system(size: ShellType.size8, weight: .semibold)).foregroundStyle(t.mute)
             .frame(width: Self.chevronWidth).onTapGesture { click("chevron") }
     }
 
