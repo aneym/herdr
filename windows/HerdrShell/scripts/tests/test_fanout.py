@@ -43,6 +43,22 @@ class FanoutTests(unittest.TestCase):
             with self.subTest(state=state, game=game, age=age):
                 self.assertEqual(fanout.decide(state, sha, game, age), expected)
 
+    def test_failed_fetch_backoff_table(self):
+        # Pure retry schedule: 30 min, then 60 min, then never for that sha.
+        f = lambda n, last: {'fetch_failures': {'s': {'n': n, 'last': last}}}
+        cases = [
+            ({}, 0, True),
+            ({'fetch_failures': {'other': {'n': 9, 'last': 0}}}, 0, True),
+            (f(1, 1000), 1000 + 1799, False),
+            (f(1, 1000), 1000 + 1800, True),
+            (f(2, 1000), 1000 + 3599, False),
+            (f(2, 1000), 1000 + 3600, True),
+            (f(3, 1000), 10 ** 9, False),
+        ]
+        for state, now, expected in cases:
+            with self.subTest(state=state, now=now):
+                self.assertEqual(fanout.fetch_due(state, 's', now), expected)
+
     def test_state_file_round_trip(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'nested/state.json'

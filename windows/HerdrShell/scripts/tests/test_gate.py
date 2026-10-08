@@ -34,7 +34,8 @@ for name in ('pc', 'theme_check', 'check_pin_drag'):
     spec.loader.exec_module(modules[name])
 pc, theme_check, pin_drag = modules['pc'], modules['theme_check'], modules['check_pin_drag']
 
-PROBES = {'game_guard.ps1', 'status.ps1', 'idle_refresh.ps1'}
+# idle_refresh.ps1 is not a probe: it starts a task in Alex's session (2026-10-08 pop-ups).
+PROBES = {'game_guard.ps1', 'status.ps1'}
 
 
 def png(width, height, grey):
@@ -88,6 +89,8 @@ class FakePC:
 
 
 def helper_reply(helper, args):
+    if helper == 'idle_refresh.ps1':
+        return '{"idle_s":999}'
     if helper != 'ctl.ps1':
         return json.dumps({'installer': 'x', 'exitcode': 0, 'exe': 'x'})
     cmd = json.loads(base64.b64decode(args[args.index('-JsonB64') + 1]))
@@ -132,6 +135,7 @@ COMMANDS = {
     'install --relaunch': (lambda: pc.cmd_install(ns(sha='a' * 40, relaunch=True)), 0),
     'ctl update apply': (lambda: pc.cmd_ctl(ns(json='{"cmd":"update","action":"apply"}')), 0),
     'run': (lambda: pc.cmd_run(ns(force_idle=True, test_window=False)), 0),
+    'run when idle': (lambda: pc.cmd_run(ns(force_idle=False, test_window=False)), 0),
     'shot': (lambda: pc.cmd_shot(ns(out=str(Path(tempfile.mkdtemp()) / 'shot.png'))), 0),
     'stage': (lambda: pc.ps_file('stage.ps1', '-Sha', 'a' * 40)[0], 0),
     'theme_check': (theme_check.main, 1),  # a mid-grey shot is neither light nor dark

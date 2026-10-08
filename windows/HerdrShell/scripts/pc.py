@@ -17,6 +17,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -69,7 +70,7 @@ class Gated(SystemExit):
 
 
 # Read-only probes; every other helper can touch the app or the PC's load.
-UNGATED = {"game_guard.ps1", "status.ps1", "idle_refresh.ps1"}
+UNGATED = {"game_guard.ps1", "status.ps1"}
 GATED = 75
 
 
@@ -254,7 +255,7 @@ def full_sha(ref):
     # The launchd fanout runs an installed copy outside any checkout.
     if len(ref) == 40 and all(c in "0123456789abcdef" for c in ref):
         return ref
-    out =subprocess.run(["git", "-C", str(REPO), "rev-parse", "--verify", f"{ref}^{{commit}}"],
+    out = subprocess.run(["git", "-C", str(REPO), "rev-parse", "--verify", f"{ref}^{{commit}}"],
                          capture_output=True, text=True)
     if out.returncode != 0:
         print(f"unknown commit {ref}", file=sys.stderr)
@@ -262,68 +263,153 @@ def full_sha(ref):
     return out.stdout.strip()
 
 
-def cmd_fetch(args):
-    sha = full_sha(args.sha)
+# A sha whose build failed this often is not dispatched again; fix the build first.
+MAX_BUILD_FAILURES = 2
+HEX64 = re.compile(r"^[0-9A-Fa-f]{64}$")
+
+
+def build_runs(sha):
+    """windows-shell.yml runs for sha, newest first (its run-name carries the sha)."""
+    rc, out = gh("run", "list", "-R", GH_REPO, "-w", WORKFLOW, "-L", "100",
+                 "--json", "databaseId,status,conclusion,displayTitle")
+    if rc != 0:
+        return None
+    try:
+        runs = json.loads(out)
+    except ValueError:
+        return None
+    return [r for r in runs if r.get("displayTitle") == f"windows shell {sha}"]
+
+
+def run_conclusion(run_id, deadline):
+    while time.monotonic() < deadline:
+        rc, out = gh("run", "view", str(run_id), "-R", GH_REPO, "--json", "status,conclusion")
+        if rc == 0:
+            try:
+                r = json.loads(out)
+            except ValueError:
+                r = {}
+            if r.get("status") == "completed":
+                return r.get("conclusion")
+        time.sleep(30)
+    return None
+
+
+def fail(msg, code=1):
+    print(msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def ensure_build(sha, dispatch):
+    """Run id holding the herdr-shell-<sha> artifact. Waits on a running build for sha
+    instead of starting another; exits 4 when the build failed."""
     run = find_artifact_run(sha)
-    if not run and args.dispatch:
+    if run:
+        return run
+    runs = build_runs(sha)
+    if runs is None:
+        fail("cannot list windows-shell.yml runs")
+    active = [r for r in runs if r.get("status") != "completed"]
+    failed = [r for r in runs if r.get("status") == "completed" and r.get("conclusion") != "success"]
+    if active:
+        run_id = active[0]["databaseId"]
+    elif not dispatch:
+        fail(f"no herdr-shell-{sha} artifact (dispatch with --dispatch)")
+    elif len(failed) >= MAX_BUILD_FAILURES:
+        ids = ", ".join(str(r["databaseId"]) for r in failed)
+        fail(f"{len(failed)} failed builds for {sha} (runs {ids}); not dispatching again", 4)
+    else:
+        seen = {r["databaseId"] for r in runs}
         rc, out = gh("workflow", "run", WORKFLOW, "-R", GH_REPO, "--ref", "main", "-f", f"ref={sha}")
         if rc != 0:
-            print(f"dispatch failed: {out}", file=sys.stderr)
-            sys.exit(1)
+            fail(f"dispatch failed: {out}")
+        run_id = None
+        deadline = time.monotonic() + 120
+        while run_id is None and time.monotonic() < deadline:
+            time.sleep(5)
+            fresh = [r for r in (build_runs(sha) or []) if r["databaseId"] not in seen]
+            run_id = fresh[0]["databaseId"] if fresh else None
+        if run_id is None:
+            fail(f"dispatched {WORKFLOW} for {sha} but its run did not appear")
         print(f"dispatched {WORKFLOW} for {sha}")
-        deadline = time.monotonic() + 60 * 60
-        while not run and time.monotonic() < deadline:
-            time.sleep(30)
-            run = find_artifact_run(sha)
-    if not run:
-        print(f"no herdr-shell-{sha} artifact (dispatch with --dispatch)", file=sys.stderr)
-        sys.exit(1)
+    print(f"build run {run_id} for {sha}")
+    conclusion = run_conclusion(run_id, time.monotonic() + 60 * 60)
+    if conclusion != "success":
+        fail(f"build run {run_id} for {sha} ended {conclusion or 'unfinished after 60 min'}", 4)
+    for _ in range(10):
+        run = find_artifact_run(sha)
+        if run:
+            return run
+        time.sleep(3)
+    fail(f"build run {run_id} succeeded but has no herdr-shell-{sha} artifact")
+
+
+def verify_artifact(d, sha):
+    """{file name: SHA-256} for a downloaded artifact; exits unless build-sha.txt names
+    sha and SHA256SUMS lists exactly the exe and installer with matching hashes."""
+    stamp = d / "build-sha.txt"
+    if not stamp.is_file() or stamp.read_text().strip() != sha:
+        fail(f"artifact build-sha.txt is missing or does not name {sha}")
+    sums = {}
+    sums_file = d / "SHA256SUMS"
+    for line in (sums_file.read_text().splitlines() if sums_file.is_file() else []):
+        parts = line.split()
+        if len(parts) != 2 or not HEX64.match(parts[0]):
+            fail(f"malformed SHA256SUMS line: {line!r}")
+        sums[parts[1]] = parts[0].upper()
+    want = {"HerdrShell.exe", f"HerdrShell-setup-{sha}.exe"}
+    if set(sums) != want:
+        fail(f"SHA256SUMS lists {sorted(sums)}, expected {sorted(want)}")
+    for name, digest in sums.items():
+        f = d / name
+        if not f.is_file() or hashlib.sha256(f.read_bytes()).hexdigest().upper() != digest:
+            fail(f"checksum mismatch for {name}")
+    return sums
+
+
+def remote_ps(script):
+    """Run a short PowerShell script on the PC in the ssh session (no desktop)."""
+    enc = base64.b64encode(script.encode("utf-16-le")).decode()
+    return remote(f"{PS} -EncodedCommand {enc}")
+
+
+def push_verified(local, name, digest):
+    """scp to <name>.part, check the hash on the PC, then rename into place."""
+    part, final = f"{R_OUT}/{name}.part", f"{R_OUT}/{name}"
+    if scp_to(local, part) != 0:
+        fail(f"scp failed for {name}")
+    rc, _ = remote_ps(
+        f"$p = '{part}'; if ((Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash -ne '{digest}') "
+        f"{{ Remove-Item -LiteralPath $p -Force; exit 9 }}; Move-Item -LiteralPath $p -Destination '{final}' -Force")
+    if rc != 0:
+        fail(f"{name} arrived corrupted on the PC (rc {rc}); removed")
+
+
+def cmd_fetch(args):
+    sha = full_sha(args.sha)
+    run = ensure_build(sha, args.dispatch)
     with tempfile.TemporaryDirectory(prefix="herdr-shell-") as tmp:
         rc, out = gh("run", "download", run, "-R", GH_REPO, "-n", f"herdr-shell-{sha}", "-D", tmp,
                      timeout=600)
         if rc != 0:
-            print(f"download failed: {out}", file=sys.stderr)
-            sys.exit(1)
+            fail(f"download failed: {out}")
         d = Path(tmp)
-        stamp = d / "build-sha.txt"
-        if stamp.exists() and stamp.read_text().strip() != sha:
-            print("artifact build-sha.txt does not match", file=sys.stderr)
-            sys.exit(1)
-        for line in (d / "SHA256SUMS").read_text().splitlines():
-            digest, name = line.split(maxsplit=1)
-            if hashlib.sha256((d / name).read_bytes()).hexdigest().upper() != digest.upper():
-                print(f"checksum mismatch for {name}", file=sys.stderr)
-                sys.exit(1)
+        sums = verify_artifact(d, sha)
         bootstrap()
-        for local, name in ((d / "HerdrShell.exe", f"HerdrShell-{sha}.exe"),
-                            (d / f"HerdrShell-setup-{sha}.exe", f"HerdrShell-setup-{sha}.exe")):
-            if scp_to(local, f"{R_OUT}/{name}") != 0:
-                print(f"scp failed for {name}", file=sys.stderr)
-                sys.exit(1)
+        push_verified(d / f"HerdrShell-setup-{sha}.exe", f"HerdrShell-setup-{sha}.exe",
+                      sums[f"HerdrShell-setup-{sha}.exe"])
+        push_verified(d / "HerdrShell.exe", f"HerdrShell-{sha}.exe", sums["HerdrShell.exe"])
+        # Written last: install_copy.ps1 trusts the exe only through this file.
+        rc, _ = remote_ps(f"Set-Content -LiteralPath '{R_OUT}/HerdrShell-{sha}.sha256' "
+                          f"-Value '{sums['HerdrShell.exe']}' -Encoding ASCII")
+        if rc != 0:
+            fail("could not record the exe checksum on the PC")
     print(f"fetched {sha} (run {run}) -> {R_OUT}")
 
 
-def cmd_install(args):
-    bootstrap()
-    want = None
-    if getattr(args, "artifact", ""):
-        # install_copy.ps1 relaunches and rolls back itself; no installer runs.
-        want = full_sha(args.artifact)
-        argv = ["-Sha", want] + (["-Relaunch"] if args.relaunch else [])
-        rc, out = ps_file("install_copy.ps1", *argv)
-        print(out.strip())
-        if rc != 0 or not args.relaunch:
-            sys.exit(rc)
-    else:
-        argv = ["-Sha", args.sha] if args.sha else []
-        rc, out = ps_file("install.ps1", *argv)
-        print(out.strip())
-        if rc != 0 or not args.relaunch:
-            sys.exit(rc)
-        rc = launch_app(argparse.Namespace(force_idle=True, test_window=False))
-        if rc != 0:
-            sys.exit(rc)
-    deadline = time.monotonic() + 60
+def wait_ui(seconds):
+    """(ui ok with machine up, summary) from the control pipe within seconds."""
+    deadline = time.monotonic() + seconds
     summary = {"machine_state": "unavailable", "rows": 0, "panes": 0}
     while time.monotonic() < deadline:
         try:
@@ -332,23 +418,74 @@ def cmd_install(args):
             summary = {"machine_state": ui.get("machine", {}).get("state"),
                        "rows": len(ui.get("rows", [])), "panes": len(ui.get("panes", []))}
             if rc == 0 and ui.get("ok") is True and summary["machine_state"] == "up":
-                if want:
-                    _rc, pong = ctl_send({"cmd": "ping"}, timeout=10)
-                    summary["commit"] = json.loads(pong).get("commit")
-                    if summary["commit"] != want:
-                        print(json.dumps(summary))
-                        print(f"running commit is not {want}", file=sys.stderr)
-                        sys.exit(1)
-                print(json.dumps(summary))
-                sys.exit(0)
+                return True, summary
         except (subprocess.TimeoutExpired, ValueError, TypeError, AttributeError):
             pass
         remaining = deadline - time.monotonic()
         if remaining > 0:
             time.sleep(min(1, remaining))
+    return False, summary
+
+
+def running_commit(seconds):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        try:
+            rc, pong = ctl_send({"cmd": "ping"}, timeout=max(1, deadline - time.monotonic()))
+            commit = json.loads(pong).get("commit")
+            if rc == 0 and commit:
+                return commit
+        except (subprocess.TimeoutExpired, ValueError, TypeError, AttributeError):
+            pass
+        time.sleep(1)
+    return None
+
+
+def cmd_install_artifact(args):
+    """install_copy.ps1 swaps the exe; pc.py checks the commit and rolls back on a mismatch."""
+    want = full_sha(args.artifact)
+    rc, out = ps_file("install_copy.ps1", "-Sha", want, *(["-Relaunch"] if args.relaunch else []))
+    print(out.strip())
+    if rc == 76:
+        fail("game started; install deferred (exit 75)", GATED)
+    if rc != 0:
+        sys.exit(rc)
+    if not args.relaunch:
+        rc, out = ps_file("install_copy.ps1", "-Sha", want, "-Check")
+        print(out.strip())
+        sys.exit(rc)
+    commit = running_commit(60)
+    if commit != want:
+        print(f"running commit is {commit}, not {want}; rolling back", file=sys.stderr)
+        _rc, out = ps_file("install_copy.ps1", "-Sha", want, "-Rollback", "-Relaunch")
+        print(out.strip())
+        sys.exit(1)
+    ps_file("install_copy.ps1", "-Sha", want, "-MarkVerified")
+    up, summary = wait_ui(60)
+    summary["commit"] = commit
     print(json.dumps(summary))
-    print("install post-check failed: UI did not report machine up within 60 s", file=sys.stderr)
-    sys.exit(1)
+    if not up:
+        fail("install post-check failed: UI did not report machine up within 60 s")
+    sys.exit(0)
+
+
+def cmd_install(args):
+    bootstrap()
+    if getattr(args, "artifact", ""):
+        cmd_install_artifact(args)
+    argv = ["-Sha", args.sha] if args.sha else []
+    rc, out = ps_file("install.ps1", *argv)
+    print(out.strip())
+    if rc != 0 or not args.relaunch:
+        sys.exit(rc)
+    rc = launch_app(argparse.Namespace(force_idle=True, test_window=False))
+    if rc != 0:
+        sys.exit(rc)
+    up, summary = wait_ui(60)
+    print(json.dumps(summary))
+    if not up:
+        fail("install post-check failed: UI did not report machine up within 60 s")
+    sys.exit(0)
 
 
 def ctl_send(obj, timeout=None):
@@ -391,7 +528,12 @@ def cmd_shot(args):
 
 
 def refresh_idle():
-    rc, out = ps_file("idle_refresh.ps1")
+    # Gated: HerdrShellIdle runs in Alex's session, so a game that starts after an
+    # earlier check must still stop it. A refusal means no idle reading.
+    try:
+        rc, out = ps_file("idle_refresh.ps1")
+    except Gated:
+        return {}
     try:
         return json.loads(out.strip())
     except json.JSONDecodeError:

@@ -1,9 +1,10 @@
-# launch.ps1 -Exe <path> [-TestWindow]: start the installed app on Alex's interactive
+# launch.ps1 -Exe <path> [-TestWindow] [-Background]: start the installed app on Alex's interactive
 # desktop via a scheduled task. ScheduledTask cmdlets keep paths with spaces intact
 # (schtasks /tr loses the inner quotes under PowerShell 5.1).
-param([Parameter(Mandatory = $true)][string]$Exe, [switch]$TestWindow)
+param([Parameter(Mandatory = $true)][string]$Exe, [switch]$TestWindow, [switch]$Background)
 $Exe = $Exe.Trim('"')
-$arg = if ($TestWindow) { '--test-window' } else { '' }
+# --background: the window opens without taking focus (install relaunches).
+$arg = if ($TestWindow) { '--test-window' } elseif ($Background) { '--background' } else { '' }
 # Scheduled tasks do not inherit the SSH helper's environment. Set the hook-only
 # override in the task process for test windows only; install and --relaunch
 # restarts are Alex's own window and keep browser defaults and throttling.

@@ -145,6 +145,8 @@ fn main() {
         .setup(|app| {
             let test_window = std::env::args().any(|a| a == "--test-window")
                 || std::env::var("HERDR_SHELL_TEST_WINDOW").as_deref() == Ok("1");
+            // Install relaunches open the window without taking focus from Alex.
+            let background = std::env::args().any(|a| a == "--background");
             let control_motion = test_window
                 || std::env::var("HERDR_SHELL_CONTROL").as_deref() == Ok("1");
             let mut config = app
@@ -172,6 +174,8 @@ fn main() {
                     .position(-20000.0, 0.0)
                     .skip_taskbar(true)
                     .focused(false);
+            } else if background {
+                window = window.focused(false);
             }
             window.build()?;
             app.manage(bridge::Attaches::default());

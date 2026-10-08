@@ -4,6 +4,7 @@
 import fcntl
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -28,6 +29,22 @@ def decide(state, newest_sha, game_running, lock_age_s):
     if game_running:
         return 'wait'
     return 'build'
+
+
+# A sha whose off-PC build or fetch failed is retried after 30, 60 min, then left
+# alone until main moves (pc.py also refuses to dispatch a sha that failed twice).
+FETCH_TRIES = 3
+FETCH_BACKOFF_S = 1800
+
+
+def fetch_due(state, sha, now):
+    """Whether a fetch of sha may run now, given state['fetch_failures']."""
+    failure = state.get('fetch_failures', {}).get(sha)
+    if not failure:
+        return True
+    if failure['n'] >= FETCH_TRIES:
+        return False
+    return now - failure['last'] >= FETCH_BACKOFF_S * 2 ** (failure['n'] - 1)
 
 
 def timestamp():
@@ -90,12 +107,23 @@ def run_pass(state):
     # builds it and the PC only receives the files. Copying files is safe
     # during a game, so the fetch never waits on the guard.
     if state.get('fetched') != sha:
+        if not fetch_due(state, sha, time.time()):
+            log(f'fetch of {sha} backing off after failures')
+            return 0
         log(f'building {sha}')
         result = subprocess.run([sys.executable, str(pc.HERE / 'pc.py'),
                                  'fetch', '--sha', sha, '--dispatch'],
                                 capture_output=True, text=True, timeout=3900)
+        run = re.search(r'build run (\d+)|\(run (\d+)\)', result.stdout or '')
+        if run:
+            state.setdefault('runs', {})[sha] = run.group(1) or run.group(2)
         if result.returncode:
-            raise RuntimeError(f'off-PC build or fetch failed ({result.returncode})')
+            failures = state.setdefault('fetch_failures', {})
+            n = failures.get(sha, {}).get('n', 0) + 1
+            failures[sha] = {'n': n, 'last': time.time()}
+            write_state(state)
+            raise RuntimeError(f'off-PC build or fetch failed ({result.returncode}), try {n}')
+        state.get('fetch_failures', {}).pop(sha, None)
         state.update(fetched=sha)
         write_state(state)
     # Only game_guard.ps1 here: it runs in the ssh session and never touches

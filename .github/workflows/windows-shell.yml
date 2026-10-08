@@ -1,4 +1,6 @@
 name: Windows Shell build
+# pc.py finds the run for a sha by this name.
+run-name: windows shell ${{ inputs.ref }}
 
 # Builds windows/HerdrShell off the gaming PC: Windows App Control on the PC
 # blocks cargo's freshly linked build-script exes, so the PC only copies the
