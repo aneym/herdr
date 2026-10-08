@@ -683,7 +683,7 @@ pub(super) fn render_pinned_tab_row(
             &crate::ui::truncate_end(trailing, space_width as usize),
             Style::default().fg(
                 if row.home_location == Some(crate::api::schema::HomeLocation::Unsynced) {
-                    status_color(crate::api::schema::AgentStatus::Done, palette)
+                    palette.peach
                 } else {
                     palette.overlay0
                 },
