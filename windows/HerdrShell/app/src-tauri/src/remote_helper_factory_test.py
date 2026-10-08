@@ -39,9 +39,30 @@ print(json.dumps({"reads":reads,"commands":commands,"result":r}))
             self.assertNotIn("/client/secret", result["reads"])
             for suffix in ("/.agent-rails/herdr/overlay.json", "/.agent-rails/factory/boxes.json", "/.agent-lb/managed/coding-agents/routing-table.json"):
                 self.assertIn(home + suffix, result["reads"])
-            self.assertEqual(result["commands"], [["/usr/bin/git", "--no-pager", "-C", "/Volumes/StudioExt/repos/agent-rails", "log", "origin/main", "--since=midnight", "--format=%h%x09%ct%x09%s"], [home + "/.local/bin/route", "pick", "implement"], [home + "/.local/bin/route", "pick", "mechanical"]])
+            self.assertEqual(result["commands"], [["/usr/bin/git", "--no-pager", "-C", "/Volumes/StudioExt/repos/agent-rails", "log", "origin/main", "--since=midnight", "--format=%h%x09%ct%x09%s"]])
             self.assertIsNone(result["result"]["pools"])
             self.assertIsNone(result["result"]["landed"])
+
+    def test_route_enum_and_fixed_argv(self):
+        harness = r'''
+import io, json, runpy, sys
+commands = []
+def audit(event, args):
+    if event == "subprocess.Popen":
+        commands.append(args[1]); raise OSError("captured")
+sys.addaudithook(audit)
+sys.stdin = io.TextIOWrapper(io.BytesIO())
+m = runpy.run_path(sys.argv[1])
+results = []
+for route in ("implement", "mechanical", "research", "implement;sh", None, []):
+    try: results.append(m["request"]({"op":"factory_route_pick", "route":route, "argv":["sh"]}))
+    except ValueError as e: results.append(str(e))
+print(json.dumps({"commands":commands,"results":results,"home":m["HOME"]}))
+'''
+        result = json.loads(subprocess.run([sys.executable, "-I", "-c", harness, str(HELPER)], capture_output=True, text=True, check=True).stdout)
+        self.assertEqual(result["commands"], [[result["home"] + "/.local/bin/route", "pick", name] for name in ("implement", "mechanical")])
+        self.assertEqual(result["results"][:2], [{"text":"route pick failed"}] * 2)
+        self.assertEqual(result["results"][2:], ["invalid factory route"] * 4)
 
     def test_pools_loopback_cap_and_redirect_floor(self):
         class Handler(http.server.BaseHTTPRequestHandler):

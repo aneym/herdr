@@ -7,6 +7,8 @@ import sys
 import re
 import subprocess
 import time
+import threading
+import queue
 import urllib.request
 import urllib.parse
 
@@ -68,7 +70,7 @@ def factory_cached(key, interval, load):
     return value
 
 
-def factory_pools(url):
+def factory_pools_read(url):
     parsed = urllib.parse.urlsplit(url)
     if parsed.scheme not in ("http", "https") or parsed.hostname not in ("127.0.0.1", "localhost") or parsed.username or parsed.password:
         raise ValueError("pools URL not allowed")
@@ -76,16 +78,37 @@ def factory_pools(url):
         def redirect_request(self, req, fp, code, msg, headers, newurl):
             raise ValueError("pools redirect not allowed")
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
-    with opener.open(urllib.request.Request(url, method="GET"), timeout=5) as response:
+    with opener.open(urllib.request.Request(url, method="GET"), timeout=4) as response:
         data = response.read(FACTORY_CAP + 1)
     if len(data) > FACTORY_CAP:
         raise ValueError("pools response too large")
     return json.loads(data)
 
 
+def factory_pools(url):
+    # A socket timeout alone resets per read; bound the entire GET, including headers.
+    result = queue.Queue(maxsize=1)
+    def fetch():
+        try:
+            result.put((factory_pools_read(url), None))
+        except Exception as error:
+            result.put((None, error))
+    threading.Thread(target=fetch, daemon=True).start()
+    try:
+        value, error = result.get(timeout=4)
+    except queue.Empty:
+        raise TimeoutError("pools request timed out")
+    if error:
+        raise error
+    return value
+
+
 def factory_file(path):
     try:
-        with open(path, "rb") as source:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as source:
+            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                return None
             data = source.read(FACTORY_CAP + 1)
         return json.loads(data) if len(data) <= FACTORY_CAP else None
     except (OSError, ValueError):
@@ -127,7 +150,12 @@ def factory_bundle():
     def read_flights():
         try:
             flights = []
-            for name in os.listdir(directory):
+            fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NONBLOCK)
+            try:
+                names = os.listdir(fd)
+            finally:
+                os.close(fd)
+            for name in names:
                 if not name.endswith(".json"):
                     continue
                 row = factory_file(os.path.join(directory, name))
@@ -139,7 +167,6 @@ def factory_bundle():
     bundle["flights"] = factory_cached("flights", 5, read_flights)
     repo = source("FACTORY_REPO", "/Volumes/StudioExt/repos/agent-rails")
     bundle["landed"] = factory_cached("landed", 60, lambda: factory_exec(["/usr/bin/git", "--no-pager", "-C", repo, "log", "origin/main", "--since=midnight", "--format=%h%x09%ct%x09%s"]))
-    bundle["picks"] = {name: factory_cached("pick:" + name, 60, lambda name=name: factory_exec([HOME + "/.local/bin/route", "pick", name])) for name in ("implement", "mechanical")}
     try:
         interval = float(os.environ.get("FACTORY_POOLS_INTERVAL", "60"))
         if not 0 < interval < float("inf"):
@@ -154,6 +181,15 @@ def factory_bundle():
 
 def request(req):
     op = req.get("op")
+    if op == "factory_route_pick":
+        route = req.get("route")
+        if route not in ("implement", "mechanical"):
+            raise ValueError("invalid factory route")
+        try:
+            result = subprocess.run([HOME + "/.local/bin/route", "pick", route], capture_output=True, text=True, timeout=5)
+            return {"text": result.stdout.strip() or result.stderr.strip()}
+        except (OSError, subprocess.TimeoutExpired):
+            return {"text": "route pick failed"}
     if op == "factory":
         return factory_bundle()
     if op == "action":

@@ -113,6 +113,7 @@ fn main() {
             files::remote_home,
             files::file_list,
             files::factory_snapshot,
+            files::factory_route_pick,
             ctl_read_result,
             ctl_motion_result,
             ctl_ui_result,

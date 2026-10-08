@@ -601,3 +601,30 @@ mod factory_tests {
         assert!(status.success(), "Factory host protocol floor failed");
     }
 }
+
+#[tauri::command]
+pub async fn factory_route_pick(
+    files: State<'_, Files>,
+    machines: State<'_, Machines>,
+    machine: String,
+    route: String,
+) -> Result<Option<String>, String> {
+    if route != "implement" && route != "mechanical" {
+        return Err("invalid factory route".into());
+    }
+    if machines.is_local(&machine)? {
+        return Err("Factory home unavailable on local Windows host".into());
+    }
+    let files = files.inner().clone();
+    let machines = machines.inner().clone();
+    let value = tauri::async_runtime::spawn_blocking(move || {
+        files.request(
+            &machines,
+            &machine,
+            json!({"op":"factory_route_pick", "route":route}),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(value["text"].as_str().map(str::to_owned))
+}

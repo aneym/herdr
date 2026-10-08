@@ -208,3 +208,6 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 .factory-chip { border: 1px solid var(--shell-line); border-radius: var(--shell-radius-row); padding: 0 var(--shell-space-factory-detail-gap); }
 .tone-amber { color: var(--shell-warn); }
 .tone-red { color: var(--shell-bad); }
+.factory-usage-glyph { width: calc(var(--shell-type-glyph) * .64); height: calc(var(--shell-type-glyph) * .64); border-radius: 50%; background: currentColor; flex-shrink: 0; }
+.factory-usage-glyph.blocked { border-radius: calc(var(--shell-radius-row) * .3); }
+.factory-usage-glyph.idle { background: transparent; border: 1px solid currentColor; }

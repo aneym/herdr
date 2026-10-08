@@ -1,4 +1,4 @@
-export interface FactoryBundle { overlay: unknown; boxes: unknown; poolState: unknown; disk: unknown; routing: unknown; decider: unknown; flights: unknown; landed: string | null; picks: Record<string, string | null>; pools: unknown; poolsInterval: number; poolsAgeSeconds?: number }
+export interface FactoryBundle { overlay: unknown; boxes: unknown; poolState: unknown; disk: unknown; routing: unknown; decider: unknown; flights: unknown; landed: string | null; picks?: Record<string, string | null>; pools: unknown; poolsInterval: number; poolsAgeSeconds?: number }
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj => v !== null && typeof v === "object" && !Array.isArray(v) ? v as Obj : {};
 const list = (v: unknown): unknown[] => Array.isArray(v) ? v : [];
@@ -8,7 +8,7 @@ const date = (v: unknown): number | undefined => { const n = num(v); const d = n
 export const scrub = (s: string) => s.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "[redacted]").replace(/\b(?:sk-|ghp_|gho_|github_pat_|xox[baprs]-|AKIA)[A-Za-z0-9_-]{8,}/g, "[redacted]").replace(/\b(?:acct|account)[_-][A-Za-z0-9]{4,}\b/gi, "[redacted]");
 const reason = (v: unknown) => scrub(str(v) || str(obj(v).reason));
 export function age(seconds: number, compact = false): string { const s = Math.max(0, Math.floor(seconds)); const [n, u] = s < 60 ? [s, "s"] : s < 3600 ? [Math.floor(s / 60), "m"] : s < 86400 ? [Math.floor(s / 3600), "h"] : [Math.floor(s / 86400), "d"]; return `${n}${compact ? "" : " "}${u}`; }
-const clock = (d: number, military = false) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: military ? "2-digit" : "numeric", minute: "2-digit", hour12: !military }).format(d);
+const clock = (d: number, military = false) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: military ? "2-digit" : "numeric", minute: "2-digit", ...(military ? { hourCycle: "h23" as const } : { hour12: true }) }).format(d);
 const percent = (n: number) => `${Math.abs(n - Math.round(n)) < .05 ? Math.round(n) : n.toFixed(1)}%`;
 const keyed = (v: unknown) => new Map(list(v).map(obj).filter(d => str(d.name)).map(d => [str(d.name).toLowerCase(), d]));
 export interface MachineRow { name: string; kind: string; summary: string; slots: string; disk: string; state: string; attention: string; dimmed: boolean; usageState: string; usageLine: string }
