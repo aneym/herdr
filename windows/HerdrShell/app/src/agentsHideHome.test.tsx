@@ -147,7 +147,7 @@ describe("hide agents and home glyph: rendered sidebar", () => {
     openMenu("agent:A");
     await choose("Hide");
     expect(api).toHaveBeenCalledWith("studio", "tab.set_hidden", { tab_id: "A", hidden: true });
-    expect(host.querySelector("footer")!.textContent).toBe("studio · connected");
+    expect(host.querySelector("footer")!.textContent).toBe("");
   });
   it("draws the home glyph with its title on agent rows in place of the space name, which stays on PINNED rows", () => {
     mount();

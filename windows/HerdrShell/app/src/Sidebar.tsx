@@ -299,5 +299,5 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
       void runAction(prompt.verb, args);
     }}>{prompt.verb === "park" ? "Park" : "Approve"}</button></div>
   </div>}
-  <footer role="status">{notice ?? menuError ?? (machine.state === "up" ? `${machine.name} · connected` : machine.state === "connecting" ? "connecting…" : `offline: ${machine.error || "disconnected"}`)}<UpdatePill /></footer></aside>;
+  <footer role="status">{notice ?? menuError}<UpdatePill /></footer></aside>;
 }

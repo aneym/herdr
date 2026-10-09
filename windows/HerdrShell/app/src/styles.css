@@ -94,6 +94,7 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 .update-actions button:disabled { cursor: default; opacity: .6; }
 .update-rollback { opacity: 0; pointer-events: none; }
 .sidebar footer:hover .update-rollback, .sidebar footer:focus-within .update-rollback { opacity: 1; pointer-events: auto; }
+.sidebar footer:empty { display: none; }
 .update-error { display: block; margin-top: var(--shell-space-step5); }
 .sidebar.pin-dragging { user-select: none; cursor: grabbing; }
 .tab-row { position: relative; }
