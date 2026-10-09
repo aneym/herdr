@@ -62,14 +62,37 @@ impl HeadlessServer {
         let _ = reject_pending_client_connections(&self.client_listener);
 
         let mut paused_terminal_ids = Vec::new();
-        for terminal_id in pane_by_terminal.keys() {
+        let mut failures = Vec::new();
+        let mut failure_kind = io::ErrorKind::Other;
+        for (terminal_id, pane_id) in &pane_by_terminal {
             if let Some(runtime) = self.app.terminal_runtimes.get(terminal_id) {
-                if let Err(err) = runtime.pause_handoff_reader(Duration::from_secs(2)) {
-                    self.rollback_handoff_before_commit(&socket_path, &paused_terminal_ids);
-                    return Err(err);
+                match runtime.pause_handoff_reader(Duration::from_secs(2)) {
+                    Ok(()) => paused_terminal_ids.push(terminal_id.clone()),
+                    Err(err) => {
+                        let agent_label = self
+                            .app
+                            .state
+                            .terminals
+                            .get(terminal_id)
+                            .and_then(|terminal| terminal.effective_agent_label());
+                        warn!(pane = pane_id, terminal = %terminal_id, agent = agent_label,
+                            error = %err, "PTY actor did not quiesce for live handoff");
+                        if failures.is_empty() {
+                            failure_kind = err.kind();
+                        }
+                        let agent = agent_label
+                            .map(|label| format!(", agent {label:?}"))
+                            .unwrap_or_default();
+                        failures.push(format!(
+                            "pane {pane_id}, terminal {terminal_id}{agent}: {err}"
+                        ));
+                    }
                 }
-                paused_terminal_ids.push(terminal_id.clone());
             }
+        }
+        if !failures.is_empty() {
+            self.rollback_handoff_before_commit(&socket_path, &paused_terminal_ids);
+            return Err(io::Error::new(failure_kind, failures.join("; ")));
         }
 
         let snapshot = crate::persist::capture(

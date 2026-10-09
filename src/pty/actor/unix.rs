@@ -70,6 +70,7 @@ struct PtyResizeRequest {
 
 #[derive(Default)]
 struct SharedPtyControls {
+    handoff_status: Option<String>,
     resize: Option<PtyResizeRequest>,
     nudge: Option<PtyResize>,
     terminal_responses: Vec<Bytes>,
@@ -111,6 +112,7 @@ enum PtyIoControlCommand {
 
 #[derive(Clone)]
 pub(crate) struct PtyIoActorHandle {
+    pane_id: u32,
     data_tx: mpsc::Sender<PtyIoDataCommand>,
     control_tx: std_mpsc::Sender<PtyIoControlCommand>,
     wake: fd::WakeWriter,
@@ -294,6 +296,10 @@ impl PtyIoActorHandle {
                 ));
             }
             user_writes.accepting = false;
+            self.controls
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .handoff_status = None;
             if self
                 .control_tx
                 .send(PtyIoControlCommand::BeginHandoff(reply_tx))
@@ -311,13 +317,27 @@ impl PtyIoActorHandle {
             Ok(Ok(())) => Ok(()),
             Ok(Err(err)) => {
                 let _ = self.rollback_handoff();
-                Err(err)
+                Err(std::io::Error::new(
+                    err.kind(),
+                    format!("pane {} PTY actor: {err}", self.pane_id),
+                ))
             }
             Err(_) => {
+                // Capture before rollback: the actor may clear its deferred handoff.
+                let status = self
+                    .controls
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .handoff_status
+                    .clone()
+                    .unwrap_or_else(|| "actor has not reported handoff state".to_string());
                 let _ = self.rollback_handoff();
                 Err(std::io::Error::new(
                     std::io::ErrorKind::TimedOut,
-                    "timed out waiting for PTY actor to quiesce",
+                    format!(
+                        "pane {} PTY actor: timed out waiting to quiesce ({status})",
+                        self.pane_id
+                    ),
                 ))
             }
         }
@@ -471,6 +491,7 @@ impl PtyIoActor {
         let controls = Arc::new(Mutex::new(SharedPtyControls::default()));
         let response_order = Arc::new(Mutex::new(()));
         let handle = PtyIoActorHandle {
+            pane_id: config.pane_id,
             data_tx,
             control_tx,
             wake: wake_pipe.writer,
@@ -847,10 +868,27 @@ impl PtyIoActorRunner {
         false
     }
 
+    fn report_handoff_status(&self, draining: bool) {
+        let pending_bytes = self
+            .pending_writes
+            .iter()
+            .map(|write| write.bytes.len())
+            .sum::<usize>()
+            .saturating_sub(self.current_write_offset);
+        self.controls
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .handoff_status = Some(format!(
+            "pending write bytes={pending_bytes}, active submission={}, draining writes={draining}",
+            self.active_submission.is_some(),
+        ));
+    }
+
     fn defer_or_begin_handoff(&mut self, reply: std_mpsc::Sender<std::io::Result<()>>) {
         if self.active_submission.is_none() {
             self.drain_pre_quiesce_commands();
         }
+        self.report_handoff_status(false);
         if self.active_submission.is_some() {
             self.pending_handoff = Some(reply);
         } else {
@@ -877,11 +915,19 @@ impl PtyIoActorRunner {
         let deadline = Instant::now() + HANDOFF_DRAIN_TIMEOUT;
         let _ = self.flush_pending_writes_once()?;
         while !self.pending_writes.is_empty() {
+            self.report_handoff_status(true);
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::TimedOut,
-                    "timed out draining PTY writes before handoff",
+                    format!(
+                        "timed out draining PTY writes before handoff (pending write bytes={})",
+                        self.pending_writes
+                            .iter()
+                            .map(|write| write.bytes.len())
+                            .sum::<usize>()
+                            .saturating_sub(self.current_write_offset)
+                    ),
                 ));
             }
             let timeout_ms = remaining.as_millis().min(i32::MAX as u128) as i32;
@@ -2036,6 +2082,50 @@ while True:
         handle.shutdown();
     }
 
+    // Integration regression: a real socket actor cannot quiesce while its
+    // accepted submission is in the enter-delay phase. Previously its error
+    // omitted the pane, making a live-handoff failure impossible to locate.
+    #[test]
+    fn handoff_timeout_names_stuck_pane_and_submission_and_rolls_back() {
+        let (handle, mut peer, read_rx) = actor_with_socket_pair(false);
+        let completion = handle
+            .queue_user_input_submission(
+                Bytes::from_static(b"prompt"),
+                Bytes::from_static(b"\r"),
+                Duration::from_millis(500),
+            )
+            .expect("submission queues");
+        let mut prompt = [0; 6];
+        peer.read_exact(&mut prompt)
+            .expect("submission reaches peer");
+        let error = handle
+            .begin_handoff(Duration::from_millis(50))
+            .expect_err("delayed submission cannot quiesce before deadline");
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+        assert!(error.to_string().contains("pane 1"), "{error}");
+        assert!(
+            error.to_string().contains("active submission=true"),
+            "{error}"
+        );
+        completion
+            .recv_timeout(Duration::from_secs(1))
+            .expect("submission reply")
+            .expect("submission survives rollback");
+        peer.write_all(b"still-live")
+            .expect("peer writes after rollback");
+        assert_eq!(
+            read_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("actor resumes reads"),
+            Bytes::from_static(b"still-live")
+        );
+        handle
+            .begin_handoff(Duration::from_secs(1))
+            .expect("retry quiesces");
+        handle.rollback_handoff().expect("retry rolls back");
+        handle.shutdown();
+    }
+
     #[test]
     fn duplicate_for_handoff_requires_quiesced_actor() {
         let (handle, mut peer, read_rx) = actor_with_socket_pair(false);
@@ -2074,6 +2164,7 @@ while True:
         let controls = Arc::new(Mutex::new(SharedPtyControls::default()));
         let (wake, _wake_read_fd) = test_wake_pair();
         let handle = PtyIoActorHandle {
+            pane_id: 1,
             data_tx,
             control_tx,
             wake,
@@ -2154,6 +2245,7 @@ while True:
             poll_observer: None,
         };
         let handle = PtyIoActorHandle {
+            pane_id: 1,
             data_tx,
             control_tx,
             wake: wake_pipe.writer,
@@ -2228,6 +2320,7 @@ while True:
             .expect("fill data queue");
         let (wake, _wake_read_fd) = test_wake_pair();
         let handle = PtyIoActorHandle {
+            pane_id: 1,
             data_tx,
             control_tx,
             wake,
