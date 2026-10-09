@@ -112,10 +112,17 @@ export default function DocPanel({ machine, tab, items, active, select, error: c
   const html = useMemo(() => renderMarkdown(content.path === path ? content.text : ""), [content, path]);
   const open = (url: string) => { if (/^(https?:|mailto:)/i.test(url)) void bridge.openUrl(url).catch(error => setContent(value => ({ ...value, error: String(error) }))); };
   const webFrame = useRef<HTMLIFrameElement>(null);
+  const lastExternal = useRef(-Infinity);
   useEffect(() => {
     const message = (event: MessageEvent) => {
       if (!webFrame.current || event.source !== webFrame.current.contentWindow) return;
-      if (event.data?.kind === "herdr-desk-external-link" && typeof event.data.href === "string") open(event.data.href);
+      if (event.data?.kind !== "herdr-desk-external-link" || typeof event.data.href !== "string") return;
+      // Any page can post this message: honour it only while the user is in the frame
+      // (a click focuses it), and at most once a second, so a page cannot spam the browser.
+      const now = performance.now();
+      if (document.activeElement !== webFrame.current || now - lastExternal.current < 1000) return;
+      lastExternal.current = now;
+      open(event.data.href);
     };
     window.addEventListener("message", message);
     return () => window.removeEventListener("message", message);

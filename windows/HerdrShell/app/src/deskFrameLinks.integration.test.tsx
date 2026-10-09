@@ -31,6 +31,13 @@ it("opens cross-origin desk links externally without navigating or opening a des
     window.dispatchEvent(new MessageEvent("message", { data, source: remote as unknown as MessageEventSource }));
   });
   remote.eval(frameScript);
+  // A posted link counts only while the user is in the frame, at most once a second.
+  const blurred = native.invoke.mock.calls.length;
+  window.dispatchEvent(new MessageEvent("message", { data: { kind: "herdr-desk-external-link", href: "https://example.net/unfocused" }, source: remote as unknown as MessageEventSource }));
+  expect(native.invoke.mock.calls).toHaveLength(blurred);
+  let clock = 10_000;
+  vi.spyOn(performance, "now").mockImplementation(() => (clock += 2000));
+  Object.defineProperty(document, "activeElement", { configurable: true, get: () => frame });
   for (const anchor of Array.from(doc.querySelectorAll("a")).slice(0, 2)) {
     const click = new remote.MouseEvent("click", { ctrlKey: true, shiftKey: true, button: 0, bubbles: true, cancelable: true });
     anchor.firstChild!.dispatchEvent(click);
