@@ -146,15 +146,27 @@ final class GhosttyRuntime {
         var route = LinkRoute.decide(url, shift: shift)
         guard route != .ignore else { return }
         let controller = (NSApp.delegate as? AppDelegate)?.controller
+        // A file in another machine's pane lives on that machine: only the desk can read it.
+        if route == .external, url.isFileURL, let paneId, Machines.split(paneId) != nil, controller != nil { route = .desk }
         if route == .desk, controller == nil { route = .external }
         let s = url.absoluteString
         if agentRun { log("open_url \(s)") }
         OpenedLinks.shared.record(route == .desk ? "desk \(s)" : s)
         switch route {
         case .desk: controller?.openOnDesk(url, paneId: paneId)
-        case .external: if !agentRun { shellOpen(url) }
+        case .external:
+            guard !agentRun else { break }
+            // A terminal can print any link: an app or executable is shown in Finder, never run.
+            if url.isFileURL, isLaunchable(url) { NSWorkspace.shared.activateFileViewerSelecting([url]) } else { shellOpen(url) }
         case .ignore: break
         }
+    }
+
+    static func isLaunchable(_ url: URL) -> Bool {
+        let values = try? url.resourceValues(forKeys: [.isApplicationKey, .isPackageKey, .isDirectoryKey, .isExecutableKey])
+        if values?.isApplication == true || values?.isPackage == true { return true }
+        if values?.isDirectory != true, values?.isExecutable == true { return true }
+        return ["command", "tool", "terminal", "workflow", "scpt", "applescript", "pkg", "mpkg", "app", "sh"].contains(url.pathExtension.lowercased())
     }
 
     /// A link's target as a URL. libghostty's link regex also matches bare paths, which
