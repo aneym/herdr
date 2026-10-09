@@ -210,6 +210,9 @@ fn main() {
             // background timer/renderer throttling so queued control hooks still run.
             #[cfg(windows)]
             {
+                // WebView2 registers this before parsing every document, including
+                // cross-origin iframe navigations. No remote Tauri IPC is enabled.
+                window = window.initialization_script_for_all_frames(include_str!("../../src/deskFrameLinks.js"));
                 if test_window {
                     window = window.data_directory(
                         app.path().app_local_data_dir()?.join("test-window-webview"),

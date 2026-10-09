@@ -111,12 +111,21 @@ export default function DocPanel({ machine, tab, items, active, select, error: c
   }, [machine, path, tab, item?.id, item?.mime]);
   const html = useMemo(() => renderMarkdown(content.path === path ? content.text : ""), [content, path]);
   const open = (url: string) => { if (/^(https?:|mailto:)/i.test(url)) void bridge.openUrl(url).catch(error => setContent(value => ({ ...value, error: String(error) }))); };
+  const webFrame = useRef<HTMLIFrameElement>(null);
+  useEffect(() => {
+    const message = (event: MessageEvent) => {
+      if (!webFrame.current || event.source !== webFrame.current.contentWindow) return;
+      if (event.data?.kind === "herdr-desk-external-link" && typeof event.data.href === "string") open(event.data.href);
+    };
+    window.addEventListener("message", message);
+    return () => window.removeEventListener("message", message);
+  }, [item?.url]);
   const frameCleanup = useRef<() => void>(() => {});
   useEffect(() => () => frameCleanup.current(), [item?.url]);
   const frameLoaded = (frame: HTMLIFrameElement) => {
     frameCleanup.current();
-    // The browser prohibits access to cross-origin iframe documents. Do not
-    // weaken the sandbox or proxy arbitrary pages to bypass that boundary.
+    // Fallback for clients without the Windows all-frame initialization script.
+    // Cross-origin pages use that script and the source-checked message above.
     try {
       const doc = frame.contentDocument;
       if (!doc) return;
@@ -128,7 +137,7 @@ export default function DocPanel({ machine, tab, items, active, select, error: c
       };
       doc.addEventListener("click", click, true);
       frameCleanup.current = () => doc.removeEventListener("click", click, true);
-    } catch { /* Cross-origin pages retain their sandboxed navigation. */ }
+    } catch { /* Native initialization handles cross-origin pages. */ }
   };
   return <section className="docs" aria-label="Documents">
     <div className="docs-header"><div className="docs-tabs" role="tablist" aria-label="Documents">{items.map(doc => <button key={docKey(doc)} role="tab" aria-selected={docKey(doc) === active} onClick={() => select(docKey(doc))}>{doc.name}</button>)}</div>
@@ -146,7 +155,7 @@ export default function DocPanel({ machine, tab, items, active, select, error: c
     {item && <div className="docs-address"><span className="docs-path" title={path ?? item.url}>{path ?? item.url}</span><button aria-label="Open document externally" className={item.url && /^(https?:|mailto:)/i.test(item.url) ? "muted" : undefined} disabled={!item.url || !/^(https?:|mailto:)/i.test(item.url)} title={!item.url ? "File is on Studio" : undefined} onClick={() => { if (item.url) open(item.url); }}>Open</button></div>}
     <div className="docs-body" role="tabpanel">
       {(catalogError || content.error) && <p className="muted" role="status">{catalogError || content.error}</p>}
-      {item?.kind === "web" ? <>{item.url && webUrl(item.url) && <iframe title={item.name} src={item.url} onLoad={event => frameLoaded(event.currentTarget)} sandbox="allow-scripts allow-forms allow-same-origin" style={{ width: "100%", height: "100%", border: 0 }} />}</> : content.source ? <iframe title={item?.name} src={content.source} sandbox="" style={{ width: "100%", height: "100%", border: 0 }} /> : item?.kind === "file" && item.mime !== "text/markdown" ? <pre>{content.text}</pre> : <div className="chat-markdown" onAuxClick={event => { if ((event.target as HTMLElement).closest("a")) event.preventDefault(); }} onClick={event => {
+      {item?.kind === "web" ? <>{item.url && webUrl(item.url) && <iframe ref={webFrame} title={item.name} src={item.url} onLoad={event => frameLoaded(event.currentTarget)} sandbox="allow-scripts allow-forms allow-same-origin" style={{ width: "100%", height: "100%", border: 0 }} />}</> : content.source ? <iframe title={item?.name} src={content.source} sandbox="" style={{ width: "100%", height: "100%", border: 0 }} /> : item?.kind === "file" && item.mime !== "text/markdown" ? <pre>{content.text}</pre> : <div className="chat-markdown" onAuxClick={event => { if ((event.target as HTMLElement).closest("a")) event.preventDefault(); }} onClick={event => {
         const anchor = (event.target as HTMLElement).closest("a");
         if (anchor) { event.preventDefault(); const url = anchor.getAttribute("href"); if (url) open(url); }
       }} dangerouslySetInnerHTML={{ __html: html }} />}
