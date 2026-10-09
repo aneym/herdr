@@ -151,7 +151,14 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         ["tabs": tabTitles, "active": active ?? NSNull(), "title": pageTitle, "text": pageText,
          "url": address.stringValue, "address_focused": address.currentEditor() != nil,
          "focused": hasFocus, "file_path": filePath.stringValue,
-         "h1": renderedHeadings, "li": renderedListItems]
+         "h1": renderedHeadings, "li": renderedListItems, "web_rect": webRect]
+    }
+
+    /// The page in window content points, top-left origin (test hook: where a click lands).
+    private var webRect: [CGFloat] {
+        guard let content = web.window?.contentView else { return [] }
+        let r = web.convert(web.bounds, to: nil)
+        return [r.minX, content.bounds.height - r.maxY, r.width, r.height]
     }
 
     var hasFocus: Bool {
@@ -362,7 +369,9 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         if navigationAction.navigationType == .linkActivated, let url = navigationAction.request.url {
             let host = url.host
-            if host != nil, host != allowedHost {
+            // Cmd+Shift+click opens any link in the default browser, as in a terminal pane.
+            let external = navigationAction.modifierFlags.isSuperset(of: [.command, .shift])
+            if external || (host != nil && host != allowedHost) {
                 openOutsideApp(url)
                 decisionHandler(.cancel)
                 return
@@ -449,6 +458,7 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
     }
 
     private func openOutsideApp(_ url: URL) {
+        OpenedLinks.shared.record(url.absoluteString)
         shellOpen(url)
     }
 

@@ -1,0 +1,17 @@
+[PASS] dev app is key in the Space and the lab pane is attached
+[PASS] pane shows the OSC 8 label, the plain URL and the file path
+[PASS] Cmd+Shift+click on the OSC 8 label opens its target externally
+[PASS] Cmd+Shift+click on a plain URL opens it externally
+[PASS] the guest's default browser (Safari) ran after each external URL open
+[PASS] Cmd+Shift+click on a file path opens it with the default app
+[PASS] no Cmd+Shift click changed the pane's desk
+[PASS] the desk column stayed closed
+[PASS] plain Cmd+click on the OSC 8 label routes to the desk
+[PASS] the Cmd+clicked URL is on the pane's desk
+[PASS] desk shows the local web page
+[PASS] desk page has a frame in the window
+[PASS] Cmd+Shift+click on a desk page link opens it externally
+[PASS] the desk stayed on its page
+[PASS] Safari ran for the desk link
+[PASS] a plain click on the same link navigates the desk
+16 passed; 0 failed

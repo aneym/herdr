@@ -1004,6 +1004,12 @@ final class TestHook {
                     "hovered_link": s.hoveredLink,
                     "keys_sent": s.keysSent, "last_key_sent": s.lastKeySent,
                     "frame": [s.frame.minX, s.frame.minY, s.frame.width, s.frame.height],
+                    // Window content points, top-left origin: where a pixel click lands on this grid.
+                    "window_rect": { () -> [CGFloat] in
+                        let r = s.convert(s.bounds, to: nil), h = c.window.contentView?.bounds.height ?? 0
+                        return [r.minX, h - r.maxY, r.width, r.height]
+                    }(),
+                    "padding_pt": [s.paddingPoints.x, s.paddingPoints.y],
                     "in_host": s.superview === c.host,
                     "selection": s.selectedText() ?? NSNull(),
                     "cell_pt": [s.cellPoints.width, s.cellPoints.height],
@@ -1021,6 +1027,8 @@ final class TestHook {
             "window_key": c.window.isKeyWindow,
             "window_number": c.window.windowNumber,
             "window_frame": NSStringFromRect(c.window.frame),
+            "backing_scale": c.window.backingScaleFactor,
+            "content_height": c.window.contentView?.bounds.height ?? 0,
             "host_frame": NSStringFromRect(c.host.frame),
             "selected_tab": c.state.selectedTab ?? NSNull(),
             "switcher_open": c.quickSwitch.isOpen,

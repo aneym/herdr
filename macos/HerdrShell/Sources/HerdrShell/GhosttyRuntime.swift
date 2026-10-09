@@ -100,12 +100,16 @@ final class GhosttyRuntime {
         if action.tag == GHOSTTY_ACTION_OPEN_URL {
             let raw = text(action.action.open_url.url, len: Int(action.action.open_url.len))
             let paneId: String?
+            // A link opens from a click, so Shift is the click's, not the keyboard's now.
+            let shift: Bool
             if target.tag == GHOSTTY_TARGET_SURFACE, let ud = ghostty_surface_userdata(target.target.surface) {
-                paneId = Unmanaged<SurfaceView>.fromOpaque(ud).takeUnretainedValue().paneId
+                let view = Unmanaged<SurfaceView>.fromOpaque(ud).takeUnretainedValue()
+                paneId = view.paneId
+                shift = view.clickShift
             } else {
                 paneId = nil
+                shift = NSEvent.modifierFlags.contains(.shift)
             }
-            let shift = NSEvent.modifierFlags.contains(.shift)
             DispatchQueue.main.async { openLink(raw, paneId: paneId, shift: shift) }
             return true
         }
@@ -138,8 +142,7 @@ final class GhosttyRuntime {
     /// routes suppress NSWorkspace there.
     static func openLink(_ raw: String, paneId: String?,
                          shift: Bool = NSEvent.modifierFlags.contains(.shift)) {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: trimmed) else { return }
+        guard let url = linkURL(raw) else { return }
         var route = LinkRoute.decide(url, shift: shift)
         guard route != .ignore else { return }
         let controller = (NSApp.delegate as? AppDelegate)?.controller
@@ -152,6 +155,16 @@ final class GhosttyRuntime {
         case .external: if !agentRun { shellOpen(url) }
         case .ignore: break
         }
+    }
+
+    /// A link's target as a URL. libghostty's link regex also matches bare paths, which
+    /// open as files; a path relative to the pane's directory is not resolvable here.
+    static func linkURL(_ raw: String) -> URL? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("/") || trimmed.hasPrefix("~/") {
+            return URL(fileURLWithPath: (trimmed as NSString).expandingTildeInPath)
+        }
+        return URL(string: trimmed)
     }
 
     private static var pendingPastes: [String: String] = [:]

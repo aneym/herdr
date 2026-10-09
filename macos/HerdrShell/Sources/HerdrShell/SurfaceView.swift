@@ -525,6 +525,10 @@ final class SurfaceView: NSView {
         init(_ event: NSEvent) { events = [event] }
     }
     private var pendingLinkGesture: LinkGesture?
+    /// Shift as it was at the last left press. libghostty opens a link at the release,
+    /// and a Cmd-click the server did not resolve replays the gesture to libghostty only
+    /// after that lookup returns, when Shift may already be up; the open reads this.
+    private(set) var clickShift = false
     private lazy var links: TerminalLinks = {
         let links = TerminalLinks(paneId: paneId, socketPath: clipboardSocketPath)
         links.readSpan = { [unowned self] r in self.readCells((r.start_col, r.row), (r.end_col, r.row)) }
@@ -637,6 +641,7 @@ final class SurfaceView: NSView {
         // Hand first responder to the surface on every click (agent-zero's
         // terminals never took keys because this only happened once).
         window?.makeFirstResponder(self)
+        clickShift = event.modifierFlags.contains(.shift)
         if event.modifierFlags.contains(.command), let c = viewportCell(surfacePoint(event)) {
             let gesture = LinkGesture(event)
             pendingLinkGesture = gesture
