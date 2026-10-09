@@ -9,7 +9,6 @@ import type { AreaChip } from "./areas";
 import { LaneSnapshot } from "./laneFiles";
 import type { Snapshot } from "./model";
 import { setAgentHidden } from "./control";
-import UpdatePill from "./UpdatePill";
 import { space } from "./tokens";
 import AgentFace from "./AgentFace";
 import { DRAG_THRESHOLD, slotAt } from "./pinDrag";
@@ -364,5 +363,5 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
       void runAction(prompt.verb, args);
     }}>{prompt.verb === "park" ? "Park" : "Approve"}</button></div>
   </div>}
-  <footer role="status">{notice ?? menuError ?? (machine.state === "down" ? `${machine.name}: unreachable` : null)}<UpdatePill /></footer></aside>;
+  <footer role="status">{notice ?? menuError ?? (machine.state === "down" ? `${machine.name}: unreachable` : null)}</footer></aside>;
 }

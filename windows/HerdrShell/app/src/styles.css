@@ -88,14 +88,18 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 .docs table { border-collapse: collapse; }
 .docs td, .docs th { padding: var(--shell-space-step4) var(--shell-space-step8); border: 1px solid var(--shell-line); }
 
-.update-actions { display: inline-flex; gap: var(--shell-space-step10); margin-left: var(--shell-space-step10); }
-.update-actions button { color: var(--shell-muted); font-size: var(--shell-type-size12); }
-.update-actions button:hover { text-decoration: underline; }
-.update-actions button:disabled { cursor: default; opacity: .6; }
-.update-rollback { opacity: 0; pointer-events: none; }
-.sidebar footer:hover .update-rollback, .sidebar footer:focus-within .update-rollback { opacity: 1; pointer-events: auto; }
+/* Title-bar Update button (Mac: UpdatePill.swift titlebar accessory). It sits on the top strip at the sidebar's trailing edge, level with the machine row. */
+.layout { position: relative; }
+.title-strip { position: absolute; top: var(--shell-space-step9); left: var(--shell-space-step8); z-index: 13; }
+.title-strip.over-sidebar { left: var(--shell-space-sidebar-width); transform: translateX(calc(-100% - var(--shell-space-step8))); }
+.title-update { position: relative; }
+.title-update-button { padding: var(--shell-space-step4) var(--shell-space-step10); border-radius: var(--shell-radius-control); background: var(--shell-selection); color: var(--shell-text); font-size: var(--shell-type-size12); font-weight: 500; white-space: nowrap; }
+.title-update-button:hover { background: var(--shell-hover); }
+.title-update.is-quiet .title-update-button { background: transparent; color: var(--shell-muted); }
+.title-update.is-quiet:not(:hover):not(:focus-within) .title-update-button { opacity: 0; }
+.title-update-menu { top: calc(100% + var(--shell-space-step4)); }
+.title-update-meta { margin: 0; padding: var(--shell-space-step6) var(--shell-space-step12) var(--shell-space-step2); color: var(--shell-muted); font-size: var(--shell-type-caption); overflow-wrap: anywhere; }
 .sidebar footer:empty { display: none; }
-.update-error { display: block; margin-top: var(--shell-space-step5); }
 .sidebar.pin-dragging { user-select: none; cursor: grabbing; }
 .tab-row { position: relative; }
 .tab-row.pin-dragged { opacity: .85; z-index: 1; }
