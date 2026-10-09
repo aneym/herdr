@@ -73,7 +73,9 @@ export function installLinks(term: Terminal, server: LinkServer, open: (url: str
   };
   // xterm activates on a release anywhere in the pressed link; the gesture decides in `up`.
   const activate = (event: MouseEvent, uri: string) => { if (event.ctrlKey) linked.set(event, uri); };
-  term.options.linkHandler = { activate };
+  // xterm otherwise drops file/mailto OSC 8 links before activate; finish keeps
+  // the allowed-scheme gate, so arbitrary OSC URI schemes still cannot open.
+  term.options.linkHandler = { activate, allowNonHttpProtocols: true };
   term.loadAddon(new WebLinksAddon(activate));
   const screen = term.element?.querySelector(".xterm-screen");
   // Registered after xterm's Linkifier on the same element, so its activation is already known.

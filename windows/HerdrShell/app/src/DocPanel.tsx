@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { bridge, fromBase64 } from "./bridge";
 import { docItems, docKey, laneFor, parseCatalog, projectFolder } from "./docs";
 import type { DocItem, LaneCatalog } from "./docs";
@@ -110,7 +110,26 @@ export default function DocPanel({ machine, tab, items, active, select, error: c
     return () => { disposed = true; clearInterval(timer); document.removeEventListener("visibilitychange", poll); };
   }, [machine, path, tab, item?.id, item?.mime]);
   const html = useMemo(() => renderMarkdown(content.path === path ? content.text : ""), [content, path]);
-  const open = (url: string) => { if (/^(https?:|mailto:)/i.test(url)) void bridge.openUrl(url).catch(error => setContent(value => ({ ...value, error: String(error) }))); };
+  const open = (url: string) => { if (/^(https?:|mailto:|file:|[a-z]:[\\/]|\/|\\\\)/i.test(url)) void bridge.openUrl(url).catch(error => setContent(value => ({ ...value, error: String(error) }))); };
+  const frameCleanup = useRef<() => void>(() => {});
+  useEffect(() => () => frameCleanup.current(), [item?.url]);
+  const frameLoaded = (frame: HTMLIFrameElement) => {
+    frameCleanup.current();
+    // The browser prohibits access to cross-origin iframe documents. Do not
+    // weaken the sandbox or proxy arbitrary pages to bypass that boundary.
+    try {
+      const doc = frame.contentDocument;
+      if (!doc) return;
+      const click = (event: MouseEvent) => {
+        if (!event.ctrlKey || !event.shiftKey || event.button !== 0) return;
+        const anchor = (event.target as Element)?.closest?.("a[href]") as HTMLAnchorElement | null;
+        if (!anchor) return;
+        event.preventDefault(); event.stopPropagation(); open(anchor.href);
+      };
+      doc.addEventListener("click", click, true);
+      frameCleanup.current = () => doc.removeEventListener("click", click, true);
+    } catch { /* Cross-origin pages retain their sandboxed navigation. */ }
+  };
   return <section className="docs" aria-label="Documents">
     <div className="docs-header"><div className="docs-tabs" role="tablist" aria-label="Documents">{items.map(doc => <button key={docKey(doc)} role="tab" aria-selected={docKey(doc) === active} onClick={() => select(docKey(doc))}>{doc.name}</button>)}</div>
       <button aria-label="Add document" onClick={() => setAdding(value => !value)}>+</button>
@@ -127,7 +146,7 @@ export default function DocPanel({ machine, tab, items, active, select, error: c
     {item && <div className="docs-address"><span className="docs-path" title={path ?? item.url}>{path ?? item.url}</span><button aria-label="Open document externally" className={item.url && /^(https?:|mailto:)/i.test(item.url) ? "muted" : undefined} disabled={!item.url || !/^(https?:|mailto:)/i.test(item.url)} title={!item.url ? "File is on Studio" : undefined} onClick={() => { if (item.url) open(item.url); }}>Open</button></div>}
     <div className="docs-body" role="tabpanel">
       {(catalogError || content.error) && <p className="muted" role="status">{catalogError || content.error}</p>}
-      {item?.kind === "web" ? <>{item.url && webUrl(item.url) && <iframe title={item.name} src={item.url} sandbox="allow-scripts allow-forms allow-same-origin" style={{ width: "100%", height: "100%", border: 0 }} />}</> : content.source ? <iframe title={item?.name} src={content.source} sandbox="" style={{ width: "100%", height: "100%", border: 0 }} /> : item?.kind === "file" && item.mime !== "text/markdown" ? <pre>{content.text}</pre> : <div className="chat-markdown" onAuxClick={event => { if ((event.target as HTMLElement).closest("a")) event.preventDefault(); }} onClick={event => {
+      {item?.kind === "web" ? <>{item.url && webUrl(item.url) && <iframe title={item.name} src={item.url} onLoad={event => frameLoaded(event.currentTarget)} sandbox="allow-scripts allow-forms allow-same-origin" style={{ width: "100%", height: "100%", border: 0 }} />}</> : content.source ? <iframe title={item?.name} src={content.source} sandbox="" style={{ width: "100%", height: "100%", border: 0 }} /> : item?.kind === "file" && item.mime !== "text/markdown" ? <pre>{content.text}</pre> : <div className="chat-markdown" onAuxClick={event => { if ((event.target as HTMLElement).closest("a")) event.preventDefault(); }} onClick={event => {
         const anchor = (event.target as HTMLElement).closest("a");
         if (anchor) { event.preventDefault(); const url = anchor.getAttribute("href"); if (url) open(url); }
       }} dangerouslySetInnerHTML={{ __html: html }} />}

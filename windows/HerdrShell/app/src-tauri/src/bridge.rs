@@ -389,14 +389,32 @@ fn forward(events: Receiver<AttachEvent>, channel: &Channel<AttachEventJs>) {
 }
 #[tauri::command]
 pub fn open_url(url: String) -> Result<(), String> {
-    let parsed = tauri::Url::parse(&url).map_err(|e| e.to_string())?;
-    if !matches!(parsed.scheme(), "http" | "https" | "mailto") {
-        return Err("only http, https and mailto URLs are allowed".into());
+    // ShellExecute accepts absolute file paths as well as URLs. Never treat an
+    // unknown URI scheme as a path (e.g. javascript: or a shell command).
+    if url.contains('\0') {
+        return Err("open target contains a null byte".into());
     }
+    let target = if std::path::Path::new(&url).is_absolute() {
+        url
+    } else {
+        let parsed = tauri::Url::parse(&url).map_err(|e| e.to_string())?;
+        match parsed.scheme() {
+            "http" | "https" | "mailto" => parsed.to_string(),
+            "file" => parsed
+                .to_file_path()
+                .map_err(|_| "invalid file URL".to_string())?
+                .to_string_lossy()
+                .into_owned(),
+            _ => {
+                return Err(
+                    "only http, https, mailto, file URLs and absolute paths are allowed".into(),
+                )
+            }
+        }
+    };
     #[cfg(windows)]
     {
-        let url: Vec<u16> = parsed
-            .as_str()
+        let url: Vec<u16> = target
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect();
