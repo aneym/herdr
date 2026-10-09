@@ -50,9 +50,15 @@ it("opens OSC 8, detected and server-resolved Ctrl+Shift links externally; Ctrl 
     screen.dispatchEvent(new MouseEvent("mousemove", { clientX: 755, clientY: 110, bubbles: true }));
     native.invoke.mockClear();
     await click(true);
-    await vi.waitFor(() => expect(native.invoke).toHaveBeenCalledWith("open_url", { url }));
-    expect(native.invoke.mock.calls.filter(([cmd, args]) => cmd === "api_request" && args.method === "desk.open")).toHaveLength(0);
-    expect(native.invoke.mock.calls.filter(([cmd]) => cmd === "open_url")).toHaveLength(1);
+    if (kind === "file") {
+      // Pane files are on the pane's machine, so Shift still opens them on the desk.
+      await vi.waitFor(() => expect(native.invoke).toHaveBeenCalledWith("api_request", { machine: "pc", method: "desk.open", params: { tab_id: "t1", ref: "C:/notes.txt", opened_by: "user" } }));
+      expect(native.invoke.mock.calls.filter(([cmd]) => cmd === "open_url")).toHaveLength(0);
+    } else {
+      await vi.waitFor(() => expect(native.invoke).toHaveBeenCalledWith("open_url", { url }));
+      expect(native.invoke.mock.calls.filter(([cmd, args]) => cmd === "api_request" && args.method === "desk.open")).toHaveLength(0);
+      expect(native.invoke.mock.calls.filter(([cmd]) => cmd === "open_url")).toHaveLength(1);
+    }
     native.invoke.mockClear();
     await click(false);
     await vi.waitFor(() => expect(native.invoke).toHaveBeenCalledWith("api_request", { machine: "pc", method: "desk.open", params: { tab_id: "t1", ref: kind === "file" ? "C:/notes.txt" : url, opened_by: "user" } }));
@@ -70,7 +76,7 @@ it("intercepts Ctrl+Shift links in an accessible desk page without navigating it
   (window as unknown as Window).happyDOM.settings.disableIframePageLoading = false;
   frame.src = "about:blank";
   const doc = frame.contentDocument!;
-  doc.body.innerHTML = '<a href="https://example.com/out">Web</a><a href="file:///C:/notes.txt">File</a>';
+  doc.body.innerHTML = '<a href="https://example.com/out">Web</a>';
   frame.dispatchEvent(new Event("load"));
   for (const anchor of doc.querySelectorAll("a")) {
     const click = new MouseEvent("click", { ctrlKey: true, shiftKey: true, button: 0, bubbles: true, cancelable: true });

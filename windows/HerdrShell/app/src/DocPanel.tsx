@@ -110,7 +110,7 @@ export default function DocPanel({ machine, tab, items, active, select, error: c
     return () => { disposed = true; clearInterval(timer); document.removeEventListener("visibilitychange", poll); };
   }, [machine, path, tab, item?.id, item?.mime]);
   const html = useMemo(() => renderMarkdown(content.path === path ? content.text : ""), [content, path]);
-  const open = (url: string) => { if (/^(https?:|mailto:|file:|[a-z]:[\\/]|\/|\\\\)/i.test(url)) void bridge.openUrl(url).catch(error => setContent(value => ({ ...value, error: String(error) }))); };
+  const open = (url: string) => { if (/^(https?:|mailto:)/i.test(url)) void bridge.openUrl(url).catch(error => setContent(value => ({ ...value, error: String(error) }))); };
   const frameCleanup = useRef<() => void>(() => {});
   useEffect(() => () => frameCleanup.current(), [item?.url]);
   const frameLoaded = (frame: HTMLIFrameElement) => {
