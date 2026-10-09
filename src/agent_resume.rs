@@ -1222,6 +1222,42 @@ pub(crate) fn restart_env_overrides(
             overrides.push(("PATH".into(), path));
         }
     }
+    with_home_git_ceiling(
+        overrides,
+        std::env::var("HOME").ok(),
+        std::env::var("GIT_CEILING_DIRECTORIES").ok(),
+    )
+}
+
+/// Agents herdr launches stop git discovery at the home directory, so an agent
+/// started below `$HOME` never walks up into a repository at `$HOME` itself.
+/// An existing ceiling list (an override, else the inherited value) is kept.
+pub(crate) fn with_home_git_ceiling(
+    mut overrides: Vec<(String, String)>,
+    home: Option<String>,
+    inherited: Option<String>,
+) -> Vec<(String, String)> {
+    const KEY: &str = "GIT_CEILING_DIRECTORIES";
+    // Git splits the list like PATH.
+    const SEP: char = if cfg!(windows) { ';' } else { ':' };
+    let Some(home) = home.filter(|home| Path::new(home).is_absolute()) else {
+        return overrides;
+    };
+    let existing = overrides
+        .iter()
+        .find(|(key, _)| key == KEY)
+        .map(|(_, value)| value.clone())
+        .or(inherited)
+        .filter(|value| !value.is_empty());
+    if existing
+        .as_deref()
+        .is_some_and(|value| value.split(SEP).any(|dir| dir == home))
+    {
+        return overrides;
+    }
+    let value = existing.map_or_else(|| home.clone(), |value| format!("{value}{SEP}{home}"));
+    overrides.retain(|(key, _)| key != KEY);
+    overrides.push((KEY.into(), value));
     overrides
 }
 

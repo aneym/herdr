@@ -1,5 +1,6 @@
 use super::*;
 
+mod agent_restart_attach;
 mod home_location;
 mod native_graphics;
 #[path = "pane_move.rs"]

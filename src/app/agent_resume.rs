@@ -318,6 +318,18 @@ impl App {
         Ok(resumed)
     }
 
+    /// Whether an in-place restart has shut this terminal's runtime down and not
+    /// yet launched its replacement. The terminal keeps its id across the swap.
+    pub(crate) fn terminal_runtime_restart_pending(
+        &self,
+        terminal_id: &crate::terminal::TerminalId,
+    ) -> bool {
+        self.pending_agent_restart_shutdowns.keys().any(|&pane_id| {
+            self.find_pane(pane_id)
+                .is_some_and(|(_, pane)| &pane.attached_terminal_id == terminal_id)
+        })
+    }
+
     pub(crate) fn finish_agent_restart_shutdown(&mut self, restart: AgentRestartAfterShutdown) {
         let AgentRestartAfterShutdown {
             pane_id,
@@ -778,10 +790,14 @@ impl App {
             );
             return false;
         };
-        let Some(launch_env) = self
-            .find_pane(pane_id)
-            .and_then(|(ws_idx, _)| self.pane_launch_env(ws_idx, pane_id, Vec::new()))
-        else {
+        let Some(launch_env) = self.find_pane(pane_id).and_then(|(ws_idx, _)| {
+            let overrides = crate::agent_resume::with_home_git_ceiling(
+                Vec::new(),
+                std::env::var("HOME").ok(),
+                std::env::var("GIT_CEILING_DIRECTORIES").ok(),
+            );
+            self.pane_launch_env(ws_idx, pane_id, overrides)
+        }) else {
             return false;
         };
 

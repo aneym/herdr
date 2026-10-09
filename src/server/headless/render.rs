@@ -697,6 +697,17 @@ impl HeadlessServer {
                 ClientConnectionMode::TerminalAttach { terminal_id }
                 | ClientConnectionMode::TerminalObserve { terminal_id } => {
                     let Some(runtime) = self.runtime_for_terminal_id_string(&terminal_id) else {
+                        // An in-place agent restart swaps the runtime under the same
+                        // terminal id: stay attached and repaint in full once it is back.
+                        if self
+                            .terminal_id_by_string(&terminal_id)
+                            .is_some_and(|id| self.app.terminal_runtime_restart_pending(&id))
+                        {
+                            if let Some(client) = self.clients.get_mut(&client_id) {
+                                client.render_state.reset_baseline();
+                            }
+                            continue;
+                        }
                         self.send_to_client(
                             client_id,
                             ServerMessage::ServerShutdown {
