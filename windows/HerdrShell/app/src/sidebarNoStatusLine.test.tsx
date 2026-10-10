@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // Alex, 2026-10-09: "update windows herdr to get parity, still seeing the status line on there".
 // The Mac sidebar draws rows as name, dot and icons, with no connection or status line under them;
-// the machine row's dot already says whether a machine is up. A connected machine whose agent
+// a remote chat's machine badge already says whether its machine is up. A connected machine whose agent
 // carries status, work and workflow data must draw no status text anywhere in the sidebar.
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -29,7 +29,7 @@ describe("sidebar status line", () => {
   function Shell({ notice }: { notice: string | null }) {
     const revealed = useSelectionReveal(null);
     const noop = () => {};
-    return <Sidebar snapshot={snapshot} machines={[{ name: "studio", state: "up" }]} chooseMachine={noop} rows={buildSidebar(snapshot)} selected={null} revealed={revealed} machine={{ name: "studio", state: "up" }} notice={notice} select={noop} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} />;
+    return <Sidebar snapshot={snapshot} rows={buildSidebar(snapshot)} selected={null} revealed={revealed} machine={{ name: "studio", state: "up" }} notice={notice} select={noop} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} />;
   }
   beforeEach(() => { stored.clear(); host = document.createElement("div"); document.body.append(host); root = createRoot(host); });
   afterEach(() => { act(() => root.unmount()); host.remove(); });

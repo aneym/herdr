@@ -26,7 +26,7 @@ it.each([false, true].flatMap(drifting => (["spaces", "areas"] as const).map(mod
   storage.set("herdr-shell.areas.mode", JSON.stringify(mode));
   const select = vi.fn(), noop = () => {};
   document.body.append(host); root = createRoot(host);
-  act(() => root!.render(<Sidebar snapshot={withPulse} catalog={catalog} machines={[]} chooseMachine={noop} rows={buildSidebar(withPulse)} selected="lead" revealed={{ last: "lead", pending: null }} machine={{ name: "studio", state: "up" }} notice={null} select={select} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} />));
+  act(() => root!.render(<Sidebar snapshot={withPulse} catalog={catalog} rows={buildSidebar(withPulse)} selected="lead" revealed={{ last: "lead", pending: null }} machine={{ name: "studio", state: "up" }} notice={null} select={select} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} />));
   expect(host.textContent).not.toContain("reply 18s");
   const ids = mode === "spaces" ? ["pinned:lead", "agent:agent", "tab:ordinary"] : ["tab:lead", "tab:agent", "tab:ordinary"];
   for (const [index, id] of ids.entries()) {

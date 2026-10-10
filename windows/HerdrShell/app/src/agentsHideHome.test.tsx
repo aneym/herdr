@@ -59,7 +59,7 @@ describe("hide agents and home glyph: rendered sidebar", () => {
   function Shell({ snapshot }: { snapshot: Snapshot }) {
     const revealed = useSelectionReveal(null);
     const noop = () => {};
-    return <Sidebar machines={[]} chooseMachine={noop} rows={buildSidebar(snapshot)} selected={null} revealed={revealed} machine={{ name: "studio", state: "up" }} notice={null} select={select} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} />;
+    return <Sidebar rows={buildSidebar(snapshot)} selected={null} revealed={revealed} machine={{ name: "studio", state: "up" }} notice={null} select={select} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} />;
   }
   const mount = (snapshot: Snapshot = story()) => act(() => root.render(<Shell snapshot={snapshot} />));
   const remount = (snapshot: Snapshot = story()) => { act(() => root.unmount()); root = createRoot(host); mount(snapshot); };

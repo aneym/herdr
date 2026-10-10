@@ -27,7 +27,7 @@ const rect = (left: number, top: number, width: number, height: number): DOMRect
 function Surface() {
   const [hover, setHover] = useState(null as string | null);
   const changed = (state: PaneDragState) => setHover(state.zone?.kind === "into_tab" ? `tab:${state.zone.tab_id}` : null);
-  return <><Sidebar machines={[machine]} chooseMachine={() => {}} rows={[{ kind: "pinned", id: "target", label: "Notes", status: "done", hotkey: null, section: "PINNED" }]} selected="t" revealed={{ last: "t", pending: null }} machine={machine} notice={null} select={() => {}} pin={() => {}} movePin={() => {}} renaming={null} startRename={() => {}} cancelRename={() => {}} commitRename={async () => {}} paneDropRow={hover} /><TabView snapshot={snapshot} selected="t" machine="studio" focused="a" onFocus={() => {}} shortcut={() => false} register={() => {}} pin={() => {}} registerDrag={registerDrag} onDragChange={changed} /></>;
+  return <><Sidebar rows={[{ kind: "pinned", id: "target", label: "Notes", status: "done", hotkey: null, section: "PINNED" }]} selected="t" revealed={{ last: "t", pending: null }} machine={machine} notice={null} select={() => {}} pin={() => {}} movePin={() => {}} renaming={null} startRename={() => {}} cancelRename={() => {}} commitRename={async () => {}} paneDropRow={hover} /><TabView snapshot={snapshot} selected="t" machine="studio" focused="a" onFocus={() => {}} shortcut={() => false} register={() => {}} pin={() => {}} registerDrag={registerDrag} onDragChange={changed} /></>;
 }
 beforeEach(async () => {
   vi.useFakeTimers(); events.clear(); result.mockReset(); drag = null;

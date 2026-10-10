@@ -23,7 +23,7 @@ describe("Spaces sidebar header actions", () => {
     const [selected, select] = useState(initial);
     const revealed = useSelectionReveal(selected);
     const noop = () => {};
-    return <><output>{selected}</output><Sidebar snapshot={snapshot} machines={[]} chooseMachine={noop} rows={buildSidebar(snapshot)} selected={selected} revealed={revealed} machine={{ name: "studio", state: "up" }} notice={null} select={id => { if (!snapshot.tabs?.some(tab => tab.tab_id === id)) throw new Error("Unknown tab"); select(id); }} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} /></>;
+    return <><output>{selected}</output><Sidebar snapshot={snapshot} rows={buildSidebar(snapshot)} selected={selected} revealed={revealed} machine={{ name: "studio", state: "up" }} notice={null} select={id => { if (!snapshot.tabs?.some(tab => tab.tab_id === id)) throw new Error("Unknown tab"); select(id); }} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} /></>;
   }
   const mount = (snapshot: Snapshot, initial?: string | null) => act(() => root.render(<Shell snapshot={snapshot} initial={initial} />));
   const click = async (label: string) => { await act(async () => { const button = host.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`); expect(button).not.toBeNull(); button!.click(); }); };

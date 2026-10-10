@@ -29,7 +29,7 @@ function Shell() {
   const revealed = useSelectionReveal(selected);
   drive = { select, show };
   const noop = () => {};
-  return visible ? <Sidebar machines={[]} chooseMachine={noop} rows={buildSidebar(snapshot)} selected={selected} revealed={revealed} machine={{ name: "studio", state: "up" }} notice={null} select={select} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} /> : null;
+  return visible ? <Sidebar rows={buildSidebar(snapshot)} selected={selected} revealed={revealed} machine={{ name: "studio", state: "up" }} notice={null} select={select} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} /> : null;
 }
 describe.each([["plain", false], ["StrictMode", true]])("sidebar reveal on select (%s)", (_name, strict) => {
   let host: HTMLDivElement, root: Root;
@@ -97,7 +97,7 @@ describe("area dot visibility", () => {
     const root = createRoot(host), noop = () => {};
     appTheme().setOverride("dark");
     try {
-      act(() => root.render(<Sidebar snapshot={snapshot} catalog={catalog} machines={[]} chooseMachine={noop} rows={[]} selected={null} revealed={{ last: null, pending: null }} machine={{ name: "studio", state: "up" }} notice={null} select={noop} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} />));
+      act(() => root.render(<Sidebar snapshot={snapshot} catalog={catalog} rows={[]} selected={null} revealed={{ last: null, pending: null }} machine={{ name: "studio", state: "up" }} notice={null} select={noop} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} />));
       const dot = host.querySelector<HTMLElement>(".areas-dot")!;
       expect(dot.classList.contains("areas-dot-ring")).toBe(true);
       expect(dot.style.backgroundColor).toBe("#1F1F23");

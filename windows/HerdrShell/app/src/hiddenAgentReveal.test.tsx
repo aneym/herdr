@@ -29,7 +29,7 @@ describe("hidden agent selection reveal", () => {
   function Shell({ selected, snapshot, shown = true }: { selected: string | null; snapshot: Snapshot; shown?: boolean }) {
     const revealed = useSelectionReveal(selected);
     const noop = () => {};
-    return shown ? <Sidebar machines={[]} chooseMachine={noop} rows={buildSidebar(snapshot)} selected={selected} revealed={revealed} machine={{ name: "studio", state: "up" }} notice={null} select={noop} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} /> : null;
+    return shown ? <Sidebar rows={buildSidebar(snapshot)} selected={selected} revealed={revealed} machine={{ name: "studio", state: "up" }} notice={null} select={noop} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} /> : null;
   }
   const mount = (selected: string | null, shown = true) => act(() => root.render(<Shell selected={selected} snapshot={story()} shown={shown} />));
   const header = () => host.querySelector<HTMLButtonElement>('[data-row="hiddenagents"]')!;

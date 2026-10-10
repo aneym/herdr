@@ -18,7 +18,7 @@ it("parks, resumes, approves and highlights Focus", async () => {
  catalog.parked = { "w1:t2": { note: "later" } };
  const noop = () => {};
  const snapshot = { workspaces: [{ workspace_id: "w1", number: 1 }], tabs: [{ tab_id: "w1:t1", workspace_id: "w1", number: 1 }, { tab_id: "w1:t2", workspace_id: "w1", number: 2 }] };
- act(() => root.render(<Sidebar snapshot={snapshot} catalog={catalog} machines={[]} chooseMachine={noop} rows={[]} selected={null} revealed={{ last: null, pending: null }} machine={{ name: "studio", state: "up" }} notice={null} select={noop} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} />));
+ act(() => root.render(<Sidebar snapshot={snapshot} catalog={catalog} rows={[]} selected={null} revealed={{ last: null, pending: null }} machine={{ name: "studio", state: "up" }} notice={null} select={noop} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} />));
  const click = async (text: string) => { const button = [...host.querySelectorAll("button")].find(b => b.textContent === text)!; expect(button).toBeTruthy(); await act(async () => button.click()); };
  const context = (title: string) => act(() => [...host.querySelectorAll(".areas-line")].find(b => b.textContent?.includes(title))!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true })));
  try {

@@ -51,7 +51,7 @@ function sidebar() {
     { kind: "space" as const, id: "w1", label: "recruiting", status: "done", hotkey: null, section: "spaces" },
     { kind: "tab" as const, id: "t1", spaceId: "w1", label: "Lane", status: "working", hotkey: null, section: "w1" },
   ];
-  act(() => root.render(<Sidebar rows={rows} machines={[]} chooseMachine={noop} selected={null} revealed={{ last: null, pending: null }} machine={{ name: "studio", state: "up" }} notice={null} select={noop} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} />));
+  act(() => root.render(<Sidebar rows={rows} selected={null} revealed={{ last: null, pending: null }} machine={{ name: "studio", state: "up" }} notice={null} select={noop} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} />));
   return host;
 }
 it("paints pinned, group and lane state as token-sized solid elements rather than text bullets", () => {

@@ -51,7 +51,7 @@ function Shell() {
     const key = (event: KeyboardEvent) => { const action = actionFor(event); if (action) void runAction(action, { ...context(selected, (id, stepping) => { navigation.noteSelection?.(!!stepping); select(id); }), navigation }); };
     document.addEventListener("keydown", key); return () => document.removeEventListener("keydown", key);
   }, [selected, navigation]);
-  return <><output aria-label="Selection">{selected}</output><Sidebar navigation={navigation} snapshot={snapshot} catalog={catalog} machines={[]} chooseMachine={noop} rows={buildSidebar(snapshot)} selected={selected} revealed={revealed} machine={{ name: "studio", state: "up" }} notice={null} select={select} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} /></>;
+  return <><output aria-label="Selection">{selected}</output><Sidebar navigation={navigation} snapshot={snapshot} catalog={catalog} rows={buildSidebar(snapshot)} selected={selected} revealed={revealed} machine={{ name: "studio", state: "up" }} notice={null} select={select} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} /></>;
 }
 let dispose: (() => void) | undefined;
 afterEach(() => { dispose?.(); dispose = undefined; stored.clear(); });

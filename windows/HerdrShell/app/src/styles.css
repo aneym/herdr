@@ -128,10 +128,6 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 .face-dot { position: absolute; width: var(--shell-face-dot); height: var(--shell-face-dot); right: calc(-1 * var(--shell-face-dot-offset)); bottom: calc(-1 * var(--shell-face-dot-offset)); border-radius: 50%; }
 .face-dot.ok { background: var(--shell-ok); }.face-dot.accent { background: var(--shell-accent); }.face-dot.warn { background: var(--shell-warn); }
 
-.machine-row { display: flex; flex-wrap: wrap; gap: var(--shell-space-step4); padding: var(--shell-space-step9) 0 var(--shell-space-step5); }
-.machine-row button { display: flex; align-items: center; gap: var(--shell-space-step6); padding: var(--shell-space-step4) var(--shell-space-step8); border-radius: var(--shell-radius-control); color: var(--shell-muted); }
-.machine-row button:hover { background: var(--shell-hover); }
-.machine-row button[aria-pressed="true"] { color: var(--shell-text); background: var(--shell-selection); }
 .status.up { color: var(--shell-ok); }.status.connecting { color: var(--shell-warn); }.status.down { color: var(--shell-muted); }
 
 .areas-mode { display: flex; align-items: center; justify-content: flex-end; gap: var(--shell-space-step4); height: calc(var(--shell-space-step32) + var(--shell-space-step4)); padding-left: var(--shell-space-step52); }
@@ -169,6 +165,9 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 .restart-confirm .restart-primary { color: var(--shell-accent); font-weight: 500; }
 .restart-confirm button:not(.restart-primary) { color: var(--shell-muted); }
 
+.machine-badge { flex-shrink: 0; display: inline-flex; align-items: center; gap: var(--shell-space-step2); font-size: var(--shell-type-section-label); font-weight: 400; color: var(--shell-muted); opacity: 0.9; white-space: nowrap; }
+.machine-badge svg { width: var(--shell-type-size8_5); height: var(--shell-type-size8_5); }
+.machine-badge.is-unhealthy { opacity: 0.45; }
 .home-glyph { flex-shrink: 0; font-size: var(--shell-type-row-trailing); }
 .home-glyph.warn { color: var(--shell-warn); }
 .hidden-agents .chevron { margin-left: auto; }

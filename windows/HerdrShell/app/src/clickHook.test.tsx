@@ -27,7 +27,7 @@ beforeEach(async () => {
   const host = document.createElement("div"); document.body.append(host);
   const style = document.createElement("style"); style.textContent = readFileSync(resolve("src/styles.css"), "utf8"); document.head.append(style);
   const root = createRoot(host), noop = () => {};
-  await act(async () => root.render(<Sidebar snapshot={snapshot} machines={[]} chooseMachine={noop} rows={buildSidebar(snapshot)} selected={null} revealed={{ last: undefined, pending: null }} machine={{ name: "studio", state: "up" }} notice={null} select={noop} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} />));
+  await act(async () => root.render(<Sidebar snapshot={snapshot} rows={buildSidebar(snapshot)} selected={null} revealed={{ last: undefined, pending: null }} machine={{ name: "studio", state: "up" }} notice={null} select={noop} pin={noop} movePin={noop} renaming={null} startRename={noop} cancelRename={noop} commitRename={async () => {}} />));
   const stop = installControl(() => ({ machine: { name: "studio", state: "up" }, machines: [], chooseMachine: () => ({ name: "studio", state: "up" }), selected: null, docs: { open: false, items: [], active: null }, rows: [], panes: [], focused: undefined, open: noop, action: async () => {} }));
   await Promise.resolve();
   cleanup = () => { stop(); act(() => root.unmount()); host.remove(); style.remove(); };
