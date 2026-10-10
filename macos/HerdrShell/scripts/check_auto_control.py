@@ -234,7 +234,7 @@ def main():
     typ("echo atc-A3")
     key("return")
     th.join()
-    took, _ = wait(lambda: b.exited_at, 12, 0.01)
+    took, _ = wait(lambda: b.exited_at or (time.time() if b.proc.poll() is not None else None), 12, 0.01)
     if took:
         gap = took - sent["last"]
         say(f"   A typed {t_a - (sent['last'] - 0.3 * len(b_line)):.1f}s into B's line; "
