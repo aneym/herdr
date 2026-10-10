@@ -190,36 +190,14 @@ struct TerminalTheme {
 
     // fallbackDark and fallbackLight come from shell/tokens.json (ShellTokens.swift).
 
-    /// Directive lines from Alex's own config that must never reach a surface: keybinds
-    /// (the shell owns chords through its menu and keymap), includes, and anything that
-    /// would make a terminal pane translucent or change the shell's grid padding.
-    static let strippedKeys: Set<String> = [
-        "keybind", "config-file", "background-opacity", "background-blur", "background-blur-radius",
-        "background-opacity-cells",
-        "window-padding-x", "window-padding-y", "window-padding-balance",
-    ]
+    /// The merge rules live in GhosttyConfigMerge.swift.
+    static var strippedKeys: Set<String> { GhosttyConfigMerge.strippedKeys }
 
-    static func key(of line: String) -> String? {
-        let t = line.trimmingCharacters(in: .whitespaces)
-        if t.isEmpty || t.hasPrefix("#") { return nil }
-        guard let eq = t.firstIndex(of: "=") else { return t }
-        return t[..<eq].trimmingCharacters(in: .whitespaces)
-    }
+    static func key(of line: String) -> String? { GhosttyConfigMerge.key(of: line) }
 
     /// Base defaults, then the user's config minus stripped keys, then enforced lines.
     static func mergedConfig(base: String, user: String?) -> String {
-        var out = base.components(separatedBy: "\n")
-        if let user {
-            for line in user.components(separatedBy: "\n") {
-                if let k = key(of: line), strippedKeys.contains(k) { continue }
-                out.append(line)
-            }
-        }
-        out.append("background-opacity = 1")
-        out.append("window-padding-x = 8")
-        out.append("window-padding-y = 6")
-        out.append("window-padding-balance = false")
-        return out.joined(separator: "\n") + "\n"
+        GhosttyConfigMerge.merged(base: base, user: user)
     }
 
     static func realHome() -> String {

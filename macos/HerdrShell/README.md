@@ -55,6 +55,7 @@ App flags: `--herdr BIN --socket PATH --control FIFO [--ghostty-config FILE] [--
 
 - **Surfaces** are retained per `terminal_id` in `SurfaceRegistry`, outside the view tree. They are laid out from herdr's own `layouts[].panes[].rect`, so a split looks the way herdr has it.
 - **Size before attach.** `ghostty_surface_set_content_scale` and `set_size` run right after `ghostty_surface_new`. Without them, `herdr terminal attach` starts on a 0x0 PTY, exits with `terminal reported a zero-sized grid`, and the pane stays blank for 5 to 17 s until a later resize. With them, first text arrives in 0.3 s.
+- **No vsync.** The config merge forces `window-vsync = false`, so libghostty never creates a CVDisplayLink. With one, a renderer thread could block for hours in `CVDisplayLink::stop()` after an overnight display sleep, and the next backing-scale change on wake blocked the main thread behind it (Not Responding, 2026-10-07 and 2026-10-10). `scripts/check_overnight_hang.py` guards it; `scripts/shell-hang-sample.sh` captures stacks if the app ever hangs again.
 - **Keys.**
   - ⌘ chords go to the app menu first: ⌘]/⌘[ switch panes, ⌘⇧]/⌘⇧[ switch tabs, ⌘1-9 jump to a tab, ⌘C/⌘V copy and paste. A chord the menu does not claim falls through to Ghostty.
   - Ctrl chords go straight to Ghostty's key encoder.

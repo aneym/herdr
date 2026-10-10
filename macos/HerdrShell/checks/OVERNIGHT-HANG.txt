@@ -1,0 +1,10 @@
+$ python3 scripts/check_overnight_hang.py   # 2026-10-10T14:42:46Z, fixed merge
+{"vsync": false, "display_link_threads": 0, "max_main_call_ms": 72.2, "max_heartbeat_gap_ms": 99.2, "wake_ms": 2.7, "cycles": 2000, "lines": 400000, "columns": 98}
+PASS overnight hang: 400000 lines, 2000 sleep/wake rounds, 20s idle; no display link, worst main-thread round 72.2 ms, wake 2.7 ms
+exit 0
+
+$ python3 scripts/check_overnight_hang.py --source <pre-fix GhosttyConfigMerge.swift without window-vsync>
+{"vsync": true, "display_link_threads": 1, "max_main_call_ms": 13.5, "max_heartbeat_gap_ms": 72.2, "wake_ms": 2.7, "cycles": 2000, "lines": 400000, "columns": 98}
+FAIL window-vsync is on in the merged config: surfaces create a CVDisplayLink
+FAIL 1 CVDisplayLink thread(s) ran in the process
+exit 1
