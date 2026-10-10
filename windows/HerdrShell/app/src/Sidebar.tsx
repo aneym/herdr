@@ -301,7 +301,7 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
     });
   };
   const collapseSpacesButton = <button className="spaces-fold-all" aria-label={anySpaceExpanded ? "Collapse all spaces" : "Expand all spaces"} title={anySpaceExpanded ? "Collapse all spaces" : "Expand all spaces"} onClick={toggleAllSpaces}><svg width="12" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={anySpaceExpanded ? "m8 4 4 4 4-4M12 2v6m-4 12 4-4 4 4M12 16v6M4 12h16" : "m8 6 4-4 4 4M12 2v6m-4 10 4 4 4-4M12 16v6M4 12h16"} /></svg></button>;
-  return <aside className={`sidebar ${drag ? "pin-dragging" : ""}`}><div className="areas-mode" aria-label="Sidebar mode">{(["areas", "spaces"] as const).map(value => <button key={value} aria-pressed={mode === value} onClick={() => changeMode(value)}>{value === "areas" ? "Areas" : "Spaces"}</button>)}{mode === "spaces" && rows.some(row => row.kind === "space") && collapseSpacesButton}</div><nav ref={nav}>
+  return <aside className={`sidebar ${drag ? "pin-dragging" : ""}`}><div className="areas-mode" aria-label="Sidebar mode">{(["areas", "spaces"] as const).map(value => <button key={value} aria-pressed={mode === value} onClick={() => changeMode(value)}>{value === "areas" ? "Areas" : "Spaces"}</button>)}{mode === "spaces" && rows.some(row => row.kind === "space") && !choices.length && collapseSpacesButton}</div><nav ref={nav}>
     {mode === "areas" ? <>
       <div className="areas-chips" aria-label="Area filters">{([["all", "All"], ["scoping", "Scope"], ["building", "Build"], ["review", "Review"], ["use", "Use"], ["parked", "Parked"]] as const).map(([value, title]) => <button key={value} aria-pressed={chip === value} onClick={() => changeChip(value)}>{value === "parked" && parkedCount ? `Parked ${parkedCount}` : title}</button>)}</div>
       {areaOnly && <button className="sidebar-row muted" onClick={() => { setAreaOnly(null); save("only", null); }}>Only {catalog.areaName(areaOnly)} ×</button>}
@@ -331,6 +331,8 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
       <span className="muted">goal</span>
       <button className="goal-pick" aria-haspopup="menu" aria-expanded={!!goalMenu} onClick={event => { const r = event.currentTarget.getBoundingClientRect(); setGoalMenu(goalMenu ? null : { x: r.left, y: r.bottom }); }}>{goalFilter?.replace(":", " · ") ?? "All"}<Chevron open={!!goalMenu} /></button>
       {goalFilter && <button className="goal-clear" aria-label="Show all goals" onClick={() => chooseGoal(null)}>✕</button>}
+      {/* With goals, collapse-all lives on the goal row, as the Mac's; without, beside the mode switch. */}
+      {collapseSpacesButton}
     </div>}
     <section className="spaces">{groupSpaces(orderedSpaces.filter(r => !r.hidden), spaceGroups).map(({ group, spaces }) => <div key={group === null ? "rest:" : `group:${group}`}>{group && <div className="sidebar-row space-group-title" data-row={`spacegroup:${group}`}><span className="label">{group}</span></div>}{spaces.map(spaceRow)}</div>)}
     {rows.some(r => r.kind === "space" && r.hidden) && <><button className="sidebar-row muted" aria-expanded={hidden} onClick={() => setHidden(!hidden)}><span className="chevron"><Chevron open={hidden} /></span>Hidden</button>{(hidden || rows.some(r => r.hidden && r.id === renaming)) && orderedSpaces.filter(r => r.hidden).map(spaceRow)}</>}

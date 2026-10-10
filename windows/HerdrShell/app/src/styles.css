@@ -147,8 +147,8 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 .areas-park-note { display: block; overflow: hidden; text-overflow: ellipsis; font-size: var(--shell-type-row-trailing); color: var(--shell-muted); }
 .areas-parked-row { height: auto; min-height: var(--shell-space-row-height); padding-top: var(--shell-space-step4); padding-bottom: var(--shell-space-step4); }
 
-.areas-mode .spaces-fold-all { color: var(--shell-muted); opacity: 1; flex: 0 0 20px; padding: 0; background: none; border: 0; }
-.areas-mode .spaces-fold-all:hover { background: var(--shell-hover); }
+.spaces-fold-all { color: var(--shell-muted); opacity: 1; flex: 0 0 20px; padding: 0; background: none; border: 0; }
+.spaces-fold-all:hover { background: var(--shell-hover); }
 
 .pane-surface.tools-3 .pane-cap { padding-right: var(--shell-space-step148); }
 .pane-menu { position: absolute; top: var(--shell-space-pane-cap-height); right: 0; min-width: var(--shell-space-step150); padding: 0; background: var(--shell-field); color: var(--shell-text); border: 1px solid var(--shell-line); border-radius: var(--shell-radius-control); box-shadow: 0 4px 16px color-mix(in srgb, color-mix(in srgb, var(--shell-bg) 25%, var(--shell-shadow-base)) 45%, transparent); z-index: 12; }
@@ -243,6 +243,7 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 .goal-pick { display: inline-flex; align-items: center; gap: var(--shell-space-step4); font-size: var(--shell-type-row-title); }
 .goal-pick .disclosure-chevron { transform: rotate(90deg); color: var(--shell-muted); }
 .goal-clear { color: var(--shell-muted); font-size: var(--shell-type-glyph); }
+.goal-row .spaces-fold-all { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; height: 100%; }
 .goal-menu { position: fixed; right: auto; top: auto; }
 .goal-menu button { display: block; width: 100%; text-align: left; padding: var(--shell-space-step4) var(--shell-space-step8); }
 .goal-menu button:hover, .goal-menu button[aria-checked="true"] { background: var(--shell-selection); }
