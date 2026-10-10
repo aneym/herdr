@@ -236,3 +236,21 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 .plus-glyph::before, .plus-glyph::after { content: ""; position: absolute; background: currentColor; }
 .plus-glyph::before { left: var(--shell-space-step2); right: var(--shell-space-step2); top: 50%; height: 1px; }
 .plus-glyph::after { top: var(--shell-space-step2); bottom: var(--shell-space-step2); left: 50%; width: 1px; }
+.select-tab .label:has(+ .machine-badge) { flex: 0 1 auto; }
+.select-tab .machine-badge { margin-right: auto; }
+.goal-row { gap: var(--shell-space-step4); margin-top: var(--shell-space-step10); padding-left: var(--shell-space-step6); }
+.goal-row:hover { background: none; }
+.goal-pick { display: inline-flex; align-items: center; gap: var(--shell-space-step4); font-size: var(--shell-type-row-title); }
+.goal-pick .disclosure-chevron { transform: rotate(90deg); color: var(--shell-muted); }
+.goal-clear { color: var(--shell-muted); font-size: var(--shell-type-glyph); }
+.goal-menu { position: fixed; right: auto; top: auto; }
+.goal-menu button { display: block; width: 100%; text-align: left; padding: var(--shell-space-step4) var(--shell-space-step8); }
+.goal-menu button:hover, .goal-menu button[aria-checked="true"] { background: var(--shell-selection); }
+.space-group-title { font-weight: 600; margin-top: var(--shell-space-step10); padding-left: var(--shell-space-step6); }
+.space-group-title:hover { background: none; }
+.space-section { padding-left: var(--shell-space-step12); font-size: var(--shell-type-section-label); font-weight: 600; letter-spacing: var(--shell-type-section-tracking); color: var(--shell-muted); cursor: default; }
+.space-section[aria-expanded] { cursor: pointer; }
+.space-section.is-group { font-weight: 400; letter-spacing: 0; text-transform: none; }
+.space-section:not([aria-expanded]):hover { background: none; }
+.space-section-count { margin-left: auto; font-variant-numeric: tabular-nums; }
+.nested .indented { padding-left: calc(var(--shell-space-step24) + var(--shell-space-step12)); }

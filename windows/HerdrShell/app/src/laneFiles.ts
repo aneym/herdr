@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import type { TabPulse } from "./model";
 import { bridge, fromBase64 } from "./bridge";
+import { parseSpaceGroups } from "./spacesOverlay";
+import type { SpaceGroup } from "./spacesOverlay";
 
 export interface LaneRecord { tab: string; name: string; label: string; kind?: string; goal?: string; goalArea?: string; section?: string; scopeURL?: string; reviewURL?: string }
 export interface ParkRecord { note?: string; at?: number; by?: string }
@@ -29,6 +31,8 @@ export function parseAreas(value: unknown) {
     areas: list(obj.areas).flatMap(a => { const id = str(a.id); return id ? [{ id, name: str(a.name) ?? id, color: str(a.color) ?? defaultAreaColor }] : []; }),
     tabs: Object.fromEntries(Object.entries(object(obj.tabs)).map(([id, v]) => { const d = object(v); return [id, { area: str(d.area), role: str(d.role), name: str(d.name) }]; })) as Record<string, TabAssign>,
     spaces: stringMap(obj.spaces), goalArea: stringMap(obj.goal_area), goal: stringMap(obj.goal),
+    // areas.json owns the space groups whenever it exists; an empty or missing list clears them.
+    spaceGroups: parseSpaceGroups(obj.space_groups),
   };
 }
 export function parseModes(value: unknown): Record<string, ParkRecord> {
@@ -56,6 +60,9 @@ export class LaneSnapshot {
   goal: Record<string, string> = {};
   parked: Record<string, ParkRecord> = {};
   hasFiles = false;
+  /** Whether areas.json exists, so its space groups replace the overlay's (as the Rust server). */
+  areasFile = false;
+  spaceGroups: SpaceGroup[] = [];
   areaName(id: string) { return this.areas.find(a => a.id === id)?.name ?? id; }
   areaColor(id: string) { return this.areas.find(a => a.id === id)?.color ?? defaultAreaColor; }
   areaId(tab: string, workspace: string, lane?: LaneRecord) { return this.tabs[tab]?.area || this.spaces[workspace] || (lane?.goalArea && this.goalArea[lane.goalArea]) || (lane?.goal && this.goal[lane.goal]) || "unsorted"; }
@@ -88,6 +95,7 @@ export function useLaneFiles(machine: string, up: boolean): LaneSnapshot {
         // Only a parsed modes document overrides the lanes file's one-tick-behind parking.
         if (files[2] !== null) { try { const obj: unknown = JSON.parse(files[2]); if (obj && typeof obj === "object" && !Array.isArray(obj)) next.parked = parseModes(obj); } catch { /* A half-written document keeps the lanes fallback. */ } }
         next.hasFiles = files[0] !== null || files[1] !== null;
+        next.areasFile = files[1] !== null;
         setSnapshot(next);
       } finally { busy = false; }
     };
