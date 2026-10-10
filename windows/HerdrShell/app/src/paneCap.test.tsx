@@ -74,7 +74,7 @@ it("the visible Chat cap uses work status and agent kind, not the card name", as
   expect(cap).not.toBeNull();
   expect(cap?.querySelector('[aria-label="working"]')).not.toBeNull();
   expect(cap?.querySelector('.label')?.textContent).toBe("claude");
-  expect(cap?.querySelector('.face')).not.toBeNull();
+  expect(cap?.querySelector('.face')).toBeNull();
 });
 it("N panes share one agents directory read on mount and each poll", async () => {
   vi.useFakeTimers();

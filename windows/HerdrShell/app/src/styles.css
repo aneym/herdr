@@ -49,8 +49,17 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 .pane-pin svg { width: var(--shell-space-step13); height: var(--shell-space-step13); fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
 .pane-pin.is-pinned { color: var(--shell-text); background: color-mix(in srgb, var(--shell-text) 5%, transparent); }
 /* Reserve the cap tools: menu, mode toggle and optional pin. */
-.pane-surface.tools-1 .pane-cap { padding-right: var(--shell-space-step84); }
-.pane-surface.tools-2 .pane-cap { padding-right: var(--shell-space-step116); }
+/* Cap room for the tools overlay (more menu always; pin on the corner pane; Terminal | Chat segment for agents). */
+.pane-surface .pane-cap { padding-right: var(--shell-space-step84); }
+.pane-surface.has-pin .pane-cap { padding-right: var(--shell-space-step116); }
+.pane-surface.has-segment .pane-cap { padding-right: var(--shell-space-step180); }
+.pane-surface.has-segment.has-pin .pane-cap { padding-right: calc(var(--shell-space-step180) + var(--shell-space-step32)); }
+/* Mac PaneCapBar segment: tint track, the active side raised (selection in dark, terminal ground with a hairline in light). */
+.pane-segment { display: flex; padding: var(--shell-space-step2); border-radius: var(--shell-radius-curve7); background: color-mix(in srgb, var(--shell-text) 5%, transparent); }
+.pane-segment button { height: var(--shell-space-step20); padding: 0 var(--shell-space-step8); border-radius: var(--shell-radius-curve5); color: var(--shell-muted); font-size: var(--shell-type-switcher-meta); font-weight: 500; }
+.pane-segment button[aria-pressed="true"] { color: var(--shell-text); background: var(--shell-selection); }
+:root[data-theme="light"] .pane-segment button[aria-pressed="true"] { background: var(--shell-terminal-bg); box-shadow: 0 0 0 0.5px var(--shell-line); }
+.pane-tools-divider { width: 1px; height: var(--shell-space-step14); background: var(--shell-line); }
 .chat { height: 100%; display: flex; flex-direction: column; padding-top: var(--shell-space-pane-cap-height); background: var(--shell-bg); }
 .chat-scroll { flex: 1; min-height: 0; overflow: auto; }
 .chat-column, .chat-bottom { width: 100%; max-width: var(--shell-space-chat-column); padding: var(--shell-space-step16) var(--shell-space-chat-gutter); margin: 0 auto; }
@@ -154,7 +163,6 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 .spaces-fold-all { color: var(--shell-muted); opacity: 1; flex: 0 0 20px; padding: 0; background: none; border: 0; }
 .spaces-fold-all:hover { background: var(--shell-hover); }
 
-.pane-surface.tools-3 .pane-cap { padding-right: var(--shell-space-step148); }
 .pane-menu { position: absolute; top: var(--shell-space-pane-cap-height); right: 0; min-width: var(--shell-space-step150); padding: 0; background: var(--shell-field); color: var(--shell-text); border: 1px solid var(--shell-line); border-radius: var(--shell-radius-control); box-shadow: 0 4px 16px color-mix(in srgb, color-mix(in srgb, var(--shell-bg) 25%, var(--shell-shadow-base)) 45%, transparent); z-index: 12; }
 .pane-menu button { border: 0; border-radius: var(--shell-radius-control); outline: none; }
 .pane-menu button:focus-visible { outline: 2px solid var(--shell-accent); outline-offset: -2px; }

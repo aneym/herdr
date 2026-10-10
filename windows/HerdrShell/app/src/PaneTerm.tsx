@@ -26,7 +26,7 @@ export interface PaneController {
   dropPaths?: (paths: readonly string[]) => Promise<void>;
   type: (text: string) => Promise<void>; read: () => string; key: (key: string) => Promise<string | null>; wheel: (dy: number) => void; focus: () => void;
 }
-export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, register, grabbable, onCapPointerDown, settling, capLabel }: { capLabel?: ReactNode; grabbable?: boolean; onCapPointerDown?: (event: ReactPointerEvent<HTMLDivElement>) => void; settling?: boolean; pane: Pane; machine: string; focused: boolean; onFocus: (id: string) => void; shortcut: (event: KeyboardEvent) => boolean; register: (id: string, value: PaneController | null) => void }) {
+export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, register, grabbable, onCapPointerDown, settling, capLabel, onTakeover }: { capLabel?: ReactNode; onTakeover?: (take: (() => void) | null) => void; grabbable?: boolean; onCapPointerDown?: (event: ReactPointerEvent<HTMLDivElement>) => void; settling?: boolean; pane: Pane; machine: string; focused: boolean; onFocus: (id: string) => void; shortcut: (event: KeyboardEvent) => boolean; register: (id: string, value: PaneController | null) => void }) {
   const host = useRef<HTMLDivElement>(null);
   const element = useRef<HTMLDivElement>(null);
   const fitNow = useRef<() => void>(() => {});
@@ -249,10 +249,12 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
     void open();
     return () => { disposed = true; unsubscribeTheme(); register(pane.pane_id, null); observer.disconnect(); clearTimeout(resizeTimer); clearTimeout(bellTimer); cancelAnimationFrame(wheelFrame); node.removeEventListener("wheel", onWheel, true); node.removeEventListener("contextmenu", onContext); node.removeEventListener("mousedown", onDown, true); window.removeEventListener("mousemove", onMove, true); window.removeEventListener("mouseup", onUp, true); data.dispose(); binary.dispose(); links.dispose(); if (handle != null) void bridge.close(handle).catch(() => {}); term.dispose(); };
   }, [machine, pane.pane_id, pane.terminal_id, register]);
+  // A host with its own menu (PaneSurface) offers Take control there instead of in the cap.
+  useEffect(() => { onTakeover?.(state === "observe" ? () => takeover.current() : null); }, [state, onTakeover]);
   useEffect(() => { if (!settling) fitNow.current(); }, [settling]);
   useEffect(() => { if (focused) host.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }, [focused]);
   return <div ref={element} data-pane-id={pane.pane_id} className={`pane ${bell ? "bell" : ""}`} onMouseDown={() => { live.current.onFocus(pane.pane_id); host.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus(); }}>
-    <div className={`pane-cap ${grabbable ? "grab" : ""}`} onPointerDown={event => { if (!(event.target as Element).closest("button")) onCapPointerDown?.(event); }}>{capLabel ?? <><Status status={pane.agent_status || "unknown"} /><span className="label">{[pane.agent, pane.terminal_title_stripped || pane.title].filter(Boolean).join(" · ")}</span></>}{state === "observe" && <button onClick={() => takeover.current()}>Take control</button>}</div>
+    <div className={`pane-cap ${grabbable ? "grab" : ""}`} onPointerDown={event => { if (!(event.target as Element).closest("button")) onCapPointerDown?.(event); }}>{capLabel ?? <><Status status={pane.agent_status || "unknown"} /><span className="label">{[pane.agent, pane.terminal_title_stripped || pane.title].filter(Boolean).join(" · ")}</span></>}{state === "observe" && !onTakeover && <button onClick={() => takeover.current()}>Take control</button>}</div>
     <div className="term-host" ref={host} />
     {state === "closed" && <button className="disconnected" title={notice} onClick={() => reconnect.current()}>Disconnected — click to reconnect</button>}
     {notice && state !== "closed" && <div className="notice">{notice}</div>}

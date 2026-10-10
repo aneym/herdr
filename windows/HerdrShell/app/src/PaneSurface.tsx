@@ -5,25 +5,26 @@ import type { PaneController } from "./PaneTerm";
 import type { Pane, Snapshot } from "./model";
 import Chat from "./Chat";
 import { bridge } from "./bridge";
-import AgentFace from "./AgentFace";
-import type { AgentCard } from "./faces";
-import { faceFor } from "./faces";
 import { Status } from "./Sidebar";
 export type PaneMode = "terminal" | "chat";
 /** The tab's pin as a pushpin; the slash marks the click that unpins. */
 function PinGlyph({ pinned }: { pinned: boolean }) {
   return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2.5h4M7 2.5v4L4.5 9h7L9 6.5v-4M8 9v4.5" />{pinned && <path d="M3 3l10 10" />}</svg>;
 }
-export default function PaneSurface(props: { cards?: Record<string, AgentCard>; agent?: NonNullable<Snapshot["agents"]>[number]; grabbable?: boolean; onCapPointerDown?: (event: ReactPointerEvent<HTMLDivElement>) => void; settling?: boolean; pane: Pane; machine: string; focused: boolean; onFocus: (id: string) => void; shortcut: (event: KeyboardEvent) => boolean; register: (id: string, controller: PaneController | null) => void; hasAgent: boolean; pinned?: boolean; onPin?: () => void; onError?: (error: unknown) => void }) {
-  const { pane, machine, hasAgent, register, pinned, onPin, agent, cards = {} } = props;
+export default function PaneSurface(props: { agent?: NonNullable<Snapshot["agents"]>[number]; grabbable?: boolean; onCapPointerDown?: (event: ReactPointerEvent<HTMLDivElement>) => void; settling?: boolean; pane: Pane; machine: string; focused: boolean; onFocus: (id: string) => void; shortcut: (event: KeyboardEvent) => boolean; register: (id: string, controller: PaneController | null) => void; hasAgent: boolean; pinned?: boolean; onPin?: () => void; onError?: (error: unknown) => void }) {
+  const { pane, machine, hasAgent, register, pinned, onPin, agent } = props;
   const name = hasAgent ? agent?.agent || "Brief" : "Brief";
   const status = agent?.work_status ?? agent?.agent_status ?? pane.agent_status ?? "";
   const densityKey = `herdr-shell.density.${machine}.${pane.pane_id}`;
   const [density, setDensity] = useState<"focus" | "full">(() => { try { return localStorage.getItem(densityKey) === "full" ? "full" : "focus"; } catch { return "focus"; } });
   const changeDensity = (next: "focus" | "full") => { setDensity(next); try { localStorage.setItem(densityKey, next); } catch { /* Keep the view usable without storage. */ } };
-  const capLabel = <>{hasAgent && <AgentFace face={faceFor(cards[pane.pane_id]?.name || name, cards[pane.pane_id]?.avatar)} status={status} request={pane.tokens?.request} />}<Status status={status} /><span className="label" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={`${pane.pane_id} · ${name}`}>{name}</span></>;
+  // Mac PaneCapBar: state glyph and name only, no agent face.
+  const capLabel = <><Status status={status} /><span className="label" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={`${pane.pane_id} · ${name}`}>{name}</span></>;
   const toolsRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState(false);
+  // Set while another client drives this terminal; the Mac has no visible Take control, so it lives in the more menu.
+  const [takeover, setTakeover] = useState<(() => void) | null>(null);
+  const onTakeover = useCallback((take: (() => void) | null) => setTakeover(() => take), []);
   const restartKey = `${machine}:${pane.pane_id}`;
   const currentRestartKey = useRef(restartKey); currentRestartKey.current = restartKey;
   const requestedRestart = useRef<string | null>(null);
@@ -109,17 +110,16 @@ export default function PaneSurface(props: { cards?: Record<string, AgentCard>; 
   } }), [register, set]);
   const onItems = useCallback((items: number) => { count.current = items; }, []);
   const chat = mode === "chat" && hasAgent;
-  const tools = 1 + (hasAgent ? 1 : 0) + (pinned !== undefined ? 1 : 0);
-  return <div className={`pane-surface ${tools ? `tools-${tools}` : ""}`} style={chat ? { display: "flex", alignItems: "flex-start" } : undefined} onMouseDown={() => props.onFocus(pane.pane_id)}>
-    <div className={`terminal-surface ${chat ? "terminal-hidden" : ""}`} aria-hidden={chat}><PaneTerm {...props} capLabel={capLabel} focused={props.focused && !chat} register={wrappedRegister} /></div>
+  return <div className={`pane-surface ${hasAgent ? "has-segment" : ""} ${pinned !== undefined ? "has-pin" : ""}`} style={chat ? { display: "flex", alignItems: "flex-start" } : undefined} onMouseDown={() => props.onFocus(pane.pane_id)}>
+    <div className={`terminal-surface ${chat ? "terminal-hidden" : ""}`} aria-hidden={chat}><PaneTerm {...props} capLabel={capLabel} onTakeover={onTakeover} focused={props.focused && !chat} register={wrappedRegister} /></div>
     {mounted && hasAgent && <div className={`chat-surface ${chat ? "" : "chat-hidden"}`}><Chat density={density} machine={machine} pane={pane.pane_id} focused={props.focused} visible={chat} onItems={onItems} /></div>}
     {chat && <div style={{ position: "relative", flex: "1 1 0", minWidth: 0, padding: "0 var(--shell-space-pane-cap-gap)", fontSize: "var(--shell-type-row-title)" }} className={`pane-cap ${props.grabbable ? "grab" : ""}`} onPointerDown={props.onCapPointerDown}>{capLabel}</div>}
     <div className="pane-tools" ref={toolsRef} style={chat ? { position: "relative", right: "auto", flexShrink: 0, marginRight: "var(--shell-space-step10)" } : undefined}>
-      {chat && <>{(["focus", "full"] as const).map(value => <button key={value} className="pane-mode" aria-pressed={density === value} onClick={() => changeDensity(value)}>{value === "focus" ? "Focus" : "Full"}</button>)}</>}
-      {hasAgent && <button className="pane-mode" title="Toggle chat" onClick={() => set(chat ? "terminal" : "chat")}>{chat ? "Terminal" : "Chat"}</button>}
+      {chat && <>{(["focus", "full"] as const).map(value => <button key={value} className="pane-mode" aria-pressed={density === value} onClick={() => changeDensity(value)}>{value === "focus" ? "Focus" : "Full"}</button>)}<span className="pane-tools-divider" aria-hidden="true" /></>}
+      {hasAgent && <div className="pane-segment" role="group" aria-label="Pane view">{(["terminal", "chat"] as const).map(value => <button key={value} aria-pressed={(value === "chat") === chat} onClick={() => set(value)}>{value === "chat" ? "Chat" : "Terminal"}</button>)}</div>}
       {pinned !== undefined && <button className={`pane-pin ${pinned ? "is-pinned" : ""}`} aria-pressed={pinned} aria-label={pinned ? "Unpin this tab" : "Pin this tab"} title={pinned ? "Unpin this chat" : "Pin this chat to the end of Pinned"} onClick={onPin}><PinGlyph pinned={pinned} /></button>}
       <button className="pane-pin" aria-label="Pane actions" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(value => !value)} onKeyDown={event => { if (event.key === "Escape") setMenu(false); }}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="3" cy="8" r=".7" /><circle cx="8" cy="8" r=".7" /><circle cx="13" cy="8" r=".7" /></svg></button>
-      {menu && <div className="pane-menu" role="menu" onKeyDown={event => { if (event.key === "Escape") setMenu(false); }}><button role="menuitem" disabled={!hasAgent || restarting} onClick={() => void restart()}>Restart agent</button></div>}
+      {menu && <div className="pane-menu" role="menu" onKeyDown={event => { if (event.key === "Escape") setMenu(false); }}>{takeover && <button role="menuitem" onClick={() => { setMenu(false); takeover(); }}>Take control</button>}<button role="menuitem" disabled={!hasAgent || restarting} onClick={() => void restart()}>Restart agent</button></div>}
     {restartError && <div className="pane-menu restart-confirm" role="dialog" aria-label="Restart agent" onKeyDown={event => { if (event.key === "Escape" || event.key === "Enter") { event.preventDefault(); event.stopPropagation(); setRestartError(null); } }}><p>{restartError}</p><div className="restart-actions"><button className="restart-primary" autoFocus onClick={() => setRestartError(null)}>OK</button></div></div>}
     {confirmRestart && <div className="pane-menu restart-confirm" role="dialog" aria-label="Restart agent" onKeyDown={event => {
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); requestedRestart.current = null; setConfirmRestart(false); }
