@@ -341,6 +341,17 @@ struct HerdrCommands {
         return machine.map { Machines.namespace(reply, machine: $0) } ?? reply
     }
 
+    /// Seconds since the last human input reached the pane from any client, or nil when
+    /// none has or the server does not say (`pane.process_info`). Short timeout: a held
+    /// pane's first key waits on it.
+    func humanInputAge(pane: String) -> TimeInterval? {
+        guard let data = call("pane.process_info", ["pane_id": pane], timeout: 1),
+              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let info = (obj["result"] as? [String: Any])?["process_info"] as? [String: Any],
+              let ms = (info["human_input_age_ms"] as? NSNumber)?.doubleValue else { return nil }
+        return ms / 1000
+    }
+
     /// Neutral socket entry for pane rearrangement, including dry-run/error replies.
     func paneDragCall(_ method: String, _ params: [String: Any]) -> [String: Any]? {
         guard let data = call(method, params) else { return nil }

@@ -196,8 +196,13 @@ final class SurfaceView: NSView {
 
     // MARK: focus
 
-    // A pane whose attach has ended (held by another client, gone) takes no keys.
-    override var acceptsFirstResponder: Bool { !exited }
+    /// Set by `SurfaceRegistry` while this pane is not the terminal's controller (held by
+    /// another client) or is still coming up after taking control: every key and click
+    /// goes here instead of the terminal. Returns true when it took the event.
+    var inputGate: ((NSEvent) -> Bool)?
+
+    // A pane whose attach has ended takes no keys, unless the registry gates them (held).
+    override var acceptsFirstResponder: Bool { !exited || inputGate != nil }
 
     override func becomeFirstResponder() -> Bool {
         let ok = super.becomeFirstResponder()
@@ -246,6 +251,7 @@ final class SurfaceView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
+        if let inputGate, inputGate(event) { return }
         guard let surface else {
             interpretKeyEvents([event])
             return
@@ -334,6 +340,7 @@ final class SurfaceView: NSView {
     }
 
     override func keyUp(with event: NSEvent) {
+        if let inputGate, inputGate(event) { return }
         // The press of a claimed chord never reached the terminal; neither does its release.
         if Keymap.shared.entry(for: event) != nil || Keymap.shared.terminalSend(for: event) != nil { return }
         if Keymap.shared.consumeRelease(event) { return }
@@ -638,6 +645,10 @@ final class SurfaceView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         guard !paneDragBlocksMouse else { return }
+        if let inputGate {
+            window?.makeFirstResponder(self)
+            if inputGate(event) { return }
+        }
         // Hand first responder to the surface on every click (agent-zero's
         // terminals never took keys because this only happened once).
         window?.makeFirstResponder(self)

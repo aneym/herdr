@@ -16,6 +16,7 @@ import type { Cell } from "./termCopy";
 import { terminalFont } from "./tokens";
 import { Status } from "./Sidebar";
 import { appTheme, terminalThemes } from "./theme";
+import { autoControl } from "./autoControl";
 export interface PaneController {
   linkClick: (row: number, col: number, ctrl: boolean) => Promise<string | null>;
   copySelection: (from: Cell, to: Cell) => Promise<{ text: string; copied: boolean }>;
@@ -59,9 +60,8 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
     let handle: number | null = null;
     let mode: Mode = { mouse: false, sgrPixels: false, kittyFlags: 0, modifyOtherKeys: 0 };
     let attachMode: "attach" | "observe" | "closed" = "closed";
-    // Another client took this pane over. The user coming back takes it back: the window
-    // gaining focus or a click on the pane. Keys never do (as on the Mac): one would be
-    // lost while the attach comes up and the rest would reach the pane without it.
+    // Another client took this pane over. The user's first key or click on the pane takes it
+    // back (autoControl): keys are queued until this client controls the terminal again.
     let takenOver = false;
     let opening = false;
     let generation = 0;
@@ -71,7 +71,7 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
     let capture: string[] | null = null;
     let capturePending: Promise<void>[] | null = null;
     const error = (value: unknown) => { if (!disposed) setNotice(String(value)); };
-    const sendBytes = async (bytes: Uint8Array) => {
+    const writeBytes = async (bytes: Uint8Array) => {
       if (handle == null || attachMode === "closed") throw new Error("Terminal disconnected");
       const b64 = toBase64(bytes);
       capture?.push(b64);
@@ -79,6 +79,24 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
       capturePending?.push(pending);
       await pending;
     };
+    // Not the controller (observing, or another client took the pane): input takes it back.
+    const claimable = () => attachMode === "observe" || (takenOver && attachMode === "closed");
+    const auto = autoControl({
+      holderInputAgeMs: async () => {
+        const reply = await bridge.api(machine, "pane.process_info", { pane_id: pane.pane_id }) as { process_info?: { human_input_age_ms?: number | null } } | null;
+        return reply?.process_info?.human_input_age_ms ?? null;
+      },
+      take: async () => {
+        if (attachMode === "observe" && handle != null) {
+          await bridge.takeControl(handle);
+          if (!disposed) { attachMode = "attach"; setState("attach"); setNotice(""); }
+        } else if (takenOver && attachMode === "closed") await open();
+        return !disposed && attachMode === "attach";
+      },
+      write: bytes => writeBytes(bytes),
+      waiting: () => { if (!disposed) setNotice("The other client is typing. This pane follows when it pauses."); },
+    });
+    const sendBytes = (bytes: Uint8Array) => auto.busy || claimable() ? auto.input(bytes) : writeBytes(bytes);
     const send = (text: string) => sendBytes(new TextEncoder().encode(text));
     const copier = new PaneCopy(term, (method, params) => bridge.api(machine, method, params), () => pane.pane_id, text => bridge.clipboardWrite(text));
     const keyTarget = () => ({ term, machine, mode, send, copier, shortcut: (event: KeyboardEvent) => live.current.shortcut(event) });
@@ -87,7 +105,7 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
       if (result.handled) { event.preventDefault(); result.work?.catch(error); return false; }
       return true;
     });
-    const reclaimed = () => { if (!takenOver || attachMode !== "closed") return false; void open(); return true; };
+    const reclaimed = () => { if (!claimable()) return false; void auto.input().catch(error); return true; };
     const data = term.onData(text => { if (hookDispatch) return; const flush = () => { void send(text).catch(error); }; if (!links.hold(text, flush)) flush(); });
     const binary = term.onBinary(text => { if (hookDispatch) return; const flush = () => { void sendBytes(Uint8Array.from(text, ch => ch.charCodeAt(0))).catch(error); }; if (!links.hold(text, flush)) flush(); });
     const open = async () => {
@@ -257,12 +275,11 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
     node.addEventListener("contextmenu", onContext);
     node.addEventListener("mousedown", onDown, true);
     node.addEventListener("mousedown", reclaimed);
-    window.addEventListener("focus", reclaimed);
     fitNow.current = () => { if (disposed || isSettling.current) return; fit.fit(); if (handle != null && (term.cols !== sentCols || term.rows !== sentRows)) { sentCols = term.cols; sentRows = term.rows; void bridge.resize(handle, sentCols, sentRows).catch(error); } };
     const observer = new ResizeObserver(() => { clearTimeout(resizeTimer); if (!isSettling.current) resizeTimer = setTimeout(() => fitNow.current(), 50); });
     observer.observe(node);
     void open();
-    return () => { disposed = true; unsubscribeTheme(); register(pane.pane_id, null); observer.disconnect(); clearTimeout(resizeTimer); clearTimeout(bellTimer); cancelAnimationFrame(wheelFrame); node.removeEventListener("wheel", onWheel, true); node.removeEventListener("contextmenu", onContext); node.removeEventListener("mousedown", onDown, true); node.removeEventListener("mousedown", reclaimed); window.removeEventListener("focus", reclaimed); window.removeEventListener("mousemove", onMove, true); window.removeEventListener("mouseup", onUp, true); data.dispose(); binary.dispose(); links.dispose(); if (handle != null) void bridge.close(handle).catch(() => {}); term.dispose(); };
+    return () => { disposed = true; unsubscribeTheme(); register(pane.pane_id, null); observer.disconnect(); clearTimeout(resizeTimer); clearTimeout(bellTimer); cancelAnimationFrame(wheelFrame); node.removeEventListener("wheel", onWheel, true); node.removeEventListener("contextmenu", onContext); node.removeEventListener("mousedown", onDown, true); node.removeEventListener("mousedown", reclaimed); window.removeEventListener("mousemove", onMove, true); window.removeEventListener("mouseup", onUp, true); data.dispose(); binary.dispose(); links.dispose(); if (handle != null) void bridge.close(handle).catch(() => {}); term.dispose(); };
   }, [machine, pane.pane_id, pane.terminal_id, register]);
   // A host with its own menu (PaneSurface) offers Take control there instead of in the cap.
   useEffect(() => { onTakeover?.(state === "observe" ? () => takeover.current() : null); }, [state, onTakeover]);

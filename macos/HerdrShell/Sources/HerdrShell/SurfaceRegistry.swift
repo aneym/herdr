@@ -21,6 +21,9 @@ struct PaneLifecycle {
     /// Seconds from the last exit being seen to the replacement's first non-blank screen.
     var lastRecoverS: Double?
     var lastExitText = ""
+    /// Seconds from the first input on the held pane to its queued keys reaching the new attach.
+    var lastTakeS: Double?
+    var takeStartedAt: Date?
 }
 
 /// Surfaces keyed by terminal_id, retained outside the view tree. Switching tabs
@@ -36,10 +39,13 @@ struct PaneLifecycle {
 ///   are now; the holder is usually the other machine's Shell, often asleep with its
 ///   socket still open, and would otherwise hold the pane forever (Alex, 2026-10-10:
 ///   "swapping between machines seems to get it stuck").
-/// - Another client takes the terminal from this app (`--takeover`): the surface stays,
-///   shows who holds it, and delivers no keys. The user coming back takes it back: the
-///   app becoming active or a click on the pane. Keys never do: a key would be lost
-///   while the attach comes up, and the rest would reach the pane without it.
+/// - Another client takes the terminal from this app (`--takeover`): the surface stays
+///   and shows who holds it. The user's first key or click on the pane takes it back with
+///   no menu action (Alex, 2026-10-10: "take control should jsut automatically happen in
+///   all clients"). Keys typed meanwhile are queued and replayed in order once the new
+///   attach has drawn the screen, so none is lost. A holder still typing is not cut off:
+///   the take waits until the pane has had no human input for `settle` seconds
+///   (`pane.process_info` human_input_age_ms, which counts every client's keys).
 /// - Hidden tabs: `keep` (default) leaves every attach running; `detach` releases the
 ///   attach of any pane not on screen and reattaches when it is shown again.
 final class SurfaceRegistry {
@@ -62,7 +68,14 @@ final class SurfaceRegistry {
     /// Retired views stay alive briefly: a libghostty callback for a closed surface may
     /// still be queued, and it carries the view pointer.
     private var retired: [SurfaceView] = []
-    private var activeObserver: NSObjectProtocol?
+    /// Keys typed into a pane this app does not control yet, in order, per terminal.
+    private var queued: [String: [NSEvent]] = [:]
+    /// Terminals with a take-control in flight (asking the holder's input age, or waiting it out).
+    private var claiming: Set<String> = []
+    /// A controller that typed within this many seconds is not taken from.
+    static let settle: TimeInterval = 1.5
+    private static let maxQueued = 4096
+    private let commands: HerdrCommands
 
     init(herdrBin: String, attachEnv: [String: String], hiddenPolicy: HiddenPolicy? = nil) {
         self.herdrBin = herdrBin
@@ -70,10 +83,7 @@ final class SurfaceRegistry {
         self.hiddenPolicy = hiddenPolicy
             ?? HiddenPolicy(rawValue: ProcessInfo.processInfo.environment["HERDR_SHELL_HIDDEN_TABS"] ?? "")
             ?? .keepAttached
-        // The user is at this machine again: take back what another machine took meanwhile.
-        activeObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
-        ) { [weak self] _ in self?.reclaimAll() }
+        commands = HerdrCommands(socketPath: attachEnv["HERDR_SOCKET_PATH"] ?? "")
     }
 
     func surface(paneId: String, terminalId: String) -> SurfaceView {
@@ -122,6 +132,7 @@ final class SurfaceRegistry {
     private func retire(_ view: SurfaceView) {
         view.onExit = nil
         view.onFocus = nil
+        view.inputGate = nil
         clearNotice(view.terminalId)
         view.removeFromSuperview()
         if let f = exitFiles.removeValue(forKey: ObjectIdentifier(view)) {
@@ -214,7 +225,10 @@ final class SurfaceRegistry {
         }
         if text.contains("taken over") {
             lc.state = .held
+            lc.takeStartedAt = nil
             lifecycle[id] = lc
+            // Keys typed into this pane between the takeover and this exit reached nothing.
+            queued[id] = nil
             showHeld(view)
             return
         }
@@ -248,14 +262,14 @@ final class SurfaceRegistry {
 
     private func showHeld(_ view: SurfaceView) {
         let id = view.terminalId
-        let takeBack = { [weak self, weak view] in
-            guard let self, let view else { return }
-            self.reclaim(view.terminalId)
-        }
-        showNotice(view, message: "Another herdr client holds this pane. Click to take it back.",
+        // The button is the explicit ask: now, without waiting for the holder to pause.
+        let takeBack: () -> Void = { [weak self] in self?.reclaim(id) }
+        showNotice(view, message: "Another herdr client holds this pane. Type or click to take it back.",
                    action: ("Take back", takeBack))
-        // A click on the held pane is the user here again: take it back.
-        notices[id]?.onClick = takeBack
+        // A click or a key on the held pane is the user here again: take it back.
+        notices[id]?.onClick = { [weak self] in self?.takeControl(id, event: nil) }
+        notices[id]?.onKey = { [weak self] e in self?.takeControl(id, event: e) }
+        gate(view)
         // Keys go to the bar (which drops them), not to the ended surface.
         if let bar = notices[id], view.window?.firstResponder === view {
             view.window?.makeFirstResponder(bar)
@@ -265,24 +279,92 @@ final class SurfaceRegistry {
             DispatchQueue.main.async {
                 guard let self, self.byTerminal[id] != nil, self.lifecycle[id]?.state == .held else { return }
                 self.lifecycle[id]?.holder = who
-                self.notices[id]?.setMessage("Held by \(who). Click to take it back.")
+                if !self.claiming.contains(id) { self.notices[id]?.setMessage("Held by \(who). Type or click to take it back.") }
             }
         }
     }
 
-    /// Take a held (or failed) pane back: a fresh attach with `--takeover`, which shuts
-    /// the other client's attach down.
+    /// Take a held (or failed) pane back now: a fresh attach with `--takeover`, which shuts
+    /// the other client's attach down. Queued keys follow once the new attach is up.
     func reclaim(_ terminalId: String) {
         guard let view = byTerminal[terminalId], let lc = lifecycle[terminalId], lc.state != .running else { return }
         log("reclaiming \(terminalId) with --takeover")
         lifecycle[terminalId]?.fastExits = 0
         replace(view, takeover: true)
+        if let new = byTerminal[terminalId], new !== view { replayWhenUp(new) }
     }
 
-    /// Take back every held pane and retry every failed one: the app became active, so
-    /// the user is at this machine.
-    func reclaimAll() {
-        for (id, lc) in lifecycle where lc.state == .held || lc.state == .failed { reclaim(id) }
+    // MARK: auto take control
+
+    /// Route every key and click on `view` to `takeControl` instead of the terminal.
+    private func gate(_ view: SurfaceView) {
+        let id = view.terminalId
+        view.inputGate = { [weak self] e in
+            guard let self else { return false }
+            self.takeControl(id, event: e.type == .leftMouseDown ? nil : e)
+            return true
+        }
+    }
+
+    /// Input on a pane this app does not control: queue the key and take the pane once
+    /// whoever holds it has been quiet for `settle` seconds. Also the entry for a focus or
+    /// click on a held pane (`event` nil). A pane already coming back only queues the key.
+    func takeControl(_ id: String, event: NSEvent?) {
+        if let event, event.type == .keyDown || event.type == .keyUp, (queued[id]?.count ?? 0) < Self.maxQueued {
+            queued[id, default: []].append(event)
+        }
+        guard let lc = lifecycle[id], lc.state == .held || lc.state == .failed,
+              !claiming.contains(id), let view = byTerminal[id] else { return }
+        if lc.takeStartedAt == nil { lifecycle[id]?.takeStartedAt = Date() }
+        claiming.insert(id)
+        let pane = view.paneId, commands = commands
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let age = commands.humanInputAge(pane: pane)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.claiming.remove(id)
+                guard let lc = self.lifecycle[id], lc.state == .held || lc.state == .failed else { return }
+                if let age, age < Self.settle {
+                    // The holder typed just now: leave them the pane until they pause.
+                    let wait = Self.settle - age + 0.05
+                    log("take control of \(id): holder typed \(Int(age * 1000)) ms ago; waiting \(Int(wait * 1000)) ms")
+                    self.notices[id]?.setMessage("The other client is typing. This pane follows when it pauses.")
+                    self.claiming.insert(id)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
+                        self?.claiming.remove(id)
+                        self?.takeControl(id, event: nil)
+                    }
+                    return
+                }
+                self.reclaim(id)
+            }
+        }
+    }
+
+    /// Keys queued while the pane was held go to the new attach once it has drawn the
+    /// screen (the server redraws only after it accepts the attach), or after 2 s on a
+    /// blank pane. Keys typed until then join the queue, so the order holds.
+    private func replayWhenUp(_ view: SurfaceView) {
+        let id = view.terminalId
+        guard !(queued[id] ?? []).isEmpty else { lifecycle[id]?.takeStartedAt = nil; return }
+        gate(view)
+        let start = Date()
+        Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { [weak self, weak view] t in
+            guard let self, let view, self.byTerminal[id] === view, !view.exited else {
+                t.invalidate()
+                if let self, self.lifecycle[id]?.state == .running { self.queued[id] = nil }
+                return
+            }
+            let drawn = !view.visibleText().trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            guard drawn || Date().timeIntervalSince(start) > 2 else { return }
+            t.invalidate()
+            view.inputGate = nil
+            let keys = self.queued.removeValue(forKey: id) ?? []
+            if let t0 = self.lifecycle[id]?.takeStartedAt { self.lifecycle[id]?.lastTakeS = Date().timeIntervalSince(t0) }
+            self.lifecycle[id]?.takeStartedAt = nil
+            log("took control of \(id); replaying \(keys.count) key events")
+            for e in keys { if e.type == .keyDown { view.keyDown(with: e) } else { view.keyUp(with: e) } }
+        }
     }
 
     /// The terminal ids of every pane that is not running, for the menu action.
@@ -359,6 +441,10 @@ final class SurfaceRegistry {
                 "notice": notices[id]?.messageText ?? NSNull(),
                 "surface_exited": view.exited,
                 "in_window": view.window != nil,
+                "queued_keys": queued[id]?.count ?? 0,
+                "last_take_s": lc.lastTakeS ?? NSNull(),
+                "claiming": claiming.contains(id),
+                "gated": view.inputGate != nil,
             ] as [String: Any]
         }
         return ["hidden_policy": hiddenPolicy.rawValue, "attached": attachedCount, "panes": panes]
@@ -428,11 +514,13 @@ final class NoticeBar: NSView {
 
     /// Called on a click on the bar; the click itself goes no further.
     var onClick: (() -> Void)?
+    /// Called with each key typed while the bar has focus.
+    var onKey: ((NSEvent) -> Void)?
 
     /// The bar takes clicks and typing itself; nothing reaches the terminal beneath it.
     /// Command chords still reach the app menu through performKeyEquivalent.
     override var acceptsFirstResponder: Bool { true }
     override func mouseDown(with event: NSEvent) { onClick?() }
-    override func keyDown(with event: NSEvent) {}
-    override func keyUp(with event: NSEvent) {}
+    override func keyDown(with event: NSEvent) { onKey?(event) }
+    override func keyUp(with event: NSEvent) { onKey?(event) }
 }

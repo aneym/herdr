@@ -11,9 +11,9 @@ ever talks to the lab session.
   1. kill -9 of one pane's `herdr terminal attach` brings the pane back with its screen
      within 1 s; the other pane's attach is untouched; typing works afterwards.
   2. A CLI `herdr terminal attach --takeover` (in a pty) takes the pane: the app shows the
-     notice with who holds it, typing in the app does not reach the pane, the CLI holder
-     still can type, and after "reclaim" (the Take back action) the app types again and
-     the CLI client is shut down.
+     notice with who holds it, the CLI holder can type, and after "reclaim" (the Take back
+     action) the app types again and the CLI client is shut down. Typing in the app takes
+     the pane back by itself: scripts/check_auto_control.py.
   3. Hidden-tab policy: `keep` leaves attaches running for tabs not on screen; `detach`
      releases them and reattaches with the screen when the tab is shown again. Attach
      count and app RSS are printed for both.
@@ -302,12 +302,7 @@ def main():
         say(f"   holder: {w['holder'] if w else lc['holder']}")
         check("notice names the holding client (pid of the CLI attach)", w is not None, f"cli pid {cli.pid}")
         check("keyboard focus is not on the ended surface", not surf(sh_, p1)["first_responder"])
-    # Typing in the app must not reach the pane.
-    typ("echo leaked-into-pane")
-    key("return")
-    time.sleep(1.0)
-    txt = S.pane_read(p1)
-    check("typing in the app does not reach the held pane", "leaked-into-pane" not in txt, txt[-160:].replace("\n", " | "))
+    # Typing in the app now takes the pane back by itself; check_auto_control.py owns that.
     # The CLI holder is the writer now.
     os.write(master, b"echo via-cli-holder\r")
     txt, dt = S.wait_read(p1, lambda x: any(l.strip() == "via-cli-holder" for l in x.splitlines()))
