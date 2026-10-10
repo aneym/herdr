@@ -81,6 +81,11 @@ struct SpacesRowView: View {
                     .layoutPriority(1)
                     .onTapGesture { click(row.link == nil ? "body" : "link") }
             }
+            if agentRow, let place = row.place {
+                Text(place).font(.system(size: ShellType.sectionLabel)).foregroundStyle(t.mute)
+                    .lineLimit(1).fixedSize()
+                    .help("Runs on " + place).accessibilityLabel("Runs on " + place)
+            }
             if let home = row.home, let glyph = homeGlyph(home) {
                 Text(glyph).font(.system(size: ShellType.rowTrailing))
                     .foregroundStyle(home == "unsynced" ? t.warn : t.mute)

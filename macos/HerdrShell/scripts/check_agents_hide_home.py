@@ -252,16 +252,25 @@ check('a hidden row dumps home:local with an empty trailing',
 check('a PINNED row keeps its space name and draws no home, even with a location',
       row('shut', 'pinned:' + P)[7] == 'rails' and home(row('shut', 'pinned:' + P)) is None)
 
+# Run place (TabInfo.runs_on): AGENTS rows say where the chat runs, just before the home glyph.
+def place(r):
+    return next((f for f in extras(r) if f.startswith('on:')), None)
+check('an agent on the box dumps on:box and one on Studio dumps on:Studio, each before its home',
+      extras(row('shut', 'agent:' + A))[-2:] == ['on:box', 'home:cloud']
+      and extras(row('shut', 'agent:' + C))[-2:] == ['on:Studio', 'home:unsynced'])
+check('rows with no run place dump none: a hidden agent from an older server, a PINNED row',
+      place(hidden_b) is None and place(row('shut', 'pinned:' + P)) is None)
+
 # Other machines: snapshot JSON carries hidden and home_location; the @machine badge stays.
 r1, r2, r3 = row('machines', 'agent:' + R1), row('machines-open', 'hiddenagent:' + R2), row('machines', 'agent:' + R3)
 check('a remote agent keeps its @ax42 badge, with home:unsynced kept last',
-      extras(r1)[-2:] == ['@ax42', 'home:unsynced'] and r1[7] == '', '|'.join(r1))
+      extras(r1)[-3:] == ['@ax42', 'on:box', 'home:unsynced'] and r1[7] == '', '|'.join(r1))
 check('an agent from an older snapshot (no home_location) dumps no home and no space name',
-      r3[0] == 'tab' and home(r3) is None and r3[7] == '' and '@ax42' in extras(r3), '|'.join(r3))
+      r3[0] == 'tab' and home(r3) is None and place(r3) is None and r3[7] == '' and '@ax42' in extras(r3), '|'.join(r3))
 # Spec line 86 applies to remote hidden rows too: the same depth as visible agents.
 check('a remote hidden agent joins the fold with its badge; an unknown home_location draws nothing',
       row('machines', 'hiddenagents')[7] == '2' and 'agent:' + R2 not in ids('machines')
-      and r2[0] == 'tab' and r2[2] == '0' and '@ax42' in extras(r2) and home(r2) is None
+      and r2[0] == 'tab' and r2[2] == '0' and '@ax42' in extras(r2) and home(r2) is None and place(r2) is None
       and ids('machines-open').index('hiddenagent:' + B) < ids('machines-open').index('hiddenagent:' + R2), '|'.join(r2))
 check('digits across machines: A, C, ax42 visible agents, then P; no hidden agent numbered',
       numbered('machines')[:5] == [A, C, R1, R3, P] and B not in numbered('machines') and R2 not in numbered('machines'),

@@ -3329,6 +3329,23 @@ impl HeadlessServer {
                 self.app.state.agent_homes = self.agent_home_poller.homes().clone();
                 changed = true;
             }
+            let path = |var: &str, default: &str| {
+                std::env::var_os(var)
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|| crate::worktree::expand_tilde_path(default))
+            };
+            let adopted =
+                path("HERDR_RAILS_HOST_DIR", "~/.agent-rails/rails-host").join("adopted.json");
+            let boxed = std::fs::read(&adopted)
+                .map(|bytes| crate::runs_on::box_panes(&bytes))
+                .unwrap_or_default();
+            let registry = crate::runs_on::Registry::load(&path(
+                "HERDR_MACHINES_REGISTRY",
+                "~/.agent-rails/factory-runtime/fleet/config/machines.json",
+            ));
+            if self.app.refresh_runs_on(&boxed, &registry) {
+                changed = true;
+            }
         }
 
         if !self.app.factory_ui.enabled {

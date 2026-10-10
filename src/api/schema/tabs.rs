@@ -114,6 +114,10 @@ pub struct TabMoveParams {
 pub struct TabInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home_location: Option<HomeLocation>,
+    /// Where the chat runs (`runs_on.rs`): "box" for a session on Alex's Rails box, else a
+    /// machine name such as "Studio" or "Book". Absent on servers that predate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runs_on: Option<String>,
     #[serde(default)]
     pub sort_rank: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]

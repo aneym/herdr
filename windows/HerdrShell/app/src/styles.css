@@ -181,6 +181,7 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 .machine-badge svg { width: var(--shell-type-size8_5); height: var(--shell-type-size8_5); }
 .machine-badge.is-unhealthy { opacity: 0.45; }
 .home-glyph { flex-shrink: 0; font-size: var(--shell-type-row-trailing); }
+.runs-on { flex-shrink: 0; white-space: nowrap; font-size: var(--shell-type-section-label); }
 .home-glyph.warn { color: var(--shell-warn); }
 .hidden-agents .chevron { margin-left: auto; }
 .hidden-agents-dot { width: var(--shell-space-step5); height: var(--shell-space-step5); border-radius: 50%; background: var(--shell-accent); }

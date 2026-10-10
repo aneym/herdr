@@ -1,0 +1,6 @@
+[PASS] tab.list: CoS runs on box, Factory and Recruiter on Studio
+[PASS] the app's AGENTS rows draw box, Studio, Studio
+[PASS] light appearance applied
+[PASS] light: sidebar shot written
+[PASS] dark appearance applied
+[PASS] dark: sidebar shot written

@@ -10,11 +10,13 @@ struct SpacesInput: Codable {
     struct Tab: Codable { var id: String; var space: String; var label: String; var agents: [Agent] = []; var focused = false; var status = "unknown"; var pinIndex: Int? = nil; var work: String? = nil; var role: String? = nil; var sortRank: UInt32 = 0; var request: String? = nil
         /// The agent card this tab runs (AgentCards): its name and https picture.
         var agentName: String? = nil; var avatar: String? = nil; var hidden = false; var homeLocation: String? = nil
-        init(id: String, space: String, label: String, agents: [Agent] = [], focused: Bool = false, status: String = "unknown", pinIndex: Int? = nil, work: String? = nil, role: String? = nil, sortRank: UInt32 = 0, request: String? = nil, hidden: Bool = false, homeLocation: String? = nil) { self.hidden = hidden; self.homeLocation = homeLocation; self.id = id; self.space = space; self.label = label; self.agents = agents; self.focused = focused; self.status = status; self.pinIndex = pinIndex; self.work = work; self.role = role; self.sortRank = sortRank; self.request = request }
+        /// Where the chat runs (herdr TabInfo.runs_on): "box", or a machine name such as "Studio".
+        var runsOn: String? = nil
+        init(id: String, space: String, label: String, agents: [Agent] = [], focused: Bool = false, status: String = "unknown", pinIndex: Int? = nil, work: String? = nil, role: String? = nil, sortRank: UInt32 = 0, request: String? = nil, hidden: Bool = false, homeLocation: String? = nil, runsOn: String? = nil) { self.hidden = hidden; self.homeLocation = homeLocation; self.runsOn = runsOn; self.id = id; self.space = space; self.label = label; self.agents = agents; self.focused = focused; self.status = status; self.pinIndex = pinIndex; self.work = work; self.role = role; self.sortRank = sortRank; self.request = request }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: Field.self)
             id = try c.decode(String.self, forKey: Field("id")); space = try c.decode(String.self, forKey: Field("space")); label = try c.decode(String.self, forKey: Field("label"))
-            agents = c.value("agents", []); focused = c.value("focused", false); status = c.value("status", "unknown"); pinIndex = c.optional("pinIndex"); work = c.optional("work"); role = c.optional("role"); sortRank = c.value("sortRank", 0); request = c.optional("request"); hidden = c.value("hidden", false); homeLocation = c.optional("homeLocation")
+            agents = c.value("agents", []); focused = c.value("focused", false); status = c.value("status", "unknown"); pinIndex = c.optional("pinIndex"); work = c.optional("work"); role = c.optional("role"); sortRank = c.value("sortRank", 0); request = c.optional("request"); hidden = c.value("hidden", false); homeLocation = c.optional("homeLocation"); runsOn = c.optional("runsOn")
         }
     }
     var spaces: [Space]; var tabs: [Tab]; var focusedTab: String?
@@ -164,6 +166,11 @@ struct SpacesRow: Identifiable, Equatable {
     var request: String?
     /// An AGENTS row's face: the agent's picture, else its initial on a tint.
     var home: String?
+    /// Where an AGENTS row's chat runs; see `place`.
+    var runsOn: String?
+    /// The run place the row draws: "box" always, a machine name only where no remote
+    /// machine badge already says it.
+    var place: String? { runsOn.flatMap { $0 == "box" || badge == nil ? $0 : nil } }
     var setsHidden: Bool? { id.hasPrefix("agent:") ? true : id.hasPrefix("hiddenagent:") ? false : nil }
     var face: Face?
     struct Face: Equatable { var initial: String; var tint: Int; var avatar: String? }
@@ -200,6 +207,7 @@ struct SpacesRow: Identifiable, Equatable {
         output.append(contentsOf: faceField)
         output.append(contentsOf: dotField)
         output.append(contentsOf: badgeField)
+        if let place { output.append("on:" + place) }
         if let home { output.append("home:" + home) }
         return output.joined(separator: "|")
     }
@@ -293,7 +301,7 @@ enum SpacesTree {
                                 title: tab.label, trailing: space?.name ?? tab.space, tab: tab.id,
                                 request: tab.role == "agent" ? tab.request : nil)
             if tab.role == "agent" {
-                row.trailing = ""; row.home = tab.homeLocation.flatMap { ["cloud", "local", "unsynced"].contains($0) ? $0 : nil }
+                row.trailing = ""; row.home = tab.homeLocation.flatMap { ["cloud", "local", "unsynced"].contains($0) ? $0 : nil }; row.runsOn = tab.runsOn
                 row.face = face(name: tab.agentName ?? tab.label, avatar: tab.avatar)
             }
             return row

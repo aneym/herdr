@@ -870,6 +870,10 @@ pub enum TabBarStatusSegment {
 pub struct AppState {
     /// Ephemeral server-resolved home locations, keyed by public pane id.
     pub agent_homes: std::collections::HashMap<String, crate::api::schema::HomeLocation>,
+    /// Ephemeral server-resolved run places off this machine ("box" or an ssh machine), keyed
+    /// by public pane id; every other pane runs on `local_machine` (`runs_on.rs`).
+    pub runs_on: std::collections::HashMap<String, String>,
+    pub local_machine: Option<String>,
     pub terminals:
         std::collections::HashMap<crate::terminal::TerminalId, crate::terminal::TerminalState>,
     /// Terminal ids whose size is currently owned by a direct attach client.
@@ -1677,6 +1681,8 @@ impl AppState {
             hidden_spaces_expanded: false,
             hidden_agents_expanded: false,
             agent_homes: Default::default(),
+            runs_on: Default::default(),
+            local_machine: None,
             next_agent_state_change_seq: 0,
             mouse_capture: true,
             copy_on_select: true,

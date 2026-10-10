@@ -54,6 +54,7 @@ mod remote;
 mod remote_machine;
 mod render_prof;
 mod render_signal;
+mod runs_on;
 mod selection;
 mod server;
 mod session;

@@ -1242,6 +1242,13 @@
                 }
               ]
             },
+            "runs_on": {
+              "description": "Where the chat runs (`runs_on.rs`): \"box\" for a session on Alex's Rails box, else a\nmachine name such as \"Studio\" or \"Book\". Absent on servers that predate it.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "sort_rank": {
               "default": 0,
               "format": "uint32",
@@ -3388,6 +3395,7 @@
               "$ref": "#/schemas/request/$defs/PaneDirection"
             },
             "size": {
+              "description": "Fraction allocated to the moved pane, clamped to 0.1..=0.9.",
               "format": "float",
               "type": [
                 "number",
@@ -12978,6 +12986,13 @@
                 {
                   "type": "null"
                 }
+              ]
+            },
+            "runs_on": {
+              "description": "Where the chat runs (`runs_on.rs`): \"box\" for a session on Alex's Rails box, else a\nmachine name such as \"Studio\" or \"Book\". Absent on servers that predate it.",
+              "type": [
+                "string",
+                "null"
               ]
             },
             "sort_rank": {

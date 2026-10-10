@@ -250,6 +250,15 @@ impl App {
                 let public_id = self.public_pane_id(ws_idx, pane_id)?;
                 self.state.agent_homes.get(&public_id).copied()
             }),
+            runs_on: tab
+                .layout
+                .pane_ids()
+                .into_iter()
+                .find_map(|pane_id| {
+                    let public_id = self.public_pane_id(ws_idx, pane_id)?;
+                    self.state.runs_on.get(&public_id).cloned()
+                })
+                .or_else(|| self.state.local_machine.clone()),
             sort_rank: self
                 .priority_tab_rank_with_workspace(ws_idx, tab_idx, &tab_id, workspace_rank)
                 .value,
@@ -496,4 +505,61 @@ fn terminal_agent_session_info(
             kind: session.session_ref.kind,
             value: session.session_ref.value.clone(),
         })
+}
+
+impl App {
+    /// Re-resolves where each chat runs (`runs_on.rs`): panes the move runner adopted onto
+    /// the box, agent panes whose foreground job is ssh, and this machine's name. Only
+    /// agent tabs are probed for ssh, so the scheduled poll stays a handful of process
+    /// lookups. True when anything changed.
+    pub(crate) fn refresh_runs_on(
+        &mut self,
+        boxed: &std::collections::HashSet<String>,
+        registry: &crate::runs_on::Registry,
+    ) -> bool {
+        let mut places = std::collections::HashMap::new();
+        for (ws_idx, ws) in self.state.workspaces.iter().enumerate() {
+            for (tab_idx, tab) in ws.tabs.iter().enumerate() {
+                let Some(tab_id) = self.public_tab_id(ws_idx, tab_idx) else {
+                    continue;
+                };
+                let agent = self
+                    .state
+                    .pinned_tabs
+                    .iter()
+                    .any(|pin| pin.tab_id == tab_id && pin.role.is_some());
+                for pane_id in tab.layout.pane_ids() {
+                    let Some(public_id) = self.public_pane_id(ws_idx, pane_id) else {
+                        continue;
+                    };
+                    if boxed.contains(&public_id) {
+                        places.insert(public_id, crate::runs_on::BOX.to_owned());
+                        continue;
+                    }
+                    if !agent {
+                        continue;
+                    }
+                    let ssh = self
+                        .lookup_runtime_sender(ws_idx, pane_id)
+                        .and_then(|runtime| runtime.child_pid())
+                        .and_then(crate::detect::foreground_job)
+                        .and_then(|job| {
+                            job.processes.iter().find_map(|process| {
+                                let argv = process.argv.as_deref()?;
+                                crate::runs_on::ssh_destination(argv)
+                                    .map(|host| registry.name(host))
+                            })
+                        });
+                    if let Some(machine) = ssh {
+                        places.insert(public_id, machine);
+                    }
+                }
+            }
+        }
+        let local = crate::platform::hostname().map(|host| registry.name(&host));
+        let changed = places != self.state.runs_on || local != self.state.local_machine;
+        self.state.runs_on = places;
+        self.state.local_machine = local;
+        changed
+    }
 }

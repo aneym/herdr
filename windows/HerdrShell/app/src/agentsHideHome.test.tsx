@@ -167,6 +167,18 @@ describe("hide agents and home glyph: rendered sidebar", () => {
     expect(row("pinned:P")!.querySelector(".space-label")?.textContent).toBe("home space");
     expect(glyph("pinned:P")).toBeNull();
   });
+  it("says where each agent runs (TabInfo.runs_on) just before its home glyph: box, or the machine", () => {
+    mount(story({ A: { runs_on: "box" }, C: { runs_on: "Studio" }, P: { runs_on: "Studio" } }));
+    toggleHeader();
+    const place = (id: string) => row(id)?.querySelector<HTMLElement>(".runs-on") ?? null;
+    expect(place("agent:A")?.textContent).toBe("box");
+    expect(place("agent:C")?.textContent).toBe("Studio");
+    expect(place("agent:C")?.getAttribute("title")).toBe("Runs on Studio");
+    expect(place("agent:C")!.nextElementSibling).toBe(glyph("agent:C"));
+    // An older server sends none; a plain pin never draws one.
+    expect(place("agent:B")).toBeNull();
+    expect(place("pinned:P")).toBeNull();
+  });
   it("draws neither glyph nor space name on an agent the server gives no home location", () => {
     mount(story({ C: { home_location: undefined } }));
     expect(glyph("agent:C")).toBeNull();

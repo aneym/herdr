@@ -9,7 +9,7 @@ struct Snapshot: Decodable {
         var sort_rank: UInt32? = nil; var parked: Bool? = nil
     }
     /// `work_status` is herdr's one answer to "is this chat working" (server app/work_status.rs); older servers omit it.
-    struct Tab: Decodable { let tab_id: String; let workspace_id: String; let label: String?; let number: Int; let agent_status: String?; let pane_count: Int?; let pin_index: Int?; var work_status: String? = nil; var role: String? = nil; var desk: DeskInfo? = nil; var sort_rank: UInt32? = nil; var hidden: Bool? = nil; var home_location: String? = nil }
+    struct Tab: Decodable { let tab_id: String; let workspace_id: String; let label: String?; let number: Int; let agent_status: String?; let pane_count: Int?; let pin_index: Int?; var work_status: String? = nil; var role: String? = nil; var desk: DeskInfo? = nil; var sort_rank: UInt32? = nil; var hidden: Bool? = nil; var home_location: String? = nil; var runs_on: String? = nil }
     struct Pane: Decodable {
         var restore_error: String? = nil
         var tokens: [String: String]? = nil
