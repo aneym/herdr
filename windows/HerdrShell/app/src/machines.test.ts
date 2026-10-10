@@ -14,3 +14,12 @@ it.each([
 ] as [string[], string, 1 | -1, string | null][])("cycles %j from %s by %s to %s", (names, current, direction, expected) => {
   expect(cycleMachine(names, current, direction)).toBe(expected);
 });
+import { renameHosts } from "./machines";
+// As the Mac's MachineRows.renameHosts: a case-only match takes the machine's name, but only when
+// it is the one machine and the one host row of that spelling.
+it("renames a host row to its machine's spelling only when unambiguous", () => {
+  const rows = (names: string[]) => names.map(name => ({ name }));
+  expect(renameHosts(rows(["Studio", "PC", "forge"]), ["studio", "pc"]).map(r => r.name)).toEqual(["studio", "pc", "forge"]);
+  expect(renameHosts(rows(["pc", "PC"]), ["pc"]).map(r => r.name)).toEqual(["pc", "PC"]);
+  expect(renameHosts(rows(["PC"]), ["pc", "Pc"]).map(r => r.name)).toEqual(["PC"]);
+});

@@ -255,3 +255,11 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 .space-section:not([aria-expanded]):hover { background: none; }
 .space-section-count { margin-left: auto; font-variant-numeric: tabular-nums; }
 .nested .indented { padding-left: calc(var(--shell-space-step24) + var(--shell-space-step12)); }
+.sidebar-hosts { padding: 0 0 var(--shell-space-step8); }
+.host-row { gap: var(--shell-space-step8); font-weight: 400; cursor: default; }
+.host-row:hover { background: none; }
+.host-name { flex-shrink: 0; white-space: nowrap; }
+.host-summary { flex: 1; min-width: 0; text-align: right; color: var(--shell-muted); font-size: var(--shell-type-section-label); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.host-alert { font-weight: 700; flex-shrink: 0; }
+.host-alert.warn { color: var(--shell-warn); }
+.host-alert.act { color: var(--shell-bad); }

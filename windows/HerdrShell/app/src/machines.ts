@@ -59,3 +59,17 @@ export function mergeMachineRows(local: SidebarRow[], remotes: RemoteMachine[]):
   }
   return [...agents, ...hiddenAgents, ...pins, ...spaces.flat()];
 }
+/** One name per machine, as the Mac's MachineRows.renameHosts: a host footer row that names a
+ *  machine in another case ("PC" for "pc") takes the machine's name, only when it is the one machine
+ *  and the one row of that spelling, so `pc` and `PC` stay two. */
+export function renameHosts<T extends { name: string }>(hosts: T[], machines: string[]): T[] {
+  const folds = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+  const names = hosts.map(h => h.name);
+  return hosts.map(host => {
+    if (machines.includes(host.name)) return host;
+    const candidates = machines.filter(m => folds(m, host.name));
+    if (candidates.length !== 1) return host;
+    const name = candidates[0];
+    return names.includes(name) || names.filter(n => folds(n, name)).length !== 1 ? host : { ...host, name };
+  });
+}
