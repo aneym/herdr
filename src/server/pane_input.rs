@@ -861,6 +861,9 @@ mod polite_send_tests {
                 assert_eq!(submit["result"]["queued"], false);
                 assert_eq!(rx.try_recv().unwrap().as_ref(), enter.as_slice());
                 if foreign_predecessor {
+                    // The owned submit went out ahead of the held foreign
+                    // send; two idle minutes later the queue self-heals it.
+                    assert_eq!(rx.try_recv().unwrap().as_ref(), b"foreign");
                     let queue = request(
                         &mut app,
                         Method::PaneQueue(PaneQueueParams {
@@ -870,7 +873,7 @@ mod polite_send_tests {
                             cancel: false,
                         }),
                     );
-                    assert_eq!(queue["result"]["sends"].as_array().unwrap().len(), 1);
+                    assert!(queue["result"]["sends"].as_array().unwrap().is_empty());
                 }
             }
             assert!(rx.try_recv().is_err());
@@ -1156,5 +1159,89 @@ mod polite_send_tests {
         assert!(rx.try_recv().is_err());
         app.flush_polite_sends(Instant::now() + Duration::from_secs(2));
         assert_eq!(rx.try_recv().unwrap().as_ref(), b"held");
+    }
+    /// Incident 2026-10-10: a lane's Claude pane sat idle for three hours
+    /// while a `pane.send_input` waited behind a predecessor whose composer
+    /// hold never released. The server's queue tick must deliver a head held
+    /// past `SELF_HEAL_AFTER` on an idle pane, in FIFO order, with receipts
+    /// naming the hold; a working agent's pane keeps holding, and a draft the
+    /// human typed is held until `HUMAN_DRAFT_GRACE` after their last key.
+    #[tokio::test]
+    async fn polite_queue_self_heals_behind_a_stuck_predecessor_on_an_idle_pane() {
+        use crate::terminal::polite_send::{HUMAN_DRAFT_GRACE, SELF_HEAL_AFTER};
+        let threshold = SELF_HEAL_AFTER + Duration::from_secs(1);
+        let grace = HUMAN_DRAFT_GRACE + Duration::from_secs(1);
+        // (agent state, human typed the draft, flush offset, heals)
+        for (agent_state, human_draft, at, heals) in [
+            (crate::detect::AgentState::Idle, false, threshold, true),
+            (crate::detect::AgentState::Working, false, threshold, false),
+            (crate::detect::AgentState::Idle, true, threshold, false),
+            (crate::detect::AgentState::Idle, true, grace, true),
+        ] {
+            let (mut app, pane, public, mut rx) = fixture(PoliteSendConfig::Agents);
+            let terminal_id = app.state.workspaces[0].terminal_id(pane).unwrap().clone();
+            app.state
+                .terminals
+                .get_mut(&terminal_id)
+                .unwrap()
+                .set_detected_state(Some(crate::detect::Agent::Claude), agent_state);
+            // Text left in the composer that nobody will ever submit: the
+            // draft hold on the head never clears by itself.
+            app.terminal_runtimes
+                .get(&terminal_id)
+                .unwrap()
+                .test_process_pty_bytes("────────\r\n❯ stale composer text\r\n────────".as_bytes());
+            if human_draft {
+                let runtime = app.terminal_runtimes.get(&terminal_id).unwrap();
+                apply_terminal_attach_input(runtime, b"half".to_vec()).unwrap();
+                assert_eq!(rx.try_recv().unwrap().as_ref(), b"half");
+            }
+            let send = |text: &str| {
+                Method::PaneSendInput(crate::api::schema::PaneSendInputParams {
+                    if_idle: false,
+                    pane_id: public.clone(),
+                    text: text.into(),
+                    keys: vec!["Enter".into()],
+                })
+            };
+            let first = request(&mut app, send("FIRST"));
+            let second = request(&mut app, send("SECOND"));
+            assert_eq!(first["result"]["queued"], true, "{first}");
+            assert_eq!(second["result"]["queued"], true, "{second}");
+            app.flush_polite_sends(Instant::now() + Duration::from_secs(31));
+            assert!(rx.try_recv().is_err(), "healed before the threshold");
+
+            app.flush_polite_sends(Instant::now() + at);
+            let mut written = Vec::new();
+            while let Ok(bytes) = rx.try_recv() {
+                written.extend_from_slice(&bytes);
+            }
+            let written = String::from_utf8_lossy(&written).into_owned();
+            let queue = request(
+                &mut app,
+                Method::PaneQueue(PaneQueueParams {
+                    id: None,
+                    pane_id: public.clone(),
+                    flush: false,
+                    cancel: false,
+                }),
+            );
+            let recent = queue["result"]["recent"].as_array().unwrap();
+            assert_eq!(recent.len(), 2, "{queue}");
+            if heals {
+                let (a, b) = (written.find("FIRST"), written.find("SECOND"));
+                assert!(a.is_some() && b.is_some() && a < b, "{written:?}");
+                assert!(queue["result"]["sends"].as_array().unwrap().is_empty());
+                for receipt in recent {
+                    assert_ne!(receipt["state"], "queued", "{receipt}");
+                    let healed = receipt["healed"].as_str().unwrap_or_default();
+                    assert!(healed.contains("human_composer_draft"), "{receipt}");
+                }
+            } else {
+                assert!(written.is_empty(), "held send leaked: {written:?}");
+                assert_eq!(queue["result"]["sends"].as_array().unwrap().len(), 2);
+                assert!(recent.iter().all(|r| r.get("healed").is_none()));
+            }
+        }
     }
 }

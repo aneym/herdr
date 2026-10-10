@@ -78,14 +78,39 @@ fn receipt(
             delivered_at: None,
             acked_at: None,
             ack_timeout: false,
+            healed: None,
         },
         enqueued: Instant::now(),
         delivered: None,
     });
     if history.recent.len() > 200 {
-        history.recent.pop_front();
+        // A receipt still held in a queue stays visible to `pane queue`
+        // however old it is: evict the oldest settled receipt instead.
+        let settled = history
+            .recent
+            .iter()
+            .position(|r| r.item.state != PaneSendState::Queued)
+            .unwrap_or(0);
+        history.recent.remove(settled);
     }
     id
+}
+
+/// A held send at the head of an idle pane's queue for this long is
+/// delivered past its hold reason (Alex, 2026-10-10: a lane sat idle for
+/// hours behind a send that never flushed; "this should never happen").
+pub(crate) const SELF_HEAL_AFTER: Duration = Duration::from_secs(60);
+
+/// A draft the human typed is theirs (Alex, 2026-09-30: a held wake must not
+/// land in his open draft); the self-heal waits this long after their last
+/// keystroke before it treats the draft as abandoned.
+pub(crate) const HUMAN_DRAFT_GRACE: Duration = Duration::from_secs(30 * 60);
+
+fn mark_healed(id: &str, note: String) {
+    let mut history = history_lock();
+    if let Some(receipt) = history.recent.iter_mut().find(|r| r.item.id == id) {
+        receipt.item.healed = Some(note);
+    }
 }
 
 fn transition(id: &str, state: PaneSendState, reason: Option<&str>) {
@@ -211,6 +236,7 @@ pub(crate) enum DeliveryVerdict {
 
 struct HeldSend {
     id: String,
+    enqueued: Instant,
     pgid: Option<u32>,
     pane_id: crate::layout::PaneId,
     method: &'static str,
@@ -624,6 +650,7 @@ impl TerminalRuntime {
             let len = payload.len();
             state.queue.push_back(HeldSend {
                 id: id.clone(),
+                enqueued: now,
                 pgid,
                 pane_id: self.0.pane_id,
                 method,
@@ -768,21 +795,27 @@ impl TerminalRuntime {
         force: bool,
         options: SendOptions,
     ) -> std::io::Result<()> {
-        self.flush_polite_queue_guarded(now, quiet, force, options, &|_| DeliveryVerdict::Ready)
+        self.flush_polite_queue_guarded(now, quiet, force, false, options, &|_| {
+            DeliveryVerdict::Ready
+        })
     }
 
     /// Flush held sends. A guarded send is dropped once it expires or
     /// `verdict` calls it stale, and held (even when forced) until `verdict`
     /// is ready and the pane has had no human input for its quiet interval.
+    /// With `agent_idle`, an unguarded head held past `SELF_HEAL_AFTER` with
+    /// no human input for as long (`HUMAN_DRAFT_GRACE` when the human typed
+    /// an unsubmitted draft) is delivered anyway and its receipt says so.
     pub(crate) fn flush_polite_queue_guarded(
         &self,
         now: Instant,
         quiet: Duration,
         force: bool,
+        agent_idle: bool,
         options: SendOptions,
         verdict: &dyn Fn(&DeliveryGuard) -> DeliveryVerdict,
     ) -> std::io::Result<()> {
-        self.flush_polite_queue_through(now, quiet, force, options, verdict, None)
+        self.flush_polite_queue_through(now, quiet, force, agent_idle, options, verdict, None)
     }
 
     /// Flush only the named receipt and its FIFO predecessors, never successors.
@@ -794,7 +827,7 @@ impl TerminalRuntime {
         options: SendOptions,
         verdict: &dyn Fn(&DeliveryGuard) -> DeliveryVerdict,
     ) -> std::io::Result<()> {
-        self.flush_polite_queue_through(now, quiet, true, options, verdict, Some(id))
+        self.flush_polite_queue_through(now, quiet, true, false, options, verdict, Some(id))
     }
 
     fn flush_polite_queue_through(
@@ -802,6 +835,7 @@ impl TerminalRuntime {
         now: Instant,
         quiet: Duration,
         force: bool,
+        agent_idle: bool,
         options: SendOptions,
         verdict: &dyn Fn(&DeliveryGuard) -> DeliveryVerdict,
         through: Option<&str>,
@@ -861,10 +895,25 @@ impl TerminalRuntime {
             } else {
                 None
             };
+            let mut healed = None;
             if !force {
                 if let Some(reason) = reason {
-                    transition(&item.id, PaneSendState::Queued, Some(reason));
-                    break;
+                    let held = now.saturating_duration_since(item.enqueued);
+                    let human_quiet = if state.draft {
+                        HUMAN_DRAFT_GRACE
+                    } else {
+                        SELF_HEAL_AFTER
+                    };
+                    let heal = agent_idle
+                        && held >= SELF_HEAL_AFTER
+                        && state
+                            .human_input_age(now)
+                            .is_none_or(|age| age >= human_quiet);
+                    if !heal {
+                        transition(&item.id, PaneSendState::Queued, Some(reason));
+                        break;
+                    }
+                    healed = Some((reason, held));
                 }
             }
             let len = item.payload.len();
@@ -901,6 +950,13 @@ impl TerminalRuntime {
             }
             self.write_polite_payload(&item.payload, true, &item.id)?;
             tracing::info!(pane_id = ?self.0.pane_id, method = item.method, bytes = len, "polite send flushed");
+            if let Some((reason, held)) = healed {
+                tracing::warn!(pane_id = ?item.pane_id, method = item.method, id = %item.id, reason, held_secs = held.as_secs(), "polite send self-healed");
+                mark_healed(
+                    &item.id,
+                    format!("{reason} held {}s on an idle pane", held.as_secs()),
+                );
+            }
             state.agent_prompt_composer = item.method == "agent.prompt";
             state.queue.pop_front();
             remaining -= 1;
@@ -1136,6 +1192,7 @@ mod tests {
                 flush_started,
                 Duration::ZERO,
                 true,
+                false,
                 SendOptions::default(),
                 &|_| DeliveryVerdict::Ready,
             )
@@ -1189,6 +1246,7 @@ mod tests {
                 Instant::now(),
                 Duration::ZERO,
                 true,
+                false,
                 SendOptions::default(),
                 &verdict,
             )

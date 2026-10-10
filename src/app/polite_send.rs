@@ -120,10 +120,18 @@ impl App {
                     continue;
                 };
                 if runtime.has_polite_queue() {
+                    let agent_idle = self.pane_info(ws_idx, pane_id).is_some_and(|pane| {
+                        matches!(
+                            pane.agent_status,
+                            crate::api::schema::AgentStatus::Idle
+                                | crate::api::schema::AgentStatus::Done
+                        )
+                    });
                     if let Err(err) = runtime.flush_polite_queue_guarded(
                         now,
                         self.polite_send_quiet,
                         self.polite_send_mode == PoliteSendConfig::Off,
+                        agent_idle,
                         self.polite_options(ws_idx, pane_id, false, false),
                         &|guard| self.agent_delivery_verdict(ws_idx, pane_id, guard),
                     ) {
@@ -218,6 +226,7 @@ impl App {
                 Instant::now(),
                 self.polite_send_quiet,
                 true,
+                false,
                 self.polite_options(ws_idx, pane_id, false, false),
                 &|guard| self.agent_delivery_verdict(ws_idx, pane_id, guard),
             ) {

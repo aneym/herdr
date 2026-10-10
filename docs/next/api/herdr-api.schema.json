@@ -10217,6 +10217,13 @@
                 "null"
               ]
             },
+            "healed": {
+              "description": "Set when the queue tick delivered this send past a hold that outlived\nthe self-heal threshold on an idle pane: the hold reason and its age.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "id": {
               "type": "string"
             },

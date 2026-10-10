@@ -816,6 +816,10 @@ pub struct PaneQueuedSend {
     pub method: String,
     pub byte_length: usize,
     pub age_secs: f64,
+    /// Set when the queue tick delivered this send past a hold that outlived
+    /// the self-heal threshold on an idle pane: the hold reason and its age.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub healed: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, Default)]
