@@ -258,21 +258,40 @@ pub(super) fn finish(preferences: Option<&Path>) {
         let now = Instant::now();
         if let Some((last, previous)) = reports.last.get(&path) {
             let elapsed = now.duration_since(*last);
-            if elapsed < Duration::from_secs(1) || (previous == &workspaces && elapsed < Duration::from_secs(60)) { return; }
+            if elapsed < Duration::from_secs(1) || (previous == &workspaces && elapsed < REFRESH) { return; }
         }
-        let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();
-        let result = (|| -> std::io::Result<()> {
-            let parent = path.parent().ok_or_else(|| std::io::Error::other("invalid sidebar report path"))?;
-            std::fs::create_dir_all(parent)?;
-            let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
-            let payload = serde_json::json!({"version": 1, "at": at, "pid": std::process::id(), "workspaces": &workspaces});
-            std::fs::write(&tmp, serde_json::to_vec(&payload)?)?;
-            std::fs::rename(tmp, &path)
-        })();
+        let result = write(&path, &workspaces);
         // Throttle failed writes too, so an unwritable directory cannot busy-loop.
         reports.last.insert(path, (now, workspaces));
         if let Err(error) = result {
             if !reports.logged_error { eprintln!("sidebar report: {error}"); reports.logged_error = true; }
         }
     });
+}
+/// An idle client draws no frames, so without this its report aged past the sections
+/// check's 180 s and read as client_offline (220 s stale in a lab, 2026-10-09).
+/// Rewrite the last drawn report with a fresh `at` once it is REFRESH old.
+pub(super) fn keepalive(preferences: Option<&Path>) {
+    REPORTS.with(|reports| {
+        let mut reports = reports.borrow_mut();
+        let Some(path) = preferences.and_then(super::preferences::sidebar_path) else { return };
+        let now = Instant::now();
+        let Some((last, workspaces)) = reports.last.get_mut(&path) else { return };
+        if now.duration_since(*last) < REFRESH { return; }
+        *last = now;
+        let result = write(&path, workspaces);
+        if let Err(error) = result {
+            if !reports.logged_error { eprintln!("sidebar report: {error}"); reports.logged_error = true; }
+        }
+    });
+}
+const REFRESH: Duration = Duration::from_secs(60);
+fn write(path: &Path, workspaces: &[WorkspaceReport]) -> std::io::Result<()> {
+    let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();
+    let parent = path.parent().ok_or_else(|| std::io::Error::other("invalid sidebar report path"))?;
+    std::fs::create_dir_all(parent)?;
+    let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
+    let payload = serde_json::json!({"version": 1, "at": at, "pid": std::process::id(), "workspaces": workspaces});
+    std::fs::write(&tmp, serde_json::to_vec(&payload)?)?;
+    std::fs::rename(tmp, path)
 }

@@ -2464,6 +2464,10 @@ impl ClientShellState {
         self.reconcile_input_source();
     }
 
+    pub(crate) fn tick_sidebar_report(&self) {
+        super::sidebar_report::keepalive(self.config.preferences_path.as_deref());
+    }
+
     pub(crate) fn tick_popup_pending(&mut self, now: std::time::Instant) {
         if self
             .popup_pending_deadline

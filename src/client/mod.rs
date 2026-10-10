@@ -804,6 +804,7 @@ async fn run_client_loop(
         let now = std::time::Instant::now();
         if let Some(shell) = state.shell.as_mut() {
             shell.tick_popup_pending(now);
+            shell.tick_sidebar_report();
         }
 
         match event {
