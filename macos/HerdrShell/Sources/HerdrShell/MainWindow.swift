@@ -730,6 +730,11 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             self?.focusedPaneByTab[tab] = v.paneId
             self?.state.focusedPane = v.paneId
             self?.applyCaps()
+            // A click on a pane another client took is the user back here: take it back.
+            // Async: the focus change is still in progress, and taking back replaces the view.
+            if self?.registry.heldTerminals.contains(v.terminalId) == true {
+                DispatchQueue.main.async { self?.registry.reclaim(v.terminalId) }
+            }
         }
     }
 

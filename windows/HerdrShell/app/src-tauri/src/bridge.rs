@@ -182,8 +182,9 @@ pub async fn attach_open(
     let (_, endpoint) = machines.endpoints(&machine)?;
     let mode = match mode.as_str() {
         "attach" => AttachMode::Attach,
+        "takeover" => AttachMode::Takeover,
         "observe" => AttachMode::Observe,
-        _ => return Err("mode must be attach or observe".into()),
+        _ => return Err("mode must be attach, takeover or observe".into()),
     };
     let attaches = attaches.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {

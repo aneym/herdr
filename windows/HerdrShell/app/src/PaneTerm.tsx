@@ -59,6 +59,10 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
     let handle: number | null = null;
     let mode: Mode = { mouse: false, sgrPixels: false, kittyFlags: 0, modifyOtherKeys: 0 };
     let attachMode: "attach" | "observe" | "closed" = "closed";
+    // Another client took this pane over. The user coming back takes it back: the window
+    // gaining focus or a click on the pane. Keys never do (as on the Mac): one would be
+    // lost while the attach comes up and the rest would reach the pane without it.
+    let takenOver = false;
     let opening = false;
     let generation = 0;
     let resizeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -83,6 +87,7 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
       if (result.handled) { event.preventDefault(); result.work?.catch(error); return false; }
       return true;
     });
+    const reclaimed = () => { if (!takenOver || attachMode !== "closed") return false; void open(); return true; };
     const data = term.onData(text => { if (hookDispatch) return; const flush = () => { void send(text).catch(error); }; if (!links.hold(text, flush)) flush(); });
     const binary = term.onBinary(text => { if (hookDispatch) return; const flush = () => { void sendBytes(Uint8Array.from(text, ch => ch.charCodeAt(0))).catch(error); }; if (!links.hold(text, flush)) flush(); });
     const open = async () => {
@@ -90,6 +95,7 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
       opening = true;
       const currentGeneration = ++generation;
       setNotice("");
+      takenOver = false;
       if (handle != null) { const old = handle; handle = null; await bridge.close(old).catch(error); }
       term.reset();
       mode = { mouse: false, sgrPixels: false, kittyFlags: 0, modifyOtherKeys: 0 };
@@ -102,13 +108,20 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
         else if (event.kind === "clipboard") void copier.programWrote(event.b64).catch(error);
         else if (event.kind === "bell") { setBell(true); clearTimeout(bellTimer); bellTimer = setTimeout(() => setBell(false), 180); }
         else if (event.kind === "notice") setNotice(event.message);
-        else { closedDuringOpen = true; attachMode = "closed"; setState("closed"); setNotice(event.reason); }
+        else { closedDuringOpen = true; attachMode = "closed"; takenOver = event.reason.includes("taken over"); setState("closed"); setNotice(event.reason); }
       };
       try {
         let next: number;
         let nextMode: "attach" | "observe" = "attach";
         try { next = await bridge.attach(machine, pane.terminal_id, openCols, openRows, "attach", onEvent); }
-        catch { if (disposed) return; closedDuringOpen = false; nextMode = "observe"; next = await bridge.attach(machine, pane.terminal_id, openCols, openRows, "observe", onEvent); }
+        catch (refused) {
+          if (disposed) return;
+          closedDuringOpen = false;
+          // Another client holds the pane: usually this user's other machine, often asleep
+          // with its socket still open. The user is here now, so take it over.
+          if (String(refused).includes("already has an attached client")) next = await bridge.attach(machine, pane.terminal_id, openCols, openRows, "takeover", onEvent);
+          else { nextMode = "observe"; next = await bridge.attach(machine, pane.terminal_id, openCols, openRows, "observe", onEvent); }
+        }
         if (disposed) { await bridge.close(next); return; }
         handle = next;
         attachMode = closedDuringOpen ? "closed" : nextMode;
@@ -243,11 +256,13 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
     node.addEventListener("wheel", onWheel, { capture: true, passive: false });
     node.addEventListener("contextmenu", onContext);
     node.addEventListener("mousedown", onDown, true);
+    node.addEventListener("mousedown", reclaimed);
+    window.addEventListener("focus", reclaimed);
     fitNow.current = () => { if (disposed || isSettling.current) return; fit.fit(); if (handle != null && (term.cols !== sentCols || term.rows !== sentRows)) { sentCols = term.cols; sentRows = term.rows; void bridge.resize(handle, sentCols, sentRows).catch(error); } };
     const observer = new ResizeObserver(() => { clearTimeout(resizeTimer); if (!isSettling.current) resizeTimer = setTimeout(() => fitNow.current(), 50); });
     observer.observe(node);
     void open();
-    return () => { disposed = true; unsubscribeTheme(); register(pane.pane_id, null); observer.disconnect(); clearTimeout(resizeTimer); clearTimeout(bellTimer); cancelAnimationFrame(wheelFrame); node.removeEventListener("wheel", onWheel, true); node.removeEventListener("contextmenu", onContext); node.removeEventListener("mousedown", onDown, true); window.removeEventListener("mousemove", onMove, true); window.removeEventListener("mouseup", onUp, true); data.dispose(); binary.dispose(); links.dispose(); if (handle != null) void bridge.close(handle).catch(() => {}); term.dispose(); };
+    return () => { disposed = true; unsubscribeTheme(); register(pane.pane_id, null); observer.disconnect(); clearTimeout(resizeTimer); clearTimeout(bellTimer); cancelAnimationFrame(wheelFrame); node.removeEventListener("wheel", onWheel, true); node.removeEventListener("contextmenu", onContext); node.removeEventListener("mousedown", onDown, true); node.removeEventListener("mousedown", reclaimed); window.removeEventListener("focus", reclaimed); window.removeEventListener("mousemove", onMove, true); window.removeEventListener("mouseup", onUp, true); data.dispose(); binary.dispose(); links.dispose(); if (handle != null) void bridge.close(handle).catch(() => {}); term.dispose(); };
   }, [machine, pane.pane_id, pane.terminal_id, register]);
   // A host with its own menu (PaneSurface) offers Take control there instead of in the cap.
   useEffect(() => { onTakeover?.(state === "observe" ? () => takeover.current() : null); }, [state, onTakeover]);

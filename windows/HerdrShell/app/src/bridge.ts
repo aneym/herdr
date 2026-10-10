@@ -41,7 +41,7 @@ export const bridge = {
   }),
   machineEvents: (fn: (status: MachineStatus) => void) => listen<MachineStatus>("herdr://machine", e => fn(e.payload)),
   snapshots: (fn: (value: { machine: string; snapshot: Snapshot }) => void) => listen<{ machine: string; snapshot: Snapshot }>("herdr://snapshot", e => fn(e.payload)),
-  attach: (machine: string, terminalId: string, cols: number, rows: number, mode: "attach" | "observe", fn: (event: AttachEvent) => void) => {
+  attach: (machine: string, terminalId: string, cols: number, rows: number, mode: "attach" | "takeover" | "observe", fn: (event: AttachEvent) => void) => {
     const onEvent = new Channel<AttachEvent>();
     onEvent.onmessage = fn;
     return invoke<number>("attach_open", { machine, terminalId, cols, rows, mode, onEvent }).then(async handle => {

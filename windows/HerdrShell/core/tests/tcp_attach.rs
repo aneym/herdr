@@ -266,3 +266,67 @@ fn takeover_replays_host_theme_after_control_terminal() {
     server.join().unwrap();
     drop(events);
 }
+
+/// Machine swap: another machine's client holds the terminal. A plain attach must fail
+/// with herdr's refusal (PaneTerm keys its takeover on that text), and a Takeover attach
+/// must ask herdr to replace the holder and come up writable.
+#[test]
+fn held_terminal_refuses_attach_and_takeover_replaces_holder() {
+    use herdr_shell_core::wire::ClientMessage;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        for takeover in [false, true] {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(TIMEOUT)).unwrap();
+            stream.set_write_timeout(Some(TIMEOUT)).unwrap();
+            read_client_frame(&mut stream);
+            send(
+                &mut stream,
+                ServerMessage::Welcome {
+                    version: PROTOCOL_VERSION,
+                    encoding: RenderEncoding::TerminalAnsi,
+                    error: None,
+                },
+            );
+            assert_eq!(
+                ClientMessage::decode(&read_client_frame(&mut stream)).unwrap(),
+                ClientMessage::AttachTerminal {
+                    terminal_id: "term-test".into(),
+                    takeover,
+                }
+            );
+            // herdr's words (src/server/headless.rs attach_terminal_client).
+            let reply = if takeover {
+                ServerMessage::Terminal(TerminalFrame {
+                    seq: 1,
+                    width: 120,
+                    height: 40,
+                    full: true,
+                    bytes: b"ready".to_vec(),
+                })
+            } else {
+                ServerMessage::ServerShutdown {
+                    reason: Some("terminal attach failed: terminal term-test already has an attached client; retry with --takeover".into()),
+                }
+            };
+            send(&mut stream, reply);
+            if takeover {
+                let _ = read_client_frame(&mut stream);
+            }
+        }
+    });
+    let endpoint = Endpoint::Tcp(addr);
+    let refused = AttachClient::connect(&endpoint, "term-test", 120, 40, AttachMode::Attach)
+        .err()
+        .expect("a held terminal refuses a plain attach");
+    assert!(refused.to_string().contains("already has an attached client"), "{refused}");
+    let client = AttachClient::connect(&endpoint, "term-test", 120, 40, AttachMode::Takeover).unwrap();
+    assert!(client.is_writable());
+    assert_eq!(
+        client.recv_timeout(TIMEOUT),
+        Some(AttachEvent::Bytes(b"ready".to_vec()))
+    );
+    drop(client);
+    server.join().unwrap();
+}

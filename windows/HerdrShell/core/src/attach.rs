@@ -38,6 +38,9 @@ pub const ENABLE_SGR_PIXELS: &[u8] = b"\x1b[?1016h";
 pub enum AttachMode {
     /// Writable attach (`ClientMessage::AttachTerminal`, no takeover).
     Attach,
+    /// Writable attach that replaces whichever client holds the terminal
+    /// (`ClientMessage::AttachTerminal { takeover: true }`).
+    Takeover,
     /// Read-only observe (`ClientMessage::ObserveTerminal`). Input is refused locally.
     Observe,
 }
@@ -202,9 +205,9 @@ impl AttachClient {
         mode: AttachMode,
     ) -> io::Result<Self> {
         let request = match mode {
-            AttachMode::Attach => ClientMessage::AttachTerminal {
+            AttachMode::Attach | AttachMode::Takeover => ClientMessage::AttachTerminal {
                 terminal_id: terminal_id.to_owned(),
-                takeover: false,
+                takeover: mode == AttachMode::Takeover,
             },
             AttachMode::Observe => ClientMessage::ObserveTerminal {
                 target: terminal_id.to_owned(),
@@ -213,7 +216,7 @@ impl AttachClient {
         let session = Session::open(endpoint, cols, rows, &request)?;
         let (command_tx, command_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
-        let writable = Arc::new(AtomicBool::new(mode == AttachMode::Attach));
+        let writable = Arc::new(AtomicBool::new(mode != AttachMode::Observe));
         let worker = Worker {
             endpoint: endpoint.clone(),
             terminal_id: terminal_id.to_owned(),

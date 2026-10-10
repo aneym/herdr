@@ -31,9 +31,15 @@ struct PaneLifecycle {
 ///   replaced at once by a fresh attach to the same terminal. herdr redraws the whole
 ///   screen on attach, so the pane comes back as it was. Repeated fast exits back off
 ///   and end in `failed` with a Retry button.
-/// - Another client takes the terminal (`--takeover`, or already holds it): the surface
-///   stays, shows who holds it, and delivers no keys until the user takes it back.
-///   Nothing here takes a pane back on its own.
+/// - Another client already holds the terminal when this app attaches: this app takes
+///   it over. Every client is the same user, and the one opening the pane is where they
+///   are now; the holder is usually the other machine's Shell, often asleep with its
+///   socket still open, and would otherwise hold the pane forever (Alex, 2026-10-10:
+///   "swapping between machines seems to get it stuck").
+/// - Another client takes the terminal from this app (`--takeover`): the surface stays,
+///   shows who holds it, and delivers no keys. The user coming back takes it back: the
+///   app becoming active or a click on the pane. Keys never do: a key would be lost
+///   while the attach comes up, and the rest would reach the pane without it.
 /// - Hidden tabs: `keep` (default) leaves every attach running; `detach` releases the
 ///   attach of any pane not on screen and reattaches when it is shown again.
 final class SurfaceRegistry {
@@ -51,13 +57,12 @@ final class SurfaceRegistry {
     var onReplace: ((_ old: SurfaceView, _ new: SurfaceView) -> Void)?
 
     private var notices: [String: NoticeBar] = [:]
-    /// Where each surface's attach command records its exit status.
-    private var exitStatusFiles: [ObjectIdentifier: String] = [:]
-    /// When we last released an attach ourselves; the server may take a moment to notice.
-    private var releasedAt: [String: Date] = [:]
+    /// Where each surface's attach command records its exit status and its stderr.
+    private var exitFiles: [ObjectIdentifier: (status: String, stderr: String)] = [:]
     /// Retired views stay alive briefly: a libghostty callback for a closed surface may
     /// still be queued, and it carries the view pointer.
     private var retired: [SurfaceView] = []
+    private var activeObserver: NSObjectProtocol?
 
     init(herdrBin: String, attachEnv: [String: String], hiddenPolicy: HiddenPolicy? = nil) {
         self.herdrBin = herdrBin
@@ -65,6 +70,10 @@ final class SurfaceRegistry {
         self.hiddenPolicy = hiddenPolicy
             ?? HiddenPolicy(rawValue: ProcessInfo.processInfo.environment["HERDR_SHELL_HIDDEN_TABS"] ?? "")
             ?? .keepAttached
+        // The user is at this machine again: take back what another machine took meanwhile.
+        activeObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in self?.reclaimAll() }
     }
 
     func surface(paneId: String, terminalId: String) -> SurfaceView {
@@ -75,20 +84,26 @@ final class SurfaceRegistry {
     // MARK: spawning
 
     private func makeView(paneId: String, terminalId: String, takeover: Bool) -> SurfaceView {
-        // The attach's exit status goes to a file, not the screen: libghostty reports 0
-        // for every exit, and the screen can hold anything the pane's program printed.
-        let statusFile = NSTemporaryDirectory() + "herdr-shell-exit-\(UUID().uuidString)"
+        // The attach's exit status and stderr go to files, not the screen: libghostty
+        // reports 0 for every exit, and the screen can hold anything the pane's program
+        // printed, or the terminal's replies to the client's color queries.
+        let base = NSTemporaryDirectory() + "herdr-shell-exit-\(UUID().uuidString)"
+        let files = (status: base, stderr: base + ".err")
         // libghostty runs the command as `exec -l <command>`, so the status write has to
         // live in a script of its own.
+        // `stty -echo`: the client asks the terminal for its 256 palette colors at start.
+        // An attach that is refused exits before the replies arrive, and the tty would
+        // echo them onto the pane as `]4;N;rgb:...` text. The client restores this mode.
         // Another machine's terminal attaches through its forwarded sockets, by its raw id.
         let remote = Machines.attachTarget(terminalId)
-        let script = "'\(herdrBin)' terminal attach \(remote?.raw ?? terminalId) --no-escape" + (takeover ? " --takeover" : "")
-            + "; echo $? > '\(statusFile)'"
+        let script = "stty -echo 2>/dev/null; "
+            + "'\(herdrBin)' terminal attach \(remote?.raw ?? terminalId) --no-escape" + (takeover ? " --takeover" : "")
+            + " 2>'\(files.stderr)'; echo $? > '\(files.status)'"
         let cmd = "/bin/sh -c '" + script.replacingOccurrences(of: "'", with: "'\\''") + "'"
         let env = remote.map { attachEnv.merging($0.env) { _, new in new } } ?? attachEnv
         let s = SurfaceView(paneId: paneId, terminalId: terminalId, command: cmd, env: env, cwd: NSHomeDirectory())
         s.onExit = { [weak self] v in self?.handleExit(v) }
-        exitStatusFiles[ObjectIdentifier(s)] = statusFile
+        exitFiles[ObjectIdentifier(s)] = files
         return s
     }
 
@@ -109,9 +124,10 @@ final class SurfaceRegistry {
         view.onFocus = nil
         clearNotice(view.terminalId)
         view.removeFromSuperview()
-        if let f = exitStatusFiles.removeValue(forKey: ObjectIdentifier(view)) { try? FileManager.default.removeItem(atPath: f) }
-        // Release the attach now, so a quick reattach does not find the terminal held.
-        releasedAt[view.terminalId] = Date()
+        if let f = exitFiles.removeValue(forKey: ObjectIdentifier(view)) {
+            try? FileManager.default.removeItem(atPath: f.status)
+            try? FileManager.default.removeItem(atPath: f.stderr)
+        }
         view.closeSurface()
         retired.append(view)
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
@@ -155,45 +171,48 @@ final class SurfaceRegistry {
     }
 
     /// Lines the herdr client writes for itself: they start with `herdr:`.
-    static func clientLines(_ screen: String) -> [String] {
-        screen.lowercased().split(separator: "\n")
+    static func clientLines(_ stderr: String) -> [String] {
+        stderr.lowercased().split(separator: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { $0.hasPrefix("herdr:") }
     }
 
-    /// The attach process's exit status, from the file its command wrote. Above 128 means
-    /// a signal ended it (kill, crash); nil means unknown.
-    private func takeExitStatus(_ view: SurfaceView) -> Int? {
-        guard let path = exitStatusFiles.removeValue(forKey: ObjectIdentifier(view)) else { return nil }
-        defer { try? FileManager.default.removeItem(atPath: path) }
-        guard let raw = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
-        return Int(raw.trimmingCharacters(in: .whitespacesAndNewlines))
+    /// The attach process's exit status and stderr, from the files its command wrote.
+    /// A status above 128 means a signal ended it (kill, crash); nil means unknown.
+    private func takeExit(_ view: SurfaceView) -> (status: Int?, stderr: String) {
+        guard let f = exitFiles.removeValue(forKey: ObjectIdentifier(view)) else { return (nil, "") }
+        defer {
+            try? FileManager.default.removeItem(atPath: f.status)
+            try? FileManager.default.removeItem(atPath: f.stderr)
+        }
+        let raw = (try? String(contentsOfFile: f.status, encoding: .utf8)) ?? ""
+        return (Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+                (try? String(contentsOfFile: f.stderr, encoding: .utf8)) ?? "")
     }
 
     private func classify(_ view: SurfaceView, exitAt: Date) {
         let id = view.terminalId
-        let status = takeExitStatus(view)
-        // A signal ended the attach: nobody said anything, whatever the pane shows. The
-        // words "taken over" on a pane's own screen must not read as a takeover.
-        let killed = (status ?? 0) > 128
-        let fresh = killed ? [] : SurfaceRegistry.clientLines(view.visibleText())
+        let exit = takeExit(view)
+        // A signal ended the attach: nobody said anything.
+        let killed = (exit.status ?? 0) > 128
+        let fresh = killed ? [] : SurfaceRegistry.clientLines(exit.stderr)
         let text = fresh.joined(separator: "\n")
         var lc = lifecycle[id] ?? PaneLifecycle()
         lc.lastExitAt = exitAt
         lc.lastExitText = fresh.last ?? ""
+        let fast = exitAt.timeIntervalSince(lc.spawnedAt) < 3
 
-        // Just released our own attach and the server has not noticed yet: not a real holder.
-        if text.contains("already has an attached client"), !text.contains("taken over"),
-           let rel = releasedAt[id], exitAt.timeIntervalSince(rel) < 3, lc.fastExits < 5 {
-            lc.fastExits += 1
+        // Another client holds the pane (another machine, or our own attach the server has
+        // not dropped yet): take it over. A takeover attach is never refused, so this runs
+        // once per open; the fast-exit cap still stops a loop if that ever changes.
+        if text.contains("already has an attached client"), !(fast && lc.fastExits >= 5) {
+            lc.fastExits = fast ? lc.fastExits + 1 : 0
             lifecycle[id] = lc
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self, weak view] in
-                guard let self, let view, self.byTerminal[id] === view else { return }
-                self.replace(view, takeover: false)
-            }
+            log("attach for \(id) refused: another client holds it; taking it over")
+            replace(view, takeover: true)
             return
         }
-        if text.contains("taken over") || text.contains("already has an attached client") {
+        if text.contains("taken over") {
             lc.state = .held
             lifecycle[id] = lc
             showHeld(view)
@@ -206,7 +225,7 @@ final class SurfaceRegistry {
             return
         }
         // Killed or crashed: bring it back. A run of fast exits backs off, then stops.
-        if exitAt.timeIntervalSince(lc.spawnedAt) < 3 { lc.fastExits += 1 } else { lc.fastExits = 0 }
+        if fast { lc.fastExits += 1 } else { lc.fastExits = 0 }
         lifecycle[id] = lc
         if lc.fastExits >= 5 {
             lifecycle[id]?.state = .failed
@@ -229,11 +248,14 @@ final class SurfaceRegistry {
 
     private func showHeld(_ view: SurfaceView) {
         let id = view.terminalId
-        showNotice(view, message: "Another herdr client holds this pane. Typing is paused here.",
-                   action: ("Take back", { [weak self, weak view] in
-                       guard let self, let view else { return }
-                       self.reclaim(view.terminalId)
-                   }))
+        let takeBack = { [weak self, weak view] in
+            guard let self, let view else { return }
+            self.reclaim(view.terminalId)
+        }
+        showNotice(view, message: "Another herdr client holds this pane. Click to take it back.",
+                   action: ("Take back", takeBack))
+        // A click on the held pane is the user here again: take it back.
+        notices[id]?.onClick = takeBack
         // Keys go to the bar (which drops them), not to the ended surface.
         if let bar = notices[id], view.window?.firstResponder === view {
             view.window?.makeFirstResponder(bar)
@@ -243,7 +265,7 @@ final class SurfaceRegistry {
             DispatchQueue.main.async {
                 guard let self, self.byTerminal[id] != nil, self.lifecycle[id]?.state == .held else { return }
                 self.lifecycle[id]?.holder = who
-                self.notices[id]?.setMessage("Held by \(who). Typing is paused here.")
+                self.notices[id]?.setMessage("Held by \(who). Click to take it back.")
             }
         }
     }
@@ -255,6 +277,12 @@ final class SurfaceRegistry {
         log("reclaiming \(terminalId) with --takeover")
         lifecycle[terminalId]?.fastExits = 0
         replace(view, takeover: true)
+    }
+
+    /// Take back every held pane and retry every failed one: the app became active, so
+    /// the user is at this machine.
+    func reclaimAll() {
+        for (id, lc) in lifecycle where lc.state == .held || lc.state == .failed { reclaim(id) }
     }
 
     /// The terminal ids of every pane that is not running, for the menu action.
@@ -398,10 +426,13 @@ final class NoticeBar: NSView {
         label.frame = NSRect(x: pad, y: (bounds.height - lh) / 2, width: max(0, right - pad), height: lh)
     }
 
+    /// Called on a click on the bar; the click itself goes no further.
+    var onClick: (() -> Void)?
+
     /// The bar takes clicks and typing itself; nothing reaches the terminal beneath it.
     /// Command chords still reach the app menu through performKeyEquivalent.
     override var acceptsFirstResponder: Bool { true }
-    override func mouseDown(with event: NSEvent) {}
+    override func mouseDown(with event: NSEvent) { onClick?() }
     override func keyDown(with event: NSEvent) {}
     override func keyUp(with event: NSEvent) {}
 }
