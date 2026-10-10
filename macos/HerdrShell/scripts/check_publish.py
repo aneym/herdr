@@ -249,6 +249,16 @@ with tempfile.TemporaryDirectory(prefix="publish-check-", dir=os.environ.get("TM
         # The publisher build path must allow an empty Studio and treat an identical
         # installed SHA as success, without reaching the build boundary again.
         shutil.rmtree(release_home / "Applications/Herdr Shell.app")
+        # Older snapshots from earlier builds; a build keeps only the newest five, never a
+        # hidden in-progress snapshot.
+        releases = release_home / "Library/Caches/herdr-shell-publish/releases"
+        seeded = []
+        for i in range(6):
+            d = releases / f"{i:040x}"
+            d.mkdir(parents=True)
+            os.utime(d, (1_700_000_000 + i * 60, 1_700_000_000 + i * 60))
+            seeded.append(d.name)
+        (releases / ".inprogress").mkdir()
         for label in ("no installed app", "already installed"):
             result = subprocess.run([sys.executable, str(publisher), pinned],
                                     env=release_env, capture_output=True, text=True, timeout=60)
@@ -258,4 +268,7 @@ with tempfile.TemporaryDirectory(prefix="publish-check-", dir=os.environ.get("TM
             if label == "already installed":
                 assert "already installed" in result.stdout, result.stdout
             print(f"PASS publish: {label} exits successfully")
+            kept = sorted(p.name for p in releases.iterdir())
+            assert kept == sorted([".inprogress", pinned, *seeded[2:]]), kept
+        print("PASS publish: a build keeps the newest five releases")
 print("PASS publisher no-downgrade and bundle identity CLI regression")

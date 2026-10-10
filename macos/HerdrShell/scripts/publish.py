@@ -57,6 +57,8 @@ TARGETS = os.environ.get("HERDR_SHELL_TARGETS", f"{HOME}/.config/herdr-shell/tar
 LOGDIR = f"{HOME}/.cache/herdr-shell-publish"
 LOCK = f"{LOGDIR}/publish.lock"
 RELEASES = f"{HOME}/Library/Caches/herdr-shell-publish/releases"
+# Each build snapshots a ~20 MB app bundle; keep only the newest few (19 had piled up by 2026-10-09).
+KEEP_RELEASES = int(os.environ.get("HERDR_SHELL_KEEP_RELEASES", "5"))
 STAGE = f"{HOME}/Library/Application Support/HerdrShell"
 SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]
 # Run from a git hook, the environment carries GIT_DIR and friends for the pushing worktree.
@@ -288,6 +290,18 @@ def shell_changed(old, new):
     return r.returncode != 0
 
 
+def prune_releases():
+    """Keep the newest KEEP_RELEASES snapshots and whatever the release points at.
+    Called under the delivery lock, so no fanout or install is reading an old one."""
+    current = os.path.realpath(STORE)
+    snaps = [e for e in os.scandir(RELEASES) if e.is_dir(follow_symlinks=False) and not e.name.startswith(".")]
+    snaps.sort(key=lambda e: e.stat(follow_symlinks=False).st_mtime, reverse=True)
+    for e in snaps[KEEP_RELEASES:]:
+        if os.path.realpath(e.path) != current:
+            shutil.rmtree(e.path, ignore_errors=True)
+            log(f"pruned release {e.name[:12]}")
+
+
 def publish(ref):
     sha = git("rev-parse", "--verify", ref + "^{commit}")
     log(f"build {ref} = {sha[:12]}")
@@ -334,6 +348,8 @@ def publish(ref):
         with delivery_lock():
             if not os.path.isdir(snapshot):
                 os.rename(tmp, snapshot)
+            else:
+                os.utime(snapshot)
             os.makedirs(os.path.dirname(STORE), exist_ok=True)
             link = STORE + ".incoming"
             if os.path.lexists(link):
@@ -347,6 +363,7 @@ def publish(ref):
                 shutil.rmtree(old, ignore_errors=True)
                 os.rename(STORE, old)
             os.replace(link, STORE)
+            prune_releases()
     except (OSError, subprocess.CalledProcessError) as e:
         log(f"FAIL snapshot {sha[:12]}: {e}")
         return False
