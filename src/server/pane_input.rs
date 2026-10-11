@@ -1241,8 +1241,11 @@ mod polite_send_tests {
         let grace = HUMAN_DRAFT_GRACE + Duration::from_secs(1);
         // (agent state, human typed the draft, flush offset, heals)
         for (agent_state, human_draft, at, heals) in [
-            (crate::detect::AgentState::Idle, false, threshold, true),
-            (crate::detect::AgentState::Working, false, threshold, false),
+            // Text inherited by a live handoff is treated as a human draft:
+            // it waits the full grace (incident 2026-10-11).
+            (crate::detect::AgentState::Idle, false, threshold, false),
+            (crate::detect::AgentState::Idle, false, grace, true),
+            (crate::detect::AgentState::Working, false, grace, false),
             (crate::detect::AgentState::Idle, true, threshold, false),
             (crate::detect::AgentState::Idle, true, grace, true),
         ] {

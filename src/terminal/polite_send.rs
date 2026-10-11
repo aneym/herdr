@@ -259,6 +259,9 @@ pub(super) struct PoliteSend {
     /// composer might be a human draft typed before the handoff, so it holds
     /// until a human key, a submit or a write of its own settles who owns it.
     composer_observed: bool,
+    /// When a live handoff imported this runtime. Unattributed composer text
+    /// gets the human-draft grace from then, as if typed at the handoff.
+    inherited_at: Option<Instant>,
     /// An agent.prompt handoff owns the composer until human input or another send.
     agent_prompt_composer: bool,
     queue: VecDeque<HeldSend>,
@@ -310,6 +313,7 @@ impl Default for PoliteSend {
             last_submit_at: None,
             draft: false,
             composer_observed: true,
+            inherited_at: None,
             agent_prompt_composer: false,
             queue: VecDeque::new(),
             raw_pending: Vec::new(),
@@ -465,7 +469,9 @@ impl TerminalRuntime {
     /// This runtime took over a live pane (handoff import): it did not see
     /// who typed what is already in the composer.
     pub(crate) fn inherit_composer(&self) {
-        self.1.lock().composer_observed = false;
+        let mut state = self.1.lock();
+        state.composer_observed = false;
+        state.inherited_at = Some(Instant::now());
     }
 
     /// Read-only view of what the draft check sees for this pane.
@@ -971,15 +977,26 @@ impl TerminalRuntime {
             if !force {
                 if let Some(reason) = reason {
                     let held = now.saturating_duration_since(item.enqueued);
-                    let human_quiet = if state.draft {
+                    // Incident 2026-10-11: after a live handoff, a wake
+                    // self-healed 60 s into Alex's unattributed draft and
+                    // submitted it. Any human draft, typed or inherited, gets
+                    // the full grace.
+                    let human_quiet = if human_draft || state.draft {
                         HUMAN_DRAFT_GRACE
                     } else {
                         SELF_HEAL_AFTER
                     };
+                    let inherited = (!state.composer_observed)
+                        .then_some(state.inherited_at)
+                        .flatten()
+                        .map(|at| now.saturating_duration_since(at));
                     let heal = agent_idle
                         && held >= SELF_HEAL_AFTER
                         && state
                             .human_input_age(now)
+                            .into_iter()
+                            .chain(inherited)
+                            .min()
                             .is_none_or(|age| age >= human_quiet);
                     if !heal {
                         transition(&item.id, PaneSendState::Queued, Some(reason));
@@ -1540,5 +1557,51 @@ mod composer_draft_tests {
         let human = runtime.composer_state(true);
         assert!(human.human_draft && human.typed_draft);
         assert!(human.last_human_key_age_ms.is_some());
+    }
+
+    #[tokio::test]
+    async fn inherited_composer_text_gets_the_full_draft_grace() {
+        let (runtime, mut rx) = TerminalRuntime::test_with_channel(80, 12);
+        runtime.inherit_composer();
+        runtime.test_process_pty_bytes("────────\r\n❯ turn shado\r\n────────".as_bytes());
+        let options = SendOptions {
+            claude: true,
+            ..SendOptions::default()
+        };
+        let quiet = Duration::from_secs(1);
+        let sent = runtime
+            .polite_send(
+                true,
+                quiet,
+                "pane.send_input",
+                Payload::Bytes(Bytes::from_static(b"wake")),
+                options,
+            )
+            .unwrap();
+        assert_eq!(sent.state, PaneSendState::Queued);
+        let ready = |_: &DeliveryGuard| DeliveryVerdict::Ready;
+        let now = Instant::now();
+        runtime
+            .flush_polite_queue_guarded(
+                now + SELF_HEAL_AFTER * 2,
+                quiet,
+                false,
+                true,
+                options,
+                &ready,
+            )
+            .unwrap();
+        assert!(rx.try_recv().is_err(), "healed into an inherited draft");
+        runtime
+            .flush_polite_queue_guarded(
+                now + HUMAN_DRAFT_GRACE + SELF_HEAL_AFTER,
+                quiet,
+                false,
+                true,
+                options,
+                &ready,
+            )
+            .unwrap();
+        assert_eq!(rx.try_recv().unwrap().as_ref(), b"wake");
     }
 }
