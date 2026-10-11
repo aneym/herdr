@@ -254,10 +254,10 @@ pub(super) struct PoliteSend {
     last_raw_input_at: Option<Instant>,
     last_submit_at: Option<Instant>,
     draft: bool,
-    /// Whether this runtime has seen the composer's owner change hands: a
-    /// human key, a submit, or a write of its own. Until then (a fresh
-    /// runtime, or one imported by a live handoff) visible composer text
-    /// might be a human draft typed before it started, so it holds.
+    /// Whether this runtime has watched the composer since it began. A
+    /// runtime imported by a live handoff has not: text already in the
+    /// composer might be a human draft typed before the handoff, so it holds
+    /// until a human key, a submit or a write of its own settles who owns it.
     composer_observed: bool,
     /// An agent.prompt handoff owns the composer until human input or another send.
     agent_prompt_composer: bool,
@@ -309,7 +309,7 @@ impl Default for PoliteSend {
             last_raw_input_at: None,
             last_submit_at: None,
             draft: false,
-            composer_observed: false,
+            composer_observed: true,
             agent_prompt_composer: false,
             queue: VecDeque::new(),
             raw_pending: Vec::new(),
@@ -460,6 +460,12 @@ impl TerminalRuntime {
     /// byte batch as `agent.resume` does; `None` when none has.
     pub(crate) fn human_input_age(&self) -> Option<Duration> {
         self.1.lock().human_input_age(Instant::now())
+    }
+
+    /// This runtime took over a live pane (handoff import): it did not see
+    /// who typed what is already in the composer.
+    pub(crate) fn inherit_composer(&self) {
+        self.1.lock().composer_observed = false;
     }
 
     /// Read-only view of what the draft check sees for this pane.
@@ -1471,8 +1477,7 @@ mod composer_draft_tests {
     fn agent_inserted_composer_text_is_not_a_human_draft() {
         let now = Instant::now();
         let mut state = PoliteSend::default();
-        // A send's own write marks the composer observed, as polite_send does.
-        state.composer_observed = true;
+        // A spawned runtime has watched its composer since it began.
         assert!(!state.human_draft(Some(true), now));
         assert!(!state.human_draft(None, now));
     }
@@ -1482,6 +1487,7 @@ mod composer_draft_tests {
         // A runtime imported by a live handoff cannot tell who typed it.
         let now = Instant::now();
         let mut state = PoliteSend::default();
+        state.composer_observed = false;
         assert!(state.human_draft(Some(true), now));
         assert!(!state.human_draft(Some(false), now));
         assert!(!state.human_draft(None, now));
@@ -1524,12 +1530,12 @@ mod composer_draft_tests {
     async fn composer_state_reports_what_the_check_sees() {
         let (runtime, _rx) = TerminalRuntime::test_with_channel(80, 12);
         runtime.test_process_pty_bytes("────────\r\n❯ planted\r\n────────".as_bytes());
-        let fresh = runtime.composer_state(true);
-        assert_eq!(fresh.screen_draft, Some(true));
-        assert!(fresh.human_draft && !fresh.composer_observed && !fresh.typed_draft);
-        runtime.1.lock().composer_observed = true;
         let agent = runtime.composer_state(true);
-        assert!(!agent.human_draft);
+        assert_eq!(agent.screen_draft, Some(true));
+        assert!(!agent.human_draft && agent.composer_observed && !agent.typed_draft);
+        runtime.inherit_composer();
+        let imported = runtime.composer_state(true);
+        assert!(imported.human_draft && !imported.composer_observed);
         runtime.record_human_bytes(b"x");
         let human = runtime.composer_state(true);
         assert!(human.human_draft && human.typed_draft);

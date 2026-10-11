@@ -103,7 +103,11 @@ impl TerminalRuntime {
             render_notify,
             render_dirty,
         )
-        .map(|runtime| Self(runtime, Default::default(), Default::default()))
+        .map(|runtime| {
+            let runtime = Self(runtime, Default::default(), Default::default());
+            runtime.inherit_composer();
+            runtime
+        })
     }
 
     // Wrapper mirrors pane runtime construction arguments.

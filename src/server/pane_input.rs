@@ -1121,6 +1121,8 @@ mod polite_send_tests {
         runtime.test_process_pty_bytes(
             "────────\r\n❯ half typed\r\n  continuation\r\n────────".as_bytes(),
         );
+        // A human typed it; text on screen alone is not a human draft.
+        runtime.record_human_text();
         let response = request(
             &mut app,
             Method::PaneSendText(PaneSendTextParams {
@@ -1253,9 +1255,10 @@ mod polite_send_tests {
                 .set_detected_state(Some(crate::detect::Agent::Claude), agent_state);
             // Text left in the composer that nobody will ever submit: the
             // draft hold on the head never clears by itself.
-            app.terminal_runtimes
-                .get(&terminal_id)
-                .unwrap()
+            // From before a live handoff, so nobody can say who typed it.
+            let runtime = app.terminal_runtimes.get(&terminal_id).unwrap();
+            runtime.inherit_composer();
+            runtime
                 .test_process_pty_bytes("────────\r\n❯ stale composer text\r\n────────".as_bytes());
             if human_draft {
                 let runtime = app.terminal_runtimes.get(&terminal_id).unwrap();
