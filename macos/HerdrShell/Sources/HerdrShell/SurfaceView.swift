@@ -306,7 +306,12 @@ final class SurfaceView: NSView {
 
         if let interpretOverride { interpretOverride(event) } else { interpretKeyEvents([translationEvent]) }
 
-        if !markedTextBefore && keyboardIdBefore != currentInputSourceId() { return }
+        if !markedTextBefore, case let after = currentInputSourceId(), keyboardIdBefore != after {
+            // A key that switches the input source must not reach the pane; say so, since
+            // a key lost here is otherwise silent.
+            log("keyDown \(terminalId): input source \(keyboardIdBefore ?? "nil") -> \(after ?? "nil"); key not sent")
+            return
+        }
 
         syncPreedit(clearIfNeeded: markedTextBefore)
 
@@ -1069,7 +1074,10 @@ extension SurfaceView: NSTextInputClient {
     func insertText(_ string: Any, replacementRange: NSRange) {
         // keyDown sets the accumulator before the input method calls back. An in-process
         // key (the check hook) has no NSApp.currentEvent, and still has to commit.
-        guard keyTextAccumulator != nil || NSApp.currentEvent != nil else { return }
+        guard keyTextAccumulator != nil || NSApp.currentEvent != nil else {
+            log("insertText \(terminalId): outside keyDown with no current event; text not sent")
+            return
+        }
         var chars = ""
         if let v = string as? String {
             chars = v

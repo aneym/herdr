@@ -362,7 +362,9 @@ final class SurfaceRegistry {
             let keys = self.queued.removeValue(forKey: id) ?? []
             if let t0 = self.lifecycle[id]?.takeStartedAt { self.lifecycle[id]?.lastTakeS = Date().timeIntervalSince(t0) }
             self.lifecycle[id]?.takeStartedAt = nil
-            log("took control of \(id); replaying \(keys.count) key events")
+            // Counts only: queued keys can be a password.
+            let downs = keys.filter { $0.type == .keyDown }
+            log("took control of \(id); replaying \(keys.count) key events (\(downs.count) presses, \(downs.filter { !($0.characters ?? "").isEmpty }.count) with text)")
             for e in keys { if e.type == .keyDown { view.keyDown(with: e) } else { view.keyUp(with: e) } }
         }
     }

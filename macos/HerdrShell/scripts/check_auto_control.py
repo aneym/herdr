@@ -135,6 +135,19 @@ class Cli:
             pass
 
 
+def take_log():
+    """The app's own take/replay/drop lines, so a lost key names the layer that lost it:
+    fewer presses replayed than typed is the queue; a 'not sent' line is the surface;
+    neither is downstream of the app (attach client, server, shell)."""
+    if not S.SPACE:
+        return ""
+    try:
+        out = S.space("exec", "grep -E 'reclaiming|took control|not sent' /Users/lume/.herdr-space/app.log | tail -8")
+    except RuntimeError as e:
+        out = str(e)
+    return " || app log: " + " | ".join(l.strip() for l in out.splitlines() if l.strip())
+
+
 def held(tid):
     return lambda: lc(state(), tid).get("state") == "held"
 
@@ -207,7 +220,7 @@ def main():
     say(f"   app-side: first key on the held pane -> queued keys replayed: {lc(state(), t1).get('last_take_s')}s")
     ok, dt = wait(has_line(p1, "atc-A2"), 6)
     check("A's whole line, first key included, reaches the pane", ok is not None,
-          f"{dt:.2f}s after the take" if ok else S.pane_read(p1)[-300:])
+          f"{dt:.2f}s after the take" if ok else S.pane_read(p1)[-300:] + take_log())
     b.close()
 
     # ---- 2. settle window -----------------------------------------------------------------
@@ -247,8 +260,9 @@ def main():
     txt = S.pane_read(p1)
     rows = [l.strip() for l in txt.splitlines()]
     check("B's line arrived whole", "atc-B2-settle" in rows, txt[-300:].replace("\n", " | "))
-    check("A's queued line arrived whole, after B's", ok is not None and "atc-B2-settle" in rows
-          and rows.index("atc-A3") > rows.index("atc-B2-settle"), txt[-300:].replace("\n", " | "))
+    whole = ok is not None and "atc-B2-settle" in rows and rows.index("atc-A3") > rows.index("atc-B2-settle")
+    check("A's queued line arrived whole, after B's", whole,
+          txt[-300:].replace("\n", " | ") + ("" if whole else take_log()))
     check("no line mixes A's and B's keys", not any(("atc-A" in l and "B2" in l) for l in rows))
     b.close()
 
