@@ -880,6 +880,72 @@ mod polite_send_tests {
         }
     }
 
+    /// Integration over the API and the real terminal screen (2026-10-11
+    /// incident): text an agent's own send left in Claude's composer, or the
+    /// background-agent footer under it, never holds the next send as a human
+    /// draft; a human keystroke in that composer does, and `pane queue` shows
+    /// what the check saw.
+    #[tokio::test]
+    async fn polite_send_composer_draft_counts_only_human_keys() {
+        let (mut app, pane, public, mut rx) = fixture(PoliteSendConfig::All);
+        let terminal_id = app.state.workspaces[0].terminal_id(pane).unwrap().clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_state(
+                Some(crate::detect::Agent::Claude),
+                crate::detect::AgentState::Idle,
+            );
+        let send = |app: &mut App, text: &str| {
+            request(
+                app,
+                Method::PaneSendText(PaneSendTextParams {
+                    if_idle: false,
+                    human: false,
+                    pane_id: public.clone(),
+                    text: text.into(),
+                }),
+            )
+        };
+        let runtime = app.terminal_runtimes.get(&terminal_id).unwrap();
+        runtime.test_process_pty_bytes(
+            "────────\r\n❯ \r\n\r\n   4  · ← for agents · ↓ to manage".as_bytes(),
+        );
+        assert_eq!(send(&mut app, "planted")["result"]["queued"], false);
+        assert_eq!(rx.try_recv().unwrap().as_ref(), b"planted");
+        app.terminal_runtimes
+            .get(&terminal_id)
+            .unwrap()
+            .test_process_pty_bytes(
+                "\x1b[2J\x1b[H────────\r\n❯ planted\r\n\r\n   4  · ← for agents".as_bytes(),
+            );
+        assert_eq!(send(&mut app, " next")["result"]["queued"], false);
+        assert_eq!(rx.try_recv().unwrap().as_ref(), b" next");
+
+        let runtime = app.terminal_runtimes.get(&terminal_id).unwrap();
+        apply_terminal_attach_input(runtime, b" typed".to_vec()).unwrap();
+        assert_eq!(rx.try_recv().unwrap().as_ref(), b" typed");
+        assert_eq!(send(&mut app, "held")["result"]["queued"], true);
+        let queue = request(
+            &mut app,
+            Method::PaneQueue(PaneQueueParams {
+                id: None,
+                pane_id: public.clone(),
+                flush: false,
+                cancel: false,
+            }),
+        );
+        assert_eq!(
+            queue["result"]["sends"][0]["reason"],
+            "human_composer_draft"
+        );
+        assert_eq!(queue["result"]["composer"]["human_draft"], true);
+        assert_eq!(queue["result"]["composer"]["typed_draft"], true);
+        assert_eq!(queue["result"]["composer"]["screen_draft"], true);
+        assert!(rx.try_recv().is_err());
+    }
+
     /// The queue API must deliver a named receipt after a long hold, preserving
     /// FIFO predecessors without also delivering later unrelated input.
     #[tokio::test]

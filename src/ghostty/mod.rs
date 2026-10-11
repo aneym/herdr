@@ -1276,25 +1276,21 @@ impl Terminal {
                     .collect()
             })
             .collect();
-        let rules: Vec<usize> = text
-            .iter()
-            .enumerate()
-            .filter_map(|(i, line)| {
-                let line = line.trim();
-                (line.starts_with("───")).then_some(i)
-            })
-            .collect();
-        let (top, bottom) = if rules.len() >= 2 {
-            (rules[rules.len() - 2] + 1, rules[rules.len() - 1])
-        } else {
-            (0, rows.len())
-        };
-        let Some(prompt) = (top..bottom)
+        let is_rule = |line: &str| line.trim().starts_with("───");
+        // The composer is the last `❯` row right under a rule. The transcript
+        // echoes past prompts with `❯` too, but never directly under a rule.
+        let Some(prompt) = (1..text.len())
             .rev()
-            .find(|i| text[*i].trim_start().starts_with('❯'))
+            .find(|i| text[*i].trim_start().starts_with('❯') && is_rule(&text[i - 1]))
         else {
             return Ok(None);
         };
+        // The composer ends at its closing rule. With background agents
+        // running, Claude drops that rule and draws the agent footer after a
+        // blank row; that footer is not a draft, so a blank row ends it too.
+        let bottom = (prompt + 1..text.len())
+            .find(|i| is_rule(&text[*i]) || text[*i].trim().is_empty())
+            .unwrap_or(text.len());
         for (y, row) in rows.iter().enumerate().take(bottom).skip(prompt) {
             let mut after_prompt = y != prompt;
             for (x, cell) in row.cells.iter().enumerate() {

@@ -254,6 +254,11 @@ pub(super) struct PoliteSend {
     last_raw_input_at: Option<Instant>,
     last_submit_at: Option<Instant>,
     draft: bool,
+    /// Whether this runtime has seen the composer's owner change hands: a
+    /// human key, a submit, or a write of its own. Until then (a fresh
+    /// runtime, or one imported by a live handoff) visible composer text
+    /// might be a human draft typed before it started, so it holds.
+    composer_observed: bool,
     /// An agent.prompt handoff owns the composer until human input or another send.
     agent_prompt_composer: bool,
     queue: VecDeque<HeldSend>,
@@ -304,6 +309,7 @@ impl Default for PoliteSend {
             last_raw_input_at: None,
             last_submit_at: None,
             draft: false,
+            composer_observed: false,
             agent_prompt_composer: false,
             queue: VecDeque::new(),
             raw_pending: Vec::new(),
@@ -315,12 +321,14 @@ impl Default for PoliteSend {
 impl PoliteSend {
     fn typing(&mut self, draft: bool) {
         self.agent_prompt_composer = false;
+        self.composer_observed = true;
         self.last_human_input_at = Some(Instant::now());
         self.draft |= draft;
     }
 
     fn submit(&mut self) {
         self.agent_prompt_composer = false;
+        self.composer_observed = true;
         self.last_human_input_at = Some(Instant::now());
         self.draft = false;
         self.last_submit_at = Some(Instant::now());
@@ -359,6 +367,39 @@ impl PoliteSend {
             .chain(self.last_raw_input_at)
             .max()
             .map(|at| now.saturating_duration_since(at))
+    }
+
+    /// Whether the composer holds a draft a human typed. Only human keys in
+    /// this pane make one: text an agent or a send left there does not, an
+    /// emptied composer clears it, and a draft with no human input for
+    /// `HUMAN_DRAFT_GRACE` is stale. `screen` is the composer as drawn
+    /// (`None` when it cannot be read, e.g. not a Claude pane).
+    fn human_draft(&mut self, screen: Option<bool>, now: Instant) -> bool {
+        let draft = self.sees_human_draft(screen, now);
+        if self.draft && (screen == Some(false) || self.draft_stale(now)) {
+            self.draft = false;
+        }
+        draft
+    }
+
+    fn sees_human_draft(&self, screen: Option<bool>, now: Instant) -> bool {
+        let typed = self.draft && !self.draft_stale(now);
+        match screen {
+            Some(false) => false,
+            Some(true) => typed || !self.composer_observed,
+            None => typed,
+        }
+    }
+
+    /// Text an `agent.prompt` handoff typed and has not submitted yet: other
+    /// sends wait so they never splice into it, but it is not a human draft.
+    fn agent_composer_draft(&self, screen: Option<bool>) -> bool {
+        screen == Some(true) && self.agent_prompt_composer
+    }
+
+    fn draft_stale(&self, now: Instant) -> bool {
+        self.last_human_input_at
+            .is_none_or(|at| now.saturating_duration_since(at) >= HUMAN_DRAFT_GRACE)
     }
 
     fn quiet(&self, now: Instant, quiet: Duration) -> bool {
@@ -419,6 +460,25 @@ impl TerminalRuntime {
     /// byte batch as `agent.resume` does; `None` when none has.
     pub(crate) fn human_input_age(&self) -> Option<Duration> {
         self.1.lock().human_input_age(Instant::now())
+    }
+
+    /// Read-only view of what the draft check sees for this pane.
+    pub(crate) fn composer_state(&self, claude: bool) -> crate::api::schema::PaneComposerState {
+        let screen = claude.then(|| self.0.claude_prompt_draft()).flatten();
+        let now = Instant::now();
+        let state = self.1.lock();
+        let ms =
+            |at: Option<Instant>| at.map(|at| now.saturating_duration_since(at).as_millis() as u64);
+        crate::api::schema::PaneComposerState {
+            human_draft: state.sees_human_draft(screen, now),
+            screen_draft: screen,
+            typed_draft: state.draft,
+            composer_observed: state.composer_observed,
+            agent_prompt_composer: state.agent_prompt_composer,
+            last_human_key_age_ms: ms(state.last_human_input_at),
+            last_raw_input_age_ms: ms(state.last_raw_input_at),
+            last_submit_age_ms: ms(state.last_submit_at),
+        }
     }
 
     pub(crate) fn record_human_text(&self) {
@@ -595,10 +655,9 @@ impl TerminalRuntime {
                 position: None,
             });
         }
-        if screen_draft == Some(false) {
-            state.draft = false;
-        }
         let now = Instant::now();
+        let human_draft = state.human_draft(screen_draft, now);
+        let agent_draft = state.agent_composer_draft(screen_draft);
         if let Some((refused, reason)) = guard
             .as_ref()
             .and_then(|(guard, verdict)| self.guard_refusal(guard, *verdict, now))
@@ -622,7 +681,7 @@ impl TerminalRuntime {
         if (!state.queue.is_empty() && !owned_submit)
             || guard_holds
             || (guarded
-                && ((screen_draft.unwrap_or(state.draft) && !owned_submit)
+                && (((human_draft || agent_draft) && !owned_submit)
                     || !state.quiet(now, quiet)
                     || settling))
         {
@@ -639,8 +698,10 @@ impl TerminalRuntime {
                 "predecessor_queued"
             } else if guard_holds {
                 "delivery_guard"
-            } else if screen_draft.unwrap_or(state.draft) && !owned_submit {
+            } else if human_draft && !owned_submit {
                 "human_composer_draft"
+            } else if agent_draft && !owned_submit {
+                "agent_composer_draft"
             } else if settling {
                 "submit_settling"
             } else {
@@ -669,6 +730,7 @@ impl TerminalRuntime {
         }
         self.write_polite_payload(&payload, false, &id)?;
         state.agent_prompt_composer = method == "agent.prompt";
+        state.composer_observed = true;
         Ok(SendOutcome {
             state: self.polite_receipt_state(&id),
             id,
@@ -870,9 +932,11 @@ impl TerminalRuntime {
             tracing::info!(pane_id = ?item.pane_id, method = item.method, reason, "guarded polite send dropped");
             false
         });
-        if screen_draft == Some(false) {
-            state.draft = false;
-        }
+        // A typed draft with no human key for `HUMAN_DRAFT_GRACE` is stale:
+        // what it held goes out now, and its receipts say so.
+        let stale_draft = state.draft && screen_draft != Some(false) && state.draft_stale(now);
+        let human_draft = state.human_draft(screen_draft, now);
+        let agent_draft = state.agent_composer_draft(screen_draft);
         let settled = state
             .last_submit_at
             .is_none_or(|at| now.saturating_duration_since(at) >= options.settle);
@@ -886,8 +950,10 @@ impl TerminalRuntime {
                 break;
             };
             let owned_submit = state.agent_prompt_composer && item.payload.is_submit();
-            let reason = if screen_draft.unwrap_or(state.draft) && !owned_submit {
+            let reason = if human_draft && !owned_submit {
                 Some("human_composer_draft")
+            } else if agent_draft && !owned_submit {
+                Some("agent_composer_draft")
             } else if !settled {
                 Some("submit_settling")
             } else if !state.quiet(now, quiet) && !submitted {
@@ -950,6 +1016,14 @@ impl TerminalRuntime {
             }
             self.write_polite_payload(&item.payload, true, &item.id)?;
             tracing::info!(pane_id = ?self.0.pane_id, method = item.method, bytes = len, "polite send flushed");
+            if healed.is_none() && stale_draft {
+                let held = now.saturating_duration_since(item.enqueued);
+                tracing::warn!(pane_id = ?item.pane_id, method = item.method, id = %item.id, held_secs = held.as_secs(), "polite send released by a stale human draft");
+                mark_healed(
+                    &item.id,
+                    format!("human_composer_draft stale, held {}s", held.as_secs()),
+                );
+            }
             if let Some((reason, held)) = healed {
                 tracing::warn!(pane_id = ?item.pane_id, method = item.method, id = %item.id, reason, held_secs = held.as_secs(), "polite send self-healed");
                 mark_healed(
@@ -958,6 +1032,7 @@ impl TerminalRuntime {
                 );
             }
             state.agent_prompt_composer = item.method == "agent.prompt";
+            state.composer_observed = true;
             state.queue.pop_front();
             remaining -= 1;
         }
@@ -1352,5 +1427,112 @@ mod agent_resume_quiet_tests {
         assert!(!unparsed.human_input_quiet(Instant::now(), quiet));
 
         assert!(PoliteSend::default().human_input_quiet(Instant::now(), quiet));
+    }
+}
+
+/// Composer-draft detection (2026-10-11 incident: four panes held behind
+/// "human_composer_draft" while Alex typed in one other chat).
+#[cfg(test)]
+mod composer_draft_tests {
+    use super::*;
+
+    fn screen(runtime: &TerminalRuntime, bytes: &str) -> Option<bool> {
+        runtime.test_process_pty_bytes(format!("\x1b[2J\x1b[H{bytes}").as_bytes());
+        runtime.0.claude_prompt_draft()
+    }
+
+    #[tokio::test]
+    async fn composer_screen_ignores_the_background_agent_footer() {
+        let (runtime, _rx) = TerminalRuntime::test_with_channel(80, 12);
+        // p169's layout: no closing rule, a blank row, then the agent footer.
+        let footer = "● done\r\n────────\r\n❯ \x1b[2mrails-dev-fix fallback check\x1b[0m\r\n\r\n   4  · ← for agents · ↓ to manage\r\n  ◯ gpt-implementer  Polling marker";
+        assert_eq!(screen(&runtime, footer), Some(false));
+        let empty = "────────\r\n❯ \r\n\r\n   4  · ← for agents";
+        assert_eq!(screen(&runtime, empty), Some(false));
+        let typed = "────────\r\n❯ turn shado\r\n\r\n   4  · ← for agents";
+        assert_eq!(screen(&runtime, typed), Some(true));
+    }
+
+    #[tokio::test]
+    async fn composer_screen_reads_only_the_ruled_composer() {
+        let (runtime, _rx) = TerminalRuntime::test_with_channel(80, 12);
+        // A past prompt echoed in the transcript is not the composer.
+        let echoed = "❯ an old message\r\n\r\n● reply\r\n────────\r\n❯ \r\n────────\r\n  footer";
+        assert_eq!(screen(&runtime, echoed), Some(false));
+        let draft = "❯ an old message\r\n────────\r\n❯ real draft\r\n────────";
+        assert_eq!(screen(&runtime, draft), Some(true));
+        let faint = "────────\r\n❯ \x1b[2msuggestion\x1b[0m\r\n────────";
+        assert_eq!(screen(&runtime, faint), Some(false));
+        // No ruled composer on screen: unknown, the typed flag decides.
+        assert_eq!(screen(&runtime, "❯ just a shell prompt"), None);
+    }
+
+    #[test]
+    fn agent_inserted_composer_text_is_not_a_human_draft() {
+        let now = Instant::now();
+        let mut state = PoliteSend::default();
+        // A send's own write marks the composer observed, as polite_send does.
+        state.composer_observed = true;
+        assert!(!state.human_draft(Some(true), now));
+        assert!(!state.human_draft(None, now));
+    }
+
+    #[test]
+    fn unobserved_composer_text_holds_until_someone_owns_it() {
+        // A runtime imported by a live handoff cannot tell who typed it.
+        let now = Instant::now();
+        let mut state = PoliteSend::default();
+        assert!(state.human_draft(Some(true), now));
+        assert!(!state.human_draft(Some(false), now));
+        assert!(!state.human_draft(None, now));
+    }
+
+    #[test]
+    fn human_keystrokes_make_a_draft_that_an_empty_composer_clears() {
+        let mut state = PoliteSend::default();
+        state.raw_bytes(b"turn shado");
+        let now = Instant::now();
+        assert!(state.human_draft(Some(true), now));
+        assert!(state.human_draft(None, now));
+        // Focus and mouse reports from a client are not keystrokes.
+        let mut reports = PoliteSend::default();
+        reports.raw_bytes(b"\x1b[I\x1b[O\x1b[<0;10;5M");
+        assert!(!reports.draft);
+        // The composer drawn empty clears the typed flag for good.
+        assert!(!state.human_draft(Some(false), now));
+        assert!(!state.draft);
+        assert!(!state.human_draft(None, now));
+        // Ctrl-U clears it too.
+        state.raw_bytes(b"x\x15");
+        assert!(!state.human_draft(None, Instant::now()));
+    }
+
+    #[test]
+    fn a_stale_human_draft_times_out() {
+        let mut state = PoliteSend::default();
+        state.raw_bytes(b"abandoned");
+        let typed = state.last_human_input_at.unwrap();
+        assert!(state.human_draft(
+            Some(true),
+            typed + HUMAN_DRAFT_GRACE - Duration::from_secs(1)
+        ));
+        assert!(!state.human_draft(Some(true), typed + HUMAN_DRAFT_GRACE));
+        assert!(!state.draft);
+    }
+
+    #[tokio::test]
+    async fn composer_state_reports_what_the_check_sees() {
+        let (runtime, _rx) = TerminalRuntime::test_with_channel(80, 12);
+        runtime.test_process_pty_bytes("────────\r\n❯ planted\r\n────────".as_bytes());
+        let fresh = runtime.composer_state(true);
+        assert_eq!(fresh.screen_draft, Some(true));
+        assert!(fresh.human_draft && !fresh.composer_observed && !fresh.typed_draft);
+        runtime.1.lock().composer_observed = true;
+        let agent = runtime.composer_state(true);
+        assert!(!agent.human_draft);
+        runtime.record_human_bytes(b"x");
+        let human = runtime.composer_state(true);
+        assert!(human.human_draft && human.typed_draft);
+        assert!(human.last_human_key_age_ms.is_some());
     }
 }

@@ -212,6 +212,7 @@ impl App {
                 ResponseResult::PaneQueue {
                     sends: vec![],
                     recent,
+                    composer: None,
                 },
             );
         }
@@ -238,6 +239,10 @@ impl App {
             ResponseResult::PaneQueue {
                 sends: self.public_queue_receipts(runtime.held_polite_sends()),
                 recent: self.public_queue_receipts(runtime.polite_queue()),
+                composer: Some(
+                    runtime
+                        .composer_state(self.polite_options(ws_idx, pane_id, false, false).claude),
+                ),
             },
         )
     }

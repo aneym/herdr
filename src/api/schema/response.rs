@@ -344,6 +344,9 @@ pub enum ResponseResult {
     PaneQueue {
         sends: Vec<super::panes::PaneQueuedSend>,
         recent: Vec<super::panes::PaneQueuedSend>,
+        /// What the composer-draft check sees, for a pane query.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        composer: Option<super::panes::PaneComposerState>,
     },
     Ok {},
 }

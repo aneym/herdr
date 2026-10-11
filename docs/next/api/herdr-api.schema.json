@@ -9498,6 +9498,64 @@
           ],
           "type": "string"
         },
+        "PaneComposerState": {
+          "description": "What the polite-send composer-draft check sees for one pane.",
+          "properties": {
+            "agent_prompt_composer": {
+              "type": "boolean"
+            },
+            "composer_observed": {
+              "description": "A human key, submit or send has reached this runtime.",
+              "type": "boolean"
+            },
+            "human_draft": {
+              "description": "The verdict: a held send waits behind a human draft.",
+              "type": "boolean"
+            },
+            "last_human_key_age_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "last_raw_input_age_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "last_submit_age_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "screen_draft": {
+              "description": "Non-faint text in Claude's composer as drawn; null when unreadable.",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "typed_draft": {
+              "description": "A human typed draft keys here since the last submit or clear.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "human_draft",
+            "typed_draft",
+            "composer_observed",
+            "agent_prompt_composer"
+          ],
+          "type": "object"
+        },
         "PaneDirection": {
           "enum": [
             "left",
@@ -12750,6 +12808,17 @@
             },
             {
               "properties": {
+                "composer": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/schemas/success_response/$defs/PaneComposerState"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "What the composer-draft check sees, for a pane query."
+                },
                 "recent": {
                   "items": {
                     "$ref": "#/schemas/success_response/$defs/PaneQueuedSend"

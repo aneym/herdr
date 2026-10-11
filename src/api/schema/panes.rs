@@ -802,6 +802,23 @@ pub enum PaneSendState {
     StaleSession,
 }
 
+/// What the polite-send composer-draft check sees for one pane.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PaneComposerState {
+    /// The verdict: a held send waits behind a human draft.
+    pub human_draft: bool,
+    /// Non-faint text in Claude's composer as drawn; null when unreadable.
+    pub screen_draft: Option<bool>,
+    /// A human typed draft keys here since the last submit or clear.
+    pub typed_draft: bool,
+    /// A human key, submit or send has reached this runtime.
+    pub composer_observed: bool,
+    pub agent_prompt_composer: bool,
+    pub last_human_key_age_ms: Option<u64>,
+    pub last_raw_input_age_ms: Option<u64>,
+    pub last_submit_age_ms: Option<u64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PaneQueuedSend {
     pub id: String,
