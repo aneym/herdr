@@ -20,6 +20,7 @@ import type { OverlayHost, SpacesOverlay } from "./spacesOverlay";
 import type { RemoteMachine } from "./machines";
 import { foldAllSpaces, foldKey, noteSelection, pinCount, revealOnSelect, spaceOpen } from "./model";
 import type { RevealMemo, SidebarRow } from "./model";
+import { newPanes } from "./newPanes";
 /** The machine running a chat from another machine: an icon and its short name, quiet after the
  *  title, as the Mac's SpacesRowView badge. An unreachable machine dims it and says so on hover. */
 function MachineBadge({ row }: { row: SidebarRow }) {
@@ -253,7 +254,8 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
     const name = machine.name;
     setCreating(true); setMenuError(null);
     try {
-      const result = await bridge.api(name, "tab.create", { workspace_id: workspace, focus: false }) as { tab?: { tab_id?: string } };
+      const result = await bridge.api(name, "tab.create", { workspace_id: workspace, focus: false }) as { tab?: { tab_id?: string }; root_pane?: { pane_id?: string } };
+      newPanes.markMine(name, result?.root_pane?.pane_id);
       const id = result?.tab?.tab_id;
       if (!id) throw new Error("API response missing tab.tab_id");
       if (pinned) {

@@ -17,6 +17,7 @@ import { terminalFont } from "./tokens";
 import { Status } from "./Sidebar";
 import { appTheme, terminalThemes } from "./theme";
 import { autoControl } from "./autoControl";
+import { newPanes } from "./newPanes";
 export interface PaneController {
   linkClick: (row: number, col: number, ctrl: boolean) => Promise<string | null>;
   copySelection: (from: Cell, to: Cell) => Promise<{ text: string; copied: boolean }>;
@@ -131,13 +132,15 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
       try {
         let next: number;
         let nextMode: "attach" | "observe" = "attach";
-        try { next = await bridge.attach(machine, pane.terminal_id, openCols, openRows, "attach", onEvent); }
+        try { next = await bridge.attach(machine, pane.terminal_id, openCols, openRows, newPanes.isMine(machine, pane.pane_id) ? "takeover" : "attach", onEvent); }
         catch (refused) {
           if (disposed) return;
           closedDuringOpen = false;
           // Another client holds the pane: usually this user's other machine, often asleep
           // with its socket still open. The user is here now, so take it over.
-          if (String(refused).includes("already has an attached client")) next = await bridge.attach(machine, pane.terminal_id, openCols, openRows, "takeover", onEvent);
+          // Unless another client just opened it (a new thread): that one stays with its maker,
+          // and this pane observes until input or Take control here (newPanes).
+          if (String(refused).includes("already has an attached client") && !newPanes.othersNew(machine, pane.pane_id)) next = await bridge.attach(machine, pane.terminal_id, openCols, openRows, "takeover", onEvent);
           else { nextMode = "observe"; next = await bridge.attach(machine, pane.terminal_id, openCols, openRows, "observe", onEvent); }
         }
         if (disposed) { await bridge.close(next); return; }

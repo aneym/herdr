@@ -3,6 +3,7 @@ import type { AreaChip } from "./areas";
 import type { Action } from "./keys";
 import type { Layout, Snapshot, SidebarRow } from "./model";
 import { tabOrder } from "./model";
+import { newPanes } from "./newPanes";
 /** Mac attention classes, independent of notification suppression and delivery. */
 export function trackAttention(previous: Snapshot | undefined, next: Snapshot, trail: readonly string[]): string[] {
   const classes = (snapshot: Snapshot) => new Map((snapshot.panes ?? []).map(pane => {
@@ -112,10 +113,12 @@ export async function runAction(action: Action, ctx: ActionContext): Promise<voi
     } else if (action === "new_tab") {
       if (!tab) throw new Error("No selected tab workspace");
       const result = await api("tab.create", { workspace_id: tab.workspace_id, focus: false });
+      newPanes.markMine(ctx.machine, responseId(result, "root_pane", "pane_id"));
       ctx.created(responseId(result, "tab", "tab_id"), responseId(result, "root_pane", "pane_id"));
     } else if (action === "split_right" || action === "split_down") {
       if (!tab) throw new Error("No selected tab");
       const result = await api("pane.split", { target_pane_id: pane(), direction: action === "split_right" ? "right" : "down", focus: false });
+      newPanes.markMine(ctx.machine, responseId(result, "pane", "pane_id"));
       ctx.created(tab.tab_id, responseId(result, "pane", "pane_id"));
     } else if (action === "close_pane") await api("pane.close", { pane_id: pane() });
     else if (action === "zoom_pane") await api("pane.zoom", { pane_id: pane(), mode: "toggle" });

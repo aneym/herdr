@@ -39,6 +39,9 @@ struct PaneLifecycle {
 ///   are now; the holder is usually the other machine's Shell, often asleep with its
 ///   socket still open, and would otherwise hold the pane forever (Alex, 2026-10-10:
 ///   "swapping between machines seems to get it stuck").
+/// - Another client just opened the pane (a new thread, NewPanes): a refused attach leaves
+///   it with that client, held here, and focusing it here does not take it back (Alex,
+///   2026-10-11: "new threads should be focused on the client that made them").
 /// - Another client takes the terminal from this app (`--takeover`): the surface stays
 ///   and shows who holds it. The user's first key or click on the pane takes it back with
 ///   no menu action (Alex, 2026-10-10: "take control should jsut automatically happen in
@@ -88,7 +91,8 @@ final class SurfaceRegistry {
 
     func surface(paneId: String, terminalId: String) -> SurfaceView {
         if let s = byTerminal[terminalId] { return s }
-        return spawn(paneId: paneId, terminalId: terminalId, takeover: false)
+        // A thread this app just made is this app's: attach it with --takeover from the start.
+        return spawn(paneId: paneId, terminalId: terminalId, takeover: NewPanes.shared.isMine(paneId))
     }
 
     // MARK: spawning
@@ -213,6 +217,16 @@ final class SurfaceRegistry {
         lc.lastExitText = fresh.last ?? ""
         let fast = exitAt.timeIntervalSince(lc.spawnedAt) < 3
 
+        // Another client just opened this pane and holds it: it stays theirs (NewPanes). A key
+        // or a click here still takes it.
+        if text.contains("already has an attached client"), NewPanes.shared.othersNew(view.paneId) {
+            lc.state = .held
+            lc.takeStartedAt = nil
+            lifecycle[id] = lc
+            log("attach for \(id) refused: another client just opened it; leaving it theirs")
+            showHeld(view)
+            return
+        }
         // Another client holds the pane (another machine, or our own attach the server has
         // not dropped yet): take it over. A takeover attach is never refused, so this runs
         // once per open; the fast-exit cap still stops a loop if that ever changes.

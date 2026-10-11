@@ -1,0 +1,15 @@
+HerdrShell attach-swap check  2026-10-11T17:52:01Z
+lab shellspike-swap; pane w1:p2 (terminal term_65d943d36ad7a2); app /Users/aneyman/.cache/herdr-build/thread-focus-swift/release/HerdrShell in the Space
+{"space": "herdr-qa", "ip": "192.168.64.5", "herdr_sha": "f7e2f95cc803"}
+{"space": "herdr-qa", "app_pid": "45399", "exe": "/Users/lume/.herdr-space/bin/HerdrShell", "host_socket": "/Users/aneyman/.cache/herdr-build/s/eaa18a/h/.config/herdr/sessions/shellspike-swap/herdr.sock", "guest_socket": "/Users/lume/.herdr-space/herdr.sock", "owner": "herdr-thread-focus"}
+
+== 3. a new thread opened here is focused and controlled here at once
+[PASS] keys typed at once land in the new thread, no click -- 0.04s
+[PASS] this app holds the new thread -- state=running notice=None
+[PASS] the other machine's client sees the thread but does not get control -- exit=1 tail='\x1b[?1006l\x1b[?1015l\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1049l\x1b[?2031l\x1b[?25h\x1b[0 qherdr: server shut down: terminal attach taken over\r\n'
+
+== 4. a new thread opened on another machine stays with that machine
+[PASS] this app shows the new thread without control -- state=held
+[PASS] the machine that made it keeps control: its keys land -- alive=True tail=b'                                                                                    \x1b[0m\x1b[3;7H\x1b[?25h\x1b[?2026l\x1b[3;7H\x1b[?25h'
+
+RESULT: PASS

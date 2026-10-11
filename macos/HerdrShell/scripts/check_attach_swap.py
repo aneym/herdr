@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Machine-swap check: a pane another machine still holds opens here without a banner.
 
-  python3 scripts/check_attach_swap.py [--no-build] [--app BIN] [--out checks/ATTACH-SWAP.txt]
+  python3 scripts/check_attach_swap.py [--no-build] [--app BIN] [--out checks/ATTACH-SWAP.txt] [--new-threads]
+
+--new-threads runs only cases 3 and 4 (new threads) on a fresh lab.
 
 --app runs another build (for example origin/main's, to see the check fail there).
 
@@ -14,9 +16,13 @@ as a second machine reaches Studio over its tunnel. The first machine is a CLI
      with its socket still open. The app starts: the pane attaches with no notice and no
      raw `]4;N;rgb:` color replies on screen, typing reaches it, and the stopped client
      is shut out when it wakes.
-  2. The host takes the pane back with --takeover: the app shows it held, and keys typed
-     in the app do not reach the pane. A click on the pane takes it back: typing works
-     afterwards and the host client is shut out.
+  2. The host takes the pane back with --takeover: the app shows it held. Keys typed in the
+     app take it back and land (auto take-control). The host takes it again; a click on the
+     pane takes it back: typing works afterwards and the host client is shut out.
+  3. The app opens a new thread (split) while the host attaches every new pane: keys typed
+     at once land in it with no click, and the host client is refused or shut out.
+  4. The host opens a new thread in the tab the app shows and attaches it: the app shows it
+     held and does not take it; the host's keys land.
 """
 import json
 import os
@@ -25,6 +31,7 @@ import select
 import signal
 import subprocess
 import sys
+import threading
 import time
 
 os.environ["SHELL_LAB"] = "shellspike-swap"
@@ -138,6 +145,11 @@ def main():
     p1 = min(lay["panes"], key=lambda p: p["rect"]["x"])["pane_id"]
     t1 = next(p["terminal_id"] for p in snap["panes"] if p["pane_id"] == p1)
     say(f"lab {S.NAME}; pane {p1} (terminal {t1}); app {APP_BIN} in the Space")
+    if "--new-threads" in sys.argv:
+        say(S.app("start").strip())
+        wait(lambda: (lambda lc: lc if lc and lc["state"] == "running" else None)(pane_state(t1, p1)[0]), 20, 0.2)
+        new_threads(spike)
+        return finish()
 
     # ---- 1. the other machine sleeps while holding the pane -----------------------------
     say()
@@ -187,13 +199,20 @@ def main():
     held = wait(lambda: (lambda lc: lc if lc and lc["state"] == "held" else None)(pane_state(t1, p1)[0]), 8, 0.2)
     check("the app shows the pane held while the other machine has it", held is not None,
           (held or {}).get("notice") or "")
-    S.type_("echo LEAKED")
+    # Since auto take-control (Alex, 2026-10-10: "take control should jsut automatically happen
+    # in all clients"), keys typed at a held pane take it back once the holder is quiet and land.
+    S.type_("echo TYPED-BACK")
     S.key("return")
-    time.sleep(1.0)
+    txt, dt = S.wait_read(p1, lambda x: book2.drain(0.05) is not None and any(
+        l.strip() == "TYPED-BACK" for l in x.splitlines()), timeout=8)
     lc_after_keys = pane_state(t1, p1)[0]
-    check("keys typed at the held pane neither reach it nor take it back",
-          "LEAKED" not in S.pane_read(p1) and lc_after_keys and lc_after_keys["state"] == "held",
-          f"state={lc_after_keys and lc_after_keys['state']}")
+    check("keys typed at the held pane take it back and land",
+          dt is not None and lc_after_keys and lc_after_keys["state"] == "running",
+          f"state={lc_after_keys and lc_after_keys['state']} {txt[-120:]!r}")
+    book3 = Cli(t1, takeover=True)
+    book3.drain(1.0)
+    wait(lambda: (lambda lc: lc if lc and lc["state"] == "held" else None)(pane_state(t1, p1)[0]), 8, 0.2)
+    book2 = book3
     for action in ("down", "up"):
         S.cmd({"cmd": "mouse", "pane": p1, "action": action, "row": 12, "col": 10})
     back = wait(lambda: (lambda r: r[0] if r[0] and r[0]["state"] == "running" and r[1] and not r[1]["exited"]
@@ -204,7 +223,73 @@ def main():
     S.key("return")
     txt, dt = S.wait_read(p1, lambda x: any(l.strip() == "SWAP-TWO" for l in x.splitlines()))
     check("typing reaches the pane after taking it back", dt is not None, f"{dt:.2f}s" if dt is not None else txt[-160:])
+    new_threads(spike)
     finish()
+
+
+def panes_of(tab):
+    snap = S.herdr_json("api", "snapshot")["result"]["snapshot"]
+    return {p["pane_id"]: p["terminal_id"] for p in snap["panes"] if p["tab_id"] == tab}
+
+
+def new_threads(tab):
+    """Alex, 2026-10-11: "new threads should be focused on the client that made them when
+    they're first made." Every client showing the tab attaches a new pane as soon as it is
+    listed; the one that made it keeps control."""
+    # ---- 3. this app opens a new thread ---------------------------------------------------
+    say()
+    say("== 3. a new thread opened here is focused and controlled here at once")
+    before = panes_of(tab)
+    S.cmd({"cmd": "split", "direction": "right"})
+    made = wait(lambda: [p for p in panes_of(tab) if p not in before], 5, 0.05)
+    p3 = made[0] if made else None
+    t3 = panes_of(tab).get(p3) if p3 else None
+    # The other machine's client attaches the new pane as soon as it is listed, as an idle Shell does.
+    other = Cli(t3, takeover=False) if t3 else None
+    # Read its screen output as a live client does: a client nobody reads stalls the pane's output.
+    pump = threading.Thread(target=lambda: other and other.drain(12.0), daemon=True)
+    pump.start()
+    shown = wait(lambda: (lambda lc, surf: lc if lc and lc["state"] == "running" and surf and surf["visible_nonblank"] else None)(
+        *pane_state(t3, p3)), 8, 0.05) if p3 else None
+    S.type_("echo NEW-HERE")
+    S.key("return")
+    txt, dt = S.wait_read(p3, lambda x: any(l.strip() == "NEW-HERE" for l in x.splitlines())) if p3 else ("", None)
+    check("keys typed at once land in the new thread, no click", dt is not None,
+          f"{dt:.2f}s" if dt is not None else f"pane={p3} shown={bool(shown)} {txt[-160:]!r}")
+    lc3, _ = pane_state(t3, p3) if p3 else (None, None)
+    check("this app holds the new thread", bool(lc3) and lc3["state"] == "running" and not lc3.get("notice"),
+          f"state={lc3 and lc3['state']} notice={lc3 and lc3.get('notice')}")
+    gone = wait(lambda: other.proc.poll() is not None, 5) if other else None
+    pump.join()
+    said = other.out.decode(errors="replace") if other else ""
+    check("the other machine's client sees the thread but does not get control",
+          gone is not None and ("already has an attached client" in said or "taken over" in said),
+          f"exit={other and other.proc.poll()} tail={said[-120:]!r}")
+
+    # ---- 4. another machine opens a new thread in the tab shown here ----------------------
+    say()
+    say("== 4. a new thread opened on another machine stays with that machine")
+    before = panes_of(tab)
+    S.lab("herdr", "pane", "split", list(before)[0], "--direction", "down")
+    made = wait(lambda: [p for p in panes_of(tab) if p not in before], 5, 0.05)
+    p4 = made[0] if made else None
+    t4 = panes_of(tab).get(p4) if p4 else None
+    # The machine that made it attaches it, taking it over if this app got there first.
+    maker = Cli(t4, takeover=True) if t4 else None
+    # The CLI client is drained while it waits: a client whose screen output nobody reads stops reading keys.
+    seen = wait(lambda: maker.drain(0.1) is not None and (lambda lc: lc if lc and lc["state"] == "held" else None)(
+        pane_state(t4, p4)[0]), 8, 0.1) if p4 else None
+    maker and maker.drain(2.0)
+    lc4, _ = pane_state(t4, p4) if p4 else (None, None)
+    check("this app shows the new thread without control", seen is not None and lc4 and lc4["state"] == "held",
+          f"state={lc4 and lc4['state']}")
+    alive = maker is not None and maker.proc.poll() is None
+    if alive:
+        os.write(maker.master, b"echo MADE-THERE\r")
+    txt, dt = S.wait_read(p4, lambda x: maker.drain(0.05) is not None and any(
+        l.strip() == "MADE-THERE" for l in x.splitlines())) if alive else ("", None)
+    check("the machine that made it keeps control: its keys land", alive and dt is not None,
+          f"alive={alive} tail={(maker.drain(0.1)[-120:] if maker else b'')!r}")
 
 
 def finish():

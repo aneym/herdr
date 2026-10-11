@@ -24,6 +24,7 @@ import type { DocsState } from "./docs";
 import type { PaneController } from "./PaneTerm";
 import { installPathDrops } from "./dropPaths";
 import { installControl } from "./control";
+import { newPanes } from "./newPanes";
 import { PENDING_LIFETIME_MS, pinMovePlan } from "./pinDrag";
 import type { PendingOrders } from "./pinDrag";
 import type { ControlState } from "./control";
@@ -84,6 +85,7 @@ export default function App() {
         if (!disposed && revision === revisions.get(name) && request === requests.get(name)) {
           attentionTrails.current[name] = trackAttention(attentionSnapshots.current[name], snapshot, attentionTrails.current[name] ?? []);
           attentionSnapshots.current[name] = snapshot;
+          newPanes.observe(name, snapshot);
           setSnapshots(value => ({ ...value, [name]: snapshot }));
         }
       } catch { /* The supervisor publishes connection failures. */ }
@@ -101,6 +103,7 @@ export default function App() {
         revisions.set(value.machine, (revisions.get(value.machine) ?? 0) + 1);
         attentionTrails.current[value.machine] = trackAttention(attentionSnapshots.current[value.machine], value.snapshot, attentionTrails.current[value.machine] ?? []);
         attentionSnapshots.current[value.machine] = value.snapshot;
+        newPanes.observe(value.machine, value.snapshot);
         setSnapshots(previous => ({ ...previous, [value.machine]: value.snapshot }));
       }));
       const before = new Map(statusRevisions);

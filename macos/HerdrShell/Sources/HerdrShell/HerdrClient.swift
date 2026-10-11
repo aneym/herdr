@@ -443,6 +443,7 @@ struct HerdrCommands {
         guard let data = call("pane.split", ["target_pane_id": targetPaneId, "direction": direction, "focus": false]),
               let env = try? JSONDecoder().decode(Env.self, from: data) else { return nil }
         let p = env.result.pane
+        NewPanes.shared.markMine(p.pane_id)
         return CreatedPane(paneId: p.pane_id, terminalId: p.terminal_id, tabId: p.tab_id)
     }
 
@@ -461,6 +462,7 @@ struct HerdrCommands {
         if let cwd { params["cwd"] = cwd }
         guard let data = call("tab.create", params),
               let env = try? JSONDecoder().decode(Env.self, from: data) else { return nil }
+        NewPanes.shared.markMine(env.result.root_pane.pane_id)
         return CreatedPane(paneId: env.result.root_pane.pane_id, terminalId: env.result.root_pane.terminal_id, tabId: env.result.tab.tab_id)
     }
 

@@ -1,22 +1,30 @@
-HerdrShell attach-swap check  2026-10-10T03:58:44Z
-swift build: ok
-lab shellspike-swap; pane w1:p2 (terminal term_65d747d7731cd2); app /Users/aneyman/.cache/herdr-build/swap-swift/release/HerdrShell in the Space
+HerdrShell attach-swap check  2026-10-11T17:55:47Z
+lab shellspike-swap; pane w1:p2 (terminal term_65d944ab59c8a2); app /Users/aneyman/.cache/herdr-build/thread-focus-swift/release/HerdrShell in the Space
 
 == 1. a sleeping machine holds the pane; this machine opens it
 [PASS] the other machine's client attaches to the pane
-{"space": "herdr-qa", "ip": "192.168.64.5", "herdr_sha": "5d4dacdf1265"}
-{"space": "herdr-qa", "app_pid": "4293", "exe": "/Users/lume/.herdr-space/bin/HerdrShell", "host_socket": "/Users/aneyman/.cache/herdr-build/s/eaa18a/h/.config/herdr/sessions/shellspike-swap/herdr.sock", "guest_socket": "/Users/lume/.herdr-space/herdr.sock", "owner": "herdr-attach-swap"}
-[PASS] the pane opens attached with its screen -- 5.7s
+{"space": "herdr-qa", "ip": "192.168.64.5", "herdr_sha": "f7e2f95cc803"}
+{"space": "herdr-qa", "app_pid": "45986", "exe": "/Users/lume/.herdr-space/bin/HerdrShell", "host_socket": "/Users/aneyman/.cache/herdr-build/s/eaa18a/h/.config/herdr/sessions/shellspike-swap/herdr.sock", "guest_socket": "/Users/lume/.herdr-space/herdr.sock", "owner": "herdr-thread-focus"}
+[PASS] the pane opens attached with its screen -- 5.0s
 [PASS] no banner on the pane at any point -- None
 [PASS] no raw OSC 4 color replies on the pane's screen
 [PASS] typing in the app reaches the pane -- 0.04s
 [PASS] the woken client finds the pane taken over and exits -- exit=1 tail='\x1b[?1006l\x1b[?1015l\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1049l\x1b[?2031l\x1b[?25h\x1b[0 qherdr: server shut down: terminal attach taken over\r\n'
 
 == 2. the other machine takes the pane; a click here takes it back
-[PASS] the app shows the pane held while the other machine has it -- Held by another herdr client. Click to take it back.
-[PASS] keys typed at the held pane neither reach it nor take it back -- state=held
+[PASS] the app shows the pane held while the other machine has it -- Held by another herdr client. Type or click to take it back.
+[PASS] keys typed at the held pane take it back and land -- state=running 'tmp % echo SWAP-ONE\nSWAP-ONE\ntmp % echo TYPED-BACK\nTYPED-BACK\ntmp %\n'
 [PASS] a click on the pane takes it back -- notice=None
 [PASS] the other machine's client is shut out
 [PASS] typing reaches the pane after taking it back -- 0.04s
+
+== 3. a new thread opened here is focused and controlled here at once
+[PASS] keys typed at once land in the new thread, no click -- 0.04s
+[PASS] this app holds the new thread -- state=running notice=None
+[PASS] the other machine's client sees the thread but does not get control -- exit=1 tail='\x1b[?1006l\x1b[?1015l\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1049l\x1b[?2031l\x1b[?25h\x1b[0 qherdr: server shut down: terminal attach taken over\r\n'
+
+== 4. a new thread opened on another machine stays with that machine
+[PASS] this app shows the new thread without control -- state=held
+[PASS] the machine that made it keeps control: its keys land -- alive=True tail=b'                                                                                    \x1b[0m\x1b[3;7H\x1b[?25h\x1b[?2026l\x1b[3;7H\x1b[?25h'
 
 RESULT: PASS

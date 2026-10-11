@@ -450,6 +450,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     func snapshotChanged() {
+        if let s = model.snapshot { NewPanes.shared.observe(source: "", paneIds: s.panes.map(\.pane_id)) }
         reportRestoreErrors()
         quickSwitch.reload()
         if reconcileClose() { return }
@@ -497,6 +498,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     /// selection that was waiting for it, or a new tab there waiting to be listed, goes through
     /// the normal snapshot path.
     func machinesChanged() {
+        for m in model.machines { if let s = m.snapshot { NewPanes.shared.observe(source: m.name, paneIds: s.panes.map(\.pane_id)) } }
         let remote = [state.selectedTab, pendingSelectTab].contains { $0.map(Machines.isRemote) == true }
         guard remote else { refreshDocs(); return }
         snapshotChanged()
@@ -719,10 +721,11 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                                 fromDrop: fromDrop)
         host.show(items, area: layout.area, dividers: zoomedPane == nil && !Machines.isRemote(tab) ? PaneDivider.from(layout) : [])
         paneDrag.layoutDidApply()
-        applyPendingFocus()
         if let focusedPane, let replacement = items.first(where: { $0.0.paneId == focusedPane })?.0 {
             window.makeFirstResponder(replacement)
         }
+        // After keeping the keyboard where it was: a pane this app just made (a split) takes it.
+        applyPendingFocus()
         applyVisibility()
         applyCaps()
     }
@@ -736,7 +739,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             // Focus on a pane another client took is the user back here: take it back once
             // the holder pauses. Async: the focus change is still in progress, and taking
             // back replaces the view.
-            if self?.registry.heldTerminals.contains(v.terminalId) == true {
+            // Not a pane another client just opened: that one stays with its creator until a key or click here.
+            if self?.registry.heldTerminals.contains(v.terminalId) == true, !NewPanes.shared.othersNew(v.paneId) {
                 DispatchQueue.main.async { self?.registry.takeControl(v.terminalId, event: nil) }
             }
         }
