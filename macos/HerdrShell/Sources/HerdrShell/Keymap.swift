@@ -223,6 +223,10 @@ extension MainWindowController {
             quickSwitch.present(selectAll: true)
         case "open_factory":
             toggleFactory()
+        case "open_settings":
+            toggleSettings()
+        case "close_settings":
+            setSettings(open: false)
         default:
             if action.hasPrefix("goto_tab_"), let n = Int(action.dropFirst("goto_tab_".count)) {
                 if quickSwitch.isOpen { quickSwitch.pick(n); return true }

@@ -275,6 +275,9 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             guard let self, !self.quickSwitch.isOpen else { return false }
             return self.docPanel.hasFocus || self.detailClaimsEscape
         }
+        Keymap.shared.addContextual(chord: "escape", action: "close_settings") { [weak self] in
+            self?.settingsOpen == true && self?.quickSwitch.isOpen == false
+        }
         Keymap.shared.addContextual(chord: "escape", action: "close_switcher") { [weak self] in
             self?.quickSwitch.isOpen == true
         }
@@ -793,6 +796,29 @@ final class MainWindowController: NSObject, NSWindowDelegate {
 
     func toggleFactory() { setFactory(open: !state.factoryOpen) }
 
+    private(set) var settingsOpen = false
+    private let settingsState = SettingsState()
+    var settingsPending: [String: Bool] { settingsState.pending }
+
+    func toggleSettings() { setSettings(open: !settingsOpen) }
+
+    /// Settings covers the whole window, sidebar included; the panes keep running underneath.
+    func setSettings(open: Bool) {
+        settingsOpen = open
+        if open, root.settings == nil {
+            root.settings = SettingsHostingView(rootView: SettingsPage(model: model, catalog: model.catalog, theme: theme,
+                                                                       state: settingsState,
+                                                                       close: { [weak self] in self?.setSettings(open: false) }))
+        }
+        root.settingsOpen = open
+        root.layoutSubtreeIfNeeded()
+        if open, let page = root.settings {
+            window.makeFirstResponder(page)
+        } else if let s = focusedSurface {
+            window.makeFirstResponder(s)
+        }
+    }
+
     func setFactory(open: Bool) {
         state.factoryOpen = open
         if open {
@@ -1267,6 +1293,15 @@ final class ShellWindow: NSWindow {
         }
         var docsWidth: CGFloat = DocPanelController.defaultWidth
         var factory: NSView?
+        var settings: NSView? {
+            didSet {
+                oldValue?.removeFromSuperview()
+                if let settings { settings.isHidden = !settingsOpen; addSubview(settings, positioned: .above, relativeTo: nil) }
+            }
+        }
+        var settingsOpen = false {
+            didSet { settings?.isHidden = !settingsOpen; needsLayout = true }
+        }
         private var switcher: NSView?
         var factoryOpen = false {
             didSet { factory?.isHidden = !factoryOpen; host.isHidden = factoryOpen; needsLayout = true }
@@ -1312,6 +1347,10 @@ final class ShellWindow: NSWindow {
         }
         host.frame = NSRect(x: x, y: 0, width: max(0, bounds.width - x - docW), height: bounds.height)
         factory?.frame = host.frame
+        if let settings {
+            settings.frame = bounds
+            addSubview(settings, positioned: .above, relativeTo: nil)
+        }
         if let switcher {
             switcher.frame = bounds
             addSubview(switcher, positioned: .above, relativeTo: nil)

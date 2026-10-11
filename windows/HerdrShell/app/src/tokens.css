@@ -85,6 +85,10 @@
   --shell-type-factory-body: 12px;
   --shell-type-factory-section: 13px;
   --shell-type-factory-detail: 11px;
+  --shell-type-settings-title: 22px;
+  --shell-type-settings-nav: 13px;
+  --shell-type-settings-row: 13.5px;
+  --shell-type-settings-meta: 11.5px;
   --shell-space-detail-width: 340px;
   --shell-space-detail-padding: 12px;
   --shell-space-detail-gap: 14px;
@@ -159,6 +163,13 @@
   --shell-space-factory-detail-gap: 4px;
   --shell-space-factory-bar-width: 140px;
   --shell-space-factory-label-width: 22px;
+  --shell-space-settings-nav-width: 220px;
+  --shell-space-settings-column: 640px;
+  --shell-space-settings-row-height: 52px;
+  --shell-space-settings-pad-x: 32px;
+  --shell-space-settings-pad-top: 40px;
+  --shell-space-settings-toggle-width: 32px;
+  --shell-space-settings-toggle-height: 18px;
   --shell-radius-detail-button: 5px;
   --shell-radius-row: 4px;
   --shell-radius-control: 6px;
@@ -187,6 +198,8 @@
   --shell-face-tint-6: #3B93F0;
   --shell-face-tint-7: #8B5CF6;
   --shell-face-tint-8: #E152B0;
+  --shell-face-settings-size: 28px;
+  --shell-face-settings-initial: 13px;
   --shell-motion-drag-threshold-px: 4px;
   --shell-motion-tab-edge-px: 12px;
   --shell-motion-edge-band-min: 24px;

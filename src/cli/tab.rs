@@ -28,7 +28,7 @@ pub(super) fn run_tab_command(args: &[String]) -> std::io::Result<i32> {
         "pin" => tab_pin(&args[1..]),
         "unpin" => tab_unpin(&args[1..]),
         "hide" => tab_set_hidden(&args[1..], true),
-        "unhide" => tab_set_hidden(&args[1..], false),
+        "show" | "unhide" => tab_set_hidden(&args[1..], false),
         "set-role" => tab_set_role(&args[1..]),
         "pin-move" => tab_pin_move(&args[1..]),
         "close" => tab_close(&args[1..]),
@@ -47,7 +47,7 @@ fn tab_set_hidden(args: &[String], hidden: bool) -> std::io::Result<i32> {
     if args.len() != 1 {
         eprintln!(
             "usage: herdr tab {} <tab>",
-            if hidden { "hide" } else { "unhide" }
+            if hidden { "hide" } else { "show" }
         );
         return Ok(2);
     }
@@ -461,7 +461,7 @@ fn print_tab_help() {
     eprintln!("  herdr tab pin <tab_id> [--priority N]");
     eprintln!("  herdr tab unpin <tab_id>");
     eprintln!("  herdr tab hide <tab_id>");
-    eprintln!("  herdr tab unhide <tab_id>");
+    eprintln!("  herdr tab show <tab_id>    (alias: unhide)");
     eprintln!("  herdr tab set-role <tab_id> <agent|none>");
     eprintln!("  herdr tab pin-move <tab_id> <pin_index>");
     eprintln!("  herdr tab close <tab_id>");

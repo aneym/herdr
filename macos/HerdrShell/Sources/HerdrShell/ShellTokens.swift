@@ -43,6 +43,10 @@ enum ShellType {
     static let factoryBody: CGFloat = 12
     static let factorySection: CGFloat = 13
     static let factoryDetail: CGFloat = 11
+    static let settingsTitle: CGFloat = 22
+    static let settingsNav: CGFloat = 13
+    static let settingsRow: CGFloat = 13.5
+    static let settingsMeta: CGFloat = 11.5
 }
 
 enum ShellSpace {
@@ -120,6 +124,13 @@ enum ShellSpace {
     static let factoryDetailGap: CGFloat = 4
     static let factoryBarWidth: CGFloat = 140
     static let factoryLabelWidth: CGFloat = 22
+    static let settingsNavWidth: CGFloat = 220
+    static let settingsColumn: CGFloat = 640
+    static let settingsRowHeight: CGFloat = 52
+    static let settingsPadX: CGFloat = 32
+    static let settingsPadTop: CGFloat = 40
+    static let settingsToggleWidth: CGFloat = 32
+    static let settingsToggleHeight: CGFloat = 18
 }
 
 enum ShellRadius {
@@ -168,5 +179,7 @@ enum ShellFace {
     static let initial: CGFloat = 9.5
     static let tintOpacityLight: CGFloat = 0.24
     static let tintOpacityDark: CGFloat = 0.32
+    static let settingsSize: CGFloat = 28
+    static let settingsInitial: CGFloat = 13
     static let tints: [UInt32] = [0x8B5E3C, 0xE8483F, 0xF08A24, 0xF0B429, 0x3ECF8E, 0x2FBFA0, 0x3B93F0, 0x8B5CF6, 0xE152B0]
 }

@@ -1,0 +1,114 @@
+{
+  "_comment": "Settings > Agents rows from one SpacesInput, read by macos/HerdrShell/scripts/check_settings_agents.py and windows/HerdrShell/app/src/settingsAgents.test.tsx. Tints are Rails personTint over nine. `cards` are agent.json files under an agents dir; `panes` are [pane, tab] pairs, as HerdrModel attaches them.",
+  "input": {
+    "spaces": [
+      {
+        "id": "w1",
+        "name": "home"
+      },
+      {
+        "id": "w2",
+        "name": "games"
+      }
+    ],
+    "tabs": [
+      {
+        "id": "w1:t1",
+        "space": "w1",
+        "label": "scratch"
+      },
+      {
+        "id": "w1:t2",
+        "space": "w1",
+        "label": "factory tab",
+        "pinIndex": 1,
+        "role": "agent",
+        "runsOn": "Studio"
+      },
+      {
+        "id": "w1:t3",
+        "space": "w1",
+        "label": "CoS",
+        "pinIndex": 0,
+        "role": "agent",
+        "runsOn": "box"
+      },
+      {
+        "id": "w2:t1",
+        "space": "w2",
+        "label": "League Coach",
+        "pinIndex": 2,
+        "role": "agent",
+        "hidden": true
+      },
+      {
+        "id": "w1:t4",
+        "space": "w1",
+        "label": "notes",
+        "pinIndex": 3
+      },
+      {
+        "id": "w2:t2",
+        "space": "w2",
+        "label": "Recruiter",
+        "pinIndex": 4,
+        "role": "agent",
+        "runsOn": "Studio"
+      }
+    ],
+    "focusedTab": null
+  },
+  "expected": [
+    {
+      "tab": "w1:t3",
+      "title": "CoS",
+      "meta": "home · box",
+      "shown": true,
+      "face": "C:8"
+    },
+    {
+      "tab": "w1:t2",
+      "title": "Factory",
+      "meta": "home · Studio",
+      "shown": true,
+      "face": "F:8"
+    },
+    {
+      "tab": "w2:t1",
+      "title": "League Coach",
+      "meta": "games",
+      "shown": false,
+      "face": "L:0"
+    },
+    {
+      "tab": "w2:t2",
+      "title": "Recruiter",
+      "meta": "games · Studio",
+      "shown": true,
+      "face": "R:6"
+    }
+  ],
+  "cards": [
+    {
+      "dir": "factory",
+      "agent": {
+        "name": "Factory",
+        "pane": "w1:p2"
+      }
+    }
+  ],
+  "panes": [
+    [
+      "w1:p1",
+      "w1:t1"
+    ],
+    [
+      "w1:p2",
+      "w1:t2"
+    ],
+    [
+      "w1:p3",
+      "w1:t3"
+    ]
+  ]
+}

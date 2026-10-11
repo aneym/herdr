@@ -1,0 +1,20 @@
+[PASS] three agent pins in order
+[PASS] sidebar draws all three agents
+[PASS] Settings opens with every agent switched on
+[PASS] Settings rows follow the pin order
+[PASS] Settings covers the whole window
+[PASS] SETTINGS-AGENTS-light shot written
+[PASS] SETTINGS-AGENTS-dark shot written
+[PASS] switch off: herdr tab.list reads hidden=true
+[PASS] hidden pin keeps its slot
+[PASS] Settings shows League Coach off
+[PASS] Agents rows drop League Coach
+[PASS] SETTINGS-AGENTS-off-light shot written
+[PASS] SETTINGS-SIDEBAR-hidden-light shot written
+[PASS] `herdr tab show` turns the switch back on
+[PASS] League Coach is back in its old slot
+[PASS] `herdr tab hide` turns the switch off
+[PASS] switch on: herdr tab.list drops hidden
+[PASS] switch on: League Coach back in its slot
+[PASS] Done closes Settings
+[PASS] SETTINGS-SIDEBAR-shown-light shot written

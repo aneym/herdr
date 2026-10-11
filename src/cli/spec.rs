@@ -328,6 +328,15 @@ fn tab_command() -> Command {
                 .arg(required("role", "ROLE").value_parser(["agent", "none"])),
         )
         .subcommand(id_command("unpin", "tab_id", "Unpin a tab"))
+        .subcommand(id_command(
+            "hide",
+            "tab_id",
+            "Hide an agent pin from the Agents list (it stays pinned and keeps running)",
+        ))
+        .subcommand(
+            id_command("show", "tab_id", "Show a hidden agent pin in the Agents list again")
+                .visible_alias("unhide"),
+        )
         .subcommand(
             Command::new("pin-move")
                 .about("Move a pinned tab in the pin order (0 is the top, as pin_index)")
@@ -1340,6 +1349,23 @@ mod tests {
                     path.join(" ")
                 );
             }
+        }
+    }
+
+    #[test]
+    fn tab_hide_and_show_are_described_and_unhide_still_parses() {
+        for args in [
+            ["herdr", "tab", "hide", "w1:t2"],
+            ["herdr", "tab", "show", "w1:t2"],
+            ["herdr", "tab", "unhide", "w1:t2"],
+        ] {
+            let matches = super::command()
+                .try_get_matches_from(args)
+                .unwrap_or_else(|error| panic!("{args:?}: {error}"));
+            let (_, tab) = matches.subcommand().expect("tab");
+            let (name, sub) = tab.subcommand().expect("tab subcommand");
+            assert_eq!(name, if args[2] == "hide" { "hide" } else { "show" });
+            assert_eq!(sub.get_one::<String>("tab_id").map(String::as_str), Some("w1:t2"));
         }
     }
 

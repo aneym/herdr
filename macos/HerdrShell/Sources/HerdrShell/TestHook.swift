@@ -216,6 +216,11 @@ final class TestHook {
             controller?.setDocs(open: open, width: width)
         case "factory":
             controller?.setFactory(open: obj["open"] as? Bool ?? true)
+        case "settings":
+            controller?.setSettings(open: obj["open"] as? Bool ?? true)
+        case "settings_toggle":
+            // {"cmd":"settings_toggle","tab":"<id>"}: the closure the row's switch runs (SettingsPage).
+            if !ClickRegistry.shared.call("settings:toggle:" + (obj["tab"] as? String ?? "")) { log("hook: settings_toggle: no row") }
         case "pane_mode":
             if let id = obj["id"] as? String, let mode = obj["mode"] as? String {
                 controller?.setPaneMode(id, mode)
@@ -1077,6 +1082,11 @@ final class TestHook {
                 .map { ($0.id, RowMenu.items(for: $0, model: c.model).map(\.rawValue)) }, uniquingKeysWith: { a, _ in a }),
             "spaces_chrome": (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(c.state.spacesChrome))) ?? [:],
             "docs_visible": c.root.docsOpen,
+            "settings_open": c.settingsOpen,
+            "settings_frame": c.root.settings.map { [$0.frame.minX, $0.frame.minY, $0.frame.width, $0.frame.height] } ?? [],
+            "window_content": [c.root.bounds.width, c.root.bounds.height],
+            "settings_rows": SettingsAgents.rows(c.model.settingsInput, pending: c.settingsPending)
+                .map { ["tab": $0.id, "title": $0.title, "meta": $0.meta, "shown": $0.shown] as [String: Any] },
             "detail_open": c.detailPanel.model.isOpen,
             "sidebar_lines": c.sidebarLines.map { $0.dump },   // P10: the rows as drawn, in order
             "shell": [

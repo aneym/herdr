@@ -16,6 +16,7 @@ import type { Action } from "./keys";
 import { runAction, trackAttention } from "./actions";
 import TabView from "./TabView";
 import FactoryPage from "./FactoryView";
+import Settings from "./Settings";
 import DetailPanel, { useDetailPanel } from "./DetailPanel";
 import DocPanel, { useDocs } from "./DocPanel";
 import { useDesk } from "./docs";
@@ -125,6 +126,7 @@ export default function App() {
 }
 function MachineView({ attentionTrails, machine, machines, snapshot, snapshots, chooseMachine, selections, control, onSelection }: { attentionTrails: MutableRefObject<Record<string, string[]>>; machine: MachineStatus; machines: MachineStatus[]; snapshot: Snapshot; snapshots: Record<string, Snapshot>; chooseMachine: (name: string) => MachineStatus; selections: Map<string, ViewSelection>; control: MutableRefObject<(() => ControlState) | null>; onSelection: (machine: string, tab: string | null) => void }) {
   const [factoryOpen, setFactoryOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [selected, setSelected] = useState<string | null>(() => restoredSelection(snapshot, selections.get(machine.name)?.selected ?? null));
   const [focused, setFocused] = useState<string | null>(selections.get(machine.name)?.focused ?? null);
   const savedSelection = useRef({ selected, focused });
@@ -264,6 +266,7 @@ function MachineView({ attentionTrails, machine, machines, snapshot, snapshots, 
       api: bridge.api, select, focus, created: (tabId, paneId) => setPending({ tabId, paneId }),
       rename: id => { setSidebarVisible(true); setRenaming(id); }, switcher: mode => { setRenaming(null); setSelectQuery(mode === "goto"); setQueryPresentation(value => value + 1); setSwitcherOpen(value => mode === "search" || mode === "goto" ? true : !value); },
       toggleFactory: () => setFactoryOpen(value => !value),
+      toggleSettings: () => setSettingsOpen(value => !value),
       toggleSidebar: () => { setRenaming(null); setSidebarVisible(value => !value); },
       error: showError, label, tabId,
     });
@@ -285,6 +288,8 @@ function MachineView({ attentionTrails, machine, machines, snapshot, snapshots, 
           ((!event.shiftKey && /^[1-9]$/.test(event.key)) || event.key === "Tab" ||
            (event.shiftKey && (["p", "m", "[", "]", "{", "}"].includes(event.key.toLowerCase()) || event.code === "BracketLeft" || event.code === "BracketRight"))))) return false;
     const name = actionFor(event);
+    // Settings covers the window: only its own chord reaches the app; Esc is the page's.
+    if (settingsOpen) { if (name === "open_settings") { setSettingsOpen(false); return true; } return false; }
     if (switcherOpen && (name === "switcher" || name === "search" || name === "goto")) { void action(name).catch(() => {}); return true; }
     if (switcherOpen || renaming) return false;
     if (event.target instanceof Element && event.target.closest('input, [contenteditable="true"]')) return false;
@@ -292,7 +297,7 @@ function MachineView({ attentionTrails, machine, machines, snapshot, snapshots, 
     if (!name) return false;
     void action(name).catch(() => {});
     return true;
-  }, [action, switcherOpen, renaming]);
+  }, [action, switcherOpen, renaming, settingsOpen]);
   useEffect(() => { const handler = (event: KeyboardEvent) => { if (shortcut(event)) { event.preventDefault(); event.stopPropagation(); } }; window.addEventListener("keydown", handler, true); return () => window.removeEventListener("keydown", handler, true); }, [shortcut]);
   const register = useCallback((id: string, value: PaneController | null) => { if (value) controllers.current.set(id, value); else controllers.current.delete(id); }, []);
   control.current = () => {
@@ -324,5 +329,5 @@ function MachineView({ attentionTrails, machine, machines, snapshot, snapshots, 
       showError(error);
     });
   }, [showError]);
-  return <div className="layout"><div className={`title-strip ${sidebarVisible ? "over-sidebar" : ""}`}><UpdatePill /></div>{sidebarVisible && <Sidebar openDetail={detailPanel.toggle} navigation={navigation} paneDropRow={paneDragState?.zone?.kind === "into_tab" ? `tab:${paneDragState.zone.tab_id}` : paneDragState?.zone?.kind === "new_tab_in" ? `space:${paneDragState.zone.workspace_id}` : null} snapshot={snapshot} catalog={catalog} remotes={remotes} selectRemote={selectRemote} overlay={overlay} hosts={hosts} rows={rows} selected={selected} revealed={revealed} machine={machine} notice={notice?.text ?? null} select={select} pin={pin} movePin={movePin} renaming={renaming} startRename={id => { setRenaming(id); }} cancelRename={() => setRenaming(null)} commitRename={async (id, label) => { try { await action("rename_tab", label, id); setRenaming(null); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); } catch { /* runAction reports through the transient status notice. */ } }} />}{detailPanel.rowId && <DetailPanel snapshot={snapshot} rowId={detailPanel.rowId} openFull={id => { detailPanel.close(); select(id); }} />}{factoryOpen && <FactoryPage machine={machine.name} online={machine.state === "up"} />}<div className="factory-pane-host" hidden={factoryOpen}><TabView onSpring={select} online={machine.state === "up"} registerDrag={registerDrag} onDragChange={setPaneDragState} snapshot={snapshot} selected={selected} machine={machine.name} focused={switcherOpen || renaming ? null : focused} onFocus={focus} shortcut={shortcut} register={register} pin={pin} onError={showError} /></div>{!factoryOpen && docsOpen && docsItems.length > 0 && <DocPanel key={docsKey} machine={machine.name} tab={selected} items={docsItems} active={activeDoc} select={selectDoc} error={docsError} close={() => { setDocsShown(value => ({ ...value, [docsKey]: false })); try { localStorage.setItem(docsKey, "false"); } catch (error) { showError(error); } }} />}{switcherOpen && <Switcher presentation={queryPresentation} query={switcherQuery} changeQuery={setSwitcherQuery} selectQuery={selectQuery} rows={rows} selected={selected} machine={machine.name} open={select} close={closeSwitcher} />}{!sidebarVisible && (notice || machine.state !== "up") && <div className="machine-error notice" role="status">{notice?.text ?? machine.error ?? machine.state}</div>}</div>;
+  return <div className="layout"><div className={`title-strip ${sidebarVisible ? "over-sidebar" : ""}`}><UpdatePill /></div>{sidebarVisible && <Sidebar openDetail={detailPanel.toggle} navigation={navigation} paneDropRow={paneDragState?.zone?.kind === "into_tab" ? `tab:${paneDragState.zone.tab_id}` : paneDragState?.zone?.kind === "new_tab_in" ? `space:${paneDragState.zone.workspace_id}` : null} snapshot={snapshot} catalog={catalog} remotes={remotes} selectRemote={selectRemote} overlay={overlay} hosts={hosts} rows={rows} selected={selected} revealed={revealed} machine={machine} notice={notice?.text ?? null} select={select} pin={pin} movePin={movePin} renaming={renaming} startRename={id => { setRenaming(id); }} cancelRename={() => setRenaming(null)} commitRename={async (id, label) => { try { await action("rename_tab", label, id); setRenaming(null); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); } catch { /* runAction reports through the transient status notice. */ } }} />}{detailPanel.rowId && <DetailPanel snapshot={snapshot} rowId={detailPanel.rowId} openFull={id => { detailPanel.close(); select(id); }} />}{factoryOpen && <FactoryPage machine={machine.name} online={machine.state === "up"} />}<div className="factory-pane-host" hidden={factoryOpen}><TabView onSpring={select} online={machine.state === "up"} registerDrag={registerDrag} onDragChange={setPaneDragState} snapshot={snapshot} selected={selected} machine={machine.name} focused={switcherOpen || renaming ? null : focused} onFocus={focus} shortcut={shortcut} register={register} pin={pin} onError={showError} /></div>{!factoryOpen && docsOpen && docsItems.length > 0 && <DocPanel key={docsKey} machine={machine.name} tab={selected} items={docsItems} active={activeDoc} select={selectDoc} error={docsError} close={() => { setDocsShown(value => ({ ...value, [docsKey]: false })); try { localStorage.setItem(docsKey, "false"); } catch (error) { showError(error); } }} />}{switcherOpen && <Switcher presentation={queryPresentation} query={switcherQuery} changeQuery={setSwitcherQuery} selectQuery={selectQuery} rows={rows} selected={selected} machine={machine.name} open={select} close={closeSwitcher} />}{!sidebarVisible && (notice || machine.state !== "up") && <div className="machine-error notice" role="status">{notice?.text ?? machine.error ?? machine.state}</div>}{settingsOpen && <Settings machine={machine.name} snapshot={snapshot} cards={cards} onError={showError} close={() => { setSettingsOpen(false); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); }} />}</div>;
 }

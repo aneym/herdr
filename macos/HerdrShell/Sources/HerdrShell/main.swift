@@ -195,14 +195,17 @@ func buildMenu(target: MainWindowController) -> NSMenu {
     if Channel.kind == .prod {
         appItems.insert(item("Check for Updates…", #selector(MainWindowController.checkForUpdates(_:)), "u", [.command, .shift]), at: 0)
     }
+    // Keymap entries under "App" (Settings… ⌘,) join the app menu above Quit.
+    Keymap.shared.dispatcher = { [weak target] in target?.perform(action: $0) ?? false }
+    let keymapped = keymapMenus(target: target)
+    appItems.insert(contentsOf: keymapped.first { $0.0 == "App" }?.1 ?? [], at: appItems.count - 1)
     submenu(Channel.name, appItems)
     submenu("Edit", [
         item("Copy", #selector(MainWindowController.copy(_:)), "c"),
         item("Paste", #selector(MainWindowController.paste(_:)), "v"),
     ])
     // Every app chord comes from Resources/keymap.json; the menu only mirrors it.
-    Keymap.shared.dispatcher = { [weak target] in target?.perform(action: $0) ?? false }
-    for (title, items) in keymapMenus(target: target) { submenu(title, items) }
+    for (title, items) in keymapped where title != "App" { submenu(title, items) }
     return main
 }
 

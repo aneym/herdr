@@ -1,0 +1,8 @@
+[PASS] agent pins in pin order; plain pins and tabs left out
+[PASS] titles prefer the agent card name, else the tab label
+[PASS] meta reads space, then where it runs
+[PASS] a hidden agent keeps its slot and reads switched off
+[PASS] faces match the Rails tint
+[PASS] a pending toggle wins until the server echoes it
+[PASS] pending toggles the server has not applied stay
+[PASS] an echoed toggle settles; the other still waits

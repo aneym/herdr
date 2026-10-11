@@ -62,6 +62,10 @@ export const type = {
   factoryBody: 12,
   factorySection: 13,
   factoryDetail: 11,
+  settingsTitle: 22,
+  settingsNav: 13,
+  settingsRow: 13.5,
+  settingsMeta: 11.5,
 } as const;
 
 export const space = {
@@ -139,6 +143,13 @@ export const space = {
   factoryDetailGap: 4,
   factoryBarWidth: 140,
   factoryLabelWidth: 22,
+  settingsNavWidth: 220,
+  settingsColumn: 640,
+  settingsRowHeight: 52,
+  settingsPadX: 32,
+  settingsPadTop: 40,
+  settingsToggleWidth: 32,
+  settingsToggleHeight: 18,
 } as const;
 
 export const radius = {

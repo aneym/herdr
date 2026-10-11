@@ -178,6 +178,12 @@
       "menu": "View"
     },
     {
+      "chord": "cmd+,",
+      "action": "open_settings",
+      "title": "Settings…",
+      "menu": "App"
+    },
+    {
       "chord": "cmd+shift+f",
       "action": "open_factory",
       "title": "Factory",

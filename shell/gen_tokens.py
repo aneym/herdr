@@ -242,7 +242,7 @@ def mac_effective():
         drv = pathlib.Path(d) / "main.swift"
         drv.write_text(MAC_DRIVER)
         exe = pathlib.Path(d) / "dump"
-        subprocess.run(["swiftc", str(MAC_DIR / "Theme.swift"), str(MAC_OUT), str(drv), "-o", str(exe)],
+        subprocess.run(["swiftc", str(MAC_DIR / "Theme.swift"), str(MAC_DIR / "GhosttyConfigMerge.swift"), str(MAC_OUT), str(drv), "-o", str(exe)],
                        check=True, capture_output=True, text=True)
         return json.loads(subprocess.check_output([str(exe), *CHROME], text=True))
 

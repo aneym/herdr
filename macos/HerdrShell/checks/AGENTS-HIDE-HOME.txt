@@ -1,0 +1,123 @@
+[PASS] B hidden: AGENTS, A, C, Hidden, PINNED, P in that order
+[PASS] no agents title row above the AGENTS section
+[PASS] the Hidden header is one shut row: kind hidden, depth 0, title Hidden, count 1, toggles hiddenagents
+[PASS] shut fold draws no B row, and B never shows in its space
+[PASS] digits A1 C2 P3: numbered skips hidden B (shut and open)
+[PASS] open fold: hiddenagent:B right under the header, before PINNED
+[PASS] open header chevron is open with the same count
+[PASS] hidden row: tab kind, depth 0, opens B, agent face, no space name
+[PASS] the header toggle key opens the fold and the choice survives a save
+[PASS] the hidden-spaces fold does not open hidden agents
+[PASS] unhidden B returns to slot 2 and the Hidden header goes
+[PASS] every agent hidden: AGENTS stays and holds only the Hidden header
+[PASS] shut header carries dot:accent when a hidden agent is blocked
+[PASS] shut header carries dot:accent when a hidden agent has an open request
+[PASS] no header dot for idle, working or done
+[PASS] open fold: the dot moves to the blocked row, off the header
+[PASS] AGENTS rows dump home:cloud and home:unsynced last, with an empty trailing
+[PASS] a hidden row dumps home:local with an empty trailing
+[PASS] a PINNED row keeps its space name and draws no home, even with a location
+[PASS] an agent on the box dumps on:box and one on Studio dumps on:Studio, each before its home
+[PASS] rows with no run place dump none: a hidden agent from an older server, a PINNED row
+[PASS] a remote agent keeps its @ax42 badge, with home:unsynced kept last
+[PASS] an agent from an older snapshot (no home_location) dumps no home and no space name
+[PASS] a remote hidden agent joins the fold with its badge; an unknown home_location draws nothing
+[PASS] digits across machines: A, C, ax42 visible agents, then P; no hidden agent numbered
+[PASS] RowMenu rule: Hide on agent: rows (remote too), Show in Agents on hiddenagent: rows, nothing elsewhere
+[PASS] PinDrag never drags hiddenagent: rows or the header; agent and pinned rows keep their sections
+[PASS] closing a selected hidden agent moves to the other pins, never to itself
+[PASS] selecting a drawn hidden row reveals nothing: its folded space stays folded
+[PASS] tabSetHidden sends tab.set_hidden {tab_id, hidden} and reads success
+[PASS] an older server (unknown_method) is a plain false
+[PASS] a remote tab is shown again on its own machine, with its raw id
+[PASS] app wiring reaches the pure rules: numberedTabIds uses SpacesTree.numbered, setAgentHidden(_:_:) sends tabSetHidden, RowMenu.hide is "Hide", RowMenu.show is "Show in Agents", RowMenu.items uses setsHidden, the menu sends setAgentHidden true and false, PinDrag.section(of:) uses SpacesTree.pinSection
+
+chrome|false|false
+numbered|s1:t1,s2:t1,s1:t3,s2:t2
+section|agentpins|0|none||mute|AGENTS||none||||
+tab|agent:s1:t1|0|none|●|working|alpha||none||s1:t1|||face:A:6|dot:ok|on:box|home:cloud
+tab|agent:s2:t1|0|none|●|working|charlie||none||s2:t1|||face:C:3|dot:ok|on:Studio|home:unsynced
+hidden|hiddenagents|0|closed||mute|Hidden|1|none|||hiddenagents|
+section|pinned|0|none||mute|PINNED||none||||
+tab|pinned:s1:t3|0|none|●|idle|papa|rails|none||s1:t3||
+space|space:s1|0|open||mute|rails||none||s1:t1|space:s1|
+section|section:s1:LANES|1|none||mute|LANES||none||||
+tab|tab:s1:t3|1|none|●|idle|papa||none||s1:t3||
+space|space:s2|0|open||mute|poker||none||s2:t1|space:s2|
+section|section:s2:LANES|1|none||mute|LANES||none||||
+tab|tab:s2:t2|1|none|●|working|coach||none||s2:t2||
+menu|agentpins|
+drag|agentpins|
+menu|agent:s1:t1|hide
+drag|agent:s1:t1|agents
+menu|agent:s2:t1|hide
+drag|agent:s2:t1|agents
+menu|hiddenagents|
+drag|hiddenagents|
+menu|pinned|
+drag|pinned|
+menu|pinned:s1:t3|
+drag|pinned:s1:t3|pinned
+menu|space:s1|
+drag|space:s1|
+menu|section:s1:LANES|
+drag|section:s1:LANES|
+menu|tab:s1:t3|
+drag|tab:s1:t3|
+menu|space:s2|
+drag|space:s2|
+menu|section:s2:LANES|
+drag|section:s2:LANES|
+menu|tab:s2:t2|
+drag|tab:s2:t2|
+
+chrome|true|false
+numbered|s1:t1,s2:t1,ax42/w1:t1,ax42/w1:t3,s1:t3,s2:t2
+section|agentpins|0|none||mute|AGENTS||none||||
+tab|agent:s1:t1|0|none|●|working|alpha||none||s1:t1|||face:A:6|dot:ok|on:box|home:cloud
+tab|agent:s2:t1|0|none|●|working|charlie||none||s2:t1|||face:C:3|dot:ok|on:Studio|home:unsynced
+tab|agent:ax42/w1:t1|0|none|●|working|remote chat||none||ax42/w1:t1|||face:R:0|dot:ok|@ax42|on:box|home:unsynced
+tab|agent:ax42/w1:t3|0|none|●|idle|remote old||none||ax42/w1:t3|||face:R:2|@ax42
+hidden|hiddenagents|0|open||mute|Hidden|2|none|||hiddenagents|
+tab|hiddenagent:s1:t2|0|none|●|idle|bravo||none||s1:t2|||face:B:8|home:local
+tab|hiddenagent:ax42/w1:t2|0|none|●|idle|remote hidden||none||ax42/w1:t2|||face:R:0|@ax42
+section|pinned|0|none||mute|PINNED||none||||
+tab|pinned:s1:t3|0|none|●|idle|papa|rails|none||s1:t3||
+space|space:s1|0|open||mute|rails||none||s1:t1|space:s1|
+section|section:s1:LANES|1|none||mute|LANES||none||||
+tab|tab:s1:t3|1|none|●|idle|papa||none||s1:t3||
+space|space:s2|0|open||mute|poker||none||s2:t1|space:s2|
+section|section:s2:LANES|1|none||mute|LANES||none||||
+tab|tab:s2:t2|1|none|●|working|coach||none||s2:t2||
+menu|agentpins|
+drag|agentpins|
+menu|agent:s1:t1|hide
+drag|agent:s1:t1|agents
+menu|agent:s2:t1|hide
+drag|agent:s2:t1|agents
+menu|agent:ax42/w1:t1|hide
+drag|agent:ax42/w1:t1|agents
+menu|agent:ax42/w1:t3|hide
+drag|agent:ax42/w1:t3|agents
+menu|hiddenagents|
+drag|hiddenagents|
+menu|hiddenagent:s1:t2|show
+drag|hiddenagent:s1:t2|
+menu|hiddenagent:ax42/w1:t2|show
+drag|hiddenagent:ax42/w1:t2|
+menu|pinned|
+drag|pinned|
+menu|pinned:s1:t3|
+drag|pinned:s1:t3|pinned
+menu|space:s1|
+drag|space:s1|
+menu|section:s1:LANES|
+drag|section:s1:LANES|
+menu|tab:s1:t3|
+drag|tab:s1:t3|
+menu|space:s2|
+drag|space:s2|
+menu|section:s2:LANES|
+drag|section:s2:LANES|
+menu|tab:s2:t2|
+drag|tab:s2:t2|

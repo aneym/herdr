@@ -323,7 +323,7 @@ sources = '\n'.join(path.read_text() for path in sorted(SRC.glob('*.swift')))
 row_menu = body(sources, r'enum RowMenu\b[^{]*\{')
 ties = {
     'numberedTabIds uses SpacesTree.numbered': 'SpacesTree.numbered(' in body(sources, r'func numberedTabIds\(state: SidebarState\)[^{]*\{'),
-    'setAgentHidden(_:_:) sends tabSetHidden': 'tabSetHidden(tabId:' in body(sources, r'func setAgentHidden\(_ \w+: String, _ \w+: Bool\)[^{]*\{'),
+    'setAgentHidden(_:_:) sends tabSetHidden': 'tabSetHidden(tabId:' in body(sources, r'func setAgentHidden\(_ \w+: String, _ \w+: Bool[^{]*\{'),
     'RowMenu.hide is "Hide"': re.search(r'\bhide\s*=\s*"Hide"', row_menu) is not None,
     'RowMenu.show is "Show in Agents"': re.search(r'\bshow\s*=\s*"Show in Agents"', row_menu) is not None,
     'RowMenu.items uses setsHidden': 'setsHidden' in body(row_menu, r'static func items\(for'),

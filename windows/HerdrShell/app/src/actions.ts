@@ -46,6 +46,7 @@ export interface ActionContext {
   created: (tabId: string, paneId: string) => void;
   rename: (id: string) => void; switcher: (mode?: "switcher" | "search" | "goto") => void; toggleSidebar: () => void;
   toggleFactory?: () => void;
+  toggleSettings?: () => void;
   error: (error: unknown) => void;
   navigation?: SidebarNavigation; attentionTrail?: readonly string[];
   label?: string; tabId?: string;
@@ -68,6 +69,7 @@ export async function runAction(action: Action, ctx: ActionContext): Promise<voi
     const pane = () => { if (!ctx.focused) throw new Error("No focused pane"); return ctx.focused; };
     const api = (method: string, params: unknown) => ctx.api(ctx.machine, method, params);
     if (action === "open_factory") ctx.toggleFactory?.();
+    else if (action === "open_settings") ctx.toggleSettings?.();
     else if (action === "toggle_area_mode") ctx.navigation?.changeMode(ctx.navigation.mode === "areas" ? "spaces" : "areas");
     else if (/^filter_[1-6]$/.test(action)) ctx.navigation?.changeChip((["all", "needs", "scoping", "building", "review", "use"] as AreaChip[])[Number(action.slice(7)) - 1]);
     else if (/^goto_space_[1-9]$/.test(action)) {

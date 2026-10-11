@@ -276,3 +276,31 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 .host-alert { font-weight: 700; flex-shrink: 0; }
 .host-alert.warn { color: var(--shell-warn); }
 .host-alert.act { color: var(--shell-bad); }
+/* Settings, full window over the sidebar and panes (SettingsPage.swift on the Mac): a section list on
+   the surface colour, then one page with a large title, a lede and hairline-separated rows, no cards. */
+.settings { position: fixed; inset: 0; z-index: 9; display: flex; background: var(--shell-bg); color: var(--shell-text); outline: none; }
+.settings-nav { width: var(--shell-space-settings-nav-width); flex-shrink: 0; display: flex; flex-direction: column; gap: var(--shell-space-step4); padding: var(--shell-space-settings-pad-top) var(--shell-space-step12) 0; background: var(--shell-surface); border-right: 1px solid var(--shell-line); }
+.settings-nav-title { padding: 0 var(--shell-space-step8) var(--shell-space-step6); font-size: var(--shell-type-section-label); font-weight: 600; letter-spacing: var(--shell-type-section-tracking); color: var(--shell-muted); }
+.settings-nav-row { display: flex; align-items: center; height: var(--shell-space-switcher-row-height); padding: 0 var(--shell-space-step8); border: 0; border-radius: var(--shell-radius-control); background: transparent; font-size: var(--shell-type-settings-nav); font-weight: 500; text-align: left; color: var(--shell-text); }
+.settings-nav-row.selected { background: var(--shell-selection); }
+.settings-page { flex: 1; min-width: 0; overflow: auto; }
+.settings-column { max-width: var(--shell-space-settings-column); padding: var(--shell-space-settings-pad-top) var(--shell-space-settings-pad-x) var(--shell-space-step32); }
+.settings-header { display: flex; align-items: baseline; justify-content: space-between; gap: var(--shell-space-step8); }
+.settings-header h1 { margin: 0; font-size: var(--shell-type-settings-title); font-weight: 600; }
+.settings-done { border: 0; padding: 0; background: transparent; font-size: var(--shell-type-settings-row); font-weight: 500; color: var(--shell-accent); cursor: pointer; }
+.settings-lede, .settings-empty { margin: var(--shell-space-step6) 0 var(--shell-space-step16); font-size: var(--shell-type-settings-meta); color: var(--shell-muted); }
+.settings-empty { font-size: var(--shell-type-settings-row); }
+.settings-rows { list-style: none; margin: 0; padding: 0; }
+.settings-row { display: flex; align-items: center; gap: var(--shell-space-step12); height: var(--shell-space-settings-row-height); position: relative; }
+.settings-row + .settings-row::before { content: ""; position: absolute; top: 0; right: 0; left: calc(var(--shell-face-settings-size) + var(--shell-space-step12)); border-top: 1px solid var(--shell-line); }
+.settings-face { position: relative; width: var(--shell-face-settings-size); height: var(--shell-face-settings-size); flex-shrink: 0; --face-tint-opacity: var(--shell-face-tint-opacity-dark); }
+:root[data-theme="light"] .settings-face { --face-tint-opacity: var(--shell-face-tint-opacity-light); }
+.settings-face .face-initial { font-size: var(--shell-face-settings-initial); }
+.settings-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--shell-space-step2); }
+.settings-row-title { font-size: var(--shell-type-settings-row); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.settings-row-meta { font-size: var(--shell-type-settings-meta); color: var(--shell-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.settings-switch { position: relative; flex-shrink: 0; width: var(--shell-space-settings-toggle-width); height: var(--shell-space-settings-toggle-height); padding: 0; border: 0; border-radius: calc(var(--shell-space-settings-toggle-height) / 2); background: color-mix(in srgb, var(--shell-text) 18%, transparent); cursor: pointer; transition: background var(--shell-motion-fade-ms) ease; }
+.settings-switch[aria-checked="true"] { background: var(--shell-accent); }
+.settings-switch-knob { position: absolute; top: var(--shell-space-step2); left: var(--shell-space-step2); width: calc(var(--shell-space-settings-toggle-height) - 2 * var(--shell-space-step2)); height: calc(var(--shell-space-settings-toggle-height) - 2 * var(--shell-space-step2)); border-radius: 50%; background: var(--shell-bg); box-shadow: 0 0 0 0.5px var(--shell-line); transition: transform var(--shell-motion-fade-ms) ease; }
+.settings-switch[aria-checked="true"] .settings-switch-knob { transform: translateX(calc(var(--shell-space-settings-toggle-width) - var(--shell-space-settings-toggle-height))); }
+.settings-switch:focus-visible, .settings-done:focus-visible { outline: 2px solid var(--shell-accent); outline-offset: 2px; }

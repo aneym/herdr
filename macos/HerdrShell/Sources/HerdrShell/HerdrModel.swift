@@ -317,9 +317,22 @@ extension HerdrModel {
         DispatchQueue.global(qos: .userInitiated).async { _ = commands.tabSetRole(tabId: tab, role: on ? "agent" : nil) }
     }
 
-    func setAgentHidden(_ tab: String, _ hidden: Bool) {
+    func setAgentHidden(_ tab: String, _ hidden: Bool, done: ((Bool) -> Void)? = nil) {
         let commands = HerdrCommands(socketPath: env["HERDR_SOCKET_PATH"] ?? "")
-        DispatchQueue.global(qos: .userInitiated).async { _ = commands.tabSetHidden(tabId: tab, hidden: hidden) }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let ok = commands.tabSetHidden(tabId: tab, hidden: hidden)
+            if let done { DispatchQueue.main.async { done(ok) } }
+        }
+    }
+
+    /// This machine's tabs with their agent cards, for Settings > Agents (SettingsAgents.rows).
+    var settingsInput: SpacesInput {
+        guard let s = snapshot else { return SpacesInput(spaces: [], tabs: [], focusedTab: nil) }
+        let input = SpacesInput(spaces: Self.spaces(s), tabs: s.tabs.map {
+            SpacesInput.Tab(id: $0.tab_id, space: $0.workspace_id, label: $0.label ?? $0.tab_id, pinIndex: $0.pin_index,
+                            role: $0.role, hidden: $0.hidden ?? false, homeLocation: $0.home_location, runsOn: $0.runs_on)
+        }, focusedTab: nil)
+        return AgentCards.attach(input, panes: s.panes.map { ($0.pane_id, $0.tab_id) }, cards: catalog.snapshot.agents)
     }
 
     func isPinned(_ tab: String) -> Bool {
