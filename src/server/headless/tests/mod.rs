@@ -4816,7 +4816,7 @@ fn remote_takeover_of_an_agent_terminal_held_on_the_home_machine_is_refused() {
             reason
                 .as_deref()
                 // "taken over" makes current Mac and PC Shells show the pane as held, not crashed.
-                .is_some_and(|reason| reason.contains("held on its home machine")
+                .is_some_and(|reason| reason.contains("agent tab in use")
                     && reason.contains("taken over")
                     && !reason.contains("already has an attached client")),
             "{reason:?}"
@@ -4846,6 +4846,27 @@ fn remote_client_takes_over_an_agent_terminal_from_an_idle_home_holder() {
             data: b"x".to_vec(),
         }));
         assert!(server.clients[&8].last_human_input_at.is_some());
+    });
+}
+
+// 2026-10-12 17:06Z: after the PC took the CoS tab, the Book's Shell (another remote client)
+// retook it at once. A remote holder someone is typing on keeps its agent tab too.
+#[test]
+fn remote_takeover_from_an_active_remote_holder_is_refused() {
+    with_terminal_session_test_server(|server, _terminal_id, target, _| {
+        pin_test_tab_as_agent(server);
+        connect_pending_terminal_client(server, 7);
+        server.clients.get_mut(&7).expect("client 7").remote = true;
+        assert!(control(server, 7, &target, false));
+        assert!(server.handle_server_event(ServerEvent::ClientInput {
+            client_id: 7,
+            data: b"a".to_vec(),
+        }));
+
+        connect_pending_terminal_client(server, 8);
+        server.clients.get_mut(&8).expect("client 8").remote = true;
+        assert!(!control(server, 8, &target, true));
+        assert_eq!(server.terminal_attach_owners.get(&target), Some(&7));
     });
 }
 

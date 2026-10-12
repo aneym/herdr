@@ -1816,12 +1816,12 @@ impl HeadlessServer {
                     &real_terminal_id,
                 )
             {
-                info!(client_id, existing_owner, terminal_id = %terminal_id, "remote takeover of a home agent terminal refused");
+                info!(client_id, existing_owner, terminal_id = %terminal_id, "remote takeover of an agent terminal in use refused");
                 self.send_to_client(
                     client_id,
                     ServerMessage::ServerShutdown {
                         reason: Some(format!(
-                            "terminal attach refused: terminal {terminal_id} is an agent tab held on its home machine and is not taken over from another machine"
+                            "terminal attach refused: terminal {terminal_id} is an agent tab in use on another client and is not taken over"
                         )),
                     },
                 );
@@ -1876,8 +1876,9 @@ impl HeadlessServer {
     }
 
     /// Agent tabs are homed on this machine (Alex, 2026-10-12): a client that arrived over ssh
-    /// may not take one over from a client on this machine while someone is typing there. This
-    /// machine may always take it back. A home holder with no human input for
+    /// may not take one over from a client someone is typing on, on this machine or another
+    /// (an idle Book Shell retook the CoS tab from the PC Alex was using). This machine may
+    /// always take it back. A home holder with no human input for
     /// `HOME_HOLDER_ACTIVE_WINDOW` is an idle screen, and the machine Alex is actually using
     /// (Alex, 2026-10-12 16:57Z: "herdr shell pc recruiter says disconnected") takes it over.
     fn remote_takeover_of_home_terminal(
@@ -1892,10 +1893,7 @@ impl HeadlessServer {
                 .last_human_input_at
                 .is_some_and(|at| at.elapsed() < HOME_HOLDER_ACTIVE_WINDOW)
         });
-        remote(client_id)
-            && holder_active
-            && !remote(existing_owner)
-            && self.app.terminal_is_agent_tab(terminal_id)
+        remote(client_id) && holder_active && self.app.terminal_is_agent_tab(terminal_id)
     }
 
     fn client_is_pending_terminal_mode(&self, client_id: u64) -> bool {

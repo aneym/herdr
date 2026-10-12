@@ -14,13 +14,16 @@ agent tab. Only a silent takeover by an idle machine is refused.
   (`HOME_HOLDER_ACTIVE_WINDOW` in `src/server/headless.rs`).
 - **An idle home holder yields.** If nobody typed on this machine's client in that window,
   the other machine takes the tab over. This is the machine Alex is using.
+- **The same holds between two other machines.** A remote client may not take a pinned
+  agent tab from another remote client someone typed on in that window (an idle Book Shell
+  retook the CoS tab from the PC Alex was using, 2026-10-12 17:06Z).
 - **This machine can always take a tab back,** from any client.
 - **Plain tabs** keep the plain rule: any `--takeover` replaces the holder.
 
 A refused takeover closes the requesting client with a reason that contains "taken over",
 so the Mac and PC Shells show the pane as held, not crashed. The server logs every
 takeover (`terminal attach takeover`, with `remote`) and every refusal
-(`remote takeover of a home agent terminal refused`) in `herdr-server.log`.
+(`remote takeover of an agent terminal in use refused`) in `herdr-server.log`.
 
 ## History
 
