@@ -368,7 +368,9 @@ enum SpacesTree {
                 let open = inside || ((chrome.expandedTabs.contains(tab.id) || focusedInside || (SpacesTree.actionUnfoldsLane && attention == "act")) && !chrome.collapsedTabs.contains(tab.id))
                 let state = SpacesTree.mark(tab, t, foldable: foldable)
                 let idle = state.idle
-                var name = t.name ?? tab.label
+                // The live label is the name: the overlay copies it every 30 s, so its name is stale
+                // right after a rename. Workflow rows keep the overlay's ledger name.
+                var name = t.kind != "workflow" && tab.label != tab.id ? tab.label : t.name ?? tab.label
                 if t.kind == "workflow", name.hasPrefix("wf ") { name = String(name.dropFirst(3)) }
                 if t.kind == "lane" {
                     if name.lowercased().hasPrefix("[scoping] ") { name = String(name.dropFirst(10)) }
