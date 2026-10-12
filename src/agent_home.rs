@@ -29,6 +29,22 @@ fn parse_status(bytes: &[u8]) -> HomeLocation {
     }
 }
 
+/// The key a folder's location is also stored under, for an agent tab whose
+/// pane no card names: `agent:<folder>`, which no public pane id can equal.
+pub(crate) fn folder_key(name: &str) -> String {
+    format!("agent:{name}")
+}
+
+/// The folder an agent tab's label names: "League Coach" -> "league-coach".
+pub(crate) fn label_folder(label: &str) -> String {
+    label
+        .trim()
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
 #[derive(Default)]
 struct CachedFile {
     stamp: Option<(Option<SystemTime>, u64)>,
@@ -86,16 +102,21 @@ impl AgentHomePoller {
             let has_marker = marker.exists;
             let valid_marker = marker.bytes.as_deref().is_some_and(parse_marker);
             let status = self.file(&status).bytes.as_deref().map(parse_status);
+            // agent-home's per-file homes keep no home.json, only status.json, so a
+            // status file alone names the location; a marker with no status is unsynced.
+            let location = match status {
+                Some(status) if !has_marker || valid_marker => status,
+                _ if has_marker || status.is_some() => HomeLocation::Unsynced,
+                _ => HomeLocation::Local,
+            };
             if let Some(pane) = pane {
-                homes.entry(pane).or_insert_with(|| {
-                    if !has_marker {
-                        HomeLocation::Local
-                    } else if !valid_marker {
-                        HomeLocation::Unsynced
-                    } else {
-                        status.unwrap_or(HomeLocation::Unsynced)
-                    }
-                });
+                homes.entry(pane).or_insert(location);
+            }
+            // A pinned agent tab with no card pane finds its home by folder name.
+            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                if let Some(name) = entry.file_name().to_str() {
+                    homes.insert(folder_key(name), location);
+                }
             }
         }
         self.files.retain(|path, _| visited.contains(path));

@@ -253,18 +253,27 @@ pub(super) fn drawn(entry: &Entry, y: u16) {
 pub(super) fn finish(preferences: Option<&Path>) {
     REPORTS.with(|reports| {
         let mut reports = reports.borrow_mut();
-        let Some(workspaces) = reports.pending.take() else { return };
-        let Some(path) = preferences.and_then(super::preferences::sidebar_path) else { return };
+        let Some(workspaces) = reports.pending.take() else {
+            return;
+        };
+        let Some(path) = preferences.and_then(super::preferences::sidebar_path) else {
+            return;
+        };
         let now = Instant::now();
         if let Some((last, previous)) = reports.last.get(&path) {
             let elapsed = now.duration_since(*last);
-            if elapsed < Duration::from_secs(1) || (previous == &workspaces && elapsed < REFRESH) { return; }
+            if elapsed < Duration::from_secs(1) || (previous == &workspaces && elapsed < REFRESH) {
+                return;
+            }
         }
         let result = write(&path, &workspaces);
         // Throttle failed writes too, so an unwritable directory cannot busy-loop.
         reports.last.insert(path, (now, workspaces));
         if let Err(error) = result {
-            if !reports.logged_error { eprintln!("sidebar report: {error}"); reports.logged_error = true; }
+            if !reports.logged_error {
+                eprintln!("sidebar report: {error}");
+                reports.logged_error = true;
+            }
         }
     });
 }
@@ -274,21 +283,35 @@ pub(super) fn finish(preferences: Option<&Path>) {
 pub(super) fn keepalive(preferences: Option<&Path>) {
     REPORTS.with(|reports| {
         let mut reports = reports.borrow_mut();
-        let Some(path) = preferences.and_then(super::preferences::sidebar_path) else { return };
+        let Some(path) = preferences.and_then(super::preferences::sidebar_path) else {
+            return;
+        };
         let now = Instant::now();
-        let Some((last, workspaces)) = reports.last.get_mut(&path) else { return };
-        if now.duration_since(*last) < REFRESH { return; }
+        let Some((last, workspaces)) = reports.last.get_mut(&path) else {
+            return;
+        };
+        if now.duration_since(*last) < REFRESH {
+            return;
+        }
         *last = now;
         let result = write(&path, workspaces);
         if let Err(error) = result {
-            if !reports.logged_error { eprintln!("sidebar report: {error}"); reports.logged_error = true; }
+            if !reports.logged_error {
+                eprintln!("sidebar report: {error}");
+                reports.logged_error = true;
+            }
         }
     });
 }
 const REFRESH: Duration = Duration::from_secs(60);
 fn write(path: &Path, workspaces: &[WorkspaceReport]) -> std::io::Result<()> {
-    let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();
-    let parent = path.parent().ok_or_else(|| std::io::Error::other("invalid sidebar report path"))?;
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("invalid sidebar report path"))?;
     std::fs::create_dir_all(parent)?;
     let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
     let payload = serde_json::json!({"version": 1, "at": at, "pid": std::process::id(), "workspaces": workspaces});

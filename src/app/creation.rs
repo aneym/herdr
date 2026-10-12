@@ -246,10 +246,24 @@ impl App {
             .unwrap_or((crate::detect::AgentState::Unknown, true));
         let tab_id = self.public_tab_id(ws_idx, tab_idx)?;
         Some(crate::api::schema::TabInfo {
-            home_location: tab.layout.pane_ids().into_iter().find_map(|pane_id| {
-                let public_id = self.public_pane_id(ws_idx, pane_id)?;
-                self.state.agent_homes.get(&public_id).copied()
-            }),
+            home_location: tab
+                .layout
+                .pane_ids()
+                .into_iter()
+                .find_map(|pane_id| {
+                    let public_id = self.public_pane_id(ws_idx, pane_id)?;
+                    self.state.agent_homes.get(&public_id).copied()
+                })
+                .or_else(|| {
+                    let agent_tab = self.state.pinned_tabs.iter().any(|pin| {
+                        pin.tab_id == tab_id && pin.role == Some(crate::api::schema::TabRole::Agent)
+                    });
+                    let label = ws.tab_display_name(tab_idx)?;
+                    agent_tab.then_some(())?;
+                    let key =
+                        crate::agent_home::folder_key(&crate::agent_home::label_folder(&label));
+                    self.state.agent_homes.get(&key).copied()
+                }),
             runs_on: tab
                 .layout
                 .pane_ids()

@@ -21,6 +21,7 @@ const CONTENT_PANE: &str = "w5Y:p2";
 const HOME_PANE: &str = "w5Y:p3";
 const RECRUITER_PANE: &str = "w5Y:p4";
 const GARBLED_PANE: &str = "w5Y:p5";
+const RAISE_PANE: &str = "w5Y:p6";
 
 /// A throwaway `HERDR_AGENTS_DIR`, passed to the poller explicitly.
 struct CardsDir(PathBuf);
@@ -156,6 +157,11 @@ fn studio_cards(tag: &str) -> CardsDir {
     dir.card("zz-garbled", "garbled", GARBLED_PANE);
     dir.marker("zz-garbled");
     dir.write("zz-garbled/.rails/status.json", r#"{"schema":1,"locat"#);
+    // agent-home v2: status.json with no home.json marker reads as its status.
+    dir.card("raise", "raise", RAISE_PANE);
+    dir.status("raise", "cloud");
+    // No card at all (the Rails tab): reachable only by folder name.
+    dir.status("rails", "cloud");
     dir.write("README.md", "not a card folder");
     let settled = SystemTime::now() - Duration::from_secs(3600);
     for file in dir.files() {
@@ -171,6 +177,16 @@ fn expected_studio_map() -> HashMap<String, HomeLocation> {
         (HOME_PANE.to_owned(), HomeLocation::Unsynced),
         (RECRUITER_PANE.to_owned(), HomeLocation::Unsynced),
         (GARBLED_PANE.to_owned(), HomeLocation::Unsynced),
+        (RAISE_PANE.to_owned(), HomeLocation::Cloud),
+        ("agent:aaa-parked".to_owned(), HomeLocation::Cloud),
+        ("agent:frank".to_owned(), HomeLocation::Cloud),
+        ("agent:content".to_owned(), HomeLocation::Local),
+        ("agent:home".to_owned(), HomeLocation::Unsynced),
+        ("agent:recruiter".to_owned(), HomeLocation::Unsynced),
+        ("agent:health".to_owned(), HomeLocation::Local),
+        ("agent:zz-garbled".to_owned(), HomeLocation::Unsynced),
+        ("agent:raise".to_owned(), HomeLocation::Cloud),
+        ("agent:rails".to_owned(), HomeLocation::Cloud),
     ])
 }
 
@@ -219,19 +235,23 @@ fn home_location_poll_rereads_only_changed_files_and_flips_on_a_status_edit() {
     );
     let mut expected = expected_studio_map();
     expected.insert(FRANK_PANE.to_owned(), HomeLocation::Unsynced);
+    expected.insert("agent:frank".to_owned(), HomeLocation::Unsynced);
     assert_eq!(poller.homes(), &expected);
 
     // health, on frank's pane, gains a clean cloud home. frank still owns the
-    // pane, so its unsynced location stands and nothing changed.
+    // pane, so its unsynced location stands; only health's folder key moves.
     for path in [dir.marker("health"), dir.status("health", "cloud")] {
         set_mtime(&path, SystemTime::now() - Duration::from_secs(1700));
     }
-    assert!(!poller.poll(dir.path()));
+    assert!(poller.poll(dir.path()));
+    expected.insert("agent:health".to_owned(), HomeLocation::Cloud);
     assert_eq!(poller.homes(), &expected);
 
     // The next sync leaves frank clean again.
     let status = dir.status("frank", "cloud");
     set_mtime(&status, SystemTime::now() - Duration::from_secs(1600));
     assert!(poller.poll(dir.path()));
-    assert_eq!(poller.homes(), &expected_studio_map());
+    let mut expected = expected_studio_map();
+    expected.insert("agent:health".to_owned(), HomeLocation::Cloud);
+    assert_eq!(poller.homes(), &expected);
 }
