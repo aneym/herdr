@@ -36,7 +36,7 @@ struct StateGlyph: View {
         let s = 8 * scale
         switch state {
         case .working:
-            Circle().fill(tokens.ok).frame(width: s, height: s)
+            Circle().fill(tokens.working).frame(width: s, height: s)
         case .needs:
             Rectangle().fill(tokens.warn).frame(width: 7 * scale, height: 7 * scale).rotationEffect(.degrees(45))
         case .blocked:
@@ -46,7 +46,7 @@ struct StateGlyph: View {
         case .asleep:
             RoundedRectangle(cornerRadius: ShellRadius.curve0_5).fill(tokens.faint).frame(width: 7 * scale, height: 1.5 * scale)
         case .done:
-            Image(systemName: "checkmark").font(.system(size: ShellType.glyph * scale, weight: .semibold)).foregroundStyle(tokens.faint)
+            Image(systemName: "checkmark").font(.system(size: ShellType.glyph * scale, weight: .semibold)).foregroundStyle(tokens.ok)
         }
     }
 }

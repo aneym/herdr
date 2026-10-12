@@ -175,15 +175,15 @@ struct SpacesRow: Identifiable, Equatable {
     var face: Face?
     struct Face: Equatable { var initial: String; var tint: Int; var avatar: String? }
     /// The dot set into the face, as a chrome token: an open request or a blocked agent needs you
-    /// (accent, the row's one blue dot, ahead of any other state), working is ok, done is warn,
+    /// (accent, the row's one blue dot, ahead of any other state), working is orange, done is ok,
     /// idle shows none.
     var faceDot: String? {
         guard face != nil else { return nil }
         if request != nil { return "accent" }
         switch tone {
-        case "working": return "ok"
+        case "working": return "working"
         case "blocked": return "accent"
-        case "done": return "warn"
+        case "done": return "ok"
         default: return nil
         }
     }

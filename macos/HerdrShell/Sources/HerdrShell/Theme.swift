@@ -45,6 +45,8 @@ struct ChromePalette: Equatable {
     var accent: UInt32
     var bad: UInt32
     var attentionAct: UInt32
+    /// A chat at work: orange, as the TUI's palette.working (Alex, 2026-09-29: "an agent is working, it should be oragne. finished, green").
+    var working: UInt32
 
     static let textTokenNames = ["ink", "mute", "orch", "lane", "wf", "ok", "warn"]
     static let surfaceTokenNames = ["panel", "sel"]
@@ -91,6 +93,7 @@ struct ChromePalette: Equatable {
         case "accent": return accent
         case "bad": return bad
         case "attentionAct": return attentionAct
+        case "working": return working
         default: return nil
         }
     }
@@ -134,6 +137,7 @@ struct Tokens {
     var lane: Color { Color(hex: chrome.lane) }
     var wf: Color { Color(hex: chrome.wf) }
     var ok: Color { Color(hex: chrome.ok) }
+    var working: Color { Color(hex: chrome.working) }
     var warn: Color { Color(hex: chrome.warn) }
     var cap: Color { Color(hex: chrome.cap) }
     var hover: Color { Color(hex: chrome.hover) }
@@ -147,9 +151,9 @@ struct Tokens {
     /// `.status`): working ok, blocked bad, done warn, anything else mute.
     func stateTone(_ tone: String) -> UInt32 {
         switch tone {
-        case "working": return chrome.ok
+        case "working": return chrome.working
         case "blocked": return chrome.bad
-        case "done": return chrome.warn
+        case "done": return chrome.ok
         default: return chrome.mute
         }
     }

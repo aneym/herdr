@@ -21,7 +21,7 @@ describe("agent faces", () => {
       expect(parseCard(text), text).toBeNull();
   });
   it("puts one dot in the face: an open request is blue ahead of working and done; idle has none", () => {
-    expect(["working", "blocked", "done", "idle", "unknown"].map(s => faceDot(s))).toEqual(["ok", "accent", "warn", null, null]);
+    expect(["working", "blocked", "done", "idle", "unknown"].map(s => faceDot(s))).toEqual(["working", "accent", "ok", null, null]);
     expect(["working", "done", "idle"].map(s => faceDot(s, "req-1"))).toEqual(["accent", "accent", "accent"]);
   });
   it("gives agent rows the face of the card whose pane the tab holds, and its open request", () => {

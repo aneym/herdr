@@ -3,7 +3,7 @@ import type { Snapshot } from "./model";
 // else its initial on one of nine tints (shell/tokens.json `face.tints`) picked from its name.
 export interface AgentCard { name: string; avatar?: string }
 export interface Face { initial: string; tint: number; avatar?: string }
-export type FaceDot = "ok" | "accent" | "warn";
+export type FaceDot = "working" | "ok" | "accent" | "warn";
 export const FACE_TINTS = 9;
 export const AGENTS_DIR = "~/.agent-rails/agents";
 const text = (value: unknown) => typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -32,10 +32,10 @@ export function faceFor(name: string, avatar?: string): Face {
   const first = [...key][0];
   return { initial: first ? first.toUpperCase() : "?", tint: hash % FACE_TINTS, ...(avatar ? { avatar } : {}) };
 }
-/** An open request or a blocked agent needs you (the row's one blue dot), working is green, done is peach, idle has none. */
+/** An open request or a blocked agent needs you (the row's one blue dot), working is orange, done is green, idle has none. */
 export function faceDot(status: string, request?: string): FaceDot | null {
   if (request) return "accent";
-  return ({ working: "ok", blocked: "accent", done: "warn" } as Record<string, FaceDot>)[status] ?? null;
+  return ({ working: "working", blocked: "accent", done: "ok" } as Record<string, FaceDot>)[status] ?? null;
 }
 export function faceHover(status: string, request?: string): string {
   if (request) return `Needs you, request ${request}`;

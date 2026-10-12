@@ -7,7 +7,7 @@ import SwiftUI
 /// Sizes, tints and opacities are shell/tokens.json `face`, shared with the Windows client.
 struct AgentFace: View {
     let face: SpacesRow.Face
-    /// The dot's chrome token (ok, accent, warn), or nil for none.
+    /// The dot's chrome token (working, ok, accent, warn), or nil for none.
     let dot: String?
     /// The row's tone (SpacesTree.mark), named on hover.
     let tone: String
@@ -65,9 +65,10 @@ struct AgentFace: View {
         }
     }
 
-    /// Green while it works, blue when it needs you (the one quiet "for you" dot), peach once done.
+    /// Orange while it works, blue when it needs you (the one quiet "for you" dot), green once done.
     private var dotColor: Color? {
         switch dot {
+        case "working": return t.working
         case "ok": return t.ok
         case "accent": return t.accent
         case "warn": return t.warn

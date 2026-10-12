@@ -1073,8 +1073,8 @@ final class TestHook {
             // top left, so a check can click each with a real pointer event.
             "row_frames": Dictionary(uniqueKeysWithValues: c.state.rowFrames.map { ($0.key, windowFrame($0.value, in: c.sidebarHostView, c)) }),
             "face_pictures": FacePictures.shared.images.keys.sorted(),
-            "face_dots": ["working": ThemeStore.hex(c.theme.tokens.chrome.ok), "blocked": ThemeStore.hex(c.theme.tokens.chrome.accent),
-                          "done": ThemeStore.hex(c.theme.tokens.chrome.warn)],
+            "face_dots": ["working": ThemeStore.hex(c.theme.tokens.chrome.working), "blocked": ThemeStore.hex(c.theme.tokens.chrome.accent),
+                          "done": ThemeStore.hex(c.theme.tokens.chrome.ok)],
             // What ⌘1..9 select, in order (pins first).
             "numbered_tabs": Array(c.model.numberedTabIds(state: c.state).prefix(9)),
             "hidden_agents": ([c.model.snapshot].compactMap { $0 } + c.model.machines.compactMap(\.snapshot)).flatMap(\.tabs).filter { $0.role == "agent" && ($0.hidden ?? false) }.map(\.tab_id),

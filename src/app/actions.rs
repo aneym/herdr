@@ -254,6 +254,12 @@ impl AppState {
     ) {
         if self.attention_read == crate::config::AttentionReadConfig::OnFocus {
             self.deferred_attention_read = None;
+            // A chat that finished while you were in it is read once you leave it, not
+            // on the next visit (Alex, 2026-09-29: "there's a delay when marking
+            // something as read after elaving the chat").
+            if let Some(previous) = previous.filter(|_| previous != current) {
+                self.mark_tab_seen_for(previous);
+            }
             self.mark_active_tab_seen();
             return;
         }
@@ -644,6 +650,15 @@ impl AppState {
         }
         if let Some(pending) = self.deferred_attention_read.take() {
             self.mark_deferred_attention_read(&pending.target, pending.state_change_seq);
+        }
+    }
+
+    fn mark_tab_seen_for(&mut self, target: &PaneFocusTarget) {
+        let Some((ws_idx, tab_idx)) = self.pane_focus_target_indices(target) else {
+            return;
+        };
+        for pane in self.workspaces[ws_idx].tabs[tab_idx].panes.values_mut() {
+            pane.seen = true;
         }
     }
 
@@ -3348,6 +3363,34 @@ mod tests {
         state.read_focused_attention();
 
         assert!(state.workspaces[0].tabs[0].panes[&root].seen);
+    }
+
+    #[test]
+    fn on_focus_completion_while_unfocused_is_read_when_leaving_the_chat() {
+        let mut state = app_with_workspaces(&["chat", "other"]);
+        state.active = Some(0);
+        state.outer_terminal_focus = Some(false);
+        let pane_id = *state.workspaces[0].panes.keys().next().unwrap();
+        let terminal_id = state.workspaces[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        state.terminals.get_mut(&terminal_id).unwrap().state = AgentState::Working;
+
+        state.handle_app_event(AppEvent::StateChanged {
+            pane_id,
+            agent: Some(Agent::Pi),
+            state: AgentState::Idle,
+            visible_blocker: false,
+            visible_working: false,
+            process_exited: false,
+            observed_at: std::time::Instant::now(),
+            runtime_pid: None,
+        });
+        assert!(!state.workspaces[0].panes[&pane_id].seen);
+
+        state.switch_workspace_tab(1, 0);
+
+        assert!(state.workspaces[0].panes[&pane_id].seen);
     }
 
     #[test]

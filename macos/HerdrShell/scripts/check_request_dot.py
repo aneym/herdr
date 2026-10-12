@@ -37,7 +37,7 @@ import Foundation
                     precondition(row.faceDot == "accent", "request beats \(tone)")
                 }
                 row.request = nil
-                row.tone = "working"; precondition(row.faceDot == "ok", "working without a request is ok")
+                row.tone = "working"; precondition(row.faceDot == "working", "working without a request is the orange working dot")
                 row.tone = "mute"; precondition(row.faceDot == nil, "idle shows no dot")
                 row.request = "req-42"; row.face = nil
                 precondition(row.trailingRequest == "req-42" && row.faceDot == nil, "no face keeps the trailing dot")
