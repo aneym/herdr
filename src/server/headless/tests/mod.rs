@@ -4771,6 +4771,82 @@ fn terminal_control_takeover_replaces_existing_controller() {
     });
 }
 
+fn pin_test_tab_as_agent(server: &mut HeadlessServer) {
+    let ws = &server.app.state.workspaces[0];
+    let tab_id = crate::workspace::public_tab_id_for_number(&ws.id, ws.tabs[0].number);
+    server
+        .app
+        .state
+        .set_tab_role(&tab_id, Some(api::schema::TabRole::Agent));
+}
+
+fn control(server: &mut HeadlessServer, client_id: u64, target: &str, takeover: bool) -> bool {
+    server.handle_server_event(ServerEvent::ClientControlTerminal {
+        client_id,
+        target: target.to_owned(),
+        takeover,
+    })
+}
+
+// Alex 2026-10-12 14:18Z: "the herdr tab keeps getting taken over by another computer even though
+// this is the only one being used". The Book's Shell (an ssh-forwarded client) re-took the CoS pane
+// from the Studio Shell. Agent tabs are homed on the server's machine: a remote client may not take
+// one over from a client on this machine.
+#[test]
+fn remote_takeover_of_an_agent_terminal_held_on_the_home_machine_is_refused() {
+    with_terminal_session_test_server(|server, _terminal_id, target, _| {
+        pin_test_tab_as_agent(server);
+        connect_pending_terminal_client(server, 7);
+        assert!(control(server, 7, &target, false));
+
+        let control_rx = connect_pending_terminal_client_with_control_rx(server, 8);
+        server.clients.get_mut(&8).expect("client 8").remote = true;
+        assert!(!control(server, 8, &target, true));
+
+        assert!(server.clients.contains_key(&7));
+        assert!(!server.clients.contains_key(&8));
+        assert_eq!(server.terminal_attach_owners.get(&target), Some(&7));
+        let reason = read_server_shutdown_reason(control_rx.recv().expect("shutdown message"));
+        assert!(
+            reason
+                .as_deref()
+                // "taken over" makes current Mac and PC Shells show the pane as held, not crashed.
+                .is_some_and(|reason| reason.contains("held on its home machine")
+                    && reason.contains("taken over")
+                    && !reason.contains("already has an attached client")),
+            "{reason:?}"
+        );
+    });
+}
+
+#[test]
+fn home_machine_takes_an_agent_terminal_back_from_a_remote_client() {
+    with_terminal_session_test_server(|server, _terminal_id, target, _| {
+        pin_test_tab_as_agent(server);
+        connect_pending_terminal_client(server, 7);
+        server.clients.get_mut(&7).expect("client 7").remote = true;
+        assert!(control(server, 7, &target, false));
+
+        connect_pending_terminal_client(server, 8);
+        assert!(control(server, 8, &target, true));
+        assert!(!server.clients.contains_key(&7));
+        assert_eq!(server.terminal_attach_owners.get(&target), Some(&8));
+    });
+}
+
+#[test]
+fn remote_takeover_of_a_plain_tab_still_replaces_the_controller() {
+    with_terminal_session_test_server(|server, _terminal_id, target, _| {
+        connect_pending_terminal_client(server, 7);
+        assert!(control(server, 7, &target, false));
+
+        connect_pending_terminal_client(server, 8);
+        server.clients.get_mut(&8).expect("client 8").remote = true;
+        assert!(control(server, 8, &target, true));
+        assert_eq!(server.terminal_attach_owners.get(&target), Some(&8));
+    });
+}
+
 #[test]
 fn terminal_observe_can_coexist_with_terminal_control() {
     with_terminal_session_test_server(|server, _terminal_id, terminal_id_string, _| {

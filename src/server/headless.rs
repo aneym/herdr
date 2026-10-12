@@ -1805,6 +1805,25 @@ impl HeadlessServer {
                 self.remove_client_and_resize_if_needed(client_id);
                 return false;
             }
+            if existing_owner != client_id
+                && self.remote_takeover_of_home_terminal(
+                    client_id,
+                    existing_owner,
+                    &real_terminal_id,
+                )
+            {
+                info!(client_id, existing_owner, terminal_id = %terminal_id, "remote takeover of a home agent terminal refused");
+                self.send_to_client(
+                    client_id,
+                    ServerMessage::ServerShutdown {
+                        reason: Some(format!(
+                            "terminal attach refused: terminal {terminal_id} is an agent tab held on its home machine and is not taken over from another machine"
+                        )),
+                    },
+                );
+                self.remove_client_and_resize_if_needed(client_id);
+                return false;
+            }
             if existing_owner != client_id {
                 self.send_to_client(
                     existing_owner,
@@ -1845,6 +1864,21 @@ impl HeadlessServer {
             runtime.resize(rows, cols, cell_size.width_px, cell_size.height_px);
         }
         true
+    }
+
+    /// Agent tabs are homed on this machine (Alex, 2026-10-12): a client that arrived over ssh
+    /// may not take one over from a client on this machine. This machine may always take it back.
+    fn remote_takeover_of_home_terminal(
+        &self,
+        client_id: u64,
+        existing_owner: u64,
+        terminal_id: &crate::terminal::TerminalId,
+    ) -> bool {
+        let remote = |id| self.clients.get(&id).is_some_and(|client| client.remote);
+        remote(client_id)
+            && self.clients.contains_key(&existing_owner)
+            && !remote(existing_owner)
+            && self.app.terminal_is_agent_tab(terminal_id)
     }
 
     fn client_is_pending_terminal_mode(&self, client_id: u64) -> bool {
@@ -1901,6 +1935,10 @@ impl HeadlessServer {
                     Some(writer),
                 );
                 connection.pixel_mouse = pixel_mouse;
+                connection.remote = crate::server::peer_origin::take(client_id);
+                if connection.remote {
+                    info!(client_id, "direct terminal client arrived over ssh");
+                }
                 self.clients.insert(client_id, connection);
                 false
             }

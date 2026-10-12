@@ -133,6 +133,25 @@ impl App {
         }
     }
 
+    /// Whether the terminal sits in a tab pinned with the agent role.
+    pub(crate) fn terminal_is_agent_tab(&self, terminal_id: &crate::terminal::TerminalId) -> bool {
+        let wanted = terminal_id.to_string();
+        self.terminal_targets()
+            .into_iter()
+            .find(|target| target.terminal_id == wanted)
+            .and_then(|target| {
+                let ws = self.state.workspaces.get(target.ws_idx)?;
+                let tab = ws.tabs.get(target.tab_idx)?;
+                let tab_id = crate::workspace::public_tab_id_for_number(&ws.id, tab.number);
+                self.state
+                    .pinned_tabs
+                    .iter()
+                    .find(|pin| pin.tab_id == tab_id)
+                    .map(|pin| pin.role == Some(crate::api::schema::TabRole::Agent))
+            })
+            .unwrap_or(false)
+    }
+
     fn terminal_targets(&self) -> Vec<TerminalTarget> {
         self.state
             .workspaces

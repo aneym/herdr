@@ -147,6 +147,8 @@ pub(crate) struct ClientConnection {
     pub(crate) direct_graphics: bool,
     /// Whether this frontend preserves exact SGR pixel reports.
     pub(crate) pixel_mouse: bool,
+    /// Whether this connection arrived through an ssh-forwarded socket (another machine).
+    pub(crate) remote: bool,
     /// Last host terminal default colors reported by this client.
     pub(crate) host_terminal_theme: crate::terminal_theme::TerminalTheme,
     /// Last host light/dark appearance reported by this client.
@@ -232,6 +234,7 @@ impl ClientConnection {
             shell_graphics_delivery: crate::kitty_graphics::surface::DeliveryCache::default(),
             direct_graphics: false,
             pixel_mouse: false,
+            remote: false,
             host_terminal_theme: crate::terminal_theme::TerminalTheme::default(),
             host_terminal_appearance: None,
             host_terminal_appearance_explicit: false,

@@ -17,6 +17,7 @@ pub mod headless;
 pub(crate) mod keybindings;
 pub(crate) mod notifications;
 pub(crate) mod pane_input;
+pub(crate) mod peer_origin;
 #[cfg(test)]
 mod render_scale_benchmark;
 pub(crate) mod render_stream;

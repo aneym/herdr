@@ -23,6 +23,7 @@ pub(crate) fn accept_pending_client_connections(
             Ok(stream) => {
                 let client_id = *next_client_id;
                 *next_client_id = next_client_id.saturating_add(1);
+                crate::server::peer_origin::note(client_id, &stream);
 
                 if let Err(err) = stream.set_nonblocking(true) {
                     warn!(err = %err, "failed to set client stream nonblocking");
