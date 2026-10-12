@@ -244,6 +244,8 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 .space-row:hover .pin, .space-row:focus-within .pin, .space-row .pin.is-pinned, .space-row[data-test-hover] .pin,
 .space-row:hover .sidebar-plus, .space-row:focus-within .sidebar-plus, .space-row[data-test-hover] .sidebar-plus { display: block; }
 .sidebar-plus:disabled { cursor: default; }
+/* As the Mac SpacesRowView.icon: trailing row controls take the row height and a 16 px width to hit. */
+.space-row .pin, .space-row .sidebar-plus, .space-row .chevron, .tab-row .pin { min-width: var(--shell-space-step16); align-self: stretch; }
 
 .plus-glyph { display: inline-block; position: relative; width: var(--shell-space-step12); height: var(--shell-space-step12); }
 .plus-glyph::before, .plus-glyph::after { content: ""; position: absolute; background: currentColor; }
