@@ -1069,6 +1069,9 @@ final class TestHook {
             // Each drawn agent face in window points from the top left, the pictures fetched, and the dot colors.
             "face_frames": Dictionary(uniqueKeysWithValues: c.state.rowFrames.filter { $0.key.hasPrefix("face:") }
                 .map { ($0.key, windowFrame($0.value, in: c.sidebarHostView, c)) }),
+            // Every sidebar click target (rows, mode buttons, the pinned +) in window points from the
+            // top left, so a check can click each with a real pointer event.
+            "row_frames": Dictionary(uniqueKeysWithValues: c.state.rowFrames.map { ($0.key, windowFrame($0.value, in: c.sidebarHostView, c)) }),
             "face_pictures": FacePictures.shared.images.keys.sorted(),
             "face_dots": ["working": ThemeStore.hex(c.theme.tokens.chrome.ok), "blocked": ThemeStore.hex(c.theme.tokens.chrome.accent),
                           "done": ThemeStore.hex(c.theme.tokens.chrome.warn)],
@@ -1111,7 +1114,12 @@ final class TestHook {
                 let f = c.host.capFrames[id] ?? .zero
                 return ["id": id, "name": cap.name, "agent": cap.agent, "chat": cap.chat,
                         "density": cap.density, "focused": cap.focused, "pinned": cap.pinned ?? NSNull(),
-                        "frame": [f.minX, f.minY, f.width, f.height]]
+                        "frame": [f.minX, f.minY, f.width, f.height],
+                        // The cap in window points from the top left, as a screenshot lays it out.
+                        "window_frame": { () -> [CGFloat] in
+                            let w = c.host.convert(f, to: nil), height = c.window.contentView?.bounds.height ?? 0
+                            return [w.minX, height - w.maxY, w.width, w.height]
+                        }()]
             },
             "chats": c.chatDump,
             "machines": c.factoryMachines.map { ["name": $0.name, "usage": $0.usageLine, "usage_state": $0.usageState] },

@@ -27,6 +27,8 @@ struct SpacesRowView: View {
     /// One slot for a state glyph or an agent face, so AGENTS and PINNED titles line up.
     static let glyphWidth: CGFloat = ShellFace.size
     static let alertWidth: CGFloat = 7
+    /// Hit width of a trailing pin, + or chevron.
+    static let iconHitWidth: CGFloat = ShellSpace.step16
     /// Trailing text is at least as wide as a three-digit count, so "3" and "12" rows
     /// give their titles the same room.
     static let countWidth: CGFloat = 20
@@ -43,7 +45,8 @@ struct SpacesRowView: View {
     var body: some View {
         HStack(spacing: ShellSpace.sidebarRowGap) {
             if row.chevron != "none", row.kind != .space, row.kind != .hidden {
-                chevron
+                chevron.frame(maxHeight: .infinity).contentShape(Rectangle())
+                    .onTapGesture { click("chevron") }.clickTarget("chevron:" + row.id)
             } else if treeRow {
                 Color.clear.frame(width: Self.chevronWidth, height: 1)
             }
@@ -116,17 +119,22 @@ struct SpacesRowView: View {
                 Text(focusMark ?? "").font(.system(size: ShellType.glyph)).foregroundStyle(t.mute)
                     .frame(width: 10).onTapGesture { if focusMark != nil { click("focus") } }
             }
-            // The PINNED header already says it, so pinned rows keep no pin glyph at rest; it comes
-            // back on hover to unpin, as does the row's context menu.
-            if row.kind == .tab, (!row.id.hasPrefix("pinned:") && !row.id.hasPrefix("agent:") && !row.id.hasPrefix("hiddenagent:")) || hovered {
-                Text("⚲").foregroundStyle(pinned ? t.accent : t.mute).fixedSize().onTapGesture { click("pin") }
+            // Rows at rest show name, dot and icons only, as the mock and the Windows Shell: a tab's pin
+            // and a space's + come on hover, and a pinned space keeps its accent pin.
+            if row.kind == .tab, hovered {
+                icon("⚲", "pin", tone: pinned ? t.accent : t.mute)
             }
             if row.kind == .space {
-                Text("⚲").foregroundStyle(pinned ? t.accent : t.mute).fixedSize().onTapGesture { click("pin") }
-                Text("+").foregroundStyle(t.mute).fixedSize().onTapGesture { click("plus") }
+                if hovered || pinned {
+                    icon("⚲", "pin", tone: pinned ? t.accent : t.mute)
+                }
+                if hovered {
+                    icon("+", "plus", tone: t.mute)
+                }
             }
             if row.kind == .space || row.kind == .hidden, row.chevron != "none" {
-                chevron
+                chevron.frame(minWidth: Self.iconHitWidth, maxHeight: .infinity).contentShape(Rectangle())
+                    .onTapGesture { click("chevron") }.clickTarget("chevron:" + row.id)
             }
         }
         .padding(.top, row.kind == .space && row.id != firstSpaceId ? ShellSpace.step10 : 0)
@@ -180,6 +188,14 @@ struct SpacesRowView: View {
         .lineLimit(1).fixedSize()
         .layoutPriority(1)
         .help(row.badgeState.map { machine + ": " + $0 } ?? "Running on " + machine)
+    }
+
+    /// A trailing glyph control. Its hit area is the row's full height and wider than the glyph,
+    /// so the pin, + and chevron are each easy to hit and never share a pixel.
+    private func icon(_ glyph: String, _ part: String, tone: Color) -> some View {
+        Text(glyph).foregroundStyle(tone).fixedSize()
+            .frame(minWidth: Self.iconHitWidth, maxHeight: .infinity).contentShape(Rectangle())
+            .onTapGesture { click(part) }.clickTarget(part + ":" + row.id)
     }
 
     private var chevron: some View {

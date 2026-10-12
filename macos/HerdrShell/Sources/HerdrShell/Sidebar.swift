@@ -306,7 +306,7 @@ struct SidebarView: View {
         } label: {
             Image(systemName: expanded ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
                 .font(.system(size: ShellType.glyph)).foregroundStyle(t.mute)
-        }.buttonStyle(.plain).help(expanded ? "Collapse all spaces" : "Expand all spaces")
+        }.buttonStyle(.plain).help(expanded ? "Collapse all spaces" : "Expand all spaces").clickTarget("collapse-spaces")
     }
 
     private var goalMenu: some View {

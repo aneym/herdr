@@ -1,0 +1,34 @@
+[PASS] dev app is key in the Space with the seeded spaces drawn
+[PASS] no pin glyph on any row at rest
+[PASS] row agent:w2:t2 (CoS) selects its tab
+[PASS] row agent:w2:t3 (Recruiter) selects its tab
+[PASS] row pinned:w2:tA (factory infra) selects its tab
+[PASS] row tab:w2:t1 (rails orchestrator) selects its tab
+[PASS] row tab:w2:t4 (recruiter) selects its tab
+[PASS] row tab:w2:t7 (workspace embed) selects its tab
+[PASS] row tab:w2:t9 (agent blocks) selects its tab
+[PASS] row tab:w2:tA (factory infra) selects its tab
+[PASS] row tab:w2:tB (conversation evals) selects its tab
+[PASS] row tab:w3:t1 (aside hls playback) selects its tab
+[PASS] row tab:w3:t2 (dev server) selects its tab
+[PASS] space row space:w2 selects its first tab
+[PASS] space row space:w3 selects its first tab
+[PASS] lane chevron tab:w2:t4 closed -> open
+[PASS] lane chevron tab:w2:t4 open -> closed
+[PASS] lane chevron tab:w2:t7 closed -> open
+[PASS] lane chevron tab:w2:t7 open -> closed
+[PASS] background group header opens
+[PASS] lane row pin (on hover) pins the tab
+[PASS] space row + (on hover) makes a tab
+[PASS] space row pin (on hover) pins the space
+[PASS] a pinned space keeps its pin at rest, nothing else
+[PASS] space chevron folds the space under 'hidden'
+[PASS] hidden header opens
+[PASS] collapse-all button folds every space
+[PASS] collapse-all button opens them again
+[PASS] mode button areas switches the sidebar
+[PASS] mode button spaces switches the sidebar
+[PASS] PINNED + makes a tab
+[PASS] pane header pin toggles the tab's pin
+[PASS] pane header ... opens its menu
+33 passed; 0 failed
