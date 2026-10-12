@@ -3339,10 +3339,11 @@ impl HeadlessServer {
             let boxed = std::fs::read(&adopted)
                 .map(|bytes| crate::runs_on::box_panes(&bytes))
                 .unwrap_or_default();
-            let registry = crate::runs_on::Registry::load(&path(
-                "HERDR_MACHINES_REGISTRY",
-                "~/.agent-rails/factory-runtime/fleet/config/machines.json",
-            ));
+            let registry = crate::runs_on::Registry::load(
+                &std::env::var_os("HERDR_MACHINES_REGISTRY")
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(crate::runs_on::registry_path),
+            );
             if self.app.refresh_runs_on(&boxed, &registry) {
                 changed = true;
             }

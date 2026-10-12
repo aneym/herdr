@@ -91,3 +91,48 @@ async fn tab_list_says_studio_for_a_local_pane_and_box_for_an_adopted_one() {
     shutdown_test_runtimes(&mut server);
     let _ = fs::remove_dir_all(&root);
 }
+
+/// Open Factory releases ship the runtime registry as `[]`, so with no
+/// HERDR_MACHINES_REGISTRY the poll must read the private overlay's registry and show
+/// its first capitalised alias ("Mac Studio"), not the raw hostname.
+#[tokio::test]
+async fn tab_list_names_this_machine_from_the_overlay_registry() {
+    let root = std::env::temp_dir().join(format!(
+        "herdr-runs-on-overlay-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let config = root.join("overlay/engine/fleet/config");
+    fs::create_dir_all(&config).unwrap();
+    let host = crate::platform::hostname().expect("hostname");
+    let host = host.trim_end_matches(".local").to_ascii_lowercase();
+    fs::write(
+        config.join("machines.json"),
+        serde_json::json!([{ "name": "studio", "aliases": ["Mac Studio", "Studio", host], "ssh": null }])
+            .to_string(),
+    )
+    .unwrap();
+    std::env::remove_var("HERDR_MACHINES_REGISTRY");
+    std::env::set_var("HERDR_RAILS_HOST_DIR", root.join("rails-host"));
+    std::env::set_var("OF_OVERLAY", root.join("overlay"));
+
+    let mut server = test_headless_server();
+    let workspace = crate::workspace::Workspace::test_new("runs-on-overlay");
+    server.app.state.workspaces = vec![workspace];
+    server.app.state.ensure_test_terminals();
+    server.app.state.active = Some(0);
+    server.app.state.selected = 0;
+    let tab_id = server.app.public_tab_id(0, 0).unwrap();
+
+    tick(&mut server);
+    assert_eq!(
+        listed_runs_on(&mut server, &tab_id).as_deref(),
+        Some("Mac Studio")
+    );
+
+    shutdown_test_runtimes(&mut server);
+    let _ = fs::remove_dir_all(&root);
+}

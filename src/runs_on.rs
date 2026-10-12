@@ -4,7 +4,7 @@
 //! `~/.agent-rails/rails-host/adopted.json`, entry `target: "box"`) runs on "box".
 //! A pane whose foreground job is `ssh <host>` runs on that machine. Any other
 //! pane runs on this server's machine. Names come from the factory machine
-//! registry (`fleet/config/machines.json`): a machine's capitalised alias
+//! registry (`registry_path`, the overlay's `fleet/config/machines.json`): a machine's capitalised alias
 //! ("Studio", "Book", "PC"), else its name; an unknown host keeps its own name.
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -73,6 +73,22 @@ impl Registry {
                 host.trim_end_matches(".local").to_owned()
             })
     }
+}
+
+/// The factory machine registry: the private overlay's copy (`$OF_OVERLAY`, else
+/// `~/.agent-rails/overlay`) when it exists, else the installed runtime's. Open Factory
+/// engine releases ship the runtime copy as `[]` (2026-10-10), so the overlay holds the
+/// real machines, the same order the engine's `config_file` reads them in.
+pub(crate) fn registry_path() -> std::path::PathBuf {
+    const REL: &str = "engine/fleet/config/machines.json";
+    let overlay = std::env::var_os("OF_OVERLAY")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| crate::worktree::expand_tilde_path("~/.agent-rails/overlay"));
+    let overlay = overlay.join(REL);
+    if overlay.is_file() {
+        return overlay;
+    }
+    crate::worktree::expand_tilde_path("~/.agent-rails/factory-runtime/fleet/config/machines.json")
 }
 
 /// Public pane ids whose session the move runner adopted onto the box.
