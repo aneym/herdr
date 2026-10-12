@@ -149,6 +149,8 @@ pub(crate) struct ClientConnection {
     pub(crate) pixel_mouse: bool,
     /// Whether this connection arrived through an ssh-forwarded socket (another machine).
     pub(crate) remote: bool,
+    /// When this client last sent a human key, text, paste or click to an attached terminal.
+    pub(crate) last_human_input_at: Option<std::time::Instant>,
     /// Last host terminal default colors reported by this client.
     pub(crate) host_terminal_theme: crate::terminal_theme::TerminalTheme,
     /// Last host light/dark appearance reported by this client.
@@ -235,6 +237,7 @@ impl ClientConnection {
             direct_graphics: false,
             pixel_mouse: false,
             remote: false,
+            last_human_input_at: None,
             host_terminal_theme: crate::terminal_theme::TerminalTheme::default(),
             host_terminal_appearance: None,
             host_terminal_appearance_explicit: false,

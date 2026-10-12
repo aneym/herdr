@@ -301,6 +301,10 @@ fn spawn_windows_client_accept_thread(
     });
 }
 
+/// How recently a home-machine holder must have typed for a remote takeover of its agent tab
+/// to be refused. Past this the holder is an idle screen and the remote machine takes over.
+const HOME_HOLDER_ACTIVE_WINDOW: std::time::Duration = std::time::Duration::from_secs(120);
+
 impl HeadlessServer {
     /// Creates and starts the headless server.
     ///
@@ -1825,6 +1829,11 @@ impl HeadlessServer {
                 return false;
             }
             if existing_owner != client_id {
+                let remote = self
+                    .clients
+                    .get(&client_id)
+                    .is_some_and(|client| client.remote);
+                info!(client_id, existing_owner, remote, terminal_id = %terminal_id, "terminal attach takeover");
                 self.send_to_client(
                     existing_owner,
                     ServerMessage::ServerShutdown {
@@ -1867,7 +1876,10 @@ impl HeadlessServer {
     }
 
     /// Agent tabs are homed on this machine (Alex, 2026-10-12): a client that arrived over ssh
-    /// may not take one over from a client on this machine. This machine may always take it back.
+    /// may not take one over from a client on this machine while someone is typing there. This
+    /// machine may always take it back. A home holder with no human input for
+    /// `HOME_HOLDER_ACTIVE_WINDOW` is an idle screen, and the machine Alex is actually using
+    /// (Alex, 2026-10-12 16:57Z: "herdr shell pc recruiter says disconnected") takes it over.
     fn remote_takeover_of_home_terminal(
         &self,
         client_id: u64,
@@ -1875,8 +1887,13 @@ impl HeadlessServer {
         terminal_id: &crate::terminal::TerminalId,
     ) -> bool {
         let remote = |id| self.clients.get(&id).is_some_and(|client| client.remote);
+        let holder_active = self.clients.get(&existing_owner).is_some_and(|holder| {
+            holder
+                .last_human_input_at
+                .is_some_and(|at| at.elapsed() < HOME_HOLDER_ACTIVE_WINDOW)
+        });
         remote(client_id)
-            && self.clients.contains_key(&existing_owner)
+            && holder_active
             && !remote(existing_owner)
             && self.app.terminal_is_agent_tab(terminal_id)
     }
@@ -2154,8 +2171,7 @@ impl HeadlessServer {
                     return false;
                 };
                 let terminal_id = terminal_id.clone();
-                if self.appearance_authority_client_id != Some(client_id)
-                    && crate::raw_input::parse_raw_input_bytes_sync(&data)
+                let human = crate::raw_input::parse_raw_input_bytes_sync(&data)
                     .iter()
                     .any(|event| {
                         matches!(
@@ -2166,9 +2182,14 @@ impl HeadlessServer {
                                 | crate::raw_input::RawInputEvent::MouseNavButton { .. }
                         ) || matches!(event, crate::raw_input::RawInputEvent::Mouse(mouse) if mouse.kind != crossterm::event::MouseEventKind::Moved
                         )
-                    })
-                {
-                    self.select_appearance_authority(client_id);
+                    });
+                if human {
+                    if let Some(client) = self.clients.get_mut(&client_id) {
+                        client.last_human_input_at = Some(std::time::Instant::now());
+                    }
+                    if self.appearance_authority_client_id != Some(client_id) {
+                        self.select_appearance_authority(client_id);
+                    }
                 }
                 if let Some(runtime) = self.runtime_for_terminal_id_string(&terminal_id) {
                     if let Err(err) = apply_terminal_attach_input(runtime, data) {

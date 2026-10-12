@@ -4798,6 +4798,11 @@ fn remote_takeover_of_an_agent_terminal_held_on_the_home_machine_is_refused() {
         pin_test_tab_as_agent(server);
         connect_pending_terminal_client(server, 7);
         assert!(control(server, 7, &target, false));
+        // Someone is typing on the home machine.
+        assert!(server.handle_server_event(ServerEvent::ClientInput {
+            client_id: 7,
+            data: b"a".to_vec(),
+        }));
 
         let control_rx = connect_pending_terminal_client_with_control_rx(server, 8);
         server.clients.get_mut(&8).expect("client 8").remote = true;
@@ -4816,6 +4821,51 @@ fn remote_takeover_of_an_agent_terminal_held_on_the_home_machine_is_refused() {
                     && !reason.contains("already has an attached client")),
             "{reason:?}"
         );
+    });
+}
+
+// Alex 2026-10-12 16:57Z: "herdr shell pc recruiter says disconnected". The Studio Shell held the
+// Recruiter tab with nobody typing there, and the PC Shell he was using was refused. Only a home
+// holder someone is typing on keeps its agent tab; an idle one yields to the machine in use.
+#[test]
+fn remote_client_takes_over_an_agent_terminal_from_an_idle_home_holder() {
+    with_terminal_session_test_server(|server, _terminal_id, target, _| {
+        pin_test_tab_as_agent(server);
+        connect_pending_terminal_client(server, 7);
+        assert!(control(server, 7, &target, false));
+
+        connect_pending_terminal_client(server, 8);
+        server.clients.get_mut(&8).expect("client 8").remote = true;
+        assert!(control(server, 8, &target, true));
+        assert!(!server.clients.contains_key(&7));
+        assert_eq!(server.terminal_attach_owners.get(&target), Some(&8));
+
+        // The machine in use drives the pane it took over.
+        assert!(server.handle_server_event(ServerEvent::ClientInput {
+            client_id: 8,
+            data: b"x".to_vec(),
+        }));
+        assert!(server.clients[&8].last_human_input_at.is_some());
+    });
+}
+
+#[test]
+fn remote_client_takes_over_when_home_holder_typed_long_ago() {
+    with_terminal_session_test_server(|server, _terminal_id, target, _| {
+        pin_test_tab_as_agent(server);
+        connect_pending_terminal_client(server, 7);
+        assert!(control(server, 7, &target, false));
+        server
+            .clients
+            .get_mut(&7)
+            .expect("client 7")
+            .last_human_input_at = std::time::Instant::now()
+            .checked_sub(HOME_HOLDER_ACTIVE_WINDOW + std::time::Duration::from_secs(1));
+
+        connect_pending_terminal_client(server, 8);
+        server.clients.get_mut(&8).expect("client 8").remote = true;
+        assert!(control(server, 8, &target, true));
+        assert_eq!(server.terminal_attach_owners.get(&target), Some(&8));
     });
 }
 
