@@ -35,13 +35,19 @@ struct Fields {
     extras: Vec<String>,
 }
 
-/// Lowercase short host name: the first word of the name, at most six columns.
+/// Lowercase short host name: the first word of the name, at most six columns. A leading
+/// "Mac" is skipped when a word follows, so the registry's "Mac Studio" stays "studio"
+/// (2026-10-12) rather than a "mac" that could be either Mac.
 pub(super) fn short_host(name: &str) -> String {
-    let first = name
+    let mut words = name
         .split(|c: char| c.is_whitespace() || c == '-' || c == '_' || c == '.')
-        .find(|part| !part.is_empty())
-        .unwrap_or("")
-        .to_lowercase();
+        .filter(|part| !part.is_empty());
+    let first = words.next().unwrap_or("");
+    let first = match words.next() {
+        Some(next) if first.eq_ignore_ascii_case("mac") => next,
+        _ => first,
+    }
+    .to_lowercase();
     truncate_end(&first, HOST_COLUMNS)
 }
 
@@ -307,6 +313,8 @@ mod tests {
         }
         assert_eq!(short_host("forge-lanes"), "forge");
         assert_eq!(short_host("Studio workstation"), "studio");
+        assert_eq!(short_host("Mac Studio"), "studio");
+        assert_eq!(short_host("Mac"), "mac");
     }
 
     #[test]
