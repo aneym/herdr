@@ -1529,6 +1529,97 @@ fn busy_lane_syncs_tab_and_sidebar_and_preserves_shell_status() {
     );
 }
 
+/// R231: the tab bar and the sidebar draw one busy rule, the endpoint's
+/// work_status. Before, the tab bar promoted on the overlay's busy copy while
+/// the sidebar followed work_status, so a header said working beside a quiet
+/// row, and a chat working by its children read idle in the tab bar.
+#[test]
+fn tab_bar_and_sidebar_follow_the_endpoint_work_status_over_the_busy_copy() {
+    let (mut snapshot, mut overlay) = fixture();
+    snapshot.tabs.retain(|tab| tab.tab_id == "lane-b");
+    let mut agent = snapshot.agents[0].clone();
+    agent.tab_id = "lane-b".into();
+    snapshot.agents = vec![agent.clone()];
+    snapshot.panes = vec![ClientShellPane {
+        tokens: Default::default(),
+        pane_id: agent.pane_id.clone(),
+        workspace_id: "ws_1".into(),
+        tab_id: "lane-b".into(),
+        label: None,
+        cwd: None,
+        foreground_cwd: None,
+        focused: false,
+        right_click_passthrough: false,
+        machine: None,
+    }];
+    overlay.tabs.get_mut("lane-b").unwrap().summary = None;
+    let palette = ClientShellConfig::from_config(&Config::default()).palette;
+    // (pane status, reported work_status, overlay busy, expected colour)
+    for (pane, work, busy, expected) in [
+        // Quiet chat, stale busy copy: both read quiet.
+        (AgentStatus::Idle, AgentStatus::Idle, true, palette.overlay0),
+        // Live factory run with idle panes: both read working.
+        (
+            AgentStatus::Idle,
+            AgentStatus::Working,
+            false,
+            palette.working,
+        ),
+    ] {
+        snapshot.agents[0].agent_status = pane;
+        snapshot.tabs[0].agent_status = pane;
+        snapshot.tabs[0].work_status = Some(work);
+        overlay.tabs.get_mut("lane-b").unwrap().busy = busy;
+        let mut state = factory_state(snapshot.clone(), overlay.clone());
+        state.config.show_tab_status = crate::config::ShowTabStatusConfig::All;
+        state.set_pane_surface(surface());
+        let frame = state.compose(110, 35).unwrap();
+        let tab_rect = state
+            .hits
+            .tabs
+            .iter()
+            .find(|(_, id)| id == "lane-b")
+            .unwrap()
+            .0;
+        let glyph = if expected == palette.working {
+            "●"
+        } else {
+            "○"
+        };
+        let tab_cells = (tab_rect.x..tab_rect.right())
+            .map(|x| {
+                &frame.cells[usize::from(tab_rect.y) * usize::from(frame.width) + usize::from(x)]
+            })
+            .map(|cell| (cell.symbol.clone(), cell.fg))
+            .collect::<Vec<_>>();
+        assert!(
+            tab_cells
+                .iter()
+                .any(|(symbol, fg)| symbol == glyph
+                    && *fg == crate::protocol::color_to_u32(expected)),
+            "{work:?} busy={busy}: tab bar disagrees with the sidebar: {tab_cells:?}"
+        );
+        let (rows, hits, buffer) = rendered_factory_rows(&snapshot, &overlay);
+        let y = hits
+            .tree_headers
+            .iter()
+            .find(|hit| hit.tab_id.as_deref() == Some("lane-b"))
+            .unwrap()
+            .rect
+            .y;
+        let x = rows[y as usize]
+            .chars()
+            .position(|ch| ch == '●' || ch == '○')
+            .unwrap() as u16;
+        assert_eq!(
+            buffer[(x, y)].fg,
+            expected,
+            "{work:?} busy={busy}: sidebar {}",
+            rows[y as usize]
+        );
+    }
+}
+
 #[test]
 fn registered_runs_count_and_expand_under_parent() {
     let (mut snapshot, mut overlay) = fixture();
@@ -1594,7 +1685,7 @@ fn registered_runs_count_and_expand_under_parent() {
 }
 
 #[test]
-fn registered_run_progress_completion_and_failure_render_under_lane() {
+fn registered_run_progress_renders_under_lane_and_finished_runs_drop() {
     let (mut snapshot, mut overlay) = fixture();
     snapshot.tabs.retain(|tab| tab.tab_id == "lane-b");
     let now = std::time::SystemTime::now()
@@ -1653,7 +1744,23 @@ fn registered_run_progress_completion_and_failure_render_under_lane() {
         }
         let mut tree = ClientTreeChrome::default();
         tree.factory_expanded_lanes.insert("lane-b".into());
-        let (rows, hits, buffer) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 48);
+        let (rows, hits, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 48);
+        // ASKS-11: a finished run's row drops when the run ends, so no row
+        // outlives its run with a stale age; a failure keeps the lane's "!".
+        if done {
+            assert!(
+                !hits
+                    .tree_headers
+                    .iter()
+                    .any(|hit| hit.key == "lane-b#run:build"),
+                "{icon}: a finished run keeps its row: {rows:?}"
+            );
+            assert!(
+                !rows.iter().any(|row| row.contains("build run")),
+                "{rows:?}"
+            );
+            continue;
+        }
         let run = hits
             .tree_headers
             .iter()
@@ -1662,25 +1769,11 @@ fn registered_run_progress_completion_and_failure_render_under_lane() {
         let line = &rows[run.rect.y as usize];
         assert!(line.contains(&format!("{icon} build run")), "{rows:?}");
         assert!(line.contains("PC"), "{line}");
-        if done {
-            assert_eq!(run.rect.height, 1);
-            assert!(
-                !rows.iter().any(|line| line.contains("build 2/3")),
-                "{rows:?}"
-            );
-        } else {
-            let progress = &rows[run.rect.y as usize + 1];
-            assert!(
-                progress.contains("build 2/3") && progress.contains("1m"),
-                "{progress}"
-            );
-        }
-        if attention == Attention::Act {
-            for ch in ['✗', '!'] {
-                let x = line.chars().position(|symbol| symbol == ch).unwrap() as u16;
-                assert_eq!(buffer[(x, run.rect.y)].fg, palette.red);
-            }
-        }
+        let progress = &rows[run.rect.y as usize + 1];
+        assert!(
+            progress.contains("build 2/3") && progress.contains("1m"),
+            "{progress}"
+        );
     }
 }
 
@@ -2357,18 +2450,22 @@ fn pinned_and_lane_rows_follow_the_endpoint_chat_status_over_a_stale_busy_overla
             mark(lane.rect),
             "{reported:?}: pinned row disagrees: {rows:?}"
         );
+        // A quiet chat's teammates are over, so their rows drop (ASKS-11).
         let run = rows
             .iter()
-            .position(|row| row.contains("trial-chase-lists"))
-            .unwrap_or_else(|| panic!("{reported:?}: run row: {rows:?}"));
+            .position(|row| row.contains("trial-chase-lists"));
+        if !working {
+            assert_eq!(
+                run, None,
+                "{reported:?}: a finished run keeps its row: {rows:?}"
+            );
+            continue;
+        }
+        let run = run.unwrap_or_else(|| panic!("{reported:?}: run row: {rows:?}"));
         let run_mark = (0..buffer.area.width)
             .map(|x| buffer[(x, run as u16)].symbol().to_owned())
             .find(|symbol| ["◐", "✓", "✗"].contains(&symbol.as_str()));
-        assert_eq!(
-            run_mark.as_deref(),
-            Some(if working { "◐" } else { "✓" }),
-            "{reported:?}: {rows:?}"
-        );
+        assert_eq!(run_mark.as_deref(), Some("◐"), "{reported:?}: {rows:?}");
     }
 }
 

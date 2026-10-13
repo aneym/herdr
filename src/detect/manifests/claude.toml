@@ -1,5 +1,5 @@
 id = "claude"
-version = "2026.10.06.6"
+version = "2026.10.12.1"
 min_engine_version = 2
 updated_at = "2026-10-06T00:00:00Z"
 aliases = ["claude-code"]
@@ -13,27 +13,29 @@ visible_working = true
 # Braille covers <= 2.1.227; half-circles are the 2.1.228 busy spinner.
 regex = ['^[\x{2800}-\x{28FF}\x{25D0}-\x{25D3}] ']
 
-# Claude keeps its title spinner while teammates or workflows run in the
-# background, even after its own turn ended. At rest, the prompt box has no
-# live status line above it and the footer under it has no "esc to
-# interrupt"; the agents panel lists the background work. That reads idle:
-# the work shows on its own run rows. A turn blocked on a "Waiting for N"
-# line stays working (2026-10-06, live captures w5X:p2, w5Y:p1, w5H:p12G).
+# A chat whose teammates, subagents or workflows still run is working, even
+# at its prompt after its own turn ended (Alex, 2026-09-29: "if something has
+# subagents owrking, that menas it is still actively working, and not done.
+# done is no subagents owrking."). Claude keeps its title spinner for them, and
+# the agents panel under the prompt box lists each running child with its
+# elapsed time or token count; an idle teammate's row ends in "idle" and the
+# title rests. Reading the panel keeps the chat working after a live handoff
+# drops the title. Replaces background_only_idle (8ea85fdf), which read such a
+# chat idle.
 [[rules]]
-id = "background_only_idle"
-state = "idle"
+id = "background_children_working"
+state = "working"
 priority = 1120
 region = "bottom_non_empty_lines(24)"
-# The prompt box (rule, prompt, rule) with an agents-panel row ("◯ name")
-# within six lines under it, past the footer, blank lines and the "main" row.
-regex = ['(?m)^─[^\n]*\n[ \t]*❯[^\n]*(?:\n[ \t]+[^\n]*){0,8}\n─[^\n]*\n(?:[^\n]*\n){0,6}[ \t]*◯[ \t]+\S']
+visible_working = true
+# The prompt box (rule, prompt, rule), then within twelve lines a running
+# agents-panel row: its elapsed time, then only "· …" facts ("◯ name … 12m 3s
+# · ↓ 9.1k tokens · 1 queued", or a workflow's bar "0/1 · 5s").
+regex = ['(?m)^─[^\n]*\n[ \t]*❯[^\n]*(?:\n[ \t]+[^\n]*){0,8}\n─[^\n]*\n(?:[^\n]*\n){0,12}[ \t]*(?:◯[ \t]+\S|[^\n]*[░█]{4,})[^\n]*?\d+[smh](?:[ \t]+·[^\n]*)?[ \t]*$']
+# A permission dialog under the panel decides on its own rule.
 not = [
-  # "esc to interrupt" in the footer under the prompt box, not anywhere in
-  # the transcript ("press esc to interrupt" advice above a resting prompt).
-  { regex = ['(?m)^─[^\n]*\n[ \t]*❯[^\n]*(?:\n[ \t]+[^\n]*){0,8}\n─[^\n]*\n(?:[^\n]*\n){0,2}[^\n]*esc to i'] },
-  { line_regex = ['^\s*[\x{002A}\x{00B7}\x{2722}\x{2733}\x{2736}\x{273B}\x{273D}]\s+\S.*…'] },
-  # The live wait line directly above the prompt box, as background_agents_working reads it.
-  { regex = ['(?m)^[\x{002A}\x{00B7}\x{2722}\x{2736}\x{273B}\x{273D}][ \t]+Waiting for [1-9]\d* (?:background agents?|dynamic workflows?) to finish(?:[ \t]+·[^\n]*)?[ \t]*\n(?:(?:[ \t]+[^\n]*)?\n){0,6}─[^\n]*\n[ \t]*❯'] },
+  { contains = ["do you want to proceed?"] },
+  { contains = ["esc to cancel"] },
 ]
 
 [[rules]]

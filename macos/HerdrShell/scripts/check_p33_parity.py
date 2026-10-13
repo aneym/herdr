@@ -108,10 +108,10 @@ else:
     print("PASS a pinned lane with live children reads working, as its space row does")
 # herdr's work fact wins over the overlay's busy copy (2026-10-06, w5P:t7 "submissions"): the chat
 # sat idle at its prompt (work "done") while the overlay still listed a finished teammate as a live
-# agent: run and the tab busy. Space row, pinned row and run row must all read it finished; with
-# work "working" the same overlay reads working. As Rust
-# pinned_and_lane_rows_follow_the_endpoint_chat_status_over_a_stale_busy_overlay.
-for work, want_tone, want_run in [("done", "done", "✓"), ("working", "working", "◐")]:
+# agent: run and the tab busy. Space row and pinned row must read it finished and its run row is
+# gone (ASKS-11: a finished run's row drops); with work "working" the same overlay reads working.
+# As Rust pinned_and_lane_rows_follow_the_endpoint_chat_status_over_a_stale_busy_overlay.
+for work, want_tone, want_run in [("done", "done", None), ("working", "working", "◐")]:
     stale = json.loads((FIXTURES / "live-child-working.json").read_text())
     # The agents report the opposite of work, so the rows can only follow the work fact.
     other = "working" if work == "done" else "done"
@@ -132,6 +132,24 @@ for work, want_tone, want_run in [("done", "done", "✓"), ("working", "working"
         print("\n".join(rows))
     else:
         print(f"PASS a {work} chat reads {want_tone} in its space row, pinned row and run row over a busy overlay")
+# ASKS-11: a run's row drops when the run ends, so no workflow row outlives its run with a stale
+# age; a running run keeps its row. As Rust registered_run_progress_renders_under_lane_and_finished_runs_drop.
+runs = json.loads((FIXTURES / "live-child-working.json").read_text())
+runs["overlay"]["tabs"]["lane"]["runs"] = [
+    {"id": "wf_live", "name": "embed 5", "phase": "Build 2/3", "started": 1000 - 600},
+    {"id": "wf_done", "name": "embed 2", "phase": "Build 3/3", "started": 1000 - 32400, "done": True},
+    {"id": "wf_failed", "name": "embed 7", "started": 1000 - 21600, "done": True, "attention": "act"}]
+runs["chrome"]["expandedTabs"] = ["lane"]
+fixture = BUILD / "finished-runs.json"
+fixture.write_text(json.dumps(runs))
+rows = base_rows(fixture)
+run_rows = [r.split("|")[1] for r in rows if r.startswith("run|")]
+lane = next((r.split("|") for r in rows if r.startswith("tab|tab:lane|")), None)
+if run_rows != ["run:wf_live"] or not lane or lane[8] != "act":
+    failures.append("finished runs drop")
+    print("\n".join(rows))
+else:
+    print("PASS a finished run's row drops, a running run's row stays, a failure keeps the lane's !")
 if failures:
     raise SystemExit("FAIL: " + ", ".join(failures))
 print("PASS P33 parity")

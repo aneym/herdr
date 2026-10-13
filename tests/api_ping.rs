@@ -2609,6 +2609,165 @@ fn pane_info_and_subscriptions_expose_done_agent_status() {
 /// restore title evidence. Screens recorded on Studio 2026-10-06 (Claude Code
 /// 2.1.291): the idle one had read working through the API and every sidebar
 /// since the previous afternoon, the workflow one read idle after a deploy.
+/// A Claude chat that rests at its prompt while its teammates run is working
+/// on every server fact a surface draws (pane, agent and tab `work_status`),
+/// and reads done only once the last child ends (Alex, 2026-09-29: "done is
+/// no subagents owrking"). The title drops first, as after a live handoff.
+#[test]
+fn claude_chat_reads_working_until_its_children_end_then_done() {
+    let _lock = test_lock();
+    let base = unique_test_dir();
+    let config_home = base.join("config");
+    let runtime_dir = base.join("runtime");
+    let socket_path = runtime_dir.join("herdr.sock");
+    let bin_dir = base.join("bin");
+    let end_file = base.join("children-end");
+    let stop_file = base.join("claude-stop");
+    fs::create_dir_all(&bin_dir).unwrap();
+
+    let rule = "────────────────────────────────────────";
+    fs::write(
+        bin_dir.join("running.screen"),
+        format!(
+            "⏺ Two slices are running.\n{rule} ultracode ─\n❯\n{rule}\n  ⏵⏵ bypass permissions on · ↓ to manage · ctx 50%\n  ⏺ main\n  ◯ s4-busy      S4 busy rule      28s · ↓ 52.5k tokens\n  ◯ embed        ████░░░░░░░░░░░░  1/5 · 3m12s\n"
+        ),
+    )
+    .unwrap();
+    fs::write(
+        bin_dir.join("ended.screen"),
+        format!(
+            "⏺ Both slices landed.\n{rule} ultracode ─\n❯\n{rule}\n  ⏵⏵ bypass permissions on · ctx 51%\n"
+        ),
+    )
+    .unwrap();
+    let fake_claude = bin_dir.join("claude");
+    fs::write(
+        &fake_claude,
+        format!(
+            "#!/bin/sh\ndir=$(dirname \"$0\")\nprintf '\\033[2J\\033[H'\ncat \"$dir/running.screen\"\nwhile [ ! -f '{end}' ]; do sleep 0.05; done\nprintf '\\033]0;%s\\007' '✳ Lane brief'\nprintf '\\033[2J\\033[H'\ncat \"$dir/ended.screen\"\nwhile [ ! -f '{stop}' ]; do sleep 0.05; done\n",
+            end = end_file.display(),
+            stop = stop_file.display()
+        ),
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&fake_claude).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&fake_claude, perms).unwrap();
+    }
+
+    let child = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    wait_for_socket(&socket_path, Duration::from_secs(5));
+    let created = send_request(
+        &socket_path,
+        &format!(
+            r#"{{"id":"children_ws","method":"workspace.create","params":{{"cwd":"{}","focus":true}}}}"#,
+            base.display()
+        ),
+    );
+    let workspace_id = created["result"]["workspace"]["workspace_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let pane = created["result"]["root_pane"]["pane_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let tab = created["result"]["tab"]["tab_id"]
+        .as_str()
+        .map(str::to_owned)
+        .unwrap_or_else(|| {
+            send_request(
+                &socket_path,
+                &format!(r#"{{"id":"children_pane","method":"pane.get","params":{{"pane_id":"{pane}"}}}}"#),
+            )["result"]["pane"]["tab_id"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        });
+    let sent = send_request(
+        &socket_path,
+        &format!(
+            r#"{{"id":"children_send","method":"pane.send_text","params":{{"pane_id":"{pane}","text":"{}"}}}}"#,
+            fake_claude.display()
+        ),
+    );
+    assert_eq!(sent["result"]["type"], "ok");
+    send_request(
+        &socket_path,
+        &format!(
+            r#"{{"id":"children_enter","method":"pane.send_keys","params":{{"pane_id":"{pane}","keys":["Enter"]}}}}"#
+        ),
+    );
+    // Look away, so the finish lands unseen and reads done.
+    send_request(
+        &socket_path,
+        &format!(
+            r#"{{"id":"children_away","method":"tab.create","params":{{"workspace_id":"{workspace_id}","focus":true}}}}"#
+        ),
+    );
+
+    // (agent_status, agent work_status, tab work_status)
+    let facts = || {
+        let agent = send_request(
+            &socket_path,
+            &format!(
+                r#"{{"id":"children_agent","method":"agent.get","params":{{"target":"{pane}"}}}}"#
+            ),
+        );
+        let tab = send_request(
+            &socket_path,
+            &format!(r#"{{"id":"children_tab","method":"tab.get","params":{{"tab_id":"{tab}"}}}}"#),
+        );
+        let text = |value: &serde_json::Value| value.as_str().unwrap_or("").to_owned();
+        (
+            text(&agent["result"]["agent"]["agent_status"]),
+            text(&agent["result"]["agent"]["work_status"]),
+            text(&tab["result"]["tab"]["work_status"]),
+        )
+    };
+    let reach = |expected: &str, why: &str| {
+        let deadline = Instant::now() + Duration::from_secs(12);
+        loop {
+            let got = facts();
+            if got
+                == (
+                    expected.to_owned(),
+                    expected.to_owned(),
+                    expected.to_owned(),
+                )
+            {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "{why}: got {got:?}, expected {expected:?} on every fact"
+            );
+            thread::sleep(Duration::from_millis(100));
+        }
+    };
+    reach("working", "children running");
+    let hold = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < hold {
+        assert_eq!(
+            facts(),
+            (
+                "working".to_owned(),
+                "working".to_owned(),
+                "working".to_owned()
+            ),
+            "a chat with running children flipped"
+        );
+        thread::sleep(Duration::from_millis(100));
+    }
+    fs::write(&end_file, "end").unwrap();
+    reach("done", "children ended");
+
+    fs::write(&stop_file, "stop").unwrap();
+    cleanup_spawned_herdr(child, base);
+}
+
 #[test]
 fn claude_screen_state_ignores_leftover_shells_and_keeps_workflow_waits_working() {
     let _lock = test_lock();
@@ -2684,15 +2843,16 @@ fn claude_screen_state_ignores_leftover_shells_and_keeps_workflow_waits_working(
             "blocked",
         ),
         // Live captures 2026-10-06: Claude keeps its title spinner while its
-        // teammates or workflows run, after its own turn has ended. At rest
-        // with only background work, the chat reads idle (w5X:p2, w5H:pZ2).
+        // teammates or workflows run, after its own turn has ended. A chat
+        // whose children still run is working (Alex, 2026-09-29: "done is no
+        // subagents owrking"); 8ea85fdf read it idle.
         (
             "teammates-at-rest",
             "◐ Lane brief",
             format!(
                 "  Still waiting on you: the syspolicyd command.\n{rule} ultracode ─\n❯ done, killed it\n{rule}\n  ⏵⏵ bypass permissions on · 28 shells · ← for agents\n  ● main\n  ◯ studio-sweep-39  test sweep  1h 6m 1s\n  ◯ scope-close-lead  close scope  44m 55s\n"
             ),
-            "idle",
+            "working",
         ),
         // w5H:p12G: a live turn with teammates keeps its spinner line and
         // "esc to interrupt" (truncated) in the footer.
@@ -2714,12 +2874,13 @@ fn claude_screen_state_ignores_leftover_shells_and_keeps_workflow_waits_working(
             ),
             "working",
         ),
-        // A wait line left in the transcript does not keep a resting chat working.
+        // A wait line left in the transcript does not keep a resting chat
+        // working once its teammate is idle; Claude's title rests too.
         (
             "stale-wait-teammates-at-rest",
-            "◐ Lane brief",
+            "✳ Lane brief",
             format!(
-                "✻ Waiting for 1 background agent to finish\n  The agent reported back.\n✻ Brewed for 4s\n{rule}\n❯\n{rule}\n  ⏵⏵ bypass permissions on · ctx 33%\n  ◯ reviewer  2m 3s\n"
+                "✻ Waiting for 1 background agent to finish\n  The agent reported back.\n✻ Brewed for 4s\n{rule}\n❯\n{rule}\n  ⏵⏵ bypass permissions on · ctx 33%\n  ◯ reviewer  Review the diff                idle\n"
             ),
             "idle",
         ),
@@ -2733,13 +2894,41 @@ fn claude_screen_state_ignores_leftover_shells_and_keeps_workflow_waits_working(
             ),
             "blocked",
         ),
-        // Review of 8ea85fdf: "esc to interrupt" advice in the transcript is
-        // not the footer; a resting chat with only teammates reads idle.
+        // Live capture w5H:p1BA 2026-10-12, after a live handoff dropped the
+        // title: the lead rests at its prompt while three teammates run. The
+        // agents panel alone keeps it working.
         (
-            "esc-advice-teammates-at-rest",
-            "◐ Lane brief",
+            "teammates-running-no-title",
+            "",
             format!(
-                "  To stop a job, press esc to interrupt.\n{rule}\n❯\n{rule}\n  ⏵⏵ bypass permissions on · ctx 33%\n  ◯ reviewer  2m 3s\n"
+                "  S4 and S2b are running.\n{rule} ultracode ─\n❯ start S2b and S4 now\n{rule}\n  ⏵⏵ bypass permissions on · 1 shell · ↓ to manage · ctx 50%\n\n  ⏺ main\n  ◯ s1-pc-install  S1 PC Shell install + focus check      19s · ↓ 98.4k tokens\n  ◯ s2b-labels     S2b live labels + done glyph parity    29s · ↓ 54.0k tokens\n"
+            ),
+            "working",
+        ),
+        // w5H:p1CF: a teammate with a queued message, and a sub-row.
+        (
+            "teammate-queued-no-title",
+            "",
+            format!(
+                "⏺ Sent the review brief.\n{rule} ultracode ─\n❯\n{rule}\n  ⏵⏵ bypass permissions on · ↓ to manage · ctx 48%\n  ⏺ main\n  ◯ opus-seat-full     Reviewing NewRoleForm dark 390 layout     40m 27s · ↓ 191.7k tokens · 1 queued\n    f2w-segment-trace  Trace reply segment join path      8m 54s · ↓ 16.6k tokens\n"
+            ),
+            "working",
+        ),
+        // w5H:p1C8: a workflow's bar row, no title.
+        (
+            "workflow-running-no-title",
+            "",
+            format!(
+                "⏺ Ax42 lacks lane-browser.\n{rule} ultracode ─\n❯\n{rule}\n  ⏵⏵ bypass permissions on · ctx 70%\n  ◯              needs-shell  ░░░░░░░░░░░░░░░░░░░░  0/1 · 7m29s · ↓ 14.0k tokens\n"
+            ),
+            "working",
+        ),
+        // w5H:p1A4: teammates that wait for a message are idle, and so is the chat.
+        (
+            "idle-teammates-at-rest",
+            "✳ Lane brief",
+            format!(
+                "  Lane is waiting on the merge.\n{rule} ultracode ─\n❯\n{rule}\n  ⏵⏵ bypass permissions on · 3 shells · ↓ to manage · ctx 25%\n  ⏺ main\n  ◯ uif-ios2    Fix ios merge build error, merge                idle\n  ◯ uif-ledger  Ledger rows R430 then R431                      idle\n  ◯ 1 idle agent\n"
             ),
             "idle",
         ),

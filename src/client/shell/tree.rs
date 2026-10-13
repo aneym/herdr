@@ -1746,7 +1746,7 @@ fn append_factory_space(
                             ));
                         }
                         if let Some(tag) = overlay.tab(&lane.tab_id) {
-                            for run in &tag.runs {
+                            for run in live_runs(lane, &tag.runs) {
                                 out.push(factory_run_row(lane, run, indent.saturating_add(2)));
                             }
                         }
@@ -1762,7 +1762,7 @@ fn append_factory_space(
                             false,
                         ));
                     }
-                    for run in runs {
+                    for run in live_runs(orchestrator, runs) {
                         out.push(factory_run_row(orchestrator, run, indent.saturating_add(1)));
                     }
                 }
@@ -1938,7 +1938,7 @@ fn append_factory_space(
                     out.push(row);
                 }
                 if let Some(tag) = overlay.tab(&child.tab_id) {
-                    for run in &tag.runs {
+                    for run in live_runs(child, &tag.runs) {
                         let mut row = factory_run_row(child, run, indent.saturating_add(1));
                         if grouped && lane_mode(lane) == TabMode::Parked {
                             if let AgentPanelListEntry::FactoryTab(tab) = &mut row {
@@ -1966,7 +1966,7 @@ fn append_factory_space(
                 }
                 out.push(row);
             }
-            for run in runs {
+            for run in live_runs(lane, runs) {
                 let mut row = factory_run_row(lane, run, indent.saturating_add(1));
                 if grouped && lane_mode(lane) == TabMode::Parked {
                     if let AgentPanelListEntry::FactoryTab(tab) = &mut row {
@@ -2416,6 +2416,16 @@ fn run_done(
                         | crate::api::schema::AgentStatus::Blocked
                 )
             })
+}
+
+/// The runs that still draw a row. A run's row drops once the run ends
+/// (ASKS-11: finished rows lingered for hours with a stale age); a failed run
+/// still raises its parent's "!" through the parent's attention roll-up.
+fn live_runs<'a>(
+    parent: &'a crate::protocol::ClientShellTab,
+    runs: &'a [crate::factory_overlay::RunTag],
+) -> impl Iterator<Item = &'a crate::factory_overlay::RunTag> {
+    runs.iter().filter(move |run| !run_done(parent, run))
 }
 
 fn split_runs(
@@ -3503,7 +3513,8 @@ impl ClientShellState {
                     || parent_mode != TabMode::Active;
                 let ask =
                     !background && !auto && tag.is_some_and(|tag| tag.attention == Attention::Act);
-                let busy = tag.is_some_and(|tag| tag.busy);
+                // A reported work status already weighed the chat's children.
+                let busy = tab.work_status.is_none() && tag.is_some_and(|tag| tag.busy);
                 let mut has_agent = false;
                 for pane in snapshot
                     .panes

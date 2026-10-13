@@ -350,11 +350,17 @@ pub(in crate::client::shell) fn tab_status_glyphs<'a>(
     use crate::api::schema::AgentStatus;
     use crate::config::ShowTabStatusConfig;
 
-    let tab_status = if busy && matches!(tab.agent_status, AgentStatus::Idle | AgentStatus::Done) {
-        AgentStatus::Working
-    } else {
-        tab.agent_status
-    };
+    // The endpoint's work status is the one rule the sidebar draws too
+    // (server app/work_status.rs), so the tab bar never disagrees with it; the
+    // overlay's busy copy only stands in for an endpoint that predates it.
+    let busy = tab.work_status.is_none() && busy;
+    let tab_status = tab.work_status.unwrap_or(
+        if busy && matches!(tab.agent_status, AgentStatus::Idle | AgentStatus::Done) {
+            AgentStatus::Working
+        } else {
+            tab.agent_status
+        },
+    );
     let show = match config.show_tab_status {
         ShowTabStatusConfig::Off => false,
         ShowTabStatusConfig::Attention => {
@@ -369,7 +375,7 @@ pub(in crate::client::shell) fn tab_status_glyphs<'a>(
     if !show {
         return Vec::new();
     }
-    snapshot
+    let statuses = snapshot
         .panes
         .iter()
         .filter(|pane| pane.tab_id == tab.tab_id)
@@ -381,8 +387,18 @@ pub(in crate::client::shell) fn tab_status_glyphs<'a>(
                 .map(|agent| agent.agent_status)
                 .unwrap_or(AgentStatus::Unknown)
         })
+        .collect::<Vec<_>>();
+    // A tab working with no working or blocked pane owns a live factory run,
+    // which the server counts on each of its agent panes (pane_work_status).
+    let promote = busy
+        || tab_status == AgentStatus::Working
+            && !statuses
+                .iter()
+                .any(|status| matches!(status, AgentStatus::Working | AgentStatus::Blocked));
+    statuses
+        .into_iter()
         .map(|status| {
-            if busy && matches!(status, AgentStatus::Idle | AgentStatus::Done) {
+            if promote && matches!(status, AgentStatus::Idle | AgentStatus::Done) {
                 AgentStatus::Working
             } else {
                 status

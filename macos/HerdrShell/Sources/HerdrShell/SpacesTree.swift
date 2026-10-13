@@ -358,7 +358,7 @@ enum SpacesTree {
                     + grouped.flatMap { tag($0).runs.map(\.attention) }
                 let rank = ["none": 0, "warn": 1, "act": 2]
                 let attention = attentions.max { (rank[$0] ?? 0) < (rank[$1] ?? 0) } ?? "none"
-                let expandable = !children.isEmpty || !runs.isEmpty || !grouped.isEmpty
+                let expandable = !children.isEmpty || runs.contains { !$0.done } || !grouped.isEmpty
                 // As Rust factory_expanded (C45/C46): a lane opens on the user's expand or while the
                 // focused tab sits inside; running work and a child that needs action leave it folded
                 // (Alex, 2026-10-05: "default collapse everything workflows so we only see talking agent").
@@ -400,9 +400,11 @@ enum SpacesTree {
                 if open {
                     for child in grouped { appendTab(child, level + 1, inside: true) }
                     for child in children { appendTab(child, level + 1, nest: false) }
-                    for run in runs {
-                        let progress = run.done ? "" : [run.phase?.lowercased(), run.started.map { age(now - $0) }].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
-                        out.append(SpacesRow(id: "run:" + run.id, kind: .run, depth: level + 1, glyph: run.done ? (run.attention == "act" ? "✗" : "✓") : "◐", tone: run.done && run.attention == "act" ? "blocked" : run.done ? "mute" : "working", title: run.name ?? run.id, trailing: [run.badge, progress.isEmpty ? nil : progress].compactMap { $0 }.joined(separator: " · "), alert: run.attention, tab: tab.id, dim: run.done))
+                    // A run's row drops when the run ends (ASKS-11, as Rust live_runs); a failed run
+                    // still raises the header's "!" through `attentions`.
+                    for run in runs where !run.done {
+                        let progress = [run.phase?.lowercased(), run.started.map { age(now - $0) }].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+                        out.append(SpacesRow(id: "run:" + run.id, kind: .run, depth: level + 1, glyph: "◐", tone: "working", title: run.name ?? run.id, trailing: [run.badge, progress.isEmpty ? nil : progress].compactMap { $0 }.joined(separator: " · "), alert: run.attention, tab: tab.id, dim: false))
                     }
                 }
             }
