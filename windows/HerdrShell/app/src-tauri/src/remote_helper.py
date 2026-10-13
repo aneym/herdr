@@ -123,14 +123,17 @@ def factory_exec(argv):
         return None
 
 
-def factory_alive(pid):
-    if type(pid) is not int or pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-        return True
-    except OSError:
-        return False
+# A live run rewrites its registry file every poll (run-workflow.sh save()) and removes it on
+# exit; the factory dashboard counts one rewritten in the last 30 minutes as moving. Runner pids
+# are not checked: after a reboot a dead runner's pid belongs to some other process.
+FACTORY_FLIGHT_FRESH_S = 1800
+
+
+def factory_registry_path():
+    # The engine's config_file order: the private overlay's copy, else the installed runtime's.
+    overlay = os.path.expanduser(os.environ.get("OF_OVERLAY", "").strip() or HOME + "/.agent-rails/overlay")
+    path = os.path.join(overlay, "engine/fleet/config/machines.json")
+    return path if os.path.isfile(path) else HOME + "/.agent-rails/factory-runtime/fleet/config/machines.json"
 
 
 def factory_bundle():
@@ -140,6 +143,7 @@ def factory_bundle():
     paths = {
         "overlay": source("FACTORY_OVERLAY", HOME + "/.agent-rails/herdr/overlay.json"),
         "boxes": source("FACTORY_BOXES", HOME + "/.agent-rails/factory/boxes.json"),
+        "machines": source("FACTORY_MACHINES", factory_registry_path()),
         "poolState": source("FACTORY_POOLSTATE", HOME + "/.agent-rails/factory/state/pool.json"),
         "disk": source("FACTORY_DISK", HOME + "/.agent-rails/fleet-disk-watch/state.json"),
         "routing": source("FACTORY_ROUTING", HOME + "/.agent-lb/managed/coding-agents/routing-table.json"),
@@ -155,11 +159,18 @@ def factory_bundle():
                 names = os.listdir(fd)
             finally:
                 os.close(fd)
+            now = time.time()
             for name in names:
                 if not name.endswith(".json"):
                     continue
-                row = factory_file(os.path.join(directory, name))
-                if isinstance(row, dict) and (factory_alive(row.get("runner_pid")) or factory_alive(row.get("child_pid"))):
+                path = os.path.join(directory, name)
+                try:
+                    if now - os.stat(path).st_mtime > FACTORY_FLIGHT_FRESH_S:
+                        continue
+                except OSError:
+                    continue
+                row = factory_file(path)
+                if isinstance(row, dict):
                     flights.append(dict(row, run_id=row.get("run_id") or name))
             return flights
         except OSError:

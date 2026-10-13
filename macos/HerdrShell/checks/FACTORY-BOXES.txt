@@ -1,0 +1,14 @@
+[PASS] light shot -- /Volumes/StudioExt/repos/herdr-wt/s7-factory-boxes/macos/HerdrShell/checks/FACTORY-BOXES-light.png
+[PASS] dark shot -- /Volumes/StudioExt/repos/herdr-wt/s7-factory-boxes/macos/HerdrShell/checks/FACTORY-BOXES-dark.png
+[PASS] one row per real machine -- Mac Studio PC ax42 forge
+[PASS] box pc-wsl: under one machine row with its load -- PC: 0.17/core  18%  2689/11960 MB
+[PASS] box forge-1: under one machine row with its load -- forge: 0.21/core  34%  2114/15611 MB
+[PASS] box forge-2: under one machine row with its load -- forge: 0.21/core  34%  2114/15611 MB
+[PASS] box forge-3: under one machine row with its load -- forge: 0.21/core  34%  2114/15611 MB
+[PASS] box forge-4: under one machine row with its load -- forge: 0.21/core  34%  2114/15611 MB
+[PASS] box forge-lanes: under one machine row with its load -- forge: 0.21/core  34%  2114/15611 MB
+[PASS] box ax42: under one machine row with its load -- ax42: 0.25/core  26%  17058/63381 MB
+[PASS] forge slots group under forge, forge-lanes keeps its own held state -- [{"dimmed": false, "disk": "", "kind": "slot", "name": "forge-1", "slots": "1/1", "state": "up"}, {"dimmed": false, "disk": "", "kind": "slot", "name": "forge-2", "slots": "1/1", "state": "up"}, {"dim
+[PASS] Mac Studio gets the disk watch's studio entry -- ok
+[PASS] in flight lists only the run whose file is still rewritten -- ['live-run']
+[PASS] dark dump draws the same rows

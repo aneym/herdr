@@ -1,0 +1,207 @@
+{
+ "_source": "Studio live factory files 2026-10-13 (R242): overlay.json hosts, factory/boxes.json, overlay engine/fleet/config/machines.json, fleet-disk-watch/state.json; notes and keys trimmed",
+ "overlay": {
+  "generated_at": "2026-10-13T06:16:36.660Z",
+  "hosts": [
+   {
+    "name": "Mac Studio",
+    "summary": "20 running \u00b7 7.6G free",
+    "usage": {
+     "state": "overloaded",
+     "age_s": 0,
+     "load_per_core": 1.56,
+     "cpu_pct": 91,
+     "mem_used_mb": 18350,
+     "mem_total_mb": 131072,
+     "slots_used": null,
+     "slots_total": null
+    }
+   },
+   {
+    "name": "PC",
+    "summary": "1 running \u00b7 8.4G free",
+    "usage": {
+     "state": "ok",
+     "age_s": 28,
+     "load_per_core": 0.17,
+     "cpu_pct": 18,
+     "mem_used_mb": 2689,
+     "mem_total_mb": 11960,
+     "slots_used": null,
+     "slots_total": null
+    }
+   },
+   {
+    "name": "ax42",
+    "summary": "4 running \u00b7 39G free \u00b7 waiting on pressure",
+    "usage": {
+     "state": "ok",
+     "age_s": 27,
+     "load_per_core": 0.25,
+     "cpu_pct": 26,
+     "mem_used_mb": 17058,
+     "mem_total_mb": 63381,
+     "slots_used": null,
+     "slots_total": null
+    }
+   },
+   {
+    "name": "forge",
+    "summary": "disk held",
+    "attention": "warn",
+    "usage": {
+     "state": "ok",
+     "age_s": 28,
+     "load_per_core": 0.21,
+     "cpu_pct": 34,
+     "mem_used_mb": 2114,
+     "mem_total_mb": 15611,
+     "slots_used": null,
+     "slots_total": null
+    }
+   }
+  ]
+ },
+ "boxes": {
+  "boxes": [
+   {
+    "name": "pc-wsl",
+    "ssh": "pc-wsl",
+    "kind": "plain",
+    "sessions": 27,
+    "checks": 8,
+    "enabled": true
+   },
+   {
+    "name": "forge-1",
+    "ssh": "forge-1",
+    "kind": "slot",
+    "sessions": 1,
+    "checks": 1,
+    "enabled": true,
+    "vm": "forge"
+   },
+   {
+    "name": "forge-2",
+    "ssh": "forge-2",
+    "kind": "slot",
+    "sessions": 1,
+    "checks": 1,
+    "enabled": true,
+    "vm": "forge"
+   },
+   {
+    "name": "forge-3",
+    "ssh": "forge-3",
+    "kind": "slot",
+    "sessions": 1,
+    "checks": 1,
+    "enabled": true,
+    "vm": "forge"
+   },
+   {
+    "name": "forge-4",
+    "ssh": "forge-4",
+    "kind": "slot",
+    "sessions": 1,
+    "checks": 1,
+    "enabled": true,
+    "vm": "forge"
+   },
+   {
+    "name": "forge-lanes",
+    "ssh": "forge-lanes",
+    "kind": "plain",
+    "sessions": 8,
+    "checks": 4,
+    "enabled": true,
+    "vm": "forge"
+   },
+   {
+    "name": "ax42",
+    "ssh": "ax42",
+    "kind": "plain",
+    "sessions": 26,
+    "checks": 16,
+    "enabled": true
+   }
+  ]
+ },
+ "machines": [
+  {
+   "name": "studio",
+   "aliases": [
+    "Mac Studio",
+    "Studio",
+    "alexs-mac-studio"
+   ],
+   "ssh": null
+  },
+  {
+   "name": "book",
+   "aliases": [
+    "MacBook",
+    "Book"
+   ],
+   "ssh": "macbook-ts"
+  },
+  {
+   "name": "ax42",
+   "ssh": "ax42"
+  },
+  {
+   "name": "pc-wsl",
+   "aliases": [
+    "PC"
+   ],
+   "ssh": "pc-wsl"
+  },
+  {
+   "name": "forge",
+   "aliases": [
+    "div"
+   ],
+   "ssh": "jobs@forge.tailf266ac.ts.net",
+   "herdr_ssh": "forge-lanes"
+  }
+ ],
+ "disk": {
+  "ax42": {
+   "status": "ok",
+   "held": null,
+   "last_run": {
+    "free_gib": 84.59222030639648,
+    "at": 1791870782.4608438
+   }
+  },
+  "forge-lanes": {
+   "status": "ok",
+   "held": {
+    "by": "disk-floor",
+    "reason": "disk: 19.2 GiB < 20 GiB (cull running)"
+   },
+   "last_run": {
+    "free_gib": 27.565879821777344,
+    "at": 1791870042.2267313
+   }
+  },
+  "pc-c": {
+   "status": "unreachable",
+   "held": null,
+   "last_run": null
+  },
+  "pc-wsl": {
+   "status": "ok",
+   "held": null,
+   "last_run": {
+    "free_gib": 761.430233001709,
+    "at": 1791871466.493105
+   }
+  },
+  "studio": {
+   "status": "ok",
+   "held": null,
+   "last_run": null
+  }
+ }
+}

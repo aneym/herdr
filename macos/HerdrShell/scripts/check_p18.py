@@ -5,7 +5,7 @@
 
 Fixtures under scripts/fixtures/p18/ are copied to a temp dir. Every FACTORY_*
 override points there. A local HTTP server serves the pools JSON. One workflow
-file uses this process's pid (live) and one uses a dead pid. The app is
+file was just rewritten (live) and one two hours ago (a dead run's leftover). The app is
 HerdrShell --demo factory --dump-factory <path>, which needs no herdr socket.
 
 Asserts come from the JSON dump the app writes on each refresh.
@@ -154,6 +154,7 @@ def prepare(root, live_pid):
     }
     json.dump(live, open(os.path.join(wf, "live.json"), "w"))
     json.dump(dead, open(os.path.join(wf, "dead.json"), "w"))
+    os.utime(os.path.join(wf, "dead.json"), (now - 7200, now - 7200))
     overlay = json.load(open(os.path.join(root, "overlay.json")))
     overlay["generated_at"] = datetime.now(ET).astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
     json.dump(overlay, open(os.path.join(root, "overlay.json"), "w"))
@@ -173,6 +174,8 @@ def env_for(root, port):
         "FACTORY_POOLS_URL": f"http://127.0.0.1:{port}/api/pools",
         "FACTORY_ROUTING": os.path.join(root, "routing.json"),
         "FACTORY_BOXES": os.path.join(root, "boxes.json"),
+        # No machine registry: each fixture name stands for its own machine.
+        "FACTORY_MACHINES": os.path.join(root, "no-machines.json"),
         "FACTORY_POOLSTATE": os.path.join(root, "pool.json"),
         "FACTORY_DISK": os.path.join(root, "disk.json"),
         "FACTORY_WORKFLOWS_DIR": os.path.join(root, "workflows"),

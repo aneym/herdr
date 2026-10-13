@@ -218,6 +218,9 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 .factory-detail { font-size: var(--shell-type-factory-detail); margin-bottom: var(--shell-space-factory-row-gap); }
 .factory-trailing { margin-left: auto; }
 .factory-dim { opacity: .4; }
+.factory-machine-box { color: var(--shell-muted); }
+.factory-box-line { display: flex; align-items: baseline; gap: var(--shell-space-factory-row-gap); padding-left: var(--shell-space-factory-box-indent); color: var(--shell-muted); font-size: var(--shell-type-factory-detail); margin-bottom: var(--shell-space-factory-detail-gap); }
+.factory-box-name { color: var(--shell-text); }
 .factory-pool { margin-bottom: var(--shell-space-factory-row-gap); }
 .factory-bar-row > span:first-child { width: var(--shell-space-factory-label-width); }
 .factory-bar-row meter { width: var(--shell-space-factory-bar-width); accent-color: var(--shell-text); }

@@ -10,6 +10,7 @@ struct FactorySources {
     var poolsURL: String
     var routing: String
     var boxes: String
+    var machines: String
     var poolState: String
     var disk: String
     var workflows: String
@@ -25,12 +26,19 @@ struct FactorySources {
             return (v as NSString).expandingTildeInPath
         }
         let home = TerminalTheme.realHome()
+        // The machine registry, in the order the engine's config_file and runs_on read it:
+        // the private overlay's copy, else the installed runtime's.
+        let overlayRoot = env("OF_OVERLAY", home + "/.agent-rails/overlay")
+        let overlayMachines = overlayRoot + "/engine/fleet/config/machines.json"
+        let machines = FileManager.default.fileExists(atPath: overlayMachines)
+            ? overlayMachines : home + "/.agent-rails/factory-runtime/fleet/config/machines.json"
         let interval = Double(ProcessInfo.processInfo.environment["FACTORY_POOLS_INTERVAL"] ?? "") ?? 60
         return FactorySources(
             overlay: env("FACTORY_OVERLAY", home + "/.agent-rails/herdr/overlay.json"),
             poolsURL: env("FACTORY_POOLS_URL", "http://127.0.0.1:2455/api/pools"),
             routing: env("FACTORY_ROUTING", home + "/.agent-lb/managed/coding-agents/routing-table.json"),
             boxes: env("FACTORY_BOXES", home + "/.agent-rails/factory/boxes.json"),
+            machines: env("FACTORY_MACHINES", machines),
             poolState: env("FACTORY_POOLSTATE", home + "/.agent-rails/factory/state/pool.json"),
             disk: env("FACTORY_DISK", home + "/.agent-rails/fleet-disk-watch/state.json"),
             workflows: env("FACTORY_WORKFLOWS_DIR", home + "/.agent-rails/workflows/tabs"),
@@ -98,6 +106,9 @@ enum FactoryText {
     }
 }
 
+/// One real machine: the overlay host's summary and load, with the boxes.json boxes it runs.
+/// A machine with one box draws that box in its own row (`box` names it when the overlay calls
+/// the machine something else, "PC" for pc-wsl); several boxes draw one line each in `boxes`.
 struct MachineRow: Equatable, Identifiable {
     var name: String
     var kind: String
@@ -109,7 +120,64 @@ struct MachineRow: Equatable, Identifiable {
     var dimmed: Bool
     var usageState: String = ""
     var usageLine: String = ""
+    var box: String = ""
+    var boxes: [BoxLine] = []
+    var boxNames: [String] = []
     var id: String { name }
+}
+
+struct BoxLine: Equatable, Identifiable {
+    var name: String
+    var kind: String
+    var slots: String
+    var disk: String
+    var state: String
+    var dimmed: Bool
+    var id: String { name }
+}
+
+/// The factory machine registry (fleet/config/machines.json): every name a machine goes by.
+/// Overlay hosts use a display alias ("PC", "Mac Studio"), boxes.json its name or ssh alias
+/// ("pc-wsl", "forge-lanes"), and a sandbox box names its machine in `vm` ("forge").
+struct MachineRegistry: Equatable {
+    /// Lowercased name, alias, ssh or herdr_ssh to the registry name.
+    var keys: [String: String] = [:]
+    /// Registry name to its lowercased name and aliases (ssh hosts may be a box's own name).
+    var names: [String: Set<String>] = [:]
+
+    init(_ list: [Any]) {
+        for item in list {
+            guard let d = item as? [String: Any], let raw = d["name"] as? String else { continue }
+            let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if name.isEmpty { continue }
+            let called = [name] + ((d["aliases"] as? [Any]) ?? []).compactMap { $0 as? String }
+            let hosts = ["ssh", "herdr_ssh"].compactMap { d[$0] as? String }
+            for v in called + hosts {
+                let key = Self.key(v)
+                if key.isEmpty { continue }
+                if keys[key] == nil { keys[key] = name }
+                if called.contains(v) { names[name, default: []].insert(key) }
+            }
+        }
+    }
+
+    static func key(_ raw: String) -> String {
+        let host = raw.split(separator: "@").last.map(String.init) ?? raw
+        let bare = host.split(whereSeparator: { $0 == " " || $0 == ":" }).first.map(String.init) ?? host
+        let trimmed = bare.hasSuffix(".local") ? String(bare.dropLast(6)) : bare
+        return trimmed.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    /// The registry name for any of a machine's names; nil when the registry does not know it.
+    func machine(_ raw: String) -> String? {
+        let key = Self.key(raw)
+        return keys[key] ?? keys[key.split(separator: ".").first.map(String.init) ?? key]
+    }
+
+    /// Lowercased keys disk and pool state may file a machine under.
+    func keys(of name: String) -> [String] {
+        Array(names[name] ?? []).sorted()
+    }
 }
 
 struct HostUsage: Equatable {
@@ -192,7 +260,12 @@ struct FactorySnapshot: Equatable {
             "updated": updated,
             "machines": machines.map {
                 ["name": $0.name, "kind": $0.kind, "summary": $0.summary, "slots": $0.slots,
-                 "disk": $0.disk, "state": $0.state, "attention": $0.attention, "dimmed": $0.dimmed] as [String: Any]
+                 "disk": $0.disk, "state": $0.state, "attention": $0.attention, "dimmed": $0.dimmed,
+                 "usage": $0.usageLine, "box": $0.box, "box_names": $0.boxNames,
+                 "boxes": $0.boxes.map {
+                     ["name": $0.name, "kind": $0.kind, "slots": $0.slots, "disk": $0.disk,
+                      "state": $0.state, "dimmed": $0.dimmed] as [String: Any]
+                 }] as [String: Any]
             },
             "pools_age_s": poolsAgeSeconds ?? NSNull(),
             "pools_stale": poolsStale,
@@ -226,6 +299,8 @@ private struct HostInfo {
 
 private struct BoxInfo {
     var name: String
+    var vm: String
+    var ssh: String
     var kind: String
     var sessions: Int?
     var checks: Int?
@@ -314,6 +389,8 @@ private enum JSONBox {
         case let s as String:
             let t = s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             return !t.isEmpty && t != "false" && t != "null" && t != "0"
+        // The disk watch records a hold as {by, reason, since}.
+        case let d as [String: Any]: return !d.isEmpty
         default: return false
         }
     }
@@ -389,11 +466,16 @@ private enum FactoryRead {
         for item in JSONBox.list(root["boxes"]) ?? [] {
             guard let d = JSONBox.obj(item), let name = JSONBox.str(d["name"]) else { continue }
             boxes[name.lowercased()] = BoxInfo(
-                name: name, kind: JSONBox.str(d["kind"]) ?? "",
+                name: name, vm: JSONBox.str(d["vm"]) ?? "", ssh: JSONBox.str(d["ssh"]) ?? "",
+                kind: JSONBox.str(d["kind"]) ?? "",
                 sessions: JSONBox.int(d["sessions"]), checks: JSONBox.int(d["checks"]),
                 enabled: JSONBox.bool(d["enabled"], default: true))
         }
         return boxes
+    }
+
+    static func registry(_ path: String) -> MachineRegistry {
+        MachineRegistry(JSONBox.list(JSONBox.read(path)) ?? [])
     }
 
     static func poolBoxes(_ path: String) -> PoolBox {
@@ -500,14 +582,19 @@ private enum FactoryRead {
         return "Decider: \(who)\(policyBit)\(ver)"
     }
 
-    static func flights(_ dir: String) -> [FlightSrc] {
+    /// A live run rewrites its registry file every poll (run-workflow.sh save(), 20 s) and
+    /// removes it on exit. The factory dashboard counts a file rewritten in the last 30 minutes
+    /// as moving; the Shell uses the same window. Pids are not used: a VM or remote client has
+    /// another process table, and on Studio a reboot hands a dead runner's pid to another process.
+    static let flightFresh: TimeInterval = 1800
+
+    static func flights(_ dir: String, now: Date = Date()) -> [FlightSrc] {
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir) else { return [] }
         var out: [FlightSrc] = []
         for name in names where name.hasSuffix(".json") {
-            guard let d = JSONBox.obj(JSONBox.read((dir as NSString).appendingPathComponent(name))) else { continue }
-            let runner = JSONBox.int(d["runner_pid"]) ?? 0
-            let child = JSONBox.int(d["child_pid"])
-            if !pidAlive(runner) && !(child != nil && pidAlive(child!)) { continue }
+            let path = (dir as NSString).appendingPathComponent(name)
+            guard let at = JSONBox.stamp(path), now.timeIntervalSince(at) <= flightFresh else { continue }
+            guard let d = JSONBox.obj(JSONBox.read(path)) else { continue }
             let id = JSONBox.str(d["run_id"]) ?? name
             out.append(FlightSrc(
                 id: id,
@@ -520,11 +607,6 @@ private enum FactoryRead {
         }
         out.sort { ($0.started ?? .distantPast) > ($1.started ?? .distantPast) }
         return out
-    }
-
-    static func pidAlive(_ pid: Int) -> Bool {
-        if pid <= 0 { return false }
-        return kill(Int32(pid), 0) == 0
     }
 
     static func landed(_ repo: String) -> (Int, [LandedRow]) {
@@ -571,6 +653,7 @@ final class FactoryModel: ObservableObject {
     private var hosts: [String: HostInfo] = [:]
     private var generatedAt: Date?
     private var boxes: [String: BoxInfo] = [:]
+    private var registry = MachineRegistry([])
     private var poolBox = PoolBox(drained: [], drainedWhy: [:], downUntil: [:], downWhy: [:])
     private var disk: [String: DiskInfo] = [:]
     private var poolSources: [PoolSrc] = []
@@ -620,7 +703,11 @@ final class FactoryModel: ObservableObject {
         fetchPools()
         let age = Timer(timeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
         let pools = Timer(timeInterval: sources.poolsInterval, repeats: true) { [weak self] _ in self?.fetchPools() }
-        let git = Timer(timeInterval: 60, repeats: true) { [weak self] _ in self?.reloadLanded() }
+        // Flights also age out: a run that stops rewriting its file changes no stamp.
+        let git = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
+            self?.reloadLanded()
+            self?.reloadFlights()
+        }
         for t in [age, pools, git] {
             RunLoop.main.add(t, forMode: .common)
             timers.append(t)
@@ -656,6 +743,7 @@ final class FactoryModel: ObservableObject {
             let stamps: [(String, Date?, TimeInterval)] = [
                 ("hosts", JSONBox.stamp(src.overlay), 0),
                 ("boxes", JSONBox.stamp(src.boxes), 15),
+                ("machines", JSONBox.stamp(src.machines), 15),
                 ("pool", JSONBox.stamp(src.poolState), 15),
                 ("disk", JSONBox.stamp(src.disk), 15),
                 ("routing", JSONBox.stamp(src.routing), 15),
@@ -681,7 +769,7 @@ final class FactoryModel: ObservableObject {
             seen[key] = stamp
             switch key {
             case "hosts": reloadHosts()
-            case "boxes": reloadBoxes()
+            case "boxes", "machines": reloadBoxes()
             case "pool": reloadPoolBoxes()
             case "disk": reloadDisk()
             case "routing", "decider": reloadRouting()
@@ -718,14 +806,20 @@ final class FactoryModel: ObservableObject {
     private func reloadBoxes() {
         let gen = bump("boxes")
         let path = sources.boxes
+        let registryPath = sources.machines
         io.async { [weak self] in
             let stamp = JSONBox.stamp(path)
+            let registryStamp = JSONBox.stamp(registryPath)
             let parsed = FactoryRead.boxes(path)
+            let registry = FactoryRead.registry(registryPath)
             DispatchQueue.main.async {
                 guard let self, self.generation["boxes"] == gen else { return }
                 self.boxes = parsed
+                self.registry = registry
                 if let stamp { self.seen["boxes"] = stamp }
+                if let registryStamp { self.seen["machines"] = registryStamp }
                 self.loadedAt["boxes"] = Date()
+                self.loadedAt["machines"] = Date()
                 self.publish()
             }
         }
@@ -910,56 +1004,81 @@ final class FactoryModel: ObservableObject {
         onChange?()
     }
 
+    /// One row per real machine. Overlay hosts and boxes.json boxes join through the machine
+    /// registry; a name the registry does not know stands for its own machine.
     private func composedMachines(now: Date) -> [MachineRow] {
-        let keys = Set(hosts.keys).union(boxes.keys)
+        func machineKey(_ name: String) -> String { (registry.machine(name) ?? name).lowercased() }
+        var hostOf: [String: HostInfo] = [:]
+        for host in hosts.values { hostOf[machineKey(host.name)] = host }
+        var boxesOf: [String: [BoxInfo]] = [:]
+        for box in boxes.values {
+            let named = [box.vm, box.name, box.ssh].first { !$0.isEmpty && registry.machine($0) != nil }
+            boxesOf[machineKey(named ?? box.name), default: []].append(box)
+        }
         var rows: [MachineRow] = []
-        for key in keys {
-            let host = hosts[key]
-            let box = boxes[key]
-            let name = box?.name ?? host?.name ?? key
-            let until = poolBox.downUntil[key]
-            let downFuture = until.map { $0 > now } ?? false
-            var state = "up"
-            var why = ""
-            if downFuture {
-                state = "down until \(FactoryText.clock(until!, format: "HH:mm"))"
-                why = poolBox.downWhy[key] ?? ""
-            } else if disk[key]?.held == true {
-                state = "held"
-            } else if poolBox.drained.contains(key) {
-                state = "drained"
-                why = poolBox.drainedWhy[key] ?? ""
-            }
-            if !why.isEmpty { state += " (\(why))" }
-            var slots = ""
-            if let sessions = box?.sessions, let checks = box?.checks { slots = "\(sessions)/\(checks)" }
-            var diskText = ""
-            if let info = disk[key] {
-                if let free = info.free {
-                    diskText = String(format: "%.1f GiB", locale: Locale(identifier: "en_US_POSIX"), free)
-                    if !info.status.isEmpty { diskText += " · \(info.status)" }
-                    if let at = info.at { diskText += " · \(FactoryText.ageWords(now.timeIntervalSince(at))) ago" }
-                } else if !info.status.isEmpty {
-                    diskText = info.status
-                }
-            }
+        for key in Set(hostOf.keys).union(boxesOf.keys) {
+            let host = hostOf[key]
+            let own = (boxesOf[key] ?? []).sorted { machineLess($0.name, $1.name) }
+            let regName = registry.machine(host?.name ?? own.first?.name ?? key)
+            let name = host?.name ?? (own.count == 1 ? own[0].name : regName ?? key)
+            let lines = own.map { boxLine($0, keys: [$0.name.lowercased()], now: now) }
+            let folded = own.count == 1
+            let boxKeys = Set(own.map { $0.name.lowercased() })
+            let machineKeys = ([name.lowercased(), key] + (regName.map { registry.keys(of: $0) } ?? []))
+                .filter { !boxKeys.contains($0) }
+            let machine = folded ? lines[0] : boxLine(nil, keys: machineKeys, now: now)
             let usage = host?.usage
             let show = usage?.visible == true
             rows.append(MachineRow(
-                name: name, kind: box?.kind ?? "", summary: host?.summary ?? "", slots: slots, disk: diskText,
-                state: state, attention: host?.attention ?? "", dimmed: box?.enabled == false,
+                name: name, kind: machine.kind, summary: host?.summary ?? "", slots: machine.slots, disk: machine.disk,
+                state: machine.state, attention: host?.attention ?? "", dimmed: machine.dimmed,
                 usageState: show ? (usage?.state ?? "") : "",
-                usageLine: usage?.line ?? ""))
+                usageLine: show ? (usage?.line ?? "") : "no load reported",
+                box: folded && own[0].name.lowercased() != name.lowercased() ? own[0].name : "",
+                boxes: folded ? [] : lines,
+                boxNames: own.map(\.name)))
         }
         rows.sort { machineLess($0.name, $1.name) }
         return rows
+    }
+
+    /// State, slots and disk for one box, or for a machine filed under any of `keys`.
+    private func boxLine(_ box: BoxInfo?, keys: [String], now: Date) -> BoxLine {
+        let until = keys.lazy.compactMap { self.poolBox.downUntil[$0] }.first
+        let info = keys.lazy.compactMap { self.disk[$0] }.first
+        var state = "up"
+        var why = ""
+        if let until, until > now {
+            state = "down until \(FactoryText.clock(until, format: "HH:mm"))"
+            why = keys.lazy.compactMap { self.poolBox.downWhy[$0] }.first ?? ""
+        } else if info?.held == true {
+            state = "held"
+        } else if let key = keys.first(where: { poolBox.drained.contains($0) }) {
+            state = "drained"
+            why = poolBox.drainedWhy[key] ?? ""
+        }
+        if !why.isEmpty { state += " (\(why))" }
+        var slots = ""
+        if let sessions = box?.sessions, let checks = box?.checks { slots = "\(sessions)/\(checks)" }
+        var diskText = ""
+        if let info {
+            if let free = info.free {
+                diskText = String(format: "%.1f GiB", locale: Locale(identifier: "en_US_POSIX"), free)
+                if !info.status.isEmpty { diskText += " · \(info.status)" }
+                if let at = info.at { diskText += " · \(FactoryText.ageWords(now.timeIntervalSince(at))) ago" }
+            } else if !info.status.isEmpty {
+                diskText = info.status
+            }
+        }
+        return BoxLine(name: box?.name ?? "", kind: box?.kind ?? "", slots: slots, disk: diskText,
+                       state: state, dimmed: box?.enabled == false)
     }
 
     private func machineLess(_ a: String, _ b: String) -> Bool {
         func r(_ name: String) -> (Int, String) {
             let n = name.lowercased()
             let g: Int
-            if n == "studio" { g = 0 }
+            if n == "studio" || n == "mac studio" { g = 0 }
             else if n == "pc" || n.hasPrefix("pc-") { g = 1 }
             else if n == "ax42" { g = 2 }
             else if n.hasPrefix("forge") { g = 3 }

@@ -44,15 +44,17 @@ export function FactoryView({ snapshot: s, machine }: { snapshot: FactorySnapsho
     <header><h1>Factory</h1><span>{s.updated}</span></header>
     <section><h2>Machines</h2>{!s.machines.length && <p>no machines</p>}{s.machines.map(r => {
       const attention = r.attention === "warn" ? "var(--shell-warn)" : r.attention === "act" ? "var(--shell-attention-act)" : "var(--shell-text)";
-      const usage = r.usageState === "overloaded" ? "var(--shell-bad)" : r.usageState === "idle" ? "var(--shell-muted)" : "var(--shell-ok)";
+      const usage = r.usageState === "overloaded" ? "var(--shell-bad)" : r.usageState === "idle" || !r.usageState ? "var(--shell-muted)" : "var(--shell-ok)";
       const glyph = r.usageState === "overloaded" ? "blocked" : r.usageState === "idle" ? "idle" : "working";
-      const state = r.state.startsWith("drained") || r.state.startsWith("down") || r.state === "held" ? "var(--shell-warn)" : "var(--shell-ok)";
+      const stateColor = (v: string) => v.startsWith("drained") || v.startsWith("down") || v === "held" ? "var(--shell-warn)" : "var(--shell-ok)";
+      const state = stateColor(r.state);
       return <div data-machine={r.name} className={r.dimmed ? "factory-dim" : ""} key={r.name}><div className="factory-row">
         {r.usageState && <span className={`factory-usage-glyph ${glyph}`} data-usage-glyph={glyph} aria-label={r.usageState} style={{ color: usage }} />}
-        <strong className="factory-machine-name" style={{ color: attention }}>{r.name}</strong><span>{r.kind}</span>
+        <strong className="factory-machine-name" style={{ color: attention }}>{r.name}</strong>{r.box && <span className="factory-machine-box">{r.box}</span>}<span>{r.kind}</span>
         <span className="factory-machine-summary" style={{ color: r.attention ? attention : "var(--shell-muted)" }}>{r.summary}</span>
         <span className="factory-trailing factory-machine-state" style={{ color: state }}>{r.state}</span></div>
-        <div className="factory-detail"><span className="factory-usage-line" style={{ color: usage }}>{r.usageLine}</span><span>{r.slots}</span><span>{r.disk}</span></div></div>;
+        <div className="factory-detail"><span className="factory-usage-line" style={{ color: usage }}>{r.usageLine}</span><span>{r.slots}</span><span>{r.disk}</span></div>
+        {r.boxes.map(x => <div data-box={x.name} key={x.name} className={`factory-box-line${x.dimmed ? " factory-dim" : ""}`}><span className="factory-box-name">{x.name}</span><span>{x.kind}</span><span>{x.slots}</span><span>{x.disk}</span><span className="factory-trailing" style={{ color: stateColor(x.state) }}>{x.state}</span></div>)}</div>;
     })}</section>
     <section><h2>Pools{s.poolsAge ? ` · ${s.poolsAge}` : ""}</h2>{!s.pools.length && <p>{s.poolsStale ? "no pool data" : "waiting for pools"}</p>}{s.pools.map(r => <div key={r.id} className={`factory-pool tone-${r.tone}`}><div className="factory-row"><span>{r.provider}</span><span>{r.id}</span><span className="factory-trailing">{r.counts}</span></div>{[["5h", r.fiveHour, r.fiveHourLabel], ["wk", r.weekly, r.weeklyLabel]].map(([label, value, text]) => <div className="factory-bar-row" key={String(label)}><span>{label}</span><meter min={0} max={100} value={typeof value === "number" ? Math.max(0, Math.min(100, value)) : 0} aria-label={`${r.id} ${label}`} /><span>{text || "—"}</span></div>)}<div className="factory-detail"><span>{r.pace}</span><span>{r.monthly}</span><span>{r.refill}</span></div></div>)}</section>
     <section><h2>Routing · ladder: {s.ladderMode || "—"}</h2>{!s.routes.length && <p>no ladder</p>}{s.routes.map(r => <div key={r.name}><button className="factory-route" aria-expanded={expanded === r.name} onClick={() => toggleRoute(r.name)}>{expanded === r.name ? "▾" : "▸"} {r.name} {r.chips.map((c, i) => <span className="factory-chip" key={i}>{c}</span>)}</button>{expanded === r.name && <p>{picks[r.name]?.text ?? "asking route pick…"}</p>}</div>)}{s.decider && <p>{s.decider}</p>}<details><summary>Open routing table</summary><pre>{s.routes.map(r => `${r.name}: ${r.chips.join(" → ")}`).join("\n")}</pre></details></section>

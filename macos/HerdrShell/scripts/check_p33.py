@@ -81,7 +81,8 @@ def main():
         other: {"kind": "lane", "name": "outreach", "idle_reason": "no work"}}, "spaces": {}, "hosts": [{"name": "Studio", "summary": "load 1/16"}],
         "usage": [{"name": "claude", "summary": "2/8 · 73%"}, {"name": "codex", "summary": "5/5 · 100%"}]}
     pathlib.Path(os.environ["FACTORY_OVERLAY"]).write_text(json.dumps(overlay))
-    # Desk file coverage lives in check_desk_space.py; the scope lane already has docs.
+    # Desk file coverage lives in check_desk_space.py. A scope_url no longer gives desk items,
+    # so the scope tab gets its doc from `herdr desk open --tab` below.
     S.app("start")
     state = wait(lambda s: len(s.get("spaces_rows", [])) >= 10)
     rows = state.get("spaces_rows", [])
@@ -107,6 +108,7 @@ def main():
     state = wait(lambda s: ws + ":IMPLEMENTING" in s.get("spaces_chrome", {}).get("collapsedSections", []))
     check("fold survives relaunch", ws + ":IMPLEMENTING" in state.get("spaces_chrome", {}).get("collapsedSections", []))
     # Docs are shown per tab and only on request: open them on the tab that has them.
+    S.lab("herdr", "desk", "open", "https://studio.tailf266ac.ts.net:8797/s/content", "--tab", tabs["scope"], "--background")
     S.cmd({"cmd": "select", "tab": tabs["scope"]})
     wait(lambda s: s.get("selected_tab") == tabs["scope"])
     S.cmd({"cmd": "docs", "open": True})

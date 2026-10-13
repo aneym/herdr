@@ -124,6 +124,7 @@ enum ShellSpace {
     static let factoryDetailGap: CGFloat = 4
     static let factoryBarWidth: CGFloat = 140
     static let factoryLabelWidth: CGFloat = 22
+    static let factoryBoxIndent: CGFloat = 16
     static let settingsNavWidth: CGFloat = 220
     static let settingsColumn: CGFloat = 640
     static let settingsRowHeight: CGFloat = 52

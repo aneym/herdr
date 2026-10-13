@@ -130,6 +130,9 @@ struct FactoryView: View {
                     StateGlyph(state: usageGlyph(row.usageState), tokens: t, scale: 0.8)
                 }
                 Text(row.name).foregroundStyle(attention(row.attention)).lineLimit(1)
+                if !row.box.isEmpty {
+                    Text(row.box).foregroundStyle(t.mute).lineLimit(1)
+                }
                 if !row.kind.isEmpty {
                     Text(row.kind).foregroundStyle(t.mute).font(.system(size: ShellType.switcherMeta))
                 }
@@ -139,7 +142,8 @@ struct FactoryView: View {
             }
             HStack(spacing: ShellSpace.step8) {
                 if !row.usageLine.isEmpty {
-                    Text(row.usageLine).foregroundStyle(usageColor(row.usageState)).monospacedDigit().lineLimit(1)
+                    Text(row.usageLine).foregroundStyle(row.usageState.isEmpty ? t.mute : usageColor(row.usageState))
+                        .monospacedDigit().lineLimit(1)
                 }
                 if !row.slots.isEmpty {
                     Text(row.slots).monospacedDigit().frame(width: 64, alignment: .trailing)
@@ -149,9 +153,27 @@ struct FactoryView: View {
             }
             .font(.system(size: ShellType.switcherMeta))
             .foregroundStyle(t.mute)
+            ForEach(row.boxes) { box in
+                boxLine(box)
+            }
         }
         .opacity(row.dimmed ? 0.4 : 1)
         .padding(.vertical, ShellSpace.step2)
+    }
+
+    private func boxLine(_ box: BoxLine) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step8) {
+            Text(box.name).foregroundStyle(t.ink).lineLimit(1)
+            if !box.kind.isEmpty { Text(box.kind) }
+            if !box.slots.isEmpty { Text(box.slots).monospacedDigit() }
+            Text(box.disk).lineLimit(1)
+            Spacer(minLength: 8)
+            Text(box.state).foregroundStyle(stateColor(box.state)).monospacedDigit().lineLimit(1)
+        }
+        .font(.system(size: ShellType.switcherMeta))
+        .foregroundStyle(t.mute)
+        .padding(.leading, ShellSpace.factoryBoxIndent)
+        .opacity(box.dimmed ? 0.4 : 1)
     }
 
     private func poolRow(_ row: PoolRow) -> some View {

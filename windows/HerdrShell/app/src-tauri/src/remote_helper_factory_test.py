@@ -96,4 +96,22 @@ except Exception as e: print(json.dumps({"error":str(e)}))
         finally:
             server.shutdown(); server.server_close(); thread.join()
 
+    def test_flights_are_runs_whose_file_is_still_rewritten(self):
+        # R242: runner pids outlive a reboot as other processes, so this test's own pid stands in for one.
+        harness = r'''
+import io, json, runpy, sys
+sys.stdin = io.TextIOWrapper(io.BytesIO())
+m = runpy.run_path(sys.argv[1])
+print(json.dumps(sorted(f["run_id"] for f in m["request"]({"op":"factory"})["flights"])))
+'''
+        with tempfile.TemporaryDirectory() as home:
+            tabs = pathlib.Path(home, "tabs"); tabs.mkdir()
+            for run_id, age in (("live", 0), ("stale", 7200)):
+                path = tabs / (run_id + ".json")
+                path.write_text(json.dumps({"run_id": run_id, "runner_pid": os.getpid()}))
+                os.utime(path, (os.path.getmtime(path) - age,) * 2)
+            env = dict(os.environ, HOME=home, FACTORY_WORKFLOWS_DIR=str(tabs), FACTORY_POOLS_URL="https://example.com")
+            reply = subprocess.run([sys.executable, "-I", "-c", harness, str(HELPER)], env=env, capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(reply.stdout), ["live"])
+
 if __name__ == "__main__": unittest.main()

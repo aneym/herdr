@@ -143,6 +143,7 @@ export const space = {
   factoryDetailGap: 4,
   factoryBarWidth: 140,
   factoryLabelWidth: 22,
+  factoryBoxIndent: 16,
   settingsNavWidth: 220,
   settingsColumn: 640,
   settingsRowHeight: 52,
