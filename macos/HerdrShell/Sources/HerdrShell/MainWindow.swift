@@ -147,7 +147,7 @@ final class PaneHostView: NSView {
             }
             return v
         }
-        let state = caps[paneId] ?? PaneCapState(paneId: paneId, name: "Brief", agent: false, focused: false, chat: false, density: "focus", glyph: .asleep)
+        let state = caps[paneId] ?? PaneCapState(paneId: paneId, name: "", agent: false, focused: false, chat: false, density: "focus", glyph: .asleep)
         let v = CapHostingView(rootView: PaneCapBar(state: state, tokens: tokens,
                                                    onTerminal: { [weak self] in self?.capAction?(paneId, "terminal") },
                                                    onChat: { [weak self] in self?.capAction?(paneId, "chat") },
@@ -925,13 +925,12 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             let agents = snap.agents.filter { $0.pane_id == p.pane_id }
             let reported = !agents.isEmpty
             let agent = agents.first
-            let named = (agent?.agent?.isEmpty == false ? agent?.agent : nil) ?? "Brief"
             let status = agent?.work_status ?? agent?.agent_status ?? p.agent_status ?? ""
             // Chat reads the local transcript and sends through the local server: local panes only.
             let chat = reported && !Machines.isRemote(p.pane_id) && Channel.mode(for: p.pane_id) == "chat"
             if chat { ensureChat(p.pane_id) }
             next[p.pane_id] = PaneCapState(
-                paneId: p.pane_id, name: named.isEmpty ? "Brief" : named, agent: reported,
+                paneId: p.pane_id, name: PaneCapName.of(p, agent: agent), agent: reported,
                 focused: (state.focusedPane ?? snap.panes.first { $0.focused == true }?.pane_id) == p.pane_id,
                 chat: chat, density: Channel.density(for: p.pane_id),
                 glyph: ShellState.from(status: status, failed: false, hasAgent: reported))

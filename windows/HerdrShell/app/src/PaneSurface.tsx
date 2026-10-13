@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import PaneTerm from "./PaneTerm";
 import type { PaneController } from "./PaneTerm";
 import type { Pane, Snapshot } from "./model";
+import { paneName } from "./model";
 import Chat from "./Chat";
 import { bridge } from "./bridge";
 import { Status } from "./Sidebar";
@@ -13,7 +14,7 @@ function PinGlyph({ pinned }: { pinned: boolean }) {
 }
 export default function PaneSurface(props: { agent?: NonNullable<Snapshot["agents"]>[number]; grabbable?: boolean; onCapPointerDown?: (event: ReactPointerEvent<HTMLDivElement>) => void; settling?: boolean; pane: Pane; machine: string; focused: boolean; onFocus: (id: string) => void; shortcut: (event: KeyboardEvent) => boolean; register: (id: string, controller: PaneController | null) => void; hasAgent: boolean; pinned?: boolean; onPin?: () => void; onError?: (error: unknown) => void }) {
   const { pane, machine, hasAgent, register, pinned, onPin, agent } = props;
-  const name = hasAgent ? agent?.agent || "Brief" : "Brief";
+  const name = paneName(pane, hasAgent ? agent : undefined);
   const status = agent?.work_status ?? agent?.agent_status ?? pane.agent_status ?? "";
   const densityKey = `herdr-shell.density.${machine}.${pane.pane_id}`;
   const [density, setDensity] = useState<"focus" | "full">(() => { try { return localStorage.getItem(densityKey) === "full" ? "full" : "focus"; } catch { return "focus"; } });

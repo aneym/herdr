@@ -13,6 +13,27 @@ final class PaneChat {
     }
 }
 
+/// The name a pane's cap shows. First the TUI border's order (Terminal.border_label): the agent's
+/// reported title, the pane's manual label, the agent kind; then the terminal's own title and its
+/// working folder, so a plain shell still names itself.
+enum PaneCapName {
+    static let fallback = "Terminal"
+
+    static func of(_ pane: Snapshot.Pane, agent: Snapshot.Agent?) -> String {
+        name(title: pane.title ?? agent?.title, label: pane.label, agent: agent?.agent ?? pane.agent,
+             terminalTitle: pane.terminal_title_stripped ?? agent?.terminal_title_stripped,
+             cwd: pane.foreground_cwd ?? pane.cwd)
+    }
+
+    static func name(title: String?, label: String?, agent: String?, terminalTitle: String?, cwd: String?) -> String {
+        let folder = cwd.map { URL(fileURLWithPath: $0).lastPathComponent }
+        for candidate in [title, label, agent, terminalTitle, folder] {
+            if let text = candidate?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty, text != "/" { return text }
+        }
+        return fallback
+    }
+}
+
 /// What one pane's 36 pt cap shows. The mode is per pane.
 struct PaneCapState: Equatable {
     var paneId: String
@@ -42,7 +63,7 @@ struct PaneCapBar: View {
         HStack(spacing: ShellSpace.paneCapGap) {
             HStack(spacing: ShellSpace.paneCapGap) {
                 StateGlyph(state: state.glyph, tokens: tokens)
-                Text(state.name.isEmpty ? "Brief" : state.name)
+                Text(state.name.isEmpty ? PaneCapName.fallback : state.name)
                     .font(.system(size: ShellType.rowTitle, weight: state.focused ? .medium : .regular))
                     .foregroundStyle(state.focused ? tokens.ink : tokens.mute)
                     .lineLimit(1)

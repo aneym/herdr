@@ -1,0 +1,5 @@
+[PASS] four panes have four caps
+[FAIL] a renamed pane's header shows its label ({"w2:p4": "Brief", "w2:p3": "Brief", "w2:p5": "Brief", "w2:p2": "Brief"})
+[FAIL] a pane's header shows its terminal title ({"w2:p4": "Brief", "w2:p3": "Brief", "w2:p5": "Brief", "w2:p2": "Brief"})
+[FAIL] plain shells show their folder ({"w2:p4": "Brief", "w2:p3": "Brief", "w2:p5": "Brief", "w2:p2": "Brief"})
+[FAIL] no header reads Brief ({"w2:p4": "Brief", "w2:p3": "Brief", "w2:p5": "Brief", "w2:p2": "Brief"})

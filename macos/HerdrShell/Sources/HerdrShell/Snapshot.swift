@@ -16,6 +16,8 @@ struct Snapshot: Decodable {
         let pane_id: String; let tab_id: String; let terminal_id: String; let agent_status: String?; let focused: Bool?
         // Titles the quick switcher matches. Older snapshots omit them.
         let title: String?; let terminal_title: String?; let terminal_title_stripped: String?
+        /// What the pane cap names (PaneCapName): the manual label, agent kind and working folder.
+        var label: String? = nil; var agent: String? = nil; var cwd: String? = nil; var foreground_cwd: String? = nil
     }
     struct Owner: Decodable { let pane_id: String? }
     struct Ownership: Decodable { let current: Owner? }

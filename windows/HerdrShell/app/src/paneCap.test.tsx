@@ -29,7 +29,7 @@ beforeEach(() => {
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-it("names a blocked agent and persists Focus/Full tool disclosure across remount, with Brief for a shell", async () => {
+it("names a blocked agent and persists Focus/Full tool disclosure across remount, with a plain name for a shell", async () => {
   await act(async () => render());
   expect(host.querySelector(".pane-cap")?.textContent).toContain("claude");
   expect(host.querySelector('.pane-cap [aria-label="blocked"]')).not.toBeNull();
@@ -44,19 +44,19 @@ it("names a blocked agent and persists Focus/Full tool disclosure across remount
   expect(host.querySelector<HTMLDetailsElement>(".chat-tools")?.open).toBe(true);
   await click("Focus"); expect(host.querySelector<HTMLDetailsElement>(".chat-tools")?.open).toBe(false);
   act(() => root.unmount()); root = createRoot(host); await act(async () => render(false));
-  expect(host.querySelector(".pane-cap")?.textContent).toContain("Brief");
+  expect(host.querySelector(".pane-cap .label")?.textContent).toBe("Terminal");
   expect([...host.querySelectorAll("button")].some(b => b.textContent === "Full")).toBe(false);
 });
 
 // Integration through App → TabView → PaneSurface, faking only native IPC and time.
-async function renderPanes(count: number) {
-  const panes = Array.from({ length: count }, (_, i) => ({ ...pane, pane_id: `p${i}`, terminal_id: `term${i}` }));
+async function renderPanes(count: number, shells?: Partial<Pane>[]) {
+  const panes = shells ? shells.map((shell, i) => ({ pane_id: `p${i}`, terminal_id: `term${i}`, tab_id: "t", workspace_id: "w", agent_status: "unknown", ...shell })) : Array.from({ length: count }, (_, i) => ({ ...pane, pane_id: `p${i}`, terminal_id: `term${i}` }));
   const snapshot: Snapshot = {
     workspaces: [{ workspace_id: "w", number: 1 }],
     tabs: [{ tab_id: "t", workspace_id: "w", number: 1, focused: true }],
     panes,
-    agents: panes.map(p => ({ ...p, agent: "claude", agent_status: "blocked", work_status: "working" })),
-    layouts: [{ tab_id: "t", area: { x: 0, y: 0, width: 900, height: 600 }, panes: panes.map((p, i) => ({ pane_id: p.pane_id, rect: { x: i * 900 / count, y: 0, width: 900 / count, height: 600 } })) }],
+    agents: shells ? [] : panes.map(p => ({ ...p, agent: "claude", agent_status: "blocked", work_status: "working" })),
+    layouts: [{ tab_id: "t", area: { x: 0, y: 0, width: 900, height: 600 }, panes: panes.map((p, i) => ({ pane_id: p.pane_id, rect: { x: i * 900 / panes.length, y: 0, width: 900 / panes.length, height: 600 } })) }],
   };
   for (const p of panes) localStorage.setItem(`herdr-shell.mode.studio.${p.pane_id}`, "chat");
   vi.spyOn(bridge, "machines").mockResolvedValue([{ name: "studio", state: "up" }]);
@@ -75,6 +75,18 @@ it("the visible Chat cap uses work status and agent kind, not the card name", as
   expect(cap?.querySelector('[aria-label="working"]')).not.toBeNull();
   expect(cap?.querySelector('.label')?.textContent).toBe("claude");
   expect(cap?.querySelector('.face')).toBeNull();
+});
+// S6 (lane herdr-ui): five plain zsh panes in one tab each read "Brief" (PC 19fd4ba6 shot).
+it("each plain shell pane's header names that pane, never a shared placeholder", async () => {
+  await renderPanes(0, [
+    { cwd: "/Users/a/repos/herdr", title: "deploy log" },
+    { cwd: "/Users/a/repos/herdr", label: "server" },
+    { cwd: "/Users/a", terminal_title_stripped: "vim notes.md" },
+    { cwd: "/Users/a", foreground_cwd: "C:\\Users\\a\\scratch" },
+    {},
+  ]);
+  const labels = [...host.querySelectorAll('.pane-surface .pane-cap .label')].map(label => label.textContent);
+  expect(labels).toEqual(["deploy log", "server", "vim notes.md", "scratch", "Terminal"]);
 });
 it("N panes share one agents directory read on mount and each poll", async () => {
   vi.useFakeTimers();
