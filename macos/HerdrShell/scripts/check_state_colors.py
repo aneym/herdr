@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Compiled check of the chat state colours both Shell sidebars draw: working is orange, an
 unread finish is green, blocked stays red and idle stays grey (Alex, 2026-09-29: "an agent is
-working, it should be oragne. finished, green ... the idle styling is fine"). Pure: compiles
+working, it should be oragne. finished, green ... the idle styling is fine"), and the row glyph
+shapes the TUI draws (working a circle, done and blocked a square). Pure: compiles
 Theme.swift, ShellTokens.swift and SpacesTree.swift, no app or server.
 """
 import os
@@ -35,7 +36,11 @@ func green(_ c: UInt32) -> Bool { let r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF,
         precondition(row.faceDot == "working", "a working face dot is orange")
         row.tone = "done"; precondition(row.faceDot == "ok", "a finished face dot is green")
         row.tone = "mute"; precondition(row.faceDot == nil, "idle face shows no dot")
-        print("PASS state_colors: dark+light working orange, done green, blocked bad, idle mute; face dots match")
+        // Shapes as the TUI's state_icons draw them: working a circle, done and blocked a square.
+        for (status, glyph) in [("working", "●"), ("done", "■"), ("blocked", "■")] {
+            precondition(SpacesTree.statusGlyph(status) == glyph, "\(status) draws \(glyph), got \(SpacesTree.statusGlyph(status))")
+        }
+        print("PASS state_colors: dark+light working orange, done green, blocked bad, idle mute; face dots match; working ●, done and blocked ■")
     }
 }
 ''')

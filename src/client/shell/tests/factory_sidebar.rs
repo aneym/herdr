@@ -416,10 +416,20 @@ fn factory_tab_strip_omits_workflows_but_preserves_other_tabs_and_click_targets(
 
 // The three frames share a lab-like fixture. Keep the ages a half-minute away
 // from a boundary so a slow CI machine does not change the displayed minute.
+/// Rename a tab as `tab.rename` does: rows draw the live label, not the overlay's 30 s copy.
+fn relabel(snapshot: &mut ClientShellSnapshot, tab_id: &str, label: &str) {
+    snapshot
+        .tabs
+        .iter_mut()
+        .find(|tab| tab.tab_id == tab_id)
+        .unwrap()
+        .label = label.into();
+}
+
 fn lab_fixture() -> (ClientShellSnapshot, FactoryOverlay) {
     let (mut snapshot, mut overlay) = fixture();
     snapshot.workspaces[0].label = "agent-rails".into();
-    overlay.tabs.get_mut("orch").unwrap().name = Some("orchestrator".into());
+    relabel(&mut snapshot, "orch", "orchestrator");
     snapshot.workspaces.push(ClientShellWorkspace {
         sort_rank: 0,
         parked: false,
@@ -1330,7 +1340,7 @@ fn factory_parent_with_running_workflow_or_busy_tag_shows_working() {
         assert!(!row.contains("idle"), "{row}");
     }
     overlay.tabs.get_mut("wf-b").unwrap().parent = Some("orch".into());
-    overlay.tabs.get_mut("orch").unwrap().name = Some("orchestrator".into());
+    relabel(&mut snapshot, "orch", "orchestrator");
     let mut folded = ClientTreeChrome::default();
     folded.factory_collapsed_lanes.insert("orch".into());
     let (wide, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &folded, 48);
@@ -2779,7 +2789,7 @@ fn factory_status_glyph_colors() {
     snapshot.agents.last_mut().unwrap().agent_status = AgentStatus::Idle;
     check_row(&snapshot, &overlay, "lane-b", palette.overlay0, None);
 
-    overlay.tabs.get_mut("orch").unwrap().name = Some("orchestrator".into());
+    relabel(&mut snapshot, "orch", "orchestrator");
     let mut folded = ClientTreeChrome::default();
     folded.factory_collapsed_lanes.insert("orch".into());
     let (plain_rows, hits, _) = rendered_factory_rows_with_tree(&snapshot, &overlay, &folded);
@@ -2868,7 +2878,7 @@ fn factory_sections_render_and_idle_click_persists() {
         );
     }
     overlay.tabs.get_mut("lane-a").unwrap().section = Some(TabSection::Scoping);
-    overlay.tabs.get_mut("lane-a").unwrap().name = Some("[Scoping] shared connections".into());
+    relabel(&mut snapshot, "lane-a", "[Scoping] shared connections");
     overlay.tabs.get_mut("lane-b").unwrap().section = Some(TabSection::Implementing);
     let (rows, hits, _) =
         rendered_factory_rows_with_gap(&snapshot, &overlay, &ClientTreeChrome::default(), 40, 0);
@@ -3009,7 +3019,7 @@ fn factory_sections_render_and_idle_click_persists() {
             .or_insert_with(TabTag::default);
         tag.kind = TabKind::Lane;
         tag.section = Some(section);
-        tag.name = Some(name.into());
+        relabel(&mut snapshot, id, name);
     }
     let mut tree = ClientTreeChrome::default();
     tree.factory_expanded_lanes.insert("lane-a".into());
@@ -3165,9 +3175,9 @@ fn unknown_section_does_not_break_overlay_parse() {
 #[test]
 fn factory_sectioned_collapsed_compact_frame_w25() {
     use crate::factory_overlay::TabSection;
-    let (snapshot, mut overlay) = lab_fixture();
+    let (mut snapshot, mut overlay) = lab_fixture();
     overlay.tabs.get_mut("lane-a").unwrap().section = Some(TabSection::Scoping);
-    overlay.tabs.get_mut("lane-a").unwrap().name = Some("[scoping] shared connections".into());
+    relabel(&mut snapshot, "lane-a", "[scoping] shared connections");
     overlay.tabs.get_mut("lane-b").unwrap().section = Some(TabSection::Closed);
     let mut tree = ClientTreeChrome::default();
     tree.factory_collapsed_lanes.insert("lane-a".into());
@@ -3188,13 +3198,16 @@ fn legacy_sections_place_lanes_and_clean_implementing_labels() {
         .retain(|tab| matches!(tab.tab_id.as_str(), "lane-a" | "lane-b" | "plain-a"));
     let overlay = crate::factory_overlay::parse(
         r#"{"version":1,"tabs":{
-        "lane-a":{"kind":"lane","section":"inflight","name":"[scoping] issue reporter"},
-        "lane-b":{"kind":"lane","section":"idle","name":"routing · it2 · Scoping"},
-        "plain-a":{"kind":"lane","section":"waiting","name":"review lane"}
+        "lane-a":{"kind":"lane","section":"inflight"},
+        "lane-b":{"kind":"lane","section":"idle"},
+        "plain-a":{"kind":"lane","section":"waiting"}
     }}"#
         .as_bytes(),
     )
     .unwrap();
+    relabel(&mut snapshot, "lane-a", "[scoping] issue reporter");
+    relabel(&mut snapshot, "lane-b", "routing · it2 · Scoping");
+    relabel(&mut snapshot, "plain-a", "review lane");
     // Width 27 keeps the cleaned labels whole beside the lane pin toggle (9f0d153f).
     let (rows, hits, _) =
         rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 27);
@@ -4597,7 +4610,7 @@ fn wide_and_emoji_titles_keep_counts_and_alert_in_their_columns() {
     // truncate, must end in "…" at its column without losing or splitting a grapheme,
     // the folded roll-up count must stay whole, and "!" must sit where it sits on a
     // plain title.
-    let (snapshot, mut overlay) = fixture();
+    let (mut snapshot, mut overlay) = fixture();
     overlay.tabs.get_mut("orch").unwrap().attention = Attention::Act;
     let (_, hits, plain) =
         rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 32);
@@ -4620,7 +4633,7 @@ fn wide_and_emoji_titles_keep_counts_and_alert_in_their_columns() {
         "⚙️ orchestrator with a long name",
         "👩‍💻 team 研究 and a long name",
     ] {
-        overlay.tabs.get_mut("orch").unwrap().name = Some(title.into());
+        relabel(&mut snapshot, "orch", title);
         let (_, hits, buffer) =
             rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 32);
         assert_eq!(
@@ -4769,4 +4782,29 @@ fn tab_pulse_stays_out_of_the_tab_row() {
         rows.iter().all(|row| !row.contains("reply 18s")),
         "{rows:#?}"
     );
+}
+
+#[test]
+fn renamed_tab_row_shows_the_live_label_before_the_overlay_catches_up() {
+    // R273 (Alex, 2026-10-07: "renaming this thread didnt work? report to herdr ui"): the
+    // overlay writer copies tab labels every 30 s, so right after a rename its name is the old
+    // one. Lane and orchestrator rows draw the live label at once; workflow rows keep the
+    // overlay's ledger name.
+    let (mut snapshot, mut overlay) = fixture();
+    overlay.tabs.get_mut("orch").unwrap().name = Some("old orchestrator".into());
+    overlay.tabs.get_mut("lane-a").unwrap().name = Some("old lane".into());
+    overlay.tabs.get_mut("wf-a").unwrap().name = Some("wf ledger run".into());
+    relabel(&mut snapshot, "orch", "rails desk");
+    relabel(&mut snapshot, "lane-a", "chauhan recap");
+    relabel(&mut snapshot, "wf-a", "claude: some title");
+    let mut tree = ClientTreeChrome::default();
+    tree.factory_expanded_lanes.insert("lane-a".into());
+    let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 48);
+    let text = rows.join("\n");
+    for shown in ["rails desk", "chauhan recap", "ledger run"] {
+        assert!(text.contains(shown), "{shown} missing: {rows:#?}");
+    }
+    for stale in ["old orchestrator", "old lane", "some title"] {
+        assert!(!text.contains(stale), "{stale} shown: {rows:#?}");
+    }
 }

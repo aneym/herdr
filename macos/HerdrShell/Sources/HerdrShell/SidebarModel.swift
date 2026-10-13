@@ -519,6 +519,7 @@ extension SidebarModel {
         let facts = Self.facts(s)
         let number = Dictionary(s.tabs.map { ($0.tab_id, $0.number) }, uniquingKeysWith: { a, _ in a })
         let space = Dictionary(s.tabs.map { ($0.tab_id, $0.workspace_id) }, uniquingKeysWith: { a, _ in a })
+        let custom = Set(s.tabs.filter { $0.custom_label == true }.map(\.tab_id))
         func item(_ r: TabRow) -> AreaItem {
             let lane = catalog.lanes[r.id]
             let ws = space[r.id] ?? ""
@@ -526,7 +527,7 @@ extension SidebarModel {
             let area = catalog.areaId(tab: r.id, workspace: ws, lane: lane)
             return AreaItem(row: r, area: area,
                             role: catalog.role(tab: r.id, lane: lane), stage: lane?.section,
-                            name: catalog.displayName(tab: r.id, lane: lane, fallback: r.label),
+                            name: catalog.displayName(tab: r.id, lane: lane, fallback: r.label, custom: custom.contains(r.id)),
                             color: catalog.areaColor(area),
                             number: number[r.id] ?? 0, failed: f.failed, devLoop: f.devLoop,
                             park: catalog.parked[r.id],

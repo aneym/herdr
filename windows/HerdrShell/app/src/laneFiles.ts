@@ -67,7 +67,8 @@ export class LaneSnapshot {
   areaColor(id: string) { return this.areas.find(a => a.id === id)?.color ?? defaultAreaColor; }
   areaId(tab: string, workspace: string, lane?: LaneRecord) { return this.tabs[tab]?.area || this.spaces[workspace] || (lane?.goalArea && this.goalArea[lane.goalArea]) || (lane?.goal && this.goal[lane.goal]) || "unsorted"; }
   role(tab: string, lane?: LaneRecord) { return this.tabs[tab]?.role || (lane?.kind === "orchestrator" ? "orchestrator" : "project"); }
-  displayName(tab: string, lane: LaneRecord | undefined, fallback: string) { return this.tabs[tab]?.name || lane?.name.replace(/^\[scoping\] /, "") || fallback; }
+  /** `custom`: the server says `fallback` is a label someone set by renaming the tab, so it wins over areas.json and lanes.json (lanes.json copies labels on a timer and lags a rename). */
+  displayName(tab: string, lane: LaneRecord | undefined, fallback: string, custom = false) { return (custom && fallback.replace(/^\[scoping\] /, "")) || this.tabs[tab]?.name || lane?.name.replace(/^\[scoping\] /, "") || fallback; }
   orderedAreaIds(used: Set<string>) {
     const listed = this.areas.map(a => a.id).filter(id => id !== "unsorted");
     for (const id of [...used].sort()) if (id !== "unsorted" && !listed.includes(id)) listed.push(id);

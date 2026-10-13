@@ -53,7 +53,11 @@ it("draws a working chat orange and an unread finish green in both modes; blocke
   }
 });
 
-it("keeps the Mac's shapes on the solid dot: blocked is a rounded square, the rest are circles", () => {
+// Shapes as the TUI's state_icons and the Mac's statusGlyph draw them (Alex, 2026-09-29, reversed
+// by him the same day: working a circle, done and blocked a square).
+it("keeps the Mac's shapes: blocked and done are squares, working is a circle", () => {
   expect(styles).toMatch(/\.status\.state-dot\s*\{[^}]*border-radius:\s*50%/);
-  expect(styles).toMatch(/\.status\.state-dot\.blocked\s*\{[^}]*border-radius:\s*var\(--shell-radius-curve1_5\)/);
+  for (const status of ["blocked", "done"]) expect(styles).toMatch(new RegExp(`\\.status\\.state-dot\\.${status}\\s*\\{[^}]*border-radius:\\s*var\\(--shell-radius-curve1_5\\)`));
+  const glyph = (status: string) => { const host = document.createElement("div"); document.body.append(host); const root = createRoot(host); act(() => root.render(<Status status={status} />)); const text = host.textContent; act(() => root.unmount()); host.remove(); return text; };
+  expect([glyph("working"), glyph("done"), glyph("blocked")]).toEqual(["●", "■", "■"]);
 });

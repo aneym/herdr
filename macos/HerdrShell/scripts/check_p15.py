@@ -121,7 +121,14 @@ def main():
     S.lab("up")
     # Saved setup is a per-lab UserDefaults suite in the real home, not the lab home
     # (cfprefsd ignores HOME). Drop it so Areas/All is the default for this run.
-    subprocess.run(["defaults", "delete", "herdr.shell.shellspike-areas"], capture_output=True)
+    # Dev builds keep it under herdr.shell.dev.<lab> (Channel.swift defaultsDomain).
+    subprocess.run(["defaults", "delete", "herdr.shell.dev.shellspike-areas"], capture_output=True)
+    if S.SPACE:
+        # In the Cua Space the app keeps its suite in the guest's home.
+        try:
+            S.space("exec", "defaults delete herdr.shell.dev.shellspike-areas 2>/dev/null; true")
+        except RuntimeError:
+            pass
     # Two spaces. The lab's stock workspace is closed after these exist.
     old = jherdr("workspace", "list")["workspaces"]
     factory = jherdr("workspace", "create", "--label", "factory-space", "--cwd", "/tmp", "--no-focus")
@@ -131,7 +138,7 @@ def main():
         herdr("workspace", "close", w["workspace_id"])
 
     def tab(ws, label):
-        r = jherdr("tab", "create", "--workspace", ws, "--label", label, "--cwd", "/tmp", "--no-focus")
+        r = jherdr("tab", "create", "--workspace", ws, *(["--label", label] if label else []), "--cwd", "/tmp", "--no-focus")
         return r["tab"]["tab_id"], r["root_pane"]["pane_id"]
 
     def ready(pane):
@@ -159,13 +166,16 @@ def main():
     # raise-space root becomes the scoping project.
     scope_r = raise_ws["tab"]["tab_id"]
     scope_r_pane = raise_ws["root_pane"]["pane_id"]
-    herdr("tab", "rename", scope_r, "raise brief raw")
+    herdr("tab", "rename", scope_r, "[scoping] raise brief")
     review, review_pane = tab(rw, "review packet")
     build, build_pane = tab(rw, "raise build")
     wf, wf_pane = tab(rw, "wf raise-1")
     closed, closed_pane = tab(rw, "old raise")
-    desk, desk_pane = tab(rw, "recruiting desk raw")
-    job1, job1_pane = tab(rw, "job outreach raw")
+    # Named by a rename or --label: the label wins over areas.json and lanes.json names (Alex
+    # renamed w5P:t6 "Recruiter" while areas.json still said "recruiting desk"). job1 keeps its
+    # automatic label, so areas.json names it.
+    desk, desk_pane = tab(rw, "recruiting desk")
+    job1, job1_pane = tab(rw, None)
     job2, job2_pane = tab(rw, "job followups")
 
     agent(orch_pane, "claude", "working", kind="orchestrator")
@@ -195,7 +205,7 @@ def main():
             {"tab": scope_f, "name": "scope factory", "label": "scope factory", "kind": "lane",
              "goal": None, "goal_area": "factory infra", "section": "scoping", "section_source": "project",
              "scope_url": None, "review_url": None, "mode": None},
-            {"tab": scope_r, "name": "[scoping] raise brief", "label": "raise brief raw", "kind": "lane",
+            {"tab": scope_r, "name": "[scoping] raise brief raw", "label": "raise brief raw", "kind": "lane",
              "goal": "raise", "goal_area": None, "section": "scoping", "section_source": "project",
              "scope_url": None, "review_url": None, "mode": None},
             {"tab": review, "name": "review packet", "label": "review packet", "kind": "lane",
@@ -210,7 +220,7 @@ def main():
             {"tab": closed, "name": "old raise", "label": "old raise", "kind": "lane",
              "goal": "raise", "goal_area": None, "section": "closed", "section_source": "project",
              "scope_url": None, "review_url": None, "mode": None},
-            {"tab": desk, "name": "recruiting desk", "label": "recruiting desk raw", "kind": "lane",
+            {"tab": desk, "name": "recruiting desk raw", "label": "recruiting desk raw", "kind": "lane",
              "goal": None, "goal_area": None, "section": "implementing", "section_source": "default",
              "scope_url": None, "review_url": None, "mode": None},
             {"tab": job1, "name": "job outreach", "label": "job outreach raw", "kind": "lane",
@@ -231,8 +241,8 @@ def main():
             {"id": "unsorted", "name": "unsorted", "color": "#999999"},
         ],
         "tabs": {
-            orch: {"area": "factory", "role": "top", "name": "rails orchestrator"},
-            desk: {"area": "recruiter", "role": "desk", "name": "recruiting desk"},
+            orch: {"area": "factory", "role": "top", "name": "Rails"},
+            desk: {"area": "recruiter", "role": "desk", "name": "Recruiter"},
             job1: {"area": "recruiter", "role": "job", "name": "job outreach"},
             job2: {"role": "job"},
         },
@@ -291,6 +301,9 @@ def main():
           closed_row is not None and closed_row["dim"] is True and closed_row["stage"] == "closed")
     check("recruiter Use group is desk then jobs",
           rec == ["recruiting desk", "job outreach", "job followups"], f"{rec}")
+    check("a renamed tab's label wins over areas.json and lanes.json names; an automatic label does not",
+          fac[:1] == ["rails orchestrator"] and rec[:2] == ["recruiting desk", "job outreach"] and "raise brief" in rai,
+          f"factory={fac[:1]} recruiter={rec[:2]} raise={rai}")
     stray_row = next(l for l in s["sidebar_lines"] if l["title"] == "stray tab")
     check("tab absent from lanes.json still shows, stage none, area by goal/space rules (factory)",
           stray_row["stage"] is None and stray_row["area"] == "factory" and stray_row["role"] == "project")

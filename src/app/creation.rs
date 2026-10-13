@@ -298,6 +298,7 @@ impl App {
             workspace_id: self.public_workspace_id(ws_idx),
             number: tab.number,
             label: ws.tab_display_name(tab_idx)?,
+            custom_label: !tab.is_auto_named(),
             focused: self.state.active == Some(ws_idx) && ws.active_tab == tab_idx,
             pane_count: tab.panes.len(),
             agent_status: pane_agent_status(agg_state, seen),

@@ -14,7 +14,7 @@ button:focus-visible { outline: 1px solid var(--shell-muted); outline-offset: -1
 .select-tab { font: inherit; display: flex; align-items: center; gap: var(--shell-space-sidebar-row-gap); width: 100%; min-width: 0; height: 100%; text-align: left; }
 .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 .status { font-size: var(--shell-type-glyph); color: var(--shell-muted); flex-shrink: 0; }
-.status.state-dot { display: inline-block; background: currentColor; border-radius: 50%; }.status.state-dot.blocked { border-radius: var(--shell-radius-curve1_5); }
+.status.state-dot { display: inline-block; background: currentColor; border-radius: 50%; }.status.state-dot.blocked { border-radius: var(--shell-radius-curve1_5); }.status.state-dot.done { border-radius: var(--shell-radius-curve1_5); }
 .status.working { color: var(--shell-working); }.status.blocked { color: var(--shell-bad); }.status.done { color: var(--shell-ok); }
 .muted { color: var(--shell-muted); }.space-label { max-width: var(--shell-space-step55); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--shell-type-row-trailing); }
 .pin { display: none; color: var(--shell-muted); flex-shrink: 0; }.tab-row:hover .pin, .tab-row:focus-within .pin, .tab-row[data-test-hover] .pin { display: block; }.pin.is-pinned { color: var(--shell-accent); }

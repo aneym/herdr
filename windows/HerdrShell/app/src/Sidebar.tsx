@@ -27,7 +27,7 @@ function MachineBadge({ row }: { row: SidebarRow }) {
   const title = row.machineHealth ? `${row.machine}: ${row.machineHealth}` : `Running on ${row.machine}`;
   return <span className={`machine-badge${row.machineHealth ? " is-unhealthy" : ""}`} data-machine={row.machine} data-health={row.machineHealth ?? "up"} title={title} aria-label={title}><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="1.5" y="2" width="9" height="6" rx="1" /><path d="M4.5 10.5h3M6 8v2.5" /></svg>{row.machine}</span>;
 }
-export function Status({ status, solid = false }: { status: string; solid?: boolean }) { return <span className={`status ${status} ${solid ? "state-dot" : ""}`} aria-label={status} style={solid ? { width: "var(--shell-face-dot)", height: "var(--shell-face-dot)" } : undefined}>{solid ? null : status === "blocked" ? "■" : "●"}</span>; }
+export function Status({ status, solid = false }: { status: string; solid?: boolean }) { return <span className={`status ${status} ${solid ? "state-dot" : ""}`} aria-label={status} style={solid ? { width: "var(--shell-face-dot)", height: "var(--shell-face-dot)" } : undefined}>{solid ? null : status === "blocked" || status === "done" ? "■" : "●"}</span>; }
 function Chevron({ open }: { open: boolean }) {
   return <svg className={`disclosure-chevron${open ? " is-open" : ""}`} viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2.5 1.5 5 4 2.5 6.5" /></svg>;
 }

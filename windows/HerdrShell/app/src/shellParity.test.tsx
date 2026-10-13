@@ -59,7 +59,9 @@ it("paints pinned, group and lane state as token-sized solid elements rather tha
   expect(dots.length).toBeGreaterThanOrEqual(3);
   for (const dot of dots) {
     expect(dot.textContent).toBe(""); expect(dot.style.width).toBe("var(--shell-face-dot)"); expect(dot.style.height).toBe("var(--shell-face-dot)");
-    expect(getComputedStyle(dot).borderRadius).toBe("50%"); expect(getComputedStyle(dot).backgroundColor).not.toBe("transparent");
+    // Done and blocked are squares, as the TUI's state_icons and the Mac's statusGlyph draw them.
+    const square = dot.classList.contains("done") || dot.classList.contains("blocked");
+    expect(getComputedStyle(dot).borderRadius).toBe(square ? "1.5px" : "50%"); expect(getComputedStyle(dot).backgroundColor).not.toBe("transparent");
   }
 });
 it("draws every sidebar disclosure as a token-sized SVG and rotates it with the fold state", () => {

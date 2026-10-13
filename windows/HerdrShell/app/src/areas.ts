@@ -36,7 +36,7 @@ function areaItems(s: Snapshot, catalog: LaneSnapshot): AreaItem[] {
     const lane = catalog.lanes[t.tab_id], area = catalog.areaId(t.tab_id, t.workspace_id, lane), status = tabStatus(s, t);
     const failed = ["failed", "error", "quarantined", "stalled"].includes(token("state")?.toLowerCase() ?? "");
     const attention = token("attention")?.toLowerCase() ?? "";
-    const item: AreaItem = { id: t.tab_id, kind, status, area, role: catalog.role(t.tab_id, lane), stage: lane?.section, name: catalog.displayName(t.tab_id, lane, t.label ?? `tab ${t.number}`), color: catalog.areaColor(area), number: t.number, park: catalog.parked[t.tab_id], children: [], facts: { failed, attention: status === "blocked" || failed || !["", "none", "false", "0", "no"].includes(attention), finished: status === "done" || ["done", "finished"].includes(token("phase")?.toLowerCase() ?? ""), devLoop: !!token("dev_loop") } };
+    const item: AreaItem = { id: t.tab_id, kind, status, area, role: catalog.role(t.tab_id, lane), stage: lane?.section, name: catalog.displayName(t.tab_id, lane, t.label ?? `tab ${t.number}`, t.custom_label), color: catalog.areaColor(area), number: t.number, park: catalog.parked[t.tab_id], children: [], facts: { failed, attention: status === "blocked" || failed || !["", "none", "false", "0", "no"].includes(attention), finished: status === "done" || ["done", "finished"].includes(token("phase")?.toLowerCase() ?? ""), devLoop: !!token("dev_loop") } };
     const owner = aa.map(a => tabByPane.get(a.ownership?.current?.pane_id ?? "")).find(id => id && id !== t.tab_id);
     if (kind === "workflow" && owner) owned.set(owner, [...owned.get(owner) ?? [], item]); else groups[kind].push(item);
   }

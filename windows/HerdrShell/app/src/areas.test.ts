@@ -50,7 +50,7 @@ const lanesFile = {
     },
     {
       "tab": "scope_r",
-      "name": "[scoping] raise brief",
+      "name": "[scoping] raise brief raw",
       "label": "raise brief raw",
       "kind": "lane",
       "goal": "raise",
@@ -115,7 +115,7 @@ const lanesFile = {
     },
     {
       "tab": "desk",
-      "name": "recruiting desk",
+      "name": "recruiting desk raw",
       "label": "recruiting desk raw",
       "kind": "lane",
       "goal": null,
@@ -187,12 +187,12 @@ const areasFile = {
     "orch": {
       "area": "factory",
       "role": "top",
-      "name": "rails orchestrator"
+      "name": "Rails"
     },
     "desk": {
       "area": "recruiter",
       "role": "desk",
-      "name": "recruiting desk"
+      "name": "Recruiter"
     },
     "job1": {
       "area": "recruiter",
@@ -221,18 +221,21 @@ const fixture = [
   ["blocked", "fw", 2, "blocked build", "blocked", "lane"],
   ["scope_f", "fw", 3, "scope factory", "working", "lane"],
   ["stray", "fw", 4, "stray tab", "idle", "lane"],
-  ["scope_r", "rw", 1, "raise brief raw", "working", "lane"],
+  ["scope_r", "rw", 1, "[scoping] raise brief", "working", "lane"],
   ["review", "rw", 2, "review packet", "working", "lane"],
   ["build", "rw", 3, "raise build", "working", "lane"],
   ["wf", "rw", 4, "wf raise-1", "working", "workflow"],
   ["closed", "rw", 5, "old raise", "idle", "lane"],
-  ["desk", "rw", 6, "recruiting desk raw", "idle", "lane"],
+  ["desk", "rw", 6, "recruiting desk", "idle", "lane"],
   ["job1", "rw", 7, "job outreach raw", "working", "lane"],
   ["job2", "rw", 8, "job followups", "idle", "lane"],
 ] as const;
 const snapshot: Snapshot = {
   workspaces: [{ workspace_id: "fw", number: 1 }, { workspace_id: "rw", number: 2 }],
-  tabs: fixture.map(([tab_id, workspace_id, number, label, agent_status]) => ({ tab_id, workspace_id, number, label, agent_status })),
+  // Every tab but job1 was named by a rename or --label, so its label wins over areas.json and
+  // lanes.json names (Alex renamed w5P:t6 "Recruiter" while areas.json still said "recruiting desk");
+  // job1 keeps its automatic label, so areas.json names it.
+  tabs: fixture.map(([tab_id, workspace_id, number, label, agent_status]) => ({ tab_id, workspace_id, number, label, custom_label: tab_id !== "job1", agent_status })),
   panes: fixture.map(([tab_id, workspace_id]) => ({ pane_id: `${tab_id}-pane`, terminal_id: tab_id, tab_id, workspace_id })),
   agents: fixture.map(([tab_id, workspace_id, , , agent_status, kind]) => ({ terminal_id: tab_id, pane_id: `${tab_id}-pane`, tab_id, workspace_id, agent: "claude", agent_status, tokens: { kind }, ...(tab_id === "wf" ? { ownership: { current: { pane_id: "build-pane" } } } : {}) })),
 };

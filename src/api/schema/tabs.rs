@@ -126,6 +126,10 @@ pub struct TabInfo {
     pub workspace_id: String,
     pub number: usize,
     pub label: String,
+    /// The label was set by a rename rather than derived from the panes. Areas mode lets it win
+    /// over areas.json and lanes.json names. Absent on servers that predate it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub custom_label: bool,
     pub focused: bool,
     pub pane_count: usize,
     pub agent_status: AgentStatus,

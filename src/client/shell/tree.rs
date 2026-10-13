@@ -2525,12 +2525,17 @@ fn factory_row(
             workspace_id: tab.workspace_id.clone(),
             tab_id: Some(tab.tab_id.clone()),
             label: {
-                let name = tag
-                    .and_then(|tag| tag.name.clone())
-                    .unwrap_or_else(|| tab.label.clone());
-                let label = if tag
-                    .is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Workflow)
-                {
+                // The live label is the name: the overlay copies it every 30 s, so its name is
+                // stale right after a rename. Workflow rows keep the overlay's ledger name.
+                let workflow =
+                    tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Workflow);
+                let name = if workflow || tab.label.is_empty() {
+                    tag.and_then(|tag| tag.name.clone())
+                        .unwrap_or_else(|| tab.label.clone())
+                } else {
+                    tab.label.clone()
+                };
+                let label = if workflow {
                     name.strip_prefix("wf ").unwrap_or(&name).to_owned()
                 } else if tag.is_some_and(|tag| tag.kind == crate::factory_overlay::TabKind::Lane) {
                     let name = if name

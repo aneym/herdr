@@ -19,9 +19,9 @@ def settle(ws):
     state = D.wait(lambda s: D.zone_is(s, kind="centre", target=b) and (D.pd(s).get("chip") or {}).get("stroke", 0) > 0)
     chip = D.pd(state).get("chip") or {}
     # The sidebar's rule (SpacesTree.statusGlyph, Windows Sidebar.tsx Status): a square for a blocked
-    # chat, a dot for every other state. A chip glyph set of its own (✓ ○ ·) fails here.
-    rule = "■" if chip.get("sourceState") in ("needs", "blocked") else "●"
-    D.check("chip: glyph follows the sidebar rule (■ blocked or needs, ● otherwise)", chip.get("glyph") == rule
+    # or done chat, a dot for every other state. A chip glyph set of its own (✓ ○ ·) fails here.
+    rule = "■" if chip.get("sourceState") in ("needs", "blocked", "done") else "●"
+    D.check("chip: glyph follows the sidebar rule (■ blocked, needs or done, ● otherwise)", chip.get("glyph") == rule
             and chip.get("text") == rule + " " + chip.get("label", ""), json.dumps(chip))
     row = next((r.split("|") for r in state.get("spaces_rows", []) if r.split("|")[1] == "tab:" + tab), None)
     row_tone = (state.get("spaces_row_tones") or {}).get("tab:" + tab)

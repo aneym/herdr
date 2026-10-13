@@ -103,10 +103,13 @@ struct LaneSnapshot: Equatable {
     }
 
     /// tabs[tab].name, else the lane name with a leading `[scoping] ` stripped, else the herdr label.
-    func displayName(tab: String, lane: LaneRecord?, fallback: String) -> String {
+    /// `custom`: the server says `fallback` is a label someone set by renaming the tab, so it wins
+    /// over areas.json and lanes.json (lanes.json copies labels on a timer and lags a rename).
+    func displayName(tab: String, lane: LaneRecord?, fallback: String, custom: Bool = false) -> String {
+        let prefix = "[scoping] "
+        if custom, !fallback.isEmpty { return fallback.hasPrefix(prefix) ? String(fallback.dropFirst(prefix.count)) : fallback }
         if let n = tabs[tab]?.name, !n.isEmpty { return n }
         if let n = lane?.name, !n.isEmpty {
-            let prefix = "[scoping] "
             return n.hasPrefix(prefix) ? String(n.dropFirst(prefix.count)) : n
         }
         return fallback

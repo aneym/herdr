@@ -232,8 +232,10 @@ enum SpacesTree {
         return (glyph, idle ? "mute" : status, idle)
     }
     /// A chat's state glyph from its status alone, as its row draws it and as the Windows sidebar's
-    /// Status does: a square for blocked, a dot for everything else. The pane drag chip uses it too.
-    static func statusGlyph(_ status: String) -> String { status == "blocked" ? "■" : "●" }
+    /// Status does: a square for blocked and done, as the TUI's state_icons draw them (Alex,
+    /// 2026-09-29: working a circle, done a square), a dot for everything else. The pane drag chip
+    /// uses it too.
+    static func statusGlyph(_ status: String) -> String { status == "blocked" || status == "done" ? "■" : "●" }
     /// As Rust run_done: an agent:<id> run is the chat's own Claude subagent or teammate, over once
     /// herdr reports the chat quiet, even while the overlay still lists it.
     static func runDone(_ run: Overlay.Run, of tab: SpacesInput.Tab) -> Bool {
