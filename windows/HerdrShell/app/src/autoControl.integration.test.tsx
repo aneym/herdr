@@ -97,3 +97,17 @@ it("an observing client takes control on input once the holder is quiet", async 
   expect(controllers.get("A")!.info().mode).toBe("attach");
   expect(typed()).toBe("A:x");
 });
+
+it("a test window observes a terminal another client holds and never takes it, even when typed into", async () => {
+  await mount("A");
+  expect(await until(() => ownerClient() === "A", 2000)).toBe(true);
+  vi.stubGlobal("__HERDR_TEST_WINDOW__", true);
+  await mount("T");
+  expect(await until(() => controllers.get("T")?.info().mode === "observe", 2000)).toBe(true);
+  void controllers.get("T")!.type("t1;");
+  await until(() => false, SETTLE_MS + 300);
+  expect(ownerClient()).toBe("A");
+  expect(controllers.get("A")!.info().mode).toBe("attach");
+  expect(controllers.get("T")!.info().mode).toBe("observe");
+  expect(typed()).toBe("");
+});

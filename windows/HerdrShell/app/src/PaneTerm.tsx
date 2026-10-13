@@ -18,6 +18,7 @@ import { Status } from "./Sidebar";
 import { appTheme, terminalThemes } from "./theme";
 import { autoControl } from "./autoControl";
 import { newPanes } from "./newPanes";
+import { isTestWindow } from "./testWindow";
 export interface PaneController {
   linkClick: (row: number, col: number, ctrl: boolean) => Promise<string | null>;
   copySelection: (from: Cell, to: Cell) => Promise<{ text: string; copied: boolean }>;
@@ -82,12 +83,15 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
     };
     // Not the controller (observing, or another client took the pane): input takes it back.
     const claimable = () => attachMode === "observe" || (takenOver && attachMode === "closed");
+    // The PC test window never takes a terminal it did not make from another client.
+    const mayTake = () => !isTestWindow() || newPanes.madeHere(machine, pane.pane_id);
     const auto = autoControl({
       holderInputAgeMs: async () => {
         const reply = await bridge.api(machine, "pane.process_info", { pane_id: pane.pane_id }) as { process_info?: { human_input_age_ms?: number | null } } | null;
         return reply?.process_info?.human_input_age_ms ?? null;
       },
       take: async () => {
+        if (!mayTake()) return false;
         if (attachMode === "observe" && handle != null) {
           await bridge.takeControl(handle);
           if (!disposed) { attachMode = "attach"; setState("attach"); setNotice(""); }
@@ -140,7 +144,7 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
           // with its socket still open. The user is here now, so take it over.
           // Unless another client just opened it (a new thread): that one stays with its maker,
           // and this pane observes until input or Take control here (newPanes).
-          if (String(refused).includes("already has an attached client") && !newPanes.othersNew(machine, pane.pane_id)) next = await bridge.attach(machine, pane.terminal_id, openCols, openRows, "takeover", onEvent);
+          if (String(refused).includes("already has an attached client") && !newPanes.othersNew(machine, pane.pane_id) && mayTake()) next = await bridge.attach(machine, pane.terminal_id, openCols, openRows, "takeover", onEvent);
           else { nextMode = "observe"; next = await bridge.attach(machine, pane.terminal_id, openCols, openRows, "observe", onEvent); }
         }
         if (disposed) { await bridge.close(next); return; }
@@ -154,7 +158,7 @@ export default function PaneTerm({ pane, machine, focused, onFocus, shortcut, re
       finally { opening = false; }
     };
     reconnect.current = () => { void open(); };
-    takeover.current = () => { if (handle != null) void bridge.takeControl(handle).then(() => { if (!disposed) { attachMode = "attach"; setState("attach"); setNotice(""); } }).catch(error); };
+    takeover.current = () => { if (handle != null && mayTake()) void bridge.takeControl(handle).then(() => { if (!disposed) { attachMode = "attach"; setState("attach"); setNotice(""); } }).catch(error); };
     let pendingWheel = 0;
     let wheelFrame = 0;
     const wheel = (dy: number) => {

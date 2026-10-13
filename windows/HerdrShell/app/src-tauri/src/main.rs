@@ -223,7 +223,9 @@ fn main() {
                 }
             }
             if test_window {
+                // The test window only observes terminals it did not make (testWindow.ts).
                 window = window
+                    .initialization_script("window.__HERDR_TEST_WINDOW__ = true;")
                     .position(-20000.0, 0.0)
                     .skip_taskbar(true)
                     .focused(false);

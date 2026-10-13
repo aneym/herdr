@@ -40,6 +40,11 @@ export class NewPanes {
     return at !== undefined && now - at < NEW_PANE_MS;
   }
 
+  /** This app made the pane, however long ago. */
+  madeHere(machine: string, paneId: string) {
+    return this.mine.has(`${machine}\n${paneId}`);
+  }
+
   othersNew(machine: string, paneId: string, now = Date.now()) {
     const key = `${machine}\n${paneId}`;
     const at = this.appeared.get(key);
