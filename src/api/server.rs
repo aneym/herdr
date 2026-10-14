@@ -304,7 +304,13 @@ fn close_caller_command(pid: u32) -> String {
     }
 }
 
-fn log_close_caller(stream: &LocalStream, request_id: &str, method: &str, target: &str) {
+fn log_close_caller(
+    stream: &LocalStream,
+    request_id: &str,
+    method: &str,
+    target: &str,
+    client: &str,
+) {
     let caller_pid = close_caller_pid(stream);
     let caller_command = caller_pid.map(close_caller_command).unwrap_or_default();
     #[cfg(unix)]
@@ -326,9 +332,9 @@ fn log_close_caller(stream: &LocalStream, request_id: &str, method: &str, target
     let caller_parent_command = caller_parent_pid
         .map(close_caller_command)
         .unwrap_or_default();
-    let client = request_id.split(':').next().unwrap_or_default();
     info!(
         event = "api.close.caller",
+        request_source = "local_socket",
         request_id,
         method,
         target,
@@ -402,10 +408,15 @@ fn handle_connection_with_stop(
     let method = api_method_name(&request.method);
     let changes_ui = request_changes_ui(&request);
     crate::logging::api_request_started(&request_id, method, changes_ui);
+    let envelope: serde_json::Value = serde_json::from_str(line).unwrap_or_default();
+    let client = envelope
+        .get("client_id")
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown");
     if let Method::TabClose(target) = &request.method {
-        log_close_caller(&stream, &request_id, method, &target.tab_id);
+        log_close_caller(&stream, &request_id, method, &target.tab_id, client);
     } else if let Method::PaneClose(target) = &request.method {
-        log_close_caller(&stream, &request_id, method, &target.pane_id);
+        log_close_caller(&stream, &request_id, method, &target.pane_id, client);
     }
 
     match request.method {
@@ -1798,7 +1809,7 @@ mod tests {
             let (mut client, server, socket_path) = local_stream_pair("close-audit");
             let (tx, mut rx) = mpsc::unbounded_channel();
             let request = serde_json::json!({
-                "id": "audit:close", "method": method, "params": {target_key: target}
+                "id": "audit:close", "client_id": "audit", "method": method, "params": {target_key: target}
             });
             writeln!(client, "{request}").unwrap();
             let thread = std::thread::spawn(move || {
@@ -1819,6 +1830,7 @@ mod tests {
             thread.join().unwrap();
             let log = std::fs::read_to_string(&log_path).unwrap();
             assert!(log.contains("api.close.caller"), "{log}");
+            assert!(log.contains("request_source=\"local_socket\""), "{log}");
             assert!(log.contains(target) && log.contains(method), "{log}");
             assert!(
                 log.contains(&format!("caller_pid={}", std::process::id())),

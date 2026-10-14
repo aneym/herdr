@@ -69,6 +69,7 @@ pub(crate) fn api_request_started(request_id: &str, method: &'static str, change
             subsystem,
             outcome,
             request_id,
+            request_source = "local_socket",
             method,
             changes_ui,
             "{message}"
@@ -79,6 +80,7 @@ pub(crate) fn api_request_started(request_id: &str, method: &'static str, change
             subsystem,
             outcome,
             request_id,
+            request_source = "local_socket",
             method,
             changes_ui,
             "{message}"
