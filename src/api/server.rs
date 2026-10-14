@@ -264,6 +264,83 @@ fn handle_connection(
     )
 }
 
+fn close_caller_pid(stream: &LocalStream) -> Option<u32> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::fd::AsRawFd;
+        let LocalStream::UdSocket(socket) = stream;
+        let mut pid: libc::pid_t = 0;
+        let mut size = std::mem::size_of_val(&pid) as libc::socklen_t;
+        let result = unsafe {
+            libc::getsockopt(
+                socket.as_raw_fd(),
+                libc::SOL_LOCAL,
+                libc::LOCAL_PEERPID,
+                (&mut pid as *mut libc::pid_t).cast(),
+                &mut size,
+            )
+        };
+        return (result == 0).then_some(pid as u32);
+    }
+    #[cfg(not(target_os = "macos"))]
+    stream.peer_creds().ok()?.pid().map(|pid| pid as u32)
+}
+
+fn close_caller_command(pid: u32) -> String {
+    #[cfg(unix)]
+    {
+        std::process::Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "comm="])
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+            .unwrap_or_default()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        String::new()
+    }
+}
+
+fn log_close_caller(stream: &LocalStream, request_id: &str, method: &str, target: &str) {
+    let caller_pid = close_caller_pid(stream);
+    let caller_command = caller_pid.map(close_caller_command).unwrap_or_default();
+    #[cfg(unix)]
+    let caller_parent_pid = caller_pid.and_then(|pid| {
+        std::process::Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "ppid="])
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .and_then(|output| {
+                String::from_utf8_lossy(&output.stdout)
+                    .trim()
+                    .parse::<u32>()
+                    .ok()
+            })
+    });
+    #[cfg(not(unix))]
+    let caller_parent_pid: Option<u32> = None;
+    let caller_parent_command = caller_parent_pid
+        .map(close_caller_command)
+        .unwrap_or_default();
+    let client = request_id.split(':').next().unwrap_or_default();
+    info!(
+        event = "api.close.caller",
+        request_id,
+        method,
+        target,
+        client,
+        caller_pid,
+        caller_command,
+        caller_parent_pid,
+        caller_parent_command,
+        "close requested"
+    );
+}
+
 fn handle_connection_with_stop(
     mut stream: LocalStream,
     api_tx: &ApiRequestSender,
@@ -325,6 +402,11 @@ fn handle_connection_with_stop(
     let method = api_method_name(&request.method);
     let changes_ui = request_changes_ui(&request);
     crate::logging::api_request_started(&request_id, method, changes_ui);
+    if let Method::TabClose(target) = &request.method {
+        log_close_caller(&stream, &request_id, method, &target.tab_id);
+    } else if let Method::PaneClose(target) = &request.method {
+        log_close_caller(&stream, &request_id, method, &target.pane_id);
+    }
 
     match request.method {
         #[cfg(unix)]
@@ -1699,6 +1781,56 @@ mod tests {
         let rejected: serde_json::Value = serde_json::from_str(&rejected).unwrap();
         assert_eq!(rejected["error"]["code"], "server_unavailable");
         assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn close_requests_log_socket_caller_and_target() {
+        for (method, target_key, target) in [
+            ("tab.close", "tab_id", "w9:t1"),
+            ("pane.close", "pane_id", "w9:p1"),
+        ] {
+            let log_path = unique_test_path("close-audit");
+            let writer = std::fs::File::create(&log_path).unwrap();
+            let subscriber = tracing_subscriber::fmt()
+                .with_ansi(false)
+                .with_writer(Mutex::new(writer))
+                .finish();
+            let (mut client, server, socket_path) = local_stream_pair("close-audit");
+            let (tx, mut rx) = mpsc::unbounded_channel();
+            let request = serde_json::json!({
+                "id": "audit:close", "method": method, "params": {target_key: target}
+            });
+            writeln!(client, "{request}").unwrap();
+            let thread = std::thread::spawn(move || {
+                tracing::subscriber::with_default(subscriber, || {
+                    handle_connection(
+                        server,
+                        &tx,
+                        &EventHub::default(),
+                        &Arc::new(AtomicBool::new(true)),
+                        None,
+                    )
+                    .unwrap();
+                });
+            });
+            let message = rx.blocking_recv().unwrap();
+            message.respond_to.send("{}".into()).unwrap();
+            let _ = read_line(&mut client);
+            thread.join().unwrap();
+            let log = std::fs::read_to_string(&log_path).unwrap();
+            assert!(log.contains("api.close.caller"), "{log}");
+            assert!(log.contains(target) && log.contains(method), "{log}");
+            assert!(
+                log.contains(&format!("caller_pid={}", std::process::id())),
+                "{log}"
+            );
+            assert!(
+                log.contains("client=\"audit\"") && log.contains("caller_command="),
+                "{log}"
+            );
+            std::fs::remove_file(log_path).unwrap();
+            std::fs::remove_file(socket_path).unwrap();
+        }
     }
 
     #[test]
