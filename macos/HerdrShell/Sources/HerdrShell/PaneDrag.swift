@@ -200,10 +200,14 @@ final class PaneDrag: NSObject {
             }
         }
         updateDwell(tab: nil)
+        guard let scale = PaneGeometry.scale(bounds: owner.host.bounds,
+            area: CGRect(x: owner.host.area.x, y: owner.host.area.y, width: owner.host.area.width, height: owner.host.area.height)) else {
+            setZone(nil); return
+        }
         let ids = owner.host.rects.map { $0.0.paneId }, rects = owner.host.rects.map { owner.host.boxRect($0.1) }
         let metrics = PaneDropMetrics(tabEdge: ShellMotion.tabEdgePx, bandMin: ShellMotion.edgeBandMin,
             bandFraction: ShellMotion.edgeBandFraction, bandMaxFraction: ShellMotion.edgeBandMaxFraction,
-            gapReach: max(owner.host.bounds.width / owner.host.area.width, owner.host.bounds.height / owner.host.area.height))
+            gapReach: max(scale.width, scale.height))
         switch PaneDrop.zone(area: owner.host.bounds, panes: rects, source: ids.firstIndex(of: source ?? ""), point: pointer, metrics: metrics) {
         case .centre(let i): setZone(.centre(ids[i]))
         case .paneEdge(let i, let s): setZone(.paneEdge(ids[i], s))
@@ -518,6 +522,9 @@ final class PaneDrag: NSObject {
     private func elapsed(_ m: Motion) -> CGFloat { frozenMs ?? CGFloat((ProcessInfo.processInfo.systemUptime - m.started) * 1000) }
     private func addMotion(pane: String?, kind: String, from: CGRect, to: CGRect, duration: CGFloat) {
         motions.removeAll { $0.pane == pane && $0.kind == kind }
+        guard duration.isFinite, duration > 0,
+              [from.origin.x, from.origin.y, from.size.width, from.size.height,
+               to.origin.x, to.origin.y, to.size.width, to.size.height].allSatisfy(\.isFinite) else { return }
         motions.append(Motion(pane: pane, kind: kind, from: from, to: to, duration: duration))
         ensureClock()
     }
@@ -529,6 +536,7 @@ final class PaneDrag: NSObject {
         }
     }
     private func retarget(_ rect: CGRect) {
+        guard PaneGeometry.drawable(rect) else { return }
         ghostTarget = rect
         if reduce || ghost == nil { ghost = rect }
         else { addMotion(pane: nil, kind: "zone", from: ghost ?? rect, to: rect, duration: ShellMotion.zoneMorphMs) }
@@ -584,6 +592,7 @@ final class PaneDrag: NSObject {
             if m.kind == "settle", let pane = m.pane { drawn[pane] = interpolate(m.from, m.to, progress(m)) }
             if m.kind == "cancel", !reduce { pointer = interpolate(m.from, m.to, progress(m)).origin }
         }
+        drawn = drawn.filter { PaneGeometry.drawable($0.value) }
         boxes = drawn
         let moving = Set(motions.compactMap { ($0.kind == "settle" || $0.kind == "crossfade") ? $0.pane : nil })
         for (pane, box) in drawn {

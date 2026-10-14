@@ -60,13 +60,14 @@ final class PaneHostView: NSView {
         // Before any pane box takes the new size: a drop still waiting on its reply ends first (see hostWillLayout).
         paneDrag?.hostWillLayout(bounds.size)
         super.layout()
-        guard area.width > 0, area.height > 0 else { return }
-        let sx = bounds.width / area.width, sy = bounds.height / area.height
+        guard let scale = PaneGeometry.scale(bounds: bounds, area: CGRect(x: area.x, y: area.y, width: area.width, height: area.height)) else { return }
+        let sx = scale.width, sy = scale.height
         let live = Set(rects.map { $0.0.paneId })
         for (id, v) in capHosts where !live.contains(id) { v.removeFromSuperview(); capHosts[id] = nil }
         for (id, v) in chatViews where !live.contains(id) { v.removeFromSuperview(); chatViews[id] = nil }
         for (s, r) in rects {
             let full = boxRect(r)
+            guard PaneGeometry.drawable(full) else { continue }
             let capH = min(ShellSpace.paneCapHeight, full.height)
             let capFrame = NSRect(x: full.minX, y: full.minY, width: full.width, height: capH)
             let body = NSRect(x: full.minX, y: full.minY + capH, width: full.width, height: max(0, full.height - capH))
@@ -96,20 +97,21 @@ final class PaneHostView: NSView {
 
     /// Shared layout conversion for caps, body, previews and hook dumps.
     func boxRect(_ r: Snapshot.Rect) -> NSRect {
-        let sx = bounds.width / area.width, sy = bounds.height / area.height
-        let gapL: CGFloat = r.x > area.x ? 1 : 0, gapT: CGFloat = r.y > area.y ? 1 : 0
-        return NSRect(x: (r.x - area.x) * sx + gapL, y: (r.y - area.y) * sy + gapT,
-                      width: r.width * sx - gapL, height: r.height * sy - gapT).integral
+        PaneGeometry.box(CGRect(x: r.x, y: r.y, width: r.width, height: r.height), bounds: bounds,
+                         area: CGRect(x: area.x, y: area.y, width: area.width, height: area.height))
     }
     /// Change origin and clip only; terminal size is established by layout().
     func drawBox(_ pane: String, rect: NSRect, opacity: CGFloat, moving: Bool = false) {
-        guard let (surface, r) = rects.first(where: { $0.0.paneId == pane }) else { return }
-        let final = boxRect(r), capH = min(ShellSpace.paneCapHeight, final.height)
+        guard PaneGeometry.drawable(rect), opacity.isFinite,
+              let (surface, r) = rects.first(where: { $0.0.paneId == pane }) else { return }
+        let final = boxRect(r)
+        guard PaneGeometry.drawable(final) else { return }
+        let capH = min(ShellSpace.paneCapHeight, final.height)
         capHosts[pane]?.setFrameOrigin(rect.origin)
         surface.setFrameOrigin(NSPoint(x: rect.minX, y: rect.minY + capH))
         chatViews[pane]?.setFrameOrigin(surface.frame.origin)
         for view in [surface as NSView, capHosts[pane], chatViews[pane]].compactMap({ $0 }) {
-            view.wantsLayer = true; view.alphaValue = opacity
+            view.wantsLayer = true; view.alphaValue = min(max(opacity, 0), 1)
             // Back moving terminal glyphs with opaque pane paint, above the static panes.
             view.layer?.backgroundColor = moving ? NSColor(hex: tokens.terminalBg).cgColor : nil
             view.layer?.zPosition = moving ? 1 : 0
