@@ -33,6 +33,7 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
     private var renderedHeadings: [String] = []
     private var renderedListItems: [String] = []
     private var pendingOpenKey: String?
+    private var requestedDesk: (tabId: String, itemId: String)?
     private let web: DocWebView
     private var tabButtons: [NSButton] = []
     private var docs: [DocItem] = []
@@ -223,7 +224,13 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         web.isHidden = tabTitles.isEmpty
         rebuildButtons()
         registerDocHooks()
-        if !same || oldKey != activeKey { loadActive() }
+        if let requested = requestedDesk, requested.tabId == tabId,
+           let item = built.first(where: { $0.deskId == requested.itemId }) {
+            requestedDesk = nil
+            activate(item.key)
+        } else if !same || oldKey != activeKey {
+            loadActive()
+        }
         view.needsLayout = true
     }
 
@@ -573,6 +580,15 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
 
     func activateDesk(_ id: String) {
         if let item = docs.first(where: { $0.deskId == id }) { activate(item.key) }
+    }
+
+    /// An explicit open navigates again even if the server reused the current item.
+    /// Retain the request until its snapshot arrives; polling must not lose the click.
+    func openDesk(_ id: String, tabId: String) {
+        requestedDesk = (tabId, id)
+        if let c = windowController, c.state.selectedTab == tabId {
+            show(model: c.model, tabId: tabId)
+        }
     }
 
     func addTransient(_ url: URL, tabId: String) {

@@ -558,7 +558,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                     OpenedLinks.shared.record(url.absoluteString)
                     shellOpen(url)
                     return
-                case .result: break
+                case .result(let reply):
+                    if let id = reply["item_id"] as? String { self.docPanel.openDesk(id, tabId: tabId) }
                 }
                 SidebarState.store.set(true, forKey: Self.docsShownKey(tabId))
                 if self.state.selectedTab == tabId { self.setDocs(open: true) }
