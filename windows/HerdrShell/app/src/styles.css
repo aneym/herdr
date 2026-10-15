@@ -248,7 +248,7 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 .space-row:hover .sidebar-plus, .space-row:focus-within .sidebar-plus, .space-row[data-test-hover] .sidebar-plus { display: block; }
 .sidebar-plus:disabled { cursor: default; }
 /* As the Mac SpacesRowView.icon: trailing row controls take the row height and a 16 px width to hit. */
-.space-row .pin, .space-row .sidebar-plus, .space-row .chevron, .tab-row .pin { min-width: var(--shell-space-step16); align-self: stretch; }
+.space-row .pin, .space-row .sidebar-plus, .space-row .chevron, .tab-row .pin, .tab-row .doc-link { min-width: var(--shell-space-step16); align-self: stretch; }
 
 .plus-glyph { display: inline-block; position: relative; width: var(--shell-space-step12); height: var(--shell-space-step12); }
 .plus-glyph::before, .plus-glyph::after { content: ""; position: absolute; background: currentColor; }
@@ -309,3 +309,7 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 .settings-switch-knob { position: absolute; top: var(--shell-space-step2); left: var(--shell-space-step2); width: calc(var(--shell-space-settings-toggle-height) - 2 * var(--shell-space-step2)); height: calc(var(--shell-space-settings-toggle-height) - 2 * var(--shell-space-step2)); border-radius: 50%; background: var(--shell-bg); box-shadow: 0 0 0 0.5px var(--shell-line); transition: transform var(--shell-motion-fade-ms) ease; }
 .settings-switch[aria-checked="true"] .settings-switch-knob { transform: translateX(calc(var(--shell-space-settings-toggle-width) - var(--shell-space-settings-toggle-height))); }
 .settings-switch:focus-visible, .settings-done:focus-visible { outline: 2px solid var(--shell-accent); outline-offset: 2px; }
+
+.doc-link { display: none; color: var(--shell-muted); flex-shrink: 0; align-items: center; justify-content: center; }
+.tab-row:hover .doc-link, .tab-row:focus-within .doc-link, .tab-row[data-test-hover] .doc-link, .doc-link.is-on { display: flex; }
+.doc-glyph { width: var(--shell-type-glyph); height: calc(var(--shell-type-glyph) * 1.2); }
