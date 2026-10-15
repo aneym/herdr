@@ -762,6 +762,20 @@ impl HeadlessServer {
         changed
     }
 
+    pub(super) fn drain_internal_events_before_shutdown(&mut self) {
+        let deadline = Instant::now() + super::super::shutdown_deadline::EVENT_DRAIN_BUDGET;
+        for _ in 0..crate::app::APP_EVENT_CHANNEL_CAPACITY {
+            if Instant::now() >= deadline {
+                warn!("stopped draining internal events at the shutdown drain budget");
+                break;
+            }
+            let (had_event, _) = self.drain_internal_events_with_forwarding_up_to(1);
+            if !had_event {
+                break;
+            }
+        }
+    }
+
     pub(super) fn drain_internal_events_with_forwarding_up_to(
         &mut self,
         limit: usize,

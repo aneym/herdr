@@ -1591,6 +1591,71 @@ fn wait_for_processes_to_exit(
     }
 }
 
+struct PaneShutdownTarget {
+    child_pid: u32,
+    child_wait_completed: Option<Arc<AtomicBool>>,
+}
+
+fn shutdown_pane_sessions_together(targets: &[PaneShutdownTarget], budget: std::time::Duration) {
+    let child_pids: Vec<u32> = targets
+        .iter()
+        .map(|target| target.child_pid)
+        .filter(|pid| *pid != 0)
+        .collect();
+    if child_pids.is_empty() {
+        return;
+    }
+    let mut pids = crate::platform::session_processes_many(&child_pids);
+    pids.extend(child_pids.iter().copied());
+    pids.sort_unstable();
+    pids.dedup();
+
+    let started = std::time::Instant::now();
+    let step = budget / 3;
+    let mut remaining = pids;
+    for signal in [
+        crate::platform::Signal::Hangup,
+        crate::platform::Signal::Terminate,
+        crate::platform::Signal::Kill,
+    ] {
+        crate::platform::signal_processes(&remaining, signal);
+        let step_deadline = std::time::Instant::now() + step;
+        loop {
+            remaining.retain(|pid| {
+                let target = targets.iter().find(|target| target.child_pid == *pid);
+                let wait_completed = target
+                    .and_then(|target| target.child_wait_completed.as_deref())
+                    .is_some_and(|flag| flag.load(Ordering::Acquire));
+                process_alive_for_shutdown(
+                    *pid,
+                    target.map_or(0, |target| target.child_pid),
+                    wait_completed,
+                    crate::platform::process_exists,
+                )
+            });
+            if remaining.is_empty() || std::time::Instant::now() >= step_deadline {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        if remaining.is_empty() {
+            info!(
+                panes = targets.len(),
+                ?signal,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "pane sessions terminated together"
+            );
+            return;
+        }
+    }
+    warn!(
+        panes = targets.len(),
+        survivors = remaining.len(),
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        "pane sessions still alive after forced shutdown"
+    );
+}
+
 fn shutdown_pane_processes(
     pane_id: PaneId,
     child_pid: u32,
@@ -2065,6 +2130,28 @@ fn publish_reported_cwd(
 }
 
 impl PaneRuntime {
+    pub fn shutdown_together(runtimes: Vec<PaneRuntime>, budget: std::time::Duration) {
+        let mut targets = Vec::with_capacity(runtimes.len());
+        let mut stopped = Vec::with_capacity(runtimes.len());
+        for mut runtime in runtimes {
+            if let Some(handle) = runtime.detect_handle.take() {
+                handle.abort();
+            }
+            runtime.compression.abort();
+            runtime.io.shutdown();
+            if !runtime.preserve_processes_on_drop {
+                targets.push(PaneShutdownTarget {
+                    child_pid: runtime.child_pid.load(Ordering::Acquire),
+                    child_wait_completed: runtime.child_wait_completed.clone(),
+                });
+            }
+            runtime.preserve_processes_on_drop = true;
+            stopped.push(runtime);
+        }
+        shutdown_pane_sessions_together(&targets, budget);
+        drop(stopped);
+    }
+
     pub fn shutdown(mut self) {
         if let Some(handle) = self.detect_handle.take() {
             handle.abort();

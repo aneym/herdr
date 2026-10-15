@@ -789,6 +789,40 @@ pub fn session_processes(child_pid: u32) -> Vec<u32> {
     pids
 }
 
+pub fn session_processes_many(child_pids: &[u32]) -> Vec<u32> {
+    let own_session = process_session_id(std::process::id());
+    let mut sessions: Vec<_> = child_pids
+        .iter()
+        .filter(|pid| **pid != 0)
+        .filter_map(|pid| process_session_id(*pid))
+        .filter(|sid| Some(*sid) != own_session)
+        .collect();
+    if sessions.is_empty() {
+        return Vec::new();
+    }
+    sessions.sort_unstable();
+    sessions.dedup();
+    let own_pid = std::process::id();
+    let mut pids = Vec::new();
+    for entry in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
+        let file_name = entry.file_name();
+        let Some(pid) = file_name
+            .to_str()
+            .filter(|name| name.bytes().all(|b| b.is_ascii_digit()))
+            .and_then(|name| name.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if pid == own_pid {
+            continue;
+        }
+        if process_session_id(pid).is_some_and(|sid| sessions.binary_search(&sid).is_ok()) {
+            pids.push(pid);
+        }
+    }
+    pids
+}
+
 pub fn signal_processes(pids: &[u32], signal: Signal) {
     let sig = match signal {
         Signal::Hangup => libc::SIGHUP,

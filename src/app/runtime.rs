@@ -34,6 +34,13 @@ impl App {
         }
     }
 
+    pub(crate) fn shutdown_all_terminal_runtimes(&mut self, budget: std::time::Duration) {
+        let runtimes = self.terminal_runtimes.drain_all();
+        if !runtimes.is_empty() {
+            crate::terminal::TerminalRuntime::shutdown_together(runtimes, budget);
+        }
+    }
+
     pub(crate) fn shutdown_detached_terminal_runtimes(&mut self) {
         let terminal_ids = std::mem::take(&mut self.state.terminal_runtime_shutdowns);
         for terminal_id in terminal_ids {

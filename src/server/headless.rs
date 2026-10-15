@@ -164,6 +164,8 @@ const SHUTDOWN_API_TIMEOUT: Duration = Duration::from_secs(5);
 /// otherwise idle. Keep this much slower than the old resize-poll cadence to
 /// avoid reintroducing the idle CPU spin.
 const CLIENT_ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(250);
+#[cfg(unix)]
+const SIGNAL_WATCH_INTERVAL: Duration = Duration::from_millis(100);
 
 // ---------------------------------------------------------------------------
 // Headless server
@@ -419,6 +421,9 @@ impl HeadlessServer {
             },
         );
 
+        #[cfg(unix)]
+        spawn_signal_watch(self.should_quit.clone(), self.server_event_tx.clone());
+
         let mut needs_render = true;
         let mut needs_full_render = true;
         let mut needs_graphics_render = false;
@@ -437,6 +442,7 @@ impl HeadlessServer {
             // A host shutdown warning precedes process termination. Do not drain pane
             // deaths here: logind's delay lock stays held until the final session save.
             if self.host_shutdown_requested.load(Ordering::Acquire) {
+                super::shutdown_deadline::arm("host shutdown");
                 self.initiate_shutdown();
                 continue;
             }
@@ -444,9 +450,7 @@ impl HeadlessServer {
             // Check if we should start shutting down.
             note_server_signal(&self.should_quit, &self.server_event_tx);
             if self.app.state.should_quit || self.should_quit.load(Ordering::Acquire) {
-                self.drain_internal_events_with_forwarding_up_to(
-                    crate::app::APP_EVENT_CHANNEL_CAPACITY,
-                );
+                self.drain_internal_events_before_shutdown();
                 self.initiate_shutdown();
                 continue;
             }
@@ -703,6 +707,8 @@ impl HeadlessServer {
         if self.app.policy.persist_session {
             self.app.save_session_on_shutdown();
         }
+        self.app
+            .shutdown_all_terminal_runtimes(super::shutdown_deadline::PANE_TEARDOWN_BUDGET);
 
         info!("headless server exiting");
         Ok(())
@@ -3595,6 +3601,7 @@ fn note_server_signal(should_quit: &AtomicBool, server_event_tx: &mpsc::Sender<S
                 if let Some(reason) = observed.quit_reason {
                     super::signals::log_quit(observed.signal, observed.sender_pid, reason);
                 }
+                super::shutdown_deadline::arm("signal");
                 should_quit.store(true, Ordering::Release);
                 let _ = server_event_tx.try_send(ServerEvent::QuitSignal);
                 break;
@@ -3604,6 +3611,21 @@ fn note_server_signal(should_quit: &AtomicBool, server_event_tx: &mpsc::Sender<S
     #[cfg(not(unix))]
     {
         let _ = (should_quit, server_event_tx);
+    }
+}
+
+#[cfg(unix)]
+fn spawn_signal_watch(should_quit: Arc<AtomicBool>, server_event_tx: mpsc::Sender<ServerEvent>) {
+    let spawned = std::thread::Builder::new()
+        .name("herdr-signal-watch".into())
+        .spawn(move || {
+            while !should_quit.load(Ordering::Acquire) {
+                std::thread::sleep(SIGNAL_WATCH_INTERVAL);
+                note_server_signal(&should_quit, &server_event_tx);
+            }
+        });
+    if let Err(err) = spawned {
+        warn!(%err, "could not start the server signal watch thread");
     }
 }
 

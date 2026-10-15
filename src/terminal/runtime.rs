@@ -46,6 +46,13 @@ impl TerminalRuntime {
         self.0.shutdown();
     }
 
+    pub fn shutdown_together(runtimes: Vec<TerminalRuntime>, budget: std::time::Duration) {
+        crate::pane::PaneRuntime::shutdown_together(
+            runtimes.into_iter().map(|runtime| runtime.0).collect(),
+            budget,
+        );
+    }
+
     #[cfg(unix)]
     pub fn duplicate_handoff_fd(&self) -> std::io::Result<std::os::fd::RawFd> {
         self.0.duplicate_handoff_fd()

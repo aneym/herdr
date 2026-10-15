@@ -56,6 +56,10 @@ impl TerminalRuntimeRegistry {
         }
     }
 
+    pub(crate) fn drain_all(&mut self) -> Vec<TerminalRuntime> {
+        self.runtimes.drain().map(|(_, runtime)| runtime).collect()
+    }
+
     pub(crate) fn len(&self) -> usize {
         self.runtimes.len()
     }

@@ -232,6 +232,10 @@ pub fn session_processes(_child_pid: u32) -> Vec<u32> {
     Vec::new()
 }
 
+pub fn session_processes_many(_child_pids: &[u32]) -> Vec<u32> {
+    Vec::new()
+}
+
 /// Unsupported platform stub.
 pub fn signal_processes(_pids: &[u32], _signal: Signal) {}
 

@@ -1111,6 +1111,31 @@ pub fn session_processes(child_pid: u32) -> Vec<u32> {
         .collect()
 }
 
+pub fn session_processes_many(child_pids: &[u32]) -> Vec<u32> {
+    let own_session = unsafe { libc::getsid(0) };
+    let mut sessions: Vec<libc::pid_t> = child_pids
+        .iter()
+        .filter(|pid| **pid != 0)
+        .map(|pid| unsafe { libc::getsid(*pid as libc::pid_t) })
+        .filter(|sid| *sid > 0 && *sid != own_session)
+        .collect();
+    if sessions.is_empty() {
+        return Vec::new();
+    }
+    sessions.sort_unstable();
+    sessions.dedup();
+    let own_pid = std::process::id();
+    all_pids()
+        .into_iter()
+        .filter(|pid| *pid != own_pid)
+        .filter(|pid| {
+            sessions
+                .binary_search(&unsafe { libc::getsid(*pid as libc::pid_t) })
+                .is_ok()
+        })
+        .collect()
+}
+
 fn all_pids() -> Vec<u32> {
     let initial_count = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
     let mut capacity = if initial_count > 0 {

@@ -21,6 +21,7 @@ pub(crate) mod peer_origin;
 #[cfg(test)]
 mod render_scale_benchmark;
 pub(crate) mod render_stream;
+pub(crate) mod shutdown_deadline;
 mod signals;
 pub mod socket_paths;
 pub(crate) mod terminal_attach;

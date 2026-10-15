@@ -2268,6 +2268,15 @@ fn session_processes_from_snapshot(child_pid: u32, snapshot: &ProcessSnapshot) -
     pids
 }
 
+pub fn session_processes_many(child_pids: &[u32]) -> Vec<u32> {
+    let snapshot = ProcessSnapshot::new(snapshot_processes());
+    child_pids
+        .iter()
+        .filter(|pid| **pid != 0)
+        .flat_map(|pid| session_processes_from_snapshot(*pid, &snapshot))
+        .collect()
+}
+
 pub fn signal_processes(pids: &[u32], signal: Signal) {
     if signal == Signal::Hangup {
         return;
