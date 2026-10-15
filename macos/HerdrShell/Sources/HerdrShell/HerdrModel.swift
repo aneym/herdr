@@ -339,6 +339,10 @@ extension HerdrModel {
         source(for: tab)?.tabs.first { $0.tab_id == tab }?.pin_index != nil
     }
 
+    func reviewDoc(_ tab: String) -> TabDoc? {
+        source(for: tab)?.tabs.first { $0.tab_id == tab }?.doc
+    }
+
     /// The pane header's pin: pinning puts the chat last in PINNED (the same path as the + on the
     /// PINNED header), unpinning drops it. Alex, 2026-10-06: "a button to pin new tabs top right
     /// next to terminal/chat pane header".

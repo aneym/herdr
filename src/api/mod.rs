@@ -50,6 +50,8 @@ pub(crate) fn request_changes_ui(request: &Request) -> bool {
             | Method::DeskOpen(_)
             | Method::DeskClose(_)
             | Method::DeskFocus(_)
+            | Method::TabDocSet(_)
+            | Method::TabDocClear(_)
             | Method::TabSetRole(_)
             | Method::TabPinMove(_)
             | Method::TabClose(_)

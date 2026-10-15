@@ -282,6 +282,11 @@ impl App {
                 .get(&tab_id)
                 .filter(|desk| !desk.info.items.is_empty())
                 .map(|desk| desk.info.clone()),
+            doc: self
+                .state
+                .desks
+                .get(&tab_id)
+                .and_then(|desk| desk.doc.clone()),
             hidden: self
                 .state
                 .pinned_tabs

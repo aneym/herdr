@@ -31,6 +31,7 @@ pub(super) fn run_tab_command(args: &[String]) -> std::io::Result<i32> {
         "show" | "unhide" => tab_set_hidden(&args[1..], false),
         "set-role" => tab_set_role(&args[1..]),
         "pin-move" => tab_pin_move(&args[1..]),
+        "doc" => super::tab_doc::run_tab_doc_command(&args[1..]),
         "close" => tab_close(&args[1..]),
         "help" | "--help" | "-h" => {
             print_tab_help();
@@ -464,6 +465,9 @@ fn print_tab_help() {
     eprintln!("  herdr tab show <tab_id>    (alias: unhide)");
     eprintln!("  herdr tab set-role <tab_id> <agent|none>");
     eprintln!("  herdr tab pin-move <tab_id> <pin_index>");
+    eprintln!("  herdr tab doc set [<tab_id>] <url_or_path> [--title TEXT]");
+    eprintln!("  herdr tab doc get [<tab_id>]");
+    eprintln!("  herdr tab doc clear [<tab_id>]");
     eprintln!("  herdr tab close <tab_id>");
 }
 

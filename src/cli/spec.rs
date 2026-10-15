@@ -334,8 +334,12 @@ fn tab_command() -> Command {
             "Hide an agent pin from the Agents list (it stays pinned and keeps running)",
         ))
         .subcommand(
-            id_command("show", "tab_id", "Show a hidden agent pin in the Agents list again")
-                .visible_alias("unhide"),
+            id_command(
+                "show",
+                "tab_id",
+                "Show a hidden agent pin in the Agents list again",
+            )
+            .visible_alias("unhide"),
         )
         .subcommand(
             Command::new("pin-move")
@@ -344,6 +348,39 @@ fn tab_command() -> Command {
                 .arg(required("pin_index", "INDEX")),
         )
         .subcommand(id_command("close", "tab_id", "Close a tab"))
+        .subcommand(tab_doc_command())
+}
+
+fn tab_doc_command() -> Command {
+    let target = |command: Command| {
+        command
+            .arg(option("tab", "TAB_ID"))
+            .arg(option("pane", "PANE_ID"))
+            .arg(flag("json"))
+    };
+    Command::new("doc")
+        .about("The doc a tab asks Alex to review; the Shell shows it on the tab's row")
+        .subcommand(target(
+            Command::new("set")
+                .about("Set the tab's review doc (default: the caller's own tab)")
+                .arg(
+                    Arg::new("args")
+                        .value_name("[TAB_ID] URL_OR_PATH")
+                        .num_args(1..=2)
+                        .required(true),
+                )
+                .arg(option("title", "TITLE")),
+        ))
+        .subcommand(target(
+            Command::new("get")
+                .about("Print the tab's review doc")
+                .arg(Arg::new("tab_id").value_name("TAB_ID")),
+        ))
+        .subcommand(target(
+            Command::new("clear")
+                .about("Clear the tab's review doc")
+                .arg(Arg::new("tab_id").value_name("TAB_ID")),
+        ))
 }
 
 fn desk_command() -> Command {
@@ -1365,7 +1402,10 @@ mod tests {
             let (_, tab) = matches.subcommand().expect("tab");
             let (name, sub) = tab.subcommand().expect("tab subcommand");
             assert_eq!(name, if args[2] == "hide" { "hide" } else { "show" });
-            assert_eq!(sub.get_one::<String>("tab_id").map(String::as_str), Some("w1:t2"));
+            assert_eq!(
+                sub.get_one::<String>("tab_id").map(String::as_str),
+                Some("w1:t2")
+            );
         }
     }
 

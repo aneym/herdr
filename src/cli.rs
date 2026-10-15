@@ -41,6 +41,7 @@ mod server_not_running;
 mod spec;
 mod status;
 mod tab;
+mod tab_doc;
 mod target;
 mod workspace;
 mod worktree;

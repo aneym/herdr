@@ -17,6 +17,7 @@ struct SpacesRowView: View {
     /// The pointer is over this row. Pinned-section rows show their unpin toggle only then.
     var hovered = false
     var showResume = false
+    var doc: TabDoc? = nil
     /// The goal row's filter menu; the sidebar owns its choices.
     var goal: AnyView? = nil
     var collapseSpaces: AnyView? = nil
@@ -121,6 +122,9 @@ struct SpacesRowView: View {
             }
             // Rows at rest show name, dot and icons only, as the mock and the Windows Shell: a tab's pin
             // and a space's + come on hover, and a pinned space keeps its accent pin.
+            if hovered, row.tab != nil, let doc {
+                docIcon(doc)
+            }
             if row.kind == .tab, hovered {
                 icon("⚲", "pin", tone: pinned ? t.accent : t.mute)
             }
@@ -196,6 +200,13 @@ struct SpacesRowView: View {
         Text(glyph).foregroundStyle(tone).fixedSize()
             .frame(minWidth: Self.iconHitWidth, maxHeight: .infinity).contentShape(Rectangle())
             .onTapGesture { click(part) }.clickTarget(part + ":" + row.id)
+    }
+
+    private func docIcon(_ doc: TabDoc) -> some View {
+        Image(systemName: "doc.text").font(.system(size: ShellType.glyph)).foregroundStyle(t.mute)
+            .frame(minWidth: Self.iconHitWidth, maxHeight: .infinity).contentShape(Rectangle())
+            .onTapGesture { click("doc") }.clickTarget("doc:" + row.id)
+            .help("Open " + doc.title + " in Aside").accessibilityLabel("Open review doc " + doc.title)
     }
 
     private var chevron: some View {

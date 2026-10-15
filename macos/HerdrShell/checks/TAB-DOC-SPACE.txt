@@ -1,0 +1,17 @@
+[PASS] CLI: tab doc set names a tab and prints tab, url and title
+[PASS] CLI: tab doc set with no tab targets the caller's own tab (HERDR_PANE_ID)
+[PASS] CLI: tab doc get on a tab without a doc reports none
+[PASS] tab.list carries each tab's doc
+[PASS] the app reads both docs from the server
+[PASS] at rest no row draws a doc icon
+[PASS] hovering the pinned Working in Rails row shows its doc icon
+[PASS] only the hovered row shows a doc icon
+[PASS] light: Shell window shot written with the icon showing
+[PASS] dark: Shell window shot written with the icon showing
+[PASS] clicking the icon opens the doc in Aside
+[PASS] clicking the icon leaves the selected tab alone
+[PASS] an unpinned tab row shows its doc icon on hover
+[PASS] a row with no doc shows no icon on hover
+[PASS] CLI: tab doc clear
+[PASS] after clear the pinned row shows no doc icon on hover
+16 passed; 0 failed

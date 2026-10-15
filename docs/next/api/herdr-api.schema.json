@@ -1179,6 +1179,33 @@
           ],
           "type": "string"
         },
+        "TabDoc": {
+          "properties": {
+            "set_at_ms": {
+              "default": 0,
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "set_by": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "url",
+            "title"
+          ],
+          "type": "object"
+        },
         "TabInfo": {
           "properties": {
             "agent_status": {
@@ -1192,6 +1219,16 @@
               "anyOf": [
                 {
                   "$ref": "#/schemas/event/$defs/DeskInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "doc": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/event/$defs/TabDoc"
                 },
                 {
                   "type": "null"
@@ -5072,6 +5109,41 @@
           },
           "type": "object"
         },
+        "TabDocSetParams": {
+          "properties": {
+            "pane_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "set_by": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tab_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "url"
+          ],
+          "type": "object"
+        },
         "TabListParams": {
           "properties": {
             "workspace_id": {
@@ -5664,6 +5736,54 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/DeskReadParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "tab.doc_set",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/TabDocSetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "tab.doc_clear",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/DeskTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "tab.doc_get",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/DeskTarget"
             }
           },
           "required": [
@@ -11308,6 +11428,36 @@
             },
             {
               "properties": {
+                "doc": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/schemas/success_response/$defs/TabDoc"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "tab_id": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "tab_doc",
+                  "type": "string"
+                },
+                "workspace_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "tab_id",
+                "workspace_id"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
                 "data_base64": {
                   "type": [
                     "string",
@@ -13010,6 +13160,33 @@
           ],
           "type": "object"
         },
+        "TabDoc": {
+          "properties": {
+            "set_at_ms": {
+              "default": 0,
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "set_by": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "url",
+            "title"
+          ],
+          "type": "object"
+        },
         "TabInfo": {
           "properties": {
             "agent_status": {
@@ -13023,6 +13200,16 @@
               "anyOf": [
                 {
                   "$ref": "#/schemas/success_response/$defs/DeskInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "doc": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/TabDoc"
                 },
                 {
                   "type": "null"

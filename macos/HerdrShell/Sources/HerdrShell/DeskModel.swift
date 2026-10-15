@@ -10,6 +10,11 @@ struct DeskItem: Codable, Equatable {
     let opened_at_ms: UInt64
 }
 
+struct TabDoc: Codable, Equatable {
+    let url: String
+    let title: String
+}
+
 struct DeskInfo: Codable, Equatable {
     var items: [DeskItem]
     var front: String?

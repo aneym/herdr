@@ -122,6 +122,8 @@ pub struct TabInfo {
     pub sort_rank: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub desk: Option<super::desk::DeskInfo>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc: Option<super::desk::TabDoc>,
     pub tab_id: String,
     pub workspace_id: String,
     pub number: usize,

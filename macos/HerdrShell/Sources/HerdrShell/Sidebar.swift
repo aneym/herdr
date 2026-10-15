@@ -268,6 +268,7 @@ struct SidebarView: View {
             pinned: row.kind == .tab ? model.isPinned(row.tab ?? "") : row.kind == .space && state.spacesChrome.pinnedSpaces.contains(String(row.id.dropFirst(6))),
             hovered: hoveredSpaceRow == row.id,
             showResume: hoveredSpaceRow == row.id && row.kind == .tab && row.tab.map { model.spacesOverlay.tabs[$0]?.mode == "parked" } == true,
+            doc: row.tab.flatMap { model.reviewDoc($0) },
             goal: row.kind == .goal ? AnyView(goalMenu) : nil,
             collapseSpaces: row.kind == .goal ? AnyView(collapseSpacesButton) : nil,
             click: { spacesClick(row, part: $0) },
@@ -328,6 +329,8 @@ struct SidebarView: View {
                 // Selected once a snapshot lists it: another machine's tab can arrive after the reply.
                 if let made = commands.tabCreate(workspaceId: id, cwd: nil) { DispatchQueue.main.async { selectNew(made.tabId) } }
             }
+        } else if part == "doc" {
+            if let doc = row.tab.flatMap({ model.reviewDoc($0) }) { ReviewDocOpener.open(doc) }
         } else if part == "link" {
             if let raw = row.link, let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") { NSWorkspace.shared.open(url) }
         } else if part == "pin" {

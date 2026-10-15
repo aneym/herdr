@@ -18,6 +18,8 @@ pub struct DeskState {
     pub info: crate::api::schema::DeskInfo,
     #[serde(default = "desk_first_id")]
     pub next_id: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc: Option<crate::api::schema::TabDoc>,
 }
 
 fn desk_first_id() -> u64 {
@@ -29,6 +31,7 @@ impl Default for DeskState {
         Self {
             info: Default::default(),
             next_id: 1,
+            doc: None,
         }
     }
 }

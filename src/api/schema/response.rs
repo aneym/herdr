@@ -51,6 +51,11 @@ pub enum ResponseResult {
     DeskList {
         desks: Vec<super::desk::TabDesk>,
     },
+    TabDoc {
+        tab_id: String,
+        workspace_id: String,
+        doc: Option<super::desk::TabDoc>,
+    },
     DeskFile {
         item_id: String,
         mime: String,

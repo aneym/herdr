@@ -1285,6 +1285,15 @@ mod tests {
             }))
             .unwrap(),
         );
+        app.handle_api_request(
+            serde_json::from_value(serde_json::json!({
+                "id": "doc", "method": "tab.doc_set",
+                "params": { "tab_id": tabs[1], "url": "https://example.com/review", "title": "Review" }
+            }))
+            .unwrap(),
+        );
+        let expected_doc = app.state.desks[&tabs[1]].clone();
+        assert_eq!(expected_doc.doc.as_ref().unwrap().title, "Review");
         let expected_desk = app.state.desks[&tabs[0]].clone();
         // A closed tab loses its desk immediately. Even an older snapshot's
         // entry for that tab must be pruned by both restore paths.
@@ -1343,6 +1352,7 @@ mod tests {
         );
         assert_eq!(order(&restored), expected, "cold restore");
         assert_eq!(restored.state.desks[&tabs[0]], expected_desk);
+        assert_eq!(restored.state.desks[&tabs[1]], expected_doc);
         assert!(!restored.state.desks.contains_key(&closed_tab));
         assert_eq!(
             restored.state.pinned_tabs[0].role,
@@ -1361,6 +1371,7 @@ mod tests {
         .unwrap();
         assert_eq!(order(&handed_off), expected, "live handoff");
         assert_eq!(handed_off.state.desks[&tabs[0]], expected_desk);
+        assert_eq!(handed_off.state.desks[&tabs[1]], expected_doc);
         assert!(!handed_off.state.desks.contains_key(&closed_tab));
         assert_eq!(
             handed_off.state.pinned_tabs[0].role,

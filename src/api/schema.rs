@@ -57,6 +57,12 @@ pub enum Method {
     DeskList(DeskTarget),
     #[serde(rename = "desk.read")]
     DeskRead(DeskReadParams),
+    #[serde(rename = "tab.doc_set")]
+    TabDocSet(TabDocSetParams),
+    #[serde(rename = "tab.doc_clear")]
+    TabDocClear(DeskTarget),
+    #[serde(rename = "tab.doc_get")]
+    TabDocGet(DeskTarget),
 
     #[serde(rename = "ping")]
     Ping(PingParams),

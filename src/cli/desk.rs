@@ -29,7 +29,7 @@ fn resolve_target(
     })
 }
 
-fn classify_reference(reference: &str) -> Result<String, String> {
+pub(super) fn classify_reference(reference: &str) -> Result<String, String> {
     let scheme_and_rest = reference.split_once(':');
     if let Some((scheme, rest)) = scheme_and_rest {
         if (scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https"))

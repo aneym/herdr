@@ -1137,6 +1137,7 @@ final class TestHook {
                      "active_item": c.docPanel.activeItem as Any? ?? NSNull()],
             "last_remote": RemoteActions.last,
             "opened_urls": OpenedLinks.shared.urls,
+            "tab_docs": Dictionary(uniqueKeysWithValues: (c.model.snapshot?.tabs ?? []).compactMap { tab in tab.doc.map { (tab.tab_id, ["url": $0.url, "title": $0.title]) } }),
             "poll_ms": c.model.pollMs,
             "surfaces": surfaces,
             "lifecycle": c.registry.lifecycleState(),
