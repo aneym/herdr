@@ -1,0 +1,9 @@
+[PASS] dev app is key in the Space and the link pane is attached
+[PASS] [plain] the Shell shows the URL on the tab it selected
+[PASS] [plain] the server resolves links on the pane the Shell shows
+[PASS] [plain] plain Cmd+click routes the URL to the desk
+[PASS] [plain] Cmd+Shift+click opens the URL in the default browser
+[PASS] [osc8] the Shell shows the URL on the tab it selected
+[PASS] [osc8] the server resolves links on the pane the Shell shows
+[PASS] [osc8] Cmd+Shift+click opens the URL in the default browser
+8 passed; 0 failed

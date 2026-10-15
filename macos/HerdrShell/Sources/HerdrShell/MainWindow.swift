@@ -568,9 +568,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         state.selectedTab = tabId
         if !stepping { state.focusCursor = nil }
         state.saveSelected()
-        if revealDocs, state.mode == .areas {
-            focusHerdr(tabId)
-        }
+        if !Machines.isRemote(tabId) { focusHerdr(tabId) }
         lastLayoutKey = ""
         refreshHost()
         refreshDocs()
