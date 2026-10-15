@@ -134,16 +134,18 @@ def main():
             f = cap["window_frame"]
             hover_at(bounds, f[0] + f[2] / 2, f[1] + f[3] + 120)
 
+    rails_row = "tab:" + rails
     S.cmd({"cmd": "select", "tab": bare})
     away()
-    state = wait(lambda s: not doc_frames(s), 4)
-    check("at rest no row draws a doc icon", not doc_frames(state), json.dumps(doc_frames(state)))
+    at_rest = ["doc:" + pinned_row, "doc:" + rails_row]
+    state = wait(lambda s: doc_frames(s) == sorted(at_rest), 4)
+    check("at rest the pinned tab's rows show its doc icon and unpinned rows show none",
+          doc_frames(state) == sorted(at_rest), json.dumps(doc_frames(state)))
 
     hover(pinned_row)
     state = wait(lambda s: frame(s, "doc:" + pinned_row) is not None)
-    check("hovering the pinned Working in Rails row shows its doc icon", frame(state, "doc:" + pinned_row) is not None,
+    check("hovering the pinned Working in Rails row keeps its doc icon", frame(state, "doc:" + pinned_row) is not None,
           json.dumps(doc_frames(state)))
-    check("only the hovered row shows a doc icon", doc_frames(state) == ["doc:" + pinned_row], json.dumps(doc_frames(state)))
     for mode in ("light", "dark"):
         S.cmd({"cmd": "appearance", "mode": mode})
         state = wait(lambda s: s.get("theme", {}).get("effective") == mode)
@@ -176,18 +178,22 @@ def main():
     state = wait(lambda s: frame(s, "doc:" + plain_row) is not None)
     check("an unpinned tab row shows its doc icon on hover", frame(state, "doc:" + plain_row) is not None,
           json.dumps(doc_frames(state)))
+    away()
+    state = wait(lambda s: frame(s, "doc:" + plain_row) is None, 4)
+    check("the unpinned row's icon goes when the pointer leaves", frame(state, "doc:" + plain_row) is None,
+          json.dumps(doc_frames(state)))
     hover(bare_row)
     time.sleep(0.8)
     state = S.state()
-    check("a row with no doc shows no icon on hover", not doc_frames(state), json.dumps(doc_frames(state)))
+    check("a row with no doc shows no icon on hover", frame(state, "doc:" + bare_row) is None
+          and doc_frames(state) == sorted(at_rest), json.dumps(doc_frames(state)))
 
     out = S.lab("herdr", "tab", "doc", "clear", rails).strip()
     check("CLI: tab doc clear", out == f"{rails} none", out)
     state = wait(lambda s: rails not in s.get("tab_docs", {}))
     hover(pinned_row)
-    time.sleep(0.8)
-    state = S.state()
-    check("after clear the pinned row shows no doc icon on hover", frame(state, "doc:" + pinned_row) is None,
+    state = wait(lambda s: not doc_frames(s), 4)
+    check("after clear the pinned row shows no doc icon, at rest or on hover", not doc_frames(state),
           json.dumps(doc_frames(state)))
 
 

@@ -122,7 +122,7 @@ struct SpacesRowView: View {
             }
             // Rows at rest show name, dot and icons only, as the mock and the Windows Shell: a tab's pin
             // and a space's + come on hover, and a pinned space keeps its accent pin.
-            if hovered, row.tab != nil, let doc {
+            if hovered || pinned, row.tab != nil, let doc {
                 docIcon(doc)
             }
             if row.kind == .tab, hovered {
