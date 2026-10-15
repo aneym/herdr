@@ -267,13 +267,13 @@ fn handle_connection(
 fn close_caller_pid(stream: &LocalStream) -> Option<u32> {
     #[cfg(target_os = "macos")]
     {
-        use std::os::fd::AsRawFd;
+        use std::os::fd::{AsFd, AsRawFd};
         let LocalStream::UdSocket(socket) = stream;
         let mut pid: libc::pid_t = 0;
         let mut size = std::mem::size_of_val(&pid) as libc::socklen_t;
         let result = unsafe {
             libc::getsockopt(
-                socket.as_raw_fd(),
+                socket.as_fd().as_raw_fd(),
                 libc::SOL_LOCAL,
                 libc::LOCAL_PEERPID,
                 (&mut pid as *mut libc::pid_t).cast(),

@@ -20,4 +20,10 @@ pub struct SessionSnapshot {
     pub panes: Vec<PaneInfo>,
     pub layouts: Vec<PaneLayoutSnapshot>,
     pub agents: Vec<AgentInfo>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub pending_agent_restores: u32,
+}
+
+fn is_zero(value: &u32) -> bool {
+    *value == 0
 }

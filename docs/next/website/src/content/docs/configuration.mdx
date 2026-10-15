@@ -577,9 +577,14 @@ Herdr resumes supported Agent conversations after a server restart by default:
 [session]
 resume_agents_on_restore = true
 startup_per_agent_delay_ms = 100
+startup_max_booting_agents = 4
+startup_agent_boot_ms = 20000
+startup_load_per_core_limit = 1.5
 ```
 
 Automatic restores start one agent at a time, 100 milliseconds apart by default, to reduce startup contention. The first eligible agent starts immediately. Set `startup_per_agent_delay_ms = 0` to disable spacing. Manual launches and explicit terminal attaches are unaffected. Restart the Herdr server to apply changes.
+
+Pinned tabs restore first, in pin order, then the focused tab, then the rest. At most `startup_max_booting_agents` restored agents boot at once; each counts for `startup_agent_boot_ms`. While the one-minute load average per CPU core is above `startup_load_per_core_limit`, unpinned tabs wait. Opening a pane starts its agent at once. Set either limit to 0 to turn it off.
 
 Only panes with a valid native session reference from an official integration can resume; other panes restore as normal shells. See [Session state and restore](/docs/session-state/) for supported Agents and persistence behavior.
 

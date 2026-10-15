@@ -331,6 +331,9 @@ pub struct SessionConfig {
     pub resume_agents_on_restore: bool,
     /// Milliseconds between automatic agent restores. Zero disables spacing.
     pub startup_per_agent_delay_ms: u32,
+    pub startup_max_booting_agents: u32,
+    pub startup_agent_boot_ms: u32,
+    pub startup_load_per_core_limit: f64,
 }
 
 impl Default for SessionConfig {
@@ -338,6 +341,9 @@ impl Default for SessionConfig {
         Self {
             resume_agents_on_restore: true,
             startup_per_agent_delay_ms: 100,
+            startup_max_booting_agents: 4,
+            startup_agent_boot_ms: 20_000,
+            startup_load_per_core_limit: 1.5,
         }
     }
 }

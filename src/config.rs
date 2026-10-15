@@ -27,9 +27,9 @@ pub use self::{
         validated_sidebar_bounds, AgentCloseFocusConfig, AgentPanelSortConfig, AgentRestartConfig,
         AttentionReadConfig, Config, ConfigReloadReport, ConfigReloadStatus, HostCursorModeConfig,
         MouseNavButtonActionConfig, NewTerminalCwdConfig, PaneBordersConfig, PoliteSendConfig,
-        ShellModeConfig, ShowTabStatusConfig, SidebarCollapsedModeConfig, StatusIndicatorStyle,
-        TabBarPositionConfig, ToastClipboardPosition, ToastConfig, ToastDelivery,
-        ToastHerdrPosition, UpdateChannelConfig, MAX_TOAST_DELAY_SECONDS,
+        SessionConfig, ShellModeConfig, ShowTabStatusConfig, SidebarCollapsedModeConfig,
+        StatusIndicatorStyle, TabBarPositionConfig, ToastClipboardPosition, ToastConfig,
+        ToastDelivery, ToastHerdrPosition, UpdateChannelConfig, MAX_TOAST_DELAY_SECONDS,
     },
     sidebar::{
         AgentSidebarToken, AgentsSidebarConfig, AutomationsSidebarConfig, SidebarConfig,

@@ -68,6 +68,12 @@ impl App {
                 crate::render_prof::duration_since("snapshot.agents", started);
                 agents
             },
+            pending_agent_restores: self
+                .state
+                .terminals
+                .values()
+                .filter(|terminal| terminal.pending_agent_resume_plan.is_some())
+                .count() as u32,
         }
     }
 }

@@ -442,6 +442,14 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # resume_agents_on_restore = true
 # Milliseconds between automatic agent restores; 0 starts them without spacing.
 # startup_per_agent_delay_ms = 100
+# Pinned tabs restore first, then the visible tab, then the rest. At most this many
+# restored agents boot at once (0 removes the cap); each counts as booting for
+# startup_agent_boot_ms.
+# startup_max_booting_agents = 4
+# startup_agent_boot_ms = 20000
+# Unpinned tabs wait while load1 per core is above this (0 turns the gate off);
+# opening a tab restores its agent at once.
+# startup_load_per_core_limit = 1.5
 
 [remote]
 # Whether herdr manages the ssh config used for `herdr --remote`.

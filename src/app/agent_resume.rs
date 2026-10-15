@@ -36,6 +36,7 @@ struct PendingAgentResumeCandidate {
     plan: crate::agent_resume::AgentResumePlan,
     rows: u16,
     cols: u16,
+    rank: super::resume_gate::ResumeRank,
 }
 
 /// Why `agent.resume` refused or failed for a pane.
@@ -597,8 +598,18 @@ impl App {
         if self.next_agent_resume_at.is_some_and(|next| now < next) {
             return false;
         }
-        let pending = self.pending_agent_resume_candidates();
+        let mut pending = self.pending_agent_resume_candidates();
+        pending.sort_by_key(|candidate| candidate.rank);
+        let boot_window = self.resume_gate.boot_window;
+        self.booting_agent_resumes
+            .retain(|(_, started)| now.saturating_duration_since(*started) < boot_window);
+        let load = if pending.is_empty() {
+            None
+        } else {
+            super::resume_gate::host_load_per_core()
+        };
         let mut changed = false;
+        let mut held = false;
         for PendingAgentResumeCandidate {
             pane_id,
             terminal_id,
@@ -606,25 +617,52 @@ impl App {
             plan,
             rows,
             cols,
+            rank,
         } in pending
         {
             if self.terminal_runtimes.get(&terminal_id).is_some() {
                 continue;
             }
-            changed |= self.start_pending_agent_resume(
+            if !self
+                .resume_gate
+                .admits(rank, self.booting_agent_resumes.len(), load)
+            {
+                held = true;
+                break;
+            }
+            let started = self.start_pending_agent_resume(
                 pane_id,
-                terminal_id,
+                terminal_id.clone(),
                 cwd,
                 plan,
                 rows,
                 cols,
                 allow_empty_theme,
             );
+            if started && self.terminal_runtimes.get(&terminal_id).is_some() {
+                tracing::info!(
+                    pane = pane_id.raw(),
+                    terminal = %terminal_id,
+                    ?rank,
+                    booting = self.booting_agent_resumes.len() + 1,
+                    load_per_core = load,
+                    "started restored agent"
+                );
+                self.booting_agent_resumes.push((terminal_id, now));
+            }
+            changed |= started;
             if changed && !self.startup_per_agent_delay.is_zero() {
                 self.next_agent_resume_at = Some(now + self.startup_per_agent_delay);
                 self.pending_agent_resume_deadline = self.next_agent_resume_at;
                 break;
             }
+        }
+        if held {
+            let recheck = now + super::resume_gate::RESUME_GATE_RECHECK;
+            if self.next_agent_resume_at.is_none_or(|next| next < recheck) {
+                self.next_agent_resume_at = Some(recheck);
+            }
+            self.pending_agent_resume_deadline = self.next_agent_resume_at;
         }
 
         if changed {
@@ -648,6 +686,17 @@ impl App {
         let mut pending = Vec::new();
         for (ws_idx, ws) in self.state.workspaces.iter().enumerate() {
             for (tab_idx, tab) in ws.tabs.iter().enumerate() {
+                let visible = self.state.active == Some(ws_idx) && tab_idx == ws.active_tab_index();
+                let rank = ws
+                    .public_tab_number(tab_idx)
+                    .map(|number| crate::workspace::public_tab_id_for_number(&ws.id, number))
+                    .and_then(|tab_id| self.state.pinned_tab_index(&tab_id))
+                    .map(super::resume_gate::ResumeRank::Pinned)
+                    .unwrap_or(if visible {
+                        super::resume_gate::ResumeRank::Visible
+                    } else {
+                        super::resume_gate::ResumeRank::Background
+                    });
                 for info in
                     self.pending_agent_resume_pane_infos(ws_idx, tab_idx, tab, terminal_area)
                 {
@@ -675,6 +724,7 @@ impl App {
                         plan,
                         rows: info.inner_rect.height,
                         cols: info.inner_rect.width,
+                        rank,
                     });
                 }
             }
@@ -757,6 +807,10 @@ impl App {
             cols,
             allow_empty_theme,
         );
+        if changed && self.terminal_runtimes.get(terminal_id).is_some() {
+            self.booting_agent_resumes
+                .push((terminal_id.clone(), Instant::now()));
+        }
         if changed {
             self.schedule_session_save();
         }
@@ -1042,6 +1096,98 @@ mod tests {
                     .count(),
                 4
             );
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn boot_restore_starts_pinned_first_and_batches_the_rest_by_load() {
+        let config: crate::config::Config =
+            toml::from_str("[session]\nstartup_per_agent_delay_ms = 0").unwrap();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &config,
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = (0..4)
+            .map(|_| crate::workspace::Workspace::test_new("restore"))
+            .collect();
+        app.state.active = Some(0);
+        app.state.view.terminal_area = Rect::new(0, 0, 100, 30);
+        app.state.ensure_test_terminals();
+        let terminals: Vec<_> = app
+            .state
+            .workspaces
+            .iter()
+            .map(|ws| ws.terminal_id(ws.tabs[0].root_pane).cloned().unwrap())
+            .collect();
+        let cwd = std::env::current_dir().unwrap();
+        for terminal in app.state.terminals.values_mut() {
+            terminal.cwd = cwd.clone();
+            terminal.pending_agent_resume_plan = Some(crate::agent_resume::AgentResumePlan {
+                agent: "codex".into(),
+                argv: long_running_test_argv(),
+                dedupe_key: terminal.id.to_string(),
+            });
+        }
+        let pinned = crate::workspace::public_tab_id_for_number(&app.state.workspaces[3].id, 1);
+        app.state.pin_tab(pinned, 0);
+        let gate = |load_per_core_limit| super::super::resume_gate::ResumeGate {
+            max_booting: 2,
+            boot_window: std::time::Duration::from_secs(5),
+            load_per_core_limit,
+        };
+        app.resume_gate = gate(f64::MIN_POSITIVE);
+        let started = |app: &App| -> Vec<usize> {
+            (0..terminals.len())
+                .filter(|&i| app.terminal_runtimes.get(&terminals[i]).is_some())
+                .collect()
+        };
+
+        let now = Instant::now();
+        assert!(app.start_pending_agent_resumes(now, true));
+        assert_eq!(
+            started(&app),
+            vec![3],
+            "the pinned tab restores first, even under load"
+        );
+        assert_eq!(
+            app.next_agent_resume_at,
+            Some(now + super::super::resume_gate::RESUME_GATE_RECHECK)
+        );
+        assert_eq!(app.pending_agent_resume_deadline, app.next_agent_resume_at);
+
+        app.resume_gate = gate(0.0);
+        assert!(!app.start_pending_agent_resumes(now + std::time::Duration::from_secs(1), true));
+        let recheck = now + std::time::Duration::from_secs(2);
+        assert!(app.start_pending_agent_resumes(recheck, true));
+        assert_eq!(
+            started(&app),
+            vec![0, 3],
+            "then the visible tab, up to the boot cap"
+        );
+
+        assert!(!app.start_pending_agent_resumes(recheck + std::time::Duration::from_secs(2), true));
+        assert_eq!(
+            started(&app),
+            vec![0, 3],
+            "no slot frees before the boot window ends"
+        );
+
+        let later = now + std::time::Duration::from_secs(8);
+        assert!(app.start_pending_agent_resumes(later, true));
+        assert_eq!(
+            started(&app),
+            vec![0, 1, 2, 3],
+            "freed slots take the next batch"
+        );
+        assert!(!app.has_pending_agent_resumes());
+
+        for (_, runtime) in app.terminal_runtimes.drain() {
+            runtime.shutdown();
         }
     }
 

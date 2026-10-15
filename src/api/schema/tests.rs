@@ -922,6 +922,7 @@ fn session_snapshot_request_and_response_round_trip() {
                 panes: Vec::new(),
                 layouts: Vec::new(),
                 agents: Vec::new(),
+                pending_agent_restores: 0,
             }),
         },
     };

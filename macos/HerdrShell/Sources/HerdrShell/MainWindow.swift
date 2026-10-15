@@ -297,6 +297,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         }.store(in: &bag)
         model.$lastError.receive(on: RunLoop.main).sink { [weak self] error in
             self?.paneDrag.connectionChanged(online: error == nil)
+            DispatchQueue.main.async { self?.syncBootStatus() }
         }.store(in: &bag)
         model.$snapshot.receive(on: RunLoop.main).sink { [weak self] _ in self?.snapshotChanged() }.store(in: &bag)
         // $machines fires before the value lands; read it on the next turn.
@@ -320,6 +321,50 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self?.refreshHost() }
         }
         updates = UpdateController(controller: self)
+        installBootStatus()
+    }
+
+    private let bootStatus = NSTextField(labelWithString: "")
+    private var bootTimer: Timer?
+    private let openedAt = Date()
+    private var bootCentered: [NSLayoutConstraint] = []
+    private var bootFooter: [NSLayoutConstraint] = []
+
+    private func installBootStatus() {
+        bootStatus.translatesAutoresizingMaskIntoConstraints = false
+        bootStatus.alignment = .center
+        bootStatus.isSelectable = false
+        bootStatus.wantsLayer = true
+        bootStatus.layer?.zPosition = 10
+        host.addSubview(bootStatus)
+        bootCentered = [bootStatus.centerXAnchor.constraint(equalTo: host.centerXAnchor),
+                        bootStatus.centerYAnchor.constraint(equalTo: host.centerYAnchor)]
+        bootFooter = [bootStatus.centerXAnchor.constraint(equalTo: host.centerXAnchor),
+                      bootStatus.bottomAnchor.constraint(equalTo: host.bottomAnchor, constant: -10)]
+        syncBootStatus()
+    }
+
+    func syncBootStatus() {
+        guard bootStatus.superview != nil else { return }
+        let line = BootStatus.line(loaded: model.snapshot != nil, error: model.lastError,
+                                   pendingRestores: model.snapshot?.pending_agent_restores ?? 0,
+                                   waitedSeconds: Int(Date().timeIntervalSince(openedAt)))
+        bootStatus.isHidden = line == nil
+        if let line {
+            let t = theme.tokens
+            bootStatus.stringValue = line.text
+            bootStatus.textColor = NSColor(hex: line.centered ? t.chrome.ink : t.chrome.mute)
+            bootStatus.font = .systemFont(ofSize: line.centered ? ShellType.body : ShellType.caption)
+            NSLayoutConstraint.deactivate(line.centered ? bootFooter : bootCentered)
+            NSLayoutConstraint.activate(line.centered ? bootCentered : bootFooter)
+        }
+        let counting = line?.centered == true && model.lastError != nil
+        if counting, bootTimer == nil {
+            bootTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.syncBootStatus() }
+        } else if !counting {
+            bootTimer?.invalidate()
+            bootTimer = nil
+        }
     }
 
     var updates: UpdateController?
@@ -393,6 +438,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         docPanel?.apply(panel: NSColor(hex: t.chrome.panel), ink: NSColor(hex: t.chrome.ink))
         host.tokens = t
         host.needsLayout = true
+        syncBootStatus()
         GhosttyRuntime.shared?.setColorScheme(theme.effective, theme: theme.terminal, surfaces: Array(registry.byTerminal.values))
     }
 
@@ -452,6 +498,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     func snapshotChanged() {
+        syncBootStatus()
         if let s = model.snapshot { NewPanes.shared.observe(source: "", paneIds: s.panes.map(\.pane_id)) }
         reportRestoreErrors()
         quickSwitch.reload()

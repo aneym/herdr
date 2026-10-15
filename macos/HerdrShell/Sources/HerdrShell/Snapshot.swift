@@ -38,6 +38,7 @@ struct Snapshot: Decodable {
     let tabs: [Tab]
     let panes: [Pane]
     let agents: [Agent]
+    var pending_agent_restores: Int? = nil
     let layouts: [Layout]
     let version: String?
     /// The server's wire protocol. Another machine whose protocol differs from the local

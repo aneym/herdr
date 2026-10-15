@@ -1676,6 +1676,24 @@
           "type": "integer",
           "default": "100",
           "description": "Milliseconds between automatic agent restores after a server restart. The first agent starts without this delay; 0 disables spacing. Does not delay manual launches or explicit terminal attaches. Restart the server to apply."
+        },
+        {
+          "key": "session.startup_max_booting_agents",
+          "type": "integer",
+          "default": "4",
+          "description": "Most restored agents booting at once after a server restart. Pinned tabs restore first, then the focused tab, then the rest. 0 removes the cap. Opening a pane still starts its agent at once. Restart the server to apply."
+        },
+        {
+          "key": "session.startup_agent_boot_ms",
+          "type": "integer",
+          "default": "20000",
+          "description": "Milliseconds a restored agent counts against session.startup_max_booting_agents. Restart the server to apply."
+        },
+        {
+          "key": "session.startup_load_per_core_limit",
+          "type": "float",
+          "default": "1.5",
+          "description": "Hold automatic restores of unpinned tabs while the one-minute load average per CPU core is above this. Pinned tabs and opened panes are not held. 0 turns the gate off. Restart the server to apply."
         }
       ]
     },
