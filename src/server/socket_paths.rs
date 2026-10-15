@@ -74,12 +74,82 @@ pub(crate) fn restrict_socket_permissions(path: &Path) -> io::Result<()> {
     crate::ipc::restrict_socket_permissions(path, SOCKET_PERMISSION_MODE)
 }
 
+#[cfg(unix)]
+pub(crate) fn server_instance_lock_path(api_socket: &Path) -> PathBuf {
+    let mut name = api_socket.as_os_str().to_owned();
+    name.push(".lock");
+    PathBuf::from(name)
+}
+
+#[cfg(unix)]
+pub(crate) fn take_server_instance_lock(
+    api_socket: &Path,
+    wait: bool,
+) -> io::Result<Option<std::fs::File>> {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let path = server_instance_lock_path(api_socket);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(SOCKET_PERMISSION_MODE)
+        .open(&path)?;
+    let flags = libc::LOCK_EX | if wait { 0 } else { libc::LOCK_NB };
+    loop {
+        if unsafe { libc::flock(file.as_raw_fd(), flags) } == 0 {
+            return Ok(Some(file));
+        }
+        let err = io::Error::last_os_error();
+        match err.raw_os_error() {
+            Some(libc::EINTR) => continue,
+            Some(libc::EWOULDBLOCK) => return Ok(None),
+            _ => return Err(err),
+        }
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::fs;
     use std::os::unix::net::UnixListener;
     use std::time::Duration;
+
+    #[test]
+    fn a_second_server_instance_cannot_take_the_lock_until_the_first_exits() {
+        let dir = std::env::temp_dir().join(format!(
+            "herdr-instance-lock-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let socket = dir.join("herdr.sock");
+        let first = take_server_instance_lock(&socket, false)
+            .unwrap()
+            .expect("first server takes the lock");
+        assert!(take_server_instance_lock(&socket, false).unwrap().is_none());
+        let waiter = {
+            let socket = socket.clone();
+            std::thread::spawn(move || take_server_instance_lock(&socket, true).unwrap().is_some())
+        };
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(!waiter.is_finished());
+        drop(first);
+        assert!(waiter.join().unwrap());
+        assert_eq!(
+            server_instance_lock_path(&socket),
+            dir.join("herdr.sock.lock")
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn client_socket_path_derived_from_api_socket_override() {

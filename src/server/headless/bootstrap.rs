@@ -23,8 +23,34 @@ pub fn run_server() -> io::Result<()> {
         let token = args
             .get(4)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing handoff token"))?;
+        #[cfg(unix)]
+        {
+            let api_socket = api::socket_path();
+            std::thread::spawn(move || {
+                if let Ok(Some(lock)) =
+                    crate::server::socket_paths::take_server_instance_lock(&api_socket, true)
+                {
+                    std::mem::forget(lock);
+                }
+            });
+        }
         return run_handoff_import_server(&socket_path, token);
     }
+
+    #[cfg(unix)]
+    let _instance_lock =
+        match crate::server::socket_paths::take_server_instance_lock(&api::socket_path(), false) {
+            Ok(Some(lock)) => Some(lock),
+            Ok(None) => {
+                eprintln!("error: herdr server is already running");
+                eprintln!("api socket: {}", api::socket_path().display());
+                std::process::exit(1);
+            }
+            Err(err) => {
+                warn!(%err, "could not take the server instance lock; continuing without it");
+                None
+            }
+        };
 
     let loaded_config = config::Config::load();
     let (api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
