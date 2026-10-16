@@ -12,14 +12,16 @@ struct SpacesInput: Codable {
         var agentName: String? = nil; var avatar: String? = nil; var hidden = false; var homeLocation: String? = nil
         /// Where the chat runs (herdr TabInfo.runs_on): "box", or a machine name such as "Studio".
         var runsOn: String? = nil
-        init(id: String, space: String, label: String, agents: [Agent] = [], focused: Bool = false, status: String = "unknown", pinIndex: Int? = nil, work: String? = nil, role: String? = nil, sortRank: UInt32 = 0, request: String? = nil, hidden: Bool = false, homeLocation: String? = nil, runsOn: String? = nil) { self.hidden = hidden; self.homeLocation = homeLocation; self.runsOn = runsOn; self.id = id; self.space = space; self.label = label; self.agents = agents; self.focused = focused; self.status = status; self.pinIndex = pinIndex; self.work = work; self.role = role; self.sortRank = sortRank; self.request = request }
+        var pinSection: String? = nil
+        init(id: String, space: String, label: String, agents: [Agent] = [], focused: Bool = false, status: String = "unknown", pinIndex: Int? = nil, work: String? = nil, role: String? = nil, sortRank: UInt32 = 0, request: String? = nil, hidden: Bool = false, homeLocation: String? = nil, runsOn: String? = nil, pinSection: String? = nil) { self.pinSection = pinSection; self.hidden = hidden; self.homeLocation = homeLocation; self.runsOn = runsOn; self.id = id; self.space = space; self.label = label; self.agents = agents; self.focused = focused; self.status = status; self.pinIndex = pinIndex; self.work = work; self.role = role; self.sortRank = sortRank; self.request = request }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: Field.self)
             id = try c.decode(String.self, forKey: Field("id")); space = try c.decode(String.self, forKey: Field("space")); label = try c.decode(String.self, forKey: Field("label"))
-            agents = c.value("agents", []); focused = c.value("focused", false); status = c.value("status", "unknown"); pinIndex = c.optional("pinIndex"); work = c.optional("work"); role = c.optional("role"); sortRank = c.value("sortRank", 0); request = c.optional("request"); hidden = c.value("hidden", false); homeLocation = c.optional("homeLocation"); runsOn = c.optional("runsOn")
+            agents = c.value("agents", []); focused = c.value("focused", false); status = c.value("status", "unknown"); pinIndex = c.optional("pinIndex"); work = c.optional("work"); role = c.optional("role"); sortRank = c.value("sortRank", 0); request = c.optional("request"); hidden = c.value("hidden", false); homeLocation = c.optional("homeLocation"); runsOn = c.optional("runsOn"); pinSection = c.optional("pinSection")
         }
     }
     var spaces: [Space]; var tabs: [Tab]; var focusedTab: String?
+    var pinSections: [String]? = nil
 }
 
 /// Overlay writers evolve independently of the shell. Missing fields use the Rust defaults.
@@ -159,6 +161,7 @@ struct SpacesRow: Identifiable, Equatable {
     enum Kind: String { case title, goal, space, section, group, tab, run, hidden, footerUsage, footerHost }
     var id: String; var kind: Kind; var depth = 0; var chevron = "none"; var glyph = ""; var tone = "mute"; var title: String; var trailing = ""
     var alert = "none"; var link: String?; var tab: String?; var toggleKey: String?; var dim = false
+    var pinGroup: String?
     /// The machine running this chat when it is not this one (MachineMerge); nil on local rows.
     var badge: String?
     /// nil while that machine is healthy; "unreachable" or "needs update" otherwise.
@@ -324,7 +327,16 @@ enum SpacesTree {
         }
         if !pins.isEmpty {
             out.append(SpacesRow(id: "pinned", kind: .section, title: "PINNED"))
-            out += pins.map { pinRow($0, prefix: "pinned:") }
+            let names = input.pinSections ?? []
+            out += pins.filter { $0.pinSection.map { !names.contains($0) } ?? true }.map { pinRow($0, prefix: "pinned:") }
+            for name in names {
+                let members = pins.filter { $0.pinSection == name }
+                guard !members.isEmpty else { continue }
+                let key = "pins:" + name
+                let closed = chrome.collapsedSections.contains(key)
+                out.append(SpacesRow(id: "pinsection:" + name, kind: .section, depth: 1, chevron: closed ? "closed" : "open", title: name.uppercased(), trailing: closed ? String(members.count) : "", toggleKey: "section:" + key))
+                if !closed { out += members.map { var row = pinRow($0, prefix: "pinned:"); row.depth = 1; row.pinGroup = name; return row } }
+            }
         }
         if !choices.isEmpty { out.append(SpacesRow(id: "goal", kind: .goal, title: "goal " + (filter?.replacingOccurrences(of: ":", with: " · ") ?? "All"), trailing: filter == nil ? "▾" : "✕")) }
         let hidden = input.spaces.filter { $0.collapsed || chrome.collapsedSpaces.contains($0.id) }

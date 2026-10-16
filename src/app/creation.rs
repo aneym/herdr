@@ -298,6 +298,12 @@ impl App {
                 .iter()
                 .find(|pin| pin.tab_id == tab_id)
                 .and_then(|pin| pin.role),
+            pin_section: self
+                .state
+                .pinned_tabs
+                .iter()
+                .find(|pin| pin.tab_id == tab_id)
+                .and_then(|pin| pin.section.clone()),
             work_status: Some(self.tab_work_status_for(ws_idx, tab_idx, &tab_id)),
             tab_id,
             workspace_id: self.public_workspace_id(ws_idx),

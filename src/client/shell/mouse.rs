@@ -3143,6 +3143,7 @@ impl ClientShellState {
                             tab_id,
                             pinned: !pinned,
                             priority: None,
+                            section: None,
                         },
                     ),
                     outcome,

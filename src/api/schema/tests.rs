@@ -923,6 +923,7 @@ fn session_snapshot_request_and_response_round_trip() {
                 layouts: Vec::new(),
                 agents: Vec::new(),
                 pending_agent_restores: 0,
+                pin_sections: Vec::new(),
             }),
         },
     };
@@ -982,6 +983,7 @@ fn worktree_request_and_response_round_trip() {
                 sort_rank: 0,
                 desk: None,
                 doc: None,
+                pin_section: None,
                 tab_id: "w_1:1".into(),
                 workspace_id: "w_1".into(),
                 number: 1,
@@ -1427,6 +1429,7 @@ fn create_response_round_trips_with_root_pane() {
                 sort_rank: 0,
                 desk: None,
                 doc: None,
+                pin_section: None,
                 tab_id: "w_1:2".into(),
                 workspace_id: "w_1".into(),
                 number: 2,

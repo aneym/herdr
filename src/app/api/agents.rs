@@ -701,18 +701,21 @@ mod tests {
                 tab_id: bound.clone(),
                 priority: 0,
                 role: Some(crate::api::schema::TabRole::Agent),
+                section: None,
             },
             crate::app::state::PinnedTab {
                 hidden: false,
                 tab_id: plain,
                 priority: 0,
                 role: None,
+                section: None,
             },
             crate::app::state::PinnedTab {
                 hidden: false,
                 tab_id: first.clone(),
                 priority: 0,
                 role: Some(crate::api::schema::TabRole::Agent),
+                section: None,
             },
         ];
         let pane = app.state.workspaces[0].tabs[1].root_pane;

@@ -7,6 +7,7 @@ mod env;
 mod integrations;
 mod layouts;
 mod panes;
+mod pin_sections;
 pub(crate) mod plugins;
 pub(super) mod responses;
 mod session;
@@ -1210,6 +1211,22 @@ impl App {
             Method::TabSetRole(params) => return self.handle_tab_set_role(request.id, params),
             Method::TabSetHidden(params) => return self.handle_tab_set_hidden(request.id, params),
             Method::TabPinMove(params) => return self.handle_tab_pin_move(request.id, params),
+            Method::TabSetPinSection(params) => {
+                return self.handle_tab_set_pin_section(request.id, params)
+            }
+            Method::PinSectionList(_) => return self.pin_sections_result(request.id),
+            Method::PinSectionCreate(params) => {
+                return self.handle_pin_section_create(request.id, params)
+            }
+            Method::PinSectionRename(params) => {
+                return self.handle_pin_section_rename(request.id, params)
+            }
+            Method::PinSectionDelete(params) => {
+                return self.handle_pin_section_delete(request.id, params)
+            }
+            Method::PinSectionMove(params) => {
+                return self.handle_pin_section_move(request.id, params)
+            }
             Method::TabClose(target) => return self.handle_tab_close(request.id, target),
             Method::AgentsList(_) => return self.handle_agents_list(request.id),
             Method::AgentList(_) => return self.handle_agent_list(request.id),

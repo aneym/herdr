@@ -897,6 +897,7 @@ async fn metadata_only_shell_can_pin_a_chat_without_taking_the_surface() {
                 tab_id: tab_id.clone(),
                 pinned: true,
                 priority: None,
+                section: None,
             }),
         }),
     });

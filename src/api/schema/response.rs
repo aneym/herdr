@@ -51,6 +51,10 @@ pub enum ResponseResult {
     DeskList {
         desks: Vec<super::desk::TabDesk>,
     },
+    PinSections {
+        sections: Vec<super::tabs::PinSectionInfo>,
+        unsectioned: Vec<String>,
+    },
     TabDoc {
         tab_id: String,
         workspace_id: String,

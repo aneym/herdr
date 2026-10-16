@@ -19,6 +19,7 @@ mod custom_commands;
 pub(crate) mod fuzzy;
 mod git_refresh;
 mod ids;
+mod pin_sections;
 mod polite_send;
 mod popup;
 mod priority;
@@ -412,6 +413,7 @@ fn restored_ui_prefs(snapshot: &crate::persist::SessionSnapshot) -> crate::persi
         tree_pinned_spaces: snapshot.tree_pinned_spaces.clone(),
         desks: snapshot.desks.clone(),
         pinned_tabs: snapshot.pinned_tabs.clone(),
+        pin_sections: snapshot.pin_sections.clone(),
         tree_show_hidden_spaces: snapshot.tree_show_hidden_spaces,
         hidden_spaces_expanded: snapshot.hidden_spaces_expanded,
         hidden_agents_expanded: snapshot.hidden_agents_expanded,
@@ -620,6 +622,7 @@ impl App {
         state.desks = ui_prefs.desks.clone();
         state.prune_desks();
         state.pinned_tabs = ui_prefs.pinned_tabs.clone();
+        state.pin_sections = ui_prefs.pin_sections.clone();
         state.prune_pinned_tabs();
         state.normalize_pin_roles();
         state.tree_show_hidden_spaces = ui_prefs.tree_show_hidden_spaces;
@@ -808,6 +811,7 @@ impl App {
         app.state.desks = snapshot.desks.clone();
         app.state.prune_desks();
         app.state.pinned_tabs = snapshot.pinned_tabs.clone();
+        app.state.pin_sections = snapshot.pin_sections.clone();
         app.state.prune_pinned_tabs();
         app.state.normalize_pin_roles();
         app.terminal_runtimes = runtimes.into();
@@ -1264,6 +1268,7 @@ mod tests {
                         tab_id: tab_id.clone(),
                         pinned: true,
                         priority,
+                        section: None,
                     },
                 ),
             });
@@ -1292,6 +1297,20 @@ mod tests {
             }))
             .unwrap(),
         );
+        for (method, params) in [
+            ("pin_section.create", serde_json::json!({ "name": "Later" })),
+            (
+                "tab.set_pin_section",
+                serde_json::json!({ "tab_id": tabs[0], "section": "Later" }),
+            ),
+        ] {
+            app.handle_api_request(
+                serde_json::from_value(
+                    serde_json::json!({ "id": "section", "method": method, "params": params }),
+                )
+                .unwrap(),
+            );
+        }
         let expected_doc = app.state.desks[&tabs[1]].clone();
         assert_eq!(expected_doc.doc.as_ref().unwrap().title, "Review");
         let expected_desk = app.state.desks[&tabs[0]].clone();
@@ -1351,6 +1370,11 @@ mod tests {
             crate::api::EventHub::default(),
         );
         assert_eq!(order(&restored), expected, "cold restore");
+        assert_eq!(restored.state.pin_sections, ["Later"]);
+        assert_eq!(
+            restored.state.pinned_tabs[2].section.as_deref(),
+            Some("Later")
+        );
         assert_eq!(restored.state.desks[&tabs[0]], expected_desk);
         assert_eq!(restored.state.desks[&tabs[1]], expected_doc);
         assert!(!restored.state.desks.contains_key(&closed_tab));
@@ -1370,6 +1394,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(order(&handed_off), expected, "live handoff");
+        assert_eq!(handed_off.state.pin_sections, ["Later"]);
+        assert_eq!(
+            handed_off.state.pinned_tabs[2].section.as_deref(),
+            Some("Later")
+        );
         assert_eq!(handed_off.state.desks[&tabs[0]], expected_desk);
         assert_eq!(handed_off.state.desks[&tabs[1]], expected_doc);
         assert!(!handed_off.state.desks.contains_key(&closed_tab));

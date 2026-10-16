@@ -264,7 +264,7 @@ struct SidebarView: View {
         return SpacesRowView(
             row: row, t: t, firstSpaceId: firstSpaceId,
             selected: row.tab == state.selectedTab,
-            focusMark: row.kind == .section && row.toggleKey != nil ? (state.spacesChrome.focusedSection[focusSpace] == row.title ? "✕" : "◎") : nil,
+            focusMark: row.kind == .section && row.toggleKey != nil && row.pinGroup == nil && !row.id.hasPrefix("pinsection:") ? (state.spacesChrome.focusedSection[focusSpace] == row.title ? "✕" : "◎") : nil,
             pinned: row.kind == .tab ? model.isPinned(row.tab ?? "") : row.kind == .space && state.spacesChrome.pinnedSpaces.contains(String(row.id.dropFirst(6))),
             hovered: hoveredSpaceRow == row.id,
             showResume: hoveredSpaceRow == row.id && row.kind == .tab && row.tab.map { model.spacesOverlay.tabs[$0]?.mode == "parked" } == true,

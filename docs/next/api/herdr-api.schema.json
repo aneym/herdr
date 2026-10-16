@@ -1273,6 +1273,13 @@
                 "null"
               ]
             },
+            "pin_section": {
+              "description": "The named section inside Pinned this pin sits in; absent when unsectioned.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "role": {
               "anyOf": [
                 {
@@ -4155,6 +4162,66 @@
           },
           "type": "object"
         },
+        "PinSectionCreateParams": {
+          "properties": {
+            "after": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "type": "object"
+        },
+        "PinSectionMoveParams": {
+          "properties": {
+            "index": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "index"
+          ],
+          "type": "object"
+        },
+        "PinSectionRenameParams": {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "new_name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "new_name"
+          ],
+          "type": "object"
+        },
+        "PinSectionTarget": {
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "type": "object"
+        },
         "PingParams": {
           "type": "object"
         },
@@ -5226,6 +5293,24 @@
           ],
           "type": "object"
         },
+        "TabSetPinSectionParams": {
+          "properties": {
+            "section": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tab_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "tab_id"
+          ],
+          "type": "object"
+        },
         "TabSetPinnedParams": {
           "description": "Pin or unpin a chat in the sidebar's pinned section. `priority` sets where\nit lands in pin order (higher first); omitted keeps/appends at the end.",
           "properties": {
@@ -5236,6 +5321,12 @@
               "format": "int64",
               "type": [
                 "integer",
+                "null"
+              ]
+            },
+            "section": {
+              "type": [
+                "string",
                 "null"
               ]
             },
@@ -6488,6 +6579,102 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/TabPinMoveParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "tab.set_pin_section",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/TabSetPinSectionParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "pin_section.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "pin_section.create",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PinSectionCreateParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "pin_section.rename",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PinSectionRenameParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "pin_section.delete",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PinSectionTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "pin_section.move",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PinSectionMoveParams"
             }
           },
           "required": [
@@ -10738,6 +10925,24 @@
           ],
           "type": "object"
         },
+        "PinSectionInfo": {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "tab_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "name",
+            "tab_ids"
+          ],
+          "type": "object"
+        },
         "PinnedAgentInfo": {
           "description": "A pinned agent tab, with its runtime binding when present.",
           "properties": {
@@ -11423,6 +11628,32 @@
               "required": [
                 "type",
                 "desks"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "sections": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/PinSectionInfo"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "pin_sections",
+                  "type": "string"
+                },
+                "unsectioned": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "type",
+                "sections",
+                "unsectioned"
               ],
               "type": "object"
             },
@@ -13093,6 +13324,13 @@
               "minimum": 0,
               "type": "integer"
             },
+            "pin_sections": {
+              "description": "Named sections inside Pinned, in order; each pinned tab names its own in `TabInfo.pin_section`.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
             "protocol": {
               "format": "uint32",
               "minimum": 0,
@@ -13251,6 +13489,13 @@
               "minimum": 0,
               "type": [
                 "integer",
+                "null"
+              ]
+            },
+            "pin_section": {
+              "description": "The named section inside Pinned this pin sits in; absent when unsectioned.",
+              "type": [
+                "string",
                 "null"
               ]
             },

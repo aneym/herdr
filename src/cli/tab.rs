@@ -31,6 +31,7 @@ pub(super) fn run_tab_command(args: &[String]) -> std::io::Result<i32> {
         "show" | "unhide" => tab_set_hidden(&args[1..], false),
         "set-role" => tab_set_role(&args[1..]),
         "pin-move" => tab_pin_move(&args[1..]),
+        "pin-section" => tab_pin_section(&args[1..]),
         "doc" => super::tab_doc::run_tab_doc_command(&args[1..]),
         "close" => tab_close(&args[1..]),
         "help" | "--help" | "-h" => {
@@ -358,10 +359,11 @@ fn tab_move(args: &[String]) -> std::io::Result<i32> {
 
 fn tab_pin(args: &[String]) -> std::io::Result<i32> {
     let Some(raw_tab_id) = args.first() else {
-        eprintln!("usage: herdr tab pin <tab_id> [--priority N]");
+        eprintln!("usage: herdr tab pin <tab_id> [--priority N] [--section NAME]");
         return Ok(2);
     };
     let mut priority = None;
+    let mut section = None;
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
@@ -379,6 +381,14 @@ fn tab_pin(args: &[String]) -> std::io::Result<i32> {
                 }
                 index += 2;
             }
+            "--section" => {
+                let Some(value) = args.get(index + 1) else {
+                    eprintln!("missing value for --section");
+                    return Ok(2);
+                };
+                section = Some(value.clone());
+                index += 2;
+            }
             other => {
                 eprintln!("unknown option: {other}");
                 return Ok(2);
@@ -390,6 +400,7 @@ fn tab_pin(args: &[String]) -> std::io::Result<i32> {
         tab_id: super::normalize_tab_id(raw_tab_id),
         pinned: true,
         priority,
+        section,
     })
 }
 
@@ -407,6 +418,7 @@ fn tab_unpin(args: &[String]) -> std::io::Result<i32> {
         tab_id: super::normalize_tab_id(raw_tab_id),
         pinned: false,
         priority: None,
+        section: None,
     })
 }
 
@@ -434,6 +446,20 @@ fn tab_pin_move(args: &[String]) -> std::io::Result<i32> {
         tab_id: super::normalize_tab_id(raw_tab_id),
         pin_index,
     })
+}
+
+fn tab_pin_section(args: &[String]) -> std::io::Result<i32> {
+    let [raw_tab_id, name] = args else {
+        eprintln!("usage: herdr tab pin-section <tab_id> <section|none>");
+        return Ok(2);
+    };
+    super::runtime::print_method(
+        "cli:tab:set_pin_section",
+        Method::TabSetPinSection(crate::api::schema::TabSetPinSectionParams {
+            tab_id: super::normalize_tab_id(raw_tab_id),
+            section: (name != "none").then(|| name.clone()),
+        }),
+    )
 }
 
 fn tab_close(args: &[String]) -> std::io::Result<i32> {

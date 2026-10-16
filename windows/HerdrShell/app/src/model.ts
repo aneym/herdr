@@ -3,7 +3,7 @@ import type { PendingOrders } from "./pinDrag";
 import { cardsByTab, faceFor } from "./faces";
 import type { AgentCard, Face } from "./faces";
 export interface Workspace { workspace_id: string; number: number; sort_rank?: number; parked?: boolean; label?: string; focused?: boolean; active_tab_id?: string; work_status?: string; agent_status?: string; tokens?: { pinned?: string; hidden?: string } }
-export interface Tab { tab_id: string; workspace_id: string; number: number; label?: string; custom_label?: boolean; focused?: boolean; pane_count?: number; work_status?: string; agent_status?: string; pin_index?: number; role?: string; sort_rank?: number; hidden?: boolean; home_location?: "cloud" | "local" | "unsynced"; runs_on?: string; doc?: TabDoc }
+export interface Tab { tab_id: string; workspace_id: string; number: number; label?: string; custom_label?: boolean; focused?: boolean; pane_count?: number; work_status?: string; agent_status?: string; pin_index?: number; role?: string; sort_rank?: number; hidden?: boolean; home_location?: "cloud" | "local" | "unsynced"; runs_on?: string; doc?: TabDoc; pin_section?: string }
 export interface TabDoc { url: string; title: string }
 export interface Pane { restore_error?: string; pane_id: string; terminal_id: string; workspace_id: string; tab_id: string; focused?: boolean; agent?: string; agent_status?: string; title?: string; terminal_title_stripped?: string; cwd?: string; foreground_cwd?: string; label?: string; tokens?: Record<string, string> }
 /** Mac PaneCapName: the TUI border's order (agent title, manual label, agent kind), then the terminal's own title and its working folder, so a plain shell still names itself. */
@@ -14,8 +14,8 @@ export function paneName(pane: Pane, agent?: { agent?: string }): string {
 export interface Rect { x: number; y: number; width: number; height: number }
 export interface Layout { tab_id: string; area: Rect; panes: { pane_id: string; rect: Rect }[]; splits?: { id: string; direction: string; ratio: number; rect: Rect }[]; zoomed?: boolean; focused_pane_id?: string }
 export interface TabPulse { line: string; drifting?: boolean }
-export interface Snapshot { overlay?: { tabs?: Record<string, { pulse?: TabPulse }> }; workspaces?: Workspace[]; tabs?: Tab[]; panes?: Pane[]; agents?: { terminal_id: string; pane_id: string; tab_id: string; workspace_id: string; agent: string; agent_status: string; work_status?: string }[]; layouts?: Layout[] }
-export interface SidebarRow { kind: "agent" | "pinned" | "space" | "tab"; id: string; label: string; status: string; hotkey: number | null; section: string; spaceLabel?: string; spaceId?: string; hidden?: boolean; parked?: boolean; pinned?: boolean; face?: Face; request?: string; home?: Tab["home_location"]; runsOn?: string; machine?: string; machineHealth?: string | null; doc?: TabDoc }
+export interface Snapshot { pin_sections?: string[]; overlay?: { tabs?: Record<string, { pulse?: TabPulse }> }; workspaces?: Workspace[]; tabs?: Tab[]; panes?: Pane[]; agents?: { terminal_id: string; pane_id: string; tab_id: string; workspace_id: string; agent: string; agent_status: string; work_status?: string }[]; layouts?: Layout[] }
+export interface SidebarRow { kind: "agent" | "pinned" | "space" | "tab"; id: string; label: string; status: string; hotkey: number | null; section: string; spaceLabel?: string; spaceId?: string; hidden?: boolean; parked?: boolean; pinned?: boolean; face?: Face; request?: string; home?: Tab["home_location"]; runsOn?: string; machine?: string; machineHealth?: string | null; doc?: TabDoc; pinGroup?: string }
 export const tabStatus = (snapshot: Snapshot, tab: Tab): string => tab.work_status ?? snapshot.agents?.find(agent => agent.tab_id === tab.tab_id)?.agent_status ?? tab.agent_status ?? "unknown";
 export const statusRank = (status: string) => ({ blocked: 3, working: 2, done: 1 }[status] ?? 0);
 export function buildSidebar(snapshot: Snapshot, pending: PendingOrders = {}, now = Date.now(), cards: Record<string, AgentCard> = {}): SidebarRow[] {
@@ -40,7 +40,8 @@ export function buildSidebar(snapshot: Snapshot, pending: PendingOrders = {}, no
     const request = snapshot.panes?.filter(p => p.tab_id === t.tab_id).map(p => p.tokens?.request).find(r => r != null);
     rows.push({ ...item, hidden: !!t.hidden, home: t.home_location, ...(t.runs_on ? { runsOn: t.runs_on } : {}), face: faceFor(card?.name ?? item.label, card?.avatar), ...(request != null ? { request } : {}) });
   });
-  pinned(tabs.filter(t => t.role !== "agent" && t.pin_index != null), "pinned").forEach(t => rows.push(row(t, "pinned", "PINNED")));
+  const groups = snapshot.pin_sections ?? [];
+  pinned(tabs.filter(t => t.role !== "agent" && t.pin_index != null), "pinned").forEach(t => rows.push({ ...row(t, "pinned", "PINNED"), ...(t.pin_section && groups.includes(t.pin_section) ? { pinGroup: t.pin_section } : {}) }));
   for (const space of spaces.filter(s => s.tokens?.hidden !== "true").concat(spaces.filter(s => s.tokens?.hidden === "true"))) {
     const children = tabs.filter(t => t.workspace_id === space.workspace_id);
     const status = children.map(t => tabStatus(snapshot, t)).sort((a, b) => statusRank(b) - statusRank(a))[0] ?? "idle";

@@ -1,0 +1,11 @@
+[PASS] CLI: pin-section create orders sections with --after
+[PASS] CLI: pin-section list prints unsectioned pins, then each section's tabs
+[PASS] the server's pin order follows the sections (Cmd+1..9 match the drawn order)
+[PASS] pin-move stays inside the tab's section
+[PASS] Shell draws unsectioned pins first, then each named section in order with its pins
+[PASS] light Shell window shot written
+[PASS] a section header folds its pins and shows their count
+[PASS] the fold is remembered across a restart
+[PASS] rename and move reach the Shell from the server
+[PASS] deleting a section keeps its tabs pinned, unsectioned
+10 passed; 0 failed

@@ -44,7 +44,7 @@ final class PinDrag: ObservableObject {
         if dragged == nil {
             guard Self.section(of: row.id) != nil, let tab = row.tab else { return }
             let machine = Self.machine(of: tab)
-            block = rows.filter { Self.section(of: $0.id) == Self.section(of: row.id) && Self.machine(of: $0.tab ?? "") == machine }
+            block = rows.filter { Self.section(of: $0.id) == Self.section(of: row.id) && $0.pinGroup == row.pinGroup && Self.machine(of: $0.tab ?? "") == machine }
                 .compactMap { r in frames[r.id].map { (r.id, $0) } }
             guard block.count > 1, block.contains(where: { $0.id == row.id }) else { block = []; return }
             dragged = row.id
@@ -110,12 +110,13 @@ final class PinDrag: ObservableObject {
               let moving = source.tabs.first(where: { $0.tab_id == tab }),
               let destination = source.tabs.first(where: { $0.tab_id == ids[to] }),
               ids.allSatisfy({ Self.machine(of: $0) == Self.machine(of: tab) }),
-              (moving.role == "agent") == (destination.role == "agent") else { return }
-        let section = moving.role == "agent" ? "agents" : "pinned"
+              (moving.role == "agent") == (destination.role == "agent"),
+              moving.pin_section == destination.pin_section else { return }
+        let section = moving.role == "agent" ? "agents" : "pinned" + (moving.pin_section.map { "|" + $0 } ?? "")
         let key = Self.key(machine: Self.machine(of: tab), section: section)
         // Snapshot indices name the visible section's slots, even for a pending permutation.
         // Hidden agents retain their server slots but are not visual drop destinations.
-        let slots = source.tabs.filter { ($0.role == "agent") == (moving.role == "agent") && !(moving.role == "agent" && ($0.hidden ?? false)) }.compactMap(\.pin_index).sorted()
+        let slots = source.tabs.filter { ($0.role == "agent") == (moving.role == "agent") && $0.pin_section == moving.pin_section && !(moving.role == "agent" && ($0.hidden ?? false)) }.compactMap(\.pin_index).sorted()
         guard slots.indices.contains(to) else { return }
         let pinIndex = slots[to]
         var order = ids
@@ -152,8 +153,9 @@ final class PinDrag: ObservableObject {
     func reorder(_ rows: [SpacesRow]) -> [SpacesRow] {
         guard !pending.isEmpty else { return rows }
         var out = rows
-        for section in ["agents", "pinned"] {
-            let slots = rows.indices.filter { Self.section(of: rows[$0].id) == section }
+        for (section, group) in [("agents", nil)] + Set(rows.filter { Self.section(of: $0.id) == "pinned" }.map(\.pinGroup)).map({ ("pinned", $0) }) {
+            let slots = rows.indices.filter { Self.section(of: rows[$0].id) == section && rows[$0].pinGroup == group }
+            let section = section + (group.map { "|" + $0 } ?? "")
             for machine in Set(slots.map { Self.machine(of: rows[$0].tab ?? "") }) {
                 let mine = slots.filter { Self.machine(of: rows[$0].tab ?? "") == machine }
                 let ids = mine.compactMap { rows[$0].tab }
@@ -221,7 +223,7 @@ private struct PinDragRow: ViewModifier {
     /// when it moves down, nowhere for the pin's own slot.
     private var insertion: Edge? {
         guard let dragged = drag.dragged, let target = drag.target, dragged != row.id else { return nil }
-        let block = rows.filter { PinDrag.section(of: $0.id) == PinDrag.section(of: row.id) && PinDrag.machine(of: $0.tab ?? "") == PinDrag.machine(of: row.tab ?? "") }
+        let block = rows.filter { PinDrag.section(of: $0.id) == PinDrag.section(of: row.id) && $0.pinGroup == row.pinGroup && PinDrag.machine(of: $0.tab ?? "") == PinDrag.machine(of: row.tab ?? "") }
         guard let from = block.firstIndex(where: { $0.id == dragged }),
               let mine = block.firstIndex(where: { $0.id == row.id }), mine == target, target != from else { return nil }
         return target < from ? .above : .below

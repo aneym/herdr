@@ -94,6 +94,8 @@ pub struct TabSetPinnedParams {
     pub pinned: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub section: Option<String>,
 }
 
 /// Move a pinned chat to `pin_index` in the shared pin order (0 is the top,
@@ -146,6 +148,46 @@ pub struct TabInfo {
     pub role: Option<TabRole>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hidden: bool,
+    /// The named section inside Pinned this pin sits in; absent when unsectioned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin_section: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PinSectionCreateParams {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PinSectionRenameParams {
+    pub name: String,
+    pub new_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PinSectionTarget {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PinSectionMoveParams {
+    pub name: String,
+    pub index: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TabSetPinSectionParams {
+    pub tab_id: String,
+    #[serde(default)]
+    pub section: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PinSectionInfo {
+    pub name: String,
+    pub tab_ids: Vec<String>,
 }
 
 /// Classify strict role decoding errors consistently at both JSON front doors.

@@ -80,6 +80,7 @@ export function useSidebarNavigation(snapshot: Snapshot, catalog: LaneSnapshot, 
   } };
 }
 export type SidebarNavigation = ReturnType<typeof useSidebarNavigation>;
+const pinBlock = (row: SidebarRow) => row.kind + (row.pinGroup ? `|${row.pinGroup}` : "");
 export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneSnapshot(), remotes = [], selectRemote, overlay = emptyOverlay(), hosts = [], rows: localRows, selected, revealed, machine, notice, select, pin, movePin, renaming, startRename, cancelRename, commitRename, paneDropRow, openDetail }: { openDetail?: (id: string) => void; navigation?: SidebarNavigation; paneDropRow?: string | null; snapshot?: Snapshot; catalog?: LaneSnapshot; remotes?: RemoteMachine[]; selectRemote?: (machine: string, tab: string) => void; overlay?: SpacesOverlay; hosts?: OverlayHost[]; rows: SidebarRow[]; selected: string | null; revealed: RevealMemo; machine: MachineStatus; notice: string | null; select: (id: string) => void; pin: (id: string, pinned: boolean) => void; movePin: (ids: string[], from: number, to: number) => void; renaming: string | null; startRename: (id: string) => void; cancelRename: () => void; commitRename: (id: string, label: string) => Promise<void> }) {
   // Other machines' chats join the one tree with a badge (the Mac's MachineMerge); no machine chips.
   const rows = useMemo(() => mergeMachineRows(localRows, remotes), [localRows, remotes]);
@@ -179,9 +180,10 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
     if (event.button !== 0 || (row.kind !== "agent" && row.kind !== "pinned") || row.hidden || row.machine || renaming === row.id) return;
     press.current?.done();
     const section = row.kind;
-    const sectionRows = () => [...nav.current?.querySelectorAll<HTMLElement>(`[data-pin-section="${section}"]`) ?? []];
+    const block = pinBlock(row);
+    const sectionRows = () => [...nav.current?.querySelectorAll<HTMLElement>("[data-pin-section]") ?? []].filter(el => el.dataset.pinSection === block);
     const elements = sectionRows();
-    const block = elements.map(el => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right }; });
+    const boxes = elements.map(el => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right }; });
     const ids = elements.map(el => el.dataset.tab ?? "");
     const move = (e: PointerEvent) => {
       const p = press.current;
@@ -222,7 +224,7 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
       if (press.current?.done === done) press.current = null;
       setDrag(null);
     };
-    press.current = { id: row.id, section, x: event.clientX, y: event.clientY, ids, block, active: false, cancelled: false, done };
+    press.current = { id: row.id, section, x: event.clientX, y: event.clientY, ids, block: boxes, active: false, cancelled: false, done };
     window.addEventListener("pointermove", move, true);
     window.addEventListener("pointerup", up, true);
     window.addEventListener("pointercancel", done, true);
@@ -231,12 +233,13 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
   const dragStyle = (row: SidebarRow): { className: string; style?: CSSProperties } => {
     if (!drag || drag.section !== row.kind) return { className: "" };
     if (drag.id === row.id) return { className: "pin-dragged", style: { transform: `translateY(${drag.travel}px)` } };
-    const block = rows.filter(r => r.kind === drag.section && !r.hidden && !r.machine).map(r => r.id);
+    const group = rows.find(r => r.kind === drag.section && r.id === drag.id)?.pinGroup;
+    const block = rows.filter(r => r.kind === drag.section && r.pinGroup === group && !r.hidden && !r.machine).map(r => r.id);
     const from = block.indexOf(drag.id), mine = block.indexOf(row.id);
     if (drag.target === null || mine !== drag.target || drag.target === from) return { className: "" };
     return { className: drag.target < from ? "drop-above" : "drop-below" };
   };
-  const tabRow = (row: SidebarRow, fold?: { open: boolean; count: number; toggle: () => void }) => { const dragged = dragStyle(row); const pinRow = !row.hidden && !row.machine && (row.kind === "agent" || row.kind === "pinned"); const remote = splitRemote(row.id); return <div key={`${row.kind}:${row.id}`} data-row={`${row.kind}:${row.id}`} data-pin-section={pinRow ? row.kind : undefined} data-tab={row.id} style={dragged.style} onPointerDown={pinRow ? event => startPress(event, row) : undefined} onClickCapture={event => { if (swallowClick.current) { event.stopPropagation(); event.preventDefault(); } }} className={`sidebar-row tab-row ${row.kind === "tab" ? "indented" : ""} ${selected === row.id ? "selected" : ""} ${dragged.className} ${paneDropRow === `tab:${row.id}` ? "pane-drop-fill" : ""}`}>
+  const tabRow = (row: SidebarRow, fold?: { open: boolean; count: number; toggle: () => void }) => { const dragged = dragStyle(row); const pinRow = !row.hidden && !row.machine && (row.kind === "agent" || row.kind === "pinned"); const remote = splitRemote(row.id); return <div key={`${row.kind}:${row.id}`} data-row={`${row.kind}:${row.id}`} data-pin-section={pinRow ? pinBlock(row) : undefined} data-tab={row.id} style={dragged.style} onPointerDown={pinRow ? event => startPress(event, row) : undefined} onClickCapture={event => { if (swallowClick.current) { event.stopPropagation(); event.preventDefault(); } }} className={`sidebar-row tab-row ${row.kind === "tab" || row.pinGroup ? "indented" : ""} ${selected === row.id ? "selected" : ""} ${dragged.className} ${paneDropRow === `tab:${row.id}` ? "pane-drop-fill" : ""}`}>
     {renaming === row.id && rows.find(r => r.kind !== "space" && r.id === row.id) === row ? <RenameInput key={row.id} label={row.label} commit={label => commitRename(row.id, label)} cancel={cancelRename} /> : <>{fold && <button className="chevron" aria-label={`Fold ${row.label}`} aria-expanded={fold.open} onClick={fold.toggle}><Chevron open={fold.open} /></button>}<button className="select-tab" onContextMenu={event => { if (row.machine && row.kind !== "agent") { event.preventDefault(); return; } menuReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; event.preventDefault(); setMenuError(null); setMenu({ row, x: event.clientX, y: event.clientY }); }} onClick={() => remote && row.machine ? selectRemote?.(row.machine, remote[1]) : select(row.id)} onDoubleClick={() => { if (!row.machine) startRename(row.id); }}>{row.face ? <AgentFace face={row.face} status={row.status} request={row.request} /> : <Status solid status={row.status} />}<span className="label">{row.label}</span>{row.kind !== "agent" && row.machine && <MachineBadge row={row} />}{row.kind === "pinned" && <span className="muted space-label">{row.spaceLabel}</span>}{fold && <span className="muted space-label">{fold.count} workflow{fold.count === 1 ? "" : "s"}</span>}{row.kind === "agent" && runsOnLabel(row) && <span className="muted runs-on" title={`Runs on ${runsOnLabel(row)}`}>{runsOnLabel(row)}</span>}{row.kind === "agent" && row.home && ["cloud", "local", "unsynced"].includes(row.home) && <span className={`home-glyph ${row.home === "unsynced" ? "warn" : "muted"}`} title={homeTitles[row.home]} aria-label={homeTitles[row.home]}>{homeGlyphs[row.home]}</span>}{row.kind === "agent" && row.machine && <MachineBadge row={row} />}</button></>}
     {row.doc && <button className={`doc-link ${row.pinned ? "is-on" : ""}`} aria-label={`Open review doc ${row.doc.title}`} title={`Open ${row.doc.title}`} onClick={() => { void bridge.openUrl(row.doc!.url).catch(error => setMenuError(String(error))); }}><DocGlyph /></button>}
     <button className={`pin ${row.pinned ? "is-pinned" : ""}`} aria-label={row.pinned ? "Unpin tab" : "Pin tab"} onClick={() => { if (remote && row.machine) void bridge.api(row.machine, "tab.set_pinned", { tab_id: remote[1], pinned: !row.pinned }).catch(error => setMenuError(String(error))); else pin(row.id, !row.pinned); }}>⚲</button>
@@ -307,6 +310,19 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
       </div>;
     });
   };
+  const pinnedBody = (items: SidebarRow[]) => {
+    const names = [...new Set(items.flatMap(r => r.pinGroup ? [r.pinGroup] : []))];
+    return [...items.filter(r => !r.hidden && !r.pinGroup).map(r => tabRow(r)), ...names.map(name => {
+      const key = `pins:${name}`, open = sectionFolds[key] ?? true, members = items.filter(r => !r.hidden && r.pinGroup === name);
+      return <div key={key} className="pin-group">
+        <div className="sidebar-row space-section" data-row={key} aria-expanded={open} onClick={() => foldSection(key, !open)}>
+          <button className="chevron" aria-label={`Fold ${name}`} aria-expanded={open} onClick={event => { event.stopPropagation(); foldSection(key, !open); }}><Chevron open={open} /></button>
+          <span className="label">{name.toUpperCase()}</span>{!open && <span className="space-section-count">{members.length}</span>}
+        </div>
+        {open && members.map(r => tabRow(r))}
+      </div>;
+    })];
+  };
   const collapseSpacesButton = <button className="spaces-fold-all" aria-label={anySpaceExpanded ? "Collapse all spaces" : "Expand all spaces"} title={anySpaceExpanded ? "Collapse all spaces" : "Expand all spaces"} onClick={toggleAllSpaces}><svg width="12" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={anySpaceExpanded ? "m8 4 4 4 4-4M12 2v6m-4 12 4-4 4 4M12 16v6M4 12h16" : "m8 6 4-4 4 4M12 2v6m-4 10 4 4 4-4M12 16v6M4 12h16"} /></svg></button>;
   return <aside className={`sidebar ${drag ? "pin-dragging" : ""}`}><div className="areas-mode" aria-label="Sidebar mode">{(["areas", "spaces"] as const).map(value => <button key={value} aria-pressed={mode === value} onClick={() => changeMode(value)}>{value === "areas" ? "Areas" : "Spaces"}</button>)}{mode === "spaces" && rows.some(row => row.kind === "space") && !choices.length && collapseSpacesButton}</div><nav ref={nav}>
     {mode === "areas" ? <>
@@ -330,7 +346,7 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
         </button>
       </div>)}
     </> : <>
-    {["AGENTS", "PINNED"].map(section => { const items = rows.filter(r => r.section === section); return items.length || (section === "PINNED" && snapshot.workspaces?.length) ? <section key={section}><h2 className="sidebar-section-title"><span>{section}</span>{section === "PINNED" && <button className="sidebar-plus" aria-label="New pinned tab" disabled={creating} onClick={() => void createTab(snapshot.tabs?.find(tab => tab.tab_id === selected)?.workspace_id ?? snapshot.workspaces?.[0]?.workspace_id, true)}><Plus /></button>}</h2>{items.filter(r => !r.hidden).map(r => tabRow(r))}{section === "AGENTS" && items.some(r => r.hidden) && <>
+    {["AGENTS", "PINNED"].map(section => { const items = rows.filter(r => r.section === section); return items.length || (section === "PINNED" && snapshot.workspaces?.length) ? <section key={section}><h2 className="sidebar-section-title"><span>{section}</span>{section === "PINNED" && <button className="sidebar-plus" aria-label="New pinned tab" disabled={creating} onClick={() => void createTab(snapshot.tabs?.find(tab => tab.tab_id === selected)?.workspace_id ?? snapshot.workspaces?.[0]?.workspace_id, true)}><Plus /></button>}</h2>{section === "PINNED" ? pinnedBody(items) : items.filter(r => !r.hidden).map(r => tabRow(r))}{section === "AGENTS" && items.some(r => r.hidden) && <>
       <button data-row="hiddenagents" className="sidebar-row muted hidden-agents" aria-expanded={hiddenAgents} onClick={() => { setHiddenAgents(!hiddenAgents); save("hiddenAgents", !hiddenAgents); }}><span>Hidden</span><span>{items.filter(r => r.hidden).length}</span>{!hiddenAgents && items.some(r => r.hidden && (r.status === "blocked" || r.request != null)) && <span className="hidden-agents-dot" data-dot="accent" />}<span className="chevron"><Chevron open={hiddenAgents} /></span></button>
       {hiddenAgents && items.filter(r => r.hidden).map(r => tabRow(r))}
     </>}</section> : null; })}

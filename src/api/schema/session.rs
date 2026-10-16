@@ -22,6 +22,9 @@ pub struct SessionSnapshot {
     pub agents: Vec<AgentInfo>,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub pending_agent_restores: u32,
+    /// Named sections inside Pinned, in order; each pinned tab names its own in `TabInfo.pin_section`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pin_sections: Vec<String>,
 }
 
 fn is_zero(value: &u32) -> bool {

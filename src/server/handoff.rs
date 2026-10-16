@@ -664,6 +664,7 @@ mod tests {
             tree_pinned_spaces: Default::default(),
             desks: Default::default(),
             pinned_tabs: Vec::new(),
+            pin_sections: Vec::new(),
             tree_show_hidden_spaces: false,
             hidden_spaces_expanded: false,
             hidden_agents_expanded: false,

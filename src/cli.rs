@@ -33,6 +33,7 @@ mod integration;
 mod machine;
 mod notification;
 mod pane;
+mod pin_section;
 mod plugin;
 mod protocol_guard;
 mod runtime;
@@ -128,6 +129,7 @@ pub fn maybe_run(args: &[String]) -> std::io::Result<CommandOutcome> {
         "workspace" => workspace::run_workspace_command(&args[2..])?,
         "worktree" => worktree::run_worktree_command(&args[2..])?,
         "tab" => tab::run_tab_command(&args[2..])?,
+        "pin-section" => pin_section::run_pin_section_command(&args[2..])?,
         "desk" => desk::run_desk_command(&args[2..])?,
         "notification" => notification::run_notification_command(&args[2..])?,
         "agent" => agent::run_agent_command(&args[2..])?,
