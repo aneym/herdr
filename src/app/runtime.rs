@@ -178,6 +178,7 @@ impl App {
             self.polite_send_deadline(now),
             self.config_diagnostic_deadline,
             self.toast_deadline,
+            self.pane_appearance_deadline,
             self.state.scrollbar_reveal_deadline(),
             self.state.next_pending_agent_notification_deadline(),
             self.state.next_managed_agent_deadline(),

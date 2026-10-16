@@ -137,6 +137,7 @@ pub struct App {
     pub(crate) policy: AppPolicy,
     pub(crate) config_diagnostic_deadline: Option<Instant>,
     pub(crate) toast_deadline: Option<Instant>,
+    pub(crate) pane_appearance_deadline: Option<Instant>,
     /// Last user-scroll epoch folded into the pane scrollbar reveal state.
     pub(crate) scrollbar_scroll_epoch: u64,
     pub(crate) last_api_notification_at: Option<Instant>,
@@ -699,6 +700,7 @@ impl App {
             usage_sampler: usage::UsageSampler::default(),
             config_diagnostic_deadline: None,
             toast_deadline: None,
+            pane_appearance_deadline: None,
             scrollbar_scroll_epoch: crate::terminal::user_scroll_epoch(),
             last_api_notification_at: None,
             state,

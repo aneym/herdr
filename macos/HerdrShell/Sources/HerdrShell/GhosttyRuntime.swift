@@ -31,6 +31,7 @@ final class GhosttyRuntime {
     /// Configs handed to libghostty on a live mode change stay alive for the process.
     private var liveConfigs: [ghostty_config_t] = []
     private var appliedTheme: String?
+    var currentConfig: ghostty_config_t { liveConfigs.last ?? config }
 
     init(configText: String) {
         self.configText = configText
@@ -68,12 +69,10 @@ final class GhosttyRuntime {
     /// Push the effective mode to the app and every live surface, so the theme pair
     /// (dark:X,light:Y) resolves to the same side as the chrome.
     func setColorScheme(_ mode: Mode, theme: TerminalTheme, surfaces: [SurfaceView]) {
-        // libghostty only re-resolves `theme = dark:X,light:Y` on a config update, so a
-        // live switch hands it the same config with the mode's single theme pinned.
-        let name = mode == .dark ? theme.dark : theme.light
-        if appliedTheme != name {
-            appliedTheme = name
-            let cfg = GhosttyRuntime.makeConfig(configText + "\ntheme = \(name)\n")
+        let pair = "light:\(theme.light),dark:\(theme.dark)"
+        if appliedTheme != pair {
+            appliedTheme = pair
+            let cfg = GhosttyRuntime.makeConfig(configText + "\ntheme = \(pair)\n")
             liveConfigs.append(cfg)
             ghostty_app_update_config(app, cfg)
             for v in surfaces { if let sf = v.surface { ghostty_surface_update_config(sf, cfg) } }
@@ -93,6 +92,22 @@ final class GhosttyRuntime {
            let ud = ghostty_surface_userdata(target.target.surface) {
             let view = Unmanaged<SurfaceView>.fromOpaque(ud).takeUnretainedValue()
             DispatchQueue.main.async { view.processExited() }
+            return true
+        }
+        if action.tag == GHOSTTY_ACTION_RELOAD_CONFIG, target.tag == GHOSTTY_TARGET_APP {
+            DispatchQueue.main.async {
+                guard let runtime = GhosttyRuntime.shared else { return }
+                ghostty_app_update_config(runtime.app, runtime.currentConfig)
+            }
+            return true
+        }
+        if action.tag == GHOSTTY_ACTION_RELOAD_CONFIG, target.tag == GHOSTTY_TARGET_SURFACE,
+           let ud = ghostty_surface_userdata(target.target.surface) {
+            let view = Unmanaged<SurfaceView>.fromOpaque(ud).takeUnretainedValue()
+            DispatchQueue.main.async { [weak view] in
+                guard let runtime = GhosttyRuntime.shared, let sf = view?.surface else { return }
+                ghostty_surface_update_config(sf, runtime.currentConfig)
+            }
             return true
         }
         // Claim these so libghostty's own opener does not run (it would open a browser

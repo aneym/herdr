@@ -1,4 +1,8 @@
+use std::time::{Duration, Instant};
+
 use super::App;
+
+const PANE_APPEARANCE_COLOR_WAIT: Duration = Duration::from_millis(1500);
 
 impl App {
     pub(crate) fn set_host_terminal_appearance_state(
@@ -13,7 +17,12 @@ impl App {
         }
         self.state.host_terminal_appearance = appearance;
         self.state.host_terminal_appearance_explicit = explicit;
-        self.apply_host_terminal_appearance_to_panes();
+        if self.host_colors_lag_appearance() {
+            self.pane_appearance_deadline = Some(Instant::now() + PANE_APPEARANCE_COLOR_WAIT);
+        } else {
+            self.pane_appearance_deadline = None;
+            self.apply_host_terminal_appearance_to_panes();
+        }
         self.refresh_effective_app_theme()
     }
 
@@ -27,7 +36,30 @@ impl App {
         self.state.host_terminal_theme = theme;
         self.state.refresh_scrollbar_ramp();
         self.apply_host_terminal_theme_to_panes();
+        if self.pane_appearance_deadline.take().is_some() {
+            self.apply_host_terminal_appearance_to_panes();
+        }
         true
+    }
+
+    pub(crate) fn flush_due_pane_appearance(&mut self, now: Instant) {
+        if self
+            .pane_appearance_deadline
+            .is_some_and(|deadline| now >= deadline)
+        {
+            self.pane_appearance_deadline = None;
+            self.apply_host_terminal_appearance_to_panes();
+        }
+    }
+
+    fn host_colors_lag_appearance(&self) -> bool {
+        let (Some(appearance), Some(background)) = (
+            self.state.host_terminal_appearance,
+            self.state.host_terminal_theme.background,
+        ) else {
+            return false;
+        };
+        background.inferred_appearance() != appearance
     }
 
     pub(super) fn refresh_effective_app_theme(&mut self) -> bool {

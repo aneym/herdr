@@ -3471,6 +3471,7 @@ impl HeadlessServer {
         }
 
         changed |= self.app.tick_scrollbar_reveal(now);
+        self.app.flush_due_pane_appearance(now);
 
         if self
             .app
