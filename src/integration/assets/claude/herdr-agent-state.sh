@@ -3,7 +3,7 @@
 # managed by herdr; reinstalling or updating the integration overwrites this file.
 # add custom hooks beside this file instead of editing it.
 # HERDR_INTEGRATION_ID=claude
-# HERDR_INTEGRATION_VERSION=10
+# HERDR_INTEGRATION_VERSION=11
 
 set -eu
 
@@ -27,6 +27,7 @@ import json
 import os
 import random
 import socket
+import subprocess
 import time
 
 source = "herdr:claude"
@@ -55,6 +56,46 @@ if hook_event_name != "SessionStart":
     raise SystemExit(0)
 is_subagent = bool(hook_input.get("agent_id"))
 if is_subagent:
+    raise SystemExit(0)
+if os.environ.get("CLAUDE_CODE_ENTRYPOINT", "").startswith("sdk"):
+    raise SystemExit(0)
+
+
+def parent_and_name(pid):
+    try:
+        output = subprocess.run(
+            ["ps", "-o", "ppid=,comm=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=1,
+        ).stdout.strip()
+        ppid_text, name = output.split(None, 1)
+        return int(ppid_text), os.path.basename(name.strip())
+    except Exception:
+        return None
+
+
+def nested_in_claude():
+    pid = os.getppid()
+    claude_processes = 0
+    for _ in range(64):
+        if pid <= 1:
+            return False
+        info = parent_and_name(pid)
+        if info is None:
+            return False
+        ppid, name = info
+        if name == "herdr":
+            return False
+        if name == "claude":
+            claude_processes += 1
+            if claude_processes > 1:
+                return True
+        pid = ppid
+    return False
+
+
+if nested_in_claude():
     raise SystemExit(0)
 request_id = f"{source}:{int(time.time() * 1000)}:{random.randrange(1_000_000):06d}"
 report_seq = time.time_ns()

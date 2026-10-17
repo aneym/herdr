@@ -1132,7 +1132,7 @@ fn claude_v9_integration_status_is_outdated_until_reinstalled() {
 
     assert_eq!(claude.path, hook_path);
     assert_eq!(claude.installed_version, Some(9));
-    assert_eq!(claude.expected_version, 10);
+    assert_eq!(claude.expected_version, CLAUDE_INTEGRATION_VERSION);
     assert_eq!(claude.state, IntegrationStatusKind::Outdated);
 
     install_claude().unwrap();
@@ -1141,10 +1141,107 @@ fn claude_v9_integration_status_is_outdated_until_reinstalled() {
         hook_path,
         CLAUDE_INTEGRATION_VERSION,
     );
-    assert_eq!(status.installed_version, Some(10));
+    assert_eq!(status.installed_version, Some(CLAUDE_INTEGRATION_VERSION));
     assert_eq!(status.state, IntegrationStatusKind::Current);
 
     std::env::remove_var("HOME");
+    let _ = fs::remove_dir_all(base);
+}
+
+#[cfg(unix)]
+fn run_claude_session_hook(
+    base: &std::path::Path,
+    wrappers: &[&std::path::Path],
+    entrypoint: &str,
+) -> Option<Value> {
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixListener;
+    use std::process::{Command, Stdio};
+
+    let hook_path = base.join("herdr-agent-state.sh");
+    fs::write(&hook_path, CLAUDE_HOOK_ASSET).unwrap();
+    let socket_path = std::path::PathBuf::from(format!(
+        "/tmp/hcs-{}-{}.sock",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let listener = UnixListener::bind(&socket_path).unwrap();
+    listener.set_nonblocking(true).unwrap();
+
+    let mut command_line = format!("sh '{}' session; true\n", hook_path.display());
+    for (index, wrapper) in wrappers.iter().enumerate().rev() {
+        let level_script = base.join(format!("level-{index}.sh"));
+        fs::write(&level_script, &command_line).unwrap();
+        command_line = format!(
+            "'{}' '{}'; true\n",
+            wrapper.display(),
+            level_script.display()
+        );
+    }
+    let mut child = Command::new("sh")
+        .arg("-c")
+        .arg(&command_line)
+        .env("HERDR_ENV", "1")
+        .env("HERDR_PANE_ID", "w1:p2")
+        .env("HERDR_SOCKET_PATH", &socket_path)
+        .env("CLAUDE_CODE_ENTRYPOINT", entrypoint)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(
+            br#"{"session_id":"child-session","transcript_path":"/tmp/child.jsonl","hook_event_name":"SessionStart","source":"startup"}"#,
+        )
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+
+    let request = listener.accept().ok().map(|(mut stream, _)| {
+        stream.set_nonblocking(false).unwrap();
+        let mut buffer = Vec::new();
+        stream.read_to_end(&mut buffer).unwrap();
+        serde_json::from_slice::<Value>(buffer.trim_ascii()).unwrap()
+    });
+    let _ = fs::remove_file(&socket_path);
+    request
+}
+
+#[cfg(unix)]
+#[test]
+fn claude_hook_reports_top_level_session_and_ignores_child_sessions() {
+    let base = unique_base();
+    fs::create_dir_all(&base).unwrap();
+    let pane_server = base.join("server").join("herdr");
+    let outer = base.join("outer").join("claude");
+    let inner = base.join("inner").join("claude");
+    for path in [&pane_server, &outer, &inner] {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink("/bin/sh", path).unwrap();
+    }
+
+    let top_level = run_claude_session_hook(&base, &[&pane_server, &outer], "cli").unwrap();
+    assert_eq!(top_level["method"], "pane.report_agent_session");
+    assert_eq!(top_level["params"]["pane_id"], "w1:p2");
+    assert_eq!(top_level["params"]["agent_session_id"], "child-session");
+
+    let under_claude_started_server =
+        run_claude_session_hook(&base, &[&outer, &pane_server, &inner], "cli").unwrap();
+    assert_eq!(
+        under_claude_started_server["params"]["agent_session_id"],
+        "child-session"
+    );
+
+    assert!(run_claude_session_hook(&base, &[&pane_server, &outer], "sdk-cli").is_none());
+    assert!(run_claude_session_hook(&base, &[&pane_server, &outer, &inner], "cli").is_none());
+
     let _ = fs::remove_dir_all(base);
 }
 
@@ -1171,7 +1268,7 @@ fn claude_v2_integration_status_is_outdated() {
 
     assert_eq!(claude.path, hook_path);
     assert_eq!(claude.installed_version, Some(2));
-    assert_eq!(claude.expected_version, 10);
+    assert_eq!(claude.expected_version, CLAUDE_INTEGRATION_VERSION);
     assert_eq!(claude.state, IntegrationStatusKind::Outdated);
 
     std::env::remove_var("HOME");
