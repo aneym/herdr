@@ -10,6 +10,23 @@ pub(crate) fn has_queued_sends() -> bool {
     QUEUED_SENDS.load(Ordering::SeqCst) != 0
 }
 
+fn subtract_queued_sends(count: usize) {
+    let _ = QUEUED_SENDS.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |queued| {
+        Some(queued.saturating_sub(count))
+    });
+}
+
+struct RetainAccounting<'a> {
+    queue: &'a mut VecDeque<HeldSend>,
+    before: usize,
+}
+
+impl Drop for RetainAccounting<'_> {
+    fn drop(&mut self) {
+        subtract_queued_sends(self.before.saturating_sub(self.queue.len()));
+    }
+}
+
 #[derive(Default)]
 pub(super) struct PoliteQueue(VecDeque<HeldSend>);
 
@@ -22,7 +39,7 @@ impl PoliteQueue {
     pub(super) fn pop_front(&mut self) -> Option<HeldSend> {
         let item = self.0.pop_front();
         if item.is_some() {
-            QUEUED_SENDS.fetch_sub(1, Ordering::SeqCst);
+            subtract_queued_sends(1);
         }
         item
     }
@@ -30,19 +47,18 @@ impl PoliteQueue {
     pub(super) fn remove(&mut self, index: usize) -> Option<HeldSend> {
         let item = self.0.remove(index);
         if item.is_some() {
-            QUEUED_SENDS.fetch_sub(1, Ordering::SeqCst);
+            subtract_queued_sends(1);
         }
         item
     }
 
-    pub(super) fn retain(&mut self, mut keep: impl FnMut(&HeldSend) -> bool) {
-        self.0.retain(|item| {
-            let retained = keep(item);
-            if !retained {
-                QUEUED_SENDS.fetch_sub(1, Ordering::SeqCst);
-            }
-            retained
-        });
+    pub(super) fn retain(&mut self, keep: impl FnMut(&HeldSend) -> bool) {
+        let before = self.0.len();
+        let accounting = RetainAccounting {
+            queue: &mut self.0,
+            before,
+        };
+        accounting.queue.retain(keep);
     }
 }
 
@@ -56,6 +72,6 @@ impl Deref for PoliteQueue {
 
 impl Drop for PoliteQueue {
     fn drop(&mut self) {
-        QUEUED_SENDS.fetch_sub(self.0.len(), Ordering::SeqCst);
+        subtract_queued_sends(self.0.len());
     }
 }
