@@ -120,7 +120,7 @@ impl App {
                 if self.state.pin_sections != before {
                     self.journal_pin_event(
                         "section_move",
-                        None,
+                        params.source.as_deref(),
                         serde_json::json!({"name": params.name.trim()}),
                     );
                 }

@@ -3,6 +3,13 @@ use crate::api::schema::{
     PinSectionTarget, Request,
 };
 
+pub(super) fn pin_source() -> String {
+    std::env::var("HERDR_PIN_SOURCE")
+        .ok()
+        .filter(|source| !source.is_empty())
+        .unwrap_or_else(|| "cli".into())
+}
+
 pub(super) fn build_method(action: &str, matches: &clap::ArgMatches) -> Result<Method, String> {
     let value = |name: &str| matches.get_one::<String>(name).cloned();
     let name = || value("name").ok_or_else(|| "missing section name".to_owned());
@@ -13,15 +20,16 @@ pub(super) fn build_method(action: &str, matches: &clap::ArgMatches) -> Result<M
             after: value("after"),
         }),
         "rename" => Method::PinSectionRename(PinSectionRenameParams {
-            source: Some("cli".into()),
+            source: Some(pin_source()),
             name: name()?,
             new_name: value("new_name").ok_or("missing new name")?,
         }),
         "delete" => Method::PinSectionDelete(PinSectionTarget {
-            source: Some("cli".into()),
+            source: Some(pin_source()),
             name: name()?,
         }),
         "move" => Method::PinSectionMove(PinSectionMoveParams {
+            source: Some(pin_source()),
             name: name()?,
             index: value("index")
                 .and_then(|raw| raw.parse().ok())
@@ -152,6 +160,7 @@ mod tests {
         assert_eq!(
             method(&["move", "Later", "--index", "0"]),
             Ok(Method::PinSectionMove(PinSectionMoveParams {
+                source: Some("cli".into()),
                 name: "Later".into(),
                 index: 0,
             }))

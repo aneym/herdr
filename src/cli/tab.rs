@@ -397,7 +397,7 @@ fn tab_pin(args: &[String]) -> std::io::Result<i32> {
     }
 
     super::runtime::tab_set_pinned(TabSetPinnedParams {
-        source: Some("cli".into()),
+        source: Some(super::pin_section::pin_source()),
         tab_id: super::normalize_tab_id(raw_tab_id),
         pinned: true,
         priority,
@@ -416,7 +416,7 @@ fn tab_unpin(args: &[String]) -> std::io::Result<i32> {
     }
 
     super::runtime::tab_set_pinned(TabSetPinnedParams {
-        source: Some("cli".into()),
+        source: Some(super::pin_section::pin_source()),
         tab_id: super::normalize_tab_id(raw_tab_id),
         pinned: false,
         priority: None,
@@ -445,7 +445,7 @@ fn tab_pin_move(args: &[String]) -> std::io::Result<i32> {
         return Ok(2);
     };
     super::runtime::tab_pin_move(TabPinMoveParams {
-        source: Some("cli".into()),
+        source: Some(super::pin_section::pin_source()),
         tab_id: super::normalize_tab_id(raw_tab_id),
         pin_index,
     })
@@ -459,7 +459,7 @@ fn tab_pin_section(args: &[String]) -> std::io::Result<i32> {
     super::runtime::print_method(
         "cli:tab:set_pin_section",
         Method::TabSetPinSection(crate::api::schema::TabSetPinSectionParams {
-            source: Some("cli".into()),
+            source: Some(super::pin_section::pin_source()),
             tab_id: super::normalize_tab_id(raw_tab_id),
             section: (name != "none").then(|| name.clone()),
         }),

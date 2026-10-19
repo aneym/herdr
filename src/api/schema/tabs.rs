@@ -181,6 +181,8 @@ pub struct PinSectionTarget {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PinSectionMoveParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     pub name: String,
     pub index: usize,
 }
