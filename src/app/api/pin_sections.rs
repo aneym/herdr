@@ -114,8 +114,16 @@ impl App {
         id: String,
         params: PinSectionMoveParams,
     ) -> String {
+        let before = self.state.pin_sections.clone();
         match self.state.move_pin_section(&params.name, params.index) {
             Ok(_) => {
+                if self.state.pin_sections != before {
+                    self.journal_pin_event(
+                        "section_move",
+                        None,
+                        serde_json::json!({"name": params.name.trim()}),
+                    );
+                }
                 self.pin_sections_changed(None);
                 self.pin_sections_result(id)
             }

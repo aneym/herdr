@@ -278,6 +278,7 @@ impl App {
             }
             if let Some(section) = params.section.as_deref() {
                 if let Err(error) = self.state.set_pin_section(&tab_id, Some(section)) {
+                    self.state.pinned_tabs = before;
                     return encode_error(id, error.code(), error.message());
                 }
             }
