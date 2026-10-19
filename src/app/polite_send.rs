@@ -102,6 +102,9 @@ impl App {
     }
 
     pub(crate) fn polite_send_deadline(&self, now: Instant) -> Option<Instant> {
+        if !crate::terminal::polite_send::has_queued_sends() {
+            return None;
+        }
         self.terminal_runtimes
             .values()
             .any(|runtime| runtime.has_polite_queue())
@@ -109,6 +112,9 @@ impl App {
     }
 
     pub(crate) fn flush_polite_sends(&self, now: Instant) {
+        if !crate::terminal::polite_send::has_queued_sends() {
+            return;
+        }
         for (ws_idx, ws) in self.state.workspaces.iter().enumerate() {
             for (pane_id, terminal_id) in ws
                 .tabs

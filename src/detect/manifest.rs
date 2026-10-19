@@ -1,3 +1,7 @@
+mod matching;
+
+use matching::{RegionMatcher, rule_evidence};
+
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex, OnceLock, RwLock},
@@ -436,6 +440,7 @@ fn evaluate_loaded_manifest(
 ) -> DetectionExplain {
     let mut matched: Option<(&ManifestRule, String)> = None;
     let mut evaluated_rules = Vec::new();
+    let mut matcher = RegionMatcher::default();
 
     for (rule, compiled_rule) in loaded
         .manifest
@@ -444,7 +449,7 @@ fn evaluate_loaded_manifest(
         .zip(loaded.compiled_rules.iter())
     {
         let region_text = region(input, &rule.region);
-        let matched_rule = compiled_rule_matches(compiled_rule, region_text);
+        let matched_rule = matcher.matches(compiled_rule, region_text);
         evaluated_rules.push(EvaluatedRule {
             id: rule.id.clone(),
             priority: rule.priority,
@@ -1201,80 +1206,9 @@ fn compile_gate(gate: &ManifestGate) -> Result<CompiledGate, String> {
     })
 }
 
+#[cfg(test)]
 fn compiled_rule_matches(rule: &CompiledRule, text: &str) -> bool {
-    let lower_text = text.to_lowercase();
-    compiled_gate_matches(&rule.gate, text, &lower_text)
-}
-
-fn rule_evidence(rule: &ManifestRule, region_text: &str) -> RuleEvidence {
-    RuleEvidence {
-        contains: rule.contains.clone(),
-        regex: rule.regex.clone(),
-        line_regex: rule.line_regex.clone(),
-        all_count: rule.all.len(),
-        any_count: rule.any.len(),
-        not_count: rule.not_gate.len(),
-        region_bytes: region_text.len(),
-        region_preview: bounded_preview(region_text),
-    }
-}
-
-fn bounded_preview(text: &str) -> String {
-    const MAX_CHARS: usize = 240;
-    let mut preview: String = text.chars().take(MAX_CHARS).collect();
-    if text.chars().count() > MAX_CHARS {
-        preview.push_str("...");
-    }
-    preview
-}
-
-fn compiled_gate_matches(gate: &CompiledGate, text: &str, lower_text: &str) -> bool {
-    if !gate
-        .contains
-        .iter()
-        .all(|needle| lower_text.contains(needle))
-    {
-        return false;
-    }
-
-    if !gate.regex.iter().all(|regex| regex.is_match(text)) {
-        return false;
-    }
-
-    if !gate
-        .line_regex
-        .iter()
-        .all(|regex| text.lines().any(|line| regex.is_match(line)))
-    {
-        return false;
-    }
-
-    if !gate
-        .all
-        .iter()
-        .all(|nested| compiled_gate_matches(nested, text, lower_text))
-    {
-        return false;
-    }
-
-    if !gate.any.is_empty()
-        && !gate
-            .any
-            .iter()
-            .any(|nested| compiled_gate_matches(nested, text, lower_text))
-    {
-        return false;
-    }
-
-    if gate
-        .not_gate
-        .iter()
-        .any(|nested| compiled_gate_matches(nested, text, lower_text))
-    {
-        return false;
-    }
-
-    true
+    RegionMatcher::default().matches(rule, text)
 }
 
 fn region<'a>(input: DetectionInput<'a>, spec: &str) -> &'a str {

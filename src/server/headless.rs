@@ -802,8 +802,7 @@ impl HeadlessServer {
             self.app.state.outer_terminal_focus = None;
             self.app.state.host_cell_size = crate::kitty_graphics::HostCellSize::default();
             self.sync_runtime_view_geometry();
-            let server_keybindings = self.server_keybindings.clone();
-            apply_keybindings(&mut self.app, &server_keybindings);
+            apply_keybindings(&mut self.app, &self.server_keybindings);
             self.sync_visible_server_config_diagnostic(false);
             return;
         };
@@ -813,8 +812,7 @@ impl HeadlessServer {
             self.app.state.outer_terminal_focus = None;
             self.app.state.host_cell_size = crate::kitty_graphics::HostCellSize::default();
             self.sync_runtime_view_geometry();
-            let server_keybindings = self.server_keybindings.clone();
-            apply_keybindings(&mut self.app, &server_keybindings);
+            apply_keybindings(&mut self.app, &self.server_keybindings);
             self.sync_visible_server_config_diagnostic(false);
             return;
         };
@@ -832,8 +830,7 @@ impl HeadlessServer {
         self.sync_runtime_view_geometry();
         self.app.state.outer_terminal_focus = outer_terminal_focus;
         self.app.state.host_cell_size = host_cell_size;
-        let server_keybindings = self.server_keybindings.clone();
-        apply_keybindings(&mut self.app, &server_keybindings);
+        apply_keybindings(&mut self.app, &self.server_keybindings);
         self.sync_visible_server_config_diagnostic(false);
         if outer_terminal_focus == Some(true) {
             self.app.state.read_focused_attention();
@@ -872,8 +869,7 @@ impl HeadlessServer {
     }
 
     fn reload_server_config(&mut self, notify_success: bool) -> crate::config::ConfigReloadReport {
-        let server_keybindings = self.server_keybindings.clone();
-        apply_keybindings(&mut self.app, &server_keybindings);
+        apply_keybindings(&mut self.app, &self.server_keybindings);
         let report = self.app.apply_config_from_disk(notify_success);
         self.app.take_config_reloaded_from_disk();
         self.server_keybindings = app_keybindings(&self.app);

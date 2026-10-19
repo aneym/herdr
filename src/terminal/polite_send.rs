@@ -1,4 +1,8 @@
+mod queue;
+
 use std::collections::VecDeque;
+
+pub(crate) use queue::has_queued_sends;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -264,7 +268,7 @@ pub(super) struct PoliteSend {
     inherited_at: Option<Instant>,
     /// An agent.prompt handoff owns the composer until human input or another send.
     agent_prompt_composer: bool,
-    queue: VecDeque<HeldSend>,
+    queue: queue::PoliteQueue,
     raw_pending: Vec<u8>,
     raw_paste: bool,
 }
@@ -315,7 +319,7 @@ impl Default for PoliteSend {
             composer_observed: true,
             inherited_at: None,
             agent_prompt_composer: false,
-            queue: VecDeque::new(),
+            queue: queue::PoliteQueue::default(),
             raw_pending: Vec::new(),
             raw_paste: false,
         }
@@ -441,8 +445,6 @@ impl TerminalRuntime {
         }
     }
 
-    /// Remove a held send before it reaches the writer. False when it is not
-    /// held here (already handed to the writer, delivered, or elsewhere).
     pub(crate) fn cancel_polite_send(&self, id: &str) -> bool {
         let mut state = self.1.lock();
         let Some(index) = state.queue.iter().position(|item| item.id == id) else {
@@ -1065,7 +1067,7 @@ impl TerminalRuntime {
 
 impl Drop for PoliteSend {
     fn drop(&mut self) {
-        for item in &self.queue {
+        for item in self.queue.iter() {
             transition(&item.id, PaneSendState::Dropped, Some("pane_closed"));
             tracing::info!(pane_id = ?item.pane_id, method = item.method, bytes = item.payload.len(), "polite send dropped");
         }
