@@ -196,6 +196,7 @@ pub(crate) struct GhosttyPaneCore {
     pub dirty_collection_hook: Option<Box<dyn FnOnce() + Send>>,
     pub terminal: crate::ghostty::Terminal,
     synchronized_output_epoch: u64,
+    view_generation: u64,
     #[cfg(windows)]
     recent_fallback: windows_recent_fallback::Cache,
     pub render_state: crate::ghostty::RenderState,
@@ -221,6 +222,14 @@ pub(crate) struct PaneTerminal {
 }
 
 impl PaneTerminal {
+    pub(crate) fn view_generation(&self) -> Option<u64> {
+        self.ghostty
+            .core
+            .lock()
+            .ok()
+            .map(|core| core.view_generation)
+    }
+
     pub(crate) fn new(ghostty: GhosttyPaneTerminal) -> Self {
         Self { ghostty }
     }
@@ -1177,6 +1186,7 @@ impl GhosttyPaneTerminal {
                 dirty_collection_hook: None,
                 terminal,
                 synchronized_output_epoch: 0,
+                view_generation: 0,
                 #[cfg(windows)]
                 recent_fallback: windows_recent_fallback::Cache::default(),
                 render_state,
@@ -1211,6 +1221,7 @@ impl GhosttyPaneTerminal {
         if let Ok(mut core) = self.core.lock() {
             let foreground_unowned = !core.child_default_foreground_changed;
             let background_unowned = !core.child_default_background_changed;
+            core.view_generation = core.view_generation.wrapping_add(1);
             core.host_terminal_theme = theme;
             if foreground_unowned && background_unowned {
                 core.transient_default_color_owner_pgid = None;
@@ -1292,13 +1303,17 @@ impl GhosttyPaneTerminal {
             .active_screen()
             .map(|screen| screen == crate::ghostty::ActiveScreen::Alternate)
             .unwrap_or(false);
-        restore_host_terminal_theme_if_needed(
+        let restored = restore_host_terminal_theme_if_needed(
             &mut core,
             pane_id,
             shell_pid,
             alternate_screen,
             foreground_job.as_ref(),
-        )
+        );
+        if restored {
+            core.view_generation = core.view_generation.wrapping_add(1);
+        }
+        restored
     }
 
     pub fn terminal_title(&self) -> Option<String> {

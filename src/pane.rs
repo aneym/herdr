@@ -3231,6 +3231,13 @@ impl PaneRuntime {
         (rows, cols)
     }
 
+    pub(crate) fn attach_view_identity(&self) -> (usize, Option<u64>) {
+        (
+            Arc::as_ptr(&self.terminal) as usize,
+            self.terminal.view_generation(),
+        )
+    }
+
     pub(crate) fn content_seq(&self) -> u64 {
         self.content_seq.load(Ordering::Acquire)
     }

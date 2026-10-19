@@ -672,6 +672,8 @@ impl HeadlessServer {
                 }
             }
             let mut surface_parts = None;
+            let mut attach_view = None;
+            let mut attach_theme_changed = false;
             let frame = match mode {
                 ClientConnectionMode::ClientShell => {
                     let crate::server::client_shell::RenderedPaneSurface {
@@ -726,6 +728,26 @@ impl HeadlessServer {
                         }
                         continue;
                     }
+                    let key = crate::server::attach_view::AttachViewKey::capture(
+                        &terminal_id,
+                        runtime,
+                        area,
+                        epoch,
+                    );
+                    if key.stable()
+                        && self
+                            .clients
+                            .get(&client_id)
+                            .is_some_and(|client| client.render_state.attach_view() == Some(&key))
+                    {
+                        continue;
+                    }
+                    attach_theme_changed = self.clients.get(&client_id).is_some_and(|client| {
+                        client
+                            .render_state
+                            .attach_view()
+                            .is_some_and(|previous| key.theme_changed(previous))
+                    });
                     let render_started = crate::render_prof::timer();
                     let (buffer, cursor) =
                         crate::server::render_stream::render_terminal_virtual(runtime, area);
@@ -748,6 +770,16 @@ impl HeadlessServer {
                             self.app.render_dirty.request_generic();
                         }
                         continue;
+                    }
+                    if key
+                        == crate::server::attach_view::AttachViewKey::capture(
+                            &terminal_id,
+                            runtime,
+                            area,
+                            after_epoch,
+                        )
+                    {
+                        attach_view = Some(key);
                     }
                     let frame_started = crate::render_prof::timer();
                     let frame = FrameData::from_ratatui_buffer_with_hyperlinks(
@@ -788,6 +820,9 @@ impl HeadlessServer {
                         || !graphics.placements.is_empty()
                         || !graphics.retained_assets.is_empty()
                 });
+            if attach_theme_changed {
+                client.render_state.request_repaint();
+            }
             let mut next_shell_graphics_delivery = None;
             let surface_prepare_started = crate::render_prof::timer();
             let prepared =
@@ -814,6 +849,9 @@ impl HeadlessServer {
                 surface_prepare_started,
             );
             let Some(mut prepared) = prepared else {
+                if let Some(key) = attach_view {
+                    client.render_state.set_attach_view(key);
+                }
                 client.clear_deferred_render();
                 crate::render_prof::event("full_render.skip_identical");
                 continue;
@@ -933,6 +971,9 @@ impl HeadlessServer {
                         client.shell_graphics_delivery = delivery;
                     }
                     client.render_state.commit_sent_frame(prepared);
+                    if let Some(key) = attach_view {
+                        client.render_state.set_attach_view(key);
+                    }
                     if shell_graphics_pending || shell_assets_deferred {
                         client.defer_full_render();
                     } else {

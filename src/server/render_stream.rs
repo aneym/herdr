@@ -26,10 +26,30 @@ pub(crate) enum ClientRenderState {
         blit_encoder: BlitEncoder,
         seq: u64,
         repaint_pending: bool,
+        attach_view: Option<crate::server::attach_view::AttachViewKey>,
     },
 }
 
 impl ClientRenderState {
+    pub(crate) fn attach_view(&self) -> Option<&crate::server::attach_view::AttachViewKey> {
+        match self {
+            Self::TerminalAnsi { attach_view, .. } => attach_view.as_ref(),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn set_attach_view(&mut self, key: crate::server::attach_view::AttachViewKey) {
+        if let Self::TerminalAnsi { attach_view, .. } = self {
+            *attach_view = key.stable().then_some(key);
+        }
+    }
+
+    fn clear_attach_view(&mut self) {
+        if let Self::TerminalAnsi { attach_view, .. } = self {
+            *attach_view = None;
+        }
+    }
+
     pub(crate) fn new(render_encoding: RenderEncoding) -> Self {
         match render_encoding {
             RenderEncoding::SemanticFrame => Self::Semantic {
@@ -43,6 +63,7 @@ impl ClientRenderState {
                 blit_encoder: BlitEncoder::new(),
                 seq: 0,
                 repaint_pending: false,
+                attach_view: None,
             },
         }
     }
@@ -60,6 +81,7 @@ impl ClientRenderState {
     }
 
     pub(crate) fn request_recompute(&mut self) {
+        self.clear_attach_view();
         if let Self::Semantic {
             surface_delta: true,
             recompute_pending,
@@ -83,6 +105,7 @@ impl ClientRenderState {
     }
 
     pub(crate) fn reset_baseline(&mut self) {
+        self.clear_attach_view();
         match self {
             Self::Semantic { last_surface, .. } => *last_surface = None,
             Self::TerminalAnsi {
@@ -97,6 +120,7 @@ impl ClientRenderState {
     }
 
     pub(crate) fn request_repaint(&mut self) {
+        self.clear_attach_view();
         match self {
             Self::Semantic { last_surface, .. } => *last_surface = None,
             Self::TerminalAnsi {
@@ -112,6 +136,7 @@ impl ClientRenderState {
                 blit_encoder,
                 seq,
                 repaint_pending,
+                ..
             } => {
                 if !*repaint_pending && blit_encoder.is_current(&frame) {
                     crate::render_prof::event("prepare_frame.ansi.skip_current");
@@ -299,6 +324,7 @@ impl ClientRenderState {
                     blit_encoder,
                     seq,
                     repaint_pending,
+                    ..
                 },
                 PreparedRender::TerminalAnsi {
                     frame,

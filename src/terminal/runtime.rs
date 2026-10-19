@@ -657,6 +657,10 @@ impl TerminalRuntime {
         self.0.current_size()
     }
 
+    pub(crate) fn attach_view_identity(&self) -> (usize, Option<u64>) {
+        self.0.attach_view_identity()
+    }
+
     pub(crate) fn content_seq(&self) -> u64 {
         self.0.content_seq()
     }

@@ -1,4 +1,5 @@
 mod alt_screen_read;
+pub(crate) mod attach_view;
 pub mod autodetect;
 #[cfg(unix)]
 pub(crate) mod client_accept;

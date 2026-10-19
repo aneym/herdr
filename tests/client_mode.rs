@@ -302,6 +302,95 @@ fn client_connects_and_receives_pane_surface() {
 }
 
 #[test]
+fn attach_idle_scroll_and_host_palette_deliver_correct_frames() {
+    let _lock = test_lock();
+    let base = unique_test_dir();
+    let config_home = base.join("config");
+    let runtime_dir = base.join("runtime");
+    let api_socket = runtime_dir.join("herdr.sock");
+    let client_socket = runtime_dir.join("herdr-client.sock");
+    let server = spawn_server_with_config(
+        &config_home,
+        &runtime_dir,
+        &api_socket,
+        &client_socket,
+        "onboarding = false\n[ui]\nmouse_capture = true\n",
+    );
+    wait_for_socket(&api_socket, Duration::from_secs(10));
+    wait_for_socket(&client_socket, Duration::from_secs(10));
+    let created = send_json_request(
+        &api_socket,
+        &serde_json::json!({
+            "id": "attach-view", "method": "workspace.create", "params": {"cwd": base}
+        })
+        .to_string(),
+    );
+    let pane_id = created["result"]["root_pane"]["pane_id"].as_str().unwrap();
+    let terminal_id = created["result"]["root_pane"]["terminal_id"]
+        .as_str()
+        .unwrap();
+    let attach = spawn_client_process_with_args(
+        &config_home,
+        &runtime_dir,
+        &api_socket,
+        &["terminal", "attach", terminal_id],
+    );
+    let master = attach._master.as_ref().unwrap();
+    let output = spawn_pty_drain(master.try_clone_reader().unwrap());
+    let mut writer = master.take_writer().unwrap();
+    assert!(wait_until(
+        Duration::from_secs(10),
+        Duration::from_millis(20),
+        || { read_output(&output).contains("\x1b[?2026l") }
+    ));
+    writer
+        .write_all(b"\x05\x1b[?997;1n\x1b]11;rgb:1111/2222/3333\x07")
+        .unwrap();
+    send_pane_shell_command(&api_socket, pane_id,
+        "stty -echo; i=0; while [ $i -lt 100 ]; do printf '\\033[7mATTACH_ROW_%03d\\033[0m\\n' $i; i=$((i+1)); done; printf 'ATTACH_READY\\n'; sleep 60");
+    assert!(
+        wait_until(Duration::from_secs(10), Duration::from_millis(20), || {
+            read_output(&output).contains("ATTACH_READY")
+        }),
+        "{}",
+        read_output(&output)
+    );
+    thread::sleep(Duration::from_millis(500));
+    let idle_frames = read_output(&output).matches("\x1b[?2026l").count();
+    thread::sleep(Duration::from_millis(700));
+    assert_eq!(
+        read_output(&output).matches("\x1b[?2026l").count(),
+        idle_frames,
+        "idle attach must not receive frames"
+    );
+    let scroll_start = output_len(&output);
+    writer.write_all(b"\x1b[<64;5;5M").unwrap();
+    assert!(
+        wait_until(Duration::from_secs(5), Duration::from_millis(20), || {
+            read_output(&output)[scroll_start..].contains("\x1b[?2026l")
+        }),
+        "scroll without PTY output must deliver a frame"
+    );
+    thread::sleep(Duration::from_millis(100));
+    let theme_start = output_len(&output);
+    writer
+        .write_all(b"\x1b[?997;2n\x1b]11;rgb:4444/5555/6666\x07\x1b]4;1;rgb:aaaa/bbbb/cccc\x07")
+        .unwrap();
+    assert!(
+        wait_until(Duration::from_secs(5), Duration::from_millis(20), || {
+            let text = read_output(&output);
+            let fresh = &text[theme_start..];
+            fresh.contains("\x1b[?2026l") && fresh.contains("ATTACH_ROW_")
+        }),
+        "host theme without PTY output must deliver a fresh frame: {:?}",
+        &read_output(&output)[theme_start..]
+    );
+    drop(writer);
+    drop(attach);
+    cleanup_spawned_herdr(server, base);
+}
+
+#[test]
 fn direct_attach_initial_mouse_capture_follows_config() {
     let _lock = test_lock();
     let base = unique_test_dir();
