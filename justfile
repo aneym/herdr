@@ -100,6 +100,9 @@ bench-release-smoke:
     cargo build --release --locked
     scripts/release_perf_smoke.sh "${CARGO_TARGET_DIR:-target}/release/herdr"
 
+bench-attach baseline candidate:
+    scripts/attach_perf_smoke.sh {{baseline}} {{candidate}}
+
 # Test public documentation snapshot and release lifecycle tooling
 docs-contract-test:
     bun test ./scripts/docs
