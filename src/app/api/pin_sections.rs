@@ -74,7 +74,14 @@ impl App {
             .state
             .rename_pin_section(&params.name, &params.new_name)
         {
-            Ok(_) => {
+            Ok(new_name) => {
+                if params.name.trim() != new_name {
+                    self.journal_pin_event(
+                        "section_rename",
+                        params.source.as_deref(),
+                        serde_json::json!({"old": params.name.trim(), "new": new_name}),
+                    );
+                }
                 self.pin_sections_changed(None);
                 self.pin_sections_result(id)
             }
@@ -87,8 +94,14 @@ impl App {
         id: String,
         params: PinSectionTarget,
     ) -> String {
+        let tab_ids = self.state.pin_section_members(params.name.trim());
         match self.state.delete_pin_section(&params.name) {
             Ok(()) => {
+                self.journal_pin_event(
+                    "section_delete",
+                    params.source.as_deref(),
+                    serde_json::json!({"name": params.name.trim(), "tab_ids": tab_ids}),
+                );
                 self.pin_sections_changed(None);
                 self.pin_sections_result(id)
             }
@@ -129,6 +142,7 @@ impl App {
             return section_error(id, error);
         }
         if self.state.pinned_tabs != before {
+            self.journal_pin_change("section", params.source.as_deref(), &tab_id);
             self.pin_sections_changed(Some(ws_idx));
         }
         match self.tab_info(ws_idx, tab_idx) {

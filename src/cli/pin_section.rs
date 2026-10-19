@@ -13,10 +13,14 @@ pub(super) fn build_method(action: &str, matches: &clap::ArgMatches) -> Result<M
             after: value("after"),
         }),
         "rename" => Method::PinSectionRename(PinSectionRenameParams {
+            source: Some("cli".into()),
             name: name()?,
             new_name: value("new_name").ok_or("missing new name")?,
         }),
-        "delete" => Method::PinSectionDelete(PinSectionTarget { name: name()? }),
+        "delete" => Method::PinSectionDelete(PinSectionTarget {
+            source: Some("cli".into()),
+            name: name()?,
+        }),
         "move" => Method::PinSectionMove(PinSectionMoveParams {
             name: name()?,
             index: value("index")
@@ -140,6 +144,7 @@ mod tests {
         assert_eq!(
             method(&["rename", "Later", "Someday"]),
             Ok(Method::PinSectionRename(PinSectionRenameParams {
+                source: Some("cli".into()),
                 name: "Later".into(),
                 new_name: "Someday".into(),
             }))
@@ -154,6 +159,7 @@ mod tests {
         assert_eq!(
             method(&["delete", "Later"]),
             Ok(Method::PinSectionDelete(PinSectionTarget {
+                source: Some("cli".into()),
                 name: "Later".into()
             }))
         );

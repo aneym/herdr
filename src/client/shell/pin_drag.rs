@@ -535,7 +535,11 @@ impl ClientShellState {
             request: Box::new(crate::api::schema::Request {
                 id,
                 method: crate::api::schema::Method::TabPinMove(
-                    crate::api::schema::TabPinMoveParams { tab_id, pin_index },
+                    crate::api::schema::TabPinMoveParams {
+                        source: None,
+                        tab_id,
+                        pin_index,
+                    },
                 ),
             }),
         });

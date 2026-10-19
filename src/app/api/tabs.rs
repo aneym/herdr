@@ -285,6 +285,11 @@ impl App {
             self.state.unpin_tab(&tab_id);
         }
         if self.state.pinned_tabs != before {
+            self.journal_pin_change(
+                if params.pinned { "pin" } else { "unpin" },
+                params.source.as_deref(),
+                &tab_id,
+            );
             self.state.mark_session_dirty();
             self.schedule_session_save();
             // API clients (Herdr Shell) refresh their snapshot on workspace
@@ -423,6 +428,7 @@ impl App {
         let before = self.state.pinned_tabs.clone();
         self.state.move_pinned_tab(&tab_id, params.pin_index);
         if self.state.pinned_tabs != before {
+            self.journal_pin_change("move", params.source.as_deref(), &tab_id);
             self.state.mark_session_dirty();
             self.schedule_session_save();
             self.emit_event(EventEnvelope {
@@ -988,6 +994,7 @@ mod tests {
         let response = app.handle_tab_set_pinned(
             "req".into(),
             TabSetPinnedParams {
+                source: None,
                 tab_id: tab_id.to_string(),
                 pinned,
                 priority,
@@ -1004,6 +1011,7 @@ mod tests {
         let response = app.handle_tab_pin_move(
             "req".into(),
             TabPinMoveParams {
+                source: None,
                 tab_id: tab_id.to_string(),
                 pin_index,
             },
@@ -1152,6 +1160,7 @@ mod tests {
             let response = app.handle_tab_set_pinned(
                 "req".into(),
                 TabSetPinnedParams {
+                    source: None,
                     tab_id: tab_id.to_string(),
                     pinned: true,
                     priority,
@@ -1173,6 +1182,7 @@ mod tests {
         let response = app.handle_tab_set_pinned(
             "req".into(),
             TabSetPinnedParams {
+                source: None,
                 tab_id: cross_space.clone(),
                 pinned: false,
                 priority: None,

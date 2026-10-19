@@ -81,6 +81,7 @@ impl ClientShellState {
                 id,
                 method: crate::api::schema::Method::TabSetPinned(
                     crate::api::schema::TabSetPinnedParams {
+                        source: None,
                         tab_id,
                         pinned: !pinned,
                         priority: None,

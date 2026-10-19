@@ -19,6 +19,7 @@ mod custom_commands;
 pub(crate) mod fuzzy;
 mod git_refresh;
 mod ids;
+mod pin_journal;
 mod pin_sections;
 mod polite_send;
 mod popup;
@@ -1267,6 +1268,7 @@ mod tests {
                 id: "pin".into(),
                 method: crate::api::schema::Method::TabSetPinned(
                     crate::api::schema::TabSetPinnedParams {
+                        source: None,
                         tab_id: tab_id.clone(),
                         pinned: true,
                         priority,
@@ -1279,6 +1281,7 @@ mod tests {
         app.handle_api_request(crate::api::schema::Request {
             id: "move".into(),
             method: crate::api::schema::Method::TabPinMove(crate::api::schema::TabPinMoveParams {
+                source: None,
                 tab_id: tabs[2].clone(),
                 pin_index: 0,
             }),

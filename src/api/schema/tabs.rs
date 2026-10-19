@@ -90,6 +90,8 @@ pub struct TabRenameParams {
 /// it lands in pin order (higher first); omitted keeps/appends at the end.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TabSetPinnedParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     pub tab_id: String,
     pub pinned: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -102,6 +104,8 @@ pub struct TabSetPinnedParams {
 /// the Cmd+1 slot), the numbering `TabInfo.pin_index` reports.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TabPinMoveParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     pub tab_id: String,
     pub pin_index: usize,
 }
@@ -162,12 +166,16 @@ pub struct PinSectionCreateParams {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PinSectionRenameParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     pub name: String,
     pub new_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PinSectionTarget {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     pub name: String,
 }
 
@@ -179,6 +187,8 @@ pub struct PinSectionMoveParams {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TabSetPinSectionParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     pub tab_id: String,
     #[serde(default)]
     pub section: Option<String>,

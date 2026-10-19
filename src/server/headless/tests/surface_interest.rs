@@ -894,6 +894,7 @@ async fn metadata_only_shell_can_pin_a_chat_without_taking_the_surface() {
         request: Box::new(api::schema::Request {
             id: "inactive-pin".into(),
             method: api::schema::Method::TabSetPinned(api::schema::TabSetPinnedParams {
+                source: None,
                 tab_id: tab_id.clone(),
                 pinned: true,
                 priority: None,
