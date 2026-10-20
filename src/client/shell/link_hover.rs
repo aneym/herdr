@@ -199,7 +199,7 @@ impl ClientShellState {
                 .is_some_and(|hover| hover.target == target)
         {
             let regions = match result {
-                Ok(crate::api::schema::ResponseResult::PaneLinkResolved { regions })
+                Ok(crate::api::schema::ResponseResult::PaneLinkResolved { regions, .. })
                     if regions.len() <= usize::from(target.inner_rect.height)
                         && regions.iter().all(|region| {
                             region.row < target.inner_rect.height

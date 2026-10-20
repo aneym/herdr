@@ -12065,6 +12065,18 @@
             },
             {
               "properties": {
+                "content_revision": {
+                  "default": 0,
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "offset_from_bottom": {
+                  "default": 0,
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
                 "regions": {
                   "items": {
                     "$ref": "#/schemas/success_response/$defs/PaneLinkRegion"
@@ -12074,6 +12086,12 @@
                 "type": {
                   "const": "pane_link_resolved",
                   "type": "string"
+                },
+                "url": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 }
               },
               "required": [

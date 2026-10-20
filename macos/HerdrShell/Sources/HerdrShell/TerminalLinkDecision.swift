@@ -1,13 +1,13 @@
 import Foundation
 
-/// Click policy kept independent of AppKit/socket timing. A resolved client target
-/// remains authoritative if activation refuses or returns a different target.
+/// Click policy: a refusal never opens a cached target; activation is authoritative.
 enum TerminalLinkDecision {
     static func needsResolution(cachedURL: String?) -> Bool { cachedURL == nil }
 
-    static func openTarget(resolved: String?, activated: String?, handled: Bool) -> String? {
-        if handled { return nil }
-        if let resolved { return resolved }
-        return activated
+    static func openTarget(resolved: String?, activated: String?, handled: Bool, succeeded: Bool = true) -> String? {
+        guard succeeded, !handled else { return nil }
+        return activated ?? resolved
     }
+
+    static func hoverTarget(serverURL: String?, fragment: String) -> String { serverURL ?? fragment }
 }

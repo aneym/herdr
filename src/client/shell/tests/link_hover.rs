@@ -35,6 +35,9 @@ fn resolve_hover(state: &mut ClientShellState, id: &str) -> bool {
         "boot-1",
         id,
         Ok(crate::api::schema::ResponseResult::PaneLinkResolved {
+            content_revision: 0,
+            offset_from_bottom: 0,
+            url: None,
             regions: vec![
                 crate::api::schema::PaneLinkRegion {
                     row: 0,
@@ -135,7 +138,12 @@ fn ctrl_hover_coalesces_motion_and_ignores_old_replies() {
     let (repaint, actions) = state.handle_endpoint_result(
         "boot-1",
         &id,
-        Ok(crate::api::schema::ResponseResult::PaneLinkResolved { regions: vec![] }),
+        Ok(crate::api::schema::ResponseResult::PaneLinkResolved {
+            regions: vec![],
+            content_revision: 0,
+            offset_from_bottom: 0,
+            url: None,
+        }),
     );
     assert!(!repaint);
     assert!(

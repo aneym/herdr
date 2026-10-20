@@ -1003,3 +1003,19 @@ and `opened_at_ms`. MIME is inferred from the file extension at open; URLs use
 their tabs close. Read and list do not change UI state. Unknown items return
 `desk_item_not_found`; invalid references return `desk_invalid_ref`, and missing
 files at open return `desk_file_not_found`.
+
+### Terminal links
+
+`pane.link.resolve` reads the link at `pane_id`, `viewport_row`, and `col` without
+invoking link plugins. Its `pane_link_resolved` result contains visible `regions`,
+`content_revision`, `offset_from_bottom`, and an optional full `url`. The target
+prefers OSC 8 and follows wrapped text into scrollback, even when its prefix is
+outside the viewport.
+
+Pass the returned `content_revision` and `offset_from_bottom` unchanged to
+`pane.link.activate` with the same cell. Output or scrolling since resolution
+returns `stale_content`; discard the cached resolution and open nothing. A
+matching activation returns an optional `url` and `handled` (a plugin claimed the
+link). Prefer the activation URL over the resolved URL, and do not open again when
+`handled` is true. These guards bind activation to server resolution, not to a
+client-displayed frame; transport/render latency remains possible.

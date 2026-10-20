@@ -1631,10 +1631,22 @@ fn pane_link_resolve_round_trips() {
             start_col: 3,
             end_col: 9,
         }],
+        content_revision: 42,
+        offset_from_bottom: 3,
+        url: Some("https://example.com/full".into()),
     };
     let json = serde_json::to_value(&result).unwrap();
     assert_eq!(json["type"], "pane_link_resolved");
     assert_eq!(json["regions"][0]["end_col"], 9);
+    assert_eq!(json["content_revision"], 42);
+    assert_eq!(json["offset_from_bottom"], 3);
+    assert_eq!(json["url"], "https://example.com/full");
+    let legacy: ResponseResult = serde_json::from_value(serde_json::json!({
+        "type": "pane_link_resolved", "regions": []
+    })).unwrap();
+    assert!(matches!(legacy, ResponseResult::PaneLinkResolved {
+        content_revision: 0, offset_from_bottom: 0, url: None, ..
+    }));
     assert_eq!(
         serde_json::from_value::<ResponseResult>(json).unwrap(),
         result

@@ -1,0 +1,15 @@
+[PASS] clipped prefix hover uses server URL
+[PASS] older server hover uses fragment
+[PASS] successful activation without URL uses resolve
+[PASS] click before hover resolves
+[PASS] click with completed hover
+[PASS] refused activation opens nothing
+[PASS] activation URL is authoritative
+[PASS] uncached activation supplies full URL
+[PASS] plugin handled opens nothing twice
+[PASS] no resolved target and refusal is native miss
+[PASS] activation sends cached resolve guards
+[PASS] refusal clears cache and suppresses native replay
+[PASS] Shift comes from triggering event including native replay
+13 passed; 0 failed
+[UNVERIFIED] real AppKit gestures and displayed-frame identity; guards bind to server resolution

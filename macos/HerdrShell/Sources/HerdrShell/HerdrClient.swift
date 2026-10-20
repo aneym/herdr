@@ -471,21 +471,28 @@ struct HerdrCommands {
         func contains(col: Int, row: Int) -> Bool { row == self.row && col >= start_col && col <= end_col }
     }
 
-    /// `pane.link.resolve`: the regions of the link under one viewport cell, read by the
-    /// server on the pane's own wrap-aware state. Nil when the call fails or is refused
-    /// (stale target, older server); an empty list when there is no link there.
-    func paneLinkResolve(paneId: String, row: Int, col: Int) -> [LinkRegion]? {
-        struct Env: Decodable { struct R: Decodable { let regions: [LinkRegion] }; let result: R }
-        guard let data = call("pane.link.resolve", ["pane_id": paneId, "viewport_row": row, "col": col], timeout: 1),
-              let env = try? JSONDecoder().decode(Env.self, from: data) else { return nil }
-        return env.result.regions
+    /// Guards and full target read with the regions; optional guards support older servers.
+    struct LinkResolution: Decodable {
+        let regions: [LinkRegion]
+        let content_revision: UInt64?
+        let offset_from_bottom: UInt64?
+        let url: String?
     }
 
-    /// `pane.link.activate`: the link target under one viewport cell, after the server's
-    /// link plugins had their turn (`handled` true means a plugin took it).
-    func paneLinkActivate(paneId: String, row: Int, col: Int) -> (url: String?, handled: Bool)? {
+    func paneLinkResolve(paneId: String, row: Int, col: Int) -> LinkResolution? {
+        struct Env: Decodable { let result: LinkResolution }
+        guard let data = call("pane.link.resolve", ["pane_id": paneId, "viewport_row": row, "col": col], timeout: 1),
+              let env = try? JSONDecoder().decode(Env.self, from: data) else { return nil }
+        return env.result
+    }
+
+    /// Activation must still match the state resolved before the click.
+    func paneLinkActivate(paneId: String, row: Int, col: Int, resolution: LinkResolution) -> (url: String?, handled: Bool)? {
         struct Env: Decodable { struct R: Decodable { let url: String?; let handled: Bool }; let result: R }
-        guard let data = call("pane.link.activate", ["pane_id": paneId, "viewport_row": row, "col": col]),
+        var params: [String: Any] = ["pane_id": paneId, "viewport_row": row, "col": col]
+        if let revision = resolution.content_revision { params["content_revision"] = revision }
+        if let offset = resolution.offset_from_bottom { params["offset_from_bottom"] = offset }
+        guard let data = call("pane.link.activate", params),
               let env = try? JSONDecoder().decode(Env.self, from: data) else { return nil }
         return (env.result.url, env.result.handled)
     }

@@ -590,9 +590,13 @@ final class SurfaceView: NSView {
     /// Ghostty decides what a mouse event means: selection when the program has
     /// not asked for the mouse, mouse reports (through herdr's attach client, to
     /// the pane) when it has. Shift forces selection, as in Ghostty itself.
+    /// Captured from the triggering event, including buffered native replays.
+    private(set) var linkEventShift = false
+
     private func sendButton(_ state: ghostty_input_mouse_state_e, _ button: ghostty_input_mouse_button_e,
                             _ event: NSEvent) -> Bool {
         guard let surface else { return false }
+        linkEventShift = event.modifierFlags.contains(.shift)
         sendPos(event)
         return ghostty_surface_mouse_button(surface, state, button, ghosttyMouseMods(event.modifierFlags))
     }

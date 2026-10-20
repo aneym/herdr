@@ -100,12 +100,15 @@ final class GhosttyRuntime {
         if action.tag == GHOSTTY_ACTION_OPEN_URL {
             let raw = text(action.action.open_url.url, len: Int(action.action.open_url.len))
             let paneId: String?
+            let shift: Bool
             if target.tag == GHOSTTY_TARGET_SURFACE, let ud = ghostty_surface_userdata(target.target.surface) {
-                paneId = Unmanaged<SurfaceView>.fromOpaque(ud).takeUnretainedValue().paneId
+                let view = Unmanaged<SurfaceView>.fromOpaque(ud).takeUnretainedValue()
+                paneId = view.paneId
+                shift = view.linkEventShift
             } else {
                 paneId = nil
+                shift = false
             }
-            let shift = NSEvent.modifierFlags.contains(.shift)
             DispatchQueue.main.async { openLink(raw, paneId: paneId, shift: shift) }
             return true
         }
@@ -147,7 +150,7 @@ final class GhosttyRuntime {
     /// the click. Desk routes still reach the lab server in agent runs; only external
     /// routes suppress NSWorkspace there.
     static func openLink(_ raw: String, paneId: String?,
-                         shift: Bool = NSEvent.modifierFlags.contains(.shift)) {
+                         shift: Bool = NSApp.currentEvent?.modifierFlags.contains(.shift) ?? false) {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed) else { return }
         var route = LinkRoute.decide(url, shift: shift)

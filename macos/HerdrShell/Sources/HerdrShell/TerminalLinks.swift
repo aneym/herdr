@@ -6,8 +6,8 @@ import AppKit
 /// row with cursor positioning and host autowrap off. libghostty therefore sees a
 /// soft-wrapped URL as unrelated rows: its link regex stops at the row edge, so the
 /// first row hovers a truncated URL and the continuation rows nothing. The server keeps
-/// the pane's real, wrap-aware screen and answers `pane.link.resolve` (regions) and
-/// `pane.link.activate` (target) for a viewport cell, as the TUI's Ctrl+click does.
+/// the pane's real, wrap-aware screen and answers `pane.link.resolve` (guards/target) and
+/// `pane.link.activate` (guarded target) for a viewport cell, as the TUI's Ctrl+click does.
 ///
 /// One request at a time, and only when the cell under the pointer changes; a cell that
 /// changed while a request was out is asked next. Any miss (no link, a pane the server
@@ -25,6 +25,7 @@ final class TerminalLinks {
 
     private(set) var url = ""
     private var regions: [HerdrCommands.LinkRegion] = []
+    private var resolution: HerdrCommands.LinkResolution?
     private var target: Cell?
     private var inFlight = false
     private var epoch = 0
@@ -46,35 +47,36 @@ final class TerminalLinks {
         epoch += 1
         target = nil
         regions = []
+        resolution = nil
         set("")
     }
 
-    /// Resolve a click independently of hover. Completion reports whether the link
-    /// claimed it; a miss lets the surface replay the buffered native gesture.
-    /// Displayed-frame guards remain blocked on ANSI attach metadata; these RPCs
-    /// currently observe server state, not a proven identity of the displayed frame.
+    /// Bind clicks to a cached resolve, or resolve first when hover has not completed.
+    /// A refused activation consumes the gesture so native replay cannot open stale text.
     func activate(at cell: Cell, shift: Bool, completion: @escaping (Bool) -> Void) {
-        let cached = !url.isEmpty && regions.contains(where: { $0.contains(col: cell.col, row: cell.row) }) ? url : nil
+        let cached = regions.contains(where: { $0.contains(col: cell.col, row: cell.row) }) ? resolution : nil
+        let cachedURL = cached == nil ? nil : url
         let (commands, paneId) = (self.commands, self.paneId)
         DispatchQueue.global(qos: .userInitiated).async {
-            // Clicks do not depend on a hover request completing first. Resolve checks
-            // for a link; activation supplies the full (possibly clipped) target.
-            if TerminalLinkDecision.needsResolution(cachedURL: cached) {
-                guard let found = commands.paneLinkResolve(paneId: paneId, row: cell.row, col: cell.col),
-                      found.contains(where: { $0.contains(col: cell.col, row: cell.row) }) else {
-                    DispatchQueue.main.async { completion(false) }
+            guard let found = cached ?? commands.paneLinkResolve(paneId: paneId, row: cell.row, col: cell.col),
+                  found.regions.contains(where: { $0.contains(col: cell.col, row: cell.row) }) else {
+                DispatchQueue.main.async { completion(false) }
+                return
+            }
+            let answer = commands.paneLinkActivate(paneId: paneId, row: cell.row, col: cell.col, resolution: found)
+            let target = TerminalLinkDecision.openTarget(resolved: found.url ?? cachedURL, activated: answer?.url,
+                                                         handled: answer?.handled ?? false, succeeded: answer != nil)
+            DispatchQueue.main.async { [weak self] in
+                guard let answer else {
+                    self?.clear()
+                    completion(true)
                     return
                 }
-            }
-            let answer = commands.paneLinkActivate(paneId: paneId, row: cell.row, col: cell.col)
-            let target = TerminalLinkDecision.openTarget(resolved: cached, activated: answer?.url,
-                                                         handled: answer?.handled ?? false)
-            DispatchQueue.main.async {
                 if let target, Self.webURL(target) != nil {
                     GhosttyRuntime.openLink(target, paneId: paneId, shift: shift)
                     completion(true)
                 } else {
-                    completion(answer?.handled ?? false)
+                    completion(answer.handled)
                 }
             }
         }
@@ -92,7 +94,7 @@ final class TerminalLinks {
                 self.inFlight = false
                 guard let current = self.target else { return }
                 if epoch == self.epoch, current == cell {
-                    self.apply(found ?? [], at: cell)
+                    self.apply(found, at: cell)
                 } else {
                     self.request()
                 }
@@ -100,20 +102,26 @@ final class TerminalLinks {
         }
     }
 
-    private func apply(_ found: [HerdrCommands.LinkRegion], at cell: Cell) {
-        let spans = found.sorted { ($0.row, $0.start_col) < ($1.row, $1.start_col) }
-        guard spans.contains(where: { $0.contains(col: cell.col, row: cell.row) }), let readSpan else {
+    private func apply(_ found: HerdrCommands.LinkResolution?, at cell: Cell) {
+        let spans = (found?.regions ?? []).sorted { ($0.row, $0.start_col) < ($1.row, $1.start_col) }
+        guard let found, spans.contains(where: { $0.contains(col: cell.col, row: cell.row) }) else {
             regions = []
+            resolution = nil
             set("")
             return
         }
-        let text = spans.map(readSpan).joined()
+        // Only older servers need visible-cell reconstruction. A clipped prefix is
+        // not a URL, while the server target follows wraps into scrollback.
+        let fragment = found.url == nil ? spans.map { readSpan?($0) ?? "" }.joined() : ""
+        let text = TerminalLinkDecision.hoverTarget(serverURL: found.url, fragment: fragment)
         guard Self.webURL(text) != nil else {
             regions = []
+            resolution = nil
             set("")
             return
         }
         regions = spans
+        resolution = found
         set(text)
     }
 

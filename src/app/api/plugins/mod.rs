@@ -311,7 +311,7 @@ impl App {
         params: &PaneLinkActivateParams,
         operation: &str,
         read: impl FnOnce(&crate::terminal::TerminalRuntime, u16, u16) -> T,
-    ) -> Result<(crate::layout::PaneId, T), String> {
+    ) -> Result<(crate::layout::PaneId, T, u64, u64), String> {
         let error = |code, message: &str| encode_error(id.to_owned(), code, message);
         let Some((ws_idx, pane_id)) = self.parse_pane_id(&params.pane_id) else {
             return Err(error("pane_not_found", "pane not found"));
@@ -360,7 +360,7 @@ impl App {
                 &format!("pane content or viewport changed during link {operation}"),
             ));
         }
-        Ok((pane_id, value))
+        Ok((pane_id, value, content_revision, current_offset.unwrap_or(0)))
     }
 
     pub(super) fn handle_pane_link_resolve(
@@ -369,9 +369,21 @@ impl App {
         params: PaneLinkActivateParams,
     ) -> String {
         match self.read_checked_pane_link(&id, &params, "resolution", |runtime, col, row| {
-            runtime.link_regions_at(col, row, crate::app::actions::url_byte_range)
+            (
+                runtime.link_regions_at(col, row, crate::app::actions::url_byte_range),
+                runtime.link_target_at(col, row)
+                    .and_then(crate::app::actions::url_from_link_target),
+            )
         }) {
-            Ok((_, regions)) => encode_success(id, ResponseResult::PaneLinkResolved { regions }),
+            Ok((_, (regions, url), content_revision, offset_from_bottom)) => encode_success(
+                id,
+                ResponseResult::PaneLinkResolved {
+                    regions,
+                    content_revision,
+                    offset_from_bottom,
+                    url,
+                },
+            ),
             Err(error) => error,
         }
     }
@@ -387,7 +399,7 @@ impl App {
                     .link_target_at(col, row)
                     .and_then(crate::app::actions::url_from_link_target)
             }) {
-                Ok(value) => value,
+                Ok((pane_id, url, _, _)) => (pane_id, url),
                 Err(error) => return error,
             };
         let handled = match url.as_deref() {
@@ -890,7 +902,7 @@ mod tests {
             method: Method::PaneLinkResolve(params.clone()),
         });
         assert!(
-            matches!(response_result(&response), ResponseResult::PaneLinkResolved { regions } if regions.len() == 1)
+            matches!(response_result(&response), ResponseResult::PaneLinkResolved { regions, content_revision, offset_from_bottom: 0, url: Some(url) } if regions.len() == 1 && content_revision == revision && url == "https://example.com")
         );
         assert!(
             rx.try_recv().is_err(),
@@ -926,6 +938,85 @@ mod tests {
         let response: serde_json::Value =
             serde_json::from_str(&app.handle_pane_link_resolve("hover".into(), params)).unwrap();
         assert_eq!(response["error"]["code"], "stale_target");
+    }
+
+    // Integration path through the JSON API and real terminal parser, including scrollback.
+    #[tokio::test]
+    async fn pane_link_resolve_binds_offscreen_target_and_refuses_changed_content() {
+        let mut app = test_app();
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("links")];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let public_id = app.public_pane_id(0, pane_id).unwrap();
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let url = "https://example.com/abcdefghijklmnopqrstuv";
+        let (runtime, _rx) = crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+            20, 2, 1024 * 1024, url.as_bytes(), 4,
+        );
+        app.terminal_runtimes.insert(terminal_id.clone(), runtime);
+        let params = PaneLinkActivateParams {
+            pane_id: public_id,
+            viewport_row: 0,
+            col: 1,
+            content_revision: None,
+            offset_from_bottom: None,
+        };
+        let response = app.handle_api_request(Request {
+            id: "resolve".into(),
+            method: Method::PaneLinkResolve(params.clone()),
+        });
+        let ResponseResult::PaneLinkResolved {
+            regions,
+            content_revision,
+            offset_from_bottom,
+            url: resolved,
+        } = response_result(&response) else {
+            panic!("expected resolution");
+        };
+        assert!(!regions.is_empty());
+        assert_eq!(resolved.as_deref(), Some(url), "prefix is above the viewport");
+        assert_eq!(content_revision, app.terminal_runtimes.get(&terminal_id).unwrap().content_seq());
+        let guarded = PaneLinkActivateParams {
+            content_revision: Some(content_revision),
+            offset_from_bottom: Some(offset_from_bottom),
+            ..params
+        };
+        let response = app.handle_api_request(Request {
+            id: "activate".into(),
+            method: Method::PaneLinkActivate(guarded.clone()),
+        });
+        assert!(matches!(response_result(&response), ResponseResult::PaneLinkActivated {
+            url: Some(target), handled: false,
+        } if target == url));
+        app.terminal_runtimes.get(&terminal_id).unwrap().scroll_up(1);
+        let stale_scroll = app.handle_api_request(Request {
+            id: "scroll".into(),
+            method: Method::PaneLinkActivate(guarded.clone()),
+        });
+        let stale_scroll: serde_json::Value = serde_json::from_str(&stale_scroll).unwrap();
+        assert_eq!(stale_scroll["error"]["code"], "stale_content");
+        let scrolled = app.handle_api_request(Request {
+            id: "scrolled".into(),
+            method: Method::PaneLinkResolve(PaneLinkActivateParams {
+                content_revision: None,
+                offset_from_bottom: None,
+                ..guarded.clone()
+            }),
+        });
+        assert!(matches!(response_result(&scrolled), ResponseResult::PaneLinkResolved {
+            offset_from_bottom: 1, url: Some(target), ..
+        } if target == url));
+        app.terminal_runtimes.get(&terminal_id).unwrap().scroll_reset();
+        app.terminal_runtimes.get(&terminal_id).unwrap().test_process_pty_bytes(b"changed");
+        let response = app.handle_api_request(Request {
+            id: "stale".into(),
+            method: Method::PaneLinkActivate(guarded),
+        });
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["error"]["code"], "stale_content");
     }
 
     fn test_app() -> App {

@@ -293,6 +293,12 @@ pub enum ResponseResult {
     },
     PaneLinkResolved {
         regions: Vec<super::panes::PaneLinkRegion>,
+        #[serde(default)]
+        content_revision: u64,
+        #[serde(default)]
+        offset_from_bottom: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        url: Option<String>,
     },
     PaneLinkActivated {
         #[serde(default, skip_serializing_if = "Option::is_none")]
