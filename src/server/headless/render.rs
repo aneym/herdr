@@ -672,6 +672,7 @@ impl HeadlessServer {
                 }
             }
             let mut surface_parts = None;
+            let mut attach_key_rendered = None;
             let frame = match mode {
                 ClientConnectionMode::ClientShell => {
                     let crate::server::client_shell::RenderedPaneSurface {
@@ -726,6 +727,20 @@ impl HeadlessServer {
                         }
                         continue;
                     }
+                    let attach_key = crate::server::render_stream::AttachRenderKey {
+                        generation: runtime.render_generation(),
+                        epoch,
+                        size: (cols, rows),
+                        cursor: runtime.cursor_state(area, true),
+                    };
+                    if self
+                        .clients
+                        .get(&client_id)
+                        .is_some_and(|client| client.render_state.attach_render_unchanged(&attach_key))
+                    {
+                        crate::render_prof::event("full_render.attach_skipped");
+                        continue;
+                    }
                     let render_started = crate::render_prof::timer();
                     let (buffer, cursor) =
                         crate::server::render_stream::render_terminal_virtual(runtime, area);
@@ -756,10 +771,10 @@ impl HeadlessServer {
                         &hyperlinks,
                     );
                     crate::render_prof::duration_since("full_render.frame_build", frame_started);
+                    attach_key_rendered = Some(attach_key);
                     frame
                 }
             };
-
             if surface_parts
                 .as_ref()
                 .is_some_and(|(_, _, _, graphics, _, _)| {
@@ -815,6 +830,9 @@ impl HeadlessServer {
             );
             let Some(mut prepared) = prepared else {
                 client.clear_deferred_render();
+                if let Some(key) = attach_key_rendered {
+                    client.render_state.note_attach_render(key);
+                }
                 crate::render_prof::event("full_render.skip_identical");
                 continue;
             };
@@ -933,6 +951,9 @@ impl HeadlessServer {
                         client.shell_graphics_delivery = delivery;
                     }
                     client.render_state.commit_sent_frame(prepared);
+                    if let Some(key) = attach_key_rendered {
+                        client.render_state.note_attach_render(key);
+                    }
                     if shell_graphics_pending || shell_assets_deferred {
                         client.defer_full_render();
                     } else {

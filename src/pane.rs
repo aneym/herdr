@@ -3392,6 +3392,10 @@ impl PaneRuntime {
         self.terminal.alternate_screen_active()
     }
 
+    pub fn render_generation(&self) -> u64 {
+        self.terminal.render_generation()
+    }
+
     pub fn cursor_state(&self, area: Rect, show_cursor: bool) -> Option<TerminalCursorState> {
         if !show_cursor {
             return None;

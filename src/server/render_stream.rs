@@ -26,7 +26,16 @@ pub(crate) enum ClientRenderState {
         blit_encoder: BlitEncoder,
         seq: u64,
         repaint_pending: bool,
+        attach_key: Option<AttachRenderKey>,
     },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AttachRenderKey {
+    pub generation: u64,
+    pub epoch: u64,
+    pub size: (u16, u16),
+    pub cursor: Option<crate::pane::TerminalCursorState>,
 }
 
 impl ClientRenderState {
@@ -43,6 +52,7 @@ impl ClientRenderState {
                 blit_encoder: BlitEncoder::new(),
                 seq: 0,
                 repaint_pending: false,
+                attach_key: None,
             },
         }
     }
@@ -88,11 +98,30 @@ impl ClientRenderState {
             Self::TerminalAnsi {
                 blit_encoder,
                 repaint_pending,
+                attach_key,
                 ..
             } => {
                 *blit_encoder = BlitEncoder::new();
                 *repaint_pending = false;
+                *attach_key = None;
             }
+        }
+    }
+
+    pub(crate) fn attach_render_unchanged(&self, key: &AttachRenderKey) -> bool {
+        matches!(
+            self,
+            Self::TerminalAnsi {
+                repaint_pending: false,
+                attach_key: Some(last),
+                ..
+            } if last == key
+        )
+    }
+
+    pub(crate) fn note_attach_render(&mut self, key: AttachRenderKey) {
+        if let Self::TerminalAnsi { attach_key, .. } = self {
+            *attach_key = Some(key);
         }
     }
 
@@ -100,8 +129,13 @@ impl ClientRenderState {
         match self {
             Self::Semantic { last_surface, .. } => *last_surface = None,
             Self::TerminalAnsi {
-                repaint_pending, ..
-            } => *repaint_pending = true,
+                repaint_pending,
+                attach_key,
+                ..
+            } => {
+                *repaint_pending = true;
+                *attach_key = None;
+            }
         }
     }
 
@@ -112,6 +146,7 @@ impl ClientRenderState {
                 blit_encoder,
                 seq,
                 repaint_pending,
+                ..
             } => {
                 if !*repaint_pending && blit_encoder.is_current(&frame) {
                     crate::render_prof::event("prepare_frame.ansi.skip_current");
@@ -299,6 +334,7 @@ impl ClientRenderState {
                     blit_encoder,
                     seq,
                     repaint_pending,
+                    ..
                 },
                 PreparedRender::TerminalAnsi {
                     frame,

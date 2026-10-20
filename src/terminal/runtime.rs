@@ -475,6 +475,10 @@ impl TerminalRuntime {
         self.0.render(frame, area, show_cursor);
     }
 
+    pub fn render_generation(&self) -> u64 {
+        self.0.render_generation()
+    }
+
     pub(crate) fn collect_dirty_patch_snapshot(
         &self,
         area_width: u16,

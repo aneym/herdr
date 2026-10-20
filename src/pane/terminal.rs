@@ -15,6 +15,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::layout::PaneId;
 use crate::protocol::CellData;
 
+mod core_cell;
 #[cfg(test)]
 mod migration_tests;
 #[cfg(windows)]
@@ -186,7 +187,7 @@ pub(crate) enum TerminalCompressionStep {
 }
 
 pub(crate) struct GhosttyPaneTerminal {
-    pub core: Mutex<GhosttyPaneCore>,
+    pub core: core_cell::CoreCell<GhosttyPaneCore>,
     key_encoder: Mutex<crate::ghostty::KeyEncoder>,
     pending_pty_responses: Arc<Mutex<Vec<Bytes>>>,
 }
@@ -481,6 +482,10 @@ impl PaneTerminal {
 
     pub fn cursor_state(&self) -> Option<TerminalCursorState> {
         self.ghostty.cursor_state()
+    }
+
+    pub fn render_generation(&self) -> u64 {
+        self.ghostty.core.generation()
     }
 
     pub fn synchronized_output_active(&self) -> bool {
@@ -1172,7 +1177,7 @@ impl GhosttyPaneTerminal {
             crate::ghostty::KeyEncoder::new().map_err(|e| std::io::Error::other(e.to_string()))?;
         key_encoder.set_from_terminal(&terminal);
         Ok(Self {
-            core: Mutex::new(GhosttyPaneCore {
+            core: core_cell::CoreCell::new(GhosttyPaneCore {
                 #[cfg(test)]
                 dirty_collection_hook: None,
                 terminal,
@@ -1982,7 +1987,7 @@ impl GhosttyPaneTerminal {
     }
 
     pub fn cursor_state(&self) -> Option<TerminalCursorState> {
-        let mut core = self.core.lock().ok()?;
+        let mut core = self.core.lock_quiet().ok()?;
         let current = current_cursor_state(&mut core);
         effective_cursor_state(&mut core, current)
     }
@@ -2184,7 +2189,7 @@ impl GhosttyPaneTerminal {
 
     pub fn visible_text(&self) -> String {
         self.core
-            .lock()
+            .lock_quiet()
             .ok()
             .and_then(|mut core| ghostty_visible_text(&mut core).ok())
             .unwrap_or_default()
@@ -2200,13 +2205,13 @@ impl GhosttyPaneTerminal {
 
     pub fn detection_text(&self) -> String {
         self.core
-            .lock()
+            .lock_quiet()
             .ok()
             .and_then(|mut core| ghostty_detection_text(&mut core).ok())
             .unwrap_or_default()
     }
 
-    fn try_lock_core(&self) -> Option<std::sync::MutexGuard<'_, GhosttyPaneCore>> {
+    fn try_lock_core(&self) -> Option<core_cell::CoreGuard<'_, GhosttyPaneCore>> {
         match self.core.try_lock() {
             Ok(core) => Some(core),
             Err(std::sync::TryLockError::WouldBlock) => None,
@@ -2244,7 +2249,7 @@ impl GhosttyPaneTerminal {
 
     pub(crate) fn recent_text_snapshot(&self, lines: usize) -> TerminalReadSnapshot {
         self.core
-            .lock()
+            .lock_quiet()
             .ok()
             .and_then(|mut core| ghostty_recent_text_snapshot(&mut core, lines).ok())
             .unwrap_or_default()
@@ -2257,7 +2262,7 @@ impl GhosttyPaneTerminal {
 
     pub(crate) fn recent_ansi_snapshot(&self, lines: usize) -> TerminalReadSnapshot {
         self.core
-            .lock()
+            .lock_quiet()
             .ok()
             .and_then(|mut core| ghostty_recent_ansi_snapshot(&mut core, lines, false).ok())
             .unwrap_or_default()
@@ -2270,7 +2275,7 @@ impl GhosttyPaneTerminal {
 
     pub(crate) fn recent_unwrapped_text_snapshot(&self, lines: usize) -> TerminalReadSnapshot {
         self.core
-            .lock()
+            .lock_quiet()
             .ok()
             .and_then(|mut core| ghostty_recent_text_unwrapped_snapshot(&mut core, lines).ok())
             .unwrap_or_default()
@@ -2282,7 +2287,7 @@ impl GhosttyPaneTerminal {
 
     pub(crate) fn recent_unwrapped_ansi_snapshot(&self, lines: usize) -> TerminalReadSnapshot {
         self.core
-            .lock()
+            .lock_quiet()
             .ok()
             .and_then(|mut core| ghostty_recent_ansi_snapshot(&mut core, lines, true).ok())
             .unwrap_or_default()
@@ -2324,7 +2329,7 @@ impl GhosttyPaneTerminal {
 
     pub fn visible_hyperlinks(&self, area: Rect) -> Vec<((u16, u16), String, String)> {
         self.core
-            .lock()
+            .lock_quiet()
             .ok()
             .and_then(|mut core| ghostty_visible_hyperlinks(&mut core, area).ok())
             .unwrap_or_default()
@@ -2357,7 +2362,7 @@ impl GhosttyPaneTerminal {
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect, show_cursor: bool) {
-        let Ok(mut core) = self.core.lock() else {
+        let Ok(mut core) = self.core.lock_quiet() else {
             return;
         };
         if core
