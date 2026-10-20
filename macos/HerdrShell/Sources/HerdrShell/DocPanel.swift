@@ -433,12 +433,12 @@ final class DocPanelController: NSObject, WKNavigationDelegate {
         if let scopeURL, let route = URLComponents(string: scopeURL)?.queryItems?.first(where: { $0.name == "route" })?.value {
             let bits = route.split(separator: "/").map(String.init)
             if bits.count >= 2, bits[0] == "scoping", !bits[1].isEmpty {
-                return (home as NSString).appendingPathComponent(".agent-rails/scoping/\(bits[1])")
+                return (home as NSString).appendingPathComponent(".config/herdr/scoping/\(bits[1])")
             }
         }
         let folder = displayName.replacingOccurrences(of: " ", with: "-")
         guard !folder.isEmpty else { return nil }
-        let path = (home as NSString).appendingPathComponent(".agent-rails/lanes/\(folder)")
+        let path = (home as NSString).appendingPathComponent(".config/herdr/lanes/\(folder)")
         return FileManager.default.fileExists(atPath: path) ? path : nil
     }
 }

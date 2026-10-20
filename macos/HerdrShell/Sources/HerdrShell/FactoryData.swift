@@ -192,7 +192,8 @@ struct FactorySnapshot: Equatable {
             "updated": updated,
             "machines": machines.map {
                 ["name": $0.name, "kind": $0.kind, "summary": $0.summary, "slots": $0.slots,
-                 "disk": $0.disk, "state": $0.state, "attention": $0.attention, "dimmed": $0.dimmed] as [String: Any]
+                 "disk": $0.disk, "state": $0.state, "attention": $0.attention, "dimmed": $0.dimmed,
+                 "usage": $0.usageLine] as [String: Any]
             },
             "pools_age_s": poolsAgeSeconds ?? NSNull(),
             "pools_stale": poolsStale,
@@ -367,7 +368,25 @@ private enum FactoryRead {
                 attention: attention == "warn" || attention == "act" ? attention : "",
                 usage: Self.usage(JSONBox.obj(d["usage"])))
         }
-        return (JSONBox.date(overlay?["generated_at"]), hosts)
+        let generated = JSONBox.date(overlay?["generated_at"])
+        let now = Date()
+        let generatedAge = generated.map { now.timeIntervalSince($0) } ?? 0
+        let fileAge = JSONBox.stamp(path).map { now.timeIntervalSince($0) } ?? 0
+        let hide = generatedAge > 30 || fileAge > 30
+        for (key, host) in hosts {
+            hosts[key] = HostInfo(name: host.name, summary: host.summary, attention: host.attention,
+                                  usage: Self.usage(host.usage, generated: generated, hide: hide))
+        }
+        return (generated, hosts)
+    }
+
+    static func usage(_ existing: HostUsage?, generated: Date?, hide: Bool) -> HostUsage? {
+        guard var usage = existing else { return nil }
+        if let generated, let age = usage.age {
+            usage.age = age + max(0, Int(Date().timeIntervalSince(generated)))
+        }
+        if hide { usage.age = max(usage.age ?? 0, 31) }
+        return usage
     }
 
     static func usage(_ d: [String: Any]?) -> HostUsage? {

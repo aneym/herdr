@@ -3,8 +3,8 @@
 
   SHELL_LAB=shellspike12 python3 scripts/check_p12.py --out checks/P12.txt
 
-Lab: the seeded tabs (two host=PC workflows) plus new tabs tagged host=forge-1 (two) and
-host=PC (one more). Run 1, default provider (herdr-only): the hosts row's per-host tab
+Lab: the seeded tabs (two host=host-1 workflows) plus new tabs tagged host=forge-1 (two) and
+host=host-1 (one more). Run 1, default provider (herdr-only): the hosts row's per-host tab
 counts match counts computed independently from `herdr api snapshot` agent tokens, and no
 slot or session numbers appear. Run 2, stub provider (`--hosts-stub FILE`): the stub's slot
 and session numbers appear in the hosts row, the tab counts still match the tokens, a host
@@ -59,11 +59,11 @@ def report(pane, agent, state, tokens):
 
 def expected_counts():
     """Tabs per host from herdr's own snapshot: first non-empty `host` token across the
-    tab's agents, else Studio. Independent of the app's code."""
+    tab's agents, else host-2. Independent of the app's code."""
     snap = S.herdr_json("api", "snapshot")["result"]["snapshot"]
     out = {}
     for t in snap["tabs"]:
-        host = "Studio"
+        host = "host-2"
         for a in snap["agents"]:
             v = (a.get("tokens") or {}).get("host", "").strip()
             if a["tab_id"] == t["tab_id"] and v:
@@ -103,12 +103,12 @@ def main():
     pcs = create_tab(ws, "pc job")
     f1 = create_tab(ws, "forge job a")
     f2 = create_tab(ws, "forge job b")
-    report(pcs, "codex", "working", {"host": "PC"})
+    report(pcs, "codex", "working", {"host": "host-1"})
     report(f1, "codex", "working", {"host": "forge-1"})
     report(f2, "codex", "idle", {"host": "forge-1"})
     exp = expected_counts()
     say(f"expected tabs per host from herdr snapshot tokens: {json.dumps(exp, sort_keys=True)}")
-    check("lab has host=PC and host=forge-1 tabs", exp.get("PC") == 3 and exp.get("forge-1") == 2, f"expected={exp}")
+    check("lab has host=host-1 and host=forge-1 tabs", exp.get("host-1") == 3 and exp.get("forge-1") == 2, f"expected={exp}")
 
     # Run 1: default provider.
     say(f"app start (default provider): {S.app('start').strip()}")
@@ -131,14 +131,14 @@ def main():
     stub = os.path.join(tempfile.mkdtemp(prefix="p12-"), "hosts.json")
     with open(stub, "w") as f:
         json.dump({"forge-1": {"slots_used": 3, "slots_total": 8, "sessions": 5},
-                   "PC": {"slots_used": 1, "slots_total": 4, "sessions": 1},
+                   "host-1": {"slots_used": 1, "slots_total": 4, "sessions": 1},
                    "box-9": {"slots_used": 0, "slots_total": 6, "sessions": 0}}, f)
     say(f"app start (stub provider {stub}): {S.app('start', '--hosts-stub', stub).strip()}")
     s = wait_hosts(lambda s: s.get("hosts_provider") == "file-stub" and by_host(s).get("forge-1", {}).get("slots_total") == 8)
     hosts = by_host(s)
     say("hosts row (stub): " + "; ".join(h["text"] for h in s["hosts"]))
     check("stub provider active", s.get("hosts_provider") == "file-stub")
-    f1r, pcr = hosts.get("forge-1", {}), hosts.get("PC", {})
+    f1r, pcr = hosts.get("forge-1", {}), hosts.get("host-1", {})
     check("stub slot numbers appear for forge-1 (3/8, 5 sessions) and PC (1/4, 1 session)",
           (f1r.get("slots_used"), f1r.get("slots_total"), f1r.get("sessions")) == (3, 8, 5)
           and (pcr.get("slots_used"), pcr.get("slots_total"), pcr.get("sessions")) == (1, 4, 1),
@@ -149,9 +149,9 @@ def main():
     b9 = hosts.get("box-9", {})
     check("a host only the provider knows shows with 0 tabs and its slots",
           b9.get("tabs") == 0 and b9.get("slots_total") == 6, f"box-9={b9.get('text')!r}")
-    check("Studio (no stub entry) shows tab count only",
-          "slots" not in hosts.get("Studio", {}).get("text", "x") and hosts.get("Studio", {}).get("tabs") == exp.get("Studio"),
-          f"Studio={hosts.get('Studio', {}).get('text')!r}")
+    check("host-2 (no stub entry) shows tab count only",
+          "slots" not in hosts.get("host-2", {}).get("text", "x") and hosts.get("host-2", {}).get("tabs") == exp.get("host-2"),
+          f"host-2={hosts.get('host-2', {}).get('text')!r}")
     S.cmd({"cmd": "shot", "out": os.path.splitext(S.OUT)[0] + ".png"})
 
     with open(stub, "w") as f:
@@ -160,7 +160,7 @@ def main():
     s = wait_hosts(lambda s: by_host(s).get("forge-1", {}).get("slots_used") == 7)
     f1r = by_host(s).get("forge-1", {})
     check("editing the stub while the app runs updates the row (forge-1 7/8, 9 sessions; PC and box-9 stats gone)",
-          f1r.get("slots_used") == 7 and f1r.get("sessions") == 9 and by_host(s).get("PC", {}).get("slots_total") is None
+          f1r.get("slots_used") == 7 and f1r.get("sessions") == 9 and by_host(s).get("host-1", {}).get("slots_total") is None
           and "box-9" not in by_host(s), f"forge-1={f1r.get('text')!r}")
     finish()
 
@@ -173,7 +173,7 @@ def finish():
     say()
     say(f"RESULT: {'PASS' if not failures else 'FAIL ' + ', '.join(failures)}")
     with open(S.OUT, "w") as f:
-        f.write("\n".join(lines) + "\n")
+        f.write("\n".join(ln.replace(os.path.expanduser("~"), "~") for ln in lines) + "\n")
     sys.exit(1 if failures else 0)
 
 

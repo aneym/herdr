@@ -146,9 +146,9 @@ def main():
 
     # 1. Rename latency.
     lats = []
-    tab_id = tabs["recruiter"]
+    tab_id = tabs["lane-a"]
     for i in range(RENAMES):
-        label = f"recruiter r{i}"
+        label = f"lane-a r{i}"
         off = os.path.getsize(APPLOG)
         t_send = time.time()
         resp = api("tab.rename", {"tab_id": tab_id, "label": label})
@@ -171,7 +171,7 @@ def main():
           f"median {sorted(got)[len(got)//2]:.0f} ms, worst {max(got):.0f} ms" if got else "none seen")
     time.sleep(0.5)
     s = state()
-    check("sidebar row shows the last rename", any(r["label"] == f"recruiter r{RENAMES-1}" for r in rows(s)))
+    check("sidebar row shows the last rename", any(r["label"] == f"lane-a r{RENAMES-1}" for r in rows(s)))
 
     # 2. Status and token changes arrive without another trigger.
     pane = next(p for p, a in ag.items() if a["tab_id"] == tab_id)
@@ -236,7 +236,7 @@ def main():
     if seen is not None:
         off = os.path.getsize(APPLOG)
         new_tabs = json.loads(lab("herdr", "api", "snapshot"))["result"]["snapshot"]["tabs"]
-        rid = next(t["tab_id"] for t in new_tabs if t["label"] == "recruiter")
+        rid = next(t["tab_id"] for t in new_tabs if t["label"] == "lane-a")
         t_send = time.time()
         api("tab.rename", {"tab_id": rid, "label": "after restart"})
         hit = None
@@ -263,7 +263,7 @@ def main():
     say(f"RESULT: {'PASS' if not failures else 'FAIL ' + ', '.join(failures)}")
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w") as f:
-        f.write("\n".join(lines) + "\n")
+        f.write("\n".join(ln.replace(os.path.expanduser("~"), "~") for ln in lines) + "\n")
     sys.exit(1 if failures else 0)
 
 

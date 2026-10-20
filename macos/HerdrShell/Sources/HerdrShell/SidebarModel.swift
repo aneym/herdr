@@ -8,14 +8,14 @@ import Foundation
 /// ~/.claude/pretty-docs/factory-devenv-mock-2026-09-28.html:
 ///
 ///     SPACES                 ⌘⇧1..9     one line per space; the current one open
-///     ▾ ◆ agent-rails        factory    (`plain` when it has no orchestrator)
+///     ▾ ◆ acme               factory    (`plain` when it has no orchestrator)
 ///     ORCHESTRATOR           inbox 3    the current space's rows sit right under its row
-///     ● rails orchestrator   [Studio]
+///     ● orchestrator         [host-2]
 ///     LANES                  7 open
-///     ▾ ● recruiter          2 wf       workflows fold into their lane as a count
-///         ● wf recruiter-2320  [PC]
+///     ▾ ● lane-a             2 wf       workflows fold into their lane as a count
+///         ● wf lane-a-1       [host-1]
 ///     ▸ background           3          finished and advisor tabs, collapsed
-///       step back · toyo research · recruiting email ✓
+///       step back · toyo research · inbox mail ✓
 ///     ▸ ◆ agent-lb           1          other spaces follow in herdr's order: a count, `●` working, `● n` when n rows want you
 ///     ▸ hidden               3          hidden spaces, collapsed, last
 ///
@@ -159,7 +159,7 @@ enum SidebarModel {
         }
 
         // The list is spaces in herdr's order with the current space's rows directly under its own
-        // row (mock frames "agent-rails" and "homebase"), then `hidden`. `head` runs through the
+        // row (mock frames "acme" and "homebase"), then `hidden`. `head` runs through the
         // current space's row, `tail` is the remaining spaces and `hidden`; `out` (below) is the
         // current space's content and sits between them.
         var head: [SidebarLine] = [], tail: [SidebarLine] = []

@@ -8,6 +8,9 @@ import SwiftUI
 /// Lays out one tab's panes using herdr's own split geometry (layouts[].panes[].rect).
 final class CapHostingView: NSHostingView<PaneCapBar> {
     override var acceptsFirstResponder: Bool { false }
+    /// The window's transparent title bar would otherwise inset this 36 pt bar and
+    /// paint the label over the terminal's first row.
+    override var safeAreaInsets: NSEdgeInsets { NSEdgeInsets() }
 }
 
 final class FactoryHostingView: NSHostingView<FactoryPage> {
@@ -19,6 +22,7 @@ final class PaneHostView: NSView {
     var area = Snapshot.Rect(x: 0, y: 0, width: 1, height: 1)
     /// Grab strips over the split dividers (P9), rebuilt from herdr's layout on every `show`.
     private var handles: [String: DividerHandleView] = [:]
+    private var lastDividers: [PaneDivider] = []
     var onDividerDrag: ((PaneDivider, DividerHandleView.Phase, CGFloat, CGFloat) -> Void)?
     var dividerHandles: [DividerHandleView] { handles.values.sorted { $0.divider.splitId < $1.divider.splitId } }
     var caps: [String: PaneCapState] = [:]
@@ -45,6 +49,7 @@ final class PaneHostView: NSView {
         let keep = Set(items.map { ObjectIdentifier($0.0) })
         for v in subviews where v is SurfaceView && !keep.contains(ObjectIdentifier(v)) { v.removeFromSuperview() }
         for (s, _) in items where s.superview !== self { addSubview(s) }
+        lastDividers = dividers
         syncHandles(dividers)
         rects = items
         self.area = area
@@ -88,6 +93,7 @@ final class PaneHostView: NSView {
                 : NSRect(x: (r.x - area.x) * sx, y: line - reach, width: r.width * sx, height: 2 * reach + 1)
             h.window?.invalidateCursorRects(for: h)
         }
+        syncHandles(lastDividers)
     }
 
     private func ensureCap(_ paneId: String) -> NSView {
@@ -141,7 +147,9 @@ final class PaneHostView: NSView {
                 let scale = div.vertical ? bounds.width / area.width : bounds.height / area.height
                 onDividerDrag?(div, phase, delta, CGFloat(div.extent) * scale)
             }
-            addSubview(h, positioned: .above, relativeTo: nil)
+            if h.superview == nil {
+                addSubview(h, positioned: .above, relativeTo: nil)
+            }
         }
     }
 }
@@ -170,6 +178,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     private var pendingFocusPane: String?
     private var didRestoreTabFocus = false
     private var didRestorePaneFocus = false
+    private var didPrunePaneModes = false
 
     init(model: HerdrModel, registry: SurfaceRegistry, theme: ThemeStore) {
         self.model = model
@@ -337,6 +346,10 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     func snapshotChanged() {
+        if !didPrunePaneModes, let panes = model.snapshot?.panes, !panes.isEmpty {
+            didPrunePaneModes = true
+            Channel.prunePaneModes(keeping: Set(panes.map(\.pane_id)))
+        }
         // A panel for a row that no longer exists (or is now a workflow) has nothing to show.
         if let id = detailPanel.model.rowId, detailContent == nil, model.snapshot != nil,
            !model.allRowsInOrder.contains(where: { $0.id == id && $0.kind != .workflow }) {

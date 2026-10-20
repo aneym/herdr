@@ -101,11 +101,38 @@ final class SurfaceView: NSView {
     /// Ends this surface's attach now (hidden-tab detach, replacement): freeing the
     /// libghostty surface closes its pty, which ends the `herdr terminal attach` client.
     /// The view itself can be kept alive a little longer for queued callbacks.
+    /// The attach client is a grandchild of the surface. Freeing the surface kills the
+    /// shell and leaves `herdr terminal attach` running, still holding the terminal.
+    func killForeground() {
+        guard let surface else { return }
+        let pid = Int32(truncatingIfNeeded: ghostty_surface_foreground_pid(surface))
+        guard pid > 1 else { return }
+        Self.killTree(pid)
+    }
+
+    private static func killTree(_ pid: Int32) {
+        guard pid > 1 else { return }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        p.arguments = ["-P", String(pid)]
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = FileHandle.nullDevice
+        if (try? p.run()) != nil {
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            p.waitUntilExit()
+            for line in String(decoding: data, as: UTF8.self).split(separator: "\n") {
+                if let child = Int32(line.trimmingCharacters(in: .whitespaces)) { killTree(child) }
+            }
+        }
+        kill(pid, SIGTERM)
+    }
+
     func closeSurface() {
         guard let s = surface else { return }
+        onExit = nil
         surface = nil
         exited = true
-        onExit = nil
         ghostty_surface_free(s)
     }
 

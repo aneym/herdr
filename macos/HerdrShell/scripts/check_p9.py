@@ -303,7 +303,7 @@ def finish():
     say()
     say(f"RESULT: {'PASS' if not failures else 'FAIL ' + ', '.join(failures)}")
     with open(OUT, "w") as f:
-        f.write("\n".join(lines) + "\n")
+        f.write("\n".join(ln.replace(os.path.expanduser("~"), "~") for ln in lines) + "\n")
     sys.exit(1 if failures else 0)
 
 

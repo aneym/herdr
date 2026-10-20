@@ -36,6 +36,7 @@ DOWN_EPOCH = 2000000000
 
 lines, failures = [], []
 procs = []
+front_before = ""
 
 
 def say(s=""):
@@ -139,7 +140,7 @@ def prepare(root, live_pid):
         "started": now - 720,
         "log": os.path.join(root, "live.log"),
         "headless": True,
-        "host": "Studio",
+        "host": "host-2",
     }
     dead = {
         "run_id": "dead-factory",
@@ -231,6 +232,27 @@ def pool(dump, pid):
     return next((p for p in dump.get("pools", []) if p.get("id") == pid), None)
 
 
+def factory_visible(png):
+    from PIL import Image
+    img = Image.open(png).convert("RGB")
+    hits = 0
+    for y in range(70, img.height - 30, 5):
+        lums = []
+        for x in range(int(img.width * 0.22), img.width - 24, 8):
+            r, g, b = img.getpixel((x, y))
+            lums.append(0.2126 * r + 0.7152 * g + 0.0722 * b)
+        if lums and max(lums) - min(lums) > 26:
+            hits += 1
+    return hits
+
+
+def frontmost_app():
+    r = subprocess.run(
+        ["osascript", "-e", 'tell application "System Events" to get name of first application process whose frontmost is true'],
+        capture_output=True, text=True)
+    return (r.stdout or "").strip() or "unknown"
+
+
 def copy_shot(dump_path, dest):
     src = os.path.splitext(dump_path)[0] + ".png"
     for _ in range(40):
@@ -249,6 +271,8 @@ def sensitive(blob):
 
 
 def main():
+    global front_before
+    front_before = frontmost_app()
     say(f"HerdrShell P18 check  {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}")
     say(f"binary: {BIN} exists={os.path.exists(BIN)}")
     if not os.path.exists(BIN):
@@ -263,8 +287,8 @@ def main():
         pools_path = os.path.join(tmp, "pools.json")
         httpd = serve(pools_path, port)
         dump = os.path.join(tmp, "light.json")
-        proc = launch(env_for(tmp, port), ["--demo", "factory", "--appearance", "light", "--dump-factory", dump])
-        got = wait_dump(dump, lambda d: machine(d, "forge-1") and pool(d, "alpha") and any(r.get("name") == "implement" for r in d.get("routing", [])), 25)
+        proc = launch(env_for(tmp, port), ["--agent-run", "--demo", "factory", "--appearance", "light", "--dump-factory", dump])
+        got = wait_dump(dump, lambda d: machine(d, "host-5") and pool(d, "alpha") and any(r.get("name") == "implement" for r in d.get("routing", [])), 25)
         alive = proc.poll() is None
         check("demo stays up and writes a dump", alive and got is not None, f"exit={proc.poll()}")
         if not got:
@@ -274,30 +298,30 @@ def main():
 
         names = [m["name"] for m in got["machines"]]
         check("every fixture box is shown",
-              all(n in names for n in ("Studio", "pc-wsl", "ax42", "forge-1", "forge-2", "forge-3")),
+              all(n in names for n in ("host-2", "host-3", "host-4", "host-5", "host-6", "host-8")),
               " ".join(names))
         until = down_until()
         states = {m["name"]: m["state"] for m in got["machines"]}
         check("drained, down, and held state words",
-              states.get("forge-1") == "drained (disk under floor)"
-              and states.get("ax42") == f"down until {until} (banner timeout)"
-              and states.get("forge-3") == "held"
-              and states.get("Studio") == "up",
-              str({k: states.get(k) for k in ("forge-1", "ax42", "forge-3", "Studio")}))
-        forge2 = machine(got, "forge-2")
+              states.get("host-5") == "drained (disk under floor)"
+              and states.get("host-4") == f"down until {until} (banner timeout)"
+              and states.get("host-8") == "held"
+              and states.get("host-2") == "up",
+              str({k: states.get(k) for k in ("host-5", "host-4", "host-8", "host-2")}))
+        forge2 = machine(got, "host-6")
         check("disabled box is dimmed", forge2 is not None and forge2.get("dimmed") is True and forge2.get("state") == "up",
               str(forge2))
-        studio = machine(got, "Studio")
-        mac = machine(got, "MacBook")
+        studio = machine(got, "host-2")
+        mac = machine(got, "host-7")
         check("attention and overlay summary",
               studio and studio.get("attention") == "warn" and "load 235/16" in studio.get("summary", "")
               and mac and mac.get("attention") == "act",
               f"studio={studio.get('attention') if studio else None} mac={mac.get('attention') if mac else None}")
         check("slots and disk",
-              machine(got, "forge-1").get("slots") == "1/1"
-              and "8.2 GiB" in machine(got, "ax42").get("disk", "")
-              and "low" in machine(got, "ax42").get("disk", ""),
-              machine(got, "ax42").get("disk", ""))
+              machine(got, "host-5").get("slots") == "1/1"
+              and "8.2 GiB" in machine(got, "host-4").get("disk", "")
+              and "low" in machine(got, "host-4").get("disk", ""),
+              machine(got, "host-4").get("disk", ""))
 
         alpha, tight, empty = pool(got, "alpha"), pool(got, "tight"), pool(got, "empty")
         check("pool bars match fixture percents",
@@ -332,7 +356,7 @@ def main():
         flights = got.get("flights", [])
         flight_names = [f.get("name") for f in flights]
         check("only the live workflow is in flight",
-              flight_names == ["ship-factory"] and flights[0].get("headless") is True and flights[0].get("host") == "Studio"
+              flight_names == ["ship-factory"] and flights[0].get("headless") is True and flights[0].get("host") == "host-2"
               and flights[0].get("lane") == "native" and str(flights[0].get("age", "")).endswith("m"),
               str(flight_names))
         check("dump stores no emails or tokens", not sensitive(got))
@@ -340,18 +364,23 @@ def main():
               sensitive({"note": "acct_9f3ab2c1"}) and sensitive({"note": "account_9f3ab2"}) and not sensitive(got))
 
         light_png = os.path.join(CHECKS, "P18-light.png")
-        check("light screenshot", copy_shot(dump, light_png), light_png)
+        copied = copy_shot(dump, light_png)
+        rows = factory_visible(light_png) if copied else 0
+        machines = got.get("machines") or []
+        check("light screenshot shows Factory rows and usage",
+              copied and rows >= 8 and any(m.get("usage") for m in machines) and len(machines) >= 2,
+              f"text_rows={rows} machines={len(machines)}")
 
         overlay_path = os.path.join(tmp, "overlay.json")
         overlay = json.load(open(overlay_path))
         for host in overlay["hosts"]:
-            if host["name"] == "Studio":
+            if host["name"] == "host-2":
                 host["summary"] = "load 240/16 · changed marker"
         json.dump(overlay, open(overlay_path, "w"))
         os.utime(overlay_path, None)
-        changed = wait_dump(dump, lambda d: machine(d, "Studio") and "changed marker" in machine(d, "Studio").get("summary", ""), 6)
+        changed = wait_dump(dump, lambda d: machine(d, "host-2") and "changed marker" in machine(d, "host-2").get("summary", ""), 6)
         check("fixture file change shows within 6s",
-              changed is not None and machine(changed, "Studio") and "changed marker" in machine(changed, "Studio").get("summary", ""))
+              changed is not None and machine(changed, "host-2") and "changed marker" in machine(changed, "host-2").get("summary", ""))
 
         stop_server(httpd)
         httpd = None
@@ -372,10 +401,14 @@ def main():
         stop(proc)
 
         dump_d = os.path.join(tmp, "dark.json")
-        proc_d = launch(env_for(tmp, port), ["--demo", "factory", "--appearance", "dark", "--dump-factory", dump_d])
-        dark_ready = wait_dump(dump_d, lambda d: machine(d, "Studio"), 25)
+        proc_d = launch(env_for(tmp, port), ["--agent-run", "--demo", "factory", "--appearance", "dark", "--dump-factory", dump_d])
+        dark_ready = wait_dump(dump_d, lambda d: machine(d, "host-2"), 25)
         dark_png = os.path.join(CHECKS, "P18-dark.png")
-        check("dark screenshot", dark_ready is not None and proc_d.poll() is None and copy_shot(dump_d, dark_png), dark_png)
+        dark_copied = dark_ready is not None and proc_d.poll() is None and copy_shot(dump_d, dark_png)
+        dark_rows = factory_visible(dark_png) if dark_copied else 0
+        check("dark screenshot shows Factory rows and usage",
+              dark_copied and dark_rows >= 8 and any((m.get("usage") for m in (dark_ready or {}).get("machines") or [])),
+              f"text_rows={dark_rows}")
         stop(proc_d)
         stop_server(httpd)
         httpd = None
@@ -385,7 +418,7 @@ def main():
             if key.startswith("FACTORY_"):
                 del live_env[key]
         live_dump = os.path.join(tmp, "live.json")
-        proc_l = launch(live_env, ["--demo", "factory", "--dump-factory", live_dump])
+        proc_l = launch(live_env, ["--agent-run", "--demo", "factory", "--dump-factory", live_dump])
         live = wait_dump(live_dump, lambda d: (d.get("machines") or d.get("pools")) and d.get("ladder_mode") and (d.get("landed_count") or 0) > 0, 25)
         live_png = os.path.join(CHECKS, "P18-live.png")
         crashed = proc_l.poll() is not None
@@ -424,10 +457,17 @@ def main():
 
 def finish(code):
     say()
-    say(f"RESULT: {'PASS' if not failures else 'FAIL ' + ', '.join(failures)}")
+    front_now = frontmost_app()
+    same = front_before not in ("", "unknown") and front_now == front_before
+    say(f"[{'PASS' if same else 'FAIL'}] frontmost app unchanged -- {front_before if same else 'took focus'}")
+    if not same:
+        code = 1
+    say(f"RESULT: {'PASS' if code == 0 and not failures else 'FAIL ' + ', '.join(failures)}")
+    home = os.path.expanduser("~")
+    body = [ln.replace(home, "~") for ln in lines]
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w") as f:
-        f.write("\n".join(lines) + "\n")
+        f.write("\n".join(body) + "\n")
     sys.exit(code)
 
 

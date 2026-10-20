@@ -185,14 +185,14 @@ def main():
             say(f"  {sec.upper():12} {r['label']:22} {r['status']:8} {r['host']:6} "
                 f"folded wf: {[c['label'] + ' @' + c['host'] + ' ' + c['status'] for c in r['children']]}")
     check("folded workflow group under its owning lane",
-          any(r["label"] == "recruiter" and [c["label"] for c in r["children"]] == ["wf recruiter-2320"]
+          any(r["label"] == "lane-a" and [c["label"] for c in r["children"]] == ["wf lane-a-1"]
               for r in side["lanes"]))
     # Live update: rename a tab through herdr and watch the sidebar follow.
-    lab("herdr", "tab", "rename", next(k for k, v in tabs.items() if v == "recruiter"), "recruiter lane")
+    lab("herdr", "tab", "rename", next(k for k, v in tabs.items() if v == "lane-a"), "lane-a lane")
     t = time.time()
     seen = None
     while time.time() - t < 4:
-        if "recruiter lane" in labels(state()["sidebar"]["lanes"]):
+        if "lane-a lane" in labels(state()["sidebar"]["lanes"]):
             seen = time.time() - t
             break
         time.sleep(0.05)

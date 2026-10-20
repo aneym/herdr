@@ -374,7 +374,7 @@ private struct ToolGroup: View {
 final class ChatUI: ObservableObject {
     enum Mode: String { case focus, full }
     static let modeKey = "HerdrShell.chatMode"
-    @Published var mode: Mode { didSet { if persist { UserDefaults.standard.set(mode.rawValue, forKey: Self.modeKey) } } }
+    @Published var mode: Mode { didSet { if persist { Channel.store.set(mode.rawValue, forKey: Self.modeKey) } } }
     @Published var groupOpen: [String: Bool] = [:]
     @Published var toolOpen: [String: Bool] = [:]
     /// Tool rows currently on screen (for the check's state dump).
@@ -383,7 +383,7 @@ final class ChatUI: ObservableObject {
 
     init(pinned: Mode? = nil) {
         persist = pinned == nil
-        mode = pinned ?? Mode(rawValue: UserDefaults.standard.string(forKey: Self.modeKey) ?? "") ?? .focus
+        mode = pinned ?? Mode(rawValue: Channel.store.string(forKey: Self.modeKey) ?? "") ?? .focus
     }
 
     /// Runs of several calls open only in Full, or once clicked.

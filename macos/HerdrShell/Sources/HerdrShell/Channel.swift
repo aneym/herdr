@@ -48,7 +48,19 @@ enum Channel {
     }
 
     static var commit: String {
-        Bundle.main.object(forInfoDictionaryKey: "HerdrShellCommit") as? String ?? ""
+        let injected = ProcessInfo.processInfo.environment["HERDR_SHELL_COMMIT"] ?? ""
+        if !injected.isEmpty { return injected }
+        return Bundle.main.object(forInfoDictionaryKey: "HerdrShellCommit") as? String ?? ""
+    }
+
+    /// A dev window may restart only into a fixture install root, never ~/Applications.
+    static var fixtureInstallRoot: URL? {
+        let raw = ProcessInfo.processInfo.environment["HERDR_SHELL_INSTALL_ROOT"] ?? ""
+        guard !raw.isEmpty else { return nil }
+        let url = URL(fileURLWithPath: (raw as NSString).expandingTildeInPath, isDirectory: true).standardizedFileURL
+        let real = installRoot.standardizedFileURL.path
+        if url.path == real || url.path.hasPrefix(real + "/") { return nil }
+        return url
     }
 
     static var builtAt: String {
@@ -82,6 +94,14 @@ enum Channel {
     static func mode(for pane: String) -> String {
         let v = paneModes()[pane] ?? "terminal"
         return v == "chat" ? "chat" : "terminal"
+    }
+
+    /// Drop modes for panes the session no longer has. Called once the first snapshot arrives.
+    static func prunePaneModes(keeping ids: Set<String>) {
+        let modes = paneModes().filter { ids.contains($0.key) }
+        if modes.count != paneModes().count { setPaneModes(modes) }
+        let density = paneDensity().filter { ids.contains($0.key) }
+        if density.count != paneDensity().count { setPaneDensity(density) }
     }
 
     static func setMode(_ mode: String, for pane: String) {

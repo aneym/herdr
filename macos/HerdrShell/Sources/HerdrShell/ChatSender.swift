@@ -84,6 +84,10 @@ final class ChatSender: ObservableObject {
     }
     private var held: [(String, Bool)] = []
     private var timer: DispatchSourceTimer?
+    /// Set while a send is waiting out a blocked pane. The recheck is 3 s after the
+    /// pane leaves blocked, not the next tick of a timer that was already running.
+    private var blockedHold = false
+    private var clearSince: Date?
     /// Transcript ids present when the message went out; only a newer You item acknowledges it.
     private var known = Set<String>()
     init(pane: String, readOnly: Bool = false) {
@@ -91,7 +95,7 @@ final class ChatSender: ObservableObject {
         self.readOnly = readOnly || pane.isEmpty
         queue = Self.queue(for: pane)
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + 3, repeating: 3)
+        timer.schedule(deadline: .now() + 0.25, repeating: 0.25)
         timer.setEventHandler { [weak self] in self?.drain() }
         self.timer = timer; timer.resume()
     }
@@ -114,7 +118,18 @@ final class ChatSender: ObservableObject {
         do {
             let a = try ChatCLI.agent(pane)
             guard a["agent"] as? String == "claude", let session = (a["agent_session"] as? [String: Any])?["value"] as? String, !session.isEmpty else { held.removeFirst(); update("No Claude session is running in that pane"); return }
-            if a["agent_status"] as? String == "blocked" { update("held: will send when the terminal stops asking"); return }
+            if a["agent_status"] as? String == "blocked" {
+                blockedHold = true
+                clearSince = nil
+                update("held: will send when the terminal stops asking")
+                return
+            }
+            if blockedHold {
+                if clearSince == nil { clearSince = Date() }
+                if let clearSince, Date().timeIntervalSince(clearSince) < 3 { return }
+                blockedHold = false
+                self.clearSince = nil
+            }
             let screen = try ChatCLI.run(["pane", "read", pane, "--source", "visible", "--lines", "12", "--format", "ansi"])
             if !anyway {
                 switch ChatCLI.prompt(screen) {
@@ -130,9 +145,9 @@ final class ChatSender: ObservableObject {
             let points = Array(text.unicodeScalars)
             for start in stride(from: 0, to: points.count, by: 300) {
                 let chunk = String(String.UnicodeScalarView(points[start..<min(start + 300, points.count)]))
-                _ = try ChatCLI.run(["pane", "send-text", pane, chunk])
+                _ = try ChatCLI.run(["pane", "send-text", "--human", pane, chunk])
             }
-            _ = try ChatCLI.run(["pane", "send-text", pane, "\r"])
+            _ = try ChatCLI.run(["pane", "send-text", "--human", pane, "\r"])
             held.removeFirst()
         } catch {
             log("chat send failed: \(error)")

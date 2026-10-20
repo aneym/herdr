@@ -1,10 +1,187 @@
-HerdrShell P6 check  2026-10-02T16:57:38Z
+HerdrShell P6 check  2026-10-02T19:12:28Z
 config: shipped ghostty.conf sets macos-option-as-alt = false; user config sets it: False
 [PASS] dead-key run uses the shipped option setting (no override in the check or the user config)
-app start: {"pids": [69464], "fifo_ready_s": 0.5}
-[FAIL] both scenario panes attached and rendered
+app start: {"pids": [96512], "fifo_ready_s": 1.31}
+[PASS] both scenario panes attached and rendered
+[PASS] pane 1 has keyboard focus on mount -- focused=w1:p2
+window: key=False app_active=False post_event_access=True
+keymap load line: keymap: 55 app chords, 1 terminal chords from /Volumes/StudioExt/repos/herdr-worktrees/native-shell-areas/macos/HerdrShell/Resources/keymap.json
+activation attempt: app_active=False window_key=False
+[INFO] dead key through the system input method: not composed (app inactive in the lab, so unverified here)
+[PASS] dead key: option+e then e reached pane 1 as e-acute (herdr pane read) -- 0.047s; line: 'tmp % é'
+[PASS] dead key: the pane got exactly e-acute (line is `% é`: no bare accent, no extra e) -- line: 'tmp % é'
+[PASS] dead key: the accent alone left nothing in the pane before the letter
+herdr pane read w1:p2 --source recent:
+  | tmp % é
+  | zsh: command not found: é
+  | tmp %
+[FAIL] live actions move focus: cmd+l right, cmd+h left, cmd+] next, cmd+[ previous -- focus order=['w1:p2', 'w1:p3', 'w1:p2', 'w1:p6', 'w1:p6']
+[FAIL] cmd+backspace reached pane 1 as ctrl+u (line cleared; the next command ran alone) -- tmp % é
+zsh: command not found: é
+tmp %
+
+[PASS] an unclaimed chord (cmd+y) reached the focused pane's Ghostty surface (press delivered, physical key y + super) -- keys_sent +1; last='keycode=16 mods=8'
+[FAIL] unclaimed ctrl+b reached the pane (cat -v printed ^B) -- tmp % é
+zsh: command not found: é
+tmp %
+
+[PASS] an unclaimed chord (cmd+y) fires no keymap action -- fired=[]
+herdr pane read w1:p2 --source recent:
+  | tmp % é
+  | zsh: command not found: é
+  | tmp %
+tab order: 5 tabs
+[PASS] cmd+1 (goto_tab_1) selects tab 1 -- selected=w1:t1 want=w1:t1
+[PASS] cmd+2 (goto_tab_2) selects tab 2 -- selected=w1:t5 want=w1:t5
+[PASS] cmd+3 (goto_tab_3) selects tab 3 -- selected=w1:t2 want=w1:t2
+[PASS] cmd+4 (goto_tab_4) selects tab 4 -- selected=w1:t3 want=w1:t3
+[PASS] cmd+5 (goto_tab_5) selects tab 5 -- selected=w1:t4 want=w1:t4
+[PASS] cmd+6 (goto_tab_6) with only 5 tabs changes nothing -- selected=w1:t1 start=w1:t1
+[PASS] cmd+7 (goto_tab_7) with only 5 tabs changes nothing -- selected=w1:t1 start=w1:t1
+[PASS] cmd+8 (goto_tab_8) with only 5 tabs changes nothing -- selected=w1:t1 start=w1:t1
+[PASS] cmd+9 (goto_tab_9) with only 5 tabs changes nothing -- selected=w1:t1 start=w1:t1
+[PASS] cmd+shift+] (next_tab) selects the neighbouring tab in sidebar order -- selected=w1:t2 want=w1:t2
+[PASS] cmd+shift+[ (prev_tab) selects the neighbouring tab in sidebar order -- selected=w1:t1 want=w1:t1
+[PASS] cmd+t (new_tab) makes one herdr tab and shows it -- tabs 5 -> 6; selected=w1:t6
+[PASS] cmd+d (split_right) makes one herdr pane and focuses it -- panes 2 -> 3
+[PASS] cmd+shift+d (split_down) makes one herdr pane and focuses it -- panes 2 -> 4
+[PASS] cmd+shift+k (focus_pane_up) moves focus to the pane above the new split -- focused=w1:p8 want=w1:p8
+[PASS] cmd+j (focus_pane_down) moves focus back to the pane below -- focused=w1:p9 want=w1:p9
+[PASS] cmd+shift+f (open_factory) opens the Factory view
+[FAIL] cmd+shift+f (open_factory) closes the Factory view
+[PASS] every live keymap action has a result check above -- unchecked=[]
+keymap entries: 55
+[PASS] static cmd+] (next_pane) fires its own effect
+[PASS] static cmd+[ (prev_pane) fires its own effect
+[PASS] static cmd+shift+] (next_tab) fires its own effect
+[PASS] static cmd+shift+[ (prev_tab) fires its own effect
+[PASS] static cmd+opt+left (focus_pane_left) fires its own effect
+[PASS] static cmd+opt+right (focus_pane_right) fires its own effect
+[PASS] static cmd+opt+up (focus_pane_up) fires its own effect
+[PASS] static cmd+opt+down (focus_pane_down) fires its own effect
+[PASS] static cmd+h (focus_pane_left) fires its own effect
+[PASS] static cmd+j (focus_pane_down) fires its own effect
+[PASS] static cmd+shift+k (focus_pane_up) fires its own effect
+[PASS] static cmd+l (focus_pane_right) fires its own effect
+[PASS] static cmd+1 (goto_tab_1) fires its own effect
+[PASS] static cmd+2 (goto_tab_2) fires its own effect
+[PASS] static cmd+3 (goto_tab_3) fires its own effect
+[PASS] static cmd+4 (goto_tab_4) fires its own effect
+[PASS] static cmd+5 (goto_tab_5) fires its own effect
+[PASS] static cmd+6 (goto_tab_6) fires its own effect
+[PASS] static cmd+7 (goto_tab_7) fires its own effect
+[PASS] static cmd+8 (goto_tab_8) fires its own effect
+[PASS] static cmd+9 (goto_tab_9) fires its own effect
+[PASS] static cmd+d (split_right) fires its own effect
+[PASS] static cmd+shift+d (split_down) fires its own effect
+[PASS] static cmd+t (new_tab) fires its own effect
+[PASS] static cmd+w (close_pane) fires its own effect
+[PASS] static cmd+e (zoom_pane) fires its own effect
+[PASS] static cmd+b (toggle_sidebar) fires its own effect
+[PASS] static cmd+shift+f (open_factory) fires its own effect
+[PASS] static cmd+shift+a (toggle_area_mode) fires its own effect
+[PASS] static cmd+\ (toggle_docs) fires its own effect
+[PASS] static cmd+opt+1 (filter_1) fires its own effect
+[PASS] static cmd+opt+2 (filter_2) fires its own effect
+[PASS] static cmd+opt+3 (filter_3) fires its own effect
+[PASS] static cmd+opt+4 (filter_4) fires its own effect
+[PASS] static cmd+opt+5 (filter_5) fires its own effect
+[PASS] static cmd+opt+6 (filter_6) fires its own effect
+[PASS] static cmd+shift+1 (goto_space_1) fires its own effect
+[PASS] static cmd+shift+2 (goto_space_2) fires its own effect
+[PASS] static cmd+shift+3 (goto_space_3) fires its own effect
+[PASS] static cmd+shift+4 (goto_space_4) fires its own effect
+[PASS] static cmd+shift+5 (goto_space_5) fires its own effect
+[PASS] static cmd+shift+6 (goto_space_6) fires its own effect
+[PASS] static cmd+shift+7 (goto_space_7) fires its own effect
+[PASS] static cmd+shift+8 (goto_space_8) fires its own effect
+[PASS] static cmd+shift+9 (goto_space_9) fires its own effect
+[PASS] static cmd+opt+j (agent_list_up) fires its own effect
+[PASS] static cmd+opt+k (agent_list_down) fires its own effect
+[PASS] static cmd+o (attention_jump) fires its own effect
+[PASS] static opt+o (overview) fires its own effect
+[PASS] static cmd+k (search) fires its own effect
+[PASS] static cmd+g (goto) fires its own effect
+[PASS] static cmd+n (spawn_agent) fires its own effect
+[PASS] static cmd+p (profile_switcher) fires its own effect
+[PASS] static cmd+m (voice_hud) fires its own effect
+[PASS] static cmd+shift+c (life_workspace) fires its own effect
+[PASS] all 55 keymap entries fire exactly their own action (app log)
+[PASS] every static chord in keymap.json still fires when no contextual chord matches -- docs and the detail panel were closed, so escape and cmd+l could not take the key
+[PASS] no keymap chord reached any Ghostty surface (key presses handed to Ghostty: before == after) -- before=42 after=42
+[FAIL] no keymap chord sent anything to any pane (every lab pane reads the same before and after) -- 
+--- before
+w1:p1:
+tmp %
+
+=====
+w1:p2:
+tmp % é
+zsh: command not
+found: é
+tmp %
+
+=====
+w1:p3:
+tmp %
+
+=====
+w1:p4:
+tmp %
+
+=====
+w1:p5:
+tmp %
+
+=====
+w1:p6:
+tmp % echo kill-ok
+kill-ok
+tmp % cat -v
+^B
+^B
+^C
+tmp %
+
+--- after
+w1:p1:
+tmp %
+
+=====
+w1:p2:
+tmp % é
+zsh: command not found: é
+tmp %
+
+=====
+w1:p3:
+tmp %
+
+=====
+w1:p4:
+tmp %
+
+=====
+w1:p5:
+tmp %
+
+=====
+w1:p6:
+tmp % echo kill-ok
+kill-ok
+tmp % cat -v
+^B
+^B
+^C
+tmp %
+
+[PASS] panes made by keymap actions (6) hold only a bare prompt (nothing leaked into them)
+  live     42  cmd+] cmd+[ cmd+shift+] cmd+shift+[ cmd+opt+left cmd+opt+right cmd+opt+up cmd+opt+down cmd+h cmd+j cmd+shift+k cmd+l cmd+1 cmd+2 cmd+3 cmd+4 cmd+5 cmd+6 cmd+7 cmd+8 cmd+9 cmd+d cmd+shift+d cmd+t cmd+shift+f cmd+shift+a cmd+\ cmd+opt+1 cmd+opt+2 cmd+opt+3 cmd+opt+4 cmd+opt+5 cmd+opt+6 cmd+shift+1 cmd+shift+2 cmd+shift+3 cmd+shift+4 cmd+shift+5 cmd+shift+6 cmd+shift+7 cmd+shift+8 cmd+shift+9
+  P9        2  cmd+w cmd+e
+  P10       3  cmd+b cmd+opt+j cmd+opt+k
+  P13       8  cmd+o opt+o cmd+k cmd+g cmd+n cmd+p cmd+m cmd+shift+c
 [PASS] frontmost app unchanged -- Aside
-[FAIL] attach clients exit with the app -- left=['69458', '69461']
+[PASS] attach clients exit with the app -- left=[]
 lab down: stop: 0
 
-RESULT: FAIL both scenario panes attached and rendered, attach clients exit with the app
+RESULT: FAIL live actions move focus: cmd+l right, cmd+h left, cmd+] next, cmd+[ previous, cmd+backspace reached pane 1 as ctrl+u (line cleared; the next command ran alone), unclaimed ctrl+b reached the pane (cat -v printed ^B), cmd+shift+f (open_factory) closes the Factory view, no keymap chord sent anything to any pane (every lab pane reads the same before and after)

@@ -152,7 +152,7 @@ def main():
     # factory-space keeps its root tab: rename it to the orchestrator.
     orch = factory["tab"]["tab_id"]
     orch_pane = factory["root_pane"]["pane_id"]
-    herdr("tab", "rename", orch, "rails orchestrator")
+    herdr("tab", "rename", orch, "orchestrator")
     blocked, blocked_pane = tab(fw, "blocked build")
     scope_f, scope_f_pane = tab(fw, "scope factory")
     stray, stray_pane = tab(fw, "stray tab")
@@ -164,7 +164,7 @@ def main():
     build, build_pane = tab(rw, "raise build")
     wf, wf_pane = tab(rw, "wf raise-1")
     closed, closed_pane = tab(rw, "old raise")
-    desk, desk_pane = tab(rw, "recruiting desk raw")
+    desk, desk_pane = tab(rw, "desk raw")
     job1, job1_pane = tab(rw, "job outreach raw")
     job2, job2_pane = tab(rw, "job followups")
 
@@ -210,7 +210,7 @@ def main():
             {"tab": closed, "name": "old raise", "label": "old raise", "kind": "lane",
              "goal": "raise", "goal_area": None, "section": "closed", "section_source": "project",
              "scope_url": None, "review_url": None, "mode": None},
-            {"tab": desk, "name": "recruiting desk", "label": "recruiting desk raw", "kind": "lane",
+            {"tab": desk, "name": "desk", "label": "desk raw", "kind": "lane",
              "goal": None, "goal_area": None, "section": "implementing", "section_source": "default",
              "scope_url": None, "review_url": None, "mode": None},
             {"tab": job1, "name": "job outreach", "label": "job outreach raw", "kind": "lane",
@@ -226,14 +226,14 @@ def main():
         "areas": [
             {"id": "factory", "name": "factory", "color": "#5AA9FF"},
             {"id": "raise", "name": "raise", "color": "#B5476B"},
-            {"id": "recruiter", "name": "recruiter", "color": "#4F5BD5"},
+            {"id": "lane-a", "name": "lane-a", "color": "#4F5BD5"},
             {"id": "empty", "name": "empty", "color": "#888888"},
             {"id": "unsorted", "name": "unsorted", "color": "#999999"},
         ],
         "tabs": {
-            orch: {"area": "factory", "role": "top", "name": "rails orchestrator"},
-            desk: {"area": "recruiter", "role": "desk", "name": "recruiting desk"},
-            job1: {"area": "recruiter", "role": "job", "name": "job outreach"},
+            orch: {"area": "factory", "role": "top", "name": "orchestrator"},
+            desk: {"area": "lane-a", "role": "desk", "name": "desk"},
+            job1: {"area": "lane-a", "role": "job", "name": "job outreach"},
             job2: {"role": "job"},
         },
         "spaces": {fw: "factory", rw: "raise"},
@@ -243,8 +243,8 @@ def main():
     # job2 has a role but no area: the raise space maps the whole workspace to raise,
     # which would put the jobs in raise. Give job2 an explicit area via the tab entry's
     # missing area falling through... space rw is raise, so job2 would be raise.
-    # Pin jobs to recruiter with an explicit area so Use is its own area.
-    areas["tabs"][job2] = {"area": "recruiter", "role": "job"}
+    # Pin jobs to lane-a with an explicit area so Use is its own area.
+    areas["tabs"][job2] = {"area": "lane-a", "role": "job"}
     with open(os.path.join(FIX, "lanes.json"), "w") as f:
         json.dump(lanes, f)
     with open(os.path.join(FIX, "areas.json"), "w") as f:
@@ -268,15 +268,15 @@ def main():
 
     area_ids = [l["area"] for l in s["sidebar_lines"] if l["kind"] == "area"]
     check("areas draw in areas[] order and an empty area is omitted",
-          area_ids == ["factory", "raise", "recruiter"] and "empty" not in area_ids, f"areas={area_ids}")
+          area_ids == ["factory", "raise", "lane-a"] and "empty" not in area_ids, f"areas={area_ids}")
     heads = subheads(s)
     check("sub-headers only when that group has rows",
           heads == ["ORCHESTRATOR", "PROJECTS", "PROJECTS", "USE"], f"headers={heads}")
     fac = titles(s, "factory")
     rai = titles(s, "raise")
-    rec = titles(s, "recruiter")
+    rec = titles(s, "lane-a")
     check("factory: orchestrator, then projects (blocked, scoping, the tab lanes.json lacks)",
-          fac[:4] == ["rails orchestrator", "blocked build", "scope factory", "stray tab"] or fac == ["rails orchestrator", "blocked build", "scope factory", "stray tab"],
+          fac[:4] == ["orchestrator", "blocked build", "scope factory", "stray tab"] or fac == ["orchestrator", "blocked build", "scope factory", "stray tab"],
           f"{fac}")
     check("raise: scoping name had [scoping] stripped, closed row is last and dimmed",
           rai[:3] == ["raise brief", "review packet", "raise build"] and rai[-1:] == ["old raise"],
@@ -284,8 +284,8 @@ def main():
     closed_row = next((l for l in s["sidebar_lines"] if l["title"] == "old raise"), None)
     check("closed row is dimmed and hidden from every chip but All (asserted per chip below)",
           closed_row is not None and closed_row["dim"] is True and closed_row["stage"] == "closed")
-    check("recruiter Use group is desk then jobs",
-          rec == ["recruiting desk", "job outreach", "job followups"], f"{rec}")
+    check("lane-a Use group is desk then jobs",
+          rec == ["desk", "job outreach", "job followups"], f"{rec}")
     stray_row = next(l for l in s["sidebar_lines"] if l["title"] == "stray tab")
     check("tab absent from lanes.json still shows, stage none, area by goal/space rules (factory)",
           stray_row["stage"] is None and stray_row["area"] == "factory" and stray_row["role"] == "project")
@@ -312,7 +312,7 @@ def main():
     click("chip", "all")
     all_names = chip_titles("all")
     check("All shows every top-level row, closed included",
-          "old raise" in all_names and "rails orchestrator" in all_names and "stray tab" in all_names and "job followups" in all_names,
+          "old raise" in all_names and "orchestrator" in all_names and "stray tab" in all_names and "job followups" in all_names,
           f"{all_names}")
     needs = chip_titles("needs")
     check("Needs you is reviewing, scoping, or blocked",
@@ -322,15 +322,15 @@ def main():
     check("Scoping chip is the scoping stage only", set(scoping_rows) == {"scope factory", "raise brief"}, f"{scoping_rows}")
     building_rows = chip_titles("building")
     check("Building chip is implementing (including the desk and jobs, and the blocked lane)",
-          set(building_rows) == {"blocked build", "raise build", "recruiting desk", "job outreach", "job followups"}, f"{building_rows}")
+          set(building_rows) == {"blocked build", "raise build", "desk", "job outreach", "job followups"}, f"{building_rows}")
     review_rows = chip_titles("review")
     check("Review chip is the reviewing stage only", review_rows == ["review packet"], f"{review_rows}")
     use_rows = chip_titles("use")
-    check("Use chip is desk then jobs", use_rows == ["recruiting desk", "job outreach", "job followups"], f"{use_rows}")
+    check("Use chip is desk then jobs", use_rows == ["desk", "job outreach", "job followups"], f"{use_rows}")
     click("chip", "all")
 
     # Focus ranking and stepping. Start from a row that is not in the queue.
-    click("row", "recruiting desk")
+    click("row", "desk")
     time.sleep(0.3)
     click("focus")
     s = wait_state(lambda s: s["shell"]["focus_expanded"] is True)
@@ -387,7 +387,7 @@ def main():
 
     # Spaces mode keeps the P10 line shape. The open space is the selected tab's,
     # so stand on the factory orchestrator where ORCHESTRATOR and LANES both exist.
-    click("row", "rails orchestrator")
+    click("row", "orchestrator")
     time.sleep(0.3)
     S.key("a", ["cmd", "shift"])
     s = wait_state(lambda s: s["shell"]["mode"] == "spaces")
@@ -488,7 +488,7 @@ def finish():
     say(f"RESULT: {'PASS' if not failures else 'FAIL ' + ', '.join(failures)}")
     os.makedirs(os.path.dirname(S.OUT), exist_ok=True)
     with open(S.OUT, "w") as f:
-        f.write("\n".join(lines) + "\n")
+        f.write("\n".join(ln.replace(os.path.expanduser("~"), "~") for ln in lines) + "\n")
     sys.exit(1 if failures else 0)
 
 

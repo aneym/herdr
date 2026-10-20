@@ -1,7 +1,7 @@
 {
-  "drained": ["forge-1"],
-  "drained_why": {"forge-1": {"reason": "disk under floor"}},
-  "down": {"ax42": 2000000000},
-  "down_why": {"ax42": {"reason": "banner timeout"}},
+  "drained": ["host-5"],
+  "drained_why": {"host-5": {"reason": "disk under floor"}},
+  "down": {"host-4": 2000000000},
+  "down_why": {"host-4": {"reason": "banner timeout"}},
   "capped": {}
 }

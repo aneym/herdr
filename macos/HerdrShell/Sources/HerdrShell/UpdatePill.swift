@@ -92,9 +92,19 @@ final class UpdateController: NSObject {
 
     func restartNow() {
         guard let windowController else { return }
+        let root: URL
+        if Channel.kind == .dev {
+            guard let fixture = Channel.fixtureInstallRoot else {
+                log("dev refuses Restart to update without a fixture install root")
+                return
+            }
+            root = fixture
+        } else {
+            root = Channel.installRoot
+        }
         windowController.saveForRelaunch()
         popover.performClose(nil)
-        if UpdateRestart.detach(waitPid: getpid(), installRoot: Channel.installRoot, support: Channel.appSupport, relaunch: .open) {
+        if UpdateRestart.detach(waitPid: getpid(), installRoot: root, support: Channel.appSupport, relaunch: .open) {
             NSApp.terminate(nil)
         }
     }

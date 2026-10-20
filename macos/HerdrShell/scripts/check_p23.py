@@ -37,7 +37,7 @@ def finish():
     say()
     say(f"RESULT: {'PASS' if not failures else 'FAIL ' + ', '.join(failures)}")
     with open(OUT, "w") as f:
-        f.write("\n".join(lines) + "\n")
+        f.write("\n".join(ln.replace(os.path.expanduser("~"), "~") for ln in lines) + "\n")
     sys.exit(1 if failures else 0)
 
 
@@ -96,44 +96,89 @@ def contrast(a, b):
 
 
 def hairline_contrast(png, st):
+    """Minimum, across every divider, of that divider's own line-vs-neighbour contrast.
+
+    The line is the nearby column or row whose neighbours agree with each other
+    (so the sample is the hairline, not text) and whose median contrast is highest.
+    """
     from PIL import Image
     img = Image.open(png).convert("RGB")
-    hx, _, hw, hh = parse_rect(st["host_frame"])
-    scale = img.width / (hx + hw)
-    best = 0.0
+    content = st.get("content_size") or [img.width, img.height]
+    scale = img.width / content[0] if content[0] else 1
+    worst = None
     for div in st["dividers"]:
-        x, y, w, h = div["frame"]
-        if div["vertical"]:
-            cx = int((hx + x + w / 2) * scale)
-            y0 = int((y + 50) * scale)
-            y1 = int((y + h - 20) * scale)
-            for col in range(cx - 6, cx + 7):
+        box = div.get("window") or div.get("frame")
+        x, y, w, h = box
+        vertical = div["vertical"] if "window" in div else div["vertical"]
+        best_med = None
+        if vertical:
+            cx = int((x + w / 2) * scale)
+            y0 = int((y + 8) * scale)
+            y1 = int((y + h - 8) * scale)
+            for col in range(cx - 2, cx + 3):
                 ratios = []
-                for row in range(max(0, y0), min(img.height, y1), 8):
-                    if col < 4 or col + 4 >= img.width:
+                for row in range(max(0, y0), min(img.height, y1), 4):
+                    if col < 3 or col + 3 >= img.width:
                         continue
                     mid = img.getpixel((col, row))
-                    left = img.getpixel((col - 4, row))
-                    right = img.getpixel((col + 4, row))
+                    left = img.getpixel((col - 3, row))
+                    right = img.getpixel((col + 3, row))
+                    if contrast(left, right) > 1.2:
+                        continue
                     ratios.append(min(contrast(mid, left), contrast(mid, right)))
                 if ratios:
-                    best = max(best, sorted(ratios)[len(ratios) // 2])
+                    med = sorted(ratios)[len(ratios) // 2]
+                    best_med = med if best_med is None else max(best_med, med)
         else:
             cy = int((y + h / 2) * scale)
-            x0 = int((hx + x + 20) * scale)
-            x1 = int((hx + x + w - 20) * scale)
-            for row in range(cy - 6, cy + 7):
+            x0 = int((x + 8) * scale)
+            x1 = int((x + w - 8) * scale)
+            for row in range(cy - 2, cy + 3):
                 ratios = []
-                for col in range(max(0, x0), min(img.width, x1), 8):
-                    if row < 4 or row + 4 >= img.height:
+                for col in range(max(0, x0), min(img.width, x1), 4):
+                    if row < 3 or row + 3 >= img.height:
                         continue
                     mid = img.getpixel((col, row))
-                    above = img.getpixel((col, row - 4))
-                    below = img.getpixel((col, row + 4))
+                    above = img.getpixel((col, row - 3))
+                    below = img.getpixel((col, row + 3))
+                    if contrast(above, below) > 1.2:
+                        continue
                     ratios.append(min(contrast(mid, above), contrast(mid, below)))
                 if ratios:
-                    best = max(best, sorted(ratios)[len(ratios) // 2])
-    return best
+                    med = sorted(ratios)[len(ratios) // 2]
+                    best_med = med if best_med is None else max(best_med, med)
+        if best_med is None:
+            return 0.0
+        worst = best_med if worst is None else min(worst, best_med)
+    return 0.0 if worst is None else worst
+
+
+def dimmed_text_contrast(png, st):
+    """Contrast between the darkest and lightest fifth of an unfocused pane."""
+    from PIL import Image
+    img = Image.open(png).convert("RGB")
+    content = st.get("content_size") or [img.width, img.height]
+    scale = img.width / content[0] if content[0] else 1
+    worst = None
+    for surface in st.get("surfaces") or []:
+        if surface.get("focused"):
+            continue
+        box = surface.get("window")
+        if not box or len(box) != 4 or box[2] < 40 or box[3] < 40:
+            continue
+        x, y, w, h = box
+        samples = []
+        for row in range(int((y + 16) * scale), int((y + h - 16) * scale), 5):
+            for col in range(int((x + 12) * scale), int((x + w - 12) * scale), 7):
+                if 0 <= col < img.width and 0 <= row < img.height:
+                    samples.append(img.getpixel((col, row)))
+        if len(samples) < 40:
+            continue
+        ordered = sorted(samples, key=lum)
+        n = max(1, len(ordered) // 5)
+        ratio = contrast(ordered[n // 2], ordered[-n + n // 2])
+        worst = ratio if worst is None else min(worst, ratio)
+    return 0.0 if worst is None else worst
 
 
 def main():
@@ -178,8 +223,11 @@ def main():
         png = shot(name)
         st = S.state()
         ratio = hairline_contrast(png, st) if os.path.getsize(png) > 1000 else 0
+        dim = dimmed_text_contrast(png, st) if os.path.getsize(png) > 1000 else 0
         check(f"{mode} hairline contrast is at least 1.3:1 against both neighbours",
-              ratio >= 1.3, f"{ratio:.2f}:1 {png}")
+              ratio >= 1.3, f"min across dividers {ratio:.2f}:1 {png}")
+        check(f"{mode} unfocused pane text contrast is at least 4.5:1",
+              dim >= 4.5, f"{dim:.2f}:1")
 
     before = S.state()["focused_pane"]
     caps_before = {c["id"]: c["focused"] for c in S.state().get("pane_caps", [])}

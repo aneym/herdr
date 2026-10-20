@@ -67,6 +67,17 @@ final class SurfaceRegistry {
             ?? .keepAttached
     }
 
+    /// Quit path: every attach client has to die with the app, including ones whose
+    /// shell already exited and left `herdr terminal attach` holding the terminal.
+    func closeAll() {
+        for view in byTerminal.values {
+            view.onExit = nil
+            view.killForeground()
+            view.closeSurface()
+        }
+        byTerminal.removeAll()
+    }
+
     func surface(paneId: String, terminalId: String) -> SurfaceView {
         if let s = byTerminal[terminalId] { return s }
         return spawn(paneId: paneId, terminalId: terminalId, takeover: false)
@@ -74,13 +85,34 @@ final class SurfaceRegistry {
 
     // MARK: spawning
 
+    /// The installed herdr supports `--human` and not `--no-escape`. A newer binary has both.
+    /// Passing the flag to a binary that lacks it makes every attach exit before a prompt.
+    private static var noEscapeByBin: [String: Bool] = [:]
+
+    private static func attachSupportsNoEscape(_ bin: String) -> Bool {
+        if let known = noEscapeByBin[bin] { return known }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: bin)
+        p.arguments = ["terminal", "attach", "--help"]
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = pipe
+        let ok = (try? p.run()) != nil
+        if ok { p.waitUntilExit() }
+        let text = ok ? String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self) : ""
+        let supports = text.contains("--no-escape")
+        noEscapeByBin[bin] = supports
+        return supports
+    }
+
     private func makeView(paneId: String, terminalId: String, takeover: Bool) -> SurfaceView {
         // The attach's exit status goes to a file, not the screen: libghostty reports 0
         // for every exit, and the screen can hold anything the pane's program printed.
         let statusFile = NSTemporaryDirectory() + "herdr-shell-exit-\(UUID().uuidString)"
         // libghostty runs the command as `exec -l <command>`, so the status write has to
         // live in a script of its own.
-        let script = "'\(herdrBin)' terminal attach \(terminalId) --no-escape" + (takeover ? " --takeover" : "")
+        let escape = Self.attachSupportsNoEscape(herdrBin) ? " --no-escape" : ""
+        let script = "'\(herdrBin)' terminal attach \(terminalId)" + escape + (takeover ? " --takeover" : "")
             + "; echo $? > '\(statusFile)'"
         let cmd = "/bin/sh -c '" + script.replacingOccurrences(of: "'", with: "'\\''") + "'"
         let s = SurfaceView(paneId: paneId, terminalId: terminalId, command: cmd, env: attachEnv, cwd: NSHomeDirectory())

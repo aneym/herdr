@@ -4,8 +4,8 @@
   SHELL_LAB=shellspike-p4 python3 scripts/check_p4.py --out checks/P4.txt
 
 Lab (seeded by lab.py, plus tabs added here): one token-tagged workflow (kind=workflow,
-host=forge-1, owned by a lane, label without "wf ") and the untagged `wf recruiter-2320`
-(no kind token, host=PC, owned by the recruiter lane). Both must fold under the right
+host=forge-1, owned by a lane, label without "wf ") and the untagged `wf lane-a-1`
+(no kind token, host=host-1, owned by the lane-a lane). Both must fold under the right
 lane with the right host badge. Extras: a tagged workflow with no owner lands in WORKFLOWS;
 a tab labelled "wf ..." but tagged kind=lane stays a lane; an unknown kind value falls back.
 """
@@ -105,15 +105,15 @@ def main():
     def kids(row):
         return [(c["label"], c["host"]) for c in row["children"]] if row else None
 
-    rec = find(side["lanes"], "recruiter")
-    check("untagged `wf recruiter-2320` (owner set, host token PC) folds under lane 'recruiter' with badge PC",
-          kids(rec) == [("wf recruiter-2320", "PC")], f"children={kids(rec)}")
+    rec = find(side["lanes"], "lane-a")
+    check("untagged `wf lane-a-1` (owner set, host token host-1) folds under lane 'lane-a' with badge host-1",
+          kids(rec) == [("wf lane-a-1", "host-1")], f"children={kids(rec)}")
     emb_row = find(side["lanes"], "embeddings")
     check("token-tagged workflow 'embed run 7' (kind=workflow, host=forge-1) folds under lane 'embeddings' with badge forge-1",
           kids(emb_row) == [("embed run 7", "forge-1")], f"children={kids(emb_row)}")
-    orch = find(side["orchestrator"], "rails orchestrator")
-    check("untagged `wf embed wave-a` folds under the orchestrator, badge PC",
-          kids(orch) == [("wf embed wave-a", "PC")], f"children={kids(orch)}")
+    orch = find(side["orchestrator"], "orchestrator")
+    check("untagged `wf embed wave-a` folds under the orchestrator, badge host-1",
+          kids(orch) == [("wf embed wave-a", "host-1")], f"children={kids(orch)}")
     free = find(side["workflows"], "nightly sweep")
     check("tagged workflow with no owner sits in WORKFLOWS with badge forge-1",
           free is not None and free["host"] == "forge-1" and free["kind"] == "workflow", f"row={free and (free['label'], free['host'])}")
@@ -122,7 +122,7 @@ def main():
     bk = find(side["lanes"], "odd kind")
     check("unknown kind value falls back to label rules (lane)", bk is not None and bk["kind"] == "lane")
     hosts = {h["host"]: h["tabs"] for h in s["hosts"]}
-    check("hosts row counts follow host tokens", hosts.get("forge-1") == 2 and hosts.get("PC") == 2, f"hosts={hosts}")
+    check("hosts row counts follow host tokens", hosts.get("forge-1") == 2 and hosts.get("host-1") == 2, f"hosts={hosts}")
     say("sidebar sections:")
     for sec in ("orchestrator", "lanes", "workflows"):
         for r in side[sec]:
@@ -138,7 +138,7 @@ def finish():
     say()
     say(f"RESULT: {'PASS' if not failures else 'FAIL ' + ', '.join(failures)}")
     with open(S.OUT, "w") as f:
-        f.write("\n".join(lines) + "\n")
+        f.write("\n".join(ln.replace(os.path.expanduser("~"), "~") for ln in lines) + "\n")
     sys.exit(1 if failures else 0)
 
 

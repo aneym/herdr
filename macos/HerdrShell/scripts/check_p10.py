@@ -4,8 +4,8 @@
   SHELL_LAB=shellspike-q python3 scripts/check_p10.py [--out checks/P10.txt]
 
 Seeds a lab that matches the mock's Rails space (~/.claude/pretty-docs/factory-devenv-mock-2026-09-28.html,
-"after . herdr 0.9 fork . grouped by kind" and the SPACES frame): three visible spaces (agent-rails,
-agent-lb, homebase) and three hidden ones; in agent-rails an orchestrator, seven lanes with folded
+"after . herdr 0.9 fork . grouped by kind" and the SPACES frame): three visible spaces (acme,
+agent-lb, homebase) and three hidden ones; in acme an orchestrator, seven lanes with folded
 workflows on PC, and three background tabs. Then asserts from the app's state dump
 (`sidebar_lines`, the same lines the view draws) that the rows, their order and fold state equal the
 expected list below, and that the come-forward rules hold:
@@ -116,26 +116,26 @@ def flush_agents():
         herdr("agent", "owner", "set", child, owner)
 
 
-PC = {"host": "PC"}
+PC = {"host": "host-1"}
 
 
 def seed():
     old = jherdr("workspace", "list")["workspaces"]
-    # agent-rails, in the order the mock lists it.
-    ws, orch, orch_tab = new_ws("agent-rails", {"pinned": "true"})
-    herdr("tab", "rename", orch_tab, "rails orchestrator")
-    register(orch, "rails orchestrator", "claude", "working", {"kind": "orchestrator", "inbox": "3"}, None)
+    # acme, in the order the mock lists it.
+    ws, orch, orch_tab = new_ws("acme", {"pinned": "true"})
+    herdr("tab", "rename", orch_tab, "orchestrator")
+    register(orch, "orchestrator", "claude", "working", {"kind": "orchestrator", "inbox": "3"}, None)
     lane = lambda label, state="working", **tok: new_tab(ws, label, "claude", state, {"kind": "lane", **tok})
-    recruiter = lane("recruiter")
+    lane_a = lane("lane-a")
     embed = lane("workspace embed", dev_loop="rails-local")
     blocks = lane("agent blocks")
     infra = lane("factory infra")
     proto = lane("proto coach")
-    lane("recruiter outreach")
+    lane("lane-b")
     lane("conversation evals", "idle")
     wf = lambda label, owner, state="working", **tok: new_tab(ws, label, "codex", state, {"kind": "workflow", **PC, **tok}, owner)
-    wf("wf recruiter-2320", recruiter)
-    wf("wf recruiter-2315", recruiter)
+    wf("wf lane-a-1", lane_a)
+    wf("wf lane-a-2", lane_a)
     wf("wf embed wave-a", embed, "blocked")
     wf("wf devloop 1", embed, "idle", phase="done")
     wf("wf blocks fold 5", blocks)
@@ -147,7 +147,7 @@ def seed():
     # Background: two advisors and a finished lane.
     new_tab(ws, "step back", "claude", "idle", {"kind": "advisor"})
     new_tab(ws, "toyo research", "claude", "idle", {"kind": "advisor"})
-    new_tab(ws, "recruiting email", "claude", "idle", {"kind": "lane", "phase": "done"})
+    new_tab(ws, "inbox mail", "claude", "idle", {"kind": "lane", "phase": "done"})
     # Other spaces.
     _, lb, lb_tab = new_ws("agent-lb", {"pinned": "true"})
     herdr("tab", "rename", lb_tab, "agent-lb work")
@@ -172,22 +172,22 @@ def expected(sel_lane_open=None):
     """Text of every line the Rails space shows at rest. Fold state is the chevron."""
     return [
         "SPACES  ⌘⇧1..9",
-        "▾ ◆ agent-rails  factory",
+        "▾ ◆ acme  factory",
         "ORCHESTRATOR  inbox 3",
-        "▾ ● rails orchestrator  1 wf  [Studio]",
-        "  ◐ wf reap  [PC]",
+        "▾ ● orchestrator  1 wf  [host-2]",
+        "  ◐ wf reap  [host-1]",
         "LANES  7 open",
-        "▸ ● recruiter  2 wf",
+        "▸ ● lane-a  2 wf",
         "▾ ● workspace embed ⟳  2 wf",
-        "  ◐ wf embed wave-a  [PC]",
-        "  ✓ wf devloop 1  [PC]",
+        "  ◐ wf embed wave-a  [host-1]",
+        "  ✓ wf devloop 1  [host-1]",
         "▸ ● agent blocks  2 wf",
         "▸ ● factory infra  3 wf",
         "▸ ● proto coach  1 wf",
-        "● recruiter outreach",
+        "● lane-b",
         "○ conversation evals  idle",
         "▸ background  3",
-        "  step back · toyo research · recruiting email ✓",
+        "  step back · toyo research · inbox mail ✓",
         "▸ ◆ agent-lb  1",
         "▸ ◆ homebase  ●",
         "▸ hidden  3",
@@ -242,12 +242,12 @@ def main():
     subprocess.run(["defaults", "delete", f"herdr.shell.{os.environ['SHELL_LAB']}"], capture_output=True)
     say(f"app start: {S.app('start').strip()}")
     want = expected()
-    s = wait_lines(lambda s: len(s["sidebar_lines"]) >= len(want) and texts(s)[:1] == want[:1] and "▾ ◆ agent-rails  factory" in texts(s))
+    s = wait_lines(lambda s: len(s["sidebar_lines"]) >= len(want) and texts(s)[:1] == want[:1] and "▾ ◆ acme  factory" in texts(s))
     if s is None:
         check("app state readable", False)
         return finish()
-    # Start on the Rails space, on the recruiter lane (the default selection is the first lane).
-    S.cmd({"cmd": "select", "tab": tab_of["recruiter"]})
+    # Start on the Rails space, on the lane-a lane (the default selection is the first lane).
+    S.cmd({"cmd": "select", "tab": tab_of["lane-a"]})
     s = wait_lines(lambda s: texts(s) == want, 6)
     say("sidebar lines as drawn:")
     for l in s["sidebar_lines"]:
@@ -260,30 +260,30 @@ def main():
 
     # Row facts the text does not carry.
     sel = [l["text"] for l in s["sidebar_lines"] if l["selected"]]
-    check("selected rows: the current space and the selected lane", sel == ["▾ ◆ agent-rails  factory", "▸ ● recruiter  2 wf"], f"selected={sel}")
+    check("selected rows: the current space and the selected lane", sel == ["▾ ◆ acme  factory", "▸ ● lane-a  2 wf"], f"selected={sel}")
     kinds = [(l["text"], l["kind"]) for l in s["sidebar_lines"] if l["kind"] in ("orchestrator", "lane", "workflow")]
     check("row kinds: 1 orchestrator, 7 lanes, 3 workflow rows shown (of 8 under their lanes)",
           [k for _, k in kinds].count("orchestrator") == 1 and [k for _, k in kinds].count("lane") == 7
           and [k for _, k in kinds].count("workflow") == 3, f"{[k for _, k in kinds]}")
     check("lane rows carry no host badge (all on Studio); workflow rows carry PC",
           all(l["host"] is None for l in s["sidebar_lines"] if l["kind"] == "lane")
-          and all(l["host"] == "PC" for l in s["sidebar_lines"] if l["kind"] == "workflow"))
+          and all(l["host"] == "host-1" for l in s["sidebar_lines"] if l["kind"] == "workflow"))
 
     # Fold by hand: open, close, and a hand-set close beats the come-forward rule.
-    S.cmd({"cmd": "sidebar_fold", "id": f"tab:{tab_of['recruiter']}", "open": True})
-    s2 = wait_lines(lambda s: "▾ ● recruiter  2 wf" in texts(s))
-    if s2 is None or "▾ ● recruiter  2 wf" not in texts(s2):
+    S.cmd({"cmd": "sidebar_fold", "id": f"tab:{tab_of['lane-a']}", "open": True})
+    s2 = wait_lines(lambda s: "▾ ● lane-a  2 wf" in texts(s))
+    if s2 is None or "▾ ● lane-a  2 wf" not in texts(s2):
         check("opening a folded lane lists its workflows in order", False, f"{texts(s2)[:6] if s2 else None}")
         return finish()
-    i = texts(s2).index("▾ ● recruiter  2 wf")
+    i = texts(s2).index("▾ ● lane-a  2 wf")
     check("opening a folded lane lists its workflows in order",
-          texts(s2)[i + 1:i + 3] == ["  ● wf recruiter-2320  [PC]", "  ● wf recruiter-2315  [PC]"], f"{texts(s2)[i:i + 3]}")
-    S.cmd({"cmd": "sidebar_fold", "id": f"tab:{tab_of['recruiter']}", "open": False})
+          texts(s2)[i + 1:i + 3] == ["  ● wf lane-a-1  [host-1]", "  ● wf lane-a-2  [host-1]"], f"{texts(s2)[i:i + 3]}")
+    S.cmd({"cmd": "sidebar_fold", "id": f"tab:{tab_of['lane-a']}", "open": False})
     S.cmd({"cmd": "sidebar_fold", "id": f"tab:{tab_of['workspace embed']}", "open": False})
     s2 = wait_lines(lambda s: "▸ ● workspace embed ⟳  2 wf" in texts(s))
     check("a fold closed by hand stays closed although a workflow inside asks",
-          s2 is not None and "▸ ● workspace embed ⟳  2 wf" in texts(s2) and "  ◐ wf embed wave-a  [PC]" not in texts(s2)
-          and "▸ ● recruiter  2 wf" in texts(s2))
+          s2 is not None and "▸ ● workspace embed ⟳  2 wf" in texts(s2) and "  ◐ wf embed wave-a  [host-1]" not in texts(s2)
+          and "▸ ● lane-a  2 wf" in texts(s2))
     S.cmd({"cmd": "sidebar_fold", "id": f"tab:{tab_of['workspace embed']}", "open": True})
 
     # Come forward: a workflow that asks opens its lane; back to idle folds it again (no manual entry).
@@ -292,7 +292,7 @@ def main():
     s2 = wait_lines(lambda s: "▾ ● factory infra  3 wf" in texts(s))
     j = texts(s2).index("▾ ● factory infra  3 wf") if s2 and "▾ ● factory infra  3 wf" in texts(s2) else -1
     check("a blocked workflow opens its collapsed lane on its own, showing the asking row",
-          j >= 0 and texts(s2)[j + 1:j + 4] == ["  ● wf infra 1  [PC]", "  ◐ wf infra 2  [PC]", "  ● wf infra 3  [PC]"],
+          j >= 0 and texts(s2)[j + 1:j + 4] == ["  ● wf infra 1  [host-1]", "  ◐ wf infra 2  [host-1]", "  ● wf infra 3  [host-1]"],
           f"{texts(s2)[j:j + 4] if j >= 0 else 'lane still closed'}")
     herdr("pane", "report-agent", pane, "--source", "spike", "--agent", "codex", "--state", "working")
     s2 = wait_lines(lambda s: "▸ ● factory infra  3 wf" in texts(s))
@@ -303,7 +303,7 @@ def main():
     herdr("pane", "report-metadata", fpane, "--source", "spike", "--token", "state=failed")
     s2 = wait_lines(lambda s: "▾ ● agent blocks  2 wf" in texts(s))
     k = texts(s2).index("▾ ● agent blocks  2 wf") if s2 and "▾ ● agent blocks  2 wf" in texts(s2) else -1
-    check("a failed workflow shows ✕ and opens its lane", k >= 0 and texts(s2)[k + 1] == "  ✕ wf blocks fold 5  [PC]",
+    check("a failed workflow shows ✕ and opens its lane", k >= 0 and texts(s2)[k + 1] == "  ✕ wf blocks fold 5  [host-1]",
           f"{texts(s2)[k:k + 2] if k >= 0 else 'lane still closed'}")
     herdr("pane", "report-metadata", fpane, "--source", "spike", "--clear-token", "state")
 
@@ -313,14 +313,14 @@ def main():
     s2 = wait_lines(lambda s: "LANES  8 open" in texts(s))
     check("an advisor that asks leaves `background` and joins LANES (8 open; background 2)",
           s2 is not None and "◐ step back" in texts(s2) and "▸ background  2" in texts(s2)
-          and "  toyo research · recruiting email ✓" in texts(s2), f"{texts(s2)[-4:] if s2 else ''}")
+          and "  toyo research · inbox mail ✓" in texts(s2), f"{texts(s2)[-4:] if s2 else ''}")
     herdr("pane", "report-agent", apane, "--source", "spike", "--agent", "claude", "--state", "idle")
     S.cmd({"cmd": "sidebar_fold", "id": "background", "open": True})
     s2 = wait_lines(lambda s: "▾ background  3" in texts(s))
     b = texts(s2).index("▾ background  3") if s2 and "▾ background  3" in texts(s2) else -1
     rows3 = texts(s2)[b + 1:b + 4] if b >= 0 else []
     check("opening background lists its three tabs in order and drops the summary line",
-          len(rows3) == 3 and "step back" in rows3[0] and "toyo research" in rows3[1] and "recruiting email" in rows3[2]
+          len(rows3) == 3 and "step back" in rows3[0] and "toyo research" in rows3[1] and "inbox mail" in rows3[2]
           and not any(t.startswith("  step back ·") for t in texts(s2)), f"{rows3}")
     S.cmd({"cmd": "sidebar_fold", "id": "background", "open": False})
 
@@ -343,23 +343,23 @@ def main():
     # Space chord: cmd+shift+3 is homebase (plain: lanes only), cmd+shift+2 agent-lb, cmd+shift+1 back.
     S.key("3", ["cmd", "shift"])
     s2 = wait_lines(lambda s: "▾ ◆ homebase  plain" in texts(s))
-    want_hb = ["SPACES  ⌘⇧1..9", "▸ ◆ agent-rails  ● 2", "▸ ◆ agent-lb  1", "▾ ◆ homebase  plain",
+    want_hb = ["SPACES  ⌘⇧1..9", "▸ ◆ acme  ● 2", "▸ ◆ agent-lb  1", "▾ ◆ homebase  plain",
                "LANES  3 open", "● aside hls playback", "· dev server", "· notes", "▸ hidden  3"]
-    check("cmd+shift+3 switches to the plain space: lanes only, no ORCHESTRATOR or WORKFLOWS, agent-rails shows `● 2` (wf reap, wf embed wave-a)",
+    check("cmd+shift+3 switches to the plain space: lanes only, no ORCHESTRATOR or WORKFLOWS, acme shows `● 2` (wf reap, wf embed wave-a)",
           s2 is not None and texts(s2) == want_hb, diff(want_hb, texts(s2) if s2 else []))
     S.key("1", ["cmd", "shift"])
-    s2 = wait_lines(lambda s: "▾ ◆ agent-rails  factory" in texts(s))
-    check("cmd+shift+1 returns to agent-rails", s2 is not None and "▾ ◆ agent-rails  factory" in texts(s2))
+    s2 = wait_lines(lambda s: "▾ ◆ acme  factory" in texts(s))
+    check("cmd+shift+1 returns to acme", s2 is not None and "▾ ◆ acme  factory" in texts(s2))
     S.key("9", ["cmd", "shift"])
     time.sleep(0.3)
     s2 = S.state()
-    check("cmd+shift+9 (no ninth space) changes nothing", "▾ ◆ agent-rails  factory" in texts(s2))
+    check("cmd+shift+9 (no ninth space) changes nothing", "▾ ◆ acme  factory" in texts(s2))
     # A click on a space row does what the chord does.
     lbrow = line(s2, "▸ ◆ agent-lb  1")
     check("space rows carry their space id (a click is not exercised here)", lbrow is not None and lbrow["space"] is not None)
 
     # Screenshots, one per appearance.
-    S.cmd({"cmd": "select", "tab": tab_of["recruiter"]})
+    S.cmd({"cmd": "select", "tab": tab_of["lane-a"]})
     for mode in ("light", "dark"):
         S.cmd({"cmd": "appearance", "mode": mode})
         time.sleep(0.8)
@@ -393,7 +393,7 @@ def finish():
     say()
     say(f"RESULT: {'PASS' if not failures else 'FAIL ' + ', '.join(failures)}")
     with open(S.OUT, "w") as f:
-        f.write("\n".join(lines) + "\n")
+        f.write("\n".join(ln.replace(os.path.expanduser("~"), "~") for ln in lines) + "\n")
     sys.exit(1 if failures else 0)
 
 

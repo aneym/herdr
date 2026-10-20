@@ -142,6 +142,18 @@ def main():
         time.sleep(0.05)
     check("both scenario panes attached and rendered", ready)
     if not ready:
+        try:
+            s = S.state()
+            brief = []
+            for x in s.get("surfaces", []):
+                brief.append({"pane": x.get("pane"), "exited": x.get("exited"),
+                              "text": (x.get("visible_nonblank") or [])[-4:]})
+            say("surfaces: " + json.dumps(brief)[:900])
+            panes = (s.get("lifecycle") or {}).get("panes") or {}
+            say("lifecycle: " + json.dumps({k: {kk: v.get(kk) for kk in ("state", "last_exit", "respawns", "fast_exits")}
+                                            for k, v in panes.items()})[:900])
+        except Exception as exc:
+            say(f"state dump failed: {exc}")
         return finish()
     check("pane 1 has keyboard focus on mount", s["focused_pane"] == p1, f"focused={s['focused_pane']}")
     say(f"window: key={s['window_key']} app_active={s['app_active']} post_event_access={s['post_event_access']}")
@@ -298,7 +310,7 @@ def main():
           bool(wait_for(lambda: S.state().get("shell", {}).get("factory_open") is True)))
     press("cmd+shift+f")
     check("cmd+shift+f (open_factory) closes the Factory view",
-          bool(wait_for(lambda: S.state().get("shell", {}).get("factory_open") is False)))
+          wait_for(lambda: {} if S.state().get("shell", {}).get("factory_open") is False else None) is not None)
     covered.add("open_factory")
     covered.update(f"goto_space_{n}" for n in range(1, 10))   # result asserted by check_p10.py (P10)
     covered.update(["toggle_area_mode", "toggle_docs"] + [f"filter_{n}" for n in range(1, 7)])  # check_p15 / check_p16
@@ -316,8 +328,10 @@ def main():
     before_all = all_panes(every_pane)
     sent0 = keys_sent_total()
     bad = []
+    S.cmd({"cmd": "docs", "open": False})
     for e in keymap["entries"]:
         reset()
+        S.cmd({"cmd": "docs", "open": False})
         off = log_size()
         mods, key = [], None
         for part in e["chord"].split("+"):
@@ -333,9 +347,11 @@ def main():
                 break
             time.sleep(0.025)
         want = e["action"] + f" chord={e['chord']}" + (f" pending={e['pending']}" if e.get("pending") else "")
-        ok = fired == [want]
+        ok = fired == [want] and not any("focus_doc_address" in x or x.startswith("close_detail") for x in fired)
         if not ok:
             bad.append((e["chord"], "fired=" + repr(fired)))
+        check(f"static {e['chord']} ({e['action']}) fires its own effect", ok,
+              "" if ok else bad[-1][1])
     reset()
     S.cmd({"cmd": "docs", "open": False})
     time.sleep(0.5)
@@ -343,7 +359,7 @@ def main():
     check(f"all {len(keymap['entries'])} keymap entries fire exactly their own action (app log)", not bad,
           "; ".join(f"{c}: {m}" for c, m in bad[:6]))
     check("every static chord in keymap.json still fires when no contextual chord matches", not bad,
-          "contextual chords take precedence; none were active")
+          "docs and the detail panel were closed, so escape and cmd+l could not take the key")
     check("no keymap chord reached any Ghostty surface (key presses handed to Ghostty: before == after)",
           keys_sent_total() == sent0, f"before={sent0} after={keys_sent_total()}")
     check("no keymap chord sent anything to any pane (every lab pane reads the same before and after)",
@@ -378,7 +394,7 @@ def finish():
     say()
     say(f"RESULT: {'PASS' if not failures else 'FAIL ' + ', '.join(failures)}")
     with open(S.OUT, "w") as f:
-        f.write("\n".join(lines) + "\n")
+        f.write("\n".join(ln.replace(os.path.expanduser("~"), "~") for ln in lines) + "\n")
     sys.exit(1 if failures else 0)
 
 

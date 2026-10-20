@@ -28,7 +28,7 @@ APP_COPY = os.path.join(LABDIR, "app", "HerdrShell")
 os.environ["HERDR_SHELL_APP"] = APP_COPY
 FIX = os.path.join(LABDIR, "fixtures")
 os.makedirs(FIX, exist_ok=True)
-CTX = os.path.join(HOME, ".agent-rails", "herdr", "context")
+CTX = os.path.join(HOME, ".config", "herdr", "context")
 CLI = os.path.join(D0, "bin", "herdr-context")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import scenario as S  # noqa: E402
@@ -345,7 +345,7 @@ def finish():
     say(f"RESULT: {'PASS' if not failures else 'FAIL ' + ', '.join(failures)}")
     os.makedirs(os.path.dirname(S.OUT), exist_ok=True)
     with open(S.OUT, "w") as f:
-        f.write("\n".join(lines) + "\n")
+        f.write("\n".join(ln.replace(os.path.expanduser("~"), "~") for ln in lines) + "\n")
     sys.exit(1 if failures else 0)
 
 

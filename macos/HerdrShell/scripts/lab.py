@@ -15,6 +15,7 @@ The live session's socket, config and binary are never used.
 """
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -36,8 +37,8 @@ def _lab_dir(name):
 
 
 LAB = _lab_dir(NAME)
-# Until P1 (--no-escape) ships in the herdr on PATH, the lab uses the spike binary.
-BIN_SRC = os.environ.get("HERDR_SHELL_BIN") or os.path.expanduser("~/.cache/herdr-build/target-pane-attach/release/herdr")
+# The installed fork supports --human. HERDR_SHELL_BIN overrides it.
+BIN_SRC = os.environ.get("HERDR_SHELL_BIN") or os.path.expanduser("~/.local/bin/herdr")
 BIN = os.path.join(LAB, "bin", "herdr")
 SESSION = NAME
 LIVE_BIN = os.path.expanduser("~/.local/bin/herdr")
@@ -134,14 +135,14 @@ def seed():
     if snap["workspaces"]:
         return
     j = lambda *a: json.loads(herdr(*a))["result"]
-    ws = j("workspace", "create", "--label", "agent-rails", "--cwd", "/tmp", "--no-focus")
+    ws = j("workspace", "create", "--label", "acme", "--cwd", "/tmp", "--no-focus")
     orch = ws["root_pane"]["pane_id"]
-    herdr("tab", "rename", ws["tab"]["tab_id"], "rails orchestrator")
+    herdr("tab", "rename", ws["tab"]["tab_id"], "orchestrator")
     wid = ws["workspace"]["workspace_id"]
     spike = j("tab", "create", "--workspace", wid, "--label", "shell spike", "--cwd", "/tmp", "--no-focus")
     herdr("pane", "split", spike["root_pane"]["pane_id"], "--direction", "right")
-    rec = j("tab", "create", "--workspace", wid, "--label", "recruiter", "--cwd", "/tmp", "--no-focus")["root_pane"]["pane_id"]
-    wf1 = j("tab", "create", "--workspace", wid, "--label", "wf recruiter-2320", "--cwd", "/tmp", "--no-focus")["root_pane"]["pane_id"]
+    rec = j("tab", "create", "--workspace", wid, "--label", "lane-a", "--cwd", "/tmp", "--no-focus")["root_pane"]["pane_id"]
+    wf1 = j("tab", "create", "--workspace", wid, "--label", "wf lane-a-1", "--cwd", "/tmp", "--no-focus")["root_pane"]["pane_id"]
     wf2 = j("tab", "create", "--workspace", wid, "--label", "wf embed wave-a", "--cwd", "/tmp", "--no-focus")["root_pane"]["pane_id"]
     # Report agents only once each shell is up; a report made while the pane's
     # process is still starting is dropped by herdr's detection.
@@ -153,14 +154,27 @@ def seed():
     for pane, agent, st in ((orch, "claude", "working"), (rec, "claude", "idle"), (wf1, "claude", "working"), (wf2, "codex", "blocked")):
         herdr("pane", "report-agent", pane, "--source", "spike", "--agent", agent, "--state", st)
     for pane in (wf1, wf2):
-        herdr("pane", "report-metadata", pane, "--source", "spike", "--token", "host=PC")
+        herdr("pane", "report-metadata", pane, "--source", "spike", "--token", "host=host-1")
     herdr("agent", "owner", "set", wf1, rec)
     herdr("agent", "owner", "set", wf2, orch)
+
+
+def kill_attaches():
+    """Attach clients outlive a SIGTERM'd shell. Reap this lab's before the next launch."""
+    if not os.path.exists(BIN):
+        return
+    r = subprocess.run(["pgrep", "-f", f"{BIN} terminal attach"], capture_output=True, text=True)
+    for pid in r.stdout.split():
+        try:
+            os.kill(int(pid), signal.SIGTERM)
+        except (ProcessLookupError, ValueError):
+            pass
 
 
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "up":
+        kill_attaches()
         up()
         seed()
     elif cmd == "env":
@@ -172,6 +186,7 @@ def main():
         if os.path.exists(SOCK):
             r = subprocess.run([BIN, "--session", SESSION, "server", "stop"], env=env(), capture_output=True, text=True)
             print("stop:", r.returncode, r.stdout.strip(), r.stderr.strip())
+        kill_attaches()
     else:
         sys.exit(__doc__)
 

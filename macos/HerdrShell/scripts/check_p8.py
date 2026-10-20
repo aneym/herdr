@@ -166,7 +166,7 @@ def main():
     sc.say()
     sc.say(f"RESULT: {'PASS' if not sc.failures else 'FAIL ' + ', '.join(sc.failures)}")
     with open(OUT, "w") as f:
-        f.write("\n".join(sc.lines) + "\n")
+        f.write("\n".join(ln.replace(os.path.expanduser("~"), "~") for ln in sc.lines) + "\n")
     sys.exit(1 if sc.failures else 0)
 
 

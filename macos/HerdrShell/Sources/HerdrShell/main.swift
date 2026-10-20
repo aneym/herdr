@@ -164,6 +164,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        controller?.registry.closeAll()
+    }
 }
 
 func buildMenu(target: MainWindowController) -> NSMenu {
@@ -204,7 +208,8 @@ app.run()
 
 func runFactoryDemo() -> Never {
     let app = NSApplication.shared
-    app.setActivationPolicy(.regular)
+    let off = flags.contains("--agent-run")
+    app.setActivationPolicy(off ? .accessory : .regular)
     let demo = FactoryDemo()
     app.delegate = demo
     app.run()
@@ -229,10 +234,17 @@ final class FactoryDemo: NSObject, NSApplicationDelegate {
         window.appearance = theme.nsAppearance
         window.contentView = host
         window.setContentSize(NSSize(width: 1100, height: 900))
-        window.center()
         window.backgroundColor = theme.tokens.windowBgNS
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        if flags.contains("--agent-run") {
+            var frame = window.frame
+            frame.origin.x = -20000
+            window.setFrame(frame, display: false)
+            window.orderBack(nil)
+        } else {
+            window.center()
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
         let menu = NSMenu()
         let appMenu = NSMenuItem()
         menu.addItem(appMenu)

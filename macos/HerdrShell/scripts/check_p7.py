@@ -174,7 +174,7 @@ def main():
     snap = S.herdr_json("api", "snapshot")["result"]["snapshot"]
     tabs = {t["label"]: t["tab_id"] for t in snap["tabs"]}
     spike = tabs["shell spike"]
-    other = tabs["recruiter"]
+    other = tabs["lane-a"]
     lay = next(l for l in snap["layouts"] if l["tab_id"] == spike)
     p1, p2 = [p["pane_id"] for p in sorted(lay["panes"], key=lambda p: p["rect"]["x"])]
     term = {p["pane_id"]: p["terminal_id"] for p in snap["panes"]}
@@ -270,7 +270,7 @@ def main():
     env = {l.split("=", 1)[0]: l.split("=", 1)[1] for l in S.lab("env").splitlines() if "=" in l}
     master, slave = pty.openpty()
     subprocess.run(["stty", "rows", "30", "cols", "100"], stdin=slave)
-    cli = subprocess.Popen([LAB_BIN, "--session", "shellspike-p7", "terminal", "attach", t1, "--takeover", "--no-escape"],
+    cli = subprocess.Popen([LAB_BIN, "--session", "shellspike-p7", "terminal", "attach", t1, "--takeover"],
                            stdin=slave, stdout=slave, stderr=slave, env=env, start_new_session=True)
     os.close(slave)
 
@@ -427,7 +427,7 @@ def finish():
     say()
     say(f"RESULT: {'PASS' if not failures else 'FAIL ' + ', '.join(failures)}")
     with open(OUT, "w") as f:
-        f.write("\n".join(lines) + "\n")
+        f.write("\n".join(ln.replace(os.path.expanduser("~"), "~") for ln in lines) + "\n")
     sys.exit(1 if failures else 0)
 
 

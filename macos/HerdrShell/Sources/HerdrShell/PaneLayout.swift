@@ -119,7 +119,7 @@ final class DividerHandleView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let thick: CGFloat = (dragging || hovering) ? 3 : 1
+        let thick: CGFloat = (dragging || hovering) ? 2 : 1
         let color = dragging ? dragColor : (hovering ? hoverColor : lineColor)
         color.setFill()
         if divider.vertical {

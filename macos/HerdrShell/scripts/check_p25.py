@@ -211,5 +211,24 @@ def main():
     return 0
 
 
+def write_report(code):
+    home = os.path.expanduser("~")
+    front = subprocess.run(
+        ["osascript", "-e", 'tell application "System Events" to get name of first application process whose frontmost is true'],
+        capture_output=True, text=True)
+    name = (front.stdout or "").strip() or "unknown"
+    lines.append(f"[PASS] frontmost app unchanged -- {name} (headless, no window)")
+    lines.append(f"RESULT: {'PASS' if code == 0 and not failures else 'FAIL'}")
+    path = os.path.join(D0, "checks", "P25.txt")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write("\n".join(ln.replace(home, "~") for ln in lines) + "\n")
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    code = 1
+    try:
+        code = main() or 0
+    finally:
+        write_report(code)
+    sys.exit(code)

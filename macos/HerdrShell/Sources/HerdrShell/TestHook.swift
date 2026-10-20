@@ -427,12 +427,17 @@ final class TestHook {
             } else if let w = controller?.window {
                 // Not key: the app must not be activated. Claimed chords run through
                 // performKeyEquivalent; everything else is delivered to the first responder.
-                let viewClaimed = ev.type == .keyDown && claimKeyEquivalent(ev, window: w)
+                // One fire per press. Key-up events must not toggle again, and the
+                // Factory page must not swallow the chord while it is first responder.
+                let keymapClaimed = down && Keymap.shared.entry(for: ev).map { entry in
+                    !entry.contextual && Keymap.shared.fire(entry)
+                } ?? false
+                let viewClaimed = !keymapClaimed && down && claimKeyEquivalent(ev, window: w)
                 // The menu matches a bare letter to an item whose equivalent is command+that letter
                 // when the app is not active, which swallows the letter. Only command chords go there.
-                let menuClaimed = !viewClaimed && ev.type == .keyDown && ev.modifierFlags.contains(.command)
+                let menuClaimed = !viewClaimed && !keymapClaimed && ev.type == .keyDown && ev.modifierFlags.contains(.command)
                     && (NSApp.mainMenu?.performKeyEquivalent(with: ev) ?? false)
-                if viewClaimed || menuClaimed {
+                if viewClaimed || keymapClaimed || menuClaimed {
                 } else if let view = w.firstResponder as? NSView {
                     switch ev.type {
                     case .keyDown: view.keyDown(with: ev)
@@ -607,6 +612,11 @@ final class TestHook {
 
     private func writeState(_ out: String) {
         guard let c = controller else { return }
+        func topLeft(_ rect: NSRect, from view: NSView) -> [CGFloat] {
+            guard let content = c.window.contentView else { return [0, 0, 0, 0] }
+            let r = view.convert(rect, to: content)
+            return [r.minX, content.bounds.height - r.maxY, r.width, r.height]
+        }
         let surfaces = c.registry.byTerminal.values.sorted { $0.paneId < $1.paneId }.map { s -> [String: Any] in
             let g = s.gridSize
             let lines = s.visibleText().split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
@@ -615,6 +625,7 @@ final class TestHook {
                     "mouse_captured": s.mouseCaptured,
                     "keys_sent": s.keysSent, "last_key_sent": s.lastKeySent,
                     "frame": [s.frame.minX, s.frame.minY, s.frame.width, s.frame.height],
+                    "window": topLeft(s.frame, from: c.host),
                     "in_host": s.superview === c.host,
                     "selection": s.selectedText() ?? NSNull(),
                     "cell_pt": [s.cellPoints.width, s.cellPoints.height],
@@ -632,13 +643,15 @@ final class TestHook {
             "window_key": c.window.isKeyWindow,
             "window_number": c.window.windowNumber,
             "window_frame": NSStringFromRect(c.window.frame),
+            "content_size": [c.window.contentView?.bounds.width ?? 0, c.window.contentView?.bounds.height ?? 0],
             "host_frame": NSStringFromRect(c.host.frame),
             "selected_tab": c.state.selectedTab ?? NSNull(),
             "focused_pane": c.focusedSurface?.paneId ?? NSNull(),
             "dividers": c.host.dividerHandles.map { h -> [String: Any] in
                 ["split": h.divider.splitId, "vertical": h.divider.vertical, "ratio": h.divider.ratio,
                  "first_pane": h.divider.firstPane, "second_pane": h.divider.secondPane,
-                 "frame": [h.frame.minX, h.frame.minY, h.frame.width, h.frame.height]]
+                 "frame": [h.frame.minX, h.frame.minY, h.frame.width, h.frame.height],
+                 "window": topLeft(h.frame, from: c.host)]
             },
             "shown_layout": c.shownLayout.map { l -> [String: Any] in
                 ["tab": l.tab_id, "area": [l.area.width, l.area.height],
@@ -669,7 +682,8 @@ final class TestHook {
                 let f = c.host.capFrames[id] ?? .zero
                 return ["id": id, "name": cap.name, "agent": cap.agent, "chat": cap.chat,
                         "density": cap.density, "focused": cap.focused,
-                        "frame": [f.minX, f.minY, f.width, f.height]]
+                        "frame": [f.minX, f.minY, f.width, f.height],
+                        "window": topLeft(f, from: c.host)]
             },
             "machines": c.factoryMachines.map { ["name": $0.name, "usage": $0.usageLine, "usage_state": $0.usageState] },
             "hosts": c.model.hostsModel.rows.map { r -> [String: Any] in

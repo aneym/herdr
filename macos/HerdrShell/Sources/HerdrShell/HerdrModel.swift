@@ -140,7 +140,7 @@ final class HerdrModel: ObservableObject {
 /// a `wf ` label or an ownership record means workflow, the first tab of a
 /// workspace that has an agent is the orchestrator, everything else a lane.
 struct TabClassifier {
-    static let defaultHost = "Studio"
+    static let defaultHost = "host-2"
 
     private let snapshot: Snapshot
     private let agentsByTab: [String: [Snapshot.Agent]]

@@ -124,7 +124,7 @@ def run():
 
     S.lab("up")
     # lab up replaces HOME, so the project folder is written after that.
-    folder = os.path.join(HOME, ".agent-rails", "scoping", "p16doc")
+    folder = os.path.join(HOME, ".config", "herdr", "scoping", "p16doc")
     os.makedirs(folder, exist_ok=True)
     resume = os.path.join(folder, "RESUME.md")
     with open(resume, "w") as f:
@@ -271,7 +271,7 @@ def finish():
     say(f"RESULT: {'PASS' if not failures else 'FAIL ' + ', '.join(failures)}")
     os.makedirs(os.path.dirname(S.OUT), exist_ok=True)
     with open(S.OUT, "w") as f:
-        f.write("\n".join(lines) + "\n")
+        f.write("\n".join(ln.replace(os.path.expanduser("~"), "~") for ln in lines) + "\n")
     sys.exit(1 if failures else 0)
 
 

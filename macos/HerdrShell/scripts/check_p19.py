@@ -734,7 +734,7 @@ def lab_checks(temp, out_dir, lines):
         lines.append('PASS draft: with "half typed in the terminal" after the pane\'s ❯, Enter showed "There\'s unsent text in the terminal" '
                      '(Send anyway / Cancel); 2 s later the pane and transcript show nothing from the composer (checks/P19-draft.png)')
         app.cmd({'cmd': 'click', 'target': 'cancel'})
-        lab('herdr', 'pane', 'send-text', pane, '\r')  # Enter in the terminal: the lab's own draft goes through
+        lab('herdr', 'pane', 'send-text', '--human', pane, '\r')  # Enter in the terminal: the lab's own draft goes through
         wait_for(lambda: 'received: half typed in the terminal' in screen(pane), 8, .05, 'the lab draft to go through', detail=lambda: screen(pane)[-300:])
         assert app.state()['pending'] == ''
 
@@ -755,8 +755,8 @@ def lab_checks(temp, out_dir, lines):
         wait_for(lambda: agent(pane).get('agent_status') != 'blocked', 10, .1, 'herdr to clear blocked')
         wait_for(lambda: f'received: {held}' in screen(pane), 3.75, .05, 'the held message', detail=lambda: screen(pane)[-300:])
         elapsed = time.monotonic() - unblocked
-        assert elapsed <= 3.75, elapsed
-        lines.append(f'PASS unblocked: the held message reached the pane {elapsed:.2f} s after the dialog closed (3 s recheck, slack 0.75 s)')
+        assert 2.25 <= elapsed <= 3.75, elapsed
+        lines.append(f'PASS unblocked: the held message reached the pane {elapsed:.2f} s after the dialog closed (3 s recheck, 2.25 s to 3.75 s)')
     finally:
         app.stop()
         lab('down')
@@ -793,6 +793,13 @@ def live_check(pane, temp, out_dir, lines):
                  f'(agent state {s["agent_state"]}); no key events and no sends (checks/P19-live.png)')
 
 
+def frontmost_app():
+    r = subprocess.run(
+        ["osascript", "-e", 'tell application "System Events" to get name of first application process whose frontmost is true'],
+        capture_output=True, text=True)
+    return (r.stdout or "").strip() or "unknown"
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--out', default='checks/P19.txt')
@@ -803,6 +810,7 @@ def main():
     out = ROOT / args.out
     out.parent.mkdir(parents=True, exist_ok=True)
     FIX.mkdir(parents=True, exist_ok=True)
+    front_before = frontmost_app()
     lines = [f'P19 chat view check  {time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}  load {os.getloadavg()[0]:.0f} on {os.cpu_count()} cores']
     failure = False
     steps = [('fixture', lambda t: fixture_checks(t, out.parent, lines)), ('focus', lambda t: focus_checks(t, lines)),
@@ -832,6 +840,14 @@ def main():
         lines.append('NOT RUN lab: --skip-lab')
     if not args.live_pane:
         lines.append('NOT RUN live screenshot: no --live-pane given')
+    front_now = frontmost_app()
+    same = front_before not in ("", "unknown") and front_now == front_before
+    lines.append(f'[{"PASS" if same else "FAIL"}] frontmost app unchanged -- {front_before if same else "took focus"}')
+    if not same:
+        failure = True
+    home = str(Path.home())
+    lines = [ln.replace(home, "~") for ln in lines]
+    lines.append(f'RESULT: {"PASS" if not failure else "FAIL"}')
     out.write_text('\n'.join(lines) + '\n')
     print(out.read_text(), end='')
     return 1 if failure else 0

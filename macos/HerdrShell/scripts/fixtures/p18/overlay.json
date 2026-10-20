@@ -1,9 +1,9 @@
 {
   "generated_at": "2026-10-01T22:30:00Z",
   "hosts": [
-    {"name": "Studio", "summary": "load 235/16 · 3 kept: 2 pinned", "attention": "warn"},
-    {"name": "PC", "summary": "14/12 live"},
-    {"name": "ax42", "summary": "4/26 live"},
-    {"name": "MacBook", "summary": "idle", "attention": "act"}
+    {"name": "host-2", "summary": "load 235/16 · 3 kept: 2 pinned", "attention": "warn", "usage": {"state": "ok", "load_per_core": 1.25, "cpu_pct": 40, "mem_used_mb": 12000, "mem_total_mb": 64000, "age_s": 4}},
+    {"name": "host-1", "summary": "14/12 live"},
+    {"name": "host-4", "summary": "4/26 live"},
+    {"name": "host-7", "summary": "idle", "attention": "act"}
   ]
 }

@@ -80,7 +80,7 @@ def seed_other_space():
         ready(p)
     for pane, agent, st, toks in ((orch, "claude", "working", {"kind": "orchestrator", "inbox_items": "OTHER-SPACE ITEM@x"}),
                                   (lane, "claude", "blocked", {"kind": "lane"}),
-                                  (wf, "codex", "blocked", {"kind": "workflow", "host": "PC", "phase": "other-phase"})):
+                                  (wf, "codex", "blocked", {"kind": "workflow", "host": "host-1", "phase": "other-phase"})):
         herdr("pane", "report-agent", pane, "--source", "spike", "--agent", agent, "--state", st)
         args = ["pane", "report-metadata", pane, "--source", "spike"]
         for k, v in toks.items():
@@ -109,11 +109,11 @@ def main():
     pane_of = {t["label"]: next(p["pane_id"] for p in snap["panes"] if p["tab_id"] == t["tab_id"]) for t in snap["tabs"]}
     lay = next(l for l in snap["layouts"] if l["tab_id"] == tabs["shell spike"])
     p1, p2 = [p["pane_id"] for p in sorted(lay["panes"], key=lambda p: p["rect"]["x"])]
-    herdr("pane", "report-metadata", pane_of["rails orchestrator"], "--source", "spike",
+    herdr("pane", "report-metadata", pane_of["orchestrator"], "--source", "spike",
           "--token", "inbox=3",
           "--token", "inbox_items=Outreach drafts drop the role title@plugin|Sidebar header height jumps@VPD",
-          "--token", "routed=recruiter drafts bug@10:52|workspace embed header@10:48")
-    herdr("pane", "report-metadata", pane_of["wf recruiter-2320"], "--source", "spike", "--token", "host=PC", "--token", "phase=impl 3/5")
+          "--token", "routed=lane-a drafts bug@10:52|workspace embed header@10:48")
+    herdr("pane", "report-metadata", pane_of["wf lane-a-1"], "--source", "spike", "--token", "host=host-1", "--token", "phase=impl 3/5")
     seed_other_space()
 
     subprocess.run(["defaults", "delete", f"herdr.shell.{os.environ['SHELL_LAB']}"], capture_output=True)
@@ -121,7 +121,7 @@ def main():
     say(f"app start: {S.app('start').strip()}")
     time.sleep(1.5)
     s = wait_state(lambda s: s["focused_pane"] == p1 and s["selected_tab"] == tabs["shell spike"]
-                   and any(r["label"] == "recruiter" and r["children"] for r in s["sidebar"]["lanes"]), 15)
+                   and any(r["label"] == "lane-a" and r["children"] for r in s["sidebar"]["lanes"]), 15)
     check("app up, 'shell spike' selected, pane 1 focused", s["focused_pane"] == p1 and s["selected_tab"] == tabs["shell spike"],
           f"tab={s['selected_tab']} pane={s['focused_pane']}")
     d = s["detail"]
@@ -130,17 +130,17 @@ def main():
     tab0, focus0 = s["selected_tab"], s["focused_pane"]
 
     # Warm-up: a real click opens the panel and a second one closes it (the window is key for these).
-    click("rails orchestrator")
+    click("orchestrator")
     check("the action closure is invoked on the orchestrator row and opens the panel", S.state()["detail"]["open"] is True)
-    click("rails orchestrator")
+    click("orchestrator")
     check("a second real click closes it", S.state()["detail"]["open"] is False)
     check("clicks ran without making the window key", "key=false" in open(os.path.join(S.LAB, "app.log")).read().split("hook: click")[-1])
 
     # Orchestrator row: inbox, routed, workflows under it by lane.
-    click("rails orchestrator")
+    click("orchestrator")
     s = S.state()
     d = s["detail"]
-    check("orchestrator click opens the panel for that row", d["open"] and d.get("title") == "rails orchestrator" and d.get("kind") == "orchestrator",
+    check("orchestrator click opens the panel for that row", d["open"] and d.get("title") == "orchestrator" and d.get("kind") == "orchestrator",
           f"row={d.get('title')}")
     inbox = [(i["text"], i["source"]) for i in d.get("inbox", [])]
     check("inbox shows the tokened items and the blocked workflow that wants you",
@@ -150,11 +150,11 @@ def main():
     check("inbox is not shown as an item, and the sidebar keeps its numeric count",
           all(i[0] != "3" for i in inbox) and hdr.get("trailing") == "inbox 3", f"header trailing={hdr.get('trailing')!r}")
     routed = [(i["text"], i["source"]) for i in d.get("routed", [])]
-    check("routed items shown for the orchestrator", routed == [("recruiter drafts bug", "10:52"), ("workspace embed header", "10:48")], f"routed={routed}")
+    check("routed items shown for the orchestrator", routed == [("lane-a drafts bug", "10:52"), ("workspace embed header", "10:48")], f"routed={routed}")
     groups = {g["lane"]: [(w["label"], w["phase"], w["host"]) for w in g["workflows"]] for g in d.get("groups", [])}
     check("workflows under the orchestrator: its own folded one, then each lane's, with phases and host badges",
-          groups.get(None) == [("wf embed wave-a", "blocked", "PC")]
-          and groups.get("recruiter") == [("wf recruiter-2320", "impl 3/5", "PC")], f"groups={groups}")
+          groups.get(None) == [("wf embed wave-a", "blocked", "host-1")]
+          and groups.get("lane-a") == [("wf lane-a-1", "impl 3/5", "host-1")], f"groups={groups}")
     everything = json.dumps(d)
     check("the other space's lane, workflow, ask and inbox never show in this space's panel",
           not any(w in everything for w in ("other lane", "wf other-secret", "other-phase", "OTHER-SPACE")), "checked panel state for other-space rows")
@@ -203,31 +203,31 @@ def main():
     time.sleep(0.2)
 
     # Lane row, switching, second click closes; tab never changes.
-    click("recruiter")
+    click("lane-a")
     s = S.state()
     d = s["detail"]
     lane_groups = {g["lane"]: [(w["label"], w["phase"], w["host"]) for w in g["workflows"]] for g in d.get("groups", [])}
     check("lane click opens that lane's panel with its workflows, no routed section",
-          d["open"] and d.get("title") == "recruiter" and d.get("kind") == "lane" and lane_groups == {None: [("wf recruiter-2320", "impl 3/5", "PC")]}
+          d["open"] and d.get("title") == "lane-a" and d.get("kind") == "lane" and lane_groups == {None: [("wf lane-a-1", "impl 3/5", "host-1")]}
           and d.get("routed") == [], f"row={d.get('title')} groups={lane_groups}")
-    click("rails orchestrator")
+    click("orchestrator")
     s = S.state()
-    check("clicking another row switches the panel to it", s["detail"]["open"] and s["detail"].get("title") == "rails orchestrator")
-    click("rails orchestrator")
+    check("clicking another row switches the panel to it", s["detail"]["open"] and s["detail"].get("title") == "orchestrator")
+    click("orchestrator")
     s = S.state()
     check("a second click on the open row closes the panel", s["detail"]["open"] is False)
     check("selected tab unchanged through all of it", s["selected_tab"] == tab0 and s["focused_pane"] == focus0)
-    click("recruiter")
+    click("lane-a")
     click(target="open_full")
     s = S.state()
     check("'open full tab' button click selects the row's tab and closes the panel",
-          s["selected_tab"] == tabs["recruiter"] and s["detail"]["open"] is False, f"tab={s['selected_tab']}")
+          s["selected_tab"] == tabs["lane-a"] and s["detail"]["open"] is False, f"tab={s['selected_tab']}")
 
     # Evidence image: panel open over the shell-spike tab.
     detail("close")
     S.cmd({"cmd": "select", "tab": tabs["shell spike"]})
     time.sleep(0.4)
-    click("rails orchestrator")
+    click("orchestrator")
     time.sleep(0.5)
     shot = os.path.splitext(S.OUT)[0] + ".png"
     if os.path.exists(shot):
@@ -255,7 +255,7 @@ def main():
     say()
     say(f"RESULT: {'PASS' if not failures else 'FAIL ' + ', '.join(failures)}")
     with open(S.OUT, "w") as f:
-        f.write("\n".join(lines) + "\n")
+        f.write("\n".join(ln.replace(os.path.expanduser("~"), "~") for ln in lines) + "\n")
     sys.exit(1 if failures else 0)
 
 

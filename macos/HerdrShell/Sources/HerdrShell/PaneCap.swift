@@ -52,9 +52,11 @@ struct PaneCapBar: View {
             }
         }
         .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .frame(height: 36)
         .background(bg)
         .opacity(state.focused ? 1 : 0.92)
+        .ignoresSafeArea()
     }
 
     private func density(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
