@@ -283,7 +283,10 @@ fn close_caller_pid(stream: &LocalStream) -> Option<u32> {
         return (result == 0).then_some(pid as u32);
     }
     #[cfg(not(target_os = "macos"))]
-    stream.peer_creds().ok()?.pid().map(|pid| pid as u32)
+    {
+        use interprocess::local_socket::traits::StreamCommon as _;
+        stream.peer_creds().ok()?.pid().map(|pid| pid as u32)
+    }
 }
 
 fn close_caller_command(pid: u32) -> String {
