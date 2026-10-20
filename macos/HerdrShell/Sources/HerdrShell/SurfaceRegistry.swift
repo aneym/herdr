@@ -49,8 +49,6 @@ struct PaneLifecycle {
 ///   attach has drawn the screen, so none is lost. A holder still typing is not cut off:
 ///   the take waits until the pane has had no human input for `settle` seconds
 ///   (`pane.process_info` human_input_age_ms, which counts every client's keys).
-/// - Hidden tabs: `keep` (default) leaves every attach running; `detach` releases the
-///   attach of any pane not on screen and reattaches when it is shown again.
 final class SurfaceRegistry {
     enum HiddenPolicy: String {
         case keepAttached = "keep"
@@ -79,6 +77,8 @@ final class SurfaceRegistry {
     static let settle: TimeInterval = 1.5
     private static let maxQueued = 4096
     private let commands: HerdrCommands
+    private var hiddenOrder: [String] = []
+    private let retainedHiddenLimit = 2
 
     init(herdrBin: String, attachEnv: [String: String], hiddenPolicy: HiddenPolicy? = nil) {
         self.herdrBin = herdrBin
@@ -433,13 +433,23 @@ final class SurfaceRegistry {
 
     // MARK: hidden tabs
 
-    /// Called after every layout change with the terminals now on screen.
     func setVisible(_ visible: Set<String>) {
-        guard hiddenPolicy == .detach else { return }
-        for (id, view) in byTerminal where !visible.contains(id) {
-            log("detaching hidden pane \(id)")
-            byTerminal[id] = nil
+        hiddenOrder.removeAll { visible.contains($0) || byTerminal[$0] == nil }
+        for id in byTerminal.keys.sorted() where !visible.contains(id) && !hiddenOrder.contains(id) {
+            hiddenOrder.append(id)
+        }
+        for (id, view) in byTerminal {
+            if let surface = view.surface {
+                ghostty_surface_set_occlusion(surface, visible.contains(id))
+            }
+        }
+        let limit = hiddenPolicy == .detach ? 0 : retainedHiddenLimit
+        while hiddenOrder.count > limit {
+            let id = hiddenOrder.removeFirst()
+            guard let view = byTerminal.removeValue(forKey: id) else { continue }
             lifecycle[id] = nil
+            queued[id] = nil
+            claiming.remove(id)
             retire(view)
         }
     }

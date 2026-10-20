@@ -129,39 +129,26 @@ struct LaneSnapshot: Equatable {
 
 final class LaneCatalog: ObservableObject {
     @Published private(set) var snapshot = LaneSnapshot.empty
-    private var timer: Timer?
-    private var stamp: [String: Date] = [:]
+    private let monitor = FileChangeMonitor()
+    private var loaded = LaneSnapshot.empty
 
     func start() {
-        reload()
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
-            self?.reloadIfChanged()
+        monitor.start(paths: { [weak self] in self?.watched ?? [] }) { [weak self] in
+            self?.load()
         }
     }
 
-    private func reloadIfChanged() {
-        var next: [String: Date] = [:]
-        var changed = false
-        for path in watched where !path.isEmpty {
-            let date = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date) ?? Date.distantPast
-            next[path] = date
-            if stamp[path] != date { changed = true }
-        }
-        if changed || Set(next.keys) != Set(stamp.keys) { reload() }
-    }
-
-    /// The files whose mtimes trigger a reload; an agent card added or removed changes the set.
     private var watched: [String] {
-        [ShellPaths.lanes, ShellPaths.areas, ShellPaths.modes] + AgentCards.files(dir: ShellPaths.agents)
+        let folders = (try? FileManager.default.contentsOfDirectory(atPath: ShellPaths.agents)) ?? []
+        return [ShellPaths.lanes, ShellPaths.areas, ShellPaths.modes, ShellPaths.agents]
+            + folders.map { (ShellPaths.agents as NSString).appendingPathComponent($0 + "/agent.json") }
     }
 
     func reload() {
-        // Stamp before reading: a file written mid-read differs from its stamp at the next poll.
-        var stamped: [String: Date] = [:]
-        for path in watched where !path.isEmpty {
-            stamped[path] = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date) ?? Date.distantPast
-        }
+        monitor.refresh()
+    }
+
+    private func load() {
         var snap = LaneSnapshot.empty
         snap.hasFiles = ShellPaths.filesPresent
         if let obj = Self.json(ShellPaths.lanes) {
@@ -179,15 +166,17 @@ final class LaneCatalog: ObservableObject {
             snap.goalArea = Self.stringMap(obj["goal_area"])
             snap.goal = Self.stringMap(obj["goal"])
             // A `space_groups` Rust cannot parse (null, a non-list, a bad group) keeps the last ones too.
-            snap.spaceGroups = Self.spaceGroups(obj) ?? snapshot.spaceGroups
+            snap.spaceGroups = Self.spaceGroups(obj) ?? loaded.spaceGroups
         } else if FileManager.default.fileExists(atPath: ShellPaths.areas) {
             // Unreadable or half-written: keep the last parsed groups, as the Rust poller does.
-            snap.spaceGroups = snapshot.spaceGroups
+            snap.spaceGroups = loaded.spaceGroups
         }
         snap.agents = AgentCards.load(dir: ShellPaths.agents)
-        stamp = stamped
-        if snap != snapshot {
-            snapshot = snap
+        guard snap != loaded else { return }
+        loaded = snap
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.snapshot != snap else { return }
+            self.snapshot = snap
             log("lanes: \(snap.lanes.count) areas: \(snap.areas.count) parked: \(snap.parked.count) agents: \(snap.agents.count)")
         }
     }

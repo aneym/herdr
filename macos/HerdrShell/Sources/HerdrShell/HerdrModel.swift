@@ -16,7 +16,7 @@ struct TabRow: Identifiable, Equatable {
 
 final class HerdrModel: ObservableObject {
     @Published private(set) var spacesOverlay = Overlay()
-    private var spacesOverlayMtime: Date?
+    private let overlayMonitor = FileChangeMonitor()
     @Published private(set) var snapshot: Snapshot?
     @Published private(set) var orchestrators: [TabRow] = []
     @Published private(set) var lanes: [TabRow] = []
@@ -79,22 +79,26 @@ final class HerdrModel: ObservableObject {
         startMachines()
         hostsModel.start()
         catalog.start()
-        Timer.publish(every: 1, on: .main, in: .common).autoconnect().sink { [weak self] _ in self?.reloadSpacesOverlay() }.store(in: &bag)
+        let home = TerminalTheme.realHome()
+        let raw = ProcessInfo.processInfo.environment["FACTORY_OVERLAY"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let path = raw.isEmpty ? home + "/.agent-rails/herdr/overlay.json" : (raw as NSString).expandingTildeInPath
+        var previous: Data?
+        overlayMonitor.start(paths: { [path] }) { [weak self] in
+            let overlay = (try? Data(contentsOf: URL(fileURLWithPath: path)))
+                .flatMap { try? JSONDecoder().decode(Overlay.self, from: $0) } ?? Overlay()
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = .sortedKeys
+            let encoded = try? encoder.encode(overlay)
+            guard encoded != previous else { return }
+            previous = encoded
+            DispatchQueue.main.async { [weak self] in self?.spacesOverlay = overlay }
+        }
         catalog.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in
             self?.objectWillChange.send()
         }.store(in: &bag)
     }
 
     private var bag = Set<AnyCancellable>()
-
-    private func reloadSpacesOverlay() {
-        let path = FactorySources.resolved().overlay
-        let stamp = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date
-        if stamp != spacesOverlayMtime {
-            spacesOverlayMtime = stamp
-            spacesOverlay = (try? Data(contentsOf: URL(fileURLWithPath: path))).flatMap { try? JSONDecoder().decode(Overlay.self, from: $0) } ?? Overlay()
-        }
-    }
 
     /// Bumped on every applied local snapshot, as MachineState.epoch is for another machine's.
     private var localEpoch = 0
@@ -105,7 +109,6 @@ final class HerdrModel: ObservableObject {
     }
 
     private func apply(_ s: Snapshot) {
-        reloadSpacesOverlay()
         localEpoch += 1
         snapshot = s
         let c = TabClassifier(s)
