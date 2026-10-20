@@ -478,17 +478,6 @@ impl HeadlessServer {
                 crate::render_prof::event("full_render_cause.metadata_expiry");
             }
 
-            // 3. Drain API requests.
-            if self.drain_api_requests_with_shutdown_check() {
-                needs_render = true;
-                needs_full_render = true;
-                crate::render_prof::event("full_render_cause.api_requests");
-            }
-            note_server_signal(&self.should_quit, &self.server_event_tx);
-            if self.should_quit.load(Ordering::Acquire) {
-                continue;
-            }
-
             self.app.sync_focus_events();
             self.app.sync_session_save_schedule();
 
@@ -506,7 +495,16 @@ impl HeadlessServer {
                 continue;
             }
 
-            // 6. Handle scheduled tasks.
+            if self.drain_api_requests_with_shutdown_check() {
+                needs_render = true;
+                needs_full_render = true;
+                crate::render_prof::event("full_render_cause.api_requests");
+            }
+            note_server_signal(&self.should_quit, &self.server_event_tx);
+            if self.should_quit.load(Ordering::Acquire) {
+                continue;
+            }
+
             let now = Instant::now();
             if self.handle_scheduled_tasks_headless(now, needs_render) {
                 needs_render = true;
@@ -2979,10 +2977,15 @@ impl HeadlessServer {
     /// During shutdown, remaining requests get a `server_unavailable` error.
     fn drain_api_requests_with_shutdown_check(&mut self) -> bool {
         let mut changed = false;
-        while {
+        let started = Instant::now();
+        for _ in 0..16 {
             note_server_signal(&self.should_quit, &self.server_event_tx);
-            !self.should_quit.load(Ordering::Acquire)
-        } {
+            if self.should_quit.load(Ordering::Acquire)
+                || !self.server_event_rx.is_empty()
+                || started.elapsed() >= Duration::from_millis(2)
+            {
+                break;
+            }
             let Ok(msg) = self.app.api_rx.try_recv() else {
                 break;
             };
@@ -3084,7 +3087,8 @@ impl HeadlessServer {
             _ => {}
         }
 
-        let mut changed = metadata_expired | api::request_changes_ui(&msg.request);
+        let request_changes_ui = api::request_changes_ui(&msg.request);
+        let mut changed = metadata_expired | request_changes_ui;
         let skip_default_workspace = skip_default_workspace_for_request
             || matches!(
                 &msg.request.method,
@@ -3103,7 +3107,7 @@ impl HeadlessServer {
             crate::layout::PaneId,
             crate::detect::AgentState,
             Option<String>,
-        )> = {
+        )> = if request_changes_ui {
             let terminals = &self.app.state.terminals;
             self.app
                 .state
@@ -3125,6 +3129,8 @@ impl HeadlessServer {
                     })
                 })
                 .collect()
+        } else {
+            Vec::new()
         };
 
         self.sync_foreground_client_state();

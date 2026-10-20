@@ -531,7 +531,7 @@ pub(crate) fn render_targets(
         })
         .collect();
 
-    targets.sort_by_key(|(client_id, _, _, is_foreground, _)| (*is_foreground, *client_id));
+    targets.sort_by_key(|(client_id, _, _, is_foreground, _)| (!*is_foreground, *client_id));
     targets
 }
 
