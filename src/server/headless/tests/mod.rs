@@ -126,6 +126,7 @@ fn test_headless_server_with_event_hub(event_hub: api::EventHub) -> HeadlessServ
         shutting_down: false,
         host_shutdown_requested: Arc::new(AtomicBool::new(false)),
         handoff_in_progress: false,
+        attach_scroll_pending: false,
         #[cfg(unix)]
         pending_handoff_repaint_nudge: false,
         should_quit,
@@ -5980,6 +5981,40 @@ async fn headless_scheduled_tasks_start_pending_agent_resume_without_foreground_
         .pending_agent_resume_plan
         .is_none());
     shutdown_test_runtimes(&mut server);
+}
+
+#[test]
+fn terminal_attach_scroll_renders_without_waiting_for_the_render_cadence() {
+    with_terminal_session_test_server(|server, _other_terminal_id, terminal_id, _pane_id| {
+        let mut client = ClientConnection::new(
+            (80, 24),
+            crate::kitty_graphics::HostCellSize::default(),
+            1,
+            RenderEncoding::SemanticFrame,
+            None,
+        );
+        client.mode = ClientConnectionMode::TerminalAttach { terminal_id };
+        server.clients.insert(1, client);
+
+        let now = Instant::now();
+        server.record_render_attempt(now, true);
+        assert!(!server.render_due(now, true, false), "a fresh render holds the cadence");
+
+        // Wheel reports arrive at the trackpad's 120 Hz, faster than the cadence.
+        assert!(server.handle_server_event(ServerEvent::ClientAttachScroll {
+            client_id: 1,
+            source: AttachScrollSource::Wheel,
+            direction: AttachScrollDirection::Up,
+            lines: 1,
+            column: None,
+            row: None,
+            modifiers: 0,
+        }));
+        assert!(server.render_due(now, true, false), "the scrolled frame goes out at once");
+
+        server.record_render_attempt(now, true);
+        assert!(!server.render_due(now, true, false), "the next frame keeps the cadence");
+    });
 }
 
 #[test]

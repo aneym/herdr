@@ -1,0 +1,28 @@
+HerdrShell scroll cadence check (shell)  2026-10-06T23:59:51Z
+attach and server binary: /Users/aneyman/.local/bin/herdr
+
+lab: ready
+window: 0 30 1024 678
+slow run 1: 10 rows over 30 frames (69 frames read), max 1, stalls 0: 0 0 0 1 0 0 1 0 0 1 0 0 1 0 0 1 0 0 1 0 0 1 0 0 1 0 0 1 0 1
+medium run 1: 19 rows over 25 frames (76 frames read), max 2, stalls 0: 1 2 1 1 1 1 1 1 1 1 1 2 0 1 0 0 2 0 0 0 1 0 0 0 1
+std run 1: 39 rows over 30 frames (82 frames read), max 4, stalls 3: 1 1 1 4 2 2 2 2 2 2 2 0 4 0 2 2 3 0 2 1 1 0 0 1 1 0 0 0 0 1
+fast run 1: 62 rows over 36 frames (81 frames read), max 8, stalls 1: 4 4 7 2 8 0 0 6 6 0 1 7 0 3 2 1 1 2 0 0 2 1 1 0 0 2 0 0 0 0 1 0 0 0 0 1
+slow run 2: 10 rows over 30 frames (69 frames read), max 1, stalls 0: 0 0 1 0 0 1 0 0 1 0 0 1 0 0 1 0 0 1 0 0 1 0 0 1 0 0 1 0 0 1
+medium run 2: 20 rows over 25 frames (72 frames read), max 4, stalls 0: 1 2 1 1 0 0 4 0 1 0 3 1 0 1 1 1 0 0 1 1 0 0 0 0 1
+std run 2: 39 rows over 29 frames (80 frames read), max 4, stalls 3: 2 0 4 0 2 2 2 2 2 2 4 0 0 2 2 2 3 0 2 3 0 0 0 2 0 0 0 0 1
+fast run 2: 59 rows over 36 frames (77 frames read), max 6, stalls 2: 4 4 4 4 4 0 4 6 0 4 6 2 2 4 0 1 1 1 0 1 1 2 0 0 0 1 1 0 0 0 1 0 0 0 0 1
+
+PASS  slow swipe: no frame moves more rows than Ghostty.app's  (Shell 1, Ghostty 1)
+PASS  slow swipe: no stalled frame mid-swipe beyond Ghostty.app's  (Shell 0, Ghostty 0)
+PASS  slow swipe: the motion was read  (10 rows)
+FAIL  medium swipe: no frame moves more rows than Ghostty.app's  (Shell 4, Ghostty 2)
+PASS  medium swipe: no stalled frame mid-swipe beyond Ghostty.app's  (Shell 0, Ghostty 0)
+PASS  medium swipe: the motion was read  (20 rows)
+FAIL  std swipe: no frame moves more rows than Ghostty.app's  (Shell 4, Ghostty 3)
+FAIL  std swipe: no stalled frame mid-swipe beyond Ghostty.app's  (Shell 3, Ghostty 0)
+PASS  std swipe: the motion was read  (39 rows)
+FAIL  fast swipe: no frame moves more rows than Ghostty.app's  (Shell 8, Ghostty 5)
+FAIL  fast swipe: no stalled frame mid-swipe beyond Ghostty.app's  (Shell 2, Ghostty 0)
+PASS  fast swipe: the motion was read  (62 rows)
+
+RESULT: FAIL medium swipe: no frame moves more rows than Ghostty.app's, std swipe: no frame moves more rows than Ghostty.app's, std swipe: no stalled frame mid-swipe beyond Ghostty.app's, fast swipe: no frame moves more rows than Ghostty.app's, fast swipe: no stalled frame mid-swipe beyond Ghostty.app's

@@ -240,6 +240,11 @@ pub struct HeadlessServer {
     shutting_down: bool,
     /// Flag set while exporting live PTYs to a replacement server.
     handoff_in_progress: bool,
+    /// An attached client scrolled since the last render. Its frame goes out at
+    /// once instead of waiting out the render cadence: wheel reports come at the
+    /// trackpad's rate, and holding them for a cadence tick that is not in phase
+    /// with the client's display lands rows in bursts (0 rows, then 4 to 6).
+    attach_scroll_pending: bool,
     /// Imported panes get one app-safe resize nudge after the first client attaches.
     #[cfg(unix)]
     pending_handoff_repaint_nudge: bool,
@@ -374,6 +379,7 @@ impl HeadlessServer {
             shutting_down: false,
             host_shutdown_requested: Arc::new(AtomicBool::new(false)),
             handoff_in_progress: false,
+            attach_scroll_pending: false,
             #[cfg(unix)]
             pending_handoff_repaint_nudge: false,
             should_quit,
@@ -528,15 +534,7 @@ impl HeadlessServer {
             // 7. Render virtually and stream frames. Hidden-only PTY work keeps a
             // bounded classification cadence without delaying presentation work
             // that joins the same coalesced request.
-            let render_cadence_due = self.app.can_render_now(now);
-            if needs_render
-                && (render_cadence_due
-                    || (self.app.can_present_now(now)
-                        && self.has_pending_presentation_work(
-                            needs_full_render,
-                            needs_graphics_render,
-                        )))
-            {
+            if needs_render && self.render_due(now, needs_full_render, needs_graphics_render) {
                 crate::render_prof::event("render.attempt");
                 let render_request = self.app.render_dirty.take();
                 let pty_dirty = !render_request.pty_sources.is_empty();
@@ -582,7 +580,7 @@ impl HeadlessServer {
                     crate::render_prof::event("full_render.invoke");
                     self.render_and_stream();
                 }
-                self.app.record_render_attempt(now, !hidden_only);
+                self.record_render_attempt(now, !hidden_only);
                 needs_render = false;
                 needs_full_render = false;
                 needs_graphics_render = false;
@@ -1331,6 +1329,7 @@ impl HeadlessServer {
         {
             warn!(client_id, terminal_id = %terminal_id, err = %err, "terminal attach scroll failed");
         }
+        self.attach_scroll_pending = true;
         true
     }
 

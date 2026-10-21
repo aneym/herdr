@@ -213,6 +213,25 @@ impl HeadlessServer {
         }
     }
 
+    /// Whether pending render work may go out at `now`. An attach client's scroll
+    /// goes out at once; everything else keeps the render cadence.
+    pub(super) fn render_due(
+        &self,
+        now: Instant,
+        needs_full_render: bool,
+        needs_graphics_render: bool,
+    ) -> bool {
+        self.app.can_render_now(now)
+            || self.attach_scroll_pending
+            || (self.app.can_present_now(now)
+                && self.has_pending_presentation_work(needs_full_render, needs_graphics_render))
+    }
+
+    pub(super) fn record_render_attempt(&mut self, now: Instant, presentation: bool) {
+        self.app.record_render_attempt(now, presentation);
+        self.attach_scroll_pending = false;
+    }
+
     pub(super) fn has_pending_presentation_work(
         &self,
         needs_full_render: bool,
