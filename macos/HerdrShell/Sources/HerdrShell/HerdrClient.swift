@@ -89,11 +89,12 @@ final class EventStream {
 }
 
 /// Live herdr state without a timer. Subscribes to herdr's lifecycle events and
-/// reconciles with one `session.snapshot` on connect and one per event batch;
+/// reconciles with one `session.snapshot` on connect and after event batches;
 /// events are only invalidation signals, the snapshot is the truth (herdr's
 /// socket API docs, "Event subscriptions"). Refreshes are serialized and
-/// coalesced: events that arrive while a snapshot is in flight cost one more
-/// read after it. Reconnects with a short backoff on disconnect or `events_lost`.
+/// coalesced: a refresh starts at most every `minInterval`, events that arrive
+/// meanwhile cost one read at the next slot, and a snapshot byte-identical to the
+/// last applied one is dropped without decoding or republishing. Reconnects with a short backoff on disconnect or `events_lost`.
 ///
 /// Two streams: a fixed one for lifecycle events, and one with a
 /// `pane.agent_status_changed` entry per pane (herdr requires a pane id there),
@@ -117,6 +118,7 @@ final class HerdrClient {
         "pane.agent_detected", "layout.updated", "desk.changed",
     ]
     static let backoff: TimeInterval = 0.5
+    static let minInterval: TimeInterval = 0.25
 
     let socketPath: String
     /// Both callbacks run on the main queue.
@@ -129,6 +131,9 @@ final class HerdrClient {
     private var statusPanes: Set<String> = []
     private var refreshing = false
     private var dirty = false
+    private var scheduled = false
+    private var lastStart = Date.distantPast
+    private var lastApplied: Data?
     private var stopped = false
     private var pendingEventAt: Date?
     private var requests = 0
@@ -185,6 +190,7 @@ final class HerdrClient {
             self?.q.async {
                 guard let self, let stream, self.general === stream, !self.stopped else { return }
                 self.general = nil
+                self.lastApplied = nil
                 self.statusStream?.stop(); self.statusStream = nil
                 self.statusPanes = []
                 if let unknown = Self.unknownEvent(reason), Self.lifecycleEvents.contains(unknown),
@@ -252,19 +258,35 @@ final class HerdrClient {
 
     private func requestRefresh() {
         guard !stopped else { return }
-        if refreshing { dirty = true; return }
+        if refreshing || scheduled { dirty = true; return }
+        let wait = lastStart.addingTimeInterval(Self.minInterval).timeIntervalSinceNow
+        if wait > 0 {
+            scheduled = true
+            q.asyncAfter(deadline: .now() + wait) {
+                self.scheduled = false
+                self.dirty = false
+                self.requestRefresh()
+            }
+            return
+        }
         refreshing = true
+        lastStart = Date()
         requests += 1
         let n = requests
         let eventAt = pendingEventAt
         pendingEventAt = nil
         let path = socketPath
         let machine = self.machine
+        let previous = lastApplied
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let t0 = Date()
             var data = HerdrSocket.request(path, #"{"id":"shell:snapshot","method":"session.snapshot","params":{}}"#)
             if let machine, let raw = data { data = Machines.namespace(raw, machine: machine) }
             let ms = Date().timeIntervalSince(t0) * 1000
+            if let data, data == previous {
+                self?.q.async { self?.finishUnchanged(n: n, ms: ms) }
+                return
+            }
             var snap: Snapshot?
             var failure = "herdr session.snapshot failed"
             if let data {
@@ -277,6 +299,7 @@ final class HerdrClient {
                 self.refreshing = false
                 guard !self.stopped else { return }
                 if let snap {
+                    self.lastApplied = data
                     let applied = Applied(snapshot: snap, fetchMs: ms,
                                           eventToApplyMs: eventAt.map { Date().timeIntervalSince($0) * 1000 })
                     if machine == nil { log(String(format: "p3: snapshot #%d fetched in %.1f ms%@", n, ms,
@@ -285,6 +308,7 @@ final class HerdrClient {
                     self.syncStatusStream(panes: Set(snap.panes.map(\.pane_id)))
                 } else {
                     self.report(failure)
+                    self.lastApplied = nil
                     if eventAt != nil { self.pendingEventAt = eventAt }
                     self.dirty = false
                     self.q.asyncAfter(deadline: .now() + Self.backoff) { self.requestRefresh() }
@@ -293,6 +317,13 @@ final class HerdrClient {
                 if self.dirty { self.dirty = false; self.requestRefresh() }
             }
         }
+    }
+
+    private func finishUnchanged(n: Int, ms: Double) {
+        refreshing = false
+        guard !stopped else { return }
+        if machine == nil { log(String(format: "p3: snapshot #%d fetched in %.1f ms, unchanged", n, ms)) }
+        if dirty { dirty = false; requestRefresh() }
     }
 
     private func report(_ message: String) {
