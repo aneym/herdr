@@ -596,6 +596,7 @@ impl App {
             agent_manifest_summaries,
             agent_manifest_update_status: crate::detect::manifest_update::load_status(),
             installed_plugins: load_plugin_registry(policy.persist_plugin_registry),
+            installed_plugins_refreshed_at: Some(std::time::Instant::now()),
             plugin_panes: std::collections::HashMap::new(),
             popup_pane: None,
             plugin_command_logs: Vec::new(),

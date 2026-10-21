@@ -35,7 +35,7 @@ const STREAM_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 // is roughly 21.4 MiB after base64 expansion. Keep the line transport bounded
 // while allowing that public API contract plus JSON overhead.
 const MAX_INITIAL_REQUEST_BYTES: usize = 24 * 1024 * 1024;
-const MAX_CONCURRENT_CONNECTIONS: usize = 32;
+const MAX_CONCURRENT_CONNECTIONS: usize = 256;
 
 struct ActiveConnectionGuard {
     active: Arc<AtomicUsize>,

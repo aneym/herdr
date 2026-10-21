@@ -11,6 +11,7 @@ use crate::app::App;
 const PLUGIN_COMMAND_OUTPUT_MAX_BYTES: usize = 64 * 1024;
 pub(super) const MAX_PLUGIN_COMMANDS_IN_FLIGHT: usize = 32;
 const PLUGIN_COMMAND_LOG_LIMIT: usize = 200;
+const PLUGIN_EVENT_HOOK_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 
 impl App {
     pub(super) fn start_plugin_command(
@@ -220,9 +221,15 @@ impl App {
         if !crate::api::schema::PLUGIN_HOOK_EVENT_KINDS.contains(&event.event) {
             return;
         }
-        if let Err(err) = self.refresh_installed_plugins() {
-            tracing::warn!(err = %err, "failed to refresh plugin registry before event hooks");
-            return;
+        let registry_fresh = self
+            .state
+            .installed_plugins_refreshed_at
+            .is_some_and(|at| at.elapsed() < PLUGIN_EVENT_HOOK_REFRESH_INTERVAL);
+        if !registry_fresh {
+            if let Err(err) = self.refresh_installed_plugins() {
+                tracing::warn!(err = %err, "failed to refresh plugin registry before event hooks");
+                return;
+            }
         }
         let plugins = self
             .state

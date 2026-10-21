@@ -34,6 +34,7 @@ impl App {
             .into_iter()
             .map(|plugin| (plugin.plugin_id.clone(), plugin))
             .collect();
+        self.state.installed_plugins_refreshed_at = Some(std::time::Instant::now());
     }
 
     fn refresh_installed_plugins(&mut self) -> std::io::Result<()> {
