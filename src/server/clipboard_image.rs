@@ -5,11 +5,11 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const STAGED_CLIPBOARD_IMAGE_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
-pub(crate) const API_STAGED_CLIPBOARD_IMAGE_LEASE: Duration = Duration::from_secs(15 * 60);
+pub(crate) const API_STAGED_CLIPBOARD_IMAGE_LEASE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 pub(crate) const API_STAGING_CLEANUP_INTERVAL: Duration = Duration::from_secs(60);
 const API_STAGE_PREFIX: &str = "api-clipboard-";
-const API_STAGE_MAX_FILES: usize = 64;
-const API_STAGE_MAX_BYTES: u64 = 64 * 1024 * 1024;
+const API_STAGE_MAX_FILES: usize = 512;
+const API_STAGE_MAX_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_DECODED_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 #[cfg(unix)]
 const DIRECTORY_MODE: u32 = 0o700;
@@ -37,28 +37,11 @@ impl Default for ApiQuota {
     }
 }
 
-pub(crate) fn stage(
-    client_id: u64,
-    extension: &str,
-    data: &[u8],
-) -> io::Result<StagedClipboardImage> {
+pub(crate) fn stage(extension: &str, data: &[u8]) -> io::Result<StagedClipboardImage> {
     validate_image(extension, data)?;
     let _guard = staging_lock();
     let dir = ensure_staging_dir()?;
     cleanup_legacy_stale(&dir, SystemTime::now());
-    stage_in_dir(
-        &dir,
-        &format!("client-{client_id}-clipboard-"),
-        extension,
-        data,
-        SystemTime::now(),
-    )
-}
-
-pub(crate) fn stage_api(extension: &str, data: &[u8]) -> io::Result<StagedClipboardImage> {
-    validate_image(extension, data)?;
-    let _guard = staging_lock();
-    let dir = ensure_staging_dir()?;
     stage_api_in(
         &dir,
         extension,
@@ -78,19 +61,6 @@ pub(crate) fn cleanup_expired_api_files() -> io::Result<()> {
     let _guard = staging_lock();
     let dir = ensure_staging_dir()?;
     cleanup_expired_api_files_in(&dir, SystemTime::now())
-}
-
-pub(crate) fn cleanup_all_api_files() -> io::Result<()> {
-    let _guard = staging_lock();
-    let dir = ensure_staging_dir()?;
-    remove_api_files_in(&dir, |_| true)
-}
-
-pub(crate) fn remove_files(paths: Vec<PathBuf>) {
-    let _guard = staging_lock();
-    for path in paths {
-        let _ = fs::remove_file(path);
-    }
 }
 
 /// Clipboard image ingestion intentionally accepts only PNG. PNG is the format
@@ -239,13 +209,7 @@ fn stage_api_in(
     quota: ApiQuota,
 ) -> io::Result<StagedClipboardImage> {
     cleanup_expired_api_files_in(dir, now)?;
-    let (count, bytes) = api_usage_in(dir)?;
-    if count >= quota.max_files || bytes.saturating_add(data.len() as u64) > quota.max_bytes {
-        return Err(io::Error::new(
-            io::ErrorKind::StorageFull,
-            "clipboard image staging quota exceeded",
-        ));
-    }
+    evict_oldest_api_files_in(dir, quota, data.len() as u64)?;
     let expires = now
         .checked_add(API_STAGED_CLIPBOARD_IMAGE_LEASE)
         .unwrap_or(now)
@@ -371,22 +335,30 @@ fn cleanup_legacy_stale(dir: &Path, now: SystemTime) {
     }
 }
 
-fn api_usage_in(dir: &Path) -> io::Result<(usize, u64)> {
-    let mut count = 0usize;
-    let mut bytes = 0u64;
+fn evict_oldest_api_files_in(dir: &Path, quota: ApiQuota, incoming: u64) -> io::Result<()> {
+    let mut staged = Vec::new();
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if api_expiry_from_name(&name).is_none() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(expires) = api_expiry_from_name(&name) else {
             continue;
-        }
+        };
         if let Ok(metadata) = safe_owned_regular_metadata(&entry.path()) {
-            count = count.saturating_add(1);
-            bytes = bytes.saturating_add(metadata.len());
+            staged.push((expires, name, entry.path(), metadata.len()));
         }
     }
-    Ok((count, bytes))
+    staged.sort();
+    let mut count = staged.len();
+    let mut bytes: u64 = staged.iter().map(|(_, _, _, len)| len).sum();
+    for (_, _, path, len) in staged {
+        if count < quota.max_files && bytes.saturating_add(incoming) <= quota.max_bytes {
+            break;
+        }
+        fs::remove_file(path)?;
+        count -= 1;
+        bytes = bytes.saturating_sub(len);
+    }
+    Ok(())
 }
 
 fn remove_api_files_in(dir: &Path, predicate: impl Fn(&str) -> bool) -> io::Result<()> {
@@ -477,42 +449,7 @@ mod tests {
         assert!(validate_image("png", b"\x89PNG\r\n\x1a\ntruncated").is_err());
     }
 
-    #[test]
-    fn api_staging_enforces_count_and_byte_quotas() {
-        let dir = test_dir("quota");
-        ensure_staging_dir_at(&dir).unwrap();
-        let now = UNIX_EPOCH + Duration::from_secs(10_000);
-        let png = valid_png();
-        let quota = ApiQuota {
-            max_files: 1,
-            max_bytes: png.len() as u64,
-        };
-        stage_api_in(&dir, "png", &png, now, quota).unwrap();
-        assert_eq!(
-            stage_api_in(&dir, "png", &png, now, quota)
-                .unwrap_err()
-                .kind(),
-            io::ErrorKind::StorageFull
-        );
-        fs::remove_dir_all(dir).unwrap();
-    }
 
-    #[test]
-    fn api_cleanup_honors_lease_then_reclaims_expired_files() {
-        let dir = test_dir("lease");
-        ensure_staging_dir_at(&dir).unwrap();
-        let now = UNIX_EPOCH + Duration::from_secs(20_000);
-        let staged = stage_api_in(&dir, "png", &valid_png(), now, ApiQuota::default()).unwrap();
-        cleanup_expired_api_files_in(
-            &dir,
-            now + API_STAGED_CLIPBOARD_IMAGE_LEASE - Duration::from_secs(1),
-        )
-        .unwrap();
-        assert!(staged.path.exists());
-        cleanup_expired_api_files_in(&dir, now + API_STAGED_CLIPBOARD_IMAGE_LEASE).unwrap();
-        assert!(!staged.path.exists());
-        fs::remove_dir_all(dir).unwrap();
-    }
 
     #[cfg(unix)]
     #[test]

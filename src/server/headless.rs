@@ -970,7 +970,6 @@ impl HeadlessServer {
         if let Some(mut removed) = removed {
             let held_inputs = removed.drain_shell_held_inputs();
             self.release_client_shell_inputs(client_id, held_inputs);
-            crate::server::clipboard_image::remove_files(removed.staged_clipboard_files);
             if let ClientConnectionMode::TerminalAttach { terminal_id } = removed.mode {
                 self.terminal_attach_owners.remove(&terminal_id);
                 if let Some(terminal_id) = self.terminal_id_by_string(&terminal_id) {
@@ -1162,7 +1161,7 @@ impl HeadlessServer {
         extension: &str,
         data: &[u8],
     ) -> std::io::Result<crate::server::clipboard_image::StagedClipboardImage> {
-        let staged = crate::server::clipboard_image::stage(client_id, extension, data)?;
+        let staged = crate::server::clipboard_image::stage(extension, data)?;
         info!(client_id, bytes = data.len(), path = %staged.paste_text, "staged client clipboard image");
         Ok(staged)
     }
@@ -2240,22 +2239,7 @@ impl HeadlessServer {
                 }
                 match self.stage_client_clipboard_image(client_id, &extension, &data) {
                     Ok(staged) => {
-                        let routed = self.paste_client_clipboard_image_path(
-                            client_id,
-                            target,
-                            staged.paste_text,
-                        );
-                        if routed {
-                            if let Some(client) = self.clients.get_mut(&client_id) {
-                                client.staged_clipboard_files.push(staged.path);
-                            } else {
-                                crate::server::clipboard_image::remove_files(vec![staged.path]);
-                                return false;
-                            }
-                        } else {
-                            crate::server::clipboard_image::remove_files(vec![staged.path]);
-                        }
-                        routed
+                        self.paste_client_clipboard_image_path(client_id, target, staged.paste_text)
                     }
                     Err(err) => {
                         warn!(client_id, err = %err, "failed to stage client clipboard image");
@@ -3583,12 +3567,7 @@ fn client_pane_input_has_appearance_interaction(events: &[protocol::ClientPaneIn
 
 impl Drop for HeadlessServer {
     fn drop(&mut self) {
-        let staged_files = self
-            .clients
-            .drain()
-            .flat_map(|(_, client)| client.staged_clipboard_files)
-            .collect::<Vec<_>>();
-        crate::server::clipboard_image::remove_files(staged_files);
+        self.clients.clear();
         let _ = self.cleanup_sockets();
     }
 }

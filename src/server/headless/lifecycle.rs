@@ -371,12 +371,7 @@ impl HeadlessServer {
         self.reject_queued_api_requests_for_shutdown();
 
         // Close all client connections.
-        let staged_files = self
-            .clients
-            .drain()
-            .flat_map(|(_, client)| client.staged_clipboard_files)
-            .collect::<Vec<_>>();
-        crate::server::clipboard_image::remove_files(staged_files);
+        self.clients.clear();
 
         // Remove socket files.
         self.cleanup_sockets()?;

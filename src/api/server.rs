@@ -63,9 +63,6 @@ impl Drop for ServerHandle {
                 warn!(path = %self.path.display(), err = %err, "failed to remove api socket on shutdown");
             }
         }
-        if let Err(err) = crate::server::clipboard_image::cleanup_all_api_files() {
-            warn!(err = %err, "failed to remove api clipboard image staging files on shutdown");
-        }
     }
 }
 
@@ -698,7 +695,7 @@ fn handle_clipboard_image_write(
         );
     }
 
-    match crate::server::clipboard_image::stage_api(&params.extension, &data) {
+    match crate::server::clipboard_image::stage(&params.extension, &data) {
         Ok(staged) => serde_json::to_string(&SuccessResponse {
             id,
             result: ResponseResult::ClipboardImageWritten {
