@@ -212,6 +212,18 @@ def strip_comments(text, css):
     return re.sub(pattern, lambda m: re.sub(r"[^\n]", " ", m.group(0)), text, flags=re.S)
 
 
+def style_spans(text):
+    """(start, end) of each JSX `style={{...}}` object, by brace matching; only these hold TSX style props."""
+    spans = []
+    for m in re.finditer(r"\bstyle\s*=\s*\{\s*\{", text):
+        depth, i = 2, m.end()
+        while i < len(text) and depth:
+            depth += {"{": 1, "}": -1}.get(text[i], 0)
+            i += 1
+        spans.append((m.end(), i))
+    return spans
+
+
 def web_lint(generated_css):
     defined = set(VAR_DEF.findall(strip_comments(generated_css, True)))
     problems = []
@@ -226,7 +238,11 @@ def web_lint(generated_css):
         found = [(m.start(), m.group(0)) for m in COLOR_LITERAL.finditer(text)]
         decls = CSS_COLOR_DECL if css else TS_COLOR_PROP
         group = 2 if css else 1
+        # TS: a named color counts only inside a JSX style object, not in any string that says "color".
+        spans = None if css else style_spans(text)
         for d in decls.finditer(text):
+            if spans is not None and not any(a <= d.start() < b for a, b in spans):
+                continue
             # url(...) and quoted strings in a CSS value are names, not colors ("red.svg").
             value = d.group(group) if not css else re.sub(r"url\([^)]*\)|\"[^\"]*\"|'[^']*'",
                                                          lambda m: " " * len(m.group(0)), d.group(group))
