@@ -47,15 +47,6 @@ final class TestHook {
         case "key":
             viaPid = (obj["via"] as? String) == "pid"
             key(obj["key"] as? String ?? "", mods: obj["mods"] as? [String] ?? [])
-        case "drop_files":
-            // Private board, same decoder and paste path as an AppKit Finder drop.
-            guard let c = controller, let pane = obj["pane"] as? String,
-                  let paths = obj["paths"] as? [String],
-                  let view = c.registry.byTerminal.values.first(where: { $0.paneId == pane }) else { return }
-            let board = NSPasteboard(name: NSPasteboard.Name("herdr-shell-drop-\(getpid())"))
-            board.clearContents()
-            board.writeObjects(paths.map { NSURL(fileURLWithPath: $0) })
-            delivered.append("drop_files \(pane) \(view.dropFiles(from: board))")
         case "clipboard_image":
             // {"cmd":"clipboard_image","path":"<png>"}: later pastes read a private named
             // board holding only this image, so a check never touches the user's clipboard.
@@ -216,11 +207,7 @@ final class TestHook {
             controller?.setDocs(open: open, width: width)
         case "factory":
             controller?.setFactory(open: obj["open"] as? Bool ?? true)
-        case "settings":
-            controller?.setSettings(open: obj["open"] as? Bool ?? true)
-        case "settings_toggle":
-            // {"cmd":"settings_toggle","tab":"<id>"}: the closure the row's switch runs (SettingsPage).
-            if !ClickRegistry.shared.call("settings:toggle:" + (obj["tab"] as? String ?? "")) { log("hook: settings_toggle: no row") }
+            if let name = obj["expand"] as? String { controller?.factoryToggleRoute(name) }
         case "pane_mode":
             if let id = obj["id"] as? String, let mode = obj["mode"] as? String {
                 controller?.setPaneMode(id, mode)
@@ -1009,12 +996,6 @@ final class TestHook {
                     "hovered_link": s.hoveredLink,
                     "keys_sent": s.keysSent, "last_key_sent": s.lastKeySent,
                     "frame": [s.frame.minX, s.frame.minY, s.frame.width, s.frame.height],
-                    // Window content points, top-left origin: where a pixel click lands on this grid.
-                    "window_rect": { () -> [CGFloat] in
-                        let r = s.convert(s.bounds, to: nil), h = c.window.contentView?.bounds.height ?? 0
-                        return [r.minX, h - r.maxY, r.width, r.height]
-                    }(),
-                    "padding_pt": [s.paddingPoints.x, s.paddingPoints.y],
                     "in_host": s.superview === c.host,
                     "selection": s.selectedText() ?? NSNull(),
                     "cell_pt": [s.cellPoints.width, s.cellPoints.height],
@@ -1032,8 +1013,6 @@ final class TestHook {
             "window_key": c.window.isKeyWindow,
             "window_number": c.window.windowNumber,
             "window_frame": NSStringFromRect(c.window.frame),
-            "backing_scale": c.window.backingScaleFactor,
-            "content_height": c.window.contentView?.bounds.height ?? 0,
             "host_frame": NSStringFromRect(c.host.frame),
             "selected_tab": c.state.selectedTab ?? NSNull(),
             "switcher_open": c.quickSwitch.isOpen,
@@ -1063,18 +1042,12 @@ final class TestHook {
             "sidebar": ["orchestrator": rows(c.model.orchestrators), "lanes": rows(c.model.lanes),
                         "workflows": rows(c.model.workflows)],
             "spaces_rows": c.model.spacesRows(state: c.state).map { $0.dump },
-            // The color each spaces row paints its state glyph in (SpacesRowView.tone).
-            "spaces_row_tones": Dictionary(c.model.spacesRows(state: c.state).map { ($0.id, ThemeStore.hex(c.theme.tokens.stateTone($0.tone))) },
-                                           uniquingKeysWith: { a, _ in a }),
             // Each drawn agent face in window points from the top left, the pictures fetched, and the dot colors.
             "face_frames": Dictionary(uniqueKeysWithValues: c.state.rowFrames.filter { $0.key.hasPrefix("face:") }
                 .map { ($0.key, windowFrame($0.value, in: c.sidebarHostView, c)) }),
-            // Every sidebar click target (rows, mode buttons, the pinned +) in window points from the
-            // top left, so a check can click each with a real pointer event.
-            "row_frames": Dictionary(uniqueKeysWithValues: c.state.rowFrames.map { ($0.key, windowFrame($0.value, in: c.sidebarHostView, c)) }),
             "face_pictures": FacePictures.shared.images.keys.sorted(),
-            "face_dots": ["working": ThemeStore.hex(c.theme.tokens.chrome.working), "blocked": ThemeStore.hex(c.theme.tokens.chrome.accent),
-                          "done": ThemeStore.hex(c.theme.tokens.chrome.ok)],
+            "face_dots": ["working": ThemeStore.hex(c.theme.tokens.chrome.ok), "blocked": ThemeStore.hex(c.theme.tokens.chrome.accent),
+                          "done": ThemeStore.hex(c.theme.tokens.chrome.warn)],
             // What ⌘1..9 select, in order (pins first).
             "numbered_tabs": Array(c.model.numberedTabIds(state: c.state).prefix(9)),
             "hidden_agents": ([c.model.snapshot].compactMap { $0 } + c.model.machines.compactMap(\.snapshot)).flatMap(\.tabs).filter { $0.role == "agent" && ($0.hidden ?? false) }.map(\.tab_id),
@@ -1085,11 +1058,6 @@ final class TestHook {
                 .map { ($0.id, RowMenu.items(for: $0, model: c.model).map(\.rawValue)) }, uniquingKeysWith: { a, _ in a }),
             "spaces_chrome": (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(c.state.spacesChrome))) ?? [:],
             "docs_visible": c.root.docsOpen,
-            "settings_open": c.settingsOpen,
-            "settings_frame": c.root.settings.map { [$0.frame.minX, $0.frame.minY, $0.frame.width, $0.frame.height] } ?? [],
-            "window_content": [c.root.bounds.width, c.root.bounds.height],
-            "settings_rows": SettingsAgents.rows(c.model.settingsInput, pending: c.settingsPending)
-                .map { ["tab": $0.id, "title": $0.title, "meta": $0.meta, "shown": $0.shown] as [String: Any] },
             "detail_open": c.detailPanel.model.isOpen,
             "sidebar_lines": c.sidebarLines.map { $0.dump },   // P10: the rows as drawn, in order
             "shell": [
@@ -1114,12 +1082,7 @@ final class TestHook {
                 let f = c.host.capFrames[id] ?? .zero
                 return ["id": id, "name": cap.name, "agent": cap.agent, "chat": cap.chat,
                         "density": cap.density, "focused": cap.focused, "pinned": cap.pinned ?? NSNull(),
-                        "frame": [f.minX, f.minY, f.width, f.height],
-                        // The cap in window points from the top left, as a screenshot lays it out.
-                        "window_frame": { () -> [CGFloat] in
-                            let w = c.host.convert(f, to: nil), height = c.window.contentView?.bounds.height ?? 0
-                            return [w.minX, height - w.maxY, w.width, w.height]
-                        }()]
+                        "frame": [f.minX, f.minY, f.width, f.height]]
             },
             "chats": c.chatDump,
             "machines": c.factoryMachines.map { ["name": $0.name, "usage": $0.usageLine, "usage_state": $0.usageState] },
@@ -1137,7 +1100,6 @@ final class TestHook {
                      "active_item": c.docPanel.activeItem as Any? ?? NSNull()],
             "last_remote": RemoteActions.last,
             "opened_urls": OpenedLinks.shared.urls,
-            "tab_docs": Dictionary(uniqueKeysWithValues: (c.model.snapshot?.tabs ?? []).compactMap { tab in tab.doc.map { (tab.tab_id, ["url": $0.url, "title": $0.title]) } }),
             "poll_ms": c.model.pollMs,
             "surfaces": surfaces,
             "lifecycle": c.registry.lifecycleState(),

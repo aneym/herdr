@@ -60,14 +60,13 @@ final class PaneHostView: NSView {
         // Before any pane box takes the new size: a drop still waiting on its reply ends first (see hostWillLayout).
         paneDrag?.hostWillLayout(bounds.size)
         super.layout()
-        guard let scale = PaneGeometry.scale(bounds: bounds, area: CGRect(x: area.x, y: area.y, width: area.width, height: area.height)) else { return }
-        let sx = scale.width, sy = scale.height
+        guard area.width > 0, area.height > 0 else { return }
+        let sx = bounds.width / area.width, sy = bounds.height / area.height
         let live = Set(rects.map { $0.0.paneId })
         for (id, v) in capHosts where !live.contains(id) { v.removeFromSuperview(); capHosts[id] = nil }
         for (id, v) in chatViews where !live.contains(id) { v.removeFromSuperview(); chatViews[id] = nil }
         for (s, r) in rects {
             let full = boxRect(r)
-            guard PaneGeometry.drawable(full) else { continue }
             let capH = min(ShellSpace.paneCapHeight, full.height)
             let capFrame = NSRect(x: full.minX, y: full.minY, width: full.width, height: capH)
             let body = NSRect(x: full.minX, y: full.minY + capH, width: full.width, height: max(0, full.height - capH))
@@ -97,21 +96,20 @@ final class PaneHostView: NSView {
 
     /// Shared layout conversion for caps, body, previews and hook dumps.
     func boxRect(_ r: Snapshot.Rect) -> NSRect {
-        PaneGeometry.box(CGRect(x: r.x, y: r.y, width: r.width, height: r.height), bounds: bounds,
-                         area: CGRect(x: area.x, y: area.y, width: area.width, height: area.height))
+        let sx = bounds.width / area.width, sy = bounds.height / area.height
+        let gapL: CGFloat = r.x > area.x ? 1 : 0, gapT: CGFloat = r.y > area.y ? 1 : 0
+        return NSRect(x: (r.x - area.x) * sx + gapL, y: (r.y - area.y) * sy + gapT,
+                      width: r.width * sx - gapL, height: r.height * sy - gapT).integral
     }
     /// Change origin and clip only; terminal size is established by layout().
     func drawBox(_ pane: String, rect: NSRect, opacity: CGFloat, moving: Bool = false) {
-        guard PaneGeometry.drawable(rect), opacity.isFinite,
-              let (surface, r) = rects.first(where: { $0.0.paneId == pane }) else { return }
-        let final = boxRect(r)
-        guard PaneGeometry.drawable(final) else { return }
-        let capH = min(ShellSpace.paneCapHeight, final.height)
+        guard let (surface, r) = rects.first(where: { $0.0.paneId == pane }) else { return }
+        let final = boxRect(r), capH = min(ShellSpace.paneCapHeight, final.height)
         capHosts[pane]?.setFrameOrigin(rect.origin)
         surface.setFrameOrigin(NSPoint(x: rect.minX, y: rect.minY + capH))
         chatViews[pane]?.setFrameOrigin(surface.frame.origin)
         for view in [surface as NSView, capHosts[pane], chatViews[pane]].compactMap({ $0 }) {
-            view.wantsLayer = true; view.alphaValue = min(max(opacity, 0), 1)
+            view.wantsLayer = true; view.alphaValue = opacity
             // Back moving terminal glyphs with opaque pane paint, above the static panes.
             view.layer?.backgroundColor = moving ? NSColor(hex: tokens.terminalBg).cgColor : nil
             view.layer?.zPosition = moving ? 1 : 0
@@ -149,7 +147,7 @@ final class PaneHostView: NSView {
             }
             return v
         }
-        let state = caps[paneId] ?? PaneCapState(paneId: paneId, name: "", agent: false, focused: false, chat: false, density: "focus", glyph: .asleep)
+        let state = caps[paneId] ?? PaneCapState(paneId: paneId, name: "Brief", agent: false, focused: false, chat: false, density: "focus", glyph: .asleep)
         let v = CapHostingView(rootView: PaneCapBar(state: state, tokens: tokens,
                                                    onTerminal: { [weak self] in self?.capAction?(paneId, "terminal") },
                                                    onChat: { [weak self] in self?.capAction?(paneId, "chat") },
@@ -277,9 +275,6 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             guard let self, !self.quickSwitch.isOpen else { return false }
             return self.docPanel.hasFocus || self.detailClaimsEscape
         }
-        Keymap.shared.addContextual(chord: "escape", action: "close_settings") { [weak self] in
-            self?.settingsOpen == true && self?.quickSwitch.isOpen == false
-        }
         Keymap.shared.addContextual(chord: "escape", action: "close_switcher") { [weak self] in
             self?.quickSwitch.isOpen == true
         }
@@ -297,7 +292,6 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         }.store(in: &bag)
         model.$lastError.receive(on: RunLoop.main).sink { [weak self] error in
             self?.paneDrag.connectionChanged(online: error == nil)
-            DispatchQueue.main.async { self?.syncBootStatus() }
         }.store(in: &bag)
         model.$snapshot.receive(on: RunLoop.main).sink { [weak self] _ in self?.snapshotChanged() }.store(in: &bag)
         // $machines fires before the value lands; read it on the next turn.
@@ -321,50 +315,6 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self?.refreshHost() }
         }
         updates = UpdateController(controller: self)
-        installBootStatus()
-    }
-
-    private let bootStatus = NSTextField(labelWithString: "")
-    private var bootTimer: Timer?
-    private let openedAt = Date()
-    private var bootCentered: [NSLayoutConstraint] = []
-    private var bootFooter: [NSLayoutConstraint] = []
-
-    private func installBootStatus() {
-        bootStatus.translatesAutoresizingMaskIntoConstraints = false
-        bootStatus.alignment = .center
-        bootStatus.isSelectable = false
-        bootStatus.wantsLayer = true
-        bootStatus.layer?.zPosition = 10
-        host.addSubview(bootStatus)
-        bootCentered = [bootStatus.centerXAnchor.constraint(equalTo: host.centerXAnchor),
-                        bootStatus.centerYAnchor.constraint(equalTo: host.centerYAnchor)]
-        bootFooter = [bootStatus.centerXAnchor.constraint(equalTo: host.centerXAnchor),
-                      bootStatus.bottomAnchor.constraint(equalTo: host.bottomAnchor, constant: -10)]
-        syncBootStatus()
-    }
-
-    func syncBootStatus() {
-        guard bootStatus.superview != nil else { return }
-        let line = BootStatus.line(loaded: model.snapshot != nil, error: model.lastError,
-                                   pendingRestores: model.snapshot?.pending_agent_restores ?? 0,
-                                   waitedSeconds: Int(Date().timeIntervalSince(openedAt)))
-        bootStatus.isHidden = line == nil
-        if let line {
-            let t = theme.tokens
-            bootStatus.stringValue = line.text
-            bootStatus.textColor = NSColor(hex: line.centered ? t.chrome.ink : t.chrome.mute)
-            bootStatus.font = .systemFont(ofSize: line.centered ? ShellType.body : ShellType.caption)
-            NSLayoutConstraint.deactivate(line.centered ? bootFooter : bootCentered)
-            NSLayoutConstraint.activate(line.centered ? bootCentered : bootFooter)
-        }
-        let counting = line?.centered == true && model.lastError != nil
-        if counting, bootTimer == nil {
-            bootTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.syncBootStatus() }
-        } else if !counting {
-            bootTimer?.invalidate()
-            bootTimer = nil
-        }
     }
 
     var updates: UpdateController?
@@ -438,7 +388,6 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         docPanel?.apply(panel: NSColor(hex: t.chrome.panel), ink: NSColor(hex: t.chrome.ink))
         host.tokens = t
         host.needsLayout = true
-        syncBootStatus()
         GhosttyRuntime.shared?.setColorScheme(theme.effective, theme: theme.terminal, surfaces: Array(registry.byTerminal.values))
     }
 
@@ -498,8 +447,6 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     func snapshotChanged() {
-        syncBootStatus()
-        if let s = model.snapshot { NewPanes.shared.observe(source: "", paneIds: s.panes.map(\.pane_id)) }
         reportRestoreErrors()
         quickSwitch.reload()
         if reconcileClose() { return }
@@ -547,7 +494,6 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     /// selection that was waiting for it, or a new tab there waiting to be listed, goes through
     /// the normal snapshot path.
     func machinesChanged() {
-        for m in model.machines { if let s = m.snapshot { NewPanes.shared.observe(source: m.name, paneIds: s.panes.map(\.pane_id)) } }
         let remote = [state.selectedTab, pendingSelectTab].contains { $0.map(Machines.isRemote) == true }
         guard remote else { refreshDocs(); return }
         snapshotChanged()
@@ -568,7 +514,9 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         state.selectedTab = tabId
         if !stepping { state.focusCursor = nil }
         state.saveSelected()
-        if !Machines.isRemote(tabId) { focusHerdr(tabId) }
+        if revealDocs, state.mode == .areas {
+            focusHerdr(tabId)
+        }
         lastLayoutKey = ""
         refreshHost()
         refreshDocs()
@@ -605,8 +553,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                     OpenedLinks.shared.record(url.absoluteString)
                     shellOpen(url)
                     return
-                case .result(let reply):
-                    if let id = reply["item_id"] as? String { self.docPanel.openDesk(id, tabId: tabId) }
+                case .result: break
                 }
                 SidebarState.store.set(true, forKey: Self.docsShownKey(tabId))
                 if self.state.selectedTab == tabId { self.setDocs(open: true) }
@@ -769,11 +716,10 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                                 fromDrop: fromDrop)
         host.show(items, area: layout.area, dividers: zoomedPane == nil && !Machines.isRemote(tab) ? PaneDivider.from(layout) : [])
         paneDrag.layoutDidApply()
+        applyPendingFocus()
         if let focusedPane, let replacement = items.first(where: { $0.0.paneId == focusedPane })?.0 {
             window.makeFirstResponder(replacement)
         }
-        // After keeping the keyboard where it was: a pane this app just made (a split) takes it.
-        applyPendingFocus()
         applyVisibility()
         applyCaps()
     }
@@ -784,13 +730,6 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             self?.focusedPaneByTab[tab] = v.paneId
             self?.state.focusedPane = v.paneId
             self?.applyCaps()
-            // Focus on a pane another client took is the user back here: take it back once
-            // the holder pauses. Async: the focus change is still in progress, and taking
-            // back replaces the view.
-            // Not a pane another client just opened: that one stays with its creator until a key or click here.
-            if self?.registry.heldTerminals.contains(v.terminalId) == true, !NewPanes.shared.othersNew(v.paneId) {
-                DispatchQueue.main.async { self?.registry.takeControl(v.terminalId, event: nil) }
-            }
         }
     }
 
@@ -847,29 +786,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     func toggleFactory() { setFactory(open: !state.factoryOpen) }
-
-    private(set) var settingsOpen = false
-    private let settingsState = SettingsState()
-    var settingsPending: [String: Bool] { settingsState.pending }
-
-    func toggleSettings() { setSettings(open: !settingsOpen) }
-
-    /// Settings covers the whole window, sidebar included; the panes keep running underneath.
-    func setSettings(open: Bool) {
-        settingsOpen = open
-        if open, root.settings == nil {
-            root.settings = SettingsHostingView(rootView: SettingsPage(model: model, catalog: model.catalog, theme: theme,
-                                                                       state: settingsState,
-                                                                       close: { [weak self] in self?.setSettings(open: false) }))
-        }
-        root.settingsOpen = open
-        root.layoutSubtreeIfNeeded()
-        if open, let page = root.settings {
-            window.makeFirstResponder(page)
-        } else if let s = focusedSurface {
-            window.makeFirstResponder(s)
-        }
-    }
+    /// Parity shots only (uncommitted): a Factory route row's click.
+    func factoryToggleRoute(_ name: String) { factoryModel?.toggleRoute(name) }
 
     func setFactory(open: Bool) {
         state.factoryOpen = open
@@ -973,12 +891,13 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             let agents = snap.agents.filter { $0.pane_id == p.pane_id }
             let reported = !agents.isEmpty
             let agent = agents.first
+            let named = (agent?.agent?.isEmpty == false ? agent?.agent : nil) ?? "Brief"
             let status = agent?.work_status ?? agent?.agent_status ?? p.agent_status ?? ""
             // Chat reads the local transcript and sends through the local server: local panes only.
             let chat = reported && !Machines.isRemote(p.pane_id) && Channel.mode(for: p.pane_id) == "chat"
             if chat { ensureChat(p.pane_id) }
             next[p.pane_id] = PaneCapState(
-                paneId: p.pane_id, name: PaneCapName.of(p, agent: agent), agent: reported,
+                paneId: p.pane_id, name: named.isEmpty ? "Brief" : named, agent: reported,
                 focused: (state.focusedPane ?? snap.panes.first { $0.focused == true }?.pane_id) == p.pane_id,
                 chat: chat, density: Channel.density(for: p.pane_id),
                 glyph: ShellState.from(status: status, failed: false, hasAgent: reported))
@@ -1344,15 +1263,6 @@ final class ShellWindow: NSWindow {
         }
         var docsWidth: CGFloat = DocPanelController.defaultWidth
         var factory: NSView?
-        var settings: NSView? {
-            didSet {
-                oldValue?.removeFromSuperview()
-                if let settings { settings.isHidden = !settingsOpen; addSubview(settings, positioned: .above, relativeTo: nil) }
-            }
-        }
-        var settingsOpen = false {
-            didSet { settings?.isHidden = !settingsOpen; needsLayout = true }
-        }
         private var switcher: NSView?
         var factoryOpen = false {
             didSet { factory?.isHidden = !factoryOpen; host.isHidden = factoryOpen; needsLayout = true }
@@ -1398,10 +1308,6 @@ final class ShellWindow: NSWindow {
         }
         host.frame = NSRect(x: x, y: 0, width: max(0, bounds.width - x - docW), height: bounds.height)
         factory?.frame = host.frame
-        if let settings {
-            settings.frame = bounds
-            addSubview(settings, positioned: .above, relativeTo: nil)
-        }
         if let switcher {
             switcher.frame = bounds
             addSubview(switcher, positioned: .above, relativeTo: nil)
