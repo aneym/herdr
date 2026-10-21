@@ -5,7 +5,7 @@
 [PASS] digits A1 C2 P3: numbered skips hidden B (shut and open)
 [PASS] open fold: hiddenagent:B right under the header, before PINNED
 [PASS] open header chevron is open with the same count
-[PASS] hidden row: tab kind, depth 0, opens B, agent face, no space name
+[PASS] hidden row: tab kind, depth 1, opens B, agent face, no space name
 [PASS] the header toggle key opens the fold and the choice survives a save
 [PASS] the hidden-spaces fold does not open hidden agents
 [PASS] unhidden B returns to slot 2 and the Hidden header goes
@@ -17,8 +17,6 @@
 [PASS] AGENTS rows dump home:cloud and home:unsynced last, with an empty trailing
 [PASS] a hidden row dumps home:local with an empty trailing
 [PASS] a PINNED row keeps its space name and draws no home, even with a location
-[PASS] an agent on the box dumps on:box and one on Studio dumps on:Studio, each before its home
-[PASS] rows with no run place dump none: a hidden agent from an older server, a PINNED row
 [PASS] a remote agent keeps its @ax42 badge, with home:unsynced kept last
 [PASS] an agent from an older snapshot (no home_location) dumps no home and no space name
 [PASS] a remote hidden agent joins the fold with its badge; an unknown home_location draws nothing
@@ -35,8 +33,8 @@
 chrome|false|false
 numbered|s1:t1,s2:t1,s1:t3,s2:t2
 section|agentpins|0|none||mute|AGENTS||none||||
-tab|agent:s1:t1|0|none|●|working|alpha||none||s1:t1|||face:A:6|dot:ok|on:box|home:cloud
-tab|agent:s2:t1|0|none|●|working|charlie||none||s2:t1|||face:C:3|dot:ok|on:Studio|home:unsynced
+tab|agent:s1:t1|0|none|●|working|alpha||none||s1:t1|||face:A:6|dot:ok|home:cloud
+tab|agent:s2:t1|0|none|●|working|charlie||none||s2:t1|||face:C:3|dot:ok|home:unsynced
 hidden|hiddenagents|0|closed||mute|Hidden|1|none|||hiddenagents|
 section|pinned|0|none||mute|PINNED||none||||
 tab|pinned:s1:t3|0|none|●|idle|papa|rails|none||s1:t3||
@@ -74,13 +72,13 @@ drag|tab:s2:t2|
 chrome|true|false
 numbered|s1:t1,s2:t1,ax42/w1:t1,ax42/w1:t3,s1:t3,s2:t2
 section|agentpins|0|none||mute|AGENTS||none||||
-tab|agent:s1:t1|0|none|●|working|alpha||none||s1:t1|||face:A:6|dot:ok|on:box|home:cloud
-tab|agent:s2:t1|0|none|●|working|charlie||none||s2:t1|||face:C:3|dot:ok|on:Studio|home:unsynced
-tab|agent:ax42/w1:t1|0|none|●|working|remote chat||none||ax42/w1:t1|||face:R:0|dot:ok|@ax42|on:box|home:unsynced
+tab|agent:s1:t1|0|none|●|working|alpha||none||s1:t1|||face:A:6|dot:ok|home:cloud
+tab|agent:s2:t1|0|none|●|working|charlie||none||s2:t1|||face:C:3|dot:ok|home:unsynced
+tab|agent:ax42/w1:t1|0|none|●|working|remote chat||none||ax42/w1:t1|||face:R:0|dot:ok|@ax42|home:unsynced
 tab|agent:ax42/w1:t3|0|none|●|idle|remote old||none||ax42/w1:t3|||face:R:2|@ax42
 hidden|hiddenagents|0|open||mute|Hidden|2|none|||hiddenagents|
-tab|hiddenagent:s1:t2|0|none|●|idle|bravo||none||s1:t2|||face:B:8|home:local
-tab|hiddenagent:ax42/w1:t2|0|none|●|idle|remote hidden||none||ax42/w1:t2|||face:R:0|@ax42
+tab|hiddenagent:s1:t2|1|none|●|idle|bravo||none||s1:t2|||face:B:8|home:local
+tab|hiddenagent:ax42/w1:t2|1|none|●|idle|remote hidden||none||ax42/w1:t2|||face:R:0|@ax42
 section|pinned|0|none||mute|PINNED||none||||
 tab|pinned:s1:t3|0|none|●|idle|papa|rails|none||s1:t3||
 space|space:s1|0|open||mute|rails||none||s1:t1|space:s1|
