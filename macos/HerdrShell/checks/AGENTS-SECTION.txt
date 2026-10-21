@@ -2,7 +2,7 @@
 [PASS] AGENTS precedes PINNED (remote agent before local plain pin)
 [PASS] agent appears once, only in AGENTS
 [PASS] AGENTS and PINNED headers carry no key hints (Alex, 2026-10-06)
-[PASS] remote agent badge and space label survive
+[PASS] remote agent badge survives and the space label is gone
 [PASS] numbered order starts remote A, local P
 [PASS] source pin indices preserved for moves
 [PASS] no agent cards: agent rows still get tinted initials from the label
@@ -20,7 +20,7 @@
 numbered|ax42/w1:t1,s1:t1,s1:t2,ax42/w2:t1,s2:t1,pc/w1:t1
 indices|s1:t1:0,ax42/w1:t1:0
 section|agentpins|0|none||mute|AGENTS||none||||
-tab|agent:ax42/w1:t1|0|none|●|working|remote chat|rails|none||ax42/w1:t1|||face:R:0|dot:ok|@ax42
+tab|agent:ax42/w1:t1|0|none|●|working|remote chat||none||ax42/w1:t1|||face:R:0|dot:ok|@ax42
 section|pinned|0|none||mute|PINNED||none||||
 tab|pinned:s1:t1|0|none|●|working|orchestrator|rails|none||s1:t1||
 title|spacegroup:Rails|0|none||mute|Rails||none||||
