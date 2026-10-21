@@ -147,6 +147,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ note: Notification) {
         let t0 = Date()
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(systemWillPowerOff(_:)),
+            name: NSWorkspace.willPowerOffNotification, object: nil)
         theme = ThemeStore(override: appearanceOverride, glass: glassTokens, terminal: terminalTheme)
         theme.startFollowingSystem()
         GhosttyRuntime.shared = GhosttyRuntime(configText: ghosttyConfigText)
@@ -169,6 +172,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shots = ShotRequest(controller: controller)
         shots?.start()
         log(String(format: "launched in %.0f ms (window %d)", Date().timeIntervalSince(t0) * 1000, controller.window.windowNumber))
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        .terminateNow
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        _exit(0)
+    }
+
+    @objc private func systemWillPowerOff(_ notification: Notification) {
+        _exit(0)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
