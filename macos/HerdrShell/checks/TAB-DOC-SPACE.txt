@@ -2,5 +2,16 @@
 [PASS] CLI: tab doc set with no tab targets the caller's own tab (HERDR_PANE_ID)
 [PASS] CLI: tab doc get on a tab without a doc reports none
 [PASS] tab.list carries each tab's doc
-[FAIL] scenario completed (RuntimeError('herdr-shell-space: no socket at /Users/aneyman/.cache/herdr-build/s/d15ce2/h/.config/herdr/sessions/shellspike-doc/herdr.sock\n'))
-4 passed; 1 failed
+[PASS] the app reads both docs from the server
+[PASS] at rest the pinned tab's rows show its doc icon and unpinned rows show none
+[PASS] hovering the pinned Working in Rails row keeps its doc icon
+[PASS] light: Shell window shot written with the icon showing
+[PASS] dark: Shell window shot written with the icon showing
+[PASS] clicking the icon opens the doc in Aside
+[PASS] clicking the icon leaves the selected tab alone
+[PASS] an unpinned tab row shows its doc icon on hover
+[PASS] the unpinned row's icon goes when the pointer leaves
+[PASS] a row with no doc shows no icon on hover
+[PASS] CLI: tab doc clear
+[PASS] after clear the pinned row shows no doc icon, at rest or on hover
+16 passed; 0 failed
