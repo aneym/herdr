@@ -183,7 +183,7 @@ fn home_location_glyph_replaces_the_space_name_on_agent_rows_only() {
 /// and value the Mac and Windows Shells read.
 #[test]
 fn home_location_absent_from_an_older_client_shell_tab_decodes_as_none() {
-    let old = r#"{"desk_count":0,"sort_rank":0,"tab_id":"w1:t1","workspace_id":"w1","number":1,"label":"frank","custom_label":true,"zoomed":false,"focused":false,"agent_status":"working","work_status":"working"}"#;
+    let old = r#"{"sort_rank":0,"tab_id":"w1:t1","workspace_id":"w1","number":1,"label":"frank","custom_label":true,"zoomed":false,"focused":false,"agent_status":"working","work_status":"working"}"#;
     let mut tab: crate::protocol::ClientShellTab =
         serde_json::from_str(old).expect("older client shell tab");
     assert_eq!(tab.home_location, None);

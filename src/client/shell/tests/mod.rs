@@ -50,7 +50,6 @@ pub(super) fn snapshot() -> ClientShellSnapshot {
         }],
         tabs: vec![ClientShellTab {
             sort_rank: 0,
-            desk_count: 0,
             tab_id: "tab_1".into(),
             workspace_id: "ws_1".into(),
             number: 1,
