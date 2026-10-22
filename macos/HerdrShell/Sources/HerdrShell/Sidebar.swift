@@ -240,10 +240,11 @@ struct SidebarView: View {
                         Text(row.title).foregroundStyle(t.mute)
                         Text(row.trailing).foregroundStyle(row.alert == "act" ? t.bad : row.alert == "warn" ? t.warn : t.mute)
                     }.fixedSize().contentShape(Rectangle())
+                        .help(row.hover ?? "")
                         .onTapGesture { if kind == .footerUsage { spacesClick(row, part: "link") } }
                 }
             }.frame(height: 23)
-            VStack(alignment: .leading, spacing: 0) { ForEach(rows) { spacesRow($0, firstSpaceId: nil) } }
+            VStack(alignment: .leading, spacing: 0) { ForEach(rows) { spacesRow($0, firstSpaceId: nil).help($0.hover ?? "") } }
         }
     }
 

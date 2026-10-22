@@ -63,8 +63,8 @@ struct Overlay: Codable {
         init(from decoder: Decoder) throws { let c = try decoder.container(keyedBy: Field.self); attention = c.value("attention", "none"); summary = c.optional("summary"); target_tab = c.optional("target_tab") }
     }
     struct Host: Codable {
-        var name = ""; var summary: String?; var attention = "none"; var url: String?
-        init(from decoder: Decoder) throws { let c = try decoder.container(keyedBy: Field.self); name = c.value("name", ""); summary = c.optional("summary"); attention = c.value("attention", "none"); url = c.optional("url") }
+        var name = ""; var summary: String?; var attention = "none"; var url: String?; var detail: String?
+        init(from decoder: Decoder) throws { let c = try decoder.container(keyedBy: Field.self); name = c.value("name", ""); summary = c.optional("summary"); attention = c.value("attention", "none"); url = c.optional("url"); detail = c.optional("detail") }
     }
     /// A named sidebar group of whole spaces (Rails, Open Factory). Members are workspace labels or ids.
     /// Rust: FactoryOverlay.space_groups, read from `space_groups` in areas.json.
@@ -176,6 +176,7 @@ struct SpacesRow: Identifiable, Equatable {
     var place: String? { runsOn.flatMap { $0 == "box" || badge == nil ? $0 : nil } }
     var setsHidden: Bool? { id.hasPrefix("agent:") ? true : id.hasPrefix("hiddenagent:") ? false : nil }
     var face: Face?
+    var hover: String?
     struct Face: Equatable { var initial: String; var tint: Int; var avatar: String? }
     /// The dot set into the face, as a chrome token: an open request or a blocked agent needs you
     /// (accent, the row's one blue dot, ahead of any other state), working is orange, done is ok,
@@ -487,7 +488,7 @@ enum SpacesTree {
             if chrome.hiddenExpanded { for space in hidden { appendSpace(space, depth: 1) } }
         }
         for (i, host) in overlay.usage.enumerated() { out.append(SpacesRow(id: "usage:\(i)", kind: .footerUsage, title: host.name, trailing: (host.summary ?? "").replacingOccurrences(of: " · ", with: " "), alert: host.attention, link: host.url)) }
-        for (i, host) in overlay.hosts.enumerated() { out.append(SpacesRow(id: "host:\(i)", kind: .footerHost, title: host.name, trailing: (host.summary ?? "").replacingOccurrences(of: "load ", with: "").replacingOccurrences(of: " live", with: ""), alert: host.attention)) }
+        for (i, host) in overlay.hosts.enumerated() { out.append(SpacesRow(id: "host:\(i)", kind: .footerHost, title: host.name, trailing: (host.summary ?? "").replacingOccurrences(of: "load ", with: "").replacingOccurrences(of: " live", with: ""), alert: host.attention, hover: host.detail.map { host.name + ": " + $0 })) }
         return out
     }
 }

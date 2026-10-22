@@ -262,6 +262,8 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 .host-alert { font-weight: 700; flex-shrink: 0; }
 .host-alert.warn { color: var(--shell-warn); }
 .host-alert.act { color: var(--shell-bad); }
+.host-summary.warn { color: var(--shell-warn); }
+.host-summary.act { color: var(--shell-bad); }
 /* Settings, full window over the sidebar and panes (SettingsPage.swift on the Mac): a section list on
    the surface colour, then one page with a large title, a lede and hairline-separated rows, no cards. */
 .settings { position: fixed; inset: 0; z-index: 9; display: flex; background: var(--shell-bg); color: var(--shell-text); outline: none; }

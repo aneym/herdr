@@ -364,8 +364,8 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
   </nav>{mode === "spaces" && hosts.length > 0 && <div className="sidebar-hosts" aria-label="Hosts">{hosts.map((host, i) => {
     // As the Mac's footerHost rows: the host, then its summary without "load " and " live", one line.
     const trailing = (host.summary ?? "").replace(/load /g, "").replace(/ live/g, "").split(" · ").join(" ");
-    return <div key={`${i}:${host.name}`} className="sidebar-row host-row" data-row={`host:${i}`} title={trailing ? `${host.name} ${trailing}` : host.name}>
-      <span className="host-name">{host.name}</span><span className="host-summary">{trailing}</span>{host.attention !== "none" && <span className={`host-alert ${host.attention === "act" ? "act" : "warn"}`}>!</span>}
+    return <div key={`${i}:${host.name}`} className="sidebar-row host-row" data-row={`host:${i}`} title={host.detail ? `${host.name}: ${host.detail}` : trailing ? `${host.name} ${trailing}` : host.name}>
+      <span className="host-name">{host.name}</span><span className={`host-summary${host.attention === "act" ? " act" : host.attention === "warn" ? " warn" : ""}`}>{trailing}</span>{host.attention !== "none" && <span className={`host-alert ${host.attention === "act" ? "act" : "warn"}`}>!</span>}
     </div>;
   })}</div>}{goalMenu && <div ref={goalMenuRef} className="pane-menu goal-menu" role="menu" aria-label="Goal filter" style={{ left: goalMenu.x, top: goalMenu.y }} onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); setGoalMenu(null); } }}>
     {[null, ...choices].map(choice => <button key={choice ?? ""} role="menuitemradio" aria-checked={choice === goalFilter} onClick={() => chooseGoal(choice)}>{choice?.replace(":", " · ") ?? "All"}</button>)}

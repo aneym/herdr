@@ -4,7 +4,7 @@ import type { SidebarRow } from "./model";
 
 /** The factory overlay's tab tag, normalised as the Mac's Overlay.Tag decoder (SpacesTree.swift). */
 export interface OverlayTag { kind: string; section?: string; mode: string; parent?: string; goal?: string; goalArea?: string; done: boolean }
-export interface OverlayHost { name: string; summary?: string; attention: string; url?: string }
+export interface OverlayHost { name: string; summary?: string; attention: string; url?: string; detail?: string }
 export interface SpaceGroup { name: string; spaces: string[] }
 export interface SpacesOverlay { tabs: Record<string, OverlayTag>; hosts: OverlayHost[]; spaceGroups: SpaceGroup[] }
 export const emptyOverlay = (): SpacesOverlay => ({ tabs: {}, hosts: [], spaceGroups: [] });
@@ -29,7 +29,7 @@ export function parseOverlay(text: string | null | undefined): SpacesOverlay {
     if (!["orchestrator", "scoping", "implementing", "reviewing", "monitoring", "closed"].includes(section ?? "")) section = undefined;
     tabs[id] = { kind, mode, section, parent: str(t.parent), goal: str(t.goal), goalArea: str(t.goal_area), done: t.done === true };
   }
-  const hosts = list(root.hosts).map(obj).map(h => ({ name: str(h.name) ?? "", summary: str(h.summary), attention: str(h.attention) ?? "none", url: str(h.url) }));
+  const hosts = list(root.hosts).map(obj).map(h => ({ name: str(h.name) ?? "", summary: str(h.summary), attention: str(h.attention) ?? "none", url: str(h.url), detail: str(h.detail) }));
   return { tabs, hosts, spaceGroups: parseSpaceGroups(root.space_groups) };
 }
 /** As the Mac's Overlay.goalChoices: each known goal that some tab carries, then its areas. */

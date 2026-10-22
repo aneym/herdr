@@ -79,7 +79,7 @@ struct SpacesRowView: View {
             Spacer(minLength: 4)
             if row.kind == .goal { collapseSpaces }
             if !row.trailing.isEmpty, row.kind != .goal {
-                trailingText.font(.system(size: ShellType.sectionLabel)).monospacedDigit().foregroundStyle(row.link == nil ? t.mute : t.accent)
+                trailingText.font(.system(size: ShellType.sectionLabel)).monospacedDigit().foregroundStyle(trailingTone)
                     .lineLimit(1).truncationMode(.tail)
                     .frame(minWidth: Self.countWidth, alignment: .trailing)
                     .layoutPriority(1)
@@ -161,6 +161,12 @@ struct SpacesRowView: View {
         case "local": return "Memory on this machine only"
         default: return "Memory not synced to Rails cloud"
         }
+    }
+
+    private var trailingTone: Color {
+        if row.link != nil { return t.accent }
+        guard row.kind == .footerHost else { return t.mute }
+        return row.alert == "act" ? t.bad : row.alert == "warn" ? t.warn : t.mute
     }
 
     /// Host summaries shed whole trailing fields before the first field clips.
