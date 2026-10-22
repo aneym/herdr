@@ -292,7 +292,7 @@ impl IndexedKeybind {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CustomCommandKeybind {
     pub bindings: ActionKeybinds,
     pub label: String,
@@ -304,7 +304,7 @@ pub struct CustomCommandKeybind {
 }
 
 /// Parsed keybinds for Herdr actions.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct NavigateKeybinds {
     pub workspace_up: ActionKeybinds,
     pub workspace_down: ActionKeybinds,
@@ -315,7 +315,7 @@ pub struct NavigateKeybinds {
 }
 
 /// Parsed keybinds for Herdr actions.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Keybinds {
     pub navigate: NavigateKeybinds,
     pub help: ActionKeybinds,

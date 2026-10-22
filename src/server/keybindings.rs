@@ -13,5 +13,7 @@ pub(crate) fn apply_keybindings(
 ) {
     app.state.prefix_code = keybindings.prefix.0;
     app.state.prefix_mods = keybindings.prefix.1;
-    app.state.keybinds = keybindings.keybinds.clone();
+    if app.state.keybinds != keybindings.keybinds {
+        app.state.keybinds = keybindings.keybinds.clone();
+    }
 }

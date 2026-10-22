@@ -116,7 +116,7 @@ impl App {
             .state
             .terminals
             .values_mut()
-            .find(|terminal| terminal.id.to_string() == resolved.terminal_id)
+            .find(|terminal| terminal.id.as_str() == resolved.terminal_id)
         else {
             return Err(AgentRenameError::Target(TerminalTargetError::NotFound {
                 target: target.to_string(),
@@ -281,7 +281,7 @@ impl App {
             .state
             .terminals
             .values_mut()
-            .find(|terminal| terminal.id.to_string() == terminal_id)?;
+            .find(|terminal| terminal.id.as_str() == terminal_id)?;
         if terminal.managed_agent_launch_pending() {
             return None;
         }
@@ -329,7 +329,7 @@ impl App {
             .state
             .terminals
             .values_mut()
-            .find(|terminal| terminal.id.to_string() == resolved.terminal_id)
+            .find(|terminal| terminal.id.as_str() == resolved.terminal_id)
         else {
             return Err(AgentOwnerError::Target(TerminalTargetError::NotFound {
                 target: target.to_string(),
@@ -364,7 +364,7 @@ impl App {
             .state
             .terminals
             .values_mut()
-            .find(|terminal| terminal.id.to_string() == resolved.terminal_id)
+            .find(|terminal| terminal.id.as_str() == resolved.terminal_id)
         else {
             return Err(AgentOwnerError::Target(TerminalTargetError::NotFound {
                 target: target.to_string(),
@@ -439,7 +439,7 @@ impl App {
             .state
             .terminals
             .values_mut()
-            .find(|terminal| terminal.id.to_string() == resolved.terminal_id)
+            .find(|terminal| terminal.id.as_str() == resolved.terminal_id)
         else {
             return Err(AgentOwnerError::Target(TerminalTargetError::NotFound {
                 target: target.to_string(),

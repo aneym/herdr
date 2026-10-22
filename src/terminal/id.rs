@@ -26,6 +26,12 @@ impl TerminalId {
     }
 }
 
+impl std::borrow::Borrow<str> for TerminalId {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
 impl fmt::Display for TerminalId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)

@@ -56,7 +56,7 @@ impl App {
                 self.state
                     .terminals
                     .values()
-                    .find(|terminal| terminal.id.to_string() == candidate.terminal_id)
+                    .find(|terminal| terminal.id.as_str() == candidate.terminal_id)
                     .is_some_and(|terminal| {
                         terminal.agent_name.as_deref() == Some(target)
                             || terminal.effective_agent_label() == Some(target)
@@ -92,7 +92,7 @@ impl App {
                 self.state
                     .terminals
                     .values()
-                    .find(|terminal| terminal.id.to_string() == candidate.terminal_id)
+                    .find(|terminal| terminal.id.as_str() == candidate.terminal_id)
                     .is_some_and(|terminal| terminal.agent_name.as_deref() == Some(target))
             })
             .collect();
@@ -109,7 +109,7 @@ impl App {
         self.state
             .terminals
             .values()
-            .find(|terminal| terminal.id.to_string() == target.terminal_id)
+            .find(|terminal| terminal.id.as_str() == target.terminal_id)
             .is_some_and(|terminal| terminal.is_agent_terminal())
     }
 
