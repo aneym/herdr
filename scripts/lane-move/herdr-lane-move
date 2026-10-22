@@ -420,7 +420,9 @@ def admit_claim_bin():
 
 
 def claim_box(name, node, priority, max_wait):
-    argv = [admit_claim_bin(), "lane", name, "--priority", str(priority), "--max", str(int(max_wait)), "--json"]
+    argv = [admit_claim_bin(), "lane", name, "--max", str(int(max_wait)), "--json"]
+    if priority:
+        argv += ["--priority", str(priority)]
     if node:
         argv += ["--node", node]
     try:
@@ -491,7 +493,7 @@ def main():
     src.add_argument("--pane", help="local herdr pane running an idle/done claude")
     src.add_argument("--session", help="finished claude session id (no live process)")
     ap.add_argument("--to", help="target ssh alias (ax42, forge-lanes, pc-wsl, studio); default: the box admit-claim grants")
-    ap.add_argument("--priority", type=int, default=50, help="admit-claim priority, 1-100")
+    ap.add_argument("--priority", type=int, help="admit-claim priority, 1-100 (default: admit-claim's)")
     ap.add_argument("--claim-wait", type=int, default=240, help=f"seconds admit-claim waits for an open box (max {WAIT_CAP})")
     ap.add_argument("--lane", help="lane name under ~/.agent-rails/lanes (default: from cwd)")
     ap.add_argument("--target-cwd", help="cwd on the target (default: mapped from the source cwd)")
