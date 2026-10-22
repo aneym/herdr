@@ -590,6 +590,7 @@ enum SubmissionBoundary {
 enum SubmissionPhase {
     WritingText,
     WaitingUntil(Instant),
+    WaitingForWrites,
     WritingEnter,
 }
 
@@ -1063,26 +1064,29 @@ impl PtyIoActorRunner {
     }
 
     fn schedule_submission_enter(&mut self) {
-        let Some(ActiveSubmission {
-            enter,
-            phase: SubmissionPhase::WaitingUntil(deadline),
-            ..
-        }) = self.active_submission.as_ref()
-        else {
+        let Some(submission) = self.active_submission.as_mut() else {
             return;
         };
-        if Instant::now() >= *deadline && self.pending_writes.is_empty() {
-            let enter = enter.clone();
-            if enter.is_empty() {
-                let submission = self.active_submission.take().unwrap();
-                if let Some(id) = &submission.receipt_id {
-                    crate::terminal::polite_send::submission_delivered(id, true);
-                }
-                let _ = submission.reply.send(Ok(()));
-            } else {
-                self.active_submission.as_mut().unwrap().phase = SubmissionPhase::WritingEnter;
-                self.enqueue_submission_write(enter, SubmissionBoundary::Enter);
+        match submission.phase {
+            SubmissionPhase::WaitingUntil(deadline) if Instant::now() >= deadline => {
+                submission.phase = SubmissionPhase::WaitingForWrites;
             }
+            SubmissionPhase::WaitingForWrites => {}
+            _ => return,
+        }
+        if !self.pending_writes.is_empty() {
+            return;
+        }
+        let enter = submission.enter.clone();
+        if enter.is_empty() {
+            let submission = self.active_submission.take().unwrap();
+            if let Some(id) = &submission.receipt_id {
+                crate::terminal::polite_send::submission_delivered(id, true);
+            }
+            let _ = submission.reply.send(Ok(()));
+        } else {
+            self.active_submission.as_mut().unwrap().phase = SubmissionPhase::WritingEnter;
+            self.enqueue_submission_write(enter, SubmissionBoundary::Enter);
         }
     }
 
@@ -1094,6 +1098,9 @@ impl PtyIoActorRunner {
         else {
             return ACTOR_IDLE_POLL_MS;
         };
+        if !self.pending_writes.is_empty() && Instant::now() >= *deadline {
+            return ACTOR_IDLE_POLL_MS;
+        }
         deadline
             .saturating_duration_since(Instant::now())
             .as_millis()

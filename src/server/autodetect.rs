@@ -206,6 +206,11 @@ pub fn spawn_server_daemon() -> io::Result<u32> {
 
     info!(exe = %exe.display(), "spawning server daemon");
 
+    #[cfg(target_os = "macos")]
+    if kickstart_launchd_server() {
+        return Ok(0);
+    }
+
     let mut command = build_server_daemon_command(exe);
 
     let pid =
@@ -215,6 +220,31 @@ pub fn spawn_server_daemon() -> io::Result<u32> {
     info!(pid, "server daemon spawned");
 
     Ok(pid)
+}
+
+#[cfg(target_os = "macos")]
+fn kickstart_launchd_server() -> bool {
+    if crate::session::explicit_session_requested() {
+        return false;
+    }
+    let api_socket = crate::session::active_api_socket_path();
+    let client_socket = client_socket_path();
+    if api_socket != crate::session::api_socket_path_for(None)
+        || client_socket != crate::session::client_socket_path_for(None)
+    {
+        return false;
+    }
+    if !crate::platform::kickstart_launchd_server(&api_socket) {
+        return false;
+    }
+    info!(socket = %client_socket.display(), "kickstarted launchd server job");
+    match wait_for_server_socket(&client_socket, SERVER_READY_TIMEOUT) {
+        Ok(()) => true,
+        Err(err) => {
+            tracing::warn!(%err, "launchd server job did not open its socket; spawning directly");
+            false
+        }
+    }
 }
 
 fn build_server_daemon_command(exe: PathBuf) -> Command {

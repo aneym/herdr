@@ -293,6 +293,59 @@ pub fn launch_server_daemon_command(command: &mut std::process::Command) -> std:
     command.spawn().map(|child| child.id())
 }
 
+#[cfg(target_os = "macos")]
+const SERVER_LAUNCHD_LABEL: &str = "com.open-factory.herdr-server";
+
+#[cfg(target_os = "macos")]
+pub(crate) fn kickstart_launchd_server(api_socket: &std::path::Path) -> bool {
+    use std::process::{Command, Stdio};
+
+    let target = format!("gui/{}/{}", unsafe { libc::getuid() }, SERVER_LAUNCHD_LABEL);
+    let Ok(print) = Command::new("/bin/launchctl")
+        .args(["print", &target])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+    else {
+        return false;
+    };
+    if !print.status.success()
+        || launchd_job_socket(&String::from_utf8_lossy(&print.stdout)).as_deref()
+            != Some(api_socket)
+    {
+        return false;
+    }
+    Command::new("/bin/launchctl")
+        .args(["kickstart", &target])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+#[cfg(target_os = "macos")]
+fn launchd_job_socket(print: &str) -> Option<std::path::PathBuf> {
+    let mut in_environment = false;
+    for line in print.lines() {
+        if line == "\tenvironment = {" {
+            in_environment = true;
+            continue;
+        }
+        if !in_environment {
+            continue;
+        }
+        let entry = line.trim();
+        if entry == "}" {
+            return None;
+        }
+        if let Some(path) = entry.strip_prefix("HERDR_SOCKET_PATH => ") {
+            return Some(std::path::PathBuf::from(path));
+        }
+    }
+    None
+}
+
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn prepare_server_process(_handoff_import: bool) -> std::io::Result<bool> {
     Ok(false)
