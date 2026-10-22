@@ -662,7 +662,7 @@ mod tests {
             tree_collapsed_spaces: Default::default(),
             tree_collapsed_tabs: Default::default(),
             tree_pinned_spaces: Default::default(),
-            desks: Default::default(),
+            tab_docs: Default::default(),
             pinned_tabs: Vec::new(),
             pin_sections: Vec::new(),
             tree_show_hidden_spaces: false,
