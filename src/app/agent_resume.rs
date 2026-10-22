@@ -8,6 +8,7 @@ use super::App;
 /// How long an `agent.resume` replacement shell keeps its pane on exit when
 /// the resumed agent has not been observed yet.
 const AGENT_RESUME_REPLACEMENT_WINDOW: std::time::Duration = std::time::Duration::from_secs(15);
+const AGENT_RESUME_IDLE_SCAN: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// The replacement runtime `agent.resume` started for a pane and when its
 /// window ends.
@@ -582,6 +583,18 @@ impl App {
             self.pending_agent_resume_deadline
                 .get_or_insert(now + super::PENDING_AGENT_RESUME_THEME_WAIT);
         }
+    }
+
+    pub(crate) fn agent_resume_scan_due(&self, now: Instant) -> bool {
+        self.next_agent_resume_scan_at.is_none_or(|at| now >= at)
+    }
+
+    pub(crate) fn schedule_agent_resume_scan(&mut self, now: Instant, started: bool) {
+        let idle_scan = now + AGENT_RESUME_IDLE_SCAN;
+        self.next_agent_resume_scan_at = (!started).then(|| {
+            self.pending_agent_resume_deadline
+                .map_or(idle_scan, |deadline| deadline.max(now).min(idle_scan))
+        });
     }
 
     pub(crate) fn pending_agent_resume_due(&self, now: Instant) -> bool {

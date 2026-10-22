@@ -419,6 +419,11 @@ impl App {
                 .focused_pane_id()
                 .is_some_and(|focused| focused == pane_id);
         let presentation = terminal.effective_presentation();
+        let cwds = self
+            .terminal_runtimes
+            .get(&pane.attached_terminal_id)
+            .map(|runtime| runtime.api_cwds())
+            .unwrap_or_default();
         Some(crate::api::schema::PaneInfo {
             pane_id: self.public_pane_id(ws_idx, pane_id)?,
             terminal_id: terminal.id.to_string(),
@@ -426,17 +431,11 @@ impl App {
             tab_id: self.public_tab_id(ws_idx, tab_idx)?,
             focused,
             profiles: terminal.profiles.clone(),
-            cwd: ws.tabs[tab_idx]
-                .cwd_for_pane(pane_id, &self.state.terminals, &self.terminal_runtimes)
+            cwd: cwds
+                .cwd
+                .or_else(|| Some(terminal.cwd.clone()))
                 .map(|cwd| cwd.display().to_string()),
-            foreground_cwd: {
-                let started = crate::render_prof::timer();
-                let cwd = ws.tabs[tab_idx]
-                    .foreground_cwd_for_pane(pane_id, &self.terminal_runtimes)
-                    .map(|cwd| cwd.display().to_string());
-                crate::render_prof::duration_since("pane_info.fg_cwd", started);
-                cwd
-            },
+            foreground_cwd: cwds.foreground_cwd.map(|cwd| cwd.display().to_string()),
             restore_error: terminal.restore_error.clone(),
             label: terminal.manual_label.clone(),
             agent: terminal.effective_agent_label().map(str::to_string),

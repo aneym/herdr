@@ -26,6 +26,7 @@ use crate::render_signal::RenderSignal;
 
 mod agent_detection;
 mod cursor;
+pub(crate) mod cwd_cache;
 mod input;
 mod kitty_keyboard;
 mod osc;
@@ -395,6 +396,40 @@ fn absolute_process_cwd(pid: u32) -> Option<std::path::PathBuf> {
 #[cfg(unix)]
 fn usable_process_cwd(pid: u32) -> Option<std::path::PathBuf> {
     absolute_process_cwd(pid).filter(|cwd| cwd.is_dir())
+}
+
+#[cfg(unix)]
+fn foreground_cwd_of(
+    pid: u32,
+    fallback_pgid: impl FnOnce() -> Option<u32>,
+) -> Option<std::path::PathBuf> {
+    let shell_cwd = absolute_process_cwd(pid);
+    let foreground_pgid = (pid > 0)
+        .then(|| crate::platform::foreground_process_group_id(pid))
+        .flatten()
+        .or_else(fallback_pgid);
+    let leader_cwd = foreground_pgid.and_then(absolute_process_cwd);
+
+    // The group leader's cwd is authoritative (issue #3270): a helper
+    // process that chdirs elsewhere inside the same foreground group
+    // must not override it. Scan other members only when the leader's
+    // cwd cannot be read at all.
+    leader_cwd.or_else(|| foreground_member_cwd_different_from_shell(pid, shell_cwd.as_ref()))
+}
+
+fn probe_cwds_off_loop(
+    child_pid: &AtomicU32,
+    reported_cwd: &Mutex<Option<std::path::PathBuf>>,
+) -> cwd_cache::ProcessCwds {
+    let pid = child_pid.load(Ordering::Acquire);
+    let reported = reported_cwd.lock().ok().and_then(|cwd| cwd.clone());
+    cwd_cache::ProcessCwds {
+        cwd: reported.or_else(|| crate::platform::process_cwd(pid)),
+        #[cfg(unix)]
+        foreground_cwd: foreground_cwd_of(pid, || None),
+        #[cfg(not(unix))]
+        foreground_cwd: None,
+    }
 }
 
 #[cfg(unix)]
@@ -1332,6 +1367,7 @@ pub struct PaneRuntime {
     current_size: Cell<(u16, u16, u32, u32)>,
     child_pid: Arc<AtomicU32>,
     reported_cwd: Arc<Mutex<Option<std::path::PathBuf>>>,
+    cwd_cache: cwd_cache::CwdCache,
     persistence_cwd: Mutex<Option<std::path::PathBuf>>,
     cwd_process_exited: Arc<AtomicBool>,
     child_wait_completed: Option<Arc<AtomicBool>>,
@@ -2586,6 +2622,7 @@ impl PaneRuntime {
             current_size: Cell::new((rows, cols, cell_width_px, cell_height_px)),
             child_pid,
             reported_cwd,
+            cwd_cache: cwd_cache::CwdCache::default(),
             persistence_cwd: Mutex::new(None),
             cwd_process_exited,
             child_wait_completed: None,
@@ -3182,6 +3219,7 @@ impl PaneRuntime {
             current_size: Cell::new((rows, cols, 0, 0)),
             child_pid,
             reported_cwd,
+            cwd_cache: cwd_cache::CwdCache::default(),
             persistence_cwd: Mutex::new(None),
             cwd_process_exited: child_wait_completed.clone(),
             child_wait_completed: Some(child_wait_completed),
@@ -3925,21 +3963,35 @@ impl PaneRuntime {
         }
     }
 
+    pub(crate) fn api_cwds(&self) -> cwd_cache::ProcessCwds {
+        let reported = self
+            .reported_cwd
+            .lock()
+            .ok()
+            .and_then(|reported| reported.clone());
+        let mut cwds = self.cwd_cache.get(
+            || cwd_cache::ProcessCwds {
+                cwd: self.cwd(),
+                foreground_cwd: self.foreground_cwd(),
+            },
+            || {
+                let child_pid = Arc::clone(&self.child_pid);
+                let reported_cwd = Arc::clone(&self.reported_cwd);
+                move || probe_cwds_off_loop(&child_pid, &reported_cwd)
+            },
+        );
+        if reported.is_some() {
+            cwds.cwd = reported;
+        }
+        cwds
+    }
+
     /// Get the current working directory of the process group controlling the pane PTY.
     pub fn foreground_cwd(&self) -> Option<std::path::PathBuf> {
         #[cfg(unix)]
         {
             let pid = self.child_pid.load(Ordering::Acquire);
-            let shell_cwd = absolute_process_cwd(pid);
-            let foreground_pgid = self.display_foreground_process_group_id(pid);
-            let leader_cwd = foreground_pgid.and_then(absolute_process_cwd);
-
-            // The group leader's cwd is authoritative (issue #3270): a helper
-            // process that chdirs elsewhere inside the same foreground group
-            // must not override it. Scan other members only when the leader's
-            // cwd cannot be read at all.
-            leader_cwd
-                .or_else(|| foreground_member_cwd_different_from_shell(pid, shell_cwd.as_ref()))
+            foreground_cwd_of(pid, || self.io.foreground_process_group_id())
         }
 
         #[cfg(not(unix))]
@@ -4078,6 +4130,7 @@ impl PaneRuntime {
                 current_size: Cell::new((rows, cols, 0, 0)),
                 child_pid: Arc::new(AtomicU32::new(0)),
                 reported_cwd: Arc::new(Mutex::new(None)),
+                cwd_cache: cwd_cache::CwdCache::default(),
                 persistence_cwd: Mutex::new(None),
                 cwd_process_exited: Arc::new(AtomicBool::new(false)),
                 child_wait_completed: None,
@@ -5288,6 +5341,7 @@ mod tests {
             current_size: Cell::new((80, 24, 0, 0)),
             child_pid: Arc::new(AtomicU32::new(0)),
             reported_cwd: Arc::new(Mutex::new(None)),
+            cwd_cache: cwd_cache::CwdCache::default(),
             child_wait_completed: None,
             kitty_keyboard_flags: Arc::new(AtomicU16::new(0)),
             content_seq: Arc::new(AtomicU64::new(0)),
@@ -5327,6 +5381,7 @@ mod tests {
             current_size: Cell::new((80, 24, 0, 0)),
             child_pid: Arc::new(AtomicU32::new(0)),
             reported_cwd: Arc::new(Mutex::new(None)),
+            cwd_cache: cwd_cache::CwdCache::default(),
             child_wait_completed: None,
             kitty_keyboard_flags: Arc::new(AtomicU16::new(0)),
             content_seq: Arc::new(AtomicU64::new(0)),

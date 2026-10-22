@@ -3539,11 +3539,13 @@ impl HeadlessServer {
 
         if geometry_dirty {
             self.app.pending_agent_resume_deadline = None;
-        } else {
+        } else if self.app.agent_resume_scan_due(now) {
             self.app.sync_pending_agent_resume_deadline(now);
-            changed |= self
+            let started = self
                 .app
                 .start_pending_agent_resumes(now, self.app.pending_agent_resume_due(now));
+            self.app.schedule_agent_resume_scan(now, started);
+            changed |= started;
         }
         changed
     }

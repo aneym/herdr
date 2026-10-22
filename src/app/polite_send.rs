@@ -109,6 +109,13 @@ impl App {
     }
 
     pub(crate) fn flush_polite_sends(&self, now: Instant) {
+        if !self
+            .terminal_runtimes
+            .values()
+            .any(|runtime| runtime.has_polite_queue())
+        {
+            return;
+        }
         for (ws_idx, ws) in self.state.workspaces.iter().enumerate() {
             for (pane_id, terminal_id) in ws
                 .tabs
@@ -120,13 +127,16 @@ impl App {
                     continue;
                 };
                 if runtime.has_polite_queue() {
-                    let agent_idle = self.pane_info(ws_idx, pane_id).is_some_and(|pane| {
-                        matches!(
-                            pane.agent_status,
-                            crate::api::schema::AgentStatus::Idle
-                                | crate::api::schema::AgentStatus::Done
-                        )
-                    });
+                    let agent_idle = ws
+                        .pane_state(pane_id)
+                        .zip(self.state.terminals.get(terminal_id))
+                        .is_some_and(|(pane, terminal)| {
+                            matches!(
+                                super::api_helpers::pane_agent_status(terminal.state, pane.seen),
+                                crate::api::schema::AgentStatus::Idle
+                                    | crate::api::schema::AgentStatus::Done
+                            )
+                        });
                     if let Err(err) = runtime.flush_polite_queue_guarded(
                         now,
                         self.polite_send_quiet,

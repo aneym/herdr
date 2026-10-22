@@ -645,8 +645,8 @@ impl TerminalRuntime {
         self.0.follow_cwd()
     }
 
-    pub fn foreground_cwd(&self) -> Option<std::path::PathBuf> {
-        self.0.foreground_cwd()
+    pub(crate) fn api_cwds(&self) -> crate::pane::cwd_cache::ProcessCwds {
+        self.0.api_cwds()
     }
 
     pub fn foreground_machine(&self) -> Option<String> {

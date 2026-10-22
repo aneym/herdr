@@ -175,6 +175,7 @@ pub struct App {
     pub(crate) pending_agent_resume_deadline: Option<Instant>,
     startup_per_agent_delay: Duration,
     next_agent_resume_at: Option<Instant>,
+    next_agent_resume_scan_at: Option<Instant>,
     resume_gate: resume_gate::ResumeGate,
     booting_agent_resumes: Vec<(crate::terminal::TerminalId, Instant)>,
     pub(crate) session_save_deadline: Option<Instant>,
@@ -739,6 +740,7 @@ impl App {
                 config.session.startup_per_agent_delay_ms.into(),
             ),
             next_agent_resume_at: None,
+            next_agent_resume_scan_at: None,
             resume_gate: resume_gate::ResumeGate::from_config(
                 &config.session,
                 policy.restore_session,
