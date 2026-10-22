@@ -1,3 +1,5 @@
+import ThoughtsSlot from "./ThoughtsSlot";
+import type { useThoughts } from "./useThoughts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { buildAreas, focusTabs, stageImplied, stageWord } from "./areas";
@@ -81,7 +83,7 @@ export function useSidebarNavigation(snapshot: Snapshot, catalog: LaneSnapshot, 
 }
 export type SidebarNavigation = ReturnType<typeof useSidebarNavigation>;
 const pinBlock = (row: SidebarRow) => row.kind + (row.pinGroup ? `|${row.pinGroup}` : "");
-export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneSnapshot(), remotes = [], selectRemote, overlay = emptyOverlay(), hosts = [], rows: localRows, selected, revealed, machine, notice, select, pin, movePin, renaming, startRename, cancelRename, commitRename, paneDropRow, openDetail }: { openDetail?: (id: string) => void; navigation?: SidebarNavigation; paneDropRow?: string | null; snapshot?: Snapshot; catalog?: LaneSnapshot; remotes?: RemoteMachine[]; selectRemote?: (machine: string, tab: string) => void; overlay?: SpacesOverlay; hosts?: OverlayHost[]; rows: SidebarRow[]; selected: string | null; revealed: RevealMemo; machine: MachineStatus; notice: string | null; select: (id: string) => void; pin: (id: string, pinned: boolean) => void; movePin: (ids: string[], from: number, to: number) => void; renaming: string | null; startRename: (id: string) => void; cancelRename: () => void; commitRename: (id: string, label: string) => Promise<void> }) {
+export default function Sidebar({ thoughts, navigation, snapshot = {}, catalog = new LaneSnapshot(), remotes = [], selectRemote, overlay = emptyOverlay(), hosts = [], rows: localRows, selected, revealed, machine, notice, select, pin, movePin, renaming, startRename, cancelRename, commitRename, paneDropRow, openDetail }: { thoughts?: ReturnType<typeof useThoughts>; openDetail?: (id: string) => void; navigation?: SidebarNavigation; paneDropRow?: string | null; snapshot?: Snapshot; catalog?: LaneSnapshot; remotes?: RemoteMachine[]; selectRemote?: (machine: string, tab: string) => void; overlay?: SpacesOverlay; hosts?: OverlayHost[]; rows: SidebarRow[]; selected: string | null; revealed: RevealMemo; machine: MachineStatus; notice: string | null; select: (id: string) => void; pin: (id: string, pinned: boolean) => void; movePin: (ids: string[], from: number, to: number) => void; renaming: string | null; startRename: (id: string) => void; cancelRename: () => void; commitRename: (id: string, label: string) => Promise<void> }) {
   // Other machines' chats join the one tree with a badge (the Mac's MachineMerge); no machine chips.
   const rows = useMemo(() => mergeMachineRows(localRows, remotes), [localRows, remotes]);
   const [themeMode, setThemeMode] = useState(() => appTheme().mode);
@@ -361,13 +363,7 @@ export default function Sidebar({ navigation, snapshot = {}, catalog = new LaneS
     {rows.some(r => r.kind === "space" && r.hidden) && <><button className="sidebar-row muted" aria-expanded={hidden} onClick={() => setHidden(!hidden)}><span className="chevron"><Chevron open={hidden} /></span>Hidden</button>{(hidden || rows.some(r => r.hidden && r.id === renaming)) && orderedSpaces.filter(r => r.hidden).map(spaceRow)}</>}
     </section>
     </>}
-  </nav>{mode === "spaces" && hosts.length > 0 && <div className="sidebar-hosts" aria-label="Hosts">{hosts.map((host, i) => {
-    // As the Mac's footerHost rows: the host, then its summary without "load " and " live", one line.
-    const trailing = (host.summary ?? "").replace(/load /g, "").replace(/ live/g, "").split(" · ").join(" ");
-    return <div key={`${i}:${host.name}`} className="sidebar-row host-row" data-row={`host:${i}`} title={host.detail ? `${host.name}: ${host.detail}` : trailing ? `${host.name} ${trailing}` : host.name}>
-      <span className="host-name">{host.name}</span><span className={`host-summary${host.attention === "act" ? " act" : host.attention === "warn" ? " warn" : ""}`}>{trailing}</span>{host.attention !== "none" && <span className={`host-alert ${host.attention === "act" ? "act" : "warn"}`}>!</span>}
-    </div>;
-  })}</div>}{goalMenu && <div ref={goalMenuRef} className="pane-menu goal-menu" role="menu" aria-label="Goal filter" style={{ left: goalMenu.x, top: goalMenu.y }} onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); setGoalMenu(null); } }}>
+  </nav><ThoughtsSlot thoughts={thoughts} hosts={mode === "spaces" ? hosts : []} />{goalMenu && <div ref={goalMenuRef} className="pane-menu goal-menu" role="menu" aria-label="Goal filter" style={{ left: goalMenu.x, top: goalMenu.y }} onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); setGoalMenu(null); } }}>
     {[null, ...choices].map(choice => <button key={choice ?? ""} role="menuitemradio" aria-checked={choice === goalFilter} onClick={() => chooseGoal(choice)}>{choice?.replace(":", " · ") ?? "All"}</button>)}
   </div>}{menu && <div ref={menuRef} className="pane-menu agent-menu" role="menu" style={{ left: Math.min(menu.x, Math.max(0, window.innerWidth - 180)), top: Math.min(menu.y, Math.max(0, window.innerHeight - 40)) }}>
     {menu.row && !menu.row.machine && openDetail && <button role="menuitem" onClick={() => { const id = menu.row!.id; setMenu(null); openDetail(id); menuReturnFocus.current?.focus(); }}>Show info</button>}

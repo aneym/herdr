@@ -192,6 +192,24 @@ def factory_bundle():
 
 def request(req):
     op = req.get("op")
+    if op in ("thought", "thoughts"):
+        args = [HOME + "/.local/bin/herdr-shell-remote", op]
+        text = None
+        if op == "thought":
+            text, source = req.get("text"), req.get("source")
+            if not isinstance(source, str) or not re.fullmatch(r"[a-z0-9-]{1,32}", source):
+                raise ValueError("invalid thought source")
+            if not isinstance(text, str) or not text.strip() or chr(0) in text or len(text) > 20000:
+                raise ValueError("invalid thought text")
+            text = text.encode("utf-8")
+            args.append("--source=" + source)
+        result = subprocess.run(args, input=text, capture_output=True, timeout=18)
+        reply = json.loads(result.stdout)
+        if result.returncode or reply.get("ok") is not True:
+            raise ValueError(reply.get("error", "thought request failed"))
+        if type(reply.get("count")) is not int or reply["count"] < 0:
+            raise ValueError("invalid thoughts count")
+        return reply
     if op == "factory_route_pick":
         route = req.get("route")
         if route not in ("implement", "mechanical"):

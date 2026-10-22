@@ -67,7 +67,6 @@ pub enum AttachEventJs {
     Bell {
         count: u16,
     },
-    /// OSC 52 data from the pane's program, still base64 as the server sent it.
     Clipboard {
         b64: String,
     },
@@ -108,8 +107,6 @@ pub async fn api_request(
     .await
     .map_err(|e| Value::String(e.to_string()))?
 }
-// Match the Mac clipboard exchange's request ID and 30-second deadline without
-// changing timeouts for ordinary API calls. A timed-out reply is never pasted.
 fn clipboard_image_request(
     endpoint: herdr_shell_core::endpoint::Endpoint,
     params: Value,
@@ -428,8 +425,6 @@ pub fn clipboard_read() -> Result<String, String> {
         .and_then(|mut c| c.get_text())
         .map_err(|e| e.to_string())
 }
-/// Image-only user pastes encode the native RGBA clipboard as PNG, never a
-/// client-local filename. No image is a normal clipboard state.
 #[tauri::command]
 pub fn clipboard_read_image() -> Result<Option<String>, String> {
     let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
@@ -512,6 +507,28 @@ pub async fn remote_action(
         .map_err(|e| e.to_string())?
 }
 
+#[tauri::command]
+pub async fn thought_save(machines: State<'_, Machines>, text: String) -> Result<Value, String> {
+    let machines = machines.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        machines.remote_request(
+            "studio",
+            serde_json::json!({"op":"thought", "text":text, "source":"pc"}),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn thoughts_count(machines: State<'_, Machines>) -> Result<Value, String> {
+    let machines = machines.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        machines.remote_request("studio", serde_json::json!({"op":"thoughts"}))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg(test)]
 mod action_tests {
     use super::validate_action;
@@ -550,8 +567,6 @@ mod action_tests {
     }
 }
 
-/// Stage dropped images through the same PNG host upload as clipboard images.
-/// Directories (even ones named *.png) and ordinary files remain path drops.
 #[tauri::command]
 pub fn drop_read_image(path: String) -> Result<Option<String>, String> {
     let path = std::path::Path::new(&path);

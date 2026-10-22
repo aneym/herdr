@@ -84,7 +84,6 @@ impl Machines {
         let path = config_dir.join("machines.json");
         let local_dir = local_herdr_dir()?;
         let defaults = default_configs(&local_dir);
-        // create_new preserves a config created concurrently rather than overwriting it.
         match fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -150,7 +149,6 @@ impl Machines {
             let (manager, app, logs, job) =
                 (manager.clone(), app.clone(), logs.clone(), job.clone());
             std::thread::spawn(move || loop {
-                // Local machines start connecting, then stay down during silent retries.
                 if config.kind != MachineKind::Local {
                     let _ = manager.change(&app, &config.name, "connecting", None, None);
                 }
@@ -321,7 +319,6 @@ struct Subscription {
     receiver: mpsc::Receiver<Result<Value, String>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
-// Only retry a newly rejected lifecycle event; transport and other errors still fail.
 fn rejected_event(reason: &str, excluded: &BTreeSet<String>) -> Option<String> {
     let rest = reason.split_once("unknown variant `")?.1;
     let event = rest.split_once('`')?.0;
@@ -576,7 +573,6 @@ fn stream_snapshots(
             let snapshot = fetch(&endpoints.0)?;
             let next_panes = pane_set(&snapshot);
             if panes != next_panes {
-                // Open the replacement before closing the old stream, so invalidations have no gap.
                 let next = Subscription::open(&endpoints.0, &next_panes)?;
                 subscription = next;
                 panes = next_panes;
@@ -620,7 +616,6 @@ impl Job {
 }
 #[cfg(windows)]
 pub(crate) struct Job(windows_sys::Win32::Foundation::HANDLE);
-// Windows Job handles may be assigned from multiple supervisor threads; ownership stays in Arc.
 #[cfg(windows)]
 unsafe impl Send for Job {}
 #[cfg(windows)]
@@ -794,33 +789,6 @@ impl Machines {
         verb: &str,
         args: &[String],
     ) -> Result<Value, String> {
-        use std::io::{Read, Write};
-        let config = self.configs.get(machine).ok_or("unknown machine")?;
-        let script = include_str!("remote_helper.py");
-        let remote = config.kind != MachineKind::Local;
-        let mut command = if !remote {
-            let mut c = Command::new("python3");
-            c.args(["-I", "-u", "-c", script]);
-            c
-        } else {
-            #[cfg(windows)]
-            let mut c = Command::new("ssh.exe");
-            #[cfg(not(windows))]
-            let mut c = Command::new("ssh");
-            // File-helper bootstrap: user argv is JSON on stdin, never shell text.
-            c.args(["-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", &config.ssh_host,
-                "python3 -I -u -c 'import sys;n=int(sys.stdin.buffer.readline());exec(compile(sys.stdin.buffer.read(n),\"herdr-shell-helper\",\"exec\"))'"]);
-            c
-        };
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x08000000);
-        }
         let hostname = std::env::var("COMPUTERNAME")
             .or_else(|_| std::env::var("HOSTNAME"))
             .or_else(|_| {
@@ -839,6 +807,38 @@ impl Machines {
                 .ok_or("hostname missing")?
                 .to_lowercase()
         );
+        self.remote_request(
+            machine,
+            json!({"op":"action", "verb":verb, "args":args, "by":by}),
+        )
+    }
+    pub(crate) fn remote_request(&self, machine: &str, request: Value) -> Result<Value, String> {
+        use std::io::{Read, Write};
+        let config = self.configs.get(machine).ok_or("unknown machine")?;
+        let script = include_str!("remote_helper.py");
+        let remote = config.kind != MachineKind::Local;
+        let mut command = if !remote {
+            let mut c = Command::new("python3");
+            c.args(["-I", "-u", "-c", script]);
+            c
+        } else {
+            #[cfg(windows)]
+            let mut c = Command::new("ssh.exe");
+            #[cfg(not(windows))]
+            let mut c = Command::new("ssh");
+            c.args(["-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", &config.ssh_host,
+                "python3 -I -u -c 'import sys;n=int(sys.stdin.buffer.readline());exec(compile(sys.stdin.buffer.read(n),\"herdr-shell-helper\",\"exec\"))'"]);
+            c
+        };
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000);
+        }
         let mut child = command.spawn().map_err(|e| e.to_string())?;
         if let Some(job) = &self.job {
             if let Err(error) = job.assign(&child) {
@@ -849,7 +849,6 @@ impl Machines {
         }
         let mut input = child.stdin.take().ok_or("action stdin missing")?;
         let mut output = child.stdout.take().ok_or("action stdout missing")?;
-        let request = json!({"op":"action", "verb":verb, "args":args, "by":by});
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             let run = || -> Result<Value, String> {

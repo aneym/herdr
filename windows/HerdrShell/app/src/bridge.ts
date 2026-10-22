@@ -20,6 +20,8 @@ export interface Mode { mouse: boolean; sgrPixels: boolean; kittyFlags: number; 
 export type AttachEvent = { kind: "bytes"; b64: string } | ({ kind: "mode"; b64: string } & Mode)
   | { kind: "bell"; count: number } | { kind: "clipboard"; b64: string } | { kind: "notice"; message: string } | { kind: "closed"; reason: string };
 export const bridge = {
+  thoughtSave: (text: string) => invoke<{ count: number }>("thought_save", { text }),
+  thoughtsCount: () => invoke<{ count: number }>("thoughts_count"),
   factoryRoutePick: (machine: string, route: "implement" | "mechanical") => invoke<string | null>("factory_route_pick", { machine, route }),
   factory: (machine: string) => invoke<import("./factory").FactoryBundle>("factory_snapshot", { machine }),
   updateStatus: () => invoke<UpdateStatus>("update_status"),

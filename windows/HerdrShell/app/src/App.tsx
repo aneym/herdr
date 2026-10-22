@@ -1,3 +1,4 @@
+import { useThoughts } from "./useThoughts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { cycleMachine, remoteMachines, renameHosts } from "./machines";
@@ -31,7 +32,6 @@ import "./tokens.css";
 import "./styles.css";
 import type { PaneDrag, PaneDragState } from "./paneDrag";
 interface ViewSelection { selected: string | null; focused: string | null }
-// Resolve saved selection using the same row policy as later snapshot updates.
 function restoredSelection(snapshot: Snapshot, selected: string | null): string | null {
   const rows = buildSidebar(snapshot);
   if (selected && tabOrder(rows).includes(selected)) return selected;
@@ -136,6 +136,7 @@ function MachineView({ attentionTrails, machine, machines, snapshot, snapshots, 
   const liftPane = useRef<(() => boolean) | undefined>();
   const [paneDragState, setPaneDragState] = useState<PaneDragState | null>(null);
   const registerDrag = useCallback((drag: PaneDrag | null, lift?: () => boolean) => { paneDrag.current = drag; liftPane.current = lift; }, []);
+  const thoughts = useThoughts();
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const detailPanel = useDetailPanel(switcherOpen, snapshot);
@@ -153,11 +154,9 @@ function MachineView({ attentionTrails, machine, machines, snapshot, snapshots, 
   const [pending, setPending] = useState<{ tabId: string; paneId: string } | null>(null);
   const controllers = useRef(new Map<string, PaneController>());
   const revealed = useSelectionReveal(selected);
-  // A dropped pin order shows until the snapshot agrees or PENDING_LIFETIME_MS passes.
   const [pendingPins, setPendingPins] = useState<PendingOrders>({});
   const catalog = useLaneFiles(machine.name, machine.state === "up");
   const overlay = useSpacesOverlay(machine.name, machine.state === "up");
-  // Host rows come from the overlay the Mac reads, on the Studio; the active machine's wins when it has some.
   const studioHosts = machine.name !== "studio" && machines.some(m => m.name === "studio" && m.state === "up");
   const studioOverlay = useSpacesOverlay("studio", studioHosts && !overlay.hosts.length);
   const hosts = useMemo(() => renameHosts(overlay.hosts.length ? overlay.hosts : studioHosts ? studioOverlay.hosts : [], machines.map(m => m.name)), [overlay, studioOverlay, studioHosts, machines]);
@@ -166,7 +165,6 @@ function MachineView({ attentionTrails, machine, machines, snapshot, snapshots, 
   const cards = useAgentCards(machine.name, machine.state === "up");
   const rows = useMemo(() => buildSidebar(snapshot, pendingPins, Date.now(), cards), [snapshot, pendingPins, cards]);
   const remotes = useMemo(() => remoteMachines(machines, snapshots, machine.name), [machines, snapshots, machine.name]);
-  // A chat on another machine opens that machine's view with the chat selected.
   const selectRemote = useCallback((name: string, tab: string) => { selections.set(name, { selected: tab, focused: null }); chooseMachine(name); }, [selections, chooseMachine]);
   useEffect(() => {
     const entries = Object.values(pendingPins);
@@ -185,7 +183,6 @@ function MachineView({ attentionTrails, machine, machines, snapshot, snapshots, 
   const select = useCallback((id: string, stepping = false) => {
     navigationRef.current.noteSelection(stepping);
     if (!state.current.snapshot.tabs?.some(t => t.tab_id === id)) throw new Error(`Unknown tab: ${id}`);
-    // Update the control target immediately, before React commits the new view.
     state.current.selected = id;
     state.current.focused = null;
     onSelection(state.current.machine.name, id);
@@ -238,7 +235,7 @@ function MachineView({ attentionTrails, machine, machines, snapshot, snapshots, 
   }, [select, focus, showError, chooseMachine]);
   const closeSwitcher = () => { setSwitcherOpen(false); const id = state.current.focused; if (id) controllers.current.get(id)?.focus(); };
   const shortcut = useCallback((event: KeyboardEvent) => {
-    if (event.type !== "keydown") return false;
+    if (event.type !== "keydown" || document.querySelector(".thought-dialog[open]")) return false;
     const drag = paneDrag.current;
     if (drag?.state.keyboard) {
       const key = moveModeKey(event);
@@ -253,7 +250,6 @@ function MachineView({ attentionTrails, machine, machines, snapshot, snapshots, 
           ((!event.shiftKey && /^[1-9]$/.test(event.key)) || event.key === "Tab" ||
            (event.shiftKey && (["p", "m", "[", "]", "{", "}"].includes(event.key.toLowerCase()) || event.code === "BracketLeft" || event.code === "BracketRight"))))) return false;
     const name = actionFor(event);
-    // Settings covers the window: only its own chord reaches the app; Esc is the page's.
     if (settingsOpen) { if (name === "open_settings") { setSettingsOpen(false); return true; } return false; }
     if (switcherOpen && (name === "switcher" || name === "search" || name === "goto")) { void action(name).catch(() => {}); return true; }
     if (switcherOpen || renaming) return false;
@@ -275,8 +271,6 @@ function MachineView({ attentionTrails, machine, machines, snapshot, snapshots, 
       detailPanel.open(tab);
     }, action };
   };
-  // A pin lands by priority, so as the Mac's pinAtEnd it then moves to the last place, counted
-  // on the owning server after the pin rather than from a snapshot that may be behind.
   const pin = (id: string, pinned: boolean) => { void (async () => {
     const name = machine.name;
     await bridge.api(name, "tab.set_pinned", { tab_id: id, pinned });
@@ -294,5 +288,5 @@ function MachineView({ attentionTrails, machine, machines, snapshot, snapshots, 
       showError(error);
     });
   }, [showError]);
-  return <div className="layout"><div className={`title-strip ${sidebarVisible ? "over-sidebar" : ""}`}><UpdatePill /></div>{sidebarVisible && <Sidebar openDetail={detailPanel.toggle} navigation={navigation} paneDropRow={paneDragState?.zone?.kind === "into_tab" ? `tab:${paneDragState.zone.tab_id}` : paneDragState?.zone?.kind === "new_tab_in" ? `space:${paneDragState.zone.workspace_id}` : null} snapshot={snapshot} catalog={catalog} remotes={remotes} selectRemote={selectRemote} overlay={overlay} hosts={hosts} rows={rows} selected={selected} revealed={revealed} machine={machine} notice={notice?.text ?? null} select={select} pin={pin} movePin={movePin} renaming={renaming} startRename={id => { setRenaming(id); }} cancelRename={() => setRenaming(null)} commitRename={async (id, label) => { try { await action("rename_tab", label, id); setRenaming(null); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); } catch { /* runAction reports through the transient status notice. */ } }} />}{detailPanel.rowId && <DetailPanel snapshot={snapshot} rowId={detailPanel.rowId} openFull={id => { detailPanel.close(); select(id); }} />}{factoryOpen && <FactoryPage machine={machine.name} online={machine.state === "up"} />}<div className="factory-pane-host" hidden={factoryOpen}><TabView onSpring={select} online={machine.state === "up"} registerDrag={registerDrag} onDragChange={setPaneDragState} snapshot={snapshot} selected={selected} machine={machine.name} focused={switcherOpen || renaming ? null : focused} onFocus={focus} shortcut={shortcut} register={register} pin={pin} onError={showError} /></div>{switcherOpen && <Switcher presentation={queryPresentation} query={switcherQuery} changeQuery={setSwitcherQuery} selectQuery={selectQuery} rows={rows} selected={selected} machine={machine.name} open={select} close={closeSwitcher} />}{!sidebarVisible && (notice || machine.state !== "up") && <div className="machine-error notice" role="status">{notice?.text ?? machine.error ?? machine.state}</div>}{settingsOpen && <Settings machine={machine.name} snapshot={snapshot} cards={cards} onError={showError} close={() => { setSettingsOpen(false); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); }} />}</div>;
+  return <div className="layout"><div className={`title-strip ${sidebarVisible ? "over-sidebar" : ""}`}><UpdatePill /></div>{sidebarVisible && <Sidebar thoughts={thoughts} openDetail={detailPanel.toggle} navigation={navigation} paneDropRow={paneDragState?.zone?.kind === "into_tab" ? `tab:${paneDragState.zone.tab_id}` : paneDragState?.zone?.kind === "new_tab_in" ? `space:${paneDragState.zone.workspace_id}` : null} snapshot={snapshot} catalog={catalog} remotes={remotes} selectRemote={selectRemote} overlay={overlay} hosts={hosts} rows={rows} selected={selected} revealed={revealed} machine={machine} notice={notice?.text ?? null} select={select} pin={pin} movePin={movePin} renaming={renaming} startRename={id => { setRenaming(id); }} cancelRename={() => setRenaming(null)} commitRename={async (id, label) => { try { await action("rename_tab", label, id); setRenaming(null); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); } catch { /* runAction reports through the transient status notice. */ } }} />}{detailPanel.rowId && <DetailPanel snapshot={snapshot} rowId={detailPanel.rowId} openFull={id => { detailPanel.close(); select(id); }} />}{factoryOpen && <FactoryPage machine={machine.name} online={machine.state === "up"} />}<div className="factory-pane-host" hidden={factoryOpen}><TabView onSpring={select} online={machine.state === "up"} registerDrag={registerDrag} onDragChange={setPaneDragState} snapshot={snapshot} selected={selected} machine={machine.name} focused={switcherOpen || renaming ? null : focused} onFocus={focus} shortcut={shortcut} register={register} pin={pin} onError={showError} /></div>{switcherOpen && <Switcher presentation={queryPresentation} query={switcherQuery} changeQuery={setSwitcherQuery} selectQuery={selectQuery} rows={rows} selected={selected} machine={machine.name} open={select} close={closeSwitcher} />}{!sidebarVisible && (notice || machine.state !== "up") && <div className="machine-error notice" role="status">{notice?.text ?? machine.error ?? machine.state}</div>}{settingsOpen && <Settings machine={machine.name} snapshot={snapshot} cards={cards} onError={showError} close={() => { setSettingsOpen(false); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); }} />}</div>;
 }

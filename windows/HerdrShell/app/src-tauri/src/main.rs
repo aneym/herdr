@@ -174,6 +174,8 @@ fn main() {
             bridge::snapshot,
             bridge::api_request,
             bridge::remote_action,
+            bridge::thought_save,
+            bridge::thoughts_count,
             bridge::attach_open,
             bridge::attach_input,
             bridge::attach_resize,

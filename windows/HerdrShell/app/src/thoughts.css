@@ -1,0 +1,12 @@
+.thoughts-count { margin-left: auto; color: var(--shell-text); }
+.thought-dialog { width: min(var(--shell-space-switcher-width), calc(100vw - var(--shell-space-step32))); padding: var(--shell-space-step16); border: 1px solid var(--shell-line); border-radius: var(--shell-radius-overlay); background: var(--shell-surface); color: var(--shell-text); }
+.thought-dialog::backdrop { background: var(--shell-scrim); }
+.thought-dialog header, .thought-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--shell-space-step12); }
+.sidebar .thought-dialog h2 { margin: 0; font-size: var(--shell-type-row-title); text-transform: none; color: var(--shell-text); }
+.thought-dialog textarea { display: block; resize: vertical; width: 100%; min-height: var(--shell-space-step96); margin: var(--shell-space-step16) 0; padding: var(--shell-space-step8); font: inherit; color: var(--shell-text); background: var(--shell-field); border: 1px solid var(--shell-line); border-radius: var(--shell-radius-control); }
+.thought-dialog textarea::placeholder { color: var(--shell-muted); }
+.thought-dialog textarea:focus-visible { outline: 1px solid var(--shell-accent); }
+.thought-error { color: var(--shell-bad); overflow-wrap: anywhere; }
+.thought-actions { justify-content: flex-end; }
+.thought-actions button { padding: var(--shell-space-step6) var(--shell-space-step12); border: 1px solid var(--shell-line); border-radius: var(--shell-radius-control); }
+.thought-dialog button:disabled { color: var(--shell-muted); cursor: default; }
