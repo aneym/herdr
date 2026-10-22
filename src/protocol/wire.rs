@@ -1109,8 +1109,6 @@ pub struct ClientShellTab {
     )]
     pub home_location: Option<crate::api::schema::HomeLocation>,
     #[serde(default)]
-    pub desk_count: usize,
-    #[serde(default)]
     pub sort_rank: u32,
     pub tab_id: String,
     pub workspace_id: String,
@@ -2978,7 +2976,6 @@ mod tests {
                 agent_status: crate::api::schema::AgentStatus::Idle,
             }],
             tabs: vec![ClientShellTab {
-                desk_count: 0,
                 sort_rank: 0,
                 tab_id: "w1:t1".into(),
                 workspace_id: "w1".into(),

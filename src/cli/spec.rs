@@ -41,7 +41,6 @@ pub(super) fn command() -> Command {
         .subcommand(worktree_command())
         .subcommand(tab_command())
         .subcommand(pin_section_command())
-        .subcommand(desk_command())
         .subcommand(notification_command())
         .subcommand(agent_command())
         .subcommand(pane_command())
@@ -421,38 +420,6 @@ fn tab_doc_command() -> Command {
             Command::new("clear")
                 .about("Clear the tab's review doc")
                 .arg(Arg::new("tab_id").value_name("TAB_ID")),
-        ))
-}
-
-fn desk_command() -> Command {
-    let target = |command: Command| {
-        command
-            .arg(option("tab", "TAB_ID"))
-            .arg(option("pane", "PANE_ID"))
-            .arg(flag("json"))
-    };
-    Command::new("desk")
-        .about("Open and manage a tab's desk")
-        .subcommand(target(
-            Command::new("open")
-                .about("Open a file or HTTP(S) URL")
-                .arg(required("reference", "PATH_OR_URL"))
-                .arg(option("title", "TITLE"))
-                .arg(flag("background")),
-        ))
-        .subcommand(
-            target(Command::new("list").about("List desk items"))
-                .arg(flag("all").conflicts_with_all(["tab", "pane"])),
-        )
-        .subcommand(target(
-            Command::new("close")
-                .about("Close an item or the front item")
-                .arg(Arg::new("item")),
-        ))
-        .subcommand(target(
-            Command::new("focus")
-                .about("Focus a desk item")
-                .arg(required("item", "ITEM")),
         ))
 }
 

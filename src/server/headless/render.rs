@@ -733,11 +733,9 @@ impl HeadlessServer {
                         size: (cols, rows),
                         cursor: runtime.cursor_state(area, true),
                     };
-                    if self
-                        .clients
-                        .get(&client_id)
-                        .is_some_and(|client| client.render_state.attach_render_unchanged(&attach_key))
-                    {
+                    if self.clients.get(&client_id).is_some_and(|client| {
+                        client.render_state.attach_render_unchanged(&attach_key)
+                    }) {
                         crate::render_prof::event("full_render.attach_skipped");
                         continue;
                     }
