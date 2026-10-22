@@ -3061,29 +3061,57 @@ mod tests {
     fn keys_interleaved_with_startup_host_replies_all_arrive() {
         let typed = b"echo atc-A2 the quick brown fox ABCDEFGHIJ 0123456789-_.";
         let mut seed: u64 = 0x9e3779b97f4a7c15;
-        let mut rnd = |n: u64| { seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17; seed % n };
+        let mut rnd = |n: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed % n
+        };
         for case in 0..4000 {
             let mut replies: Vec<Vec<u8>> = Vec::new();
             replies.push(b"\x1b]10;rgb:dddd/dddd/dddd\x1b\\".to_vec());
             replies.push(b"\x1b]11;rgb:2828/2c2c/3434\x1b\\".to_vec());
-            for i in 0..256u32 { replies.push(format!("\x1b]4;{i};rgb:{:04x}/{:04x}/{:04x}\x1b\\", i * 3, i * 5, i * 7).into_bytes()); }
+            for i in 0..256u32 {
+                replies.push(
+                    format!(
+                        "\x1b]4;{i};rgb:{:04x}/{:04x}/{:04x}\x1b\\",
+                        i * 3,
+                        i * 5,
+                        i * 7
+                    )
+                    .into_bytes(),
+                );
+            }
             replies.push(b"\x1b[?997;1n".to_vec());
             // Late answers to the setup probe (kitty flags, primary device attributes)
             // and the cell size report, when the probe timed out under load.
-            if case % 3 == 0 { replies.insert(rnd(replies.len() as u64) as usize, b"\x1b[?1u".to_vec()); }
-            if case % 3 == 0 { replies.insert(rnd(replies.len() as u64) as usize, b"\x1b[?62;22c".to_vec()); }
-            if case % 5 == 0 { replies.insert(rnd(replies.len() as u64) as usize, b"\x1b[6;17;8t".to_vec()); }
+            if case % 3 == 0 {
+                replies.insert(rnd(replies.len() as u64) as usize, b"\x1b[?1u".to_vec());
+            }
+            if case % 3 == 0 {
+                replies.insert(rnd(replies.len() as u64) as usize, b"\x1b[?62;22c".to_vec());
+            }
+            if case % 5 == 0 {
+                replies.insert(rnd(replies.len() as u64) as usize, b"\x1b[6;17;8t".to_vec());
+            }
             // Each reply and each key is one write by the host terminal; an idle flush
             // can only fall between writes.
             let mut stream = Vec::new();
             let mut bounds = std::collections::BTreeSet::new();
             let mut ti = 0;
             for r in &replies {
-                while ti < typed.len() && rnd(8) == 0 { stream.push(typed[ti]); ti += 1; bounds.insert(stream.len()); }
+                while ti < typed.len() && rnd(8) == 0 {
+                    stream.push(typed[ti]);
+                    ti += 1;
+                    bounds.insert(stream.len());
+                }
                 stream.extend_from_slice(r);
                 bounds.insert(stream.len());
             }
-            for &b in &typed[ti..] { stream.push(b); bounds.insert(stream.len()); }
+            for &b in &typed[ti..] {
+                stream.push(b);
+                bounds.insert(stream.len());
+            }
             let mut framer = RawInputByteFramer::for_host_input();
             framer.set_host_escape_disambiguation_active(case % 2 == 0);
             framer.host_color_query_sent();
@@ -3095,12 +3123,23 @@ mod tests {
                 let n = (1 + rnd(64) as usize).min(stream.len() - at);
                 out.extend(framer.push(&stream[at..at + n]));
                 at += n;
-                if bounds.contains(&at) && rnd(6) == 0 { out.extend(framer.flush_timeout()); }
+                if bounds.contains(&at) && rnd(6) == 0 {
+                    out.extend(framer.flush_timeout());
+                }
             }
             out.extend(framer.flush_timeout());
             out.extend(framer.flush_timeout());
-            let text: Vec<u8> = out.iter().filter(|c| c.first() != Some(&0x1b)).flatten().copied().collect();
-            assert_eq!(String::from_utf8_lossy(&text), String::from_utf8_lossy(typed), "case {case}");
+            let text: Vec<u8> = out
+                .iter()
+                .filter(|c| c.first() != Some(&0x1b))
+                .flatten()
+                .copied()
+                .collect();
+            assert_eq!(
+                String::from_utf8_lossy(&text),
+                String::from_utf8_lossy(typed),
+                "case {case}"
+            );
         }
     }
 }

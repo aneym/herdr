@@ -30,9 +30,9 @@ impl<T> CoreCell<T> {
     pub(crate) fn try_lock(&self) -> TryLockResult<CoreGuard<'_, T>> {
         match self.inner.try_lock() {
             Ok(guard) => Ok(self.wrap(guard)),
-            Err(TryLockError::Poisoned(poisoned)) => Err(TryLockError::Poisoned(
-                PoisonError::new(self.wrap(poisoned.into_inner())),
-            )),
+            Err(TryLockError::Poisoned(poisoned)) => Err(TryLockError::Poisoned(PoisonError::new(
+                self.wrap(poisoned.into_inner()),
+            ))),
             Err(TryLockError::WouldBlock) => Err(TryLockError::WouldBlock),
         }
     }

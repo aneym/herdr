@@ -19,7 +19,6 @@ fn fixture() -> (ClientShellSnapshot, FactoryOverlay) {
     {
         snapshot.tabs.push(ClientShellTab {
             sort_rank: 0,
-            desk_count: 0,
             tab_id: label.to_string(),
             workspace_id: "ws_1".into(),
             number: index + 1,
@@ -247,7 +246,6 @@ fn focused_agent_half_pad_does_not_overlap_next_factory_space() {
     });
     snapshot.tabs.push(ClientShellTab {
         sort_rank: 0,
-        desk_count: 0,
         tab_id: "other-tab".into(),
         workspace_id: "ws_2".into(),
         number: 1,
@@ -451,7 +449,6 @@ fn lab_fixture() -> (ClientShellSnapshot, FactoryOverlay) {
     });
     snapshot.tabs.push(ClientShellTab {
         sort_rank: 0,
-        desk_count: 0,
         tab_id: "poker".into(),
         workspace_id: "ws_2".into(),
         number: 1,
@@ -2658,7 +2655,6 @@ fn factory_grouping_ignores_cycles_and_cross_space_parents() {
     snapshot.agents.push(remote);
     snapshot.tabs.push(ClientShellTab {
         sort_rank: 0,
-        desk_count: 0,
         tab_id: "remote".into(),
         workspace_id: "ws_2".into(),
         number: 1,
