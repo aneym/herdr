@@ -1,0 +1,39 @@
+Release binary is current against Package.swift, Sources and Resources
+Started isolated lab shellspike-t
+{"space": "herdr-qa", "ip": "192.168.64.6", "herdr_sha": "49e7d75db1cf"}
+{"space": "herdr-qa", "app_pid": "11318", "exe": "/Users/lume/.herdr-space/bin/HerdrShell", "host_socket": "/Users/aneyman/.cache/herdr-build/t/h/.config/herdr/sessions/shellspike-t/herdr.sock", "guest_socket": "/Users/lume/.herdr-space/herdr.sock", "owner": "thoughts-slot"}
+[PASS] fresh app control FIFO ready
+[PASS] isolated guest inbox starts empty -- /Users/lume/.herdr-space/thoughts-check-0dc68d993588465bb134eb0017c7f719
+[PASS] Thoughts row opens capture 1
+[PASS] saved thought 1
+[PASS] Thoughts row opens capture 2
+[PASS] screenshot step1-capture-open.png
+[PASS] saved thought 2
+[PASS] inbox contains exactly two files
+FILE 20261022T213108Z-apple-virtual-machine-1-f83d3b.md
+---
+ts: 2026-10-22T21:31:08Z
+source: apple-virtual-machine-1
+---
+An unorganized thought from the Mac slot
+FILE 20261022T213133Z-apple-virtual-machine-1-dd627e.md
+---
+ts: 2026-10-22T21:31:33Z
+source: apple-virtual-machine-1
+---
+First line of another thought
+Second line stays separate
+
+[PASS] stored text preserves both thoughts including multiline bytes
+[PASS] state thoughts_count == 2
+[PASS] screenshot step1-thoughts-2.png
+[PASS] screenshot mac-thoughts-light.png
+[PASS] screenshot mac-thoughts-capture-light.png
+[PASS] screenshot mac-thoughts-dark.png
+[PASS] screenshot mac-thoughts-capture-dark.png
+[PASS] poll refreshes state thoughts_count == 1 after archival
+[PASS] inbox now contains exactly one file
+[PASS] screenshot step2-thoughts-1.png
+[PASS] Space stop --if-mine
+[PASS] isolated lab down
+RESULT: PASS

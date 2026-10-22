@@ -16,7 +16,7 @@ enum RemoteActions {
         let launch = ProcessInfo.processInfo.environment
         environment = launch.filter { !$0.key.hasPrefix("HERDR_") && !$0.key.hasPrefix("CLAUDE") }
         // Preserve only tool overrides, never the launching pane's identity.
-        for key in ["HERDR_LANE_BIN", "HERDR_KIND_BIN", "HERDR_SOCKET_PATH"] { environment[key] = launch[key] }
+        for key in ["HERDR_LANE_BIN", "HERDR_KIND_BIN", "HERDR_SOCKET_PATH", "HERDR_THOUGHTS_DIR"] { environment[key] = launch[key] }
         environment["HERDR_BIN_PATH"] = herdrBin
         environment["CONTROL_MODES"] = ShellPaths.modes
         environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + (environment["PATH"] ?? "")
@@ -39,10 +39,11 @@ enum RemoteActions {
 
     static func quote(_ text: String) -> String { "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'" }
 
-    static func run(verb: String, args: [String], done: @escaping (Bool, String) -> Void) {
+    static func run(verb: String, args: [String], stdin: String? = nil, done: @escaping (Bool, String) -> Void) {
         let transport = ssh == nil ? "local" : "ssh"
         DispatchQueue.global(qos: .userInitiated).async {
             var ok = false, message = ""
+            var count: Int?
             do {
                 if let configError { throw NSError(domain: configError, code: 1) }
                 let p = Process()
@@ -62,12 +63,20 @@ enum RemoteActions {
                 var childEnvironment = environment
                 if ssh == nil { childEnvironment["HERDR_SOCKET_PATH"] = ProcessInfo.processInfo.environment["HERDR_SOCKET_PATH"] }
                 p.environment = childEnvironment
+                let input = Pipe()
+                p.standardInput = stdin == nil ? FileHandle.nullDevice : input.fileHandleForReading
                 let out = Pipe()
                 p.standardOutput = out
                 p.standardError = FileHandle.nullDevice
                 let exited = DispatchSemaphore(value: 0)
                 p.terminationHandler = { _ in exited.signal() }
                 try p.run()
+                if let stdin {
+                    DispatchQueue.global().async {
+                        try? input.fileHandleForWriting.write(contentsOf: Data(stdin.utf8))
+                        try? input.fileHandleForWriting.close()
+                    }
+                }
                 // Drain while the process runs, so a large modes file cannot fill its pipe.
                 let data = out.fileHandleForReading.readDataToEndOfFile
                 let readDone = DispatchSemaphore(value: 0)
@@ -82,6 +91,7 @@ enum RemoteActions {
                       let reply = try JSONSerialization.jsonObject(with: result.data) as? [String: Any] else {
                     throw NSError(domain: "Invalid remote reply", code: 1)
                 }
+                count = reply["count"] as? Int
                 ok = p.terminationStatus == 0 && reply["ok"] as? Bool == true
                 message = reply[ok ? "message" : "error"] as? String ?? (ok ? "Done" : "Remote action failed")
                 if ok, let modes = reply["modes"] {
@@ -89,9 +99,10 @@ enum RemoteActions {
                     try json.write(to: URL(fileURLWithPath: ShellPaths.modes), options: .atomic)
                 }
             } catch { ok = false; message = (error as NSError).domain }
-            let success = ok, text = message
+            let success = ok, text = message, savedCount = count
             DispatchQueue.main.async {
                 last = ["verb": verb, "ok": success, "message": text, "transport": transport]
+                if success, let savedCount { last["count"] = savedCount }
                 NotificationCenter.default.post(name: .remoteActionFinished, object: nil)
                 done(success, text)
             }

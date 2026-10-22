@@ -723,15 +723,18 @@ struct ChatView: View {
 
 /// The composer's text view. Enter sends, Shift+Enter is a newline, Cmd+Enter sends past a
 /// draft warning. Reports its content height so the field grows with the text.
-private struct ComposerField: NSViewRepresentable {
+struct ComposerField: NSViewRepresentable {
     @Binding var text: String
     @Binding var height: CGFloat
     let ink: NSColor
     var submit: (Bool) -> Void
+    var cancel: (() -> Void)? = nil
 
     final class Editor: NSTextView {
         var submit: ((Bool) -> Void)?
+        var cancel: (() -> Void)?
         override func keyDown(with event: NSEvent) {
+            if event.keyCode == 53, let cancel { cancel(); return }
             if event.keyCode == 36 || event.keyCode == 76, !event.modifierFlags.contains(.shift), !hasMarkedText() {
                 submit?(event.modifierFlags.contains(.command)); return
             }
@@ -786,6 +789,7 @@ private struct ComposerField: NSViewRepresentable {
         editor.textColor = ink
         editor.insertionPointColor = ink
         editor.submit = submit
+        editor.cancel = cancel
     }
 }
 

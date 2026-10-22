@@ -227,6 +227,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     private var didRestoreTabFocus = false
     private var didRestorePaneFocus = false
     private(set) var quickSwitch: QuickSwitchController!
+    private(set) var thoughtsCapture: ThoughtsCapture!
     /// `--agent-run` never activates, so the window stays non-key. A click through the
     /// test hook still means Alex is looking at the selected tab.
     var inProcessKey = false
@@ -244,6 +245,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         paneDrag = PaneDrag(owner: self)
         host.paneDrag = paneDrag
         quickSwitch = QuickSwitchController(owner: self)
+        thoughtsCapture = ThoughtsCapture(owner: self)
         window.title = Channel.name
         if Channel.kind == .dev { window.subtitle = "DEV" }
         window.titlebarAppearsTransparent = true
@@ -258,6 +260,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                                                           },
                                                           selectNew: { [weak self] in self?.selectWhenListed($0) },
                                                           onFactory: { [weak self] in self?.toggleFactory() },
+                                                          onThoughts: { [weak self] in self?.thoughtsCapture.present() },
                                                           onRename: { [weak self] tab in self?.promptRenameTab(tab) }))
         sidebarContainer = SidebarContainer(content: sidebar)
         root = RootView(sidebar: sidebarContainer, host: host)
@@ -276,6 +279,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         }
         window.contentView = root
         quickSwitch.install(in: root, theme: theme)
+        thoughtsCapture.install(in: root, theme: theme)
         applyTheme()
         registry.onReplace = { [weak self] old, new in self?.replaceSurface(old: old, new: new) }
 
@@ -721,7 +725,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     /// True while any pane's chat composer, on screen or in a hidden tab, holds unsent text.
     var hasUnsentDraft: Bool { chats.values.contains { !$0.ui.draft.isEmpty } }
     /// A sheet, an app-modal alert or the switcher is up; a dev reload waits for it to close.
-    var busyWithModal: Bool { NSApp.modalWindow != nil || window.attachedSheet != nil || quickSwitch.isOpen }
+    var busyWithModal: Bool { NSApp.modalWindow != nil || window.attachedSheet != nil || quickSwitch.isOpen || thoughtsCapture.isOpen }
     /// The pane a dev reload had focused comes back with its tab (DevReload.swift).
     func seedFocus(tab: String, pane: String) { focusedPaneByTab[tab] = pane }
     /// Each open chat as the view sees it: the agent state from herdr and the items read.
@@ -887,7 +891,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         state.focusedPane = paneId
         if let tab = state.selectedTab { focusedPaneByTab[tab] = paneId }
         // While the switcher is up the pane must not take keys.
-        if !quickSwitch.isOpen { window.makeFirstResponder(s) }
+        if !quickSwitch.isOpen && !thoughtsCapture.isOpen { window.makeFirstResponder(s) }
         applyCaps()
     }
 
@@ -1190,6 +1194,13 @@ final class ShellWindow: NSWindow {
         if event.type == .keyDown, let c = delegate as? MainWindowController, c.quickSwitch.sink(event) {
             return true
         }
+        if event.type == .keyDown, let c = delegate as? MainWindowController, c.thoughtsCapture.isOpen {
+            if event.keyCode == 53 { c.thoughtsCapture.dismiss(); return true }
+            if [36, 76].contains(event.keyCode), !event.modifierFlags.contains(.shift) {
+                c.thoughtsCapture.save(); return true
+            }
+            return super.performKeyEquivalent(with: event)
+        }
         if event.type == .keyDown, let entry = Keymap.shared.entry(for: event), entry.contextual {
             return Keymap.shared.fire(entry)
         }
@@ -1222,6 +1233,7 @@ final class ShellWindow: NSWindow {
         var settingsOpen = false {
             didSet { settings?.isHidden = !settingsOpen; needsLayout = true }
         }
+        var thoughts: NSView?
         private var switcher: NSView?
         var factoryOpen = false {
             didSet { factory?.isHidden = !factoryOpen; host.isHidden = factoryOpen; needsLayout = true }
@@ -1268,6 +1280,10 @@ final class ShellWindow: NSWindow {
         if let switcher {
             switcher.frame = bounds
             addSubview(switcher, positioned: .above, relativeTo: nil)
+        }
+        if let thoughts {
+            thoughts.frame = bounds
+            addSubview(thoughts, positioned: .above, relativeTo: nil)
         }
     }
 }

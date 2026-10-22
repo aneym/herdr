@@ -15,6 +15,7 @@ struct TabRow: Identifiable, Equatable {
 }
 
 final class HerdrModel: ObservableObject {
+    let thoughts = ThoughtsModel()
     @Published private(set) var spacesOverlay = Overlay()
     private let overlayMonitor = FileChangeMonitor()
     @Published private(set) var snapshot: Snapshot?
@@ -78,6 +79,10 @@ final class HerdrModel: ObservableObject {
         client.start()
         startMachines()
         hostsModel.start()
+        thoughts.start()
+        thoughts.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &bag)
         catalog.start()
         let home = TerminalTheme.realHome()
         let raw = ProcessInfo.processInfo.environment["FACTORY_OVERLAY"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

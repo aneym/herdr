@@ -263,6 +263,12 @@ final class TestHook {
                 NSApp.activate(ignoringOtherApps: true)
                 controller?.window.makeKeyAndOrderFront(nil)
             }
+        case "thoughts_open":
+            controller?.thoughtsCapture.present()
+        case "thoughts_type":
+            if let text = obj["text"] as? String { controller?.thoughtsCapture.text = text }
+        case "thoughts_save":
+            controller?.thoughtsCapture.save()
         case "switcher":
             // {"cmd":"switcher","open":true|false,"query":"...","pick":N}
             // pick is 1-based, the same row ⌘N chooses.
@@ -312,9 +318,9 @@ final class TestHook {
             view = c.sidebarHostView
             guard let f = c.state.rowFrames["pinned+"] else { log("hook: click: no pinned +"); return }
             frame = f
-        case "focus":
+        case "focus", "thoughts":
             view = c.sidebarHostView
-            guard let f = c.state.rowFrames["focus"] else { log("hook: click: no focus row"); return }
+            guard let f = c.state.rowFrames[target] else { return }
             frame = f
         case "resume", "parked":
             // {"target":"resume","label":"<parked row title>"}: that row's Resume button.
@@ -985,6 +991,8 @@ final class TestHook {
             "content_height": c.window.contentView?.bounds.height ?? 0,
             "host_frame": NSStringFromRect(c.host.frame),
             "selected_tab": c.state.selectedTab ?? NSNull(),
+            "thoughts_open": c.thoughtsCapture.isOpen,
+            "thoughts_count": c.model.thoughts.count,
             "switcher_open": c.quickSwitch.isOpen,
             "switcher_results": c.quickSwitch.results,
             "sidebar_visible": c.state.sidebarVisible,

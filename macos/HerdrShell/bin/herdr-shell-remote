@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Run shell actions on the machine that owns the herdr server."""
+import datetime
 import json
 import os
 import re
 import subprocess
 import sys
+import secrets
+from pathlib import Path
 
 
 def modes():
@@ -13,9 +16,45 @@ def modes():
         return json.load(f)
 
 
+def thoughts(verb, argv):
+    root = Path(os.environ.get("HERDR_THOUGHTS_DIR", os.path.expanduser("~/.agent-rails/thoughts")))
+    inbox = root / "inbox"
+    if verb == "thought":
+        if len(argv) != 1 or not argv[0].startswith("--source="):
+            raise ValueError("Expected --source=<source>")
+        source = argv[0].split("=", 1)[1]
+        if not re.fullmatch(r"[a-z0-9-]{1,32}", source):
+            raise ValueError("Invalid source")
+        raw = sys.stdin.buffer.read(80001)
+        text = raw.decode("utf-8")
+        if not text.strip() or "\0" in text or len(text) > 20000:
+            raise ValueError("Thought must be nonblank, contain no NUL, and be at most 20000 characters")
+        inbox.mkdir(parents=True, exist_ok=True)
+        (root / "done").mkdir(parents=True, exist_ok=True)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        name = f"{now:%Y%m%dT%H%M%SZ}-{source}-{secrets.token_hex(3)}.md"
+        path = inbox / name
+        temporary = inbox / ("." + name + ".tmp")
+        body = f"---\nts: {now:%Y-%m-%dT%H:%M:%SZ}\nsource: {source}\n---\n".encode("utf-8") + raw
+        try:
+            with temporary.open("xb") as f:
+                f.write(body)
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+    elif argv:
+        raise ValueError("Unexpected arguments")
+    count = sum(1 for entry in inbox.iterdir() if not entry.name.startswith(".") and entry.name.endswith(".md")) if inbox.exists() else 0
+    if verb == "thought":
+        return {"ok": True, "message": "saved", "path": str(path), "count": count}
+    return {"ok": True, "count": count}
+
+
 def main():
     from types import SimpleNamespace
     argv = sys.argv[1:]
+    if argv and argv[0] in ("thought", "thoughts"):
+        return thoughts(argv[0], argv[1:])
     if not argv or argv[0] not in ("ping", "modes", "park", "unpark", "approve"):
         raise ValueError("Invalid verb")
     a = SimpleNamespace(verb=argv.pop(0), target=None, note=None, quote=None, by=None)

@@ -162,6 +162,7 @@ struct SidebarView: View {
     /// Selects a tab just created, once a snapshot lists it.
     var selectNew: (String) -> Void = { _ in }
     var onFactory: () -> Void = {}
+    var onThoughts: () -> Void = {}
     var onRename: (String) -> Void = { _ in }
 
     /// Tabs whose Resume is running, so a second click does nothing and the button says so.
@@ -226,6 +227,7 @@ struct SidebarView: View {
 
     private func spacesFooter(_ rows: [SpacesRow]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
+            thoughtsRow
             footerGroup(.footerUsage, allRows: rows)
             footerGroup(.footerHost, allRows: rows)
         }.padding(.horizontal, ShellSpace.step8).padding(.bottom, ShellSpace.step8)
@@ -684,6 +686,28 @@ struct SidebarView: View {
     }
 
     private var factoryFooter: some View {
+        VStack(spacing: 0) {
+            thoughtsRow
+            factoryRow
+        }
+    }
+
+    private var thoughtsRow: some View {
+        HStack(spacing: ShellSpace.step8) {
+            Text("Thoughts").foregroundStyle(t.mute)
+            Spacer(minLength: ShellSpace.step4)
+            if model.thoughts.count > 0 { Text(String(model.thoughts.count)).foregroundStyle(t.ink) }
+        }
+        .font(.system(size: ShellType.rowTitle))
+        .padding(.horizontal, ShellSpace.step10)
+        .frame(height: ShellSpace.switcherRowHeight)
+        .contentShape(Rectangle())
+        .onTapGesture { onThoughts() }
+        .hookAction("thoughts") { onThoughts() }
+        .clickTarget("thoughts")
+    }
+
+    private var factoryRow: some View {
         HStack(spacing: ShellSpace.step8) {
             Text("Factory")
                 .font(.system(size: ShellType.size12, weight: .medium))
